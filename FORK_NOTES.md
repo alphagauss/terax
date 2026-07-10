@@ -11,8 +11,8 @@ We selectively cherry-pick or manually port bug fixes, security fixes, and usefu
 
 ## Picked upstream commits
 
-### 2026-07-07
-
+### 2026-07-10
+merge upstream to main :6bdcd1ed40b633dfabb859957a8fcd8d9f8e5f7c
 
 
 ## Skipped upstream changes
