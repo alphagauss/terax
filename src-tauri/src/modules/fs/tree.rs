@@ -64,7 +64,7 @@ fn git_non_ignored_names(dir: &Path, show_hidden: bool) -> HashSet<String> {
 /// `show_hidden` is set. `git_decorations` opts into the per-entry `gitignored`
 /// flag; off by default so non-explorer callers pay nothing.
 #[tauri::command]
-pub fn fs_read_dir(
+pub async fn fs_read_dir(
     path: String,
     show_hidden: bool,
     git_decorations: Option<bool>,
@@ -73,28 +73,25 @@ pub fn fs_read_dir(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let manager = remote::manager::global_manager()?;
-        let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
-        return tauri::async_runtime::block_on(remote::sftp::read_dir(
-            &workspace,
-            &path,
-            show_hidden,
-        ))
-        .map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| DirEntry {
-                    name: entry.name,
-                    kind: match entry.kind {
-                        remote::sftp::RemoteEntryKind::File => EntryKind::File,
-                        remote::sftp::RemoteEntryKind::Dir => EntryKind::Dir,
-                        remote::sftp::RemoteEntryKind::Symlink => EntryKind::Symlink,
-                    },
-                    size: entry.size,
-                    mtime: entry.mtime,
-                    gitignored: false,
-                })
-                .collect()
-        });
+        let workspace = manager.workspace(profile_id).await?;
+        return remote::sftp::read_dir(&workspace, &path, show_hidden)
+            .await
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .map(|entry| DirEntry {
+                        name: entry.name,
+                        kind: match entry.kind {
+                            remote::sftp::RemoteEntryKind::File => EntryKind::File,
+                            remote::sftp::RemoteEntryKind::Dir => EntryKind::Dir,
+                            remote::sftp::RemoteEntryKind::Symlink => EntryKind::Symlink,
+                        },
+                        size: entry.size,
+                        mtime: entry.mtime,
+                        gitignored: false,
+                    })
+                    .collect()
+            });
     }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {
@@ -176,7 +173,7 @@ pub fn fs_read_dir(
 /// Symlinks to directories are included (matches shell `cd` semantics).
 /// Hidden entries are filtered by dot-prefix only.
 #[tauri::command]
-pub fn list_subdirs(
+pub async fn list_subdirs(
     path: String,
     show_hidden: bool,
     workspace: Option<WorkspaceEnv>,
@@ -184,19 +181,16 @@ pub fn list_subdirs(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let manager = remote::manager::global_manager()?;
-        let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
-        return tauri::async_runtime::block_on(remote::sftp::read_dir(
-            &workspace,
-            &path,
-            show_hidden,
-        ))
-        .map(|entries| {
-            entries
-                .into_iter()
-                .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::Dir)
-                .map(|entry| entry.name)
-                .collect()
-        });
+        let workspace = manager.workspace(profile_id).await?;
+        return remote::sftp::read_dir(&workspace, &path, show_hidden)
+            .await
+            .map(|entries| {
+                entries
+                    .into_iter()
+                    .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::Dir)
+                    .map(|entry| entry.name)
+                    .collect()
+            });
     }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {

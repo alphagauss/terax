@@ -113,9 +113,9 @@ pub async fn pty_open(
 // Input is the latency-critical path: raw body + id header skips JSON
 // serialization of every keystroke on both sides of the IPC boundary.
 #[tauri::command]
-pub fn pty_write(
-    state: tauri::State<PtyState>,
-    request: tauri::ipc::Request,
+pub async fn pty_write(
+    state: tauri::State<'_, PtyState>,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<(), String> {
     let id: u32 = request
         .headers()
@@ -126,6 +126,9 @@ pub fn pty_write(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("pty_write: expected raw body".to_string());
     };
+    if bytes.len() > 1024 * 1024 {
+        return Err("pty_write: input chunk exceeds 1 MiB".to_string());
+    }
     let session = state.sessions.read().unwrap().get(&id).cloned();
     if session.is_none() {
         let remote = state
@@ -138,10 +141,7 @@ pub fn pty_write(
                 log::warn!("pty_write: unknown id={id}");
                 "no session".to_string()
             })?;
-        return remote
-            .input
-            .send(bytes.to_vec())
-            .map_err(|_| "remote terminal input channel closed".to_string());
+        return remote.write(bytes.to_vec()).await;
     }
     let session = session.expect("checked above");
     // Bind to a local so the MutexGuard temporary drops before `session` —
@@ -178,10 +178,7 @@ pub fn pty_resize(
                 log::warn!("pty_resize: unknown id={id}");
                 "no session".to_string()
             })?;
-        return remote
-            .resize
-            .send((cols, rows))
-            .map_err(|_| "remote terminal resize channel closed".to_string());
+        return remote.resize(cols, rows);
     }
     let session = session.expect("checked above");
     let result = session

@@ -66,14 +66,9 @@ pub async fn shell_run_command(
             .clamp(1, MAX_TIMEOUT_SECS),
     );
 
-    // The blocking spawn + wait runs on a worker thread so the Tauri async
-    // runtime stays unblocked.
-    let (tx, rx) = mpsc::channel::<Result<CommandOutput, String>>();
-    thread::spawn(move || {
-        let _ = tx.send(run_blocking(trimmed, cwd_path, workspace, dur));
-    });
-
-    rx.recv().map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || run_blocking(trimmed, cwd_path, workspace, dur))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 pub(crate) fn run_blocking_inner(
@@ -182,9 +177,9 @@ impl Default for ShellState {
 }
 
 #[tauri::command]
-pub fn shell_session_open(
-    state: tauri::State<ShellState>,
-    registry: tauri::State<WorkspaceRegistry>,
+pub async fn shell_session_open(
+    state: tauri::State<'_, ShellState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<u32, String> {
@@ -196,7 +191,7 @@ pub fn shell_session_open(
             WorkspaceEnv::Wsl { distro } => crate::modules::workspace::wsl_home(distro.clone())?,
             WorkspaceEnv::Ssh { profile_id } => {
                 let manager = remote::manager::global_manager()?;
-                tauri::async_runtime::block_on(manager.home(profile_id))?
+                manager.home(profile_id).await?
             }
             WorkspaceEnv::Local => {
                 crate::modules::fs::to_canon(dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")))
@@ -235,11 +230,9 @@ pub async fn shell_session_run(
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1, MAX_TIMEOUT_SECS),
     );
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = tx.send(session.run(command, cwd, workspace, dur));
-    });
-    rx.recv().map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || session.run(command, cwd, workspace, dur))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -249,9 +242,9 @@ pub fn shell_session_close(state: tauri::State<ShellState>, id: u32) -> Result<(
 }
 
 #[tauri::command]
-pub fn shell_bg_spawn(
-    state: tauri::State<ShellState>,
-    registry: tauri::State<WorkspaceRegistry>,
+pub async fn shell_bg_spawn(
+    state: tauri::State<'_, ShellState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
     command: String,
     cwd: Option<String>,
     workspace: Option<WorkspaceEnv>,
@@ -260,7 +253,7 @@ pub fn shell_bg_spawn(
     authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
     if let WorkspaceEnv::Ssh { profile_id } = &workspace {
         let id = state.next_bg_id.fetch_add(1, Ordering::Relaxed);
-        let proc = RemoteBackgroundProc::spawn(profile_id.clone(), command, cwd)?;
+        let proc = RemoteBackgroundProc::spawn(profile_id.clone(), command, cwd).await?;
         state.remote_bg.write().unwrap().insert(id, proc);
         return Ok(id);
     }
@@ -271,13 +264,14 @@ pub fn shell_bg_spawn(
 }
 
 #[tauri::command]
-pub fn shell_bg_logs(
-    state: tauri::State<ShellState>,
+pub async fn shell_bg_logs(
+    state: tauri::State<'_, ShellState>,
     handle: u32,
     since_offset: Option<u64>,
 ) -> Result<BackgroundLogResponse, String> {
-    if let Some(proc) = state.remote_bg.read().unwrap().get(&handle).cloned() {
-        return proc.read_logs(since_offset.unwrap_or(0));
+    let remote_proc = state.remote_bg.read().unwrap().get(&handle).cloned();
+    if let Some(proc) = remote_proc {
+        return proc.read_logs(since_offset.unwrap_or(0)).await;
     }
     let proc = state
         .bg
@@ -290,9 +284,10 @@ pub fn shell_bg_logs(
 }
 
 #[tauri::command]
-pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(), String> {
-    if let Some(proc) = state.remote_bg.write().unwrap().remove(&handle) {
-        return proc.kill();
+pub async fn shell_bg_kill(state: tauri::State<'_, ShellState>, handle: u32) -> Result<(), String> {
+    let remote_proc = state.remote_bg.write().unwrap().remove(&handle);
+    if let Some(proc) = remote_proc {
+        return proc.kill().await;
     }
     if let Some(proc) = state.bg.read().unwrap().get(&handle).cloned() {
         proc.kill();
@@ -301,15 +296,23 @@ pub fn shell_bg_kill(state: tauri::State<ShellState>, handle: u32) -> Result<(),
 }
 
 #[tauri::command]
-pub fn shell_bg_list(state: tauri::State<ShellState>) -> Result<Vec<BackgroundProcInfo>, String> {
-    let map = state.bg.read().unwrap();
-    let mut out = Vec::with_capacity(map.len());
-    for (id, p) in map.iter() {
-        out.push(p.info(*id));
-    }
-    drop(map);
-    for (id, proc) in state.remote_bg.read().unwrap().iter() {
-        out.push(proc.info(*id));
+pub async fn shell_bg_list(
+    state: tauri::State<'_, ShellState>,
+) -> Result<Vec<BackgroundProcInfo>, String> {
+    let mut out = {
+        let map = state.bg.read().unwrap();
+        let mut local = Vec::with_capacity(map.len());
+        for (id, proc) in map.iter() {
+            local.push(proc.info(*id));
+        }
+        local
+    };
+    let remote: Vec<_> = {
+        let map = state.remote_bg.read().unwrap();
+        map.iter().map(|(id, proc)| (*id, proc.clone())).collect()
+    };
+    for (id, proc) in remote {
+        out.push(proc.info(id).await);
     }
     out.sort_by_key(|i| i.handle);
     Ok(out)
@@ -326,7 +329,11 @@ struct RemoteBackgroundProc {
 }
 
 impl RemoteBackgroundProc {
-    fn spawn(profile_id: String, command: String, cwd: Option<String>) -> Result<Self, String> {
+    async fn spawn(
+        profile_id: String,
+        command: String,
+        cwd: Option<String>,
+    ) -> Result<Self, String> {
         let command = command.trim().to_string();
         if command.is_empty() {
             return Err("empty command".into());
@@ -334,19 +341,24 @@ impl RemoteBackgroundProc {
         let log_path = format!("/tmp/terax-bg-{}.log", uuid::Uuid::new_v4());
         let inner = match cwd.as_deref().filter(|value| !value.trim().is_empty()) {
             Some(cwd) => format!(
-                "cd -- {} && exec sh -lc {}",
+                "cd -- {} && exec /bin/bash -lc {}",
                 remote::session::shell_quote(cwd),
                 remote::session::shell_quote(&command)
             ),
-            None => format!("exec sh -lc {}", remote::session::shell_quote(&command)),
+            None => format!(
+                "exec /bin/bash -lc {}",
+                remote::session::shell_quote(&command)
+            ),
         };
         let launch = format!(
             "nohup sh -c {} >{} 2>&1 </dev/null & echo $!",
             remote::session::shell_quote(&inner),
             remote::session::shell_quote(&log_path)
         );
-        let output =
-            remote::manager::exec_blocking(&profile_id, &launch, None, Duration::from_secs(15))?;
+        let manager = remote::manager::global_manager()?;
+        let output = manager
+            .exec(&profile_id, &launch, None, Duration::from_secs(15))
+            .await?;
         if output.exit_code != Some(0) {
             return Err(String::from_utf8_lossy(&output.stderr).into_owned());
         }
@@ -371,20 +383,18 @@ impl RemoteBackgroundProc {
         })
     }
 
-    fn read_logs(&self, since: u64) -> Result<BackgroundLogResponse, String> {
+    async fn read_logs(&self, since: u64) -> Result<BackgroundLogResponse, String> {
         let command = format!(
             "if [ -f {log} ]; then tail -c +{start} -- {log}; fi",
             log = remote::session::shell_quote(&self.log_path),
             start = since.saturating_add(1),
         );
-        let output = remote::manager::exec_blocking(
-            &self.profile_id,
-            &command,
-            None,
-            Duration::from_secs(10),
-        )?;
+        let manager = remote::manager::global_manager()?;
+        let output = manager
+            .exec(&self.profile_id, &command, None, Duration::from_secs(10))
+            .await?;
         let bytes = output.stdout;
-        let running = self.is_running();
+        let running = self.is_running().await;
         Ok(BackgroundLogResponse {
             next_offset: since.saturating_add(bytes.len() as u64),
             bytes: String::from_utf8_lossy(&bytes).into_owned(),
@@ -394,33 +404,40 @@ impl RemoteBackgroundProc {
         })
     }
 
-    fn is_running(&self) -> bool {
-        remote::manager::exec_blocking(
-            &self.profile_id,
-            &format!("kill -0 {} 2>/dev/null", self.pid),
-            None,
-            Duration::from_secs(5),
-        )
-        .is_ok_and(|output| output.exit_code == Some(0))
+    async fn is_running(&self) -> bool {
+        let Ok(manager) = remote::manager::global_manager() else {
+            return false;
+        };
+        manager
+            .exec(
+                &self.profile_id,
+                &format!("kill -0 {} 2>/dev/null", self.pid),
+                None,
+                Duration::from_secs(5),
+            )
+            .await
+            .is_ok_and(|output| output.exit_code == Some(0))
     }
 
-    fn kill(&self) -> Result<(), String> {
+    async fn kill(&self) -> Result<(), String> {
         let command = format!(
             "kill -- -{pid} 2>/dev/null || kill {pid} 2>/dev/null || true; rm -f -- {log}",
             pid = self.pid,
             log = remote::session::shell_quote(&self.log_path),
         );
-        remote::manager::exec_blocking(&self.profile_id, &command, None, Duration::from_secs(10))
+        remote::manager::global_manager()?
+            .exec(&self.profile_id, &command, None, Duration::from_secs(10))
+            .await
             .map(|_| ())
     }
 
-    fn info(&self, handle: u32) -> BackgroundProcInfo {
+    async fn info(&self, handle: u32) -> BackgroundProcInfo {
         BackgroundProcInfo {
             handle,
             command: self.command.clone(),
             cwd: self.cwd.clone(),
             started_at_ms: self.started_at_ms,
-            exited: !self.is_running(),
+            exited: !self.is_running().await,
             exit_code: None,
         }
     }

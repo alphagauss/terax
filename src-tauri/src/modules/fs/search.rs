@@ -46,7 +46,7 @@ const PRUNE_DIRS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub fn fs_search(
+pub async fn fs_search(
     root: String,
     query: String,
     limit: Option<usize>,
@@ -64,7 +64,8 @@ pub fn fs_search(
     let show_hidden = show_hidden.unwrap_or(false);
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let (entries, truncated) = remote_walk(profile_id, &root, show_hidden, 16, MAX_SCANNED)?;
+        let (entries, truncated) =
+            remote_walk(profile_id, &root, show_hidden, 16, MAX_SCANNED).await?;
         let candidates = entries
             .into_iter()
             .map(|entry| SearchHit {
@@ -171,7 +172,7 @@ pub struct ListFilesResult {
 }
 
 #[tauri::command]
-pub fn fs_list_files(
+pub async fn fs_list_files(
     root: String,
     limit: Option<usize>,
     max_depth: Option<usize>,
@@ -189,7 +190,7 @@ pub fn fs_list_files(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let (entries, mut truncated) =
-            remote_walk(profile_id, &root, show_hidden, depth, MAX_SCANNED)?;
+            remote_walk(profile_id, &root, show_hidden, depth, MAX_SCANNED).await?;
         let mut files: Vec<String> = entries
             .into_iter()
             .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::File)
@@ -261,7 +262,7 @@ pub fn fs_list_files(
     Ok(ListFilesResult { files, truncated })
 }
 
-fn remote_walk(
+async fn remote_walk(
     profile_id: &str,
     root: &str,
     show_hidden: bool,
@@ -269,12 +270,8 @@ fn remote_walk(
     cap: usize,
 ) -> Result<(Vec<remote::sftp::RemoteWalkEntry>, bool), String> {
     let manager = remote::manager::global_manager()?;
-    let profile_id = profile_id.to_string();
-    let root = root.to_string();
-    tauri::async_runtime::block_on(async move {
-        let workspace = manager.workspace(&profile_id).await?;
-        remote::sftp::walk(&workspace, &root, show_hidden, depth, cap).await
-    })
+    let workspace = manager.workspace(profile_id).await?;
+    remote::sftp::walk(&workspace, root, show_hidden, depth, cap).await
 }
 
 fn display_path(

@@ -64,7 +64,7 @@ const emptyForm = (): Form => ({
   keepaliveSeconds: "30",
   reconnectEnabled: true,
   reconnectMaxAttempts: "5",
-  rootPath: "",
+  rootPath: "~",
 });
 
 function formFromProfile(profile: SshProfile): Form {
@@ -84,7 +84,7 @@ function formFromProfile(profile: SshProfile): Form {
     keepaliveSeconds: String(profile.keepaliveSeconds),
     reconnectEnabled: profile.reconnectEnabled,
     reconnectMaxAttempts: String(profile.reconnectMaxAttempts),
-    rootPath: profile.rootPath ?? "",
+    rootPath: profile.rootPath ?? "~",
   };
 }
 
@@ -103,7 +103,7 @@ function profileFromForm(form: Form): SshProfile {
     keepaliveSeconds: Math.max(0, Number(form.keepaliveSeconds) || 0),
     reconnectEnabled: form.reconnectEnabled,
     reconnectMaxAttempts: Math.max(1, Number(form.reconnectMaxAttempts) || 5),
-    rootPath: form.rootPath.trim() || null,
+    rootPath: form.rootPath.trim() || "~",
   };
 }
 
@@ -648,7 +648,7 @@ function ConnectionForm({
         <Input
           value={form.rootPath}
           onChange={(event) => update("rootPath", event.target.value)}
-          placeholder="$HOME (automatic)"
+          placeholder="~"
         />
       </Field>
       <Field label="Keepalive seconds">

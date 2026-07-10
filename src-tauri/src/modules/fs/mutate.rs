@@ -3,15 +3,13 @@ use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 /// Creates a new empty file. Fails if the file already exists.
 #[tauri::command]
-pub fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
+pub async fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let profile_id = profile_id.to_string();
-        return tauri::async_runtime::block_on(async move {
-            let manager = remote::manager::global_manager()?;
-            let workspace = manager.workspace(&profile_id).await?;
-            remote::sftp::create_file(&workspace, &path).await
-        });
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&profile_id).await?;
+        return remote::sftp::create_file(&workspace, &path).await;
     }
     let p = resolve_path(&path, &workspace);
     if p.exists() {
@@ -27,15 +25,13 @@ pub fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(
 /// Parents are created as needed — matches the common "new folder" UX
 /// where typing "a/b/c" creates the full chain.
 #[tauri::command]
-pub fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
+pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let profile_id = profile_id.to_string();
-        return tauri::async_runtime::block_on(async move {
-            let manager = remote::manager::global_manager()?;
-            let workspace = manager.workspace(&profile_id).await?;
-            remote::sftp::create_dir(&workspace, &path).await
-        });
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&profile_id).await?;
+        return remote::sftp::create_dir(&workspace, &path).await;
     }
     let p = resolve_path(&path, &workspace);
     if p.exists() {
@@ -49,15 +45,17 @@ pub fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<()
 
 /// Renames (or moves) a path. Refuses to overwrite an existing target.
 #[tauri::command]
-pub fn fs_rename(from: String, to: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
+pub async fn fs_rename(
+    from: String,
+    to: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let profile_id = profile_id.to_string();
-        return tauri::async_runtime::block_on(async move {
-            let manager = remote::manager::global_manager()?;
-            let workspace = manager.workspace(&profile_id).await?;
-            remote::sftp::rename(&workspace, &from, &to).await
-        });
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&profile_id).await?;
+        return remote::sftp::rename(&workspace, &from, &to).await;
     }
     let from_p = resolve_path(&from, &workspace);
     let to_p = resolve_path(&to, &workspace);
@@ -80,15 +78,13 @@ pub fn fs_rename(from: String, to: String, workspace: Option<WorkspaceEnv>) -> R
 /// Deletes a file or directory (recursively for dirs). Callers are
 /// responsible for confirming destructive operations with the user.
 #[tauri::command]
-pub fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
+pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let profile_id = profile_id.to_string();
-        return tauri::async_runtime::block_on(async move {
-            let manager = remote::manager::global_manager()?;
-            let workspace = manager.workspace(&profile_id).await?;
-            remote::sftp::delete(&workspace, &path).await
-        });
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&profile_id).await?;
+        return remote::sftp::delete(&workspace, &path).await;
     }
     let p = resolve_path(&path, &workspace);
     let meta = std::fs::symlink_metadata(&p).map_err(|e| {
@@ -125,7 +121,7 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
 /// dirs. Sources are absolute OS paths (from a drag-drop); only the destination
 /// is workspace-resolved. Refuses to overwrite existing entries.
 #[tauri::command]
-pub fn fs_copy(
+pub async fn fs_copy(
     sources: Vec<String>,
     dest_dir: String,
     workspace: Option<WorkspaceEnv>,
@@ -133,11 +129,9 @@ pub fn fs_copy(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let profile_id = profile_id.to_string();
-        return tauri::async_runtime::block_on(async move {
-            let manager = remote::manager::global_manager()?;
-            let workspace = manager.workspace(&profile_id).await?;
-            remote::sftp::upload_sources(&workspace, &sources, &dest_dir).await
-        });
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&profile_id).await?;
+        return remote::sftp::upload_sources(&workspace, &sources, &dest_dir).await;
     }
     let dest = resolve_path(&dest_dir, &workspace);
     for source in &sources {
@@ -169,57 +163,65 @@ mod tests {
         p.to_string_lossy().into_owned()
     }
 
-    #[test]
-    fn create_file_makes_empty_and_refuses_to_clobber() {
+    #[tokio::test]
+    async fn create_file_makes_empty_and_refuses_to_clobber() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("new.txt");
-        fs_create_file(s(f.clone()), None).expect("create");
+        fs_create_file(s(f.clone()), None).await.expect("create");
         assert!(f.exists());
         assert_eq!(std::fs::read(&f).unwrap(), b"");
 
         // A second create must error, not truncate existing content.
         std::fs::write(&f, b"data").unwrap();
-        let err = fs_create_file(s(f.clone()), None).unwrap_err();
+        let err = fs_create_file(s(f.clone()), None).await.unwrap_err();
         assert!(err.contains("already exists"), "got: {err}");
         assert_eq!(std::fs::read(&f).unwrap(), b"data");
     }
 
-    #[test]
-    fn create_dir_builds_nested_chain_and_refuses_existing() {
+    #[tokio::test]
+    async fn create_dir_builds_nested_chain_and_refuses_existing() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("a/b/c");
-        fs_create_dir(s(nested.clone()), None).expect("create dir");
+        fs_create_dir(s(nested.clone()), None)
+            .await
+            .expect("create dir");
         assert!(nested.is_dir());
-        let err = fs_create_dir(s(nested), None).unwrap_err();
+        let err = fs_create_dir(s(nested), None).await.unwrap_err();
         assert!(err.contains("already exists"), "got: {err}");
     }
 
-    #[test]
-    fn rename_moves_and_never_overwrites() {
+    #[tokio::test]
+    async fn rename_moves_and_never_overwrites() {
         let dir = tempfile::tempdir().unwrap();
         let from = dir.path().join("a.txt");
         let to = dir.path().join("b.txt");
         std::fs::write(&from, b"payload").unwrap();
 
-        fs_rename(s(from.clone()), s(to.clone()), None).expect("rename");
+        fs_rename(s(from.clone()), s(to.clone()), None)
+            .await
+            .expect("rename");
         assert!(!from.exists());
         assert_eq!(std::fs::read(&to).unwrap(), b"payload");
 
         // Missing source is reported, not silently ignored.
-        let err = fs_rename(s(from), s(dir.path().join("c.txt")), None).unwrap_err();
+        let err = fs_rename(s(from), s(dir.path().join("c.txt")), None)
+            .await
+            .unwrap_err();
         assert!(err.contains("not found"), "got: {err}");
 
         // Refusing to overwrite an existing target is the data-loss guard.
         let occupied = dir.path().join("keep.txt");
         std::fs::write(&occupied, b"keep").unwrap();
-        let err = fs_rename(s(to.clone()), s(occupied.clone()), None).unwrap_err();
+        let err = fs_rename(s(to.clone()), s(occupied.clone()), None)
+            .await
+            .unwrap_err();
         assert!(err.contains("already exists"), "got: {err}");
         assert_eq!(std::fs::read(&occupied).unwrap(), b"keep");
         assert!(to.exists());
     }
 
-    #[test]
-    fn copy_brings_file_and_dir_in_and_refuses_clobber() {
+    #[tokio::test]
+    async fn copy_brings_file_and_dir_in_and_refuses_clobber() {
         let src = tempfile::tempdir().unwrap();
         let dest = tempfile::tempdir().unwrap();
         std::fs::write(src.path().join("a.txt"), b"payload").unwrap();
@@ -231,6 +233,7 @@ mod tests {
             s(dest.path().to_path_buf()),
             None,
         )
+        .await
         .expect("copy");
 
         assert_eq!(
@@ -249,33 +252,36 @@ mod tests {
             s(dest.path().to_path_buf()),
             None,
         )
+        .await
         .unwrap_err();
         assert!(err.contains("already exists"), "got: {err}");
     }
 
-    #[test]
-    fn delete_removes_file_then_dir_recursively() {
+    #[tokio::test]
+    async fn delete_removes_file_then_dir_recursively() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("x.txt");
         std::fs::write(&f, b"x").unwrap();
-        fs_delete(s(f.clone()), None).expect("delete file");
+        fs_delete(s(f.clone()), None).await.expect("delete file");
         assert!(!f.exists());
 
         let sub = dir.path().join("sub");
         std::fs::create_dir_all(sub.join("inner")).unwrap();
         std::fs::write(sub.join("inner/y.txt"), b"y").unwrap();
-        fs_delete(s(sub.clone()), None).expect("delete dir");
+        fs_delete(s(sub.clone()), None).await.expect("delete dir");
         assert!(!sub.exists());
 
-        let err = fs_delete(s(dir.path().join("missing")), None).unwrap_err();
+        let err = fs_delete(s(dir.path().join("missing")), None)
+            .await
+            .unwrap_err();
         assert!(!err.is_empty());
     }
 
     // Deleting a symlink that points at a directory must remove only the link,
     // never recurse through it and wipe the target's contents.
     #[cfg(unix)]
-    #[test]
-    fn delete_does_not_follow_symlink_into_target() {
+    #[tokio::test]
+    async fn delete_does_not_follow_symlink_into_target() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("real");
         std::fs::create_dir(&real).unwrap();
@@ -284,7 +290,9 @@ mod tests {
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        fs_delete(s(link.clone()), None).expect("delete symlink");
+        fs_delete(s(link.clone()), None)
+            .await
+            .expect("delete symlink");
         assert!(!link.exists(), "symlink itself should be gone");
         assert!(real.is_dir(), "target dir must survive");
         assert_eq!(std::fs::read(real.join("keep.txt")).unwrap(), b"keep");

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use tauri::Emitter;
@@ -16,6 +16,7 @@ use super::tunnel::TunnelManager;
 pub struct RemoteManager {
     workspaces: RwLock<HashMap<String, Arc<RemoteWorkspace>>>,
     statuses: RwLock<HashMap<String, ConnectionInfo>>,
+    connect_locks: StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_keys: Arc<HostKeyVerifier>,
     pub tunnels: TunnelManager,
 }
@@ -29,6 +30,7 @@ impl Default for RemoteManager {
         Self {
             workspaces: RwLock::new(HashMap::new()),
             statuses: RwLock::new(HashMap::new()),
+            connect_locks: StdMutex::new(HashMap::new()),
             host_keys: Arc::new(HostKeyVerifier::new(path)),
             tunnels: TunnelManager::default(),
         }
@@ -42,6 +44,8 @@ impl RemoteManager {
         app: tauri::AppHandle,
     ) -> Result<ConnectionInfo, String> {
         let profile_id = request.profile.id.clone();
+        let connect_lock = self.connect_lock(&profile_id);
+        let _connect_guard = connect_lock.lock().await;
         self.set_status(
             &app,
             ConnectionInfo {
@@ -64,13 +68,32 @@ impl RemoteManager {
             match RemoteWorkspace::connect(request, app.clone(), self.host_keys.clone()).await {
                 Ok(workspace) => workspace,
                 Err(error) => {
+                    let previous_is_open = match previous.as_ref() {
+                        Some(previous) => !previous.is_closed().await,
+                        None => false,
+                    };
+                    let previous_home = match previous.as_ref() {
+                        Some(previous) if previous_is_open => Some(previous.home().await),
+                        _ => None,
+                    };
+                    let message = if previous_is_open {
+                        format!(
+                        "Reconnect failed; the previous SSH connection is still active: {error}"
+                    )
+                    } else {
+                        error.clone()
+                    };
                     self.set_status(
                         &app,
                         ConnectionInfo {
                             profile_id,
-                            status: ConnectionStatus::Error,
-                            home: None,
-                            message: Some(error.clone()),
+                            status: if previous_is_open {
+                                ConnectionStatus::Connected
+                            } else {
+                                ConnectionStatus::Error
+                            },
+                            home: previous_home,
+                            message: Some(message),
                         },
                     )
                     .await;
@@ -105,6 +128,17 @@ impl RemoteManager {
         }
         self.spawn_monitor(workspace, app);
         Ok(info)
+    }
+
+    fn connect_lock(&self, profile_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self
+            .connect_locks
+            .lock()
+            .expect("SSH connect lock poisoned");
+        locks
+            .entry(profile_id.to_string())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     fn spawn_monitor(self: &Arc<Self>, workspace: Arc<RemoteWorkspace>, app: tauri::AppHandle) {

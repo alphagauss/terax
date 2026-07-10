@@ -11,7 +11,7 @@ use std::time::Duration;
 use russh::client::{self, Handle, Handler, KeyboardInteractiveAuthResponse, Msg};
 use russh::keys::ssh_key::{HashAlg, PublicKey};
 use russh::keys::PrivateKeyWithHashAlg;
-use russh::{ChannelMsg, Disconnect};
+use russh::{ChannelMsg, Disconnect, Sig};
 use tokio::sync::{Mutex, RwLock};
 use zeroize::Zeroizing;
 
@@ -91,6 +91,7 @@ pub struct RemoteWorkspace {
     pub remote_forwards: RemoteForwardRegistry,
     pub(crate) sftp: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     home: RwLock<String>,
+    login_home: RwLock<String>,
     secret: Zeroizing<String>,
     proxy_secret: Zeroizing<String>,
 }
@@ -110,59 +111,69 @@ impl RemoteWorkspace {
             (!proxy_secret.is_empty()).then_some(proxy_secret.as_str()),
         )?;
 
-        let config = client::Config {
-            client_id: russh::SshId::Standard(std::borrow::Cow::Borrowed("SSH-2.0-OpenSSH_9.9")),
-            keepalive_interval: (profile.keepalive_seconds > 0)
-                .then(|| Duration::from_secs(profile.keepalive_seconds)),
-            keepalive_max: 3,
-            nodelay: true,
-            ..Default::default()
-        };
+        // Keep russh's real client identifier. Advertising OpenSSH makes an
+        // OpenSSH server enable private channel extensions such as
+        // eow@openssh.com that russh does not implement.
+        let config = Arc::new(client_config(profile.keepalive_seconds));
 
         let remote_forwards = RemoteForwardRegistry::default();
-        let handler = ClientHandler {
-            app,
-            profile_id: profile.id.clone(),
-            host: profile.host.clone(),
-            port: profile.port,
-            host_keys,
-            remote_forwards: remote_forwards.clone(),
-        };
-        let stream = tokio::time::timeout(
-            Duration::from_secs(15),
-            super::proxy::connect(proxy.as_ref(), &profile.host, profile.port),
+        let mut handle = connect_transport(
+            &profile,
+            proxy.as_ref(),
+            config.clone(),
+            app.clone(),
+            host_keys.clone(),
+            remote_forwards.clone(),
         )
-        .await
-        .map_err(|_| "SSH TCP connection timed out".to_string())?
-        .map_err(|e| format!("SSH TCP connection failed: {e}"))?;
-        let mut handle = tokio::time::timeout(
-            Duration::from_secs(20),
-            client::connect_stream(Arc::new(config), stream, handler),
-        )
-        .await
-        .map_err(|_| "SSH handshake timed out".to_string())?
-        .map_err(|e| format!("SSH handshake failed: {e}"))?;
+        .await?;
 
-        authenticate(&mut handle, &profile, secret.as_str()).await?;
+        if authenticate_primary(&mut handle, &profile, secret.as_str()).await?
+            == PrimaryAuthResult::KeyboardInteractiveRequired
+        {
+            // Several servers and russh versions do not reliably continue
+            // keyboard-interactive after a rejected password request. Match
+            // meatshell's behavior and retry that method on a fresh transport.
+            let _ = handle
+                .disconnect(
+                    Disconnect::ByApplication,
+                    "Retry keyboard-interactive authentication",
+                    "en",
+                )
+                .await;
+            handle = connect_transport(
+                &profile,
+                proxy.as_ref(),
+                config,
+                app,
+                host_keys,
+                remote_forwards.clone(),
+            )
+            .await?;
+            if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
+                .await?
+            {
+                return Err("SSH server rejected the supplied credentials".into());
+            }
+        }
         let workspace = Arc::new(Self {
             profile,
             handle: Arc::new(Mutex::new(handle)),
             remote_forwards,
             sftp: Mutex::new(None),
             home: RwLock::new("/".into()),
+            login_home: RwLock::new("/".into()),
             secret,
             proxy_secret,
         });
-        let detected_home = workspace
-            .exec("printf %s \"$HOME\"", None, Duration::from_secs(10))
-            .await
-            .ok()
-            .and_then(|output| {
-                let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                (!value.is_empty()).then_some(value)
-            })
-            .unwrap_or_else(|| format!("/home/{}", workspace.profile.username));
-        let home = workspace
+        let detected_home = match detect_linux_bash_home(&workspace).await {
+            Ok(home) => home,
+            Err(error) => {
+                workspace.disconnect().await;
+                return Err(error);
+            }
+        };
+        *workspace.login_home.write().await = detected_home.clone();
+        let requested_root = workspace
             .profile
             .root_path
             .as_deref()
@@ -170,7 +181,25 @@ impl RemoteWorkspace {
             .filter(|value| !value.is_empty())
             .map(|value| expand_remote_home(value, &detected_home))
             .unwrap_or(detected_home);
-        *workspace.home.write().await = home;
+        let root = match super::sftp::canonicalize(&workspace, &requested_root).await {
+            Ok(root) => root,
+            Err(error) => {
+                workspace.disconnect().await;
+                return Err(format!("invalid SSH rootPath {requested_root}: {error}"));
+            }
+        };
+        let root_stat = match super::sftp::stat(&workspace, &root).await {
+            Ok(stat) => stat,
+            Err(error) => {
+                workspace.disconnect().await;
+                return Err(format!("cannot access SSH rootPath {root}: {error}"));
+            }
+        };
+        if root_stat.kind != super::sftp::RemoteEntryKind::Dir {
+            workspace.disconnect().await;
+            return Err(format!("SSH rootPath is not a directory: {root}"));
+        }
+        *workspace.home.write().await = root;
         Ok(workspace)
     }
 
@@ -186,20 +215,25 @@ impl RemoteWorkspace {
         self.home.read().await.clone()
     }
 
+    pub async fn login_home(&self) -> String {
+        self.login_home.read().await.clone()
+    }
+
     pub async fn is_closed(&self) -> bool {
         self.handle.lock().await.is_closed()
     }
 
     pub async fn disconnect(&self) {
+        let sftp = self.sftp.lock().await.take();
+        if let Some(sftp) = sftp {
+            let _ = tokio::time::timeout(Duration::from_secs(1), sftp.close()).await;
+        }
         let _ = self
             .handle
             .lock()
             .await
             .disconnect(Disconnect::ByApplication, "Terax workspace closed", "en")
             .await;
-        if let Some(sftp) = self.sftp.lock().await.take() {
-            let _ = sftp.close().await;
-        }
     }
 
     pub async fn exec(
@@ -240,7 +274,11 @@ impl RemoteWorkspace {
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         output.exit_code = Some(exit_status as i32)
                     }
-                    Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => break,
+                    Some(ChannelMsg::ExitSignal { signal_name, .. }) => {
+                        output.exit_code = Some(signal_exit_code(&signal_name))
+                    }
+                    Some(ChannelMsg::Eof) => {}
+                    Some(ChannelMsg::Close) | None => break,
                     _ => {}
                 }
             }
@@ -257,6 +295,86 @@ impl RemoteWorkspace {
             }
         }
     }
+}
+
+fn client_config(keepalive_seconds: u64) -> client::Config {
+    client::Config {
+        keepalive_interval: (keepalive_seconds > 0).then(|| Duration::from_secs(keepalive_seconds)),
+        keepalive_max: 3,
+        nodelay: true,
+        ..Default::default()
+    }
+}
+
+async fn connect_transport(
+    profile: &SshProfile,
+    proxy: Option<&ProxyConfig>,
+    config: Arc<client::Config>,
+    app: tauri::AppHandle,
+    host_keys: Arc<HostKeyVerifier>,
+    remote_forwards: RemoteForwardRegistry,
+) -> Result<Handle<ClientHandler>, String> {
+    let handler = ClientHandler {
+        app,
+        profile_id: profile.id.clone(),
+        host: profile.host.clone(),
+        port: profile.port,
+        host_keys,
+        remote_forwards,
+    };
+    let stream = tokio::time::timeout(
+        Duration::from_secs(15),
+        super::proxy::connect(proxy, &profile.host, profile.port),
+    )
+    .await
+    .map_err(|_| "SSH TCP connection timed out".to_string())?
+    .map_err(|e| format!("SSH TCP connection failed: {e}"))?;
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        client::connect_stream(config, stream, handler),
+    )
+    .await
+    .map_err(|_| "SSH handshake timed out".to_string())?
+    .map_err(|e| format!("SSH handshake failed: {e}"))
+}
+
+async fn detect_linux_bash_home(workspace: &RemoteWorkspace) -> Result<String, String> {
+    const PROBE: &str = "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${SHELL##*/}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; printf '%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\"";
+    let output = workspace.exec(PROBE, None, Duration::from_secs(10)).await?;
+    if output.timed_out {
+        return Err("timed out while detecting the remote Linux/bash environment".into());
+    }
+    match output.exit_code {
+        Some(0) => {}
+        Some(92) => return Err("Remote SSH currently supports Linux hosts only".into()),
+        Some(93) => return Err("Remote SSH currently requires bash as the login shell".into()),
+        Some(94) => return Err("Remote SSH login did not provide a HOME directory".into()),
+        Some(code) => {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("failed to detect the remote Linux/bash environment (exit {code})")
+            } else {
+                format!("failed to detect the remote Linux/bash environment: {detail}")
+            });
+        }
+        None => {
+            return Err(
+                "SSH server closed the environment probe without reporting an exit status".into(),
+            )
+        }
+    }
+    let fields: Vec<&[u8]> = output.stdout.split(|byte| *byte == 0).collect();
+    if fields.len() != 3 || fields[0] != b"Linux" || fields[1].is_empty() || fields[2].is_empty() {
+        return Err("SSH server returned an invalid Linux/bash environment probe".into());
+    }
+    let home = std::str::from_utf8(fields[2])
+        .map_err(|_| "Remote SSH HOME is not valid UTF-8".to_string())?
+        .to_string();
+    validate_remote_path(&home)?;
+    if !home.starts_with('/') {
+        return Err(format!("Remote SSH HOME is not an absolute path: {home}"));
+    }
+    Ok(home)
 }
 
 #[derive(Default, Debug)]
@@ -276,22 +394,24 @@ fn append_bounded(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool) {
     target.extend_from_slice(&data[..data.len().min(remaining)]);
 }
 
-async fn authenticate(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrimaryAuthResult {
+    Authenticated,
+    KeyboardInteractiveRequired,
+}
+
+async fn authenticate_primary(
     handle: &mut Handle<ClientHandler>,
     profile: &SshProfile,
     secret: &str,
-) -> Result<(), String> {
+) -> Result<PrimaryAuthResult, String> {
     let result = match profile.auth_method {
         SshAuthMethod::Password => {
             let password = handle
                 .authenticate_password(&profile.username, secret)
                 .await
                 .map_err(|e| format!("password authentication failed: {e}"))?;
-            if password.success() {
-                true
-            } else {
-                authenticate_keyboard_interactive(handle, &profile.username, secret).await?
-            }
+            return Ok(password_auth_result(password.success()));
         }
         SshAuthMethod::PrivateKey => {
             let path = profile.identity_file.as_deref().unwrap_or_default();
@@ -310,9 +430,17 @@ async fn authenticate(
         SshAuthMethod::Agent => authenticate_agent(handle, &profile.username).await?,
     };
     if result {
-        Ok(())
+        Ok(PrimaryAuthResult::Authenticated)
     } else {
         Err("SSH server rejected the supplied credentials".into())
+    }
+}
+
+fn password_auth_result(success: bool) -> PrimaryAuthResult {
+    if success {
+        PrimaryAuthResult::Authenticated
+    } else {
+        PrimaryAuthResult::KeyboardInteractiveRequired
     }
 }
 
@@ -423,6 +551,24 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+pub(crate) fn signal_exit_code(signal: &Sig) -> i32 {
+    128 + match signal {
+        Sig::HUP => 1,
+        Sig::INT => 2,
+        Sig::QUIT => 3,
+        Sig::ILL => 4,
+        Sig::ABRT => 6,
+        Sig::FPE => 8,
+        Sig::KILL => 9,
+        Sig::USR1 => 10,
+        Sig::SEGV => 11,
+        Sig::PIPE => 13,
+        Sig::ALRM => 14,
+        Sig::TERM => 15,
+        Sig::Custom(_) => 0,
+    }
+}
+
 pub fn join_remote(parent: &str, name: &str) -> String {
     if parent.is_empty() {
         return name.to_string();
@@ -455,7 +601,11 @@ fn expand_remote_home(path: &str, home: &str) -> String {
             return join_remote(home, rest);
         }
     }
-    path.to_string()
+    if path.starts_with('/') {
+        path.to_string()
+    } else {
+        join_remote(home, path)
+    }
 }
 
 pub fn validate_remote_path(path: &str) -> Result<(), String> {
@@ -467,7 +617,7 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod path_tests {
-    use super::expand_remote_home;
+    use super::{client_config, expand_remote_home, password_auth_result, PrimaryAuthResult};
 
     #[test]
     fn expands_common_remote_home_forms() {
@@ -478,5 +628,22 @@ mod path_tests {
             "/home/me/code"
         );
         assert_eq!(expand_remote_home("/srv/code", "/home/me"), "/srv/code");
+        assert_eq!(expand_remote_home("code", "/home/me"), "/home/me/code");
+    }
+
+    #[test]
+    fn rejected_password_requires_fresh_keyboard_interactive_transport() {
+        assert_eq!(
+            password_auth_result(false),
+            PrimaryAuthResult::KeyboardInteractiveRequired
+        );
+        assert_eq!(password_auth_result(true), PrimaryAuthResult::Authenticated);
+    }
+
+    #[test]
+    fn client_banner_does_not_impersonate_openssh() {
+        let banner = format!("{:?}", client_config(30).client_id);
+        assert!(!banner.contains("OpenSSH"), "unexpected banner: {banner}");
+        assert!(banner.contains("russh"), "unexpected banner: {banner}");
     }
 }

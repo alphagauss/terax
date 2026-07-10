@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use russh::keys::ssh_key::{HashAlg, PublicKey};
 use serde::Serialize;
@@ -43,6 +43,7 @@ struct HostKeyPrompt {
 pub struct HostKeyVerifier {
     path: PathBuf,
     pending: tokio::sync::Mutex<HashMap<String, PendingVerification>>,
+    trusted_once: Mutex<HashMap<String, (String, Instant)>>,
     file_lock: Mutex<()>,
 }
 
@@ -51,6 +52,7 @@ impl HostKeyVerifier {
         Self {
             path,
             pending: tokio::sync::Mutex::new(HashMap::new()),
+            trusted_once: Mutex::new(HashMap::new()),
             file_lock: Mutex::new(()),
         }
     }
@@ -135,8 +137,22 @@ impl HostKeyVerifier {
         if status == HostKeyStatus::Match {
             return true;
         }
-        let request_id = uuid::Uuid::new_v4().to_string();
+        let id = Self::id(host, port);
         let key_line = Self::key_line(key);
+        if self
+            .trusted_once
+            .lock()
+            .ok()
+            .and_then(|mut trusted| {
+                trusted
+                    .retain(|_, (_, accepted_at)| accepted_at.elapsed() < Duration::from_secs(120));
+                trusted.get(&id).cloned()
+            })
+            .is_some_and(|(accepted_key, _)| accepted_key == key_line)
+        {
+            return true;
+        }
+        let request_id = uuid::Uuid::new_v4().to_string();
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().await.insert(
             request_id.clone(),
@@ -183,6 +199,15 @@ impl HostKeyVerifier {
             .ok_or_else(|| "host-key verification request not found".to_string())?;
         if accepted && remember {
             self.remember(&pending.host, pending.port, &pending.key)?;
+        }
+        if accepted {
+            self.trusted_once
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(
+                    Self::id(&pending.host, pending.port),
+                    (pending.key.clone(), Instant::now()),
+                );
         }
         let _ = pending.sender.send(accepted);
         Ok(())

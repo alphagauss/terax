@@ -8,6 +8,7 @@ Terax does not require these repositories at build time or runtime.
 ## CrabPort
 
 - Project: CrabPort, https://github.com/chi11321/CrabPort
+- Reviewed revision: `8666047ebd6e72bd1ee9b04b08204f114a818361`
 - License: Apache License 2.0
 - Used as the main reference for the SSH/SFTP/proxy/tunnel module boundaries,
   proxy transport, transfer operations, and connection/tunnel lifecycle.
@@ -22,6 +23,7 @@ The Apache License 2.0 text is included in the root `LICENSE` file.
 ## Eussh
 
 - Project: Eussh, https://github.com/WillSat/eussh
+- Reviewed revision: `43174993bed3b4f81d65c75aba3139beaecb5dac`
 - Copyright: Copyright (c) 2026 Eussh
 - License: MIT
 - Used as the reference for the russh session/channel flow, host-key prompt,
@@ -57,6 +59,7 @@ SOFTWARE.
 ## meatshell
 
 - Project: meatshell, https://github.com/jeff141/meatshell
+- Reviewed revision: `8c5eeef7b4f0326644606aef3c5a89bfec342455`
 - Copyright: meatshell contributors
 - License declared by its Cargo package: MIT OR Apache-2.0. Terax uses the
   Apache-2.0 option for the adapted material.
@@ -70,3 +73,10 @@ SOFTWARE.
   remaining behavior to russh and Terax's workspace APIs.
 
 The Apache License 2.0 text is included in the root `LICENSE` file.
+
+## Scope retained in Terax
+
+The migrated implementation is self-contained in this repository. Its current
+remote-host contract is Linux with bash as the account login shell. The three
+reviewed repositories are provenance and design references only; no absolute
+local path, source checkout, build step, or runtime lookup depends on them.

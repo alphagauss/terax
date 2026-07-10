@@ -1,10 +1,14 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { currentWorkspaceEnv, useWorkspaceEnvStore } from "@/modules/workspace";
+import {
+  useWorkspaceEnvStore,
+  workspaceScopeKey,
+} from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
+import { fileFingerprintChanged } from "./remotePolling";
 
 type ReadResult =
   | { kind: "text"; content: string; size: number; mtime: number }
@@ -29,7 +33,10 @@ type Options = {
 };
 
 export function useDocument({ path, onDirtyChange }: Options) {
-  const workspaceKind = useWorkspaceEnvStore((state) => state.env.kind);
+  const workspace = useWorkspaceEnvStore((state) => state.env);
+  const workspaceScope = workspaceScopeKey(workspace);
+  const activeWorkspaceScopeRef = useRef(workspaceScope);
+  activeWorkspaceScopeRef.current = workspaceScope;
   const [doc, setDoc] = useState<DocumentState>({ status: "loading" });
   const [dirty, setDirty] = useState(false);
 
@@ -58,21 +65,24 @@ export function useDocument({ path, onDirtyChange }: Options) {
   }, []);
 
   const diskMtimeRef = useRef<number | null>(null);
+  const diskSizeRef = useRef<number | null>(null);
 
   const writeToDisk = useCallback(async () => {
     const content = bufferRef.current;
+    const diskContent = restoreEol(content, eolRef.current);
     const mtime = await invoke<number>("fs_write_file", {
       path,
-      content: restoreEol(content, eolRef.current),
-      workspace: currentWorkspaceEnv(),
+      content: diskContent,
+      workspace,
       source: "editor",
     });
     diskMtimeRef.current = mtime;
+    diskSizeRef.current = new TextEncoder().encode(diskContent).byteLength;
     savedRef.current = content;
     // Edits typed while the write was in flight must stay dirty.
     setDirty(bufferRef.current !== content);
     notifyDocumentSaved(path);
-  }, [path]);
+  }, [path, workspace]);
 
   // False when the write was withheld because the file changed on disk
   // since load; overwriting is an explicit user action from the toast.
@@ -81,9 +91,9 @@ export function useDocument({ path, onDirtyChange }: Options) {
     if (known !== null) {
       const stat = await invoke<FileStat>("fs_stat", {
         path,
-        workspace: currentWorkspaceEnv(),
+        workspace,
       }).catch(() => null);
-      if (stat && stat.mtime !== known) {
+      if (stat && fileFingerprintChanged(known, diskSizeRef.current, stat)) {
         const name = path.split(/[\\/]/).pop() ?? path;
         toast.warning("File changed on disk", {
           id: `save-conflict:${path}`,
@@ -95,7 +105,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     }
     await writeToDisk();
     return true;
-  }, [path, writeToDisk]);
+  }, [path, workspace, writeToDisk]);
 
   // Notify parent of dirty transitions.
   const onDirtyChangeRef = useRef(onDirtyChange);
@@ -115,6 +125,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     if (res.kind === "text") {
       eolRef.current = detectEol(res.content);
       diskMtimeRef.current = res.mtime;
+      diskSizeRef.current = res.size;
       const content = normalizeToLf(res.content);
       if (skipIfUnchanged && content === savedRef.current) return;
       savedRef.current = content;
@@ -122,8 +133,10 @@ export function useDocument({ path, onDirtyChange }: Options) {
       setDirty(false);
       setDoc({ status: "ready", content, size: res.size });
     } else if (res.kind === "binary") {
+      diskSizeRef.current = res.size;
       setDoc({ status: "binary", size: res.size });
     } else if (res.kind === "toolarge") {
+      diskSizeRef.current = res.size;
       setDoc({ status: "toolarge", size: res.size, limit: res.limit });
     }
   }, []);
@@ -132,10 +145,10 @@ export function useDocument({ path, onDirtyChange }: Options) {
     (force: boolean) =>
       invoke<ReadResult>("fs_read_file", {
         path,
-        workspace: currentWorkspaceEnv(),
+        workspace,
         force,
       }),
-    [path],
+    [path, workspace],
   );
 
   // Load on path change.
@@ -171,21 +184,46 @@ export function useDocument({ path, onDirtyChange }: Options) {
   // read resolves, since typing can start while it is in flight.
   const reload = useCallback((): boolean => {
     if (dirtyRef.current) return false;
+    const requestedScope = workspaceScope;
     void readFromDisk(forceRef.current)
       .then((res) => {
-        if (!dirtyRef.current) adoptRead(res, true);
+        if (
+          requestedScope === activeWorkspaceScopeRef.current &&
+          !dirtyRef.current
+        ) {
+          adoptRead(res, true);
+        }
       })
       // Transient failures (e.g. ENOENT mid atomic-rename) must not replace
       // a healthy buffer with an error screen.
       .catch((e) => console.warn("[editor] reload failed", path, e));
     return true;
-  }, [readFromDisk, adoptRead, path]);
+  }, [readFromDisk, adoptRead, path, workspaceScope]);
+
+  const pollRemote = useCallback(async () => {
+    if (dirtyRef.current) return;
+    const stat = await invoke<FileStat>("fs_stat", { path, workspace }).catch(
+      () => null,
+    );
+    if (!stat || dirtyRef.current) return;
+    if (!fileFingerprintChanged(diskMtimeRef.current, diskSizeRef.current, stat)) {
+      return;
+    }
+    reload();
+  }, [path, reload, workspace]);
 
   useEffect(() => {
-    if (workspaceKind !== "ssh") return;
-    const timer = window.setInterval(() => reload(), 3000);
+    if (workspace.kind !== "ssh") return;
+    let inFlight = false;
+    const timer = window.setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
+      void pollRemote().finally(() => {
+        inFlight = false;
+      });
+    }, 3000);
     return () => window.clearInterval(timer);
-  }, [workspaceKind, reload]);
+  }, [workspace.kind, pollRemote]);
 
   const save = useCallback(async (): Promise<boolean> => {
     clearAutoSaveTimer();
@@ -202,6 +240,7 @@ export function useDocument({ path, onDirtyChange }: Options) {
     (diskText: string, mtime: number): string => {
       eolRef.current = detectEol(diskText);
       diskMtimeRef.current = mtime;
+      diskSizeRef.current = new TextEncoder().encode(diskText).byteLength;
       const content = normalizeToLf(diskText);
       savedRef.current = content;
       setDirty(bufferRef.current !== content);

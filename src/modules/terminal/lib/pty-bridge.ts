@@ -28,6 +28,8 @@ export async function openPty(
   const onExit = new Channel<number>();
 
   let released = false;
+  let openedId: number | null = null;
+  let exitReceived = false;
   const noop = () => {};
   const releaseHandlers = () => {
     if (released) return;
@@ -38,8 +40,12 @@ export async function openPty(
 
   onData.onmessage = (buf) => handlers.onData(new Uint8Array(buf));
   onExit.onmessage = (code) => {
+    exitReceived = true;
     handlers.onExit?.(code);
     releaseHandlers();
+    if (openedId !== null) {
+      void invoke("pty_close", { id: openedId }).catch(() => {});
+    }
   };
 
   const id = await invoke<number>("pty_open", {
@@ -52,6 +58,10 @@ export async function openPty(
     onData,
     onExit,
   });
+  openedId = id;
+  if (exitReceived) {
+    void invoke("pty_close", { id }).catch(() => {});
+  }
 
   let closed = false;
   const headers = { "x-pty-id": String(id) };

@@ -17,6 +17,7 @@ import {
   registerPromptTracker,
 } from "./osc-handlers";
 import { openPty, type PtySession } from "./pty-bridge";
+import { isRecoverableRemoteExit } from "./exit";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import {
@@ -536,6 +537,19 @@ async function openPtyForSession(
         s.pty = null;
         s.pendingInput = "";
         s.commandRunning = false;
+        if (isRecoverableRemoteExit(code)) {
+          s.spawnFailed = true;
+          const slot = getSlotForLeaf(leafId);
+          if (slot) slot.term.options.disableStdin = false;
+          deliverPtyBytes(
+            leafId,
+            new TextEncoder().encode(
+              "\r\n\x1b[31m[terax] SSH connection closed\x1b[0m\r\n\x1b[2mreconnect the workspace, then press Enter to restart bash\x1b[0m\r\n",
+            ),
+          );
+          scheduleHiddenRelease(leafId, s);
+          return;
+        }
         const slot = getSlotForLeaf(leafId);
         if (slot) slot.term.options.disableStdin = true;
         scheduleHiddenRelease(leafId, s);
@@ -688,7 +702,7 @@ function attachSession(
     openPtyWithRetry(leafId, s, s.initialCwd)
       .then((pty) => {
         s.ptyOpening = false;
-        if (s.disposed) {
+        if (s.disposed || s.shellExited) {
           pty.close();
           return;
         }

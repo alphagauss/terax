@@ -26,13 +26,16 @@ function removeInlineProxyPassword(value?: string | null): string | null {
 }
 
 function normalizeProfile(profile: SshProfile): SshProfile {
+  const keepalive = Number(profile.keepaliveSeconds);
   return {
     ...profile,
     proxyUrl: removeInlineProxyPassword(profile.proxyUrl),
     port: Number(profile.port) || 22,
-    keepaliveSeconds: Number(profile.keepaliveSeconds) || 30,
+    keepaliveSeconds:
+      Number.isFinite(keepalive) && keepalive >= 0 ? keepalive : 30,
     reconnectMaxAttempts: Number(profile.reconnectMaxAttempts) || 5,
     reconnectEnabled: Boolean(profile.reconnectEnabled),
+    rootPath: profile.rootPath?.trim() || "~",
   };
 }
 
