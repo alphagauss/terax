@@ -9,6 +9,7 @@ pub struct ResolvedGitDirectory {
     pub workspace: WorkspaceEnv,
     pub git_path: String,
     pub local_path: PathBuf,
+    pub remote: bool,
 }
 
 pub fn split_upstream(upstream: &str) -> (Option<String>, Option<String>) {
@@ -31,6 +32,27 @@ pub fn canonical_dir(
     path: &str,
     workspace: &WorkspaceEnv,
 ) -> Result<ResolvedGitDirectory> {
+    if let WorkspaceEnv::Ssh { profile_id } = workspace {
+        let manager = crate::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
+        let profile_id = profile_id.clone();
+        let path = path.to_string();
+        let canonical = tauri::async_runtime::block_on(async move {
+            let workspace = manager.workspace(&profile_id).await?;
+            let canonical = crate::modules::remote::sftp::canonicalize(&workspace, &path).await?;
+            let stat = crate::modules::remote::sftp::stat(&workspace, &canonical).await?;
+            if stat.kind != crate::modules::remote::sftp::RemoteEntryKind::Dir {
+                return Err(format!("not a remote directory: {canonical}"));
+            }
+            Ok::<_, String>(canonical)
+        })
+        .map_err(GitError::Spawn)?;
+        return Ok(ResolvedGitDirectory {
+            workspace: workspace.clone(),
+            git_path: canonical.clone(),
+            local_path: PathBuf::from(canonical),
+            remote: true,
+        });
+    }
     let candidate = resolve_path(path, workspace);
     if !candidate.is_dir() {
         return Err(GitError::NotADirectory(path.to_string()));
@@ -47,6 +69,7 @@ pub fn canonical_dir(
         workspace: workspace.clone(),
         git_path,
         local_path,
+        remote: false,
     })
 }
 
@@ -56,7 +79,7 @@ pub fn authorized_repo_root(
     workspace: &WorkspaceEnv,
 ) -> Result<ResolvedGitDirectory> {
     let canonical = canonical_dir(registry, path, workspace)?;
-    if !registry.is_authorized(&canonical.local_path) {
+    if !canonical.remote && !registry.is_authorized(&canonical.local_path) {
         return Err(GitError::PathOutsideWorkspace(canonical.local_path.clone()));
     }
     Ok(canonical)

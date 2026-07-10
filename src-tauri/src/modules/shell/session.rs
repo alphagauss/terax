@@ -77,8 +77,12 @@ impl ShellSession {
         if self.pristine.load(Ordering::Acquire) {
             if let Some(hint) = cwd_hint.filter(|s| !s.is_empty()) {
                 let effective_workspace = workspace_hint.as_ref().unwrap_or(&self.workspace);
-                let p = resolve_path(&hint, effective_workspace);
-                if p.is_dir() {
+                let usable = if effective_workspace.is_ssh() {
+                    crate::modules::remote::session::validate_remote_path(&hint).is_ok()
+                } else {
+                    resolve_path(&hint, effective_workspace).is_dir()
+                };
+                if usable {
                     *self.cwd.lock().unwrap() = hint;
                 }
             }
@@ -102,12 +106,20 @@ impl ShellSession {
 
         let (stdout_clean, cwd_after) = strip_cwd_sentinel(&raw.stdout, &cwd, &self.sentinel);
         if let Some(ref new_cwd) = cwd_after {
-            let p = resolve_path(new_cwd, &self.workspace);
-            if p.is_dir() {
+            let usable = if self.workspace.is_ssh() {
+                crate::modules::remote::session::validate_remote_path(new_cwd).is_ok()
+            } else {
+                resolve_path(new_cwd, &self.workspace).is_dir()
+            };
+            if usable {
                 *self.cwd.lock().unwrap() = new_cwd.clone();
             }
         }
-        let resolved_cwd = to_canon(self.current_cwd());
+        let resolved_cwd = if self.workspace.is_ssh() {
+            self.current_cwd().replace('\\', "/")
+        } else {
+            to_canon(self.current_cwd())
+        };
 
         Ok(SessionRunOutput {
             stdout: stdout_clean,
@@ -127,7 +139,7 @@ fn wrap_posix_with_sentinel(command: &str, sentinel: &str) -> String {
 }
 
 fn wrap_with_sentinel(command: &str, workspace: &WorkspaceEnv, sentinel: &str) -> String {
-    if workspace.is_wsl() {
+    if workspace.is_wsl() || workspace.is_ssh() {
         return wrap_posix_with_sentinel(command, sentinel);
     }
     #[cfg(unix)]
@@ -175,7 +187,10 @@ mod tests {
         let stdout = format!("{attacker}{trailer}");
         let (clean, cwd) = strip_cwd_sentinel(&stdout, "/fallback", &s.sentinel);
         assert_eq!(cwd.as_deref(), Some("/real"));
-        assert!(clean.contains(attacker), "attacker payload survives in stdout");
+        assert!(
+            clean.contains(attacker),
+            "attacker payload survives in stdout"
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
 
 use super::to_canon;
+use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize, Clone)]
@@ -62,6 +63,22 @@ pub fn fs_search(
     let cap = limit.unwrap_or(200).min(1000);
     let show_hidden = show_hidden.unwrap_or(false);
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let (entries, truncated) = remote_walk(profile_id, &root, show_hidden, 16, MAX_SCANNED)?;
+        let candidates = entries
+            .into_iter()
+            .map(|entry| SearchHit {
+                path: entry.path,
+                rel: entry.rel,
+                name: entry.name,
+                is_dir: entry.kind == remote::sftp::RemoteEntryKind::Dir,
+            })
+            .collect();
+        return Ok(SearchResult {
+            hits: rank_fuzzy(candidates, q, cap),
+            truncated,
+        });
+    }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
@@ -170,6 +187,22 @@ pub fn fs_list_files(
     let depth = max_depth.unwrap_or(DEFAULT_DEPTH).clamp(1, HARD_DEPTH);
     let show_hidden = show_hidden.unwrap_or(false);
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let (entries, mut truncated) =
+            remote_walk(profile_id, &root, show_hidden, depth, MAX_SCANNED)?;
+        let mut files: Vec<String> = entries
+            .into_iter()
+            .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::File)
+            .map(|entry| entry.rel)
+            .take(cap + 1)
+            .collect();
+        if files.len() > cap {
+            files.truncate(cap);
+            truncated = true;
+        }
+        files.sort_by_key(|path| path.to_lowercase());
+        return Ok(ListFilesResult { files, truncated });
+    }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
@@ -226,6 +259,22 @@ pub fn fs_list_files(
 
     files.sort_by_key(|a| a.to_lowercase());
     Ok(ListFilesResult { files, truncated })
+}
+
+fn remote_walk(
+    profile_id: &str,
+    root: &str,
+    show_hidden: bool,
+    depth: usize,
+    cap: usize,
+) -> Result<(Vec<remote::sftp::RemoteWalkEntry>, bool), String> {
+    let manager = remote::manager::global_manager()?;
+    let profile_id = profile_id.to_string();
+    let root = root.to_string();
+    tauri::async_runtime::block_on(async move {
+        let workspace = manager.workspace(&profile_id).await?;
+        remote::sftp::walk(&workspace, &root, show_hidden, depth, cap).await
+    })
 }
 
 fn display_path(

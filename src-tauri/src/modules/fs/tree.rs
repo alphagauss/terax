@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
+use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 #[derive(Serialize)]
@@ -70,6 +71,31 @@ pub fn fs_read_dir(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<DirEntry>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let manager = remote::manager::global_manager()?;
+        let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
+        return tauri::async_runtime::block_on(remote::sftp::read_dir(
+            &workspace,
+            &path,
+            show_hidden,
+        ))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .map(|entry| DirEntry {
+                    name: entry.name,
+                    kind: match entry.kind {
+                        remote::sftp::RemoteEntryKind::File => EntryKind::File,
+                        remote::sftp::RemoteEntryKind::Dir => EntryKind::Dir,
+                        remote::sftp::RemoteEntryKind::Symlink => EntryKind::Symlink,
+                    },
+                    size: entry.size,
+                    mtime: entry.mtime,
+                    gitignored: false,
+                })
+                .collect()
+        });
+    }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("fs_read_dir({}) failed: {e}", root.display());
@@ -156,6 +182,22 @@ pub fn list_subdirs(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<String>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let manager = remote::manager::global_manager()?;
+        let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
+        return tauri::async_runtime::block_on(remote::sftp::read_dir(
+            &workspace,
+            &path,
+            show_hidden,
+        ))
+        .map(|entries| {
+            entries
+                .into_iter()
+                .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::Dir)
+                .map(|entry| entry.name)
+                .collect()
+        });
+    }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {
         log::debug!("list_subdirs({}) read_dir failed: {e}", root.display());

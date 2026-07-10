@@ -1,6 +1,7 @@
 export {
   currentWorkspaceScopeKey,
   currentWorkspaceEnv,
+  getSshHome,
   getWslHome,
   LOCAL_WORKSPACE,
   parseWorkspaceScopeKey,

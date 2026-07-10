@@ -15,9 +15,9 @@ use crate::modules::git::types::{
     GitOutput, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, MAX_OUTPUT_BYTES,
     MAX_TIMEOUT_SECS, MIN_GIT_VERSION,
 };
-use crate::modules::workspace::WorkspaceEnv;
 #[cfg(windows)]
 use crate::modules::workspace::validate_wsl_distro_name;
+use crate::modules::workspace::WorkspaceEnv;
 
 #[derive(Clone)]
 enum Availability {
@@ -47,6 +47,7 @@ fn workspace_cache_key(workspace: &WorkspaceEnv) -> String {
     match workspace {
         WorkspaceEnv::Local => "local".into(),
         WorkspaceEnv::Wsl { distro } => format!("wsl:{distro}"),
+        WorkspaceEnv::Ssh { profile_id } => format!("ssh:{profile_id}"),
     }
 }
 
@@ -249,6 +250,27 @@ where
         .into_iter()
         .map(|arg| arg.as_ref().to_os_string())
         .collect();
+    if let WorkspaceEnv::Ssh { profile_id } = workspace {
+        let mut command = String::from(
+            "env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= GIT_OPTIONAL_LOCKS=0 GCM_INTERACTIVE=Never LC_ALL=C git",
+        );
+        for arg in &args {
+            let arg = arg
+                .to_str()
+                .ok_or_else(|| GitError::command("git command", "non-UTF-8 argument"))?;
+            command.push(' ');
+            command.push_str(&crate::modules::remote::session::shell_quote(arg));
+        }
+        let output = crate::modules::remote::manager::exec_blocking(profile_id, &command, cwd, dur)
+            .map_err(GitError::Spawn)?;
+        return Ok(GitOutput {
+            stdout: output.stdout,
+            stderr: output.stderr,
+            exit_code: output.exit_code,
+            timed_out: output.timed_out,
+            truncated: output.truncated,
+        });
+    }
     let mut cmd = build_git_command(workspace, cwd, &args)?;
     cmd.env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")

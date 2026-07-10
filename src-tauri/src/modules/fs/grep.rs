@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use grep_matcher::Matcher as _;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
@@ -10,6 +11,7 @@ use ignore::{WalkBuilder, WalkState};
 use serde::Serialize;
 
 use super::to_canon;
+use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
@@ -182,6 +184,18 @@ pub fn fs_grep(
         return Err("empty pattern".into());
     }
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let cap = max_results
+            .unwrap_or(DEFAULT_MAX_RESULTS)
+            .clamp(1, HARD_MAX_RESULTS);
+        let matcher = RegexMatcherBuilder::new()
+            .case_insensitive(case_insensitive.unwrap_or(false))
+            .line_terminator(Some(b'\n'))
+            .build(&pattern)
+            .map_err(|e| format!("bad regex: {e}"))?;
+        let globs = build_globset(glob.as_deref().unwrap_or(&[]))?;
+        return search_remote(profile_id, &root, &matcher, &globs, cap, &|| false);
+    }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
@@ -225,6 +239,18 @@ pub fn fs_grep_interactive(
     let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let cap = max_results
+            .unwrap_or(DEFAULT_MAX_RESULTS)
+            .clamp(1, HARD_MAX_RESULTS);
+        let matcher = RegexMatcherBuilder::new()
+            .case_smart(true)
+            .line_terminator(Some(b'\n'))
+            .build(&escape_literal(&pattern))
+            .map_err(|e| format!("bad pattern: {e}"))?;
+        let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
+        return search_remote(profile_id, &root, &matcher, &None, cap, &cancel);
+    }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
@@ -241,13 +267,7 @@ pub fn fs_grep_interactive(
 
     let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
     Ok(search_tree(
-        &root_path,
-        &root,
-        &workspace,
-        &matcher,
-        &None,
-        cap,
-        &cancel,
+        &root_path, &root, &workspace, &matcher, &None, cap, &cancel,
     ))
 }
 
@@ -274,6 +294,33 @@ pub fn fs_glob(
         return Err("empty pattern".into());
     }
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let cap = max_results.unwrap_or(500).clamp(1, HARD_MAX_RESULTS);
+        let glob = Glob::new(&pattern).map_err(|e| format!("bad glob: {e}"))?;
+        let mut builder = GlobSetBuilder::new();
+        builder.add(glob);
+        let set = builder.build().map_err(|e| format!("globset build: {e}"))?;
+        let manager = remote::manager::global_manager()?;
+        let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
+        let (entries, mut truncated) = tauri::async_runtime::block_on(remote::sftp::walk(
+            &workspace, &root, false, 16, 50_000,
+        ))?;
+        let mut hits = Vec::new();
+        for entry in entries {
+            if entry.kind != remote::sftp::RemoteEntryKind::File || !set.is_match(&entry.rel) {
+                continue;
+            }
+            if hits.len() >= cap {
+                truncated = true;
+                break;
+            }
+            hits.push(GlobHit {
+                path: entry.path,
+                rel: entry.rel,
+            });
+        }
+        return Ok(GlobResponse { hits, truncated });
+    }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
@@ -322,6 +369,65 @@ pub fn fs_glob(
     Ok(GlobResponse { hits, truncated })
 }
 
+fn search_remote(
+    profile_id: &str,
+    root: &str,
+    matcher: &RegexMatcher,
+    globs: &Option<GlobSet>,
+    cap: usize,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<GrepResponse, String> {
+    let manager = remote::manager::global_manager()?;
+    let workspace = tauri::async_runtime::block_on(manager.workspace(profile_id))?;
+    let (entries, mut truncated) =
+        tauri::async_runtime::block_on(remote::sftp::walk(&workspace, root, false, 16, 50_000))?;
+    let mut hits = Vec::new();
+    let mut files_scanned = 0usize;
+    for entry in entries {
+        if cancel() {
+            break;
+        }
+        if entry.kind != remote::sftp::RemoteEntryKind::File || entry.size > FILE_SIZE_CAP {
+            continue;
+        }
+        if globs.as_ref().is_some_and(|set| !set.is_match(&entry.rel)) {
+            continue;
+        }
+        let bytes = match tauri::async_runtime::block_on(remote::sftp::read_file(
+            &workspace,
+            &entry.path,
+            FILE_SIZE_CAP,
+        )) {
+            Ok(bytes) if !bytes.iter().take(8192).any(|byte| *byte == 0) => bytes,
+            _ => continue,
+        };
+        files_scanned += 1;
+        let text = String::from_utf8_lossy(&bytes);
+        for (index, line) in text.lines().enumerate() {
+            if matcher.is_match(line.as_bytes()).unwrap_or(false) {
+                if hits.len() >= cap {
+                    truncated = true;
+                    break;
+                }
+                hits.push(GrepHit {
+                    path: entry.path.clone(),
+                    rel: entry.rel.clone(),
+                    line: index as u64 + 1,
+                    text: line.to_string(),
+                });
+            }
+        }
+        if hits.len() >= cap {
+            break;
+        }
+    }
+    Ok(GrepResponse {
+        hits,
+        truncated,
+        files_scanned,
+    })
+}
+
 fn display_path(
     path: &std::path::Path,
     root_path: &std::path::Path,
@@ -361,11 +467,26 @@ mod tests {
         let ws = WorkspaceEnv::from_option(None);
         let root_display = dir.path().to_string_lossy().to_string();
 
-        let live = search_tree(dir.path(), &root_display, &ws, &matcher, &None, 100, &|| false);
+        let live = search_tree(
+            dir.path(),
+            &root_display,
+            &ws,
+            &matcher,
+            &None,
+            100,
+            &|| false,
+        );
         assert_eq!(live.hits.len(), 1, "uncancelled search finds the match");
 
-        let stopped =
-            search_tree(dir.path(), &root_display, &ws, &matcher, &None, 100, &|| true);
+        let stopped = search_tree(
+            dir.path(),
+            &root_display,
+            &ws,
+            &matcher,
+            &None,
+            100,
+            &|| true,
+        );
         assert!(stopped.hits.is_empty(), "cancelled search yields nothing");
     }
 }

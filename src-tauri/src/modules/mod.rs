@@ -6,6 +6,7 @@ pub mod lsp;
 pub mod net;
 pub mod proc;
 pub mod pty;
+pub mod remote;
 pub mod secrets;
 pub mod shell;
 pub mod workspace;

@@ -44,10 +44,31 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 bytes = "1"
 futures-util = "0.3"
-tokio = { version = "1", default-features = false, features = ["rt"] }
+tokio = { version = "1", default-features = false, features = [
+	"rt-multi-thread",
+	"macros",
+	"sync",
+	"net",
+	"io-util",
+	"time",
+	"fs",
+] }
 tempfile = "3"
 notify = "8.2.0"
 which = "8.0.4"
+russh = { version = "0.61.2", default-features = false, features = [
+	"ring",
+	"rsa",
+	"flate2",
+	"async-trait",
+] }
+russh-sftp = "2.3.0"
+uuid = { version = "1", features = ["v4", "serde"] }
+zeroize = "1"
+tokio-socks = "0.5"
+tokio-rustls = "0.26"
+rustls-pki-types = "1"
+rustls-platform-verifier = "0.6"
 
 [dev-dependencies]
 proptest = "1"

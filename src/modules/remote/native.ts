@@ -1,0 +1,100 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  ConnectionInfo,
+  HostKeyPrompt,
+  ImportedHost,
+  SshProfile,
+  TunnelConfig,
+  TunnelInfo,
+} from "./types";
+
+export const SSH_SECRET_SERVICE = "terax-ssh";
+const proxySecretAccount = (profileId: string) => `${profileId}:proxy`;
+
+export const remoteNative = {
+  connect: (
+    profile: SshProfile,
+    secret?: string | null,
+    proxySecret?: string | null,
+  ) =>
+    invoke<ConnectionInfo>("ssh_connect", {
+      request: {
+        profile,
+        secret: secret || null,
+        proxySecret: proxySecret || null,
+      },
+    }),
+  disconnect: (profileId: string) =>
+    invoke<void>("ssh_disconnect", { profileId }),
+  reconnect: (profileId: string) =>
+    invoke<ConnectionInfo>("ssh_reconnect", { profileId }),
+  status: (profileId: string) =>
+    invoke<ConnectionInfo>("ssh_connection_status", { profileId }),
+  home: (profileId: string) => invoke<string>("ssh_home", { profileId }),
+  confirmHostKey: (requestId: string, accepted: boolean, remember: boolean) =>
+    invoke<void>("ssh_confirm_host_key", {
+      requestId,
+      accepted,
+      remember,
+    }),
+  importConfig: () => invoke<ImportedHost[]>("ssh_import_config"),
+  listTunnels: (profileId?: string) =>
+    invoke<TunnelInfo[]>("ssh_tunnel_list", {
+      profileId: profileId ?? null,
+    }),
+  startTunnel: (config: TunnelConfig) =>
+    invoke<TunnelInfo>("ssh_tunnel_start", { config }),
+  stopTunnel: (id: number) => invoke<void>("ssh_tunnel_stop", { id }),
+  upload: (profileId: string, localPath: string, remoteDir: string) =>
+    invoke<void>("ssh_upload", { profileId, localPath, remoteDir }),
+  download: (profileId: string, remotePath: string, localDir: string) =>
+    invoke<string>("ssh_download", { profileId, remotePath, localDir }),
+  getSecret: (profileId: string) =>
+    invoke<string | null>("secrets_get", {
+      service: SSH_SECRET_SERVICE,
+      account: profileId,
+    }),
+  setSecret: (profileId: string, secret: string) =>
+    invoke<void>("secrets_set", {
+      service: SSH_SECRET_SERVICE,
+      account: profileId,
+      password: secret,
+    }),
+  getProxySecret: (profileId: string) =>
+    invoke<string | null>("secrets_get", {
+      service: SSH_SECRET_SERVICE,
+      account: proxySecretAccount(profileId),
+    }),
+  setProxySecret: (profileId: string, secret: string) =>
+    invoke<void>("secrets_set", {
+      service: SSH_SECRET_SERVICE,
+      account: proxySecretAccount(profileId),
+      password: secret,
+    }),
+  deleteProxySecret: (profileId: string) =>
+    invoke<void>("secrets_delete", {
+      service: SSH_SECRET_SERVICE,
+      account: proxySecretAccount(profileId),
+    }),
+  deleteSecret: async (profileId: string) => {
+    await Promise.all([
+      invoke<void>("secrets_delete", {
+        service: SSH_SECRET_SERVICE,
+        account: profileId,
+      }),
+      invoke<void>("secrets_delete", {
+        service: SSH_SECRET_SERVICE,
+        account: proxySecretAccount(profileId),
+      }),
+    ]);
+  },
+  onStatus: (handler: (info: ConnectionInfo) => void): Promise<UnlistenFn> =>
+    listen<ConnectionInfo>("terax://ssh-status", (event) =>
+      handler(event.payload),
+    ),
+  onHostKey: (handler: (prompt: HostKeyPrompt) => void): Promise<UnlistenFn> =>
+    listen<HostKeyPrompt>("terax://ssh-host-key", (event) =>
+      handler(event.payload),
+    ),
+};

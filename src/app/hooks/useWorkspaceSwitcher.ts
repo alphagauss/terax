@@ -4,14 +4,15 @@ import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/tabs";
 import {
   getWslHome,
+  getSshHome,
   LOCAL_WORKSPACE,
   type WorkspaceEnv,
 } from "@/modules/workspace";
 
 async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
-  return env.kind === "wsl"
-    ? getWslHome(env.distro)
-    : (await homeDir()).replace(/\\/g, "/");
+  if (env.kind === "wsl") return getWslHome(env.distro);
+  if (env.kind === "ssh") return getSshHome(env.profileId);
+  return (await homeDir()).replace(/\\/g, "/");
 }
 
 type Params = {
@@ -73,11 +74,7 @@ export function useWorkspaceSwitcher({
 
   const switchWorkspace = useCallback(
     async (env: WorkspaceEnv): Promise<boolean> => {
-      if (
-        env.kind === workspaceEnv.kind &&
-        (env.kind === "local" ||
-          (workspaceEnv.kind === "wsl" && env.distro === workspaceEnv.distro))
-      ) {
+      if (workspaceScopeEqual(env, workspaceEnv)) {
         return false;
       }
       const dirty = tabsRef.current.some((t) => t.kind === "editor" && t.dirty);
@@ -134,4 +131,11 @@ export function useWorkspaceSwitcher({
     switchWorkspace,
     adoptWorkspaceEnv,
   };
+}
+
+function workspaceScopeEqual(a: WorkspaceEnv, b: WorkspaceEnv): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "local") return true;
+  if (a.kind === "wsl") return b.kind === "wsl" && a.distro === b.distro;
+  return b.kind === "ssh" && a.profileId === b.profileId;
 }

@@ -9,12 +9,12 @@ use crate::modules::git::process::{
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot,
-    GitPushResult, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
+    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
+    GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES,
     NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
-    authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream,
+    authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
     ResolvedGitDirectory,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
@@ -25,7 +25,7 @@ pub fn resolve_repo(
     workspace: &WorkspaceEnv,
 ) -> Result<Option<GitRepoInfo>> {
     let cwd = canonical_dir(registry, cwd, workspace)?;
-    if !registry.is_authorized(&cwd.local_path) {
+    if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
     }
     ensure_git_available(&cwd.workspace)?;
@@ -45,7 +45,9 @@ fn resolve_repo_in_authorized(
         return Ok(None);
     };
     let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
-    let _ = registry.authorize(&canonical_root.local_path);
+    if !canonical_root.remote {
+        let _ = registry.authorize(&canonical_root.local_path);
+    }
 
     let head = match git_stdout_lines(
         &canonical_root.workspace,
@@ -87,7 +89,7 @@ pub fn panel_snapshot(
     workspace: &WorkspaceEnv,
 ) -> Result<GitPanelSnapshot> {
     let cwd = canonical_dir(registry, cwd, workspace)?;
-    if !registry.is_authorized(&cwd.local_path) {
+    if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
     }
     ensure_git_available(&cwd.workspace)?;
@@ -103,7 +105,9 @@ pub fn panel_snapshot(
         });
     };
     let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
-    let _ = registry.authorize(&canonical_root.local_path);
+    if !canonical_root.remote {
+        let _ = registry.authorize(&canonical_root.local_path);
+    }
 
     let status = status_inner(&canonical_root)?;
     let repo = GitRepoInfo {
@@ -180,7 +184,11 @@ fn diff_inner(
         args.push("--cached".into());
     }
     let pathspec = match path.filter(|p| !p.is_empty()) {
-        Some(p) => Some(pathspec_from_input(&repo_root.local_path, p)?),
+        Some(p) => Some(pathspec_from_input(
+            &repo_root.local_path,
+            p,
+            repo_root.remote,
+        )?),
         None => None,
     };
     if let Some(spec) = pathspec.as_ref() {
@@ -215,14 +223,15 @@ pub fn diff_content(
 ) -> Result<GitDiffContentResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    let worktree_path = resolve_within_repo(&repo_root.local_path, path)?;
-    let rel_path = pathspec(&repo_root.local_path, &worktree_path);
+    let rel_path = pathspec_from_input(&repo_root.local_path, path, repo_root.remote)?;
+    let worktree_path = repo_root.local_path.join(&rel_path);
 
     let original_rel = match original_path {
-        Some(orig) if !orig.is_empty() => {
-            let resolved = resolve_within_repo(&repo_root.local_path, orig)?;
-            Some(pathspec(&repo_root.local_path, &resolved))
-        }
+        Some(orig) if !orig.is_empty() => Some(pathspec_from_input(
+            &repo_root.local_path,
+            orig,
+            repo_root.remote,
+        )?),
         _ => None,
     };
 
@@ -247,7 +256,7 @@ pub fn diff_content(
             &format!(":{rel_path}"),
         )?
     } else {
-        read_text_file(&worktree_path)?
+        read_worktree_text(&repo_root, &rel_path, &worktree_path)?
     };
     let patch = diff_inner(&repo_root, Some(&rel_path), staged)?;
     let is_binary =
@@ -273,7 +282,7 @@ pub fn stage(
     if paths.is_empty() {
         return Ok(());
     }
-    let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
+    let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
     let mut args: Vec<OsString> = vec!["add".into(), "--".into()];
     for p in &resolved {
         args.push(p.clone().into());
@@ -298,7 +307,7 @@ pub fn unstage(
     if paths.is_empty() {
         return Ok(());
     }
-    let resolved = resolve_pathspecs(&repo_root.local_path, paths)?;
+    let resolved = resolve_pathspecs(&repo_root.local_path, paths, repo_root.remote)?;
     let mut reset_args: Vec<OsString> = vec!["reset".into(), "HEAD".into(), "--".into()];
     for p in &resolved {
         reset_args.push(p.clone().into());
@@ -315,12 +324,7 @@ pub fn unstage(
     if !looks_like_no_head(&output) {
         return ensure_success(&output, "git reset failed");
     }
-    let mut rm_args: Vec<OsString> = vec![
-        "rm".into(),
-        "--cached".into(),
-        "-r".into(),
-        "--".into(),
-    ];
+    let mut rm_args: Vec<OsString> = vec!["rm".into(), "--cached".into(), "-r".into(), "--".into()];
     for p in &resolved {
         rm_args.push(p.clone().into());
     }
@@ -356,7 +360,7 @@ pub fn discard(
     let mut tracked: Vec<String> = Vec::with_capacity(entries.len());
     let mut untracked: Vec<String> = Vec::new();
     for entry in entries {
-        let resolved = pathspec_from_input(&repo_root.local_path, &entry.path)?;
+        let resolved = pathspec_from_input(&repo_root.local_path, &entry.path, repo_root.remote)?;
         if entry.untracked {
             untracked.push(resolved);
         } else {
@@ -717,19 +721,11 @@ pub fn commit_file_diff(
     if !sha_is_safe(sha) {
         return Err(GitError::command("git show", "invalid commit sha"));
     }
-    let resolved = resolve_within_repo(&repo_root.local_path, path)?;
-    let rel = resolved
-        .strip_prefix(&repo_root.local_path)
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| path.replace('\\', "/"));
+    let rel = pathspec_from_input(&repo_root.local_path, path, repo_root.remote)?;
 
     let original_rel = match original_path {
         Some(orig) if !orig.is_empty() => {
-            let resolved_orig = resolve_within_repo(&repo_root.local_path, orig)?;
-            resolved_orig
-                .strip_prefix(&repo_root.local_path)
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_else(|_| orig.replace('\\', "/"))
+            pathspec_from_input(&repo_root.local_path, orig, repo_root.remote)?
         }
         _ => rel.clone(),
     };
@@ -958,17 +954,52 @@ fn nothing_to_commit(output: &GitOutput) -> bool {
     stderr.contains("nothing to commit") || stdout.contains("nothing to commit")
 }
 
-fn resolve_pathspecs(repo_root: &Path, paths: &[String]) -> Result<Vec<String>> {
+fn resolve_pathspecs(repo_root: &Path, paths: &[String], remote: bool) -> Result<Vec<String>> {
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
-        out.push(pathspec_from_input(repo_root, p)?);
+        out.push(pathspec_from_input(repo_root, p, remote)?);
     }
     Ok(out)
 }
 
-fn pathspec_from_input(repo_root: &Path, rel: &str) -> Result<String> {
+fn pathspec_from_input(repo_root: &Path, rel: &str, remote: bool) -> Result<String> {
+    if remote {
+        if !is_safe_pathspec(rel) || rel.starts_with(['/', '\\']) {
+            return Err(GitError::InvalidPath(rel.into()));
+        }
+        return Ok(rel.replace('\\', "/"));
+    }
     let resolved = resolve_within_repo(repo_root, rel)?;
     Ok(pathspec(repo_root, &resolved))
+}
+
+fn read_worktree_text(
+    repo_root: &ResolvedGitDirectory,
+    relative: &str,
+    local_path: &Path,
+) -> Result<TextSource> {
+    let WorkspaceEnv::Ssh { profile_id } = &repo_root.workspace else {
+        return read_text_file(local_path);
+    };
+    let manager = crate::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
+    let profile_id = profile_id.clone();
+    let path = crate::modules::remote::session::join_remote(&repo_root.git_path, relative);
+    let bytes = tauri::async_runtime::block_on(async move {
+        let workspace = manager.workspace(&profile_id).await?;
+        let stat = crate::modules::remote::sftp::stat(&workspace, &path).await?;
+        if stat.size > MAX_FILE_BYTES {
+            return Err(format!("remote file is too large: {} bytes", stat.size));
+        }
+        crate::modules::remote::sftp::read_file(&workspace, &path, MAX_FILE_BYTES).await
+    })
+    .map_err(GitError::Spawn)?;
+    if bytes.iter().take(8192).any(|byte| *byte == 0) {
+        return Ok(TextSource::Binary);
+    }
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) => TextSource::Text(text),
+        Err(_) => TextSource::Binary,
+    })
 }
 
 fn pathspec(repo_root: &Path, absolute: &Path) -> String {
@@ -1078,10 +1109,7 @@ pub fn list_branches(
                 && !existing.is_head;
             if should_replace {
                 let is_head = existing.is_head || b.is_head;
-                deduped[existing_idx] = GitBranchEntry {
-                    is_head,
-                    ..b
-                };
+                deduped[existing_idx] = GitBranchEntry { is_head, ..b };
             } else if b.is_head && !existing.is_head {
                 let mut updated = deduped[existing_idx].clone();
                 updated.is_head = true;
@@ -1113,7 +1141,11 @@ fn push_worktree(
         b.clone()
     } else if let Some(ref sha) = head_sha {
         // if detached HEAD with no branch — show shortened SHA as name
-        let short = if sha.len() >= 7 { &sha[..7] } else { sha.as_str() };
+        let short = if sha.len() >= 7 {
+            &sha[..7]
+        } else {
+            sha.as_str()
+        };
         format!("(detached @ {})", short)
     } else {
         return;

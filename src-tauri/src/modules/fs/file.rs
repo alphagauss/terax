@@ -6,6 +6,7 @@ use serde::Serialize;
 use tauri::Emitter;
 use tempfile::NamedTempFile;
 
+use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -56,12 +57,45 @@ fn mtime_millis(meta: &fs::Metadata) -> u64 {
 
 #[tauri::command]
 pub async fn fs_read_file(
+    remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
 ) -> Result<ReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let workspace = remote.manager.workspace(profile_id).await?;
+        let meta = remote::sftp::stat(&workspace, &path).await?;
+        let limit = if force.unwrap_or(false) {
+            FORCE_MAX_READ_BYTES
+        } else {
+            MAX_READ_BYTES
+        };
+        if meta.size > limit {
+            return Ok(ReadResult::TooLarge {
+                size: meta.size,
+                limit,
+            });
+        }
+        let bytes = remote::sftp::read_file(&workspace, &path, limit).await?;
+        return classify_bytes(bytes, meta.size, meta.mtime);
+    }
     read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
+}
+
+fn classify_bytes(bytes: Vec<u8>, size: u64, mtime: u64) -> Result<ReadResult, String> {
+    let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
+    if bytes[..sniff_len].contains(&0) {
+        return Ok(ReadResult::Binary { size });
+    }
+    match String::from_utf8(bytes) {
+        Ok(content) => Ok(ReadResult::Text {
+            content,
+            size,
+            mtime,
+        }),
+        Err(_) => Ok(ReadResult::Binary { size }),
+    }
 }
 
 fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
@@ -85,21 +119,7 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
         e.to_string()
     })?;
 
-    // Null-byte sniff on the first chunk. Not perfect (misses UTF-16 BOM
-    // cases) but catches the common "this is a PNG" mistake cheaply.
-    let sniff_len = bytes.len().min(BINARY_SNIFF_BYTES);
-    if bytes[..sniff_len].contains(&0) {
-        return Ok(ReadResult::Binary { size });
-    }
-
-    match String::from_utf8(bytes) {
-        Ok(content) => Ok(ReadResult::Text {
-            content,
-            size,
-            mtime: mtime_millis(&meta),
-        }),
-        Err(_) => Ok(ReadResult::Binary { size }),
-    }
+    classify_bytes(bytes, size, mtime_millis(&meta))
 }
 
 #[derive(Serialize, Clone)]
@@ -126,6 +146,7 @@ fn write_atomic(target: &Path, content: &[u8]) -> std::io::Result<()> {
 /// detection without a follow-up stat.
 #[tauri::command]
 pub async fn fs_write_file(
+    remote: tauri::State<'_, RemoteState>,
     path: String,
     content: String,
     workspace: Option<WorkspaceEnv>,
@@ -133,6 +154,18 @@ pub async fn fs_write_file(
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let workspace = remote.manager.workspace(profile_id).await?;
+        let mtime = remote::sftp::write_file(&workspace, &path, content.as_bytes()).await?;
+        let _ = app.emit(
+            "fs:file-written",
+            FileWrittenEvent {
+                path: path.clone(),
+                source,
+            },
+        );
+        return Ok(mtime);
+    }
     let target = resolve_path(&path, &workspace);
     let original_permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     write_atomic(&target, content.as_bytes()).map_err(|e| {
@@ -143,9 +176,7 @@ pub async fn fs_write_file(
     if let Some(perms) = original_permissions {
         let _ = fs::set_permissions(&target, perms);
     }
-    let mtime = fs::metadata(&target)
-        .map(|m| mtime_millis(&m))
-        .unwrap_or(0);
+    let mtime = fs::metadata(&target).map(|m| mtime_millis(&m)).unwrap_or(0);
     let _ = app.emit(
         "fs:file-written",
         FileWrittenEvent {
@@ -159,18 +190,41 @@ pub async fn fs_write_file(
 
 #[tauri::command]
 pub async fn fs_canonicalize(
+    remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let workspace = remote.manager.workspace(profile_id).await?;
+        return remote::sftp::canonicalize(&workspace, &path).await;
+    }
     let p = resolve_path(&path, &workspace);
     let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
     Ok(super::to_canon(&canon))
 }
 
 #[tauri::command]
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
+pub async fn fs_stat(
+    remote: tauri::State<'_, RemoteState>,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<FileStat, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let workspace = remote.manager.workspace(profile_id).await?;
+        let meta = remote::sftp::stat(&workspace, &path).await?;
+        let kind = match meta.kind {
+            remote::sftp::RemoteEntryKind::File => StatKind::File,
+            remote::sftp::RemoteEntryKind::Dir => StatKind::Dir,
+            remote::sftp::RemoteEntryKind::Symlink => StatKind::Symlink,
+        };
+        return Ok(FileStat {
+            size: meta.size,
+            mtime: meta.mtime,
+            kind,
+        });
+    }
     let p = resolve_path(&path, &workspace);
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
     // fs::metadata follows symlinks, so the link check needs symlink_metadata.

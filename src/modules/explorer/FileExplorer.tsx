@@ -44,6 +44,9 @@ import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { remoteNative } from "@/modules/remote";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
+import { toast } from "sonner";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -85,7 +88,13 @@ type Row =
       gitStatusCode: GitStatusCode | null;
     }
   | { kind: "pending"; key: string; depth: number; pendingKind: "file" | "dir" }
-  | { kind: "status"; key: string; depth: number; tone: "muted" | "error"; message: string };
+  | {
+      kind: "status";
+      key: string;
+      depth: number;
+      tone: "muted" | "error";
+      message: string;
+    };
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
@@ -195,6 +204,7 @@ export const FileExplorer = memo(
     ref,
   ) {
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
+    const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
     const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
     const { lookup: lookupGitStatus } = useGitStatus(
       rootPath,
@@ -209,7 +219,11 @@ export const FileExplorer = memo(
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const { rows, entryIndexByPath } = useMemo(() => {
-      if (!rootPath) return { rows: [] as Row[], entryIndexByPath: new Map<string, number>() };
+      if (!rootPath)
+        return {
+          rows: [] as Row[],
+          entryIndexByPath: new Map<string, number>(),
+        };
       return buildRows(rootPath, tree, lookupGitStatus);
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
@@ -273,7 +287,8 @@ export const FileExplorer = memo(
     });
 
     const dropTargetDir = dnd.dropTargetDir ?? fileDrop.externalTargetDir;
-    const rootIsDropTarget = dropTargetDir != null && dropTargetDir === rootPath;
+    const rootIsDropTarget =
+      dropTargetDir != null && dropTargetDir === rootPath;
     useEffect(() => {
       if (!dropTargetDir || dropTargetDir === rootPath) return;
       if (tree.expanded.has(dropTargetDir)) return;
@@ -306,7 +321,10 @@ export const FileExplorer = memo(
 
     const lastSyncedActivePathRef = useRef<string | null>(null);
     useEffect(() => {
-      if (!activeFilePath || activeFilePath === lastSyncedActivePathRef.current) {
+      if (
+        !activeFilePath ||
+        activeFilePath === lastSyncedActivePathRef.current
+      ) {
         return;
       }
       if (!entryIndexByPath.has(activeFilePath)) return;
@@ -478,7 +496,11 @@ export const FileExplorer = memo(
           );
         case "status":
           return (
-            <StatusRow depth={row.depth} message={row.message} tone={row.tone} />
+            <StatusRow
+              depth={row.depth}
+              message={row.message}
+              tone={row.tone}
+            />
           );
       }
     };
@@ -682,12 +704,63 @@ export const FileExplorer = memo(
                       Open in Terminal
                     </ContextMenuItem>
                   )}
-                  <ContextMenuItem
-                    className={COMPACT_ITEM}
-                    onSelect={() => void revealInFinder(menuTarget.path)}
-                  >
-                    Reveal in Finder
-                  </ContextMenuItem>
+                  {workspaceEnv.kind === "ssh" ? (
+                    <>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => {
+                          const localDir = window.prompt(
+                            "Download to local directory:",
+                          );
+                          if (!localDir) return;
+                          void remoteNative
+                            .download(
+                              workspaceEnv.profileId,
+                              menuTarget.path,
+                              localDir,
+                            )
+                            .then((path) =>
+                              toast.success(`Downloaded to ${path}`),
+                            )
+                            .catch((error) => toast.error(String(error)));
+                        }}
+                      >
+                        Download to Local…
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => {
+                          const localPath = window.prompt(
+                            "Local file or directory to upload:",
+                          );
+                          if (!localPath) return;
+                          const remoteDir = menuTarget.isDir
+                            ? menuTarget.path
+                            : parentOf(menuTarget.path, rootPath);
+                          void remoteNative
+                            .upload(
+                              workspaceEnv.profileId,
+                              localPath,
+                              remoteDir,
+                            )
+                            .then(() => {
+                              tree.refresh(remoteDir);
+                              toast.success("Upload complete");
+                            })
+                            .catch((error) => toast.error(String(error)));
+                        }}
+                      >
+                        Upload Local Path…
+                      </ContextMenuItem>
+                    </>
+                  ) : (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => void revealInFinder(menuTarget.path)}
+                    >
+                      Reveal in Finder
+                    </ContextMenuItem>
+                  )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
@@ -725,7 +798,9 @@ export const FileExplorer = memo(
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() =>
-                      void copyToClipboard(relativePath(rootPath, menuTarget.path))
+                      void copyToClipboard(
+                        relativePath(rootPath, menuTarget.path),
+                      )
                     }
                   >
                     Copy Relative Path
@@ -765,12 +840,33 @@ export const FileExplorer = memo(
                       Open in Terminal
                     </ContextMenuItem>
                   )}
-                  <ContextMenuItem
-                    className={COMPACT_ITEM}
-                    onSelect={() => void revealInFinder(rootPath)}
-                  >
-                    Reveal in Finder
-                  </ContextMenuItem>
+                  {workspaceEnv.kind === "ssh" ? (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => {
+                        const localPath = window.prompt(
+                          "Local file or directory to upload:",
+                        );
+                        if (!localPath) return;
+                        void remoteNative
+                          .upload(workspaceEnv.profileId, localPath, rootPath)
+                          .then(() => {
+                            tree.refresh(rootPath);
+                            toast.success("Upload complete");
+                          })
+                          .catch((error) => toast.error(String(error)));
+                      }}
+                    >
+                      Upload Local Path…
+                    </ContextMenuItem>
+                  ) : (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => void revealInFinder(rootPath)}
+                    >
+                      Reveal in Finder
+                    </ContextMenuItem>
+                  )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}

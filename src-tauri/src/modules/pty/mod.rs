@@ -12,11 +12,13 @@ use std::thread;
 use portable_pty::PtySize;
 use tauri::ipc::{Channel, Response};
 
+use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{user_spawn_cwd_or_home, WorkspaceEnv, WorkspaceRegistry};
 use session::Session;
 
 pub struct PtyState {
     sessions: RwLock<HashMap<u32, Arc<Session>>>,
+    remote_sessions: RwLock<HashMap<u32, Arc<remote::terminal::RemoteTerminalHandle>>>,
     // Starts at 1 so freshly-handed-out ids are never 0, which the frontend
     // sometimes treats as "unset". Increments monotonically; never reused.
     next_id: AtomicU32,
@@ -26,6 +28,7 @@ impl Default for PtyState {
     fn default() -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
+            remote_sessions: RwLock::new(HashMap::new()),
             next_id: AtomicU32::new(1),
         }
     }
@@ -42,6 +45,7 @@ impl PtyState {
 pub async fn pty_open(
     app: tauri::AppHandle,
     state: tauri::State<'_, PtyState>,
+    remote: tauri::State<'_, RemoteState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
     cols: u16,
     rows: u16,
@@ -54,11 +58,25 @@ pub async fn pty_open(
 ) -> Result<u32, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     let blocks = blocks.unwrap_or(false);
-    let cwd = user_spawn_cwd_or_home(&registry, cwd.as_deref(), &workspace);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
+    if let WorkspaceEnv::Ssh { profile_id } = &workspace {
+        let remote_workspace = remote.manager.workspace(profile_id).await?;
+        let session =
+            remote::terminal::open(remote_workspace, cols, rows, cwd, on_data, on_exit).await?;
+        state
+            .remote_sessions
+            .write()
+            .unwrap()
+            .insert(id, Arc::new(session));
+        log::info!("remote PTY opened id={id} profile={profile_id} cols={cols} rows={rows}");
+        return Ok(id);
+    }
+    let cwd = user_spawn_cwd_or_home(&registry, cwd.as_deref(), &workspace);
     let session = tauri::async_runtime::spawn_blocking(move || {
-        session::spawn(id, app, cols, rows, cwd, workspace, blocks, shell, on_data, on_exit)
-            .map(|(s, _)| s)
+        session::spawn(
+            id, app, cols, rows, cwd, workspace, blocks, shell, on_data, on_exit,
+        )
+        .map(|(s, _)| s)
     })
     .await
     .map_err(|e| {
@@ -108,16 +126,24 @@ pub fn pty_write(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("pty_write: expected raw body".to_string());
     };
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| {
-            log::warn!("pty_write: unknown id={id}");
-            "no session".to_string()
-        })?;
+    let session = state.sessions.read().unwrap().get(&id).cloned();
+    if session.is_none() {
+        let remote = state
+            .remote_sessions
+            .read()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| {
+                log::warn!("pty_write: unknown id={id}");
+                "no session".to_string()
+            })?;
+        return remote
+            .input
+            .send(bytes.to_vec())
+            .map_err(|_| "remote terminal input channel closed".to_string());
+    }
+    let session = session.expect("checked above");
     // Bind to a local so the MutexGuard temporary drops before `session` —
     // see rustc note on tail-expression temporary drop order.
     let result = session
@@ -140,16 +166,24 @@ pub fn pty_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let session = state
-        .sessions
-        .read()
-        .unwrap()
-        .get(&id)
-        .cloned()
-        .ok_or_else(|| {
-            log::warn!("pty_resize: unknown id={id}");
-            "no session".to_string()
-        })?;
+    let session = state.sessions.read().unwrap().get(&id).cloned();
+    if session.is_none() {
+        let remote = state
+            .remote_sessions
+            .read()
+            .unwrap()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| {
+                log::warn!("pty_resize: unknown id={id}");
+                "no session".to_string()
+            })?;
+        return remote
+            .resize
+            .send((cols, rows))
+            .map_err(|_| "remote terminal resize channel closed".to_string());
+    }
+    let session = session.expect("checked above");
     let result = session
         .master
         .lock()
@@ -169,6 +203,11 @@ pub fn pty_resize(
 
 #[tauri::command]
 pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
+    if let Some(remote) = state.remote_sessions.write().unwrap().remove(&id) {
+        remote.close();
+        log::info!("remote PTY closed id={id}");
+        return Ok(());
+    }
     let session = state.sessions.write().unwrap().remove(&id);
     if let Some(s) = session {
         if let Err(e) = s.killer.lock().unwrap().kill() {
@@ -198,6 +237,9 @@ pub fn pty_close(state: tauri::State<PtyState>, id: u32) -> Result<(), String> {
 
 #[tauri::command]
 pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
+    if state.remote_sessions.read().unwrap().contains_key(&id) {
+        return Ok(false);
+    }
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_process: unknown session id={id}");
@@ -215,6 +257,9 @@ pub fn pty_has_foreground_process(state: tauri::State<PtyState>, id: u32) -> Res
 // pty_has_foreground_process, which counts background children too.
 #[tauri::command]
 pub fn pty_has_foreground_job(state: tauri::State<PtyState>, id: u32) -> Result<bool, String> {
+    if state.remote_sessions.read().unwrap().contains_key(&id) {
+        return Ok(false);
+    }
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or_else(|| {
         log::warn!("pty_has_foreground_job: unknown session id={id}");
@@ -250,8 +295,7 @@ fn shell_has_children(shell_pid: u32) -> bool {
     use std::mem::{size_of, zeroed};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32,
-        TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
     };
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -281,11 +325,22 @@ fn shell_has_children(shell_pid: u32) -> bool {
 // running process; reap them on boot before any new tab spawns.
 #[tauri::command]
 pub fn pty_close_all(state: tauri::State<PtyState>) -> Result<usize, String> {
+    let remote: Vec<_> = state
+        .remote_sessions
+        .write()
+        .unwrap()
+        .drain()
+        .map(|(_, session)| session)
+        .collect();
+    let remote_count = remote.len();
+    for session in remote {
+        session.close();
+    }
     let drained: Vec<(u32, Arc<Session>)> = {
         let mut sessions = state.sessions.write().unwrap();
         sessions.drain().collect()
     };
-    let count = drained.len();
+    let count = drained.len() + remote_count;
     for (id, s) in drained {
         if let Err(e) = s.killer.lock().unwrap().kill() {
             log::debug!("pty_close_all: kill id={id} returned {e}");

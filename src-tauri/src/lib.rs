@@ -1,6 +1,6 @@
 pub mod modules;
 
-use modules::{agent, fs, git, history, lsp, net, pty, secrets, shell, workspace};
+use modules::{agent, fs, git, history, lsp, net, pty, remote, secrets, shell, workspace};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
@@ -174,6 +174,7 @@ pub fn run() {
             Ok(())
         })
         .manage(pty::PtyState::default())
+        .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
@@ -199,6 +200,18 @@ pub fn run() {
             pty::pty_has_foreground_job,
             pty::pty_shell_name,
             pty::pty_list_shells,
+            remote::commands::ssh_connect,
+            remote::commands::ssh_disconnect,
+            remote::commands::ssh_reconnect,
+            remote::commands::ssh_connection_status,
+            remote::commands::ssh_home,
+            remote::commands::ssh_confirm_host_key,
+            remote::commands::ssh_import_config,
+            remote::commands::ssh_tunnel_start,
+            remote::commands::ssh_tunnel_stop,
+            remote::commands::ssh_tunnel_list,
+            remote::commands::ssh_upload,
+            remote::commands::ssh_download,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

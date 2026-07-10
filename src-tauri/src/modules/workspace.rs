@@ -80,6 +80,10 @@ pub fn authorize_spawn_cwd(
     let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
+    if workspace.is_ssh() {
+        crate::modules::remote::session::validate_remote_path(cwd)?;
+        return Ok(Some(PathBuf::from(cwd)));
+    }
     let resolved = resolve_path(cwd, workspace);
     let canonical =
         std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
@@ -105,6 +109,10 @@ pub fn authorize_user_spawn_cwd(
     let Some(cwd) = cwd.map(str::trim).filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
+    if workspace.is_ssh() {
+        crate::modules::remote::session::validate_remote_path(cwd)?;
+        return Ok(Some(PathBuf::from(cwd)));
+    }
     let resolved = resolve_path(cwd, workspace);
     let canonical =
         std::fs::canonicalize(&resolved).map_err(|e| format!("cwd not accessible: {e}"))?;
@@ -146,6 +154,10 @@ pub async fn workspace_authorize(
     registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    if workspace.is_ssh() {
+        crate::modules::remote::session::validate_remote_path(&path)?;
+        return Ok(path.replace('\\', "/"));
+    }
     let resolved = resolve_path(&path, &workspace);
     let canonical = registry.authorize(&resolved).map_err(|e| e.to_string())?;
     Ok(crate::modules::fs::to_canon(&canonical))
@@ -316,6 +328,10 @@ pub enum WorkspaceEnv {
     Wsl {
         distro: String,
     },
+    Ssh {
+        #[serde(rename = "profileId")]
+        profile_id: String,
+    },
 }
 
 impl WorkspaceEnv {
@@ -325,6 +341,17 @@ impl WorkspaceEnv {
 
     pub fn is_wsl(&self) -> bool {
         matches!(self, Self::Wsl { .. })
+    }
+
+    pub fn is_ssh(&self) -> bool {
+        matches!(self, Self::Ssh { .. })
+    }
+
+    pub fn ssh_profile_id(&self) -> Option<&str> {
+        match self {
+            Self::Ssh { profile_id } => Some(profile_id),
+            _ => None,
+        }
     }
 }
 
@@ -340,6 +367,7 @@ pub fn resolve_path(path: &str, workspace: &WorkspaceEnv) -> PathBuf {
     match workspace {
         WorkspaceEnv::Local => PathBuf::from(path),
         WorkspaceEnv::Wsl { distro } => wsl_path_to_host(distro, path),
+        WorkspaceEnv::Ssh { .. } => PathBuf::from(path),
     }
 }
 
@@ -938,13 +966,22 @@ mod appimage_tests {
         let env = reader(&[
             ("LD_LIBRARY_PATH", "/tmp/.mount_Terax_X/usr/lib:/usr/lib"),
             ("PATH", "/tmp/.mount_Terax_X/usr/bin:/usr/bin:/bin"),
-            ("GST_PLUGIN_SYSTEM_PATH", "/tmp/.mount_Terax_X/usr/lib/gstreamer-1.0"),
+            (
+                "GST_PLUGIN_SYSTEM_PATH",
+                "/tmp/.mount_Terax_X/usr/lib/gstreamer-1.0",
+            ),
             ("APPDIR", "/tmp/.mount_Terax_X"),
         ]);
         let out = compute_appimage_env_overrides(appdir, env);
 
-        assert_eq!(find(&out, "LD_LIBRARY_PATH"), Some(&Some(OsString::from("/usr/lib"))));
-        assert_eq!(find(&out, "PATH"), Some(&Some(OsString::from("/usr/bin:/bin"))));
+        assert_eq!(
+            find(&out, "LD_LIBRARY_PATH"),
+            Some(&Some(OsString::from("/usr/lib")))
+        );
+        assert_eq!(
+            find(&out, "PATH"),
+            Some(&Some(OsString::from("/usr/bin:/bin")))
+        );
         // Only an APPDIR entry, so the var is removed entirely.
         assert_eq!(find(&out, "GST_PLUGIN_SYSTEM_PATH"), Some(&None));
         assert_eq!(find(&out, "APPDIR"), Some(&None));
@@ -968,9 +1005,16 @@ mod appimage_tests {
     fn unsets_value_vars_only_when_pointing_into_appdir() {
         let appdir = Path::new("/tmp/.mount_Terax_X");
         let into = reader(&[("LD_PRELOAD", "/tmp/.mount_Terax_X/usr/lib/x.so")]);
-        assert_eq!(find(&compute_appimage_env_overrides(appdir, into), "LD_PRELOAD"), Some(&None));
+        assert_eq!(
+            find(&compute_appimage_env_overrides(appdir, into), "LD_PRELOAD"),
+            Some(&None)
+        );
 
         let outside = reader(&[("FONTCONFIG_FILE", "/etc/fonts/fonts.conf")]);
-        assert!(find(&compute_appimage_env_overrides(appdir, outside), "FONTCONFIG_FILE").is_none());
+        assert!(find(
+            &compute_appimage_env_overrides(appdir, outside),
+            "FONTCONFIG_FILE"
+        )
+        .is_none());
     }
 }

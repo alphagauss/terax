@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 
@@ -82,6 +83,7 @@ type Options = {
 };
 
 export function useFileTree(rootPath: string | null, options?: Options) {
+  const workspaceKind = useWorkspaceEnvStore((state) => state.env.kind);
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const showHiddenRef = useRef(showHidden);
   const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
@@ -142,7 +144,9 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       }
 
       const liveDirs = new Set(
-        entries.filter((e) => e.kind === "dir").map((e) => joinPath(path, e.name)),
+        entries
+          .filter((e) => e.kind === "dir")
+          .map((e) => joinPath(path, e.name)),
       );
       const removedRoots: string[] = [];
       for (const key of Object.keys(nodesRef.current)) {
@@ -175,7 +179,8 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           return changed ? n : c;
         });
         const toUnwatch: string[] = [];
-        for (const d of dead) if (watchedRef.current.delete(d)) toUnwatch.push(d);
+        for (const d of dead)
+          if (watchedRef.current.delete(d)) toUnwatch.push(d);
         watchRemove(toUnwatch);
       }
     } catch (e) {
@@ -257,6 +262,18 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     // every expanded directory.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHidden, gitDecorations, rootPath, fetchChildren]);
+
+  // SFTP has no portable server-push file watcher. Poll only directories that
+  // are already visible so remote changes appear without walking the project.
+  useEffect(() => {
+    if (workspaceKind !== "ssh" || !rootPath) return;
+    const timer = window.setInterval(() => {
+      for (const [path, state] of Object.entries(nodesRef.current)) {
+        if (state.status === "loaded") void fetchChildren(path);
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [workspaceKind, rootPath, fetchChildren]);
 
   const toggle = useCallback(
     (path: string) => {

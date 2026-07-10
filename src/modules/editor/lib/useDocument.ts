@@ -1,6 +1,6 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv, useWorkspaceEnvStore } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ type Options = {
 };
 
 export function useDocument({ path, onDirtyChange }: Options) {
+  const workspaceKind = useWorkspaceEnvStore((state) => state.env.kind);
   const [doc, setDoc] = useState<DocumentState>({ status: "loading" });
   const [dirty, setDirty] = useState(false);
 
@@ -179,6 +180,12 @@ export function useDocument({ path, onDirtyChange }: Options) {
       .catch((e) => console.warn("[editor] reload failed", path, e));
     return true;
   }, [readFromDisk, adoptRead, path]);
+
+  useEffect(() => {
+    if (workspaceKind !== "ssh") return;
+    const timer = window.setInterval(() => reload(), 3000);
+    return () => window.clearInterval(timer);
+  }, [workspaceKind, reload]);
 
   const save = useCallback(async (): Promise<boolean> => {
     clearAutoSaveTimer();
