@@ -1,5 +1,7 @@
 # TERAX.md
 
+**use utf-8 for markdown**
+
 Terax loads `TERAX.md` from the workspace root as agent memory (similar to AGENTS.md / CLAUDE.md). This file is also the project's living architecture doc - read it before making changes.
 
 ## Project
