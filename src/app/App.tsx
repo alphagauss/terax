@@ -289,6 +289,7 @@ export default function App() {
   const miniOpen = useChatStore((s) => s.mini.open);
   const miniPresence = usePresence(miniOpen, 200);
   const openMini = useChatStore((s) => s.openMini);
+  const toggleMini = useChatStore((s) => s.toggleMini);
   const focusInput = useChatStore((s) => s.focusInput);
   const openPanel = useChatStore((s) => s.openPanel);
   const panelOpen = useChatStore((s) => s.panelOpen);
@@ -680,8 +681,19 @@ export default function App() {
         window.dispatchEvent(new CustomEvent(TOGGLE_BLOCK_INPUT_EVENT)),
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
-      "search.focus": () => searchInlineRef.current?.focus(),
+      "search.focus": () => {
+        const editor = editorRefs.current.get(activeId);
+        if (editor) editor.openSearch();
+        else searchInlineRef.current?.focus();
+      },
       "ai.toggle": togglePanelAndFocus,
+      "ai.toggleMini": () => {
+        if (!hasComposer) {
+          void openSettingsWindow("models");
+          return;
+        }
+        toggleMini();
+      },
       "ai.askSelection": askFromSelection,
       "agent.focusAttention": () => {
         const t = nextAttentionTarget();
@@ -696,6 +708,10 @@ export default function App() {
       "view.zenMode": () => setZenMode((v) => !v),
       "editor.undo": () => editorRefs.current.get(activeId)?.undo(),
       "editor.redo": () => editorRefs.current.get(activeId)?.redo(),
+      "editor.aiComplete": () =>
+        editorRefs.current.get(activeId)?.triggerAiComplete(),
+      "editor.codeComplete": () =>
+        editorRefs.current.get(activeId)?.triggerCodeComplete(),
     }),
     [
       activeId,
@@ -712,7 +728,9 @@ export default function App() {
       splitActivePaneInActiveTab,
       focusNextPaneInTab,
       toggleSourceControl,
+      hasComposer,
       togglePanelAndFocus,
+      toggleMini,
       askFromSelection,
       toggleSidebar,
       toggleExplorerFocus,
@@ -725,7 +743,12 @@ export default function App() {
 
   const shortcutsDisabled = useCallback(
     (id: ShortcutId, e: KeyboardEvent) => {
-      if (id === "editor.undo" || id === "editor.redo") {
+      if (
+        id === "editor.undo" ||
+        id === "editor.redo" ||
+        id === "editor.aiComplete" ||
+        id === "editor.codeComplete"
+      ) {
         return activeTab?.kind !== "editor";
       }
       if (id === "ai.askSelection") {
