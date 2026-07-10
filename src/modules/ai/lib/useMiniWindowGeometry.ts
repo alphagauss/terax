@@ -1,5 +1,9 @@
 import { useCallback, useLayoutEffect, useRef } from "react";
 import {
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
+import {
   applyDrag,
   applyResize,
   clampGeom,
@@ -9,7 +13,7 @@ import {
   type Viewport,
 } from "./miniWindowGeometry";
 
-const STORE_KEY = "terax-ui-mini-window-geom";
+const STORE_KEY = "ai:miniWindowGeometry";
 
 const viewport = (): Viewport => ({
   vw: window.innerWidth,
@@ -17,10 +21,8 @@ const viewport = (): Viewport => ({
 });
 
 function loadGeom(): Geom | null {
-  try {
-    const raw = window.localStorage.getItem(STORE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as Partial<Geom>;
+  const p = getWorkspaceValue<Partial<Geom>>(STORE_KEY);
+  if (p) {
     if (
       typeof p.x === "number" &&
       typeof p.y === "number" &&
@@ -29,18 +31,12 @@ function loadGeom(): Geom | null {
     ) {
       return { x: p.x, y: p.y, w: p.w, h: p.h };
     }
-  } catch {
-    // corrupt entry — fall back to default placement
   }
   return null;
 }
 
 function saveGeom(g: Geom) {
-  try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(g));
-  } catch {
-    // private mode / quota — geometry just won't persist
-  }
+  void setWorkspaceValue(STORE_KEY, g);
 }
 
 type Compute = (start: Geom, dx: number, dy: number, vp: Viewport) => Geom;

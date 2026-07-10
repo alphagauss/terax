@@ -63,7 +63,8 @@ russh = { version = "0.61.2", default-features = false, features = [
 	"async-trait",
 ] }
 russh-sftp = "2.3.0"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+fs2 = "0.4"
 zeroize = "1"
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
@@ -100,6 +101,7 @@ windows-sys = { version = "0.61", features = [
 	"Win32_System_ProcessStatus",
 	"Win32_System_Threading",
 	"Win32_System_Diagnostics_ToolHelp",
+	"Win32_Storage_FileSystem",
 ] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

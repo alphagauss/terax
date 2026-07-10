@@ -320,7 +320,7 @@ fn compute_appimage_env_overrides(
     out
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum WorkspaceEnv {
     #[default]
@@ -540,7 +540,7 @@ pub(crate) fn normalize_wsl_value(output: String, fallback: &str) -> String {
 }
 
 #[cfg(windows)]
-fn list_distros_blocking() -> Result<Vec<WslDistro>, String> {
+pub(crate) fn list_distros_blocking() -> Result<Vec<WslDistro>, String> {
     let out = run_wsl(&["--list", "--verbose"])?;
     let mut distros = Vec::new();
     for raw in out.lines().skip(1) {

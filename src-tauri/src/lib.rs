@@ -1,6 +1,9 @@
 pub mod modules;
 
-use modules::{agent, fs, git, history, lsp, net, pty, remote, secrets, shell, workspace};
+use modules::{
+    agent, ai_sessions, fs, git, history, lsp, net, pty, remote, secrets, shared_store, shell,
+    workspace, workspace_process,
+};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
@@ -14,22 +17,6 @@ struct LaunchDir(Mutex<Option<String>>);
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     state.0.lock().expect("LaunchDir mutex poisoned").take()
-}
-
-fn parse_launch_dir() -> Option<String> {
-    for arg in std::env::args().skip(1) {
-        if arg.starts_with('-') {
-            continue;
-        }
-        let Ok(canon) = std::fs::canonicalize(&arg) else {
-            continue;
-        };
-        if !canon.is_dir() {
-            continue;
-        }
-        return Some(crate::modules::fs::to_canon(&canon));
-    }
-    None
 }
 
 #[tauri::command]
@@ -128,7 +115,20 @@ pub fn run() {
         }
     }
 
-    let cli_dir = parse_launch_dir();
+    let request = workspace_process::parse_args(std::env::args().skip(1)).unwrap_or_else(|error| {
+        eprintln!("Terax startup error: {error}");
+        std::process::exit(2);
+    });
+    let app_data = dirs::data_dir()
+        .expect("Terax startup error: application data directory is unavailable")
+        .join("app.crynta.terax");
+    let workspace_process =
+        workspace_process::initialize(&app_data, request).unwrap_or_else(|error| {
+            eprintln!("Terax startup error: {error}");
+            std::process::exit(2);
+        });
+    let cli_dir = workspace_process.bootstrap().launch_dir.clone();
+    let window_state_filename = workspace_process.bootstrap().window_state_filename.clone();
     workspace::init_launch_cwd(cli_dir.as_deref());
 
     let builder = tauri::Builder::default();
@@ -142,6 +142,7 @@ pub fn run() {
         // Windows/Linux.
         .plugin(
             tauri_plugin_window_state::Builder::new()
+                .with_filename(window_state_filename)
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
         )
@@ -156,6 +157,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
+            _app.manage(shared_store::SharedStoreState::new(_app.handle())?);
             // macOS skips parent() for the settings window, so tie its lifecycle
             // to the main window here instead. Other platforms keep parent().
             #[cfg(target_os = "macos")]
@@ -175,6 +177,8 @@ pub fn run() {
             Ok(())
         })
         .manage(pty::PtyState::default())
+        .manage(workspace_process)
+        .manage(ai_sessions::AiSessionsState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
@@ -269,6 +273,19 @@ pub fn run() {
             workspace::wsl_home,
             workspace::workspace_authorize,
             workspace::workspace_current_dir,
+            workspace_process::get_workspace_bootstrap,
+            workspace_process::spawn_workspace_process,
+            ai_sessions::ai_sessions_list,
+            ai_sessions::ai_session_read,
+            ai_sessions::ai_session_publish,
+            ai_sessions::ai_session_delete,
+            ai_sessions::ai_session_run_acquire,
+            ai_sessions::ai_session_run_release,
+            ai_sessions::ai_sessions_migrate_legacy,
+            shared_store::shared_store_read,
+            shared_store::shared_store_set,
+            shared_store::shared_store_delete,
+            shared_store::shared_store_revision,
             get_launch_dir,
             open_settings_window,
             agent::agent_enable_hooks,

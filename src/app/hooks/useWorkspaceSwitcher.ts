@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useState } from "react";
 import { homeDir } from "@tauri-apps/api/path";
 import { native } from "@/modules/ai/lib/native";
+import { remoteNative, useRemoteStore } from "@/modules/remote";
 import type { Tab } from "@/modules/tabs";
 import {
   getWslHome,
@@ -11,7 +12,25 @@ import {
 
 async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
   if (env.kind === "wsl") return getWslHome(env.distro);
-  if (env.kind === "ssh") return getSshHome(env.profileId);
+  if (env.kind === "ssh") {
+    const profiles = await useRemoteStore.getState().load();
+    const profile = profiles.find((item) => item.id === env.profileId);
+    if (!profile) throw new Error(`SSH profile not found: ${env.profileId}`);
+    const status = await remoteNative.status(env.profileId).catch(() => null);
+    if (status?.status !== "connected") {
+      const [secret, proxySecret] = await Promise.all([
+        remoteNative.getSecret(env.profileId),
+        remoteNative.getProxySecret(env.profileId),
+      ]);
+      const connected = await remoteNative.connect(
+        profile,
+        secret ?? "",
+        proxySecret ?? "",
+      );
+      useRemoteStore.getState().setStatus(connected);
+    }
+    return getSshHome(env.profileId);
+  }
   return (await homeDir()).replace(/\\/g, "/");
 }
 

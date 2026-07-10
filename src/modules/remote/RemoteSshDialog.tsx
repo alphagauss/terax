@@ -27,6 +27,7 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConnected: (profile: SshProfile) => void | Promise<void>;
+  launchOnly?: boolean;
 };
 
 type Form = {
@@ -116,7 +117,12 @@ function proxyUrlContainsPassword(value: string): boolean {
   return separator >= 0 && userInfo.slice(separator + 1).length > 0;
 }
 
-export function RemoteSshDialog({ open, onOpenChange, onConnected }: Props) {
+export function RemoteSshDialog({
+  open,
+  onOpenChange,
+  onConnected,
+  launchOnly = false,
+}: Props) {
   const profiles = useRemoteStore((state) => state.profiles);
   const statuses = useRemoteStore((state) => state.statuses);
   const load = useRemoteStore((state) => state.load);
@@ -220,12 +226,14 @@ export function RemoteSshDialog({ open, onOpenChange, onConnected }: Props) {
       } else if (!profile.proxyUrl || !form.rememberProxySecret) {
         await remoteNative.deleteProxySecret(profile.id).catch(() => {});
       }
-      const info = await remoteNative.connect(
-        profile,
-        form.secret,
-        form.proxySecret,
-      );
-      setStatus(info);
+      if (!launchOnly) {
+        const info = await remoteNative.connect(
+          profile,
+          form.secret,
+          form.proxySecret,
+        );
+        setStatus(info);
+      }
       await onConnected(profile);
       onOpenChange(false);
     } catch (cause) {
@@ -546,7 +554,13 @@ export function RemoteSshDialog({ open, onOpenChange, onConnected }: Props) {
             disabled={busy || page !== "connection"}
             onClick={() => void connect()}
           >
-            {busy ? "Connecting…" : "Connect workspace"}
+            {busy
+              ? launchOnly
+                ? "Opening…"
+                : "Connecting…"
+              : launchOnly
+                ? "Open window"
+                : "Connect workspace"}
           </Button>
         </DialogFooter>
       </DialogContent>

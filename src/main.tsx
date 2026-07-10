@@ -7,6 +7,7 @@ import ReactDOM from "react-dom/client";
 import App from "./app/App";
 import { initLaunchDir } from "./lib/launchDir";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
+import { initializeWorkspaceProcess } from "./modules/workspace-process";
 
 if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
@@ -18,6 +19,8 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
   const { scan } = await import("react-scan");
   scan({ enabled: true });
 }
+
+await initializeWorkspaceProcess();
 
 // Reap PTY sessions orphaned by a prior webview load before any tab spawns.
 await invoke("pty_close_all").catch(() => {});

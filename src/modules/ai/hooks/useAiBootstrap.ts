@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
@@ -27,6 +28,10 @@ export function useAiBootstrap(): {
   const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
+  const refreshSessions = useChatStore((s) => s.refreshSessions);
+  const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
+  const panelOpen = useChatStore((s) => s.panelOpen);
+  const sessionSyncError = useChatStore((s) => s.sessionSyncError);
 
   useEffect(() => {
     if (activeSessionId) firePendingReviewForSession(activeSessionId);
@@ -99,6 +104,31 @@ export function useAiBootstrap(): {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
   }, [hydrateSessions]);
+
+  useEffect(() => {
+    if (!sessionsHydrated) return;
+    const refresh = () => void refreshSessions();
+    const onFocus = () => refresh();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    if (panelOpen || document.visibilityState === "visible") refresh();
+    const timer = setInterval(() => {
+      if (panelOpen || document.visibilityState === "visible") refresh();
+    }, 3_000);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [sessionsHydrated, panelOpen, refreshSessions]);
+
+  useEffect(() => {
+    if (!sessionSyncError) return;
+    toast.error("AI session sync failed", { description: sessionSyncError });
+  }, [sessionSyncError]);
 
   return { hasComposer, keysLoaded };
 }

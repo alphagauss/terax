@@ -6,14 +6,18 @@ import {
   useState,
 } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import {
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 import type { SidebarViewId } from "./types";
 
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 480;
-const SIDEBAR_WIDTH_STORAGE_KEY = "terax.sidebar.width";
-const SIDEBAR_VIEW_STORAGE_KEY = "terax.sidebar.view";
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "terax.sidebar.collapsed";
+const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar:width";
+const SIDEBAR_VIEW_STORAGE_KEY = "sidebar:view";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "sidebar:collapsed";
 
 function clampSidebarWidth(width: number): number {
   return Math.min(
@@ -23,33 +27,20 @@ function clampSidebarWidth(width: number): number {
 }
 
 function readSidebarWidth(): number {
-  try {
-    const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-    const parsed = stored ? Number.parseInt(stored, 10) : NaN;
-    return Number.isFinite(parsed)
-      ? clampSidebarWidth(parsed)
-      : SIDEBAR_DEFAULT_WIDTH;
-  } catch {
-    return SIDEBAR_DEFAULT_WIDTH;
-  }
+  const stored = getWorkspaceValue<number>(SIDEBAR_WIDTH_STORAGE_KEY);
+  return Number.isFinite(stored)
+    ? clampSidebarWidth(stored as number)
+    : SIDEBAR_DEFAULT_WIDTH;
 }
 
 function readSidebarView(): SidebarViewId {
-  try {
-    const stored = window.localStorage.getItem(SIDEBAR_VIEW_STORAGE_KEY);
-    if (stored === "explorer" || stored === "source-control") return stored;
-  } catch {
-    // ignore
-  }
+  const stored = getWorkspaceValue<string>(SIDEBAR_VIEW_STORAGE_KEY);
+  if (stored === "explorer" || stored === "source-control") return stored;
   return "explorer";
 }
 
 function readSidebarCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return getWorkspaceValue<boolean>(SIDEBAR_COLLAPSED_STORAGE_KEY) ?? false;
 }
 
 type FocusableExplorer = {
@@ -71,24 +62,13 @@ export function useSidebarPanel(
 
   const persistSidebarView = useCallback((view: SidebarViewId) => {
     setSidebarViewState(view);
-    try {
-      window.localStorage.setItem(SIDEBAR_VIEW_STORAGE_KEY, view);
-    } catch {
-      // storage may fail in private mode
-    }
+    void setWorkspaceValue(SIDEBAR_VIEW_STORAGE_KEY, view);
   }, []);
 
   const persistSidebarCollapsed = useCallback((collapsed: boolean) => {
     if (collapsedRef.current === collapsed) return;
     collapsedRef.current = collapsed;
-    try {
-      window.localStorage.setItem(
-        SIDEBAR_COLLAPSED_STORAGE_KEY,
-        collapsed ? "1" : "0",
-      );
-    } catch {
-      // storage may fail in private mode
-    }
+    void setWorkspaceValue(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed);
   }, []);
 
   const toggleSidebar = useCallback(() => {
@@ -123,11 +103,7 @@ export function useSidebarPanel(
     }
     sidebarWidthWriteTimerRef.current = window.setTimeout(() => {
       sidebarWidthWriteTimerRef.current = 0;
-      try {
-        window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(next));
-      } catch {
-        // ignore
-      }
+      void setWorkspaceValue(SIDEBAR_WIDTH_STORAGE_KEY, next);
     }, 200);
   }, []);
 

@@ -5,6 +5,17 @@ projects listed below. The code was reorganized, reduced, and modified to fit
 Terax's Tauri workspace, filesystem, PTY, shell, Git, and React interfaces.
 Terax does not require these repositories at build time or runtime.
 
+## fs2
+
+- Project: fs2, https://github.com/danburkert/fs2-rs
+- Version: 0.4.3
+- Author: Dan Burkert
+- License: MIT OR Apache-2.0; Terax uses the Apache-2.0 option.
+- Used for cross-platform advisory file locks protecting Workspace identities,
+  AI session runs, shared JSON mutations, and the Linux secrets fallback.
+
+The Apache License 2.0 text is included in the root `LICENSE` file.
+
 ## CrabPort
 
 - Project: CrabPort, https://github.com/chi11321/CrabPort

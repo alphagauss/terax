@@ -1,10 +1,10 @@
-# Two-process model and IPC command reference
+# Per-Workspace process pair and IPC command reference
 
 This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
 
 ## The split
 
-Terax is two processes: the Rust backend (`src-tauri/`) and the webview frontend (`src/`).
+A Terax Workspace window is a process pair: the Rust backend (`src-tauri/`) and its webview frontend (`src/`). Opening another Workspace window starts another independent application process and therefore another pair. Runtime resources do not cross that boundary; only explicitly shared atomic files and the OS keychain are global.
 
 - **Rust owns all OS access**: PTY, file system, git, shell spawn, network, secrets, workspace authorization.
 - **The webview never touches the FS, processes, or shells directly**. Every host operation goes through an `invoke()` call to a command registered in `src-tauri/src/lib.rs`.

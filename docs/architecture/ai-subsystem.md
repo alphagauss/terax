@@ -49,13 +49,15 @@ The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, 
 
 ## Sessions
 
-Conversations are organized into sessions. Persistence lives in `terax-ai-sessions.json` via `tauri-plugin-store` (`src/modules/ai/lib/sessions.ts`):
+Conversations are organized into sessions. Completed history is stored as one atomic snapshot per UUID under the AppData `sessions/` directory (`src-tauri/src/modules/ai_sessions.rs` and `src/modules/ai/lib/sessions.ts`):
 
-- `sessions` key: list of session metadata
-- `activeId` key: active session id
-- `messages:<id>` keys: per-session messages, loaded lazily
+- `<uuid>.json`: title, timestamps, complete messages, and todos
+- `<uuid>.lock`: OS lock used while one process is running the session
+- no shared session index; list operations scan and validate snapshot metadata
 
-`AgentRunBridge` mirrors active-session messages to disk on every change and auto-derives titles from the first user message.
+Streaming state remains in the owning process. `AgentRunBridge` publishes a complete snapshot only after the run becomes idle, errors, or is stopped; a crash therefore preserves the previous complete snapshot instead of a partial stream. Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. The active session id is stored in the UUID-specific Workspace file.
+
+At startup, the Rust migration command converts the legacy sessions/todos stores to deterministic UUID snapshots, writes the completion marker last, and keeps the old files as `.v0.backup.json` files.
 
 ## Composer
 

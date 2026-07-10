@@ -172,7 +172,14 @@ function Body({
   const focusInput = useChatStore((s) => s.focusInput);
   const step = useChatStore((s) => s.agentMeta.step);
 
-  const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
+  const revision = useChatStore((s) => s.activeSessionRevision);
+  const chat = useMemo(
+    () => {
+      void revision;
+      return getOrCreateChat(sessionId);
+    },
+    [sessionId, revision],
+  );
   const helpers = useChat<UIMessage>({ chat });
   const isBusy =
     helpers.status === "submitted" || helpers.status === "streaming";

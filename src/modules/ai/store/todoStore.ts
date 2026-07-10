@@ -1,10 +1,5 @@
 import { create } from "zustand";
-import {
-  deleteTodos as persistDelete,
-  loadTodos as persistLoad,
-  saveTodos as persistSave,
-  type Todo,
-} from "../lib/todos";
+import type { Todo } from "../lib/todos";
 
 type TodosState = {
   /** Map of sessionId -> todos. */
@@ -22,12 +17,11 @@ export const useTodosStore = create<TodosState>((set, get) => ({
 
   async hydrate(sessionId) {
     if (get().hydrated.has(sessionId)) return;
-    const todos = await persistLoad(sessionId);
     set((s) => {
       const nextHydrated = new Set(s.hydrated);
       nextHydrated.add(sessionId);
       return {
-        bySession: { ...s.bySession, [sessionId]: todos },
+        bySession: { ...s.bySession, [sessionId]: [] },
         hydrated: nextHydrated,
       };
     });
@@ -37,7 +31,6 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     set((s) => ({
       bySession: { ...s.bySession, [sessionId]: todos },
     }));
-    void persistSave(sessionId, todos);
   },
 
   async clearSession(sessionId) {
@@ -48,9 +41,19 @@ export const useTodosStore = create<TodosState>((set, get) => ({
       nextHydrated.delete(sessionId);
       return { bySession: next, hydrated: nextHydrated };
     });
-    await persistDelete(sessionId);
   },
 }));
+
+export function seedTodos(sessionId: string, todos: Todo[]): void {
+  useTodosStore.setState((state) => {
+    const hydrated = new Set(state.hydrated);
+    hydrated.add(sessionId);
+    return {
+      bySession: { ...state.bySession, [sessionId]: todos },
+      hydrated,
+    };
+  });
+}
 
 export function getTodos(sessionId: string | null): Todo[] {
   if (!sessionId) return [];

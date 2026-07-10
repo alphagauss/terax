@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
@@ -73,6 +74,9 @@ type ProviderProps = {
 export function AiComposerProvider({ children }: ProviderProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore((s) => s.agentMeta.status);
+  const readOnly = useChatStore((s) =>
+    sessionId ? Boolean(s.readOnlySessionIds[sessionId]) : false,
+  );
   const isBusy = status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
@@ -308,18 +312,18 @@ export function AiComposerProvider({ children }: ProviderProps) {
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     if (!store.mini.open) store.openMini();
     void (async () => {
-      const { getOrCreateChat } = await import("../store/chatRuntime");
-      const chat = getOrCreateChat(sessionId);
-      void chat.sendMessage({ role: "user", parts } as Parameters<
-        typeof chat.sendMessage
-      >[0]);
+      const { sendChatMessage } = await import("../store/chatRuntime");
+      const sent = await sendChatMessage(sessionId, { role: "user", parts });
+      if (!sent) {
+        toast.info("This session is running in another window");
+        return;
+      }
+      setValue("");
+      setFiles([]);
+      setPickedSnippets([]);
+      setPickedCommands([]);
+      requestAnimationFrame(() => textareaRef.current?.focus());
     })();
-    setValue("");
-    setFiles([]);
-    setPickedSnippets([]);
-    setPickedCommands([]);
-    // Re-focus immediately after submit so the user can type a follow-up
-    requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
   const stop = () => {
@@ -329,6 +333,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const canSend =
     !isBusy &&
+    !readOnly &&
     (value.trim().length > 0 ||
       files.length > 0 ||
       pickedSnippets.length > 0 ||

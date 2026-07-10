@@ -1,4 +1,12 @@
-import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  deleteSharedStoreKey,
+  readSharedStore,
+  setSharedStoreKey,
+} from "@/lib/sharedStore";
+import {
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 
 export type AgentIconId =
   | "coder"
@@ -79,11 +87,8 @@ export const BUILTIN_AGENTS: readonly Agent[] = [
   },
 ] as const;
 
-const STORE_PATH = "terax-ai-agents.json";
 const KEY_CUSTOM = "customAgents";
-const KEY_ACTIVE = "activeAgentId";
-
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+const agentKey = (id: string) => `agent:${id}`;
 
 export type LoadedAgents = {
   custom: Agent[];
@@ -91,25 +96,50 @@ export type LoadedAgents = {
 };
 
 export async function loadAgents(): Promise<LoadedAgents> {
-  // One IPC roundtrip via entries() instead of two sequential get()s.
-  const entries = await store.entries();
-  let custom: Agent[] | undefined;
-  let activeId: string | undefined;
-  for (const [k, v] of entries) {
-    if (k === KEY_CUSTOM) custom = v as Agent[];
-    else if (k === KEY_ACTIVE) activeId = v as string;
+  const values = await readSharedStore("ai-agents");
+  const records = Object.entries(values)
+    .filter(([key]) => key.startsWith("agent:"))
+    .map(([, value]) => value as Agent);
+  const legacy = Array.isArray(values[KEY_CUSTOM])
+    ? (values[KEY_CUSTOM] as Agent[])
+    : [];
+  const custom = [
+    ...new Map([...legacy, ...records].map((agent) => [agent.id, agent])).values(),
+  ];
+  if (legacy.length > 0) {
+    await Promise.all(
+      legacy
+        .filter((agent) => values[agentKey(agent.id)] === undefined)
+        .map((agent) =>
+          setSharedStoreKey("ai-agents", agentKey(agent.id), agent),
+        ),
+    );
+    await deleteSharedStoreKey("ai-agents", KEY_CUSTOM);
   }
-  return { custom: custom ?? [], activeId: activeId ?? BUILTIN_AGENTS[0].id };
+  return {
+    custom,
+    activeId:
+      getWorkspaceValue<string>("ai:activeAgentId") ?? BUILTIN_AGENTS[0].id,
+  };
 }
 
 export async function saveCustomAgents(custom: Agent[]): Promise<void> {
-  await store.set(KEY_CUSTOM, custom);
-  await store.save();
+  const values = await readSharedStore("ai-agents");
+  const desired = new Set(custom.map((agent) => agent.id));
+  await Promise.all([
+    ...custom.map((agent) =>
+      setSharedStoreKey("ai-agents", agentKey(agent.id), agent),
+    ),
+    ...Object.keys(values)
+      .filter(
+        (key) => key.startsWith("agent:") && !desired.has(key.slice(6)),
+      )
+      .map((key) => deleteSharedStoreKey("ai-agents", key)),
+  ]);
 }
 
 export async function saveActiveAgentId(id: string): Promise<void> {
-  await store.set(KEY_ACTIVE, id);
-  await store.save();
+  await setWorkspaceValue("ai:activeAgentId", id);
 }
 
 export function newAgentId(): string {

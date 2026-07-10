@@ -1,64 +1,57 @@
 import type { UIMessage } from "@ai-sdk/react";
-import { LazyStore } from "@tauri-apps/plugin-store";
+import { invoke } from "@tauri-apps/api/core";
+import type { Todo } from "./todos";
 
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  modifiedAt?: number;
+  size?: number;
+  fingerprint?: string;
 };
 
-const STORE_PATH = "terax-ai-sessions.json";
-const KEY_SESSIONS = "sessions";
-const KEY_ACTIVE = "activeId";
-const messagesKey = (id: string) => `messages:${id}`;
-
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
-
-export type LoadedSessions = {
-  sessions: SessionMeta[];
-  activeId: string | null;
+export type SessionSnapshot = {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: UIMessage[];
+  todos: Todo[];
 };
 
-export async function loadAll(): Promise<LoadedSessions> {
-  // One IPC roundtrip via entries() rather than two parallel get()s. Per-
-  // session messages are loaded lazily via `loadMessages` only when a
-  // session is opened, so cold boot stays at a single store call.
-  const entries = await store.entries();
-  let sessions: SessionMeta[] | undefined;
-  let activeId: string | null | undefined;
-  for (const [k, v] of entries) {
-    if (k === KEY_SESSIONS) sessions = v as SessionMeta[];
-    else if (k === KEY_ACTIVE) activeId = v as string | null;
-  }
-  return { sessions: sessions ?? [], activeId: activeId ?? null };
+export function listSessions(): Promise<SessionMeta[]> {
+  return invoke<SessionMeta[]>("ai_sessions_list");
 }
 
-export async function loadMessages(id: string): Promise<UIMessage[] | null> {
-  return (await store.get<UIMessage[]>(messagesKey(id))) ?? null;
+export function readSession(id: string): Promise<SessionSnapshot> {
+  return invoke<SessionSnapshot>("ai_session_read", { id });
 }
 
-export async function saveSessionsList(sessions: SessionMeta[]): Promise<void> {
-  await store.set(KEY_SESSIONS, sessions);
+export function publishSession(snapshot: SessionSnapshot): Promise<void> {
+  return invoke("ai_session_publish", { snapshot });
 }
 
-export async function saveActiveId(id: string | null): Promise<void> {
-  await store.set(KEY_ACTIVE, id);
+export function deleteSessionFile(id: string): Promise<void> {
+  return invoke("ai_session_delete", { id });
 }
 
-export async function saveMessages(
-  id: string,
-  messages: UIMessage[],
-): Promise<void> {
-  await store.set(messagesKey(id), messages);
+export function acquireSessionRun(id: string): Promise<boolean> {
+  return invoke<boolean>("ai_session_run_acquire", { id });
 }
 
-export async function deleteSessionData(id: string): Promise<void> {
-  await store.delete(messagesKey(id));
+export function releaseSessionRun(id: string): Promise<void> {
+  return invoke("ai_session_run_release", { id });
+}
+
+export function migrateLegacySessions(): Promise<number> {
+  return invoke<number>("ai_sessions_migrate_legacy");
 }
 
 export function newSessionId(): string {
-  return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return crypto.randomUUID();
 }
 
 export function deriveTitle(messages: UIMessage[]): string {
@@ -77,4 +70,19 @@ export function deriveTitle(messages: UIMessage[]): string {
     }
   }
   return "New chat";
+}
+
+export function mergeSessionMetadata(
+  local: SessionMeta[],
+  disk: SessionMeta[],
+  runningIds: ReadonlySet<string>,
+): SessionMeta[] {
+  const preserved = local.filter(
+    (session) => !session.fingerprint || runningIds.has(session.id),
+  );
+  const preservedIds = new Set(preserved.map((session) => session.id));
+  return [
+    ...preserved,
+    ...disk.filter((session) => !preservedIds.has(session.id)),
+  ].sort((left, right) => right.updatedAt - left.updatedAt);
 }

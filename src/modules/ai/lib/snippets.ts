@@ -1,4 +1,8 @@
-import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  deleteSharedStoreKey,
+  readSharedStore,
+  setSharedStoreKey,
+} from "@/lib/sharedStore";
 
 export type Snippet = {
   id: string;
@@ -9,18 +13,47 @@ export type Snippet = {
   content: string;
 };
 
-const STORE_PATH = "terax-ai-snippets.json";
 const KEY_LIST = "snippets";
-
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+const snippetKey = (id: string) => `snippet:${id}`;
 
 export async function loadSnippets(): Promise<Snippet[]> {
-  return (await store.get<Snippet[]>(KEY_LIST)) ?? [];
+  const values = await readSharedStore("ai-snippets");
+  const records = Object.entries(values)
+    .filter(([key]) => key.startsWith("snippet:"))
+    .map(([, value]) => value as Snippet);
+  const legacy = Array.isArray(values[KEY_LIST])
+    ? (values[KEY_LIST] as Snippet[])
+    : [];
+  if (legacy.length > 0) {
+    await Promise.all(
+      legacy
+        .filter((snippet) => values[snippetKey(snippet.id)] === undefined)
+        .map((snippet) =>
+          setSharedStoreKey("ai-snippets", snippetKey(snippet.id), snippet),
+        ),
+    );
+    await deleteSharedStoreKey("ai-snippets", KEY_LIST);
+  }
+  return [
+    ...new Map(
+      [...legacy, ...records].map((snippet) => [snippet.id, snippet]),
+    ).values(),
+  ];
 }
 
 export async function saveSnippets(list: Snippet[]): Promise<void> {
-  await store.set(KEY_LIST, list);
-  await store.save();
+  const values = await readSharedStore("ai-snippets");
+  const desired = new Set(list.map((snippet) => snippet.id));
+  await Promise.all([
+    ...list.map((snippet) =>
+      setSharedStoreKey("ai-snippets", snippetKey(snippet.id), snippet),
+    ),
+    ...Object.keys(values)
+      .filter(
+        (key) => key.startsWith("snippet:") && !desired.has(key.slice(8)),
+      )
+      .map((key) => deleteSharedStoreKey("ai-snippets", key)),
+  ]);
 }
 
 export function newSnippetId(): string {

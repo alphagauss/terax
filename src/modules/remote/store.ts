@@ -1,13 +1,16 @@
-import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  deleteSharedStoreKey,
+  onSharedStoreChange,
+  readSharedStore,
+  setSharedStoreKey,
+} from "@/lib/sharedStore";
 import { create } from "zustand";
 import { remoteNative } from "./native";
 import type { ConnectionInfo, SshProfile } from "./types";
 
-const profileStore = new LazyStore("terax-ssh-profiles.json", {
-  defaults: {},
-  autoSave: 300,
-});
 const PROFILES_KEY = "profiles";
+const profileKey = (id: string) => `profile:${id}`;
+let subscribed = false;
 
 type RemoteState = {
   profiles: SshProfile[];
@@ -44,15 +47,36 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
   statuses: {},
   loaded: false,
   load: async () => {
-    if (get().loaded) return get().profiles;
-    const stored =
-      (await profileStore.get<SshProfile[]>(PROFILES_KEY).catch(() => null)) ??
-      [];
+    const values = await readSharedStore("ssh-profiles");
+    const records = Object.entries(values)
+      .filter(([key]) => key.startsWith("profile:"))
+      .map(([, value]) => value as SshProfile);
+    const legacy = Array.isArray(values[PROFILES_KEY])
+      ? (values[PROFILES_KEY] as SshProfile[])
+      : [];
+    const stored = [
+      ...new Map(
+        [...legacy, ...records].map((profile) => [profile.id, profile]),
+      ).values(),
+    ];
     const profiles = stored.map(normalizeProfile);
-    if (JSON.stringify(profiles) !== JSON.stringify(stored)) {
-      await profileStore.set(PROFILES_KEY, profiles);
+    if (legacy.length > 0) {
+      await Promise.all(
+        profiles
+          .filter((profile) => values[profileKey(profile.id)] === undefined)
+          .map((profile) =>
+            setSharedStoreKey("ssh-profiles", profileKey(profile.id), profile),
+          ),
+      );
+      await deleteSharedStoreKey("ssh-profiles", PROFILES_KEY);
     }
     set({ profiles, loaded: true });
+    if (!subscribed) {
+      subscribed = true;
+      void onSharedStoreChange("ssh-profiles", () => {
+        void useRemoteStore.getState().load();
+      });
+    }
     const statuses = await Promise.all(
       profiles.map((profile) =>
         remoteNative.status(profile.id).catch(
@@ -78,7 +102,11 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
       normalized,
     ].sort((a, b) => a.name.localeCompare(b.name));
     set({ profiles, loaded: true });
-    await profileStore.set(PROFILES_KEY, profiles);
+    await setSharedStoreKey(
+      "ssh-profiles",
+      profileKey(normalized.id),
+      normalized,
+    );
   },
   saveProfiles: async (incoming) => {
     const byId = new Map(
@@ -90,7 +118,16 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
       a.name.localeCompare(b.name),
     );
     set({ profiles, loaded: true });
-    await profileStore.set(PROFILES_KEY, profiles);
+    await Promise.all(
+      incoming.map((profile) => {
+        const normalized = normalizeProfile(profile);
+        return setSharedStoreKey(
+          "ssh-profiles",
+          profileKey(normalized.id),
+          normalized,
+        );
+      }),
+    );
   },
   deleteProfile: async (profileId) => {
     await remoteNative.disconnect(profileId).catch(() => {});
@@ -101,7 +138,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     const statuses = { ...get().statuses };
     delete statuses[profileId];
     set({ profiles, statuses });
-    await profileStore.set(PROFILES_KEY, profiles);
+    await deleteSharedStoreKey("ssh-profiles", profileKey(profileId));
   },
   setStatus: (info) =>
     set((state) => ({

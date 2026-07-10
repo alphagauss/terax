@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { findLeafCwd } from "@/modules/terminal/lib/panes";
 import type { Tab } from "./useTabs";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 
 const APP_NAME = "Terax";
 
@@ -37,9 +38,17 @@ export function useWindowTitle(
   const label = tabLabel(activeTab);
 
   useEffect(() => {
-    let title: string;
-    if (project && label && label !== project) title = `${project} — ${label}`;
-    else title = project || label || APP_NAME;
+    const bootstrap = currentWorkspaceBootstrap();
+    const environment =
+      bootstrap.env.kind === "wsl"
+        ? `WSL ${bootstrap.env.distro}`
+        : bootstrap.env.kind === "ssh"
+          ? `SSH ${bootstrap.env.profileId}`
+          : "Local";
+    let content: string;
+    if (project && label && label !== project) content = `${project} — ${label}`;
+    else content = project || label || APP_NAME;
+    const title = `${content} · ${environment} · ${bootstrap.id.slice(0, 8)}`;
 
     document.title = title;
     void getCurrentWindow()

@@ -1,4 +1,8 @@
-import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  deleteWorkspaceValue,
+  getWorkspaceEntries,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import type { SerializedTab } from "./serialize";
 
@@ -7,7 +11,6 @@ export type SpaceMeta = {
   name: string;
   root: string | null;
   env: WorkspaceEnv;
-  /** Opt-in accent, index into SPACE_COLORS. Undefined = theme primary. */
   color?: number;
   createdAt: number;
   updatedAt: number;
@@ -18,13 +21,10 @@ export type SpaceState = {
   activeTabIndex: number;
 };
 
-const STORE_PATH = "terax-spaces.json";
 const KEY_SPACES = "spaces";
-const KEY_ACTIVE = "activeId";
-const STATE_PREFIX = "state:";
+const KEY_ACTIVE = "activeSpaceId";
+const STATE_PREFIX = "spaceState:";
 const stateKey = (id: string) => `${STATE_PREFIX}${id}`;
-
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 500 });
 
 export type LoadedSpaces = {
   spaces: SpaceMeta[];
@@ -33,34 +33,33 @@ export type LoadedSpaces = {
 };
 
 export async function loadAll(): Promise<LoadedSpaces> {
-  const entries = await store.entries();
-  let spaces: SpaceMeta[] = [];
-  let activeId: string | null = null;
+  const entries = getWorkspaceEntries();
+  const spaces = (entries.get(KEY_SPACES) as SpaceMeta[] | undefined) ?? [];
+  const activeId =
+    (entries.get(KEY_ACTIVE) as string | null | undefined) ?? null;
   const states = new Map<string, SpaceState>();
-  for (const [k, v] of entries) {
-    if (k === KEY_SPACES) spaces = (v as SpaceMeta[]) ?? [];
-    else if (k === KEY_ACTIVE) activeId = (v as string | null) ?? null;
-    else if (k.startsWith(STATE_PREFIX)) {
-      states.set(k.slice(STATE_PREFIX.length), v as SpaceState);
+  for (const [key, value] of entries) {
+    if (key.startsWith(STATE_PREFIX)) {
+      states.set(key.slice(STATE_PREFIX.length), value as SpaceState);
     }
   }
   return { spaces, activeId, states };
 }
 
-export async function saveSpacesList(spaces: SpaceMeta[]): Promise<void> {
-  await store.set(KEY_SPACES, spaces);
+export function saveSpacesList(spaces: SpaceMeta[]): Promise<void> {
+  return setWorkspaceValue(KEY_SPACES, spaces);
 }
 
-export async function saveActiveId(id: string | null): Promise<void> {
-  await store.set(KEY_ACTIVE, id);
+export function saveActiveId(id: string | null): Promise<void> {
+  return setWorkspaceValue(KEY_ACTIVE, id);
 }
 
-export async function saveState(id: string, state: SpaceState): Promise<void> {
-  await store.set(stateKey(id), state);
+export function saveState(id: string, state: SpaceState): Promise<void> {
+  return setWorkspaceValue(stateKey(id), state);
 }
 
-export async function deleteSpaceData(id: string): Promise<void> {
-  await store.delete(stateKey(id));
+export function deleteSpaceData(id: string): Promise<void> {
+  return deleteWorkspaceValue(stateKey(id));
 }
 
 export function newSpaceId(): string {

@@ -137,7 +137,18 @@ export async function sendMessage(text: string): Promise<boolean> {
     !getActiveProviderKey()
   )
     return false;
+  if (!(await state.ensureSessionRunLock(sessionId))) return false;
   const c = getOrCreateChat(sessionId);
   await c.sendMessage({ text });
+  return true;
+}
+
+export async function sendChatMessage(
+  sessionId: string,
+  message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+): Promise<boolean> {
+  const state = useChatStore.getState();
+  if (!(await state.ensureSessionRunLock(sessionId))) return false;
+  await getOrCreateChat(sessionId).sendMessage(message);
   return true;
 }

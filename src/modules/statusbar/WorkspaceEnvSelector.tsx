@@ -148,8 +148,18 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
           ) : null}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setRemoteOpen(true)}>
-            Remote SSH
+            Add or edit SSH profile...
           </DropdownMenuItem>
+          {profiles.map((profile) => (
+            <DropdownMenuItem
+              key={profile.id}
+              onSelect={() =>
+                onSelect({ kind: "ssh", profileId: profile.id })
+              }
+            >
+              SSH: {profile.name}
+            </DropdownMenuItem>
+          ))}
           {env.kind === "ssh" ? (
             <DropdownMenuItem
               onSelect={() =>
@@ -180,6 +190,7 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
       <RemoteSshDialog
         open={remoteOpen}
         onOpenChange={setRemoteOpen}
+        launchOnly
         onConnected={(profile) =>
           onSelect({ kind: "ssh", profileId: profile.id })
         }

@@ -1,42 +1,46 @@
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { LazyStore } from "@tauri-apps/plugin-store";
+import {
+  deleteSharedStoreKey,
+  onSharedStoreChange,
+  readSharedStore,
+  setSharedStoreKey,
+} from "@/lib/sharedStore";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Theme } from "./types";
 
-const STORE_PATH = "terax-custom-themes.json";
-const KEY = "themes";
-const CHANGED_EVENT = "terax://custom-themes-changed";
-
-const store = new LazyStore(STORE_PATH, { defaults: {}, autoSave: 200 });
+const LEGACY_KEY = "themes";
+const themeKey = (id: string) => `theme:${id}`;
 
 export async function listCustomThemes(): Promise<Theme[]> {
-  const v = await store.get<Theme[]>(KEY);
-  return Array.isArray(v) ? v : [];
+  const values = await readSharedStore("custom-themes");
+  const records = Object.entries(values)
+    .filter(([key]) => key.startsWith("theme:"))
+    .map(([, value]) => value as Theme);
+  const legacy = Array.isArray(values[LEGACY_KEY])
+    ? (values[LEGACY_KEY] as Theme[])
+    : [];
+  if (legacy.length > 0) {
+    await Promise.all(
+      legacy
+        .filter((theme) => values[themeKey(theme.id)] === undefined)
+        .map((theme) =>
+          setSharedStoreKey("custom-themes", themeKey(theme.id), theme),
+        ),
+    );
+    await deleteSharedStoreKey("custom-themes", LEGACY_KEY);
+  }
+  return [
+    ...new Map([...legacy, ...records].map((theme) => [theme.id, theme])).values(),
+  ];
 }
 
-export async function saveCustomTheme(theme: Theme): Promise<void> {
-  const current = await listCustomThemes();
-  const next = current.filter((t) => t.id !== theme.id).concat(theme);
-  await store.set(KEY, next);
-  await store.save();
-  await emit(CHANGED_EVENT);
+export function saveCustomTheme(theme: Theme): Promise<void> {
+  return setSharedStoreKey("custom-themes", themeKey(theme.id), theme);
 }
 
-export async function deleteCustomTheme(id: string): Promise<void> {
-  const current = await listCustomThemes();
-  const next = current.filter((t) => t.id !== id);
-  if (next.length === current.length) return;
-  await store.set(KEY, next);
-  await store.save();
-  await emit(CHANGED_EVENT);
+export function deleteCustomTheme(id: string): Promise<void> {
+  return deleteSharedStoreKey("custom-themes", themeKey(id));
 }
 
-export async function onCustomThemesChange(cb: () => void): Promise<UnlistenFn> {
-  const unsubLocal = await store.onChange((key) => {
-    if (key === KEY) cb();
-  });
-  const unsubEvent = await listen(CHANGED_EVENT, () => cb());
-  return () => {
-    unsubLocal();
-    unsubEvent();
-  };
+export function onCustomThemesChange(cb: () => void): Promise<UnlistenFn> {
+  return onSharedStoreChange("custom-themes", cb);
 }

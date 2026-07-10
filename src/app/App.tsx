@@ -87,9 +87,14 @@ import {
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
 import { useWorkspaceEnvStore, type WorkspaceEnv } from "@/modules/workspace";
+import {
+  policyForEnvironmentSelection,
+  spawnWorkspaceProcess,
+} from "@/modules/workspace-process";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
@@ -187,7 +192,6 @@ export default function App() {
     home,
     launchCwd,
     launchCwdResolved,
-    switchWorkspace,
     adoptWorkspaceEnv,
   } = useWorkspaceSwitcher({
     tabsRef,
@@ -201,14 +205,24 @@ export default function App() {
   const spacesHydrated = useSpaces((s) => s.hydrated);
 
   const handleWorkspaceChange = useCallback(
-    async (env: WorkspaceEnv) => {
-      const switched = await switchWorkspace(env);
-      if (switched && activeSpaceId) {
-        useSpaces.getState().setEnv(activeSpaceId, env);
-      }
+    (env: WorkspaceEnv) => {
+      const policy = policyForEnvironmentSelection(workspaceEnv, env);
+      void spawnWorkspaceProcess(env, policy).catch((error) => {
+        toast.error("Failed to open Workspace window", {
+          description: String(error),
+        });
+      });
     },
-    [switchWorkspace, activeSpaceId],
+    [workspaceEnv],
   );
+
+  const openNewWindow = useCallback(() => {
+    void spawnWorkspaceProcess(workspaceEnv, "fresh").catch((error) => {
+      toast.error("Failed to open Workspace window", {
+        description: String(error),
+      });
+    });
+  }, [workspaceEnv]);
 
   useSpacesBoot({
     ready: launchCwdResolved,
@@ -653,6 +667,7 @@ export default function App() {
     () => ({
       "commandPalette.open": () => openCommandPalette("commands"),
       "commandPalette.content": () => openCommandPalette("content"),
+      "window.new": openNewWindow,
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
@@ -715,6 +730,7 @@ export default function App() {
     }),
     [
       activeId,
+      openNewWindow,
       openCommandPalette,
       stepSwitcher,
       cycleSpace,
@@ -1008,6 +1024,7 @@ export default function App() {
             searchTarget,
             explorerRoot,
             home,
+            openNewWindow,
             openNewTab,
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
@@ -1039,6 +1056,7 @@ export default function App() {
       searchTarget,
       explorerRoot,
       home,
+      openNewWindow,
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,

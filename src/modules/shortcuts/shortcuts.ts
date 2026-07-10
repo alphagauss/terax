@@ -7,6 +7,7 @@ import { IS_MAC, MOD_PROP } from "@/lib/platform";
 export type ShortcutId =
   | "commandPalette.open"
   | "commandPalette.content"
+  | "window.new"
   | "tab.new"
   | "tab.newBlock"
   | "tab.newPrivate"
@@ -85,6 +86,12 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Find in files",
     group: "General",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "p" }],
+  },
+  {
+    id: "window.new",
+    label: "New window",
+    group: "General",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "n" }],
   },
   {
     id: "settings.open",

@@ -38,6 +38,7 @@ export type CommandPaletteActionContext = {
   searchTarget: SearchTarget;
   explorerRoot: string | null;
   home: string | null;
+  openNewWindow: () => void;
   openNewTab: () => void;
   openNewBlock: () => void;
   openNewPrivate: () => void;
@@ -83,6 +84,15 @@ export function createCommandItems(
     onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
 
   return [
+    {
+      id: "window.new",
+      title: "New Window",
+      group: "General",
+      keywords: ["window", "workspace", "new"],
+      icon: DashboardSquare01Icon,
+      shortcutId: "window.new",
+      run: ctx.openNewWindow,
+    },
     {
       id: "settings.open",
       title: "Open settings",

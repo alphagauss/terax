@@ -53,7 +53,6 @@ import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type AutocompleteTrigger,
-  emitKeysChanged,
   setAutocompleteEnabled,
   setAutocompleteModelId,
   setAutocompleteProvider,
@@ -179,25 +178,21 @@ export function ModelsSection() {
   const onSaveKey = async (provider: ProviderId, value: string) => {
     await setKey(provider, value);
     setKeys((prev) => (prev ? { ...prev, [provider]: value } : prev));
-    await emitKeysChanged();
   };
 
   const onClearKey = async (provider: ProviderId) => {
     await clearKey(provider);
     setKeys((prev) => (prev ? { ...prev, [provider]: null } : prev));
-    await emitKeysChanged();
   };
 
   const onSaveEndpointKey = async (endpointId: string, value: string) => {
     await setCustomEndpointKey(endpointId, value);
     setEpKeys((prev) => ({ ...prev, [endpointId]: value }));
-    await emitKeysChanged();
   };
 
   const onClearEndpointKey = async (endpointId: string) => {
     await clearCustomEndpointKey(endpointId);
     setEpKeys((prev) => ({ ...prev, [endpointId]: null }));
-    await emitKeysChanged();
   };
 
   const addCustomEndpoint = async () => {

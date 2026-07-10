@@ -33,7 +33,7 @@ use tauri::Manager;
 #[derive(Default)]
 pub struct SecretsState {
     #[cfg(target_os = "linux")]
-    cache: Mutex<Option<HashMap<String, String>>>,
+    guard: Mutex<()>,
     #[cfg(not(target_os = "linux"))]
     _phantom: Mutex<()>,
 }
@@ -65,32 +65,15 @@ pub(crate) fn read_store_at(path: &std::path::Path) -> Result<HashMap<String, St
 }
 
 #[cfg(target_os = "linux")]
-fn write_store(app: &AppHandle, map: &HashMap<String, String>) -> Result<(), String> {
-    write_store_at(&store_path(app)?, map)
-}
-
-#[cfg(target_os = "linux")]
 pub(crate) fn write_store_at(
     path: &std::path::Path,
     map: &HashMap<String, String>,
 ) -> Result<(), String> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::PermissionsExt;
 
-    let tmp = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec(map).map_err(|e| e.to_string())?;
-
-    // 0600: only the owning user can read or write the secrets file.
-    let mut f = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)
-        .map_err(|e| e.to_string())?;
-    f.write_all(&bytes).map_err(|e| e.to_string())?;
-    f.sync_all().map_err(|e| e.to_string())?;
-    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    crate::modules::storage::write_atomic(path, &bytes).map_err(|e| e.to_string())?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -99,12 +82,27 @@ fn with_store<F, R>(app: &AppHandle, state: &SecretsState, f: F) -> Result<R, St
 where
     F: FnOnce(&mut HashMap<String, String>) -> R,
 {
-    let mut guard = state.cache.lock().map_err(|e| e.to_string())?;
-    if guard.is_none() {
-        *guard = Some(read_store(app)?);
-    }
-    let map = guard.as_mut().expect("cache initialized above");
-    Ok(f(map))
+    let _guard = state.guard.lock().map_err(|e| e.to_string())?;
+    let mut map = read_store(app)?;
+    Ok(f(&mut map))
+}
+
+#[cfg(target_os = "linux")]
+fn mutate_store<F>(app: &AppHandle, state: &SecretsState, f: F) -> Result<(), String>
+where
+    F: FnOnce(&mut HashMap<String, String>),
+{
+    let _guard = state.guard.lock().map_err(|e| e.to_string())?;
+    let path = store_path(app)?;
+    let _file_lock = crate::modules::storage::FileLock::acquire(
+        &path.with_extension("json.lock"),
+        std::time::Duration::from_secs(5),
+    )
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "secrets store is busy".to_string())?;
+    let mut map = read_store_at(&path)?;
+    f(&mut map);
+    write_store_at(&path, &map)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -146,23 +144,20 @@ pub async fn secrets_set(
     password: String,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    {
+    let result = {
         let key = key(&service, &account);
-        with_store(&app, &state, |m| {
+        mutate_store(&app, &state, |m| {
             m.insert(key, password);
-        })?;
-        let snapshot = {
-            let guard = state.cache.lock().map_err(|e| e.to_string())?;
-            guard.as_ref().cloned().unwrap_or_default()
-        };
-        write_store(&app, &snapshot)
-    }
+        })
+    };
     #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, state);
+    let result = {
+        let _ = &state;
         let e = entry(&service, &account)?;
         e.set_password(&password).map_err(|e| e.to_string())
-    }
+    };
+    result?;
+    crate::modules::shared_store::bump_keys_epoch(&app)
 }
 
 #[tauri::command]
@@ -173,26 +168,23 @@ pub async fn secrets_delete(
     account: String,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
-    {
+    let result = {
         let key = key(&service, &account);
-        with_store(&app, &state, |m| {
+        mutate_store(&app, &state, |m| {
             m.remove(&key);
-        })?;
-        let snapshot = {
-            let guard = state.cache.lock().map_err(|e| e.to_string())?;
-            guard.as_ref().cloned().unwrap_or_default()
-        };
-        write_store(&app, &snapshot)
-    }
+        })
+    };
     #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, state);
+    let result = {
+        let _ = &state;
         let e = entry(&service, &account)?;
         match e.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(err) => Err(err.to_string()),
         }
-    }
+    };
+    result?;
+    crate::modules::shared_store::bump_keys_epoch(&app)
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -245,7 +237,10 @@ mod tests {
         write_store_at(&p, &HashMap::new()).unwrap();
 
         let tmp_path = p.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "tmp file must be renamed away on success");
+        assert!(
+            !tmp_path.exists(),
+            "tmp file must be renamed away on success"
+        );
     }
 
     #[test]

@@ -1,14 +1,12 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
+import { toast } from "sonner";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
-import {
-  flushPersist,
-  useChatStore,
-  type AgentRunStatus,
-} from "../store/chatStore";
+import { shouldPublishSnapshot } from "../lib/sessionLifecycle";
+import { useChatStore, type AgentRunStatus } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 
 /**
@@ -21,7 +19,7 @@ import { getOrCreateChat } from "../store/chatRuntime";
  *    to act on it; hiding it would be hostile.
  *  - For pending `write_file` calls, opens an AI diff tab in the editor area
  *    so the user can review the proposed change before approving.
- *  - Persists messages of the active session on every change.
+ *  - Publishes one complete snapshot when a run reaches a terminal state.
  */
 
 export type DiffOpenInput = {
@@ -39,8 +37,9 @@ export type AgentRunBridgeProps = {
 
 export function AgentRunBridge(props: AgentRunBridgeProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
+  const revision = useChatStore((s) => s.activeSessionRevision);
   if (!sessionId) return null;
-  return <Bridge sessionId={sessionId} {...props} />;
+  return <Bridge key={`${sessionId}:${revision}`} sessionId={sessionId} {...props} />;
 }
 
 type BridgeProps = { sessionId: string } & AgentRunBridgeProps;
@@ -65,7 +64,7 @@ function Bridge({
   });
   const patch = useChatStore((s) => s.patchAgentMeta);
   const openMini = useChatStore((s) => s.openMini);
-  const persistMessages = useChatStore((s) => s.persistMessages);
+  const publishMessages = useChatStore((s) => s.publishMessages);
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
 
   // Expose the approval responder so the diff tab can resolve approvals.
@@ -77,21 +76,6 @@ function Bridge({
     return () => setApprovalResponder(null);
   }, [setApprovalResponder, addToolApprovalResponse]);
 
-  useEffect(() => {
-    persistMessages(sessionId, messages);
-  }, [sessionId, messages, persistMessages]);
-
-  // Flush the debounced write whenever the chat goes idle (or errors),
-  // and on unmount, so a closed app or session-switch never loses the tail.
-  useEffect(() => {
-    if (status !== "submitted" && status !== "streaming") {
-      flushPersist(sessionId);
-    }
-  }, [sessionId, status]);
-  useEffect(() => {
-    return () => flushPersist(sessionId);
-  }, [sessionId]);
-
   const approvalsPending = useMemo(() => {
     let n = 0;
     for (const m of messages) {
@@ -102,6 +86,53 @@ function Bridge({
     }
     return n;
   }, [messages]);
+
+  const latestMessages = useRef(messages);
+  latestMessages.current = messages;
+  const runDirty = useRef(false);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const approvalsRef = useRef(approvalsPending);
+  approvalsRef.current = approvalsPending;
+  useEffect(() => {
+    const running = status === "submitted" || status === "streaming";
+    if (running) runDirty.current = true;
+    if (!shouldPublishSnapshot(status, approvalsPending, runDirty.current)) return;
+    const timer = window.setTimeout(() => {
+      if (
+        !shouldPublishSnapshot(
+          statusRef.current,
+          approvalsRef.current,
+          runDirty.current,
+        )
+      )
+        return;
+      runDirty.current = false;
+      void publishMessages(sessionId, latestMessages.current).catch((error) => {
+        runDirty.current = true;
+        toast.error("Failed to save AI session", {
+          description: String(error),
+        });
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, status, approvalsPending, publishMessages]);
+  useEffect(
+    () => () => {
+      if (
+        !shouldPublishSnapshot(
+          statusRef.current,
+          approvalsRef.current,
+          runDirty.current,
+        )
+      )
+        return;
+      void publishMessages(sessionId, latestMessages.current).catch((error) => {
+        console.error("Failed to save AI session during switch:", error);
+      });
+    },
+    [sessionId, publishMessages],
+  );
 
   useEffect(() => {
     let runStatus: AgentRunStatus;
@@ -129,10 +160,6 @@ function Bridge({
   // open duplicates. Reset when the session changes.
   const openedRef = useRef<Set<string>>(new Set());
   const fileMutationFingerprintRef = useRef<string>("");
-  useEffect(() => {
-    openedRef.current = new Set();
-    fileMutationFingerprintRef.current = "";
-  }, [sessionId]);
 
   // Cheap fingerprint of file-mutation tool parts only. The diff-tab effect
   // is the most expensive thing on the streaming path, so we skip it when

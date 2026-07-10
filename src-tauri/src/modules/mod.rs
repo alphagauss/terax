@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod ai_sessions;
 pub mod fs;
 pub mod git;
 pub mod history;
@@ -8,5 +9,8 @@ pub mod proc;
 pub mod pty;
 pub mod remote;
 pub mod secrets;
+pub mod shared_store;
 pub mod shell;
+pub mod storage;
 pub mod workspace;
+pub mod workspace_process;

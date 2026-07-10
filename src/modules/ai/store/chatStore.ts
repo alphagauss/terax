@@ -13,17 +13,23 @@ import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
 import {
-  deleteSessionData,
+  acquireSessionRun,
+  deleteSessionFile,
   deriveTitle,
-  loadAll,
-  loadMessages,
+  listSessions,
+  migrateLegacySessions,
+  mergeSessionMetadata,
   newSessionId,
-  saveActiveId,
-  saveMessages,
-  saveSessionsList,
+  publishSession,
+  readSession,
+  releaseSessionRun,
   type SessionMeta,
 } from "../lib/sessions";
 import { pushRecentModel } from "../lib/modelPrefs";
+import {
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 
 export type Live = {
   getCwd: () => string | null;
@@ -142,13 +148,17 @@ type StoreState = {
   sessionsHydrated: boolean;
   sessions: SessionMeta[];
   activeSessionId: string | null;
+  activeSessionRevision: number;
+  readOnlySessionIds: Record<string, true>;
+  sessionSyncError: string | null;
   hydrateSessions: () => Promise<void>;
+  refreshSessions: () => Promise<void>;
+  ensureSessionRunLock: (id: string) => Promise<boolean>;
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
-  /** Persist messages of a session and bump its updatedAt + auto-title. */
-  persistMessages: (id: string, messages: UIMessage[]) => void;
+  publishMessages: (id: string, messages: UIMessage[]) => Promise<void>;
 };
 
 const NOOP_LIVE: Live = {
@@ -173,7 +183,6 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
     const oldest = chats.keys().next().value;
     if (!oldest || oldest === id) break;
     if (useChatStore.getState().activeSessionId === oldest) break;
-    flushPersistEntry(oldest);
     void chats.get(oldest)?.stop();
     chats.delete(oldest);
   }
@@ -182,30 +191,13 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
 // when the matching Chat is constructed.
 export const seedMessages = new Map<string, UIMessage[]>();
 
-// Trailing debounce for per-token message persistence. Streaming fires
-// `persistMessages` on every token; without this we'd JSON-serialize the
-// full message array and round-trip to the store plugin per token, which
-// stalls the UI. Flush on idle (status transition) via `flushPersist`.
-const PERSIST_DEBOUNCE_MS = 300;
-const pendingPersist = new Map<
-  string,
-  { latest: UIMessage[]; timer: ReturnType<typeof setTimeout> }
->();
+const heldRunLocks = new Set<string>();
 
-function flushPersistEntry(id: string) {
-  const entry = pendingPersist.get(id);
-  if (!entry) return;
-  clearTimeout(entry.timer);
-  pendingPersist.delete(id);
-  void saveMessages(id, entry.latest);
-}
-
-export function flushPersist(id?: string): void {
-  if (id) {
-    flushPersistEntry(id);
-    return;
-  }
-  for (const key of Array.from(pendingPersist.keys())) flushPersistEntry(key);
+async function seedSnapshot(id: string): Promise<void> {
+  const snapshot = await readSession(id);
+  seedMessages.set(id, snapshot.messages);
+  const { seedTodos } = await import("./todoStore");
+  seedTodos(id, snapshot.todos);
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -240,9 +232,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
   toggleMini: () => set((s) => ({ mini: { open: !s.mini.open } })),
 
   panelOpen: false,
-  openPanel: () => set({ panelOpen: true }),
-  closePanel: () => set({ panelOpen: false }),
-  togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
+  openPanel: () => {
+    set({ panelOpen: true });
+    void setWorkspaceValue("ai:panelOpen", true);
+  },
+  closePanel: () => {
+    set({ panelOpen: false });
+    void setWorkspaceValue("ai:panelOpen", false);
+  },
+  togglePanel: () =>
+    set((s) => {
+      const panelOpen = !s.panelOpen;
+      void setWorkspaceValue("ai:panelOpen", panelOpen);
+      return { panelOpen };
+    }),
 
   focusSignal: 0,
   pendingPrefill: null,
@@ -283,38 +286,101 @@ export const useChatStore = create<StoreState>((set, get) => ({
   sessionsHydrated: false,
   sessions: [],
   activeSessionId: null,
+  activeSessionRevision: 0,
+  readOnlySessionIds: {},
+  sessionSyncError: null,
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    const { sessions } = await loadAll();
-
-    // Reuse the most recent untitled "New chat" session if one exists from
-    // the previous run — no point stacking empty placeholder sessions every
-    // launch. Otherwise prepend a fresh one.
-    const reusable = sessions[0]?.title === "New chat" ? sessions[0] : null;
-    let nextSessions: SessionMeta[];
-    let freshId: string;
-    if (reusable) {
-      nextSessions = sessions;
-      freshId = reusable.id;
-    } else {
-      freshId = newSessionId();
+    try {
+      await migrateLegacySessions();
+      const sessions = await listSessions();
+      const savedActive = getWorkspaceValue<string>("ai:activeSessionId");
+      const restored = sessions.find((session) => session.id === savedActive);
+      const freshId = newSessionId();
       const fresh: SessionMeta = {
         id: freshId,
         title: "New chat",
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      nextSessions = [fresh, ...sessions];
-      void saveSessionsList(nextSessions);
+      if (restored) await seedSnapshot(restored.id);
+      set({
+        sessions: restored ? sessions : [fresh, ...sessions],
+        activeSessionId: restored?.id ?? freshId,
+        panelOpen: getWorkspaceValue<boolean>("ai:panelOpen") ?? false,
+        sessionsHydrated: true,
+        sessionSyncError: null,
+      });
+    } catch (error) {
+      set({
+        sessionsHydrated: true,
+        sessionSyncError: String(error),
+      });
     }
-    void saveActiveId(freshId);
+  },
 
+  refreshSessions: async () => {
+    try {
+      const disk = await listSessions();
+      const local = get().sessions;
+      const diskById = new Map(disk.map((session) => [session.id, session]));
+      const merged = mergeSessionMetadata(local, disk, heldRunLocks);
+
+      const activeId = get().activeSessionId;
+      if (activeId && !heldRunLocks.has(activeId)) {
+        const before = local.find((session) => session.id === activeId);
+        const after = diskById.get(activeId);
+        if (after && before?.fingerprint !== after.fingerprint) {
+          await chats.get(activeId)?.stop();
+          chats.delete(activeId);
+          await seedSnapshot(activeId);
+          set({ activeSessionRevision: get().activeSessionRevision + 1 });
+        }
+      }
+
+      let next = merged;
+      let nextActive = activeId;
+      if (next.length === 0) {
+        const id = newSessionId();
+        next = [
+          {
+            id,
+            title: "New chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ];
+        nextActive = id;
+      } else if (activeId && !next.some((session) => session.id === activeId)) {
+        chats.delete(activeId);
+        seedMessages.delete(activeId);
+        nextActive = next[0].id;
+      }
+      set({
+        sessions: next,
+        activeSessionId: nextActive,
+        sessionSyncError: null,
+      });
+    } catch (error) {
+      set({ sessionSyncError: String(error) });
+    }
+  },
+
+  ensureSessionRunLock: async (id) => {
+    if (heldRunLocks.has(id)) return true;
+    const acquired = await acquireSessionRun(id);
+    if (acquired) {
+      heldRunLocks.add(id);
+      const next = { ...get().readOnlySessionIds };
+      delete next[id];
+      set({ readOnlySessionIds: next });
+      return true;
+    }
     set({
-      sessions: nextSessions,
-      activeSessionId: freshId,
-      sessionsHydrated: true,
+      readOnlySessionIds: { ...get().readOnlySessionIds, [id]: true },
     });
+    return false;
   },
 
   newSession: () => {
@@ -327,8 +393,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     };
     const next = [meta, ...get().sessions];
     set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
-    void saveSessionsList(next);
-    void saveActiveId(id);
+    void setWorkspaceValue("ai:activeSessionId", id);
     return id;
   },
 
@@ -340,86 +405,99 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
       set({ activeSessionId: id, agentMeta: IDLE_META });
-      void saveActiveId(id);
+      void setWorkspaceValue("ai:activeSessionId", id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
       flip();
       return;
     }
-    void loadMessages(id).then((m) => {
-      if (m && m.length > 0 && !chats.has(id)) seedMessages.set(id, m);
-      flip();
-    });
+    void seedSnapshot(id)
+      .catch((error) => set({ sessionSyncError: String(error) }))
+      .finally(flip);
   },
 
   deleteSession: (id) => {
-    const remaining = get().sessions.filter((s) => s.id !== id);
-    chats.get(id)?.stop();
-    chats.delete(id);
-    seedMessages.delete(id);
-    const pend = pendingPersist.get(id);
-    if (pend) {
-      clearTimeout(pend.timer);
-      pendingPersist.delete(id);
-    }
-    void deleteSessionData(id);
-    void useTodosStore.getState().clearSession(id);
-
-    if (remaining.length === 0) {
-      const fresh: SessionMeta = {
-        id: newSessionId(),
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      set({ sessions: [fresh], activeSessionId: fresh.id });
-      void saveSessionsList([fresh]);
-      void saveActiveId(fresh.id);
-      return;
-    }
-
-    const wasActive = get().activeSessionId === id;
-    const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
-    set({ sessions: remaining, activeSessionId: nextActive });
-    void saveSessionsList(remaining);
-    if (wasActive) void saveActiveId(nextActive);
+    void (async () => {
+      try {
+        await deleteSessionFile(id);
+        await useTodosStore.getState().clearSession(id);
+        const remaining = get().sessions.filter((session) => session.id !== id);
+        await chats.get(id)?.stop();
+        chats.delete(id);
+        seedMessages.delete(id);
+        if (remaining.length === 0) {
+          const fresh: SessionMeta = {
+            id: newSessionId(),
+            title: "New chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          set({ sessions: [fresh], activeSessionId: fresh.id });
+          await setWorkspaceValue("ai:activeSessionId", fresh.id);
+          return;
+        }
+        const wasActive = get().activeSessionId === id;
+        const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
+        set({ sessions: remaining, activeSessionId: nextActive });
+        if (wasActive) await setWorkspaceValue("ai:activeSessionId", nextActive);
+      } catch (error) {
+        set({ sessionSyncError: String(error) });
+      }
+    })();
   },
 
   renameSession: (id, title) => {
+    const current = get().sessions.find((session) => session.id === id);
     const next = get().sessions.map((s) =>
       s.id === id ? { ...s, title, updatedAt: Date.now() } : s,
     );
     set({ sessions: next });
-    void saveSessionsList(next);
+    if (!current?.fingerprint) return;
+    void (async () => {
+      try {
+        const snapshot = await readSession(id);
+        await publishSession({ ...snapshot, title, updatedAt: Date.now() });
+        await get().refreshSessions();
+      } catch (error) {
+        set({
+          sessions: get().sessions.map((session) =>
+            session.id === id && current ? current : session,
+          ),
+          sessionSyncError: String(error),
+        });
+      }
+    })();
   },
 
-  persistMessages: (id, messages) => {
-    // Debounce the message-blob write so streaming doesn't pound the store.
-    const existing = pendingPersist.get(id);
-    if (existing) clearTimeout(existing.timer);
-    const timer = setTimeout(() => {
-      const entry = pendingPersist.get(id);
-      if (!entry) return;
-      pendingPersist.delete(id);
-      void saveMessages(id, entry.latest);
-    }, PERSIST_DEBOUNCE_MS);
-    pendingPersist.set(id, { latest: messages, timer });
-
-    // Update zustand session list only when the derived title actually
-    // changes — otherwise we'd rewrite the sessions array (and trigger
-    // re-renders + a store write) on every token.
+  publishMessages: async (id, messages) => {
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
-    const isUntitled = !meta.title || meta.title === "New chat";
-    if (!isUntitled) return;
-    const nextTitle = deriveTitle(messages);
-    if (nextTitle === meta.title) return;
-    const next = sessions.map((s) =>
-      s.id === id ? { ...s, title: nextTitle, updatedAt: Date.now() } : s,
-    );
-    set({ sessions: next });
-    void saveSessionsList(next);
+    if (messages.length === 0 && meta.title === "New chat") return;
+    const updatedAt = Date.now();
+    const title =
+      !meta.title || meta.title === "New chat"
+        ? deriveTitle(messages)
+        : meta.title;
+    await publishSession({
+      schemaVersion: 1,
+      id,
+      title,
+      createdAt: meta.createdAt,
+      updatedAt,
+      messages,
+      todos: useTodosStore.getState().bySession[id] ?? [],
+    });
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === id
+          ? { ...session, title, updatedAt, fingerprint: "published" }
+          : session,
+      ),
+    });
+    heldRunLocks.delete(id);
+    await releaseSessionRun(id);
+    await get().refreshSessions();
   },
 }));
 
