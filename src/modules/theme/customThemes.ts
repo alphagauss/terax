@@ -7,7 +7,6 @@ import {
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { Theme } from "./types";
 
-const LEGACY_KEY = "themes";
 const themeKey = (id: string) => `theme:${id}`;
 
 export async function listCustomThemes(): Promise<Theme[]> {
@@ -15,22 +14,7 @@ export async function listCustomThemes(): Promise<Theme[]> {
   const records = Object.entries(values)
     .filter(([key]) => key.startsWith("theme:"))
     .map(([, value]) => value as Theme);
-  const legacy = Array.isArray(values[LEGACY_KEY])
-    ? (values[LEGACY_KEY] as Theme[])
-    : [];
-  if (legacy.length > 0) {
-    await Promise.all(
-      legacy
-        .filter((theme) => values[themeKey(theme.id)] === undefined)
-        .map((theme) =>
-          setSharedStoreKey("custom-themes", themeKey(theme.id), theme),
-        ),
-    );
-    await deleteSharedStoreKey("custom-themes", LEGACY_KEY);
-  }
-  return [
-    ...new Map([...legacy, ...records].map((theme) => [theme.id, theme])).values(),
-  ];
+  return records;
 }
 
 export function saveCustomTheme(theme: Theme): Promise<void> {

@@ -144,19 +144,6 @@ export function endpointIdFromCompatModel(modelId: string): string {
     : "";
 }
 
-/** One-shot migration of the legacy single OpenAI-compatible config into the
- *  named-endpoint list. Returns one endpoint when the old base URL + model id
- *  were both set, else empty. `id` is supplied by the caller to stay pure. */
-export function migrateLegacyCompatEndpoint(
-  baseURL: string,
-  modelId: string,
-  contextLimit: number,
-  id: string,
-): CustomEndpoint[] {
-  if (!baseURL.trim() || !modelId.trim()) return [];
-  return [{ id, name: "Custom endpoint", baseURL, modelId, contextLimit }];
-}
-
 export function getProvider(id: ProviderId): ProviderInfo {
   const p = PROVIDERS.find((x) => x.id === id);
   if (!p) throw new Error(`Unknown provider: ${id}`);

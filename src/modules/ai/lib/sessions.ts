@@ -46,10 +46,6 @@ export function releaseSessionRun(id: string): Promise<void> {
   return invoke("ai_session_run_release", { id });
 }
 
-export function migrateLegacySessions(): Promise<number> {
-  return invoke<number>("ai_sessions_migrate_legacy");
-}
-
 export function newSessionId(): string {
   return crypto.randomUUID();
 }

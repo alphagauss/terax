@@ -87,7 +87,6 @@ export const BUILTIN_AGENTS: readonly Agent[] = [
   },
 ] as const;
 
-const KEY_CUSTOM = "customAgents";
 const agentKey = (id: string) => `agent:${id}`;
 
 export type LoadedAgents = {
@@ -100,32 +99,8 @@ export async function loadAgents(): Promise<LoadedAgents> {
   const records = Object.entries(values)
     .filter(([key]) => key.startsWith("agent:"))
     .map(([, value]) => value as Agent);
-  const legacy = Array.isArray(values[KEY_CUSTOM])
-    ? (values[KEY_CUSTOM] as Agent[])
-    : [];
-  const custom = [
-    ...new Map([...legacy, ...records].map((agent) => [agent.id, agent])).values(),
-  ];
-  if (legacy.length > 0) {
-    await Promise.all(
-      legacy
-        .filter((agent) => values[agentKey(agent.id)] === undefined)
-        .map((agent) =>
-          setSharedStoreKey("ai-agents", agentKey(agent.id), agent),
-        ),
-    );
-    await deleteSharedStoreKey("ai-agents", KEY_CUSTOM);
-  }
-  let activeId = getWorkspaceValue<string>("ai:activeAgentId");
-  if (
-    !activeId &&
-    getWorkspaceValue<boolean>("migration:legacySpaces") &&
-    typeof values.activeAgentId === "string"
-  ) {
-    activeId = values.activeAgentId;
-    await setWorkspaceValue("ai:activeAgentId", activeId);
-    await deleteSharedStoreKey("ai-agents", "activeAgentId");
-  }
+  const custom = records;
+  const activeId = getWorkspaceValue<string>("ai:activeAgentId");
   return {
     custom,
     activeId: activeId ?? BUILTIN_AGENTS[0].id,

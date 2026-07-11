@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -260,97 +260,6 @@ fn write_metadata(root: &Path, metadata: &WorkspaceMetadata) -> Result<(), Strin
         .map_err(|e| e.to_string())
 }
 
-fn migrate_legacy_workspace_state(root: &Path, id: Uuid, env: &WorkspaceEnv) -> Result<(), String> {
-    if *env != WorkspaceEnv::Local {
-        return Ok(());
-    }
-    let marker = root.join(".workspace-v1-migration-complete");
-    if marker.is_file() {
-        return Ok(());
-    }
-    let _lock = FileLock::acquire(
-        &root.join(".workspace-v1-migration.lock"),
-        Duration::from_secs(5),
-    )
-    .map_err(|error| error.to_string())?
-    .ok_or_else(|| "legacy Workspace migration is still running".to_string())?;
-    if marker.is_file() {
-        return Ok(());
-    }
-
-    let legacy_current = root.join("terax-spaces.json");
-    let backup = root.join("terax-spaces.v0.backup.json");
-    let legacy_path = if legacy_current.exists() {
-        legacy_current
-    } else {
-        backup.clone()
-    };
-
-    let target_path = root.join(state_filename(id));
-    let mut target = serde_json::from_slice::<Value>(
-        &fs::read(&target_path).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?
-    .as_object()
-    .cloned()
-    .ok_or_else(|| "Workspace state must be a JSON object".to_string())?;
-    let already_initialized = target
-        .get("spaces")
-        .and_then(Value::as_array)
-        .is_some_and(|spaces| !spaces.is_empty());
-
-    if !already_initialized {
-        if legacy_path.exists() {
-            let legacy_bytes = fs::read(&legacy_path).map_err(|error| error.to_string())?;
-            let legacy = serde_json::from_slice::<Value>(&legacy_bytes)
-                .map_err(|error| format!("invalid legacy Spaces store: {error}"))?
-                .as_object()
-                .cloned()
-                .ok_or_else(|| "legacy Spaces store must be a JSON object".to_string())?;
-
-            if let Some(Value::Array(spaces)) = legacy.get("spaces") {
-                let normalized = spaces
-                    .iter()
-                    .cloned()
-                    .map(|mut space| {
-                        if let Some(map) = space.as_object_mut() {
-                            map.remove("env");
-                        }
-                        space
-                    })
-                    .collect();
-                target.insert("spaces".to_string(), Value::Array(normalized));
-            }
-            if let Some(active) = legacy.get("activeId") {
-                target.insert("activeSpaceId".to_string(), active.clone());
-            }
-            for (key, value) in &legacy {
-                if let Some(space_id) = key.strip_prefix("state:") {
-                    target.insert(format!("spaceState:{space_id}"), value.clone());
-                }
-            }
-        }
-        target.insert("migration:legacySpaces".to_string(), Value::Bool(true));
-        write_atomic(
-            &target_path,
-            &serde_json::to_vec(&target).map_err(|error| error.to_string())?,
-        )
-        .map_err(|error| error.to_string())?;
-    }
-
-    if backup.exists() && !backup.is_file() {
-        return Err(format!(
-            "legacy Spaces backup is not a file: {}",
-            backup.display()
-        ));
-    }
-    if legacy_path.exists() && legacy_path != backup && !backup.exists() {
-        let bytes = fs::read(&legacy_path).map_err(|error| error.to_string())?;
-        write_atomic(&backup, &bytes).map_err(|error| error.to_string())?;
-    }
-    write_atomic(&marker, b"1\n").map_err(|error| error.to_string())
-}
-
 fn canonical_launch_dir(path: Option<PathBuf>) -> Result<Option<String>, String> {
     let Some(path) = path else {
         return Ok(None);
@@ -470,9 +379,6 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<WorkspaceProces
     };
     metadata.last_opened_at = timestamp;
     write_metadata(root, &metadata)?;
-    if let Err(error) = migrate_legacy_workspace_state(root, id, &request.env) {
-        log::warn!("legacy Workspace state migration deferred: {error}");
-    }
     Ok(WorkspaceProcessState {
         bootstrap: WorkspaceBootstrap {
             schema_version: SCHEMA_VERSION,
@@ -584,7 +490,6 @@ mod tests {
         ])
         .is_err());
     }
-
     #[test]
     fn positional_directory_is_fresh_local() {
         let request = parse_args([".".to_string()]).unwrap();
@@ -651,115 +556,6 @@ mod tests {
         .unwrap();
         assert_eq!(args, [ENV_ARG, "ssh:ssh-profile", POLICY_ARG, "recent"]);
         assert!(args.iter().all(|arg| !arg.contains("password")));
-    }
-
-    #[test]
-    fn first_local_workspace_migrates_legacy_spaces_without_space_env() {
-        let root = tempfile::tempdir().unwrap();
-        fs::write(
-            root.path().join("terax-spaces.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "spaces": [{
-                    "id": "default",
-                    "name": "Default",
-                    "root": "C:/work",
-                    "env": { "kind": "wsl", "distro": "Ubuntu" },
-                    "createdAt": 1,
-                    "updatedAt": 2
-                }],
-                "activeId": "default",
-                "state:default": { "tabs": [], "activeTabIndex": 0 }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let state = initialize(root.path(), parse_args(Vec::<String>::new()).unwrap()).unwrap();
-        let value: Value = serde_json::from_slice(
-            &fs::read(root.path().join(&state.bootstrap.state_filename)).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value["activeSpaceId"], "default");
-        assert!(value["spaceState:default"].is_object());
-        assert!(value["spaces"][0].get("env").is_none());
-        assert!(root.path().join("terax-spaces.v0.backup.json").exists());
-        assert!(root
-            .path()
-            .join(".workspace-v1-migration-complete")
-            .exists());
-    }
-
-    #[test]
-    fn legacy_spaces_do_not_overwrite_initialized_workspace() {
-        let root = tempfile::tempdir().unwrap();
-        let id = Uuid::new_v4();
-        let metadata = WorkspaceMetadata {
-            schema_version: SCHEMA_VERSION,
-            id: id.to_string(),
-            env: WorkspaceEnv::Local,
-            created_at: 1,
-            last_opened_at: 1,
-        };
-        write_metadata(root.path(), &metadata).unwrap();
-        let target = root.path().join(state_filename(id));
-        let mut value: Value = serde_json::from_slice(&fs::read(&target).unwrap()).unwrap();
-        value.as_object_mut().unwrap().insert(
-            "spaces".to_string(),
-            serde_json::json!([{ "id": "current" }]),
-        );
-        write_atomic(&target, &serde_json::to_vec(&value).unwrap()).unwrap();
-        fs::write(
-            root.path().join("terax-spaces.json"),
-            br#"{"spaces":[{"id":"legacy"}]}"#,
-        )
-        .unwrap();
-
-        migrate_legacy_workspace_state(root.path(), id, &WorkspaceEnv::Local).unwrap();
-        let after: Value = serde_json::from_slice(&fs::read(target).unwrap()).unwrap();
-        assert_eq!(after["spaces"][0]["id"], "current");
-        assert!(after.get("migration:legacySpaces").is_none());
-    }
-
-    #[test]
-    fn empty_first_local_workspace_is_selected_for_ui_state_migration() {
-        let root = tempfile::tempdir().unwrap();
-        let state = initialize(root.path(), parse_args(Vec::<String>::new()).unwrap()).unwrap();
-        let value: Value = serde_json::from_slice(
-            &fs::read(root.path().join(&state.bootstrap.state_filename)).unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value["migration:legacySpaces"], true);
-        assert!(root
-            .path()
-            .join(".workspace-v1-migration-complete")
-            .is_file());
-    }
-
-    #[test]
-    fn workspace_backup_failure_does_not_create_marker() {
-        let root = tempfile::tempdir().unwrap();
-        let id = Uuid::new_v4();
-        write_metadata(
-            root.path(),
-            &WorkspaceMetadata {
-                schema_version: SCHEMA_VERSION,
-                id: id.to_string(),
-                env: WorkspaceEnv::Local,
-                created_at: 1,
-                last_opened_at: 1,
-            },
-        )
-        .unwrap();
-        fs::write(root.path().join("terax-spaces.json"), br#"{"spaces":[]}"#).unwrap();
-        fs::create_dir(root.path().join("terax-spaces.v0.backup.json")).unwrap();
-
-        assert!(migrate_legacy_workspace_state(root.path(), id, &WorkspaceEnv::Local).is_err());
-        assert!(!root
-            .path()
-            .join(".workspace-v1-migration-complete")
-            .is_file());
     }
 
     #[test]

@@ -13,7 +13,6 @@ export type Snippet = {
   content: string;
 };
 
-const KEY_LIST = "snippets";
 const snippetKey = (id: string) => `snippet:${id}`;
 
 export async function loadSnippets(): Promise<Snippet[]> {
@@ -21,24 +20,7 @@ export async function loadSnippets(): Promise<Snippet[]> {
   const records = Object.entries(values)
     .filter(([key]) => key.startsWith("snippet:"))
     .map(([, value]) => value as Snippet);
-  const legacy = Array.isArray(values[KEY_LIST])
-    ? (values[KEY_LIST] as Snippet[])
-    : [];
-  if (legacy.length > 0) {
-    await Promise.all(
-      legacy
-        .filter((snippet) => values[snippetKey(snippet.id)] === undefined)
-        .map((snippet) =>
-          setSharedStoreKey("ai-snippets", snippetKey(snippet.id), snippet),
-        ),
-    );
-    await deleteSharedStoreKey("ai-snippets", KEY_LIST);
-  }
-  return [
-    ...new Map(
-      [...legacy, ...records].map((snippet) => [snippet.id, snippet]),
-    ).values(),
-  ];
+  return records;
 }
 
 export function upsertSnippet(snippet: Snippet): Promise<void> {

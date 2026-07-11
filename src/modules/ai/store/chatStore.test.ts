@@ -4,7 +4,6 @@ const io = vi.hoisted(() => ({
   acquire: vi.fn(),
   release: vi.fn(),
   list: vi.fn(),
-  migrate: vi.fn(),
   publish: vi.fn(),
   read: vi.fn(),
   remove: vi.fn(),
@@ -17,7 +16,6 @@ vi.mock("../lib/sessions", async (importOriginal) => ({
   acquireSessionRun: io.acquire,
   releaseSessionRun: io.release,
   listSessions: io.list,
-  migrateLegacySessions: io.migrate,
   publishSession: io.publish,
   readSession: io.read,
   deleteSessionFile: io.remove,
@@ -73,7 +71,6 @@ describe("chat store multi-process lifecycle", () => {
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
-    io.migrate.mockResolvedValue(0);
     io.publish.mockResolvedValue(undefined);
     io.read.mockImplementation(async (id: string) =>
       snapshot(id === first.id ? first : second),
@@ -102,19 +99,6 @@ describe("chat store multi-process lifecycle", () => {
     expect(io.workspaceSet).toHaveBeenCalledWith(
       "ai:activeSessionId",
       first.id,
-    );
-  });
-
-  it("loads valid snapshots even when legacy migration reports an error", async () => {
-    io.migrate.mockRejectedValue(new Error("legacy backup failed"));
-    io.list.mockResolvedValue([first]);
-
-    await useChatStore.getState().hydrateSessions();
-
-    expect(useChatStore.getState().activeSessionId).toBe(first.id);
-    expect(useChatStore.getState().sessionsHydrated).toBe(true);
-    expect(useChatStore.getState().sessionSyncError).toContain(
-      "legacy backup failed",
     );
   });
 

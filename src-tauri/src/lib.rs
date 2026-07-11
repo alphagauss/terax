@@ -280,7 +280,6 @@ pub fn run() {
             ai_sessions::ai_session_delete,
             ai_sessions::ai_session_run_acquire,
             ai_sessions::ai_session_run_release,
-            ai_sessions::ai_sessions_migrate_legacy,
             shared_store::shared_store_read,
             shared_store::shared_store_set,
             shared_store::shared_store_delete,

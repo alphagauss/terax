@@ -8,7 +8,6 @@ import { create } from "zustand";
 import { remoteNative } from "./native";
 import type { ConnectionInfo, SshProfile } from "./types";
 
-const PROFILES_KEY = "profiles";
 const profileKey = (id: string) => `profile:${id}`;
 let subscribed = false;
 
@@ -51,25 +50,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     const records = Object.entries(values)
       .filter(([key]) => key.startsWith("profile:"))
       .map(([, value]) => value as SshProfile);
-    const legacy = Array.isArray(values[PROFILES_KEY])
-      ? (values[PROFILES_KEY] as SshProfile[])
-      : [];
-    const stored = [
-      ...new Map(
-        [...legacy, ...records].map((profile) => [profile.id, profile]),
-      ).values(),
-    ];
-    const profiles = stored.map(normalizeProfile);
-    if (legacy.length > 0) {
-      await Promise.all(
-        profiles
-          .filter((profile) => values[profileKey(profile.id)] === undefined)
-          .map((profile) =>
-            setSharedStoreKey("ssh-profiles", profileKey(profile.id), profile),
-          ),
-      );
-      await deleteSharedStoreKey("ssh-profiles", PROFILES_KEY);
-    }
+    const profiles = records.map(normalizeProfile);
     set({ profiles, loaded: true });
     if (!subscribed) {
       subscribed = true;

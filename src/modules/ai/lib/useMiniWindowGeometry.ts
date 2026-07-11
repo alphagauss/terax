@@ -14,7 +14,6 @@ import {
 } from "./miniWindowGeometry";
 
 const STORE_KEY = "ai:miniWindowGeometry";
-const LEGACY_STORE_KEY = "terax-ui-mini-window-geom";
 
 const viewport = (): Viewport => ({
   vw: window.innerWidth,
@@ -22,18 +21,7 @@ const viewport = (): Viewport => ({
 });
 
 function loadGeom(): Geom | null {
-  let p = getWorkspaceValue<Partial<Geom>>(STORE_KEY);
-  if (!p && getWorkspaceValue<boolean>("migration:legacySpaces")) {
-    try {
-      const raw = window.localStorage.getItem(LEGACY_STORE_KEY);
-      if (raw) {
-        p = JSON.parse(raw) as Partial<Geom>;
-        void setWorkspaceValue(STORE_KEY, p);
-      }
-    } catch {
-      // Invalid legacy geometry falls back to the default placement.
-    }
-  }
+  const p = getWorkspaceValue<Partial<Geom>>(STORE_KEY);
   if (p) {
     if (
       typeof p.x === "number" &&

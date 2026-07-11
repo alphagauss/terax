@@ -106,7 +106,7 @@ Three distinct surfaces:
 - `get_workspace_bootstrap` - immutable Workspace UUID, environment, launch directory, and state filenames selected before the webview renders
 - `spawn_workspace_process` - starts another executable instance for a new or existing Workspace; it never resets the caller
 
-Each process holds its Workspace OS lock for its lifetime. Legacy single-window state is imported only into the first empty Local Workspace; initialized Workspace state is never overwritten, the backup is written before the migration marker, and obsolete per-Space environments are discarded.
+Each process holds its Workspace OS lock for its lifetime.
 
 ### Shared configuration (`src-tauri/src/modules/shared_store.rs`)
 
@@ -119,7 +119,6 @@ The writing process receives an immediate change event and other processes recei
 
 - `ai_sessions_list` / `ai_session_read` / `ai_session_publish` / `ai_session_delete`
 - `ai_session_run_acquire` / `ai_session_run_release` - cross-process exclusive run ownership
-- `ai_sessions_migrate_legacy` - retryable legacy snapshot migration
 
 ### Network (`src-tauri/src/modules/net.rs`)
 

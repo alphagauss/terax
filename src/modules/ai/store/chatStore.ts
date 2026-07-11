@@ -17,7 +17,6 @@ import {
   deleteSessionFile,
   deriveTitle,
   listSessions,
-  migrateLegacySessions,
   mergeSessionMetadata,
   newSessionId,
   publishSession,
@@ -289,12 +288,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
-    let migrationError: string | null = null;
-    try {
-      await migrateLegacySessions();
-    } catch (error) {
-      migrationError = String(error);
-    }
     try {
       const sessions = await listSessions();
       const savedActive = getWorkspaceValue<string>("ai:activeSessionId");
@@ -318,7 +311,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         activeSessionId: activeId,
         panelOpen: getWorkspaceValue<boolean>("ai:panelOpen") ?? false,
         sessionsHydrated: true,
-        sessionSyncError: migrationError,
+        sessionSyncError: null,
       });
     } catch (error) {
       set({

@@ -59,8 +59,6 @@ Streaming state remains in the owning process. Sending first acquires the sessio
 
 Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent snapshot, then a fresh session.
 
-At startup, the Rust migration command takes the migration lock, converts the legacy sessions/todos stores to deterministic UUID snapshots, verifies all writes, creates `.v0.backup.json` files, and writes the completion marker last. A retry can use either an original legacy file or its backup, and a migration error does not hide already-valid new snapshots.
-
 ## Composer
 
 `AiComposerProvider` (`src/modules/ai/lib/composer.tsx`) is a React context that holds shared input state (text, attachments, voice) for the docked input bar and any other surface. Attachments can be images, text files, or `selection` chips from the terminal or editor. Selections are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit time and are not pasted into the textarea.
