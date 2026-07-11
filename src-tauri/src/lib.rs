@@ -5,9 +5,11 @@ use modules::{
     shell, workspace, workspace_process,
 };
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
-use tauri::{PhysicalPosition, WindowEvent};
+use tauri::WindowEvent;
+use tauri::{
+    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder,
+};
 use tauri_plugin_window_state::StateFlags;
 
 /// Drained on first read so HMR / re-mounts can't replay the launch dir.
@@ -124,19 +126,18 @@ pub fn run() {
             eprintln!("Terax startup error: {error}");
             std::process::exit(2);
         });
-    let workspace_process =
-        workspace_process::initialize(&workspace_dir, request).unwrap_or_else(|error| {
+    let workspace_process = match workspace_process::initialize(&workspace_dir, request) {
+        Ok(workspace_process::InitializeOutcome::Opened(state)) => state,
+        Ok(workspace_process::InitializeOutcome::ActivatedExisting) => std::process::exit(0),
+        Err(error) => {
             eprintln!("Terax startup error: {error}");
             std::process::exit(2);
-        });
+        }
+    };
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
+    let window_geometry = workspace_process.bootstrap().window_geometry;
     let window_state_path = app_data::directory(app_data::Directory::WindowState)
-        .map(|directory| {
-            directory.join(format!(
-                "terax-window-state.{}.json",
-                workspace_process.bootstrap().id
-            ))
-        })
+        .map(|directory| directory.join(&workspace_process.bootstrap().window_state_filename))
         .unwrap_or_else(|error| {
             eprintln!("Terax startup error: {error}");
             std::process::exit(2);
@@ -332,7 +333,15 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(move |app, event| {
+            if let tauri::RunEvent::Ready = event {
+                if let (Some(geometry), Some(main)) =
+                    (window_geometry, app.get_webview_window("main"))
+                {
+                    let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));
+                    let _ = main.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+                }
+            }
             // Servers exit on stdin EOF, but destructors are not guaranteed
             // on process exit; kill explicitly.
             if let tauri::RunEvent::Exit = event {

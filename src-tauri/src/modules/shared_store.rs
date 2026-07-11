@@ -89,6 +89,19 @@ pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
     emit_changed(app, &root, "keys-epoch")
 }
 
+pub(crate) fn request_workspace_activation(environment: &str) -> Result<(), String> {
+    let root = store_dir()?;
+    mutate(&root, "settings", |map| {
+        map.insert(
+            "workspaceActivation".to_string(),
+            serde_json::json!({
+                "requestId": uuid::Uuid::new_v4().to_string(),
+                "environment": environment,
+            }),
+        );
+    })
+}
+
 fn revision(path: &Path) -> String {
     let Ok(bytes) = fs::read(path) else {
         return "missing".to_string();

@@ -30,6 +30,7 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setTerminalWebglEnabled,
+  setWorkspaceWindowMode,
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
@@ -76,6 +77,7 @@ export function GeneralSection() {
 
   const autostart = usePreferencesStore((s) => s.autostart);
   const restoreWindowState = usePreferencesStore((s) => s.restoreWindowState);
+  const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
@@ -415,6 +417,31 @@ export function GeneralSection() {
               checked={restoreWindowState}
               onCheckedChange={(v) => void setRestoreWindowState(v)}
             />
+          </SettingRow>
+          <SettingRow
+            title="Workspace windows"
+            description="Single window reuses one window per Local, WSL, or SSH environment. Changes apply to windows opened afterwards."
+          >
+            <Select
+              value={workspaceWindowMode}
+              onValueChange={(v) =>
+                void setWorkspaceWindowMode(
+                  v === "multiple" ? "multiple" : "single",
+                )
+              }
+            >
+              <SelectTrigger className="h-8 w-56 text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single" className="text-[12px]">
+                  Single window per environment
+                </SelectItem>
+                <SelectItem value="multiple" className="text-[12px]">
+                  Multiple windows per environment
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </SettingRow>
         </div>
       </div>

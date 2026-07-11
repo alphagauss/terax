@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
+import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { isMarkdownPath } from "@/lib/utils";
@@ -93,6 +94,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import {
+  currentWorkspaceBootstrap,
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
@@ -109,6 +111,16 @@ import { WorkspaceSurface } from "./components/WorkspaceSurface";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
+
+type WorkspaceActivation = { requestId: string; environment: string };
+
+function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
+  if (!value || typeof value !== "object") return null;
+  const { requestId, environment } = value as Record<string, unknown>;
+  return typeof requestId === "string" && typeof environment === "string"
+    ? { requestId, environment }
+    : null;
+}
 
 export default function App() {
   const initialLaunchCwd =
@@ -183,6 +195,40 @@ export default function App() {
   const liveLeavesRef = useRef<Set<number>>(new Set());
 
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
+  const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
+  const activationRequestRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void onSharedStoreChange("settings", async () => {
+      const activation = parseWorkspaceActivation(
+        (await readSharedStore("settings")).workspaceActivation,
+      );
+      if (
+        !activation ||
+        activation.environment !== currentWorkspaceBootstrap().environmentKey ||
+        activation.requestId === activationRequestRef.current
+      ) {
+        return;
+      }
+      activationRequestRef.current = activation.requestId;
+      const window = getCurrentWindow();
+      await window.show();
+      await window.setFocus();
+    })
+      .then((next) => {
+        if (disposed) next();
+        else unlisten = next;
+      })
+      .catch((error) =>
+        console.error("workspace activation listener failed:", error),
+      );
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
   const {
     home,
     launchCwd,
@@ -359,8 +405,10 @@ export default function App() {
     handlePathDeleted,
   } = useTabCloseGuards({ tabs, disposeTab });
 
-  const { pendingAppClose, confirmAppClose, cancelAppClose } =
-    useAppCloseGuard(tabsRef, flushCompletedSessionRuns);
+  const { pendingAppClose, confirmAppClose, cancelAppClose } = useAppCloseGuard(
+    tabsRef,
+    flushCompletedSessionRuns,
+  );
 
   useEffect(() => {
     const live = new Set<number>();
@@ -1011,6 +1059,7 @@ export default function App() {
             explorerRoot,
             home,
             openNewWindow,
+            workspaceWindowMode,
             openNewTab,
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
@@ -1043,6 +1092,7 @@ export default function App() {
       explorerRoot,
       home,
       openNewWindow,
+      workspaceWindowMode,
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,

@@ -27,6 +27,8 @@ export const DEFAULT_THEME_ID = "terax-default";
 
 export type BackgroundKind = "none" | "image";
 
+export type WorkspaceWindowMode = "single" | "multiple";
+
 export const EDITOR_THEMES = [
   "kanagawa",
   "kanagawa-lotus",
@@ -126,6 +128,7 @@ export type Preferences = {
   customInstructions: string;
   autostart: boolean;
   restoreWindowState: boolean;
+  workspaceWindowMode: WorkspaceWindowMode;
   autocompleteEnabled: boolean;
   autocompleteTrigger: AutocompleteTrigger;
   autocompleteProvider: AutocompleteProviderId;
@@ -208,6 +211,7 @@ const KEY_EDITOR_THEME = "editorTheme";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
 const KEY_AUTOSTART = "autostart";
 const KEY_RESTORE_WINDOW = "restoreWindowState";
+const KEY_WORKSPACE_WINDOW_MODE = "workspaceWindowMode";
 export type AutocompleteTrigger = "auto" | "manual";
 
 const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
@@ -281,6 +285,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   customInstructions: "",
   autostart: false,
   restoreWindowState: true,
+  workspaceWindowMode: "single",
   autocompleteEnabled: false,
   autocompleteTrigger: "auto",
   autocompleteProvider: "cerebras",
@@ -368,6 +373,10 @@ export async function loadPreferences(): Promise<Preferences> {
     restoreWindowState:
       get<boolean>(KEY_RESTORE_WINDOW) ??
       DEFAULT_PREFERENCES.restoreWindowState,
+    workspaceWindowMode:
+      get<WorkspaceWindowMode>(KEY_WORKSPACE_WINDOW_MODE) === "multiple"
+        ? "multiple"
+        : DEFAULT_PREFERENCES.workspaceWindowMode,
     autocompleteEnabled:
       get<boolean>(KEY_AUTOCOMPLETE_ENABLED) ??
       DEFAULT_PREFERENCES.autocompleteEnabled,
@@ -490,8 +499,7 @@ export async function setLspActivation(
     ((await readSharedStore("settings"))[KEY_LSP_ACTIVATION] as Record<
       string,
       LspActivation
-    >) ??
-    {};
+    >) ?? {};
   const next = { ...current };
   if (value === null) delete next[id];
   else next[id] = value;
@@ -562,6 +570,12 @@ export async function setAutostart(value: boolean): Promise<void> {
 
 export async function setRestoreWindowState(value: boolean): Promise<void> {
   await writePref(KEY_RESTORE_WINDOW, value);
+}
+
+export async function setWorkspaceWindowMode(
+  value: WorkspaceWindowMode,
+): Promise<void> {
+  await writePref(KEY_WORKSPACE_WINDOW_MODE, value);
 }
 
 export async function setAutocompleteTrigger(
@@ -804,6 +818,7 @@ export async function onPreferencesChange(
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",
     [KEY_AUTOSTART]: "autostart",
     [KEY_RESTORE_WINDOW]: "restoreWindowState",
+    [KEY_WORKSPACE_WINDOW_MODE]: "workspaceWindowMode",
     [KEY_AUTOCOMPLETE_ENABLED]: "autocompleteEnabled",
     [KEY_AUTOCOMPLETE_TRIGGER]: "autocompleteTrigger",
     [KEY_AUTOCOMPLETE_PROVIDER]: "autocompleteProvider",

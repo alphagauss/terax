@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCommandItems, type CommandPaletteActionContext } from "./commands";
+import {
+  createCommandItems,
+  type CommandPaletteActionContext,
+} from "./commands";
 
 function context(): CommandPaletteActionContext {
   const noop = vi.fn();
@@ -10,6 +13,7 @@ function context(): CommandPaletteActionContext {
     explorerRoot: null,
     home: null,
     openNewWindow: noop,
+    workspaceWindowMode: "multiple",
     openNewTab: noop,
     openNewBlock: noop,
     openNewPrivate: noop,
@@ -43,5 +47,13 @@ describe("command palette commands", () => {
     expect(items[0]?.shortcutId).toBe("window.new");
     items[0]?.run();
     expect(ctx.openNewWindow).toHaveBeenCalledOnce();
+  });
+
+  it("hides New Window in single-window mode", () => {
+    const ctx = context();
+    ctx.workspaceWindowMode = "single";
+    expect(
+      createCommandItems(ctx).some((item) => item.id === "window.new"),
+    ).toBe(false);
   });
 });

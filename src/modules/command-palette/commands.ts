@@ -39,6 +39,7 @@ export type CommandPaletteActionContext = {
   explorerRoot: string | null;
   home: string | null;
   openNewWindow: () => void;
+  workspaceWindowMode: "single" | "multiple";
   openNewTab: () => void;
   openNewBlock: () => void;
   openNewPrivate: () => void;
@@ -82,17 +83,23 @@ export function createCommandItems(
       : undefined;
   const closeDisabled =
     onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
+  const windowItems: PaletteItem[] =
+    ctx.workspaceWindowMode === "multiple"
+      ? [
+          {
+            id: "window.new",
+            title: "New Window",
+            group: "General",
+            keywords: ["window", "workspace", "new"],
+            icon: DashboardSquare01Icon,
+            shortcutId: "window.new",
+            run: ctx.openNewWindow,
+          },
+        ]
+      : [];
 
   return [
-    {
-      id: "window.new",
-      title: "New Window",
-      group: "General",
-      keywords: ["window", "workspace", "new"],
-      icon: DashboardSquare01Icon,
-      shortcutId: "window.new",
-      run: ctx.openNewWindow,
-    },
+    ...windowItems,
     {
       id: "settings.open",
       title: "Open settings",
@@ -122,7 +129,14 @@ export function createCommandItems(
       id: "spaces.overview",
       title: "Spaces: Overview",
       group: "Spaces",
-      keywords: ["spaces", "sessions", "overview", "organize", "manage", "move"],
+      keywords: [
+        "spaces",
+        "sessions",
+        "overview",
+        "organize",
+        "manage",
+        "move",
+      ],
       icon: DashboardSquare01Icon,
       run: ctx.openSpacesOverview,
     },
@@ -140,8 +154,7 @@ export function createCommandItems(
       group: "Spaces" as const,
       keywords: ["space", "switch", "session", sp.name],
       icon: DashboardSquare01Icon,
-      disabledReason:
-        sp.id === ctx.activeSpaceId ? "Current space" : undefined,
+      disabledReason: sp.id === ctx.activeSpaceId ? "Current space" : undefined,
       run: () => ctx.switchSpace(sp.id),
     })),
     {

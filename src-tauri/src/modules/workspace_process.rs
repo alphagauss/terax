@@ -1,18 +1,19 @@
 use crate::modules::storage::{write_atomic, FileLock};
 use crate::modules::workspace::{validate_wsl_distro_name, WorkspaceEnv};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use uuid::Uuid;
 
-const SCHEMA_VERSION: u32 = 1;
 const ENV_ARG: &str = "--terax-workspace-env";
 const POLICY_ARG: &str = "--terax-workspace-policy";
-const ID_ARG: &str = "--terax-workspace-id";
 const DIR_ARG: &str = "--terax-launch-dir";
+const GEOMETRY_ARG: &str = "--terax-window-geometry";
+const REGISTRY_LOCK: &str = "terax-workspace-registry.lock";
+const WINDOW_MODE_KEY: &str = "workspaceWindowMode";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -21,32 +22,50 @@ pub enum WorkspacePolicy {
     Recent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceWindowMode {
+    Single,
+    Multiple,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceBootstrap {
     pub schema_version: u32,
     pub id: String,
     pub env: WorkspaceEnv,
+    pub environment_key: String,
     pub launch_dir: Option<String>,
     pub state_path: String,
+    pub window_state_filename: String,
+    pub window_geometry: Option<WindowGeometry>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-struct WorkspaceMetadata {
-    schema_version: u32,
-    id: String,
-    env: WorkspaceEnv,
-    created_at: u64,
-    last_opened_at: u64,
+pub struct WindowGeometry {
+    pub width: u32,
+    pub height: u32,
+    pub x: i32,
+    pub y: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchRequest {
     env: WorkspaceEnv,
     policy: WorkspacePolicy,
-    workspace_id: Option<Uuid>,
     launch_dir: Option<PathBuf>,
+    window_geometry: Option<WindowGeometry>,
+}
+
+struct EnvironmentIdentity {
+    key: String,
+    filename_key: String,
+}
+
+enum StateKind {
+    Single,
+    Extra(Uuid),
 }
 
 pub struct WorkspaceProcessState {
@@ -54,11 +73,9 @@ pub struct WorkspaceProcessState {
     _lock: FileLock,
 }
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+pub enum InitializeOutcome {
+    Opened(WorkspaceProcessState),
+    ActivatedExisting,
 }
 
 fn parse_env(raw: &str) -> Result<WorkspaceEnv, String> {
@@ -88,13 +105,13 @@ fn parse_env(raw: &str) -> Result<WorkspaceEnv, String> {
 pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchRequest, String> {
     let mut env = None;
     let mut policy = None;
-    let mut workspace_id = None;
     let mut launch_dir = None;
     let mut positional = None;
+    let mut window_geometry = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let target = match arg.as_str() {
-            ENV_ARG | POLICY_ARG | ID_ARG | DIR_ARG => Some(
+            ENV_ARG | POLICY_ARG | DIR_ARG | GEOMETRY_ARG => Some(
                 args.next()
                     .ok_or_else(|| format!("missing value for {arg}"))?,
             ),
@@ -117,22 +134,17 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
                     value => return Err(format!("invalid Workspace policy: {value}")),
                 });
             }
-            ID_ARG => {
-                if workspace_id.is_some() {
-                    return Err(format!("duplicate {ID_ARG}"));
-                }
-                let raw = target.as_deref().unwrap();
-                let id = Uuid::parse_str(raw).map_err(|_| "workspace id must be a UUID")?;
-                if id.to_string() != raw {
-                    return Err("workspace id must use canonical lowercase format".to_string());
-                }
-                workspace_id = Some(id);
-            }
             DIR_ARG => {
                 if launch_dir.is_some() {
                     return Err(format!("duplicate {DIR_ARG}"));
                 }
                 launch_dir = Some(PathBuf::from(target.unwrap()));
+            }
+            GEOMETRY_ARG => {
+                if window_geometry.is_some() {
+                    return Err(format!("duplicate {GEOMETRY_ARG}"));
+                }
+                window_geometry = Some(parse_window_geometry(target.as_deref().unwrap())?);
             }
             _ if arg.starts_with('-') => return Err(format!("unknown argument: {arg}")),
             _ => {
@@ -145,7 +157,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     }
 
     let has_internal =
-        env.is_some() || policy.is_some() || workspace_id.is_some() || launch_dir.is_some();
+        env.is_some() || policy.is_some() || launch_dir.is_some() || window_geometry.is_some();
     if has_internal && positional.is_some() {
         return Err(
             "internal Workspace arguments cannot be combined with a positional directory"
@@ -160,103 +172,90 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
             } else {
                 WorkspacePolicy::Recent
             },
-            workspace_id: None,
             launch_dir: positional,
+            window_geometry: None,
         });
     }
 
     let env = env.ok_or_else(|| format!("{ENV_ARG} is required"))?;
     let policy = policy.ok_or_else(|| format!("{POLICY_ARG} is required"))?;
-    if workspace_id.is_some() && policy != WorkspacePolicy::Recent {
-        return Err("explicit workspace id requires recent policy".to_string());
-    }
     if launch_dir.is_some() && (env != WorkspaceEnv::Local || policy != WorkspacePolicy::Fresh) {
         return Err("launch directory requires a fresh Local Workspace".to_string());
     }
     Ok(LaunchRequest {
         env,
         policy,
-        workspace_id,
         launch_dir,
+        window_geometry,
     })
 }
 
-fn state_filename(id: Uuid) -> String {
-    format!("terax-workspace.{id}.json")
-}
-
-fn lock_filename(id: Uuid) -> String {
-    format!("terax-workspace.{id}.lock")
-}
-
-fn read_metadata(path: &Path, expected: Uuid) -> Result<WorkspaceMetadata, String> {
-    let value: Value = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
-    let metadata: WorkspaceMetadata = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    if metadata.schema_version != SCHEMA_VERSION
-        || metadata.id != expected.to_string()
-        || metadata.created_at > metadata.last_opened_at
-    {
-        return Err("Workspace metadata does not match its filename".to_string());
+fn parse_window_geometry(raw: &str) -> Result<WindowGeometry, String> {
+    let mut values = raw.split(',');
+    let width = values
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value >= 420 && *value <= 10_000)
+        .ok_or_else(|| "invalid window width".to_string())?;
+    let height = values
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value >= 280 && *value <= 10_000)
+        .ok_or_else(|| "invalid window height".to_string())?;
+    let x = values
+        .next()
+        .and_then(|value| value.parse::<i32>().ok())
+        .ok_or_else(|| "invalid window x position".to_string())?;
+    let y = values
+        .next()
+        .and_then(|value| value.parse::<i32>().ok())
+        .ok_or_else(|| "invalid window y position".to_string())?;
+    if values.next().is_some() {
+        return Err("invalid window geometry".to_string());
     }
-    Ok(metadata)
+    Ok(WindowGeometry {
+        width,
+        height,
+        x,
+        y,
+    })
 }
 
-fn scan(root: &Path) -> Result<Vec<(Uuid, WorkspaceMetadata)>, String> {
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut result = Vec::new();
-    for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let Some(raw_id) = name
-            .strip_prefix("terax-workspace.")
-            .and_then(|value| value.strip_suffix(".json"))
-        else {
-            continue;
-        };
-        let Ok(id) = Uuid::parse_str(raw_id) else {
-            log::warn!("ignoring invalid Workspace filename: {}", path.display());
-            continue;
-        };
-        match read_metadata(&path, id) {
-            Ok(metadata) => result.push((id, metadata)),
-            Err(error) => log::warn!("ignoring invalid Workspace metadata: {error}"),
-        }
-    }
-    result.sort_by(|(left_id, left), (right_id, right)| {
-        right
-            .last_opened_at
-            .cmp(&left.last_opened_at)
-            .then_with(|| right.created_at.cmp(&left.created_at))
-            .then_with(|| left_id.cmp(right_id))
-    });
-    Ok(result)
-}
-
-fn write_metadata(root: &Path, metadata: &WorkspaceMetadata) -> Result<(), String> {
-    let id = Uuid::parse_str(&metadata.id).map_err(|e| e.to_string())?;
-    let path = root.join(state_filename(id));
-    let mut map = if path.exists() {
-        let value: Value = serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
-        value
-            .as_object()
-            .cloned()
-            .ok_or_else(|| "Workspace state must be a JSON object".to_string())?
-    } else {
-        Map::new()
+fn state_filename(environment: &EnvironmentIdentity, kind: &StateKind) -> String {
+    let suffix = match kind {
+        StateKind::Single => "single".to_string(),
+        StateKind::Extra(id) => id.to_string(),
     };
-    let metadata_value = serde_json::to_value(metadata).map_err(|e| e.to_string())?;
-    for (key, value) in metadata_value.as_object().unwrap() {
-        map.insert(key.clone(), value.clone());
+    format!(
+        "terax-workspace.{}.{}.json",
+        environment.filename_key, suffix
+    )
+}
+
+fn lock_filename(environment: &EnvironmentIdentity, kind: &StateKind) -> String {
+    state_filename(environment, kind).replace(".json", ".lock")
+}
+
+fn window_state_filename(environment: &EnvironmentIdentity, kind: &StateKind) -> String {
+    state_filename(environment, kind).replacen("terax-workspace.", "terax-window-state.", 1)
+}
+
+fn parse_extra_state_filename(name: &str) -> Option<Uuid> {
+    let raw = name
+        .strip_prefix("terax-workspace.")?
+        .strip_suffix(".json")?;
+    let (_, suffix) = raw.rsplit_once('.')?;
+    Uuid::parse_str(suffix).ok()
+}
+
+fn parse_legacy_state_filename(name: &str) -> Option<Uuid> {
+    let raw = name
+        .strip_prefix("terax-workspace.")?
+        .strip_suffix(".json")?;
+    if raw.contains('.') {
+        return None;
     }
-    write_atomic(&path, &serde_json::to_vec(&map).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    Uuid::parse_str(raw).ok()
 }
 
 fn canonical_launch_dir(path: Option<PathBuf>) -> Result<Option<String>, String> {
@@ -272,6 +271,60 @@ fn canonical_launch_dir(path: Option<PathBuf>) -> Result<Option<String>, String>
         ));
     }
     Ok(Some(crate::modules::fs::to_canon(&canonical)))
+}
+
+fn ssh_profile(profile_id: &str) -> Result<crate::modules::remote::models::SshProfile, String> {
+    let path = crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)?
+        .join("terax-ssh-profiles.json");
+    let value: Value = serde_json::from_slice(
+        &fs::read(&path)
+            .map_err(|e| format!("cannot read SSH profiles {}: {e}", path.display()))?,
+    )
+    .map_err(|e| format!("invalid SSH profiles store: {e}"))?;
+    let profile = value
+        .as_object()
+        .and_then(|map| map.get(&format!("profile:{profile_id}")))
+        .ok_or_else(|| format!("SSH profile not found: {profile_id}"))?;
+    serde_json::from_value(profile.clone()).map_err(|e| format!("invalid SSH profile: {e}"))
+}
+
+fn environment_identity(env: &WorkspaceEnv) -> Result<EnvironmentIdentity, String> {
+    let key = match env {
+        WorkspaceEnv::Local => "local".to_string(),
+        WorkspaceEnv::Wsl { distro } => format!("wsl:{distro}"),
+        WorkspaceEnv::Ssh { profile_id } => {
+            let profile = ssh_profile(profile_id)?;
+            format!(
+                "ssh:{}:{}:{}",
+                profile.host.to_ascii_lowercase(),
+                profile.port,
+                profile.username
+            )
+        }
+    };
+    let filename_key = match env {
+        WorkspaceEnv::Local => "local".to_string(),
+        WorkspaceEnv::Wsl { distro } => format!("wsl-{}", filename_component(distro)),
+        WorkspaceEnv::Ssh { .. } => format!("ssh-{}", filename_component(&key["ssh:".len()..])),
+    };
+    Ok(EnvironmentIdentity { key, filename_key })
+}
+
+fn filename_component(value: &str) -> String {
+    let mut result = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_' {
+            result.push(char::from(byte));
+        } else {
+            result.push('_');
+            result.push_str(&format!("{byte:02x}"));
+        }
+    }
+    if result.len() <= 120 {
+        result
+    } else {
+        Uuid::new_v5(&Uuid::NAMESPACE_URL, value.as_bytes()).to_string()
+    }
 }
 
 fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
@@ -295,102 +348,192 @@ fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
             }
         }
         WorkspaceEnv::Ssh { profile_id } => {
-            let path =
-                crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)?
-                    .join("terax-ssh-profiles.json");
-            let value: Value = serde_json::from_slice(
-                &fs::read(&path)
-                    .map_err(|e| format!("cannot read SSH profiles {}: {e}", path.display()))?,
-            )
-            .map_err(|e| format!("invalid SSH profiles store: {e}"))?;
-            if value
-                .as_object()
-                .is_some_and(|map| map.contains_key(&format!("profile:{profile_id}")))
-            {
-                Ok(())
-            } else {
-                Err(format!("SSH profile not found: {profile_id}"))
+            ssh_profile(profile_id)?.validate()?;
+            Ok(())
+        }
+    }
+}
+
+fn window_mode() -> WorkspaceWindowMode {
+    let Ok(path) = crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)
+        .map(|root| root.join("terax-settings.json"))
+    else {
+        return WorkspaceWindowMode::Single;
+    };
+    let Ok(value) = fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+        .ok_or(())
+    else {
+        return WorkspaceWindowMode::Single;
+    };
+    if value.get(WINDOW_MODE_KEY).and_then(Value::as_str) == Some("multiple") {
+        WorkspaceWindowMode::Multiple
+    } else {
+        WorkspaceWindowMode::Single
+    }
+}
+
+fn ensure_state(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        return Ok(());
+    }
+    write_atomic(path, b"{}").map_err(|error| error.to_string())
+}
+
+fn remove_stale_state(state_path: &Path, lock_path: &Path, window_state_root: &Path, id: Uuid) {
+    if let Err(error) = fs::remove_file(state_path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            log::warn!(
+                "cannot remove stale Workspace state {}: {error}",
+                state_path.display()
+            );
+            return;
+        }
+    }
+    if let Err(error) = fs::remove_file(lock_path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            log::warn!(
+                "cannot remove stale Workspace lock {}: {error}",
+                lock_path.display()
+            );
+        }
+    }
+    let names = [
+        state_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.replacen("terax-workspace.", "terax-window-state.", 1)),
+        Some(format!("terax-window-state.{id}.json")),
+    ];
+    for name in names.into_iter().flatten() {
+        let window_state = window_state_root.join(name);
+        if let Err(error) = fs::remove_file(&window_state) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "cannot remove stale window state {}: {error}",
+                    window_state.display()
+                );
             }
         }
     }
 }
 
-pub fn initialize(root: &Path, request: LaunchRequest) -> Result<WorkspaceProcessState, String> {
-    fs::create_dir_all(root).map_err(|e| e.to_string())?;
-    validate_environment(&request.env)?;
-    let launch_dir = canonical_launch_dir(request.launch_dir)?;
-    let selected = if let Some(id) = request.workspace_id {
-        let metadata = read_metadata(&root.join(state_filename(id)), id)?;
-        if metadata.env != request.env {
-            return Err("explicit Workspace environment does not match metadata".to_string());
-        }
-        Some((id, metadata))
-    } else if request.policy == WorkspacePolicy::Recent {
-        scan(root)?
-            .into_iter()
-            .find(|(_, metadata)| metadata.env == request.env)
-    } else {
-        None
-    };
+fn cleanup_extra_states(root: &Path, window_state_root: &Path) -> Result<(), String> {
+    if !root.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(id) =
+            parse_extra_state_filename(name).or_else(|| parse_legacy_state_filename(name))
+        else {
+            continue;
+        };
+        let lock_path = path.with_extension("lock");
+        let Some(lock) = FileLock::try_acquire(&lock_path).map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        drop(lock);
+        remove_stale_state(&path, &lock_path, window_state_root, id);
+    }
+    Ok(())
+}
 
-    let timestamp = now_millis();
-    let (id, mut metadata, lock) = if let Some((id, mut metadata)) = selected {
-        match FileLock::try_acquire(&root.join(lock_filename(id))).map_err(|e| e.to_string())? {
-            Some(lock) => {
-                metadata.last_opened_at = timestamp;
-                (id, metadata, lock)
-            }
-            None if request.workspace_id.is_some() => {
-                return Err("explicit Workspace is already open".to_string())
-            }
-            None => {
-                let id = Uuid::new_v4();
-                let lock = FileLock::try_acquire(&root.join(lock_filename(id)))
-                    .map_err(|e| e.to_string())?
-                    .expect("new UUID lock cannot be occupied");
-                (
-                    id,
-                    WorkspaceMetadata {
-                        schema_version: SCHEMA_VERSION,
-                        id: id.to_string(),
-                        env: request.env.clone(),
-                        created_at: timestamp,
-                        last_opened_at: timestamp,
-                    },
-                    lock,
-                )
-            }
-        }
-    } else {
-        let id = Uuid::new_v4();
-        let lock = FileLock::try_acquire(&root.join(lock_filename(id)))
-            .map_err(|e| e.to_string())?
-            .expect("new UUID lock cannot be occupied");
-        (
-            id,
-            WorkspaceMetadata {
-                schema_version: SCHEMA_VERSION,
-                id: id.to_string(),
-                env: request.env.clone(),
-                created_at: timestamp,
-                last_opened_at: timestamp,
-            },
-            lock,
-        )
+fn single_id(environment: &EnvironmentIdentity) -> Uuid {
+    Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("terax-workspace-single:{}", environment.key).as_bytes(),
+    )
+}
+
+fn make_state(
+    environment: &EnvironmentIdentity,
+    kind: StateKind,
+    lock: FileLock,
+    env: WorkspaceEnv,
+    launch_dir: Option<String>,
+    launch_geometry: Option<WindowGeometry>,
+) -> Result<WorkspaceProcessState, String> {
+    let id = match kind {
+        StateKind::Single => single_id(environment),
+        StateKind::Extra(id) => id,
     };
-    metadata.last_opened_at = timestamp;
-    write_metadata(root, &metadata)?;
-    let state_path = root.join(state_filename(id));
+    let root =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::Workspaces)?;
+    let state_path = root.join(state_filename(environment, &kind));
+    ensure_state(&state_path)?;
+    let window_state_filename = window_state_filename(environment, &kind);
+    let window_state_path =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?
+            .join(&window_state_filename);
     Ok(WorkspaceProcessState {
         bootstrap: WorkspaceBootstrap {
-            schema_version: SCHEMA_VERSION,
+            schema_version: 2,
             id: id.to_string(),
-            env: request.env,
+            env,
+            environment_key: environment.key.clone(),
             launch_dir,
             state_path: state_path.to_string_lossy().into_owned(),
+            window_state_filename,
+            window_geometry: (!window_state_path.exists())
+                .then_some(launch_geometry)
+                .flatten(),
         },
         _lock: lock,
     })
+}
+
+pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutcome, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    validate_environment(&request.env)?;
+    let environment = environment_identity(&request.env)?;
+    let launch_dir = canonical_launch_dir(request.launch_dir)?;
+    let launch_geometry = request.window_geometry;
+    let window_state_root =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
+    let _registry = FileLock::acquire(&root.join(REGISTRY_LOCK), Duration::from_secs(5))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Workspace registry is busy".to_string())?;
+    cleanup_extra_states(root, &window_state_root)?;
+
+    let _policy = request.policy;
+    let single_kind = StateKind::Single;
+    let single_lock_path = root.join(lock_filename(&environment, &single_kind));
+    match FileLock::try_acquire(&single_lock_path).map_err(|error| error.to_string())? {
+        Some(lock) => Ok(InitializeOutcome::Opened(make_state(
+            &environment,
+            single_kind,
+            lock,
+            request.env,
+            launch_dir,
+            launch_geometry,
+        )?)),
+        None if window_mode() == WorkspaceWindowMode::Single => {
+            crate::modules::shared_store::request_workspace_activation(&environment.key)?;
+            Ok(InitializeOutcome::ActivatedExisting)
+        }
+        None => {
+            let id = Uuid::new_v4();
+            let kind = StateKind::Extra(id);
+            let lock = FileLock::try_acquire(&root.join(lock_filename(&environment, &kind)))
+                .map_err(|error| error.to_string())?
+                .expect("new UUID lock cannot be occupied");
+            Ok(InitializeOutcome::Opened(make_state(
+                &environment,
+                kind,
+                lock,
+                request.env,
+                launch_dir,
+                launch_geometry,
+            )?))
+        }
+    }
 }
 
 impl WorkspaceProcessState {
@@ -418,6 +561,7 @@ fn spawn_args(
     env: &WorkspaceEnv,
     policy: WorkspacePolicy,
     launch_dir: Option<&str>,
+    window_geometry: Option<WindowGeometry>,
 ) -> Result<Vec<String>, String> {
     parse_env(&env_arg(env))?;
     if launch_dir.is_some() && (*env != WorkspaceEnv::Local || policy != WorkspacePolicy::Fresh) {
@@ -439,6 +583,13 @@ fn spawn_args(
         args.push(DIR_ARG.to_string());
         args.push(canonical);
     }
+    if let Some(geometry) = window_geometry {
+        args.push(GEOMETRY_ARG.to_string());
+        args.push(format!(
+            "{},{},{},{}",
+            geometry.width, geometry.height, geometry.x, geometry.y
+        ));
+    }
     Ok(args)
 }
 
@@ -447,8 +598,9 @@ pub fn spawn_workspace_process(
     env: WorkspaceEnv,
     policy: WorkspacePolicy,
     launch_dir: Option<String>,
+    window_geometry: Option<WindowGeometry>,
 ) -> Result<u32, String> {
-    let args = spawn_args(&env, policy, launch_dir.as_deref())?;
+    let args = spawn_args(&env, policy, launch_dir.as_deref(), window_geometry)?;
     #[cfg(target_os = "linux")]
     let executable = std::env::var_os("APPIMAGE")
         .filter(|value| !value.is_empty())
@@ -467,7 +619,6 @@ pub fn spawn_workspace_process(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     #[test]
     fn parser_rejects_unknown_duplicate_and_conflicting_arguments() {
@@ -491,124 +642,101 @@ mod tests {
         ])
         .is_err());
     }
+
     #[test]
     fn positional_directory_is_fresh_local() {
         let request = parse_args([".".to_string()]).unwrap();
         assert_eq!(request.env, WorkspaceEnv::Local);
         assert_eq!(request.policy, WorkspacePolicy::Fresh);
         assert_eq!(request.launch_dir, Some(PathBuf::from(".")));
+        assert_eq!(request.window_geometry, None);
     }
 
     #[test]
-    fn recent_reuses_unlocked_workspace_and_fresh_never_does() {
-        let root = tempfile::tempdir().unwrap();
-        let recent = parse_args(Vec::<String>::new()).unwrap();
-        let first = initialize(root.path(), recent.clone()).unwrap();
-        let first_id = first.bootstrap.id.clone();
+    fn parser_accepts_valid_window_geometry() {
+        let request = parse_args([
+            ENV_ARG.to_string(),
+            "local".to_string(),
+            POLICY_ARG.to_string(),
+            "fresh".to_string(),
+            GEOMETRY_ARG.to_string(),
+            "1200,800,40,72".to_string(),
+        ])
+        .unwrap();
         assert_eq!(
-            PathBuf::from(&first.bootstrap.state_path),
-            root.path()
-                .join(state_filename(Uuid::parse_str(&first_id).unwrap()))
+            request.window_geometry,
+            Some(WindowGeometry {
+                width: 1200,
+                height: 800,
+                x: 40,
+                y: 72,
+            })
         );
-        drop(first);
-        let restored = initialize(root.path(), recent).unwrap();
-        assert_eq!(restored.bootstrap.id, first_id);
-        drop(restored);
-        let fresh = initialize(
-            root.path(),
-            LaunchRequest {
-                env: WorkspaceEnv::Local,
-                policy: WorkspacePolicy::Fresh,
-                workspace_id: None,
-                launch_dir: None,
-            },
-        )
-        .unwrap();
-        assert_ne!(fresh.bootstrap.id, first_id);
     }
 
     #[test]
-    fn locked_most_recent_workspace_creates_fresh_without_falling_back() {
+    fn extra_state_filename_does_not_match_single_state() {
+        let id = Uuid::new_v4();
+        assert_eq!(
+            parse_extra_state_filename(&format!("terax-workspace.local.{id}.json")),
+            Some(id)
+        );
+        assert_eq!(
+            parse_extra_state_filename("terax-workspace.local.single.json"),
+            None
+        );
+    }
+
+    #[test]
+    fn single_state_has_a_stable_id() {
+        let environment = EnvironmentIdentity {
+            key: "local".to_string(),
+            filename_key: "local".to_string(),
+        };
+        assert_eq!(single_id(&environment), single_id(&environment));
+    }
+
+    #[test]
+    fn filename_component_is_windows_safe_and_keeps_short_names_readable() {
+        assert_eq!(filename_component("Ubuntu"), "Ubuntu");
+        assert_eq!(filename_component("dev@example:22"), "dev_40example_3a22");
+    }
+
+    #[test]
+    fn window_state_uses_the_matching_workspace_name() {
+        let environment = EnvironmentIdentity {
+            key: "local".to_string(),
+            filename_key: "local".to_string(),
+        };
+        assert_eq!(
+            window_state_filename(&environment, &StateKind::Single),
+            "terax-window-state.local.single.json"
+        );
+    }
+
+    #[test]
+    fn cleanup_removes_unlocked_extra_state_and_keeps_locked_state() {
         let root = tempfile::tempdir().unwrap();
-        let request = parse_args(Vec::<String>::new()).unwrap();
-        let first = initialize(root.path(), request.clone()).unwrap();
-        let second = initialize(root.path(), request).unwrap();
-        assert_ne!(first.bootstrap.id, second.bootstrap.id);
-    }
-
-    #[test]
-    fn explicit_workspace_cannot_be_opened_twice() {
-        let root = tempfile::tempdir().unwrap();
-        let first = initialize(root.path(), parse_args(Vec::<String>::new()).unwrap()).unwrap();
-        let id = Uuid::parse_str(&first.bootstrap.id).unwrap();
-        let request = LaunchRequest {
-            env: WorkspaceEnv::Local,
-            policy: WorkspacePolicy::Recent,
-            workspace_id: Some(id),
-            launch_dir: None,
+        let windows = tempfile::tempdir().unwrap();
+        let environment = EnvironmentIdentity {
+            key: "local".to_string(),
+            filename_key: "local".to_string(),
         };
-        assert!(initialize(root.path(), request).is_err());
-    }
-
-    #[test]
-    fn child_arguments_are_strict_and_do_not_include_secrets() {
-        let args = spawn_args(
-            &WorkspaceEnv::Ssh {
-                profile_id: "ssh-profile".to_string(),
-            },
-            WorkspacePolicy::Recent,
-            None,
-        )
-        .unwrap();
-        assert_eq!(args, [ENV_ARG, "ssh:ssh-profile", POLICY_ARG, "recent"]);
-        assert!(args.iter().all(|arg| !arg.contains("password")));
-    }
-
-    #[test]
-    fn subprocess_workspace_lock_helper() {
-        let Some(root) = std::env::var_os("TERAX_WORKSPACE_TEST_ROOT") else {
-            return;
-        };
-        let id = Uuid::parse_str(&std::env::var("TERAX_WORKSPACE_TEST_ID").unwrap()).unwrap();
-        let request = LaunchRequest {
-            env: WorkspaceEnv::Local,
-            policy: WorkspacePolicy::Recent,
-            workspace_id: Some(id),
-            launch_dir: None,
-        };
-        let error = match initialize(Path::new(&root), request) {
-            Ok(_) => panic!("subprocess unexpectedly acquired an open Workspace"),
-            Err(error) => error,
-        };
-        assert!(error.contains("already open"));
-    }
-
-    #[test]
-    fn workspace_lock_is_exclusive_across_processes_and_reusable() {
-        let root = tempfile::tempdir().unwrap();
-        let held = initialize(root.path(), parse_args(Vec::<String>::new()).unwrap()).unwrap();
-        let id = held.bootstrap.id.clone();
-        let status = Command::new(std::env::current_exe().unwrap())
-            .arg("--exact")
-            .arg("modules::workspace_process::tests::subprocess_workspace_lock_helper")
-            .arg("--nocapture")
-            .env("TERAX_WORKSPACE_TEST_ROOT", root.path())
-            .env("TERAX_WORKSPACE_TEST_ID", &id)
-            .status()
-            .unwrap();
-        assert!(status.success());
-
-        drop(held);
-        let reopened = initialize(
-            root.path(),
-            LaunchRequest {
-                env: WorkspaceEnv::Local,
-                policy: WorkspacePolicy::Recent,
-                workspace_id: Some(Uuid::parse_str(&id).unwrap()),
-                launch_dir: None,
-            },
-        )
-        .unwrap();
-        assert_eq!(reopened.bootstrap.id, id);
+        let stale = Uuid::new_v4();
+        let live = Uuid::new_v4();
+        let stale_kind = StateKind::Extra(stale);
+        let live_kind = StateKind::Extra(live);
+        let stale_path = root.path().join(state_filename(&environment, &stale_kind));
+        let live_path = root.path().join(state_filename(&environment, &live_kind));
+        fs::write(&stale_path, b"{}").unwrap();
+        fs::write(&live_path, b"{}").unwrap();
+        let live_lock =
+            FileLock::try_acquire(&root.path().join(lock_filename(&environment, &live_kind)))
+                .unwrap()
+                .unwrap();
+        cleanup_extra_states(root.path(), windows.path()).unwrap();
+        assert!(!stale_path.exists());
+        assert!(live_path.exists());
+        drop(live_lock);
     }
 }

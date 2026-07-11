@@ -1,14 +1,25 @@
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 export type WorkspaceBootstrap = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   env: WorkspaceEnv;
+  environmentKey: string;
   launchDir: string | null;
   statePath: string;
+  windowStateFilename: string;
+  windowGeometry: WindowGeometry | null;
+};
+
+export type WindowGeometry = {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
 };
 
 export type WorkspacePolicy = "fresh" | "recent";
@@ -55,15 +66,30 @@ export async function deleteWorkspaceValue(key: string): Promise<void> {
   await store.delete(key);
 }
 
-export function spawnWorkspaceProcess(
+export async function spawnWorkspaceProcess(
   env: WorkspaceEnv,
   policy: WorkspacePolicy,
   launchDir?: string,
 ): Promise<number> {
+  const window = getCurrentWindow();
+  const [size, position, maximized] = await Promise.all([
+    window.outerSize(),
+    window.outerPosition(),
+    window.isMaximized(),
+  ]);
+  const windowGeometry = maximized
+    ? null
+    : {
+        width: size.width,
+        height: size.height,
+        x: position.x + 32,
+        y: position.y + 32,
+      };
   return invoke<number>("spawn_workspace_process", {
     env,
     policy,
     launchDir: launchDir ?? null,
+    windowGeometry,
   });
 }
 
