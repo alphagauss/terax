@@ -87,7 +87,6 @@ import {
   writeToSession,
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
-import { UpdaterDialog } from "@/modules/updater";
 import {
   currentWorkspaceEnv,
   useWorkspaceEnvStore,
@@ -1300,8 +1299,6 @@ export default function App() {
             rootPath={explorerRoot ?? home}
             onCreated={(path) => openFileTab(path)}
           />
-
-          <UpdaterDialog />
 
           <CloseDialogs
             tabs={tabs}

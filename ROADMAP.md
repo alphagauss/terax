@@ -80,7 +80,6 @@ The themes below frame every scope decision.
 - [x] macOS, Linux (.deb / .rpm / AppImage), Windows (NSIS), WSL
 - [x] AUR (Arch)
 - [x] Windows Explorer context-menu integration
-- [x] Auto-updater
 - [x] OS keychain for API keys
 - [x] No telemetry
 

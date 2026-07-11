@@ -23,7 +23,6 @@ Until `1.0.0`, only the latest minor gets security fixes. See the current versio
 - The Rust backend in `src-tauri/` (PTY, FS, IPC, plugins)
 - The frontend in `src/` - anywhere untrusted input lands (terminal output, file content, AI tool results, credentials)
 - Release artifacts on GitHub and `terax.app`
-- The auto-updater
 
 ## What's not
 
@@ -34,7 +33,7 @@ Until `1.0.0`, only the latest minor gets security fixes. See the current versio
 ## What we do to keep things safe
 
 - **API keys** live in the OS keychain via `keyring` - not on disk, not in `localStorage`, not in logs.
-- **No telemetry.** Terax only talks to the network when you ask it to (AI requests, update checks, web preview).
+- **No telemetry.** Terax only talks to the network when you ask it to (AI requests, web preview).
 - **AI tool approval.** File writes and shell commands from the agent need your OK before they run.
 - **No Node in the renderer.** The frontend only reaches the host through the allow-listed Tauri commands.
 - **Signed releases.** Updates are verified before they're applied.

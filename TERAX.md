@@ -107,7 +107,6 @@ Each module is self-contained, exports a thin barrel via `index.ts`, and owns it
 - **workspace/** - Local/WSL/SSH environment model used by the current process.
 - **workspace-process/** - render-before-bootstrap context, UUID-specific Workspace store, process spawning, and environment selection policy.
 - **theme/** - custom theme engine (no `next-themes`). `ThemeProvider` + `applyTheme` write CSS variables; built-in presets in `themes/` (terax-default, claude, kanagawa, kanagawa-dragon, tokyo-night, catppuccin, rose-pine, everforest, nord, gruvbox, dracula, solarized, tide, sage, caffeine), each optionally declaring an `editorTheme` pairing consumed by `resolveEditorThemeId` (see editor/). User themes via `customThemes.ts` + `validateTheme.ts`, optional background image via `bgImageStore.ts` + `SurfaceLayer`.
-- **updater/** - auto-updater UI built on `tauri-plugin-updater`.
 - **agents/** - agent notifications + management for both the built-in Terax agent and terminal coding-agents (Claude Code, Codex, Gemini CLI). Shared store (`store/agentStore.ts`: terminal `sessions` + `localAgent` + `notifications`) and a shared router (`lib/route.ts`: suppress when focused-and-visible, OS-notify when unfocused, in-app Sonner toast when focused-but-hidden) feed the header `NotificationBell` (management surface, Terax agent listed first, per-agent hook enable rows). Toasts use Sonner (`components/ui/sonner.tsx`) themed via the central engine; `lib/agentIcon.tsx` renders the per-agent brand mark (Terax logo, Claude/ChatGPT/Gemini hugeicon). Terminal detection is Rust-side (`pty/agent_detect.rs`) on the PTY reader's byte filter, armed on `OSC 133;C;<cmd>` or self-armed by the marker, emitting `terax:agent-signal` transitions (`started`/`working`/`attention`/`finished`/`exited`) driven only by OSC sequences (never raw output, so a repainting TUI never flaps) - zero cost when no agent runs. All three agents converge on the same `OSC 777` marker the detector reads, installed via `agent_enable_hooks(agent)` / `agent_hooks_status(agent)` in `modules/agent.rs` (data-driven `AgentSpec` per agent; atomic write, never clobbers invalid JSON, prunes empty groups, idempotent; gated on `TERAX_TERMINAL`). Delivery differs because only Claude's hook protocol can return terminal bytes in the hook *response*: **Claude** (`~/.claude/settings.json`, `UserPromptSubmit`/`Notification`/`Stop`) returns the marker via the `terminalSequence` field (legacy 3-field `notify;Terax;<event>`). **Codex** (`~/.codex/hooks.json`, `UserPromptSubmit`/`PermissionRequest`/`Stop`) and **Gemini** (`~/.gemini/settings.json`, `BeforeAgent`/`Notification`/`AfterAgent`, `matcher:"*"`) can't, so the hook *command* emits the 4-field `notify;Terax;<agent>;<event>` marker itself (`printf > /dev/tty` on Unix, or `terax __terax_notify` writing to `CONOUT$` after `AttachConsole` on Windows) and prints `{}` as a JSON stdout no-op (Codex's `Stop` and Gemini both reject empty/non-JSON stdout). The agent-named marker lets a self-arm name the right agent when no preexec fired (bash/tmux/Windows). The Terax agent path is `ai/components/LocalAgentNotificationsBridge.tsx`, mapping `chatStore.agentMeta` (`awaiting-approval`→attention, busy→idle→finished, `error`) into the same router.
 - **command-palette/** - modal command palette (`CommandPalette.tsx`, `commands.ts`) for actions and navigation.
 - **spaces/** - Workspace-local UI groups/projects (name, root, color, per-space tab persistence) via `useSpaces` and `SpaceSwitcher`; a Space never owns or switches the process environment.
@@ -146,7 +145,7 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 
 ### Tauri capabilities
 
-`src-tauri/capabilities/default.json` is the allowlist for plugin APIs available to the webview. New plugins (dialog, autostart, updater, window-state, store, opener, os, log are wired in `lib.rs`) typically need:
+`src-tauri/capabilities/default.json` is the allowlist for plugin APIs available to the webview. New plugins (dialog, autostart, window-state, store, opener, os, log are wired in `lib.rs`) typically need:
 1. `Cargo.toml` dependency
 2. `.plugin(...)` call in `lib.rs` `run()`
 3. capability entry in `default.json`
@@ -163,7 +162,6 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
   - **macOS**: `minimumSystemVersion: 10.15`.
   - **Linux**: deb depends `libwebkit2gtk-4.1-0`, `libgtk-3-0`; rpm `webkit2gtk4.1`, `gtk3`; AppImage bundles its media framework.
   - **Windows**: NSIS installer in `currentUser` mode (no admin required), WebView2 via `embedBootstrapper` (offline install).
-- Auto-updater configured with a public minisign key; release artifacts at `https://github.com/crynta/terax-ai/releases/latest/download/latest.json`.
 
 ### Known gotchas
 

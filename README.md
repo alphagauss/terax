@@ -95,7 +95,7 @@ Terax is a lightweight open-source terminal (ADE) built on Tauri 2 + Rust and Re
 
 ## Install
 
-Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page. Terax auto-updates from there.
+Latest installers are on the [Releases](https://github.com/crynta/terax-ai/releases/latest) page.
 
 ### Windows notes
 

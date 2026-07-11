@@ -221,7 +221,6 @@ src/                        React frontend
     tabs/                   Tab/split model
     terminal/               xterm.js sessions, OSC handlers, renderer pool
     theme/                  Custom theme engine and presets
-    updater/                Auto-updater UI
     workspace/              Workspace environment switching
 ```
 
