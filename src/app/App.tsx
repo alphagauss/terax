@@ -582,10 +582,10 @@ export default function App() {
       // Markdown opens in its rendered view by default; a per-tab toggle flips
       // it to the raw editor. Other files default to preview (pin=false);
       // explicit actions like context-menu "Open" pass pin=true to persist.
-      if (isMarkdownPath(path)) newMarkdownTab(path);
-      else openFileTab(path, pin ?? false);
+      if (isMarkdownPath(path)) newMarkdownTab(path, explorerRoot ?? undefined);
+      else openFileTab(path, pin ?? false, explorerRoot ?? undefined);
     },
-    [openFileTab, newMarkdownTab],
+    [explorerRoot, openFileTab, newMarkdownTab],
   );
 
   const handlePathRenamed = useCallback(

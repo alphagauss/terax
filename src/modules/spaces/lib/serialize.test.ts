@@ -25,6 +25,29 @@ function term(over: Partial<Extract<Tab, { kind: "terminal" }>>): Tab {
 }
 
 describe("serializeTabs", () => {
+  it("preserves a file tab's sidebar root", () => {
+    const tabs: Tab[] = [
+      {
+        id: 1,
+        kind: "editor",
+        spaceId: "s1",
+        title: "x",
+        path: "/workspace/src/x.ts",
+        explorerRoot: "/workspace",
+        dirty: false,
+        preview: false,
+      },
+    ];
+
+    expect(serializeTabs(tabs)).toEqual([
+      {
+        kind: "editor",
+        path: "/workspace/src/x.ts",
+        explorerRoot: "/workspace",
+      },
+    ]);
+  });
+
   it("drops private terminals and transient kinds", () => {
     const tabs: Tab[] = [
       term({ id: 1 }),
@@ -144,7 +167,7 @@ describe("hydrateTabs", () => {
 
   it("hydrates editor/preview/markdown as cold with derived titles", () => {
     const serialized: SerializedTab[] = [
-      { kind: "editor", path: "/a/foo.ts" },
+      { kind: "editor", path: "/a/foo.ts", explorerRoot: "/a" },
       { kind: "preview", url: "http://localhost:5173/x" },
       { kind: "markdown", path: "/a/README.md" },
     ];
@@ -155,5 +178,6 @@ describe("hydrateTabs", () => {
       "localhost:5173",
       "README.md",
     ]);
+    expect(out[0]).toMatchObject({ explorerRoot: "/a" });
   });
 });

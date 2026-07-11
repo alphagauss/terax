@@ -6,6 +6,25 @@ type Result = {
   inheritedCwdForNewTab: () => string | undefined;
 };
 
+export function resolveExplorerRoot(
+  activeTab: Tab | undefined,
+  tabs: Tab[],
+  lastTerminalCwd: string | null,
+  home: string | null,
+): string | null {
+  if (activeTab?.kind === "terminal" && activeTab.cwd) return activeTab.cwd;
+  if (
+    (activeTab?.kind === "editor" || activeTab?.kind === "markdown") &&
+    activeTab.explorerRoot
+  ) {
+    return activeTab.explorerRoot;
+  }
+  if (lastTerminalCwd) return lastTerminalCwd;
+  const anyTerm = tabs.find((t) => t.kind === "terminal" && t.cwd);
+  if (anyTerm?.kind === "terminal" && anyTerm.cwd) return anyTerm.cwd;
+  return home;
+}
+
 export function useWorkspaceCwd(
   activeTab: Tab | undefined,
   tabs: Tab[],
@@ -20,11 +39,7 @@ export function useWorkspaceCwd(
   }, [activeTab]);
 
   const explorerRoot = useMemo<string | null>(() => {
-    if (activeTab?.kind === "terminal" && activeTab.cwd) return activeTab.cwd;
-    if (lastTerminalCwd.current) return lastTerminalCwd.current;
-    const anyTerm = tabs.find((t) => t.kind === "terminal" && t.cwd);
-    if (anyTerm?.kind === "terminal" && anyTerm.cwd) return anyTerm.cwd;
-    return home;
+    return resolveExplorerRoot(activeTab, tabs, lastTerminalCwd.current, home);
   }, [activeTab, tabs, home]);
 
   const inheritedCwdForNewTab = useCallback((): string | undefined => {

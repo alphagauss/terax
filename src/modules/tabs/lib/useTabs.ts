@@ -49,6 +49,8 @@ export type EditorTab = TabBase & {
    * is replaced by the next single-click rather than accumulating.
    */
   preview: boolean;
+  /** Explorer root active when this file was opened from the sidebar. */
+  explorerRoot?: string;
   overrideLanguage?: string | null;
 };
 
@@ -64,6 +66,8 @@ export type MarkdownTab = TabBase & {
   kind: "markdown";
   title: string;
   path: string;
+  /** Explorer root active when this file was opened from the sidebar. */
+  explorerRoot?: string;
 };
 
 export type AiDiffStatus = "pending" | "approved" | "rejected";
@@ -130,6 +134,7 @@ export type TabPatch = Partial<{
   /** Empty string resets a terminal tab to its cwd-derived name. */
   customTitle: string;
   overrideLanguage: string | null;
+  explorerRoot: string;
 }>;
 
 function basename(path: string): string {
@@ -232,7 +237,10 @@ export function planSpaceRemoval(
   let activeId = currentActiveId;
   if (!next.some((t) => t.spaceId === fallbackSpaceId)) {
     const tabId = allocId();
-    next = [...next, coldTerminalTab(tabId, allocId(), fallbackSpaceId, fallbackCwd)];
+    next = [
+      ...next,
+      coldTerminalTab(tabId, allocId(), fallbackSpaceId, fallbackCwd),
+    ];
     activeId = tabId;
   } else if (!next.some((t) => t.id === currentActiveId)) {
     const inFallback = next.filter((t) => t.spaceId === fallbackSpaceId);
@@ -492,80 +500,101 @@ export function useTabs(initial?: Partial<TerminalTab>) {
    *   reused: if a persistent tab for the path already exists it is activated;
    *   otherwise the current preview slot is replaced with the new path.
    */
-  const openFileTab = useCallback((path: string, pin = true) => {
-    let targetId: number | null = null;
-    setTabs((curr) => {
-      if (pin) {
-        // Persistent open: find any existing editor tab, pin it if needed.
-        const existing = curr.find(
-          (t) => t.kind === "editor" && t.path === path,
-        );
-        if (existing) {
-          targetId = existing.id;
-          if ((existing as EditorTab).preview) {
+  const openFileTab = useCallback(
+    (path: string, pin = true, explorerRoot?: string) => {
+      let targetId: number | null = null;
+      setTabs((curr) => {
+        if (pin) {
+          // Persistent open: find any existing editor tab, pin it if needed.
+          const existing = curr.find(
+            (t) => t.kind === "editor" && t.path === path,
+          );
+          if (existing) {
+            targetId = existing.id;
+            if ((existing as EditorTab).preview || explorerRoot) {
+              return curr.map((t) =>
+                t.id === existing.id
+                  ? {
+                      ...t,
+                      preview: false,
+                      ...(explorerRoot !== undefined && { explorerRoot }),
+                    }
+                  : t,
+              );
+            }
+            return curr;
+          }
+          const id = nextIdRef.current++;
+          targetId = id;
+          return [
+            ...curr,
+            {
+              id,
+              kind: "editor",
+              spaceId: activeSpaceIdRef.current,
+              title: basename(path),
+              path,
+              dirty: false,
+              preview: false,
+              ...(explorerRoot !== undefined && { explorerRoot }),
+            } satisfies EditorTab,
+          ];
+        } else {
+          // Preview open: persistent tab for this path takes priority.
+          const persistent = curr.find(
+            (t) =>
+              t.kind === "editor" &&
+              t.path === path &&
+              !(t as EditorTab).preview,
+          );
+          if (persistent) {
+            targetId = persistent.id;
+            if (explorerRoot === undefined) return curr;
             return curr.map((t) =>
-              t.id === existing.id ? { ...t, preview: false } : t,
+              t.id === persistent.id ? { ...t, explorerRoot } : t,
             );
           }
-          return curr;
-        }
-        const id = nextIdRef.current++;
-        targetId = id;
-        return [
-          ...curr,
-          {
+          // Reuse the slot if it already shows the same path.
+          const existingPreview = curr.find(
+            (t) =>
+              t.kind === "editor" &&
+              t.path === path &&
+              (t as EditorTab).preview,
+          );
+          if (existingPreview) {
+            targetId = existingPreview.id;
+            if (explorerRoot === undefined) return curr;
+            return curr.map((t) =>
+              t.id === existingPreview.id ? { ...t, explorerRoot } : t,
+            );
+          }
+          // Replace the current preview slot, or append a new one.
+          const previewIdx = curr.findIndex(
+            (t) => t.kind === "editor" && (t as EditorTab).preview,
+          );
+          const id = nextIdRef.current++;
+          targetId = id;
+          const tab: EditorTab = {
             id,
             kind: "editor",
             spaceId: activeSpaceIdRef.current,
             title: basename(path),
             path,
             dirty: false,
-            preview: false,
-          } satisfies EditorTab,
-        ];
-      } else {
-        // Preview open: persistent tab for this path takes priority.
-        const persistent = curr.find(
-          (t) =>
-            t.kind === "editor" && t.path === path && !(t as EditorTab).preview,
-        );
-        if (persistent) {
-          targetId = persistent.id;
-          return curr;
+            preview: true,
+            ...(explorerRoot !== undefined && { explorerRoot }),
+          };
+          if (previewIdx === -1) return [...curr, tab];
+          const next = [...curr];
+          next[previewIdx] = tab;
+          return next;
         }
-        // Reuse the slot if it already shows the same path.
-        const existingPreview = curr.find(
-          (t) =>
-            t.kind === "editor" && t.path === path && (t as EditorTab).preview,
-        );
-        if (existingPreview) {
-          targetId = existingPreview.id;
-          return curr;
-        }
-        // Replace the current preview slot, or append a new one.
-        const previewIdx = curr.findIndex(
-          (t) => t.kind === "editor" && (t as EditorTab).preview,
-        );
-        const id = nextIdRef.current++;
-        targetId = id;
-        const tab: EditorTab = {
-          id,
-          kind: "editor",
-          spaceId: activeSpaceIdRef.current,
-          title: basename(path),
-          path,
-          dirty: false,
-          preview: true,
-        };
-        if (previewIdx === -1) return [...curr, tab];
-        const next = [...curr];
-        next[previewIdx] = tab;
-        return next;
-      }
-    });
-    if (targetId !== null) setActiveId(targetId);
-    return targetId as number | null;
-  }, []);
+      });
+      if (targetId !== null) setActiveId(targetId);
+      return targetId as number | null;
+    },
+    [],
+  );
 
   /**
    * Promotes a preview tab to a persistent one. Called on double-click of the
@@ -670,7 +699,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     return id;
   }, []);
 
-  const newMarkdownTab = useCallback((path: string) => {
+  const newMarkdownTab = useCallback((path: string, explorerRoot?: string) => {
     let targetId: number | null = null;
     setTabs((curr) => {
       const existing = curr.find(
@@ -678,7 +707,10 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       );
       if (existing) {
         targetId = existing.id;
-        return curr;
+        if (explorerRoot === undefined) return curr;
+        return curr.map((t) =>
+          t.id === existing.id ? { ...t, explorerRoot } : t,
+        );
       }
       const id = nextIdRef.current++;
       targetId = id;
@@ -690,6 +722,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           spaceId: activeSpaceIdRef.current,
           title: basename(path),
           path,
+          ...(explorerRoot !== undefined && { explorerRoot }),
         },
       ];
     });
@@ -738,6 +771,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
               cold: t.cold,
               title: t.title,
               path: t.path,
+              ...(t.explorerRoot !== undefined && {
+                explorerRoot: t.explorerRoot,
+              }),
               overrideLanguage: t.overrideLanguage ?? null,
             };
           }
@@ -940,6 +976,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           return {
             ...x,
             ...(patch.title !== undefined && { title: patch.title }),
+            ...(patch.explorerRoot !== undefined && {
+              explorerRoot: patch.explorerRoot,
+            }),
           };
         }
         // editor tab: auto-promote from preview the moment the file becomes dirty.
@@ -956,6 +995,9 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           ...(patch.overrideLanguage !== undefined && {
             overrideLanguage: patch.overrideLanguage,
           }),
+          ...(patch.explorerRoot !== undefined && {
+            explorerRoot: patch.explorerRoot,
+          }),
         };
       }),
     );
@@ -963,9 +1005,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
 
   const selectByIndex = useCallback(
     (idx: number, spaceId?: string) => {
-      const t = spaceId
-        ? pickTabBySpaceIndex(tabs, idx, spaceId)
-        : tabs[idx];
+      const t = spaceId ? pickTabBySpaceIndex(tabs, idx, spaceId) : tabs[idx];
       if (t) setActiveId(t.id);
     },
     [tabs],

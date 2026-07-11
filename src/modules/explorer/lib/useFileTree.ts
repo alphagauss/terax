@@ -1,9 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  useWorkspaceEnvStore,
-  workspaceScopeKey,
-} from "@/modules/workspace";
+import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { isCurrentTreeRequest } from "./requestGuard";
@@ -38,6 +35,20 @@ export function dirname(path: string): string {
   const i = path.lastIndexOf("/");
   if (i <= 0) return "/";
   return path.slice(0, i);
+}
+
+export function ancestorDirs(root: string, path: string): string[] {
+  const prefix = root.endsWith("/") ? root : `${root}/`;
+  if (!path.startsWith(prefix)) return [];
+  const relativeParent = dirname(path).slice(prefix.length);
+  if (!relativeParent) return [];
+  const dirs: string[] = [];
+  let current = root;
+  for (const segment of relativeParent.split("/")) {
+    current = joinPath(current, segment);
+    dirs.push(current);
+  }
+  return dirs;
 }
 
 const EXPANSION_CACHE_LIMIT = 8;
@@ -135,100 +146,107 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     watchRemove([path]);
   }, []);
 
-  const fetchChildren = useCallback(async (path: string) => {
-    if (treeScope !== activeTreeScopeRef.current) return;
-    if (inFlightRef.current.has(path)) return;
-    const generation = requestGenerationRef.current;
-    const requestId = ++requestIdRef.current;
-    const request = { scope: treeScope, generation, id: requestId };
-    inFlightRef.current.set(path, requestId);
-    if (nodesRef.current[path]?.status !== "loaded") {
-      setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
-    }
-    try {
-      const entries = await invoke<DirEntry[]>("fs_read_dir", {
-        path,
-        showHidden: showHiddenRef.current,
-        gitDecorations: gitDecorationsRef.current,
-        workspace,
-      });
-      if (
-        !isCurrentTreeRequest(
-          request,
-          activeTreeScopeRef.current,
-          requestGenerationRef.current,
-          inFlightRef.current.get(path),
-        )
-      ) {
-        return;
+  const fetchChildren = useCallback(
+    async (path: string) => {
+      if (treeScope !== activeTreeScopeRef.current) return;
+      if (inFlightRef.current.has(path)) return;
+      const generation = requestGenerationRef.current;
+      const requestId = ++requestIdRef.current;
+      const request = { scope: treeScope, generation, id: requestId };
+      inFlightRef.current.set(path, requestId);
+      if (nodesRef.current[path]?.status !== "loaded") {
+        setNodes((s) => ({ ...s, [path]: { status: "loading" } }));
       }
+      try {
+        const entries = await invoke<DirEntry[]>("fs_read_dir", {
+          path,
+          showHidden: showHiddenRef.current,
+          gitDecorations: gitDecorationsRef.current,
+          workspace,
+        });
+        if (
+          !isCurrentTreeRequest(
+            request,
+            activeTreeScopeRef.current,
+            requestGenerationRef.current,
+            inFlightRef.current.get(path),
+          )
+        ) {
+          return;
+        }
 
-      const prev = nodesRef.current[path];
-      if (prev?.status === "loaded" && sameDirListing(prev.entries, entries)) {
-        return;
-      }
+        const prev = nodesRef.current[path];
+        if (
+          prev?.status === "loaded" &&
+          sameDirListing(prev.entries, entries)
+        ) {
+          return;
+        }
 
-      const liveDirs = new Set(
-        entries
-          .filter((e) => e.kind === "dir")
-          .map((e) => joinPath(path, e.name)),
-      );
-      const removedRoots: string[] = [];
-      for (const key of Object.keys(nodesRef.current)) {
-        if (dirname(key) === path && !liveDirs.has(key)) removedRoots.push(key);
-      }
-      const dead = new Set<string>();
-      if (removedRoots.length > 0) {
-        const candidates = new Set<string>([
-          ...Object.keys(nodesRef.current),
-          ...expandedRef.current,
-          ...watchedRef.current,
-        ]);
-        for (const k of candidates) {
-          if (removedRoots.some((r) => isUnder(k, r))) dead.add(k);
+        const liveDirs = new Set(
+          entries
+            .filter((e) => e.kind === "dir")
+            .map((e) => joinPath(path, e.name)),
+        );
+        const removedRoots: string[] = [];
+        for (const key of Object.keys(nodesRef.current)) {
+          if (dirname(key) === path && !liveDirs.has(key))
+            removedRoots.push(key);
+        }
+        const dead = new Set<string>();
+        if (removedRoots.length > 0) {
+          const candidates = new Set<string>([
+            ...Object.keys(nodesRef.current),
+            ...expandedRef.current,
+            ...watchedRef.current,
+          ]);
+          for (const k of candidates) {
+            if (removedRoots.some((r) => isUnder(k, r))) dead.add(k);
+          }
+        }
+
+        setNodes((s) => {
+          const next: TreeState = {};
+          for (const [k, v] of Object.entries(s)) if (!dead.has(k)) next[k] = v;
+          next[path] = { status: "loaded", entries };
+          return next;
+        });
+
+        if (dead.size > 0) {
+          setExpanded((c) => {
+            let changed = false;
+            const n = new Set(c);
+            for (const d of dead) if (n.delete(d)) changed = true;
+            return changed ? n : c;
+          });
+          const toUnwatch: string[] = [];
+          for (const d of dead)
+            if (watchedRef.current.delete(d)) toUnwatch.push(d);
+          watchRemove(toUnwatch);
+        }
+      } catch (e) {
+        if (
+          !isCurrentTreeRequest(
+            request,
+            activeTreeScopeRef.current,
+            requestGenerationRef.current,
+            inFlightRef.current.get(path),
+          )
+        ) {
+          return;
+        }
+        setNodes((s) => ({
+          ...s,
+          [path]: { status: "error", message: String(e) },
+        }));
+      } finally {
+        if (inFlightRef.current.get(path) === requestId) {
+          inFlightRef.current.delete(path);
         }
       }
-
-      setNodes((s) => {
-        const next: TreeState = {};
-        for (const [k, v] of Object.entries(s)) if (!dead.has(k)) next[k] = v;
-        next[path] = { status: "loaded", entries };
-        return next;
-      });
-
-      if (dead.size > 0) {
-        setExpanded((c) => {
-          let changed = false;
-          const n = new Set(c);
-          for (const d of dead) if (n.delete(d)) changed = true;
-          return changed ? n : c;
-        });
-        const toUnwatch: string[] = [];
-        for (const d of dead)
-          if (watchedRef.current.delete(d)) toUnwatch.push(d);
-        watchRemove(toUnwatch);
-      }
-    } catch (e) {
-      if (
-        !isCurrentTreeRequest(
-          request,
-          activeTreeScopeRef.current,
-          requestGenerationRef.current,
-          inFlightRef.current.get(path),
-        )
-      ) {
-        return;
-      }
-      setNodes((s) => ({
-        ...s,
-        [path]: { status: "error", message: String(e) },
-      }));
-    } finally {
-      if (inFlightRef.current.get(path) === requestId) {
-        inFlightRef.current.delete(path);
-      }
-    }
-  }, [treeScope, workspace]);
+    },
+    [treeScope, workspace],
+  );
 
   // Root change → restore the cached expansion for this root, re-scope watches,
   // and persist the outgoing root's expansion on the way out.

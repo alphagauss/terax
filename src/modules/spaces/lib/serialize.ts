@@ -22,9 +22,9 @@ export type SerializedTab =
       blocks?: boolean;
       customTitle?: string;
     }
-  | { kind: "editor"; path: string }
+  | { kind: "editor"; path: string; explorerRoot?: string }
   | { kind: "preview"; url: string }
-  | { kind: "markdown"; path: string };
+  | { kind: "markdown"; path: string; explorerRoot?: string };
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -78,11 +78,23 @@ function serializeTab(tab: Tab): SerializedTab | null {
         ...(tab.customTitle !== undefined && { customTitle: tab.customTitle }),
       };
     case "editor":
-      return { kind: "editor", path: tab.path };
+      return {
+        kind: "editor",
+        path: tab.path,
+        ...(tab.explorerRoot !== undefined && {
+          explorerRoot: tab.explorerRoot,
+        }),
+      };
     case "preview":
       return { kind: "preview", url: tab.url };
     case "markdown":
-      return { kind: "markdown", path: tab.path };
+      return {
+        kind: "markdown",
+        path: tab.path,
+        ...(tab.explorerRoot !== undefined && {
+          explorerRoot: tab.explorerRoot,
+        }),
+      };
     default:
       return null;
   }
@@ -175,6 +187,7 @@ function hydrateTab(
         path: s.path,
         dirty: false,
         preview: false,
+        ...(s.explorerRoot !== undefined && { explorerRoot: s.explorerRoot }),
       } satisfies EditorTab;
     case "preview":
       return {
@@ -193,6 +206,7 @@ function hydrateTab(
         cold: true,
         title: basename(s.path),
         path: s.path,
+        ...(s.explorerRoot !== undefined && { explorerRoot: s.explorerRoot }),
       } satisfies MarkdownTab;
     default:
       return null;

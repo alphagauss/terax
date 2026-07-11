@@ -38,7 +38,7 @@ import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
-import { useFileTree } from "./lib/useFileTree";
+import { ancestorDirs, useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
@@ -321,17 +321,32 @@ export const FileExplorer = memo(
 
     const lastSyncedActivePathRef = useRef<string | null>(null);
     useEffect(() => {
+      lastSyncedActivePathRef.current = null;
+    }, [rootPath]);
+
+    useEffect(() => {
       if (
         !activeFilePath ||
         activeFilePath === lastSyncedActivePathRef.current
       ) {
         return;
       }
+      if (rootPath) {
+        for (const dir of ancestorDirs(rootPath, activeFilePath)) {
+          tree.expand(dir);
+        }
+      }
       if (!entryIndexByPath.has(activeFilePath)) return;
       lastSyncedActivePathRef.current = activeFilePath;
       setSelectedPath(activeFilePath);
       requestAnimationFrame(() => scrollEntryIntoView(activeFilePath));
-    }, [activeFilePath, entryIndexByPath, scrollEntryIntoView]);
+    }, [
+      activeFilePath,
+      rootPath,
+      entryIndexByPath,
+      scrollEntryIntoView,
+      tree.expand,
+    ]);
 
     useImperativeHandle(
       ref,
