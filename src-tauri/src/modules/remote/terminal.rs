@@ -11,6 +11,7 @@ use tauri::ipc::{Channel, Response};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use super::session::{shell_quote, signal_exit_code, validate_remote_path, RemoteWorkspace};
+use crate::modules::pty::shell_init::{bashrc_script, normalize_script};
 
 pub const TRANSPORT_CLOSED_EXIT_CODE: i32 = -255;
 
@@ -49,6 +50,7 @@ pub async fn open(
     cols: u16,
     rows: u16,
     cwd: Option<String>,
+    blocks: bool,
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<RemoteTerminalHandle, String> {
@@ -64,23 +66,15 @@ pub async fn open(
         .await
         .map_err(|e| format!("allocate remote PTY: {e}"))?;
     let login_home = workspace.login_home().await;
-    let cwd = cwd.filter(|cwd| !cwd.trim().is_empty());
-    if cwd.as_deref().is_none_or(|cwd| same_path(cwd, &login_home)) {
-        // A login terminal should use the SSH shell request. This is the
-        // behavior shared by CrabPort, Eussh and meatshell, and lets the
-        // server establish bash exactly as a normal SSH client does.
-        channel
-            .request_shell(true)
-            .await
-            .map_err(|e| format!("start remote shell: {e}"))?;
-    } else if let Some(cwd) = cwd {
-        validate_remote_path(&cwd)?;
-        let command = format!("cd -- {} && exec /bin/bash --login", shell_quote(&cwd));
-        channel
-            .exec(true, command.into_bytes())
-            .await
-            .map_err(|e| format!("start remote shell: {e}"))?;
-    }
+    let cwd = cwd
+        .filter(|cwd| !cwd.trim().is_empty())
+        .unwrap_or(login_home);
+    validate_remote_path(&cwd)?;
+    let command = integrated_bash_command(&cwd, blocks);
+    channel
+        .exec(true, command.into_bytes())
+        .await
+        .map_err(|e| format!("start remote shell: {e}"))?;
 
     let (mut read, write) = channel.split();
     let (input_tx, mut input_rx) = mpsc::channel::<Vec<u8>>(32);
@@ -151,19 +145,40 @@ pub async fn open(
     })
 }
 
-fn same_path(left: &str, right: &str) -> bool {
-    left.trim_end_matches('/') == right.trim_end_matches('/')
+fn integrated_bash_command(cwd: &str, blocks: bool) -> String {
+    let blocks = if blocks { " TERAX_BLOCKS=1" } else { "" };
+    format!(
+        "cd -- {} && exec env TERAX_TERMINAL=1{} /bin/bash --rcfile <(printf %s {}) -i",
+        shell_quote(cwd),
+        blocks,
+        shell_quote(&normalize_script(bashrc_script())),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{same_path, signal_exit_code, TRANSPORT_CLOSED_EXIT_CODE};
+    use super::{integrated_bash_command, signal_exit_code, TRANSPORT_CLOSED_EXIT_CODE};
     use russh::Sig;
 
     #[test]
-    fn compares_remote_root_without_trailing_slash() {
-        assert!(same_path("/home/me/", "/home/me"));
-        assert!(!same_path("/home/me/code", "/home/me"));
+    fn starts_integrated_bash_in_the_requested_directory() {
+        let command = integrated_bash_command("/home/me/project", false);
+
+        assert!(command.starts_with("cd -- '/home/me/project' && exec env TERAX_TERMINAL=1 "));
+        assert!(command.contains("/bin/bash --rcfile <(printf %s '"));
+        assert!(command.ends_with(") -i"));
+        assert!(command.contains("_terax_precmd"));
+        assert!(!command.contains('\r'));
+        assert!(!command.contains("TERAX_BLOCKS=1"));
+    }
+
+    #[test]
+    fn quotes_cwd_and_enables_blocks_when_requested() {
+        let command = integrated_bash_command("/home/me/it's here", true);
+
+        assert!(command.starts_with(
+            "cd -- '/home/me/it'\\''s here' && exec env TERAX_TERMINAL=1 TERAX_BLOCKS=1 ",
+        ));
     }
 
     #[test]

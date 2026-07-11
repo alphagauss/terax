@@ -27,3 +27,4 @@ stats.html
 
 *.tsbuildinfo
 .pnpm-store
+.cargo-test-target

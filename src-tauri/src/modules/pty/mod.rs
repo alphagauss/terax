@@ -62,7 +62,8 @@ pub async fn pty_open(
     if let WorkspaceEnv::Ssh { profile_id } = &workspace {
         let remote_workspace = remote.manager.workspace(profile_id).await?;
         let session =
-            remote::terminal::open(remote_workspace, cols, rows, cwd, on_data, on_exit).await?;
+            remote::terminal::open(remote_workspace, cols, rows, cwd, blocks, on_data, on_exit)
+                .await?;
         state
             .remote_sessions
             .write()

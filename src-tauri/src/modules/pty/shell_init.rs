@@ -4,8 +4,7 @@ use portable_pty::CommandBuilder;
 
 use crate::modules::workspace::{self, WorkspaceEnv};
 
-#[cfg(windows)]
-const BASHRC_SCRIPT: &str = include_str!("scripts/bashrc.bash");
+pub(crate) const BASHRC_SCRIPT: &str = include_str!("scripts/bashrc.bash");
 #[cfg(windows)]
 const ZSHENV_SCRIPT: &str = include_str!("scripts/zshenv.zsh");
 #[cfg(windows)]
@@ -19,9 +18,12 @@ const FISH_INIT_SCRIPT: &str = include_str!("scripts/init.fish");
 const FISH_INIT_COMMAND: &str =
     "source \"$TERAX_FISH_INIT\"; functions -q __terax_install_prompt; and __terax_install_prompt";
 
-#[cfg(windows)]
-fn bashrc_script() -> &'static str {
+pub(crate) fn bashrc_script() -> &'static str {
     BASHRC_SCRIPT
+}
+
+pub(crate) fn normalize_script(content: &str) -> String {
+    content.replace("\r\n", "\n")
 }
 
 #[cfg(windows)]
@@ -187,7 +189,6 @@ mod unix {
     const ZPROFILE: &str = include_str!("scripts/zprofile.zsh");
     const ZLOGIN: &str = include_str!("scripts/zlogin.zsh");
     const ZSHRC: &str = include_str!("scripts/zshrc.zsh");
-    const BASHRC: &str = include_str!("scripts/bashrc.bash");
     const FISH_INIT: &str = include_str!("scripts/init.fish");
 
     pub enum Shell {
@@ -369,7 +370,7 @@ mod unix {
         let dir = integration_root()?.join("bash");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
         let rc = dir.join("bashrc");
-        write_if_changed(&rc, BASHRC)?;
+        write_if_changed(&rc, super::BASHRC_SCRIPT)?;
         Ok(rc)
     }
 
@@ -709,27 +710,23 @@ mod windows {
         Ok((linux_dir, unc_dir))
     }
 
-    fn normalize_script(content: &str) -> String {
-        content.replace("\r\n", "\n")
-    }
-
     fn prepare_wsl_zdotdir(distro: &str) -> Result<String, String> {
         let (linux_dir, unc_dir) = prepare_wsl_integration_dir(distro, "zsh")?;
         write_if_changed(
             &unc_dir.join(".zshenv"),
-            &normalize_script(super::zshenv_script()),
+            &super::normalize_script(super::zshenv_script()),
         )?;
         write_if_changed(
             &unc_dir.join(".zprofile"),
-            &normalize_script(super::zprofile_script()),
+            &super::normalize_script(super::zprofile_script()),
         )?;
         write_if_changed(
             &unc_dir.join(".zshrc"),
-            &normalize_script(super::zshrc_script()),
+            &super::normalize_script(super::zshrc_script()),
         )?;
         write_if_changed(
             &unc_dir.join(".zlogin"),
-            &normalize_script(super::zlogin_script()),
+            &super::normalize_script(super::zlogin_script()),
         )?;
         Ok(linux_dir)
     }
@@ -738,7 +735,7 @@ mod windows {
         let (linux_dir, _unc_dir) = prepare_wsl_integration_dir(distro, "bash")?;
         let linux_rc = format!("{linux_dir}/bashrc");
         let unc_file = crate::modules::workspace::wsl_path_to_unc(distro, &linux_rc);
-        let content = normalize_script(super::bashrc_script());
+        let content = super::normalize_script(super::bashrc_script());
         write_if_changed(&unc_file, &content)?;
         Ok(linux_rc)
     }
@@ -747,7 +744,7 @@ mod windows {
         let (linux_dir, unc_dir) = prepare_wsl_integration_dir(distro, "fish")?;
         let linux_file = format!("{linux_dir}/terax.fish");
         let unc_file = unc_dir.join("terax.fish");
-        let content = normalize_script(super::fish_init_script());
+        let content = super::normalize_script(super::fish_init_script());
         write_if_changed(&unc_file, &content)?;
         Ok(linux_file)
     }
@@ -772,7 +769,7 @@ mod windows {
         let dir = integration_root()?.join("bash");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
         let rc = dir.join("bashrc");
-        write_if_changed(&rc, &normalize_script(super::bashrc_script()))?;
+        write_if_changed(&rc, &super::normalize_script(super::bashrc_script()))?;
         Ok(rc)
     }
 
