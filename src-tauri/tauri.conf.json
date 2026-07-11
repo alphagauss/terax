@@ -16,7 +16,7 @@
         "title": "Terax",
         "width": 1200,
         "height": 900,
-        "minWidth": 640,
+        "minWidth": 980,
         "minHeight": 480,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,

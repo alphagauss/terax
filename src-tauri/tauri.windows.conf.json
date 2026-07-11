@@ -5,9 +5,16 @@
       {
         "label": "main",
         "title": "Terax",
+        "width": 1200,
+        "height": 900,
+        "minWidth": 980,
+        "minHeight": 480,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "decorations": false,
         "transparent": true,
         "visible": false,
+        "dragDropEnabled": true,
         "shadow": true
       }
     ]
