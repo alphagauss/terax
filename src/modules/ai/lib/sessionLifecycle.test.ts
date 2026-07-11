@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldPublishSnapshot } from "./sessionLifecycle";
+import {
+  canChangeSession,
+  shouldPublishSnapshot,
+} from "./sessionLifecycle";
 
 describe("AI session snapshot lifecycle", () => {
   it.each(["submitted", "streaming"] as const)(
@@ -22,5 +25,10 @@ describe("AI session snapshot lifecycle", () => {
 
   it("does not publish an untouched hydrated session", () => {
     expect(shouldPublishSnapshot("ready", 0, false)).toBe(false);
+  });
+
+  it("blocks session changes while the active run lock is held", () => {
+    expect(canChangeSession(true)).toBe(false);
+    expect(canChangeSession(false)).toBe(true);
   });
 });

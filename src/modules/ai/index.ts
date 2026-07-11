@@ -21,6 +21,7 @@ export {
   type CustomEndpointKeys,
 } from "./lib/keyring";
 export {
+  flushCompletedSessionRuns,
   getActiveProviderKey,
   hasKeyForModel,
   stop,

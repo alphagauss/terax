@@ -2,10 +2,11 @@ import { onSharedStoreChange } from "@/lib/sharedStore";
 import { create } from "zustand";
 import {
   BUILTIN_AGENTS,
+  deleteCustomAgent,
   loadAgents,
   newAgentId,
   saveActiveAgentId,
-  saveCustomAgents,
+  upsertCustomAgent,
   type Agent,
 } from "../lib/agents";
 
@@ -50,7 +51,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
     const next =
       idx === -1 ? [...list, agent] : list.map((a) => (a.id === agent.id ? agent : a));
     set({ customAgents: next });
-    void saveCustomAgents(next);
+    void upsertCustomAgent(agent);
   },
   remove: (id) => {
     const list = get().customAgents.filter((a) => a.id !== id);
@@ -61,7 +62,7 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       set({ activeId: active });
       void saveActiveAgentId(active);
     }
-    void saveCustomAgents(list);
+    void deleteCustomAgent(id);
   },
 }));
 

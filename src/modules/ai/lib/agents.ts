@@ -116,26 +116,28 @@ export async function loadAgents(): Promise<LoadedAgents> {
     );
     await deleteSharedStoreKey("ai-agents", KEY_CUSTOM);
   }
+  let activeId = getWorkspaceValue<string>("ai:activeAgentId");
+  if (
+    !activeId &&
+    getWorkspaceValue<boolean>("migration:legacySpaces") &&
+    typeof values.activeAgentId === "string"
+  ) {
+    activeId = values.activeAgentId;
+    await setWorkspaceValue("ai:activeAgentId", activeId);
+    await deleteSharedStoreKey("ai-agents", "activeAgentId");
+  }
   return {
     custom,
-    activeId:
-      getWorkspaceValue<string>("ai:activeAgentId") ?? BUILTIN_AGENTS[0].id,
+    activeId: activeId ?? BUILTIN_AGENTS[0].id,
   };
 }
 
-export async function saveCustomAgents(custom: Agent[]): Promise<void> {
-  const values = await readSharedStore("ai-agents");
-  const desired = new Set(custom.map((agent) => agent.id));
-  await Promise.all([
-    ...custom.map((agent) =>
-      setSharedStoreKey("ai-agents", agentKey(agent.id), agent),
-    ),
-    ...Object.keys(values)
-      .filter(
-        (key) => key.startsWith("agent:") && !desired.has(key.slice(6)),
-      )
-      .map((key) => deleteSharedStoreKey("ai-agents", key)),
-  ]);
+export function upsertCustomAgent(agent: Agent): Promise<void> {
+  return setSharedStoreKey("ai-agents", agentKey(agent.id), agent);
+}
+
+export function deleteCustomAgent(id: string): Promise<void> {
+  return deleteSharedStoreKey("ai-agents", agentKey(id));
 }
 
 export async function saveActiveAgentId(id: string): Promise<void> {

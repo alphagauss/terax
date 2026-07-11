@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
@@ -164,6 +164,26 @@ pub fn ai_session_read(app: AppHandle, id: String) -> Result<SessionSnapshot, St
     read_snapshot(&sessions_dir(&app)?, strict_uuid(&id)?)
 }
 
+fn publish_with_run_lock(
+    root: &Path,
+    state: &AiSessionsState,
+    id: Uuid,
+    snapshot: &SessionSnapshot,
+) -> Result<(), String> {
+    let run_locks = state
+        .run_locks
+        .lock()
+        .map_err(|_| "AI session lock state is poisoned".to_string())?;
+    if run_locks.contains_key(&id) {
+        return publish_snapshot(root, snapshot);
+    }
+    drop(run_locks);
+    let _lock = FileLock::try_acquire(&lock_path(root, id))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "session is running in another window".to_string())?;
+    publish_snapshot(root, snapshot)
+}
+
 #[tauri::command]
 pub fn ai_session_publish(
     app: AppHandle,
@@ -172,18 +192,7 @@ pub fn ai_session_publish(
 ) -> Result<(), String> {
     let id = validate_snapshot(&snapshot)?;
     let root = sessions_dir(&app)?;
-    let owns_run_lock = state
-        .run_locks
-        .lock()
-        .map_err(|_| "AI session lock state is poisoned".to_string())?
-        .contains_key(&id);
-    if owns_run_lock {
-        return publish_snapshot(&root, &snapshot);
-    }
-    let _lock = FileLock::try_acquire(&lock_path(&root, id))
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "session is running in another window".to_string())?;
-    publish_snapshot(&root, &snapshot)
+    publish_with_run_lock(&root, state.inner(), id, &snapshot)
 }
 
 #[tauri::command]
@@ -270,20 +279,56 @@ fn object_from_file(path: &Path) -> Result<serde_json::Map<String, Value>, Strin
         .ok_or_else(|| format!("{} must contain a JSON object", path.display()))
 }
 
+fn legacy_source(app_data: &Path, current: &str, backup: &str) -> PathBuf {
+    let current = app_data.join(current);
+    if current.exists() {
+        current
+    } else {
+        app_data.join(backup)
+    }
+}
+
+fn backup_legacy(source: &Path, backup: &Path) -> Result<(), String> {
+    if !source.exists() || source == backup {
+        return Ok(());
+    }
+    if backup.exists() {
+        return backup
+            .is_file()
+            .then_some(())
+            .ok_or_else(|| format!("legacy backup is not a file: {}", backup.display()));
+    }
+    let bytes = fs::read(source).map_err(|error| error.to_string())?;
+    write_atomic(backup, &bytes).map_err(|error| error.to_string())
+}
+
 fn migrate_legacy(root: &Path, app_data: &Path) -> Result<usize, String> {
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    if root.join(MIGRATION_MARKER).exists() {
+    if root.join(MIGRATION_MARKER).is_file() {
         return Ok(0);
     }
-    let _migration_lock = FileLock::try_acquire(&root.join(".migration-v1.lock"))
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "AI session migration is running in another process".to_string())?;
-    if root.join(MIGRATION_MARKER).exists() {
+    let _migration_lock =
+        FileLock::acquire(&root.join(".migration-v1.lock"), Duration::from_secs(30))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| {
+                "AI session migration is still running in another process".to_string()
+            })?;
+    if root.join(MIGRATION_MARKER).is_file() {
         return Ok(0);
     }
 
-    let sessions_path = app_data.join("terax-ai-sessions.json");
-    let todos_path = app_data.join("terax-ai-todos.json");
+    let sessions_backup = app_data.join("terax-ai-sessions.v0.backup.json");
+    let todos_backup = app_data.join("terax-ai-todos.v0.backup.json");
+    let sessions_path = legacy_source(
+        app_data,
+        "terax-ai-sessions.json",
+        "terax-ai-sessions.v0.backup.json",
+    );
+    let todos_path = legacy_source(
+        app_data,
+        "terax-ai-todos.json",
+        "terax-ai-todos.v0.backup.json",
+    );
     let sessions_store = object_from_file(&sessions_path)?;
     let todos_store = object_from_file(&todos_path)?;
     let legacy_sessions: Vec<LegacySession> = match sessions_store.get("sessions") {
@@ -326,18 +371,9 @@ fn migrate_legacy(root: &Path, app_data: &Path) -> Result<usize, String> {
         )?;
     }
 
+    backup_legacy(&sessions_path, &sessions_backup)?;
+    backup_legacy(&todos_path, &todos_backup)?;
     write_atomic(&root.join(MIGRATION_MARKER), b"1\n").map_err(|error| error.to_string())?;
-    if sessions_path.exists() {
-        fs::rename(
-            &sessions_path,
-            app_data.join("terax-ai-sessions.v0.backup.json"),
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    if todos_path.exists() {
-        fs::rename(&todos_path, app_data.join("terax-ai-todos.v0.backup.json"))
-            .map_err(|error| error.to_string())?;
-    }
     Ok(legacy_sessions.len())
 }
 
@@ -354,6 +390,20 @@ pub fn ai_sessions_migrate_legacy(app: AppHandle) -> Result<usize, String> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::process::Command;
+    use std::time::Instant;
+
+    fn wait_for(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     fn snapshot(id: Uuid, title: &str) -> SessionSnapshot {
         SessionSnapshot {
@@ -381,6 +431,49 @@ mod tests {
         publish_snapshot(dir.path(), &snapshot(id, "new")).unwrap();
         assert_eq!(read_snapshot(dir.path(), id).unwrap().title, "new");
         assert_eq!(list_sessions(dir.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn subprocess_session_lock_helper() {
+        let Some(root) = std::env::var_os("TERAX_SESSION_TEST_ROOT") else {
+            return;
+        };
+        let id = Uuid::parse_str(&std::env::var("TERAX_SESSION_TEST_ID").unwrap()).unwrap();
+        let ready = PathBuf::from(std::env::var_os("TERAX_SESSION_TEST_READY").unwrap());
+        let release = PathBuf::from(std::env::var_os("TERAX_SESSION_TEST_RELEASE").unwrap());
+        let _lock = FileLock::try_acquire(&lock_path(Path::new(&root), id))
+            .unwrap()
+            .unwrap();
+        fs::write(&ready, b"ready").unwrap();
+        wait_for(&release);
+    }
+
+    #[test]
+    fn publish_is_exclusive_across_processes_and_retries_after_release() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let ready = dir.path().join("ready");
+        let release = dir.path().join("release");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("modules::ai_sessions::tests::subprocess_session_lock_helper")
+            .arg("--nocapture")
+            .env("TERAX_SESSION_TEST_ROOT", dir.path())
+            .env("TERAX_SESSION_TEST_ID", id.to_string())
+            .env("TERAX_SESSION_TEST_READY", &ready)
+            .env("TERAX_SESSION_TEST_RELEASE", &release)
+            .spawn()
+            .unwrap();
+
+        wait_for(&ready);
+        let state = AiSessionsState::default();
+        let value = snapshot(id, "locked");
+        assert!(publish_with_run_lock(dir.path(), &state, id, &value).is_err());
+        fs::write(&release, b"release").unwrap();
+        assert!(child.wait().unwrap().success());
+
+        publish_with_run_lock(dir.path(), &state, id, &value).unwrap();
+        assert_eq!(read_snapshot(dir.path(), id).unwrap().title, "locked");
     }
 
     #[test]
@@ -436,5 +529,73 @@ mod tests {
         assert!(migrate_legacy(&root, app_data.path()).is_err());
         assert!(!root.join(MIGRATION_MARKER).exists());
         assert!(app_data.path().join("terax-ai-sessions.json").exists());
+    }
+
+    #[test]
+    fn backup_failure_does_not_create_marker() {
+        let app_data = tempfile::tempdir().unwrap();
+        fs::write(
+            app_data.path().join("terax-ai-sessions.json"),
+            br#"{"sessions":[]}"#,
+        )
+        .unwrap();
+        fs::create_dir(app_data.path().join("terax-ai-sessions.v0.backup.json")).unwrap();
+
+        let root = app_data.path().join("sessions");
+        assert!(migrate_legacy(&root, app_data.path()).is_err());
+        assert!(!root.join(MIGRATION_MARKER).exists());
+    }
+
+    #[test]
+    fn migration_can_resume_from_backup_only() {
+        let app_data = tempfile::tempdir().unwrap();
+        fs::write(
+            app_data.path().join("terax-ai-sessions.v0.backup.json"),
+            serde_json::to_vec(&json!({
+                "sessions": [{
+                    "id": "legacy-backup",
+                    "title": "Backup",
+                    "createdAt": 1,
+                    "updatedAt": 2
+                }],
+                "messages:legacy-backup": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let root = app_data.path().join("sessions");
+        assert_eq!(migrate_legacy(&root, app_data.path()).unwrap(), 1);
+        assert_eq!(list_sessions(&root).unwrap().len(), 1);
+        assert!(root.join(MIGRATION_MARKER).exists());
+    }
+
+    #[test]
+    fn migration_retries_after_marker_write_failure() {
+        let app_data = tempfile::tempdir().unwrap();
+        fs::write(
+            app_data.path().join("terax-ai-sessions.json"),
+            serde_json::to_vec(&json!({
+                "sessions": [{
+                    "id": "legacy-marker",
+                    "title": "Marker",
+                    "createdAt": 1,
+                    "updatedAt": 2
+                }],
+                "messages:legacy-marker": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let root = app_data.path().join("sessions");
+        fs::create_dir_all(root.join(MIGRATION_MARKER)).unwrap();
+        assert!(migrate_legacy(&root, app_data.path()).is_err());
+        assert!(root.join(MIGRATION_MARKER).is_dir());
+
+        fs::remove_dir(root.join(MIGRATION_MARKER)).unwrap();
+        assert_eq!(migrate_legacy(&root, app_data.path()).unwrap(), 1);
+        assert_eq!(list_sessions(&root).unwrap().len(), 1);
+        assert!(root.join(MIGRATION_MARKER).is_file());
     }
 }

@@ -11,6 +11,8 @@ A Terax Workspace window is a process pair: the Rust backend (`src-tauri/`) and 
 
 This boundary is the root of the security model. Untrusted input (terminal escape sequences, file content, AI tool results) is parsed and validated in Rust or in carefully scoped frontend code, never executed by the renderer.
 
+The process bootstrap selects exactly one Local, WSL, or SSH environment. Spaces only partition UI state inside that Workspace. The SSH event bridge is registered before auto-connect, and WSL/SSH tabs stay cold until environment initialization resolves the target home; a failed SSH auto-connect is recovered with credentials in the same process so secrets never cross the command line.
+
 ## Adding a new IPC command
 
 1. Write the `#[tauri::command]` async function in the appropriate `src-tauri/src/modules/<area>/` module.
@@ -99,6 +101,26 @@ Three distinct surfaces:
 - `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
+### Workspace process (`src-tauri/src/modules/workspace_process.rs`)
+
+- `get_workspace_bootstrap` - immutable Workspace UUID, environment, launch directory, and state filenames selected before the webview renders
+- `spawn_workspace_process` - starts another executable instance for a new or existing Workspace; it never resets the caller
+
+Each process holds its Workspace OS lock for its lifetime. Legacy single-window state is imported only into the first empty Local Workspace; initialized Workspace state is never overwritten, the backup is written before the migration marker, and obsolete per-Space environments are discarded.
+
+### Shared configuration (`src-tauri/src/modules/shared_store.rs`)
+
+- `shared_store_read` / `shared_store_revision`
+- `shared_store_set` / `shared_store_delete` - lock, read the latest object, mutate one key, and atomically replace the file
+
+The writing process receives an immediate change event and other processes receive file-watcher events. Frontend listeners perform a trailing revision check, so event coalescing cannot permanently hide the final write.
+
+### AI session snapshots (`src-tauri/src/modules/ai_sessions.rs`)
+
+- `ai_sessions_list` / `ai_session_read` / `ai_session_publish` / `ai_session_delete`
+- `ai_session_run_acquire` / `ai_session_run_release` - cross-process exclusive run ownership
+- `ai_sessions_migrate_legacy` - retryable legacy snapshot migration
+
 ### Network (`src-tauri/src/modules/net.rs`)
 
 - `ai_http_request` / `ai_http_stream` - AI HTTP proxy with SSRF guard
@@ -126,6 +148,8 @@ Three distinct surfaces:
 - The webview must not spawn processes, read files, or make network calls except through the commands above.
 - New commands must be registered in `lib.rs` and guarded at the boundary (workspace auth, deny-list, SSRF, approval flow).
 - Plugin permissions must be added to `src-tauri/capabilities/default.json` if the command uses a plugin API.
+- Never pass SSH passwords, proxy passwords, or other secrets through process arguments or Workspace files.
+- Shared entity writers must mutate only their target key; never persist a stale full-list snapshot.
 
 ## See also
 

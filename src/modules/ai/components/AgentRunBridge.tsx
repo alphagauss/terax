@@ -1,7 +1,6 @@
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
-import { toast } from "sonner";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
@@ -65,6 +64,7 @@ function Bridge({
   const patch = useChatStore((s) => s.patchAgentMeta);
   const openMini = useChatStore((s) => s.openMini);
   const publishMessages = useChatStore((s) => s.publishMessages);
+  const runLocked = useChatStore((s) => Boolean(s.runLockSessionIds[sessionId]));
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
 
   // Expose the approval responder so the diff tab can resolve approvals.
@@ -89,44 +89,48 @@ function Bridge({
 
   const latestMessages = useRef(messages);
   latestMessages.current = messages;
-  const runDirty = useRef(false);
+  const publishing = useRef(false);
   const statusRef = useRef(status);
   statusRef.current = status;
   const approvalsRef = useRef(approvalsPending);
   approvalsRef.current = approvalsPending;
+  const runLockedRef = useRef(runLocked);
+  runLockedRef.current = runLocked;
   useEffect(() => {
-    const running = status === "submitted" || status === "streaming";
-    if (running) runDirty.current = true;
-    if (!shouldPublishSnapshot(status, approvalsPending, runDirty.current)) return;
+    if (!shouldPublishSnapshot(status, approvalsPending, runLocked)) return;
     const timer = window.setTimeout(() => {
       if (
         !shouldPublishSnapshot(
           statusRef.current,
           approvalsRef.current,
-          runDirty.current,
+          runLockedRef.current,
         )
       )
         return;
-      runDirty.current = false;
-      void publishMessages(sessionId, latestMessages.current).catch((error) => {
-        runDirty.current = true;
-        toast.error("Failed to save AI session", {
-          description: String(error),
+      if (publishing.current) return;
+      publishing.current = true;
+      void publishMessages(sessionId, latestMessages.current)
+        .catch((error) => {
+          useChatStore.setState({ sessionSyncError: String(error) });
+        })
+        .finally(() => {
+          publishing.current = false;
         });
-      });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [sessionId, status, approvalsPending, publishMessages]);
+  }, [sessionId, status, approvalsPending, runLocked, publishMessages]);
   useEffect(
     () => () => {
       if (
         !shouldPublishSnapshot(
           statusRef.current,
           approvalsRef.current,
-          runDirty.current,
+          runLockedRef.current,
         )
       )
         return;
+      if (publishing.current) return;
+      publishing.current = true;
       void publishMessages(sessionId, latestMessages.current).catch((error) => {
         console.error("Failed to save AI session during switch:", error);
       });

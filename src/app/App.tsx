@@ -17,6 +17,7 @@ import {
 import {
   AgentRunBridge,
   AiMiniWindow,
+  flushCompletedSessionRuns,
   LocalAgentNotificationsBridge,
   SelectionAskAi,
   useAiBootstrap,
@@ -41,6 +42,7 @@ import {
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
 import type { PreviewPaneHandle } from "@/modules/preview";
+import { HostKeyDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -86,7 +88,11 @@ import {
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import { UpdaterDialog } from "@/modules/updater";
-import { useWorkspaceEnvStore, type WorkspaceEnv } from "@/modules/workspace";
+import {
+  currentWorkspaceEnv,
+  useWorkspaceEnvStore,
+  type WorkspaceEnv,
+} from "@/modules/workspace";
 import {
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
@@ -103,9 +109,11 @@ import {
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
-import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
+import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
 
 export default function App() {
+  const initialLaunchCwd =
+    currentWorkspaceEnv().kind === "local" ? getLaunchDir() : null;
   const {
     tabs,
     activeId,
@@ -143,8 +151,7 @@ export default function App() {
     splitActivePane,
     closeActivePane,
     closePaneByLeaf,
-    resetWorkspace,
-  } = useTabs(getLaunchDir() ? { cwd: getLaunchDir() } : undefined);
+  } = useTabs(initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
@@ -176,30 +183,17 @@ export default function App() {
   // split/unsplit re-mount components but the leaf is still live.
   const liveLeavesRef = useRef<Set<number>>(new Set());
 
-  const clearWorkspaceState = useCallback(() => {
-    for (const id of liveLeavesRef.current) disposeSession(id);
-    searchAddons.current.clear();
-    terminalRefs.current.clear();
-    editorRefs.current.clear();
-    previewRefs.current.clear();
-    setActiveSearchAddon(null);
-    setActiveEditorHandle(null);
-  }, []);
-
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
-  const setWorkspaceEnv = useWorkspaceEnvStore((s) => s.setEnv);
   const {
     home,
     launchCwd,
     launchCwdResolved,
-    adoptWorkspaceEnv,
-  } = useWorkspaceSwitcher({
-    tabsRef,
-    workspaceEnv,
-    setWorkspaceEnv,
-    resetWorkspace,
-    clearWorkspaceState,
-  });
+    environmentError,
+    remoteEventsReady,
+    hostPrompt,
+    clearHostPrompt,
+    initializeWorkspaceEnv,
+  } = useWorkspaceEnvironment();
 
   const activeSpaceId = useSpaces((s) => s.activeId);
   const spacesHydrated = useSpaces((s) => s.hydrated);
@@ -225,14 +219,13 @@ export default function App() {
   }, [workspaceEnv]);
 
   useSpacesBoot({
-    ready: launchCwdResolved,
-    launchCwd,
-    home,
+    ready: launchCwdResolved && remoteEventsReady,
     allocId,
     replaceTabs,
     markBooted,
     setActiveSpaceForNewTabs,
-    adoptWorkspaceEnv,
+    initializeWorkspaceEnv,
+    environmentHome: home,
   });
 
   useSpacePersistence({
@@ -249,10 +242,6 @@ export default function App() {
     const prev = prevSpaceRef.current;
     prevSpaceRef.current = activeSpaceId;
     if (prev === null || prev === activeSpaceId) return;
-    const meta = useSpaces
-      .getState()
-      .spaces.find((s) => s.id === activeSpaceId);
-    if (meta) void adoptWorkspaceEnv(meta.env);
     const inSpace = tabsRef.current.filter((t) => t.spaceId === activeSpaceId);
     if (inSpace.length === 0) return;
     // Keep the active tab if it already belongs to the newly active space (a
@@ -265,7 +254,6 @@ export default function App() {
     spacesHydrated,
     setActiveSpaceForNewTabs,
     setActiveId,
-    adoptWorkspaceEnv,
   ]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
@@ -324,7 +312,7 @@ export default function App() {
   const { explorerRoot, inheritedCwdForNewTab } = useWorkspaceCwd(
     activeTab,
     tabs,
-    launchCwd ?? home,
+    home,
   );
 
   useWindowTitle(activeTab, explorerRoot);
@@ -373,7 +361,7 @@ export default function App() {
   } = useTabCloseGuards({ tabs, disposeTab });
 
   const { pendingAppClose, confirmAppClose, cancelAppClose } =
-    useAppCloseGuard(tabsRef);
+    useAppCloseGuard(tabsRef, flushCompletedSessionRuns);
 
   useEffect(() => {
     const live = new Set<number>();
@@ -939,13 +927,12 @@ export default function App() {
     const meta = create({
       name: `Space ${spaces.length + 1}`,
       root: activeCwd ?? home ?? null,
-      env: workspaceEnv,
     });
     setActiveSpaceForNewTabs(meta.id);
     newTab(activeCwd ?? undefined);
     setActive(meta.id);
     return meta.id;
-  }, [activeCwd, home, workspaceEnv, newTab, setActiveSpaceForNewTabs]);
+  }, [activeCwd, home, newTab, setActiveSpaceForNewTabs]);
 
   const handleDeleteSpace = useCallback(
     (id: string) => {
@@ -1250,6 +1237,8 @@ export default function App() {
               cwd={activeCwd}
               filePath={activeFilePath}
               home={home}
+              workspaceError={environmentError}
+              onWorkspaceRetry={initializeWorkspaceEnv}
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onOpenMini={openMini}
@@ -1265,6 +1254,7 @@ export default function App() {
             activeId={activeId}
             onActivate={onActivateAgent}
           />
+          <HostKeyDialog prompt={hostPrompt} onResolved={clearHostPrompt} />
           <Toaster position="bottom-right" />
 
           {hasComposer ? (

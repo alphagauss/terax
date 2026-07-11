@@ -107,6 +107,19 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    fn wait_for(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn lock_is_exclusive_and_released_on_drop() {
@@ -125,5 +138,42 @@ mod tests {
         write_atomic(&path, b"old").unwrap();
         write_atomic(&path, b"new").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    }
+
+    #[test]
+    fn subprocess_lock_helper() {
+        let Some(lock_path) = std::env::var_os("TERAX_TEST_LOCK_PATH") else {
+            return;
+        };
+        let ready = std::path::PathBuf::from(std::env::var_os("TERAX_TEST_READY").unwrap());
+        let release = std::path::PathBuf::from(std::env::var_os("TERAX_TEST_RELEASE").unwrap());
+        let _lock = FileLock::try_acquire(Path::new(&lock_path))
+            .unwrap()
+            .unwrap();
+        std::fs::write(&ready, b"ready").unwrap();
+        wait_for(&release);
+    }
+
+    #[test]
+    fn lock_is_exclusive_across_processes_and_released_on_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("cross-process.lock");
+        let ready = dir.path().join("ready");
+        let release = dir.path().join("release");
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("modules::storage::tests::subprocess_lock_helper")
+            .arg("--nocapture")
+            .env("TERAX_TEST_LOCK_PATH", &lock_path)
+            .env("TERAX_TEST_READY", &ready)
+            .env("TERAX_TEST_RELEASE", &release)
+            .spawn()
+            .unwrap();
+
+        wait_for(&ready);
+        assert!(FileLock::try_acquire(&lock_path).unwrap().is_none());
+        std::fs::write(&release, b"release").unwrap();
+        assert!(child.wait().unwrap().success());
+        assert!(FileLock::try_acquire(&lock_path).unwrap().is_some());
     }
 }

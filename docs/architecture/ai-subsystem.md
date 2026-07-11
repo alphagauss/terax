@@ -55,9 +55,11 @@ Conversations are organized into sessions. Completed history is stored as one at
 - `<uuid>.lock`: OS lock used while one process is running the session
 - no shared session index; list operations scan and validate snapshot metadata
 
-Streaming state remains in the owning process. `AgentRunBridge` publishes a complete snapshot only after the run becomes idle, errors, or is stopped; a crash therefore preserves the previous complete snapshot instead of a partial stream. Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. The active session id is stored in the UUID-specific Workspace file.
+Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. `AgentRunBridge` publishes a complete snapshot only after the run becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both atomic publish and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs, while a crash preserves the previous complete snapshot instead of a partial stream.
 
-At startup, the Rust migration command converts the legacy sessions/todos stores to deterministic UUID snapshots, writes the completion marker last, and keeps the old files as `.v0.backup.json` files.
+Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent snapshot, then a fresh session.
+
+At startup, the Rust migration command takes the migration lock, converts the legacy sessions/todos stores to deterministic UUID snapshots, verifies all writes, creates `.v0.backup.json` files, and writes the completion marker last. A retry can use either an original legacy file or its backup, and a migration error does not hide already-valid new snapshots.
 
 ## Composer
 
@@ -90,6 +92,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval; read-only tools still pass the deny-list.
+- A session run lock owns its in-memory runtime until publish and release both succeed; session navigation must not bypass that lifecycle.
 
 ## See also
 

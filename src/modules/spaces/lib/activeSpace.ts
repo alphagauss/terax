@@ -12,20 +12,18 @@ export function findActiveSpace(
   return spaces[0] ?? null;
 }
 
-export function activeSpaceEnv(
-  spaces: SpaceMeta[],
-  activeId: string | null,
-): WorkspaceEnv {
-  return findActiveSpace(spaces, activeId)?.env ?? { kind: "local" };
+export function initialWorkspaceRoot(
+  env: WorkspaceEnv,
+  explicitLaunchDir: string | null,
+  resolvedHome: string | null,
+): string | null {
+  if (env.kind === "local" && explicitLaunchDir) return explicitLaunchDir;
+  return resolvedHome;
 }
 
-// A WSL space falls back to null, not the local cwd, so its first tab opens at
-// the WSL home instead of a Windows path.
-export function freshTabCwd(
+export function canBootWorkspaceEnvironment(
   env: WorkspaceEnv,
-  restoredHome: string | null,
-  launchCwd: string | null,
-  home: string | null,
-): string | null {
-  return restoredHome ?? (env.kind === "local" ? (launchCwd ?? home) : null);
+  resolvedHome: string | null,
+): boolean {
+  return env.kind === "local" || resolvedHome !== null;
 }

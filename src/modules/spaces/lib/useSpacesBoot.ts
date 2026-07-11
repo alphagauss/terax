@@ -2,23 +2,38 @@ import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/tabs";
 import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
 import { isLeaf, type PaneNode } from "@/modules/terminal/lib/panes";
-import { currentWorkspaceEnv, type WorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { useEffect, useRef } from "react";
-import { activeSpaceEnv, freshTabCwd } from "./activeSpace";
+import {
+  canBootWorkspaceEnvironment,
+  findActiveSpace,
+  initialWorkspaceRoot,
+} from "./activeSpace";
 import { freshTerminalTab, hydrateTabs } from "./serialize";
 import { loadAll, type SpaceMeta, saveActiveId, saveSpacesList } from "./store";
 import { useSpaces } from "./useSpaces";
 
 type Params = {
   ready: boolean;
-  launchCwd: string | null;
-  home: string | null;
   allocId: () => number;
   replaceTabs: (tabs: Tab[], activeId: number) => void;
   markBooted: () => void;
   setActiveSpaceForNewTabs: (id: string) => void;
-  adoptWorkspaceEnv: (env: WorkspaceEnv) => Promise<string | null>;
+  initializeWorkspaceEnv: () => Promise<string | null>;
+  environmentHome: string | null;
 };
+
+export async function prepareWorkspaceBoot<T>(
+  env: ReturnType<typeof currentWorkspaceEnv>,
+  environmentHome: string | null,
+  initializeWorkspaceEnv: () => Promise<string | null>,
+  loadWorkspaceState: () => Promise<T>,
+): Promise<{ resolvedHome: string | null; loaded: T } | null> {
+  const resolvedHome = environmentHome ?? (await initializeWorkspaceEnv());
+  if (!canBootWorkspaceEnvironment(env, resolvedHome)) return null;
+  return { resolvedHome, loaded: await loadWorkspaceState() };
+}
 
 function uniqueCwds(tabs: Tab[]): string[] {
   const set = new Set<string>();
@@ -35,13 +50,12 @@ function uniqueCwds(tabs: Tab[]): string[] {
 
 export function useSpacesBoot({
   ready,
-  launchCwd,
-  home,
   allocId,
   replaceTabs,
   markBooted,
   setActiveSpaceForNewTabs,
-  adoptWorkspaceEnv,
+  initializeWorkspaceEnv,
+  environmentHome,
 }: Params) {
   const done = useRef(false);
 
@@ -51,22 +65,39 @@ export function useSpacesBoot({
 
     void (async () => {
       try {
-        const { spaces, activeId, states } = await loadAll();
+        const env = currentWorkspaceEnv();
+        const prepared = await prepareWorkspaceBoot(
+          env,
+          environmentHome,
+          initializeWorkspaceEnv,
+          loadAll,
+        );
+        if (!prepared) {
+          done.current = false;
+          return;
+        }
+        const { resolvedHome, loaded } = prepared;
+        const { spaces, activeId, states } = loaded;
 
         if (spaces.length === 0) {
-          const root = launchCwd ?? home ?? null;
+          const root = initialWorkspaceRoot(
+            env,
+            currentWorkspaceBootstrap().launchDir,
+            resolvedHome,
+          );
           const meta: SpaceMeta = {
             id: DEFAULT_SPACE_ID,
             name: "Default",
             root,
-            env: currentWorkspaceEnv(),
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
+          const tab = freshTerminalTab(DEFAULT_SPACE_ID, root, allocId);
           await saveSpacesList([meta]);
           await saveActiveId(DEFAULT_SPACE_ID);
           setActiveSpaceForNewTabs(DEFAULT_SPACE_ID);
           useSpaces.getState().hydrate([meta], DEFAULT_SPACE_ID);
+          replaceTabs([tab], tab.id);
           return;
         }
 
@@ -83,15 +114,9 @@ export function useSpacesBoot({
             : spaces[0].id;
         setActiveSpaceForNewTabs(active);
 
-        // Apply the space's env+home before the fresh-tab fallback and spawns
-        // below; env is set synchronously so cwd resolution picks WSL vs local.
-        const env = activeSpaceEnv(spaces, active);
-        const restoredHome = await adoptWorkspaceEnv(env);
-
-        // Active space must never be empty, else its tab list shows nothing.
         if (!restored.some((t) => t.spaceId === active)) {
-          const cwd = freshTabCwd(env, restoredHome, launchCwd, home);
-          restored.push(freshTerminalTab(active, cwd, allocId));
+          const root = findActiveSpace(spaces, active)?.root ?? resolvedHome;
+          restored.push(freshTerminalTab(active, root, allocId));
         }
 
         await Promise.allSettled(
@@ -110,17 +135,16 @@ export function useSpacesBoot({
       } catch (e) {
         console.error("[terax] spaces boot failed:", e);
       } finally {
-        markBooted();
+        if (done.current) markBooted();
       }
     })();
   }, [
     ready,
-    launchCwd,
-    home,
     allocId,
     replaceTabs,
     markBooted,
     setActiveSpaceForNewTabs,
-    adoptWorkspaceEnv,
+    initializeWorkspaceEnv,
+    environmentHome,
   ]);
 }

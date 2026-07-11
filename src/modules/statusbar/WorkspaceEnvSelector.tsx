@@ -7,11 +7,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { IS_WINDOWS } from "@/lib/platform";
 import {
-  HostKeyDialog,
   RemoteSshDialog,
   remoteNative,
   useRemoteStore,
-  type HostKeyPrompt,
 } from "@/modules/remote";
 import {
   LOCAL_WORKSPACE,
@@ -20,13 +18,19 @@ import {
 } from "@/modules/workspace";
 import { Refresh01Icon, ServerStack03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   onSelect: (env: WorkspaceEnv) => void;
+  connectionError?: string | null;
+  onCurrentConnected?: () => Promise<string | null>;
 };
 
-export function WorkspaceEnvSelector({ onSelect }: Props) {
+export function WorkspaceEnvSelector({
+  onSelect,
+  connectionError = null,
+  onCurrentConnected,
+}: Props) {
   const env = useWorkspaceEnvStore((state) => state.env);
   const distros = useWorkspaceEnvStore((state) => state.distros);
   const loading = useWorkspaceEnvStore((state) => state.loading);
@@ -35,31 +39,15 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
   const profiles = useRemoteStore((state) => state.profiles);
   const statuses = useRemoteStore((state) => state.statuses);
   const loadProfiles = useRemoteStore((state) => state.load);
-  const setRemoteStatus = useRemoteStore((state) => state.setStatus);
   const [remoteOpen, setRemoteOpen] = useState(false);
-  const [hostPrompt, setHostPrompt] = useState<HostKeyPrompt | null>(null);
+  const [remoteMode, setRemoteMode] = useState<"launch" | "connect-current">(
+    "launch",
+  );
+  const promptedError = useRef<string | null>(null);
 
   useEffect(() => {
     void loadProfiles();
-    let active = true;
-    let unlistenStatus: (() => void) | undefined;
-    let unlistenHostKey: (() => void) | undefined;
-    void remoteNative.onStatus(setRemoteStatus).then((unlisten) => {
-      if (active) unlistenStatus = unlisten;
-      else unlisten();
-    });
-    void remoteNative
-      .onHostKey((prompt) => setHostPrompt(prompt))
-      .then((unlisten) => {
-        if (active) unlistenHostKey = unlisten;
-        else unlisten();
-      });
-    return () => {
-      active = false;
-      unlistenStatus?.();
-      unlistenHostKey?.();
-    };
-  }, [loadProfiles, setRemoteStatus]);
+  }, [loadProfiles]);
 
   const activeProfile = useMemo(
     () =>
@@ -70,6 +58,18 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
   );
   const activeStatus =
     env.kind === "ssh" ? statuses[env.profileId]?.status : undefined;
+
+  useEffect(() => {
+    if (env.kind !== "ssh" || !activeProfile || !connectionError) {
+      if (!connectionError) promptedError.current = null;
+      return;
+    }
+    const fingerprint = `${env.profileId}:${connectionError}`;
+    if (promptedError.current === fingerprint) return;
+    promptedError.current = fingerprint;
+    setRemoteMode("connect-current");
+    setRemoteOpen(true);
+  }, [activeProfile, connectionError, env]);
 
   const handleOpenChange = (open: boolean) => {
     if (IS_WINDOWS && open && distros.length === 0 && !loading) {
@@ -147,7 +147,12 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
             </>
           ) : null}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setRemoteOpen(true)}>
+          <DropdownMenuItem
+            onSelect={() => {
+              setRemoteMode("launch");
+              setRemoteOpen(true);
+            }}
+          >
             Add or edit SSH profile...
           </DropdownMenuItem>
           {profiles.map((profile) => (
@@ -162,13 +167,37 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
           ))}
           {env.kind === "ssh" ? (
             <DropdownMenuItem
-              onSelect={() =>
-                void remoteNative.reconnect(env.profileId).catch(() => {
-                  setRemoteOpen(true);
-                })
-              }
+              onSelect={() => {
+                void remoteNative
+                  .reconnect(env.profileId)
+                  .then(async () => {
+                    const nextHome = await onCurrentConnected?.();
+                    if (!nextHome) {
+                      setRemoteMode("connect-current");
+                      setRemoteOpen(true);
+                    }
+                  })
+                  .catch(() => {
+                    setRemoteMode("connect-current");
+                    setRemoteOpen(true);
+                  });
+              }}
             >
               Reconnect current SSH
+            </DropdownMenuItem>
+          ) : null}
+          {connectionError ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                if (env.kind === "ssh") {
+                  setRemoteMode("connect-current");
+                  setRemoteOpen(true);
+                  return;
+                }
+                void onCurrentConnected?.();
+              }}
+            >
+              Retry current environment
             </DropdownMenuItem>
           ) : null}
           {IS_WINDOWS ? (
@@ -190,14 +219,24 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
       <RemoteSshDialog
         open={remoteOpen}
         onOpenChange={setRemoteOpen}
-        launchOnly
-        onConnected={(profile) =>
-          onSelect({ kind: "ssh", profileId: profile.id })
+        launchOnly={remoteMode === "launch"}
+        preferredProfileId={
+          remoteMode === "connect-current" && env.kind === "ssh"
+            ? env.profileId
+            : null
         }
-      />
-      <HostKeyDialog
-        prompt={hostPrompt}
-        onResolved={() => setHostPrompt(null)}
+        onConnected={async (profile) => {
+          if (remoteMode === "launch") {
+            onSelect({ kind: "ssh", profileId: profile.id });
+          } else {
+            const nextHome = await onCurrentConnected?.();
+            if (!nextHome) {
+              throw new Error(
+                "SSH connected, but the remote Workspace home could not be resolved.",
+              );
+            }
+          }
+        }}
       />
     </>
   );

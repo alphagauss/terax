@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
-import { setLastWslDistro } from "@/modules/settings/store";
 
 export type WorkspaceEnv =
   | { kind: "local" }
@@ -29,10 +28,7 @@ export const useWorkspaceEnvStore = create<State>((set) => ({
   distros: [],
   loading: false,
   error: null,
-  setEnv: (env) => {
-    set({ env });
-    if (env.kind === "wsl") void setLastWslDistro(env.distro);
-  },
+  setEnv: (env) => set({ env }),
   refreshDistros: async () => {
     set({ loading: true, error: null });
     try {

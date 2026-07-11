@@ -21,6 +21,8 @@ type Props = {
   cwd: string | null;
   filePath?: string | null;
   home: string | null;
+  workspaceError: string | null;
+  onWorkspaceRetry: () => Promise<string | null>;
   onCd: (path: string) => void;
   onWorkspaceChange: (env: WorkspaceEnv) => void;
   onOpenMini: () => void;
@@ -33,6 +35,8 @@ export function StatusBar({
   cwd,
   filePath,
   home,
+  workspaceError,
+  onWorkspaceRetry,
   onCd,
   onWorkspaceChange,
   onOpenMini,
@@ -45,7 +49,11 @@ export function StatusBar({
   return (
     <footer className="flex h-8 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-card/60 pl-3 pr-4 text-[11px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
+        <WorkspaceEnvSelector
+          onSelect={onWorkspaceChange}
+          connectionError={workspaceError}
+          onCurrentConnected={onWorkspaceRetry}
+        />
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />

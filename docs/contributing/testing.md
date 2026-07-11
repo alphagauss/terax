@@ -18,6 +18,8 @@ cargo nextest run --locked        # CI uses nextest
 
 If you do not have `cargo-nextest` installed, `cargo test --locked` is the local fallback. Install nextest with `cargo install cargo-nextest`.
 
+The `storage`, `workspace_process`, `ai_sessions`, and `shared_store` Rust suites also launch the current test executable as helper processes. They verify real OS-lock exclusion, release/retry behavior, and concurrent read-latest/key-mutation behavior across process boundaries, not merely two tasks sharing one in-memory state. Keep these tests in the normal Rust test command when changing Workspace locks, AI session ownership, or shared configuration.
+
 ## What must have a test
 
 `CONTRIBUTING.md` requires a test for any change that touches behavior in these load-bearing paths:

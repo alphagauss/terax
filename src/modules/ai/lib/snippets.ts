@@ -41,19 +41,12 @@ export async function loadSnippets(): Promise<Snippet[]> {
   ];
 }
 
-export async function saveSnippets(list: Snippet[]): Promise<void> {
-  const values = await readSharedStore("ai-snippets");
-  const desired = new Set(list.map((snippet) => snippet.id));
-  await Promise.all([
-    ...list.map((snippet) =>
-      setSharedStoreKey("ai-snippets", snippetKey(snippet.id), snippet),
-    ),
-    ...Object.keys(values)
-      .filter(
-        (key) => key.startsWith("snippet:") && !desired.has(key.slice(8)),
-      )
-      .map((key) => deleteSharedStoreKey("ai-snippets", key)),
-  ]);
+export function upsertSnippet(snippet: Snippet): Promise<void> {
+  return setSharedStoreKey("ai-snippets", snippetKey(snippet.id), snippet);
+}
+
+export function deleteSnippet(id: string): Promise<void> {
+  return deleteSharedStoreKey("ai-snippets", snippetKey(id));
 }
 
 export function newSnippetId(): string {

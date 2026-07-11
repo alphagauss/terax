@@ -9,7 +9,10 @@ import {
   hasAnyKey,
 } from "../lib/keyring";
 import { useAgentsStore } from "../store/agentsStore";
-import { useChatStore } from "../store/chatStore";
+import {
+  flushCompletedSessionRuns,
+  useChatStore,
+} from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /**
@@ -107,7 +110,16 @@ export function useAiBootstrap(): {
 
   useEffect(() => {
     if (!sessionsHydrated) return;
-    const refresh = () => void refreshSessions();
+    let refreshing = false;
+    const refresh = () => {
+      if (refreshing) return;
+      refreshing = true;
+      void flushCompletedSessionRuns()
+        .then(refreshSessions)
+        .finally(() => {
+          refreshing = false;
+        });
+    };
     const onFocus = () => refresh();
     const onVisibility = () => {
       if (document.visibilityState === "visible") refresh();

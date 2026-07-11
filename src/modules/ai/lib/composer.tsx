@@ -74,9 +74,6 @@ type ProviderProps = {
 export function AiComposerProvider({ children }: ProviderProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore((s) => s.agentMeta.status);
-  const readOnly = useChatStore((s) =>
-    sessionId ? Boolean(s.readOnlySessionIds[sessionId]) : false,
-  );
   const isBusy = status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
@@ -333,7 +330,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const canSend =
     !isBusy &&
-    !readOnly &&
     (value.trim().length > 0 ||
       files.length > 0 ||
       pickedSnippets.length > 0 ||

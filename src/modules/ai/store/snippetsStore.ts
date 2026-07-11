@@ -1,9 +1,10 @@
 import { onSharedStoreChange } from "@/lib/sharedStore";
 import { create } from "zustand";
 import {
+  deleteSnippet,
   loadSnippets,
   newSnippetId,
-  saveSnippets,
+  upsertSnippet,
   type Snippet,
 } from "../lib/snippets";
 
@@ -34,12 +35,12 @@ export const useSnippetsStore = create<State>((set, get) => ({
     const next =
       idx === -1 ? [...list, snippet] : list.map((s) => (s.id === snippet.id ? snippet : s));
     set({ snippets: next });
-    void saveSnippets(next);
+    void upsertSnippet(snippet);
   },
   remove: (id) => {
     const next = get().snippets.filter((s) => s.id !== id);
     set({ snippets: next });
-    void saveSnippets(next);
+    void deleteSnippet(id);
   },
 }));
 

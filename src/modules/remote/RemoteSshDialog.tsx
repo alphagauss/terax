@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { launchOnlySecretError } from "./launchValidation";
 import { remoteNative } from "./native";
 import { newProfileId, useRemoteStore } from "./store";
 import type {
@@ -28,6 +29,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   onConnected: (profile: SshProfile) => void | Promise<void>;
   launchOnly?: boolean;
+  preferredProfileId?: string | null;
 };
 
 type Form = {
@@ -122,6 +124,7 @@ export function RemoteSshDialog({
   onOpenChange,
   onConnected,
   launchOnly = false,
+  preferredProfileId = null,
 }: Props) {
   const profiles = useRemoteStore((state) => state.profiles);
   const statuses = useRemoteStore((state) => state.statuses);
@@ -179,10 +182,22 @@ export function RemoteSshDialog({
   useEffect(() => {
     if (!open) return;
     void load().then((loaded) => {
-      if (selectedId || loaded.length === 0) return;
-      void selectProfile(loaded[0]);
+      const preferred = preferredProfileId
+        ? loaded.find((profile) => profile.id === preferredProfileId)
+        : null;
+      if (preferred && selectedId !== preferred.id) {
+        void selectProfile(preferred);
+        return;
+      }
+      if (!selectedId && loaded.length > 0) void selectProfile(loaded[0]);
     });
-  }, [open, load, selectedId, selectProfile]);
+  }, [
+    open,
+    load,
+    preferredProfileId,
+    selectedId,
+    selectProfile,
+  ]);
 
   useEffect(() => {
     if (!open || page !== "tunnels" || !selectedId) return;
@@ -210,6 +225,11 @@ export function RemoteSshDialog({
       setError(
         "Do not put a password in the proxy URL. Enter it in the secure proxy-password field.",
       );
+      return;
+    }
+    const launchError = launchOnlySecretError({ launchOnly, ...form });
+    if (launchError) {
+      setError(launchError);
       return;
     }
     setBusy(true);

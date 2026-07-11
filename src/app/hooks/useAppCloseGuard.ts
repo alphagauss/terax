@@ -17,7 +17,10 @@ export type AppCloseBlocker = {
   busyTerminal: boolean;
 };
 
-export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
+export function useAppCloseGuard(
+  tabsRef: RefObject<Tab[]>,
+  beforeClose?: () => Promise<void>,
+) {
   const [pendingAppClose, setPendingAppClose] =
     useState<AppCloseBlocker | null>(null);
   const forceClose = useRef(false);
@@ -37,6 +40,7 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
         if (dirtyEditors > 0 || busyTerminal) {
           setPendingAppClose({ dirtyEditors, busyTerminal });
         } else {
+          await beforeClose?.();
           forceClose.current = true;
           void getCurrentWindow().close();
         }
@@ -49,13 +53,16 @@ export function useAppCloseGuard(tabsRef: RefObject<Tab[]>) {
       disposed = true;
       unlisten?.();
     };
-  }, [tabsRef]);
+  }, [tabsRef, beforeClose]);
 
   const confirmAppClose = useCallback(() => {
     setPendingAppClose(null);
-    forceClose.current = true;
-    void getCurrentWindow().close();
-  }, []);
+    void (async () => {
+      await beforeClose?.();
+      forceClose.current = true;
+      await getCurrentWindow().close();
+    })();
+  }, [beforeClose]);
 
   const cancelAppClose = useCallback(() => setPendingAppClose(null), []);
 

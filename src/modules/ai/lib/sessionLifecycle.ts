@@ -7,12 +7,16 @@ export type PersistableChatStatus =
 export function shouldPublishSnapshot(
   status: PersistableChatStatus,
   approvalsPending: number,
-  runDirty: boolean,
+  runLocked: boolean,
 ): boolean {
   return (
-    runDirty &&
+    runLocked &&
     status !== "submitted" &&
     status !== "streaming" &&
     approvalsPending === 0
   );
+}
+
+export function canChangeSession(runLocked: boolean): boolean {
+  return !runLocked;
 }

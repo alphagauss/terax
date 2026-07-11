@@ -445,6 +445,9 @@ function ContextIndicator({ messages }: { messages: UIMessage[] }) {
 function SessionPicker() {
   const sessions = useChatStore((s) => s.sessions);
   const activeId = useChatStore((s) => s.activeSessionId);
+  const runLocked = useChatStore((s) =>
+    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
+  );
   const switchSession = useChatStore((s) => s.switchSession);
   const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
@@ -478,6 +481,7 @@ function SessionPicker() {
       <DropdownMenuContent align="start" className="min-w-56">
         <DropdownMenuItem
           onSelect={() => newSession()}
+          disabled={runLocked}
           className="gap-2 text-xs"
         >
           <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
@@ -489,6 +493,7 @@ function SessionPicker() {
             key={s.id}
             session={s}
             active={s.id === activeId}
+            disabled={runLocked}
             onSelect={() => switchSession(s.id)}
             onDelete={() => deleteSession(s.id)}
           />
@@ -501,16 +506,19 @@ function SessionPicker() {
 function SessionRow({
   session,
   active,
+  disabled,
   onSelect,
   onDelete,
 }: {
   session: SessionMeta;
   active: boolean;
+  disabled: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
   return (
     <DropdownMenuItem
+      disabled={disabled}
       onSelect={(e) => {
         // Don't dismiss if user clicked the trash icon — handle below.
         const target = e.target as HTMLElement | null;
@@ -530,6 +538,7 @@ function SessionRow({
       </span>
       <button
         type="button"
+        disabled={disabled}
         data-session-delete
         onClick={(e) => {
           e.stopPropagation();

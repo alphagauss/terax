@@ -2,11 +2,12 @@ use crate::modules::storage::{write_atomic, FileLock};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 const STORES: &[(&str, &str)] = &[
@@ -78,25 +79,34 @@ fn mutate(
 }
 
 pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
-    mutate(&app_data(app)?, "keys-epoch", |map| {
+    let root = app_data(app)?;
+    mutate(&root, "keys-epoch", |map| {
         map.insert(
             "epoch".to_string(),
             Value::from(uuid::Uuid::new_v4().to_string()),
         );
-    })
+    })?;
+    emit_changed(app, &root, "keys-epoch")
 }
 
 fn revision(path: &Path) -> String {
-    let Ok(metadata) = fs::metadata(path) else {
+    let Ok(bytes) = fs::read(path) else {
         return "missing".to_string();
     };
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    format!("{modified}:{}", metadata.len())
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    format!("{:016x}:{}", hasher.finish(), bytes.len())
+}
+
+fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String> {
+    app.emit(
+        "terax://shared-store-changed",
+        SharedStoreChanged {
+            store: store.to_string(),
+            revision: revision(&store_path(root, store)?),
+        },
+    )
+    .map_err(|error| error.to_string())
 }
 
 impl SharedStoreState {
@@ -104,8 +114,7 @@ impl SharedStoreState {
         let root = app_data(app)?;
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         let handle = app.clone();
-        let emitted_at = Arc::new(Mutex::new(HashMap::<String, Instant>::new()));
-        let callback_times = Arc::clone(&emitted_at);
+        let watched_root = root.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
                 let Ok(event) = result else {
@@ -119,24 +128,7 @@ impl SharedStoreState {
                     else {
                         continue;
                     };
-                    let mut times = match callback_times.lock() {
-                        Ok(times) => times,
-                        Err(_) => return,
-                    };
-                    if times
-                        .get(*store)
-                        .is_some_and(|last| last.elapsed() < Duration::from_millis(200))
-                    {
-                        continue;
-                    }
-                    times.insert((*store).to_string(), Instant::now());
-                    let _ = handle.emit(
-                        "terax://shared-store-changed",
-                        SharedStoreChanged {
-                            store: (*store).to_string(),
-                            revision: revision(&path),
-                        },
-                    );
+                    let _ = emit_changed(&handle, &watched_root, store);
                 }
             })
             .map_err(|error| error.to_string())?;
@@ -164,9 +156,11 @@ pub fn shared_store_set(
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
-    mutate(&app_data(&app)?, &store, |map| {
+    let root = app_data(&app)?;
+    mutate(&root, &store, |map| {
         map.insert(key, value);
-    })
+    })?;
+    emit_changed(&app, &root, &store)
 }
 
 #[tauri::command]
@@ -174,9 +168,11 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
-    mutate(&app_data(&app)?, &store, |map| {
+    let root = app_data(&app)?;
+    mutate(&root, &store, |map| {
         map.remove(&key);
-    })
+    })?;
+    emit_changed(&app, &root, &store)
 }
 
 #[tauri::command]
@@ -187,6 +183,21 @@ pub fn shared_store_revision(app: AppHandle, store: String) -> Result<String, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    fn wait_for(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn rejects_unknown_store_and_corrupt_json() {
@@ -224,6 +235,16 @@ mod tests {
     }
 
     #[test]
+    fn equal_length_writes_have_distinct_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("terax-settings.json");
+        fs::write(&path, br#"{"a":true}"#).unwrap();
+        let before = revision(&path);
+        fs::write(&path, br#"{"b":true}"#).unwrap();
+        assert_ne!(before, revision(&path));
+    }
+
+    #[test]
     fn concurrent_mutation_waits_for_the_file_lock() {
         let dir = tempfile::tempdir().unwrap();
         let path = lock_path(dir.path(), "settings").unwrap();
@@ -243,5 +264,54 @@ mod tests {
                 .get("after"),
             Some(&Value::Bool(true))
         );
+    }
+
+    #[test]
+    fn subprocess_mutation_helper() {
+        let Some(root) = std::env::var_os("TERAX_SHARED_TEST_ROOT") else {
+            return;
+        };
+        let key = std::env::var("TERAX_SHARED_TEST_KEY").unwrap();
+        let ready = PathBuf::from(std::env::var_os("TERAX_SHARED_TEST_READY").unwrap());
+        let go = PathBuf::from(std::env::var_os("TERAX_SHARED_TEST_GO").unwrap());
+        fs::write(&ready, b"ready").unwrap();
+        wait_for(&go);
+        mutate(Path::new(&root), "settings", |map| {
+            map.insert(key, Value::Bool(true));
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn independent_key_mutations_are_safe_across_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let go = dir.path().join("go");
+        let executable = std::env::current_exe().unwrap();
+        let mut children = Vec::new();
+        for (index, key) in ["from-a", "from-b"].into_iter().enumerate() {
+            let ready = dir.path().join(format!("ready-{index}"));
+            let child = Command::new(&executable)
+                .arg("--exact")
+                .arg("modules::shared_store::tests::subprocess_mutation_helper")
+                .arg("--nocapture")
+                .env("TERAX_SHARED_TEST_ROOT", dir.path())
+                .env("TERAX_SHARED_TEST_KEY", key)
+                .env("TERAX_SHARED_TEST_READY", &ready)
+                .env("TERAX_SHARED_TEST_GO", &go)
+                .spawn()
+                .unwrap();
+            children.push((child, ready));
+        }
+        for (_, ready) in &children {
+            wait_for(ready);
+        }
+        fs::write(&go, b"go").unwrap();
+        for (mut child, _) in children {
+            assert!(child.wait().unwrap().success());
+        }
+
+        let map = read_map(&dir.path().join("terax-settings.json")).unwrap();
+        assert_eq!(map.get("from-a"), Some(&Value::Bool(true)));
+        assert_eq!(map.get("from-b"), Some(&Value::Bool(true)));
     }
 }

@@ -1,6 +1,9 @@
-import type { WorkspaceEnv } from "@/modules/workspace";
 import { describe, expect, it } from "vitest";
-import { activeSpaceEnv, findActiveSpace, freshTabCwd } from "./activeSpace";
+import {
+  canBootWorkspaceEnvironment,
+  findActiveSpace,
+  initialWorkspaceRoot,
+} from "./activeSpace";
 import type { SpaceMeta } from "./store";
 
 function space(over: Partial<SpaceMeta>): SpaceMeta {
@@ -8,7 +11,6 @@ function space(over: Partial<SpaceMeta>): SpaceMeta {
     id: "s1",
     name: "Space",
     root: null,
-    env: { kind: "local" },
     createdAt: 0,
     updatedAt: 0,
     ...over,
@@ -32,48 +34,75 @@ describe("findActiveSpace", () => {
   });
 });
 
-describe("activeSpaceEnv", () => {
-  it("restores the active space's WSL env", () => {
-    const spaces = [
-      space({ id: "a", env: { kind: "local" } }),
-      space({ id: "b", env: { kind: "wsl", distro: "Ubuntu" } }),
-    ];
-    expect(activeSpaceEnv(spaces, "b")).toEqual({
-      kind: "wsl",
-      distro: "Ubuntu",
-    });
+describe("initialWorkspaceRoot", () => {
+  it("uses an explicit launch directory only for Local", () => {
+    expect(
+      initialWorkspaceRoot(
+        { kind: "local" },
+        "C:/work",
+        "C:/Users/me",
+      ),
+    ).toBe("C:/work");
+    expect(
+      initialWorkspaceRoot(
+        { kind: "wsl", distro: "Ubuntu" },
+        "C:/work",
+        "/home/aj",
+      ),
+    ).toBe("/home/aj");
   });
 
-  it("restores the env of the fallback space when activeId is missing", () => {
-    const spaces = [space({ id: "a", env: { kind: "wsl", distro: "Debian" } })];
-    expect(activeSpaceEnv(spaces, null)).toEqual({
-      kind: "wsl",
-      distro: "Debian",
-    });
+  it("uses the resolved environment home for fresh Local, WSL, and SSH", () => {
+    expect(
+      initialWorkspaceRoot({ kind: "local" }, null, "C:/Users/me"),
+    ).toBe("C:/Users/me");
+    expect(
+      initialWorkspaceRoot(
+        { kind: "wsl", distro: "Ubuntu" },
+        null,
+        "/home/aj",
+      ),
+    ).toBe("/home/aj");
+    expect(
+      initialWorkspaceRoot(
+        { kind: "ssh", profileId: "server" },
+        null,
+        "/home/remote",
+      ),
+    ).toBe("/home/remote");
   });
 
-  it("defaults to local when there are no spaces", () => {
-    expect(activeSpaceEnv([], "a")).toEqual({ kind: "local" });
+  it("does not leak a host path when a remote home is unavailable", () => {
+    expect(
+      initialWorkspaceRoot(
+        { kind: "wsl", distro: "Ubuntu" },
+        "C:/work",
+        null,
+      ),
+    ).toBeNull();
   });
 });
 
-describe("freshTabCwd", () => {
-  const wsl: WorkspaceEnv = { kind: "wsl", distro: "Ubuntu" };
-  const local: WorkspaceEnv = { kind: "local" };
-
-  it("prefers the restored home for any env", () => {
-    expect(freshTabCwd(wsl, "/home/aj", "C:/Users/me", "C:/Users/me")).toBe(
-      "/home/aj",
-    );
+describe("canBootWorkspaceEnvironment", () => {
+  it("keeps WSL and SSH terminals cold until their remote home resolves", () => {
+    expect(
+      canBootWorkspaceEnvironment({ kind: "wsl", distro: "Ubuntu" }, null),
+    ).toBe(false);
+    expect(
+      canBootWorkspaceEnvironment(
+        { kind: "ssh", profileId: "server" },
+        null,
+      ),
+    ).toBe(false);
+    expect(
+      canBootWorkspaceEnvironment(
+        { kind: "ssh", profileId: "server" },
+        "/home/remote",
+      ),
+    ).toBe(true);
   });
 
-  it("returns null for a WSL space when its home did not resolve", () => {
-    expect(freshTabCwd(wsl, null, "C:/Users/me", "C:/Users/me")).toBeNull();
-  });
-
-  it("falls back to the local launch cwd then home for a local space", () => {
-    expect(freshTabCwd(local, null, "C:/work", "C:/Users/me")).toBe("C:/work");
-    expect(freshTabCwd(local, null, null, "C:/Users/me")).toBe("C:/Users/me");
-    expect(freshTabCwd(local, null, null, null)).toBeNull();
+  it("allows Local to use the process default when home lookup fails", () => {
+    expect(canBootWorkspaceEnvironment({ kind: "local" }, null)).toBe(true);
   });
 });

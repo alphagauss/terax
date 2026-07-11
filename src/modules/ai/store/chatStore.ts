@@ -149,7 +149,7 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   activeSessionRevision: number;
-  readOnlySessionIds: Record<string, true>;
+  runLockSessionIds: Record<string, true>;
   sessionSyncError: string | null;
   hydrateSessions: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -157,7 +157,6 @@ type StoreState = {
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
-  renameSession: (id: string, title: string) => void;
   publishMessages: (id: string, messages: UIMessage[]) => Promise<void>;
 };
 
@@ -190,8 +189,6 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
 export const seedMessages = new Map<string, UIMessage[]>();
-
-const heldRunLocks = new Set<string>();
 
 async function seedSnapshot(id: string): Promise<void> {
   const snapshot = await readSession(id);
@@ -287,30 +284,41 @@ export const useChatStore = create<StoreState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   activeSessionRevision: 0,
-  readOnlySessionIds: {},
+  runLockSessionIds: {},
   sessionSyncError: null,
 
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
+    let migrationError: string | null = null;
     try {
       await migrateLegacySessions();
+    } catch (error) {
+      migrationError = String(error);
+    }
+    try {
       const sessions = await listSessions();
       const savedActive = getWorkspaceValue<string>("ai:activeSessionId");
-      const restored = sessions.find((session) => session.id === savedActive);
-      const freshId = newSessionId();
-      const fresh: SessionMeta = {
-        id: freshId,
-        title: "New chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
+      const restored =
+        sessions.find((session) => session.id === savedActive) ??
+        sessions[0] ??
+        null;
+      const fresh: SessionMeta | null = restored
+        ? null
+        : {
+            id: newSessionId(),
+            title: "New chat",
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+      const activeId = restored?.id ?? fresh?.id ?? null;
       if (restored) await seedSnapshot(restored.id);
+      if (activeId) await setWorkspaceValue("ai:activeSessionId", activeId);
       set({
-        sessions: restored ? sessions : [fresh, ...sessions],
-        activeSessionId: restored?.id ?? freshId,
+        sessions: fresh ? [fresh, ...sessions] : sessions,
+        activeSessionId: activeId,
         panelOpen: getWorkspaceValue<boolean>("ai:panelOpen") ?? false,
         sessionsHydrated: true,
-        sessionSyncError: null,
+        sessionSyncError: migrationError,
       });
     } catch (error) {
       set({
@@ -325,17 +333,28 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const disk = await listSessions();
       const local = get().sessions;
       const diskById = new Map(disk.map((session) => [session.id, session]));
-      const merged = mergeSessionMetadata(local, disk, heldRunLocks);
+      const runLocks = new Set(Object.keys(get().runLockSessionIds));
+
+      for (const session of local) {
+        if (!session.fingerprint || runLocks.has(session.id)) continue;
+        const after = diskById.get(session.id);
+        if (after?.fingerprint === session.fingerprint) continue;
+        await chats.get(session.id)?.stop();
+        chats.delete(session.id);
+        seedMessages.delete(session.id);
+        await useTodosStore.getState().clearSession(session.id);
+      }
+
+      const merged = mergeSessionMetadata(local, disk, runLocks);
 
       const activeId = get().activeSessionId;
-      if (activeId && !heldRunLocks.has(activeId)) {
+      let activeChanged = false;
+      if (activeId && !runLocks.has(activeId)) {
         const before = local.find((session) => session.id === activeId);
         const after = diskById.get(activeId);
         if (after && before?.fingerprint !== after.fingerprint) {
-          await chats.get(activeId)?.stop();
-          chats.delete(activeId);
           await seedSnapshot(activeId);
-          set({ activeSessionRevision: get().activeSessionRevision + 1 });
+          activeChanged = true;
         }
       }
 
@@ -352,14 +371,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
           },
         ];
         nextActive = id;
-      } else if (activeId && !next.some((session) => session.id === activeId)) {
-        chats.delete(activeId);
-        seedMessages.delete(activeId);
+      } else if (!activeId || !next.some((session) => session.id === activeId)) {
         nextActive = next[0].id;
+      }
+
+      if (nextActive && nextActive !== activeId) {
+        const nextMeta = next.find((session) => session.id === nextActive);
+        if (nextMeta?.fingerprint) await seedSnapshot(nextActive);
+        await setWorkspaceValue("ai:activeSessionId", nextActive);
+        activeChanged = true;
       }
       set({
         sessions: next,
         activeSessionId: nextActive,
+        activeSessionRevision: activeChanged
+          ? get().activeSessionRevision + 1
+          : get().activeSessionRevision,
         sessionSyncError: null,
       });
     } catch (error) {
@@ -368,22 +395,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   ensureSessionRunLock: async (id) => {
-    if (heldRunLocks.has(id)) return true;
+    if (get().runLockSessionIds[id]) return true;
     const acquired = await acquireSessionRun(id);
     if (acquired) {
-      heldRunLocks.add(id);
-      const next = { ...get().readOnlySessionIds };
-      delete next[id];
-      set({ readOnlySessionIds: next });
+      set({
+        runLockSessionIds: { ...get().runLockSessionIds, [id]: true },
+        sessionSyncError: null,
+      });
       return true;
     }
-    set({
-      readOnlySessionIds: { ...get().readOnlySessionIds, [id]: true },
-    });
     return false;
   },
 
   newSession: () => {
+    const activeId = get().activeSessionId;
+    if (activeId && get().runLockSessionIds[activeId]) return activeId;
     const id = newSessionId();
     const meta: SessionMeta = {
       id,
@@ -400,6 +426,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
+    const activeId = get().activeSessionId;
+    if (activeId && get().runLockSessionIds[activeId]) return;
 
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
@@ -417,6 +445,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   deleteSession: (id) => {
+    if (Object.keys(get().runLockSessionIds).length > 0) return;
     void (async () => {
       try {
         await deleteSessionFile(id);
@@ -438,6 +467,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
         }
         const wasActive = get().activeSessionId === id;
         const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
+        const nextMeta = remaining.find((session) => session.id === nextActive);
+        if (
+          wasActive &&
+          nextMeta?.fingerprint &&
+          !chats.has(nextMeta.id) &&
+          !seedMessages.has(nextMeta.id)
+        ) {
+          try {
+            await seedSnapshot(nextMeta.id);
+          } catch (error) {
+            set({ sessionSyncError: String(error) });
+          }
+        }
         set({ sessions: remaining, activeSessionId: nextActive });
         if (wasActive) await setWorkspaceValue("ai:activeSessionId", nextActive);
       } catch (error) {
@@ -446,34 +488,17 @@ export const useChatStore = create<StoreState>((set, get) => ({
     })();
   },
 
-  renameSession: (id, title) => {
-    const current = get().sessions.find((session) => session.id === id);
-    const next = get().sessions.map((s) =>
-      s.id === id ? { ...s, title, updatedAt: Date.now() } : s,
-    );
-    set({ sessions: next });
-    if (!current?.fingerprint) return;
-    void (async () => {
-      try {
-        const snapshot = await readSession(id);
-        await publishSession({ ...snapshot, title, updatedAt: Date.now() });
-        await get().refreshSessions();
-      } catch (error) {
-        set({
-          sessions: get().sessions.map((session) =>
-            session.id === id && current ? current : session,
-          ),
-          sessionSyncError: String(error),
-        });
-      }
-    })();
-  },
-
   publishMessages: async (id, messages) => {
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
-    if (messages.length === 0 && meta.title === "New chat") return;
+    if (messages.length === 0 && meta.title === "New chat") {
+      await releaseSessionRun(id);
+      const runLockSessionIds = { ...get().runLockSessionIds };
+      delete runLockSessionIds[id];
+      set({ runLockSessionIds });
+      return;
+    }
     const updatedAt = Date.now();
     const title =
       !meta.title || meta.title === "New chat"
@@ -488,18 +513,45 @@ export const useChatStore = create<StoreState>((set, get) => ({
       messages,
       todos: useTodosStore.getState().bySession[id] ?? [],
     });
+    await releaseSessionRun(id);
+    const runLockSessionIds = { ...get().runLockSessionIds };
+    delete runLockSessionIds[id];
     set({
       sessions: get().sessions.map((session) =>
         session.id === id
           ? { ...session, title, updatedAt, fingerprint: "published" }
           : session,
       ),
+      runLockSessionIds,
     });
-    heldRunLocks.delete(id);
-    await releaseSessionRun(id);
     await get().refreshSessions();
   },
 }));
+
+function hasPendingApproval(messages: UIMessage[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.parts.some(
+        (part) => (part as { state?: string }).state === "approval-requested",
+      ),
+  );
+}
+
+export async function flushCompletedSessionRuns(): Promise<void> {
+  const state = useChatStore.getState();
+  for (const id of Object.keys(state.runLockSessionIds)) {
+    const chat = chats.get(id);
+    if (!chat) continue;
+    if (chat.status === "submitted" || chat.status === "streaming") continue;
+    if (hasPendingApproval(chat.messages)) continue;
+    try {
+      await useChatStore.getState().publishMessages(id, chat.messages);
+    } catch (error) {
+      useChatStore.setState({ sessionSyncError: String(error) });
+    }
+  }
+}
 
 export function getAgentMeta(): AgentMeta {
   return useChatStore.getState().agentMeta;

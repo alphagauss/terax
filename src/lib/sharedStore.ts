@@ -30,32 +30,77 @@ export function deleteSharedStoreKey(
   return invoke("shared_store_delete", { store, key });
 }
 
-export function sharedStoreRevision(store: SharedStoreName): Promise<string> {
+function sharedStoreRevision(store: SharedStoreName): Promise<string> {
   return invoke("shared_store_revision", { store });
 }
 
+const REVISION_DEBOUNCE_MS = 100;
+
 export async function onSharedStoreChange(
   store: SharedStoreName,
-  callback: () => void,
+  callback: () => void | Promise<void>,
 ): Promise<UnlistenFn> {
-  let lastRevision = await sharedStoreRevision(store).catch(() => "");
-  const check = async () => {
-    const next = await sharedStoreRevision(store).catch(() => lastRevision);
-    if (next === lastRevision) return;
-    lastRevision = next;
-    callback();
+  let lastRevision: string | null = null;
+  let timer: number | null = null;
+  let checking = false;
+  let pending = false;
+  let disposed = false;
+
+  const check = async (force = false) => {
+    if (disposed) return;
+    if (checking) {
+      pending = true;
+      return;
+    }
+    checking = true;
+    try {
+      const next = await sharedStoreRevision(store).catch(() => lastRevision);
+      if (next === null) return;
+      if (!force && next === lastRevision) return;
+      await callback();
+      lastRevision = next;
+    } finally {
+      checking = false;
+      if (pending && !disposed) {
+        pending = false;
+        void check().catch((error) => {
+          console.error(`[terax] ${store} shared-store refresh failed:`, error);
+        });
+      }
+    }
   };
-  const unlisten = await listen<{ store: string; revision: string }>(
+
+  const schedule = () => {
+    if (disposed) return;
+    if (timer !== null) window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = null;
+      void check().catch((error) => {
+        console.error(`[terax] ${store} shared-store refresh failed:`, error);
+      });
+    }, REVISION_DEBOUNCE_MS);
+  };
+
+  const unlisten = await listen<{ store: string }>(
     "terax://shared-store-changed",
     (event) => {
-      if (event.payload.store !== store) return;
-      lastRevision = event.payload.revision;
-      callback();
+      if (event.payload.store === store) schedule();
     },
   );
-  window.addEventListener("focus", check);
-  return () => {
+  window.addEventListener("focus", schedule);
+
+  const dispose = () => {
+    disposed = true;
+    if (timer !== null) window.clearTimeout(timer);
     unlisten();
-    window.removeEventListener("focus", check);
+    window.removeEventListener("focus", schedule);
   };
+
+  // The listener is active before the baseline read. Force one reload so a
+  // write between a caller's initial read and this subscription cannot vanish.
+  await check(true).catch((error) => {
+    console.error(`[terax] ${store} shared-store refresh failed:`, error);
+  });
+
+  return dispose;
 }

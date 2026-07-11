@@ -3,14 +3,12 @@ import {
   getWorkspaceEntries,
   setWorkspaceValue,
 } from "@/modules/workspace-process";
-import type { WorkspaceEnv } from "@/modules/workspace";
 import type { SerializedTab } from "./serialize";
 
 export type SpaceMeta = {
   id: string;
   name: string;
   root: string | null;
-  env: WorkspaceEnv;
   color?: number;
   createdAt: number;
   updatedAt: number;
@@ -34,7 +32,13 @@ export type LoadedSpaces = {
 
 export async function loadAll(): Promise<LoadedSpaces> {
   const entries = getWorkspaceEntries();
-  const spaces = (entries.get(KEY_SPACES) as SpaceMeta[] | undefined) ?? [];
+  const stored = (entries.get(KEY_SPACES) as
+    | (SpaceMeta & { env?: unknown })[]
+    | undefined) ?? [];
+  const spaces = stored.map(({ env: _legacyEnv, ...space }) => space);
+  if (stored.some((space) => "env" in space)) {
+    await setWorkspaceValue(KEY_SPACES, spaces);
+  }
   const activeId =
     (entries.get(KEY_ACTIVE) as string | null | undefined) ?? null;
   const states = new Map<string, SpaceState>();
