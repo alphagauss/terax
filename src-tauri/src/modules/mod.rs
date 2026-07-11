@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod ai_sessions;
+pub mod app_data;
 pub mod fs;
 pub mod git;
 pub mod history;

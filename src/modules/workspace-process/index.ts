@@ -8,8 +8,7 @@ export type WorkspaceBootstrap = {
   id: string;
   env: WorkspaceEnv;
   launchDir: string | null;
-  stateFilename: string;
-  windowStateFilename: string;
+  statePath: string;
 };
 
 export type WorkspacePolicy = "fresh" | "recent";
@@ -20,7 +19,7 @@ const cache = new Map<string, unknown>();
 
 export async function initializeWorkspaceProcess(): Promise<void> {
   bootstrap = await invoke<WorkspaceBootstrap>("get_workspace_bootstrap");
-  store = new LazyStore(bootstrap.stateFilename, {
+  store = new LazyStore(bootstrap.statePath, {
     defaults: {},
     autoSave: 200,
   });

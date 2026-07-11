@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
@@ -23,9 +22,8 @@ pub struct RemoteManager {
 
 impl Default for RemoteManager {
     fn default() -> Self {
-        let path = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("terax")
+        let path = crate::modules::app_data::directory(crate::modules::app_data::Directory::Ssh)
+            .expect("Terax SSH data directory is unavailable")
             .join("known_hosts");
         Self {
             workspaces: RwLock::new(HashMap::new()),

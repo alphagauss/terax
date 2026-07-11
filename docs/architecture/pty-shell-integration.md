@@ -37,9 +37,9 @@ Integration scripts live in `src-tauri/src/modules/pty/scripts/`:
 
 - `zshenv.zsh`, `zprofile.zsh`, `zlogin.zsh`, `zshrc.zsh` for zsh
 - `bashrc.bash` for bash
-- `init.fish` for fish, installed to `~/.config/fish/conf.d/terax.fish`
+- `init.fish` for fish, stored under `~/.terax/shell-integration/fish/` and explicitly sourced only by fish instances started by Terax
 
-Zsh is launched with `ZDOTDIR` pointing at a temp directory that sources our scripts and then the user's real configs. Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish uses `conf.d` so no user file is replaced.
+Zsh is launched with `ZDOTDIR` pointing at Terax's integration directory, which sources our scripts and then the user's real configs. Bash uses `--rcfile` with a wrapper that sources the user's `~/.bashrc` after Terax's. Fish receives the generated script path through `TERAX_FISH_INIT` and sources it with `-C`, so no user configuration file is changed.
 
 All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Terax can track cwd and detect command boundaries without parsing the user's prompt.
 

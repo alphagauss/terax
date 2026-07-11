@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 const STORES: &[(&str, &str)] = &[
     ("settings", "terax-settings.json"),
@@ -37,8 +37,8 @@ fn filename(store: &str) -> Result<&'static str, String> {
         .ok_or_else(|| format!("shared store is not allowed: {store}"))
 }
 
-fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|error| error.to_string())
+fn store_dir() -> Result<PathBuf, String> {
+    crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)
 }
 
 fn store_path(root: &Path, store: &str) -> Result<PathBuf, String> {
@@ -79,7 +79,7 @@ fn mutate(
 }
 
 pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
-    let root = app_data(app)?;
+    let root = store_dir()?;
     mutate(&root, "keys-epoch", |map| {
         map.insert(
             "epoch".to_string(),
@@ -111,7 +111,7 @@ fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String>
 
 impl SharedStoreState {
     pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let root = app_data(app)?;
+        let root = store_dir()?;
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         let handle = app.clone();
         let watched_root = root.clone();
@@ -142,8 +142,8 @@ impl SharedStoreState {
 }
 
 #[tauri::command]
-pub fn shared_store_read(app: AppHandle, store: String) -> Result<Map<String, Value>, String> {
-    read_map(&store_path(&app_data(&app)?, &store)?)
+pub fn shared_store_read(store: String) -> Result<Map<String, Value>, String> {
+    read_map(&store_path(&store_dir()?, &store)?)
 }
 
 #[tauri::command]
@@ -156,7 +156,7 @@ pub fn shared_store_set(
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
-    let root = app_data(&app)?;
+    let root = store_dir()?;
     mutate(&root, &store, |map| {
         map.insert(key, value);
     })?;
@@ -168,7 +168,7 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
-    let root = app_data(&app)?;
+    let root = store_dir()?;
     mutate(&root, &store, |map| {
         map.remove(&key);
     })?;
@@ -176,8 +176,8 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
 }
 
 #[tauri::command]
-pub fn shared_store_revision(app: AppHandle, store: String) -> Result<String, String> {
-    Ok(revision(&store_path(&app_data(&app)?, &store)?))
+pub fn shared_store_revision(store: String) -> Result<String, String> {
+    Ok(revision(&store_path(&store_dir()?, &store)?))
 }
 
 #[cfg(test)]

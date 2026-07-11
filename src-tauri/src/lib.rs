@@ -1,8 +1,8 @@
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, fs, git, history, lsp, net, pty, remote, secrets, shared_store, shell,
-    workspace, workspace_process,
+    agent, ai_sessions, app_data, fs, git, history, lsp, net, pty, remote, secrets, shared_store,
+    shell, workspace, workspace_process,
 };
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -119,16 +119,34 @@ pub fn run() {
         eprintln!("Terax startup error: {error}");
         std::process::exit(2);
     });
-    let app_data = dirs::data_dir()
-        .expect("Terax startup error: application data directory is unavailable")
-        .join("app.crynta.terax");
+    let workspace_dir =
+        app_data::directory(app_data::Directory::Workspaces).unwrap_or_else(|error| {
+            eprintln!("Terax startup error: {error}");
+            std::process::exit(2);
+        });
     let workspace_process =
-        workspace_process::initialize(&app_data, request).unwrap_or_else(|error| {
+        workspace_process::initialize(&workspace_dir, request).unwrap_or_else(|error| {
             eprintln!("Terax startup error: {error}");
             std::process::exit(2);
         });
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
-    let window_state_filename = workspace_process.bootstrap().window_state_filename.clone();
+    let window_state_path = app_data::directory(app_data::Directory::WindowState)
+        .map(|directory| {
+            directory.join(format!(
+                "terax-window-state.{}.json",
+                workspace_process.bootstrap().id
+            ))
+        })
+        .unwrap_or_else(|error| {
+            eprintln!("Terax startup error: {error}");
+            std::process::exit(2);
+        });
+    if let Some(parent) = window_state_path.parent() {
+        std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+            eprintln!("Terax startup error: create {}: {error}", parent.display());
+            std::process::exit(2);
+        });
+    }
     workspace::init_launch_cwd(cli_dir.as_deref());
 
     let builder = tauri::Builder::default();
@@ -141,7 +159,7 @@ pub fn run() {
         // Windows/Linux.
         .plugin(
             tauri_plugin_window_state::Builder::new()
-                .with_filename(window_state_filename)
+                .with_filename(window_state_path.to_string_lossy().into_owned())
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
         )
@@ -152,6 +170,18 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
+                .clear_targets()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Folder {
+                        path: app_data::directory(app_data::Directory::Logs).unwrap_or_else(
+                            |error| {
+                                eprintln!("Terax startup error: {error}");
+                                std::process::exit(2);
+                            },
+                        ),
+                        file_name: None,
+                    },
+                ))
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())

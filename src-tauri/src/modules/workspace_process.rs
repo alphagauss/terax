@@ -28,8 +28,7 @@ pub struct WorkspaceBootstrap {
     pub id: String,
     pub env: WorkspaceEnv,
     pub launch_dir: Option<String>,
-    pub state_filename: String,
-    pub window_state_filename: String,
+    pub state_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -275,7 +274,7 @@ fn canonical_launch_dir(path: Option<PathBuf>) -> Result<Option<String>, String>
     Ok(Some(crate::modules::fs::to_canon(&canonical)))
 }
 
-fn validate_environment(root: &Path, env: &WorkspaceEnv) -> Result<(), String> {
+fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
     match env {
         WorkspaceEnv::Local => Ok(()),
         WorkspaceEnv::Wsl { distro } => {
@@ -296,7 +295,9 @@ fn validate_environment(root: &Path, env: &WorkspaceEnv) -> Result<(), String> {
             }
         }
         WorkspaceEnv::Ssh { profile_id } => {
-            let path = root.join("terax-ssh-profiles.json");
+            let path =
+                crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)?
+                    .join("terax-ssh-profiles.json");
             let value: Value = serde_json::from_slice(
                 &fs::read(&path)
                     .map_err(|e| format!("cannot read SSH profiles {}: {e}", path.display()))?,
@@ -316,7 +317,7 @@ fn validate_environment(root: &Path, env: &WorkspaceEnv) -> Result<(), String> {
 
 pub fn initialize(root: &Path, request: LaunchRequest) -> Result<WorkspaceProcessState, String> {
     fs::create_dir_all(root).map_err(|e| e.to_string())?;
-    validate_environment(root, &request.env)?;
+    validate_environment(&request.env)?;
     let launch_dir = canonical_launch_dir(request.launch_dir)?;
     let selected = if let Some(id) = request.workspace_id {
         let metadata = read_metadata(&root.join(state_filename(id)), id)?;
@@ -379,14 +380,14 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<WorkspaceProces
     };
     metadata.last_opened_at = timestamp;
     write_metadata(root, &metadata)?;
+    let state_path = root.join(state_filename(id));
     Ok(WorkspaceProcessState {
         bootstrap: WorkspaceBootstrap {
             schema_version: SCHEMA_VERSION,
             id: id.to_string(),
             env: request.env,
             launch_dir,
-            state_filename: state_filename(id),
-            window_state_filename: format!("terax-window-state.{id}.json"),
+            state_path: state_path.to_string_lossy().into_owned(),
         },
         _lock: lock,
     })
@@ -504,6 +505,11 @@ mod tests {
         let recent = parse_args(Vec::<String>::new()).unwrap();
         let first = initialize(root.path(), recent.clone()).unwrap();
         let first_id = first.bootstrap.id.clone();
+        assert_eq!(
+            PathBuf::from(&first.bootstrap.state_path),
+            root.path()
+                .join(state_filename(Uuid::parse_str(&first_id).unwrap()))
+        );
         drop(first);
         let restored = initialize(root.path(), recent).unwrap();
         assert_eq!(restored.bootstrap.id, first_id);

@@ -16,8 +16,8 @@ const ZLOGIN_SCRIPT: &str = include_str!("scripts/zlogin.zsh");
 const ZSHRC_SCRIPT: &str = include_str!("scripts/zshrc.zsh");
 #[cfg(windows)]
 const FISH_INIT_SCRIPT: &str = include_str!("scripts/init.fish");
-const FISH_REINSTALL_PROMPT: &str =
-    "functions -q __terax_install_prompt; and __terax_install_prompt";
+const FISH_INIT_COMMAND: &str =
+    "source \"$TERAX_FISH_INIT\"; functions -q __terax_install_prompt; and __terax_install_prompt";
 
 #[cfg(windows)]
 fn bashrc_script() -> &'static str {
@@ -325,8 +325,9 @@ mod unix {
                 cmd.arg("-i");
             }
             Shell::Fish => {
-                if let Err(e) = prepare_fish_conf_d() {
-                    log::warn!("fish shell integration disabled: {e}");
+                match prepare_fish_init() {
+                    Ok(init) => cmd.env("TERAX_FISH_INIT", init),
+                    Err(e) => log::warn!("fish shell integration disabled: {e}"),
                 }
                 // fish 4.0+ writes its own OSC 133 A/B; ours would double it.
                 cmd.env("fish_features", "no-mark-prompt");
@@ -335,7 +336,7 @@ mod unix {
                 // framework prompt (starship etc.) loaded there can't override
                 // the markers and break cwd tracking.
                 cmd.arg("-C");
-                cmd.arg(super::FISH_REINSTALL_PROMPT);
+                cmd.arg(super::FISH_INIT_COMMAND);
             }
             Shell::Other => {
                 log::info!(
@@ -347,8 +348,9 @@ mod unix {
     }
 
     fn integration_root() -> Result<PathBuf, String> {
-        let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-        let root = home.join(".cache").join("terax").join("shell-integration");
+        let root = crate::modules::app_data::directory(
+            crate::modules::app_data::Directory::ShellIntegration,
+        )?;
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
     }
@@ -371,12 +373,12 @@ mod unix {
         Ok(rc)
     }
 
-    fn prepare_fish_conf_d() -> Result<(), String> {
-        let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-        let dir = home.join(".config").join("fish").join("conf.d");
+    fn prepare_fish_init() -> Result<PathBuf, String> {
+        let dir = integration_root()?.join("fish");
         fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-        write_if_changed(&dir.join("terax.fish"), FISH_INIT)?;
-        Ok(())
+        let init = dir.join("terax.fish");
+        write_if_changed(&init, FISH_INIT)?;
+        Ok(init)
     }
 
     fn write_if_changed(path: &Path, content: &str) -> Result<(), String> {
@@ -435,22 +437,10 @@ mod unix {
         }
 
         #[test]
-        fn builds_unix_fish_launch_with_post_config_rewrap() {
-            let mut cmd = CommandBuilder::new("/usr/bin/fish");
-            apply_shell_init(&mut cmd, &Shell::Fish, "/usr/bin/fish");
-            let argv: Vec<_> = cmd
-                .get_argv()
-                .iter()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect();
+        fn fish_init_command_loads_the_terax_script_before_rewrapping() {
             assert_eq!(
-                argv,
-                vec![
-                    "/usr/bin/fish".to_string(),
-                    "-i".to_string(),
-                    "-C".to_string(),
-                    super::super::FISH_REINSTALL_PROMPT.to_string(),
-                ]
+                super::super::FISH_INIT_COMMAND,
+                "source \"$TERAX_FISH_INIT\"; functions -q __terax_install_prompt; and __terax_install_prompt"
             );
         }
     }
@@ -495,7 +485,9 @@ mod windows {
         Bash {
             rcfile: String,
         },
-        Fish,
+        Fish {
+            init: String,
+        },
         None,
     }
 
@@ -601,8 +593,8 @@ mod windows {
                     WslShellIntegration::None
                 }
             },
-            ShellKind::Fish => match prepare_wsl_fish_conf_d(&distro) {
-                Ok(()) => WslShellIntegration::Fish,
+            ShellKind::Fish => match prepare_wsl_fish_init(&distro) {
+                Ok(init) => WslShellIntegration::Fish { init },
                 Err(e) => {
                     log::warn!("WSL fish shell integration disabled for {distro}: {e}");
                     WslShellIntegration::None
@@ -671,13 +663,14 @@ mod windows {
                 args.push(rcfile);
                 args.push("-i".to_string());
             }
-            (ShellKind::Fish, WslShellIntegration::Fish) => {
+            (ShellKind::Fish, WslShellIntegration::Fish { init }) => {
                 args.push("env".to_string());
                 args.push("fish_features=no-mark-prompt".to_string());
+                args.push(format!("TERAX_FISH_INIT={init}"));
                 args.push(shell_path.to_string());
                 args.push("-i".to_string());
                 args.push("-C".to_string());
-                args.push(super::FISH_REINSTALL_PROMPT.to_string());
+                args.push(super::FISH_INIT_COMMAND.to_string());
             }
             (ShellKind::Zsh, WslShellIntegration::None) => {
                 args.push(shell_path.to_string());
@@ -708,7 +701,7 @@ mod windows {
     fn prepare_wsl_integration_dir(distro: &str, shell: &str) -> Result<(String, PathBuf), String> {
         let home = crate::modules::workspace::wsl_home(distro.to_string())?;
         let linux_dir = format!(
-            "{}/.cache/terax/shell-integration/{shell}",
+            "{}/.terax/shell-integration/{shell}",
             home.trim_end_matches('/')
         );
         let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
@@ -750,20 +743,19 @@ mod windows {
         Ok(linux_rc)
     }
 
-    fn prepare_wsl_fish_conf_d(distro: &str) -> Result<(), String> {
-        let home = crate::modules::workspace::wsl_home(distro.to_string())?;
-        let linux_dir = format!("{}/.config/fish/conf.d", home.trim_end_matches('/'));
-        let unc_dir = crate::modules::workspace::wsl_path_to_unc(distro, &linux_dir);
-        fs::create_dir_all(&unc_dir).map_err(|e| format!("create {}: {e}", unc_dir.display()))?;
+    fn prepare_wsl_fish_init(distro: &str) -> Result<String, String> {
+        let (linux_dir, unc_dir) = prepare_wsl_integration_dir(distro, "fish")?;
+        let linux_file = format!("{linux_dir}/terax.fish");
         let unc_file = unc_dir.join("terax.fish");
         let content = normalize_script(super::fish_init_script());
         write_if_changed(&unc_file, &content)?;
-        Ok(())
+        Ok(linux_file)
     }
 
     fn integration_root() -> Result<PathBuf, String> {
-        let home = dirs::home_dir().ok_or_else(|| "could not resolve home dir".to_string())?;
-        let root = home.join(".cache").join("terax").join("shell-integration");
+        let root = crate::modules::app_data::directory(
+            crate::modules::app_data::Directory::ShellIntegration,
+        )?;
         fs::create_dir_all(&root).map_err(|e| format!("create {}: {e}", root.display()))?;
         Ok(root)
     }
@@ -874,7 +866,7 @@ mod windows {
                 "/usr/bin/zsh",
                 ShellKind::Zsh,
                 WslShellIntegration::Zsh {
-                    zdotdir: "/home/vinicios/.cache/terax/shell-integration/zsh".into(),
+                    zdotdir: "/home/vinicios/.terax/shell-integration/zsh".into(),
                     user_zdotdir: None,
                 },
             );
@@ -887,7 +879,7 @@ mod windows {
                     "/home/vinicios/repo".to_string(),
                     "--exec".to_string(),
                     "env".to_string(),
-                    "ZDOTDIR=/home/vinicios/.cache/terax/shell-integration/zsh".to_string(),
+                    "ZDOTDIR=/home/vinicios/.terax/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
                 ]
@@ -902,7 +894,7 @@ mod windows {
                 "/usr/bin/zsh",
                 ShellKind::Zsh,
                 WslShellIntegration::Zsh {
-                    zdotdir: "/home/vinicios/.cache/terax/shell-integration/zsh".into(),
+                    zdotdir: "/home/vinicios/.terax/shell-integration/zsh".into(),
                     user_zdotdir: Some("/home/vinicios/.config/zsh".into()),
                 },
             );
@@ -916,7 +908,7 @@ mod windows {
                     "--exec".to_string(),
                     "env".to_string(),
                     "TERAX_USER_ZDOTDIR=/home/vinicios/.config/zsh".to_string(),
-                    "ZDOTDIR=/home/vinicios/.cache/terax/shell-integration/zsh".to_string(),
+                    "ZDOTDIR=/home/vinicios/.terax/shell-integration/zsh".to_string(),
                     "/usr/bin/zsh".to_string(),
                     "-l".to_string(),
                 ]
@@ -954,7 +946,7 @@ mod windows {
                 "/bin/bash",
                 ShellKind::Bash,
                 WslShellIntegration::Bash {
-                    rcfile: "/home/vinicios/.cache/terax/shell-integration/bash/bashrc".into(),
+                    rcfile: "/home/vinicios/.terax/shell-integration/bash/bashrc".into(),
                 },
             );
             assert_eq!(
@@ -967,7 +959,7 @@ mod windows {
                     "--exec".to_string(),
                     "/bin/bash".to_string(),
                     "--rcfile".to_string(),
-                    "/home/vinicios/.cache/terax/shell-integration/bash/bashrc".to_string(),
+                    "/home/vinicios/.terax/shell-integration/bash/bashrc".to_string(),
                     "-i".to_string(),
                 ]
             );
@@ -980,7 +972,9 @@ mod windows {
                 "Ubuntu",
                 "/usr/bin/fish",
                 ShellKind::Fish,
-                WslShellIntegration::Fish,
+                WslShellIntegration::Fish {
+                    init: "/home/vinicios/.terax/shell-integration/fish/terax.fish".into(),
+                },
             );
             assert_eq!(
                 spec.args,
@@ -992,10 +986,12 @@ mod windows {
                     "--exec".to_string(),
                     "env".to_string(),
                     "fish_features=no-mark-prompt".to_string(),
+                    "TERAX_FISH_INIT=/home/vinicios/.terax/shell-integration/fish/terax.fish"
+                        .to_string(),
                     "/usr/bin/fish".to_string(),
                     "-i".to_string(),
                     "-C".to_string(),
-                    super::super::FISH_REINSTALL_PROMPT.to_string(),
+                    super::super::FISH_INIT_COMMAND.to_string(),
                 ]
             );
         }

@@ -8,7 +8,7 @@ use std::sync::Mutex;
 #[cfg(test)]
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 use uuid::Uuid;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -49,12 +49,8 @@ fn strict_uuid(id: &str) -> Result<Uuid, String> {
     Ok(parsed)
 }
 
-fn sessions_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("sessions"))
+fn sessions_dir() -> Result<PathBuf, String> {
+    crate::modules::app_data::directory(crate::modules::app_data::Directory::Sessions)
 }
 
 fn snapshot_path(root: &Path, id: Uuid) -> PathBuf {
@@ -155,13 +151,13 @@ fn list_sessions(root: &Path) -> Result<Vec<SessionMetadata>, String> {
 }
 
 #[tauri::command]
-pub fn ai_sessions_list(app: AppHandle) -> Result<Vec<SessionMetadata>, String> {
-    list_sessions(&sessions_dir(&app)?)
+pub fn ai_sessions_list() -> Result<Vec<SessionMetadata>, String> {
+    list_sessions(&sessions_dir()?)
 }
 
 #[tauri::command]
-pub fn ai_session_read(app: AppHandle, id: String) -> Result<SessionSnapshot, String> {
-    read_snapshot(&sessions_dir(&app)?, strict_uuid(&id)?)
+pub fn ai_session_read(id: String) -> Result<SessionSnapshot, String> {
+    read_snapshot(&sessions_dir()?, strict_uuid(&id)?)
 }
 
 fn publish_with_run_lock(
@@ -186,23 +182,18 @@ fn publish_with_run_lock(
 
 #[tauri::command]
 pub fn ai_session_publish(
-    app: AppHandle,
     state: State<'_, AiSessionsState>,
     snapshot: SessionSnapshot,
 ) -> Result<(), String> {
     let id = validate_snapshot(&snapshot)?;
-    let root = sessions_dir(&app)?;
+    let root = sessions_dir()?;
     publish_with_run_lock(&root, state.inner(), id, &snapshot)
 }
 
 #[tauri::command]
-pub fn ai_session_delete(
-    app: AppHandle,
-    state: State<'_, AiSessionsState>,
-    id: String,
-) -> Result<(), String> {
+pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
     let id = strict_uuid(&id)?;
-    let root = sessions_dir(&app)?;
+    let root = sessions_dir()?;
     if state
         .run_locks
         .lock()
@@ -224,7 +215,6 @@ pub fn ai_session_delete(
 
 #[tauri::command]
 pub fn ai_session_run_acquire(
-    app: AppHandle,
     state: State<'_, AiSessionsState>,
     id: String,
 ) -> Result<bool, String> {
@@ -236,7 +226,7 @@ pub fn ai_session_run_acquire(
     if locks.contains_key(&id) {
         return Ok(true);
     }
-    let root = sessions_dir(&app)?;
+    let root = sessions_dir()?;
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let Some(lock) =
         FileLock::try_acquire(&lock_path(&root, id)).map_err(|error| error.to_string())?

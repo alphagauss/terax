@@ -49,7 +49,7 @@ The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, 
 
 ## Sessions
 
-Conversations are organized into sessions. Completed history is stored as one atomic snapshot per UUID under the AppData `sessions/` directory (`src-tauri/src/modules/ai_sessions.rs` and `src/modules/ai/lib/sessions.ts`):
+Conversations are organized into sessions. Completed history is stored as one atomic snapshot per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs` and `src/modules/ai/lib/sessions.ts`):
 
 - `<uuid>.json`: title, timestamps, complete messages, and todos
 - `<uuid>.lock`: OS lock used while one process is running the session
