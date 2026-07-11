@@ -179,7 +179,7 @@ function termOptions() {
     fontSize: Math.max(4, Math.round(prefs.terminalFontSize * prefs.zoomLevel)),
     theme: buildTerminalTheme(),
     cursorBlink: false,
-    cursorStyle: "bar" as const,
+    cursorStyle: "block" as const,
     cursorInactiveStyle: "outline" as const,
     scrollback: prefs.terminalScrollback,
     allowProposedApi: true,
