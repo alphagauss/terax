@@ -404,16 +404,6 @@ const chrome = EditorView.theme({
       color: "var(--accent-foreground)",
     },
   },
-
-  ".cm-tooltip ::-webkit-scrollbar": { width: "8px", height: "8px" },
-  ".cm-tooltip ::-webkit-scrollbar-thumb": {
-    backgroundColor:
-      "color-mix(in srgb, var(--muted-foreground) 30%, transparent)",
-    borderRadius: "4px",
-    backgroundClip: "padding-box",
-    border: "2px solid transparent",
-  },
-  ".cm-tooltip ::-webkit-scrollbar-track": { background: "transparent" },
 });
 
 const THEME: Extension = Object.freeze([

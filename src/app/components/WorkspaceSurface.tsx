@@ -6,6 +6,7 @@ import { PreviewStack } from "@/modules/preview";
 import type { Tab } from "@/modules/tabs";
 import { TerminalStack } from "@/modules/terminal";
 import type { ComponentProps } from "react";
+import "./WorkspaceSurface.css";
 
 type TerminalStackProps = ComponentProps<typeof TerminalStack>;
 type EditorStackProps = ComponentProps<typeof EditorStack>;
@@ -69,10 +70,10 @@ export function WorkspaceSurface({
   const isGitHistoryTab = kind === "git-history";
 
   return (
-    <div className="relative h-full min-h-0">
+    <div className="workspace-surface relative h-full min-h-0">
       <div
         className={cn(
-          "absolute inset-0 px-3 pt-2 pb-2",
+          "workspace-terminal-surface absolute inset-0 pt-2 pr-0 pb-2 pl-3",
           !isTerminalTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isTerminalTab}
@@ -105,7 +106,7 @@ export function WorkspaceSurface({
       </div>
       <div
         className={cn(
-          "absolute inset-0 px-3 pt-2 pb-2",
+          "absolute inset-0 pt-2 pr-0 pb-2 pl-3",
           !isPreviewTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isPreviewTab}
@@ -119,7 +120,7 @@ export function WorkspaceSurface({
       </div>
       <div
         className={cn(
-          "absolute inset-0 px-3 pt-2 pb-2",
+          "absolute inset-0 pt-2 pr-0 pb-2 pl-3",
           !isMarkdownTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isMarkdownTab}
@@ -132,7 +133,7 @@ export function WorkspaceSurface({
       </div>
       <div
         className={cn(
-          "absolute inset-0 px-3 pt-2 pb-2",
+          "absolute inset-0 pt-2 pr-0 pb-2 pl-3",
           !isAiDiffTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isAiDiffTab}
@@ -146,7 +147,7 @@ export function WorkspaceSurface({
       </div>
       <div
         className={cn(
-          "absolute inset-0 px-3 pt-2 pb-2",
+          "absolute inset-0 pt-2 pr-0 pb-2 pl-3",
           !isGitDiffTab && "invisible pointer-events-none",
         )}
         aria-hidden={!isGitDiffTab}

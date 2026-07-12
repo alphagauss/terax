@@ -1,0 +1,30 @@
+.workspace-surface {
+  --scrollbar-size: 12px;
+}
+
+.workspace-terminal-surface {
+  background: var(--terminal-background);
+}
+
+.workspace-surface .xterm .scrollbar,
+.workspace-surface .xterm .scrollbar.vertical,
+.workspace-surface .xterm .scrollbar.horizontal {
+  width: var(--scrollbar-size) !important;
+  height: var(--scrollbar-size) !important;
+}
+
+.workspace-surface .xterm .xterm-scrollable-element > .scrollbar > .slider {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.workspace-surface
+  .xterm
+  .xterm-scrollable-element
+  > .scrollbar
+  > .slider:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}

@@ -232,7 +232,10 @@ export function CommandPalette({
           placeholder={placeholder}
           autoFocus
         />
-        <ScrollArea className="max-h-[420px]">
+        <ScrollArea
+          type="always"
+          className="command-palette-scrollbar max-h-[420px]"
+        >
           <CommandList className="max-h-none overflow-visible pr-3">
             {inThemes ? (
               <CommandGroup heading="Themes">
@@ -396,7 +399,11 @@ function rankCommands(
   }
   const scored: { item: PaletteItem; s: number }[] = [];
   for (const item of items) {
-    const s = fuzzyBest(term, [item.title, item.group, ...(item.keywords ?? [])]);
+    const s = fuzzyBest(term, [
+      item.title,
+      item.group,
+      ...(item.keywords ?? []),
+    ]);
     if (s !== null) scored.push({ item, s });
   }
   scored.sort(
@@ -494,7 +501,9 @@ function StatusItem({
         />
       ) : null}
       <span
-        className={tone === "error" ? "text-destructive" : "text-muted-foreground"}
+        className={
+          tone === "error" ? "text-destructive" : "text-muted-foreground"
+        }
       >
         {label}
       </span>

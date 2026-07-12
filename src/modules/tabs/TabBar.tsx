@@ -175,9 +175,10 @@ export function TabBar({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-      if (el.scrollWidth <= el.clientWidth) return;
       e.preventDefault();
-      el.scrollLeft += e.deltaY;
+      if (el.scrollWidth > el.clientWidth) {
+        el.scrollBy({ left: e.deltaY, behavior: "smooth" });
+      }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -195,7 +196,7 @@ export function TabBar({
     <div
       ref={scrollRef}
       data-tauri-drag-region
-      className="min-w-0 shrink overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="min-w-0 shrink scroll-smooth overflow-x-auto overflow-y-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div className="flex w-max items-center gap-0.5">
         <Tabs

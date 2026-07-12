@@ -191,51 +191,11 @@ html[data-chrome="borderless"] #settings-root {
   background: var(--background);
 }
 
-/*
- * xterm.js overrides — kept outside @layer so they win against the addon's
- * own stylesheet (which is not in any layer and would otherwise override).
- *
- * Newer xterm renders scrollbars as real <div class="scrollbar vertical|horizontal">
- * children rather than relying on native overflow scrollbars. Both code paths exist
- * across versions, so we hide both.
- */
-.xterm .scrollbar,
-.xterm .scrollbar.vertical,
-.xterm .scrollbar.horizontal {
-  display: none !important;
-  visibility: hidden !important;
-  width: 0 !important;
-  height: 0 !important;
-  pointer-events: none !important;
-}
-.xterm .xterm-viewport,
-.xterm-viewport {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-.xterm .xterm-viewport::-webkit-scrollbar,
-.xterm-viewport::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-  display: none !important;
-}
 .xterm,
 .xterm-screen,
 .xterm:focus,
 .xterm.focus {
   outline: none !important;
-}
-
-.cm-editor,
-.cm-scroller {
-  scrollbar-width: none !important;
-  -ms-overflow-style: none !important;
-}
-.cm-editor::-webkit-scrollbar,
-.cm-scroller::-webkit-scrollbar {
-  width: 0 !important;
-  height: 0 !important;
-  display: none !important;
 }
 
 body {
@@ -298,81 +258,107 @@ textarea,
   display: none !important;
 }
 
-/* Kill native scrollbars everywhere by default — Linux/Windows ship chunky
- * Chromium bars that break the chrome, and macOS WKWebView flashes its overlay
- * scrollbar briefly during layout transitions (AI panel open, pane split,
- * window resize) which looks like a glitch. Visible scroll affordances are
- * provided per-region via shadcn <ScrollArea>. */
-html,
-html *,
-html *::before,
-html *::after {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-html *::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  display: none;
-}
-
-/* Native scroll containers can opt into the same scrollbar language as the
- * Radix ScrollArea. CodeMirror uses the selector below because it owns its
- * scroller and cannot be wrapped in a second viewport. */
-.app-scrollbar,
-.cm-editor .cm-scroller {
-  scrollbar-width: thin !important;
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track) !important;
-  -ms-overflow-style: auto !important;
-}
-.app-scrollbar::-webkit-scrollbar,
-.cm-editor .cm-scroller::-webkit-scrollbar {
-  width: var(--scrollbar-size) !important;
-  height: var(--scrollbar-size) !important;
-  display: block !important;
-}
-.app-scrollbar::-webkit-scrollbar-thumb,
-.cm-editor .cm-scroller::-webkit-scrollbar-thumb {
-  min-height: 24px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
-}
-.app-scrollbar::-webkit-scrollbar-thumb:hover,
-.cm-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  background-clip: padding-box;
-}
-.app-scrollbar::-webkit-scrollbar-track,
-.cm-editor .cm-scroller::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-}
-
-[data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
-  width: var(--scrollbar-size);
-}
-[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
-  height: var(--scrollbar-size);
-}
-[data-slot="scroll-area-thumb"] {
-  background-color: var(--scrollbar-thumb);
-}
-[data-slot="scroll-area-thumb"]:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-
 /* Motion tokens. Reduced-motion zeroes the durations as a global snap. */
 :root {
   --scrollbar-size: 10px;
-  --scrollbar-thumb: var(--border);
-  --scrollbar-thumb-hover: var(--muted-foreground);
+  --scrollbar-thumb: oklch(0.82 0 0);
+  --scrollbar-thumb-hover: oklch(0.62 0 0);
   --scrollbar-track: transparent;
+  --scrollbar-show-duration: 100ms;
+  --scrollbar-hide-duration: 800ms;
   --dur-fast: 160ms;
   --dur-base: 240ms;
   --dur-slow: 320ms;
   --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark {
+  --scrollbar-thumb: oklch(0.48 0 0);
+  --scrollbar-thumb-hover: oklch(0.62 0 0);
+}
+
+@property --scrollbar-current-thumb {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope)
+  :where(
+    .app-scrollbar,
+    .cm-scroller,
+    [data-slot="scroll-area-viewport"],
+    [class~="overflow-auto"],
+    [class~="overflow-y-auto"],
+    [class~="overflow-x-auto"]
+  ) {
+  --scrollbar-current-thumb: transparent;
+  scrollbar-width: auto;
+  scrollbar-color: var(--scrollbar-current-thumb) var(--scrollbar-track);
+  -ms-overflow-style: auto;
+  transition: --scrollbar-current-thumb var(--scrollbar-hide-duration) linear;
+
+  &:hover {
+    --scrollbar-current-thumb: var(--scrollbar-thumb);
+    transition-duration: var(--scrollbar-show-duration);
+  }
+
+  &::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+
+  &::-webkit-scrollbar-track {
+    background-color: var(--scrollbar-track);
+  }
+
+  &::-webkit-scrollbar-thumb {
+    min-height: 24px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background-color: var(--scrollbar-current-thumb);
+    background-clip: padding-box;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area-scrollbar"] {
+  opacity: 0;
+  transition: opacity var(--scrollbar-hide-duration) linear;
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area"]:hover
+  > [data-slot="scroll-area-scrollbar"],
+.command-palette-scrollbar:hover > [data-slot="scroll-area-scrollbar"] {
+  opacity: 1;
+  transition-duration: var(--scrollbar-show-duration);
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  width: var(--scrollbar-size);
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
+  height: var(--scrollbar-size);
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area-thumb"] {
+  background-color: var(--scrollbar-thumb);
+}
+
+:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
+  [data-slot="scroll-area-thumb"]:hover {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 @keyframes terax-collapsible-down {
@@ -500,6 +486,8 @@ html *::-webkit-scrollbar {
 
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --scrollbar-show-duration: 0.01ms;
+    --scrollbar-hide-duration: 0.01ms;
     --dur-fast: 0.01ms;
     --dur-base: 0.01ms;
     --dur-slow: 0.01ms;
