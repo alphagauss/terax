@@ -6,11 +6,20 @@
   background: var(--terminal-background);
 }
 
-.workspace-surface .xterm .scrollbar,
-.workspace-surface .xterm .scrollbar.vertical,
-.workspace-surface .xterm .scrollbar.horizontal {
+.workspace-surface .xterm .scrollbar.vertical {
   width: var(--scrollbar-size) !important;
+}
+
+.workspace-surface .xterm .scrollbar.vertical > .slider {
+  width: 100% !important;
+}
+
+.workspace-surface .xterm .scrollbar.horizontal {
   height: var(--scrollbar-size) !important;
+}
+
+.workspace-surface .xterm .scrollbar.horizontal > .slider {
+  height: 100% !important;
 }
 
 .workspace-surface .xterm .xterm-scrollable-element > .scrollbar > .slider {
