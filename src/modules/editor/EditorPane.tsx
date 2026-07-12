@@ -529,7 +529,7 @@ export const EditorPane = memo(
       if (isImage || isVideo || isAudio || isPdf) {
         const assetUrl = convertFileSrc(path);
         return (
-          <div className="flex h-full min-h-0 flex-col items-center justify-center bg-background p-4 overflow-auto">
+          <div className="app-scrollbar flex h-full min-h-0 flex-col items-center justify-center bg-background p-4 overflow-auto">
             {isImage && (
               <img
                 src={assetUrl}

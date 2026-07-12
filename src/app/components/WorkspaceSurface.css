@@ -7,6 +7,9 @@
 }
 
 .workspace-surface .xterm .scrollbar.vertical {
+  display: flex !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
   width: var(--scrollbar-size) !important;
 }
 
@@ -15,7 +18,21 @@
 }
 
 .workspace-surface .xterm .scrollbar.horizontal {
+  display: flex !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
   height: var(--scrollbar-size) !important;
+}
+
+.workspace-surface .xterm .xterm-viewport {
+  scrollbar-width: auto !important;
+  -ms-overflow-style: auto !important;
+}
+
+.workspace-surface .xterm .xterm-viewport::-webkit-scrollbar {
+  width: var(--scrollbar-size) !important;
+  height: var(--scrollbar-size) !important;
+  display: block !important;
 }
 
 .workspace-surface .xterm .scrollbar.horizontal > .slider {

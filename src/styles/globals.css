@@ -258,9 +258,22 @@ textarea,
   display: none !important;
 }
 
+html,
+html *,
+html *::before,
+html *::after {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 /* Motion tokens. Reduced-motion zeroes the durations as a global snap. */
 :root {
-  --scrollbar-size: 10px;
+  --scrollbar-size: 12px;
   --scrollbar-thumb: oklch(0.82 0 0);
   --scrollbar-thumb-hover: oklch(0.62 0 0);
   --scrollbar-track: transparent;
@@ -284,19 +297,12 @@ textarea,
   initial-value: transparent;
 }
 
-:where(.workspace-surface, .sidebar-scrollbar-scope)
-  :where(
-    .app-scrollbar,
-    .cm-scroller,
-    [data-slot="scroll-area-viewport"],
-    [class~="overflow-auto"],
-    [class~="overflow-y-auto"],
-    [class~="overflow-x-auto"]
-  ) {
+.app-scrollbar,
+.cm-editor .cm-scroller {
   --scrollbar-current-thumb: transparent;
-  scrollbar-width: auto;
+  scrollbar-width: auto !important;
   scrollbar-color: var(--scrollbar-current-thumb) var(--scrollbar-track);
-  -ms-overflow-style: auto;
+  -ms-overflow-style: auto !important;
   transition: --scrollbar-current-thumb var(--scrollbar-hide-duration) linear;
 
   &:hover {
@@ -305,8 +311,9 @@ textarea,
   }
 
   &::-webkit-scrollbar {
-    width: var(--scrollbar-size);
-    height: var(--scrollbar-size);
+    width: var(--scrollbar-size) !important;
+    height: var(--scrollbar-size) !important;
+    display: block !important;
   }
 
   &::-webkit-scrollbar-track {
@@ -324,7 +331,6 @@ textarea,
   &::-webkit-scrollbar-thumb:hover {
     background-color: var(--scrollbar-thumb-hover);
   }
-
 }
 
 :where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
@@ -341,23 +347,23 @@ textarea,
   transition-duration: var(--scrollbar-show-duration);
 }
 
-:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
-  [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
-  width: var(--scrollbar-size);
+:where([data-slot="scroll-area-scrollbar"])[data-orientation="vertical"] {
+  width: var(--scrollbar-size) !important;
 }
 
-:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
-  [data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
-  height: var(--scrollbar-size);
+:where([data-slot="scroll-area-scrollbar"])[data-orientation="horizontal"] {
+  height: var(--scrollbar-size) !important;
 }
 
-:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
-  [data-slot="scroll-area-thumb"] {
+[data-slot="scroll-area-thumb"] {
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background-color: var(--scrollbar-thumb);
+  background-clip: padding-box;
 }
 
-:where(.workspace-surface, .sidebar-scrollbar-scope, .command-palette-scrollbar)
-  [data-slot="scroll-area-thumb"]:hover {
+[data-slot="scroll-area-thumb"]:hover {
   background-color: var(--scrollbar-thumb-hover);
 }
 
