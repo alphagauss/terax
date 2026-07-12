@@ -14,6 +14,7 @@ type Palette = {
   lineHighlight: string;
   gutterFg: string;
   comment: string;
+  commentItalic?: boolean;
   keyword: string;
   boldKeyword?: boolean;
   string: string;
@@ -49,7 +50,7 @@ function build(p: Palette): Extension {
       {
         tag: [t.comment, t.lineComment, t.blockComment, t.docComment],
         color: p.comment,
-        fontStyle: "italic",
+        ...(p.commentItalic === false ? {} : { fontStyle: "italic" }),
       },
       {
         tag: [
@@ -408,4 +409,56 @@ export const rosePineDawn = build({
   heading: "#907aa9",
   link: "#907aa9",
   invalid: "#b4637a",
+});
+
+export const modernDark = build({
+  mode: "dark",
+  bg: "#1f1f1f",
+  fg: "#cccccc",
+  caret: "#aeafad",
+  selection: "#264f78",
+  lineHighlight: "#2a2d2e",
+  gutterFg: "#6e7681",
+  comment: "#6a9955",
+  commentItalic: false,
+  keyword: "#c586c0",
+  string: "#ce9178",
+  number: "#b5cea8",
+  constant: "#569cd6",
+  func: "#dcdcaa",
+  variable: "#9cdcfe",
+  property: "#9cdcfe",
+  type: "#4ec9b0",
+  operator: "#d4d4d4",
+  tag: "#569cd6",
+  attr: "#9cdcfe",
+  heading: "#569cd6",
+  link: "#4daafc",
+  invalid: "#f44747",
+});
+
+export const modernLight = build({
+  mode: "light",
+  bg: "#ffffff",
+  fg: "#3b3b3b",
+  caret: "#005fb8",
+  selection: "#add6ff80",
+  lineHighlight: "#f2f2f2",
+  gutterFg: "#6e7681",
+  comment: "#008000",
+  commentItalic: false,
+  keyword: "#af00db",
+  string: "#a31515",
+  number: "#098658",
+  constant: "#0000ff",
+  func: "#795e26",
+  variable: "#001080",
+  property: "#001080",
+  type: "#267f99",
+  operator: "#000000",
+  tag: "#800000",
+  attr: "#e50000",
+  heading: "#800000",
+  link: "#005fb8",
+  invalid: "#cd3131",
 });

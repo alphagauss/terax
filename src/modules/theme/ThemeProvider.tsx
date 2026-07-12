@@ -14,7 +14,7 @@ import {
   setThemeId as persistThemeId,
   type ThemePref,
 } from "@/modules/settings/store";
-import { applyTheme, clearTheme } from "./applyTheme";
+import { applyTheme } from "./applyTheme";
 import {
   listCustomThemes,
   onCustomThemesChange,
@@ -70,7 +70,7 @@ function resolveTheme(id: string, custom: Theme[]): Theme {
   return custom.find((t) => t.id === id) ?? getBuiltinTheme(id) ?? getDefaultTheme();
 }
 
-export function ThemeProvider({ children, defaultMode = "system" }: ThemeProviderProps) {
+export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderProps) {
   const [mode, setModeState] = useState<ThemePref>(() => readFastMode(defaultMode));
   const [themeId, setThemeIdState] = useState<string>(() => readFastThemeId());
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -135,10 +135,6 @@ export function ThemeProvider({ children, defaultMode = "system" }: ThemeProvide
 
   const effectiveId = previewId ?? themeId;
   useEffect(() => {
-    if (effectiveId === DEFAULT_THEME_ID) {
-      clearTheme();
-      return;
-    }
     applyTheme(resolveTheme(effectiveId, customThemes), resolvedMode);
   }, [effectiveId, resolvedMode, customThemes]);
 

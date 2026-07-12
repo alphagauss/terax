@@ -68,12 +68,24 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
     ".cm-activeLine": {
       borderTopRightRadius: "5px",
       borderBottomRightRadius: "5px",
-      backgroundColor: "color-mix(in srgb, var(--foreground) 4%, transparent)",
+      backgroundColor: "transparent !important",
+      boxShadow:
+        "inset 0 1px color-mix(in srgb, var(--foreground) 10%, transparent), inset 0 -1px color-mix(in srgb, var(--foreground) 10%, transparent)",
+    },
+    ".cm-activeLineGutter": {
+      backgroundColor: "transparent !important",
+      boxShadow:
+        "inset 0 1px color-mix(in srgb, var(--foreground) 10%, transparent), inset 0 -1px color-mix(in srgb, var(--foreground) 10%, transparent)",
     },
     ".cm-lineNumbers .cm-activeLineGutter": {
       borderTopLeftRadius: "5px",
       borderBottomLeftRadius: "5px",
+      color: "var(--foreground) !important",
+      opacity: "1",
       userSelect: "none",
+    },
+    ".dark & .cm-lineNumbers .cm-activeLineGutter": {
+      color: "#ffffff !important",
     },
     ".cm-cursor, .cm-dropCursor": {
       borderLeftColor: "var(--foreground)",
@@ -92,11 +104,6 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
       outline:
         "1px solid color-mix(in srgb, var(--foreground) 35%, transparent) !important",
     },
-    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection":
-      {
-        backgroundColor:
-          "color-mix(in srgb, var(--foreground) 18%, transparent) !important",
-      },
     ".cm-panels": {
       backgroundColor: "var(--popover)",
       color: "var(--popover-foreground)",

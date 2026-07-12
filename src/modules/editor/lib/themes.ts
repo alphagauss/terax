@@ -17,6 +17,8 @@ import {
   kanagawa,
   kanagawaDragon,
   kanagawaLotus,
+  modernDark,
+  modernLight,
   rosePine,
   rosePineDawn,
   solarizedDark,
@@ -24,6 +26,7 @@ import {
 } from "./cmThemes";
 
 export const EDITOR_THEME_EXT: Record<EditorThemeId, Extension> = {
+  modern: modernDark,
   kanagawa,
   "kanagawa-lotus": kanagawaLotus,
   "kanagawa-dragon": kanagawaDragon,
@@ -46,4 +49,9 @@ export const EDITOR_THEME_EXT: Record<EditorThemeId, Extension> = {
   "github-light": githubLight,
   "xcode-dark": xcodeDark,
   "xcode-light": xcodeLight,
+};
+
+export const MODERN_EDITOR_THEME_EXT: Record<"light" | "dark", Extension> = {
+  dark: modernDark,
+  light: modernLight,
 };

@@ -299,14 +299,23 @@ export function ThemesSection() {
               {[...EDITOR_THEMES]
                 .sort(
                   (a, b) =>
-                    (EDITOR_THEME_MODE[a] === resolvedMode ? 0 : 1) -
-                    (EDITOR_THEME_MODE[b] === resolvedMode ? 0 : 1),
+                    (EDITOR_THEME_MODE[a] === "both" ||
+                    EDITOR_THEME_MODE[a] === resolvedMode
+                      ? 0
+                      : 1) -
+                    (EDITOR_THEME_MODE[b] === "both" ||
+                    EDITOR_THEME_MODE[b] === resolvedMode
+                      ? 0
+                      : 1),
                 )
                 .map((id) => (
                   <SelectItem
                     key={id}
                     value={id}
-                    disabled={EDITOR_THEME_MODE[id] !== resolvedMode}
+                    disabled={
+                      EDITOR_THEME_MODE[id] !== "both" &&
+                      EDITOR_THEME_MODE[id] !== resolvedMode
+                    }
                     className="text-[12px]"
                   >
                     {EDITOR_THEME_LABELS[id]}

@@ -23,13 +23,14 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export type ThemePref = "system" | "light" | "dark";
 
-export const DEFAULT_THEME_ID = "terax-default";
+export const DEFAULT_THEME_ID = "modern";
 
 export type BackgroundKind = "none" | "image";
 
 export type WorkspaceWindowMode = "single" | "multiple";
 
 export const EDITOR_THEMES = [
+  "modern",
   "kanagawa",
   "kanagawa-lotus",
   "kanagawa-dragon",
@@ -66,7 +67,8 @@ export function isEditorThemeId(v: unknown): v is EditorThemeId {
   );
 }
 
-export const EDITOR_THEME_MODE: Record<EditorThemeId, "light" | "dark"> = {
+export const EDITOR_THEME_MODE: Record<EditorThemeId, "light" | "dark" | "both"> = {
+  modern: "both",
   kanagawa: "dark",
   "kanagawa-lotus": "light",
   "kanagawa-dragon": "dark",
@@ -92,6 +94,7 @@ export const EDITOR_THEME_MODE: Record<EditorThemeId, "light" | "dark"> = {
 };
 
 export const EDITOR_THEME_LABELS: Record<EditorThemeId, string> = {
+  modern: "Modern",
   kanagawa: "Kanagawa Wave",
   "kanagawa-lotus": "Kanagawa Lotus",
   "kanagawa-dragon": "Kanagawa Dragon",
@@ -274,7 +277,7 @@ export const TERMINAL_SCROLLBACK_PRESETS = [
 ] as const;
 
 export const DEFAULT_PREFERENCES: Preferences = {
-  theme: "system",
+  theme: "dark",
   themeId: DEFAULT_THEME_ID,
   backgroundKind: "none",
   backgroundImageId: null,

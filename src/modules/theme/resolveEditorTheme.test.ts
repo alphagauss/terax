@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveEditorThemeId } from "./resolveEditorTheme";
+import { getBuiltinTheme } from "./themes";
 import type { Theme } from "./types";
 
 const custom: Theme = {
@@ -22,6 +23,14 @@ describe("resolveEditorThemeId", () => {
     );
   });
 
+  it("switches the Modern palette with the active mode", () => {
+    expect(resolveEditorThemeId("auto", "modern", [], "dark")).toBe("modern");
+    expect(resolveEditorThemeId("auto", "modern", [], "light")).toBe("modern");
+    const theme = getBuiltinTheme("modern");
+    expect(theme?.variants.dark).toBeDefined();
+    expect(theme?.variants.light).toBeDefined();
+  });
+
   it("auto falls back to the other mode when a pairing is missing", () => {
     // Dragon only declares a dark pairing.
     expect(resolveEditorThemeId("auto", "kanagawa-dragon", [], "light")).toBe(
@@ -40,7 +49,10 @@ describe("resolveEditorThemeId", () => {
 
   it("auto with an unknown app theme uses the default theme pairing", () => {
     expect(resolveEditorThemeId("auto", "does-not-exist", [], "dark")).toBe(
-      "atomone",
+      "modern",
+    );
+    expect(resolveEditorThemeId("auto", "does-not-exist", [], "light")).toBe(
+      "modern",
     );
   });
 
