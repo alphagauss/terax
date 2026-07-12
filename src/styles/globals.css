@@ -316,8 +316,58 @@ html *::-webkit-scrollbar {
   display: none;
 }
 
+/* Native scroll containers can opt into the same scrollbar language as the
+ * Radix ScrollArea. CodeMirror uses the selector below because it owns its
+ * scroller and cannot be wrapped in a second viewport. */
+.app-scrollbar,
+.cm-editor .cm-scroller {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track) !important;
+  -ms-overflow-style: auto !important;
+}
+.app-scrollbar::-webkit-scrollbar,
+.cm-editor .cm-scroller::-webkit-scrollbar {
+  width: var(--scrollbar-size) !important;
+  height: var(--scrollbar-size) !important;
+  display: block !important;
+}
+.app-scrollbar::-webkit-scrollbar-thumb,
+.cm-editor .cm-scroller::-webkit-scrollbar-thumb {
+  min-height: 24px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+.app-scrollbar::-webkit-scrollbar-thumb:hover,
+.cm-editor .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+.app-scrollbar::-webkit-scrollbar-track,
+.cm-editor .cm-scroller::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+[data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  width: var(--scrollbar-size);
+}
+[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"] {
+  height: var(--scrollbar-size);
+}
+[data-slot="scroll-area-thumb"] {
+  background-color: var(--scrollbar-thumb);
+}
+[data-slot="scroll-area-thumb"]:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
 /* Motion tokens. Reduced-motion zeroes the durations as a global snap. */
 :root {
+  --scrollbar-size: 10px;
+  --scrollbar-thumb: var(--border);
+  --scrollbar-thumb-hover: var(--muted-foreground);
+  --scrollbar-track: transparent;
   --dur-fast: 160ms;
   --dur-base: 240ms;
   --dur-slow: 320ms;
