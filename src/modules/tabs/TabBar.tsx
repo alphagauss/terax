@@ -46,6 +46,8 @@ import {
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab } from "./lib/useTabs";
 
+const LANGUAGE_MENU_ENABLED = false;
+
 type Props = {
   tabs: Tab[];
   activeId: number;
@@ -345,7 +347,7 @@ export function TabBar({
                       compact ? "max-w-48" : "max-w-80",
                     )}
                   >
-                    {t.kind === "editor" ? (
+                    {LANGUAGE_MENU_ENABLED && t.kind === "editor" ? (
                       <DropdownMenu
                         onOpenChange={(open) => {
                           if (!open) setShowAllLanguages(false);
