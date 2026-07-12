@@ -5,6 +5,7 @@ import { search } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { chromeTheme } from "./chromeTheme";
+import { indentGuides } from "./indentGuides";
 
 // Compartments allow runtime reconfiguration without rebuilding state.
 export const languageCompartment = new Compartment();
@@ -18,6 +19,7 @@ export function indentExtension(unit: string): Extension {
   return [
     indentUnit.of(unit),
     EditorState.tabSize.of(unit === "\t" ? 4 : unit.length),
+    indentGuides(),
   ];
 }
 
