@@ -182,6 +182,7 @@ function termOptions() {
     cursorStyle: "block" as const,
     cursorInactiveStyle: "outline" as const,
     scrollback: prefs.terminalScrollback,
+    smoothScrollDuration: 120,
     allowProposedApi: true,
     minimumContrastRatio: bgActive(prefs) ? MCR_BG_ACTIVE : MCR_BG_INACTIVE,
   };
