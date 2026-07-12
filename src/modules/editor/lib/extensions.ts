@@ -37,7 +37,7 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
       backgroundColor: "transparent !important",
       color: "var(--foreground)",
       outline: "none",
-      padding: "8px",
+      padding: "0px",
     },
     ".cm-scroller": {
       fontFamily: detectMonoFontFamily(),
