@@ -532,7 +532,7 @@ export const FileExplorer = memo(
       >
         <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 px-2">
           <span
-            className="flex flex-1 items-center truncate text-xs font-medium text-foreground/80"
+            className="flex flex-1 items-center truncate text-xs font-medium text-foreground"
             title={rootPath}
           >
             <img

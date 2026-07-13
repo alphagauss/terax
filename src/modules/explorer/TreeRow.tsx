@@ -91,8 +91,8 @@ function EntryRowImpl(props: EntryRowProps) {
         isSelected
           ? "bg-accent text-foreground"
           : gitignored
-            ? "text-muted-foreground/70"
-            : "text-foreground/85",
+            ? "text-muted-foreground"
+            : "text-foreground",
         isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
       )}
       style={{ paddingLeft }}

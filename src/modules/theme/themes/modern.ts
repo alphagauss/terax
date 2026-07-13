@@ -63,7 +63,7 @@ export const lightModernVariant: ThemeVariant = {
     accentForeground: "#3b3b3b",
     destructive: "#f85149",
     border: "#e5e5e5",
-    input: "#ffffff",
+    input: "#e5e5e5",
     ring: "#005fb8",
     sidebar: "#f8f8f8",
     sidebarForeground: "#3b3b3b",

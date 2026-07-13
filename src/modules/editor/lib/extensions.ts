@@ -60,12 +60,12 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
     },
     ".cm-gutter": { backgroundColor: "transparent !important" },
     ".cm-lineNumbers .cm-gutterElement": {
-      opacity: "0.55",
+      opacity: "1",
     },
     ".cm-foldGutter": { width: "10px" },
     ".cm-foldGutter .cm-gutterElement": {
       color: "var(--muted-foreground)",
-      opacity: "0.5",
+      opacity: "1",
     },
     ".cm-activeLine": {
       borderTopRightRadius: "5px",

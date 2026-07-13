@@ -249,7 +249,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         }}
                         className={cn(
                           "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors",
-                          isSelected ? "bg-accent text-foreground" : "hover:bg-accent/50 text-foreground/80"
+                          isSelected ? "bg-accent text-foreground" : "hover:bg-accent/50 text-foreground"
                         )}
                         title={hit.path}
                       >
