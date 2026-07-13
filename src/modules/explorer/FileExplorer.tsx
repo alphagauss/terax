@@ -10,6 +10,7 @@ import {
   FileAddIcon,
   Folder01Icon,
   FolderAddIcon,
+  ListChevronsDownUpIcon,
   Refresh01Icon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -52,6 +53,7 @@ export type FileExplorerHandle = {
   focus: () => void;
   isFocused: () => boolean;
   focusSearch: () => void;
+  collapseAll: () => void;
 };
 
 type Props = {
@@ -369,8 +371,9 @@ export const FileExplorer = memo(
           setIsSearchOpen(true);
           searchRef.current?.focus();
         },
+        collapseAll: tree.collapseAll,
       }),
-      [entryPaths, scrollEntryIntoView, selectedPath],
+      [entryPaths, scrollEntryIntoView, selectedPath, tree.collapseAll],
     );
 
     useGlobalShortcuts({
@@ -577,8 +580,23 @@ export const FileExplorer = memo(
             className="size-6 text-muted-foreground hover:text-foreground"
             onClick={() => tree.refresh(rootPath)}
             title="Refresh"
+            aria-label="Refresh"
           >
             <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6 text-muted-foreground hover:text-foreground"
+            onClick={tree.collapseAll}
+            title="Collapse All"
+            aria-label="Collapse All"
+          >
+            <HugeiconsIcon
+              icon={ListChevronsDownUpIcon}
+              size={13}
+              strokeWidth={2}
+            />
           </Button>
         </div>
 

@@ -330,7 +330,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       for (const [path, state] of Object.entries(nodesRef.current)) {
         if (state.status === "loaded") void fetchChildren(path);
       }
-    }, 3000);
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [workspace.kind, rootPath, fetchChildren]);
 
@@ -376,6 +376,19 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     },
     [fetchChildren],
   );
+
+  const collapseAll = useCallback(() => {
+    if (expandedRef.current.size === 0) return;
+
+    expandedRef.current = new Set();
+    setExpanded(new Set());
+
+    const toUnwatch = [...watchedRef.current].filter(
+      (path) => path !== rootPath,
+    );
+    for (const path of toUnwatch) watchedRef.current.delete(path);
+    watchRemove(toUnwatch);
+  }, [rootPath]);
 
   // --- mutations ---
 
@@ -510,6 +523,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     toggle,
     expand,
     refresh,
+    collapseAll,
     beginCreate,
     cancelCreate,
     commitCreate,
