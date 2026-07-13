@@ -4,7 +4,7 @@ export const darkModernVariant: ThemeVariant = {
   colors: {
     background: "#1f1f1f",
     foreground: "#cccccc",
-    card: "#202020",
+    card: "#181818",
     cardForeground: "#cccccc",
     popover: "#202020",
     popoverForeground: "#cccccc",
