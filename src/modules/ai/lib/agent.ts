@@ -285,7 +285,7 @@ export function buildConfiguredLanguageModel(
   } else if (m.id === "openrouter-custom") {
     if (!local.openrouterModelId?.trim()) {
       throw new Error(
-        "OpenRouter: no model id set. Open Settings → Models and enter an OpenRouter model id (e.g. anthropic/claude-sonnet-4-6).",
+        "OpenRouter: no model id set. Open Settings → Models and enter an OpenRouter model id (e.g. anthropic/claude-sonnet-5).",
       );
     }
     resolvedId = local.openrouterModelId.trim();
