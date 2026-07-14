@@ -53,6 +53,9 @@ Fork-specific adaptation:
   - Manual registration adds an icon-bearing Open with Terax action for files and selected folders.
   - File context actions use the Windows Document selection model so single and multi-file selections are routed through the existing locked queue.
   - Manual unregistration removes the application association and both Explorer context menu entries.
+- `61ef39e fix(settings): restore scoped window feedback`
+  - The settings webview mounts its own toast renderer so Open With actions display success and error feedback.
+  - The settings window uses the main window as its parent instead of being globally always-on-top.
 
 Verification:
 
@@ -62,6 +65,7 @@ Verification:
 - `pnpm.cmd build` passed.
 - `cargo clippy --all-targets --locked -- -D warnings` passed.
 - The Open With command and icon tests, multi-file launch tests, and locked request-queue test passed.
+- The settings eager-loading tests passed after adding the toast renderer.
 - `cargo test --locked` completed with 224 tests passing. Its only failure is the pre-existing Windows symlink escape test, which requires Developer Mode or administrator symlink privileges.
 
 
