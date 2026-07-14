@@ -75,7 +75,7 @@ pub struct WorkspaceProcessState {
 }
 
 pub enum InitializeOutcome {
-    Opened(WorkspaceProcessState),
+    Opened(Box<WorkspaceProcessState>),
     ActivatedExisting,
 }
 
@@ -515,7 +515,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     let single_kind = StateKind::Single;
     let single_lock_path = root.join(lock_filename(&environment, &single_kind));
     match FileLock::try_acquire(&single_lock_path).map_err(|error| error.to_string())? {
-        Some(lock) => Ok(InitializeOutcome::Opened(make_state(
+        Some(lock) => Ok(InitializeOutcome::Opened(Box::new(make_state(
             &environment,
             single_kind,
             lock,
@@ -523,7 +523,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             launch_dir,
             launch_files,
             launch_geometry,
-        )?)),
+        )?))),
         None if request.env == WorkspaceEnv::Local && !launch_files.is_empty() => {
             crate::modules::shared_store::request_workspace_file_open(
                 &environment.key,
@@ -545,7 +545,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             let lock = FileLock::try_acquire(&root.join(lock_filename(&environment, &kind)))
                 .map_err(|error| error.to_string())?
                 .expect("new UUID lock cannot be occupied");
-            Ok(InitializeOutcome::Opened(make_state(
+            Ok(InitializeOutcome::Opened(Box::new(make_state(
                 &environment,
                 kind,
                 lock,
@@ -553,7 +553,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
                 launch_dir,
                 launch_files,
                 launch_geometry,
-            )?))
+            )?)))
         }
     }
 }
@@ -584,6 +584,16 @@ pub fn get_workspace_bootstrap(
     state: tauri::State<'_, WorkspaceProcessState>,
 ) -> WorkspaceBootstrap {
     state.bootstrap.clone()
+}
+
+#[tauri::command]
+pub fn take_workspace_open_files(
+    state: tauri::State<'_, WorkspaceProcessState>,
+) -> Result<Vec<String>, String> {
+    crate::modules::shared_store::take_workspace_file_open(
+        &state.bootstrap.environment_key,
+        &state.bootstrap.id,
+    )
 }
 
 fn env_arg(env: &WorkspaceEnv) -> String {

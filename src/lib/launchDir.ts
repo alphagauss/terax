@@ -17,3 +17,10 @@ export async function consumeLaunchFiles(): Promise<string[]> {
   const files = await invoke<string[]>("get_launch_files").catch(() => []);
   return files.map((file) => file.replace(/\\/g, "/"));
 }
+
+export async function consumeWorkspaceOpenFiles(): Promise<string[]> {
+  const files = await invoke<string[]>("take_workspace_open_files").catch(
+    () => [],
+  );
+  return files.map((file) => file.replace(/\\/g, "/"));
+}

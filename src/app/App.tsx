@@ -5,7 +5,11 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
+import {
+  consumeLaunchFiles,
+  consumeWorkspaceOpenFiles,
+  getLaunchDir,
+} from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
 import { usePresence } from "@/lib/usePresence";
@@ -117,12 +121,11 @@ type WorkspaceActivation = {
   requestId: string;
   environment: string;
   workspaceId: string;
-  files: string[];
 };
 
 function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   if (!value || typeof value !== "object") return null;
-  const { requestId, environment, workspaceId, files } = value as Record<
+  const { requestId, environment, workspaceId } = value as Record<
     string,
     unknown
   >;
@@ -133,14 +136,7 @@ function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   ) {
     return null;
   }
-  return {
-    requestId,
-    environment,
-    workspaceId,
-    files: Array.isArray(files)
-      ? files.filter((file): file is string => typeof file === "string")
-      : [],
-  };
+  return { requestId, environment, workspaceId };
 }
 
 function parentDirectory(path: string): string | null {
@@ -227,41 +223,6 @@ export default function App() {
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
   const activationRequestRef = useRef<string | null>(null);
-  const [activationFiles, setActivationFiles] = useState<string[]>([]);
-
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void onSharedStoreChange("settings", async () => {
-      const activation = parseWorkspaceActivation(
-        (await readSharedStore("settings")).workspaceActivation,
-      );
-      if (
-        !activation ||
-        activation.environment !== currentWorkspaceBootstrap().environmentKey ||
-        activation.workspaceId !== currentWorkspaceBootstrap().id ||
-        activation.requestId === activationRequestRef.current
-      ) {
-        return;
-      }
-      activationRequestRef.current = activation.requestId;
-      setActivationFiles(activation.files);
-      const window = getCurrentWindow();
-      await window.show();
-      await window.setFocus();
-    })
-      .then((next) => {
-        if (disposed) next();
-        else unlisten = next;
-      })
-      .catch((error) =>
-        console.error("workspace activation listener failed:", error),
-      );
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
   const {
     home,
     launchCwd,
@@ -621,24 +582,59 @@ export default function App() {
     [explorerRoot, openFileTab, newMarkdownTab],
   );
 
-  useEffect(() => {
-    let disposed = false;
-    const openAll = async (files: string[]) => {
+  const openLaunchFiles = useCallback(
+    async (files: string[]) => {
       for (const file of files) {
         const parent = parentDirectory(file);
         if (parent) await native.workspaceAuthorize(parent).catch(() => {});
-        if (!disposed) handleOpenFile(file, true);
+        handleOpenFile(file, true);
       }
-    };
-    void consumeLaunchFiles().then(openAll);
-    if (activationFiles.length > 0) {
-      void openAll(activationFiles);
-      setActivationFiles([]);
-    }
+    },
+    [handleOpenFile],
+  );
+  const openLaunchFilesRef = useRef(openLaunchFiles);
+  openLaunchFilesRef.current = openLaunchFiles;
+
+  useEffect(() => {
+    void consumeLaunchFiles().then((files) =>
+      openLaunchFilesRef.current(files),
+    );
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void onSharedStoreChange("settings", async () => {
+      const activation = parseWorkspaceActivation(
+        (await readSharedStore("settings")).workspaceActivation,
+      );
+      if (
+        !activation ||
+        activation.environment !== currentWorkspaceBootstrap().environmentKey ||
+        activation.workspaceId !== currentWorkspaceBootstrap().id ||
+        activation.requestId === activationRequestRef.current
+      ) {
+        return;
+      }
+      activationRequestRef.current = activation.requestId;
+      const window = getCurrentWindow();
+      await window.show();
+      await window.setFocus();
+      const files = await consumeWorkspaceOpenFiles();
+      if (!disposed) await openLaunchFilesRef.current(files);
+    })
+      .then((next) => {
+        if (disposed) next();
+        else unlisten = next;
+      })
+      .catch((error) =>
+        console.error("workspace activation listener failed:", error),
+      );
     return () => {
       disposed = true;
+      unlisten?.();
     };
-  }, [activationFiles, handleOpenFile]);
+  }, []);
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {

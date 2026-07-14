@@ -137,7 +137,7 @@ pub fn run() {
             std::process::exit(2);
         });
     let workspace_process = match workspace_process::initialize(&workspace_dir, request) {
-        Ok(workspace_process::InitializeOutcome::Opened(state)) => state,
+        Ok(workspace_process::InitializeOutcome::Opened(state)) => *state,
         Ok(workspace_process::InitializeOutcome::ActivatedExisting) => std::process::exit(0),
         Err(error) => {
             eprintln!("Terax startup error: {error}");
@@ -321,6 +321,7 @@ pub fn run() {
             workspace::workspace_authorize,
             workspace::workspace_current_dir,
             workspace_process::get_workspace_bootstrap,
+            workspace_process::take_workspace_open_files,
             workspace_process::spawn_workspace_process,
             ai_sessions::ai_sessions_list,
             ai_sessions::ai_session_read,
