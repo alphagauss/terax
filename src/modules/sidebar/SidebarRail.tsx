@@ -5,8 +5,8 @@ import type { SidebarViewId } from "./types";
 
 export const SIDEBAR_RAIL_HEIGHT = 36;
 
-type RailItem = {
-  id: SidebarViewId;
+export type SidebarRailItem<Id extends string = string> = {
+  id: Id;
   label: string;
   icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
   badge?: number;
@@ -19,7 +19,7 @@ type Props = {
 };
 
 export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
-  const items: RailItem[] = [
+  const items: SidebarRailItem<SidebarViewId>[] = [
     { id: "explorer", label: "Files", icon: FolderTreeIcon },
     {
       id: "source-control",
@@ -29,6 +29,18 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
     },
   ];
 
+  return <SidebarViewRail items={items} activeView={activeView} onSelectView={onSelectView} />;
+}
+
+export function SidebarViewRail<Id extends string>({
+  items,
+  activeView,
+  onSelectView,
+}: {
+  items: readonly SidebarRailItem<Id>[];
+  activeView: Id;
+  onSelectView: (view: Id) => void;
+}) {
   return (
     <div
       style={{ height: SIDEBAR_RAIL_HEIGHT }}
@@ -36,7 +48,8 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
     >
       {items.map((item) => {
         const isActive = item.id === activeView;
-        const showBadge = !!item.badge && item.badge > 0;
+        const badge = item.badge ?? 0;
+        const showBadge = badge > 0;
         return (
           <button
             key={item.id}
@@ -58,10 +71,10 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
               strokeWidth={isActive ? 2 : 1.75}
               className="shrink-0 transition-[stroke-width] duration-[var(--dur-base)]"
             />
-            <span>{item.label}</span>
+            <span className="min-w-0 truncate">{item.label}</span>
             {showBadge ? (
               <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-muted-foreground">
-                {item.badge! > 99 ? "99+" : item.badge}
+                {badge > 99 ? "99+" : badge}
               </span>
             ) : null}
           </button>

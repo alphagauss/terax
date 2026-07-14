@@ -8,6 +8,7 @@ import {
   CommandIcon,
   Settings01Icon,
   SidebarLeftIcon,
+  SidebarRightIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -46,6 +47,8 @@ type Props = {
   onActivateAgent: (tabId: number, leafId: number) => void;
   onActivateLocalAgent: () => void;
   onOpenSettings: () => void;
+  onToggleSecondarySidebar?: () => void;
+  secondarySidebarOpen?: boolean;
   spaceSwitcher: ReactNode;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
@@ -73,6 +76,8 @@ export function Header({
   onActivateAgent,
   onActivateLocalAgent,
   onOpenSettings,
+  onToggleSecondarySidebar,
+  secondarySidebarOpen = false,
   spaceSwitcher,
   searchTarget,
   searchRef,
@@ -102,6 +107,20 @@ export function Header({
       <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.75} />
     </Button>
   );
+
+  const secondarySidebarButton = onToggleSecondarySidebar ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      onClick={onToggleSecondarySidebar}
+      title="Toggle secondary sidebar"
+      aria-label="Toggle secondary sidebar"
+      aria-pressed={secondarySidebarOpen}
+    >
+      <HugeiconsIcon icon={SidebarRightIcon} size={15} strokeWidth={1.75} />
+    </Button>
+  ) : null;
 
   return (
     <div
@@ -178,10 +197,16 @@ export function Header({
             onActivateLocal={onActivateLocalAgent}
           />
           {settingsButton}
+          {secondarySidebarButton}
         </>
       )}
 
-      {!IS_MAC && settingsButton}
+      {!IS_MAC && (
+        <>
+          {settingsButton}
+          {secondarySidebarButton}
+        </>
+      )}
 
       {USE_CUSTOM_WINDOW_CONTROLS && (
         <>

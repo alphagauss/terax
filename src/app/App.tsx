@@ -57,9 +57,15 @@ import {
   useGlobalShortcuts,
 } from "@/modules/shortcuts";
 import {
+  SECONDARY_SIDEBAR_MAX_WIDTH,
+  SECONDARY_SIDEBAR_MIN_WIDTH,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  SecondarySidebar,
+  type SecondarySidebarView,
   SidebarRail,
+  WORKSPACE_MIN_WIDTH,
+  useSecondarySidebarPanel,
   useSidebarPanel,
 } from "@/modules/sidebar";
 import {
@@ -122,6 +128,11 @@ type WorkspaceActivation = {
   environment: string;
   workspaceId: string;
 };
+
+const SECONDARY_SIDEBAR_VIEWS: readonly SecondarySidebarView[] = [];
+const SECONDARY_SIDEBAR_VIEW_IDS = SECONDARY_SIDEBAR_VIEWS.map(
+  (view) => view.id,
+);
 
 function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   if (!value || typeof value !== "object") return null;
@@ -314,6 +325,11 @@ export default function App() {
     persistSidebarWidth,
     toggleExplorerFocus,
   } = useSidebarPanel(explorerRef);
+
+  const secondarySidebar = useSecondarySidebarPanel(
+    SECONDARY_SIDEBAR_VIEW_IDS,
+  );
+  const hasSecondarySidebar = SECONDARY_SIDEBAR_VIEWS.length > 0;
 
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -1221,6 +1237,12 @@ export default function App() {
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
+              onToggleSecondarySidebar={
+                hasSecondarySidebar ? secondarySidebar.toggle : undefined
+              }
+              secondarySidebarOpen={
+                hasSecondarySidebar && !secondarySidebar.collapsed
+              }
               spaceSwitcher={spaceSwitcher}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
@@ -1234,7 +1256,7 @@ export default function App() {
               className="min-h-0 flex-1"
             >
               <ResizablePanel
-                id="sidebar"
+                id="primary-sidebar"
                 panelRef={sidebarRef}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
@@ -1289,7 +1311,11 @@ export default function App() {
                 </div>
               </ResizablePanel>
               <ResizableHandle withHandle />
-              <ResizablePanel id="workspace" defaultSize="78%" minSize="480px">
+              <ResizablePanel
+                id="workspace"
+                defaultSize="78%"
+                minSize={`${WORKSPACE_MIN_WIDTH}px`}
+              >
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="relative min-h-0 flex-1">
                     <WorkspaceSurface
@@ -1327,6 +1353,37 @@ export default function App() {
                   />
                 </div>
               </ResizablePanel>
+              {hasSecondarySidebar ? (
+                <>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel
+                    id="secondary-sidebar"
+                    panelRef={secondarySidebar.panelRef}
+                    groupResizeBehavior="preserve-pixel-size"
+                    defaultSize={
+                      secondarySidebar.initialCollapsed
+                        ? "0px"
+                        : `${secondarySidebar.widthRef.current}px`
+                    }
+                    minSize={`${SECONDARY_SIDEBAR_MIN_WIDTH}px`}
+                    maxSize={`${SECONDARY_SIDEBAR_MAX_WIDTH}px`}
+                    collapsible
+                    collapsedSize={0}
+                    onResize={(size) => {
+                      if (size.inPixels > 0) {
+                        secondarySidebar.persistWidth(size.inPixels);
+                      }
+                      secondarySidebar.persistCollapsed(size.inPixels <= 0);
+                    }}
+                  >
+                    <SecondarySidebar
+                      views={SECONDARY_SIDEBAR_VIEWS}
+                      activeView={secondarySidebar.activeView}
+                      onSelectView={secondarySidebar.persistView}
+                    />
+                  </ResizablePanel>
+                </>
+              ) : null}
             </ResizablePanelGroup>
           </main>
 

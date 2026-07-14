@@ -11,18 +11,21 @@ import {
   setWorkspaceValue,
 } from "@/modules/workspace-process";
 import type { SidebarViewId } from "./types";
+import {
+  clampPanelWidth,
+  PRIMARY_SIDEBAR_DEFAULT_WIDTH,
+  PRIMARY_SIDEBAR_MAX_WIDTH,
+  PRIMARY_SIDEBAR_MIN_WIDTH,
+} from "./layout";
 
-export const SIDEBAR_DEFAULT_WIDTH = 260;
-export const SIDEBAR_MIN_WIDTH = 220;
-export const SIDEBAR_MAX_WIDTH = 480;
+export const SIDEBAR_DEFAULT_WIDTH = PRIMARY_SIDEBAR_DEFAULT_WIDTH;
+export const SIDEBAR_MIN_WIDTH = PRIMARY_SIDEBAR_MIN_WIDTH;
+export const SIDEBAR_MAX_WIDTH = PRIMARY_SIDEBAR_MAX_WIDTH;
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar:width";
 const SIDEBAR_VIEW_STORAGE_KEY = "sidebar:view";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "sidebar:collapsed";
 function clampSidebarWidth(width: number): number {
-  return Math.min(
-    SIDEBAR_MAX_WIDTH,
-    Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)),
-  );
+  return clampPanelWidth(width, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
 }
 
 function readSidebarWidth(): number {
