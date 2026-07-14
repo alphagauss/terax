@@ -17,10 +17,12 @@ import {
   AUTO_SAVE_DELAY_MAX,
   AUTO_SAVE_DELAY_MIN,
   clampAutoSaveDelay,
+  EDITOR_FONT_SIZES,
   type EditorFormatter,
   setEditorAutoSave,
   setEditorAutoSaveDelay,
   setEditorCustomFormatCommand,
+  setEditorFontSize,
   setEditorFormatOnSave,
   setEditorFormatter,
   setEditorFormatterByLang,
@@ -37,6 +39,7 @@ import { SettingRow } from "../components/SettingRow";
 const AUTO_SAVE_STEP = 100;
 
 export function EditorSection() {
+  const editorFontSize = usePreferencesStore((s) => s.editorFontSize);
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
   const editorAutoSave = usePreferencesStore((s) => s.editorAutoSave);
@@ -56,6 +59,31 @@ export function EditorSection() {
         title="Editor"
         description="Editing behavior, saving, and language servers."
       />
+
+      <div className="flex flex-col gap-2">
+        <Label>Appearance</Label>
+        <SettingRow title="Font size" description="Code editor text size.">
+          <Select
+            value={String(editorFontSize)}
+            onValueChange={(v) => void setEditorFontSize(Number(v))}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EDITOR_FONT_SIZES.map((size) => (
+                <SelectItem
+                  key={size}
+                  value={String(size)}
+                  className="text-[12px]"
+                >
+                  {size}px
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </div>
 
       <div className="flex flex-col gap-2">
         <Label>Editing</Label>
