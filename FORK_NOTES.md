@@ -49,6 +49,10 @@ Fork-specific adaptation:
   - Registration writes the current-user registry directly instead of spawning a console process for every supported extension.
   - File-open requests use a locked queue that the target Workspace drains atomically, so concurrent launches cannot overwrite each other.
   - The frontend opens drained files through a stable callback instead of cancelling them during an activation state update.
+- `c13ada6 feat(bundle): add Terax Explorer context menus`
+  - Manual registration adds an icon-bearing Open with Terax action for files and selected folders.
+  - File context actions use the Windows Document selection model so single and multi-file selections are routed through the existing locked queue.
+  - Manual unregistration removes the application association and both Explorer context menu entries.
 
 Verification:
 
@@ -57,7 +61,7 @@ Verification:
 - `pnpm.cmd test` passed: 59 files, 385 tests.
 - `pnpm.cmd build` passed.
 - `cargo clippy --all-targets --locked -- -D warnings` passed.
-- The Open With command test and locked request-queue test passed.
+- The Open With command and icon tests, multi-file launch tests, and locked request-queue test passed.
 - `cargo test --locked` completed with 224 tests passing. Its only failure is the pre-existing Windows symlink escape test, which requires Developer Mode or administrator symlink privileges.
 
 
