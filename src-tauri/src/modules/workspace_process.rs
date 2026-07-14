@@ -55,7 +55,7 @@ pub struct WindowGeometry {
 pub struct LaunchRequest {
     env: WorkspaceEnv,
     policy: WorkspacePolicy,
-    launch_dir: Option<PathBuf>,
+    launch_paths: Vec<PathBuf>,
     window_geometry: Option<WindowGeometry>,
 }
 
@@ -107,7 +107,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     let mut env = None;
     let mut policy = None;
     let mut launch_dir = None;
-    let mut positional = None;
+    let mut positional = Vec::new();
     let mut window_geometry = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -148,32 +148,26 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
                 window_geometry = Some(parse_window_geometry(target.as_deref().unwrap())?);
             }
             _ if arg.starts_with('-') => return Err(format!("unknown argument: {arg}")),
-            _ => {
-                if positional.is_some() {
-                    return Err("only one launch directory may be provided".to_string());
-                }
-                positional = Some(PathBuf::from(arg));
-            }
+            _ => positional.push(PathBuf::from(arg)),
         }
     }
 
     let has_internal =
         env.is_some() || policy.is_some() || launch_dir.is_some() || window_geometry.is_some();
-    if has_internal && positional.is_some() {
+    if has_internal && !positional.is_empty() {
         return Err(
-            "internal Workspace arguments cannot be combined with a positional directory"
-                .to_string(),
+            "internal Workspace arguments cannot be combined with positional paths".to_string(),
         );
     }
     if !has_internal {
         return Ok(LaunchRequest {
             env: WorkspaceEnv::Local,
-            policy: if positional.is_some() {
-                WorkspacePolicy::Fresh
-            } else {
+            policy: if positional.is_empty() {
                 WorkspacePolicy::Recent
+            } else {
+                WorkspacePolicy::Fresh
             },
-            launch_dir: positional,
+            launch_paths: positional,
             window_geometry: None,
         });
     }
@@ -186,7 +180,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     Ok(LaunchRequest {
         env,
         policy,
-        launch_dir,
+        launch_paths: launch_dir.into_iter().collect(),
         window_geometry,
     })
 }
@@ -259,31 +253,31 @@ fn parse_legacy_state_filename(name: &str) -> Option<Uuid> {
     Uuid::parse_str(raw).ok()
 }
 
-fn canonical_launch_target(path: Option<PathBuf>) -> Result<(Option<String>, Vec<String>), String> {
-    let Some(path) = path else {
-        return Ok((None, Vec::new()));
-    };
-    let canonical = fs::canonicalize(&path)
-        .map_err(|e| format!("launch path {} is invalid: {e}", path.display()))?;
-    if canonical.is_dir() {
-        return Ok((Some(crate::modules::fs::to_canon(&canonical)), Vec::new()));
+fn canonical_launch_target(paths: Vec<PathBuf>) -> Result<(Option<String>, Vec<String>), String> {
+    let mut dir = None;
+    let mut files = Vec::new();
+    for path in paths {
+        let canonical = fs::canonicalize(&path)
+            .map_err(|e| format!("launch path {} is invalid: {e}", path.display()))?;
+        if canonical.is_dir() {
+            if dir.is_none() {
+                dir = Some(crate::modules::fs::to_canon(&canonical));
+            }
+            continue;
+        }
+        if canonical.is_file() {
+            if dir.is_none() {
+                dir = canonical.parent().map(crate::modules::fs::to_canon);
+            }
+            files.push(crate::modules::fs::to_canon(&canonical));
+            continue;
+        }
+        return Err(format!(
+            "launch path is not a file or directory: {}",
+            canonical.display()
+        ));
     }
-    if canonical.is_file() {
-        let dir = canonical
-            .parent()
-            .map(crate::modules::fs::to_canon)
-            .ok_or_else(|| {
-                format!(
-                    "launch file has no parent directory: {}",
-                    canonical.display()
-                )
-            })?;
-        return Ok((Some(dir), vec![crate::modules::fs::to_canon(&canonical)]));
-    }
-    Err(format!(
-        "launch path is not a file or directory: {}",
-        canonical.display()
-    ))
+    Ok((dir, files))
 }
 
 fn ssh_profile(profile_id: &str) -> Result<crate::modules::remote::models::SshProfile, String> {
@@ -508,7 +502,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     validate_environment(&request.env)?;
     let environment = environment_identity(&request.env)?;
-    let (launch_dir, launch_files) = canonical_launch_target(request.launch_dir)?;
+    let (launch_dir, launch_files) = canonical_launch_target(request.launch_paths)?;
     let launch_geometry = request.window_geometry;
     let window_state_root =
         crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
@@ -564,6 +558,21 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     }
 }
 
+pub fn route_local_open_files(files: &[String]) -> Result<(), String> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let environment = EnvironmentIdentity {
+        key: "local".to_string(),
+        filename_key: "local".to_string(),
+    };
+    crate::modules::shared_store::request_workspace_file_open(
+        &environment.key,
+        &single_id(&environment).to_string(),
+        files,
+    )
+}
+
 impl WorkspaceProcessState {
     pub fn bootstrap(&self) -> &WorkspaceBootstrap {
         &self.bootstrap
@@ -606,7 +615,7 @@ fn spawn_args(
         .to_string(),
     ];
     if let Some(path) = launch_dir {
-        let (canonical, files) = canonical_launch_target(Some(PathBuf::from(path)))?;
+        let (canonical, files) = canonical_launch_target(vec![PathBuf::from(path)])?;
         if !files.is_empty() {
             return Err("launch directory must be a directory".to_string());
         }
@@ -679,7 +688,7 @@ mod tests {
         let request = parse_args([".".to_string()]).unwrap();
         assert_eq!(request.env, WorkspaceEnv::Local);
         assert_eq!(request.policy, WorkspacePolicy::Fresh);
-        assert_eq!(request.launch_dir, Some(PathBuf::from(".")));
+        assert_eq!(request.launch_paths, vec![PathBuf::from(".")]);
         assert_eq!(request.window_geometry, None);
     }
 
@@ -689,9 +698,39 @@ mod tests {
         let file = root.path().join("example.rs");
         fs::write(&file, b"fn main() {}").unwrap();
 
-        let (dir, files) = canonical_launch_target(Some(file.clone())).unwrap();
+        let (dir, files) = canonical_launch_target(vec![file.clone()]).unwrap();
         assert_eq!(dir, Some(crate::modules::fs::to_canon(root.path())));
         assert_eq!(files, vec![crate::modules::fs::to_canon(&file)]);
+    }
+
+    #[test]
+    fn multiple_file_arguments_are_fresh_local() {
+        let request = parse_args(["one.rs".to_string(), "two.rs".to_string()]).unwrap();
+        assert_eq!(request.env, WorkspaceEnv::Local);
+        assert_eq!(request.policy, WorkspacePolicy::Fresh);
+        assert_eq!(
+            request.launch_paths,
+            vec![PathBuf::from("one.rs"), PathBuf::from("two.rs")]
+        );
+    }
+
+    #[test]
+    fn multiple_launch_files_all_open() {
+        let root = tempfile::tempdir().unwrap();
+        let one = root.path().join("one.rs");
+        let two = root.path().join("two.rs");
+        fs::write(&one, b"one").unwrap();
+        fs::write(&two, b"two").unwrap();
+
+        let (dir, files) = canonical_launch_target(vec![one.clone(), two.clone()]).unwrap();
+        assert_eq!(dir, Some(crate::modules::fs::to_canon(root.path())));
+        assert_eq!(
+            files,
+            vec![
+                crate::modules::fs::to_canon(&one),
+                crate::modules::fs::to_canon(&two),
+            ]
+        );
     }
 
     #[test]

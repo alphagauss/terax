@@ -367,5 +367,16 @@ pub fn run() {
                     state.kill_all();
                 }
             }
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                let files = urls
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .filter_map(|path| std::fs::canonicalize(path).ok())
+                    .filter(|path| path.is_file())
+                    .map(|path| fs::to_canon(&path))
+                    .collect::<Vec<_>>();
+                let _ = workspace_process::route_local_open_files(&files);
+            }
         });
 }
