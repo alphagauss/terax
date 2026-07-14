@@ -157,7 +157,7 @@ export function GeneralSection() {
     setOpenWithAction("remove");
     try {
       await invoke("open_with_unregister");
-      toast.success("Removed Open With registration");
+      toast.success("Unregistered Open With");
     } catch (error) {
       toast.error("Could not remove Open With registration", {
         description: String(error),
@@ -485,7 +485,7 @@ export function GeneralSection() {
           <Label>Open With</Label>
           <SettingRow
             title="File associations"
-            description="Register the current Terax executable for supported text and source files. This does not change default apps."
+            description="Add Open with Terax for files and folders, including multi-file selections. This does not change default apps."
           >
             <div className="flex gap-2">
               <Button
@@ -501,7 +501,9 @@ export function GeneralSection() {
                 onClick={() => void unregisterOpenWith()}
                 disabled={openWithAction !== null}
               >
-                {openWithAction === "remove" ? "Removing..." : "Remove"}
+                {openWithAction === "remove"
+                  ? "Unregistering..."
+                  : "Unregister"}
               </Button>
             </div>
           </SettingRow>

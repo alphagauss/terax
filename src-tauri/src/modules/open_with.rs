@@ -69,9 +69,23 @@ const FILE_EXTENSIONS: &[&str] = &[
     ".proto",
 ];
 
+#[cfg(windows)]
+const FILE_CONTEXT_KEY: &str = r"Software\Classes\*\shell\Terax";
+
+#[cfg(windows)]
+const DIRECTORY_CONTEXT_KEY: &str = r"Software\Classes\Directory\shell\Terax";
+
+#[cfg(windows)]
+const CONTEXT_MENU_LABEL: &str = "Open with Terax";
+
 #[cfg(any(windows, test))]
 fn command_value(executable: &Path) -> String {
     format!("\"{}\" \"%1\"", executable.display())
+}
+
+#[cfg(any(windows, test))]
+fn icon_value(executable: &Path) -> String {
+    format!("\"{}\",0", executable.display())
 }
 
 #[cfg(windows)]
@@ -96,6 +110,30 @@ fn notify_association_changed() {
     }
 }
 
+#[cfg(windows)]
+fn register_context_menu(
+    current_user: &RegKey,
+    key: &str,
+    executable: &Path,
+    multi_select_model: &str,
+) -> Result<(), String> {
+    let (verb, _) = current_user
+        .create_subkey(key)
+        .map_err(|error| error.to_string())?;
+    verb.set_value("", &CONTEXT_MENU_LABEL)
+        .map_err(|error| error.to_string())?;
+    verb.set_value("Icon", &icon_value(executable))
+        .map_err(|error| error.to_string())?;
+    verb.set_value("MultiSelectModel", &multi_select_model)
+        .map_err(|error| error.to_string())?;
+    let (command, _) = verb
+        .create_subkey("command")
+        .map_err(|error| error.to_string())?;
+    command
+        .set_value("", &command_value(executable))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn open_with_register() -> Result<String, String> {
     #[cfg(windows)]
@@ -103,25 +141,31 @@ pub fn open_with_register() -> Result<String, String> {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let key = application_key(&executable)?;
         let current_user = RegKey::predef(HKEY_CURRENT_USER);
-        let (open, _) = current_user
-            .create_subkey(format!(r"{key}\shell\open"))
+        let (application, _) = current_user
+            .create_subkey(&key)
             .map_err(|error| error.to_string())?;
-        open.set_value("FriendlyAppName", &"Terax")
+        application
+            .set_value("FriendlyAppName", &"Terax")
             .map_err(|error| error.to_string())?;
-        let (command, _) = open
-            .create_subkey("command")
+        application
+            .set_value("ApplicationIcon", &icon_value(&executable))
+            .map_err(|error| error.to_string())?;
+        let (command, _) = application
+            .create_subkey(r"shell\open\command")
             .map_err(|error| error.to_string())?;
         command
             .set_value("", &command_value(&executable))
             .map_err(|error| error.to_string())?;
-        let (supported_types, _) = current_user
-            .create_subkey(format!(r"{key}\SupportedTypes"))
+        let (supported_types, _) = application
+            .create_subkey("SupportedTypes")
             .map_err(|error| error.to_string())?;
         for extension in FILE_EXTENSIONS {
             supported_types
                 .set_value(extension, &"")
                 .map_err(|error| error.to_string())?;
         }
+        register_context_menu(&current_user, FILE_CONTEXT_KEY, &executable, "Document")?;
+        register_context_menu(&current_user, DIRECTORY_CONTEXT_KEY, &executable, "Single")?;
         notify_association_changed();
         Ok(executable.to_string_lossy().into_owned())
     }
@@ -136,11 +180,14 @@ pub fn open_with_unregister() -> Result<(), String> {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let key = application_key(&executable)?;
         let current_user = RegKey::predef(HKEY_CURRENT_USER);
-        match current_user.delete_subkey_all(key) {
-            Ok(()) => notify_association_changed(),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.to_string()),
+        for key in [&key, FILE_CONTEXT_KEY, DIRECTORY_CONTEXT_KEY] {
+            match current_user.delete_subkey_all(key) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
         }
+        notify_association_changed();
         Ok(())
     }
     #[cfg(not(windows))]
@@ -156,6 +203,14 @@ mod tests {
         assert_eq!(
             command_value(Path::new(r"C:\Tools\Terax.exe")),
             r#""C:\Tools\Terax.exe" "%1""#
+        );
+    }
+
+    #[test]
+    fn icon_uses_the_executable_primary_icon() {
+        assert_eq!(
+            icon_value(Path::new(r"C:\Tools\Terax.exe")),
+            r#""C:\Tools\Terax.exe",0"#
         );
     }
 }
