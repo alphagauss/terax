@@ -5,9 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Kbd } from "@/components/ui/kbd";
 import { Spinner } from "@/components/ui/spinner";
-import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
@@ -30,7 +28,6 @@ import {
   GoogleGeminiIcon,
   Grok02Icon,
   MistralIcon,
-  Message01Icon,
   Mic01Icon,
   PlugIcon,
   ServerStack01Icon,
@@ -60,6 +57,8 @@ import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { AiComposerInput } from "./AiComposerInput";
+import { ChipsRow } from "./ChipsRow";
 
 const PROVIDER_ICON = {
   openai: ChatGptIcon,
@@ -77,130 +76,117 @@ const PROVIDER_ICON = {
   ollama: ServerStack01Icon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
-export function AiOpenButton({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md border border-border/60 bg-card px-2 text-xs",
-        "text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground",
-        "animate-in slide-in-from-top-2 duration-200 ease-out",
-      )}
-      title="Open AI agent"
-    >
-      <span>Open AI agent</span>
-      <Kbd className="h-4 min-w-4 px-1">{fmtShortcut(MOD_KEY, "I")}</Kbd>
-    </button>
-  );
-}
-
-export function AiStatusBarControls() {
+export function AiSidebarComposer() {
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const toggleMini = useChatStore((s) => s.toggleMini);
-  const miniOpen = useChatStore((s) => s.mini.open);
-  const closePanel = useChatStore((s) => s.closePanel);
 
   return (
-    <div className="flex items-center gap-0.5">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept={ACCEPTED_FILES}
-        className="hidden"
-        onChange={(e) => {
-          void c.addFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
+    <div className="relative z-10 shrink-0 px-3 pb-3">
+      <div className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-accent/80 p-2.5 shadow-lg shadow-background/60">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED_FILES}
+          className="hidden"
+          onChange={(e) => {
+            void c.addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
 
-      <IconBtn
-        title="Attach file or image"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={c.isBusy}
-      >
-        <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-      </IconBtn>
+        <ChipsRow
+          files={c.files}
+          onRemoveFile={c.removeFile}
+          snippets={c.pickedSnippets}
+          onRemoveSnippet={(id) => {
+            const snippet = c.pickedSnippets.find((item) => item.id === id);
+            c.removeSnippet(id);
+            if (!snippet) return;
+            const pattern = new RegExp(`(^|\\s)#${snippet.handle}\\b ?`);
+            c.setValue((value) =>
+              value.replace(pattern, (_match, lead: string) => lead),
+            );
+          }}
+          commands={c.pickedCommands}
+          onRemoveCommand={c.removeCommand}
+        />
 
-      {c.voice.supported && (
-        <IconBtn
-          title={
-            !c.voice.hasKey
-              ? `Voice needs a ${STT_PROVIDER_LABELS[c.voice.sttProvider]} key`
-              : c.voice.recording
-                ? "Stop & transcribe"
-                : c.voice.transcribing
-                  ? "Transcribing…"
-                  : "Voice input"
-          }
-          onClick={() =>
-            c.voice.recording ? c.voice.stop() : void c.voice.start()
-          }
-          disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
-          className={cn(
-            c.voice.recording &&
-            "bg-destructive/10 text-destructive hover:bg-destructive/15",
-          )}
-        >
-          {c.voice.recording ? (
-            <span className="size-2 animate-pulse rounded-full bg-destructive" />
-          ) : c.voice.transcribing ? (
-            <Spinner className="size-3" />
+        <AiComposerInput />
+
+        <div className="flex min-w-0 items-center gap-0.5">
+          <IconBtn
+            title="Attach file or image"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={c.isBusy}
+          >
+            <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+          </IconBtn>
+
+          {c.voice.supported ? (
+            <IconBtn
+              title={
+                !c.voice.hasKey
+                  ? `Voice needs a ${STT_PROVIDER_LABELS[c.voice.sttProvider]} key`
+                  : c.voice.recording
+                    ? "Stop & transcribe"
+                    : c.voice.transcribing
+                      ? "Transcribing…"
+                      : "Voice input"
+              }
+              onClick={() =>
+                c.voice.recording ? c.voice.stop() : void c.voice.start()
+              }
+              disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
+              className={cn(
+                c.voice.recording &&
+                  "bg-destructive/10 text-destructive hover:bg-destructive/15",
+              )}
+            >
+              {c.voice.recording ? (
+                <span className="size-2 animate-pulse rounded-full bg-destructive" />
+              ) : c.voice.transcribing ? (
+                <Spinner className="size-3" />
+              ) : (
+                <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
+              )}
+            </IconBtn>
+          ) : null}
+
+          <ModelDropdown />
+          <span className="min-w-1 flex-1" />
+
+          {c.isBusy ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={c.stop}
+              className="size-7"
+              aria-label="Stop"
+              title="Stop"
+            >
+              <HugeiconsIcon
+                icon={StopCircleIcon}
+                size={14}
+                strokeWidth={1.75}
+              />
+            </Button>
           ) : (
-            <HugeiconsIcon icon={Mic01Icon} size={13} strokeWidth={1.75} />
+            <Button
+              type="button"
+              size="icon"
+              onClick={c.submit}
+              disabled={!c.canSend}
+              className="size-7 rounded-full"
+              aria-label="Send"
+              title="Send (Enter)"
+            >
+              <HugeiconsIcon icon={ArrowUpIcon} size={14} strokeWidth={1.75} />
+            </Button>
           )}
-        </IconBtn>
-      )}
-
-      <ModelDropdown />
-
-      <span className="mx-1 h-8 w-px bg-border" aria-hidden />
-      <Button
-        onClick={closePanel}
-        title="Close AI panel"
-        size="xs"
-        variant="ghost"
-        aria-label="Close AI panel"
-        className="text-[11px] text-foreground/85 px-1"
-      >
-        <Kbd className="h-4 gap-px px-2 font-mono text-[11px]">
-          {fmtShortcut(MOD_KEY, "I")}
-        </Kbd>
-      </Button>
-      <IconBtn
-        title={`${miniOpen ? "Close" : "Open"} AI chat window (${fmtShortcut("⇧", MOD_KEY, "I")})`}
-        onClick={toggleMini}
-      >
-        <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
-      </IconBtn>
-
-      {c.isBusy ? (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={c.stop}
-          className="size-6"
-          aria-label="Stop"
-          title="Stop"
-        >
-          <HugeiconsIcon icon={StopCircleIcon} size={13} strokeWidth={1.75} />
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          size="icon"
-          onClick={c.submit}
-          disabled={!c.canSend}
-          className="h-5.5 w-7.5 ml-1"
-          aria-label="Send"
-          title="Send (Enter)"
-        >
-          <HugeiconsIcon icon={ArrowUpIcon} size={13} strokeWidth={1.75} />
-        </Button>
-      )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -247,10 +233,7 @@ function ModelDropdown() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKeys]);
 
-  const allModels = useMemo(
-    () => [...MODELS, ...epModelInfos],
-    [epModelInfos],
-  );
+  const allModels = useMemo(() => [...MODELS, ...epModelInfos], [epModelInfos]);
 
   const COMPAT_PROVIDER_ID = "__compat__";
 
@@ -371,22 +354,21 @@ function ModelDropdown() {
               active={activeProvider === null}
               onClick={() => setActiveProvider(null)}
             />
-            {[...sortedProviders.configured, ...sortedProviders.unconfigured].map(
-              (p) => (
-                <ProviderPill
-                  key={p.id}
-                  icon={PROVIDER_ICON[p.id]}
-                  title={
-                    hasKeyFor(p.id)
-                      ? p.label
-                      : `${p.label} — not configured`
-                  }
-                  active={activeProvider === p.id}
-                  muted={!hasKeyFor(p.id)}
-                  onClick={() => setActiveProvider(p.id)}
-                />
-              ),
-            )}
+            {[
+              ...sortedProviders.configured,
+              ...sortedProviders.unconfigured,
+            ].map((p) => (
+              <ProviderPill
+                key={p.id}
+                icon={PROVIDER_ICON[p.id]}
+                title={
+                  hasKeyFor(p.id) ? p.label : `${p.label} — not configured`
+                }
+                active={activeProvider === p.id}
+                muted={!hasKeyFor(p.id)}
+                onClick={() => setActiveProvider(p.id)}
+              />
+            ))}
             {customEndpoints.length > 0 && (
               <ProviderPill
                 icon={PlugIcon}
@@ -428,10 +410,7 @@ function ModelDropdown() {
                   key={m.id}
                   model={m}
                   selected={m.id === selected}
-                  hasKey={
-                    isCompatModelId(m.id) ||
-                    hasKeyFor(m.provider)
-                  }
+                  hasKey={isCompatModelId(m.id) || hasKeyFor(m.provider)}
                   favorite={favoriteIds.includes(m.id)}
                   showProviderIcon={activeProvider === null}
                   onPick={() => {
@@ -524,11 +503,7 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
   if (!p) return null;
   return (
     <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
-      <HugeiconsIcon
-        icon={PROVIDER_ICON[p.id]}
-        size={13}
-        strokeWidth={1.75}
-      />
+      <HugeiconsIcon icon={PROVIDER_ICON[p.id]} size={13} strokeWidth={1.75} />
       <span>{p.label}</span>
     </div>
   );
@@ -643,11 +618,7 @@ function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
     <div className="ml-auto flex items-center gap-1.5">
       <CapBar icon={BrainIcon} value={caps.intelligence} label="Intelligence" />
       <CapBar icon={FlashIcon} value={caps.speed} label="Speed" />
-      <CapBar
-        icon={CoinsDollarIcon}
-        value={caps.cost}
-        label="Affordability"
-      />
+      <CapBar icon={CoinsDollarIcon} value={caps.cost} label="Affordability" />
     </div>
   );
 }
@@ -662,10 +633,7 @@ function CapBar({
   label: string;
 }) {
   return (
-    <span
-      className="flex items-center gap-0.5"
-      title={`${label}: ${value}/5`}
-    >
+    <span className="flex items-center gap-0.5" title={`${label}: ${value}/5`}>
       <HugeiconsIcon
         icon={icon}
         size={10}

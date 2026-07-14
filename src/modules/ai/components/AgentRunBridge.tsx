@@ -38,7 +38,9 @@ export function AgentRunBridge(props: AgentRunBridgeProps) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const revision = useChatStore((s) => s.activeSessionRevision);
   if (!sessionId) return null;
-  return <Bridge key={`${sessionId}:${revision}`} sessionId={sessionId} {...props} />;
+  return (
+    <Bridge key={`${sessionId}:${revision}`} sessionId={sessionId} {...props} />
+  );
 }
 
 type BridgeProps = { sessionId: string } & AgentRunBridgeProps;
@@ -52,19 +54,16 @@ type ToolPartLike = ToolUIPart & {
 
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
-function Bridge({
-  sessionId,
-  openAiDiffTab,
-  closeAiDiffTab,
-}: BridgeProps) {
+function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
   });
   const patch = useChatStore((s) => s.patchAgentMeta);
-  const openMini = useChatStore((s) => s.openMini);
   const publishMessages = useChatStore((s) => s.publishMessages);
-  const runLocked = useChatStore((s) => Boolean(s.runLockSessionIds[sessionId]));
+  const runLocked = useChatStore((s) =>
+    Boolean(s.runLockSessionIds[sessionId]),
+  );
   const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
 
   // Expose the approval responder so the diff tab can resolve approvals.
@@ -148,16 +147,10 @@ function Bridge({
     patch({
       status: runStatus,
       approvalsPending,
-      ...(runStatus === "idle" || runStatus === "error"
-        ? { step: null }
-        : {}),
+      ...(runStatus === "idle" || runStatus === "error" ? { step: null } : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
   }, [status, approvalsPending, patch]);
-
-  useEffect(() => {
-    if (approvalsPending > 0) openMini();
-  }, [approvalsPending, openMini]);
 
   // ---- AI diff tab management ----------------------------------------------
   // We track which approvalIds have already opened a tab so re-renders don't
@@ -180,8 +173,7 @@ function Bridge({
           t === "tool-multi_edit"
         ) {
           const state = (p as { state?: string }).state ?? "";
-          const id =
-            (p as { approval?: { id?: string } }).approval?.id ?? "";
+          const id = (p as { approval?: { id?: string } }).approval?.id ?? "";
           fp += `${id}:${state}|`;
         }
       }

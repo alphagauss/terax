@@ -24,7 +24,7 @@ export function SecondarySidebar({ views, activeView, onSelectView }: Props) {
           onSelectView={onSelectView}
         />
       ) : null}
-      <div key={selected.id} className="min-h-0 flex-1 terax-panel-in">
+      <div key={selected.id} className="min-h-0 flex-1">
         {selected.content}
       </div>
     </aside>

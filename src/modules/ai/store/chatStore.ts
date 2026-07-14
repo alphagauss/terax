@@ -11,7 +11,11 @@ import {
 } from "../config";
 import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
-import { EMPTY_PROVIDER_KEYS, type ProviderKeys, type CustomEndpointKeys } from "../lib/keyring";
+import {
+  EMPTY_PROVIDER_KEYS,
+  type ProviderKeys,
+  type CustomEndpointKeys,
+} from "../lib/keyring";
 import {
   acquireSessionRun,
   deleteSessionFile,
@@ -82,20 +86,13 @@ const IDLE_META: AgentMeta = {
   compactionNotice: null,
 };
 
-export type MiniState = {
-  open: boolean;
-};
-
 export type PendingSelection = {
   id: string;
   text: string;
   source: "terminal" | "editor";
 };
 
-export type ApprovalResponder = (
-  approvalId: string,
-  approved: boolean,
-) => void;
+export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
   live: Live;
@@ -119,16 +116,6 @@ type StoreState = {
 
   selectedModelId: string;
   setSelectedModelId: (id: string) => void;
-
-  mini: MiniState;
-  openMini: () => void;
-  closeMini: () => void;
-  toggleMini: () => void;
-
-  panelOpen: boolean;
-  openPanel: () => void;
-  closePanel: () => void;
-  togglePanel: () => void;
 
   focusSignal: number;
   pendingPrefill: string | null;
@@ -222,32 +209,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     void pushRecentModel(id);
   },
 
-  mini: { open: false },
-  openMini: () => set({ mini: { open: true } }),
-  closeMini: () => set({ mini: { open: false } }),
-  toggleMini: () => set((s) => ({ mini: { open: !s.mini.open } })),
-
-  panelOpen: false,
-  openPanel: () => {
-    set({ panelOpen: true });
-    void setWorkspaceValue("ai:panelOpen", true);
-  },
-  closePanel: () => {
-    set({ panelOpen: false });
-    void setWorkspaceValue("ai:panelOpen", false);
-  },
-  togglePanel: () =>
-    set((s) => {
-      const panelOpen = !s.panelOpen;
-      void setWorkspaceValue("ai:panelOpen", panelOpen);
-      return { panelOpen };
-    }),
-
   focusSignal: 0,
   pendingPrefill: null,
   focusInput: (prefill = null) =>
     set((s) => ({
-      panelOpen: true,
       focusSignal: s.focusSignal + 1,
       pendingPrefill: prefill ?? null,
     })),
@@ -263,9 +228,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (!trimmed) return;
     const id = `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     set((s) => ({
-      panelOpen: true,
       focusSignal: s.focusSignal + 1,
-      pendingSelections: [...s.pendingSelections, { id, text: trimmed, source }],
+      pendingSelections: [
+        ...s.pendingSelections,
+        { id, text: trimmed, source },
+      ],
     }));
   },
   consumeSelections: () => {
@@ -309,7 +276,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
       set({
         sessions: fresh ? [fresh, ...sessions] : sessions,
         activeSessionId: activeId,
-        panelOpen: getWorkspaceValue<boolean>("ai:panelOpen") ?? false,
         sessionsHydrated: true,
         sessionSyncError: null,
       });
@@ -364,7 +330,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
           },
         ];
         nextActive = id;
-      } else if (!activeId || !next.some((session) => session.id === activeId)) {
+      } else if (
+        !activeId ||
+        !next.some((session) => session.id === activeId)
+      ) {
         nextActive = next[0].id;
       }
 
@@ -474,7 +443,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
           }
         }
         set({ sessions: remaining, activeSessionId: nextActive });
-        if (wasActive) await setWorkspaceValue("ai:activeSessionId", nextActive);
+        if (wasActive)
+          await setWorkspaceValue("ai:activeSessionId", nextActive);
       } catch (error) {
         set({ sessionSyncError: String(error) });
       }
@@ -551,7 +521,8 @@ export function getAgentMeta(): AgentMeta {
 }
 
 export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } = useChatStore.getState();
+  const { selectedModelId, apiKeys, customEndpointKeys } =
+    useChatStore.getState();
   if (isCompatModelId(selectedModelId)) {
     const eid = endpointIdFromCompatModel(selectedModelId);
     return customEndpointKeys[eid] ?? null;

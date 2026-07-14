@@ -87,6 +87,16 @@ export function useSecondarySidebarPanel(viewIds: readonly string[]) {
     }
   }, []);
 
+  const open = useCallback(() => {
+    const panel = panelRef.current;
+    if (!panel || panel.getSize().asPercentage > 0) return;
+    panel.resize(`${widthRef.current}px`);
+  }, []);
+
+  const close = useCallback(() => {
+    panelRef.current?.collapse();
+  }, []);
+
   useEffect(() => {
     return () => {
       if (widthWriteTimerRef.current) {
@@ -104,6 +114,8 @@ export function useSecondarySidebarPanel(viewIds: readonly string[]) {
     persistView,
     persistCollapsed,
     persistWidth,
+    open,
+    close,
     toggle,
   };
 }

@@ -3,12 +3,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useChatStore } from "@/modules/ai";
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
-import {
-  AiOpenButton,
-  AiStatusBarControls,
-} from "@/modules/ai/components/AiStatusBarControls";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
@@ -25,9 +20,8 @@ type Props = {
   onWorkspaceRetry: () => Promise<string | null>;
   onCd: (path: string) => void;
   onWorkspaceChange: (env: WorkspaceEnv) => void;
-  onOpenMini: () => void;
-  /** Only rendered when the AI panel is open and a key is loaded. */
-  hasComposer: boolean;
+  onToggleAi: () => void;
+  aiOpen: boolean;
   privateActive: boolean;
 };
 
@@ -39,13 +33,10 @@ export function StatusBar({
   onWorkspaceRetry,
   onCd,
   onWorkspaceChange,
-  onOpenMini,
-  hasComposer,
+  onToggleAi,
+  aiOpen,
   privateActive,
 }: Props) {
-  const panelOpen = useChatStore((s) => s.panelOpen);
-  const togglePanel = useChatStore((s) => s.togglePanel);
-
   return (
     <footer className="flex h-8 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-card/60 pl-3 pr-4 text-[11px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -76,12 +67,7 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        <AgentStatusPill onClick={onOpenMini} />
-        {panelOpen && hasComposer ? (
-          <AiStatusBarControls />
-        ) : (
-          <AiOpenButton onOpen={togglePanel} />
-        )}
+        <AgentStatusPill onClick={onToggleAi} active={aiOpen} />
       </div>
     </footer>
   );

@@ -1,33 +1,36 @@
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { AlertCircleIcon } from "@hugeicons/core-free-icons";
+import {
+  AiChat01Icon,
+  AlertCircleIcon,
+  AlertDiamondIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useChatStore, type AgentMeta } from "../store/chatStore";
 
 type Props = {
   onClick: () => void;
+  active?: boolean;
 };
 
-export function AgentStatusPill({ onClick }: Props) {
+export function AgentStatusPill({ onClick, active = false }: Props) {
   const meta = useChatStore((s) => s.agentMeta);
-
-  // awaiting-approval is surfaced by the notification + auto-opened mini window.
-  if (meta.status === "awaiting-approval") return null;
-  if (meta.status === "idle" && !meta.error) return null;
-
   const { tone, icon, label } = describe(meta);
 
   return (
     <button
-      key={`${meta.status}:${label}`}
       type="button"
       onClick={onClick}
       className={cn(
-        "flex h-6 items-center gap-1.5 rounded-md border px-1.5 text-[11px] transition-colors",
-        "animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out",
+        "flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors",
         tone,
+        active &&
+          meta.status === "idle" &&
+          "border-border bg-accent text-foreground",
       )}
-      title="Open AI log"
+      title={active ? "Close AI sidebar" : "Open AI sidebar"}
+      aria-label={active ? "Close AI sidebar" : "Open AI sidebar"}
+      aria-pressed={active}
     >
       {icon}
       <span className="max-w-[180px] truncate">{label}</span>
@@ -40,20 +43,36 @@ function describe(meta: AgentMeta): {
   icon: React.ReactNode;
   label: string;
 } {
+  if (meta.status === "awaiting-approval") {
+    return {
+      tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400",
+      icon: (
+        <HugeiconsIcon icon={AlertDiamondIcon} size={12} strokeWidth={1.75} />
+      ),
+      label:
+        meta.approvalsPending > 1
+          ? `${meta.approvalsPending} approvals`
+          : "Approval needed",
+    };
+  }
   if (meta.status === "error") {
     return {
-      tone:
-        "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
+      tone: "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
       icon: (
         <HugeiconsIcon icon={AlertCircleIcon} size={12} strokeWidth={1.75} />
       ),
       label: meta.error ?? "Error",
     };
   }
-  // thinking | streaming
+  if (meta.status === "idle") {
+    return {
+      tone: "border-transparent text-muted-foreground hover:border-border/60 hover:bg-accent hover:text-foreground",
+      icon: <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />,
+      label: "AI",
+    };
+  }
   return {
-    tone:
-      "border-border/60 bg-card text-muted-foreground hover:text-foreground",
+    tone: "border-border/60 bg-card text-muted-foreground hover:text-foreground",
     icon: <Spinner className="size-3" />,
     label: meta.step ?? "Thinking…",
   };

@@ -1,4 +1,3 @@
-import type { PresenceState } from "@/lib/usePresence";
 import { lazy, Suspense } from "react";
 import type { AgentRunBridgeProps } from "./AgentRunBridge";
 import type { SelectionAskAiProps } from "./SelectionAskAi";
@@ -7,12 +6,8 @@ const AgentRunBridgeInner = lazy(() =>
   import("./AgentRunBridge").then((m) => ({ default: m.AgentRunBridge })),
 );
 
-const AiMiniWindowInner = lazy(() =>
-  import("./AiMiniWindow").then((m) => ({ default: m.AiMiniWindow })),
-);
-
-const AiInputBarConnectInner = lazy(() =>
-  import("./AiInputBar").then((m) => ({ default: m.AiInputBarConnect })),
+const AiSidebarPanelInner = lazy(() =>
+  import("./AiSidebarPanel").then((m) => ({ default: m.AiSidebarPanel })),
 );
 
 const SelectionAskAiInner = lazy(() =>
@@ -27,18 +22,22 @@ export function AgentRunBridge(props: AgentRunBridgeProps) {
   );
 }
 
-export function AiMiniWindow({ state }: { state: PresenceState }) {
+export function AiSidebarPanel({
+  hasComposer,
+  onClose,
+}: {
+  hasComposer: boolean;
+  onClose: () => void;
+}) {
   return (
-    <Suspense fallback={null}>
-      <AiMiniWindowInner state={state} />
-    </Suspense>
-  );
-}
-
-export function AiInputBarConnect({ onAdd }: { onAdd: () => void }) {
-  return (
-    <Suspense fallback={null}>
-      <AiInputBarConnectInner onAdd={onAdd} />
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center bg-sidebar text-xs text-muted-foreground">
+          Loading AI…
+        </div>
+      }
+    >
+      <AiSidebarPanelInner hasComposer={hasComposer} onClose={onClose} />
     </Suspense>
   );
 }

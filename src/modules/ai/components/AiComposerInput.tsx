@@ -60,8 +60,14 @@ function detectFileTrigger(value: string, caret: number): FileTrigger | null {
 
 export function AiComposerInput() {
   const c = useComposer();
+  const focusSignal = useChatStore((s) => s.focusSignal);
   const snippets = useSnippetsStore((s) => s.snippets);
   const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+
+  useEffect(() => {
+    if (focusSignal === 0) return;
+    requestAnimationFrame(() => c.textareaRef.current?.focus());
+  }, [c.textareaRef, focusSignal]);
 
   const [trigger, setTrigger] = useState<SnippetTrigger | null>(null);
   const [fileTrigger, setFileTrigger] = useState<FileTrigger | null>(null);

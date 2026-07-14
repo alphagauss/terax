@@ -24,10 +24,15 @@ function liveStatus(s: RunStatus): AgentStatus | null {
   return null;
 }
 
-export function LocalAgentNotificationsBridge() {
+export function LocalAgentNotificationsBridge({
+  visible,
+  onActivate,
+}: {
+  visible: boolean;
+  onActivate: () => void;
+}) {
   const status = useChatStore((s) => s.agentMeta.status) as RunStatus;
   const error = useChatStore((s) => s.agentMeta.error);
-  const visible = useChatStore((s) => s.panelOpen || s.mini.open);
   const focused = useWindowFocus();
 
   const visibleRef = useRef(visible);
@@ -37,9 +42,12 @@ export function LocalAgentNotificationsBridge() {
   const prev = useRef<RunStatus>(status);
 
   useEffect(() => {
-    useAgentStore.getState().setLocalAgent(
-      liveStatus(status) ? { agent: AGENT, status: liveStatus(status)! } : null,
-    );
+    const nextLiveStatus = liveStatus(status);
+    useAgentStore
+      .getState()
+      .setLocalAgent(
+        nextLiveStatus ? { agent: AGENT, status: nextLiveStatus } : null,
+      );
 
     const was = prev.current;
     prev.current = status;
@@ -59,17 +67,21 @@ export function LocalAgentNotificationsBridge() {
         focused: focusedRef.current,
         visible: visibleRef.current,
         allowToast: true,
-        onActivate: () => useChatStore.getState().openPanel(),
+        onActivate,
       });
 
     if (status === "awaiting-approval") {
-      fire("attention", "Terax needs your approval", "Approve a tool to continue");
+      fire(
+        "attention",
+        "Terax needs your approval",
+        "Approve a tool to continue",
+      );
     } else if (status === "error") {
       fire("error", "Terax run failed", error ?? undefined);
     } else if (status === "idle" && isBusy(was)) {
       fire("finished", "Terax finished", "Your task is ready");
     }
-  }, [status, error]);
+  }, [status, error, onActivate]);
 
   return null;
 }

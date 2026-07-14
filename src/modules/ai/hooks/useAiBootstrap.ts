@@ -9,10 +9,7 @@ import {
   hasAnyKey,
 } from "../lib/keyring";
 import { useAgentsStore } from "../store/agentsStore";
-import {
-  flushCompletedSessionRuns,
-  useChatStore,
-} from "../store/chatStore";
+import { flushCompletedSessionRuns, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /**
@@ -33,7 +30,6 @@ export function useAiBootstrap(): {
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
-  const panelOpen = useChatStore((s) => s.panelOpen);
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
 
   useEffect(() => {
@@ -126,16 +122,16 @@ export function useAiBootstrap(): {
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
-    if (panelOpen || document.visibilityState === "visible") refresh();
+    if (document.visibilityState === "visible") refresh();
     const timer = setInterval(() => {
-      if (panelOpen || document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "visible") refresh();
     }, 3_000);
     return () => {
       clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [sessionsHydrated, panelOpen, refreshSessions]);
+  }, [sessionsHydrated, refreshSessions]);
 
   useEffect(() => {
     if (!sessionSyncError) return;

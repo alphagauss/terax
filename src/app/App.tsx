@@ -21,7 +21,7 @@ import {
 } from "@/modules/agents";
 import {
   AgentRunBridge,
-  AiMiniWindow,
+  AiSidebarPanel,
   flushCompletedSessionRuns,
   LocalAgentNotificationsBridge,
   SelectionAskAi,
@@ -110,14 +110,12 @@ import {
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { AiChat01Icon } from "@hugeicons/core-free-icons";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
-import {
-  TOGGLE_BLOCK_INPUT_EVENT,
-  WorkspaceInputBar,
-} from "./components/WorkspaceInputBar";
+import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { WorkspaceSurface } from "./components/WorkspaceSurface";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
@@ -129,10 +127,7 @@ type WorkspaceActivation = {
   workspaceId: string;
 };
 
-const SECONDARY_SIDEBAR_VIEWS: readonly SecondarySidebarView[] = [];
-const SECONDARY_SIDEBAR_VIEW_IDS = SECONDARY_SIDEBAR_VIEWS.map(
-  (view) => view.id,
-);
+const SECONDARY_SIDEBAR_VIEW_IDS = ["ai"] as const;
 
 function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   if (!value || typeof value !== "object") return null;
@@ -326,11 +321,7 @@ export default function App() {
     toggleExplorerFocus,
   } = useSidebarPanel(explorerRef);
 
-  const secondarySidebar = useSecondarySidebarPanel(
-    SECONDARY_SIDEBAR_VIEW_IDS,
-  );
-  const hasSecondarySidebar = SECONDARY_SIDEBAR_VIEWS.length > 0;
-
+  const secondarySidebar = useSecondarySidebarPanel(SECONDARY_SIDEBAR_VIEW_IDS);
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [paletteInitialMode, setPaletteInitialMode] = useState<
@@ -343,17 +334,28 @@ export default function App() {
     },
     [],
   );
-  const miniOpen = useChatStore((s) => s.mini.open);
-  const miniPresence = usePresence(miniOpen, 200);
-  const openMini = useChatStore((s) => s.openMini);
-  const toggleMini = useChatStore((s) => s.toggleMini);
   const focusInput = useChatStore((s) => s.focusInput);
-  const openPanel = useChatStore((s) => s.openPanel);
-  const panelOpen = useChatStore((s) => s.panelOpen);
   const setLive = useChatStore((s) => s.setLive);
   const respondToApproval = useChatStore((s) => s.respondToApproval);
 
-  const { hasComposer, keysLoaded } = useAiBootstrap();
+  const { hasComposer } = useAiBootstrap();
+
+  const secondarySidebarViews = useMemo<readonly SecondarySidebarView[]>(
+    () => [
+      {
+        id: "ai",
+        label: "AI",
+        icon: AiChat01Icon,
+        content: (
+          <AiSidebarPanel
+            hasComposer={hasComposer}
+            onClose={secondarySidebar.close}
+          />
+        ),
+      },
+    ],
+    [hasComposer, secondarySidebar.close],
+  );
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -490,55 +492,55 @@ export default function App() {
     return null;
   }, [tabs, activeId]);
 
-  const togglePanelAndFocus = useCallback(() => {
-    if (!hasComposer) {
-      void openSettingsWindow("models");
-      return;
-    }
-    if (panelOpen) {
-      useChatStore.getState().closePanel();
+  const openAiPanel = useCallback(() => {
+    secondarySidebar.persistView("ai");
+    secondarySidebar.open();
+  }, [secondarySidebar.open, secondarySidebar.persistView]);
+
+  const openAiPanelAndFocus = useCallback(
+    (prefill: string | null = null) => {
+      openAiPanel();
+      focusInput(prefill);
+    },
+    [focusInput, openAiPanel],
+  );
+
+  const toggleAiPanel = useCallback(() => {
+    if (secondarySidebar.collapsed) {
+      openAiPanelAndFocus();
     } else {
-      openPanel();
-      focusInput(null);
+      secondarySidebar.close();
     }
-  }, [hasComposer, panelOpen, openPanel, focusInput]);
+  }, [openAiPanelAndFocus, secondarySidebar.close, secondarySidebar.collapsed]);
 
   const attachSelection = useChatStore((s) => s.attachSelection);
 
   const handleAttachFileToAgent = useCallback(
     (path: string) => {
-      if (!hasComposer) {
-        void openSettingsWindow("models");
-        return;
-      }
       // Dispatch a window event the composer listens for. Same pattern as
       // selections — keeps file-explorer decoupled from the AI module.
       window.dispatchEvent(
         new CustomEvent<string>("terax:ai-attach-file", { detail: path }),
       );
-      openPanel();
-      focusInput(null);
+      openAiPanelAndFocus();
     },
-    [hasComposer, openPanel, focusInput],
+    [openAiPanelAndFocus],
   );
 
   const askFromSelection = useCallback(() => {
-    if (!hasComposer) {
-      void openSettingsWindow("models");
-      return;
-    }
     const selection = captureActiveSelection();
     if (!selection || !selection.trim()) {
-      focusInput(null);
+      openAiPanelAndFocus();
       return;
     }
     const source: "terminal" | "editor" =
       activeTab?.kind === "editor" ? "editor" : "terminal";
+    openAiPanel();
     attachSelection(selection, source);
   }, [
-    hasComposer,
     captureActiveSelection,
-    focusInput,
+    openAiPanel,
+    openAiPanelAndFocus,
     attachSelection,
     activeTab,
   ]);
@@ -791,8 +793,6 @@ export default function App() {
       "terminal.clear": () => {
         clearFocusedTerminal();
       },
-      "terminal.toggleInput": () =>
-        window.dispatchEvent(new CustomEvent(TOGGLE_BLOCK_INPUT_EVENT)),
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
       "search.focus": () => {
@@ -800,14 +800,7 @@ export default function App() {
         if (editor) editor.openSearch();
         else searchInlineRef.current?.focus();
       },
-      "ai.toggle": togglePanelAndFocus,
-      "ai.toggleMini": () => {
-        if (!hasComposer) {
-          void openSettingsWindow("models");
-          return;
-        }
-        toggleMini();
-      },
+      "ai.toggle": toggleAiPanel,
       "ai.askSelection": askFromSelection,
       "agent.focusAttention": () => {
         const t = nextAttentionTarget();
@@ -843,9 +836,7 @@ export default function App() {
       splitActivePaneInActiveTab,
       focusNextPaneInTab,
       toggleSourceControl,
-      hasComposer,
-      togglePanelAndFocus,
-      toggleMini,
+      toggleAiPanel,
       askFromSelection,
       toggleSidebar,
       toggleExplorerFocus,
@@ -883,11 +874,7 @@ export default function App() {
           (e.target as HTMLElement | null) ?? document.activeElement;
         return !(target as HTMLElement | null)?.closest?.(".xterm");
       }
-      if (
-        id === "terminal.toggleInput" ||
-        id === "blocks.prev" ||
-        id === "blocks.next"
-      ) {
+      if (id === "blocks.prev" || id === "blocks.next") {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
       }
       if (id === "sidebar.toggle") {
@@ -970,9 +957,8 @@ export default function App() {
   const onActivateAgent = activateAgentTarget;
 
   const onActivateLocalAgent = useCallback(() => {
-    openPanel();
-    focusInput(null);
-  }, [openPanel, focusInput]);
+    openAiPanelAndFocus();
+  }, [openAiPanelAndFocus]);
 
   const handleLeafExit = useCallback(
     (leafId: number, _code: number) => {
@@ -1137,7 +1123,7 @@ export default function App() {
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
-            toggleAi: togglePanelAndFocus,
+            toggleAi: toggleAiPanel,
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
@@ -1166,7 +1152,7 @@ export default function App() {
       handleCloseTabOrPane,
       splitActivePaneInActiveTab,
       toggleSidebar,
-      togglePanelAndFocus,
+      toggleAiPanel,
       askFromSelection,
       activeSpaceId,
       handleNewSpace,
@@ -1237,12 +1223,8 @@ export default function App() {
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
-              onToggleSecondarySidebar={
-                hasSecondarySidebar ? secondarySidebar.toggle : undefined
-              }
-              secondarySidebarOpen={
-                hasSecondarySidebar && !secondarySidebar.collapsed
-              }
+              onToggleSecondarySidebar={secondarySidebar.toggle}
+              secondarySidebarOpen={!secondarySidebar.collapsed}
               spaceSwitcher={spaceSwitcher}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
@@ -1279,10 +1261,7 @@ export default function App() {
                     onSelectView={persistSidebarView}
                     changedCount={sourceControl.changedCount}
                   />
-                  <div
-                    key={sidebarView}
-                    className="min-h-0 flex-1 terax-panel-in"
-                  >
+                  <div key={sidebarView} className="min-h-0 flex-1">
                     {sidebarView === "explorer" ? (
                       <FileExplorer
                         ref={explorerRef}
@@ -1346,44 +1325,38 @@ export default function App() {
                     activeLeafId={activeLeafId}
                     cwd={activeCwd}
                     home={home}
-                    hasComposer={hasComposer}
-                    panelOpen={panelOpen}
-                    keysLoaded={keysLoaded}
-                    onConnect={() => void openSettingsWindow("models")}
                   />
                 </div>
               </ResizablePanel>
-              {hasSecondarySidebar ? (
-                <>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel
-                    id="secondary-sidebar"
-                    panelRef={secondarySidebar.panelRef}
-                    groupResizeBehavior="preserve-pixel-size"
-                    defaultSize={
-                      secondarySidebar.initialCollapsed
-                        ? "0px"
-                        : `${secondarySidebar.widthRef.current}px`
-                    }
-                    minSize={`${SECONDARY_SIDEBAR_MIN_WIDTH}px`}
-                    maxSize={`${SECONDARY_SIDEBAR_MAX_WIDTH}px`}
-                    collapsible
-                    collapsedSize={0}
-                    onResize={(size) => {
-                      if (size.inPixels > 0) {
-                        secondarySidebar.persistWidth(size.inPixels);
-                      }
-                      secondarySidebar.persistCollapsed(size.inPixels <= 0);
-                    }}
-                  >
-                    <SecondarySidebar
-                      views={SECONDARY_SIDEBAR_VIEWS}
-                      activeView={secondarySidebar.activeView}
-                      onSelectView={secondarySidebar.persistView}
-                    />
-                  </ResizablePanel>
-                </>
-              ) : null}
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="secondary-sidebar"
+                panelRef={secondarySidebar.panelRef}
+                groupResizeBehavior="preserve-pixel-size"
+                defaultSize={
+                  secondarySidebar.initialCollapsed
+                    ? "0px"
+                    : `${secondarySidebar.widthRef.current}px`
+                }
+                minSize={`${SECONDARY_SIDEBAR_MIN_WIDTH}px`}
+                maxSize={`${SECONDARY_SIDEBAR_MAX_WIDTH}px`}
+                collapsible
+                collapsedSize={0}
+                onResize={(size) => {
+                  if (size.inPixels > 0) {
+                    secondarySidebar.persistWidth(size.inPixels);
+                  }
+                  secondarySidebar.persistCollapsed(size.inPixels <= 0);
+                }}
+              >
+                <SecondarySidebar
+                  views={
+                    secondarySidebar.collapsed ? [] : secondarySidebarViews
+                  }
+                  activeView={secondarySidebar.activeView}
+                  onSelectView={secondarySidebar.persistView}
+                />
+              </ResizablePanel>
             </ResizablePanelGroup>
           </main>
 
@@ -1396,8 +1369,8 @@ export default function App() {
               onWorkspaceRetry={initializeWorkspaceEnv}
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
-              onOpenMini={openMini}
-              hasComposer={hasComposer}
+              onToggleAi={toggleAiPanel}
+              aiOpen={!secondarySidebar.collapsed}
               privateActive={
                 activeTab?.kind === "terminal" && activeTab.private === true
               }
@@ -1418,12 +1391,11 @@ export default function App() {
                 openAiDiffTab={openAiDiffTab}
                 closeAiDiffTab={closeAiDiffTab}
               />
-              <LocalAgentNotificationsBridge />
+              <LocalAgentNotificationsBridge
+                visible={!secondarySidebar.collapsed}
+                onActivate={openAiPanel}
+              />
             </>
-          ) : null}
-
-          {hasComposer && miniPresence.mounted ? (
-            <AiMiniWindow state={miniPresence.state} />
           ) : null}
           {askPresence.mounted ? (
             <SelectionAskAi

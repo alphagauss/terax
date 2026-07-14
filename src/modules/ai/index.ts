@@ -1,7 +1,6 @@
 export {
   AgentRunBridge,
-  AiInputBarConnect,
-  AiMiniWindow,
+  AiSidebarPanel,
   SelectionAskAi,
 } from "./components/lazy";
 export { AgentStatusPill } from "./components/AgentStatusPill";

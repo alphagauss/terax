@@ -2,8 +2,8 @@ import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
-  ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
+import { Button } from "@/components/ui/button";
 import {
   Message,
   MessageContent,
@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  ArrowDown01Icon,
   ArrowRight01Icon,
   CodeIcon,
   File01Icon,
@@ -40,8 +41,155 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useMemo } from "react";
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
+import {
+  type StickToBottomContext,
+  useStickToBottomContext,
+} from "use-stick-to-bottom";
 import { AiToolApproval } from "./AiToolApproval";
+
+type ConversationScrollPosition = {
+  top: number;
+  atBottom: boolean;
+  anchor: {
+    messageId: string;
+    offset: number;
+  } | null;
+};
+
+const conversationScrollPositions = new Map<
+  string,
+  ConversationScrollPosition
+>();
+
+const FAST_SCROLL_SPRING = {
+  damping: 0.78,
+  stiffness: 0.09,
+  mass: 0.95,
+} as const;
+
+function useConversationScrollMemory(sessionId: string) {
+  const contextRef = useRef<StickToBottomContext | null>(null);
+  const remembered = conversationScrollPositions.get(sessionId);
+
+  useLayoutEffect(() => {
+    let frame = 0;
+    let disposed = false;
+    let element: HTMLElement | null = null;
+    let save: (() => void) | null = null;
+
+    const bind = () => {
+      const context = contextRef.current;
+      element = context?.scrollRef.current ?? null;
+      if (!context || !element) {
+        frame = window.requestAnimationFrame(bind);
+        return;
+      }
+
+      const savePosition = () => {
+        if (!element) return;
+        const remaining =
+          element.scrollHeight - element.clientHeight - element.scrollTop;
+        conversationScrollPositions.set(sessionId, {
+          top: element.scrollTop,
+          atBottom: remaining <= 4,
+          anchor: findConversationAnchor(element),
+        });
+      };
+      save = savePosition;
+
+      const saved = conversationScrollPositions.get(sessionId);
+      if (saved && !saved.atBottom) {
+        context.stopScroll();
+        const restore = () => {
+          if (!element) return;
+          context.stopScroll();
+          const maxScrollTop = Math.max(
+            0,
+            element.scrollHeight - element.clientHeight,
+          );
+          const anchorElement = saved.anchor
+            ? findConversationMessage(element, saved.anchor.messageId)
+            : null;
+          if (anchorElement && saved.anchor) {
+            const viewportTop = element.getBoundingClientRect().top;
+            const currentOffset =
+              anchorElement.getBoundingClientRect().top - viewportTop;
+            element.scrollTop = Math.min(
+              maxScrollTop,
+              Math.max(
+                0,
+                element.scrollTop + currentOffset - saved.anchor.offset,
+              ),
+            );
+            return;
+          }
+          element.scrollTop = Math.min(saved.top, maxScrollTop);
+        };
+        restore();
+        queueMicrotask(() => {
+          if (disposed) return;
+          restore();
+          element?.addEventListener("scroll", savePosition, { passive: true });
+        });
+        return;
+      }
+
+      element.addEventListener("scroll", savePosition, { passive: true });
+    };
+
+    bind();
+    return () => {
+      disposed = true;
+      window.cancelAnimationFrame(frame);
+      if (element && save) element.removeEventListener("scroll", save);
+    };
+  }, [sessionId]);
+
+  return {
+    contextRef,
+    initial: remembered?.atBottom === false ? false : ("instant" as const),
+  };
+}
+
+function conversationMessages(element: HTMLElement): HTMLElement[] {
+  return Array.from(
+    element.querySelectorAll<HTMLElement>("[data-conversation-message-id]"),
+  );
+}
+
+function findConversationAnchor(element: HTMLElement): {
+  messageId: string;
+  offset: number;
+} | null {
+  const viewportTop = element.getBoundingClientRect().top;
+  const anchor = conversationMessages(element).find(
+    (message) => message.getBoundingClientRect().bottom > viewportTop,
+  );
+  const messageId = anchor?.dataset.conversationMessageId;
+  if (!anchor || !messageId) return null;
+  return {
+    messageId,
+    offset: anchor.getBoundingClientRect().top - viewportTop,
+  };
+}
+
+function findConversationMessage(
+  element: HTMLElement,
+  messageId: string,
+): HTMLElement | null {
+  return (
+    conversationMessages(element).find(
+      (message) => message.dataset.conversationMessageId === messageId,
+    ) ?? null
+  );
+}
 
 function CommandSnippet({ name }: { name: string }) {
   const meta = SLASH_COMMANDS[name];
@@ -79,8 +227,7 @@ type ContextChip =
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE =
-  /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
+const FILE_RE = /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
 const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
 
 function countLines(s: string): number {
@@ -170,6 +317,7 @@ type ApprovalArg = {
 };
 
 type Props = {
+  sessionId: string;
   messages: UIMessage[];
   status: ChatStatus;
   error: Error | undefined;
@@ -179,12 +327,14 @@ type Props = {
 };
 
 export function AiChatView({
+  sessionId,
   messages,
   status,
   error,
   clearError,
   addToolApprovalResponse,
 }: Props) {
+  const scrollMemory = useConversationScrollMemory(sessionId);
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
   const showSpinner = isBusy && lastMessage?.role === "user";
@@ -200,14 +350,19 @@ export function AiChatView({
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
 
   const onApproval = useCallback(
-    (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
+    (id: string, approved: boolean) =>
+      addToolApprovalResponse({ id, approved }),
     [addToolApprovalResponse],
   );
 
   if (messages.length === 0) {
     return (
-      <Conversation>
-        <ConversationContent>
+      <Conversation
+        contextRef={scrollMemory.contextRef}
+        initial={scrollMemory.initial}
+        resize="instant"
+      >
+        <ConversationContent scrollClassName="app-scrollbar [scrollbar-gutter:stable]">
           <ConversationEmptyState
             title="Ask Terax anything"
             description="Explain command output, fix errors, generate snippets, or run a task."
@@ -218,8 +373,16 @@ export function AiChatView({
   }
 
   return (
-    <Conversation>
-      <ConversationContent className="gap-5 p-3">
+    <Conversation
+      contextRef={scrollMemory.contextRef}
+      initial={scrollMemory.initial}
+      resize="instant"
+      {...FAST_SCROLL_SPRING}
+    >
+      <ConversationContent
+        className="gap-5 p-3"
+        scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
+      >
         {messages.map((m) => (
           <RenderedMessage
             key={m.id}
@@ -266,8 +429,32 @@ export function AiChatView({
           </div>
         )}
       </ConversationContent>
-      <ConversationScrollButton />
+      <FastConversationScrollButton />
     </Conversation>
+  );
+}
+
+function FastConversationScrollButton() {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+  if (isAtBottom) return null;
+
+  return (
+    <Button
+      type="button"
+      size="icon"
+      variant="outline"
+      aria-label="Scroll to bottom"
+      title="Scroll to bottom"
+      onClick={() => {
+        void scrollToBottom({
+          animation: FAST_SCROLL_SPRING,
+          ignoreEscapes: true,
+        });
+      }}
+      className="absolute bottom-3 left-1/2 size-7 -translate-x-1/2 rounded-full border-border/50 bg-background/90 shadow-md backdrop-blur dark:bg-background/80 dark:hover:bg-muted"
+    >
+      <HugeiconsIcon icon={ArrowDown01Icon} size={13} strokeWidth={2} />
+    </Button>
   );
 }
 
@@ -347,7 +534,7 @@ const RenderedMessage = memo(function RenderedMessage({
     const stripped = stripUserContextBlocks(withoutCmd);
 
     return (
-      <Message from="user">
+      <Message from="user" data-conversation-message-id={message.id}>
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
@@ -363,12 +550,16 @@ const RenderedMessage = memo(function RenderedMessage({
     );
   }
 
-  const groups = useMemo(() => buildPartGroups(message.parts as AnyPart[]), [
-    message.parts,
-  ]);
+  const groups = useMemo(
+    () => buildPartGroups(message.parts as AnyPart[]),
+    [message.parts],
+  );
 
   return (
-    <Message from={message.role}>
+    <Message
+      from={message.role}
+      data-conversation-message-id={message.id}
+    >
       <MessageContent>
         <div className="flex flex-col gap-3">
           {groups.map((g) => {
@@ -534,9 +725,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
                 strokeWidth={1.75}
                 className="shrink-0 opacity-60"
               />
-              <span className="truncate text-foreground">
-                {basename(path)}
-              </span>
+              <span className="truncate text-foreground">{basename(path)}</span>
               <span className="truncate opacity-60">{path}</span>
             </li>
           ))}
