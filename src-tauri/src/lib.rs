@@ -1,8 +1,8 @@
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, app_data, fs, git, history, lsp, net, pty, remote, secrets, shared_store,
-    shell, workspace, workspace_process,
+    agent, ai_sessions, app_data, fs, git, history, lsp, net, open_with, pty, remote, secrets,
+    shared_store, shell, workspace, workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -332,6 +332,8 @@ pub fn run() {
             shared_store::shared_store_set,
             shared_store::shared_store_delete,
             shared_store::shared_store_revision,
+            open_with::open_with_register,
+            open_with::open_with_unregister,
             get_launch_dir,
             get_launch_files,
             open_settings_window,

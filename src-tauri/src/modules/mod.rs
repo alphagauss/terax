@@ -6,6 +6,7 @@ pub mod git;
 pub mod history;
 pub mod lsp;
 pub mod net;
+pub mod open_with;
 pub mod proc;
 pub mod pty;
 pub mod remote;

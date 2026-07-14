@@ -13,6 +13,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { ThemePref } from "@/modules/settings/store";
@@ -45,6 +47,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
@@ -98,6 +101,9 @@ export function GeneralSection() {
   const terminalScrollback = usePreferencesStore((s) => s.terminalScrollback);
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  const [openWithAction, setOpenWithAction] = useState<
+    "register" | "remove" | null
+  >(null);
 
   useEffect(() => {
     let alive = true;
@@ -130,6 +136,34 @@ export function GeneralSection() {
       await setAutostart(next);
     } catch (e) {
       console.error("autostart toggle failed", e);
+    }
+  };
+
+  const registerOpenWith = async () => {
+    setOpenWithAction("register");
+    try {
+      const executable = await invoke<string>("open_with_register");
+      toast.success("Registered for Open With", { description: executable });
+    } catch (error) {
+      toast.error("Could not register for Open With", {
+        description: String(error),
+      });
+    } finally {
+      setOpenWithAction(null);
+    }
+  };
+
+  const unregisterOpenWith = async () => {
+    setOpenWithAction("remove");
+    try {
+      await invoke("open_with_unregister");
+      toast.success("Removed Open With registration");
+    } catch (error) {
+      toast.error("Could not remove Open With registration", {
+        description: String(error),
+      });
+    } finally {
+      setOpenWithAction(null);
     }
   };
 
@@ -445,6 +479,34 @@ export function GeneralSection() {
           </SettingRow>
         </div>
       </div>
+
+      {IS_WINDOWS ? (
+        <div className="flex flex-col gap-2">
+          <Label>Open With</Label>
+          <SettingRow
+            title="File associations"
+            description="Register the current Terax executable for supported text and source files. This does not change default apps."
+          >
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => void registerOpenWith()}
+                disabled={openWithAction !== null}
+              >
+                {openWithAction === "register" ? "Registering..." : "Register"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void unregisterOpenWith()}
+                disabled={openWithAction !== null}
+              >
+                {openWithAction === "remove" ? "Removing..." : "Remove"}
+              </Button>
+            </div>
+          </SettingRow>
+        </div>
+      ) : null}
     </div>
   );
 }
