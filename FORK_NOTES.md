@@ -45,13 +45,20 @@ Fork-specific adaptation:
   - Open With files are always routed to the deterministic Local primary window.
   - Windows General settings provides explicit Register and Remove actions.
   - Registration uses the current executable path, writes only the current-user Open With entry, and does not change default applications.
+- `ef56f61 fix(bundle): stabilize Open With registration and routing`
+  - Registration writes the current-user registry directly instead of spawning a console process for every supported extension.
+  - File-open requests use a locked queue that the target Workspace drains atomically, so concurrent launches cannot overwrite each other.
+  - The frontend opens drained files through a stable callback instead of cancelling them during an activation state update.
 
 Verification:
 
-- `pnpm.cmd check-types` passed before the final npm dependency refresh.
+- `pnpm.cmd lint` passed with the existing warnings.
+- `pnpm.cmd check-types` passed after the final dependency refresh and Open With fixes.
 - `pnpm.cmd test` passed: 59 files, 385 tests.
-- Cargo compilation and the Open With unit test passed after the Cargo lockfile update.
-- The full Cargo test suite has one pre-existing Windows limitation: the symlink escape test requires Developer Mode or administrator symlink privileges.
+- `pnpm.cmd build` passed.
+- `cargo clippy --all-targets --locked -- -D warnings` passed.
+- The Open With command test and locked request-queue test passed.
+- `cargo test --locked` completed with 224 tests passing. Its only failure is the pre-existing Windows symlink escape test, which requires Developer Mode or administrator symlink privileges.
 
 
 ## Skipped upstream changes
