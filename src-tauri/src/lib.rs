@@ -6,8 +6,6 @@ use modules::{
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
-#[cfg(target_os = "macos")]
-use tauri::WindowEvent;
 use tauri::{
     Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder,
 };
@@ -39,7 +37,6 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     };
 
     if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.set_always_on_top(true);
         let _ = window.show();
         let _ = window.set_focus();
         if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
@@ -55,15 +52,10 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         .inner_size(900.0, 700.0)
         .min_inner_size(820.0, 620.0)
         .resizable(true)
-        .visible(false)
-        // Keep settings above the main app window so it doesn't get hidden
-        // when the user clicks back into the editor or terminal (#33).
-        .always_on_top(true);
+        .visible(false);
 
-    // Tie lifecycle to the main window so settings minimizes/closes with it.
-    // macOS: skip parent() — child + always_on_top leaves the settings webview
-    // behind the main window except while the parent is being dragged (#33).
-    #[cfg(not(target_os = "macos"))]
+    // Keep settings above the main app and tie their lifecycle together without
+    // making the settings window globally always-on-top.
     let builder = if let Some(main) = app.get_webview_window("main") {
         builder.parent(&main).map_err(|e| e.to_string())?
     } else {
@@ -199,22 +191,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
             _app.manage(shared_store::SharedStoreState::new(_app.handle())?);
-            // macOS skips parent() for the settings window, so tie its lifecycle
-            // to the main window here instead. Other platforms keep parent().
-            #[cfg(target_os = "macos")]
-            if let Some(main) = _app.get_webview_window("main") {
-                let handle = _app.handle().clone();
-                main.on_window_event(move |event| {
-                    if matches!(
-                        event,
-                        WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed
-                    ) {
-                        if let Some(settings) = handle.get_webview_window("settings") {
-                            let _ = settings.close();
-                        }
-                    }
-                });
-            }
             Ok(())
         })
         .manage(pty::PtyState::default())

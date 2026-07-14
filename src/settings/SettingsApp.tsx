@@ -1,3 +1,4 @@
+import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
@@ -152,6 +153,7 @@ export function SettingsApp() {
           {ActiveSection && <ActiveSection />}
         </div>
       </main>
+      <Toaster position="bottom-right" />
     </div>
   );
 }
