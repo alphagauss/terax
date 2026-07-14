@@ -36,6 +36,7 @@ pub struct WorkspaceBootstrap {
     pub env: WorkspaceEnv,
     pub environment_key: String,
     pub launch_dir: Option<String>,
+    pub launch_files: Vec<String>,
     pub state_path: String,
     pub window_state_filename: String,
     pub window_geometry: Option<WindowGeometry>,
@@ -258,19 +259,31 @@ fn parse_legacy_state_filename(name: &str) -> Option<Uuid> {
     Uuid::parse_str(raw).ok()
 }
 
-fn canonical_launch_dir(path: Option<PathBuf>) -> Result<Option<String>, String> {
+fn canonical_launch_target(path: Option<PathBuf>) -> Result<(Option<String>, Vec<String>), String> {
     let Some(path) = path else {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     };
     let canonical = fs::canonicalize(&path)
-        .map_err(|e| format!("launch directory {} is invalid: {e}", path.display()))?;
-    if !canonical.is_dir() {
-        return Err(format!(
-            "launch path is not a directory: {}",
-            canonical.display()
-        ));
+        .map_err(|e| format!("launch path {} is invalid: {e}", path.display()))?;
+    if canonical.is_dir() {
+        return Ok((Some(crate::modules::fs::to_canon(&canonical)), Vec::new()));
     }
-    Ok(Some(crate::modules::fs::to_canon(&canonical)))
+    if canonical.is_file() {
+        let dir = canonical
+            .parent()
+            .map(crate::modules::fs::to_canon)
+            .ok_or_else(|| {
+                format!(
+                    "launch file has no parent directory: {}",
+                    canonical.display()
+                )
+            })?;
+        return Ok((Some(dir), vec![crate::modules::fs::to_canon(&canonical)]));
+    }
+    Err(format!(
+        "launch path is not a file or directory: {}",
+        canonical.display()
+    ))
 }
 
 fn ssh_profile(profile_id: &str) -> Result<crate::modules::remote::models::SshProfile, String> {
@@ -458,6 +471,7 @@ fn make_state(
     lock: FileLock,
     env: WorkspaceEnv,
     launch_dir: Option<String>,
+    launch_files: Vec<String>,
     launch_geometry: Option<WindowGeometry>,
 ) -> Result<WorkspaceProcessState, String> {
     let id = match kind {
@@ -479,6 +493,7 @@ fn make_state(
             env,
             environment_key: environment.key.clone(),
             launch_dir,
+            launch_files,
             state_path: state_path.to_string_lossy().into_owned(),
             window_state_filename,
             window_geometry: (!window_state_path.exists())
@@ -493,7 +508,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     validate_environment(&request.env)?;
     let environment = environment_identity(&request.env)?;
-    let launch_dir = canonical_launch_dir(request.launch_dir)?;
+    let (launch_dir, launch_files) = canonical_launch_target(request.launch_dir)?;
     let launch_geometry = request.window_geometry;
     let window_state_root =
         crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
@@ -512,10 +527,22 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             lock,
             request.env,
             launch_dir,
+            launch_files,
             launch_geometry,
         )?)),
+        None if request.env == WorkspaceEnv::Local && !launch_files.is_empty() => {
+            crate::modules::shared_store::request_workspace_file_open(
+                &environment.key,
+                &single_id(&environment).to_string(),
+                &launch_files,
+            )?;
+            Ok(InitializeOutcome::ActivatedExisting)
+        }
         None if window_mode() == WorkspaceWindowMode::Single => {
-            crate::modules::shared_store::request_workspace_activation(&environment.key)?;
+            crate::modules::shared_store::request_workspace_activation(
+                &environment.key,
+                &single_id(&environment).to_string(),
+            )?;
             Ok(InitializeOutcome::ActivatedExisting)
         }
         None => {
@@ -530,6 +557,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
                 lock,
                 request.env,
                 launch_dir,
+                launch_files,
                 launch_geometry,
             )?))
         }
@@ -578,8 +606,11 @@ fn spawn_args(
         .to_string(),
     ];
     if let Some(path) = launch_dir {
-        let canonical = canonical_launch_dir(Some(PathBuf::from(path)))?
-            .expect("launch directory was provided");
+        let (canonical, files) = canonical_launch_target(Some(PathBuf::from(path)))?;
+        if !files.is_empty() {
+            return Err("launch directory must be a directory".to_string());
+        }
+        let canonical = canonical.expect("launch directory was provided");
         args.push(DIR_ARG.to_string());
         args.push(canonical);
     }
@@ -650,6 +681,17 @@ mod tests {
         assert_eq!(request.policy, WorkspacePolicy::Fresh);
         assert_eq!(request.launch_dir, Some(PathBuf::from(".")));
         assert_eq!(request.window_geometry, None);
+    }
+
+    #[test]
+    fn launch_file_uses_its_parent_and_is_preserved() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("example.rs");
+        fs::write(&file, b"fn main() {}").unwrap();
+
+        let (dir, files) = canonical_launch_target(Some(file.clone())).unwrap();
+        assert_eq!(dir, Some(crate::modules::fs::to_canon(root.path())));
+        assert_eq!(files, vec![crate::modules::fs::to_canon(&file)]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use modules::{
     agent, ai_sessions, app_data, fs, git, history, lsp, net, pty, remote, secrets, shared_store,
     shell, workspace, workspace_process,
 };
+use std::path::PathBuf;
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use tauri::WindowEvent;
@@ -16,9 +17,18 @@ use tauri_plugin_window_state::StateFlags;
 #[derive(Default)]
 struct LaunchDir(Mutex<Option<String>>);
 
+/// Drained on first read so HMR / re-mounts cannot replay launch files.
+#[derive(Default)]
+struct LaunchFiles(Mutex<Vec<String>>);
+
 #[tauri::command]
 fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
     state.0.lock().expect("LaunchDir mutex poisoned").take()
+}
+
+#[tauri::command]
+fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
+    std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
 }
 
 #[tauri::command]
@@ -135,6 +145,7 @@ pub fn run() {
         }
     };
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
+    let launch_files = workspace_process.bootstrap().launch_files.clone();
     let window_geometry = workspace_process.bootstrap().window_geometry;
     let window_state_path = app_data::directory(app_data::Directory::WindowState)
         .map(|directory| directory.join(&workspace_process.bootstrap().window_state_filename))
@@ -222,9 +233,15 @@ pub fn run() {
             if let Some(ref launch_dir) = cli_dir {
                 let _ = registry.authorize(launch_dir);
             }
+            for file in &launch_files {
+                if let Some(parent) = PathBuf::from(file).parent() {
+                    let _ = registry.authorize(parent);
+                }
+            }
             registry
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
+        .manage(LaunchFiles(Mutex::new(launch_files)))
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -316,6 +333,7 @@ pub fn run() {
             shared_store::shared_store_delete,
             shared_store::shared_store_revision,
             get_launch_dir,
+            get_launch_files,
             open_settings_window,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,

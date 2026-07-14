@@ -10,6 +10,7 @@ export type WorkspaceBootstrap = {
   env: WorkspaceEnv;
   environmentKey: string;
   launchDir: string | null;
+  launchFiles: string[];
   statePath: string;
   windowStateFilename: string;
   windowGeometry: WindowGeometry | null;

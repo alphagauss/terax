@@ -12,3 +12,8 @@ export async function initLaunchDir(): Promise<void> {
 export function getLaunchDir(): string | undefined {
   return cached;
 }
+
+export async function consumeLaunchFiles(): Promise<string[]> {
+  const files = await invoke<string[]>("get_launch_files").catch(() => []);
+  return files.map((file) => file.replace(/\\/g, "/"));
+}

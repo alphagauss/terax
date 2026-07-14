@@ -5,7 +5,7 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { getLaunchDir } from "@/lib/launchDir";
+import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
 import { usePresence } from "@/lib/usePresence";
@@ -113,14 +113,42 @@ import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
 
-type WorkspaceActivation = { requestId: string; environment: string };
+type WorkspaceActivation = {
+  requestId: string;
+  environment: string;
+  workspaceId: string;
+  files: string[];
+};
 
 function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   if (!value || typeof value !== "object") return null;
-  const { requestId, environment } = value as Record<string, unknown>;
-  return typeof requestId === "string" && typeof environment === "string"
-    ? { requestId, environment }
-    : null;
+  const { requestId, environment, workspaceId, files } = value as Record<
+    string,
+    unknown
+  >;
+  if (
+    typeof requestId !== "string" ||
+    typeof environment !== "string" ||
+    typeof workspaceId !== "string"
+  ) {
+    return null;
+  }
+  return {
+    requestId,
+    environment,
+    workspaceId,
+    files: Array.isArray(files)
+      ? files.filter((file): file is string => typeof file === "string")
+      : [],
+  };
+}
+
+function parentDirectory(path: string): string | null {
+  const index = path.lastIndexOf("/");
+  if (index < 0) return null;
+  if (index === 0) return "/";
+  if (index === 2 && /^[A-Za-z]:/.test(path)) return path.slice(0, 3);
+  return path.slice(0, index);
 }
 
 export default function App() {
@@ -199,6 +227,7 @@ export default function App() {
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
   const activationRequestRef = useRef<string | null>(null);
+  const [activationFiles, setActivationFiles] = useState<string[]>([]);
 
   useEffect(() => {
     let disposed = false;
@@ -210,11 +239,13 @@ export default function App() {
       if (
         !activation ||
         activation.environment !== currentWorkspaceBootstrap().environmentKey ||
+        activation.workspaceId !== currentWorkspaceBootstrap().id ||
         activation.requestId === activationRequestRef.current
       ) {
         return;
       }
       activationRequestRef.current = activation.requestId;
+      setActivationFiles(activation.files);
       const window = getCurrentWindow();
       await window.show();
       await window.setFocus();
@@ -589,6 +620,25 @@ export default function App() {
     },
     [explorerRoot, openFileTab, newMarkdownTab],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    const openAll = async (files: string[]) => {
+      for (const file of files) {
+        const parent = parentDirectory(file);
+        if (parent) await native.workspaceAuthorize(parent).catch(() => {});
+        if (!disposed) handleOpenFile(file, true);
+      }
+    };
+    void consumeLaunchFiles().then(openAll);
+    if (activationFiles.length > 0) {
+      void openAll(activationFiles);
+      setActivationFiles([]);
+    }
+    return () => {
+      disposed = true;
+    };
+  }, [activationFiles, handleOpenFile]);
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {

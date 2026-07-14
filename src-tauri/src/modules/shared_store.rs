@@ -89,7 +89,10 @@ pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
     emit_changed(app, &root, "keys-epoch")
 }
 
-pub(crate) fn request_workspace_activation(environment: &str) -> Result<(), String> {
+pub(crate) fn request_workspace_activation(
+    environment: &str,
+    workspace_id: &str,
+) -> Result<(), String> {
     let root = store_dir()?;
     mutate(&root, "settings", |map| {
         map.insert(
@@ -97,6 +100,26 @@ pub(crate) fn request_workspace_activation(environment: &str) -> Result<(), Stri
             serde_json::json!({
                 "requestId": uuid::Uuid::new_v4().to_string(),
                 "environment": environment,
+                "workspaceId": workspace_id,
+            }),
+        );
+    })
+}
+
+pub(crate) fn request_workspace_file_open(
+    environment: &str,
+    workspace_id: &str,
+    files: &[String],
+) -> Result<(), String> {
+    let root = store_dir()?;
+    mutate(&root, "settings", |map| {
+        map.insert(
+            "workspaceActivation".to_string(),
+            serde_json::json!({
+                "requestId": uuid::Uuid::new_v4().to_string(),
+                "environment": environment,
+                "workspaceId": workspace_id,
+                "files": files,
             }),
         );
     })
