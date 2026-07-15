@@ -1,11 +1,16 @@
 import { cn } from "@/lib/utils";
+import type { MarkdownAnchor } from "@/modules/markdown/lib/anchor";
+import { MarkdownPreviewPane } from "@/modules/markdown/MarkdownPreviewPane";
 import type { MarkdownTab, Tab } from "@/modules/tabs";
-import { MarkdownPreviewPane } from "./MarkdownPreviewPane";
 
 type Props = {
   tabs: Tab[];
   activeId: number;
-  onSetMarkdownView: (id: number, mode: "rendered" | "raw") => void;
+  onSetMarkdownView: (
+    id: number,
+    mode: "rendered" | "raw",
+    anchor: MarkdownAnchor | null,
+  ) => void;
 };
 
 export function MarkdownStack({ tabs, activeId, onSetMarkdownView }: Props) {
@@ -29,7 +34,10 @@ export function MarkdownStack({ tabs, activeId, onSetMarkdownView }: Props) {
             <MarkdownPreviewPane
               path={t.path}
               visible={visible}
-              onSetView={(mode) => onSetMarkdownView(t.id, mode)}
+              onSetView={(mode, anchor) =>
+                onSetMarkdownView(t.id, mode, anchor)
+              }
+              restoreAnchor={t.markdownAnchor}
             />
           </div>
         );

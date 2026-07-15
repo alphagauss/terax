@@ -1,6 +1,7 @@
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
+import type { MarkdownAnchor } from "@/modules/markdown";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
@@ -80,6 +81,7 @@ export type EditorPaneHandle = {
   triggerAiComplete: () => void;
   /** Open CodeMirror's completion popup. */
   triggerCodeComplete: () => void;
+  getMarkdownAnchor: () => MarkdownAnchor | null;
 };
 
 type Props = {
@@ -88,11 +90,52 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
+  markdownAnchor?: MarkdownAnchor | null;
 };
 
 // Above this, syntax highlighting and LSP are disabled: a multi-MB lezer
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
+
+function captureEditorAnchor(view: EditorView): MarkdownAnchor {
+  const scrollRect = view.scrollDOM.getBoundingClientRect();
+  const viewportTop = Math.max(
+    0,
+    (scrollRect.top - view.documentTop) / view.scaleY,
+  );
+  const block = view.lineBlockAtHeight(viewportTop);
+  const line = view.state.doc.lineAt(block.from);
+  const lineRect = view.coordsAtPos(line.from);
+  const scrollable = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+  return {
+    sourceLine: line.number,
+    offset: lineRect ? lineRect.top - scrollRect.top : 0,
+    scrollRatio: scrollable > 0 ? view.scrollDOM.scrollTop / scrollable : 0,
+  };
+}
+
+function restoreEditorAnchor(view: EditorView, anchor: MarkdownAnchor) {
+  if (anchor.sourceLine == null) {
+    const scrollable =
+      view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
+    view.scrollDOM.scrollTop = Math.max(0, scrollable * anchor.scrollRatio);
+    return;
+  }
+  const lineNumber = Math.max(
+    1,
+    Math.min(anchor.sourceLine, view.state.doc.lines),
+  );
+  const line = view.state.doc.line(lineNumber);
+  view.dispatch({
+    effects: EditorView.scrollIntoView(line.from, { y: "start" }),
+  });
+  requestAnimationFrame(() => {
+    const lineRect = view.coordsAtPos(line.from);
+    if (!lineRect) return;
+    const scrollRect = view.scrollDOM.getBoundingClientRect();
+    view.scrollDOM.scrollTop += lineRect.top - scrollRect.top - anchor.offset;
+  });
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -104,7 +147,14 @@ function formatBytes(n: number): string {
 // skip re-rendering entirely when App re-renders (terminal events, tab churn).
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
-    const { path, overrideLanguage, onDirtyChange, onSaved, onClose } = props;
+    const {
+      path,
+      overrideLanguage,
+      onDirtyChange,
+      onSaved,
+      onClose,
+      markdownAnchor,
+    } = props;
 
     const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
       useDocument({
@@ -240,6 +290,7 @@ export const EditorPane = memo(
     pathRef.current = path;
 
     const pendingLineRef = useRef<number | null>(null);
+    const restoredMarkdownAnchorRef = useRef<MarkdownAnchor | null>(null);
     const statusRef = useRef(doc.status);
     statusRef.current = doc.status;
 
@@ -260,6 +311,22 @@ export const EditorPane = memo(
     useEffect(() => {
       if (doc.status === "ready") applyPendingGoto();
     }, [doc.status, applyPendingGoto]);
+
+    useEffect(() => {
+      if (
+        doc.status !== "ready" ||
+        !markdownAnchor ||
+        restoredMarkdownAnchorRef.current === markdownAnchor
+      )
+        return;
+      const frame = requestAnimationFrame(() => {
+        const view = cmRef.current?.view;
+        if (!view) return;
+        restoredMarkdownAnchorRef.current = markdownAnchor;
+        restoreEditorAnchor(view, markdownAnchor);
+      });
+      return () => cancelAnimationFrame(frame);
+    }, [doc.status, markdownAnchor]);
 
     const extensions = useMemo(
       () => [
@@ -392,12 +459,14 @@ export const EditorPane = memo(
       void resolveLanguage(resolvePath).catch(() => {});
     }, [path, overrideLanguage]);
 
+    const documentSize = doc.status === "ready" ? doc.size : null;
+
     useEffect(() => {
       const ext =
         overrideLanguage || (path.split(".").pop()?.toLowerCase() ?? null);
       languageRef.current = ext;
       if (doc.status !== "ready") return;
-      if (doc.size > SYNTAX_MAX_BYTES) {
+      if (documentSize !== null && documentSize > SYNTAX_MAX_BYTES) {
         setLangId(null);
         const view = cmRef.current?.view;
         view?.dispatch({ effects: languageCompartment.reconfigure([]) });
@@ -425,7 +494,7 @@ export const EditorPane = memo(
       return () => {
         cancelled = true;
       };
-    }, [path, doc.status, overrideLanguage]);
+    }, [path, doc.status, overrideLanguage, documentSize]);
 
     useImperativeHandle(
       ref,
@@ -470,6 +539,10 @@ export const EditorPane = memo(
           return view.state.sliceDoc(from, to);
         },
         getPath: () => path,
+        getMarkdownAnchor: () => {
+          const view = cmRef.current?.view;
+          return view ? captureEditorAnchor(view) : null;
+        },
         reload: () => reloadRef.current(),
         gotoLine: (line: number) => {
           pendingLineRef.current = line;
@@ -573,7 +646,8 @@ export const EditorPane = memo(
         );
       }
 
-      const canForce = doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
+      const canForce =
+        doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
       return (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
           <div className="text-sm text-foreground">

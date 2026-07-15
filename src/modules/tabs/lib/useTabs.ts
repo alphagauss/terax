@@ -1,4 +1,5 @@
 import { isMarkdownPath } from "@/lib/utils";
+import type { MarkdownAnchor } from "@/modules/markdown";
 import {
   findLeafCwd,
   hasLeaf,
@@ -52,6 +53,7 @@ export type EditorTab = TabBase & {
   /** Explorer root active when this file was opened from the sidebar. */
   explorerRoot?: string;
   overrideLanguage?: string | null;
+  markdownAnchor?: MarkdownAnchor;
 };
 
 export type PreviewTab = TabBase & {
@@ -68,6 +70,7 @@ export type MarkdownTab = TabBase & {
   path: string;
   /** Explorer root active when this file was opened from the sidebar. */
   explorerRoot?: string;
+  markdownAnchor?: MarkdownAnchor;
 };
 
 export type AiDiffStatus = "pending" | "approved" | "rejected";
@@ -743,7 +746,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   }, []);
 
   const setMarkdownView = useCallback(
-    (id: number, mode: "rendered" | "raw") => {
+    (id: number, mode: "rendered" | "raw", anchor: MarkdownAnchor | null) => {
       setTabs((curr) =>
         curr.map((t) => {
           if (
@@ -760,6 +763,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
               overrideLanguage:
                 (t as { overrideLanguage?: string | null }).overrideLanguage ??
                 null,
+              markdownAnchor: anchor ?? undefined,
             };
           }
           if (mode === "rendered" && t.kind === "editor") {
@@ -775,6 +779,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
                 explorerRoot: t.explorerRoot,
               }),
               overrideLanguage: t.overrideLanguage ?? null,
+              markdownAnchor: anchor ?? undefined,
             };
           }
           return t;

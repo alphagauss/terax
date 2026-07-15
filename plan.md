@@ -1,22 +1,97 @@
-# File tab sidebar context
+# Markdown 阅读视图重构与长文档性能优化
 
-## Goal
+## 目标
 
-When a file opened from the sidebar becomes active, restore the sidebar root
-that was active when it was opened and select that file in the tree. Do not
-change any terminal session's working directory.
+- 将大纲与正文改成 Markdown 页面内部两个真正独立的布局区域。
+- 大纲宽度可调整，折叠后面板与分隔线完全消失，窄窗口下不覆盖正文。
+- 大纲按钮固定在正文区域左上角，与右上角 Rendered / Raw 控件尺寸和高度一致。
+- 正文使用正文面板的真实可用宽度，不再通过视觉偏移或固定 860px 上限模拟让位。
+- 删除现有浮层、正文平移、分阶段定时器和相关兼容代码。
+- 长文档采用分块渐进挂载。块一旦挂载就保留，不卸载离屏正文。
+- 推迟离屏代码块解析与高亮，缩短首次打开长 Markdown 的主线程阻塞。
+- 保持 Rendered / Raw 位置映射、大纲跳转、活动标题跟踪和独立滚动正确。
 
-## Approach
+## 不在范围内
 
-- Store the sidebar root on editor and markdown tabs opened from the explorer.
-- Prefer that stored root while the corresponding file tab is active.
-- Reveal the file by expanding its ancestor directories, then select and scroll
-  it into view after a root change.
-- Persist the optional root with Space tab state and authorize it at restore.
-- Reuse the shared path and workspace-environment flow for Local, WSL, and SSH.
+- 不做会卸载离屏正文块的真正虚拟化。
+- 不把 Markdown 解析迁移到 Rust。
+- 不保留旧浮层布局、旧正文平移逻辑或双实现开关。
 
-## Verification
+## 设计约束
 
-- Add serialization tests for file-tab sidebar roots.
-- Add explorer-root resolution and file-reveal helper tests.
-- Run frontend lint, type checks, and tests.
+### 独立布局
+
+- 复用项目现有 `react-resizable-panels` 依赖和 UI 封装。
+- 大纲面板默认 240px，限制在合理的最小和最大宽度内。
+- 正文面板占据剩余宽度，并设置正确的 `min-width: 0` 和独立滚动容器。
+- 窄空间不足时折叠大纲，不允许回退为覆盖正文的浮层。
+- 展开和折叠只提交一次布局变化，不动画整篇正文的 `left`、`transform`、宽度或 flex 基准值。
+- 仅对大纲内部的小型内容区域使用短时透明度和水平位移动画。
+
+### 可调整分隔线
+
+- 拖动期间只移动轻量预览分隔线。
+- 指针释放或键盘调整完成后一次性提交大纲宽度，避免长正文连续换行重排。
+- 宽度只在提交时进入 React 状态，并在当前 Markdown 视图生命周期内保留。
+- 折叠时分隔线不可见、不可聚焦、不可命中。
+
+### 渐进正文渲染
+
+- 普通短文档继续一次性渲染，避免为小文件增加调度开销。
+- 长文档先切分为稳定 Markdown 块，优先挂载首屏和邻近块。
+- 后续块通过空闲时间分批挂载，已挂载块永久保留。
+- 保留轻量块占位容器和高度估算，避免正文滚动范围剧烈变化。
+- 大纲跳转或 Rendered 锚点恢复命中未挂载块时，立即提升目标块及必要邻近块的挂载优先级。
+- 对无法安全拆分的结构使用单块渲染，不保留旧静态渲染组件分支。
+
+### 源位置与大纲
+
+- 将标题标识和源行属性统一写入 rehype 源位置插件。
+- 删除六个自定义 Heading 包装组件，恢复 Streamdown 默认标题样式。
+- 大纲从 Markdown 源或块元数据生成完整结果，不依赖所有正文标题已经挂载。
+- 缓存标题 DOM 引用和位置，只在正文尺寸真正变化或目标块首次挂载后失效。
+- 正文滚动跟踪继续使用 `requestAnimationFrame` 和二分查找。
+- 点击大纲直接通过缓存或容器内精确选择器查找目标，不再全量查询后线性查找。
+
+### 代码块高亮
+
+- 代码块跟随所属 Markdown 块延迟挂载。
+- 离屏块未挂载前不启动 Lezer 高亮或 Mermaid 渲染。
+- 已挂载代码块保留现有复制、运行命令和图表行为。
+
+## 实施步骤
+
+1. 建立独立的 Markdown 大纲与正文可调整布局，移动按钮并删除旧浮层和平移动画。
+2. 精简大纲组件和源位置标注，移除重复 Heading 包装与 `calculateOutlineShift`。
+3. 增加 Markdown 块元数据、长文档阈值和可测试的渐进挂载调度核心。
+4. 接入 Streamdown 分块模式和延迟 Block 组件，保证源行偏移、目标提升和永久挂载。
+5. 将大纲提取改为完整源数据，优化活动标题测量、缓存和跳转。
+6. 让代码高亮自然跟随块挂载，并补齐复杂 Markdown 结构回退策略。
+7. 补齐布局、块切分、调度、锚点、大纲和回归测试。
+8. 运行格式、lint、类型、单元测试、构建和 eager bundle 检查。
+9. 按 `docs/contributing/ui-runtime-debugging.md` 在真实 Tauri WebView 中验证长文档首次打开、展开折叠、窄窗口和分隔线交互。
+
+## 验收标准
+
+- 大纲展开时与正文无水平覆盖，折叠时宽度为 0 且无残留竖条。
+- 正文宽度始终等于正文面板可用宽度，不出现旧的 860px 人为上限或右侧溢出。
+- 展开和折叠不再对全文执行逐帧位置或宽度动画。
+- 拖动分隔线期间正文不连续重排，释放后只提交一次宽度。
+- 长文档首次 Rendered 展示不再由一次完整 Streamdown 渲染长期占用主线程。
+- 大纲在正文未完全挂载时仍完整可用，跳转可以提升并定位目标块。
+- Rendered / Raw 往返尽可能保持源行和视口偏移。
+- 普通 Markdown、代码围栏、列表、表格、HTML、脚注和 Mermaid 不发生语义回归。
+- 大纲长列表仍保持虚拟化和独立流畅滚动。
+- 不存在旧浮层、平移状态机、兼容开关或未使用的新代码。
+
+## 验证命令
+
+```text
+pnpm lint
+pnpm format:check
+pnpm check-types
+pnpm test
+pnpm build
+pnpm analyze:eager
+git diff --check
+```

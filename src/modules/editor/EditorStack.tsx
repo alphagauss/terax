@@ -1,5 +1,5 @@
 import { cn, isMarkdownPath } from "@/lib/utils";
-import { MarkdownViewToggle } from "@/modules/markdown";
+import { type MarkdownAnchor, MarkdownViewToggle } from "@/modules/markdown";
 import type { EditorTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
 import { EditorPane, type EditorPaneHandle } from "./EditorPane";
@@ -10,7 +10,11 @@ type Props = {
   onDirtyChange: (id: number, dirty: boolean) => void;
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
   onCloseTab: (id: number) => void;
-  onSetMarkdownView: (id: number, mode: "rendered" | "raw") => void;
+  onSetMarkdownView: (
+    id: number,
+    mode: "rendered" | "raw",
+    anchor: MarkdownAnchor | null,
+  ) => void;
 };
 
 export function EditorStack({
@@ -46,13 +50,18 @@ export function EditorStack({
   const refCallbacks = useRef(
     new Map<number, (h: EditorPaneHandle | null) => void>(),
   );
+  const editorHandles = useRef(new Map<number, EditorPaneHandle>());
   const dirtyCallbacks = useRef(new Map<number, (dirty: boolean) => void>());
   const closeCallbacks = useRef(new Map<number, () => void>());
 
   const getRefCallback = (id: number) => {
     let cb = refCallbacks.current.get(id);
     if (!cb) {
-      cb = (h: EditorPaneHandle | null) => registerRef.current(id, h);
+      cb = (h: EditorPaneHandle | null) => {
+        if (h) editorHandles.current.set(id, h);
+        else editorHandles.current.delete(id);
+        registerRef.current(id, h);
+      };
       refCallbacks.current.set(id, cb);
     }
     return cb;
@@ -86,6 +95,9 @@ export function EditorStack({
     for (const id of closeCallbacks.current.keys()) {
       if (!live.has(id)) closeCallbacks.current.delete(id);
     }
+    for (const id of editorHandles.current.keys()) {
+      if (!live.has(id)) editorHandles.current.delete(id);
+    }
   }, [editors]);
 
   if (editors.length === 0) return null;
@@ -106,7 +118,17 @@ export function EditorStack({
               {isMarkdownPath(t.path) && (
                 <MarkdownViewToggle
                   mode="raw"
-                  onChange={(mode) => onSetMarkdownView(t.id, mode)}
+                  onChange={(mode) =>
+                    onSetMarkdownView(
+                      t.id,
+                      mode,
+                      mode === "rendered"
+                        ? (editorHandles.current
+                            .get(t.id)
+                            ?.getMarkdownAnchor() ?? null)
+                        : null,
+                    )
+                  }
                   renderedDisabled={t.dirty}
                   renderedHint="Save to preview"
                 />
@@ -115,6 +137,7 @@ export function EditorStack({
                 ref={getRefCallback(t.id)}
                 path={t.path}
                 overrideLanguage={t.overrideLanguage}
+                markdownAnchor={t.markdownAnchor}
                 onDirtyChange={getDirtyCallback(t.id)}
                 onClose={getCloseCallback(t.id)}
               />
