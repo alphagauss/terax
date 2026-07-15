@@ -11,6 +11,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
+import { useIsCodeFenceIncomplete } from "streamdown";
 
 import { Shimmer } from "./shimmer";
 import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
@@ -39,6 +40,32 @@ const WINDOWS_SHELL = new Set([
   "batch",
 ]);
 const SHELL_LANGS = new Set([...POSIX_SHELL, ...WINDOWS_SHELL]);
+const DIAGRAM_LANGS = new Set(["mermaid"]);
+
+type MermaidInstance = import("@streamdown/mermaid").MermaidInstance;
+
+let mermaidInstance: Promise<MermaidInstance> | null = null;
+let mermaidRenderId = 0;
+
+function loadMermaid(): Promise<MermaidInstance> {
+  mermaidInstance ??= import("@streamdown/mermaid").then(
+    ({ createMermaidPlugin }) => {
+      const plugin = createMermaidPlugin({
+        config: {
+          startOnLoad: false,
+          securityLevel: "strict",
+          suppressErrorRendering: true,
+          theme: document.documentElement.classList.contains("dark")
+            ? "dark"
+            : "default",
+          fontFamily: "JetBrains Mono, sans-serif",
+        },
+      });
+      return plugin.getMermaid();
+    },
+  );
+  return mermaidInstance;
+}
 
 function shellPrompt(lang: string): string {
   if (WINDOWS_SHELL.has(lang)) return lang === "cmd" || lang === "bat" || lang === "batch" ? ">" : "PS>";
@@ -53,6 +80,10 @@ function normalizeLangLabel(raw: string): string {
   return lower || "text";
 }
 
+export function isDiagramLanguage(raw: string | null): boolean {
+  return DIAGRAM_LANGS.has(normalizeLangLabel(raw ?? ""));
+}
+
 export type ChatCodeBlockProps = {
   code: string;
   lang: string | null;
@@ -64,6 +95,10 @@ export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
 
   if (streaming) {
     return <GeneratingPlaceholder label={label} />;
+  }
+
+  if (isDiagramLanguage(lang)) {
+    return <MermaidCode code={code} />;
   }
 
   if (SHELL_LANGS.has(label)) {
@@ -81,6 +116,71 @@ function GeneratingPlaceholder({ label }: { label: string }) {
         {label === "text" ? "Generating code…" : `Generating ${label}…`}
       </Shimmer>
     </div>
+  );
+}
+
+function MermaidCode({ code }: { code: string }) {
+  const isIncomplete = useIsCodeFenceIncomplete();
+  const [state, setState] = useState<
+    | { kind: "waiting" }
+    | { kind: "loading" }
+    | { kind: "ready"; svg: string }
+    | { kind: "error"; message: string }
+  >({ kind: "waiting" });
+
+  useEffect(() => {
+    let cancelled = false;
+    setState({ kind: isIncomplete ? "waiting" : "loading" });
+
+    if (isIncomplete || !code.trim()) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const id = `terax-mermaid-${++mermaidRenderId}`;
+    void loadMermaid()
+      .then((mermaid) => mermaid.render(id, code))
+      .then(({ svg }) => {
+        if (!cancelled) setState({ kind: "ready", svg });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error ? error.message : "Mermaid syntax error";
+        setState({ kind: "error", message });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [code, isIncomplete]);
+
+  return (
+    <BlockChrome label="mermaid" code={code}>
+      {state.kind === "ready" ? (
+        <div
+          role="img"
+          aria-label="Mermaid diagram"
+          className="flex min-h-32 justify-center overflow-auto bg-background/40 p-4"
+          dangerouslySetInnerHTML={{ __html: state.svg }}
+        />
+      ) : state.kind === "error" ? (
+        <pre className="m-0 whitespace-pre-wrap px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+          {code}
+          {"\n\n"}
+          <span className="text-destructive">{state.message}</span>
+        </pre>
+      ) : state.kind === "waiting" ? (
+        <pre className="m-0 whitespace-pre-wrap px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
+          {code}
+        </pre>
+      ) : (
+        <div className="flex min-h-32 items-center justify-center px-3 py-6 text-[11px] text-muted-foreground">
+          Rendering diagram…
+        </div>
+      )}
+    </BlockChrome>
   );
 }
 

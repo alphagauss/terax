@@ -7,7 +7,15 @@ import { traceEager } from "../../scripts/eager-graph.mjs";
 // these (e.g. a barrel re-export of chat runtime, or a `cn`-style util getting
 // absorbed into a feature chunk) will fail here. xterm and motion are
 // intentionally eager (terminal-first shell) and are not asserted against.
-const HEAVY = ["@ai-sdk", "ai", "streamdown", "@codemirror", "@uiw"];
+const HEAVY = [
+  "@ai-sdk",
+  "ai",
+  "streamdown",
+  "@streamdown",
+  "mermaid",
+  "@codemirror",
+  "@uiw",
+];
 
 function heavyEagerHits(entry: string): string[] {
   const { hits } = traceEager(entry, HEAVY);
