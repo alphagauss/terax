@@ -2,6 +2,7 @@
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
+import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
 import {
   Tooltip,
   TooltipContent,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
@@ -332,7 +334,12 @@ const ChatMarkdownCode = (props: ComponentProps<typeof MarkdownCode>) => (
 const streamdownComponents = { code: ChatMarkdownCode };
 
 export const MessageResponse = memo(
-  ({ className, streaming = false, ...props }: MessageResponseProps) => (
+  ({
+    className,
+    children,
+    streaming = false,
+    ...props
+  }: MessageResponseProps) => (
     <ChatStreamingProvider value={streaming}>
       <Streamdown
         className={cn(
@@ -340,8 +347,11 @@ export const MessageResponse = memo(
           className,
         )}
         components={streamdownComponents}
+        plugins={streamdownPlugins}
         {...props}
-      />
+      >
+        {normalizeMathDelimiters(children)}
+      </Streamdown>
     </ChatStreamingProvider>
   ),
   (prevProps, nextProps) =>

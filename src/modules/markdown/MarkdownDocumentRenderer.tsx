@@ -1,4 +1,5 @@
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
+import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
 import { cn } from "@/lib/utils";
 import {
   MARKDOWN_CONTENT_CHANGE_EVENT,
@@ -428,6 +429,7 @@ export const MarkdownDocumentRenderer = forwardRef<
           <Streamdown
             className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
             components={markdownComponents}
+            plugins={streamdownPlugins}
             rehypePlugins={progressiveRehypePlugins}
             remarkPlugins={progressiveRemarkPlugins}
             mode="streaming"
@@ -443,6 +445,7 @@ export const MarkdownDocumentRenderer = forwardRef<
         <Streamdown
           className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
           components={markdownComponents}
+          plugins={streamdownPlugins}
           rehypePlugins={staticRehypePlugins}
           mode="static"
           parseIncompleteMarkdown={false}
