@@ -367,7 +367,8 @@ function pickSlotFor(leafId: number): PickResult {
       best = s;
     }
   }
-  const chosen = best!;
+  if (!best) throw new Error("Renderer pool has no evictable slot");
+  const chosen = best;
   return { slot: chosen, previousLeafId: chosen.currentLeafId };
 }
 

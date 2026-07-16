@@ -218,8 +218,10 @@ export const FileExplorer = memo(
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const treeRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: buildRows reads selected tree slices to avoid rebuilding on unrelated tree changes.
     const { rows, entryIndexByPath } = useMemo(() => {
       if (!rootPath)
         return {
@@ -227,9 +229,6 @@ export const FileExplorer = memo(
           entryIndexByPath: new Map<string, number>(),
         };
       return buildRows(rootPath, tree, lookupGitStatus);
-      // `tree` is intentionally omitted: its identity changes every render, but
-      // the listed fields are the only inputs buildRows actually reads.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
       rootPath,
       tree.nodes,
@@ -354,7 +353,8 @@ export const FileExplorer = memo(
       ref,
       () => ({
         focus: () => {
-          containerRef.current?.focus();
+          if (treeRef.current) treeRef.current.focus();
+          else searchRef.current?.focus();
           if (!selectedPath && entryPaths.length > 0) {
             const first = entryPaths[0];
             setSelectedPath(first);
@@ -486,6 +486,7 @@ export const FileExplorer = memo(
         case "rename": {
           return (
             <EntryRow
+              domId={`file-tree-item-${encodeURIComponent(row.path)}`}
               path={row.path}
               name={row.name}
               isDir={row.isDir}
@@ -524,12 +525,7 @@ export const FileExplorer = memo(
     };
 
     return (
-      <div
-        ref={containerRef}
-        className="flex h-full flex-col outline-none"
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-      >
+      <div ref={containerRef} className="flex h-full flex-col outline-none">
         <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 px-2">
           <span
             className="flex flex-1 items-center truncate text-xs font-medium text-foreground"
@@ -619,8 +615,19 @@ export const FileExplorer = memo(
           >
             <ContextMenuTrigger asChild>
               <div
-                ref={scrollRef}
+                ref={(node) => {
+                  scrollRef.current = node;
+                  treeRef.current = node;
+                }}
                 data-explorer-drop=""
+                role="tree"
+                aria-label="Files"
+                aria-activedescendant={
+                  selectedPath
+                    ? `file-tree-item-${encodeURIComponent(selectedPath)}`
+                    : undefined
+                }
+                tabIndex={0}
                 className={cn(
                   "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
                   rootIsDropTarget &&
@@ -628,6 +635,7 @@ export const FileExplorer = memo(
                 )}
                 onPointerDown={dnd.onPointerDown}
                 onClickCapture={dnd.onClickCapture}
+                onKeyDown={handleKeyDown}
                 onContextMenuCapture={(e) => {
                   const el = (e.target as HTMLElement).closest<HTMLElement>(
                     "[data-fs-path]",
@@ -647,6 +655,9 @@ export const FileExplorer = memo(
               >
                 {pendingAtRoot ? (
                   <div
+                    role="treeitem"
+                    aria-level={1}
+                    tabIndex={-1}
                     className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
                     style={{ paddingLeft: 6 }}
                   >
@@ -671,12 +682,24 @@ export const FileExplorer = memo(
                   </div>
                 ) : null}
                 {root?.status === "loading" && (
-                  <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                  <div
+                    role="treeitem"
+                    aria-level={1}
+                    aria-disabled
+                    tabIndex={-1}
+                    className="px-3 py-2 text-[11px] text-muted-foreground"
+                  >
                     Loading…
                   </div>
                 )}
                 {root?.status === "error" && (
-                  <div className="px-3 py-2 text-[11px] text-destructive">
+                  <div
+                    role="treeitem"
+                    aria-level={1}
+                    aria-disabled
+                    tabIndex={-1}
+                    className="px-3 py-2 text-[11px] text-destructive"
+                  >
                     {root.message}
                   </div>
                 )}

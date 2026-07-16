@@ -38,7 +38,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   compatModelIdForEndpoint,
   getCompatModelInfo,
@@ -213,8 +213,10 @@ function ModelDropdown() {
       ? !!apiKeys[current.provider]
       : true;
 
-  const hasKeyFor = (id: ProviderId) =>
-    providerNeedsKey(id) ? !!apiKeys[id] : true;
+  const hasKeyFor = useCallback(
+    (id: ProviderId) => (providerNeedsKey(id) ? !!apiKeys[id] : true),
+    [apiKeys],
+  );
 
   const epModelInfos = useMemo(() => {
     return customEndpoints.map((ep) =>
@@ -230,8 +232,7 @@ function ModelDropdown() {
       (hasKeyFor(p.id) ? configured : unconfigured).push(p);
     }
     return { configured, unconfigured };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKeys]);
+  }, [hasKeyFor]);
 
   const allModels = useMemo(() => [...MODELS, ...epModelInfos], [epModelInfos]);
 

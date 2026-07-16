@@ -110,6 +110,7 @@ export const GraphRail = memo(function GraphRail({
   const overflow = row.laneCount > visible;
 
   return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: The decorative graph is hidden from assistive technology.
     <svg
       width={width}
       height={rowHeight}

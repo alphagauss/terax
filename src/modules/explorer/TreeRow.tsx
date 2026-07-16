@@ -15,6 +15,7 @@ export type RowActions = {
 };
 
 export type EntryRowProps = {
+  domId: string;
   path: string;
   name: string;
   isDir: boolean;
@@ -33,6 +34,7 @@ export type EntryRowProps = {
 
 function EntryRowImpl(props: EntryRowProps) {
   const {
+    domId,
     path,
     name,
     isDir,
@@ -55,6 +57,11 @@ function EntryRowImpl(props: EntryRowProps) {
   if (isRenaming) {
     return (
       <div
+        id={domId}
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-selected={isSelected}
+        tabIndex={-1}
         className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
         style={{ paddingLeft }}
       >
@@ -82,7 +89,13 @@ function EntryRowImpl(props: EntryRowProps) {
 
   return (
     <button
+      id={domId}
       type="button"
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-expanded={isDir ? isExpanded : undefined}
+      aria-selected={isSelected}
+      tabIndex={-1}
       data-fs-path={path}
       onClick={handleClick}
       onDoubleClick={() => !isDir && actions.beginRename(path)}
@@ -144,6 +157,9 @@ export function PendingRow({
 }: PendingRowProps) {
   return (
     <div
+      role="treeitem"
+      aria-level={depth + 1}
+      tabIndex={-1}
       className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
       style={{ paddingLeft: 6 + depth * 12 }}
     >
@@ -176,6 +192,10 @@ export function StatusRow({
 }) {
   return (
     <div
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-disabled
+      tabIndex={-1}
       className={cn(
         "h-6 truncate px-2 text-[11px] leading-6",
         tone === "error" ? "text-destructive" : "text-muted-foreground",

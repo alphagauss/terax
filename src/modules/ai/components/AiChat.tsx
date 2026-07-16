@@ -522,6 +522,14 @@ const RenderedMessage = memo(function RenderedMessage({
       break;
     }
   }
+  const groups = useMemo(
+    () =>
+      message.role === "user"
+        ? []
+        : buildPartGroups(message.parts as AnyPart[]),
+    [message.parts, message.role],
+  );
+
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -549,11 +557,6 @@ const RenderedMessage = memo(function RenderedMessage({
       </Message>
     );
   }
-
-  const groups = useMemo(
-    () => buildPartGroups(message.parts as AnyPart[]),
-    [message.parts],
-  );
 
   return (
     <Message
@@ -631,8 +634,9 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
         key: `reads-${partKey(run.parts[0], run.startIdx)}`,
       });
     } else {
+      const startIdx = run.startIdx;
       run.parts.forEach((p, k) => {
-        const idx = run!.startIdx + k;
+        const idx = startIdx + k;
         out.push({ kind: "single", part: p, idx, key: partKey(p, idx) });
       });
     }

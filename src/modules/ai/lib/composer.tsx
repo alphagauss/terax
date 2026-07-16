@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
@@ -76,6 +83,42 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  const attachFileByPath = useCallback(async (path: string) => {
+    try {
+      type ReadResult =
+        | { kind: "text"; content: string; size: number }
+        | { kind: "binary"; size: number }
+        | { kind: "toolarge"; size: number; limit: number };
+      const result = await invoke<ReadResult>("fs_read_file", {
+        path,
+        workspace: currentWorkspaceEnv(),
+      });
+      if (result.kind !== "text") {
+        // Binary/oversize files: skip (could surface a toast in future).
+        console.warn("attachFileByPath: skipped non-text file", path, result);
+        return;
+      }
+      const name = path.split("/").pop() || path;
+      const id = `path-${path}`;
+      setFiles((prev) => {
+        if (prev.some((f) => f.id === id)) return prev;
+        const att: FileAttachment = {
+          id,
+          name,
+          kind: "text",
+          mediaType: "text/plain",
+          text: result.content,
+          size: result.size,
+        };
+        return [...prev, att];
+      });
+      // Open the AI panel & focus the input so the user sees the chip.
+      useChatStore.getState().focusInput();
+    } catch (e) {
+      console.error("attachFileByPath failed:", e);
+    }
+  }, []);
+
   const focusSignal = useChatStore((s) => s.focusSignal);
   const pendingPrefill = useChatStore((s) => s.pendingPrefill);
   const consumePrefill = useChatStore((s) => s.consumePrefill);
@@ -98,7 +141,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
     prevIsBusyRef.current = isBusy;
-  }, [isBusy, textareaRef]);
+  }, [isBusy]);
 
   // Listen for explorer's "Attach to Agent" event.
   useEffect(() => {
@@ -110,9 +153,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     };
     window.addEventListener("terax:ai-attach-file", onAttach);
     return () => window.removeEventListener("terax:ai-attach-file", onAttach);
-    // attachFileByPath is stable for our purposes (closes over setFiles only)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [attachFileByPath]);
 
   useEffect(() => {
     if (pendingSelections.length === 0) return;
@@ -171,42 +212,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
     );
   const removeCommand = (name: string) =>
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
-
-  const attachFileByPath = async (path: string) => {
-    try {
-      type ReadResult =
-        | { kind: "text"; content: string; size: number }
-        | { kind: "binary"; size: number }
-        | { kind: "toolarge"; size: number; limit: number };
-      const result = await invoke<ReadResult>("fs_read_file", {
-        path,
-        workspace: currentWorkspaceEnv(),
-      });
-      if (result.kind !== "text") {
-        // Binary/oversize files: skip (could surface a toast in future).
-        console.warn("attachFileByPath: skipped non-text file", path, result);
-        return;
-      }
-      const name = path.split("/").pop() || path;
-      const id = `path-${path}`;
-      setFiles((prev) => {
-        if (prev.some((f) => f.id === id)) return prev;
-        const att: FileAttachment = {
-          id,
-          name,
-          kind: "text",
-          mediaType: "text/plain",
-          text: result.content,
-          size: result.size,
-        };
-        return [...prev, att];
-      });
-      // Open the AI panel & focus the input so the user sees the chip.
-      useChatStore.getState().focusInput();
-    } catch (e) {
-      console.error("attachFileByPath failed:", e);
-    }
-  };
 
   const submit = () => {
     if (isBusy) return;

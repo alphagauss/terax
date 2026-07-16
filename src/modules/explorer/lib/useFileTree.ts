@@ -310,6 +310,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     };
   }, [fetchChildren]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is intentionally omitted so ordinary tree edits do not refetch every expanded directory.
   useEffect(() => {
     if (!rootPath) return;
     const loadedPaths = Object.entries(nodes)
@@ -317,9 +318,6 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       .map(([path]) => path);
     for (const path of loadedPaths) void fetchChildren(path);
     // Re-list loaded directories when visibility or git-decoration prefs change.
-    // `nodes` is intentionally omitted so ordinary tree edits don't refetch
-    // every expanded directory.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHidden, gitDecorations, rootPath, fetchChildren]);
 
   // SFTP has no portable server-push file watcher. Poll only directories that

@@ -55,6 +55,7 @@ export function PaneTreeView(props: Props) {
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: This wrapper synchronizes pane focus with the active leaf. */}
           <div
             onMouseDownCapture={() => {
               if (!focused) onFocusLeaf(node.id);

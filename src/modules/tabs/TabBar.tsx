@@ -270,8 +270,6 @@ export function TabBar({
               const trigger = (
                 <TabsTrigger
                   value={String(t.id)}
-                  data-tab-id={t.id}
-                  data-tab-active={isActive ? "true" : undefined}
                   onPointerDown={(e) => {
                     if (e.button !== 0) return;
                     if ((e.target as HTMLElement).closest("[data-no-drag]"))
@@ -336,10 +334,12 @@ export function TabBar({
                       : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
                     draggingId === t.id && "opacity-50",
                     compact
-                      ? "px-1.5!"
+                      ? tabs.length === 1
+                        ? "px-1.5!"
+                        : "ps-1.5! pe-6!"
                       : tabs.length === 1
                         ? "px-2!"
-                        : "ps-2! pe-1!",
+                        : "ps-2! pe-6!",
                   )}
                 >
                   <span
@@ -356,6 +356,7 @@ export function TabBar({
                       >
                         <DropdownMenuTrigger asChild>
                           {/* span, not button: a button nested in the TabsTrigger button is invalid DOM and breaks WebKit focus. */}
+                          {/* biome-ignore lint/a11y/useSemanticElements: The dropdown trigger cannot be a nested button. */}
                           <span
                             role="button"
                             tabIndex={-1}
@@ -453,36 +454,44 @@ export function TabBar({
                     {(t.kind === "editor" || t.kind === "markdown") &&
                     t.dirty ? (
                       <span
+                        role="img"
                         aria-label="Unsaved changes"
                         className="size-1.5 shrink-0 rounded-full bg-foreground/70"
                       />
                     ) : null}
                   </span>
+                </TabsTrigger>
+              );
+
+              const tabCell = (
+                <div
+                  data-tab-id={t.id}
+                  data-tab-active={isActive ? "true" : undefined}
+                  className="group relative flex h-7 shrink-0 items-stretch"
+                >
+                  {trigger}
                   {tabs.length > 1 && (
-                    <span
-                      role="button"
+                    <button
+                      type="button"
                       aria-label="Close tab"
                       data-no-drag
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onClose(t.id);
-                      }}
-                      className="rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60"
+                      onClick={() => onClose(t.id)}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       <HugeiconsIcon
                         icon={Cancel01Icon}
                         size={11}
                         strokeWidth={2}
                       />
-                    </span>
+                    </button>
                   )}
-                </TabsTrigger>
+                </div>
               );
 
               const tabNode =
                 t.kind === "terminal" ? (
                   <ContextMenu>
-                    <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+                    <ContextMenuTrigger asChild>{tabCell}</ContextMenuTrigger>
                     <ContextMenuContent
                       className="min-w-32 p-1"
                       onCloseAutoFocus={(e) => e.preventDefault()}
@@ -517,7 +526,7 @@ export function TabBar({
                     </ContextMenuContent>
                   </ContextMenu>
                 ) : (
-                  trigger
+                  tabCell
                 );
 
               return (

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useChatStore } from "../store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -58,15 +58,17 @@ export function useWhisperRecording({
     !!navigator.mediaDevices?.getUserMedia &&
     typeof MediaRecorder !== "undefined";
 
-  const sttOptions: SttOptions = {
-    groqSttModel,
-    whispercppBaseURL,
-  };
+  const sttOptions = useMemo<SttOptions>(
+    () => ({ groqSttModel, whispercppBaseURL }),
+    [groqSttModel, whispercppBaseURL],
+  );
 
-  const teardownStream = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+  const teardownStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach((track) => {
+      track.stop();
+    });
     streamRef.current = null;
-  };
+  }, []);
 
   const stop = useCallback(() => {
     const rec = recRef.current;
@@ -114,14 +116,23 @@ export function useWhisperRecording({
       teardownStream();
       setState("idle");
     }
-  }, [apiKeys, sttProvider, sttOptions, onResult, state, supported, hasKey]);
+  }, [
+    apiKeys,
+    hasKey,
+    onResult,
+    state,
+    sttOptions,
+    sttProvider,
+    supported,
+    teardownStream,
+  ]);
 
   useEffect(() => {
     return () => {
       recRef.current?.stop();
       teardownStream();
     };
-  }, []);
+  }, [teardownStream]);
 
   return {
     state,

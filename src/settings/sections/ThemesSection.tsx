@@ -141,8 +141,8 @@ export function ThemesSection() {
         description="Theme, background image, and customization."
       />
 
-      <div
-        role="presentation"
+      <fieldset
+        aria-label="Theme files"
         className="flex flex-col gap-2"
         onDragOver={(e) => {
           e.preventDefault();
@@ -202,48 +202,54 @@ export function ThemesSection() {
             const selected = themeId === t.id;
             const isCustom = customIds.has(t.id);
             return (
-              <button
+              <div
                 key={t.id}
-                type="button"
-                onClick={() => setThemeId(t.id)}
-                className={cn(
-                  "group flex items-center gap-3 rounded-lg border p-2.5 text-left transition-all",
-                  selected
-                    ? "border-foreground/60 ring-1 ring-foreground/20"
-                    : "border-border/60 hover:border-border",
-                )}
+                className="group relative"
               >
-                <div
-                  className="flex h-10 w-14 shrink-0 items-center justify-center gap-1 rounded-md border border-border/40"
-                  style={{ background: swatchBg }}
+                <button
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setThemeId(t.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    isCustom && "pr-16",
+                    selected
+                      ? "border-foreground/60 ring-1 ring-foreground/20"
+                      : "border-border/60 hover:border-border",
+                  )}
                 >
-                  <span
-                    className="h-5 w-2 rounded-sm"
-                    style={{ background: swatchAccent }}
-                  />
-                  <span
-                    className="h-5 w-2 rounded-sm"
-                    style={{ background: swatchFg, opacity: 0.7 }}
-                  />
-                  <span
-                    className="h-5 w-2 rounded-sm"
-                    style={{ background: swatchMuted }}
-                  />
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-[12.5px] font-medium">
-                    {t.name}
-                  </span>
-                  {t.description ? (
-                    <span className="truncate text-[11px] text-muted-foreground">
-                      {t.description}
-                    </span>
-                  ) : null}
-                </div>
-                {isCustom ? (
-                  <span className="ml-1 flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                  <div
+                    className="flex h-10 w-14 shrink-0 items-center justify-center gap-1 rounded-md border border-border/40"
+                    style={{ background: swatchBg }}
+                  >
                     <span
-                      role="button"
+                      className="h-5 w-2 rounded-sm"
+                      style={{ background: swatchAccent }}
+                    />
+                    <span
+                      className="h-5 w-2 rounded-sm"
+                      style={{ background: swatchFg, opacity: 0.7 }}
+                    />
+                    <span
+                      className="h-5 w-2 rounded-sm"
+                      style={{ background: swatchMuted }}
+                    />
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-[12.5px] font-medium">
+                      {t.name}
+                    </span>
+                    {t.description ? (
+                      <span className="truncate text-[11px] text-muted-foreground">
+                        {t.description}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+                {isCustom ? (
+                  <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                    <button
+                      type="button"
                       aria-label={`Edit ${t.name}`}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                       onClick={(e) => {
@@ -256,9 +262,9 @@ export function ThemesSection() {
                         size={12}
                         strokeWidth={1.75}
                       />
-                    </span>
-                    <span
-                      role="button"
+                    </button>
+                    <button
+                      type="button"
                       aria-label={`Remove ${t.name}`}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-destructive"
                       onClick={(e) => {
@@ -267,14 +273,14 @@ export function ThemesSection() {
                       }}
                     >
                       ×
-                    </span>
+                    </button>
                   </span>
                 ) : null}
-              </button>
+              </div>
             );
           })}
         </div>
-      </div>
+      </fieldset>
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
@@ -326,8 +332,8 @@ export function ThemesSection() {
         </div>
       </div>
 
-      <div
-        role="presentation"
+      <fieldset
+        aria-label="Background image files"
         className="flex flex-col gap-2"
         onDragOver={(e) => {
           e.preventDefault();
@@ -413,7 +419,7 @@ export function ThemesSection() {
             default look until set.
           </p>
         )}
-      </div>
+      </fieldset>
     </div>
   );
 }

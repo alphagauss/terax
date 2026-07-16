@@ -447,7 +447,7 @@ export function GitHistoryPane({
         filesInflightRef.current.delete(sha);
       }
     },
-    [repoRoot],
+    [bumpFiles, repoRoot],
   );
 
   const handleRowClick = useCallback(
@@ -875,7 +875,7 @@ function CommitDetail({
             <HugeiconsIcon icon={Copy01Icon} size={11} strokeWidth={1.9} />
             {copied ? "Copied" : "Copy SHA"}
           </Button>
-          {webUrl ? (
+          {remoteWeb && webUrl ? (
             <Button
               size="xs"
               variant="ghost"
@@ -887,7 +887,7 @@ function CommitDetail({
                 size={11}
                 strokeWidth={1.9}
               />
-              {hostLabel(remoteWeb!)}
+              {hostLabel(remoteWeb)}
             </Button>
           ) : null}
         </div>
