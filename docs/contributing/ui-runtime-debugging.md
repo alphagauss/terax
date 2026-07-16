@@ -1,5 +1,14 @@
 # Complex UI diagnosis and runtime debugging
 
+> Agent instruction: This document is mandatory only when runtime inspection is
+> warranted: the UI issue is difficult to verify from source code alone, the
+> interaction is complex, the issue has failed repeatedly, or the user explicitly
+> requests runtime debugging or acceptance. Simple, local, source-verifiable UI
+> changes do not require this workflow. When triggered, read this document
+> completely before editing code and do not skip runtime reproduction or
+> measurement merely because the suspected fix appears to be a CSS or React
+> change.
+
 This guide is primarily for Codex and other agents operating in restricted execution environments. Its commands and recovery steps account for filesystem sandboxes, GUI-launch approval, detached child processes, and browser-control capability boundaries.
 
 Use this guide for frontend problems that are difficult to explain from source alone: a control is misplaced, a panel clips or overflows, a click reaches the wrong target, state appears stale, a component flashes or remounts, or a change works in one layout but not another.

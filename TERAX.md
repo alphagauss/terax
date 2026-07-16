@@ -14,6 +14,20 @@ Terax loads `TERAX.md` from the workspace root as agent memory (similar to AGENT
 - Frontend checks: `pnpm lint`, `pnpm check-types`, `pnpm test`
 - Rust checks: `cd src-tauri && cargo clippy --all-targets --locked -- -D warnings`, `cd src-tauri && cargo nextest run --locked` (local fallback: `cargo test --locked`)
 
+## Conditional workflow routing
+
+Use the following workflow only when runtime inspection is warranted. It is mandatory when a frontend UI issue is difficult to verify from source code alone, the interaction is complex, the issue has failed repeatedly, or the user explicitly asks for runtime debugging or acceptance. Typical examples include:
+
+- incorrect layout, size, clipping, overflow, or positioning
+- click or pointer-event problems
+- stale UI, flashing, remounting, lost focus, or reset scroll
+- behavior that differs after resize, pane activation, theme, zoom, or async updates
+- any request to inspect DOM, computed styles, runtime measurements, or the real Tauri WebView
+
+Simple, local, source-verifiable UI changes do not require this workflow. Do not start a Tauri runtime or perform DOM inspection merely because a task changes UI code.
+
+When the workflow is triggered, **you must read and follow** `docs/contributing/ui-runtime-debugging.md` completely before editing. First establish the reproduction contract, then use the real Tauri runtime when IPC or native state is involved, collect bounded runtime evidence, identify the first incorrect layer, and repeat the same evidence after the change. Do not diagnose layout from a plain Vite page when the behavior depends on Tauri IPC.
+
 ## Quality bar
 
 Production-grade or it does not ship. Every change is judged against all of these, not just "it works":
@@ -181,4 +195,4 @@ Long-form contributor guides live under `docs/`. These guides elaborate on `TERA
 - `docs/architecture/ai-subsystem.md` - AI stack, sessions, tools, adding a provider
 - `docs/architecture/terminal-renderer-pool.md` - renderer pool and DormantRing invariants
 - `docs/contributing/testing.md` - testing contract and core-subsystem invariants
-- `docs/contributing/ui-runtime-debugging.md` - runtime DOM measurement, overflow tracing, computed-style inspection, and UI regression verification
+- `docs/contributing/ui-runtime-debugging.md` - **conditional workflow for complex or explicitly requested UI runtime debugging**; runtime DOM measurement, overflow tracing, computed-style inspection, and UI regression verification
