@@ -1,8 +1,11 @@
 import { cn } from "@/lib/utils";
+import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
 import {
-  captureRenderedAnchor,
-  type MarkdownAnchor,
-  restoreRenderedAnchor,
+  MARKDOWN_ACTIVATION_OFFSET,
+  MARKDOWN_CONTENT_CHANGE_EVENT,
+  readActiveRenderedHeadingId,
+  readRenderedViewportSourceLine,
+  restoreRenderedSourceLine,
 } from "@/modules/markdown/lib/anchor";
 import {
   findBlockIndexForSourceLine,
@@ -10,12 +13,14 @@ import {
   type MarkdownDocumentHeading,
   prepareMarkdownDocument,
 } from "@/modules/markdown/lib/document";
+import { findActiveOutlineId } from "@/modules/markdown/lib/outline";
 import {
   MarkdownDocumentRenderer,
   type MarkdownDocumentRendererHandle,
 } from "@/modules/markdown/MarkdownDocumentRenderer";
 import { MarkdownOutlinePanel } from "@/modules/markdown/MarkdownOutlinePanel";
 import { MarkdownOutlineToggle } from "@/modules/markdown/MarkdownOutlineToggle";
+import { MarkdownRawPane } from "@/modules/markdown/MarkdownRawPane";
 import { MarkdownSplitLayout } from "@/modules/markdown/MarkdownSplitLayout";
 import { MarkdownViewToggle } from "@/modules/markdown/MarkdownViewToggle";
 import { currentWorkspaceEnv } from "@/modules/workspace";
@@ -34,30 +39,64 @@ type Status =
   | { kind: "toolarge"; size: number; limit: number }
   | { kind: "error"; message: string };
 
+type ViewMode = "rendered" | "raw";
+
+export type MarkdownPreviewPaneHandle = {
+  gotoSourceLine: (sourceLine: number) => void;
+};
+
 type Props = {
+  id: number;
   path: string;
   visible: boolean;
-  onSetView: (mode: "rendered" | "raw", anchor: MarkdownAnchor | null) => void;
-  restoreAnchor?: MarkdownAnchor | null;
+  dirty: boolean;
+  registerEditorHandle: (id: number, handle: EditorPaneHandle | null) => void;
+  registerNavigationHandle: (
+    id: number,
+    handle: MarkdownPreviewPaneHandle | null,
+  ) => void;
+  onDirtyChange: (id: number, dirty: boolean) => void;
+  onCloseTab: (id: number) => void;
 };
 
 const NAVIGATION_FRAME_LIMIT = 30;
 
 export function MarkdownPreviewPane({
+  id,
   path,
   visible,
-  onSetView,
-  restoreAnchor,
+  dirty,
+  registerEditorHandle,
+  registerNavigationHandle,
+  onDirtyChange,
+  onCloseTab,
 }: Props) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
+  const [viewMode, setViewMode] = useState<ViewMode>("rendered");
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineAvailable, setOutlineAvailable] = useState(true);
+  const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [renderedRestore, setRenderedRestore] = useState<{
+    sourceLine: number;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MarkdownDocumentRendererHandle>(null);
-  const restoredAnchorRef = useRef<MarkdownAnchor | null>(null);
-  const resizeAnchorRef = useRef<MarkdownAnchor | null>(null);
+  const editorRef = useRef<EditorPaneHandle>(null);
   const navigationFrameRef = useRef(0);
+  const loadVersionRef = useRef(0);
+  const pendingRawSourceLineRef = useRef<number | null>(null);
+  const resizeSourceLineRef = useRef<number | null>(null);
+  const navigationTargetRef = useRef<(sourceLine: number) => void>(() => {});
+  const callbackRef = useRef({
+    registerEditorHandle,
+    onDirtyChange,
+    onCloseTab,
+  });
+  callbackRef.current = { registerEditorHandle, onDirtyChange, onCloseTab };
   const outlineId = `${useId()}-markdown-outline`;
 
   const cancelPendingNavigation = useCallback(() => {
@@ -66,20 +105,16 @@ export function MarkdownPreviewPane({
     navigationFrameRef.current = 0;
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    cancelPendingNavigation();
-    restoredAnchorRef.current = null;
-    setStatus({ kind: "loading" });
-    setOutlineOpen(false);
-    setOutlineAvailable(true);
-
-    invoke<ReadResult>("fs_read_file", {
-      path,
-      workspace: currentWorkspaceEnv(),
-    })
-      .then((result) => {
-        if (cancelled) return;
+  const loadDocument = useCallback(
+    async (showLoading: boolean) => {
+      const version = ++loadVersionRef.current;
+      if (showLoading) setStatus({ kind: "loading" });
+      try {
+        const result = await invoke<ReadResult>("fs_read_file", {
+          path,
+          workspace: currentWorkspaceEnv(),
+        });
+        if (version !== loadVersionRef.current) return;
         if (result.kind === "text") {
           setStatus({
             kind: "ready",
@@ -94,17 +129,23 @@ export function MarkdownPreviewPane({
             limit: result.limit,
           });
         }
-      })
-      .catch((error) => {
-        if (!cancelled) {
+      } catch (error) {
+        if (version === loadVersionRef.current) {
           setStatus({ kind: "error", message: String(error) });
         }
-      });
+      }
+    },
+    [path],
+  );
 
+  useEffect(() => {
+    cancelPendingNavigation();
+    setActiveOutlineId(null);
+    void loadDocument(true);
     return () => {
-      cancelled = true;
+      loadVersionRef.current += 1;
     };
-  }, [cancelPendingNavigation, path]);
+  }, [cancelPendingNavigation, loadDocument]);
 
   useEffect(
     () => () => {
@@ -113,57 +154,101 @@ export function MarkdownPreviewPane({
     [cancelPendingNavigation],
   );
 
-  const anchorRoot = useCallback(
-    (anchor: MarkdownAnchor): ParentNode | null => {
-      const content = contentRef.current;
-      if (!content || anchor.blockIndex === undefined) return content;
-      return (
-        rendererRef.current?.findBlockElement(anchor.blockIndex) ??
-        content.querySelector<HTMLElement>(
-          `[data-markdown-block-mounted][data-markdown-block-index="${anchor.blockIndex}"]`,
-        ) ??
-        content
-      );
-    },
-    [],
-  );
+  const document = status.kind === "ready" ? status.document : null;
+  const hasOutline = Boolean(document?.outline.length);
 
-  const scheduleAnchorRestore = useCallback(
-    (anchor: MarkdownAnchor) => {
-      cancelPendingNavigation();
-      navigationFrameRef.current = requestAnimationFrame(() => {
+  useEffect(() => {
+    if (viewMode !== "rendered" || !scrollContainer || !document) return;
+    let frame = 0;
+    const updateActiveHeading = () => {
+      frame = 0;
+      const sourceLine = readRenderedViewportSourceLine(scrollContainer);
+      const active =
+        sourceLine === undefined
+          ? readActiveRenderedHeadingId(scrollContainer)
+          : findActiveOutlineId(document.outline, sourceLine);
+      setActiveOutlineId((current) => (current === active ? current : active));
+    };
+    const scheduleUpdate = () => {
+      if (frame === 0) frame = requestAnimationFrame(updateActiveHeading);
+    };
+
+    updateActiveHeading();
+    scrollContainer.addEventListener("scroll", scheduleUpdate, {
+      passive: true,
+    });
+    scrollContainer.addEventListener(
+      MARKDOWN_CONTENT_CHANGE_EVENT,
+      scheduleUpdate,
+    );
+    return () => {
+      scrollContainer.removeEventListener("scroll", scheduleUpdate);
+      scrollContainer.removeEventListener(
+        MARKDOWN_CONTENT_CHANGE_EVENT,
+        scheduleUpdate,
+      );
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [document, scrollContainer, viewMode]);
+
+  const requestRenderedRestore = useCallback((sourceLine: number | null) => {
+    if (sourceLine == null) return;
+    setRenderedRestore({ sourceLine });
+  }, []);
+
+  useEffect(() => {
+    const sourceLine = renderedRestore?.sourceLine;
+    if (
+      viewMode !== "rendered" ||
+      sourceLine == null ||
+      !scrollContainer ||
+      !document
+    ) {
+      return;
+    }
+
+    cancelPendingNavigation();
+    const blockIndex = findBlockIndexForSourceLine(document.blocks, sourceLine);
+    if (blockIndex >= 0) rendererRef.current?.ensureBlock(blockIndex);
+    let attempts = 0;
+    const restore = () => {
+      const root =
+        (blockIndex >= 0
+          ? rendererRef.current?.findBlockElement(blockIndex)
+          : null) ?? contentRef.current;
+      if (
+        (root &&
+          restoreRenderedSourceLine(scrollContainer, sourceLine, root)) ||
+        attempts >= NAVIGATION_FRAME_LIMIT
+      ) {
         navigationFrameRef.current = 0;
-        const container = scrollRef.current;
-        const root = anchorRoot(anchor);
-        if (container && root) restoreRenderedAnchor(container, anchor, root);
-      });
-    },
-    [anchorRoot, cancelPendingNavigation],
-  );
+        setRenderedRestore(null);
+        return;
+      }
+      attempts += 1;
+      navigationFrameRef.current = requestAnimationFrame(restore);
+    };
+    navigationFrameRef.current = requestAnimationFrame(restore);
+    return cancelPendingNavigation;
+  }, [
+    cancelPendingNavigation,
+    document,
+    renderedRestore,
+    scrollContainer,
+    viewMode,
+  ]);
 
   const handleOutlineOpenChange = useCallback(
     (open: boolean) => {
       if (open === outlineOpen) return;
-      const container = scrollRef.current;
-      const anchor = container ? captureRenderedAnchor(container) : null;
+      const sourceLine = scrollRef.current
+        ? readRenderedViewportSourceLine(scrollRef.current)
+        : null;
       setOutlineOpen(open);
-      if (anchor) scheduleAnchorRestore(anchor);
+      requestRenderedRestore(sourceLine ?? null);
     },
-    [outlineOpen, scheduleAnchorRestore],
+    [outlineOpen, requestRenderedRestore],
   );
-
-  const captureResizeAnchor = useCallback(() => {
-    const container = scrollRef.current;
-    resizeAnchorRef.current = container
-      ? captureRenderedAnchor(container)
-      : null;
-  }, []);
-
-  const restoreResizeAnchor = useCallback(() => {
-    const anchor = resizeAnchorRef.current;
-    resizeAnchorRef.current = null;
-    if (anchor) scheduleAnchorRestore(anchor);
-  }, [scheduleAnchorRestore]);
 
   useEffect(() => {
     if (!outlineOpen || !visible) return;
@@ -174,73 +259,30 @@ export function MarkdownPreviewPane({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleOutlineOpenChange, outlineOpen, visible]);
 
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (
-      !container ||
-      status.kind !== "ready" ||
-      !restoreAnchor ||
-      restoredAnchorRef.current === restoreAnchor
-    ) {
-      return;
-    }
-
-    cancelPendingNavigation();
-    const renderer = rendererRef.current;
-    const sourceLine = restoreAnchor.sourceLine;
-    const blockIndex =
-      sourceLine === undefined
-        ? -1
-        : findBlockIndexForSourceLine(status.document.blocks, sourceLine);
-    if (blockIndex >= 0) renderer?.ensureBlock(blockIndex);
-
-    let attempts = 0;
-    const restore = () => {
-      const currentRenderer = rendererRef.current;
-      const ready =
-        blockIndex < 0 ||
-        (currentRenderer !== null &&
-          (!currentRenderer.progressive ||
-            (currentRenderer.isBlockMounted(blockIndex) &&
-              currentRenderer.findBlockElement(blockIndex) !== null)));
-      if (ready || attempts >= NAVIGATION_FRAME_LIMIT) {
-        navigationFrameRef.current = 0;
-        restoredAnchorRef.current = restoreAnchor;
-        restoreRenderedAnchor(
-          container,
-          restoreAnchor,
-          anchorRoot({ ...restoreAnchor, blockIndex }) ?? container,
-        );
-        return;
-      }
-      attempts += 1;
-      navigationFrameRef.current = requestAnimationFrame(restore);
-    };
-    navigationFrameRef.current = requestAnimationFrame(restore);
-
-    return cancelPendingNavigation;
-  }, [anchorRoot, cancelPendingNavigation, restoreAnchor, status]);
-
   const scrollToHeading = useCallback(
     (item: MarkdownDocumentHeading) => {
+      setActiveOutlineId(item.id);
+      if (viewMode === "raw") {
+        editorRef.current?.scrollToSourceLine(item.sourceLine);
+        return;
+      }
+
       const container = scrollRef.current;
       const content = contentRef.current;
       if (!container || !content) return;
       cancelPendingNavigation();
       rendererRef.current?.ensureBlock(item.blockIndex);
-
       let attempts = 0;
       const reveal = () => {
-        const heading =
-          rendererRef.current?.findHeadingElement(item.id) ??
-          content.querySelector<HTMLElement>(
-            `[data-markdown-heading-id="${item.id}"]`,
-          );
+        const heading = content.querySelector<HTMLElement>(
+          `[data-markdown-heading-id="${item.id}"]`,
+        );
         if (heading) {
           navigationFrameRef.current = 0;
-          const containerTop = container.getBoundingClientRect().top;
           container.scrollTop +=
-            heading.getBoundingClientRect().top - containerTop - 20;
+            heading.getBoundingClientRect().top -
+            container.getBoundingClientRect().top -
+            MARKDOWN_ACTIVATION_OFFSET;
           return;
         }
         if (attempts >= NAVIGATION_FRAME_LIMIT) {
@@ -252,12 +294,81 @@ export function MarkdownPreviewPane({
       };
       navigationFrameRef.current = requestAnimationFrame(reveal);
     },
-    [cancelPendingNavigation],
+    [cancelPendingNavigation, viewMode],
   );
 
-  const document = status.kind === "ready" ? status.document : null;
-  const hasOutline = Boolean(document?.outline.length);
-  const scrollContainer = scrollRef.current;
+  const handleViewChange = useCallback(
+    (mode: ViewMode) => {
+      if (mode === viewMode || (mode === "rendered" && dirty)) return;
+      if (mode === "raw") {
+        pendingRawSourceLineRef.current = scrollRef.current
+          ? (readRenderedViewportSourceLine(scrollRef.current) ?? null)
+          : null;
+        setViewMode("raw");
+        return;
+      }
+
+      const sourceLine = editorRef.current?.getViewportSourceLine() ?? null;
+      setViewMode("rendered");
+      requestRenderedRestore(sourceLine);
+      void loadDocument(false).then(() => requestRenderedRestore(sourceLine));
+    },
+    [dirty, loadDocument, requestRenderedRestore, viewMode],
+  );
+
+  const handleEditorRef = useCallback(
+    (handle: EditorPaneHandle | null) => {
+      editorRef.current = handle;
+      callbackRef.current.registerEditorHandle(id, handle);
+    },
+    [id],
+  );
+  const handleDirtyChange = useCallback(
+    (nextDirty: boolean) => callbackRef.current.onDirtyChange(id, nextDirty),
+    [id],
+  );
+  const handleClose = useCallback(
+    () => callbackRef.current.onCloseTab(id),
+    [id],
+  );
+  const handleRawViewportLine = useCallback(
+    (sourceLine: number) => {
+      if (!document) return;
+      const active = findActiveOutlineId(document.outline, sourceLine);
+      setActiveOutlineId((current) => (current === active ? current : active));
+    },
+    [document],
+  );
+  useEffect(() => {
+    if (viewMode !== "raw" || !document) return;
+    const sourceLine = editorRef.current?.getViewportSourceLine();
+    if (sourceLine != null) handleRawViewportLine(sourceLine);
+  }, [document, handleRawViewportLine, viewMode]);
+
+  navigationTargetRef.current = (sourceLine) => {
+    const active = document
+      ? findActiveOutlineId(document.outline, sourceLine)
+      : null;
+    setActiveOutlineId(active);
+    if (viewMode === "raw") {
+      editorRef.current?.scrollToSourceLine(sourceLine);
+    } else {
+      requestRenderedRestore(sourceLine);
+    }
+  };
+
+  useEffect(() => {
+    const handle: MarkdownPreviewPaneHandle = {
+      gotoSourceLine: (sourceLine) => navigationTargetRef.current(sourceLine),
+    };
+    registerNavigationHandle(id, handle);
+    return () => registerNavigationHandle(id, null);
+  }, [id, registerNavigationHandle]);
+
+  const handleScrollRef = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollContainer(node);
+  }, []);
 
   return (
     <div
@@ -270,14 +381,21 @@ export function MarkdownPreviewPane({
         outlineOpen={outlineOpen && hasOutline}
         onOutlineOpenChange={handleOutlineOpenChange}
         onOutlineAvailabilityChange={setOutlineAvailable}
-        onOutlineResizeStart={captureResizeAnchor}
-        onOutlineWidthChange={restoreResizeAnchor}
+        onOutlineResizeStart={() => {
+          resizeSourceLineRef.current = scrollRef.current
+            ? (readRenderedViewportSourceLine(scrollRef.current) ?? null)
+            : null;
+        }}
+        onOutlineWidthChange={() => {
+          requestRenderedRestore(resizeSourceLineRef.current);
+          resizeSourceLineRef.current = null;
+        }}
         outline={
-          document && scrollContainer ? (
+          document ? (
             <div id={outlineId} className="h-full min-h-0">
               <MarkdownOutlinePanel
                 items={document.outline}
-                scrollContainer={scrollContainer}
+                activeId={activeOutlineId}
                 onSelect={scrollToHeading}
               />
             </div>
@@ -294,52 +412,60 @@ export function MarkdownPreviewPane({
             />
           )}
           <MarkdownViewToggle
-            mode="rendered"
-            onChange={(mode) =>
-              onSetView(
-                mode,
-                scrollRef.current
-                  ? captureRenderedAnchor(scrollRef.current)
-                  : null,
-              )
-            }
+            mode={viewMode}
+            onChange={handleViewChange}
+            renderedDisabled={dirty}
+            renderedHint="Save to preview"
           />
-          <div
-            ref={scrollRef}
-            className="app-scrollbar min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable]"
-          >
+
+          {viewMode === "raw" ? (
+            <MarkdownRawPane
+              ref={handleEditorRef}
+              path={path}
+              initialSourceLine={pendingRawSourceLineRef.current}
+              onViewportSourceLineChange={handleRawViewportLine}
+              onDirtyChange={handleDirtyChange}
+              onSaved={() => void loadDocument(false)}
+              onClose={handleClose}
+            />
+          ) : (
             <div
-              ref={contentRef}
-              className="w-full min-w-0 px-4 pt-12 pb-6 sm:px-8"
+              ref={handleScrollRef}
+              className="app-scrollbar min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable]"
             >
-              {status.kind === "loading" && (
-                <p className="text-[12px] text-muted-foreground">Loading…</p>
-              )}
-              {status.kind === "error" && (
-                <p className="text-[12px] text-destructive">
-                  Failed to read file: {status.message}
-                </p>
-              )}
-              {status.kind === "binary" && (
-                <p className="text-[12px] text-muted-foreground">
-                  Binary file: cannot render as markdown.
-                </p>
-              )}
-              {status.kind === "toolarge" && (
-                <p className="text-[12px] text-muted-foreground">
-                  File is {status.size} bytes; limit {status.limit}.
-                </p>
-              )}
-              {document && scrollContainer && (
-                <MarkdownDocumentRenderer
-                  ref={rendererRef}
-                  document={document}
-                  visible={visible}
-                  scrollContainer={scrollContainer}
-                />
-              )}
+              <div
+                ref={contentRef}
+                className="w-full min-w-0 px-4 pt-12 pb-6 sm:px-8"
+              >
+                {status.kind === "loading" && (
+                  <p className="text-[12px] text-muted-foreground">Loading…</p>
+                )}
+                {status.kind === "error" && (
+                  <p className="text-[12px] text-destructive">
+                    Failed to read file: {status.message}
+                  </p>
+                )}
+                {status.kind === "binary" && (
+                  <p className="text-[12px] text-muted-foreground">
+                    Binary file: cannot render as markdown.
+                  </p>
+                )}
+                {status.kind === "toolarge" && (
+                  <p className="text-[12px] text-muted-foreground">
+                    File is {status.size} bytes; limit {status.limit}.
+                  </p>
+                )}
+                {document && scrollContainer && (
+                  <MarkdownDocumentRenderer
+                    ref={rendererRef}
+                    document={document}
+                    visible={visible}
+                    scrollContainer={scrollContainer}
+                  />
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </MarkdownSplitLayout>
     </div>

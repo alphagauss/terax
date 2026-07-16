@@ -1,7 +1,5 @@
-import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 import {
-  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
@@ -12,17 +10,15 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PanelImperativeHandle } from "react-resizable-panels";
 
-const MARKDOWN_OUTLINE_DEFAULT_WIDTH = 240;
-const MARKDOWN_OUTLINE_MIN_WIDTH = 180;
-const MARKDOWN_OUTLINE_MAX_WIDTH = 360;
-const MARKDOWN_CONTENT_MIN_WIDTH = 320;
-
+const OUTLINE_DEFAULT_WIDTH = 240;
+const OUTLINE_MIN_WIDTH = 180;
+const OUTLINE_MAX_WIDTH = 360;
+const CONTENT_MIN_WIDTH = 320;
 const SEPARATOR_WIDTH = 1;
-const KEYBOARD_RESIZE_STEP = 10;
+const KEYBOARD_STEP = 10;
 
-type MarkdownSplitLayoutProps = {
+type Props = {
   outlineOpen: boolean;
   onOutlineOpenChange: (open: boolean) => void;
   outline: ReactNode;
@@ -45,23 +41,19 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function canFitOutline(containerWidth: number | null): boolean {
+function outlineAvailable(containerWidth: number): boolean {
   return (
-    containerWidth === null ||
-    containerWidth <= 0 ||
-    containerWidth >=
-      MARKDOWN_OUTLINE_MIN_WIDTH + MARKDOWN_CONTENT_MIN_WIDTH + SEPARATOR_WIDTH
+    containerWidth === 0 ||
+    containerWidth >= OUTLINE_MIN_WIDTH + CONTENT_MIN_WIDTH + SEPARATOR_WIDTH
   );
 }
 
-function maxOutlineWidth(containerWidth: number | null): number {
-  if (containerWidth === null || containerWidth <= 0) {
-    return MARKDOWN_OUTLINE_MAX_WIDTH;
-  }
+function maximumOutlineWidth(containerWidth: number): number {
+  if (containerWidth === 0) return OUTLINE_MAX_WIDTH;
   return clamp(
-    containerWidth - MARKDOWN_CONTENT_MIN_WIDTH - SEPARATOR_WIDTH,
-    MARKDOWN_OUTLINE_MIN_WIDTH,
-    MARKDOWN_OUTLINE_MAX_WIDTH,
+    containerWidth - CONTENT_MIN_WIDTH - SEPARATOR_WIDTH,
+    OUTLINE_MIN_WIDTH,
+    OUTLINE_MAX_WIDTH,
   );
 }
 
@@ -75,279 +67,183 @@ export function MarkdownSplitLayout({
   onOutlineAvailabilityChange,
   onOutlineResizeStart,
   onOutlineWidthChange,
-}: MarkdownSplitLayoutProps) {
-  const groupRef = useRef<HTMLDivElement>(null);
+}: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLHRElement>(null);
-  const outlinePanelRef = useRef<PanelImperativeHandle>(null);
-  const preferredOutlineWidthRef = useRef(MARKDOWN_OUTLINE_DEFAULT_WIDTH);
-  const groupWidthRef = useRef<number | null>(null);
+  const guideRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const unavailableCloseNotifiedRef = useRef(false);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const [renderedOutlineWidth, setRenderedOutlineWidth] = useState(
-    MARKDOWN_OUTLINE_DEFAULT_WIDTH,
-  );
-  const layoutId = useId();
-  const outlinePanelId = `${layoutId}-outline`;
-  const contentPanelId = `${layoutId}-content`;
-  const outlineAvailable = canFitOutline(containerWidth);
-  const effectiveOutlineOpen = outlineOpen && outlineAvailable;
-  const maximumOutlineWidth = maxOutlineWidth(containerWidth);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [outlineWidth, setOutlineWidth] = useState(OUTLINE_DEFAULT_WIDTH);
+  const outlineId = `${useId()}-outline`;
+  const available = outlineAvailable(containerWidth);
+  const open = outlineOpen && available;
+  const maximumWidth = maximumOutlineWidth(containerWidth);
+  const renderedWidth = clamp(outlineWidth, OUTLINE_MIN_WIDTH, maximumWidth);
 
   useLayoutEffect(() => {
-    const group = groupRef.current;
-    if (!group) return;
-
-    const updateWidth = (width: number) => {
-      groupWidthRef.current = width;
-      setContainerWidth((current) =>
-        current !== null && Math.abs(current - width) < 0.5 ? current : width,
-      );
-    };
-    updateWidth(group.getBoundingClientRect().width);
-
+    const container = containerRef.current;
+    if (!container) return;
+    const update = (width: number) => setContainerWidth(width);
+    update(container.getBoundingClientRect().width);
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) updateWidth(entry.contentRect.width);
+      const width = entries[0]?.contentRect.width;
+      if (width !== undefined) update(width);
     });
-    observer.observe(group);
+    observer.observe(container);
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
-    onOutlineAvailabilityChange?.(outlineAvailable);
-  }, [onOutlineAvailabilityChange, outlineAvailable]);
+    onOutlineAvailabilityChange?.(available);
+  }, [available, onOutlineAvailabilityChange]);
 
   useEffect(() => {
-    if (outlineOpen && !outlineAvailable) {
-      if (!unavailableCloseNotifiedRef.current) {
-        unavailableCloseNotifiedRef.current = true;
-        onOutlineOpenChange(false);
-      }
-      return;
-    }
-    unavailableCloseNotifiedRef.current = false;
-  }, [onOutlineOpenChange, outlineAvailable, outlineOpen]);
+    if (outlineOpen && !available) onOutlineOpenChange(false);
+  }, [available, onOutlineOpenChange, outlineOpen]);
 
-  useLayoutEffect(() => {
-    const outlinePanel = outlinePanelRef.current;
-    if (!outlinePanel) return;
-    if (!effectiveOutlineOpen) {
-      outlinePanel.collapse();
-      return;
-    }
+  const showGuide = useCallback((width: number) => {
+    const guide = guideRef.current;
+    if (!guide) return;
+    guide.style.transform = `translateX(${width}px)`;
+    guide.style.opacity = "1";
+  }, []);
 
-    const nextWidth = clamp(
-      preferredOutlineWidthRef.current,
-      MARKDOWN_OUTLINE_MIN_WIDTH,
-      maximumOutlineWidth,
-    );
-    outlinePanel.resize(`${nextWidth}px`);
-  }, [effectiveOutlineOpen, maximumOutlineWidth]);
+  const hideGuide = useCallback(() => {
+    if (guideRef.current) guideRef.current.style.opacity = "0";
+    delete separatorRef.current?.dataset.dragging;
+  }, []);
 
-  const resetGhost = useCallback(() => {
-    const separator = separatorRef.current;
-    const currentWidth =
-      outlinePanelRef.current?.getSize().inPixels || renderedOutlineWidth;
-    if (separator) {
-      delete separator.dataset.dragging;
-      separator.setAttribute("aria-valuenow", String(Math.round(currentWidth)));
-      separator.setAttribute(
-        "aria-valuetext",
-        `${Math.round(currentWidth)} pixels`,
-      );
-      separator.style.setProperty("--markdown-outline-preview-x", "0px");
-    }
-  }, [renderedOutlineWidth]);
-
-  const commitOutlineWidth = useCallback(
+  const commitWidth = useCallback(
     (width: number) => {
-      const outlinePanel = outlinePanelRef.current;
-      if (!outlinePanel || !canFitOutline(groupWidthRef.current)) return;
       const nextWidth = clamp(
         width,
-        MARKDOWN_OUTLINE_MIN_WIDTH,
-        maxOutlineWidth(groupWidthRef.current),
+        OUTLINE_MIN_WIDTH,
+        maximumOutlineWidth(containerRef.current?.clientWidth ?? 0),
       );
-      preferredOutlineWidthRef.current = nextWidth;
-      outlinePanel.resize(`${nextWidth}px`);
-      setRenderedOutlineWidth(nextWidth);
+      setOutlineWidth(nextWidth);
       onOutlineWidthChange?.(nextWidth);
     },
     [onOutlineWidthChange],
   );
 
-  const updateDrag = useCallback((event: PointerEvent<HTMLHRElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const nextWidth = clamp(
-      drag.startWidth + event.clientX - drag.startX,
-      MARKDOWN_OUTLINE_MIN_WIDTH,
-      maxOutlineWidth(groupWidthRef.current),
-    );
-    drag.nextWidth = nextWidth;
-    separatorRef.current?.setAttribute(
-      "aria-valuenow",
-      String(Math.round(nextWidth)),
-    );
-    separatorRef.current?.setAttribute(
-      "aria-valuetext",
-      `${Math.round(nextWidth)} pixels`,
-    );
-    separatorRef.current?.style.setProperty(
-      "--markdown-outline-preview-x",
-      `${nextWidth - drag.startWidth}px`,
-    );
-  }, []);
+  const updateDrag = useCallback(
+    (event: PointerEvent<HTMLHRElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      drag.nextWidth = clamp(
+        drag.startWidth + event.clientX - drag.startX,
+        OUTLINE_MIN_WIDTH,
+        maximumOutlineWidth(containerRef.current?.clientWidth ?? 0),
+      );
+      showGuide(drag.nextWidth);
+    },
+    [showGuide],
+  );
 
   const finishDrag = useCallback(
-    (commit: boolean, pointerId: number) => {
+    (pointerId: number, commit: boolean) => {
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== pointerId) return;
       dragRef.current = null;
-      resetGhost();
-      if (commit) commitOutlineWidth(drag.nextWidth);
+      hideGuide();
+      if (commit) commitWidth(drag.nextWidth);
     },
-    [commitOutlineWidth, resetGhost],
+    [commitWidth, hideGuide],
   );
 
   const handlePointerDown = useCallback(
     (event: PointerEvent<HTMLHRElement>) => {
-      const outlinePanel = outlinePanelRef.current;
-      if (
-        event.button !== 0 ||
-        !event.isPrimary ||
-        !outlinePanel ||
-        !outlineAvailable
-      ) {
-        return;
-      }
+      if (event.button !== 0 || !event.isPrimary || !available) return;
       event.preventDefault();
       onOutlineResizeStart?.();
-      const startWidth = clamp(
-        outlinePanel.getSize().inPixels || preferredOutlineWidthRef.current,
-        MARKDOWN_OUTLINE_MIN_WIDTH,
-        maximumOutlineWidth,
-      );
       dragRef.current = {
         pointerId: event.pointerId,
         startX: event.clientX,
-        startWidth,
-        nextWidth: startWidth,
+        startWidth: renderedWidth,
+        nextWidth: renderedWidth,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
       event.currentTarget.dataset.dragging = "true";
+      showGuide(renderedWidth);
     },
-    [maximumOutlineWidth, onOutlineResizeStart, outlineAvailable],
+    [available, onOutlineResizeStart, renderedWidth, showGuide],
   );
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLHRElement>) => {
       let nextWidth: number | null = null;
-      const currentWidth =
-        outlinePanelRef.current?.getSize().inPixels || renderedOutlineWidth;
-      switch (event.key) {
-        case "ArrowLeft":
-          nextWidth = currentWidth - KEYBOARD_RESIZE_STEP;
-          break;
-        case "ArrowRight":
-          nextWidth = currentWidth + KEYBOARD_RESIZE_STEP;
-          break;
-        case "Home":
-          nextWidth = MARKDOWN_OUTLINE_MIN_WIDTH;
-          break;
-        case "End":
-          nextWidth = maximumOutlineWidth;
-          break;
-      }
+      if (event.key === "ArrowLeft") nextWidth = renderedWidth - KEYBOARD_STEP;
+      else if (event.key === "ArrowRight") {
+        nextWidth = renderedWidth + KEYBOARD_STEP;
+      } else if (event.key === "Home") nextWidth = OUTLINE_MIN_WIDTH;
+      else if (event.key === "End") nextWidth = maximumWidth;
       if (nextWidth === null) return;
       event.preventDefault();
       onOutlineResizeStart?.();
-      commitOutlineWidth(nextWidth);
+      commitWidth(nextWidth);
     },
-    [
-      commitOutlineWidth,
-      maximumOutlineWidth,
-      onOutlineResizeStart,
-      renderedOutlineWidth,
-    ],
+    [commitWidth, maximumWidth, onOutlineResizeStart, renderedWidth],
   );
 
   return (
-    <ResizablePanelGroup
-      elementRef={groupRef}
-      orientation="horizontal"
-      disabled
-      disableCursor
+    <div
+      ref={containerRef}
       data-markdown-split-layout
-      className={cn("relative h-full min-h-0 w-full min-w-0", className)}
+      className={cn(
+        "relative flex h-full min-h-0 w-full min-w-0 overflow-hidden",
+        className,
+      )}
     >
-      <ResizablePanel
-        id={outlinePanelId}
-        panelRef={outlinePanelRef}
-        defaultSize="0px"
-        minSize={`${MARKDOWN_OUTLINE_MIN_WIDTH}px`}
-        maxSize={`${maximumOutlineWidth}px`}
-        collapsedSize="0px"
-        collapsible
-        groupResizeBehavior="preserve-pixel-size"
-        aria-hidden={!effectiveOutlineOpen}
-        inert={!effectiveOutlineOpen}
-        style={{ overflow: "hidden" }}
-        onResize={(size) => {
-          if (size.inPixels > 0) setRenderedOutlineWidth(size.inPixels);
-        }}
-      >
-        <div className="h-full min-h-0 min-w-0 overflow-hidden">
-          {effectiveOutlineOpen ? outline : null}
-        </div>
-      </ResizablePanel>
+      {open && (
+        <aside
+          id={outlineId}
+          className="h-full min-h-0 shrink-0 overflow-hidden"
+          style={{ width: renderedWidth }}
+        >
+          {outline}
+        </aside>
+      )}
 
-      {effectiveOutlineOpen && (
+      {open && (
         <hr
           ref={separatorRef}
           tabIndex={0}
           aria-label={separatorLabel}
-          aria-controls={outlinePanelId}
+          aria-controls={outlineId}
           aria-orientation="vertical"
-          aria-valuemin={MARKDOWN_OUTLINE_MIN_WIDTH}
-          aria-valuemax={maximumOutlineWidth}
-          aria-valuenow={Math.round(renderedOutlineWidth)}
-          aria-valuetext={`${Math.round(renderedOutlineWidth)} pixels`}
+          aria-valuemin={OUTLINE_MIN_WIDTH}
+          aria-valuemax={maximumWidth}
+          aria-valuenow={Math.round(renderedWidth)}
+          aria-valuetext={`${Math.round(renderedWidth)} pixels`}
           data-markdown-outline-separator
           className={cn(
             "relative z-20 m-0 h-full w-px shrink-0 cursor-col-resize touch-none border-0 bg-border p-0",
             "after:absolute after:inset-y-0 after:-left-1 after:w-3 after:content-['']",
-            "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-px before:translate-x-[var(--markdown-outline-preview-x)] before:bg-primary before:opacity-0 before:will-change-transform before:content-['']",
             "focus-visible:bg-ring focus-visible:outline-none",
-            "data-[dragging=true]:bg-primary/60 data-[dragging=true]:before:opacity-100",
+            "data-[dragging=true]:bg-primary/60",
           )}
-          style={
-            {
-              "--markdown-outline-preview-x": "0px",
-            } as CSSProperties
-          }
           onPointerDown={handlePointerDown}
           onPointerMove={updateDrag}
           onPointerUp={(event) => {
             updateDrag(event);
-            finishDrag(true, event.pointerId);
+            finishDrag(event.pointerId, true);
           }}
-          onPointerCancel={(event) => finishDrag(false, event.pointerId)}
-          onLostPointerCapture={(event) => finishDrag(false, event.pointerId)}
+          onPointerCancel={(event) => finishDrag(event.pointerId, false)}
+          onLostPointerCapture={(event) => finishDrag(event.pointerId, false)}
           onKeyDown={handleKeyDown}
-          data-markdown-outline-resize-preview
         />
       )}
 
-      <ResizablePanel
-        id={contentPanelId}
-        minSize={`${MARKDOWN_CONTENT_MIN_WIDTH}px`}
-        groupResizeBehavior="preserve-relative-size"
-        style={{ overflow: "hidden" }}
-      >
-        <div className="h-full min-h-0 min-w-0 overflow-hidden">{children}</div>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+      <main className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+        {children}
+      </main>
+
+      <div
+        ref={guideRef}
+        aria-hidden
+        data-markdown-outline-resize-preview
+        className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px bg-primary opacity-0 shadow-[0_0_6px_var(--color-primary)] will-change-transform"
+      />
+    </div>
   );
 }

@@ -1,5 +1,3 @@
-import { isMarkdownPath } from "@/lib/utils";
-import type { MarkdownAnchor } from "@/modules/markdown";
 import {
   findLeafCwd,
   hasLeaf,
@@ -53,7 +51,6 @@ export type EditorTab = TabBase & {
   /** Explorer root active when this file was opened from the sidebar. */
   explorerRoot?: string;
   overrideLanguage?: string | null;
-  markdownAnchor?: MarkdownAnchor;
 };
 
 export type PreviewTab = TabBase & {
@@ -68,9 +65,9 @@ export type MarkdownTab = TabBase & {
   kind: "markdown";
   title: string;
   path: string;
+  dirty: boolean;
   /** Explorer root active when this file was opened from the sidebar. */
   explorerRoot?: string;
-  markdownAnchor?: MarkdownAnchor;
 };
 
 export type AiDiffStatus = "pending" | "approved" | "rejected";
@@ -725,6 +722,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           spaceId: activeSpaceIdRef.current,
           title: basename(path),
           path,
+          dirty: false,
           ...(explorerRoot !== undefined && { explorerRoot }),
         },
       ];
@@ -744,50 +742,6 @@ export function useTabs(initial?: Partial<TerminalTab>) {
       }),
     );
   }, []);
-
-  const setMarkdownView = useCallback(
-    (id: number, mode: "rendered" | "raw", anchor: MarkdownAnchor | null) => {
-      setTabs((curr) =>
-        curr.map((t) => {
-          if (
-            t.id !== id ||
-            !isMarkdownPath((t as { path?: string }).path ?? "")
-          )
-            return t;
-          if (mode === "raw" && t.kind === "markdown") {
-            return {
-              ...t,
-              kind: "editor" as const,
-              dirty: false,
-              preview: false,
-              overrideLanguage:
-                (t as { overrideLanguage?: string | null }).overrideLanguage ??
-                null,
-              markdownAnchor: anchor ?? undefined,
-            };
-          }
-          if (mode === "rendered" && t.kind === "editor") {
-            if (t.dirty) return t;
-            return {
-              id: t.id,
-              kind: "markdown" as const,
-              spaceId: t.spaceId,
-              cold: t.cold,
-              title: t.title,
-              path: t.path,
-              ...(t.explorerRoot !== undefined && {
-                explorerRoot: t.explorerRoot,
-              }),
-              overrideLanguage: t.overrideLanguage ?? null,
-              markdownAnchor: anchor ?? undefined,
-            };
-          }
-          return t;
-        }),
-      );
-    },
-    [],
-  );
 
   const openGitDiffTab = useCallback(
     (input: {
@@ -981,6 +935,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
           return {
             ...x,
             ...(patch.title !== undefined && { title: patch.title }),
+            ...(patch.dirty !== undefined && { dirty: patch.dirty }),
+            ...(patch.path !== undefined && { path: patch.path }),
             ...(patch.explorerRoot !== undefined && {
               explorerRoot: patch.explorerRoot,
             }),
@@ -1205,7 +1161,6 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     pinTab,
     newPreviewTab,
     newMarkdownTab,
-    setMarkdownView,
     openAiDiffTab,
     openGitDiffTab,
     openCommitHistoryTab,

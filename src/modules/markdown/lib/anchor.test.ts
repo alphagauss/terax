@@ -12,12 +12,18 @@ import {
 } from "streamdown";
 import { describe, expect, it } from "vitest";
 import {
-  captureRenderedAnchor,
+  readActiveRenderedHeadingId,
+  readRenderedViewportSourceLine,
   rehypeMarkdownSourcePositions,
-  restoreRenderedAnchor,
+  restoreRenderedSourceLine,
 } from "./anchor";
 
-function block(start: number, end: number, top: number, height: number) {
+function sourceElement(
+  start: number,
+  end: number,
+  top: number,
+  height: number,
+) {
   return {
     dataset: {
       markdownSourceLine: String(start),
@@ -31,90 +37,86 @@ function block(start: number, end: number, top: number, height: number) {
   } as unknown as HTMLElement;
 }
 
-function container(blocks: HTMLElement[], top = 100) {
+function container(elements: HTMLElement[], top = 100) {
   return {
     scrollTop: 200,
-    scrollHeight: 1_000,
-    clientHeight: 500,
-    querySelectorAll: () => blocks,
-    getBoundingClientRect: () => ({ top }),
+    ownerDocument: { elementsFromPoint: () => [] },
+    querySelectorAll: () => elements,
+    getBoundingClientRect: () => ({
+      top,
+      left: 0,
+      right: 600,
+      width: 600,
+      height: 500,
+    }),
   } as unknown as HTMLElement;
 }
 
-describe("markdown rendered anchors", () => {
-  it("maps progress through a rendered source block back to a source line", () => {
-    const target = container([block(10, 20, 50, 100)]);
-
-    expect(captureRenderedAnchor(target)).toEqual({
-      sourceLine: 15,
-      offset: 0,
-      scrollRatio: 0.4,
-    });
-  });
-
-  it("restores a source line inside the smallest matching rendered block", () => {
-    const outer = block(10, 30, 80, 200);
-    const inner = block(15, 20, 120, 50);
+describe("rendered source lines", () => {
+  it("reads and restores against the shared viewport activation line", () => {
+    const outer = sourceElement(10, 30, 80, 200);
+    const inner = sourceElement(15, 20, 120, 50);
     const target = container([outer, inner]);
 
-    restoreRenderedAnchor(target, {
-      sourceLine: 18,
-      offset: 0,
-      scrollRatio: 0,
-    });
+    expect(readRenderedViewportSourceLine(target)).toBe(16);
+    expect(restoreRenderedSourceLine(target, 18)).toBe(true);
+    expect(target.scrollTop).toBe(218);
+  });
 
-    expect(target.scrollTop).toBe(250);
+  it("selects the last heading above the activation line", () => {
+    const first = {
+      dataset: { markdownHeadingId: "first" },
+      getBoundingClientRect: () => ({ top: 90 }),
+    } as unknown as HTMLElement;
+    const second = {
+      dataset: { markdownHeadingId: "second" },
+      getBoundingClientRect: () => ({ top: 132 }),
+    } as unknown as HTMLElement;
+    const third = {
+      dataset: { markdownHeadingId: "third" },
+      getBoundingClientRect: () => ({ top: 180 }),
+    } as unknown as HTMLElement;
+
+    expect(readActiveRenderedHeadingId(container([first, second, third]))).toBe(
+      "second",
+    );
   });
 });
 
 describe("rehypeMarkdownSourcePositions", () => {
-  it("adds source ranges only to rendered block elements", () => {
-    const paragraph = {
-      type: "element",
-      tagName: "p",
-      position: { start: { line: 3 }, end: { line: 5 } },
-    };
-    const emphasis = {
-      type: "element",
-      tagName: "em",
-      position: { start: { line: 3 }, end: { line: 3 } },
-    };
-    const tree = { type: "root", children: [paragraph, emphasis] };
-
-    rehypeMarkdownSourcePositions()(tree);
-
-    expect(paragraph).toMatchObject({
-      properties: {
-        "data-markdown-source-line": "3",
-        "data-markdown-source-end-line": "5",
-      },
-    });
-    expect(emphasis).not.toHaveProperty("properties");
-  });
-
-  it("offsets block ranges and assigns stable heading ids", () => {
-    const heading = {
+  it("adds ranges, unique heading ids and preserves an authored id", () => {
+    const first = {
       type: "element",
       tagName: "h2",
+      properties: { id: "authored" },
+      position: { start: { line: 2 }, end: { line: 2 } },
+    };
+    const second = {
+      type: "element",
+      tagName: "h3",
       position: { start: { line: 2 }, end: { line: 3 } },
     };
 
     rehypeMarkdownSourcePositions({ lineOffset: 10 })({
       type: "root",
-      children: [heading],
+      children: [first, second],
     });
 
-    expect(heading).toMatchObject({
+    expect(first.properties).toMatchObject({
+      id: "authored",
+      "data-markdown-heading-id": "markdown-heading-12",
+      "data-markdown-source-line": "12",
+    });
+    expect(second).toMatchObject({
       properties: {
-        id: "markdown-heading-12",
-        "data-markdown-heading-id": "markdown-heading-12",
-        "data-markdown-source-line": "12",
+        id: "markdown-heading-12-2",
+        "data-markdown-heading-id": "markdown-heading-12-2",
         "data-markdown-source-end-line": "13",
       },
     });
   });
 
-  it("preserves source ranges through the Streamdown render pipeline", () => {
+  it("preserves source ranges through Streamdown static rendering", () => {
     const html = renderToStaticMarkup(
       createElement(
         Streamdown,
@@ -125,41 +127,45 @@ describe("rehypeMarkdownSourcePositions", () => {
             rehypeMarkdownSourcePositions,
           ],
         },
-        "Paragraph text",
-      ),
-    );
-
-    expect(html).toContain('data-markdown-source-line="1"');
-    expect(html).toContain('data-markdown-source-end-line="1"');
-  });
-
-  it("keeps Streamdown's default heading renderer", () => {
-    const html = renderToStaticMarkup(
-      createElement(
-        Streamdown,
-        {
-          mode: "static",
-          rehypePlugins: [
-            ...Object.values(defaultRehypePlugins),
-            rehypeMarkdownSourcePositions,
-          ],
-        },
-        "# Heading",
+        "# Heading\n\nParagraph",
       ),
     );
 
     expect(html).toContain('data-streamdown="heading-1"');
-    expect(html).toContain('id="markdown-heading-1"');
+    expect(html).toContain('data-markdown-heading-id="markdown-heading-1"');
+    expect(html).toContain('data-markdown-source-line="3"');
   });
 
-  it("maps a progressively rendered block back to absolute source lines", () => {
+  it("places fenced-code source ranges on the code element", () => {
+    const html = renderToStaticMarkup(
+      createElement(
+        Streamdown,
+        {
+          mode: "static",
+          components: {
+            code: (props) => createElement("code", props),
+          },
+          rehypePlugins: [
+            ...Object.values(defaultRehypePlugins),
+            rehypeMarkdownSourcePositions,
+          ],
+        },
+        "```ts\nconst value = 1;\n```",
+      ),
+    );
+
+    expect(html).toMatch(
+      /<code[^>]*data-markdown-source-line="1"[^>]*data-markdown-source-end-line="3"/,
+    );
+  });
+
+  it("maps a progressive block back to absolute source lines", () => {
     const block: MarkdownDocumentBlock = {
       index: 4,
       content: "## Deferred heading\n",
       startLine: 25,
       endLine: 25,
       estimatedHeight: 60,
-      key: "deferred-heading",
     };
     const html = renderToStaticMarkup(
       createElement(
@@ -180,8 +186,7 @@ describe("rehypeMarkdownSourcePositions", () => {
     );
 
     expect(html).not.toContain("terax-markdown-block");
-    expect(html).toContain('id="markdown-heading-25"');
-    expect(html).toContain('data-markdown-source-line="25"');
+    expect(html).toContain('data-markdown-heading-id="markdown-heading-25"');
     expect(html).toContain('data-markdown-block-index="4"');
   });
 });

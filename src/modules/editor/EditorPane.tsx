@@ -1,7 +1,6 @@
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
-import type { MarkdownAnchor } from "@/modules/markdown";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
@@ -74,6 +73,8 @@ export type EditorPaneHandle = {
   reload: () => boolean;
   /** Move the cursor to a 1-based line and center it, once content is ready. */
   gotoLine: (line: number) => void;
+  /** Scroll a 1-based source line to the viewport activation line. */
+  scrollToSourceLine: (line: number) => void;
   /** Apply CodeMirror's undo/redo commands. */
   undo: () => void;
   redo: () => void;
@@ -81,7 +82,8 @@ export type EditorPaneHandle = {
   triggerAiComplete: () => void;
   /** Open CodeMirror's completion popup. */
   triggerCodeComplete: () => void;
-  getMarkdownAnchor: () => MarkdownAnchor | null;
+  /** Read the 1-based source line at the viewport activation line. */
+  getViewportSourceLine: () => number | null;
 };
 
 type Props = {
@@ -90,50 +92,37 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
-  markdownAnchor?: MarkdownAnchor | null;
+  initialSourceLine?: number | null;
+  onViewportSourceLineChange?: (line: number) => void;
 };
+
+export type EditorPaneProps = Props;
 
 // Above this, syntax highlighting and LSP are disabled: a multi-MB lezer
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
+const VIEWPORT_SOURCE_LINE_OFFSET = 32;
 
-function captureEditorAnchor(view: EditorView): MarkdownAnchor {
+function editorViewportSourceLine(view: EditorView): number {
   const scrollRect = view.scrollDOM.getBoundingClientRect();
   const viewportTop = Math.max(
     0,
     (scrollRect.top - view.documentTop) / view.scaleY,
   );
-  const block = view.lineBlockAtHeight(viewportTop);
-  const line = view.state.doc.lineAt(block.from);
-  const lineRect = view.coordsAtPos(line.from);
-  const scrollable = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
-  return {
-    sourceLine: line.number,
-    offset: lineRect ? lineRect.top - scrollRect.top : 0,
-    scrollRatio: scrollable > 0 ? view.scrollDOM.scrollTop / scrollable : 0,
-  };
+  const block = view.lineBlockAtHeight(
+    viewportTop + VIEWPORT_SOURCE_LINE_OFFSET / view.scaleY,
+  );
+  return view.state.doc.lineAt(block.from).number;
 }
 
-function restoreEditorAnchor(view: EditorView, anchor: MarkdownAnchor) {
-  if (anchor.sourceLine == null) {
-    const scrollable =
-      view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight;
-    view.scrollDOM.scrollTop = Math.max(0, scrollable * anchor.scrollRatio);
-    return;
-  }
-  const lineNumber = Math.max(
-    1,
-    Math.min(anchor.sourceLine, view.state.doc.lines),
-  );
+function restoreEditorSourceLine(view: EditorView, sourceLine: number) {
+  const lineNumber = Math.max(1, Math.min(sourceLine, view.state.doc.lines));
   const line = view.state.doc.line(lineNumber);
   view.dispatch({
-    effects: EditorView.scrollIntoView(line.from, { y: "start" }),
-  });
-  requestAnimationFrame(() => {
-    const lineRect = view.coordsAtPos(line.from);
-    if (!lineRect) return;
-    const scrollRect = view.scrollDOM.getBoundingClientRect();
-    view.scrollDOM.scrollTop += lineRect.top - scrollRect.top - anchor.offset;
+    effects: EditorView.scrollIntoView(line.from, {
+      y: "start",
+      yMargin: VIEWPORT_SOURCE_LINE_OFFSET,
+    }),
   });
 }
 
@@ -153,7 +142,8 @@ export const EditorPane = memo(
       onDirtyChange,
       onSaved,
       onClose,
-      markdownAnchor,
+      initialSourceLine,
+      onViewportSourceLineChange,
     } = props;
 
     const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
@@ -166,6 +156,8 @@ export const EditorPane = memo(
     const adoptDiskTextRef = useRef(adoptDiskText);
     adoptDiskTextRef.current = adoptDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
+    const viewportLineChangeRef = useRef(onViewportSourceLineChange);
+    viewportLineChangeRef.current = onViewportSourceLineChange;
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
@@ -290,7 +282,7 @@ export const EditorPane = memo(
     pathRef.current = path;
 
     const pendingLineRef = useRef<number | null>(null);
-    const restoredMarkdownAnchorRef = useRef<MarkdownAnchor | null>(null);
+    const restoredSourceLineRef = useRef<number | null>(null);
     const statusRef = useRef(doc.status);
     statusRef.current = doc.status;
 
@@ -315,18 +307,19 @@ export const EditorPane = memo(
     useEffect(() => {
       if (
         doc.status !== "ready" ||
-        !markdownAnchor ||
-        restoredMarkdownAnchorRef.current === markdownAnchor
+        initialSourceLine == null ||
+        restoredSourceLineRef.current === initialSourceLine
       )
         return;
       const frame = requestAnimationFrame(() => {
         const view = cmRef.current?.view;
         if (!view) return;
-        restoredMarkdownAnchorRef.current = markdownAnchor;
-        restoreEditorAnchor(view, markdownAnchor);
+        restoredSourceLineRef.current = initialSourceLine;
+        restoreEditorSourceLine(view, initialSourceLine);
+        viewportLineChangeRef.current?.(editorViewportSourceLine(view));
       });
       return () => cancelAnimationFrame(frame);
-    }, [doc.status, markdownAnchor]);
+    }, [doc.status, initialSourceLine]);
 
     const extensions = useMemo(
       () => [
@@ -351,6 +344,12 @@ export const EditorPane = memo(
         languageCompartment.of([]),
         lspCompartment.of([]),
         diagnosticsReporter(() => pathRef.current),
+        EditorView.updateListener.of((update) => {
+          if (!update.viewportChanged && !update.geometryChanged) return;
+          viewportLineChangeRef.current?.(
+            editorViewportSourceLine(update.view),
+          );
+        }),
         // Before inlineCompletion so an open popup wins Tab over the ghost.
         Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
         inlineCompletion({
@@ -478,7 +477,11 @@ export const EditorPane = memo(
           ? `dummy.${overrideLanguage}`
           : path;
         return (
-          (await resolveLanguage(resolvePath)) ?? { ext: [], name: "", id: "" }
+          (await resolveLanguage(resolvePath)) ?? {
+            ext: [],
+            name: "",
+            id: "",
+          }
         );
       };
       void resolve().then((result) => {
@@ -539,14 +542,23 @@ export const EditorPane = memo(
           return view.state.sliceDoc(from, to);
         },
         getPath: () => path,
-        getMarkdownAnchor: () => {
+        getViewportSourceLine: () => {
           const view = cmRef.current?.view;
-          return view ? captureEditorAnchor(view) : null;
+          return view ? editorViewportSourceLine(view) : null;
         },
         reload: () => reloadRef.current(),
         gotoLine: (line: number) => {
           pendingLineRef.current = line;
           applyPendingGoto();
+        },
+        scrollToSourceLine: (line: number) => {
+          const view = cmRef.current?.view;
+          if (!view) return;
+          restoreEditorSourceLine(view, line);
+          view.focus();
+          requestAnimationFrame(() => {
+            viewportLineChangeRef.current?.(editorViewportSourceLine(view));
+          });
         },
         undo: () => {
           const view = cmRef.current?.view;

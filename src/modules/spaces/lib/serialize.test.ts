@@ -168,6 +168,7 @@ describe("hydrateTabs", () => {
   it("hydrates editor/preview/markdown as cold with derived titles", () => {
     const serialized: SerializedTab[] = [
       { kind: "editor", path: "/a/foo.ts", explorerRoot: "/a" },
+      { kind: "editor", path: "/a/legacy.md" },
       { kind: "preview", url: "http://localhost:5173/x" },
       { kind: "markdown", path: "/a/README.md" },
     ];
@@ -175,9 +176,16 @@ describe("hydrateTabs", () => {
     expect(out.every((t) => t.cold === true)).toBe(true);
     expect(out.map((t) => t.title)).toEqual([
       "foo.ts",
+      "legacy.md",
       "localhost:5173",
       "README.md",
     ]);
     expect(out[0]).toMatchObject({ explorerRoot: "/a" });
+    expect(out.map((t) => t.kind)).toEqual([
+      "editor",
+      "markdown",
+      "preview",
+      "markdown",
+    ]);
   });
 });

@@ -4,13 +4,12 @@ import {
   MARKDOWN_CONTENT_CHANGE_EVENT,
   rehypeMarkdownSourcePositions,
 } from "@/modules/markdown/lib/anchor";
-import {
-  type MarkdownDocument,
-  type MarkdownDocumentBlock,
-  shouldProgressivelyRender,
+import type {
+  MarkdownDocument,
+  MarkdownDocumentBlock,
 } from "@/modules/markdown/lib/document";
 import {
-  ProgressiveMountController,
+  ProgressiveMountStore,
   startProgressiveMounting,
 } from "@/modules/markdown/lib/progressiveMount";
 import {
@@ -46,7 +45,7 @@ const INITIAL_RENDER_MIN_BLOCKS = 2;
 const INITIAL_RENDER_MAX_BLOCKS = 24;
 const BLOCK_PREFETCH_MARGIN = 1_200;
 const BLOCK_PREFETCH_RADIUS = 2;
-const IDLE_BATCH_SIZE = 1;
+const IDLE_BATCH_SIZE = 2;
 const IDLE_TIMEOUT = 500;
 
 const staticRehypePlugins = [
@@ -67,7 +66,7 @@ type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
 };
 
 type ProgressiveBlockContextValue = {
-  controller: ProgressiveMountController;
+  store: ProgressiveMountStore;
   document: MarkdownDocument;
   observePlaceholder: (element: HTMLElement) => () => void;
   registerBlockElement: (index: number, element: HTMLElement) => () => void;
@@ -191,7 +190,7 @@ function ProgressiveMarkdownBlock(props: BlockProps) {
   }
 
   const {
-    controller,
+    store,
     document,
     observePlaceholder,
     registerBlockElement,
@@ -201,12 +200,12 @@ function ProgressiveMarkdownBlock(props: BlockProps) {
   const placeholderRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef<HTMLDivElement>(null);
   const subscribe = useCallback(
-    (listener: () => void) => controller.subscribe(props.index, listener),
-    [controller, props.index],
+    (listener: () => void) => store.subscribe(props.index, listener),
+    [props.index, store],
   );
   const getSnapshot = useCallback(
-    () => controller.isMounted(props.index),
-    [controller, props.index],
+    () => store.isMounted(props.index),
+    [props.index, store],
   );
   const mounted = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
@@ -268,10 +267,7 @@ const MemoizedProgressiveMarkdownBlock = memo(ProgressiveMarkdownBlock);
 
 export type MarkdownDocumentRendererHandle = {
   ensureBlock: (index: number) => void;
-  isBlockMounted: (index: number) => boolean;
   findBlockElement: (index: number) => HTMLElement | null;
-  findHeadingElement: (id: string) => HTMLElement | null;
-  progressive: boolean;
 };
 
 type Props = {
@@ -287,41 +283,40 @@ export const MarkdownDocumentRenderer = forwardRef<
   { document, visible, scrollContainer },
   ref,
 ) {
-  const progressive =
-    document.blocks.length > 1 && shouldProgressivelyRender(document);
-  const initialCount = progressive
-    ? initialMarkdownBlockCount(document.blocks, scrollContainer.clientHeight)
-    : document.blocks.length;
-  const controller = useMemo(
-    () => new ProgressiveMountController(document.blocks.length, 0),
-    [document],
+  const progressive = document.progressive;
+  const store = useMemo(
+    () =>
+      new ProgressiveMountStore(
+        document.blocks.length,
+        progressive
+          ? initialMarkdownBlockCount(
+              document.blocks,
+              scrollContainer.clientHeight,
+            )
+          : document.blocks.length,
+      ),
+    [document, progressive, scrollContainer],
   );
   const placeholderNodesRef = useRef(new Set<HTMLElement>());
   const placeholderObserverRef = useRef<IntersectionObserver | null>(null);
   const blockElementsRef = useRef(new Map<number, HTMLElement>());
-  const headingElementsRef = useRef(new Map<string, HTMLElement>());
   const contentChangeFrameRef = useRef(0);
 
   useEffect(
     () => () => {
-      controller.dispose();
+      store.dispose();
     },
-    [controller],
+    [store],
   );
-
-  useLayoutEffect(() => {
-    if (!progressive || !visible || controller.nextUnmountedIndex !== 0) return;
-    controller.mountNextBatch(initialCount);
-  }, [controller, initialCount, progressive, visible]);
 
   useEffect(() => {
     if (!progressive) return;
-    return startProgressiveMounting(controller, {
+    return startProgressiveMounting(store, {
       active: visible,
       batchSize: IDLE_BATCH_SIZE,
       timeout: IDLE_TIMEOUT,
     });
-  }, [controller, progressive, visible]);
+  }, [progressive, store, visible]);
 
   useEffect(() => {
     if (!progressive || !visible || typeof IntersectionObserver === "undefined")
@@ -335,7 +330,7 @@ export const MarkdownDocumentRenderer = forwardRef<
             (entry.target as HTMLElement).dataset.markdownBlockIndex,
           );
           if (Number.isInteger(index)) {
-            controller.mountAround(index, BLOCK_PREFETCH_RADIUS);
+            store.mountAround(index, BLOCK_PREFETCH_RADIUS);
           }
         }
       },
@@ -353,7 +348,7 @@ export const MarkdownDocumentRenderer = forwardRef<
         placeholderObserverRef.current = null;
       }
     };
-  }, [controller, progressive, scrollContainer, visible]);
+  }, [progressive, scrollContainer, store, visible]);
 
   useEffect(
     () => () => {
@@ -384,22 +379,9 @@ export const MarkdownDocumentRenderer = forwardRef<
   const registerBlockElement = useCallback(
     (index: number, element: HTMLElement) => {
       blockElementsRef.current.set(index, element);
-      const headings = Array.from(
-        element.querySelectorAll<HTMLElement>("[data-markdown-heading-id]"),
-      );
-      for (const heading of headings) {
-        const id = heading.dataset.markdownHeadingId;
-        if (id) headingElementsRef.current.set(id, heading);
-      }
       return () => {
         if (blockElementsRef.current.get(index) === element) {
           blockElementsRef.current.delete(index);
-        }
-        for (const heading of headings) {
-          const id = heading.dataset.markdownHeadingId;
-          if (id && headingElementsRef.current.get(id) === heading) {
-            headingElementsRef.current.delete(id);
-          }
         }
       };
     },
@@ -410,14 +392,11 @@ export const MarkdownDocumentRenderer = forwardRef<
     ref,
     () => ({
       ensureBlock: (index) => {
-        if (progressive) controller.mountAround(index, BLOCK_PREFETCH_RADIUS);
+        if (progressive) store.mountAround(index, BLOCK_PREFETCH_RADIUS);
       },
-      isBlockMounted: (index) => !progressive || controller.isMounted(index),
       findBlockElement: (index) => blockElementsRef.current.get(index) ?? null,
-      findHeadingElement: (id) => headingElementsRef.current.get(id) ?? null,
-      progressive,
     }),
-    [controller, progressive],
+    [progressive, store],
   );
 
   const parseMarkdownIntoBlocks = useMemo(
@@ -426,18 +405,18 @@ export const MarkdownDocumentRenderer = forwardRef<
   );
   const progressiveContext = useMemo<ProgressiveBlockContextValue>(
     () => ({
-      controller,
+      store,
       document,
       observePlaceholder,
       registerBlockElement,
       notifyContentChange,
     }),
     [
-      controller,
       document,
       notifyContentChange,
       observePlaceholder,
       registerBlockElement,
+      store,
     ],
   );
 

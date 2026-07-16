@@ -1,19 +1,31 @@
 import { cn } from "@/lib/utils";
-import type { MarkdownAnchor } from "@/modules/markdown/lib/anchor";
-import { MarkdownPreviewPane } from "@/modules/markdown/MarkdownPreviewPane";
+import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
+import {
+  MarkdownPreviewPane,
+  type MarkdownPreviewPaneHandle,
+} from "@/modules/markdown/MarkdownPreviewPane";
 import type { MarkdownTab, Tab } from "@/modules/tabs";
 
 type Props = {
   tabs: Tab[];
   activeId: number;
-  onSetMarkdownView: (
+  registerEditorHandle: (id: number, handle: EditorPaneHandle | null) => void;
+  registerNavigationHandle: (
     id: number,
-    mode: "rendered" | "raw",
-    anchor: MarkdownAnchor | null,
+    handle: MarkdownPreviewPaneHandle | null,
   ) => void;
+  onDirtyChange: (id: number, dirty: boolean) => void;
+  onCloseTab: (id: number) => void;
 };
 
-export function MarkdownStack({ tabs, activeId, onSetMarkdownView }: Props) {
+export function MarkdownStack({
+  tabs,
+  activeId,
+  registerEditorHandle,
+  registerNavigationHandle,
+  onDirtyChange,
+  onCloseTab,
+}: Props) {
   const markdowns = tabs.filter(
     (t): t is MarkdownTab => t.kind === "markdown" && !t.cold,
   );
@@ -32,12 +44,14 @@ export function MarkdownStack({ tabs, activeId, onSetMarkdownView }: Props) {
             aria-hidden={!visible}
           >
             <MarkdownPreviewPane
+              id={t.id}
               path={t.path}
               visible={visible}
-              onSetView={(mode, anchor) =>
-                onSetMarkdownView(t.id, mode, anchor)
-              }
-              restoreAnchor={t.markdownAnchor}
+              dirty={t.dirty}
+              registerEditorHandle={registerEditorHandle}
+              registerNavigationHandle={registerNavigationHandle}
+              onDirtyChange={onDirtyChange}
+              onCloseTab={onCloseTab}
             />
           </div>
         );

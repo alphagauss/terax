@@ -9,7 +9,6 @@ function blocks(...heights: number[]): MarkdownDocumentBlock[] {
     startLine: index + 1,
     endLine: index + 1,
     estimatedHeight,
-    key: `block-${index}`,
   }));
 }
 

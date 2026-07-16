@@ -1,29 +1,17 @@
 import { cn } from "@/lib/utils";
-import {
-  MARKDOWN_CONTENT_CHANGE_EVENT,
-  readRenderedViewportSourceLine,
-} from "@/modules/markdown/lib/anchor";
-import {
-  findActiveOutlineId,
-  type MarkdownOutlineItem,
-} from "@/modules/markdown/lib/outline";
+import type { MarkdownOutlineItem } from "@/modules/markdown/lib/outline";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 const OUTLINE_ROW_HEIGHT = 28;
 
 type Props = {
   items: readonly MarkdownOutlineItem[];
-  scrollContainer: HTMLElement;
+  activeId: string | null;
   onSelect: (item: MarkdownOutlineItem) => void;
 };
 
-export function MarkdownOutlinePanel({
-  items,
-  scrollContainer,
-  onSelect,
-}: Props) {
-  const [activeId, setActiveId] = useState<string | null>(null);
+export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
   const navRef = useRef<HTMLElement>(null);
   const baseLevel = useMemo(
     () => items.reduce((lowest, item) => Math.min(lowest, item.level), 6),
@@ -42,32 +30,6 @@ export function MarkdownOutlinePanel({
     paddingEnd: 8,
     getItemKey: (index) => items[index]?.id ?? index,
   });
-
-  useEffect(() => {
-    let frame = 0;
-    const updateActiveHeading = () => {
-      frame = 0;
-      const sourceLine = readRenderedViewportSourceLine(scrollContainer);
-      if (sourceLine === undefined) return;
-      const active = findActiveOutlineId(items, sourceLine);
-      setActiveId((current) => (current === active ? current : active));
-    };
-    const onScroll = () => {
-      if (frame === 0) frame = requestAnimationFrame(updateActiveHeading);
-    };
-
-    updateActiveHeading();
-    scrollContainer.addEventListener("scroll", onScroll, { passive: true });
-    scrollContainer.addEventListener(MARKDOWN_CONTENT_CHANGE_EVENT, onScroll);
-    return () => {
-      scrollContainer.removeEventListener("scroll", onScroll);
-      scrollContainer.removeEventListener(
-        MARKDOWN_CONTENT_CHANGE_EVENT,
-        onScroll,
-      );
-      if (frame !== 0) cancelAnimationFrame(frame);
-    };
-  }, [items, scrollContainer]);
 
   useEffect(() => {
     if (!activeId) return;

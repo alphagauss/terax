@@ -1,29 +1,19 @@
-type ProgressiveMountListener = () => void;
+type Listener = () => void;
 
 const noop = () => {};
 
-function normalizeCount(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.floor(value);
-}
-
-export class ProgressiveMountController {
-  readonly blockCount: number;
-
+export class ProgressiveMountStore {
   private readonly mounted: Uint8Array;
-  private readonly listeners = new Map<number, Set<ProgressiveMountListener>>();
+  private readonly listeners = new Map<number, Set<Listener>>();
   private nextIndex: number;
-  private disposed = false;
 
-  constructor(blockCount: number, initialCount: number) {
-    this.blockCount = normalizeCount(blockCount);
-    this.mounted = new Uint8Array(this.blockCount);
-    const mountedCount = Math.min(
-      this.blockCount,
-      normalizeCount(initialCount),
-    );
-    this.mounted.fill(1, 0, mountedCount);
-    this.nextIndex = mountedCount;
+  constructor(
+    readonly blockCount: number,
+    initiallyMounted = 0,
+  ) {
+    this.mounted = new Uint8Array(blockCount);
+    this.nextIndex = Math.min(blockCount, initiallyMounted);
+    this.mounted.fill(1, 0, this.nextIndex);
   }
 
   get allMounted(): boolean {
@@ -35,159 +25,105 @@ export class ProgressiveMountController {
   }
 
   isMounted(index: number): boolean {
-    return this.isValidIndex(index) && this.mounted[index] === 1;
+    return this.mounted[index] === 1;
   }
 
-  subscribe(index: number, listener: ProgressiveMountListener): () => void {
-    if (this.disposed || !this.isValidIndex(index)) return noop;
-
-    let indexListeners = this.listeners.get(index);
-    if (!indexListeners) {
-      indexListeners = new Set();
-      this.listeners.set(index, indexListeners);
+  subscribe(index: number, listener: Listener): () => void {
+    let blockListeners = this.listeners.get(index);
+    if (!blockListeners) {
+      blockListeners = new Set();
+      this.listeners.set(index, blockListeners);
     }
-    indexListeners.add(listener);
-
+    blockListeners.add(listener);
     return () => {
-      indexListeners.delete(listener);
-      if (indexListeners.size === 0) this.listeners.delete(index);
+      blockListeners.delete(listener);
+      if (blockListeners.size === 0) this.listeners.delete(index);
     };
   }
 
-  mount(index: number): boolean {
-    if (
-      this.disposed ||
-      !this.isValidIndex(index) ||
-      this.mounted[index] === 1
-    ) {
-      return false;
+  mountAround(index: number, radius: number): void {
+    const start = Math.max(0, index - radius);
+    const end = Math.min(this.blockCount - 1, index + radius);
+    for (let current = start; current <= end; current += 1) {
+      this.mount(current);
     }
-
-    this.mounted[index] = 1;
-    this.advanceNextIndex(index);
-    this.notify(index);
-    return true;
   }
 
-  mountAround(index: number, radius: number): number {
-    if (this.disposed || !this.isValidIndex(index)) return 0;
-
-    const safeRadius = normalizeCount(radius);
-    const start = Math.max(0, index - safeRadius);
-    const end = Math.min(this.blockCount - 1, index + safeRadius);
+  mountNext(count: number): number {
     let mountedCount = 0;
-
-    for (let current = start; current <= end; current++) {
-      if (this.mount(current)) mountedCount++;
-    }
-
-    return mountedCount;
-  }
-
-  mountNextBatch(batchSize: number): number {
-    if (this.disposed || this.allMounted) return 0;
-
-    const size = normalizeCount(batchSize);
-    if (size === 0) return 0;
-
-    let mountedCount = 0;
-    while (mountedCount < size && !this.allMounted) {
+    while (mountedCount < count && !this.allMounted) {
       const index = this.nextIndex;
-      if (this.mount(index)) mountedCount++;
+      if (this.mount(index)) mountedCount += 1;
     }
     return mountedCount;
   }
 
   dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
     this.listeners.clear();
   }
 
-  private isValidIndex(index: number): boolean {
-    return Number.isInteger(index) && index >= 0 && index < this.blockCount;
-  }
-
-  private advanceNextIndex(changedIndex: number): void {
-    if (changedIndex !== this.nextIndex) return;
-    while (
-      this.nextIndex < this.blockCount &&
-      this.mounted[this.nextIndex] === 1
-    ) {
-      this.nextIndex++;
+  private mount(index: number): boolean {
+    if (index < 0 || index >= this.blockCount || this.mounted[index] === 1) {
+      return false;
     }
-  }
-
-  private notify(index: number): void {
-    const indexListeners = this.listeners.get(index);
-    if (!indexListeners) return;
-    for (const listener of [...indexListeners]) listener();
+    this.mounted[index] = 1;
+    if (index === this.nextIndex) {
+      while (
+        this.nextIndex < this.blockCount &&
+        this.mounted[this.nextIndex] === 1
+      ) {
+        this.nextIndex += 1;
+      }
+    }
+    for (const listener of this.listeners.get(index) ?? []) listener();
+    return true;
   }
 }
 
-interface ProgressiveMountingOptions {
+type ProgressiveMountOptions = {
+  active: boolean;
   batchSize: number;
   timeout: number;
-  active: boolean;
-}
+};
 
 export function startProgressiveMounting(
-  controller: ProgressiveMountController,
-  options: ProgressiveMountingOptions,
+  store: ProgressiveMountStore,
+  options: ProgressiveMountOptions,
 ): () => void {
-  if (!options.active || controller.allMounted) return noop;
+  if (!options.active || store.allMounted) return noop;
 
-  const batchSize = Math.max(1, normalizeCount(options.batchSize));
-  const timeout = normalizeCount(options.timeout);
-  let canceled = false;
+  let cancelled = false;
   let idleHandle: number | null = null;
   let timerHandle: ReturnType<typeof setTimeout> | null = null;
-
   const schedule = () => {
-    if (canceled || controller.allMounted) return;
-
+    if (cancelled || store.allMounted) return;
     if (typeof globalThis.requestIdleCallback === "function") {
-      idleHandle = globalThis.requestIdleCallback(runIdle, { timeout });
-      return;
+      idleHandle = globalThis.requestIdleCallback(runIdle, {
+        timeout: options.timeout,
+      });
+    } else {
+      timerHandle = globalThis.setTimeout(runFallback, 16);
     }
-
-    timerHandle = globalThis.setTimeout(runFallback, 16);
   };
-
   const runIdle = (deadline: IdleDeadline) => {
     idleHandle = null;
-    if (canceled || controller.allMounted) return;
-
-    const hasBudget = deadline.timeRemaining() > 0;
-    const mountedCount = hasBudget
-      ? controller.mountNextBatch(batchSize)
-      : deadline.didTimeout
-        ? controller.mountNextBatch(1)
-        : 0;
-
-    if ((hasBudget || deadline.didTimeout) && mountedCount === 0) return;
+    if (cancelled || store.allMounted) return;
+    if (deadline.timeRemaining() > 0 || deadline.didTimeout) {
+      store.mountNext(options.batchSize);
+    }
+    schedule();
+  };
+  const runFallback = () => {
+    timerHandle = null;
+    if (cancelled || store.allMounted) return;
+    store.mountNext(options.batchSize * 2);
     schedule();
   };
 
-  const runFallback = () => {
-    timerHandle = null;
-    if (canceled || controller.allMounted) return;
-    if (controller.mountNextBatch(batchSize) > 0) schedule();
-  };
-
   schedule();
-
   return () => {
-    if (canceled) return;
-    canceled = true;
-
-    if (idleHandle !== null) {
-      globalThis.cancelIdleCallback?.(idleHandle);
-      idleHandle = null;
-    }
-    if (timerHandle !== null) {
-      globalThis.clearTimeout(timerHandle);
-      timerHandle = null;
-    }
+    cancelled = true;
+    if (idleHandle !== null) globalThis.cancelIdleCallback?.(idleHandle);
+    if (timerHandle !== null) globalThis.clearTimeout(timerHandle);
   };
 }

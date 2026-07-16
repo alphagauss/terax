@@ -15,7 +15,6 @@ describe("markdown block source positions", () => {
       startLine: 42,
       endLine: 42,
       estimatedHeight: 60,
-      key: "block-key",
     };
 
     expect(markdownBlockRenderContent(block)).toBe(

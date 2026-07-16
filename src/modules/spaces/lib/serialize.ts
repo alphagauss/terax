@@ -1,3 +1,4 @@
+import { isMarkdownPath } from "@/lib/utils";
 import {
   isLeaf,
   type PaneNode,
@@ -178,6 +179,20 @@ function hydrateTab(
       } satisfies TerminalTab;
     }
     case "editor":
+      if (isMarkdownPath(s.path)) {
+        return {
+          id: allocId(),
+          kind: "markdown",
+          spaceId,
+          cold: true,
+          title: basename(s.path),
+          path: s.path,
+          dirty: false,
+          ...(s.explorerRoot !== undefined && {
+            explorerRoot: s.explorerRoot,
+          }),
+        } satisfies MarkdownTab;
+      }
       return {
         id: allocId(),
         kind: "editor",
@@ -206,6 +221,7 @@ function hydrateTab(
         cold: true,
         title: basename(s.path),
         path: s.path,
+        dirty: false,
         ...(s.explorerRoot !== undefined && { explorerRoot: s.explorerRoot }),
       } satisfies MarkdownTab;
     default:

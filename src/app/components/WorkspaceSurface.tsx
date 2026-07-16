@@ -10,6 +10,7 @@ import "./WorkspaceSurface.css";
 
 type TerminalStackProps = ComponentProps<typeof TerminalStack>;
 type EditorStackProps = ComponentProps<typeof EditorStack>;
+type MarkdownStackProps = ComponentProps<typeof MarkdownStack>;
 type PreviewStackProps = ComponentProps<typeof PreviewStack>;
 type AiDiffStackProps = ComponentProps<typeof AiDiffStack>;
 type GitHistoryStackProps = ComponentProps<typeof GitHistoryStack>;
@@ -24,6 +25,7 @@ type Props = {
   onExit: TerminalStackProps["onExit"];
   onFocusLeaf: TerminalStackProps["onFocusLeaf"];
   registerEditorHandle: EditorStackProps["registerHandle"];
+  registerMarkdownNavigationHandle: MarkdownStackProps["registerNavigationHandle"];
   onEditorDirtyChange: EditorStackProps["onDirtyChange"];
   onEditorCloseTab: EditorStackProps["onCloseTab"];
   registerPreviewHandle: PreviewStackProps["registerHandle"];
@@ -32,7 +34,6 @@ type Props = {
   onAiDiffReject: AiDiffStackProps["onReject"];
   onOpenCommitFile: GitHistoryStackProps["onOpenCommitFile"];
   onGitHistorySearchHandle: GitHistoryStackProps["onSearchHandle"];
-  onSetMarkdownView: EditorStackProps["onSetMarkdownView"];
 };
 
 /**
@@ -50,6 +51,7 @@ export function WorkspaceSurface({
   onExit,
   onFocusLeaf,
   registerEditorHandle,
+  registerMarkdownNavigationHandle,
   onEditorDirtyChange,
   onEditorCloseTab,
   registerPreviewHandle,
@@ -58,7 +60,6 @@ export function WorkspaceSurface({
   onAiDiffReject,
   onOpenCommitFile,
   onGitHistorySearchHandle,
-  onSetMarkdownView,
 }: Props) {
   const kind = activeTab?.kind;
   const isTerminalTab = kind === "terminal";
@@ -101,7 +102,6 @@ export function WorkspaceSurface({
           registerHandle={registerEditorHandle}
           onDirtyChange={onEditorDirtyChange}
           onCloseTab={onEditorCloseTab}
-          onSetMarkdownView={onSetMarkdownView}
         />
       </div>
       <div
@@ -128,7 +128,10 @@ export function WorkspaceSurface({
         <MarkdownStack
           tabs={tabs}
           activeId={activeId}
-          onSetMarkdownView={onSetMarkdownView}
+          registerEditorHandle={registerEditorHandle}
+          registerNavigationHandle={registerMarkdownNavigationHandle}
+          onDirtyChange={onEditorDirtyChange}
+          onCloseTab={onEditorCloseTab}
         />
       </div>
       <div

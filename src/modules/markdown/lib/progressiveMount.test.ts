@@ -1,91 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ProgressiveMountController,
+  ProgressiveMountStore,
   startProgressiveMounting,
 } from "./progressiveMount";
 
-describe("ProgressiveMountController", () => {
-  it("starts with a bounded initial prefix and advances monotonically", () => {
-    const controller = new ProgressiveMountController(5, 2);
+describe("ProgressiveMountStore", () => {
+  it("mounts a sequential prefix and a distant target range", () => {
+    const store = new ProgressiveMountStore(8, 2);
 
-    expect([0, 1, 2, 3, 4].map((index) => controller.isMounted(index))).toEqual(
-      [true, true, false, false, false],
-    );
-    expect(controller.nextUnmountedIndex).toBe(2);
-    expect(controller.allMounted).toBe(false);
+    store.mountAround(6, 1);
 
-    expect(controller.mount(4)).toBe(true);
-    expect(controller.nextUnmountedIndex).toBe(2);
-    expect(controller.mountNextBatch(2)).toBe(2);
-    expect(controller.nextUnmountedIndex).toBeNull();
-    expect(controller.allMounted).toBe(true);
+    expect(
+      Array.from({ length: 8 }, (_, index) => store.isMounted(index)),
+    ).toEqual([true, true, false, false, false, true, true, true]);
+    expect(store.nextUnmountedIndex).toBe(2);
+    expect(store.mountNext(3)).toBe(3);
+    expect(store.allMounted).toBe(true);
   });
 
-  it("notifies only listeners for indices that actually change", () => {
-    const controller = new ProgressiveMountController(4, 1);
+  it("notifies only the block that becomes mounted", () => {
+    const store = new ProgressiveMountStore(3);
     const first = vi.fn();
     const second = vi.fn();
-    const unsubscribe = controller.subscribe(1, first);
-    controller.subscribe(2, second);
+    const unsubscribe = store.subscribe(0, first);
+    store.subscribe(1, second);
 
-    expect(controller.mount(0)).toBe(false);
-    expect(controller.mount(1)).toBe(true);
-    expect(controller.mount(1)).toBe(false);
+    store.mountNext(1);
     expect(first).toHaveBeenCalledOnce();
     expect(second).not.toHaveBeenCalled();
 
     unsubscribe();
-    controller.mount(2);
+    store.mountNext(1);
     expect(first).toHaveBeenCalledOnce();
     expect(second).toHaveBeenCalledOnce();
-  });
-
-  it("mounts a bounded range around a block", () => {
-    const controller = new ProgressiveMountController(6, 0);
-    const listeners = Array.from({ length: 6 }, () => vi.fn());
-    listeners.forEach((listener, index) => {
-      controller.subscribe(index, listener);
-    });
-
-    expect(controller.mountAround(2, 2)).toBe(5);
-    expect(
-      [0, 1, 2, 3, 4, 5].map((index) => controller.isMounted(index)),
-    ).toEqual([true, true, true, true, true, false]);
-    expect(listeners.map((listener) => listener.mock.calls.length)).toEqual([
-      1, 1, 1, 1, 1, 0,
-    ]);
-    expect(controller.mountAround(0, 10)).toBe(1);
-    expect(controller.allMounted).toBe(true);
-  });
-
-  it("handles invalid counts and indices without changing state", () => {
-    const controller = new ProgressiveMountController(3.9, -2);
-    const listener = vi.fn();
-
-    expect(controller.blockCount).toBe(3);
-    expect(controller.isMounted(-1)).toBe(false);
-    expect(controller.isMounted(1.5)).toBe(false);
-    expect(controller.mount(-1)).toBe(false);
-    expect(controller.mount(3)).toBe(false);
-    expect(controller.mountAround(4, 2)).toBe(0);
-    expect(controller.mountNextBatch(0)).toBe(0);
-    expect(controller.subscribe(5, listener)).toBeTypeOf("function");
-    expect(listener).not.toHaveBeenCalled();
-    expect(controller.nextUnmountedIndex).toBe(0);
-  });
-
-  it("stops mounting and notifying after disposal", () => {
-    const controller = new ProgressiveMountController(3, 1);
-    const listener = vi.fn();
-    controller.subscribe(1, listener);
-
-    controller.dispose();
-
-    expect(controller.mount(1)).toBe(false);
-    expect(controller.mountAround(1, 1)).toBe(0);
-    expect(controller.mountNextBatch(2)).toBe(0);
-    expect(controller.isMounted(1)).toBe(false);
-    expect(listener).not.toHaveBeenCalled();
   });
 });
 
@@ -119,111 +66,51 @@ describe("startProgressiveMounting", () => {
     vi.unstubAllGlobals();
   });
 
-  const installIdleCallbacks = () => {
-    vi.stubGlobal("requestIdleCallback", requestIdle);
-    vi.stubGlobal("cancelIdleCallback", cancelIdle);
-  };
-
   const runIdle = (id: number, didTimeout: boolean, budget: number) => {
     const entry = idleEntries.get(id);
     if (!entry) throw new Error(`Idle callback ${id} was not scheduled`);
     idleEntries.delete(id);
-    entry.callback({
-      didTimeout,
-      timeRemaining: () => budget,
-    });
+    entry.callback({ didTimeout, timeRemaining: () => budget });
   };
 
-  it("does not schedule when inactive or already complete", () => {
-    installIdleCallbacks();
-
-    const stopInactive = startProgressiveMounting(
-      new ProgressiveMountController(5, 1),
-      { active: false, batchSize: 2, timeout: 100 },
-    );
-    const stopComplete = startProgressiveMounting(
-      new ProgressiveMountController(1, 1),
-      { active: true, batchSize: 2, timeout: 100 },
-    );
-
-    expect(requestIdle).not.toHaveBeenCalled();
-    stopInactive();
-    stopComplete();
-  });
-
-  it("uses idle budget to mount one batch per round", () => {
-    installIdleCallbacks();
-    const controller = new ProgressiveMountController(6, 1);
-    const stop = startProgressiveMounting(controller, {
+  it("mounts idle batches and cancels pending work", () => {
+    vi.stubGlobal("requestIdleCallback", requestIdle);
+    vi.stubGlobal("cancelIdleCallback", cancelIdle);
+    const store = new ProgressiveMountStore(7, 1);
+    const stop = startProgressiveMounting(store, {
       active: true,
       batchSize: 2,
       timeout: 75,
     });
 
-    expect(requestIdle).toHaveBeenCalledOnce();
     expect(idleEntries.get(1)?.options).toEqual({ timeout: 75 });
     runIdle(1, false, 5);
-    expect(controller.nextUnmountedIndex).toBe(3);
-    expect(requestIdle).toHaveBeenCalledTimes(2);
-
-    runIdle(2, false, 5);
-    expect(controller.nextUnmountedIndex).toBe(5);
-    runIdle(3, false, 5);
-    expect(controller.allMounted).toBe(true);
-    expect(requestIdle).toHaveBeenCalledTimes(3);
-    stop();
-  });
-
-  it("waits without budget but advances one block after a timeout", () => {
-    installIdleCallbacks();
-    const controller = new ProgressiveMountController(4, 1);
-    startProgressiveMounting(controller, {
-      active: true,
-      batchSize: 3,
-      timeout: 50,
-    });
-
-    runIdle(1, false, 0);
-    expect(controller.nextUnmountedIndex).toBe(1);
+    expect(store.nextUnmountedIndex).toBe(3);
     runIdle(2, true, 0);
-    expect(controller.nextUnmountedIndex).toBe(2);
-  });
-
-  it("cancels pending idle work", () => {
-    installIdleCallbacks();
-    const controller = new ProgressiveMountController(4, 1);
-    const stop = startProgressiveMounting(controller, {
-      active: true,
-      batchSize: 2,
-      timeout: 100,
-    });
-    const pendingCallback = idleEntries.get(1)?.callback;
+    expect(store.nextUnmountedIndex).toBe(5);
 
     stop();
-    pendingCallback?.({ didTimeout: true, timeRemaining: () => 0 });
-
-    expect(cancelIdle).toHaveBeenCalledWith(1);
-    expect(controller.nextUnmountedIndex).toBe(1);
-    expect(requestIdle).toHaveBeenCalledOnce();
+    expect(cancelIdle).toHaveBeenCalledWith(3);
+    expect(store.nextUnmountedIndex).toBe(5);
   });
 
-  it("falls back to cancelable timer batches", async () => {
+  it("uses multi-block timer batches when idle callbacks are unavailable", async () => {
     vi.stubGlobal("requestIdleCallback", undefined);
     vi.stubGlobal("cancelIdleCallback", undefined);
-    const controller = new ProgressiveMountController(7, 1);
-    const stop = startProgressiveMounting(controller, {
+    const store = new ProgressiveMountStore(10, 1);
+    const stop = startProgressiveMounting(store, {
       active: true,
       batchSize: 2,
       timeout: 100,
     });
 
     await vi.advanceTimersToNextTimerAsync();
-    expect(controller.nextUnmountedIndex).toBe(3);
+    expect(store.nextUnmountedIndex).toBe(5);
     await vi.advanceTimersToNextTimerAsync();
-    expect(controller.nextUnmountedIndex).toBe(5);
+    expect(store.nextUnmountedIndex).toBe(9);
 
     stop();
     await vi.runAllTimersAsync();
-    expect(controller.nextUnmountedIndex).toBe(5);
+    expect(store.nextUnmountedIndex).toBe(9);
   });
 });

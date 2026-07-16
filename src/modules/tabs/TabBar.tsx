@@ -450,7 +450,8 @@ export function TabBar({
                     <span className={cn("truncate", isPreview && "italic")}>
                       {labelFor(t)}
                     </span>
-                    {t.kind === "editor" && t.dirty ? (
+                    {(t.kind === "editor" || t.kind === "markdown") &&
+                    t.dirty ? (
                       <span
                         aria-label="Unsaved changes"
                         className="size-1.5 shrink-0 rounded-full bg-foreground/70"

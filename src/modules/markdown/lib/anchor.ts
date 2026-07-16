@@ -5,13 +5,6 @@ import {
   readMarkdownProcessingNumber,
 } from "@/modules/markdown/lib/sourcePosition";
 
-export type MarkdownAnchor = {
-  sourceLine?: number;
-  blockIndex?: number;
-  offset: number;
-  scrollRatio: number;
-};
-
 type PositionedNode = {
   type?: string;
   tagName?: string;
@@ -41,11 +34,10 @@ const SOURCE_BLOCK_TAGS = new Set([
   "table",
   "hr",
 ]);
-
-const SOURCE_BLOCK_SELECTOR = "[data-markdown-source-line]";
-const SOURCE_POSITION_SELECTOR =
+const SOURCE_SELECTOR =
   "[data-markdown-source-line],[data-markdown-block-start-line]";
 
+export const MARKDOWN_ACTIVATION_OFFSET = 32;
 export const MARKDOWN_CONTENT_CHANGE_EVENT = "markdown-content-change";
 
 export function rehypeMarkdownSourcePositions(
@@ -59,21 +51,30 @@ export function rehypeMarkdownSourcePositions(
     const blockIndex =
       options.blockIndex ??
       readMarkdownProcessingNumber(file, MARKDOWN_BLOCK_INDEX_DATA_KEY);
-    const visit = (node: PositionedNode) => {
+    const headingCounts = new Map<number, number>();
+
+    const visit = (node: PositionedNode, parentTag?: string) => {
       const start = node.position?.start?.line;
       const end = node.position?.end?.line;
+      const tag = node.tagName;
+      const fencedCode = tag === "code" && parentTag === "pre";
       if (
         node.type === "element" &&
-        node.tagName &&
-        SOURCE_BLOCK_TAGS.has(node.tagName) &&
+        tag &&
+        (SOURCE_BLOCK_TAGS.has(tag) || fencedCode) &&
         typeof start === "number"
       ) {
         const sourceStart = start + lineOffset;
         const sourceEnd = (end ?? start) + lineOffset;
-        const heading = /^h[1-6]$/.test(node.tagName);
+        const heading = /^h[1-6]$/.test(tag);
+        const occurrence = heading
+          ? (headingCounts.get(sourceStart) ?? 0) + 1
+          : 0;
+        if (heading) headingCounts.set(sourceStart, occurrence);
         const headingId = heading
-          ? `markdown-heading-${sourceStart}`
+          ? `markdown-heading-${sourceStart}${occurrence > 1 ? `-${occurrence}` : ""}`
           : undefined;
+        const existingId = node.properties?.id;
         node.properties = {
           ...node.properties,
           "data-markdown-source-line": String(sourceStart),
@@ -82,12 +83,14 @@ export function rehypeMarkdownSourcePositions(
             "data-markdown-block-index": String(blockIndex),
           }),
           ...(headingId && {
-            id: headingId,
+            id: typeof existingId === "string" ? existingId : headingId,
             "data-markdown-heading-id": headingId,
           }),
         };
       }
-      node.children?.forEach(visit);
+      node.children?.forEach((child) => {
+        visit(child, tag);
+      });
     };
 
     visit(tree);
@@ -110,148 +113,124 @@ function sourceRange(element: HTMLElement) {
   };
 }
 
-function sourceBlocks(container: ParentNode): HTMLElement[] {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(SOURCE_BLOCK_SELECTOR),
-  );
-}
-
-function sourceElementAtViewport(container: HTMLElement): HTMLElement | null {
+function sourceElementAtActivation(container: HTMLElement): HTMLElement | null {
   const viewport = container.getBoundingClientRect();
-  const ownerDocument = container.ownerDocument;
-  if (ownerDocument?.elementsFromPoint && viewport.width > 0) {
-    const inset = Math.min(40, viewport.width / 4);
-    const xPositions = [
-      viewport.left + inset,
-      viewport.left + viewport.width / 2,
-      viewport.right - inset,
-    ];
-    const scanHeight = Math.min(container.clientHeight, 128);
-    for (let yOffset = 1; yOffset <= scanHeight; yOffset += 16) {
-      for (const x of xPositions) {
-        for (const element of ownerDocument.elementsFromPoint(
-          x,
-          viewport.top + yOffset,
-        )) {
-          if (!(element instanceof HTMLElement) || !container.contains(element))
-            continue;
-          const sourceElement = element.closest<HTMLElement>(
-            SOURCE_POSITION_SELECTOR,
-          );
-          if (sourceElement && container.contains(sourceElement)) {
-            return sourceElement;
-          }
-        }
+  const y =
+    viewport.top + Math.min(MARKDOWN_ACTIVATION_OFFSET, viewport.height);
+  const inset = Math.min(40, viewport.width / 4);
+  const xPositions = [
+    viewport.left + inset,
+    viewport.left + viewport.width / 2,
+    viewport.right - inset,
+  ];
+
+  for (const x of xPositions) {
+    for (const element of container.ownerDocument.elementsFromPoint?.(x, y) ??
+      []) {
+      if (!(element instanceof HTMLElement) || !container.contains(element)) {
+        continue;
+      }
+      const sourceElement = element.closest<HTMLElement>(SOURCE_SELECTOR);
+      if (sourceElement && container.contains(sourceElement)) {
+        return sourceElement;
       }
     }
   }
 
-  for (const block of Array.from(
-    container.querySelectorAll<HTMLElement>(SOURCE_POSITION_SELECTOR),
+  let containing: HTMLElement | null = null;
+  let containingHeight = Number.POSITIVE_INFINITY;
+  let preceding: HTMLElement | null = null;
+  for (const element of container.querySelectorAll<HTMLElement>(
+    SOURCE_SELECTOR,
   )) {
-    if (block.getBoundingClientRect().bottom > viewport.top + 1) return block;
+    const rect = element.getBoundingClientRect();
+    if (rect.top <= y && rect.bottom > y) {
+      if (rect.height < containingHeight) {
+        containing = element;
+        containingHeight = rect.height;
+      }
+      continue;
+    }
+    if (rect.top > y) return containing ?? preceding ?? element;
+    preceding = element;
   }
-  return null;
-}
-
-function sourceLineWithinElement(
-  element: HTMLElement,
-  viewportTop: number,
-): number | undefined {
-  const range = sourceRange(element);
-  if (!range) return undefined;
-  const rect = element.getBoundingClientRect();
-  const progress = Math.max(
-    0,
-    Math.min(1, (viewportTop - rect.top) / Math.max(1, rect.height)),
-  );
-  return Math.round(range.start + (range.end - range.start) * progress);
+  return containing ?? preceding;
 }
 
 export function readRenderedViewportSourceLine(
   container: HTMLElement,
 ): number | undefined {
-  const selected = sourceElementAtViewport(container);
-  return selected
-    ? sourceLineWithinElement(selected, container.getBoundingClientRect().top)
-    : undefined;
+  const element = sourceElementAtActivation(container);
+  const range = element ? sourceRange(element) : null;
+  if (!element || !range) return undefined;
+
+  const rect = element.getBoundingClientRect();
+  const activationY =
+    container.getBoundingClientRect().top + MARKDOWN_ACTIVATION_OFFSET;
+  const progress = Math.max(
+    0,
+    Math.min(1, (activationY - rect.top) / Math.max(1, rect.height)),
+  );
+  return Math.round(range.start + (range.end - range.start) * progress);
 }
 
-function scrollRatio(container: HTMLElement): number {
-  const scrollable = container.scrollHeight - container.clientHeight;
-  return scrollable > 0 ? container.scrollTop / scrollable : 0;
-}
-
-export function captureRenderedAnchor(container: HTMLElement): MarkdownAnchor {
-  const viewport = container.getBoundingClientRect();
-  const selected = sourceElementAtViewport(container);
-
-  if (!selected) return { offset: 0, scrollRatio: scrollRatio(container) };
-  const range = sourceRange(selected);
-  if (!range) return { offset: 0, scrollRatio: scrollRatio(container) };
-
-  const rect = selected.getBoundingClientRect();
-  const blockIndex = Number(selected.dataset.markdownBlockIndex);
-  return {
-    sourceLine: sourceLineWithinElement(selected, viewport.top),
-    ...(Number.isInteger(blockIndex) && { blockIndex }),
-    offset: Math.max(0, rect.top - viewport.top),
-    scrollRatio: scrollRatio(container),
-  };
-}
-
-export function restoreRenderedAnchor(
+export function readActiveRenderedHeadingId(
   container: HTMLElement,
-  anchor: MarkdownAnchor,
-  root: ParentNode = container,
-): void {
-  const blocks = sourceBlocks(root);
-  const sourceLine = anchor.sourceLine;
-  if (sourceLine == null || blocks.length === 0) {
-    const scrollable = container.scrollHeight - container.clientHeight;
-    container.scrollTop = Math.max(0, scrollable * anchor.scrollRatio);
-    return;
+): string | null {
+  const activationY =
+    container.getBoundingClientRect().top + MARKDOWN_ACTIVATION_OFFSET;
+  let active: string | null = null;
+  for (const heading of container.querySelectorAll<HTMLElement>(
+    "[data-markdown-heading-id]",
+  )) {
+    if (heading.getBoundingClientRect().top > activationY + 1) break;
+    active = heading.dataset.markdownHeadingId ?? active;
   }
+  return active;
+}
 
-  let containing: HTMLElement | undefined;
-  let containingRange: ReturnType<typeof sourceRange> = null;
-  let preceding: HTMLElement | undefined;
+export function restoreRenderedSourceLine(
+  container: HTMLElement,
+  sourceLine: number,
+  root: ParentNode = container,
+): boolean {
+  let target: HTMLElement | null = null;
+  let targetRange: ReturnType<typeof sourceRange> = null;
+  let preceding: HTMLElement | null = null;
   let precedingRange: ReturnType<typeof sourceRange> = null;
-  for (const block of blocks) {
-    const range = sourceRange(block);
+
+  for (const element of root.querySelectorAll<HTMLElement>(SOURCE_SELECTOR)) {
+    const range = sourceRange(element);
     if (!range) continue;
     if (range.start <= sourceLine && sourceLine <= range.end) {
       if (
-        !containingRange ||
-        range.end - range.start < containingRange.end - containingRange.start
+        !targetRange ||
+        range.end - range.start < targetRange.end - targetRange.start
       ) {
-        containing = block;
-        containingRange = range;
+        target = element;
+        targetRange = range;
       }
     } else if (
       range.start <= sourceLine &&
       (!precedingRange || range.start >= precedingRange.start)
     ) {
-      preceding = block;
+      preceding = element;
       precedingRange = range;
     }
   }
 
-  const target = containing ?? preceding ?? blocks[0];
-  const targetRange =
-    containingRange ?? precedingRange ?? sourceRange(blocks[0]);
+  target ??= preceding;
+  targetRange ??= precedingRange;
+  if (!target || !targetRange) return false;
 
-  if (!target || !targetRange) {
-    const scrollable = container.scrollHeight - container.clientHeight;
-    container.scrollTop = Math.max(0, scrollable * anchor.scrollRatio);
-    return;
-  }
-
-  const viewport = container.getBoundingClientRect();
   const rect = target.getBoundingClientRect();
-  const lineSpan = targetRange.end - targetRange.start;
-  const progress =
-    lineSpan > 0 ? (sourceLine - targetRange.start) / lineSpan : 0;
+  const viewportTop = container.getBoundingClientRect().top;
+  const span = targetRange.end - targetRange.start;
+  const progress = span > 0 ? (sourceLine - targetRange.start) / span : 0;
   container.scrollTop +=
-    rect.top + rect.height * progress - viewport.top - anchor.offset;
+    rect.top +
+    rect.height * progress -
+    viewportTop -
+    MARKDOWN_ACTIVATION_OFFSET;
+  return true;
 }

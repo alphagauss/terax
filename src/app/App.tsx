@@ -47,6 +47,7 @@ import {
   type SearchTarget,
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
+import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import type { PreviewPaneHandle } from "@/modules/preview";
 import { HostKeyDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -177,7 +178,6 @@ export default function App() {
     pinTab,
     newPreviewTab,
     newMarkdownTab,
-    setMarkdownView,
     setOverrideLanguage,
     openAiDiffTab,
     closeAiDiffTab,
@@ -212,6 +212,10 @@ export default function App() {
   const searchInlineRef = useRef<SearchInlineHandle | null>(null);
   const terminalRefs = useRef<Map<number, TerminalPaneHandle>>(new Map());
   const editorRefs = useRef<Map<number, EditorPaneHandle>>(new Map());
+  const markdownNavigationRefs = useRef(
+    new Map<number, MarkdownPreviewPaneHandle>(),
+  );
+  const pendingGotoLine = useRef<Map<number, number>>(new Map());
   const previewRefs = useRef<Map<number, PreviewPaneHandle>>(new Map());
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
@@ -360,7 +364,9 @@ export default function App() {
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
   const isBlockTab = activeTerminalTab?.blocks === true;
-  const isEditorTab = activeTab?.kind === "editor";
+  const isEditorTab =
+    activeTab?.kind === "editor" ||
+    (activeTab?.kind === "markdown" && activeEditorHandle !== null);
   const isGitHistoryTab = activeTab?.kind === "git-history";
 
   useEditorFileSync({ tabs, tabsRef, editorRefs });
@@ -397,6 +403,8 @@ export default function App() {
       // the effect below as the pane tree changes; only the tab-id-keyed
       // handles need explicit cleanup here.
       editorRefs.current.delete(id);
+      markdownNavigationRefs.current.delete(id);
+      pendingGotoLine.current.delete(id);
       previewRefs.current.delete(id);
       closeTab(id);
     },
@@ -486,7 +494,7 @@ export default function App() {
       const lid = t.activeLeafId;
       return terminalRefs.current.get(lid)?.getSelection() ?? null;
     }
-    if (t.kind === "editor") {
+    if (t.kind === "editor" || t.kind === "markdown") {
       return editorRefs.current.get(activeId)?.getSelection() ?? null;
     }
     return null;
@@ -533,8 +541,7 @@ export default function App() {
       openAiPanelAndFocus();
       return;
     }
-    const source: "terminal" | "editor" =
-      activeTab?.kind === "editor" ? "editor" : "terminal";
+    const source: "terminal" | "editor" = isEditorTab ? "editor" : "terminal";
     openAiPanel();
     attachSelection(selection, source);
   }, [
@@ -542,7 +549,7 @@ export default function App() {
     openAiPanel,
     openAiPanelAndFocus,
     attachSelection,
-    activeTab,
+    isEditorTab,
   ]);
 
   const { askPopup, setAskPopup, onAskFromSelection } = useSelectionAskAi({
@@ -657,7 +664,7 @@ export default function App() {
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {
       for (const t of tabs) {
-        if (t.kind !== "editor") continue;
+        if (t.kind !== "editor" && t.kind !== "markdown") continue;
         if (t.path === from) {
           const i = to.lastIndexOf("/");
           updateTab(t.id, { path: to, title: i === -1 ? to : to.slice(i + 1) });
@@ -683,7 +690,9 @@ export default function App() {
       : null;
 
   const activeFilePath = (() => {
-    if (activeTab?.kind === "editor") return activeTab.path;
+    if (activeTab?.kind === "editor" || activeTab?.kind === "markdown") {
+      return activeTab.path;
+    }
     if (activeTab?.kind === "git-diff") {
       if (/^([A-Za-z]:|\/|\\)/.test(activeTab.path)) return activeTab.path;
       const root = activeTab.repoRoot.replace(/[\\/]+$/, "");
@@ -855,7 +864,7 @@ export default function App() {
         id === "editor.aiComplete" ||
         id === "editor.codeComplete"
       ) {
-        return activeTab?.kind !== "editor";
+        return !isEditorTab;
       }
       if (id === "ai.askSelection") {
         const target =
@@ -892,7 +901,7 @@ export default function App() {
       }
       return false;
     },
-    [activeTab],
+    [activeTab, captureActiveSelection, isEditorTab],
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
@@ -920,6 +929,22 @@ export default function App() {
       if (id === activeId) setActiveEditorHandle(h);
     },
     [activeId],
+  );
+
+  const registerMarkdownNavigationHandle = useCallback(
+    (id: number, handle: MarkdownPreviewPaneHandle | null) => {
+      if (handle) {
+        markdownNavigationRefs.current.set(id, handle);
+        const line = pendingGotoLine.current.get(id);
+        if (line != null) {
+          pendingGotoLine.current.delete(id);
+          handle.gotoSourceLine(line);
+        }
+      } else {
+        markdownNavigationRefs.current.delete(id);
+      }
+    },
+    [],
   );
 
   const registerPreviewHandle = useCallback(
@@ -1159,16 +1184,18 @@ export default function App() {
     ],
   );
 
-  const pendingGotoLine = useRef<Map<number, number>>(new Map());
   const openContentHit = useCallback(
     (path: string, line: number) => {
-      const id = openFileTab(path, true);
+      const markdown = isMarkdownPath(path);
+      const id = markdown ? newMarkdownTab(path) : openFileTab(path, true);
       if (id == null) return;
-      const h = editorRefs.current.get(id);
-      if (h) h.gotoLine(line);
+      const editor = editorRefs.current.get(id);
+      const markdownNavigation = markdownNavigationRefs.current.get(id);
+      if (markdownNavigation) markdownNavigation.gotoSourceLine(line);
+      else if (editor) editor.gotoLine(line);
       else pendingGotoLine.current.set(id, line);
     },
-    [openFileTab],
+    [newMarkdownTab, openFileTab],
   );
 
   useEffect(() => {
@@ -1307,6 +1334,9 @@ export default function App() {
                       onExit={handleLeafExit}
                       onFocusLeaf={handleFocusLeaf}
                       registerEditorHandle={registerEditorHandle}
+                      registerMarkdownNavigationHandle={
+                        registerMarkdownNavigationHandle
+                      }
                       onEditorDirtyChange={handleEditorDirty}
                       onEditorCloseTab={disposeTab}
                       registerPreviewHandle={registerPreviewHandle}
@@ -1315,7 +1345,6 @@ export default function App() {
                       onAiDiffReject={(id) => respondToApproval(id, false)}
                       onOpenCommitFile={openCommitFileDiffTab}
                       onGitHistorySearchHandle={setGitHistoryHandle}
-                      onSetMarkdownView={setMarkdownView}
                     />
                   </div>
 
@@ -1425,7 +1454,7 @@ export default function App() {
             open={newEditorOpen}
             onOpenChange={setNewEditorOpen}
             rootPath={explorerRoot ?? home}
-            onCreated={(path) => openFileTab(path)}
+            onCreated={(path) => handleOpenFile(path, true)}
           />
 
           <CloseDialogs
