@@ -26,12 +26,14 @@ export function MarkdownCode({
   className,
   children,
   node: _node,
+  onRun,
   variant = "chat",
   ...rest
 }: {
   className?: string;
   children?: ReactNode;
   node?: unknown;
+  onRun?: (command: string) => boolean;
   variant?: "chat" | "preview";
   "data-block"?: string;
 }) {
@@ -53,6 +55,7 @@ export function MarkdownCode({
     <ChatCodeBlock
       code={code}
       lang={match?.[1] ?? null}
+      onRun={onRun}
       variant={variant}
     />
   );

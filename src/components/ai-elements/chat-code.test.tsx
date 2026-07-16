@@ -28,4 +28,20 @@ describe("MarkdownCode", () => {
     expect(html).toContain("data-markdown-code-block");
     expect(html).toContain("first line\nsecond line");
   });
+
+  it("keeps shell execution exclusive to chat code blocks", () => {
+    const preview = renderToStaticMarkup(
+      <MarkdownCode className="language-bash" data-block="true" variant="preview">
+        echo hello
+      </MarkdownCode>,
+    );
+    const chat = renderToStaticMarkup(
+      <MarkdownCode className="language-bash" data-block="true" onRun={() => true}>
+        echo hello
+      </MarkdownCode>,
+    );
+
+    expect(preview).not.toContain("Run in active terminal");
+    expect(chat).toContain("Run in active terminal");
+  });
 });

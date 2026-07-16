@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useChatStore } from "@/modules/ai/store/chatStore";
 import { useTheme } from "@/modules/theme";
 import type { MermaidConfig } from "@streamdown/mermaid";
 import {
@@ -135,12 +134,14 @@ export function isDiagramLanguage(raw: string | null): boolean {
 export type ChatCodeBlockProps = {
   code: string;
   lang: string | null;
+  onRun?: (command: string) => boolean;
   variant?: "chat" | "preview";
 };
 
 export function ChatCodeBlock({
   code,
   lang,
+  onRun,
   variant = "chat",
 }: ChatCodeBlockProps) {
   const streaming = useContext(StreamingCtx);
@@ -154,8 +155,8 @@ export function ChatCodeBlock({
     return <MermaidCode code={code} preview={variant === "preview"} />;
   }
 
-  if (variant === "chat" && SHELL_LANGS.has(label)) {
-    return <CommandCard code={code} lang={label} />;
+  if (variant === "chat" && onRun && SHELL_LANGS.has(label)) {
+    return <CommandCard code={code} lang={label} onRun={onRun} />;
   }
 
   return <FinalizedCodeBlock code={code} lang={label} />;
@@ -495,7 +496,15 @@ const HighlightedPre = memo(function HighlightedPre({
   );
 });
 
-function CommandCard({ code, lang }: { code: string; lang: string }) {
+function CommandCard({
+  code,
+  lang,
+  onRun,
+}: {
+  code: string;
+  lang: string;
+  onRun: (command: string) => boolean;
+}) {
   const isMultiline = code.includes("\n");
   const prompt = shellPrompt(lang);
   return (
@@ -505,7 +514,7 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
           {normalizeLangLabel(lang)}
         </span>
         <div className="flex items-center gap-1">
-          <RunInTerminalButton command={code} />
+          <RunInTerminalButton command={code} onRun={onRun} />
           <CopyButton text={code} />
         </div>
       </div>
@@ -531,13 +540,18 @@ function CommandCard({ code, lang }: { code: string; lang: string }) {
   );
 }
 
-function RunInTerminalButton({ command }: { command: string }) {
+function RunInTerminalButton({
+  command,
+  onRun,
+}: {
+  command: string;
+  onRun: (command: string) => boolean;
+}) {
   const [sent, setSent] = useState(false);
   const tRef = useRef<number>(0);
   useEffect(() => () => window.clearTimeout(tRef.current), []);
-  const onRun = () => {
-    const ok = useChatStore.getState().live.injectIntoActivePty(command);
-    if (!ok) return;
+  const handleRun = () => {
+    if (!onRun(command)) return;
     setSent(true);
     tRef.current = window.setTimeout(() => setSent(false), 1500);
   };
@@ -546,7 +560,7 @@ function RunInTerminalButton({ command }: { command: string }) {
       type="button"
       size="sm"
       variant="ghost"
-      onClick={onRun}
+      onClick={handleRun}
       className="h-5 gap-1 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
       aria-label="Run in active terminal"
       title="Run in active terminal"

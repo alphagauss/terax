@@ -9,6 +9,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
@@ -321,7 +322,14 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   streaming?: boolean;
 };
 
-const streamdownComponents = { code: MarkdownCode };
+const runInActiveTerminal = (command: string) =>
+  useChatStore.getState().live.injectIntoActivePty(command);
+
+const ChatMarkdownCode = (props: ComponentProps<typeof MarkdownCode>) => (
+  <MarkdownCode {...props} onRun={runInActiveTerminal} />
+);
+
+const streamdownComponents = { code: ChatMarkdownCode };
 
 export const MessageResponse = memo(
   ({ className, streaming = false, ...props }: MessageResponseProps) => (
