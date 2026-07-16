@@ -1357,7 +1357,10 @@ export default function App() {
                   />
                 </div>
               </ResizablePanel>
-              <ResizableHandle withHandle />
+              <ResizableHandle
+                withHandle
+                disabled={secondarySidebar.collapsed}
+              />
               <ResizablePanel
                 id="secondary-sidebar"
                 panelRef={secondarySidebar.panelRef}
