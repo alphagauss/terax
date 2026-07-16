@@ -3,11 +3,17 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { useTheme } from "@/modules/theme";
+import type { MermaidConfig } from "@streamdown/mermaid";
 import {
+  ArrowAllDirectionIcon,
   ArrowRight01Icon,
   CheckmarkCircle01Icon,
   CopyIcon,
+  FitToScreenIcon,
   TerminalIcon,
+  ZoomInAreaIcon,
+  ZoomOutAreaIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
@@ -55,16 +61,58 @@ function loadMermaid(): Promise<MermaidInstance> {
           startOnLoad: false,
           securityLevel: "strict",
           suppressErrorRendering: true,
-          theme: document.documentElement.classList.contains("dark")
-            ? "dark"
-            : "default",
-          fontFamily: "JetBrains Mono, sans-serif",
         },
       });
       return plugin.getMermaid();
     },
   );
   return mermaidInstance;
+}
+
+function mermaidConfig(mode: "light" | "dark", preview: boolean): MermaidConfig {
+  if (!preview) {
+    return {
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+      theme: mode === "dark" ? "dark" : "default",
+      fontFamily: "JetBrains Mono, sans-serif",
+    };
+  }
+
+  const styles = getComputedStyle(document.documentElement);
+  const color = (name: string) => styles.getPropertyValue(name).trim();
+  const background = color("--background");
+  const foreground = color("--foreground");
+  const muted = color("--muted");
+  const border = color("--muted-foreground");
+
+  return {
+    startOnLoad: false,
+    securityLevel: "strict",
+    suppressErrorRendering: true,
+    theme: "base",
+    fontFamily: "Inter Variable, Segoe UI, sans-serif",
+    themeVariables: {
+      background,
+      primaryColor: muted,
+      primaryTextColor: foreground,
+      primaryBorderColor: border,
+      secondaryColor: color("--secondary"),
+      secondaryTextColor: foreground,
+      secondaryBorderColor: border,
+      tertiaryColor: background,
+      tertiaryTextColor: foreground,
+      tertiaryBorderColor: border,
+      lineColor: border,
+      textColor: foreground,
+      mainBkg: muted,
+      nodeBorder: border,
+      clusterBkg: background,
+      clusterBorder: border,
+      edgeLabelBackground: background,
+    },
+  };
 }
 
 function shellPrompt(lang: string): string {
@@ -87,9 +135,14 @@ export function isDiagramLanguage(raw: string | null): boolean {
 export type ChatCodeBlockProps = {
   code: string;
   lang: string | null;
+  variant?: "chat" | "preview";
 };
 
-export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
+export function ChatCodeBlock({
+  code,
+  lang,
+  variant = "chat",
+}: ChatCodeBlockProps) {
   const streaming = useContext(StreamingCtx);
   const label = normalizeLangLabel(lang ?? "");
 
@@ -98,10 +151,10 @@ export function ChatCodeBlock({ code, lang }: ChatCodeBlockProps) {
   }
 
   if (isDiagramLanguage(lang)) {
-    return <MermaidCode code={code} />;
+    return <MermaidCode code={code} preview={variant === "preview"} />;
   }
 
-  if (SHELL_LANGS.has(label)) {
+  if (variant === "chat" && SHELL_LANGS.has(label)) {
     return <CommandCard code={code} lang={label} />;
   }
 
@@ -119,8 +172,9 @@ function GeneratingPlaceholder({ label }: { label: string }) {
   );
 }
 
-function MermaidCode({ code }: { code: string }) {
+function MermaidCode({ code, preview }: { code: string; preview: boolean }) {
   const isIncomplete = useIsCodeFenceIncomplete();
+  const { resolvedMode } = useTheme();
   const [state, setState] = useState<
     | { kind: "waiting" }
     | { kind: "loading" }
@@ -140,7 +194,10 @@ function MermaidCode({ code }: { code: string }) {
 
     const id = `terax-mermaid-${++mermaidRenderId}`;
     void loadMermaid()
-      .then((mermaid) => mermaid.render(id, code))
+      .then((mermaid) => {
+        mermaid.initialize(mermaidConfig(resolvedMode, preview));
+        return mermaid.render(id, code);
+      })
       .then(({ svg }) => {
         if (!cancelled) setState({ kind: "ready", svg });
       })
@@ -154,7 +211,11 @@ function MermaidCode({ code }: { code: string }) {
     return () => {
       cancelled = true;
     };
-  }, [code, isIncomplete]);
+  }, [code, isIncomplete, preview, resolvedMode]);
+
+  if (preview && state.kind === "ready") {
+    return <MermaidViewport key={state.svg} svg={state.svg} />;
+  }
 
   return (
     <BlockChrome label="mermaid" code={code}>
@@ -184,6 +245,161 @@ function MermaidCode({ code }: { code: string }) {
   );
 }
 
+const MERMAID_MIN_ZOOM = 0.5;
+const MERMAID_MAX_ZOOM = 3;
+const MERMAID_ZOOM_STEP = 0.2;
+
+type MermaidView = { scale: number; x: number; y: number };
+
+function MermaidViewport({ svg }: { svg: string }) {
+  const [panEnabled, setPanEnabled] = useState(false);
+  const [view, setView] = useState<MermaidView>({ scale: 1, x: 0, y: 0 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+
+  const zoom = (delta: number) => {
+    setView((current) => ({
+      ...current,
+      scale: Math.max(
+        MERMAID_MIN_ZOOM,
+        Math.min(MERMAID_MAX_ZOOM, current.scale + delta),
+      ),
+    }));
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panEnabled || event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: view.x,
+      originY: view.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setView((current) => ({
+      ...current,
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    }));
+  };
+
+  const handlePointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const reset = () => setView({ scale: 1, x: 0, y: 0 });
+
+  return (
+    <div
+      data-markdown-interactive="mermaid"
+      className="relative my-4 min-h-32 overflow-hidden rounded-md border border-transparent bg-background transition-colors duration-150 hover:border-border/70 focus-within:border-border/70"
+    >
+      <div
+        data-markdown-visual-toolbar
+        className="flex items-center"
+      >
+        <DiagramButton
+          label="Pan diagram"
+          active={panEnabled}
+          onClick={() => setPanEnabled((enabled) => !enabled)}
+          icon={ArrowAllDirectionIcon}
+        />
+        <DiagramButton
+          label="Zoom out"
+          disabled={view.scale <= MERMAID_MIN_ZOOM}
+          onClick={() => zoom(-MERMAID_ZOOM_STEP)}
+          icon={ZoomOutAreaIcon}
+        />
+        <DiagramButton
+          label="Zoom in"
+          disabled={view.scale >= MERMAID_MAX_ZOOM}
+          onClick={() => zoom(MERMAID_ZOOM_STEP)}
+          icon={ZoomInAreaIcon}
+        />
+        <DiagramButton
+          label="Fit diagram"
+          onClick={reset}
+          icon={FitToScreenIcon}
+        />
+      </div>
+      <div
+        data-markdown-mermaid-viewport
+        className={cn(
+          "flex min-h-32 items-center justify-center overflow-hidden p-4",
+          panEnabled && "cursor-grab active:cursor-grabbing",
+        )}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onWheel={(event) => {
+          if (!event.ctrlKey) return;
+          event.preventDefault();
+          zoom(event.deltaY > 0 ? -MERMAID_ZOOM_STEP : MERMAID_ZOOM_STEP);
+        }}
+      >
+        <div
+          role="img"
+          aria-label="Mermaid diagram"
+          className="flex w-full max-w-full origin-center justify-center transition-transform duration-150 ease-out"
+          style={{
+            transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
+          }}
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DiagramButton({
+  label,
+  icon,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: typeof ArrowAllDirectionIcon;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active || undefined}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+        active && "bg-accent text-foreground",
+      )}
+    >
+      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.6} />
+    </button>
+  );
+}
+
 function BlockChrome({
   label,
   code,
@@ -194,7 +410,10 @@ function BlockChrome({
   children: React.ReactNode;
 }) {
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30">
+    <div
+      data-markdown-code-block
+      className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/30"
+    >
       <div className="flex items-center justify-between gap-2 border-b border-border/40 bg-muted/20 px-3 py-1">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {label}

@@ -435,7 +435,7 @@ export function MarkdownPreviewPane({
             >
               <div
                 ref={contentRef}
-                className="w-full min-w-0 px-4 pt-12 pb-6 sm:px-8"
+                className="mx-auto w-full min-w-0 max-w-[800px] px-4 pt-12 pb-6 sm:px-[26px]"
               >
                 {status.kind === "loading" && (
                   <p className="text-[12px] text-muted-foreground">Loading…</p>

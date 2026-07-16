@@ -63,6 +63,7 @@ const progressiveRehypePlugins = [
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
   node?: unknown;
+  "data-block"?: string;
 };
 
 type ProgressiveBlockContextValue = {
@@ -128,18 +129,18 @@ function MarkdownPreviewCode({
   const visible = useContext(MarkdownVisibilityContext);
   const elementRef = useRef<HTMLElement>(null);
   const [nearViewport, setNearViewport] = useState(false);
-  const fenced = className?.includes("language-") ?? false;
+  const block = "data-block" in props;
 
   useEffect(() => {
-    if (!fenced || !visible || nearViewport) return;
+    if (!block || !visible || nearViewport) return;
     const element = elementRef.current;
     if (!element) return;
     return observeCodeNearViewport(element, () => setNearViewport(true));
-  }, [fenced, nearViewport, visible]);
+  }, [block, nearViewport, visible]);
 
-  if (!fenced || nearViewport) {
+  if (!block || nearViewport) {
     return (
-      <MarkdownCode className={className} {...props}>
+      <MarkdownCode className={className} variant="preview" {...props}>
         {children}
       </MarkdownCode>
     );
@@ -150,7 +151,7 @@ function MarkdownPreviewCode({
       ref={elementRef}
       className={cn(
         className,
-        "block whitespace-pre-wrap px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground",
+        "block max-w-full overflow-x-auto whitespace-pre px-4 py-3 font-mono text-[12px] leading-[1.5] text-foreground",
       )}
       {...props}
     >
@@ -425,7 +426,7 @@ export const MarkdownDocumentRenderer = forwardRef<
       {progressive ? (
         <ProgressiveBlockContext.Provider value={progressiveContext}>
           <Streamdown
-            className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+            className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
             components={markdownComponents}
             rehypePlugins={progressiveRehypePlugins}
             remarkPlugins={progressiveRemarkPlugins}
@@ -440,7 +441,7 @@ export const MarkdownDocumentRenderer = forwardRef<
         </ProgressiveBlockContext.Provider>
       ) : (
         <Streamdown
-          className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+          className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
           components={markdownComponents}
           rehypePlugins={staticRehypePlugins}
           mode="static"
