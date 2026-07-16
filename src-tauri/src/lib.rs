@@ -82,7 +82,6 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         let _ = window.set_decorations(false);
     }
 
-    #[cfg(target_os = "macos")]
     if let Some(main) = app.get_webview_window("main") {
         if let (Ok(main_pos), Ok(main_size), Ok(settings_size)) = (
             main.outer_position(),
