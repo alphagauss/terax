@@ -1,4 +1,4 @@
-import type { Tab } from "@/modules/tabs";
+import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useEffect, useMemo, useRef } from "react";
 import { selectLiveTerminals } from "./lib/liveTerminals";
@@ -15,6 +15,8 @@ type Props = {
   onCwd: (leafId: number, cwd: string) => void;
   onExit: (leafId: number, code: number) => void;
   onFocusLeaf: (tabId: number, leafId: number) => void;
+  onSplitPane: (leafId: number, dir: "row" | "col", before: boolean) => void;
+  onClosePane: (leafId: number) => void;
 };
 
 type Bundle = {
@@ -32,6 +34,8 @@ export function TerminalStack({
   onCwd,
   onExit,
   onFocusLeaf,
+  onSplitPane,
+  onClosePane,
 }: Props) {
   const terminals = useMemo(() => selectLiveTerminals(tabs), [tabs]);
 
@@ -80,6 +84,13 @@ export function TerminalStack({
     <div className="relative h-full w-full">
       {terminals.map((t) => {
         const tabVisible = t.id === activeId;
+        const paneCount = leafIds(t.paneTree).length;
+        const canSplit = !t.blocks && paneCount < MAX_PANES_PER_TAB;
+        const splitDisabledReason = t.blocks
+          ? "Pane splitting is unavailable in block tabs"
+          : paneCount >= MAX_PANES_PER_TAB
+            ? `Maximum ${MAX_PANES_PER_TAB} panes per tab`
+            : null;
         return (
           <div
             key={t.id}
@@ -95,7 +106,11 @@ export function TerminalStack({
               tabVisible={tabVisible}
               activeLeafId={t.activeLeafId}
               blocks={t.blocks ?? false}
+              canSplit={canSplit}
+              splitDisabledReason={splitDisabledReason}
               onFocusLeaf={(leafId) => onFocusLeaf(t.id, leafId)}
+              onSplitPane={onSplitPane}
+              onClosePane={onClosePane}
               getBundle={getBundle}
             />
           </div>

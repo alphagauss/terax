@@ -191,6 +191,7 @@ export default function App() {
     focusPane,
     focusNextPaneInTab,
     splitActivePane,
+    splitPaneByLeaf,
     closeActivePane,
     closePaneByLeaf,
   } = useTabs(initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined);
@@ -1333,6 +1334,8 @@ export default function App() {
                       onCwd={handleTerminalCwd}
                       onExit={handleLeafExit}
                       onFocusLeaf={handleFocusLeaf}
+                      onSplitPane={splitPaneByLeaf}
+                      onClosePane={closePaneByLeaf}
                       registerEditorHandle={registerEditorHandle}
                       registerMarkdownNavigationHandle={
                         registerMarkdownNavigationHandle
