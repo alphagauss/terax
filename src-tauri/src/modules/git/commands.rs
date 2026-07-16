@@ -75,6 +75,20 @@ pub async fn git_diff(
 }
 
 #[tauri::command]
+pub async fn git_diff_head(
+    repo_root: String,
+    path: Option<String>,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<GitDiffResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::diff_head(r, &repo_root, path.as_deref(), &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_diff_content(
     repo_root: String,
     path: String,

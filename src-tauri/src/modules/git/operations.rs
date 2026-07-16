@@ -171,17 +171,48 @@ pub fn diff(
 ) -> Result<GitDiffResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    diff_inner(&repo_root, path, staged)
+    diff_inner(
+        &repo_root,
+        path,
+        if staged {
+            DiffMode::Index
+        } else {
+            DiffMode::Worktree
+        },
+    )
+}
+
+pub fn diff_head(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    path: Option<&str>,
+    workspace: &WorkspaceEnv,
+) -> Result<GitDiffResult> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    diff_inner(&repo_root, path, DiffMode::Head)
+}
+
+#[derive(Clone, Copy)]
+enum DiffMode {
+    Worktree,
+    Index,
+    Head,
 }
 
 fn diff_inner(
     repo_root: &ResolvedGitDirectory,
     path: Option<&str>,
-    staged: bool,
+    mode: DiffMode,
 ) -> Result<GitDiffResult> {
     let mut args: Vec<OsString> = vec!["diff".into(), "--no-ext-diff".into()];
-    if staged {
-        args.push("--cached".into());
+    match mode {
+        DiffMode::Worktree => {}
+        DiffMode::Index => args.push("--cached".into()),
+        DiffMode::Head => {
+            args.push("HEAD".into());
+            args.push("--diff-filter=CDMRTUXB".into());
+        }
     }
     let pathspec = match path.filter(|p| !p.is_empty()) {
         Some(p) => Some(pathspec_from_input(
@@ -258,7 +289,15 @@ pub fn diff_content(
     } else {
         read_worktree_text(&repo_root, &rel_path, &worktree_path)?
     };
-    let patch = diff_inner(&repo_root, Some(&rel_path), staged)?;
+    let patch = diff_inner(
+        &repo_root,
+        Some(&rel_path),
+        if staged {
+            DiffMode::Index
+        } else {
+            DiffMode::Worktree
+        },
+    )?;
     let is_binary =
         matches!(original, TextSource::Binary) || matches!(modified, TextSource::Binary);
 

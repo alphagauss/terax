@@ -267,6 +267,7 @@ pub fn run() {
             git::commands::git_panel_snapshot,
             git::commands::git_status,
             git::commands::git_diff,
+            git::commands::git_diff_head,
             git::commands::git_diff_content,
             git::commands::git_stage,
             git::commands::git_unstage,
