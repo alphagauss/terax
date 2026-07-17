@@ -18,6 +18,7 @@ import {
   AUTO_SAVE_DELAY_MIN,
   clampAutoSaveDelay,
   EDITOR_FONT_SIZES,
+  type DiffViewMode,
   type EditorFormatter,
   setEditorAutoSave,
   setEditorAutoSaveDelay,
@@ -27,6 +28,7 @@ import {
   setEditorFormatter,
   setEditorFormatterByLang,
   setEditorWordWrap,
+  setDiffViewMode,
   setVimMode,
 } from "@/modules/settings/store";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -42,6 +44,7 @@ export function EditorSection() {
   const editorFontSize = usePreferencesStore((s) => s.editorFontSize);
   const vimMode = usePreferencesStore((s) => s.vimMode);
   const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
+  const diffViewMode = usePreferencesStore((s) => s.diffViewMode);
   const editorAutoSave = usePreferencesStore((s) => s.editorAutoSave);
   const editorAutoSaveDelay = usePreferencesStore((s) => s.editorAutoSaveDelay);
   const editorFormatOnSave = usePreferencesStore((s) => s.editorFormatOnSave);
@@ -104,6 +107,27 @@ export function EditorSection() {
             checked={editorWordWrap}
             onCheckedChange={(v) => void setEditorWordWrap(v)}
           />
+        </SettingRow>
+        <SettingRow
+          title="Git diff view"
+          description="Show Git diffs inline or side by side."
+        >
+          <Select
+            value={diffViewMode}
+            onValueChange={(v) => void setDiffViewMode(v as DiffViewMode)}
+          >
+            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inline" className="text-[12px]">
+                Inline
+              </SelectItem>
+              <SelectItem value="split" className="text-[12px]">
+                Side by side
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </SettingRow>
       </div>
 

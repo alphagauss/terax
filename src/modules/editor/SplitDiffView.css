@@ -1,0 +1,19 @@
+.split-diff-view:hover .split-diff-horizontal-scrollbar {
+  --scrollbar-current-thumb: var(--scrollbar-thumb);
+  transition-duration: var(--scrollbar-show-duration);
+}
+
+.split-diff-view > .cm-changeOverview {
+  bottom: calc(var(--scrollbar-size) + 2px);
+}
+
+.split-diff-view .cm-editor .cm-scroller {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.split-diff-view .cm-editor .cm-scroller::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}

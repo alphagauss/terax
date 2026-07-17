@@ -80,6 +80,32 @@ export function parseUnifiedDiff(diffText: string): GitChanges {
   return res;
 }
 
+export function gitChangesForDiff(
+  diffText: string,
+  originalContent: string,
+  modifiedContent: string,
+): GitChanges {
+  const changes = parseUnifiedDiff(diffText);
+  if (
+    changes.added.size > 0 ||
+    changes.modified.size > 0 ||
+    changes.deleted.size > 0
+  ) {
+    return changes;
+  }
+  if (originalContent.length === 0 && modifiedContent.length > 0) {
+    const lines = modifiedContent.split(/\r?\n/);
+    const count = Math.max(
+      1,
+      lines.length - (modifiedContent.endsWith("\n") ? 1 : 0),
+    );
+    for (let line = 1; line <= count; line++) changes.added.add(line);
+  } else if (originalContent.length > 0 && modifiedContent.length === 0) {
+    changes.deleted.add(1);
+  }
+  return changes;
+}
+
 export const setGitChanges = StateEffect.define<GitChanges>();
 
 const gitChangesField = StateField.define<GitChanges>({
@@ -123,7 +149,7 @@ function changeRanges(changes: GitChanges): ChangeRange[] {
   return ranges;
 }
 
-function renderOverview(
+export function renderGitChangeOverview(
   view: EditorView,
   rail: HTMLDivElement,
   changes: GitChanges,
@@ -162,7 +188,7 @@ class ChangeOverview {
     this.rail.className = "cm-changeOverview";
     this.rail.setAttribute("aria-hidden", "true");
     view.dom.append(this.rail);
-    renderOverview(view, this.rail, view.state.field(gitChangesField));
+    renderGitChangeOverview(view, this.rail, view.state.field(gitChangesField));
   }
 
   update(update: ViewUpdate) {
@@ -172,7 +198,11 @@ class ChangeOverview {
       update.state.field(gitChangesField) !==
         update.startState.field(gitChangesField)
     ) {
-      renderOverview(this.view, this.rail, update.state.field(gitChangesField));
+      renderGitChangeOverview(
+        this.view,
+        this.rail,
+        update.state.field(gitChangesField),
+      );
     }
   }
 
@@ -209,37 +239,18 @@ const changeGutterTheme = EditorView.baseTheme({
   ".cm-change-deleted": {
     boxShadow: "inset 0 -2px 0 0 var(--terminal-ansi-red)",
   },
-  ".cm-changeOverview": {
-    position: "absolute",
-    top: "2px",
-    right: "1px",
-    bottom: "2px",
-    width: "6px",
-    pointerEvents: "none",
-    zIndex: "1",
-  },
-  ".cm-changeOverview-added, .cm-changeOverview-modified, .cm-changeOverview-deleted":
-    {
-      position: "absolute",
-      left: "1px",
-      right: "1px",
-      minHeight: "2px",
-      borderRadius: "1px",
-    },
-  ".cm-changeOverview-added": {
-    backgroundColor: "var(--terminal-ansi-green)",
-  },
-  ".cm-changeOverview-modified": {
-    backgroundColor: "var(--terminal-ansi-blue)",
-  },
-  ".cm-changeOverview-deleted": {
-    backgroundColor: "var(--terminal-ansi-red)",
-  },
 });
+
+const changeOverviewPlugin = ViewPlugin.fromClass(ChangeOverview);
+
+export const gitChangeOverview: Extension = [
+  gitChangesField,
+  changeOverviewPlugin,
+];
 
 export const gitChangeGutter: Extension = [
   gitChangesField,
   changeGutter,
   changeGutterTheme,
-  ViewPlugin.fromClass(ChangeOverview),
+  changeOverviewPlugin,
 ];

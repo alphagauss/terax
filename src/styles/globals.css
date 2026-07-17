@@ -369,6 +369,38 @@ html *::-webkit-scrollbar {
   background-color: var(--scrollbar-thumb-hover);
 }
 
+.cm-changeOverview {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  bottom: 2px;
+  z-index: 1;
+  width: 6px;
+  pointer-events: none;
+}
+
+.cm-changeOverview-added,
+.cm-changeOverview-modified,
+.cm-changeOverview-deleted {
+  position: absolute;
+  right: 1px;
+  left: 1px;
+  min-height: 2px;
+  border-radius: 1px;
+}
+
+.cm-changeOverview-added {
+  background-color: var(--terminal-ansi-green);
+}
+
+.cm-changeOverview-modified {
+  background-color: var(--terminal-ansi-blue);
+}
+
+.cm-changeOverview-deleted {
+  background-color: var(--terminal-ansi-red);
+}
+
 @keyframes terax-collapsible-down {
   from {
     height: 0;

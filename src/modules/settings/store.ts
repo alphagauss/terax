@@ -23,6 +23,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export type ThemePref = "system" | "light" | "dark";
 
+export type DiffViewMode = "inline" | "split";
+
 export const DEFAULT_THEME_ID = "modern";
 
 export type BackgroundKind = "none" | "image";
@@ -155,6 +157,7 @@ export type Preferences = {
   recentModelIds: string[];
   vimMode: boolean;
   editorWordWrap: boolean;
+  diffViewMode: DiffViewMode;
   showHidden: boolean;
   explorerGitDecorations: boolean;
   terminalWebglEnabled: boolean;
@@ -241,6 +244,7 @@ const KEY_FAVORITE_MODELS = "favoriteModelIds";
 const KEY_RECENT_MODELS = "recentModelIds";
 const KEY_VIM_MODE = "vimMode";
 const KEY_EDITOR_WORD_WRAP = "editorWordWrap";
+const KEY_DIFF_VIEW_MODE = "diffViewMode";
 const KEY_SHOW_HIDDEN = "showHidden";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
 const KEY_TERMINAL_WEBGL_ENABLED = "terminalWebglEnabled";
@@ -321,6 +325,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   recentModelIds: [],
   vimMode: false,
   editorWordWrap: false,
+  diffViewMode: "inline",
   showHidden: false,
   explorerGitDecorations: true,
   terminalWebglEnabled: true,
@@ -444,6 +449,12 @@ export async function loadPreferences(): Promise<Preferences> {
     vimMode: get<boolean>(KEY_VIM_MODE) ?? DEFAULT_PREFERENCES.vimMode,
     editorWordWrap:
       get<boolean>(KEY_EDITOR_WORD_WRAP) ?? DEFAULT_PREFERENCES.editorWordWrap,
+    diffViewMode: (() => {
+      const stored = get<string>(KEY_DIFF_VIEW_MODE);
+      return stored === "inline" || stored === "split"
+        ? stored
+        : DEFAULT_PREFERENCES.diffViewMode;
+    })(),
     showHidden: get<boolean>(KEY_SHOW_HIDDEN) ?? DEFAULT_PREFERENCES.showHidden,
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
@@ -705,6 +716,10 @@ export async function setEditorWordWrap(value: boolean): Promise<void> {
   await writePref(KEY_EDITOR_WORD_WRAP, value);
 }
 
+export async function setDiffViewMode(value: DiffViewMode): Promise<void> {
+  await writePref(KEY_DIFF_VIEW_MODE, value);
+}
+
 export async function setShowHidden(value: boolean): Promise<void> {
   await writePref(KEY_SHOW_HIDDEN, value);
 }
@@ -870,6 +885,7 @@ export async function onPreferencesChange(
     [KEY_RECENT_MODELS]: "recentModelIds",
     [KEY_VIM_MODE]: "vimMode",
     [KEY_EDITOR_WORD_WRAP]: "editorWordWrap",
+    [KEY_DIFF_VIEW_MODE]: "diffViewMode",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
     [KEY_TERMINAL_WEBGL_ENABLED]: "terminalWebglEnabled",

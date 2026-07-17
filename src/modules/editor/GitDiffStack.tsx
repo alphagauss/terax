@@ -42,7 +42,6 @@ export function GitDiffStack({ tabs, activeId }: Props) {
           path: active.path,
           originalPath: active.originalPath,
         }}
-        chipLabel={active.shortSha}
       />
     </div>
   );

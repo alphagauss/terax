@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseUnifiedDiff } from "./gitGutter";
+import { gitChangesForDiff, parseUnifiedDiff } from "./gitGutter";
 
 describe("parseUnifiedDiff", () => {
   it("returns nothing for empty input", () => {
@@ -51,5 +51,17 @@ describe("parseUnifiedDiff", () => {
     const diff = ["@@ -1,1 +1,2 @@", " a", "+- a bullet", ""].join("\n");
     const c = parseUnifiedDiff(diff);
     expect([...c.added]).toEqual([2]);
+  });
+});
+
+describe("gitChangesForDiff", () => {
+  it("marks an untracked file when git does not return a patch", () => {
+    const changes = gitChangesForDiff("", "", "first\nsecond\n");
+    expect([...changes.added]).toEqual([1, 2]);
+  });
+
+  it("marks a deleted file when git does not return a patch", () => {
+    const changes = gitChangesForDiff("", "content\n", "");
+    expect([...changes.deleted]).toEqual([1]);
   });
 });
