@@ -1,7 +1,7 @@
-import { useCallback, useMemo } from "react";
 import { native } from "@/modules/ai/lib/native";
 import type { SidebarViewId } from "@/modules/sidebar";
 import type { Tab } from "@/modules/tabs";
+import { useCallback, useMemo } from "react";
 import { useSourceControl } from "./useSourceControl";
 
 function dirname(path: string | null): string | null {
@@ -26,6 +26,7 @@ type Params = {
     repoRoot: string;
     branch: string | null;
   }) => void;
+  closeTab: (id: number) => void;
 };
 
 /**
@@ -44,6 +45,7 @@ export function useSourceControlContext({
   sidebarView,
   cycleSidebarView,
   openCommitHistoryTab,
+  closeTab,
 }: Params) {
   const workspaceFallbackPath = launchCwdResolved
     ? (launchCwd ?? home ?? null)
@@ -85,6 +87,13 @@ export function useSourceControlContext({
   const openGitGraphFromContext = useCallback(async () => {
     const known = sourceControl.hasRepo ? sourceControl.repo : null;
     if (known) {
+      if (
+        activeTab?.kind === "git-history" &&
+        activeTab.repoRoot === known.repoRoot
+      ) {
+        closeTab(activeTab.id);
+        return;
+      }
       openCommitHistoryTab({
         repoRoot: known.repoRoot,
         branch: sourceControl.status?.branch ?? null,
@@ -95,11 +104,20 @@ export function useSourceControlContext({
     try {
       const repo = await native.gitResolveRepo(sourceControlContextPath);
       if (!repo) return;
+      if (
+        activeTab?.kind === "git-history" &&
+        activeTab.repoRoot === repo.repoRoot
+      ) {
+        closeTab(activeTab.id);
+        return;
+      }
       openCommitHistoryTab({ repoRoot: repo.repoRoot, branch: repo.branch });
     } catch {
       /* noop */
     }
   }, [
+    activeTab,
+    closeTab,
     openCommitHistoryTab,
     sourceControl.hasRepo,
     sourceControl.repo,

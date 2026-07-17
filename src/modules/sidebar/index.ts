@@ -16,6 +16,13 @@ export {
 } from "./useSidebarPanel";
 export { useSecondarySidebarPanel } from "./useSecondarySidebarPanel";
 export {
+  SidebarSectionAction,
+  SidebarSectionGroup,
+  type SidebarSectionDefinition,
+  type SidebarSectionRenderState,
+} from "./SidebarSectionGroup";
+export { SIDEBAR_SECTION_HEADER_HEIGHT } from "./sectionLayout";
+export {
   SECONDARY_SIDEBAR_DEFAULT_WIDTH,
   SECONDARY_SIDEBAR_MIN_WIDTH,
   SECONDARY_SIDEBAR_MAX_WIDTH,

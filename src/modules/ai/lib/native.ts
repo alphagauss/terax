@@ -59,6 +59,7 @@ export type GitChangedFile = {
 export type GitStatusSnapshot = {
   repoRoot: string;
   branch: string;
+  headSha: string | null;
   upstream: string | null;
   ahead: number;
   behind: number;
@@ -98,6 +99,7 @@ export type GitLogEntry = {
   authorEmail: string;
   timestampSecs: number;
   parents: string[];
+  refs: string[];
   subject: string;
   filesChanged: number;
   insertions: number;
@@ -319,6 +321,12 @@ export const native = {
       message,
       workspace: currentWorkspaceEnv(),
     }),
+  gitUndoCommit: (repoRoot: string, expectedHead: string) =>
+    invoke<void>("git_undo_commit", {
+      repoRoot,
+      expectedHead,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitFetch: (repoRoot: string) =>
     invoke<void>("git_fetch", {
       repoRoot,
@@ -346,6 +354,12 @@ export const native = {
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
+      repoRoot,
+      sha,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitCommitMessage: (repoRoot: string, sha: string) =>
+    invoke<string>("git_commit_message", {
       repoRoot,
       sha,
       workspace: currentWorkspaceEnv(),

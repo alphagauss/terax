@@ -169,6 +169,20 @@ pub async fn git_commit(
 }
 
 #[tauri::command]
+pub async fn git_undo_commit(
+    repo_root: String,
+    expected_head: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::undo_commit(r, &repo_root, &expected_head, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_fetch(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,
@@ -239,6 +253,20 @@ pub async fn git_show_commit(
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::show_commit_diff(r, &repo_root, &sha, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn git_commit_message(
+    repo_root: String,
+    sha: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::commit_message(r, &repo_root, &sha, &workspace).map_err(Into::into)
     })
     .await
 }

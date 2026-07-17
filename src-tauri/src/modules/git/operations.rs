@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
@@ -153,6 +154,7 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     Ok(GitStatusSnapshot {
         repo_root: repo_root.git_path.clone(),
         branch: parsed.branch,
+        head_sha: parsed.head_sha,
         upstream: parsed.upstream,
         ahead: parsed.ahead,
         behind: parsed.behind,
@@ -479,6 +481,57 @@ pub fn commit(
     })
 }
 
+pub fn undo_commit(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    expected_head: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !full_sha_is_safe(expected_head) {
+        return Err(GitError::command(
+            "git update-ref",
+            "invalid expected HEAD sha",
+        ));
+    }
+
+    let parent_spec = format!("{expected_head}^");
+    let parent = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--verify", parent_spec.as_str()],
+    )?
+    .ok_or_else(|| GitError::command("git update-ref", "the root commit cannot be undone"))?;
+
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("update-ref"),
+            OsStr::new("HEAD"),
+            OsStr::new(&parent),
+            OsStr::new(expected_head),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.exit_code != Some(0) {
+        if let Ok(Some(current_head)) = git_stdout_line_opt(
+            &repo_root.workspace,
+            &repo_root.git_path,
+            ["rev-parse", "--verify", "HEAD"],
+        ) {
+            if current_head != expected_head {
+                return Err(GitError::command(
+                    "git update-ref",
+                    "HEAD changed; refresh the graph and try again",
+                ));
+            }
+        }
+    }
+    ensure_success(&output, "git update-ref failed")
+}
+
 pub fn push(
     registry: &WorkspaceRegistry,
     repo_root: &str,
@@ -513,7 +566,7 @@ pub fn push(
     })
 }
 
-const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%s";
+const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s";
 const MAX_LOG_LIMIT: u32 = 200;
 
 pub fn log(
@@ -570,7 +623,7 @@ pub fn log(
     let stdout = std::str::from_utf8(&output.stdout).unwrap_or("");
     let mut entries: Vec<GitLogEntry> = Vec::with_capacity(bounded as usize);
     // Lines we get back interleave:
-    //   <sha>\x1f<author>\x1f<email>\x1f<ts>\x1f<parents>\x1f<subject>
+    //   <sha>\x1f<author>\x1f<email>\x1f<ts>\x1f<parents>\x1f<refs>\x1f<subject>
     //   <blank>
     //    5 files changed, 12 insertions(+), 3 deletions(-)
     // Commits without diffstats (root commits, merges with no changes) just
@@ -582,7 +635,7 @@ pub fn log(
             continue;
         }
         if line.contains('\x1f') {
-            let mut fields = line.splitn(6, '\x1f');
+            let mut fields = line.splitn(7, '\x1f');
             let sha = fields.next().unwrap_or("").to_string();
             if !sha_is_safe(&sha) {
                 continue;
@@ -595,6 +648,14 @@ pub fn log(
                 .split_ascii_whitespace()
                 .map(|s| s.to_string())
                 .collect();
+            let refs = fields
+                .next()
+                .unwrap_or("")
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect();
             let subject = fields.next().unwrap_or("").to_string();
             let short_sha = sha.chars().take(7).collect::<String>();
             entries.push(GitLogEntry {
@@ -604,6 +665,7 @@ pub fn log(
                 author_email,
                 timestamp_secs: timestamp,
                 parents,
+                refs,
                 subject,
                 files_changed: 0,
                 insertions: 0,
@@ -658,6 +720,34 @@ pub fn show_commit_diff(
     })
 }
 
+pub fn commit_message(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    sha: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<String> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !sha_is_safe(sha) {
+        return Err(GitError::command("git show", "invalid commit sha"));
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("show"),
+            OsStr::new("-s"),
+            OsStr::new("--format=%B"),
+            OsStr::new(sha),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git show failed")?;
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
+}
+
 fn parse_shortstat(tail: &str) -> (u32, u32, u32) {
     // Looks for a line like " 5 files changed, 12 insertions(+), 3 deletions(-)"
     for line in tail.lines() {
@@ -689,6 +779,10 @@ fn sha_is_safe(sha: &str) -> bool {
     !sha.is_empty() && sha.len() <= 64 && sha.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+fn full_sha_is_safe(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && sha.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 pub fn commit_files(
     registry: &WorkspaceRegistry,
     repo_root: &str,
@@ -701,50 +795,47 @@ pub fn commit_files(
         return Err(GitError::command("git diff-tree", "invalid commit sha"));
     }
 
-    let output = run_git(
+    let parent_spec = format!("{sha}^");
+    let first_parent = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--verify", parent_spec.as_str()],
+    )?;
+    let diff_tree_args = |format: &str| {
+        let mut args: Vec<OsString> = vec![
+            "diff-tree".into(),
+            "--no-commit-id".into(),
+            "-r".into(),
+            "-z".into(),
+            format.into(),
+        ];
+        if let Some(parent) = &first_parent {
+            args.push(parent.into());
+        } else {
+            args.push("--root".into());
+        }
+        args.push(sha.into());
+        args
+    };
+
+    let name_status_output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        [
-            OsStr::new("diff-tree"),
-            OsStr::new("--no-commit-id"),
-            OsStr::new("-r"),
-            OsStr::new("-z"),
-            OsStr::new("--name-status"),
-            OsStr::new("--numstat"),
-            OsStr::new(sha),
-        ],
+        diff_tree_args("--name-status"),
         DEFAULT_TIMEOUT_SECS,
     )?;
-    ensure_success(&output, "git diff-tree failed")?;
+    ensure_success(&name_status_output, "git diff-tree failed")?;
+    let numstat_output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        diff_tree_args("--numstat"),
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&numstat_output, "git diff-tree failed")?;
 
-    let (name_status_bytes, numstat_bytes) = split_name_status_numstat(&output.stdout);
-    let mut files = parse_diff_tree_name_status(name_status_bytes);
-    apply_numstat(&mut files, numstat_bytes);
+    let mut files = parse_diff_tree_name_status(&name_status_output.stdout);
+    apply_numstat(&mut files, &numstat_output.stdout);
     Ok(files)
-}
-
-fn split_name_status_numstat(bytes: &[u8]) -> (&[u8], &[u8]) {
-    let s = std::str::from_utf8(bytes).unwrap_or("");
-    let tokens: Vec<(usize, &str)> = s
-        .split('\0')
-        .scan(0usize, |off, t| {
-            let start = *off;
-            *off += t.len() + 1;
-            Some((start, t))
-        })
-        .collect();
-    let mut split_at = bytes.len();
-    for (idx, tok) in tokens.iter().enumerate() {
-        if tok.1.contains('\t') {
-            split_at = tok.0;
-            // Walk back: numstat for R/C with -z emits "<a>\t<r>" then two
-            // NUL-separated paths. The two trailing path tokens belong to the
-            // numstat block, not name-status.
-            let _ = idx;
-            break;
-        }
-    }
-    (&bytes[..split_at], &bytes[split_at..])
 }
 
 pub fn commit_file_diff(
@@ -892,6 +983,11 @@ fn parse_diff_tree_name_status(bytes: &[u8]) -> Vec<GitCommitFileChange> {
 }
 
 fn apply_numstat(files: &mut [GitCommitFileChange], bytes: &[u8]) {
+    let file_indexes: HashMap<String, usize> = files
+        .iter()
+        .enumerate()
+        .map(|(index, file)| (file.path.clone(), index))
+        .collect();
     let s = std::str::from_utf8(bytes).unwrap_or("");
     let tokens: Vec<&str> = s.split('\0').filter(|t| !t.is_empty()).collect();
     let mut idx = 0;
@@ -927,7 +1023,8 @@ fn apply_numstat(files: &mut [GitCommitFileChange], bytes: &[u8]) {
         if path.is_empty() {
             continue;
         }
-        if let Some(file) = files.iter_mut().find(|f| f.path == path) {
+        if let Some(&file_index) = file_indexes.get(&path) {
+            let file = &mut files[file_index];
             file.added = added;
             file.removed = removed;
             file.is_binary = is_binary;
@@ -1236,6 +1333,15 @@ mod tests {
         assert!(!sha_is_safe("abc 123"));
         assert!(!sha_is_safe(&"a".repeat(65)));
         assert!(!sha_is_safe(";rm -rf /"));
+    }
+
+    #[test]
+    fn full_sha_is_safe_accepts_sha1_and_sha256() {
+        assert!(full_sha_is_safe(&"a".repeat(40)));
+        assert!(full_sha_is_safe(&"f".repeat(64)));
+        assert!(!full_sha_is_safe("abc123"));
+        assert!(!full_sha_is_safe(&"a".repeat(41)));
+        assert!(!full_sha_is_safe(&"z".repeat(40)));
     }
 
     #[test]

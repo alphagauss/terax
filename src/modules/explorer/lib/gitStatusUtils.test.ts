@@ -25,6 +25,7 @@ function snapshot(changedFiles: GitChangedFile[]): GitStatusSnapshot {
   return {
     repoRoot: "/repo",
     branch: "main",
+    headSha: null,
     upstream: null,
     ahead: 0,
     behind: 0,

@@ -1,19 +1,19 @@
 import { lazy, Suspense } from "react";
 import type { ComponentProps } from "react";
-import type { SourceControlPanel as SourceControlPanelType } from "./SourceControlPanel";
+import type { SourceControlViewContainer as SourceControlViewContainerType } from "./SourceControlPanel";
 
-const SourceControlPanelInner = lazy(() =>
+const SourceControlViewContainerInner = lazy(() =>
   import("./SourceControlPanel").then((m) => ({
-    default: m.SourceControlPanel,
+    default: m.SourceControlViewContainer,
   })),
 );
 
-type Props = ComponentProps<typeof SourceControlPanelType>;
+type Props = ComponentProps<typeof SourceControlViewContainerType>;
 
-export function SourceControlPanel(props: Props) {
+export function SourceControlViewContainer(props: Props) {
   return (
     <Suspense fallback={null}>
-      <SourceControlPanelInner {...props} />
+      <SourceControlViewContainerInner {...props} />
     </Suspense>
   );
 }

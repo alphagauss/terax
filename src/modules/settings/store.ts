@@ -160,6 +160,7 @@ export type Preferences = {
   diffViewMode: DiffViewMode;
   showHidden: boolean;
   explorerGitDecorations: boolean;
+  sourceControlShowUndoCommit: boolean;
   terminalWebglEnabled: boolean;
   terminalCursorBlink: boolean;
   terminalFontFamily: string;
@@ -247,6 +248,7 @@ const KEY_EDITOR_WORD_WRAP = "editorWordWrap";
 const KEY_DIFF_VIEW_MODE = "diffViewMode";
 const KEY_SHOW_HIDDEN = "showHidden";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
+const KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT = "sourceControlShowUndoCommit";
 const KEY_TERMINAL_WEBGL_ENABLED = "terminalWebglEnabled";
 const KEY_TERMINAL_CURSOR_BLINK = "terminalCursorBlink";
 const KEY_TERMINAL_FONT_FAMILY = "terminalFontFamily";
@@ -328,6 +330,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   diffViewMode: "inline",
   showHidden: false,
   explorerGitDecorations: true,
+  sourceControlShowUndoCommit: true,
   terminalWebglEnabled: true,
   terminalCursorBlink: false,
   terminalFontFamily: "",
@@ -459,6 +462,9 @@ export async function loadPreferences(): Promise<Preferences> {
     explorerGitDecorations:
       get<boolean>(KEY_EXPLORER_GIT_DECORATIONS) ??
       DEFAULT_PREFERENCES.explorerGitDecorations,
+    sourceControlShowUndoCommit:
+      get<boolean>(KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT) ??
+      DEFAULT_PREFERENCES.sourceControlShowUndoCommit,
     terminalWebglEnabled:
       get<boolean>(KEY_TERMINAL_WEBGL_ENABLED) ??
       DEFAULT_PREFERENCES.terminalWebglEnabled,
@@ -728,6 +734,12 @@ export async function setExplorerGitDecorations(value: boolean): Promise<void> {
   await writePref(KEY_EXPLORER_GIT_DECORATIONS, value);
 }
 
+export async function setSourceControlShowUndoCommit(
+  value: boolean,
+): Promise<void> {
+  await writePref(KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT, value);
+}
+
 export async function setTerminalWebglEnabled(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_WEBGL_ENABLED, value);
 }
@@ -888,6 +900,7 @@ export async function onPreferencesChange(
     [KEY_DIFF_VIEW_MODE]: "diffViewMode",
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
+    [KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT]: "sourceControlShowUndoCommit",
     [KEY_TERMINAL_WEBGL_ENABLED]: "terminalWebglEnabled",
     [KEY_TERMINAL_CURSOR_BLINK]: "terminalCursorBlink",
     [KEY_TERMINAL_FONT_FAMILY]: "terminalFontFamily",

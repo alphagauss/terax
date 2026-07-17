@@ -24,6 +24,7 @@ import {
   setExplorerGitDecorations,
   setRestoreWindowState,
   setShowHidden,
+  setSourceControlShowUndoCommit,
   setTerminalCursorBlink,
   setTerminalFontFamily,
   setTerminalFontSize,
@@ -84,6 +85,9 @@ export function GeneralSection() {
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
+  );
+  const sourceControlShowUndoCommit = usePreferencesStore(
+    (s) => s.sourceControlShowUndoCommit,
   );
   const terminalWebglEnabled = usePreferencesStore(
     (s) => s.terminalWebglEnabled,
@@ -239,6 +243,21 @@ export function GeneralSection() {
           <Switch
             checked={explorerGitDecorations}
             onCheckedChange={(v) => void setExplorerGitDecorations(v)}
+          />
+        </SettingRow>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label>Source Control</Label>
+        <SettingRow
+          title="Show Undo Commit"
+          description="Show an action on the latest commit that moves HEAD to its parent and keeps the changes staged."
+        >
+          <Switch
+            checked={sourceControlShowUndoCommit}
+            onCheckedChange={(value) =>
+              void setSourceControlShowUndoCommit(value)
+            }
           />
         </SettingRow>
       </div>

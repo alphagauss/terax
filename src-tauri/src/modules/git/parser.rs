@@ -3,6 +3,7 @@ use crate::modules::git::types::GitChangedFile;
 #[derive(Default)]
 pub struct PorcelainV2 {
     pub branch: String,
+    pub head_sha: Option<String>,
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
@@ -17,6 +18,12 @@ pub fn parse_porcelain_v2(stdout: &str) -> PorcelainV2 {
     };
     let mut tokens = stdout.split('\0').filter(|t| !t.is_empty()).peekable();
     while let Some(tok) = tokens.next() {
+        if let Some(rest) = tok.strip_prefix("# branch.oid ") {
+            if !rest.is_empty() && rest != "(initial)" {
+                out.head_sha = Some(rest.to_string());
+            }
+            continue;
+        }
         if let Some(rest) = tok.strip_prefix("# branch.head ") {
             out.branch = rest.to_string();
             out.is_detached = rest == "(detached)";
@@ -168,6 +175,7 @@ mod tests {
         );
         let parsed = parse_porcelain_v2(stdout);
         assert_eq!(parsed.branch, "main");
+        assert_eq!(parsed.head_sha.as_deref(), Some("abc123"));
         assert_eq!(parsed.upstream.as_deref(), Some("origin/main"));
         assert_eq!(parsed.ahead, 2);
         assert_eq!(parsed.behind, 1);
@@ -186,8 +194,16 @@ mod tests {
     fn handles_detached_head() {
         let parsed = parse_porcelain_v2("# branch.oid abc\0# branch.head (detached)\0");
         assert!(parsed.is_detached);
+        assert_eq!(parsed.head_sha.as_deref(), Some("abc"));
         assert_eq!(parsed.branch, "(detached)");
         assert!(parsed.upstream.is_none());
+    }
+
+    #[test]
+    fn unborn_head_has_no_sha() {
+        let parsed = parse_porcelain_v2("# branch.oid (initial)\0# branch.head main\0");
+        assert_eq!(parsed.branch, "main");
+        assert!(parsed.head_sha.is_none());
     }
 
     #[test]
@@ -199,6 +215,7 @@ mod tests {
         assert_eq!(parsed.behind, 0);
         assert!(!parsed.is_detached);
         assert!(parsed.upstream.is_none());
+        assert!(parsed.head_sha.is_none());
     }
 
     // The whole point of skip_fields counting exact fields: a path with spaces

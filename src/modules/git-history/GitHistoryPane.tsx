@@ -8,36 +8,32 @@ import { Spinner } from "@/components/ui/spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
-  native,
   type GitCommitFileChange,
   type GitLogEntry,
+  native,
 } from "@/modules/ai/lib/native";
-import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  Copy01Icon,
-  File02Icon,
-  LinkSquare02Icon,
-} from "@hugeicons/core-free-icons";
+import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   memo,
+  type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { CommitDetail, type CommitDetailFilesEntry } from "./CommitDetail";
 import { GraphRail, MAX_VISIBLE_LANES, railWidth } from "./GraphRail";
 import {
   EMPTY_GRAPH_STATE,
-  layoutGraph,
   type GraphRow,
   type GraphState,
+  layoutGraph,
 } from "./lib/graph";
 import {
   commitWebUrl,
@@ -77,23 +73,22 @@ type Props = {
   onSearchHandle?: (handle: GitHistorySearchHandle | null) => void;
 };
 
-type LoadStatus = "idle" | "initial" | "more" | "error";
+type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
 
-type FilesEntry =
-  | { state: "loading" }
-  | { state: "loaded"; files: GitCommitFileChange[] }
-  | { state: "error"; error: string };
+type FilesEntry = CommitDetailFilesEntry;
 
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : path;
-}
-
-function dirname(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const index = normalized.lastIndexOf("/");
-  if (index <= 0) return "";
-  return normalized.slice(0, index);
+function setFilesCacheEntry(
+  cache: Map<string, FilesEntry>,
+  sha: string,
+  entry: FilesEntry,
+) {
+  cache.delete(sha);
+  cache.set(sha, entry);
+  while (cache.size > FILES_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
 }
 
 function normalizeError(error: unknown): string {
@@ -103,17 +98,6 @@ function normalizeError(error: unknown): string {
     if (typeof message === "string") return message;
   }
   return "Unknown error";
-}
-
-function absoluteTime(secs: number): string {
-  if (!secs) return "";
-  return new Date(secs * 1000).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function authorInitials(name: string): string {
@@ -156,22 +140,6 @@ function compactDate(secs: number): string {
     return `${month} ${day}  ${hh}:${mm}`;
   }
   return `${month} ${day} ${d.getFullYear()}`;
-}
-
-function statusTone(code: string): string {
-  switch (code.toUpperCase()) {
-    case "A":
-      return "text-emerald-600 dark:text-emerald-400";
-    case "M":
-      return "text-amber-600 dark:text-amber-300";
-    case "D":
-      return "text-rose-600 dark:text-rose-400";
-    case "R":
-    case "C":
-      return "text-sky-600 dark:text-sky-300";
-    default:
-      return "text-muted-foreground";
-  }
 }
 
 function highlight(text: string, query: string): ReactNode {
@@ -220,13 +188,15 @@ export function GitHistoryPane({
   } | null>(null);
   const [remoteWeb, setRemoteWeb] = useState<RemoteWebInfo | null>(null);
   const filesCacheRef = useRef(new Map<string, FilesEntry>());
-  const [filesTick, setFilesTick] = useState(0);
+  const [, setFilesTick] = useState(0);
   const bumpFiles = useCallback(() => setFilesTick((n) => n + 1), []);
 
   const requestIdRef = useRef(0);
   const inflightMoreRef = useRef(false);
+  const filesRequestIdRef = useRef(0);
   const filesInflightRef = useRef(new Set<string>());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const openSequenceRef = useRef(0);
   const graphCacheRef = useRef<{
     rows: GraphRow[];
     byCommit: Map<string, GraphRow>;
@@ -288,8 +258,6 @@ export function GitHistoryPane({
     }
     return { graphByCommit: cache.byCommit, maxLaneCount: cache.maxLaneCount };
   }, [commits]);
-  const gridTemplate = GRID_TEMPLATE;
-
   const filtered = useMemo(() => {
     const q = activeSearch.toLowerCase();
     if (!q) return commits;
@@ -316,6 +284,9 @@ export function GitHistoryPane({
 
   const loadInitial = useCallback(async () => {
     const requestId = ++requestIdRef.current;
+    inflightMoreRef.current = false;
+    openSequenceRef.current += 1;
+    setOpenAnchor(null);
     setLoadStatus("initial");
     setError(null);
     setEndReached(false);
@@ -328,22 +299,25 @@ export function GitHistoryPane({
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
       setError(normalizeError(err));
-      setLoadStatus("error");
+      setLoadStatus("initial-error");
     }
   }, [repoRoot]);
 
   const loadMore = useCallback(async () => {
     if (inflightMoreRef.current || endReached) return;
-    if (loadStatus !== "idle") return;
+    if (loadStatus !== "idle" && loadStatus !== "more-error") return;
     const last = commits[commits.length - 1];
     if (!last) return;
+    const requestId = requestIdRef.current;
     inflightMoreRef.current = true;
     setLoadStatus("more");
+    setError(null);
     try {
       const entries = await native.gitLog(repoRoot, {
         limit: PAGE_SIZE,
         beforeSha: last.sha,
       });
+      if (requestId !== requestIdRef.current) return;
       setCommits((prev) => {
         const seen = new Set(prev.map((c) => c.sha));
         const merged = [...prev];
@@ -353,18 +327,23 @@ export function GitHistoryPane({
       if (entries.length < PAGE_SIZE) setEndReached(true);
       setLoadStatus("idle");
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(normalizeError(err));
-      setLoadStatus("error");
+      setLoadStatus("more-error");
     } finally {
-      inflightMoreRef.current = false;
+      if (requestId === requestIdRef.current) {
+        inflightMoreRef.current = false;
+      }
     }
   }, [commits, endReached, loadStatus, repoRoot]);
 
   useEffect(() => {
+    filesRequestIdRef.current += 1;
     filesInflightRef.current.clear();
     filesCacheRef.current.clear();
     bumpFiles();
     setCommits([]);
+    openSequenceRef.current += 1;
     setOpenAnchor(null);
     void loadInitial();
   }, [bumpFiles, loadInitial]);
@@ -389,6 +368,7 @@ export function GitHistoryPane({
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
+    openSequenceRef.current += 1;
     setOpenAnchor((prev) => (prev ? null : prev));
     if (activeSearch) return;
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -416,6 +396,7 @@ export function GitHistoryPane({
   }, [commits.length, activeSearch, endReached, loadMore, loadStatus]);
 
   const handleRefresh = useCallback(() => {
+    filesRequestIdRef.current += 1;
     filesInflightRef.current.clear();
     filesCacheRef.current.clear();
     bumpFiles();
@@ -428,23 +409,29 @@ export function GitHistoryPane({
       const cache = filesCacheRef.current;
       const existing = cache.get(sha);
       if (existing && existing.state !== "error") return;
+      const requestId = filesRequestIdRef.current;
       filesInflightRef.current.add(sha);
-      cache.set(sha, { state: "loading" });
+      setFilesCacheEntry(cache, sha, { state: "loading" });
       bumpFiles();
       try {
-        const files = await native.gitCommitFiles(repoRoot, sha);
-        cache.set(sha, { state: "loaded", files });
-        while (cache.size > FILES_CACHE_LIMIT) {
-          const oldest = cache.keys().next().value;
-          if (oldest === undefined || oldest === sha) break;
-          cache.delete(oldest);
-        }
+        const [files, message] = await Promise.all([
+          native.gitCommitFiles(repoRoot, sha),
+          native.gitCommitMessage(repoRoot, sha),
+        ]);
+        if (requestId !== filesRequestIdRef.current) return;
+        setFilesCacheEntry(cache, sha, { state: "loaded", files, message });
         bumpFiles();
       } catch (err) {
-        cache.set(sha, { state: "error", error: normalizeError(err) });
+        if (requestId !== filesRequestIdRef.current) return;
+        setFilesCacheEntry(cache, sha, {
+          state: "error",
+          error: normalizeError(err),
+        });
         bumpFiles();
       } finally {
-        filesInflightRef.current.delete(sha);
+        if (requestId === filesRequestIdRef.current) {
+          filesInflightRef.current.delete(sha);
+        }
       }
     },
     [bumpFiles, repoRoot],
@@ -453,6 +440,7 @@ export function GitHistoryPane({
   const handleRowClick = useCallback(
     (sha: string, event: React.MouseEvent<HTMLElement>) => {
       if (openAnchor?.sha === sha) {
+        openSequenceRef.current += 1;
         setOpenAnchor(null);
         return;
       }
@@ -462,24 +450,31 @@ export function GitHistoryPane({
       const PADDING = 16;
       const maxLeft = window.innerWidth - POPOVER_WIDTH - PADDING;
       const left = Math.max(PADDING, Math.min(event.clientX, maxLeft));
-      setOpenAnchor({
+      const nextAnchor = {
         sha,
         top: event.clientY,
         left,
         width: 1,
         height: 1,
-      });
+      };
+      const sequence = ++openSequenceRef.current;
+      setOpenAnchor(null);
+      window.setTimeout(() => {
+        if (sequence === openSequenceRef.current) setOpenAnchor(nextAnchor);
+      }, 0);
       void fetchFiles(sha);
     },
     [fetchFiles, openAnchor?.sha],
   );
 
-  const closePopover = useCallback(() => setOpenAnchor(null), []);
+  const closePopover = useCallback(() => {
+    openSequenceRef.current += 1;
+    setOpenAnchor(null);
+  }, []);
 
-  const openFilesEntry = useMemo(() => {
-    if (!openAnchor) return null;
-    return filesCacheRef.current.get(openAnchor.sha) ?? null;
-  }, [openAnchor, filesTick]);
+  const openFilesEntry = openAnchor
+    ? (filesCacheRef.current.get(openAnchor.sha) ?? null)
+    : null;
 
   const handleFileOpen = useCallback(
     (commit: GitLogEntry, file: GitCommitFileChange) => {
@@ -496,14 +491,6 @@ export function GitHistoryPane({
     [onOpenCommitFile, repoRoot],
   );
 
-  const copyToClipboard = useCallback(async (value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      /* noop */
-    }
-  }, []);
-
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={200}>
       <div className="flex h-full min-h-0 flex-col bg-background [contain:layout_style]">
@@ -514,7 +501,7 @@ export function GitHistoryPane({
               Loading commits…
             </span>
           </CenterPlaceholder>
-        ) : loadStatus === "error" && commits.length === 0 ? (
+        ) : loadStatus === "initial-error" && commits.length === 0 ? (
           <CenterPlaceholder>
             <div className="text-[13px] font-medium">
               Could not load history
@@ -539,7 +526,7 @@ export function GitHistoryPane({
               className="grid shrink-0 items-center gap-3 border-b border-border/40 bg-card/55 pr-3 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
               style={{
                 height: TABLE_HEADER_HEIGHT,
-                gridTemplateColumns: gridTemplate,
+                gridTemplateColumns: GRID_TEMPLATE,
               }}
             >
               <div />
@@ -583,7 +570,7 @@ export function GitHistoryPane({
                         active={openAnchor?.sha === commit.sha}
                         graphRow={graphByCommit.get(commit.sha) ?? null}
                         maxLaneCount={maxLaneCount}
-                        gridTemplate={gridTemplate}
+                        gridTemplate={GRID_TEMPLATE}
                         onClick={handleRowClick}
                       />
                     </div>
@@ -602,14 +589,20 @@ export function GitHistoryPane({
                   End of history
                 </div>
               ) : null}
-              {loadStatus === "error" && commits.length > 0 ? (
+              {(loadStatus === "initial-error" ||
+                loadStatus === "more-error") &&
+              commits.length > 0 ? (
                 <div className="flex items-center justify-center gap-2 py-3 text-[11px] text-destructive">
-                  {error ?? "Failed to load more"}
+                  {error ?? "Failed to load commits"}
                   <Button
                     size="xs"
                     variant="ghost"
                     className="h-6 cursor-pointer text-[11px]"
-                    onClick={() => void loadMore()}
+                    onClick={
+                      loadStatus === "initial-error"
+                        ? handleRefresh
+                        : () => void loadMore()
+                    }
                   >
                     Retry
                   </Button>
@@ -659,12 +652,22 @@ export function GitHistoryPane({
                   if (!commit) return null;
                   return (
                     <CommitDetail
+                      key={commit.sha}
                       commit={commit}
                       filesEntry={openFilesEntry}
-                      remoteWeb={remoteWeb}
-                      onCopySha={copyToClipboard}
-                      onOpenFile={handleFileOpen}
-                      onRetryFiles={() => void fetchFiles(openAnchor.sha)}
+                      remoteAction={
+                        remoteWeb
+                          ? {
+                              label: hostLabel(remoteWeb),
+                              onClick: () =>
+                                void openUrl(
+                                  commitWebUrl(remoteWeb, commit.sha),
+                                ).catch(console.error),
+                            }
+                          : undefined
+                      }
+                      onOpenFile={(file) => void handleFileOpen(commit, file)}
+                      onRetry={() => void fetchFiles(openAnchor.sha)}
                     />
                   );
                 })()
@@ -800,236 +803,6 @@ const CommitRow = memo(function CommitRow({
         ) : commit.filesChanged === 0 ? (
           <span className="text-muted-foreground/40">—</span>
         ) : null}
-      </span>
-    </button>
-  );
-});
-
-type CommitDetailProps = {
-  commit: GitLogEntry;
-  filesEntry: FilesEntry | null;
-  remoteWeb: RemoteWebInfo | null;
-  onCopySha: (value: string) => Promise<void> | void;
-  onOpenFile: (
-    commit: GitLogEntry,
-    file: GitCommitFileChange,
-  ) => Promise<void> | void;
-  onRetryFiles: () => void;
-};
-
-function CommitDetail({
-  commit,
-  filesEntry,
-  remoteWeb,
-  onCopySha,
-  onOpenFile,
-  onRetryFiles,
-}: CommitDetailProps) {
-  const absolute = absoluteTime(commit.timestampSecs);
-  const webUrl = remoteWeb ? commitWebUrl(remoteWeb, commit.sha) : null;
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) return;
-    const t = window.setTimeout(() => setCopied(false), 1100);
-    return () => window.clearTimeout(t);
-  }, [copied]);
-
-  return (
-    <div className="flex max-h-[60vh] min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border/45 p-3">
-        <div className="flex items-start gap-2">
-          <span className="mt-px shrink-0 rounded bg-muted/65 px-1.5 py-0.5 font-mono text-[10.5px] leading-none tabular-nums text-muted-foreground">
-            {commit.shortSha}
-          </span>
-          <div className="min-w-0 flex-1 text-[12.5px] font-semibold leading-snug text-foreground">
-            {commit.subject || (
-              <span className="text-muted-foreground">(no subject)</span>
-            )}
-          </div>
-        </div>
-        <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <span className="truncate">{commit.author || "Unknown"}</span>
-          {commit.authorEmail ? (
-            <>
-              <span className="text-muted-foreground/45">·</span>
-              <span className="truncate text-muted-foreground/85">
-                {commit.authorEmail}
-              </span>
-            </>
-          ) : null}
-          <span className="text-muted-foreground/45">·</span>
-          <span className="shrink-0 tabular-nums">{absolute}</span>
-        </div>
-
-        <div className="mt-2.5 flex items-center gap-1">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="h-6 cursor-pointer gap-1.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              void onCopySha(commit.sha);
-              setCopied(true);
-            }}
-          >
-            <HugeiconsIcon icon={Copy01Icon} size={11} strokeWidth={1.9} />
-            {copied ? "Copied" : "Copy SHA"}
-          </Button>
-          {remoteWeb && webUrl ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="h-6 cursor-pointer gap-1.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-              onClick={() => void openUrl(webUrl).catch(console.error)}
-            >
-              <HugeiconsIcon
-                icon={LinkSquare02Icon}
-                size={11}
-                strokeWidth={1.9}
-              />
-              {hostLabel(remoteWeb)}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CommitFiles
-          commit={commit}
-          filesEntry={filesEntry}
-          onOpenFile={onOpenFile}
-          onRetry={onRetryFiles}
-        />
-      </div>
-    </div>
-  );
-}
-
-function CommitFiles({
-  commit,
-  filesEntry,
-  onOpenFile,
-  onRetry,
-}: {
-  commit: GitLogEntry;
-  filesEntry: FilesEntry | null;
-  onOpenFile: (
-    commit: GitLogEntry,
-    file: GitCommitFileChange,
-  ) => Promise<void> | void;
-  onRetry: () => void;
-}) {
-  if (!filesEntry || filesEntry.state === "loading") {
-    return (
-      <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
-        <Spinner className="size-3" />
-        Loading files…
-      </div>
-    );
-  }
-  if (filesEntry.state === "error") {
-    return (
-      <div className="flex items-center justify-between gap-2 px-3 py-3 text-[11px] text-destructive">
-        <span className="truncate">{filesEntry.error}</span>
-        <Button
-          size="xs"
-          variant="ghost"
-          className="h-6 cursor-pointer text-[11px]"
-          onClick={onRetry}
-        >
-          Retry
-        </Button>
-      </div>
-    );
-  }
-  if (filesEntry.files.length === 0) {
-    return (
-      <div className="px-3 py-3 text-[11px] text-muted-foreground">
-        No file changes.
-      </div>
-    );
-  }
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-between px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
-        <span>Files</span>
-        <span className="rounded-sm bg-muted/55 px-1 py-px text-[9.5px] tabular-nums text-muted-foreground/85 normal-case tracking-normal">
-          {filesEntry.files.length}
-        </span>
-      </div>
-      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
-        <ul className="space-y-px px-1.5 pb-2">
-          {filesEntry.files.map((file) => (
-            <li key={file.path}>
-              <FileRow
-                file={file}
-                onOpen={() => void onOpenFile(commit, file)}
-              />
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-const FileRow = memo(function FileRow({
-  file,
-  onOpen,
-}: {
-  file: GitCommitFileChange;
-  onOpen: () => void;
-}) {
-  const fileName = basename(file.path);
-  const dir = dirname(file.path);
-  const iconUrl = fileIconUrl(fileName);
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-accent/40"
-    >
-      {iconUrl ? (
-        <img src={iconUrl} alt="" className="size-3.5 shrink-0" />
-      ) : (
-        <span className="size-3.5 shrink-0" />
-      )}
-      <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
-        <span className="truncate text-[11.5px] font-medium leading-tight">
-          {fileName}
-        </span>
-        {dir ? (
-          <span className="min-w-0 flex-1 truncate text-[10px] leading-tight text-muted-foreground/80">
-            {dir}
-          </span>
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums">
-        {file.isBinary ? (
-          <span className="text-muted-foreground/70">binary</span>
-        ) : (
-          <>
-            {file.added > 0 ? (
-              <span className="text-emerald-600 dark:text-emerald-400">
-                +{file.added}
-              </span>
-            ) : null}
-            {file.removed > 0 ? (
-              <span className="text-rose-600 dark:text-rose-400">
-                −{file.removed}
-              </span>
-            ) : null}
-          </>
-        )}
-      </div>
-      <span
-        className={cn(
-          "inline-flex w-4 shrink-0 justify-center text-[9.5px] font-bold leading-none tabular-nums",
-          statusTone(file.status),
-        )}
-        title={file.statusLabel}
-      >
-        {file.status.toUpperCase()}
       </span>
     </button>
   );

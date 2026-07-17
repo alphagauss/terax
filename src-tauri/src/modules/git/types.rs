@@ -34,6 +34,7 @@ pub struct GitChangedFile {
 pub struct GitStatusSnapshot {
     pub repo_root: String,
     pub branch: String,
+    pub head_sha: Option<String>,
     pub upstream: Option<String>,
     pub ahead: u32,
     pub behind: u32,
@@ -101,6 +102,7 @@ pub struct GitLogEntry {
     pub author_email: String,
     pub timestamp_secs: i64,
     pub parents: Vec<String>,
+    pub refs: Vec<String>,
     pub subject: String,
     pub files_changed: u32,
     pub insertions: u32,

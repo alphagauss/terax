@@ -70,7 +70,7 @@ import {
   useSidebarPanel,
 } from "@/modules/sidebar";
 import {
-  SourceControlPanel,
+  SourceControlViewContainer,
   useSourceControlContext,
 } from "@/modules/source-control";
 import {
@@ -723,6 +723,7 @@ export default function App() {
       sidebarView,
       cycleSidebarView,
       openCommitHistoryTab,
+      closeTab,
     });
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
@@ -1305,11 +1306,13 @@ export default function App() {
                         onAttachToAgent={handleAttachFileToAgent}
                       />
                     ) : (
-                      <SourceControlPanel
+                      <SourceControlViewContainer
                         open
                         sourceControl={sourceControl}
                         onOpenDiff={openGitDiffTab}
                         onOpenGitGraph={openGitGraphFromContext}
+                        fullGraphOpen={activeTab?.kind === "git-history"}
+                        onOpenCommitFile={openCommitFileDiffTab}
                         onOpenFile={handleOpenFile}
                         onNavigateToPath={cdInNewTab}
                       />

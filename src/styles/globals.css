@@ -510,6 +510,31 @@ html *::-webkit-scrollbar {
   animation: terax-shimmer var(--shimmer-duration, 2s) linear infinite;
 }
 
+html.sidebar-section-view-transition {
+  view-transition-name: none;
+}
+
+html.sidebar-section-view-transition::view-transition-group(*) {
+  animation-duration: 150ms;
+  animation-timing-function: linear;
+}
+
+html.sidebar-section-view-transition::view-transition-old(*) {
+  animation: none;
+  mix-blend-mode: normal;
+  object-fit: none;
+  object-position: top left;
+  opacity: 0;
+}
+
+html.sidebar-section-view-transition::view-transition-new(*) {
+  animation: none;
+  mix-blend-mode: normal;
+  object-fit: none;
+  object-position: top left;
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --scrollbar-show-duration: 0.01ms;

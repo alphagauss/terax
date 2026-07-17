@@ -71,6 +71,7 @@ fn status_on_empty_repo_has_no_files() {
     let fx = GitRepoFixture::new();
     let snap = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).expect("status");
     assert_eq!(snap.branch, "main");
+    assert!(snap.head_sha.is_none());
     assert!(snap.changed_files.is_empty());
     assert_eq!(snap.ahead, 0);
     assert_eq!(snap.behind, 0);
@@ -127,6 +128,95 @@ fn stage_then_commit_produces_log_entry() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sha, commit.commit_sha);
     assert_eq!(entries[0].subject, "add a");
+    assert!(entries[0].refs.iter().any(|value| value.contains("main")));
+
+    let snap = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert_eq!(snap.head_sha.as_deref(), Some(commit.commit_sha.as_str()));
+}
+
+#[test]
+fn undo_commit_moves_head_and_keeps_changes_staged() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "v1\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "v1"]);
+    let first = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+
+    fx.write_file("a.txt", "v2\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "v2"]);
+    let second = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+
+    operations::undo_commit(&fx.registry, &fx.repo_str(), &second, &fx.workspace)
+        .expect("undo_commit");
+
+    let status = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert_eq!(status.head_sha.as_deref(), Some(first.as_str()));
+    let changed = status
+        .changed_files
+        .iter()
+        .find(|file| file.path == "a.txt")
+        .expect("undone commit remains staged");
+    assert!(changed.staged);
+    assert!(!changed.unstaged);
+}
+
+#[test]
+fn undo_commit_rejects_a_stale_expected_head() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    for version in 1..=3 {
+        fx.write_file("a.txt", &format!("v{version}\n"));
+        fx.run_git(&["add", "a.txt"]);
+        fx.run_git(&["commit", "-q", "-m", &format!("v{version}")]);
+    }
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 3, None, &fx.workspace).unwrap();
+    let current = entries[0].sha.clone();
+    let stale = entries[1].sha.clone();
+
+    let error = operations::undo_commit(&fx.registry, &fx.repo_str(), &stale, &fx.workspace)
+        .expect_err("stale HEAD must fail");
+    assert!(error.to_string().contains("HEAD changed"));
+    let status = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
+    assert_eq!(status.head_sha.as_deref(), Some(current.as_str()));
+}
+
+#[test]
+fn undo_commit_requires_a_full_sha() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let error = operations::undo_commit(&fx.registry, &fx.repo_str(), "abc123", &fx.workspace)
+        .expect_err("abbreviated SHA must fail");
+    assert!(error.to_string().contains("invalid expected HEAD sha"));
+}
+
+#[test]
+fn undo_commit_rejects_the_root_commit() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "root\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "root"]);
+    let root = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+
+    let error = operations::undo_commit(&fx.registry, &fx.repo_str(), &root, &fx.workspace)
+        .expect_err("root commit must fail");
+    assert!(error.to_string().contains("root commit cannot be undone"));
 }
 
 #[test]
@@ -416,6 +506,135 @@ fn commit_files_reports_added_and_modified() {
     assert_eq!(files[0].path, "a.txt");
     assert_eq!(files[0].status, "M");
     assert_eq!(files[0].status_label, "Modified");
+    assert_eq!(files[0].added, 1);
+    assert_eq!(files[0].removed, 1);
+    assert!(!files[0].is_binary);
+}
+
+#[test]
+fn commit_files_reports_files_from_the_root_commit() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("root.txt", "first\nsecond\n");
+    fx.run_git(&["add", "root.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "root"]);
+
+    let root = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &root, &fx.workspace)
+        .expect("root commit files");
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "root.txt");
+    assert_eq!(files[0].status, "A");
+    assert_eq!((files[0].added, files[0].removed), (2, 0));
+}
+
+#[test]
+fn commit_files_reports_a_merge_relative_to_its_first_parent() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("base.txt", "base\n");
+    fx.run_git(&["add", "base.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "base"]);
+
+    fx.run_git(&["checkout", "-q", "-b", "feature"]);
+    fx.write_file("feature.txt", "feature\n");
+    fx.run_git(&["add", "feature.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "feature"]);
+
+    fx.run_git(&["checkout", "-q", "main"]);
+    fx.write_file("main.txt", "main\n");
+    fx.run_git(&["add", "main.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "main"]);
+    fx.run_git(&["merge", "-q", "--no-ff", "feature", "-m", "merge"]);
+
+    let merge = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge, &fx.workspace)
+        .expect("merge commit files");
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "feature.txt");
+    assert_eq!(files[0].status, "A");
+    assert_eq!((files[0].added, files[0].removed), (1, 0));
+}
+
+#[test]
+fn commit_files_merges_status_and_numstat_for_added_modified_and_deleted() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("modified.txt", "before\n");
+    fx.write_file("deleted.txt", "remove me\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+
+    fx.write_file("modified.txt", "after\n");
+    fx.write_file("added.txt", "new\n");
+    std::fs::remove_file(fx.repo_path.join("deleted.txt")).unwrap();
+    fx.run_git(&["add", "-A"]);
+    fx.run_git(&["commit", "-q", "-m", "mixed"]);
+
+    let head = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+    let files = operations::commit_files(&fx.registry, &fx.repo_str(), &head, &fx.workspace)
+        .expect("commit_files");
+
+    let added = files.iter().find(|file| file.path == "added.txt").unwrap();
+    assert_eq!(
+        (added.status.as_str(), added.added, added.removed),
+        ("A", 1, 0)
+    );
+    let modified = files
+        .iter()
+        .find(|file| file.path == "modified.txt")
+        .unwrap();
+    assert_eq!(
+        (modified.status.as_str(), modified.added, modified.removed),
+        ("M", 1, 1)
+    );
+    let deleted = files
+        .iter()
+        .find(|file| file.path == "deleted.txt")
+        .unwrap();
+    assert_eq!(
+        (deleted.status.as_str(), deleted.added, deleted.removed),
+        ("D", 0, 1)
+    );
+}
+
+#[test]
+fn commit_message_returns_subject_and_body() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&[
+        "commit",
+        "-q",
+        "-m",
+        "subject line",
+        "-m",
+        "body line one\nbody line two",
+    ]);
+    let head = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+        .sha
+        .clone();
+
+    let message = operations::commit_message(&fx.registry, &fx.repo_str(), &head, &fx.workspace)
+        .expect("commit_message");
+    assert_eq!(message, "subject line\n\nbody line one\nbody line two");
 }
 
 #[test]
