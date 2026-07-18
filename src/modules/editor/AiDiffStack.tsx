@@ -1,4 +1,4 @@
-import type { AiDiffTab, Tab } from "@/modules/tabs";
+import type { AiDiffTab, Tab } from "@/modules/workbench";
 import { AiDiffPane } from "./AiDiffPane";
 
 type Props = {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  createCommandItems,
   type CommandPaletteActionContext,
+  createCommandItems,
 } from "./commands";
 
 function context(): CommandPaletteActionContext {
@@ -21,9 +21,9 @@ function context(): CommandPaletteActionContext {
     openNewPreview: noop,
     openGitGraph: noop,
     toggleSourceControl: noop,
-    closeActiveTabOrPane: noop,
-    splitPaneRight: noop,
-    splitPaneDown: noop,
+    closeActiveTab: noop,
+    splitGroupRight: noop,
+    splitGroupDown: noop,
     focusSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,

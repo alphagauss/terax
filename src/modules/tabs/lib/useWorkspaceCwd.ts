@@ -1,5 +1,5 @@
+import type { Tab } from "@/modules/workbench";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { Tab } from "./useTabs";
 
 type Result = {
   explorerRoot: string | null;

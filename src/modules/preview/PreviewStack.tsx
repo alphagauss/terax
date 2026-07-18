@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { PreviewTab, Tab } from "@/modules/tabs";
+import type { PreviewTab, Tab } from "@/modules/workbench";
 import { useEffect, useRef } from "react";
 import { PreviewPane, type PreviewPaneHandle } from "./PreviewPane";
 

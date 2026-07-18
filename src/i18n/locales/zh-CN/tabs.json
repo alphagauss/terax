@@ -12,5 +12,13 @@
   "privacy": "隐私",
   "editor": "编辑器",
   "preview": "预览",
-  "gitGraph": "Git Graph"
+  "gitGraph": "Git 图",
+  "splitRight": "向右拆分",
+  "splitAndMove": "拆分和移动",
+  "splitMove": {
+    "up": "向上拆分",
+    "down": "向下拆分",
+    "left": "向左拆分",
+    "right": "向右拆分"
+  }
 }

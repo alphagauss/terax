@@ -1,191 +1,118 @@
+import {
+  hydrateSpaceWorkbench,
+  isSerializedWorkbenchNode,
+  serializeSpaceWorkbench,
+} from "@/modules/spaces/lib/serialize";
+import type { Tab, WorkbenchState } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
-import type { PaneNode } from "@/modules/terminal/lib/panes";
-import type { Tab } from "@/modules/tabs/lib/useTabs";
-import { hydrateTabs, serializeTabs, type SerializedTab } from "./serialize";
 
 function counter(start = 100): () => number {
-  let n = start;
-  return () => n++;
+  let value = start;
+  return () => value++;
 }
 
-function leafIdsOf(node: PaneNode): number[] {
-  return node.kind === "leaf" ? [node.id] : node.children.flatMap(leafIdsOf);
-}
-
-function term(over: Partial<Extract<Tab, { kind: "terminal" }>>): Tab {
-  return {
+function state(): WorkbenchState {
+  const terminal: Tab = {
     id: 1,
+    terminalId: 10,
     kind: "terminal",
-    spaceId: "s1",
-    title: "shell",
-    paneTree: { kind: "leaf", id: 2, cwd: "/a" },
-    activeLeafId: 2,
-    ...over,
-  } as Tab;
+    spaceId: "default",
+    title: "api",
+    cwd: "/work/api",
+    customTitle: "api",
+  };
+  const editor: Tab = {
+    id: 2,
+    kind: "editor",
+    spaceId: "default",
+    title: "main.ts",
+    path: "/work/main.ts",
+    explorerRoot: "/work",
+    dirty: false,
+    preview: false,
+  };
+  return {
+    tabs: { 1: terminal, 2: editor },
+    spaces: {
+      default: {
+        root: {
+          kind: "split",
+          id: 20,
+          axis: "row",
+          sizes: [35, 65],
+          children: [
+            { kind: "group", id: 21, groupId: 30 },
+            { kind: "group", id: 22, groupId: 31 },
+          ],
+        },
+        groups: {
+          30: { id: 30, tabIds: [1], activeTabId: 1 },
+          31: { id: 31, tabIds: [2], activeTabId: 2 },
+        },
+        activeGroupId: 31,
+      },
+    },
+  };
 }
 
-describe("serializeTabs", () => {
-  it("preserves a file tab's sidebar root", () => {
-    const tabs: Tab[] = [
-      {
-        id: 1,
-        kind: "editor",
-        spaceId: "s1",
-        title: "x",
-        path: "/workspace/src/x.ts",
-        explorerRoot: "/workspace",
-        dirty: false,
-        preview: false,
-      },
-    ];
-
-    expect(serializeTabs(tabs)).toEqual([
-      {
-        kind: "editor",
-        path: "/workspace/src/x.ts",
-        explorerRoot: "/workspace",
-      },
-    ]);
-  });
-
-  it("drops private terminals and transient kinds", () => {
-    const tabs: Tab[] = [
-      term({ id: 1 }),
-      term({ id: 3, private: true }),
-      {
-        id: 5,
-        kind: "git-diff",
-        spaceId: "s1",
-        title: "d",
-        path: "/a/x",
-        repoRoot: "/a",
-        mode: "+",
-        originalPath: null,
-      },
-      {
-        id: 7,
-        kind: "editor",
-        spaceId: "s1",
-        title: "x",
-        path: "/a/x.ts",
-        dirty: false,
-        preview: false,
-      },
-    ];
-    const out = serializeTabs(tabs);
-    expect(out.map((t) => t.kind)).toEqual(["terminal", "editor"]);
-  });
-
-  it("marks the active leaf in a split tree", () => {
-    const tree: PaneNode = {
+describe("Workbench Space serialization", () => {
+  it("round-trips layout, active group, tabs, and terminal cwd", () => {
+    const serialized = serializeSpaceWorkbench(state(), "default");
+    expect(serialized).toMatchObject({
       kind: "split",
-      id: 10,
-      dir: "row",
-      children: [
-        { kind: "leaf", id: 11, cwd: "/a" },
-        { kind: "leaf", id: 12, cwd: "/b" },
-      ],
-    };
-    const [s] = serializeTabs([term({ paneTree: tree, activeLeafId: 12 })]);
-    const node = s as Extract<SerializedTab, { kind: "terminal" }>;
-    expect(node.tree.kind).toBe("split");
-    if (node.tree.kind === "split") {
-      expect(node.tree.children[1]).toMatchObject({ cwd: "/b", active: true });
-      expect(node.tree.children[0]).not.toHaveProperty("active");
-    }
-  });
-});
-
-describe("hydrateTabs", () => {
-  it("round-trips structure, cwd, blocks and active leaf", () => {
-    const tree: PaneNode = {
+      axis: "row",
+      sizes: [35, 65],
+    });
+    if (!serialized) throw new Error("missing serialized Workbench");
+    const restored = hydrateSpaceWorkbench(serialized, "default", counter());
+    expect(restored?.space.root).toMatchObject({
       kind: "split",
-      id: 10,
-      dir: "col",
-      children: [
-        { kind: "leaf", id: 11, cwd: "/a" },
-        { kind: "leaf", id: 12, cwd: "/b" },
-      ],
-    };
-    const tabs: Tab[] = [
-      term({
-        paneTree: tree,
-        activeLeafId: 12,
-        blocks: true,
-        customTitle: "x",
-      }),
-    ];
-    const serialized = serializeTabs(tabs);
-    const [restored] = hydrateTabs(serialized, "s2", counter());
-    expect(restored.kind).toBe("terminal");
-    if (restored.kind !== "terminal") return;
-
-    expect(restored.spaceId).toBe("s2");
-    expect(restored.cold).toBe(true);
-    expect(restored.blocks).toBe(true);
-    expect(restored.customTitle).toBe("x");
-    expect(restored.paneTree.kind).toBe("split");
-
-    const leaves = leafIdsOf(restored.paneTree);
-    expect(new Set(leaves).size).toBe(2);
-    expect(leaves).toContain(restored.activeLeafId);
-    // active leaf was the second one, which carried /b
-    expect(restored.cwd).toBe("/b");
-  });
-
-  it("allocates fresh, unique, monotonic ids across all tabs and leaves", () => {
-    const tree: PaneNode = {
-      kind: "split",
-      id: 10,
-      dir: "row",
-      children: [
-        { kind: "leaf", id: 11, cwd: "/a" },
-        { kind: "leaf", id: 12, cwd: "/b" },
-      ],
-    };
-    const serialized = serializeTabs([
-      term({ id: 1, paneTree: tree, activeLeafId: 11 }),
-      term({ id: 2 }),
-    ]);
-    const restored = hydrateTabs(serialized, "s1", counter(100));
-
-    const ids: number[] = [];
-    for (const t of restored) {
-      ids.push(t.id);
-      if (t.kind === "terminal") ids.push(...leafIdsOf(t.paneTree));
-    }
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(Math.min(...ids)).toBeGreaterThanOrEqual(100);
-  });
-
-  it("returns empty for corrupted input without throwing", () => {
-    expect(hydrateTabs([] as SerializedTab[], "s1", counter())).toEqual([]);
-    expect(
-      hydrateTabs(null as unknown as SerializedTab[], "s1", counter()),
-    ).toEqual([]);
-  });
-
-  it("hydrates editor/preview/markdown as cold with derived titles", () => {
-    const serialized: SerializedTab[] = [
-      { kind: "editor", path: "/a/foo.ts", explorerRoot: "/a" },
-      { kind: "editor", path: "/a/legacy.md" },
-      { kind: "preview", url: "http://localhost:5173/x" },
-      { kind: "markdown", path: "/a/README.md" },
-    ];
-    const out = hydrateTabs(serialized, "s1", counter());
-    expect(out.every((t) => t.cold === true)).toBe(true);
-    expect(out.map((t) => t.title)).toEqual([
-      "foo.ts",
-      "legacy.md",
-      "localhost:5173",
-      "README.md",
-    ]);
-    expect(out[0]).toMatchObject({ explorerRoot: "/a" });
-    expect(out.map((t) => t.kind)).toEqual([
+      axis: "row",
+      sizes: [35, 65],
+    });
+    expect(restored?.tabs.map((tab) => tab.kind)).toEqual([
+      "terminal",
       "editor",
-      "markdown",
-      "preview",
-      "markdown",
     ]);
+    expect(restored?.tabs[0]).toMatchObject({
+      kind: "terminal",
+      cwd: "/work/api",
+      customTitle: "api",
+      cold: true,
+    });
+    const active = restored?.space.groups[restored.space.activeGroupId];
+    expect(
+      restored?.tabs.find((tab) => tab.id === active?.activeTabId)?.kind,
+    ).toBe("editor");
+  });
+
+  it("drops private and transient pages and collapses empty branches", () => {
+    const current = state();
+    current.tabs[1] = { ...current.tabs[1], private: true } as Tab;
+    const serialized = serializeSpaceWorkbench(current, "default");
+    expect(serialized).toMatchObject({ kind: "group" });
+  });
+
+  it("rejects the old flat Space state shape", () => {
+    expect(isSerializedWorkbenchNode({ tabs: [], activeTabIndex: 0 })).toBe(
+      false,
+    );
+  });
+
+  it("rejects invalid active flags and panel sizes", () => {
+    const group = {
+      kind: "group",
+      tabs: [{ kind: "terminal" }],
+      activeTabIndex: 0,
+    };
+    expect(isSerializedWorkbenchNode({ ...group, active: "yes" })).toBe(false);
+    expect(
+      isSerializedWorkbenchNode({
+        kind: "split",
+        axis: "row",
+        children: [group, group],
+        sizes: [100, -1],
+      }),
+    ).toBe(false);
   });
 });

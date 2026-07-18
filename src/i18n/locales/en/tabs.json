@@ -12,5 +12,13 @@
   "privacy": "Privacy",
   "editor": "Editor",
   "preview": "Preview",
-  "gitGraph": "Git Graph"
+  "gitGraph": "Git Graph",
+  "splitRight": "Split Right",
+  "splitAndMove": "Split and Move",
+  "splitMove": {
+    "up": "Split Up",
+    "down": "Split Down",
+    "left": "Split Left",
+    "right": "Split Right"
+  }
 }

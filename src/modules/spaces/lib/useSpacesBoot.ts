@@ -1,25 +1,33 @@
 import { native } from "@/modules/ai/lib/native";
-import type { Tab } from "@/modules/tabs";
-import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
-import { isLeaf, type PaneNode } from "@/modules/terminal/lib/panes";
+import {
+  canBootWorkspaceEnvironment,
+  initialWorkspaceRoot,
+} from "@/modules/spaces/lib/activeSpace";
+import {
+  freshSpaceWorkbench,
+  hydrateSpaceWorkbench,
+} from "@/modules/spaces/lib/serialize";
+import {
+  loadAll,
+  type SpaceMeta,
+  saveActiveId,
+  saveSpacesList,
+} from "@/modules/spaces/lib/store";
+import { useSpaces } from "@/modules/spaces/lib/useSpaces";
+import {
+  DEFAULT_SPACE_ID,
+  type Tab,
+  type WorkbenchState,
+} from "@/modules/workbench/types";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { useEffect, useRef } from "react";
-import {
-  canBootWorkspaceEnvironment,
-  findActiveSpace,
-  initialWorkspaceRoot,
-} from "./activeSpace";
-import { freshTerminalTab, hydrateTabs } from "./serialize";
-import { loadAll, type SpaceMeta, saveActiveId, saveSpacesList } from "./store";
-import { useSpaces } from "./useSpaces";
 
 type Params = {
   ready: boolean;
   allocId: () => number;
-  replaceTabs: (tabs: Tab[], activeId: number) => void;
+  replaceWorkbench: (state: WorkbenchState, activeSpaceId: string) => void;
   markBooted: () => void;
-  setActiveSpaceForNewTabs: (id: string) => void;
   initializeWorkspaceEnv: () => Promise<string | null>;
   environmentHome: string | null;
 };
@@ -36,29 +44,24 @@ export async function prepareWorkspaceBoot<T>(
 }
 
 function uniqueCwds(tabs: Tab[]): string[] {
-  const set = new Set<string>();
-  const walk = (n: PaneNode) => {
-    if (isLeaf(n)) {
-      if (n.cwd) set.add(n.cwd);
-      return;
-    }
-    for (const c of n.children) walk(c);
-  };
-  for (const t of tabs) {
-    if (t.kind === "terminal") walk(t.paneTree);
-    if ((t.kind === "editor" || t.kind === "markdown") && t.explorerRoot) {
-      set.add(t.explorerRoot);
+  const paths = new Set<string>();
+  for (const tab of tabs) {
+    if (tab.kind === "terminal" && tab.cwd) paths.add(tab.cwd);
+    if (
+      (tab.kind === "editor" || tab.kind === "markdown") &&
+      tab.explorerRoot
+    ) {
+      paths.add(tab.explorerRoot);
     }
   }
-  return [...set];
+  return [...paths];
 }
 
 export function useSpacesBoot({
   ready,
   allocId,
-  replaceTabs,
+  replaceWorkbench,
   markBooted,
-  setActiveSpaceForNewTabs,
   initializeWorkspaceEnv,
   environmentHome,
 }: Params) {
@@ -82,7 +85,8 @@ export function useSpacesBoot({
           return;
         }
         const { resolvedHome, loaded } = prepared;
-        const { spaces, activeId, states } = loaded;
+        let spaces = loaded.spaces;
+        let activeSpaceId = loaded.activeId;
 
         if (spaces.length === 0) {
           const root = initialWorkspaceRoot(
@@ -97,48 +101,40 @@ export function useSpacesBoot({
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
-          const tab = freshTerminalTab(DEFAULT_SPACE_ID, root, allocId);
-          await saveSpacesList([meta]);
-          await saveActiveId(DEFAULT_SPACE_ID);
-          setActiveSpaceForNewTabs(DEFAULT_SPACE_ID);
-          useSpaces.getState().hydrate([meta], DEFAULT_SPACE_ID);
-          replaceTabs([tab], tab.id);
-          return;
-        }
-
-        const restored: Tab[] = [];
-        for (const space of spaces) {
-          const st = states.get(space.id);
-          if (!st) continue;
-          restored.push(...hydrateTabs(st.tabs, space.id, allocId));
+          spaces = [meta];
+          activeSpaceId = meta.id;
+          await saveSpacesList(spaces);
+          await saveActiveId(meta.id);
         }
 
         const active =
-          activeId && spaces.some((s) => s.id === activeId)
-            ? activeId
+          activeSpaceId && spaces.some((space) => space.id === activeSpaceId)
+            ? activeSpaceId
             : spaces[0].id;
-        setActiveSpaceForNewTabs(active);
+        const state: WorkbenchState = { tabs: {}, spaces: {} };
 
-        if (!restored.some((t) => t.spaceId === active)) {
-          const root = findActiveSpace(spaces, active)?.root ?? resolvedHome;
-          restored.push(freshTerminalTab(active, root, allocId));
+        for (const spaceMeta of spaces) {
+          const persisted = loaded.states.get(spaceMeta.id);
+          const restored = persisted
+            ? hydrateSpaceWorkbench(persisted.workbench, spaceMeta.id, allocId)
+            : null;
+          const workbench =
+            restored ??
+            freshSpaceWorkbench(spaceMeta.id, spaceMeta.root, allocId);
+          state.spaces[spaceMeta.id] = workbench.space;
+          for (const tab of workbench.tabs) state.tabs[tab.id] = tab;
         }
 
         await Promise.allSettled(
-          uniqueCwds(restored).map((cwd) => native.workspaceAuthorize(cwd)),
+          uniqueCwds(Object.values(state.tabs)).map((cwd) =>
+            native.workspaceAuthorize(cwd),
+          ),
         );
 
-        const initialActiveIndex: Record<string, number> = {};
-        for (const [id, st] of states)
-          initialActiveIndex[id] = st.activeTabIndex;
-        useSpaces.getState().hydrate(spaces, active, initialActiveIndex);
-
-        const inActive = restored.filter((t) => t.spaceId === active);
-        const idx = states.get(active)?.activeTabIndex ?? 0;
-        const activeTab = inActive[idx] ?? inActive[0] ?? restored[0];
-        replaceTabs(restored, activeTab.id);
-      } catch (e) {
-        console.error("[terax] spaces boot failed:", e);
+        useSpaces.getState().hydrate(spaces, active);
+        replaceWorkbench(state, active);
+      } catch (error) {
+        console.error("[terax] spaces boot failed:", error);
       } finally {
         if (done.current) markBooted();
       }
@@ -146,9 +142,8 @@ export function useSpacesBoot({
   }, [
     ready,
     allocId,
-    replaceTabs,
+    replaceWorkbench,
     markBooted,
-    setActiveSpaceForNewTabs,
     initializeWorkspaceEnv,
     environmentHome,
   ]);

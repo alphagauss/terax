@@ -16,7 +16,7 @@ const ShellInput = lazy(() => import("@/modules/terminal/block/ShellInput"));
 type Props = {
   isBlockTab: boolean;
   isTerminalTab: boolean;
-  activeLeafId: number | null;
+  terminalId: number | null;
   cwd: string | null;
   home: string | null;
 };
@@ -24,14 +24,14 @@ type Props = {
 export function WorkspaceInputBar({
   isBlockTab,
   isTerminalTab,
-  activeLeafId,
+  terminalId,
   cwd,
   home,
 }: Props) {
   const { resolvedMode, themeId, customThemes } = useTheme();
   const themeKey = `${resolvedMode}:${themeId}:${customThemes.length}`;
   const { os, shell } = useSystemInfo();
-  const controller = useBlockController(isBlockTab ? activeLeafId : null);
+  const controller = useBlockController(isBlockTab ? terminalId : null);
   const blockMode = controller?.blockMode ?? "prompt";
 
   const [promptNonce, setPromptNonce] = useState(0);
@@ -44,7 +44,7 @@ export function WorkspaceInputBar({
   }, [blockMode]);
   const branch = useGitBranch(isTerminalTab ? cwd : null, promptNonce);
 
-  if (!isBlockTab || !controller || activeLeafId === null) return null;
+  if (!isBlockTab || !controller || terminalId === null) return null;
 
   return (
     <div className="shrink-0 border-t border-border/60 bg-card/40 px-3 py-2">
@@ -75,7 +75,7 @@ export function WorkspaceInputBar({
         </div>
         <Suspense fallback={null}>
           <ShellInput
-            leafId={activeLeafId}
+            leafId={terminalId}
             mode={blockMode}
             focused
             themeKey={themeKey}

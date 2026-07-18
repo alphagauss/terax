@@ -1,6 +1,6 @@
 import { native } from "@/modules/ai/lib/native";
 import type { SidebarViewId } from "@/modules/sidebar";
-import type { Tab } from "@/modules/tabs";
+import type { Tab } from "@/modules/workbench";
 import { useCallback, useMemo } from "react";
 import { useSourceControl } from "./useSourceControl";
 
@@ -15,7 +15,7 @@ function dirname(path: string | null): string | null {
 type Params = {
   activeTab: Tab | undefined;
   tabs: Tab[];
-  activeTerminalLeafCwd: string | null;
+  activeTerminalCwd: string | null;
   explorerRoot: string | null;
   launchCwd: string | null;
   launchCwdResolved: boolean;
@@ -37,7 +37,7 @@ type Params = {
 export function useSourceControlContext({
   activeTab,
   tabs,
-  activeTerminalLeafCwd,
+  activeTerminalCwd,
   explorerRoot,
   launchCwd,
   launchCwdResolved,
@@ -52,7 +52,7 @@ export function useSourceControlContext({
     : null;
   const sourceControlContextPath = (() => {
     if (activeTab?.kind === "terminal") {
-      return activeTerminalLeafCwd ?? explorerRoot ?? workspaceFallbackPath;
+      return activeTerminalCwd ?? explorerRoot ?? workspaceFallbackPath;
     }
     if (activeTab?.kind === "editor") return dirname(activeTab.path);
     if (activeTab?.kind === "git-diff") return activeTab.repoRoot;

@@ -1,6 +1,6 @@
 import i18n from "@/i18n";
-import type { Tab } from "@/modules/tabs";
-import { hasLeaf, leafIdForPty } from "@/modules/terminal";
+import { leafIdForPty } from "@/modules/terminal";
+import type { Tab } from "@/modules/workbench";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { displayAgent } from "../lib/format";
@@ -24,7 +24,7 @@ function tabInfo(
   leafId: number,
 ): { tabId: number; title: string } | null {
   for (const t of tabs) {
-    if (t.kind === "terminal" && hasLeaf(t.paneTree, leafId)) {
+    if (t.kind === "terminal" && t.terminalId === leafId) {
       return { tabId: t.id, title: t.title };
     }
   }

@@ -10,8 +10,8 @@ import {
   consumeWorkspaceOpenFiles,
   getLaunchDir,
 } from "@/lib/launchDir";
-import { quoteShellArg } from "@/lib/shellQuote";
 import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
+import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
@@ -60,14 +60,14 @@ import {
 import {
   SECONDARY_SIDEBAR_MAX_WIDTH,
   SECONDARY_SIDEBAR_MIN_WIDTH,
-  SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH,
   SecondarySidebar,
   type SecondarySidebarView,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
   SidebarRail,
-  WORKSPACE_MIN_WIDTH,
   useSecondarySidebarPanel,
   useSidebarPanel,
+  WORKSPACE_MIN_WIDTH,
 } from "@/modules/sidebar";
 import {
   SourceControlViewContainer,
@@ -83,23 +83,26 @@ import { StatusBar } from "@/modules/statusbar";
 import {
   TabSwitcherHud,
   useTabSwitcher,
-  useTabs,
   useWindowTitle,
   useWorkspaceCwd,
 } from "@/modules/tabs";
-import { DEFAULT_SPACE_ID } from "@/modules/tabs/lib/useTabs";
 import {
   clearFocusedTerminal,
   disposeSession,
-  findLeafCwd,
-  hasLeaf,
-  leafIds,
   navigateFocusedBlocks,
   type TerminalPaneHandle,
   useTerminalFileDrop,
   writeToSession,
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
+import {
+  DEFAULT_SPACE_ID,
+  findGroupForTab,
+  useWorkbench,
+  type WorkbenchChromeActions,
+  WorkbenchSurface,
+  type WorkbenchViewServices,
+} from "@/modules/workbench";
 import {
   currentWorkspaceEnv,
   useWorkspaceEnvStore,
@@ -110,15 +113,14 @@ import {
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AiChat01Icon } from "@hugeicons/core-free-icons";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
-import { WorkspaceSurface } from "./components/WorkspaceSurface";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
@@ -159,18 +161,23 @@ export default function App() {
   const initialLaunchCwd =
     currentWorkspaceEnv().kind === "local" ? getLaunchDir() : null;
   const {
+    state: workbenchState,
     tabs,
     activeId,
     setActiveId,
+    setActiveGroup,
     allocId,
-    replaceTabs,
+    replaceWorkbench,
     moveTabToSpace,
+    moveTabToGroup,
     reorderTab,
     reorderTabByGap,
     newTabInSpace,
-    removeTabsForSpace,
+    createSpace,
+    removeSpace,
+    closeExitedTerminal,
     markBooted,
-    setActiveSpaceForNewTabs,
+    setActiveSpace,
     newTab,
     newBlockTab,
     newAgentTab,
@@ -188,17 +195,14 @@ export default function App() {
     closeTab,
     updateTab,
     selectByIndex,
-    setLeafCwd,
-    focusPane,
-    focusNextPaneInTab,
-    splitActivePane,
-    splitPaneByLeaf,
-    closeActivePane,
-    closePaneByLeaf,
-  } = useTabs(initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined);
+    setTerminalCwd,
+    focusGroup,
+    splitTab,
+    resizeSplit,
+  } = useWorkbench(initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
-  // (e.g. cdInNewTab) read the latest pane state instead of a stale closure.
+  // (e.g. cdInNewTab) read the latest Workbench state instead of a stale closure.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
 
@@ -206,7 +210,7 @@ export default function App() {
     const t = tabs.find((x) => x.id === activeId);
     return t && t.kind === "terminal" ? t : null;
   }, [tabs, activeId]);
-  const activeLeafId = activeTerminalTab?.activeLeafId ?? null;
+  const activeTerminalId = activeTerminalTab?.terminalId ?? null;
 
   const searchAddons = useRef<Map<number, SearchAddon>>(new Map());
   const [activeSearchAddon, setActiveSearchAddon] =
@@ -221,6 +225,7 @@ export default function App() {
   const previewRefs = useRef<Map<number, PreviewPaneHandle>>(new Map());
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
+  const gitHistoryRefs = useRef(new Map<number, GitHistorySearchHandle>());
   const [gitHistoryHandle, setGitHistoryHandle] =
     useState<GitHistorySearchHandle | null>(null);
   const { zoomIn, zoomOut, zoomReset } = useZoom();
@@ -228,9 +233,8 @@ export default function App() {
   useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
 
-  // Drives session disposal off the pane tree, not React lifecycles —
-  // split/unsplit re-mount components but the leaf is still live.
-  const liveLeavesRef = useRef<Set<number>>(new Set());
+  // Session disposal follows stable terminal ids, not React lifecycles.
+  const liveTerminalIdsRef = useRef<Set<number>>(new Set());
 
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
@@ -272,46 +276,27 @@ export default function App() {
   useSpacesBoot({
     ready: launchCwdResolved && remoteEventsReady,
     allocId,
-    replaceTabs,
+    replaceWorkbench,
     markBooted,
-    setActiveSpaceForNewTabs,
     initializeWorkspaceEnv,
     environmentHome: home,
   });
 
   useSpacePersistence({
-    tabs,
-    activeId,
-    activeSpaceId: activeSpaceId ?? DEFAULT_SPACE_ID,
+    state: workbenchState,
     enabled: spacesHydrated,
   });
 
-  const prevSpaceRef = useRef(activeSpaceId);
   useEffect(() => {
     if (!spacesHydrated || !activeSpaceId) return;
-    setActiveSpaceForNewTabs(activeSpaceId);
-    const prev = prevSpaceRef.current;
-    prevSpaceRef.current = activeSpaceId;
-    if (prev === null || prev === activeSpaceId) return;
-    const inSpace = tabsRef.current.filter((t) => t.spaceId === activeSpaceId);
-    if (inSpace.length === 0) return;
-    // Keep the active tab if it already belongs to the newly active space (a
-    // cross-space jump set it explicitly); else fall to the space's last tab.
-    if (inSpace.some((t) => t.id === activeId)) return;
-    setActiveId(inSpace[inSpace.length - 1].id);
-  }, [
-    activeSpaceId,
-    activeId,
-    spacesHydrated,
-    setActiveSpaceForNewTabs,
-    setActiveId,
-  ]);
+    setActiveSpace(activeSpaceId);
+  }, [activeSpaceId, spacesHydrated, setActiveSpace]);
 
   const [switcherOpen, setSwitcherOpen] = useState(false);
-
   const spaceTabs = useMemo(
-    () => tabs.filter((t) => t.spaceId === (activeSpaceId ?? DEFAULT_SPACE_ID)),
-    [tabs, activeSpaceId],
+    () =>
+      tabs.filter((tab) => tab.spaceId === (activeSpaceId ?? DEFAULT_SPACE_ID)),
+    [activeSpaceId, tabs],
   );
 
   const {
@@ -392,26 +377,26 @@ export default function App() {
 
   useEffect(() => {
     setActiveSearchAddon(
-      activeLeafId !== null
-        ? (searchAddons.current.get(activeLeafId) ?? null)
+      activeTerminalId !== null
+        ? (searchAddons.current.get(activeTerminalId) ?? null)
         : null,
     );
     setActiveEditorHandle(editorRefs.current.get(activeId) ?? null);
-  }, [activeId, activeLeafId]);
+    setGitHistoryHandle(gitHistoryRefs.current.get(activeId) ?? null);
+  }, [activeId, activeTerminalId]);
 
   const handleSearchReady = useCallback(
-    (leafId: number, addon: SearchAddon) => {
-      searchAddons.current.set(leafId, addon);
-      if (leafId === activeLeafId) setActiveSearchAddon(addon);
+    (terminalId: number, addon: SearchAddon) => {
+      searchAddons.current.set(terminalId, addon);
+      if (terminalId === activeTerminalId) setActiveSearchAddon(addon);
     },
-    [activeLeafId],
+    [activeTerminalId],
   );
 
   const disposeTab = useCallback(
     (id: number) => {
-      // Terminal-leaf-keyed maps (terminalRefs/searchAddons) are pruned by
-      // the effect below as the pane tree changes; only the tab-id-keyed
-      // handles need explicit cleanup here.
+      // Terminal-id maps are pruned by the effect below; tab-id handles need
+      // explicit cleanup here.
       editorRefs.current.delete(id);
       markdownNavigationRefs.current.delete(id);
       pendingGotoLine.current.delete(id);
@@ -443,14 +428,12 @@ export default function App() {
   useEffect(() => {
     const live = new Set<number>();
     for (const t of tabs) {
-      if (t.kind === "terminal") {
-        for (const id of leafIds(t.paneTree)) live.add(id);
-      }
+      if (t.kind === "terminal") live.add(t.terminalId);
     }
-    for (const id of liveLeavesRef.current) {
+    for (const id of liveTerminalIdsRef.current) {
       if (!live.has(id)) disposeSession(id);
     }
-    liveLeavesRef.current = live;
+    liveTerminalIdsRef.current = live;
     for (const k of [...terminalRefs.current.keys()])
       if (!live.has(k)) terminalRefs.current.delete(k);
     for (const k of [...searchAddons.current.keys()])
@@ -501,8 +484,7 @@ export default function App() {
     const t = tabs.find((x) => x.id === activeId);
     if (!t) return null;
     if (t.kind === "terminal") {
-      const lid = t.activeLeafId;
-      return terminalRefs.current.get(lid)?.getSelection() ?? null;
+      return terminalRefs.current.get(t.terminalId)?.getSelection() ?? null;
     }
     if (t.kind === "editor" || t.kind === "markdown") {
       return editorRefs.current.get(activeId)?.getSelection() ?? null;
@@ -582,13 +564,13 @@ export default function App() {
 
   const sendCd = useCallback(
     (path: string) => {
-      if (activeLeafId === null) return;
-      const term = terminalRefs.current.get(activeLeafId);
+      if (activeTerminalId === null) return;
+      const term = terminalRefs.current.get(activeTerminalId);
       if (!term) return;
       term.write(`cd ${quoteShellArg(path)}\r`);
       term.focus();
     },
-    [activeLeafId],
+    [activeTerminalId],
   );
 
   const cdInNewTab = useCallback(
@@ -597,7 +579,7 @@ export default function App() {
       setTimeout(() => {
         const tab = tabsRef.current.find((x) => x.id === tabId);
         if (!tab || tab.kind !== "terminal") return;
-        const t = terminalRefs.current.get(tab.activeLeafId);
+        const t = terminalRefs.current.get(tab.terminalId);
         if (!t) return;
         t.write(`cd ${quoteShellArg(path)}\r`);
         t.focus();
@@ -615,6 +597,25 @@ export default function App() {
       else openFileTab(path, pin ?? false, explorerRoot ?? undefined);
     },
     [explorerRoot, openFileTab, newMarkdownTab],
+  );
+
+  const handleDropFileToWorkbench = useCallback(
+    (
+      path: string,
+      target: Parameters<WorkbenchChromeActions["dropTab"]>[1],
+    ) => {
+      const groupId = target.groupId;
+      const id = isMarkdownPath(path)
+        ? newMarkdownTab(path, explorerRoot ?? undefined, groupId)
+        : openFileTab(path, true, explorerRoot ?? undefined, groupId);
+      if (id === null) return;
+      if (target.kind === "tabs") {
+        reorderTabByGap(id, target.gap);
+      } else if (target.zone !== "center") {
+        splitTab(id, target.zone, true, groupId);
+      }
+    },
+    [explorerRoot, newMarkdownTab, openFileTab, reorderTabByGap, splitTab],
   );
 
   const openLaunchFiles = useCallback(
@@ -692,12 +693,8 @@ export default function App() {
     [tabs, updateTab],
   );
 
-  const activeTerminalLeafCwd =
-    activeTab?.kind === "terminal"
-      ? (findLeafCwd(activeTab.paneTree, activeTab.activeLeafId) ??
-        activeTab.cwd ??
-        null)
-      : null;
+  const activeTerminalCwd =
+    activeTab?.kind === "terminal" ? (activeTab.cwd ?? null) : null;
 
   const activeFilePath = (() => {
     if (activeTab?.kind === "editor" || activeTab?.kind === "markdown") {
@@ -724,7 +721,7 @@ export default function App() {
     useSourceControlContext({
       activeTab,
       tabs,
-      activeTerminalLeafCwd,
+      activeTerminalCwd,
       explorerRoot,
       launchCwd,
       launchCwdResolved,
@@ -739,8 +736,8 @@ export default function App() {
   );
 
   const openPreviewTab = useCallback(
-    (url: string) => {
-      const id = newPreviewTab(url);
+    (url: string, groupId?: number) => {
+      const id = newPreviewTab(url, groupId);
       // Focus the address bar if the URL is empty so the user can type.
       if (!url) {
         setTimeout(() => previewRefs.current.get(id)?.focusAddressBar(), 0);
@@ -750,38 +747,29 @@ export default function App() {
     [newPreviewTab],
   );
 
-  const splitActivePaneInActiveTab = useCallback(
-    (dir: "row" | "col") => {
-      const t = tabsRef.current.find((x) => x.id === activeId);
-      if (!t || t.kind !== "terminal") return;
-      splitActivePane(activeId, dir);
+  const splitActiveTab = useCallback(
+    (direction: "right" | "down") => {
+      splitTab(activeId, direction);
     },
-    [activeId, splitActivePane],
+    [activeId, splitTab],
   );
 
-  const handleCloseTabOrPane = useCallback(() => {
-    const t = tabsRef.current.find((x) => x.id === activeId);
-    if (t?.kind === "terminal" && leafIds(t.paneTree).length > 1) {
-      closeActivePane(activeId);
-      return;
-    }
+  const handleCloseActiveTab = useCallback(() => {
     void handleClose(activeId);
-  }, [activeId, closeActivePane, handleClose]);
+  }, [activeId, handleClose]);
 
   const [zenMode, setZenMode] = useState(false);
 
-  // Focus an agent's tab, switching to its space first so the header and tab
-  // strip don't end up showing a different space than the focused pane.
+  // Focus an agent's tab, switching to its Space before activating its group.
   const activateAgentTarget = useCallback(
-    (tabId: number, leafId: number) => {
+    (tabId: number, _terminalId: number) => {
       const space = tabsRef.current.find((t) => t.id === tabId)?.spaceId;
       if (space && space !== useSpaces.getState().activeId) {
         useSpaces.getState().setActive(space);
       }
       setActiveId(tabId);
-      focusPane(tabId, leafId);
     },
-    [setActiveId, focusPane],
+    [setActiveId],
   );
 
   const shortcutHandlers = useMemo<ShortcutHandlers>(
@@ -794,7 +782,7 @@ export default function App() {
       "tab.newPrivate": openNewPrivateTab,
       "tab.newPreview": () => openPreviewTab(""),
       "tab.newEditor": () => setNewEditorOpen(true),
-      "tab.close": handleCloseTabOrPane,
+      "tab.close": handleCloseActiveTab,
       "tab.next": () => stepSwitcher(1),
       "tab.prev": () => stepSwitcher(-1),
       "tab.selectByIndex": (e) =>
@@ -805,11 +793,11 @@ export default function App() {
       "space.next": () => cycleSpace(1),
       "space.prev": () => cycleSpace(-1),
       "space.overview": () => setSwitcherOpen(true),
-      "pane.splitRight": () => splitActivePaneInActiveTab("row"),
-      "pane.splitDown": () => splitActivePaneInActiveTab("col"),
-      "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
-      "pane.focusPrev": () => focusNextPaneInTab(activeId, -1),
-      "pane.source": toggleSourceControl,
+      "workbench.splitRight": () => splitActiveTab("right"),
+      "workbench.splitDown": () => splitActiveTab("down"),
+      "workbench.focusNext": () => focusGroup(1),
+      "workbench.focusPrev": () => focusGroup(-1),
+      "view.sourceControl": toggleSourceControl,
       "terminal.clear": () => {
         clearFocusedTerminal();
       },
@@ -846,15 +834,15 @@ export default function App() {
       openCommandPalette,
       stepSwitcher,
       cycleSpace,
-      handleCloseTabOrPane,
+      handleCloseActiveTab,
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,
       openPreviewTab,
       activeSpaceId,
       selectByIndex,
-      splitActivePaneInActiveTab,
-      focusNextPaneInTab,
+      splitActiveTab,
+      focusGroup,
       toggleSourceControl,
       toggleAiPanel,
       askFromSelection,
@@ -918,9 +906,9 @@ export default function App() {
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
 
   const registerTerminalHandle = useCallback(
-    (leafId: number, h: TerminalPaneHandle | null) => {
-      if (h) terminalRefs.current.set(leafId, h);
-      else terminalRefs.current.delete(leafId);
+    (terminalId: number, h: TerminalPaneHandle | null) => {
+      if (h) terminalRefs.current.set(terminalId, h);
+      else terminalRefs.current.delete(terminalId);
     },
     [],
   );
@@ -973,8 +961,8 @@ export default function App() {
 
   const authorizedCwds = useRef(new Set<string>());
   const handleTerminalCwd = useCallback(
-    (leafId: number, cwd: string) => {
-      setLeafCwd(leafId, cwd);
+    (terminalId: number, cwd: string) => {
+      setTerminalCwd(terminalId, cwd);
       if (cwd && !authorizedCwds.current.has(cwd)) {
         authorizedCwds.current.add(cwd);
         native.workspaceAuthorize(cwd).catch(() => {
@@ -982,12 +970,7 @@ export default function App() {
         });
       }
     },
-    [setLeafCwd],
-  );
-
-  const handleFocusLeaf = useCallback(
-    (tabId: number, leafId: number) => focusPane(tabId, leafId),
-    [focusPane],
+    [setTerminalCwd],
   );
 
   const onActivateAgent = activateAgentTarget;
@@ -996,21 +979,21 @@ export default function App() {
     openAiPanelAndFocus();
   }, [openAiPanelAndFocus]);
 
-  const handleLeafExit = useCallback(
-    (leafId: number, _code: number) => {
+  const handleTerminalExit = useCallback(
+    (terminalId: number, _code: number) => {
       const all = tabsRef.current;
       const tab = all.find(
-        (t) => t.kind === "terminal" && hasLeaf(t.paneTree, leafId),
+        (candidate) =>
+          candidate.kind === "terminal" && candidate.terminalId === terminalId,
       );
       if (!tab || tab.kind !== "terminal") return;
-      // Last pane of the last tab: quit instead of respawning a shell.
-      if (leafIds(tab.paneTree).length === 1 && all.length === 1) {
+      if (all.length === 1) {
         void getCurrentWindow().close();
       } else {
-        closePaneByLeaf(leafId);
+        closeExitedTerminal(tab.id);
       }
     },
-    [closePaneByLeaf],
+    [closeExitedTerminal],
   );
 
   const handleEditorDirty = useCallback(
@@ -1024,11 +1007,11 @@ export default function App() {
   );
 
   const searchTarget = useMemo<SearchTarget>(() => {
-    if (isTerminalTab && activeLeafId !== null && activeSearchAddon)
+    if (isTerminalTab && activeTerminalId !== null && activeSearchAddon)
       return {
         kind: "terminal",
         addon: activeSearchAddon,
-        focus: () => terminalRefs.current.get(activeLeafId)?.focus(),
+        focus: () => terminalRefs.current.get(activeTerminalId)?.focus(),
       };
     if (isEditorTab && activeEditorHandle)
       return {
@@ -1047,13 +1030,13 @@ export default function App() {
     isTerminalTab,
     isEditorTab,
     isGitHistoryTab,
-    activeLeafId,
+    activeTerminalId,
     activeSearchAddon,
     activeEditorHandle,
     gitHistoryHandle,
   ]);
 
-  const activeCwd = activeTerminalLeafCwd;
+  const activeCwd = activeTerminalCwd;
 
   const handleNewSpace = useCallback(() => {
     const { spaces, create, setActive } = useSpaces.getState();
@@ -1061,11 +1044,10 @@ export default function App() {
       name: `Space ${spaces.length + 1}`,
       root: activeCwd ?? home ?? null,
     });
-    setActiveSpaceForNewTabs(meta.id);
-    newTab(activeCwd ?? undefined);
+    createSpace(meta.id, activeCwd ?? undefined);
     setActive(meta.id);
     return meta.id;
-  }, [activeCwd, home, newTab, setActiveSpaceForNewTabs]);
+  }, [activeCwd, createSpace, home]);
 
   const handleDeleteSpace = useCallback(
     (id: string) => {
@@ -1074,9 +1056,9 @@ export default function App() {
       const root = useSpaces
         .getState()
         .spaces.find((s) => s.id === nextSpaceId)?.root;
-      removeTabsForSpace(id, nextSpaceId, root ?? undefined);
+      removeSpace(id, nextSpaceId, root ?? undefined);
     },
-    [removeTabsForSpace],
+    [removeSpace],
   );
 
   const handleMoveTab = useCallback(
@@ -1153,9 +1135,9 @@ export default function App() {
             openNewPreview: () => openPreviewTab(""),
             openGitGraph: openGitGraphFromContext,
             toggleSourceControl,
-            closeActiveTabOrPane: handleCloseTabOrPane,
-            splitPaneRight: () => splitActivePaneInActiveTab("row"),
-            splitPaneDown: () => splitActivePaneInActiveTab("col"),
+            closeActiveTab: handleCloseActiveTab,
+            splitGroupRight: () => splitActiveTab("right"),
+            splitGroupDown: () => splitActiveTab("down"),
             focusSearch: () => searchInlineRef.current?.focus(),
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
@@ -1185,8 +1167,8 @@ export default function App() {
       openPreviewTab,
       openGitGraphFromContext,
       toggleSourceControl,
-      handleCloseTabOrPane,
-      splitActivePaneInActiveTab,
+      handleCloseActiveTab,
+      splitActiveTab,
       toggleSidebar,
       toggleAiPanel,
       askFromSelection,
@@ -1216,13 +1198,13 @@ export default function App() {
 
   const insertHistoryCommand = useMemo(
     () =>
-      isTerminalTab && activeLeafId !== null
+      isTerminalTab && activeTerminalId !== null
         ? (cmd: string) => {
-            writeToSession(activeLeafId, cmd);
-            terminalRefs.current.get(activeLeafId)?.focus();
+            writeToSession(activeTerminalId, cmd);
+            terminalRefs.current.get(activeTerminalId)?.focus();
           }
         : null,
-    [isTerminalTab, activeLeafId],
+    [isTerminalTab, activeTerminalId],
   );
 
   useAiLiveBridge({
@@ -1237,25 +1219,135 @@ export default function App() {
     terminalRefs,
   });
 
+  const handleDropTab = useCallback(
+    (
+      tabId: number,
+      target: Parameters<WorkbenchChromeActions["dropTab"]>[1],
+    ) => {
+      if (target.kind === "tabs") {
+        const owner = findGroupForTab(workbenchState, tabId);
+        if (owner?.group.id === target.groupId) {
+          reorderTabByGap(tabId, target.gap);
+        } else {
+          moveTabToGroup(tabId, target.groupId, target.gap);
+        }
+        return;
+      }
+      if (target.zone === "center") {
+        moveTabToGroup(tabId, target.groupId);
+      } else {
+        splitTab(tabId, target.zone, true, target.groupId);
+      }
+    },
+    [moveTabToGroup, reorderTabByGap, splitTab, workbenchState],
+  );
+
+  const groupCwd = useCallback(
+    (groupId: number) => {
+      const space = workbenchState.spaces[activeSpaceId ?? DEFAULT_SPACE_ID];
+      const tab = space
+        ? workbenchState.tabs[space.groups[groupId]?.activeTabId]
+        : undefined;
+      return tab?.kind === "terminal" ? tab.cwd : inheritedCwdForNewTab();
+    },
+    [activeSpaceId, inheritedCwdForNewTab, workbenchState],
+  );
+
+  const workbenchActions = useMemo<WorkbenchChromeActions>(
+    () => ({
+      selectTab: setActiveId,
+      activateGroup: setActiveGroup,
+      newTerminal: (groupId) => newTab(groupCwd(groupId), groupId),
+      newBlock: (groupId) => newBlockTab(groupCwd(groupId), groupId),
+      newPrivate: (groupId) => newPrivateTab(groupCwd(groupId), groupId),
+      newPreview: (groupId) => openPreviewTab("", groupId),
+      newEditor: (groupId) => {
+        setActiveGroup(groupId);
+        setNewEditorOpen(true);
+      },
+      newGitGraph: (groupId) => {
+        setActiveGroup(groupId);
+        openGitGraphFromContext();
+      },
+      closeTab: (tabId) => void handleClose(tabId),
+      pinTab,
+      renameTab: handleRenameTab,
+      dropTab: handleDropTab,
+      splitTab: (tabId, direction, move) =>
+        void splitTab(tabId, direction, move),
+      overrideLanguage: setOverrideLanguage,
+      resizeSplit,
+    }),
+    [
+      groupCwd,
+      handleClose,
+      handleDropTab,
+      handleRenameTab,
+      newBlockTab,
+      newPrivateTab,
+      newTab,
+      openGitGraphFromContext,
+      openPreviewTab,
+      pinTab,
+      resizeSplit,
+      setActiveGroup,
+      setActiveId,
+      setOverrideLanguage,
+      splitTab,
+    ],
+  );
+
+  const registerGitHistoryHandle = useCallback(
+    (tabId: number, handle: GitHistorySearchHandle | null) => {
+      if (handle) gitHistoryRefs.current.set(tabId, handle);
+      else gitHistoryRefs.current.delete(tabId);
+      if (tabId === activeId) setGitHistoryHandle(handle);
+    },
+    [activeId],
+  );
+
+  const workbenchServices = useMemo<WorkbenchViewServices>(
+    () => ({
+      registerTerminalHandle,
+      onSearchReady: handleSearchReady,
+      onTerminalCwd: handleTerminalCwd,
+      onTerminalExit: handleTerminalExit,
+      onFocusTab: setActiveId,
+      registerEditorHandle,
+      registerMarkdownNavigationHandle,
+      onEditorDirtyChange: handleEditorDirty,
+      onEditorCloseTab: disposeTab,
+      registerPreviewHandle,
+      onPreviewUrlChange: handlePreviewUrl,
+      onAiDiffAccept: (id) => respondToApproval(id, true),
+      onAiDiffReject: (id) => respondToApproval(id, false),
+      onOpenCommitFile: openCommitFileDiffTab,
+      onGitHistorySearchHandle: registerGitHistoryHandle,
+    }),
+    [
+      disposeTab,
+      handleEditorDirty,
+      handlePreviewUrl,
+      handleSearchReady,
+      handleTerminalCwd,
+      handleTerminalExit,
+      openCommitFileDiffTab,
+      registerEditorHandle,
+      registerGitHistoryHandle,
+      registerMarkdownNavigationHandle,
+      registerPreviewHandle,
+      registerTerminalHandle,
+      respondToApproval,
+      setActiveId,
+    ],
+  );
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
         <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
           {!zenMode && (
             <Header
-              tabs={spaceTabs}
-              activeId={activeId}
-              onSelect={setActiveId}
-              onNew={openNewTab}
-              onNewBlock={openNewBlockTab}
-              onNewPrivate={openNewPrivateTab}
-              onNewPreview={() => openPreviewTab("")}
-              onNewEditor={() => setNewEditorOpen(true)}
-              onNewGitGraph={openGitGraphFromContext}
-              onClose={handleClose}
-              onPin={pinTab}
-              onRename={handleRenameTab}
-              onReorder={reorderTabByGap}
               onToggleSidebar={toggleSidebar}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}
@@ -1266,7 +1358,6 @@ export default function App() {
               spaceSwitcher={spaceSwitcher}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
-              onOverrideLanguage={setOverrideLanguage}
             />
           )}
 
@@ -1317,6 +1408,7 @@ export default function App() {
                         onPathDeleted={handlePathDeleted}
                         onRevealInTerminal={cdInNewTab}
                         onAttachToAgent={handleAttachFileToAgent}
+                        onDropToWorkbench={handleDropFileToWorkbench}
                       />
                     ) : (
                       <SourceControlViewContainer
@@ -1341,36 +1433,18 @@ export default function App() {
               >
                 <div className="flex h-full min-h-0 flex-col">
                   <div className="relative min-h-0 flex-1">
-                    <WorkspaceSurface
-                      tabs={tabs}
-                      activeId={activeId}
-                      activeTab={activeTab}
-                      registerTerminalHandle={registerTerminalHandle}
-                      onSearchReady={handleSearchReady}
-                      onCwd={handleTerminalCwd}
-                      onExit={handleLeafExit}
-                      onFocusLeaf={handleFocusLeaf}
-                      onSplitPane={splitPaneByLeaf}
-                      onClosePane={closePaneByLeaf}
-                      registerEditorHandle={registerEditorHandle}
-                      registerMarkdownNavigationHandle={
-                        registerMarkdownNavigationHandle
-                      }
-                      onEditorDirtyChange={handleEditorDirty}
-                      onEditorCloseTab={disposeTab}
-                      registerPreviewHandle={registerPreviewHandle}
-                      onPreviewUrlChange={handlePreviewUrl}
-                      onAiDiffAccept={(id) => respondToApproval(id, true)}
-                      onAiDiffReject={(id) => respondToApproval(id, false)}
-                      onOpenCommitFile={openCommitFileDiffTab}
-                      onGitHistorySearchHandle={setGitHistoryHandle}
+                    <WorkbenchSurface
+                      state={workbenchState}
+                      activeSpaceId={activeSpaceId ?? DEFAULT_SPACE_ID}
+                      actions={workbenchActions}
+                      services={workbenchServices}
                     />
                   </div>
 
                   <WorkspaceInputBar
                     isBlockTab={isBlockTab}
                     isTerminalTab={isTerminalTab}
-                    activeLeafId={activeLeafId}
+                    terminalId={activeTerminalId}
                     cwd={activeCwd}
                     home={home}
                   />

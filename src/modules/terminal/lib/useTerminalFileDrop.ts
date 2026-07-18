@@ -6,7 +6,7 @@ import { pasteIntoLeaf } from "./rendererPool";
 
 // Tauri reports the drop point in physical pixels on some platforms and logical
 // on others; only scale down when it overflows the logical viewport.
-function leafIdAt(x: number, y: number): number | null {
+function terminalIdAt(x: number, y: number): number | null {
   let lx = x;
   let ly = y;
   if (x > window.innerWidth || y > window.innerHeight) {
@@ -15,15 +15,15 @@ function leafIdAt(x: number, y: number): number | null {
     ly = y / dpr;
   }
   const el = document.elementFromPoint(lx, ly);
-  const leafEl = el?.closest<HTMLElement>("[data-pane-leaf]");
-  if (!leafEl) return null;
-  const id = Number(leafEl.dataset.paneLeaf);
+  const terminal = el?.closest<HTMLElement>("[data-terminal-id]");
+  if (!terminal) return null;
+  const id = Number(terminal.dataset.terminalId);
   return Number.isFinite(id) ? id : null;
 }
 
-/** Wires native OS file drops into the terminal pane under the cursor: shows a
- * drop overlay on that pane while dragging, and bracketed-pastes the
- * shell-quoted path(s) on drop. Drops outside any terminal leaf are ignored. */
+/** Wires native OS file drops into the terminal under the cursor: shows a drop
+ * overlay while dragging and bracketed-pastes the shell-quoted paths on drop.
+ * Drops outside a terminal are ignored. */
 export function useTerminalFileDrop(): void {
   useEffect(() => {
     let disposed = false;
@@ -34,7 +34,7 @@ export function useTerminalFileDrop(): void {
       .onDragDropEvent((e) => {
         const p = e.payload;
         if (p.type === "enter" || p.type === "over") {
-          setTarget(leafIdAt(p.position.x, p.position.y));
+          setTarget(terminalIdAt(p.position.x, p.position.y));
           return;
         }
         if (p.type === "leave") {
@@ -44,9 +44,9 @@ export function useTerminalFileDrop(): void {
         if (p.type === "drop") {
           setTarget(null);
           if (!p.paths.length) return;
-          const leafId = leafIdAt(p.position.x, p.position.y);
-          if (leafId !== null) {
-            pasteIntoLeaf(leafId, formatDroppedPaths(p.paths));
+          const terminalId = terminalIdAt(p.position.x, p.position.y);
+          if (terminalId !== null) {
+            pasteIntoLeaf(terminalId, formatDroppedPaths(p.paths));
           }
         }
       })

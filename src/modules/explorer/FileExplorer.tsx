@@ -6,6 +6,13 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { cn } from "@/lib/utils";
+import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { remoteNative } from "@/modules/remote";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useGlobalShortcuts } from "@/modules/shortcuts";
+import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import {
   FileAddIcon,
   Folder01Icon,
@@ -27,28 +34,22 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
-import { EntryRow, PendingRow, StatusRow, type RowActions } from "./TreeRow";
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
+import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { ancestorDirs, useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
-import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { useGlobalShortcuts } from "@/modules/shortcuts";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
-import { remoteNative } from "@/modules/remote";
-import { useWorkspaceEnvStore } from "@/modules/workspace";
-import { toast } from "sonner";
+import { EntryRow, PendingRow, type RowActions, StatusRow } from "./TreeRow";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -65,6 +66,7 @@ type Props = {
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
+  onDropToWorkbench?: (path: string, target: WorkbenchDropTarget) => void;
   gitStatus?: GitStatusSnapshot | null;
 };
 
@@ -203,6 +205,7 @@ export const FileExplorer = memo(
       onPathDeleted,
       onRevealInTerminal,
       onAttachToAgent,
+      onDropToWorkbench,
       gitStatus,
     },
     ref,
@@ -283,6 +286,7 @@ export const FileExplorer = memo(
       rootPath: rootPath ?? "",
       isDir: isDirAt,
       onMove: tree.movePath,
+      onDropToWorkbench,
     });
 
     const fileDrop = useExplorerFileDrop({
@@ -889,7 +893,9 @@ export const FileExplorer = memo(
                       }
                     }}
                   >
-                    {deleteConfirm ? t("menu.confirmDelete") : t("common:delete")}
+                    {deleteConfirm
+                      ? t("menu.confirmDelete")
+                      : t("common:delete")}
                   </ContextMenuItem>
                 </>
               ) : (

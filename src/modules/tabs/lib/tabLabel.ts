@@ -1,4 +1,4 @@
-import type { Tab } from "./useTabs";
+import type { Tab } from "@/modules/workbench";
 
 /**
  * The label shown on a tab. Non-terminal tabs use their stored title; terminal

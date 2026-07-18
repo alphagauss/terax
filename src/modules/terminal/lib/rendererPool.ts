@@ -10,14 +10,14 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { type FontWeight, Terminal } from "@xterm/xterm";
 import { shouldCursorBlink } from "./cursorBlink";
 import {
-  readTerminalClipboard,
-  writeTerminalClipboard,
-} from "./terminalClipboard";
-import {
   terminalDeleteSequence,
   terminalLineNavigationSequence,
   terminalWordNavigationSequence,
 } from "./keymap";
+import {
+  readTerminalClipboard,
+  writeTerminalClipboard,
+} from "./terminalClipboard";
 
 export const POOL_MAX_SIZE = 5;
 const FIT_DEBOUNCE_MS = 8;
@@ -291,7 +291,8 @@ function createSlot(): Slot {
       if (event.type === "keydown") {
         const targetLeafId = slot.currentLeafId;
         void readTerminalClipboard().then((text) => {
-          if (text && slot.currentLeafId === targetLeafId) slot.term.paste(text);
+          if (text && slot.currentLeafId === targetLeafId)
+            slot.term.paste(text);
         });
       }
       event.preventDefault();
@@ -336,6 +337,15 @@ function evictionScore(s: Slot): number {
   );
 }
 
+export function visibleBindingsRequireAnotherSlot(
+  bindings: Array<{ bound: boolean; visible: boolean }>,
+): boolean {
+  return (
+    bindings.length > 0 &&
+    bindings.every((binding) => binding.bound && binding.visible)
+  );
+}
+
 function pickSlotFor(leafId: number): PickResult {
   const retainedOwn = slots.find(
     (s) => s.currentLeafId === null && s.retainedLeafId === leafId,
@@ -356,6 +366,18 @@ function pickSlotFor(leafId: number): PickResult {
     if (!retained || s.lastUsedAt < retained.lastUsedAt) retained = s;
   }
   if (retained) return { slot: retained, previousLeafId: null };
+
+  const allBoundSlotsVisible = visibleBindingsRequireAnotherSlot(
+    slots.map((slot) => ({
+      bound: slot.currentLeafId !== null,
+      visible:
+        slot.currentLeafId !== null &&
+        (adapter?.isLeafVisible(slot.currentLeafId) ?? false),
+    })),
+  );
+  if (allBoundSlotsVisible) {
+    return { slot: createSlot(), previousLeafId: null };
+  }
 
   let best: Slot | null = null;
   let bestScore = Number.POSITIVE_INFINITY;

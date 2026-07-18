@@ -1,3 +1,5 @@
+import { leafHasForegroundProcess } from "@/modules/terminal";
+import type { Tab } from "@/modules/workbench";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   type RefObject,
@@ -6,15 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Tab } from "@/modules/tabs";
-import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
 
 async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
-  const leaves = tabs.flatMap((t) =>
-    t.kind === "terminal" ? leafIds(t.paneTree) : [],
+  const terminalIds = tabs.flatMap((tab) =>
+    tab.kind === "terminal" ? [tab.terminalId] : [],
   );
-  if (leaves.length === 0) return false;
-  const checks = await Promise.all(leaves.map(leafHasForegroundProcess));
+  if (terminalIds.length === 0) return false;
+  const checks = await Promise.all(terminalIds.map(leafHasForegroundProcess));
   return checks.some(Boolean);
 }
 

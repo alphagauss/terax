@@ -20,11 +20,11 @@ export type ShortcutId =
   | "space.next"
   | "space.prev"
   | "space.overview"
-  | "pane.splitRight"
-  | "pane.splitDown"
-  | "pane.focusNext"
-  | "pane.focusPrev"
-  | "pane.source"
+  | "workbench.splitRight"
+  | "workbench.splitDown"
+  | "workbench.focusNext"
+  | "workbench.focusPrev"
+  | "view.sourceControl"
   | "terminal.clear"
   | "blocks.prev"
   | "blocks.next"
@@ -49,7 +49,7 @@ export type ShortcutGroup =
   | "General"
   | "Tabs"
   | "Spaces"
-  | "Panes"
+  | "Workbench"
   | "Terminal"
   | "Search"
   | "AI"
@@ -130,38 +130,38 @@ export const SHORTCUTS: Shortcut[] = [
   },
   {
     id: "tab.close",
-    label: "Close tab or pane",
+    label: "Close tab",
     group: "Tabs",
     defaultBindings: [{ [MOD_PROP]: true, key: "w" }],
   },
   {
-    id: "pane.splitRight",
-    label: "Split pane right",
-    group: "Panes",
+    id: "workbench.splitRight",
+    label: "Split Workbench right",
+    group: "Workbench",
     defaultBindings: [{ [MOD_PROP]: true, key: "d" }],
   },
   {
-    id: "pane.splitDown",
-    label: "Split pane down",
-    group: "Panes",
+    id: "workbench.splitDown",
+    label: "Split Workbench down",
+    group: "Workbench",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "d" }],
   },
   {
-    id: "pane.focusNext",
-    label: "Focus next pane",
-    group: "Panes",
+    id: "workbench.focusNext",
+    label: "Focus next group",
+    group: "Workbench",
     defaultBindings: [{ [MOD_PROP]: true, key: "]" }],
   },
   {
-    id: "pane.focusPrev",
-    label: "Focus previous pane",
-    group: "Panes",
+    id: "workbench.focusPrev",
+    label: "Focus previous group",
+    group: "Workbench",
     defaultBindings: [{ [MOD_PROP]: true, key: "[" }],
   },
   {
-    id: "pane.source",
+    id: "view.sourceControl",
     label: "Toggle source panel",
-    group: "Panes",
+    group: "View",
     defaultBindings: [{ [MOD_PROP]: true, key: "g" }],
   },
   {
@@ -339,7 +339,7 @@ export const SHORTCUTS: Shortcut[] = [
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   "General",
   "Tabs",
-  "Panes",
+  "Workbench",
   "Terminal",
   "View",
   "Search",

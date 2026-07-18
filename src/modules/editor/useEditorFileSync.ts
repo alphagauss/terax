@@ -4,7 +4,7 @@ import {
   watchAdd,
   watchRemove,
 } from "@/modules/explorer/lib/watch";
-import type { Tab } from "@/modules/tabs";
+import type { Tab } from "@/modules/workbench";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type RefObject, useEffect, useRef } from "react";
 import type { EditorPaneHandle } from "./EditorPane";

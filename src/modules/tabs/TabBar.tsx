@@ -4,6 +4,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
@@ -22,6 +25,18 @@ import {
 } from "@/modules/editor/lib/languageDefinitions";
 import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import {
+  beginWorkbenchDrag,
+  finishWorkbenchDrag,
+  updateWorkbenchDrag,
+  useWorkbenchDragSnapshot,
+  type WorkbenchDropTarget,
+} from "@/modules/workbench/dragSession";
+import type {
+  EditorTab,
+  Tab,
+  WorkbenchDirection,
+} from "@/modules/workbench/types";
 import {
   Cancel01Icon,
   Clock01Icon,
@@ -45,13 +60,14 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { labelFor } from "./lib/tabLabel";
-import type { EditorTab, Tab } from "./lib/useTabs";
 
 const LANGUAGE_MENU_ENABLED = false;
 
 type Props = {
+  groupId: number;
   tabs: Tab[];
   activeId: number;
+  activeGroup: boolean;
   onSelect: (id: number) => void;
   onNew: () => void;
   onNewBlock: () => void;
@@ -64,15 +80,22 @@ type Props = {
   onPin: (id: number) => void;
   /** Set a terminal tab's custom label; empty string resets to default. */
   onRename: (id: number, title: string) => void;
-  /** Move a dragged tab to a new position (insertion gap index 0..tabs.length). */
-  onReorder: (fromId: number, toGapIndex: number) => void;
+  onDropTab: (tabId: number, target: WorkbenchDropTarget) => void;
+  onSplitTab: (
+    tabId: number,
+    direction: WorkbenchDirection,
+    move: boolean,
+  ) => void;
+  canClose: boolean;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
   compact?: boolean;
 };
 
 export function TabBar({
+  groupId,
   tabs,
   activeId,
+  activeGroup,
   onSelect,
   onNew,
   onNewBlock,
@@ -83,7 +106,9 @@ export function TabBar({
   onClose,
   onPin,
   onRename,
-  onReorder,
+  onDropTab,
+  onSplitTab,
+  canClose,
   onOverrideLanguage,
   compact,
 }: Props) {
@@ -92,11 +117,33 @@ export function TabBar({
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [dropGap, setDropGap] = useState<number | null>(null);
   const [showAllLanguages, setShowAllLanguages] = useState(false);
+  const dragSnapshot = useWorkbenchDragSnapshot();
+  const dropGap =
+    dragSnapshot.target?.kind === "tabs" &&
+    dragSnapshot.target.groupId === groupId
+      ? dragSnapshot.target.gap
+      : null;
+  const draggedTabId =
+    dragSnapshot.payload?.kind === "tab"
+      ? dragSnapshot.payload.tabId
+      : draggingId;
+  const dragActive = dragSnapshot.payload !== null || draggingId !== null;
+  const draggedTabIndex =
+    draggedTabId === null
+      ? -1
+      : tabs.findIndex((tab) => tab.id === draggedTabId);
+  const showDropGap = (gap: number) =>
+    dragActive &&
+    dropGap === gap &&
+    (draggedTabIndex < 0 ||
+      (gap !== draggedTabIndex && gap !== draggedTabIndex + 1));
+  const dropTabRef = useRef(onDropTab);
+  dropTabRef.current = onDropTab;
   const drag = useRef<{
     pointerId: number;
     startX: number;
+    startY: number;
     fromId: number;
     active: boolean;
   } | null>(null);
@@ -131,6 +178,8 @@ export function TabBar({
   }, []);
 
   useLayoutEffect(() => {
+    void activeId;
+    void tabs;
     measurePill();
   }, [measurePill, activeId, tabs]);
 
@@ -151,23 +200,11 @@ export function TabBar({
     }
   }, [pill, pillReady]);
 
-  const gapAtX = (clientX: number) => {
-    const els = Array.from(
-      scrollRef.current?.querySelectorAll<HTMLElement>("[data-tab-id]") ?? [],
-    );
-    for (let i = 0; i < els.length; i++) {
-      const r = els[i].getBoundingClientRect();
-      if (clientX < r.left + r.width / 2) return i;
-    }
-    return els.length;
-  };
-
   const endDrag = (currentTarget: HTMLElement) => {
     const st = drag.current;
     if (st) currentTarget.releasePointerCapture?.(st.pointerId);
     drag.current = null;
     setDraggingId(null);
-    setDropGap(null);
     document.body.style.userSelect = "";
   };
 
@@ -197,8 +234,8 @@ export function TabBar({
   return (
     <div
       ref={scrollRef}
-      data-tauri-drag-region
-      className="min-w-0 shrink scroll-smooth overflow-x-auto overflow-y-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      data-workbench-tabbar={groupId}
+      className="min-w-0 flex-1 scroll-smooth overflow-x-auto overflow-y-hidden overscroll-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <div className="flex w-max items-center gap-0.5">
         <Tabs
@@ -211,7 +248,10 @@ export function TabBar({
           >
             <span
               aria-hidden
-              className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-foreground/[0.07] shadow-sm ring-1 ring-inset ring-foreground/[0.05]"
+              className={cn(
+                "pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-foreground/[0.07] shadow-sm ring-1 ring-inset",
+                activeGroup ? "ring-primary/60" : "ring-foreground/[0.05]",
+              )}
               style={
                 pill
                   ? {
@@ -231,20 +271,13 @@ export function TabBar({
               const isActive = t.id === activeId;
               const isNew = !firstRender && !seen.has(t.id);
 
-              const srcIndex = tabs.findIndex((x) => x.id === draggingId);
-              const showGap = (gap: number) =>
-                draggingId !== null &&
-                dropGap === gap &&
-                gap !== srcIndex &&
-                gap !== srcIndex + 1;
-
               // While renaming, render a non-button cell so the <input> is not
               // nested inside the trigger <button> (invalid HTML, and WebKit
               // blocks focus/selection on inputs inside buttons).
               if (editingId === t.id && t.kind === "terminal") {
                 return (
                   <Fragment key={t.id}>
-                    {showGap(i) && <DropIndicator />}
+                    {showDropGap(i) && <DropIndicator />}
                     <div
                       data-tab-id={t.id}
                       className={cn(
@@ -262,7 +295,7 @@ export function TabBar({
                         onCancel={() => setEditingId(null)}
                       />
                     </div>
-                    {i === tabs.length - 1 && showGap(tabs.length) && (
+                    {i === tabs.length - 1 && showDropGap(tabs.length) && (
                       <DropIndicator />
                     )}
                   </Fragment>
@@ -279,6 +312,7 @@ export function TabBar({
                     drag.current = {
                       pointerId: e.pointerId,
                       startX: e.clientX,
+                      startY: e.clientY,
                       fromId: t.id,
                       active: false,
                     };
@@ -288,27 +322,44 @@ export function TabBar({
                     const st = drag.current;
                     if (!st || st.pointerId !== e.pointerId) return;
                     if (!st.active) {
-                      if (Math.abs(e.clientX - st.startX) < 4) return;
+                      if (
+                        Math.hypot(
+                          e.clientX - st.startX,
+                          e.clientY - st.startY,
+                        ) < 4
+                      ) {
+                        return;
+                      }
                       st.active = true;
                       setDraggingId(st.fromId);
                       document.body.style.userSelect = "none";
+                      beginWorkbenchDrag(
+                        { kind: "tab", tabId: st.fromId },
+                        (payload, target) => {
+                          if (payload.kind === "tab") {
+                            dropTabRef.current(payload.tabId, target);
+                          }
+                        },
+                      );
                     }
                     e.preventDefault();
-                    setDropGap(gapAtX(e.clientX));
+                    updateWorkbenchDrag(e.clientX, e.clientY);
                   }}
                   onPointerUp={(e) => {
                     const st = drag.current;
-                    if (st?.active && dropGap !== null) {
-                      onReorder(st.fromId, dropGap);
-                    } else if (st && !st.active) {
+                    if (st?.active) finishWorkbenchDrag(true);
+                    else if (st) {
                       onSelect(t.id);
                     }
                     endDrag(e.currentTarget);
                   }}
-                  onPointerCancel={(e) => endDrag(e.currentTarget)}
+                  onPointerCancel={(e) => {
+                    finishWorkbenchDrag(false);
+                    endDrag(e.currentTarget);
+                  }}
                   onDoubleClick={() => isPreview && onPin(t.id)}
                   onAuxClick={(e) => {
-                    if (e.button === 1 && tabs.length > 1) {
+                    if (e.button === 1 && canClose) {
                       e.preventDefault();
                       e.stopPropagation();
                       onClose(t.id);
@@ -459,7 +510,7 @@ export function TabBar({
                     t.dirty ? (
                       <span
                         role="img"
-                        aria-label="Unsaved changes"
+                        aria-label={tr("unsavedChanges")}
                         className="size-1.5 shrink-0 rounded-full bg-foreground/70"
                       />
                     ) : null}
@@ -474,10 +525,10 @@ export function TabBar({
                   className="group relative flex h-7 shrink-0 items-stretch"
                 >
                   {trigger}
-                  {tabs.length > 1 && (
+                  {canClose && (
                     <button
                       type="button"
-                      aria-label="Close tab"
+                      aria-label={tr("closeTab")}
                       data-no-drag
                       onClick={() => onClose(t.id)}
                       className="absolute right-1 top-1/2 z-[2] -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -492,14 +543,17 @@ export function TabBar({
                 </div>
               );
 
-              const tabNode =
-                t.kind === "terminal" ? (
-                  <ContextMenu>
-                    <ContextMenuTrigger asChild>{tabCell}</ContextMenuTrigger>
-                    <ContextMenuContent
-                      className="min-w-32 p-1"
-                      onCloseAutoFocus={(e) => e.preventDefault()}
-                    >
+              const canCopySplit =
+                t.kind !== "ai-diff" &&
+                !((t.kind === "editor" || t.kind === "markdown") && t.dirty);
+              const tabNode = (
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>{tabCell}</ContextMenuTrigger>
+                  <ContextMenuContent
+                    className="min-w-48 p-1"
+                    onCloseAutoFocus={(e) => e.preventDefault()}
+                  >
+                    {t.kind === "terminal" && (
                       <ContextMenuItem
                         className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
                         onSelect={() => setEditingId(t.id)}
@@ -511,33 +565,59 @@ export function TabBar({
                         />
                         <span className="flex-1">{tr("common:rename")}</span>
                       </ContextMenuItem>
-                      {tabs.length > 1 && (
-                        <>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
-                            onSelect={() => onClose(t.id)}
-                          >
-                            <HugeiconsIcon
-                              icon={Cancel01Icon}
-                              size={13}
-                              strokeWidth={1.75}
-                            />
-                            <span className="flex-1">{tr("common:close")}</span>
-                          </ContextMenuItem>
-                        </>
-                      )}
-                    </ContextMenuContent>
-                  </ContextMenu>
-                ) : (
-                  tabCell
-                );
+                    )}
+                    {t.kind === "terminal" && <ContextMenuSeparator />}
+                    <ContextMenuItem
+                      disabled={!canCopySplit}
+                      className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                      onSelect={() => onSplitTab(t.id, "right", false)}
+                    >
+                      {tr("splitRight")}
+                    </ContextMenuItem>
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="rounded-xl px-2.5 py-1.5 text-[13px]">
+                        {tr("splitAndMove")}
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="min-w-36 p-1">
+                        {(["up", "down", "left", "right"] as const).map(
+                          (direction) => (
+                            <ContextMenuItem
+                              key={direction}
+                              disabled={tabs.length === 1}
+                              className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                              onSelect={() => onSplitTab(t.id, direction, true)}
+                            >
+                              {tr(`splitMove.${direction}`)}
+                            </ContextMenuItem>
+                          ),
+                        )}
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {canClose && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => onClose(t.id)}
+                        >
+                          <HugeiconsIcon
+                            icon={Cancel01Icon}
+                            size={13}
+                            strokeWidth={1.75}
+                          />
+                          <span className="flex-1">{tr("common:close")}</span>
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>
+              );
 
               return (
                 <Fragment key={t.id}>
-                  {showGap(i) && <DropIndicator />}
+                  {showDropGap(i) && <DropIndicator />}
                   {tabNode}
-                  {i === tabs.length - 1 && showGap(tabs.length) && (
+                  {i === tabs.length - 1 && showDropGap(tabs.length) && (
                     <DropIndicator />
                   )}
                 </Fragment>

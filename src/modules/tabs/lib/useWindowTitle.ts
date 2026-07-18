@@ -1,8 +1,7 @@
-import { useEffect } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { findLeafCwd } from "@/modules/terminal/lib/panes";
-import type { Tab } from "./useTabs";
+import type { Tab } from "@/modules/workbench";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useEffect } from "react";
 
 const APP_NAME = "Terax";
 
@@ -15,8 +14,7 @@ function basename(path: string): string {
 function tabLabel(tab: Tab | undefined): string {
   if (!tab) return "";
   if (tab.kind === "terminal") {
-    const cwd = findLeafCwd(tab.paneTree, tab.activeLeafId) ?? tab.cwd;
-    return cwd ? basename(cwd) : tab.title;
+    return tab.cwd ? basename(tab.cwd) : tab.title;
   }
   return tab.title;
 }
@@ -46,7 +44,8 @@ export function useWindowTitle(
           ? `SSH ${bootstrap.env.profileId}`
           : "Local";
     let content: string;
-    if (project && label && label !== project) content = `${project} — ${label}`;
+    if (project && label && label !== project)
+      content = `${project} — ${label}`;
     else content = project || label || APP_NAME;
     const title = `${content} · ${environment} · ${bootstrap.id.slice(0, 8)}`;
 

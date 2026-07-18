@@ -1,3 +1,4 @@
+import type { AppCloseBlocker } from "@/app/hooks/useAppCloseGuard";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -8,8 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { AppCloseBlocker } from "@/app/hooks/useAppCloseGuard";
-import type { Tab } from "@/modules/tabs";
+import type { Tab } from "@/modules/workbench";
 import { useTranslation } from "react-i18next";
 
 type Props = {

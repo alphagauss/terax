@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { AiDiffStatus } from "@/modules/tabs";
+import type { AiDiffStatus } from "@/modules/workbench";
 import { presentableDiff, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";

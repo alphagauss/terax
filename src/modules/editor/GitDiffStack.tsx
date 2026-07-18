@@ -1,4 +1,8 @@
-import type { GitCommitFileDiffTab, GitDiffTab, Tab } from "@/modules/tabs";
+import type {
+  GitCommitFileDiffTab,
+  GitDiffTab,
+  Tab,
+} from "@/modules/workbench";
 import { GitDiffPane } from "./GitDiffPane";
 
 type Props = {

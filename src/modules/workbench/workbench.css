@@ -2,6 +2,12 @@
   --scrollbar-size: 12px;
 }
 
+.workbench-drop-indicator {
+  transition-property: top, left, width, height, background-color;
+  transition-duration: var(--dur-feedback);
+  transition-timing-function: var(--ease-standard);
+}
+
 .workspace-terminal-surface {
   background: var(--terminal-background);
 }

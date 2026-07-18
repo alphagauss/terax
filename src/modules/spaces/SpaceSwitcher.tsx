@@ -6,7 +6,8 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useShortcutLabel } from "@/modules/shortcuts";
-import { labelFor, type Tab, TabIcon } from "@/modules/tabs";
+import { labelFor, TabIcon } from "@/modules/tabs";
+import type { Tab } from "@/modules/workbench";
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -191,13 +192,15 @@ export function SpaceSwitcher({
       return;
     }
     const rect = hit.getBoundingClientRect();
-    const edge: Edge = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+    const edge: Edge =
+      e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
     const kind = hit.getAttribute("data-drop");
     let next: DropTarget | null = null;
     if (st.kind === "space") {
       if (kind === "space") {
         const spaceId = hit.getAttribute("data-space-id");
-        if (spaceId && spaceId !== st.id) next = { kind: "space", spaceId, edge };
+        if (spaceId && spaceId !== st.id)
+          next = { kind: "space", spaceId, edge };
       }
     } else if (kind === "tab") {
       const tabId = Number(hit.getAttribute("data-tab-id"));
@@ -401,7 +404,9 @@ function SpaceRow({
         data-space-id={space.id}
         role="button"
         tabIndex={editing ? -1 : 0}
-        onPointerDown={editing ? undefined : (e) => onPointerDown(e, "space", space.id)}
+        onPointerDown={
+          editing ? undefined : (e) => onPointerDown(e, "space", space.id)
+        }
         onPointerMove={onPointerMove}
         onPointerUp={editing ? undefined : (e) => onPointerUp(e, onSwitch)}
         onPointerCancel={(e) => onPointerUp(e)}

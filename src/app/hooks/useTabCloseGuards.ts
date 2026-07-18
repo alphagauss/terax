@@ -1,6 +1,6 @@
+import { leafHasForegroundProcess } from "@/modules/terminal";
+import type { Tab } from "@/modules/workbench";
 import { useCallback, useState } from "react";
-import { leafHasForegroundProcess, leafIds } from "@/modules/terminal";
-import { nextActiveInSpace, type Tab } from "@/modules/tabs";
 
 type Params = {
   tabs: Tab[];
@@ -25,16 +25,19 @@ export function useTabCloseGuards({ tabs, disposeTab }: Params) {
     async (id: number) => {
       // Last tab in its space can't be closed (closeTab refuses). Skip the
       // dialog entirely so confirming it doesn't appear to silently fail.
-      if (nextActiveInSpace(tabs, id) === null) return;
       const t = tabs.find((x) => x.id === id);
+      if (
+        !t ||
+        tabs.filter((candidate) => candidate.spaceId === t.spaceId).length < 2
+      ) {
+        return;
+      }
       if ((t?.kind === "editor" || t?.kind === "markdown") && t.dirty) {
         setPendingCloseTab(id);
         return;
       }
       if (t?.kind === "terminal") {
-        const leaves = leafIds(t.paneTree);
-        const checks = await Promise.all(leaves.map(leafHasForegroundProcess));
-        if (checks.some(Boolean)) {
+        if (await leafHasForegroundProcess(t.terminalId)) {
           setPendingTerminalCloseTab(id);
           return;
         }

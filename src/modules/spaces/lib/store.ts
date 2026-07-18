@@ -3,7 +3,10 @@ import {
   getWorkspaceEntries,
   setWorkspaceValue,
 } from "@/modules/workspace-process";
-import type { SerializedTab } from "./serialize";
+import {
+  isSerializedWorkbenchNode,
+  type SerializedWorkbenchNode,
+} from "./serialize";
 
 export type SpaceMeta = {
   id: string;
@@ -15,8 +18,8 @@ export type SpaceMeta = {
 };
 
 export type SpaceState = {
-  tabs: SerializedTab[];
-  activeTabIndex: number;
+  version: 2;
+  workbench: SerializedWorkbenchNode;
 };
 
 const KEY_SPACES = "spaces";
@@ -32,19 +35,19 @@ export type LoadedSpaces = {
 
 export async function loadAll(): Promise<LoadedSpaces> {
   const entries = getWorkspaceEntries();
-  const stored = (entries.get(KEY_SPACES) as
-    | (SpaceMeta & { env?: unknown })[]
-    | undefined) ?? [];
-  const spaces = stored.map(({ env: _legacyEnv, ...space }) => space);
-  if (stored.some((space) => "env" in space)) {
-    await setWorkspaceValue(KEY_SPACES, spaces);
-  }
+  const spaces = (entries.get(KEY_SPACES) as SpaceMeta[] | undefined) ?? [];
   const activeId =
     (entries.get(KEY_ACTIVE) as string | null | undefined) ?? null;
   const states = new Map<string, SpaceState>();
   for (const [key, value] of entries) {
     if (key.startsWith(STATE_PREFIX)) {
-      states.set(key.slice(STATE_PREFIX.length), value as SpaceState);
+      const candidate = value as Partial<SpaceState>;
+      if (
+        candidate.version === 2 &&
+        isSerializedWorkbenchNode(candidate.workbench)
+      ) {
+        states.set(key.slice(STATE_PREFIX.length), candidate as SpaceState);
+      }
     }
   }
   return { spaces, activeId, states };

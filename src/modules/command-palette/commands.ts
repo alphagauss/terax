@@ -1,6 +1,6 @@
+import i18n from "@/i18n";
 import type { SearchTarget } from "@/modules/header";
-import { MAX_PANES_PER_TAB, type Tab } from "@/modules/tabs";
-import { leafIds } from "@/modules/terminal";
+import type { Tab } from "@/modules/workbench";
 import {
   Cancel01Icon,
   DashboardSquare01Icon,
@@ -19,7 +19,6 @@ import {
   SparklesIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import i18n from "@/i18n";
 import type { PaletteItem } from "./types";
 
 const t = (key: string, opts?: Record<string, unknown>) =>
@@ -29,7 +28,7 @@ export const COMMAND_GROUPS = [
   "General",
   "Spaces",
   "Tabs",
-  "Panes",
+  "Workbench",
   "Git",
   "Search",
   "View",
@@ -51,9 +50,9 @@ export type CommandPaletteActionContext = {
   openNewPreview: () => void;
   openGitGraph: () => void;
   toggleSourceControl: () => void;
-  closeActiveTabOrPane: () => void;
-  splitPaneRight: () => void;
-  splitPaneDown: () => void;
+  closeActiveTab: () => void;
+  splitGroupRight: () => void;
+  splitGroupDown: () => void;
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
@@ -74,19 +73,18 @@ export function createCommandItems(
   ctx: CommandPaletteActionContext,
 ): PaletteItem[] {
   const activeTab = ctx.tabs.find((tab) => tab.id === ctx.activeId);
-  const activeTerminalTab = activeTab?.kind === "terminal" ? activeTab : null;
-  const activePaneCount = activeTerminalTab
-    ? leafIds(activeTerminalTab.paneTree).length
-    : 0;
-  const onlyOneTab = ctx.tabs.length < 2;
+  const onlyOneTab =
+    !activeTab ||
+    ctx.tabs.filter((tab) => tab.spaceId === activeTab.spaceId).length < 2;
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
-  const splitDisabled = !activeTerminalTab
-    ? "No terminal tab"
-    : activePaneCount >= MAX_PANES_PER_TAB
-      ? "Pane limit"
+  const splitDisabled =
+    !activeTab ||
+    activeTab.kind === "ai-diff" ||
+    ((activeTab.kind === "editor" || activeTab.kind === "markdown") &&
+      activeTab.dirty)
+      ? "This view cannot be copied"
       : undefined;
-  const closeDisabled =
-    onlyOneTab && activePaneCount < 2 ? "Last tab" : undefined;
+  const closeDisabled = onlyOneTab ? "Last tab" : undefined;
   const windowItems: PaletteItem[] =
     ctx.workspaceWindowMode === "multiple"
       ? [
@@ -194,7 +192,9 @@ export function createCommandItems(
       keywords: ["file", "editor", "create"],
       icon: FileEditIcon,
       shortcutId: "tab.newEditor",
-      disabledReason: noWorkspaceRoot ? t("disabled.noWorkspaceRoot") : undefined,
+      disabledReason: noWorkspaceRoot
+        ? t("disabled.noWorkspaceRoot")
+        : undefined,
       run: ctx.openNewEditor,
     },
     {
@@ -214,27 +214,27 @@ export function createCommandItems(
       icon: Cancel01Icon,
       shortcutId: "tab.close",
       disabledReason: closeDisabled,
-      run: ctx.closeActiveTabOrPane,
+      run: ctx.closeActiveTab,
     },
     {
-      id: "pane.splitRight",
-      title: t("cmd.pane.splitRight"),
-      group: "Panes",
+      id: "workbench.splitRight",
+      title: t("cmd.workbench.splitRight"),
+      group: "Workbench",
       keywords: ["terminal", "pane", "split", "right", "column"],
       icon: LayoutTwoColumnIcon,
-      shortcutId: "pane.splitRight",
+      shortcutId: "workbench.splitRight",
       disabledReason: splitDisabled,
-      run: ctx.splitPaneRight,
+      run: ctx.splitGroupRight,
     },
     {
-      id: "pane.splitDown",
-      title: t("cmd.pane.splitDown"),
-      group: "Panes",
+      id: "workbench.splitDown",
+      title: t("cmd.workbench.splitDown"),
+      group: "Workbench",
       keywords: ["terminal", "pane", "split", "down", "row"],
       icon: LayoutTwoRowIcon,
-      shortcutId: "pane.splitDown",
+      shortcutId: "workbench.splitDown",
       disabledReason: splitDisabled,
-      run: ctx.splitPaneDown,
+      run: ctx.splitGroupDown,
     },
     {
       id: "git.graph",
@@ -250,7 +250,7 @@ export function createCommandItems(
       group: "Git",
       keywords: ["git", "source control", "changes", "staging", "diff"],
       icon: SourceCodeIcon,
-      shortcutId: "pane.source",
+      shortcutId: "view.sourceControl",
       run: ctx.toggleSourceControl,
     },
     {
@@ -278,7 +278,9 @@ export function createCommandItems(
       keywords: ["find", "terminal", "editor", "current"],
       icon: Search01Icon,
       shortcutId: "search.focus",
-      disabledReason: ctx.searchTarget ? undefined : t("disabled.noSearchableView"),
+      disabledReason: ctx.searchTarget
+        ? undefined
+        : t("disabled.noSearchableView"),
       run: ctx.focusSearch,
     },
     {

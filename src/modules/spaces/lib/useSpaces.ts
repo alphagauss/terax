@@ -2,9 +2,9 @@ import { create } from "zustand";
 import {
   deleteSpaceData,
   newSpaceId,
+  type SpaceMeta,
   saveActiveId,
   saveSpacesList,
-  type SpaceMeta,
 } from "./store";
 
 type CreateInput = {
@@ -17,14 +17,7 @@ type State = {
   spaces: SpaceMeta[];
   activeId: string | null;
   hydrated: boolean;
-  // Per-space active tab index loaded from disk, so persistence preserves it
-  // for spaces the user never visits this session.
-  initialActiveIndex: Record<string, number>;
-  hydrate: (
-    spaces: SpaceMeta[],
-    activeId: string | null,
-    initialActiveIndex?: Record<string, number>,
-  ) => void;
+  hydrate: (spaces: SpaceMeta[], activeId: string | null) => void;
   create: (input: CreateInput) => SpaceMeta;
   rename: (id: string, name: string) => void;
   setColor: (id: string, color: number | undefined) => void;
@@ -37,10 +30,8 @@ export const useSpaces = create<State>((set, get) => ({
   spaces: [],
   activeId: null,
   hydrated: false,
-  initialActiveIndex: {},
-
-  hydrate: (spaces, activeId, initialActiveIndex = {}) => {
-    set({ spaces, activeId, initialActiveIndex, hydrated: true });
+  hydrate: (spaces, activeId) => {
+    set({ spaces, activeId, hydrated: true });
   },
 
   create: (input) => {

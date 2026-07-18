@@ -1,4 +1,4 @@
-import type { GitHistoryTab, Tab } from "@/modules/tabs";
+import type { GitHistoryTab, Tab } from "@/modules/workbench";
 import { GitHistoryPane, type GitHistorySearchHandle } from "./GitHistoryPane";
 
 type CommitFileDiffOpenInput = {

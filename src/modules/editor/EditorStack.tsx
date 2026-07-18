@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { EditorTab, Tab } from "@/modules/tabs";
+import type { EditorTab, Tab } from "@/modules/workbench";
 import { useEffect, useRef } from "react";
 import { EditorPane, type EditorPaneHandle } from "./EditorPane";
 

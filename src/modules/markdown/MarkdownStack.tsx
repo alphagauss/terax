@@ -4,7 +4,7 @@ import {
   MarkdownPreviewPane,
   type MarkdownPreviewPaneHandle,
 } from "@/modules/markdown/MarkdownPreviewPane";
-import type { MarkdownTab, Tab } from "@/modules/tabs";
+import type { MarkdownTab, Tab } from "@/modules/workbench";
 
 type Props = {
   tabs: Tab[];

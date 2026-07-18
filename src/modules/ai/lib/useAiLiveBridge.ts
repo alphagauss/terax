@@ -1,13 +1,12 @@
-import { type RefObject, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
 import {
-  findLeafCwd,
   type TerminalPaneHandle,
   whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
-import type { Tab } from "@/modules/tabs";
+import type { Tab } from "@/modules/workbench";
+import { invoke } from "@tauri-apps/api/core";
+import { type RefObject, useEffect, useRef } from "react";
 import type { Live } from "../store/chatStore";
 import { redactSensitive } from "./redact";
 
@@ -61,17 +60,12 @@ export function useAiLiveBridge(params: Params) {
       const { activeId, tabs, explorerRoot, launchCwd, home } = ref.current;
       const active = tabs.find((x) => x.id === activeId);
       if (active?.kind === "terminal") {
-        return (
-          findLeafCwd(active.paneTree, active.activeLeafId) ??
-          active.cwd ??
-          null
-        );
+        return active.cwd ?? null;
       }
       for (let i = tabs.length - 1; i >= 0; i--) {
         const t = tabs[i];
         if (t.kind !== "terminal") continue;
-        const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd;
-        if (cwd) return cwd;
+        if (t.cwd) return t.cwd;
       }
       return explorerRoot ?? launchCwd ?? home ?? null;
     };
@@ -83,7 +77,7 @@ export function useAiLiveBridge(params: Params) {
         const t = tabs.find((x) => x.id === activeId);
         if (t?.kind !== "terminal") return null;
         if (t.private) return null;
-        const buf = terminalRefs.current.get(t.activeLeafId)?.getBuffer(300);
+        const buf = terminalRefs.current.get(t.terminalId)?.getBuffer(300);
         return buf ? redactSensitive(buf) : null;
       },
       isActiveTerminalPrivate: () => {
@@ -95,7 +89,7 @@ export function useAiLiveBridge(params: Params) {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
         if (t?.kind !== "terminal") return false;
-        const term = terminalRefs.current.get(t.activeLeafId);
+        const term = terminalRefs.current.get(t.terminalId);
         if (!term) return false;
         term.write(text);
         term.focus();
@@ -128,9 +122,9 @@ export function useAiLiveBridge(params: Params) {
         useManagedAgentsStore
           .getState()
           .register({ leafId, tabId, sessionId, task: oneLine, cwd });
-        const hooksReady = invoke("agent_enable_hooks", { agent: "claude" }).catch(
-          () => {},
-        );
+        const hooksReady = invoke("agent_enable_hooks", {
+          agent: "claude",
+        }).catch(() => {});
         void (async () => {
           await Promise.all([whenSessionReady(leafId), hooksReady]);
           if (!writeToSession(leafId, "claude\r")) {

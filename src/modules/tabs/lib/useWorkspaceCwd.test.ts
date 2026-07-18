@@ -1,16 +1,15 @@
+import type { Tab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
-import type { Tab } from "./useTabs";
 import { resolveExplorerRoot } from "./useWorkspaceCwd";
 
 const terminal = (cwd: string): Tab =>
   ({
     id: 1,
+    terminalId: 2,
     kind: "terminal",
     spaceId: "default",
     title: "shell",
     cwd,
-    paneTree: { kind: "leaf", id: 2, cwd },
-    activeLeafId: 2,
   }) as Tab;
 
 describe("resolveExplorerRoot", () => {
