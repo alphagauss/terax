@@ -21,6 +21,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import i18n from "@/i18n";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowDown01Icon,
@@ -303,7 +304,9 @@ function chipIcon(c: ContextChip) {
 
 function chipLabel(c: ContextChip): string {
   if (c.kind === "selection") {
-    return c.source === "editor" ? "Editor selection" : "Terminal selection";
+    return c.source === "editor"
+      ? i18n.t("ai:chat.editorSelection")
+      : i18n.t("ai:chat.terminalSelection");
   }
   if (c.kind === "file") return c.name;
   return `#${c.name}`;

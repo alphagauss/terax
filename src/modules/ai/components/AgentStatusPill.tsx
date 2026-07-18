@@ -6,6 +6,8 @@ import {
   AlertDiamondIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { useChatStore, type AgentMeta } from "../store/chatStore";
 
 type Props = {
@@ -14,8 +16,9 @@ type Props = {
 };
 
 export function AgentStatusPill({ onClick, active = false }: Props) {
+  const { t } = useTranslation("ai");
   const meta = useChatStore((s) => s.agentMeta);
-  const { tone, icon, label } = describe(meta);
+  const { tone, icon, label } = describe(meta, t);
 
   return (
     <button
@@ -28,8 +31,8 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
           meta.status === "idle" &&
           "border-border bg-accent text-foreground",
       )}
-      title={active ? "Close AI sidebar" : "Open AI sidebar"}
-      aria-label={active ? "Close AI sidebar" : "Open AI sidebar"}
+      title={active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")}
+      aria-label={active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")}
       aria-pressed={active}
     >
       {icon}
@@ -38,7 +41,10 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
   );
 }
 
-function describe(meta: AgentMeta): {
+function describe(
+  meta: AgentMeta,
+  t: TFunction<"ai">,
+): {
   tone: string;
   icon: React.ReactNode;
   label: string;
@@ -51,8 +57,8 @@ function describe(meta: AgentMeta): {
       ),
       label:
         meta.approvalsPending > 1
-          ? `${meta.approvalsPending} approvals`
-          : "Approval needed",
+          ? t("statusPill.approvalsPending", { count: meta.approvalsPending })
+          : t("statusPill.approvalNeeded"),
     };
   }
   if (meta.status === "error") {
@@ -61,7 +67,7 @@ function describe(meta: AgentMeta): {
       icon: (
         <HugeiconsIcon icon={AlertCircleIcon} size={12} strokeWidth={1.75} />
       ),
-      label: meta.error ?? "Error",
+      label: meta.error ?? t("statusPill.error"),
     };
   }
   if (meta.status === "idle") {
@@ -74,6 +80,6 @@ function describe(meta: AgentMeta): {
   return {
     tone: "border-border/60 bg-card text-muted-foreground hover:text-foreground",
     icon: <Spinner className="size-3" />,
-    label: meta.step ?? "Thinking…",
+    label: meta.step ?? t("statusPill.thinking"),
   };
 }

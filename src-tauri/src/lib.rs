@@ -1,3 +1,4 @@
+pub mod menu;
 pub mod modules;
 
 use modules::{
@@ -189,6 +190,12 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
+            // Localized native menu bar, built from the persisted `language`
+            // preference. No-op off macOS.
+            #[cfg(target_os = "macos")]
+            {
+                let _ = menu::build_menu(_app.handle());
+            }
             _app.manage(shared_store::SharedStoreState::new(_app.handle())?);
             Ok(())
         })
@@ -329,6 +336,7 @@ pub fn run() {
             history::history_commands,
             history::history_record,
             history::history_list,
+            menu::apply_menu_language,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

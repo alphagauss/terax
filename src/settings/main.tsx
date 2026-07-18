@@ -1,4 +1,6 @@
 import "../styles/globals.css";
+import "@/i18n";
+import { preloadEn, preloadZhCN } from "@/i18n";
 
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { ThemeProvider } from "@/modules/theme";
@@ -10,6 +12,9 @@ if (USE_CUSTOM_WINDOW_CONTROLS) {
   document.documentElement.dataset.chrome = "borderless";
 }
 
+// Preload panel en locale bundles in the background (non-blocking).
+void preloadEn();
+
 ReactDOM.createRoot(
   document.getElementById("settings-root") as HTMLElement,
 ).render(
@@ -17,6 +22,13 @@ ReactDOM.createRoot(
     <SettingsApp />
   </ThemeProvider>,
 );
+
+const preloadChinese = () => void preloadZhCN().catch(() => {});
+if ("requestIdleCallback" in window) {
+  window.requestIdleCallback(preloadChinese, { timeout: 1500 });
+} else {
+  setTimeout(preloadChinese, 0);
+}
 
 const showWindow = () => {
   getCurrentWindow()

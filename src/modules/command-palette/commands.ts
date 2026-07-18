@@ -19,7 +19,11 @@ import {
   SparklesIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
+import i18n from "@/i18n";
 import type { PaletteItem } from "./types";
+
+const t = (key: string, opts?: Record<string, unknown>) =>
+  i18n.t(`commandPalette:${key}`, opts ?? {}) as string;
 
 export const COMMAND_GROUPS = [
   "General",
@@ -111,7 +115,7 @@ export function createCommandItems(
     },
     {
       id: "theme.pick",
-      title: "Change theme...",
+      title: t("cmd.theme.pick"),
       group: "General",
       keywords: ["theme", "appearance", "color", "dark", "light"],
       icon: PaintBoardIcon,
@@ -119,7 +123,7 @@ export function createCommandItems(
     },
     {
       id: "shortcuts.open",
-      title: "Keyboard shortcuts",
+      title: t("cmd.shortcuts.open"),
       group: "General",
       keywords: ["keys", "keybindings", "settings"],
       icon: KeyboardIcon,
@@ -142,7 +146,7 @@ export function createCommandItems(
     },
     {
       id: "spaces.new",
-      title: "New Space",
+      title: t("cmd.spaces.new"),
       group: "Spaces",
       keywords: ["space", "session", "workspace", "group", "create"],
       icon: DashboardSquare01Icon,
@@ -168,7 +172,7 @@ export function createCommandItems(
     },
     {
       id: "tab.newBlock",
-      title: "New block terminal",
+      title: t("cmd.tab.newBlock"),
       group: "Tabs",
       keywords: ["blocks", "warp", "command blocks", "terminal"],
       icon: DashboardSquare01Icon,
@@ -176,7 +180,7 @@ export function createCommandItems(
     },
     {
       id: "tab.newPrivate",
-      title: "New private terminal",
+      title: t("cmd.tab.newPrivate"),
       group: "Tabs",
       keywords: ["privacy", "private", "incognito", "hidden from ai"],
       icon: IncognitoIcon,
@@ -185,17 +189,17 @@ export function createCommandItems(
     },
     {
       id: "tab.newEditor",
-      title: "New editor tab",
+      title: t("cmd.tab.newEditor"),
       group: "Tabs",
       keywords: ["file", "editor", "create"],
       icon: FileEditIcon,
       shortcutId: "tab.newEditor",
-      disabledReason: noWorkspaceRoot ? "No workspace root" : undefined,
+      disabledReason: noWorkspaceRoot ? t("disabled.noWorkspaceRoot") : undefined,
       run: ctx.openNewEditor,
     },
     {
       id: "tab.newPreview",
-      title: "New web preview",
+      title: t("cmd.tab.newPreview"),
       group: "Tabs",
       keywords: ["browser", "web", "localhost", "preview"],
       icon: Globe02Icon,
@@ -204,7 +208,7 @@ export function createCommandItems(
     },
     {
       id: "tab.close",
-      title: "Close tab or pane",
+      title: t("cmd.tab.close"),
       group: "Tabs",
       keywords: ["close", "remove", "pane"],
       icon: Cancel01Icon,
@@ -214,7 +218,7 @@ export function createCommandItems(
     },
     {
       id: "pane.splitRight",
-      title: "Split pane right",
+      title: t("cmd.pane.splitRight"),
       group: "Panes",
       keywords: ["terminal", "pane", "split", "right", "column"],
       icon: LayoutTwoColumnIcon,
@@ -224,7 +228,7 @@ export function createCommandItems(
     },
     {
       id: "pane.splitDown",
-      title: "Split pane down",
+      title: t("cmd.pane.splitDown"),
       group: "Panes",
       keywords: ["terminal", "pane", "split", "down", "row"],
       icon: LayoutTwoRowIcon,
@@ -234,7 +238,7 @@ export function createCommandItems(
     },
     {
       id: "git.graph",
-      title: "Open git graph",
+      title: t("cmd.git.graph"),
       group: "Git",
       keywords: ["git", "graph", "history", "log", "commits"],
       icon: SourceCodeIcon,
@@ -242,7 +246,7 @@ export function createCommandItems(
     },
     {
       id: "git.source",
-      title: "Toggle source control",
+      title: t("cmd.git.source"),
       group: "Git",
       keywords: ["git", "source control", "changes", "staging", "diff"],
       icon: SourceCodeIcon,
@@ -251,7 +255,7 @@ export function createCommandItems(
     },
     {
       id: "search.content",
-      title: "Find content in files",
+      title: t("cmd.search.content"),
       group: "Search",
       keywords: ["grep", "ripgrep", "text", "contents", "search in files"],
       icon: FileSearchIcon,
@@ -260,7 +264,7 @@ export function createCommandItems(
     },
     {
       id: "history.open",
-      title: "Search command history",
+      title: t("cmd.history.open"),
       group: "Search",
       keywords: ["history", "shell", "rerun", "previous commands"],
       icon: TerminalIcon,
@@ -269,27 +273,29 @@ export function createCommandItems(
     },
     {
       id: "search.focus",
-      title: "Find in current tab",
+      title: t("cmd.search.focus"),
       group: "Search",
       keywords: ["find", "terminal", "editor", "current"],
       icon: Search01Icon,
       shortcutId: "search.focus",
-      disabledReason: ctx.searchTarget ? undefined : "No searchable view",
+      disabledReason: ctx.searchTarget ? undefined : t("disabled.noSearchableView"),
       run: ctx.focusSearch,
     },
     {
       id: "explorer.search",
-      title: "Search files by name",
+      title: t("cmd.explorer.search"),
       group: "Search",
       keywords: ["explorer", "workspace", "file", "open"],
       icon: Search01Icon,
       shortcutId: "explorer.search",
-      disabledReason: ctx.explorerRoot ? undefined : "No workspace root",
+      disabledReason: ctx.explorerRoot
+        ? undefined
+        : t("disabled.noWorkspaceRoot"),
       run: ctx.focusExplorerSearch,
     },
     {
       id: "sidebar.toggle",
-      title: "Toggle file explorer",
+      title: t("cmd.sidebar.toggle"),
       group: "View",
       keywords: ["sidebar", "files", "explorer"],
       icon: SidebarLeftIcon,
@@ -298,7 +304,7 @@ export function createCommandItems(
     },
     {
       id: "ai.toggle",
-      title: "Toggle AI agent",
+      title: t("cmd.ai.toggle"),
       group: "AI",
       keywords: ["assistant", "chat", "agent"],
       icon: SparklesIcon,
@@ -307,7 +313,7 @@ export function createCommandItems(
     },
     {
       id: "ai.askSelection",
-      title: "Ask AI about selection",
+      title: t("cmd.ai.askSelection"),
       group: "AI",
       keywords: ["selection", "explain", "assistant", "chat"],
       icon: SparklesIcon,

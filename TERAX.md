@@ -96,6 +96,28 @@ All Terax-owned files live under `~/.terax`: shared configuration, AI sessions, 
 
 ### Frontend (`src/`)
 
+#### Internationalization
+
+Terax uses `i18next` with `react-i18next`. Translation resources live in
+`src/i18n/locales/<language>/<namespace>.json`; keep namespace names aligned
+across languages. Components normally call `useTranslation("settings")` and
+then `t("general.title")`; use the `namespace:key` form such as
+`t("common:loading")` when reading another namespace. `src/i18n/index.ts`
+discovers locale files through Vite glob imports, preloads English panel
+bundles, and preloads `zh-CN` during idle time after the first paint.
+
+All user-visible text must use translations, including JSX text, buttons,
+menus, tooltips, `title`, `aria-label`, `placeholder`, toast messages,
+validation errors, command-palette entries, and native macOS menu labels. Use
+interpolation for dynamic values and `Trans` when translated content contains
+React markup. Do not add a second language store or persist language to
+`localStorage`; `language` in the shared settings store is the single source
+of truth and also drives the native menu.
+
+When adding a user-visible string, update both `en` and `zh-CN` namespace files
+in the same change. If an existing file still contains untranslated UI copy,
+translate it when touching that file and keep the change localized.
+
 Each application process runs one single-window React app. Multi-window behavior comes from multiple application processes, not multiple Workspace webviews in one process. Path alias `@/*` → `src/*`. Tabs are a tagged union (`kind`: `terminal` | `editor` | `preview` | `markdown` | `ai-diff` | `git-diff` | `git-history` | `git-commit-file`) and **not** unmounted on switch - they're hidden via `invisible pointer-events-none` so PTYs and dev servers keep streaming in the background.
 
 `App.tsx` wires modules together - keep it a coordinator. New features go inside the appropriate `modules/<area>/`.

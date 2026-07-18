@@ -39,9 +39,11 @@ import { Edit02Icon, PlusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SectionHeader } from "../components/SectionHeader";
 
 export function ThemesSection() {
+  const { t } = useTranslation();
   const { themeId, setThemeId, resolvedMode, customThemes } = useTheme();
   const builtinThemes = listBuiltinThemes();
   const themes = useMemo(
@@ -154,7 +156,7 @@ export function ThemesSection() {
         }}
       >
         <div className="flex items-center justify-between">
-          <Label>Theme</Label>
+          <Label>{t("themes.theme.label")}</Label>
           <div className="flex items-center gap-1.5">
             <Button
               variant="outline"
@@ -163,7 +165,7 @@ export function ThemesSection() {
               onClick={onCreateTheme}
             >
               <HugeiconsIcon icon={PlusSignIcon} size={11} strokeWidth={2} />
-              Create
+              {t("themes.theme.create")}
             </Button>
             <Button
               variant="outline"
@@ -171,7 +173,7 @@ export function ThemesSection() {
               className="h-7 px-2 text-[11px]"
               onClick={onPickThemeFile}
             >
-              Import .terax-theme
+              {t("themes.theme.import")}
             </Button>
           </div>
           <input
@@ -285,9 +287,9 @@ export function ThemesSection() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col">
-            <Label>Editor theme</Label>
+            <Label>{t("themes.editorTheme.label")}</Label>
             <span className="text-[11px] text-muted-foreground">
-              Syntax colors for the code editor. Auto follows the app theme.
+              {t("themes.editorTheme.description")}
             </span>
           </div>
           <Select
@@ -299,7 +301,7 @@ export function ThemesSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={EDITOR_THEME_AUTO} className="text-[12px]">
-                Auto (match app theme)
+                {t("themes.editorTheme.auto")}
               </SelectItem>
               <SelectSeparator />
               {[...EDITOR_THEMES]
@@ -345,7 +347,7 @@ export function ThemesSection() {
         }}
       >
         <div className="flex items-center justify-between">
-          <Label>Background</Label>
+          <Label>{t("themes.background.label")}</Label>
           <div className="flex items-center gap-2">
             {backgroundKind === "image" && backgroundImageId ? (
               <Button
@@ -354,7 +356,7 @@ export function ThemesSection() {
                 className="h-7 px-2 text-[11px] text-muted-foreground hover:text-destructive"
                 onClick={() => void onRemoveBackground()}
               >
-                Remove
+                {t("themes.background.remove")}
               </Button>
             ) : null}
             <Button
@@ -363,7 +365,9 @@ export function ThemesSection() {
               className="h-7 px-2 text-[11px]"
               onClick={onPickBgFile}
             >
-              {backgroundKind === "image" ? "Replace image" : "Choose image"}
+              {backgroundKind === "image"
+                ? t("themes.background.replace")
+                : t("themes.background.choose")}
             </Button>
             <input
               ref={bgInputRef}
@@ -386,7 +390,7 @@ export function ThemesSection() {
           <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[11.5px] text-muted-foreground">
-                Opacity
+                {t("themes.background.opacity")}
               </span>
               <span className="tabular-nums text-[11px] text-muted-foreground">
                 {Math.round(backgroundOpacity * 100)}%
@@ -400,7 +404,9 @@ export function ThemesSection() {
               onValueChange={(v) => void setBackgroundOpacity(v[0] ?? 0)}
             />
             <div className="flex items-center justify-between gap-3 pt-1">
-              <span className="text-[11.5px] text-muted-foreground">Blur</span>
+              <span className="text-[11.5px] text-muted-foreground">
+                {t("themes.background.blur")}
+              </span>
               <span className="tabular-nums text-[11px] text-muted-foreground">
                 {backgroundBlur}px
               </span>

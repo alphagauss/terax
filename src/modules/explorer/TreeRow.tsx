@@ -2,6 +2,7 @@ import { cn } from "@/lib/utils";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
+import { useTranslation } from "react-i18next";
 import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
@@ -155,6 +156,7 @@ export function PendingRow({
   onCommit,
   onCancel,
 }: PendingRowProps) {
+  const { t } = useTranslation("explorer");
   return (
     <div
       role="treeitem"
@@ -173,7 +175,7 @@ export function PendingRow({
       />
       <InlineInput
         initial=""
-        placeholder={kind === "dir" ? "New folder" : "New file"}
+        placeholder={kind === "dir" ? t("newFolder") : t("newFile")}
         onCommit={onCommit}
         onCancel={onCancel}
       />

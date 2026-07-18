@@ -1,4 +1,5 @@
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
+import i18n from "@/i18n";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
@@ -30,6 +31,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   inlineCompletion,
@@ -144,6 +146,7 @@ function formatBytes(n: number): string {
 // skip re-rendering entirely when App re-renders (terminal events, tab churn).
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
+    const { t } = useTranslation("editor");
     const {
       path,
       overrideLanguage,
@@ -256,9 +259,8 @@ export const EditorPane = memo(
           }
         } else if (!warnedNoLspRef.current) {
           warnedNoLspRef.current = true;
-          toast.warning("Format on save skipped", {
-            description:
-              "No active language server for this file. Enable one in the statusbar, or pick an external formatter in Settings.",
+          toast.warning(i18n.t("editor:formatOnSaveSkipped"), {
+            description: i18n.t("editor:formatOnSaveSkippedDescription"),
           });
         }
       }
@@ -274,7 +276,9 @@ export const EditorPane = memo(
           prefs.editorCustomFormatCommand,
         );
         if (error) {
-          toast.error(`${formatter} format failed`, { description: error });
+          toast.error(i18n.t("editor:formatFailed", { formatter }), {
+            description: error,
+          });
         } else {
           const readBack = await readFileText(pathRef.current);
           if (readBack !== null && view && view.state.doc === docAtSave) {
@@ -660,7 +664,7 @@ export const EditorPane = memo(
     if (doc.status === "loading") {
       return (
         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-          Loading…
+          {t("common:loading")}
         </div>
       );
     }
@@ -738,11 +742,11 @@ export const EditorPane = memo(
       return (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
           <div className="text-sm text-foreground">
-            {doc.status === "binary" ? "Binary file" : "File too large"}
+            {doc.status === "binary" ? t("binaryFile") : t("fileTooLarge")}
           </div>
           <div className="text-xs text-muted-foreground">
             {formatBytes(doc.size)} ·{" "}
-            {canForce ? "syntax features disabled" : "preview not supported"}
+            {canForce ? t("syntaxFeaturesDisabled") : t("previewNotSupported")}
           </div>
           {canForce && (
             <button

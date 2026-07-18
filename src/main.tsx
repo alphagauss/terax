@@ -1,5 +1,7 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
+import "./i18n";
+import { preloadEn, preloadZhCN } from "./i18n";
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -28,9 +30,19 @@ await invoke("pty_close_all").catch(() => {});
 // Seed before first paint so default tab mounts at target cwd (no flicker).
 await initLaunchDir();
 
+// Preload panel en locale bundles in the background (non-blocking).
+void preloadEn();
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <App />,
 );
+
+const preloadChinese = () => void preloadZhCN().catch(() => {});
+if ("requestIdleCallback" in window) {
+  window.requestIdleCallback(preloadChinese, { timeout: 1500 });
+} else {
+  setTimeout(preloadChinese, 0);
+}
 
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled

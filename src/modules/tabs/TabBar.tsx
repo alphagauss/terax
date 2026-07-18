@@ -43,6 +43,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { labelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab } from "./lib/useTabs";
 
@@ -86,6 +87,7 @@ export function TabBar({
   onOverrideLanguage,
   compact,
 }: Props) {
+  const { t: tr } = useTranslation("tabs");
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -388,9 +390,11 @@ export function TabBar({
                               alt=""
                             />
                             <div className="flex flex-1 flex-col">
-                              <span>Auto Detect</span>
+                              <span>{tr("autoDetect")}</span>
                               <span className="text-[10px] text-muted-foreground italic">
-                                Mode: {resolveDisplayName(t.title)}
+                                {tr("mode", {
+                                  name: resolveDisplayName(t.title),
+                                })}
                               </span>
                             </div>
                             {!(t as EditorTab).overrideLanguage && (
@@ -408,8 +412,8 @@ export function TabBar({
                             className="w-full px-2.5 py-1.5 text-left text-xs text-primary/60 hover:text-primary rounded-lg transition-colors hover:bg-accent"
                           >
                             {showAllLanguages
-                              ? "↑ Fewer languages"
-                              : "↓ All languages"}
+                              ? tr("fewerLanguages")
+                              : tr("allLanguages")}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator className="my-1 border-t border-border/30" />
                           {(showAllLanguages
@@ -505,7 +509,7 @@ export function TabBar({
                           size={13}
                           strokeWidth={1.75}
                         />
-                        <span className="flex-1">Rename</span>
+                        <span className="flex-1">{tr("common:rename")}</span>
                       </ContextMenuItem>
                       {tabs.length > 1 && (
                         <>
@@ -519,7 +523,7 @@ export function TabBar({
                               size={13}
                               strokeWidth={1.75}
                             />
-                            <span className="flex-1">Close</span>
+                            <span className="flex-1">{tr("common:close")}</span>
                           </ContextMenuItem>
                         </>
                       )}
@@ -547,7 +551,7 @@ export function TabBar({
               variant="ghost"
               size="icon"
               className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-              title="New tab"
+              title={tr("newTab")}
             >
               <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
             </Button>
@@ -563,7 +567,7 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">Terminal</span>
+              <span className="flex-1">{tr("terminal")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "T")}
               </span>
@@ -574,7 +578,7 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">Blocks</span>
+              <span className="flex-1">{tr("blocks")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, SHIFT_KEY, "T")}
               </span>
@@ -585,7 +589,7 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">Privacy</span>
+              <span className="flex-1">{tr("privacy")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "R")}
               </span>
@@ -596,14 +600,14 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">Editor</span>
+              <span className="flex-1">{tr("editor")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "E")}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewPreview()}>
               <HugeiconsIcon icon={Globe02Icon} size={14} strokeWidth={1.75} />
-              <span className="flex-1">Preview</span>
+              <span className="flex-1">{tr("preview")}</span>
               <span className="text-xs text-muted-foreground">
                 {fmtShortcut(MOD_KEY, "P")}
               </span>
@@ -614,7 +618,7 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">Git Graph</span>
+              <span className="flex-1">{tr("gitGraph")}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -721,6 +725,7 @@ function TabRenameInput({
   onCommit: (value: string) => void;
   onCancel: () => void;
 }) {
+  const { t: tr } = useTranslation("tabs");
   const ref = useRef<HTMLInputElement>(null);
   // Guards against a trailing blur re-resolving an edit that Enter/Escape
   // already finished (Escape must never commit).
@@ -754,7 +759,7 @@ function TabRenameInput({
     <input
       ref={ref}
       defaultValue={initial}
-      aria-label="Rename tab"
+      aria-label={tr("renameTab")}
       className={cn(
         "w-28 min-w-0 rounded-sm bg-background px-1 text-xs text-foreground",
         "outline-none ring-1 ring-border focus:ring-ring",

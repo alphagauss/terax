@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import {
   Popover,
   PopoverAnchor,
@@ -162,6 +163,7 @@ export function GitHistoryPane({
   onOpenCommitFile,
   onSearchHandle,
 }: Props) {
+  const { t } = useTranslation("gitHistory");
   const [commits, setCommits] = useState<GitLogEntry[]>([]);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -530,12 +532,12 @@ export function GitHistoryPane({
               }}
             >
               <div />
-              <div className="pl-px">SHA</div>
-              <div className="min-w-0">Subject</div>
+              <div className="pl-px">{t("columnSha")}</div>
+              <div className="min-w-0">{t("columnSubject")}</div>
               <div />
-              <div className="ml-2">Author</div>
-              <div className="text-right">Date</div>
-              <div className="text-right">Changes</div>
+              <div className="ml-2">{t("columnAuthor")}</div>
+              <div className="text-right">{t("columnDate")}</div>
+              <div className="text-right">{t("columnChanges")}</div>
             </div>
             <div
               ref={scrollRef}
@@ -706,6 +708,7 @@ const CommitRow = memo(function CommitRow({
   gridTemplate,
   onClick,
 }: CommitRowProps) {
+  const { t } = useTranslation("gitHistory");
   const date = compactDate(commit.timestampSecs);
   const initials = authorInitials(commit.author);
   const totalStat = commit.insertions + commit.deletions;
@@ -743,7 +746,7 @@ const CommitRow = memo(function CommitRow({
         {commit.subject ? (
           highlight(commit.subject, query)
         ) : (
-          <span className="text-muted-foreground">(no subject)</span>
+          <span className="text-muted-foreground">{t("noSubject")}</span>
         )}
       </span>
       <span aria-hidden />
@@ -760,7 +763,7 @@ const CommitRow = memo(function CommitRow({
           {initials}
         </span>
         <span className="min-w-0 truncate">
-          {commit.author ? highlight(commit.author, query) : "Unknown"}
+          {commit.author ? highlight(commit.author, query) : t("unknownAuthor")}
         </span>
       </span>
       <span className="text-right font-mono text-[10.5px] tabular-nums text-muted-foreground/75">
@@ -770,7 +773,7 @@ const CommitRow = memo(function CommitRow({
         {commit.filesChanged > 0 ? (
           <span
             className="inline-flex items-center gap-1 text-muted-foreground/75"
-            title={`${commit.filesChanged} ${commit.filesChanged === 1 ? "file" : "files"} changed`}
+            title={t("filesChanged", { count: commit.filesChanged })}
           >
             <HugeiconsIcon
               icon={File02Icon}
