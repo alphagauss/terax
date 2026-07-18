@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import {
+  animateResizableLayout,
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -16,17 +17,12 @@ import {
 } from "@/modules/workspace-process";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Fragment,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
-import { flushSync } from "react-dom";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+import { Fragment, type ReactNode, useCallback, useRef, useState } from "react";
+import type {
+  Layout,
+  LayoutChangedMeta,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import {
   normalizeSidebarSectionLayout,
   SIDEBAR_SECTION_HEADER_HEIGHT,
@@ -57,15 +53,11 @@ type Props = {
   className?: string;
 };
 
-let activeSidebarSectionTransition: ViewTransition | null = null;
-let cleanupActiveSidebarSectionTransition: (() => void) | null = null;
-
 function storageKey(id: string): string {
   return `sidebar:sections:${id}`;
 }
 
 export function SidebarSectionGroup({ id, sections, className }: Props) {
-  const transitionScope = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const [initialLayout] = useState(() =>
     normalizeSidebarSectionLayout(
       getWorkspaceValue<unknown>(storageKey(id)),
@@ -87,135 +79,89 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
     ),
   );
   const collapsedRef = useRef(
-    new Map(
-      Object.entries(initialLayout.sections).map(([sectionId, item]) => [
-        sectionId,
-        item.collapsed,
-      ]),
+    new Set(
+      Object.entries(initialLayout.sections)
+        .filter(([, item]) => item.collapsed)
+        .map(([sectionId]) => sectionId),
     ),
   );
   const [collapsedSections, setCollapsedSections] = useState(
-    () =>
-      new Set(
-        Object.entries(initialLayout.sections)
-          .filter(([, item]) => item.collapsed)
-          .map(([sectionId]) => sectionId),
-      ),
+    () => new Set(collapsedRef.current),
   );
-  const panelElementsRef = useRef(new Map<string, HTMLDivElement>());
-  const layoutFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (layoutFrameRef.current !== null) {
-        window.cancelAnimationFrame(layoutFrameRef.current);
-      }
-    };
-  }, []);
-
-  const setCollapsed = useCallback((sectionId: string, collapsed: boolean) => {
-    if (collapsedRef.current.get(sectionId) === collapsed) return;
-    collapsedRef.current.set(sectionId, collapsed);
-    setCollapsedSections((current) => {
-      const next = new Set(current);
-      if (collapsed) next.add(sectionId);
-      else next.delete(sectionId);
-      return next;
-    });
-  }, []);
+  const groupElementRef = useRef<HTMLDivElement>(null);
 
   const persistLayout = useCallback(() => {
     const next: SidebarSectionLayout = { version: 1, sections: {} };
     for (const section of sections) {
       next.sections[section.id] = {
         size: sizesRef.current.get(section.id) ?? section.defaultSize,
-        collapsed: collapsedRef.current.get(section.id) ?? false,
+        collapsed: collapsedRef.current.has(section.id),
       };
     }
     void setWorkspaceValue(storageKey(id), next);
   }, [id, sections]);
 
+  const replaceCollapsedSections = useCallback((next: Set<string>) => {
+    collapsedRef.current = next;
+    setCollapsedSections((current) =>
+      current.size === next.size &&
+      [...current].every((sectionId) => next.has(sectionId))
+        ? current
+        : next,
+    );
+  }, []);
+
   const handleLayoutChanged = useCallback(() => {
-    if (layoutFrameRef.current !== null) {
-      window.cancelAnimationFrame(layoutFrameRef.current);
+    const nextCollapsed = new Set<string>();
+    for (const section of sections) {
+      const panel = panelRefs.current.get(section.id);
+      if (!panel) continue;
+      if (panel.isCollapsed()) nextCollapsed.add(section.id);
+      else sizesRef.current.set(section.id, panel.getSize().inPixels);
     }
-    layoutFrameRef.current = window.requestAnimationFrame(() => {
-      layoutFrameRef.current = null;
-      for (const section of sections) {
-        const panel = panelRefs.current.get(section.id);
-        if (!panel) continue;
-        const collapsed = panel.isCollapsed();
-        setCollapsed(section.id, collapsed);
-        if (!collapsed) {
-          sizesRef.current.set(section.id, panel.getSize().inPixels);
-        }
-      }
-      persistLayout();
-    });
-  }, [persistLayout, sections, setCollapsed]);
+    replaceCollapsedSections(nextCollapsed);
+    persistLayout();
+  }, [persistLayout, replaceCollapsedSections, sections]);
+
+  const handleUserLayoutChanged = useCallback(
+    (_layout: Layout, meta: LayoutChangedMeta) => {
+      if (meta.isUserInteraction) handleLayoutChanged();
+    },
+    [handleLayoutChanged],
+  );
 
   const toggleSection = useCallback(
     (section: SidebarSectionDefinition) => {
       const panel = panelRefs.current.get(section.id);
       if (!panel) return;
-      const wasCollapsed = panel.isCollapsed();
+      const wasCollapsed = collapsedRef.current.has(section.id);
       if (!wasCollapsed) {
         sizesRef.current.set(section.id, panel.getSize().inPixels);
       }
+      const nextCollapsed = new Set(collapsedRef.current);
+      if (wasCollapsed) nextCollapsed.delete(section.id);
+      else nextCollapsed.add(section.id);
+      replaceCollapsedSections(nextCollapsed);
+      persistLayout();
 
-      const updateLayout = () => {
-        flushSync(() => {
-          if (wasCollapsed) panel.expand();
-          else panel.collapse();
-          setCollapsed(section.id, panel.isCollapsed());
-        });
-      };
-      const reduceMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
-      if (reduceMotion || typeof document.startViewTransition !== "function") {
-        updateLayout();
-        return;
-      }
-
-      activeSidebarSectionTransition?.skipTransition();
-      cleanupActiveSidebarSectionTransition?.();
-      const elements = sections.flatMap((item) => {
-        const element = panelElementsRef.current.get(item.id);
-        return element ? [element] : [];
+      animateResizableLayout(groupElementRef.current, () => {
+        if (wasCollapsed) {
+          panel.resize(
+            `${sizesRef.current.get(section.id) ?? section.defaultSize}px`,
+          );
+        } else panel.collapse();
       });
-      elements.forEach((element, index) => {
-        element.style.viewTransitionName = `terax-sidebar-section-${transitionScope}-${index}`;
-      });
-      document.documentElement.classList.add("sidebar-section-view-transition");
-      const transition = document.startViewTransition(updateLayout);
-      let cleaned = false;
-      const cleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        for (const element of elements) {
-          element.style.removeProperty("view-transition-name");
-        }
-        if (activeSidebarSectionTransition !== transition) return;
-        activeSidebarSectionTransition = null;
-        cleanupActiveSidebarSectionTransition = null;
-        document.documentElement.classList.remove(
-          "sidebar-section-view-transition",
-        );
-      };
-      activeSidebarSectionTransition = transition;
-      cleanupActiveSidebarSectionTransition = cleanup;
-      void transition.finished.then(cleanup, cleanup);
     },
-    [sections, setCollapsed, transitionScope],
+    [persistLayout, replaceCollapsedSections],
   );
 
   return (
     <ResizablePanelGroup
       id={`sidebar-sections-${id}`}
+      elementRef={groupElementRef}
       orientation="vertical"
       className={cn("min-h-0 flex-1", className)}
-      onLayoutChanged={handleLayoutChanged}
+      onLayoutChanged={handleUserLayoutChanged}
     >
       {sections.map((section, index) => {
         const collapsed = collapsedSections.has(section.id);
@@ -232,10 +178,6 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
               panelRef={(handle) => {
                 if (handle) panelRefs.current.set(section.id, handle);
                 else panelRefs.current.delete(section.id);
-              }}
-              elementRef={(element) => {
-                if (element) panelElementsRef.current.set(section.id, element);
-                else panelElementsRef.current.delete(section.id);
               }}
               defaultSize={
                 saved?.collapsed
@@ -268,7 +210,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
                 aria-hidden={collapsed}
                 inert={collapsed}
                 className={cn(
-                  "min-h-0 flex-1 overflow-hidden",
+                  "min-h-0 flex-1 overflow-hidden transition-opacity duration-pane ease-standard motion-reduce:transition-none",
                   collapsed ? "pointer-events-none opacity-0" : "opacity-100",
                 )}
               >
@@ -313,7 +255,7 @@ function SidebarSectionHeader({
           size={12}
           strokeWidth={2.1}
           className={cn(
-            "shrink-0 text-muted-foreground",
+            "shrink-0 text-muted-foreground transition-transform duration-pane ease-standard motion-reduce:transition-none",
             expanded ? "rotate-0" : "-rotate-90",
           )}
         />
@@ -334,7 +276,7 @@ function SidebarSectionHeader({
       {actions ? (
         <div
           className={cn(
-            "ml-1 flex shrink-0 items-center gap-0.5",
+            "ml-1 flex shrink-0 items-center gap-0.5 transition-opacity duration-feedback motion-reduce:transition-none",
             expanded
               ? "opacity-100"
               : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",

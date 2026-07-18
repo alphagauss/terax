@@ -169,7 +169,7 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
   return (
     <div className="flex flex-col">
       {open ? (
-        <div className="relative shrink-0 px-2 py-1.5 animate-in fade-in-0 slide-in-from-top-3 duration-200 ease-out">
+        <div className="relative shrink-0 px-2 py-1.5 animate-in fade-in-0 slide-in-from-top-3 duration-surface ease-emphasized">
           <HugeiconsIcon
             icon={Search01Icon}
             size={13}

@@ -42,7 +42,7 @@ export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
   return (
     <div
       data-markdown-outline
-      className="flex h-full min-h-0 flex-col bg-sidebar animate-in fade-in slide-in-from-left-2 duration-150 motion-reduce:animate-none"
+      className="flex h-full min-h-0 flex-col bg-sidebar"
     >
       <div className="flex h-12 shrink-0 items-center border-b border-border/60 px-3">
         <span className="truncate text-xs font-medium text-foreground">

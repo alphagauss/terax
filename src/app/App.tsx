@@ -14,7 +14,7 @@ import { quoteShellArg } from "@/lib/shellQuote";
 import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
-import { isMarkdownPath } from "@/lib/utils";
+import { cn, isMarkdownPath } from "@/lib/utils";
 import {
   AgentNotificationsBridge,
   nextAttentionTarget,
@@ -114,6 +114,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AiChat01Icon } from "@hugeicons/core-free-icons";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
@@ -317,16 +318,24 @@ export default function App() {
     sidebarRef,
     sidebarWidthRef,
     sidebarView,
+    sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,
-    persistSidebarCollapsed,
     toggleSidebar,
     cycleSidebarView,
-    persistSidebarWidth,
+    commitSidebarLayout,
     toggleExplorerFocus,
   } = useSidebarPanel(explorerRef);
 
   const secondarySidebar = useSecondarySidebarPanel(SECONDARY_SIDEBAR_VIEW_IDS);
+  const commitWorkbenchLayout = useCallback(
+    (_layout: Layout, meta: LayoutChangedMeta) => {
+      if (!meta.isUserInteraction) return;
+      commitSidebarLayout();
+      secondarySidebar.commitLayout();
+    },
+    [commitSidebarLayout, secondarySidebar.commitLayout],
+  );
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [paletteInitialMode, setPaletteInitialMode] = useState<
@@ -1265,6 +1274,7 @@ export default function App() {
             <ResizablePanelGroup
               orientation="horizontal"
               className="min-h-0 flex-1"
+              onLayoutChanged={commitWorkbenchLayout}
             >
               <ResizablePanel
                 id="primary-sidebar"
@@ -1279,12 +1289,15 @@ export default function App() {
                 maxSize={`${SIDEBAR_MAX_WIDTH}px`}
                 collapsible
                 collapsedSize={0}
-                onResize={(size) => {
-                  if (size.inPixels > 0) persistSidebarWidth(size.inPixels);
-                  persistSidebarCollapsed(size.inPixels <= 0);
-                }}
               >
-                <div className="sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar">
+                <div
+                  className={cn(
+                    "sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
+                    sidebarCollapsed
+                      ? "pointer-events-none -translate-x-1.5 opacity-0"
+                      : "translate-x-0 opacity-100",
+                  )}
+                >
                   <SidebarRail
                     activeView={sidebarView}
                     onSelectView={persistSidebarView}
@@ -1380,20 +1393,23 @@ export default function App() {
                 maxSize={`${SECONDARY_SIDEBAR_MAX_WIDTH}px`}
                 collapsible
                 collapsedSize={0}
-                onResize={(size) => {
-                  if (size.inPixels > 0) {
-                    secondarySidebar.persistWidth(size.inPixels);
-                  }
-                  secondarySidebar.persistCollapsed(size.inPixels <= 0);
-                }}
               >
-                <SecondarySidebar
-                  views={
-                    secondarySidebar.collapsed ? [] : secondarySidebarViews
-                  }
-                  activeView={secondarySidebar.activeView}
-                  onSelectView={secondarySidebar.persistView}
-                />
+                <div
+                  className={cn(
+                    "h-full min-h-0 transition-[opacity,translate] duration-pane ease-standard",
+                    secondarySidebar.collapsed
+                      ? "pointer-events-none translate-x-1.5 opacity-0"
+                      : "translate-x-0 opacity-100",
+                  )}
+                >
+                  <SecondarySidebar
+                    views={
+                      secondarySidebar.collapsed ? [] : secondarySidebarViews
+                    }
+                    activeView={secondarySidebar.activeView}
+                    onSelectView={secondarySidebar.persistView}
+                  />
+                </div>
               </ResizablePanel>
             </ResizablePanelGroup>
           </main>

@@ -134,11 +134,11 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
 
     return (
       <div
-        className="relative h-7 shrink-0 transition-[width] duration-200 ease-out"
+        className="relative h-7 shrink-0 transition-[width] duration-surface ease-emphasized"
         style={{ width: expanded ? 192 : 28 }}
       >
         {expanded ? (
-          <div className="absolute inset-0 animate-in fade-in-0 duration-150">
+          <div className="absolute inset-0 animate-in fade-in-0 duration-control">
             <HugeiconsIcon
               icon={Search01Icon}
               size={13}
@@ -189,7 +189,7 @@ export const SearchInline = forwardRef<SearchInlineHandle, Props>(
             )}
           </div>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-end animate-in fade-in-0 duration-150">
+          <div className="absolute inset-0 flex items-center justify-end animate-in fade-in-0 duration-control">
             <Button
               variant="ghost"
               size="icon"

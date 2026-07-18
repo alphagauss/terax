@@ -131,7 +131,7 @@
   justify-content: space-between;
   height: 18px;
   opacity: 0.72;
-  transition: opacity var(--dur-fast) var(--ease-soft);
+  transition: opacity var(--dur-feedback) var(--ease-standard);
 }
 
 .bt-bar:hover {
@@ -209,8 +209,8 @@
   border-radius: 5px;
   color: inherit;
   transition:
-    background var(--dur-fast) var(--ease-soft),
-    color var(--dur-fast) var(--ease-soft);
+    background var(--dur-feedback) var(--ease-standard),
+    color var(--dur-feedback) var(--ease-standard);
 }
 
 .bt-btn:hover {

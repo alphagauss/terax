@@ -39,9 +39,9 @@ function readView(viewIds: readonly string[]): string | null {
 export function useSecondarySidebarPanel(viewIds: readonly string[]) {
   const panelRef = useRef<PanelImperativeHandle | null>(null);
   const widthRef = useRef(readWidth());
-  const widthWriteTimerRef = useRef(0);
   const [initialCollapsed] = useState(readCollapsed);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
+  const collapsedRef = useRef(initialCollapsed);
   const [activeView, setActiveView] = useState(() => readView(viewIds));
 
   useEffect(() => {
@@ -59,51 +59,52 @@ export function useSecondarySidebarPanel(viewIds: readonly string[]) {
   );
 
   const persistCollapsed = useCallback((next: boolean) => {
-    setCollapsed((current) => {
-      if (current === next) return current;
-      void setWorkspaceValue(COLLAPSED_STORAGE_KEY, next);
-      return next;
-    });
+    setCollapsed(next);
+    if (collapsedRef.current === next) return;
+    collapsedRef.current = next;
+    void setWorkspaceValue(COLLAPSED_STORAGE_KEY, next);
   }, []);
 
-  const persistWidth = useCallback((next: number) => {
-    widthRef.current = next;
-    if (widthWriteTimerRef.current) {
-      window.clearTimeout(widthWriteTimerRef.current);
+  const commitLayout = useCallback(() => {
+    const size = panelRef.current?.getSize().inPixels ?? 0;
+    const nextCollapsed = size <= 0;
+    if (!nextCollapsed) {
+      const width = clampPanelWidth(
+        size,
+        SECONDARY_SIDEBAR_MIN_WIDTH,
+        SECONDARY_SIDEBAR_MAX_WIDTH,
+      );
+      if (widthRef.current !== width) {
+        widthRef.current = width;
+        void setWorkspaceValue(WIDTH_STORAGE_KEY, width);
+      }
     }
-    widthWriteTimerRef.current = window.setTimeout(() => {
-      widthWriteTimerRef.current = 0;
-      void setWorkspaceValue(WIDTH_STORAGE_KEY, next);
-    }, 200);
-  }, []);
+    persistCollapsed(nextCollapsed);
+  }, [persistCollapsed]);
 
   const toggle = useCallback(() => {
     const panel = panelRef.current;
     if (!panel) return;
     if (panel.getSize().asPercentage <= 0) {
       panel.resize(`${widthRef.current}px`);
+      persistCollapsed(false);
     } else {
       panel.collapse();
+      persistCollapsed(true);
     }
-  }, []);
+  }, [persistCollapsed]);
 
   const open = useCallback(() => {
     const panel = panelRef.current;
     if (!panel || panel.getSize().asPercentage > 0) return;
     panel.resize(`${widthRef.current}px`);
-  }, []);
+    persistCollapsed(false);
+  }, [persistCollapsed]);
 
   const close = useCallback(() => {
     panelRef.current?.collapse();
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (widthWriteTimerRef.current) {
-        window.clearTimeout(widthWriteTimerRef.current);
-      }
-    };
-  }, []);
+    persistCollapsed(true);
+  }, [persistCollapsed]);
 
   return {
     panelRef,
@@ -112,8 +113,7 @@ export function useSecondarySidebarPanel(viewIds: readonly string[]) {
     collapsed,
     initialCollapsed,
     persistView,
-    persistCollapsed,
-    persistWidth,
+    commitLayout,
     open,
     close,
     toggle,

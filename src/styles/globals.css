@@ -10,6 +10,11 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    --default-transition-duration: var(--dur-feedback);
+    --default-transition-timing-function: var(--ease-standard);
+    --ease-in: var(--ease-standard);
+    --ease-out: var(--ease-standard);
+    --ease-in-out: var(--ease-standard);
     --font-heading: var(--font-sans);
     --font-sans: 'Inter Variable', sans-serif;
     --color-sidebar-ring: var(--sidebar-ring);
@@ -50,6 +55,62 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@utility duration-feedback {
+  --tw-duration: var(--dur-feedback);
+  transition-duration: var(--dur-feedback);
+  animation-duration: var(--dur-feedback);
+}
+
+@utility duration-control {
+  --tw-duration: var(--dur-control);
+  transition-duration: var(--dur-control);
+  animation-duration: var(--dur-control);
+}
+
+@utility duration-pane {
+  --tw-duration: var(--dur-pane);
+  transition-duration: var(--dur-pane);
+  animation-duration: var(--dur-pane);
+}
+
+@utility duration-surface {
+  --tw-duration: var(--dur-surface);
+  transition-duration: var(--dur-surface);
+  animation-duration: var(--dur-surface);
+}
+
+@utility ease-standard {
+  --tw-ease: var(--ease-standard);
+  transition-timing-function: var(--ease-standard);
+  animation-timing-function: var(--ease-standard);
+}
+
+@utility ease-emphasized {
+  --tw-ease: var(--ease-emphasized);
+  transition-timing-function: var(--ease-emphasized);
+  animation-timing-function: var(--ease-emphasized);
+}
+
+/* Registry compatibility: generated shadcn and AI Elements keep their source
+ * classes while resolving to the project motion contract. */
+@layer utilities {
+  .duration-100 {
+    --tw-duration: var(--dur-feedback);
+    transition-duration: var(--dur-feedback);
+    animation-duration: var(--dur-feedback);
+  }
+  .duration-150 {
+    --tw-duration: var(--dur-control);
+    transition-duration: var(--dur-control);
+    animation-duration: var(--dur-control);
+  }
+  .duration-200 {
+    --tw-duration: var(--dur-surface);
+    transition-duration: var(--dur-surface);
+    animation-duration: var(--dur-surface);
+  }
 }
 
 :root {
@@ -122,6 +183,12 @@
 }
 
 @layer base {
+  *,
+  *::before,
+  *::after {
+    --tw-duration: var(--dur-feedback);
+    --tw-ease: var(--ease-standard);
+  }
   * {
     @apply border-border outline-ring/50;
     }
@@ -273,7 +340,7 @@ html *::-webkit-scrollbar {
   display: none;
 }
 
-/* Motion tokens. Reduced-motion zeroes the durations as a global snap. */
+/* Semantic motion tokens. Continuous resize never opts into a transition. */
 :root {
   --scrollbar-size: 12px;
   --scrollbar-thumb: oklch(0.82 0 0);
@@ -281,11 +348,17 @@ html *::-webkit-scrollbar {
   --scrollbar-track: transparent;
   --scrollbar-show-duration: 100ms;
   --scrollbar-hide-duration: 800ms;
-  --dur-fast: 160ms;
-  --dur-base: 240ms;
-  --dur-slow: 320ms;
-  --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-feedback: 100ms;
+  --dur-control: 160ms;
+  --dur-pane: 150ms;
+  --dur-surface: 240ms;
+  --dur-fast: var(--dur-feedback);
+  --dur-base: var(--dur-control);
+  --dur-slow: var(--dur-surface);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-premium: var(--ease-emphasized);
+  --ease-soft: var(--ease-standard);
 }
 
 .dark {
@@ -427,10 +500,10 @@ html *::-webkit-scrollbar {
   overflow: hidden;
 }
 .terax-collapsible-content[data-state="open"] {
-  animation: terax-collapsible-down var(--dur-base) var(--ease-soft);
+  animation: terax-collapsible-down var(--dur-control) var(--ease-standard);
 }
 .terax-collapsible-content[data-state="closed"] {
-  animation: terax-collapsible-up var(--dur-base) var(--ease-soft);
+  animation: terax-collapsible-up var(--dur-control) var(--ease-standard);
 }
 
 /* Height auto<->0 reveal without JS measuring: animate the grid track from 0fr
@@ -440,8 +513,8 @@ html *::-webkit-scrollbar {
   display: grid;
   grid-template-rows: 0fr;
   transition:
-    grid-template-rows var(--dur-base) var(--ease-premium),
-    opacity var(--dur-base) var(--ease-premium);
+    grid-template-rows var(--dur-control) var(--ease-emphasized),
+    opacity var(--dur-control) var(--ease-emphasized);
   opacity: 0;
 }
 .terax-reveal[data-state="open"] {
@@ -464,7 +537,7 @@ html *::-webkit-scrollbar {
   }
 }
 .terax-tab-in {
-  animation: terax-tab-in var(--dur-base) var(--ease-premium);
+  animation: terax-tab-in var(--dur-control) var(--ease-emphasized);
 }
 
 @keyframes terax-pill-in {
@@ -478,7 +551,19 @@ html *::-webkit-scrollbar {
   }
 }
 .terax-pill-in {
-  animation: terax-pill-in var(--dur-base) var(--ease-premium);
+  animation: terax-pill-in var(--dur-control) var(--ease-emphasized);
+}
+
+[data-slot="resizable-panel-group"][data-layout-animating="true"]
+  > [data-slot="resizable-panel"] {
+  transition: flex-grow var(--dur-pane) var(--ease-standard);
+}
+
+[data-slot="resizable-panel-group"][data-layout-animating="true"]:has(
+    > [data-slot="resizable-handle"][data-separator="active"]
+  )
+  > [data-slot="resizable-panel"] {
+  transition: none;
 }
 
 /* Text shimmer loop (replaces motion background-position animation). Driven by
@@ -510,38 +595,24 @@ html *::-webkit-scrollbar {
   animation: terax-shimmer var(--shimmer-duration, 2s) linear infinite;
 }
 
-html.sidebar-section-view-transition {
-  view-transition-name: none;
-}
-
-html.sidebar-section-view-transition::view-transition-group(*) {
-  animation-duration: 150ms;
-  animation-timing-function: linear;
-}
-
-html.sidebar-section-view-transition::view-transition-old(*) {
-  animation: none;
-  mix-blend-mode: normal;
-  object-fit: none;
-  object-position: top left;
-  opacity: 0;
-}
-
-html.sidebar-section-view-transition::view-transition-new(*) {
-  animation: none;
-  mix-blend-mode: normal;
-  object-fit: none;
-  object-position: top left;
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
   :root {
     --scrollbar-show-duration: 0.01ms;
     --scrollbar-hide-duration: 0.01ms;
-    --dur-fast: 0.01ms;
-    --dur-base: 0.01ms;
-    --dur-slow: 0.01ms;
+    --dur-feedback: 0.01ms;
+    --dur-control: 0.01ms;
+    --dur-pane: 0.01ms;
+    --dur-surface: 0.01ms;
+  }
+  html *,
+  html *::before,
+  html *::after {
+    scroll-behavior: auto !important;
+    transition-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
   .terax-reveal {
     transition: none;

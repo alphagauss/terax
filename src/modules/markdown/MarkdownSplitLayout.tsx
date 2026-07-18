@@ -1,3 +1,4 @@
+import { readMotionDurationMs, readMotionEasing } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import {
   type KeyboardEvent,
@@ -57,6 +58,16 @@ function maximumOutlineWidth(containerWidth: number): number {
   );
 }
 
+function animatedTranslateX(element: HTMLElement): number {
+  const transform = window.getComputedStyle(element).transform;
+  if (!transform || transform === "none") return 0;
+  try {
+    return new DOMMatrixReadOnly(transform).m41;
+  } catch {
+    return 0;
+  }
+}
+
 export function MarkdownSplitLayout({
   outlineOpen,
   onOutlineOpenChange,
@@ -69,9 +80,12 @@ export function MarkdownSplitLayout({
   onOutlineWidthChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
   const separatorRef = useRef<HTMLHRElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const mainAnimationRef = useRef<Animation | null>(null);
+  const previousOutlineOpenRef = useRef(outlineOpen);
   const [containerWidth, setContainerWidth] = useState(0);
   const [outlineWidth, setOutlineWidth] = useState(OUTLINE_DEFAULT_WIDTH);
   const outlineId = `${useId()}-outline`;
@@ -100,6 +114,53 @@ export function MarkdownSplitLayout({
   useEffect(() => {
     if (outlineOpen && !available) onOutlineOpenChange(false);
   }, [available, onOutlineOpenChange, outlineOpen]);
+
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+
+    const toggled = previousOutlineOpenRef.current !== outlineOpen;
+    previousOutlineOpenRef.current = outlineOpen;
+
+    if (!toggled || !available) return;
+    const interruptedOffset = mainAnimationRef.current
+      ? animatedTranslateX(main)
+      : 0;
+    const offset = (outlineOpen ? -1 : 1) * (renderedWidth + SEPARATOR_WIDTH);
+    const duration = readMotionDurationMs("--dur-pane", 150);
+    const startOffset = offset + interruptedOffset;
+    mainAnimationRef.current?.cancel();
+    if (Math.abs(startOffset) < 0.5 || duration <= 0) return;
+
+    const animation = main.animate(
+      [
+        { transform: `translate3d(${startOffset}px, 0, 0)` },
+        { transform: "translate3d(0, 0, 0)" },
+      ],
+      {
+        duration,
+        easing: readMotionEasing(
+          "--ease-emphasized",
+          "cubic-bezier(0.16, 1, 0.3, 1)",
+        ),
+      },
+    );
+    mainAnimationRef.current = animation;
+    const clearAnimation = () => {
+      if (mainAnimationRef.current === animation) {
+        mainAnimationRef.current = null;
+      }
+    };
+    animation.onfinish = clearAnimation;
+    animation.oncancel = clearAnimation;
+  }, [available, outlineOpen, renderedWidth]);
+
+  useEffect(
+    () => () => {
+      mainAnimationRef.current?.cancel();
+    },
+    [],
+  );
 
   const showGuide = useCallback((width: number) => {
     const guide = guideRef.current;
@@ -194,47 +255,70 @@ export function MarkdownSplitLayout({
         className,
       )}
     >
-      {open && (
-        <aside
-          id={outlineId}
-          className="h-full min-h-0 shrink-0 overflow-hidden"
-          style={{ width: renderedWidth }}
-        >
-          {outline}
-        </aside>
-      )}
-
-      {open && (
-        <hr
-          ref={separatorRef}
-          tabIndex={0}
-          aria-label={separatorLabel}
-          aria-controls={outlineId}
-          aria-orientation="vertical"
-          aria-valuemin={OUTLINE_MIN_WIDTH}
-          aria-valuemax={maximumWidth}
-          aria-valuenow={Math.round(renderedWidth)}
-          aria-valuetext={`${Math.round(renderedWidth)} pixels`}
-          data-markdown-outline-separator
+      {available && (
+        <div
+          aria-hidden={!open}
+          inert={!open}
+          data-markdown-outline-shell
+          data-state={open ? "open" : "closed"}
           className={cn(
-            "relative z-20 m-0 h-full w-px shrink-0 cursor-col-resize touch-none border-0 bg-border p-0",
-            "after:absolute after:inset-y-0 after:-left-1 after:w-3 after:content-['']",
-            "focus-visible:bg-ring focus-visible:outline-none",
-            "data-[dragging=true]:bg-primary/60",
+            "flex h-full min-h-0 shrink-0",
+            open
+              ? "relative"
+              : "pointer-events-none absolute inset-y-0 left-0 z-0",
           )}
-          onPointerDown={handlePointerDown}
-          onPointerMove={updateDrag}
-          onPointerUp={(event) => {
-            updateDrag(event);
-            finishDrag(event.pointerId, true);
-          }}
-          onPointerCancel={(event) => finishDrag(event.pointerId, false)}
-          onLostPointerCapture={(event) => finishDrag(event.pointerId, false)}
-          onKeyDown={handleKeyDown}
-        />
+          style={{ width: renderedWidth + SEPARATOR_WIDTH }}
+        >
+          <aside
+            id={outlineId}
+            className="h-full min-h-0 shrink-0 overflow-hidden transition-[clip-path,opacity,transform] duration-pane ease-emphasized"
+            style={{
+              width: renderedWidth,
+              clipPath: open ? "inset(0 0 0 0)" : "inset(0 100% 0 0)",
+              opacity: open ? 1 : 0,
+              transform: open
+                ? "translate3d(0, 0, 0)"
+                : "translate3d(-8px, 0, 0)",
+            }}
+          >
+            {outline}
+          </aside>
+
+          <hr
+            ref={separatorRef}
+            tabIndex={open ? 0 : -1}
+            aria-label={separatorLabel}
+            aria-controls={outlineId}
+            aria-orientation="vertical"
+            aria-valuemin={OUTLINE_MIN_WIDTH}
+            aria-valuemax={maximumWidth}
+            aria-valuenow={Math.round(renderedWidth)}
+            aria-valuetext={`${Math.round(renderedWidth)} pixels`}
+            data-markdown-outline-separator
+            className={cn(
+              "relative z-20 m-0 h-full w-px shrink-0 cursor-col-resize touch-none border-0 bg-border p-0 transition-[background-color,opacity] duration-pane hover:bg-primary/45",
+              "after:absolute after:inset-y-0 after:-left-1 after:w-3 after:content-['']",
+              "focus-visible:bg-ring focus-visible:outline-none",
+              "data-[dragging=true]:bg-primary/60",
+              open ? "opacity-100" : "opacity-0",
+            )}
+            onPointerDown={handlePointerDown}
+            onPointerMove={updateDrag}
+            onPointerUp={(event) => {
+              updateDrag(event);
+              finishDrag(event.pointerId, true);
+            }}
+            onPointerCancel={(event) => finishDrag(event.pointerId, false)}
+            onLostPointerCapture={(event) => finishDrag(event.pointerId, false)}
+            onKeyDown={handleKeyDown}
+          />
+        </div>
       )}
 
-      <main className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main
+        ref={mainRef}
+        className="relative z-10 h-full min-h-0 min-w-0 flex-1 overflow-hidden"
+      >
         {children}
       </main>
 
@@ -242,7 +326,7 @@ export function MarkdownSplitLayout({
         ref={guideRef}
         aria-hidden
         data-markdown-outline-resize-preview
-        className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px bg-primary opacity-0 shadow-[0_0_6px_var(--color-primary)] will-change-transform"
+        className="pointer-events-none absolute inset-y-0 left-0 z-30 w-px bg-primary opacity-0 shadow-[0_0_6px_var(--color-primary)] transition-opacity duration-feedback ease-standard will-change-transform"
       />
     </div>
   );

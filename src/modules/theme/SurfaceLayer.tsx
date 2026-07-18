@@ -8,7 +8,6 @@ import { createPortal } from "react-dom";
 
 const OVERLAY_Z = 2147483646;
 const RESIZE_IDLE_MS = 280;
-const FADE_IN_MS = 200;
 
 export function SurfaceLayer() {
   const [fastPath] = useState(readBgFastPath);
@@ -94,7 +93,7 @@ function BackgroundImage({ fastImageId }: { fastImageId: string | null }) {
         opacity: renderedOpacity,
         filter: blurActive ? `blur(${blur}px)` : undefined,
         transform: "translateZ(0)",
-        transition: `opacity ${FADE_IN_MS}ms ease-out`,
+        transition: "opacity var(--dur-surface) var(--ease-standard)",
       }}
     />,
     document.body,

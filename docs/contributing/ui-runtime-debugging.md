@@ -138,6 +138,15 @@ After the real WebView is attached, use the smallest probe that can confirm the 
 
 Keep reads bounded to the affected element and its ownership chain. Record the measurements that prove or reject the hypothesis, then repeat the same probe after the change. A screenshot verifies appearance, not hit testing, overflow, focus, or state correctness.
 
+## Motion performance contract
+
+- Use `duration-feedback`, `duration-control`, `duration-pane`, or `duration-surface`. Tailwind transitions and entrance animations without an explicit duration use feedback timing. Generated registry files may keep numeric classes that the compatibility layer maps to tokens; application code must not add numeric duration utilities or `transition-all`.
+- Keep pointer resize transition-free. Update visual guides with transforms during the gesture and commit React state, layout persistence, and expensive measurement after release.
+- Prefer `transform` and `opacity`. A geometry transition is allowed only for a short discrete action whose affected subtree is known to be cheap.
+- Workbench sidebars change geometry immediately because xterm and editor observers react to every intermediate size. Animate only their content entrance unless expensive observers are explicitly suspended for the transaction and flushed once afterward.
+- Long Markdown documents commit outline geometry once and use FLIP for perceived movement. The outline surface may animate clip, transform, and opacity because its rendered subtree is small and virtualized.
+- `prefers-reduced-motion` must snap every transition and animation. Global smooth scrolling remains disabled.
+
 ## Completion
 
 - Reproduce the original state in the real Tauri WebView.

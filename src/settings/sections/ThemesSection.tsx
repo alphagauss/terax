@@ -211,7 +211,7 @@ export function ThemesSection() {
                   aria-pressed={selected}
                   onClick={() => setThemeId(t.id)}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-all focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                     isCustom && "pr-16",
                     selected
                       ? "border-foreground/60 ring-1 ring-foreground/20"

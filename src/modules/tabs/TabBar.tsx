@@ -218,8 +218,8 @@ export function TabBar({
                       transitionProperty: pillReady
                         ? "transform, width"
                         : "none",
-                      transitionDuration: "var(--dur-base)",
-                      transitionTimingFunction: "var(--ease-premium)",
+                      transitionDuration: "var(--dur-control)",
+                      transitionTimingFunction: "var(--ease-emphasized)",
                     }
                   : { opacity: 0 }
               }
@@ -361,7 +361,7 @@ export function TabBar({
                             role="button"
                             tabIndex={-1}
                             data-no-drag
-                            className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm p-1 -m-1 transition-all hover:bg-accent hover:text-accent-foreground hover:ring-1 hover:ring-primary/30 hover:shadow-[0_0_4px_var(--color-popover-foreground)]"
+                            className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm p-1 -m-1 transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground hover:ring-1 hover:ring-primary/30 hover:shadow-[0_0_4px_var(--color-popover-foreground)]"
                           >
                             <TabIcon tab={t} />
                           </span>

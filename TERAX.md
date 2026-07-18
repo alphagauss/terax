@@ -100,6 +100,23 @@ Each application process runs one single-window React app. Multi-window behavior
 
 `App.tsx` wires modules together - keep it a coordinator. New features go inside the appropriate `modules/<area>/`.
 
+### Workbench layout and motion
+
+`react-resizable-panels` is the only SplitView primitive. Use stable panel ids and nested groups for sidebars, sections, terminal panes, and future editor groups. Pointer resize stays transition-free. During a gesture, update only a visual guide through a DOM ref and `transform`; do not update business React state, write storage, or start and reset timers. Read and persist the final panel sizes only after `onLayoutChanged` reports a user interaction. Imperative collapse or expand must synchronize the known target state directly. Never read the panel DOM immediately after an imperative resize to infer that target because React may not have committed it yet.
+
+Before creating motion for a component, reuse the semantic tokens and utilities in `src/styles/globals.css`, `src/lib/motion.ts`, and the existing resizable primitives. Feedback is 100ms, controls are 160ms, panes are 150ms, and surfaces are 240ms. Use `ease-standard` for direct state changes and `ease-emphasized` for spatial entrances or exits. Tailwind transitions and entrance animations without an explicit duration use the feedback token. JavaScript or WAAPI motion must read the same CSS tokens through `src/lib/motion.ts`; do not duplicate duration or easing literals. Generated shadcn and AI Elements files may retain registry numeric duration classes because the compatibility layer maps them to these tokens. Do not hand-edit generated files only to rename those classes.
+
+New component motion follows this contract:
+
+- Choose the existing semantic duration before adding a class or animation. Do not add a component-specific millisecond value when feedback, control, pane, or surface already describes it.
+- Prefer compositor-friendly `transform` and `opacity`. A small bounded surface may also reveal with `clip-path`. Geometry may animate only for a short, discrete action in a known-cheap subtree.
+- Large or unknown subtrees, long Markdown documents, editors, terminals, and layouts observed by expensive `ResizeObserver` callbacks must not animate `width`, `height`, `left`, `top`, `flex-basis`, or grid tracks. Commit geometry once, then use a content entrance or FLIP animation. Root Workbench sidebar geometry intentionally changes immediately.
+- CSS transitions or WAAPI own the frames. Do not build animation loops with `requestAnimationFrame`, intervals, or repeated timers. Motion must be cancellable, rapid toggles must continue from the current visual state, and reduced motion must snap to the result.
+- During an animation or pointer gesture, do not perform per-frame React state updates, store writes, terminal fits, or layout measurement. In particular, never interleave DOM writes with repeated `getBoundingClientRect`, `offset*`, `client*`, or computed-style reads. One measurement before and one after a discrete layout commit is acceptable for FLIP.
+- Do not add `transition-all`, Document View Transition, `flushSync`, global smooth scrolling, one-off numeric duration utilities in application code, or a runtime dependency only for animation.
+
+Lightweight nested pane toggles may use `animateResizableLayout`, which installs a one-shot transition and removes it on completion or interruption. Primary and secondary Workbench sidebars use immediate geometry plus a short composited content entrance. Markdown outline toggles commit layout once, use FLIP for the document position, and reveal the small outline surface with clip, transform, and opacity. Markdown outline dragging stays transform-only and commits its width once on release. When a new component cannot fit one of these patterns, document why its subtree is cheap before introducing a geometry animation.
+
 ### Module layout (`src/modules/`)
 
 Each module is self-contained, exports a thin barrel via `index.ts`, and owns its hooks under `lib/`.
@@ -146,8 +163,8 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 
 - **shadcn/ui** is configured (`components.json`, style `radix-luma`, base `mist`, icon lib **hugeicons**). Primitives in `src/components/ui/` - don't hand-edit; re-run `pnpm dlx shadcn add` to upgrade.
 - **AI Elements** (Vercel) live in `src/components/ai-elements/` from the `@ai-elements` registry in `components.json`. Same rule: regenerate, don't hand-patch - composition wrappers belong in `modules/ai/components/`.
-- **Tailwind v4** - no `tailwind.config.*`, config is in `src/App.css` via `@theme`. Use `cn()` from `@/lib/utils`.
-- Animation: `motion` (Framer Motion successor). Resizable layout: `react-resizable-panels`.
+- **Tailwind v4** - no `tailwind.config.*`, config is in `src/styles/globals.css` via `@theme`. Use `cn()` from `@/lib/utils`.
+- Animation: semantic CSS transitions. Resizable layout: `react-resizable-panels`.
 - Path imports: always `@/…`, never relative across modules.
 - Cross-platform paths: anywhere a path may originate from OSC 7, the explorer, or the OS, normalize separators with `.split(/[\\/]/)` rather than `.split("/")`.
 - Canonical path form on the frontend is **forward-slash**. `homeDir()` returns backslashes on Windows; convert at the boundary (App.tsx setHome). OSC 7 already arrives as forward-slash. Equal canonical strings keep `useFileTree` from wiping its tree and flashing the explorer when `tab.cwd` first arrives.

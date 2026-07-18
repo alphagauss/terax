@@ -57,7 +57,7 @@ export function Chip({
       className={cn(
         "group inline-flex h-[22px] items-center gap-1.5 rounded-md border text-[11px] leading-none",
         children ? "px-2" : "px-1.5",
-        "animate-in fade-in-0 zoom-in-95 duration-150",
+        "animate-in fade-in-0 zoom-in-95 duration-control",
         !onRemove && "pointer-events-none select-none",
         TONES[tone].box,
       )}

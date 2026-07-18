@@ -1,10 +1,4 @@
-import {
-  type RefObject,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type RefObject, useCallback, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import {
   getWorkspaceValue,
@@ -57,11 +51,13 @@ export function useSidebarPanel(
 ) {
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const sidebarWidthRef = useRef(readSidebarWidth());
-  const sidebarWidthWriteTimerRef = useRef(0);
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [sidebarView, setSidebarViewState] =
     useState<SidebarViewId>(readSidebarView);
   const [initialSidebarCollapsed] = useState(readSidebarCollapsed);
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(
+    initialSidebarCollapsed,
+  );
   const collapsedRef = useRef(initialSidebarCollapsed);
 
   const persistSidebarView = useCallback((view: SidebarViewId) => {
@@ -69,7 +65,8 @@ export function useSidebarPanel(
     void setWorkspaceValue(SIDEBAR_VIEW_STORAGE_KEY, view);
   }, []);
 
-  const persistSidebarCollapsed = useCallback((collapsed: boolean) => {
+  const setSidebarCollapsed = useCallback((collapsed: boolean) => {
+    setSidebarCollapsedState(collapsed);
     if (collapsedRef.current === collapsed) return;
     collapsedRef.current = collapsed;
     void setWorkspaceValue(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed);
@@ -78,9 +75,14 @@ export function useSidebarPanel(
   const toggleSidebar = useCallback(() => {
     const p = sidebarRef.current;
     if (!p) return;
-    if (p.getSize().asPercentage <= 0) p.resize(`${sidebarWidthRef.current}px`);
-    else p.collapse();
-  }, []);
+    if (p.getSize().asPercentage <= 0) {
+      p.resize(`${sidebarWidthRef.current}px`);
+      setSidebarCollapsed(false);
+    } else {
+      p.collapse();
+      setSidebarCollapsed(true);
+    }
+  }, [setSidebarCollapsed]);
 
   const cycleSidebarView = useCallback(
     (view: SidebarViewId) => {
@@ -88,36 +90,32 @@ export function useSidebarPanel(
       const collapsed = panel ? panel.getSize().asPercentage <= 0 : false;
       if (collapsed) {
         if (panel) panel.resize(`${sidebarWidthRef.current}px`);
+        setSidebarCollapsed(false);
         if (view !== sidebarView) persistSidebarView(view);
         return;
       }
       if (view === sidebarView) {
         panel?.collapse();
+        setSidebarCollapsed(true);
         return;
       }
       persistSidebarView(view);
     },
-    [persistSidebarView, sidebarView],
+    [persistSidebarView, setSidebarCollapsed, sidebarView],
   );
 
-  const persistSidebarWidth = useCallback((next: number) => {
-    sidebarWidthRef.current = next;
-    if (sidebarWidthWriteTimerRef.current) {
-      window.clearTimeout(sidebarWidthWriteTimerRef.current);
-    }
-    sidebarWidthWriteTimerRef.current = window.setTimeout(() => {
-      sidebarWidthWriteTimerRef.current = 0;
-      void setWorkspaceValue(SIDEBAR_WIDTH_STORAGE_KEY, next);
-    }, 200);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (sidebarWidthWriteTimerRef.current) {
-        window.clearTimeout(sidebarWidthWriteTimerRef.current);
+  const commitSidebarLayout = useCallback(() => {
+    const size = sidebarRef.current?.getSize().inPixels ?? 0;
+    const collapsed = size <= 0;
+    if (!collapsed) {
+      const width = clampSidebarWidth(size);
+      if (sidebarWidthRef.current !== width) {
+        sidebarWidthRef.current = width;
+        void setWorkspaceValue(SIDEBAR_WIDTH_STORAGE_KEY, width);
       }
-    };
-  }, []);
+    }
+    setSidebarCollapsed(collapsed);
+  }, [setSidebarCollapsed]);
 
   const toggleExplorerFocus = useCallback(() => {
     const explorer = explorerRef.current;
@@ -125,6 +123,7 @@ export function useSidebarPanel(
     const collapsed = panel ? panel.getSize().asPercentage <= 0 : false;
     if (sidebarView !== "explorer" || collapsed) {
       if (panel && collapsed) panel.resize(`${sidebarWidthRef.current}px`);
+      if (collapsed) setSidebarCollapsed(false);
       if (sidebarView !== "explorer") persistSidebarView("explorer");
       const active = document.activeElement;
       explorerReturnFocusRef.current =
@@ -149,18 +148,18 @@ export function useSidebarPanel(
     explorerReturnFocusRef.current =
       active instanceof HTMLElement && active !== document.body ? active : null;
     explorer.focus();
-  }, [explorerRef, persistSidebarView, sidebarView]);
+  }, [explorerRef, persistSidebarView, setSidebarCollapsed, sidebarView]);
 
   return {
     sidebarRef,
     sidebarWidthRef,
     sidebarView,
+    sidebarCollapsed,
     initialSidebarCollapsed,
     persistSidebarView,
-    persistSidebarCollapsed,
     toggleSidebar,
     cycleSidebarView,
-    persistSidebarWidth,
+    commitSidebarLayout,
     toggleExplorerFocus,
   };
 }
