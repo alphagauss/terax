@@ -404,7 +404,6 @@ export type AcquireParams = {
   altScreen: boolean;
   drainRing: (write: (bytes: Uint8Array) => void) => void;
   shellExited: boolean;
-  searchQuery: string | null;
   cols: number;
   rows: number;
   registerOsc: (term: Terminal) => (() => void)[];
@@ -525,12 +524,6 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
     // resizePty updates session.cols/rows + pty backend; no separate scope call.
     adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
-  }
-
-  if (!fast && p.searchQuery) {
-    try {
-      slot.searchAddon.findNext(p.searchQuery);
-    } catch {}
   }
 
   applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);

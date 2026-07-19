@@ -47,7 +47,7 @@ import {
 } from "./rendererPool";
 
 type Callbacks = {
-  onSearchReady?: (addon: SearchAddon) => void;
+  onSearchReady?: (addon: SearchAddon | null) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
 };
@@ -68,7 +68,6 @@ type Session = {
   rows: number;
   container: HTMLDivElement | null;
   snapshot: string | null;
-  searchQuery: string | null;
   dormantRing: DormantRing;
   pendingInput: string;
   hasSlot: boolean;
@@ -448,7 +447,6 @@ function ensureSession(
     rows: 0,
     container: null,
     snapshot: null,
-    searchQuery: null,
     dormantRing: new DormantRing(),
     pendingInput: "",
     hasSlot: false,
@@ -608,7 +606,6 @@ function bindLeafToSlot(leafId: number, s: Session): void {
     drainRing: (write) => s.dormantRing.drain(write),
     // Keep stdin alive after a spawn failure so Enter can trigger the retry.
     shellExited: s.shellExited && !s.spawnFailed,
-    searchQuery: s.searchQuery,
     cols: s.cols,
     rows: s.rows,
     registerOsc: (term) => {
@@ -677,6 +674,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
 
 function unbindLeafFromSlot(leafId: number, s: Session): void {
   if (!s.hasSlot) return;
+  s.callbacks.onSearchReady?.(null);
   const out = releaseSlot(leafId);
   if (out) {
     if (out.cols > 0) s.cols = out.cols;
@@ -828,7 +826,7 @@ type Options = {
   focused?: boolean;
   initialCwd?: string;
   blocks?: boolean;
-  onSearchReady?: (addon: SearchAddon) => void;
+  onSearchReady?: (addon: SearchAddon | null) => void;
   onExit?: (code: number) => void;
   onCwd?: (cwd: string) => void;
 };

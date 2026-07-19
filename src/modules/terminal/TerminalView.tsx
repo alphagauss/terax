@@ -4,7 +4,6 @@ import {
   type TerminalPaneHandle,
 } from "@/modules/terminal/TerminalPane";
 import type { TerminalTab } from "@/modules/workbench";
-import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,7 +15,6 @@ type Props = {
     terminalId: number,
     handle: TerminalPaneHandle | null,
   ) => void;
-  onSearchReady: (terminalId: number, addon: SearchAddon) => void;
   onCwd: (terminalId: number, cwd: string) => void;
   onExit: (terminalId: number, code: number) => void;
 };
@@ -26,7 +24,6 @@ export function TerminalView({
   visible,
   focused,
   registerHandle,
-  onSearchReady,
   onCwd,
   onExit,
 }: Props) {
@@ -44,7 +41,6 @@ export function TerminalView({
         focused={focused}
         initialCwd={tab.cwd}
         blocks={tab.blocks}
-        onSearchReady={onSearchReady}
         onCwd={onCwd}
         onExit={onExit}
       />

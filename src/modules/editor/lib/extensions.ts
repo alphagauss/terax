@@ -5,6 +5,7 @@ import { search } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { chromeTheme } from "./chromeTheme";
+import { createEditorFindPanel } from "./find/editorFindPanel";
 import { indentGuides } from "./indentGuides";
 
 // Compartments allow runtime reconfiguration without rebuilding state.
@@ -35,7 +36,7 @@ export const DEFAULT_INDENT: Extension = indentExtension("  ");
 // highlightSelectionMatches and the search keymap.
 // Singleton: per-pane instances would inject duplicate style modules.
 const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
-  search({ top: true }),
+  search({ top: true, createPanel: createEditorFindPanel }),
   lintGutter(),
   chromeTheme(),
   EditorView.theme({
@@ -111,9 +112,24 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
         "1px solid color-mix(in srgb, var(--foreground) 35%, transparent) !important",
     },
     ".cm-panels": {
-      backgroundColor: "var(--popover)",
-      color: "var(--popover-foreground)",
-      borderColor: "var(--border)",
+      backgroundColor: "transparent",
+      border: "none",
+    },
+    ".cm-panel.terax-find-panel-host": {
+      position: "absolute",
+      zIndex: "30",
+      top: "0",
+      right: "0",
+      left: "0",
+      display: "flex",
+      justifyContent: "flex-end",
+      padding: "3px 24px 0 8px",
+      backgroundColor: "transparent",
+      border: "none",
+      pointerEvents: "none",
+    },
+    ".cm-panel.terax-find-panel-host .terax-find-widget": {
+      pointerEvents: "auto",
     },
   }),
 ]);

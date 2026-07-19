@@ -1,5 +1,4 @@
 import i18n from "@/i18n";
-import type { SearchTarget } from "@/modules/header";
 import type { Tab } from "@/modules/workbench";
 import {
   Cancel01Icon,
@@ -38,7 +37,7 @@ export const COMMAND_GROUPS = [
 export type CommandPaletteActionContext = {
   tabs: Tab[];
   activeId: number;
-  searchTarget: SearchTarget;
+  canFind: boolean;
   explorerRoot: string | null;
   home: string | null;
   openNewWindow: () => void;
@@ -275,9 +274,7 @@ export function createCommandItems(
       keywords: ["find", "terminal", "editor", "current"],
       icon: Search01Icon,
       shortcutId: "search.focus",
-      disabledReason: ctx.searchTarget
-        ? undefined
-        : t("disabled.noSearchableView"),
+      disabledReason: ctx.canFind ? undefined : t("disabled.noSearchableView"),
       run: ctx.focusSearch,
     },
     {

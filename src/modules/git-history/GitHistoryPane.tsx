@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { useTranslation } from "react-i18next";
 import {
   Popover,
   PopoverAnchor,
@@ -7,12 +6,19 @@ import {
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import {
   type GitCommitFileChange,
   type GitLogEntry,
   native,
 } from "@/modules/ai/lib/native";
+import {
+  FIND_PRESENCE_MS,
+  type FindHandle,
+  FindWidget,
+  type FindWidgetHandle,
+} from "@/modules/find";
 import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -21,13 +27,13 @@ import {
   memo,
   type ReactNode,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { CommitDetail, type CommitDetailFilesEntry } from "./CommitDetail";
 import { GraphRail, MAX_VISIBLE_LANES, railWidth } from "./GraphRail";
 import {
@@ -62,17 +68,11 @@ type CommitFileDiffOpenInput = {
   originalPath: string | null;
 };
 
-export type GitHistorySearchHandle = {
-  setQuery: (query: string) => void;
-  clearQuery: () => void;
-};
-
 type Props = {
   repoRoot: string;
   visible: boolean;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
-  /** Lets the header search bar drive commit filtering for the active pane. */
-  onSearchHandle?: (handle: GitHistorySearchHandle | null) => void;
+  onFindHandle?: (handle: FindHandle | null) => void;
 };
 
 type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
@@ -181,26 +181,33 @@ export function GitHistoryPane({
   repoRoot,
   visible,
   onOpenCommitFile,
-  onSearchHandle,
+  onFindHandle,
 }: Props) {
   const { t } = useTranslation("gitHistory");
   const [commits, setCommits] = useState<GitLogEntry[]>([]);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [endReached, setEndReached] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
-  const deferredSearch = useDeferredValue(searchInput.trim());
-  // Require at least 2 characters before filtering to avoid noisy single-char
-  // matches and pointless full-list scans on every keystroke.
-  const activeSearch = deferredSearch.length >= 2 ? deferredSearch : "";
+  const findPresence = usePresence(findOpen, FIND_PRESENCE_MS);
+  const activeSearch = searchInput.trim();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const findWidgetRef = useRef<FindWidgetHandle>(null);
+
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    requestAnimationFrame(() => findWidgetRef.current?.focus(true));
+  }, []);
 
   useEffect(() => {
-    onSearchHandle?.({
-      setQuery: (query: string) => setSearchInput(query),
-      clearQuery: () => setSearchInput(""),
-    });
-    return () => onSearchHandle?.(null);
-  }, [onSearchHandle]);
+    onFindHandle?.({ open: openFind });
+    return () => onFindHandle?.(null);
+  }, [onFindHandle, openFind]);
+
+  useEffect(() => {
+    if (!findPresence.mounted) setSearchInput("");
+  }, [findPresence.mounted]);
   const [openAnchor, setOpenAnchor] = useState<{
     sha: string;
     top: number;
@@ -524,7 +531,27 @@ export function GitHistoryPane({
 
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={200}>
-      <div className="flex h-full min-h-0 flex-col bg-background [contain:layout_style]">
+      <div
+        ref={rootRef}
+        tabIndex={-1}
+        className="relative flex h-full min-h-0 flex-col bg-background outline-none [contain:layout_style]"
+      >
+        {findPresence.mounted ? (
+          <div className="pointer-events-none absolute top-1 right-6 left-2 z-30 flex justify-end">
+            <FindWidget
+              ref={findWidgetRef}
+              className="pointer-events-auto"
+              state={findPresence.state}
+              query={searchInput}
+              result={searchInput ? { total: filtered.length } : undefined}
+              onQueryChange={setSearchInput}
+              onClose={() => {
+                setFindOpen(false);
+                rootRef.current?.focus({ preventScroll: true });
+              }}
+            />
+          </div>
+        ) : null}
         {loadStatus === "initial" && commits.length === 0 ? (
           <CenterPlaceholder>
             <Spinner className="size-4" />

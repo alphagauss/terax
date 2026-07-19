@@ -28,11 +28,19 @@ export function useSelectionAskAi({
       );
     };
 
+    const isInsideFind = (target: EventTarget | null) =>
+      !!(target as HTMLElement | null)?.closest?.("[data-find-widget]");
+
     const onDown = (e: MouseEvent) => {
+      if (isInsideFind(e.target)) {
+        setAskPopup(null);
+        return;
+      }
       if (isInsideAi(e.target)) return;
       setAskPopup(null);
     };
     const onUp = (e: MouseEvent) => {
+      if (isInsideFind(e.target)) return;
       if (isInsideAi(e.target)) return;
       const el = e.target as HTMLElement | null;
       const inContentArea = el?.closest?.(".xterm, .cm-editor");
@@ -47,7 +55,6 @@ export function useSelectionAskAi({
         }
       }, 0);
     };
-
     document.addEventListener("mousedown", onDown);
     document.addEventListener("mouseup", onUp);
     return () => {

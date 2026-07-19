@@ -9,7 +9,7 @@ function context(): CommandPaletteActionContext {
   return {
     tabs: [],
     activeId: 0,
-    searchTarget: null,
+    canFind: false,
     explorerRoot: null,
     home: null,
     openNewWindow: noop,

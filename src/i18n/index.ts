@@ -13,6 +13,7 @@ import enStatusbar from "./locales/en/statusbar.json";
 import enTabs from "./locales/en/tabs.json";
 import enTerminal from "./locales/en/terminal.json";
 import enEditor from "./locales/en/editor.json";
+import enFind from "./locales/en/find.json";
 import enSpaces from "./locales/en/spaces.json";
 import enSidebar from "./locales/en/sidebar.json";
 
@@ -45,6 +46,7 @@ const CORE_EN: Record<string, Record<string, unknown>> = {
   tabs: enTabs,
   terminal: enTerminal,
   editor: enEditor,
+  find: enFind,
   spaces: enSpaces,
   sidebar: enSidebar,
 };
@@ -55,7 +57,10 @@ function extractNs(path: string): string | null {
   return m ? m[1] : null;
 }
 
-const enPanelLoaders = new Map<string, () => Promise<Record<string, unknown>>>();
+const enPanelLoaders = new Map<
+  string,
+  () => Promise<Record<string, unknown>>
+>();
 for (const [path, loader] of Object.entries(enPanelModules)) {
   const ns = extractNs(path);
   if (!ns || CORE_EN[ns]) continue; // core already loaded eagerly

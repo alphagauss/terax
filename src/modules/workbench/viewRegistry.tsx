@@ -5,16 +5,13 @@ import {
   EditorView,
   GitDiffView,
 } from "@/modules/editor";
-import {
-  type GitHistorySearchHandle,
-  GitHistoryView,
-} from "@/modules/git-history";
+import type { FindHandle } from "@/modules/find";
+import { GitHistoryView } from "@/modules/git-history";
 import { MarkdownView } from "@/modules/markdown";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
 import { type TerminalPaneHandle, TerminalView } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench/types";
-import type { SearchAddon } from "@xterm/addon-search";
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -30,7 +27,6 @@ export type WorkbenchViewServices = {
     terminalId: number,
     handle: TerminalPaneHandle | null,
   ) => void;
-  onSearchReady: (terminalId: number, addon: SearchAddon) => void;
   onTerminalCwd: (terminalId: number, cwd: string) => void;
   onTerminalExit: (terminalId: number, code: number) => void;
   onFocusTab: (tabId: number) => void;
@@ -52,10 +48,7 @@ export type WorkbenchViewServices = {
   onAiDiffAccept: (approvalId: string) => void;
   onAiDiffReject: (approvalId: string) => void;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
-  onGitHistorySearchHandle: (
-    tabId: number,
-    handle: GitHistorySearchHandle | null,
-  ) => void;
+  onGitHistoryFindHandle: (tabId: number, handle: FindHandle | null) => void;
 };
 
 type Props = {
@@ -90,7 +83,6 @@ export function WorkbenchRegisteredView({
           visible={visible}
           focused={focused}
           registerHandle={services.registerTerminalHandle}
-          onSearchReady={services.onSearchReady}
           onCwd={services.onTerminalCwd}
           onExit={services.onTerminalExit}
         />
@@ -138,7 +130,7 @@ export function WorkbenchRegisteredView({
           tab={tab}
           visible={visible}
           onOpenCommitFile={services.onOpenCommitFile}
-          onSearchHandle={services.onGitHistorySearchHandle}
+          onFindHandle={services.onGitHistoryFindHandle}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
+import type { FindHandle } from "@/modules/find";
 import type { GitHistoryTab } from "@/modules/workbench";
 import { useCallback } from "react";
-import { GitHistoryPane, type GitHistorySearchHandle } from "./GitHistoryPane";
+import { GitHistoryPane } from "./GitHistoryPane";
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -15,21 +16,18 @@ type Props = {
   tab: GitHistoryTab;
   visible: boolean;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
-  onSearchHandle: (
-    tabId: number,
-    handle: GitHistorySearchHandle | null,
-  ) => void;
+  onFindHandle: (tabId: number, handle: FindHandle | null) => void;
 };
 
 export function GitHistoryView({
   tab,
   visible,
   onOpenCommitFile,
-  onSearchHandle,
+  onFindHandle,
 }: Props) {
-  const handleSearch = useCallback(
-    (handle: GitHistorySearchHandle | null) => onSearchHandle(tab.id, handle),
-    [onSearchHandle, tab.id],
+  const handleFind = useCallback(
+    (handle: FindHandle | null) => onFindHandle(tab.id, handle),
+    [onFindHandle, tab.id],
   );
 
   return (
@@ -37,7 +35,7 @@ export function GitHistoryView({
       repoRoot={tab.repoRoot}
       visible={visible}
       onOpenCommitFile={onOpenCommitFile}
-      onSearchHandle={handleSearch}
+      onFindHandle={handleFind}
     />
   );
 }

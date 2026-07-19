@@ -1,0 +1,23 @@
+{
+  "dialogLabel": "Find and Replace",
+  "findLabel": "Find",
+  "findPlaceholder": "Find",
+  "replaceLabel": "Replace",
+  "replacePlaceholder": "Replace",
+  "matchCase": "Match Case",
+  "wholeWord": "Match Whole Word",
+  "regex": "Use Regular Expression",
+  "preserveCase": "Preserve Case",
+  "findInSelection": "Find in Selection",
+  "previous": "Previous Match",
+  "next": "Next Match",
+  "replace": "Replace",
+  "replaceAll": "Replace All",
+  "toggleReplace": "Toggle Replace",
+  "close": "Close",
+  "noResults": "No results",
+  "invalidRegex": "Invalid regular expression",
+  "matchLocation": "{{current}} / {{total}}",
+  "matchCount": "{{count}} results",
+  "matchLimit": "Only the first {{count}} results are counted"
+}

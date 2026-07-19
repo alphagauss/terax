@@ -2,20 +2,14 @@ import i18n from "@/i18n";
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
+import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
-import {
-  findNext,
-  findPrevious,
-  gotoLine,
-  openSearchPanel,
-  SearchQuery,
-  setSearchQuery,
-} from "@codemirror/search";
+import { gotoLine } from "@codemirror/search";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
@@ -64,19 +58,14 @@ import {
 } from "./lib/gitGutter";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
+import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 
 initVimGlobals();
 
-export type EditorPaneHandle = {
-  setQuery: (q: string) => void;
-  findNext: () => void;
-  findPrevious: () => void;
-  clearQuery: () => void;
-  /** Open CodeMirror's find/replace panel. */
-  openSearch: () => void;
+export type EditorPaneHandle = FindHandle & {
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
@@ -607,34 +596,10 @@ export const EditorPane = memo(
     useImperativeHandle(
       ref,
       () => ({
-        setQuery: (q: string) => {
+        open: () => {
           const view = cmRef.current?.view;
           if (!view) return;
-          view.dispatch({
-            effects: setSearchQuery.of(
-              new SearchQuery({ search: q, caseSensitive: false }),
-            ),
-          });
-          if (q) findNext(view);
-        },
-        findNext: () => {
-          const view = cmRef.current?.view;
-          if (view) findNext(view);
-        },
-        findPrevious: () => {
-          const view = cmRef.current?.view;
-          if (view) findPrevious(view);
-        },
-        clearQuery: () => {
-          const view = cmRef.current?.view;
-          if (!view) return;
-          view.dispatch({
-            effects: setSearchQuery.of(new SearchQuery({ search: "" })),
-          });
-        },
-        openSearch: () => {
-          const view = cmRef.current?.view;
-          if (view) openSearchPanel(view);
+          openEditorFindPanel(view);
         },
         focus: () => {
           cmRef.current?.view?.focus();

@@ -42,12 +42,8 @@ import {
   useEditorFileSync,
 } from "@/modules/editor";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
-import type { GitHistorySearchHandle } from "@/modules/git-history";
-import {
-  Header,
-  type SearchInlineHandle,
-  type SearchTarget,
-} from "@/modules/header";
+import type { FindHandle } from "@/modules/find";
+import { Header } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import type { WebPreviewPaneHandle } from "@/modules/preview";
@@ -119,7 +115,6 @@ import {
 } from "@/modules/workspace-process";
 import { AiChat01Icon } from "@hugeicons/core-free-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
@@ -226,10 +221,6 @@ export default function App() {
   }, [tabs, activeId]);
   const activeTerminalId = activeTerminalTab?.terminalId ?? null;
 
-  const searchAddons = useRef<Map<number, SearchAddon>>(new Map());
-  const [activeSearchAddon, setActiveSearchAddon] =
-    useState<SearchAddon | null>(null);
-  const searchInlineRef = useRef<SearchInlineHandle | null>(null);
   const terminalRefs = useRef<Map<number, TerminalPaneHandle>>(new Map());
   const editorRefs = useRef<Map<number, EditorPaneHandle>>(new Map());
   const markdownNavigationRefs = useRef(
@@ -239,9 +230,7 @@ export default function App() {
   const webPreviewRefs = useRef<Map<number, WebPreviewPaneHandle>>(new Map());
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
-  const gitHistoryRefs = useRef(new Map<number, GitHistorySearchHandle>());
-  const [gitHistoryHandle, setGitHistoryHandle] =
-    useState<GitHistorySearchHandle | null>(null);
+  const gitHistoryRefs = useRef(new Map<number, FindHandle>());
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useApplyEditorFontSize();
   useTerminalFileDrop();
@@ -390,22 +379,8 @@ export default function App() {
   useWindowTitle(activeTab, explorerRoot);
 
   useEffect(() => {
-    setActiveSearchAddon(
-      activeTerminalId !== null
-        ? (searchAddons.current.get(activeTerminalId) ?? null)
-        : null,
-    );
     setActiveEditorHandle(editorRefs.current.get(activeId) ?? null);
-    setGitHistoryHandle(gitHistoryRefs.current.get(activeId) ?? null);
-  }, [activeId, activeTerminalId]);
-
-  const handleSearchReady = useCallback(
-    (terminalId: number, addon: SearchAddon) => {
-      searchAddons.current.set(terminalId, addon);
-      if (terminalId === activeTerminalId) setActiveSearchAddon(addon);
-    },
-    [activeTerminalId],
-  );
+  }, [activeId]);
 
   const disposeTab = useCallback(
     (id: number) => {
@@ -427,6 +402,7 @@ export default function App() {
       markdownNavigationRefs.current.delete(id);
       pendingGotoLine.current.delete(id);
       webPreviewRefs.current.delete(id);
+      gitHistoryRefs.current.delete(id);
     },
     [closeTab],
   );
@@ -471,8 +447,6 @@ export default function App() {
     liveTerminalIdsRef.current = live;
     for (const k of [...terminalRefs.current.keys()])
       if (!live.has(k)) terminalRefs.current.delete(k);
-    for (const k of [...searchAddons.current.keys()])
-      if (!live.has(k)) searchAddons.current.delete(k);
   }, [tabs]);
 
   // Most-recently-used tab ids, most recent first, pruned to live tabs. Drives
@@ -581,6 +555,25 @@ export default function App() {
     askFromSelection,
   });
   const askPresence = usePresence(Boolean(askPopup), 120);
+
+  const activeFindHandle = useCallback((): FindHandle | null => {
+    const tabId = activeIdRef.current;
+    const editor = editorRefs.current.get(tabId);
+    if (editor) return editor;
+    const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
+    if (tab?.kind === "terminal") {
+      return terminalRefs.current.get(tab.terminalId) ?? null;
+    }
+    if (tab?.kind === "git-history") {
+      return gitHistoryRefs.current.get(tabId) ?? null;
+    }
+    return null;
+  }, []);
+
+  const focusFind = useCallback(() => {
+    setAskPopup(null);
+    activeFindHandle()?.open();
+  }, [activeFindHandle, setAskPopup]);
 
   const openNewTab = useCallback(() => {
     newTab(inheritedCwdForNewTab());
@@ -836,11 +829,7 @@ export default function App() {
       },
       "blocks.prev": () => navigateFocusedBlocks(-1),
       "blocks.next": () => navigateFocusedBlocks(1),
-      "search.focus": () => {
-        const editor = editorRefs.current.get(activeId);
-        if (editor) editor.openSearch();
-        else searchInlineRef.current?.focus();
-      },
+      "search.focus": focusFind,
       "ai.toggle": toggleAiPanel,
       "ai.askSelection": askFromSelection,
       "agent.focusAttention": () => {
@@ -876,6 +865,7 @@ export default function App() {
       selectByIndex,
       splitActiveTab,
       focusGroup,
+      focusFind,
       toggleSourceControl,
       toggleAiPanel,
       askFromSelection,
@@ -890,6 +880,9 @@ export default function App() {
 
   const shortcutsDisabled = useCallback(
     (id: ShortcutId, e: KeyboardEvent) => {
+      if (id === "search.focus") {
+        return activeFindHandle() === null;
+      }
       if (
         id === "editor.undo" ||
         id === "editor.redo" ||
@@ -933,7 +926,7 @@ export default function App() {
       }
       return false;
     },
-    [activeTab, captureActiveSelection, isEditorTab],
+    [activeFindHandle, activeTab, captureActiveSelection, isEditorTab],
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
@@ -1038,36 +1031,6 @@ export default function App() {
     (id: number, title: string) => updateTab(id, { customTitle: title.trim() }),
     [updateTab],
   );
-
-  const searchTarget = useMemo<SearchTarget>(() => {
-    if (isTerminalTab && activeTerminalId !== null && activeSearchAddon)
-      return {
-        kind: "terminal",
-        addon: activeSearchAddon,
-        focus: () => terminalRefs.current.get(activeTerminalId)?.focus(),
-      };
-    if (isEditorTab && activeEditorHandle)
-      return {
-        kind: "editor",
-        handle: activeEditorHandle,
-        focus: () => activeEditorHandle.focus(),
-      };
-    if (isGitHistoryTab && gitHistoryHandle)
-      return {
-        kind: "git-history",
-        handle: gitHistoryHandle,
-        focus: () => {},
-      };
-    return null;
-  }, [
-    isTerminalTab,
-    isEditorTab,
-    isGitHistoryTab,
-    activeTerminalId,
-    activeSearchAddon,
-    activeEditorHandle,
-    gitHistoryHandle,
-  ]);
 
   const activeCwd = activeTerminalCwd;
 
@@ -1207,7 +1170,7 @@ export default function App() {
         ? createCommandItems({
             tabs,
             activeId,
-            searchTarget,
+            canFind: isTerminalTab || isEditorTab || isGitHistoryTab,
             explorerRoot,
             home,
             openNewWindow,
@@ -1222,7 +1185,7 @@ export default function App() {
             closeActiveTab: handleCloseActiveTab,
             splitGroupRight: () => splitActiveTab("right"),
             splitGroupDown: () => splitActiveTab("down"),
-            focusSearch: () => searchInlineRef.current?.focus(),
+            focusSearch: focusFind,
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
             toggleAi: toggleAiPanel,
@@ -1240,7 +1203,9 @@ export default function App() {
       commandPaletteOpen,
       tabs,
       activeId,
-      searchTarget,
+      isTerminalTab,
+      isEditorTab,
+      isGitHistoryTab,
       explorerRoot,
       home,
       openNewWindow,
@@ -1253,6 +1218,7 @@ export default function App() {
       toggleSourceControl,
       handleCloseActiveTab,
       splitActiveTab,
+      focusFind,
       toggleSidebar,
       toggleAiPanel,
       askFromSelection,
@@ -1382,10 +1348,9 @@ export default function App() {
   );
 
   const registerGitHistoryHandle = useCallback(
-    (tabId: number, handle: GitHistorySearchHandle | null) => {
+    (tabId: number, handle: FindHandle | null) => {
       if (handle) gitHistoryRefs.current.set(tabId, handle);
       else gitHistoryRefs.current.delete(tabId);
-      if (tabId === activeIdRef.current) setGitHistoryHandle(handle);
     },
     [],
   );
@@ -1393,7 +1358,6 @@ export default function App() {
   const workbenchServices = useMemo<WorkbenchViewServices>(
     () => ({
       registerTerminalHandle,
-      onSearchReady: handleSearchReady,
       onTerminalCwd: handleTerminalCwd,
       onTerminalExit: handleTerminalExit,
       onFocusTab: setActiveId,
@@ -1406,12 +1370,11 @@ export default function App() {
       onAiDiffAccept: (id) => respondToApproval(id, true),
       onAiDiffReject: (id) => respondToApproval(id, false),
       onOpenCommitFile: openCommitFileDiffTab,
-      onGitHistorySearchHandle: registerGitHistoryHandle,
+      onGitHistoryFindHandle: registerGitHistoryHandle,
     }),
     [
       handleEditorDirty,
       handleWebPreviewUrl,
-      handleSearchReady,
       handleTerminalCwd,
       handleTerminalExit,
       openCommitFileDiffTab,
@@ -1440,8 +1403,6 @@ export default function App() {
               onToggleSecondarySidebar={secondarySidebar.toggle}
               secondarySidebarOpen={!secondarySidebar.collapsed}
               spaceSwitcher={spaceSwitcher}
-              searchTarget={searchTarget}
-              searchRef={searchInlineRef}
             />
           )}
 

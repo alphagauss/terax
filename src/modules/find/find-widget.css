@@ -1,0 +1,68 @@
+.terax-find-widget {
+  container-type: inline-size;
+  width: min(340px, 100%);
+}
+
+.terax-find-widget[data-replace="true"] {
+  display: grid;
+  grid-template-columns:
+    22px minmax(0, 1fr) minmax(0, max-content) repeat(4, max-content);
+  column-gap: 2px;
+  padding: 4px;
+}
+
+.terax-find-widget[data-replace="true"] .terax-find-widget__find-row,
+.terax-find-widget__replace-reveal,
+.terax-find-widget__replace-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.terax-find-widget[data-replace="true"] .terax-find-widget__find-row,
+.terax-find-widget__replace-row {
+  display: grid;
+  padding: 0;
+}
+
+.terax-find-widget__toggle {
+  grid-column: 1;
+}
+
+.terax-find-widget__find-field,
+.terax-find-widget__replace-field {
+  grid-column: 2;
+}
+
+.terax-find-widget__status {
+  grid-column: 3;
+}
+
+.terax-find-widget__previous,
+.terax-find-widget__replace-one {
+  grid-column: 4;
+}
+
+.terax-find-widget__next,
+.terax-find-widget__replace-all {
+  grid-column: 5;
+}
+
+.terax-find-widget__selection {
+  grid-column: 6;
+}
+
+.terax-find-widget__close {
+  grid-column: 7;
+}
+
+@container (max-width: 290px) {
+  .terax-find-widget__status {
+    display: none;
+  }
+}
+
+@container (max-width: 260px) {
+  .terax-find-widget__selection {
+    display: none;
+  }
+}
