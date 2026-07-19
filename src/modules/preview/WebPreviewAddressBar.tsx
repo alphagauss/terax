@@ -48,7 +48,7 @@ const PORT_PRESETS: readonly PortPreset[] = [
   { port: 11434, label: "Ollama", hint: "ollama api" },
 ];
 
-export type PreviewAddressBarHandle = {
+export type WebPreviewAddressBarHandle = {
   focus: () => void;
 };
 
@@ -58,61 +58,63 @@ type Props = {
   onReload: () => void;
 };
 
-export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
-  function PreviewAddressBar({ url, onSubmit, onReload }, ref) {
-    const { t } = useTranslation("preview");
-    const [draft, setDraft] = useState(url);
-    const inputRef = useRef<HTMLInputElement>(null);
+export const WebPreviewAddressBar = forwardRef<
+  WebPreviewAddressBarHandle,
+  Props
+>(function WebPreviewAddressBar({ url, onSubmit, onReload }, ref) {
+  const { t } = useTranslation("webPreview");
+  const [draft, setDraft] = useState(url);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-    // Keep draft in sync when the parent updates the URL externally
-    // (AI tool, detected localhost chip, etc.).
-    useEffect(() => {
-      setDraft(url);
-    }, [url]);
+  // Keep draft in sync when the parent updates the URL externally
+  // (AI tool, detected localhost chip, etc.).
+  useEffect(() => {
+    setDraft(url);
+  }, [url]);
 
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => {
-          const el = inputRef.current;
-          if (!el) return;
-          el.focus();
-          el.select();
-        },
-      }),
-      [],
-    );
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        el.select();
+      },
+    }),
+    [],
+  );
 
-    const [notice, setNotice] = useState<string | null>(null);
-    const [checkingPort, setCheckingPort] = useState<number | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [checkingPort, setCheckingPort] = useState<number | null>(null);
 
-    const submit = () => {
-      const next = normalizeUrl(draft);
-      if (!next) {
-        setNotice(t("addressBar.enterUrlNotice"));
-        return;
-      }
-      setNotice(null);
-      if (next !== url) onSubmit(next);
-      else onReload();
-    };
+  const submit = () => {
+    const next = normalizeUrl(draft);
+    if (!next) {
+      setNotice(t("addressBar.enterUrlNotice"));
+      return;
+    }
+    setNotice(null);
+    if (next !== url) onSubmit(next);
+    else onReload();
+  };
 
-    const tryPort = async (port: number) => {
-      setNotice(null);
-      setCheckingPort(port);
-      const url = `http://localhost:${port}`;
-      const ok = await probeUrl(url);
-      setCheckingPort(null);
-      if (!ok) {
-        setNotice(t("addressBar.noServerNotice", { port }));
-        return;
-      }
-      setDraft(url);
-      onSubmit(url);
-    };
+  const tryPort = async (port: number) => {
+    setNotice(null);
+    setCheckingPort(port);
+    const url = `http://localhost:${port}`;
+    const ok = await probeUrl(url);
+    setCheckingPort(null);
+    if (!ok) {
+      setNotice(t("addressBar.noServerNotice", { port }));
+      return;
+    }
+    setDraft(url);
+    onSubmit(url);
+  };
 
-    return (
-      <div className="shrink-0 border-b border-border/60">
+  return (
+    <div className="shrink-0 border-b border-border/60">
       <div className="flex h-9 items-center gap-1 bg-card/40 px-1.5">
         <Button
           type="button"
@@ -137,11 +139,7 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
               title={t("addressBar.portsTitle")}
               className="h-7 shrink-0 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              <HugeiconsIcon
-                icon={Globe02Icon}
-                size={13}
-                strokeWidth={1.75}
-              />
+              <HugeiconsIcon icon={Globe02Icon} size={13} strokeWidth={1.75} />
               <span className="hidden sm:inline">{t("addressBar.ports")}</span>
             </Button>
           </DropdownMenuTrigger>
@@ -199,11 +197,7 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
           className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           disabled={!url}
         >
-          <HugeiconsIcon
-            icon={LinkSquare02Icon}
-            size={14}
-            strokeWidth={1.75}
-          />
+          <HugeiconsIcon icon={LinkSquare02Icon} size={14} strokeWidth={1.75} />
         </Button>
       </div>
       {notice ? (
@@ -218,10 +212,9 @@ export const PreviewAddressBar = forwardRef<PreviewAddressBarHandle, Props>(
           </button>
         </div>
       ) : null}
-      </div>
-    );
-  },
-);
+    </div>
+  );
+});
 
 async function probeUrl(url: string): Promise<boolean> {
   try {
@@ -242,7 +235,8 @@ function normalizeUrl(raw: string): string | null {
   if (!trimmed) return null;
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (/^localhost(:|\/|$)/i.test(trimmed)) return `http://${trimmed}`;
-  if (/^\d{1,3}(\.\d{1,3}){3}(:|\/|$)/.test(trimmed)) return `http://${trimmed}`;
+  if (/^\d{1,3}(\.\d{1,3}){3}(:|\/|$)/.test(trimmed))
+    return `http://${trimmed}`;
   if (/^[\w.-]+\.[a-z]{2,}/i.test(trimmed)) return `https://${trimmed}`;
   return trimmed;
 }

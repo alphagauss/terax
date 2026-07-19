@@ -28,8 +28,8 @@ export type EditorTab = TabBase & {
   overrideLanguage?: string | null;
 };
 
-export type PreviewTab = TabBase & {
-  kind: "preview";
+export type WebPreviewTab = TabBase & {
+  kind: "web-preview";
   url: string;
 };
 
@@ -78,7 +78,7 @@ export type GitCommitFileDiffTab = TabBase & {
 export type Tab =
   | TerminalTab
   | EditorTab
-  | PreviewTab
+  | WebPreviewTab
   | MarkdownTab
   | AiDiffTab
   | GitDiffTab
@@ -90,10 +90,14 @@ export type TabPatch = Partial<{
   cwd: string;
   path: string;
   dirty: boolean;
+  preview: boolean;
   url: string;
   customTitle: string;
   overrideLanguage: string | null;
   explorerRoot: string;
+  originalPath: string | null;
+  shortSha: string;
+  subject: string;
 }>;
 
 export type WorkbenchGroup = {

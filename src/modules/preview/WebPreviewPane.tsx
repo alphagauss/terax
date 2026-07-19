@@ -9,11 +9,11 @@ import {
 } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
-  PreviewAddressBar,
-  type PreviewAddressBarHandle,
-} from "./PreviewAddressBar";
+  WebPreviewAddressBar,
+  type WebPreviewAddressBarHandle,
+} from "./WebPreviewAddressBar";
 
-export type PreviewPaneHandle = {
+export type WebPreviewPaneHandle = {
   reload: () => void;
   focusAddressBar: () => void;
   getUrl: () => string;
@@ -27,25 +27,31 @@ type Props = {
 
 // Tear the iframe down after this much invisibility — a background dev
 // server page can hold hundreds of MB inside the WebView.
-const SUSPEND_AFTER_MS = 30_000;
+export const WEB_PREVIEW_SUSPEND_AFTER_MS = 5 * 60 * 1000;
 
-export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
-  function PreviewPane({ url, visible, onUrlChange }, ref) {
-    const { t } = useTranslation("preview");
+export function scheduleWebPreviewSuspension(
+  onSuspend: () => void,
+): () => void {
+  const timer = setTimeout(onSuspend, WEB_PREVIEW_SUSPEND_AFTER_MS);
+  return () => clearTimeout(timer);
+}
+
+export const WebPreviewPane = forwardRef<WebPreviewPaneHandle, Props>(
+  function WebPreviewPane({ url, visible, onUrlChange }, ref) {
+    const { t } = useTranslation("webPreview");
     // `nonce` is part of the iframe `key`. Bumping it remounts the iframe,
     // which is the only reliable cross-origin reload (calling
     // contentWindow.location.reload() throws on cross-origin frames).
     const [nonce, setNonce] = useState(0);
     const [loaded, setLoaded] = useState(visible);
-    const addressRef = useRef<PreviewAddressBarHandle>(null);
+    const addressRef = useRef<WebPreviewAddressBarHandle>(null);
 
     useEffect(() => {
       if (visible) {
         setLoaded(true);
         return;
       }
-      const t = setTimeout(() => setLoaded(false), SUSPEND_AFTER_MS);
-      return () => clearTimeout(t);
+      return scheduleWebPreviewSuspension(() => setLoaded(false));
     }, [visible]);
 
     useImperativeHandle(
@@ -71,7 +77,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
           pointerEvents: visible ? "auto" : "none",
         }}
       >
-        <PreviewAddressBar
+        <WebPreviewAddressBar
           ref={addressRef}
           url={url}
           onSubmit={onUrlChange}
@@ -130,7 +136,7 @@ export const PreviewPane = forwardRef<PreviewPaneHandle, Props>(
 );
 
 function SuspendedState({ onReload }: { onReload: () => void }) {
-  const { t } = useTranslation("preview");
+  const { t } = useTranslation("webPreview");
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="flex size-10 items-center justify-center rounded-2xl border border-border/60 bg-card text-muted-foreground">
@@ -156,7 +162,7 @@ function SuspendedState({ onReload }: { onReload: () => void }) {
 }
 
 function EmptyState() {
-  const { t } = useTranslation("preview");
+  const { t } = useTranslation("webPreview");
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-4 px-6 text-center">
       <div className="flex size-12 items-center justify-center rounded-2xl border border-border/60 bg-card text-muted-foreground">

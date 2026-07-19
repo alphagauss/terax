@@ -1,1 +1,1 @@
-export { MarkdownStack } from "./MarkdownStackLazy";
+export { MarkdownView } from "./MarkdownViewLazy";

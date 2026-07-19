@@ -1,3 +1,7 @@
+import {
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 import {
@@ -5,17 +9,17 @@ import {
   endpointIdFromCompatModel,
   getModel,
   isCompatModelId,
-  providerNeedsKey,
   type ModelId,
   type ProviderId,
+  providerNeedsKey,
 } from "../config";
-import { useTodosStore } from "./todoStore";
 import type { AgentUsage } from "../lib/agent";
 import {
+  type CustomEndpointKeys,
   EMPTY_PROVIDER_KEYS,
   type ProviderKeys,
-  type CustomEndpointKeys,
 } from "../lib/keyring";
+import { pushRecentModel } from "../lib/modelPrefs";
 import {
   acquireSessionRun,
   deleteSessionFile,
@@ -28,11 +32,7 @@ import {
   releaseSessionRun,
   type SessionMeta,
 } from "../lib/sessions";
-import { pushRecentModel } from "../lib/modelPrefs";
-import {
-  getWorkspaceValue,
-  setWorkspaceValue,
-} from "@/modules/workspace-process";
+import { useTodosStore } from "./todoStore";
 
 export type Live = {
   getCwd: () => string | null;
@@ -41,7 +41,7 @@ export type Live = {
   injectIntoActivePty: (text: string) => boolean;
   getWorkspaceRoot: () => string | null;
   getActiveFile: () => string | null;
-  openPreview: (url: string) => boolean;
+  openWebPreview: (url: string) => boolean;
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
@@ -153,7 +153,7 @@ const NOOP_LIVE: Live = {
   injectIntoActivePty: () => false,
   getWorkspaceRoot: () => null,
   getActiveFile: () => null,
-  openPreview: () => false,
+  openWebPreview: () => false,
   spawnManagedAgent: () => null,
   readLeafBuffer: () => null,
 };

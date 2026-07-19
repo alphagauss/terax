@@ -109,7 +109,8 @@ export const PROVIDERS: readonly ProviderInfo[] = [
     label: "MLX",
     keyringAccount: "",
     keyPrefix: null,
-    consoleUrl: "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
+    consoleUrl:
+      "https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md",
   },
   {
     id: "ollama",
@@ -221,7 +222,8 @@ export const MODELS = [
     provider: "openai",
     label: "GPT-5.5 Pro",
     hint: "Max",
-    description: "Highest-accuracy version for the hardest professional and agentic tasks.",
+    description:
+      "Highest-accuracy version for the hardest professional and agentic tasks.",
     capabilities: { intelligence: 5, speed: 2, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -293,7 +295,8 @@ export const MODELS = [
     provider: "anthropic",
     label: "Claude Opus 4.8",
     hint: "Best",
-    description: "Anthropic's most capable model for complex reasoning and long-horizon agentic coding.",
+    description:
+      "Anthropic's most capable model for complex reasoning and long-horizon agentic coding.",
     capabilities: { intelligence: 5, speed: 2, cost: 1 },
     tags: ["vision", "reasoning", "tools", "coding"],
     supportsTemperature: false,
@@ -434,7 +437,8 @@ export const MODELS = [
     provider: "xai",
     label: "Grok 4.3",
     hint: "Flagship",
-    description: "Most intelligent and fastest Grok. Strong agentic tool use and 1M context.",
+    description:
+      "Most intelligent and fastest Grok. Strong agentic tool use and 1M context.",
     capabilities: { intelligence: 5, speed: 4, cost: 2 },
     tags: ["vision", "reasoning", "tools", "coding"],
   },
@@ -443,7 +447,8 @@ export const MODELS = [
     provider: "xai",
     label: "Grok Build 0.1",
     hint: "Coding",
-    description: "Specialized fast coding model for agentic workflows (powers Grok Build CLI).",
+    description:
+      "Specialized fast coding model for agentic workflows (powers Grok Build CLI).",
     capabilities: { intelligence: 4, speed: 5, cost: 4 },
     tags: ["tools", "coding"],
   },
@@ -629,7 +634,9 @@ export function getCompatModelInfo(
     provider: "openai-compatible",
     label: ep?.modelId || name,
     hint: name,
-    description: ep ? `${name} — ${ep.baseURL}` : "Custom OpenAI-compatible endpoint",
+    description: ep
+      ? `${name} — ${ep.baseURL}`
+      : "Custom OpenAI-compatible endpoint",
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   };
 }
@@ -664,7 +671,10 @@ const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
 
 // Reasoning models reject tool-call turns whose reasoning was stripped; keep it.
 export function modelKeepsReasoning(m: ModelInfo): boolean {
-  return (m.tags?.includes("reasoning") ?? false) || FREEFORM_PROVIDERS.has(m.provider);
+  return (
+    (m.tags?.includes("reasoning") ?? false) ||
+    FREEFORM_PROVIDERS.has(m.provider)
+  );
 }
 
 export function modelSupportsTemperature(
@@ -797,7 +807,11 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 
 export function estimateCost(
   modelId: string | undefined,
-  usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number },
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+  },
 ): number | null {
   if (!modelId) return null;
   const p = MODEL_PRICING[modelId];
@@ -805,7 +819,9 @@ export function estimateCost(
   const fresh = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
   const cached = usage.cachedInputTokens;
   return (
-    (fresh * p.input + cached * (p.cacheRead ?? p.input) + usage.outputTokens * p.output) /
+    (fresh * p.input +
+      cached * (p.cacheRead ?? p.input) +
+      usage.outputTokens * p.output) /
     1_000_000
   );
 }
@@ -889,7 +905,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 - Mutate (approval required): edit, multi_edit, write_file, create_directory, bash_run, bash_background
 - Background process IO: bash_logs, bash_list, bash_kill
 - Plan / delegation: todo_write, run_subagent
-- Side-channel: suggest_command, open_preview
+- Side-channel: suggest_command, open_web_preview
 
 # Tool budget
 - Don't re-read a file you read earlier this session unless you wrote to it; read_file returns {unchanged: true} and you pay the round-trip for nothing.
@@ -912,7 +928,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 # Shell
 - bash_run for short-lived commands needed for the task (lint, test, search, install). cwd persists across calls in the session shell. Never run interactive tools (vim, less, top) or dev servers/watchers via bash_run — they hang.
 - bash_background for dev servers, watchers, log tailers. Read output via bash_logs, terminate via bash_kill.
-- BEFORE spawning any dev server (pnpm dev, next dev, vite, cargo watch, ...) call bash_list. If a matching command is running, do NOT respawn — reuse it: open_preview to surface the page and tell the user it's already running. Only restart on explicit user request (bash_kill the old handle first).
+- BEFORE spawning any dev server (pnpm dev, next dev, vite, cargo watch, ...) call bash_list. If a matching command is running, do NOT respawn — reuse it: open_web_preview to surface the page and tell the user it's already running. Only restart on explicit user request (bash_kill the old handle first).
 - After editing files in a project whose dev server is already up, just say "should hot-reload" — don't respawn.
 - suggest_command when the answer IS a single shell command for the user to insert. Don't also paste it in prose.
 
@@ -925,7 +941,7 @@ Every turn carries a short <env> block (prepended to the latest user message): w
 
 export const SYSTEM_PROMPT_LITE = `You are Terax, an AI agent in a developer terminal. Each turn carries an <env> block (workspace_root, active_terminal_cwd, optional active_file) prepended to the user's message — treat as ground truth.
 
-Tools: read_file, list_directory, grep, glob, get_terminal_output, edit, multi_edit, write_file, create_directory, bash_run, bash_background, bash_logs, bash_list, bash_kill, suggest_command, open_preview.
+Tools: read_file, list_directory, grep, glob, get_terminal_output, edit, multi_edit, write_file, create_directory, bash_run, bash_background, bash_logs, bash_list, bash_kill, suggest_command, open_web_preview.
 
 Rules:
 - Execute, don't echo. When asked to create/fix/edit a file, go straight to the tool call. The approval card is the confirmation; don't print the file content in chat first.

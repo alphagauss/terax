@@ -19,7 +19,6 @@ type Props = {
   onSearchReady: (terminalId: number, addon: SearchAddon) => void;
   onCwd: (terminalId: number, cwd: string) => void;
   onExit: (terminalId: number, code: number) => void;
-  onFocus: (tabId: number) => void;
 };
 
 export function TerminalView({
@@ -30,7 +29,6 @@ export function TerminalView({
   onSearchReady,
   onCwd,
   onExit,
-  onFocus,
 }: Props) {
   const setRef = useCallback(
     (handle: TerminalPaneHandle | null) =>
@@ -38,12 +36,7 @@ export function TerminalView({
     [registerHandle, tab.terminalId],
   );
   return (
-    <div
-      data-terminal-id={tab.terminalId}
-      className="relative h-full w-full"
-      onMouseDownCapture={() => onFocus(tab.id)}
-      onFocusCapture={() => onFocus(tab.id)}
-    >
+    <div data-terminal-id={tab.terminalId} className="relative h-full w-full">
       <TerminalPane
         ref={setRef}
         leafId={tab.terminalId}

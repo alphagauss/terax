@@ -35,6 +35,8 @@ import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
+  hasOtherDocumentView,
+  isDocumentTab,
   NewEditorDialog,
   useApplyEditorFontSize,
   useEditorFileSync,
@@ -48,7 +50,7 @@ import {
 } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
-import type { PreviewPaneHandle } from "@/modules/preview";
+import type { WebPreviewPaneHandle } from "@/modules/preview";
 import { HostKeyDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -160,6 +162,9 @@ function parentDirectory(path: string): string | null {
 export default function App() {
   const initialLaunchCwd =
     currentWorkspaceEnv().kind === "local" ? getLaunchDir() : null;
+  const revealWorkbenchSpace = useCallback((spaceId: string) => {
+    useSpaces.getState().setActive(spaceId);
+  }, []);
   const {
     state: workbenchState,
     tabs,
@@ -184,7 +189,7 @@ export default function App() {
     newPrivateTab,
     openFileTab,
     pinTab,
-    newPreviewTab,
+    newWebPreviewTab,
     newMarkdownTab,
     setOverrideLanguage,
     openAiDiffTab,
@@ -194,17 +199,23 @@ export default function App() {
     openCommitFileDiffTab,
     closeTab,
     updateTab,
+    setDocumentDirty,
     selectByIndex,
     setTerminalCwd,
     focusGroup,
     splitTab,
     resizeSplit,
-  } = useWorkbench(initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined);
+  } = useWorkbench(
+    initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined,
+    revealWorkbenchSpace,
+  );
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest Workbench state instead of a stale closure.
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -222,7 +233,7 @@ export default function App() {
     new Map<number, MarkdownPreviewPaneHandle>(),
   );
   const pendingGotoLine = useRef<Map<number, number>>(new Map());
-  const previewRefs = useRef<Map<number, PreviewPaneHandle>>(new Map());
+  const webPreviewRefs = useRef<Map<number, WebPreviewPaneHandle>>(new Map());
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
   const gitHistoryRefs = useRef(new Map<number, GitHistorySearchHandle>());
@@ -395,13 +406,24 @@ export default function App() {
 
   const disposeTab = useCallback(
     (id: number) => {
+      const closing = tabsRef.current.find((tab) => tab.id === id);
+      const next = closeTab(id);
+      if (next.tabs[id]) return;
+      if (closing && isDocumentTab(closing)) {
+        if (!hasOtherDocumentView(Object.values(next.tabs), closing)) {
+          const workspace = currentWorkspaceEnv();
+          void import("@/modules/editor/lib/documentModel").then(
+            ({ discardSharedDocumentModel }) =>
+              discardSharedDocumentModel(workspace, closing.path),
+          );
+        }
+      }
       // Terminal-id maps are pruned by the effect below; tab-id handles need
       // explicit cleanup here.
       editorRefs.current.delete(id);
       markdownNavigationRefs.current.delete(id);
       pendingGotoLine.current.delete(id);
-      previewRefs.current.delete(id);
-      closeTab(id);
+      webPreviewRefs.current.delete(id);
     },
     [closeTab],
   );
@@ -419,6 +441,11 @@ export default function App() {
     cancelDeleteClose,
     handlePathDeleted,
   } = useTabCloseGuards({ tabs, disposeTab });
+  const handleCloseRef = useRef(handleClose);
+  handleCloseRef.current = handleClose;
+  const requestEditorClose = useCallback((id: number) => {
+    void handleCloseRef.current(id);
+  }, []);
 
   const { pendingAppClose, confirmAppClose, cancelAppClose } = useAppCloseGuard(
     tabsRef,
@@ -735,16 +762,16 @@ export default function App() {
     (s) => s.explorerGitDecorations,
   );
 
-  const openPreviewTab = useCallback(
+  const openWebPreviewTab = useCallback(
     (url: string, groupId?: number) => {
-      const id = newPreviewTab(url, groupId);
+      const id = newWebPreviewTab(url, groupId);
       // Focus the address bar if the URL is empty so the user can type.
       if (!url) {
-        setTimeout(() => previewRefs.current.get(id)?.focusAddressBar(), 0);
+        setTimeout(() => webPreviewRefs.current.get(id)?.focusAddressBar(), 0);
       }
       return id;
     },
-    [newPreviewTab],
+    [newWebPreviewTab],
   );
 
   const splitActiveTab = useCallback(
@@ -780,7 +807,7 @@ export default function App() {
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
-      "tab.newPreview": () => openPreviewTab(""),
+      "tab.newWebPreview": () => openWebPreviewTab(""),
       "tab.newEditor": () => setNewEditorOpen(true),
       "tab.close": handleCloseActiveTab,
       "tab.next": () => stepSwitcher(1),
@@ -838,7 +865,7 @@ export default function App() {
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,
-      openPreviewTab,
+      openWebPreviewTab,
       activeSpaceId,
       selectByIndex,
       splitActiveTab,
@@ -925,9 +952,9 @@ export default function App() {
       } else {
         editorRefs.current.delete(id);
       }
-      if (id === activeId) setActiveEditorHandle(h);
+      if (id === activeIdRef.current) setActiveEditorHandle(h);
     },
-    [activeId],
+    [],
   );
 
   const registerMarkdownNavigationHandle = useCallback(
@@ -946,15 +973,15 @@ export default function App() {
     [],
   );
 
-  const registerPreviewHandle = useCallback(
-    (id: number, h: PreviewPaneHandle | null) => {
-      if (h) previewRefs.current.set(id, h);
-      else previewRefs.current.delete(id);
+  const registerWebPreviewHandle = useCallback(
+    (id: number, h: WebPreviewPaneHandle | null) => {
+      if (h) webPreviewRefs.current.set(id, h);
+      else webPreviewRefs.current.delete(id);
     },
     [],
   );
 
-  const handlePreviewUrl = useCallback(
+  const handleWebPreviewUrl = useCallback(
     (id: number, url: string) => updateTab(id, { url }),
     [updateTab],
   );
@@ -997,8 +1024,8 @@ export default function App() {
   );
 
   const handleEditorDirty = useCallback(
-    (id: number, dirty: boolean) => updateTab(id, { dirty }),
-    [updateTab],
+    (id: number, dirty: boolean) => setDocumentDirty(id, dirty),
+    [setDocumentDirty],
   );
 
   const handleRenameTab = useCallback(
@@ -1132,7 +1159,7 @@ export default function App() {
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
             openNewEditor: () => setNewEditorOpen(true),
-            openNewPreview: () => openPreviewTab(""),
+            openNewWebPreview: () => openWebPreviewTab(""),
             openGitGraph: openGitGraphFromContext,
             toggleSourceControl,
             closeActiveTab: handleCloseActiveTab,
@@ -1164,7 +1191,7 @@ export default function App() {
       openNewTab,
       openNewBlockTab,
       openNewPrivateTab,
-      openPreviewTab,
+      openWebPreviewTab,
       openGitGraphFromContext,
       toggleSourceControl,
       handleCloseActiveTab,
@@ -1214,7 +1241,7 @@ export default function App() {
     explorerRoot,
     launchCwd,
     home,
-    openPreviewTab,
+    openWebPreviewTab,
     newAgentTab,
     terminalRefs,
   });
@@ -1260,7 +1287,7 @@ export default function App() {
       newTerminal: (groupId) => newTab(groupCwd(groupId), groupId),
       newBlock: (groupId) => newBlockTab(groupCwd(groupId), groupId),
       newPrivate: (groupId) => newPrivateTab(groupCwd(groupId), groupId),
-      newPreview: (groupId) => openPreviewTab("", groupId),
+      newWebPreview: (groupId) => openWebPreviewTab("", groupId),
       newEditor: (groupId) => {
         setActiveGroup(groupId);
         setNewEditorOpen(true);
@@ -1287,7 +1314,7 @@ export default function App() {
       newPrivateTab,
       newTab,
       openGitGraphFromContext,
-      openPreviewTab,
+      openWebPreviewTab,
       pinTab,
       resizeSplit,
       setActiveGroup,
@@ -1301,9 +1328,9 @@ export default function App() {
     (tabId: number, handle: GitHistorySearchHandle | null) => {
       if (handle) gitHistoryRefs.current.set(tabId, handle);
       else gitHistoryRefs.current.delete(tabId);
-      if (tabId === activeId) setGitHistoryHandle(handle);
+      if (tabId === activeIdRef.current) setGitHistoryHandle(handle);
     },
-    [activeId],
+    [],
   );
 
   const workbenchServices = useMemo<WorkbenchViewServices>(
@@ -1316,18 +1343,17 @@ export default function App() {
       registerEditorHandle,
       registerMarkdownNavigationHandle,
       onEditorDirtyChange: handleEditorDirty,
-      onEditorCloseTab: disposeTab,
-      registerPreviewHandle,
-      onPreviewUrlChange: handlePreviewUrl,
+      onEditorCloseTab: requestEditorClose,
+      registerWebPreviewHandle,
+      onWebPreviewUrlChange: handleWebPreviewUrl,
       onAiDiffAccept: (id) => respondToApproval(id, true),
       onAiDiffReject: (id) => respondToApproval(id, false),
       onOpenCommitFile: openCommitFileDiffTab,
       onGitHistorySearchHandle: registerGitHistoryHandle,
     }),
     [
-      disposeTab,
       handleEditorDirty,
-      handlePreviewUrl,
+      handleWebPreviewUrl,
       handleSearchReady,
       handleTerminalCwd,
       handleTerminalExit,
@@ -1335,8 +1361,9 @@ export default function App() {
       registerEditorHandle,
       registerGitHistoryHandle,
       registerMarkdownNavigationHandle,
-      registerPreviewHandle,
+      registerWebPreviewHandle,
       registerTerminalHandle,
+      requestEditorClose,
       respondToApproval,
       setActiveId,
     ],

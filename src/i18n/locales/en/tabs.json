@@ -11,7 +11,7 @@
   "blocks": "Blocks",
   "privacy": "Privacy",
   "editor": "Editor",
-  "preview": "Preview",
+  "webPreview": "Web Preview",
   "gitGraph": "Git Graph",
   "splitRight": "Split Right",
   "splitAndMove": "Split and Move",

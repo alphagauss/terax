@@ -1,6 +1,10 @@
 import {
+  normalizePathForIdentity,
+  pathBasename,
+  titleFromUrl,
+} from "@/lib/utils";
+import {
   activateGroup,
-  activateTab,
   activeTabId,
   addTabToGroup,
   allTabs,
@@ -9,7 +13,10 @@ import {
   findGroupForTab,
   groupIds,
   moveTabToGroup as moveTabInState,
+  patchDocumentDirty,
+  patchTab,
   reorderTabByGap as reorderTabByGapInState,
+  revealTabInState,
   splitWithTab,
   tabsForSpace,
   updateSplitSizes,
@@ -22,28 +29,15 @@ import {
   type GitDiffTab,
   type GitHistoryTab,
   type MarkdownTab,
-  type PreviewTab,
   type SpaceWorkbench,
   type Tab,
   type TabPatch,
   type TerminalTab,
+  type WebPreviewTab,
   type WorkbenchDirection,
   type WorkbenchState,
 } from "@/modules/workbench/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
-
-function titleFromUrl(url: string): string {
-  try {
-    return new URL(url).host || url;
-  } catch {
-    return url || "preview";
-  }
-}
 
 function createInitialState(initial?: Partial<TerminalTab>): WorkbenchState {
   const tab: TerminalTab = {
@@ -67,64 +61,7 @@ function firstGroupId(space: SpaceWorkbench): number {
   return groupIds(space.root)[0];
 }
 
-function patchTab(
-  state: WorkbenchState,
-  id: number,
-  patch: TabPatch,
-): WorkbenchState {
-  const tab = state.tabs[id];
-  if (!tab) return state;
-  let next: Tab;
-  if (tab.kind === "terminal") {
-    next = {
-      ...tab,
-      ...(patch.title !== undefined && { title: patch.title }),
-      ...(patch.cwd !== undefined && { cwd: patch.cwd }),
-      ...(patch.customTitle !== undefined && {
-        customTitle: patch.customTitle || undefined,
-      }),
-    };
-  } else if (tab.kind === "preview") {
-    next = {
-      ...tab,
-      ...(patch.title !== undefined && { title: patch.title }),
-      ...(patch.url !== undefined && {
-        url: patch.url,
-        title: patch.title ?? titleFromUrl(patch.url),
-      }),
-    };
-  } else if (tab.kind === "markdown") {
-    next = {
-      ...tab,
-      ...(patch.title !== undefined && { title: patch.title }),
-      ...(patch.path !== undefined && { path: patch.path }),
-      ...(patch.dirty !== undefined && { dirty: patch.dirty }),
-      ...(patch.explorerRoot !== undefined && {
-        explorerRoot: patch.explorerRoot,
-      }),
-    };
-  } else if (tab.kind === "editor") {
-    next = {
-      ...tab,
-      ...(patch.dirty === true && tab.preview && { preview: false }),
-      ...(patch.title !== undefined && { title: patch.title }),
-      ...(patch.path !== undefined && { path: patch.path }),
-      ...(patch.dirty !== undefined && { dirty: patch.dirty }),
-      ...(patch.overrideLanguage !== undefined && {
-        overrideLanguage: patch.overrideLanguage,
-      }),
-      ...(patch.explorerRoot !== undefined && {
-        explorerRoot: patch.explorerRoot,
-      }),
-    };
-  } else {
-    if (patch.title === undefined) return state;
-    next = { ...tab, title: patch.title };
-  }
-  return { ...state, tabs: { ...state.tabs, [id]: next } };
-}
-
-function replacePreview(
+function replaceEditorPreview(
   state: WorkbenchState,
   groupId: number,
   previousId: number,
@@ -160,9 +97,9 @@ function cloneForSplit(tab: Tab, id: number, terminalId: number): Tab | null {
     case "terminal":
       return { ...tab, id, terminalId, cold: false };
     case "editor":
-      return tab.dirty ? null : { ...tab, id, preview: false, cold: false };
+      return { ...tab, id, preview: false, cold: false };
     case "markdown":
-      return tab.dirty ? null : { ...tab, id, cold: false };
+      return { ...tab, id, cold: false };
     case "ai-diff":
       return null;
     default:
@@ -187,9 +124,14 @@ function maxRuntimeId(state: WorkbenchState): number {
   return max;
 }
 
-export function useWorkbench(initial?: Partial<TerminalTab>) {
+export function useWorkbench(
+  initial?: Partial<TerminalTab>,
+  onRevealSpace?: (spaceId: string) => void,
+) {
   const [state, setState] = useState(() => createInitialState(initial));
   const stateRef = useRef(state);
+  const onRevealSpaceRef = useRef(onRevealSpace);
+  onRevealSpaceRef.current = onRevealSpace;
   const nextIdRef = useRef(5);
   const [booted, setBooted] = useState(false);
   const [activeSpaceId, setActiveSpaceId] = useState(DEFAULT_SPACE_ID);
@@ -245,10 +187,20 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
 
   const tabs = useMemo(() => allTabs(state), [state]);
   const activeId = activeTabId(state, activeSpaceId) ?? 0;
-  const setActiveId = useCallback(
-    (id: number) => commit((current) => activateTab(current, id)),
-    [commit],
+  const revealTab = useCallback(
+    (id: number, patch?: TabPatch) => {
+      const revealed = revealTabInState(stateRef.current, id, patch);
+      if (!revealed) return false;
+      if (revealed.spaceId !== activeSpaceIdRef.current) {
+        setActiveSpace(revealed.spaceId);
+      }
+      onRevealSpaceRef.current?.(revealed.spaceId);
+      commit(() => revealed.state);
+      return true;
+    },
+    [commit, setActiveSpace],
   );
+  const setActiveId = useCallback((id: number) => revealTab(id), [revealTab]);
 
   const setActiveGroup = useCallback(
     (groupId: number) =>
@@ -293,7 +245,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         kind: "terminal",
         spaceId,
         cold: true,
-        title: cwd ? basename(cwd) : "shell",
+        title: cwd ? pathBasename(cwd) : "shell",
         cwd,
       };
       commit((current) => ({
@@ -415,18 +367,15 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       const editorTabs = group.tabIds
         .map((id) => stateRef.current.tabs[id])
         .filter((tab): tab is EditorTab => tab?.kind === "editor");
-      const existing = editorTabs.find((tab) => tab.path === path);
+      const resourcePath = normalizePathForIdentity(path);
+      const existing = editorTabs.find(
+        (tab) => normalizePathForIdentity(tab.path) === resourcePath,
+      );
       if (existing) {
-        commit((current) => {
-          const activated = activateTab(current, existing.id);
-          return pin && existing.preview
-            ? patchTab(activated, existing.id, {
-                dirty: existing.dirty,
-                explorerRoot,
-              })
-            : activated;
+        revealTab(existing.id, {
+          ...(pin && { preview: false }),
+          ...(explorerRoot !== undefined && { explorerRoot }),
         });
-        if (pin && existing.preview) pinTab(existing.id);
         return existing.id;
       }
       const id = allocId();
@@ -434,7 +383,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         id,
         kind: "editor",
         spaceId,
-        title: basename(path),
+        title: pathBasename(path),
         path,
         dirty: false,
         preview: !pin,
@@ -443,14 +392,16 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       if (!pin) {
         const preview = editorTabs.find((candidate) => candidate.preview);
         if (preview) {
-          commit((current) => replacePreview(current, target, preview.id, tab));
+          commit((current) =>
+            replaceEditorPreview(current, target, preview.id, tab),
+          );
           return id;
         }
       }
       addPage(tab, target);
       return id;
     },
-    [addPage, allocId, commit, pinTab, targetGroup],
+    [addPage, allocId, commit, revealTab, targetGroup],
   );
 
   const newMarkdownTab = useCallback(
@@ -459,13 +410,19 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
+      const resourcePath = normalizePathForIdentity(path);
       const existing = group?.tabIds
         .map((id) => stateRef.current.tabs[id])
         .find((tab): tab is MarkdownTab =>
-          Boolean(tab?.kind === "markdown" && tab.path === path),
+          Boolean(
+            tab?.kind === "markdown" &&
+              normalizePathForIdentity(tab.path) === resourcePath,
+          ),
         );
       if (existing) {
-        commit((current) => activateTab(current, existing.id));
+        revealTab(existing.id, {
+          ...(explorerRoot !== undefined && { explorerRoot }),
+        });
         return existing.id;
       }
       const id = allocId();
@@ -474,7 +431,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
           id,
           kind: "markdown",
           spaceId,
-          title: basename(path),
+          title: pathBasename(path),
           path,
           dirty: false,
           ...(explorerRoot !== undefined && { explorerRoot }),
@@ -483,15 +440,15 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       );
       return id;
     },
-    [addPage, allocId, commit, targetGroup],
+    [addPage, allocId, revealTab, targetGroup],
   );
 
-  const newPreviewTab = useCallback(
+  const newWebPreviewTab = useCallback(
     (url: string, groupId?: number) => {
       const id = allocId();
-      const tab: PreviewTab = {
+      const tab: WebPreviewTab = {
         id,
-        kind: "preview",
+        kind: "web-preview",
         spaceId: activeSpaceIdRef.current,
         title: titleFromUrl(url),
         url,
@@ -514,7 +471,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         (tab) => tab.kind === "ai-diff" && tab.approvalId === input.approvalId,
       );
       if (existing) {
-        setActiveId(existing.id);
+        revealTab(existing.id);
         return existing.id;
       }
       const id = allocId();
@@ -522,7 +479,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         id,
         kind: "ai-diff",
         spaceId: activeSpaceIdRef.current,
-        title: `${basename(input.path)} (AI diff)`,
+        title: `${pathBasename(input.path)} (AI diff)`,
         path: input.path,
         originalContent: input.originalContent,
         proposedContent: input.proposedContent,
@@ -532,7 +489,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       });
       return id;
     },
-    [addPage, allocId, setActiveId],
+    [addPage, allocId, revealTab],
   );
 
   const setAiDiffStatus = useCallback(
@@ -585,14 +542,10 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
           tab.mode === input.mode,
       );
       if (existing) {
-        commit((current) =>
-          activateTab(
-            patchTab(current, existing.id, {
-              title: input.title ?? `${basename(input.path)} (${input.mode})`,
-            }),
-            existing.id,
-          ),
-        );
+        revealTab(existing.id, {
+          title: input.title ?? `${pathBasename(input.path)} (${input.mode})`,
+          originalPath: input.originalPath ?? null,
+        });
         return existing.id;
       }
       const id = allocId();
@@ -600,7 +553,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         id,
         kind: "git-diff",
         spaceId: activeSpaceIdRef.current,
-        title: input.title ?? `${basename(input.path)} (${input.mode})`,
+        title: input.title ?? `${pathBasename(input.path)} (${input.mode})`,
         path: input.path,
         repoRoot: input.repoRoot,
         mode: input.mode,
@@ -609,7 +562,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       addPage(tab);
       return id;
     },
-    [addPage, allocId, commit],
+    [addPage, allocId, revealTab],
   );
 
   const openCommitHistoryTab = useCallback(
@@ -619,9 +572,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         (tab) => tab.kind === "git-history" && tab.repoRoot === input.repoRoot,
       );
       if (existing) {
-        commit((current) =>
-          activateTab(patchTab(current, existing.id, { title }), existing.id),
-        );
+        revealTab(existing.id, { title });
         return existing.id;
       }
       const id = allocId();
@@ -635,7 +586,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       addPage(tab);
       return id;
     },
-    [addPage, allocId, commit],
+    [addPage, allocId, revealTab],
   );
 
   const openCommitFileDiffTab = useCallback(
@@ -655,7 +606,12 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
           tab.path === input.path,
       );
       if (existing) {
-        setActiveId(existing.id);
+        revealTab(existing.id, {
+          title: `${pathBasename(input.path)} @ ${input.shortSha}`,
+          originalPath: input.originalPath,
+          shortSha: input.shortSha,
+          subject: input.subject,
+        });
         return existing.id;
       }
       const id = allocId();
@@ -663,18 +619,24 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
         id,
         kind: "git-commit-file",
         spaceId: activeSpaceIdRef.current,
-        title: `${basename(input.path)} @ ${input.shortSha}`,
+        title: `${pathBasename(input.path)} @ ${input.shortSha}`,
         ...input,
       };
       addPage(tab);
       return id;
     },
-    [addPage, allocId, setActiveId],
+    [addPage, allocId, revealTab],
   );
 
   const updateTab = useCallback(
     (id: number, patch: TabPatch) =>
       commit((current) => patchTab(current, id, patch)),
+    [commit],
+  );
+
+  const setDocumentDirty = useCallback(
+    (id: number, dirty: boolean) =>
+      commit((current) => patchDocumentDirty(current, id, dirty)),
     [commit],
   );
 
@@ -765,7 +727,11 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
       }
       const nextTab = move
         ? source
-        : cloneForSplit(source, allocId(), allocId());
+        : cloneForSplit(
+            source,
+            allocId(),
+            source.kind === "terminal" ? allocId() : 0,
+          );
       if (!nextTab) return null;
       const groupId = allocId();
       const nodeId = allocId();
@@ -942,7 +908,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
     newPrivateTab,
     openFileTab,
     pinTab,
-    newPreviewTab,
+    newWebPreviewTab,
     newMarkdownTab,
     openAiDiffTab,
     openGitDiffTab,
@@ -951,6 +917,7 @@ export function useWorkbench(initial?: Partial<TerminalTab>) {
     closeAiDiffTab,
     closeTab,
     updateTab,
+    setDocumentDirty,
     setOverrideLanguage,
     setTerminalCwd,
     selectByIndex,

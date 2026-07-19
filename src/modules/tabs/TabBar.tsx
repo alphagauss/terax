@@ -17,7 +17,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fmtShortcut, MOD_KEY, SHIFT_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
   ALL_LANGUAGES,
@@ -25,6 +24,7 @@ import {
 } from "@/modules/editor/lib/languageDefinitions";
 import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import { useShortcutLabel } from "@/modules/shortcuts";
 import {
   beginWorkbenchDrag,
   finishWorkbenchDrag,
@@ -72,7 +72,7 @@ type Props = {
   onNew: () => void;
   onNewBlock: () => void;
   onNewPrivate: () => void;
-  onNewPreview: () => void;
+  onNewWebPreview: () => void;
   onNewEditor: () => void;
   onNewGitGraph: () => void;
   onClose: (id: number) => void;
@@ -100,7 +100,7 @@ export function TabBar({
   onNew,
   onNewBlock,
   onNewPrivate,
-  onNewPreview,
+  onNewWebPreview,
   onNewEditor,
   onNewGitGraph,
   onClose,
@@ -113,6 +113,11 @@ export function TabBar({
   compact,
 }: Props) {
   const { t: tr } = useTranslation("tabs");
+  const newTerminalShortcut = useShortcutLabel("tab.new");
+  const newBlockShortcut = useShortcutLabel("tab.newBlock");
+  const newPrivateShortcut = useShortcutLabel("tab.newPrivate");
+  const newEditorShortcut = useShortcutLabel("tab.newEditor");
+  const newWebPreviewShortcut = useShortcutLabel("tab.newWebPreview");
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -649,7 +654,7 @@ export function TabBar({
               />
               <span className="flex-1">{tr("terminal")}</span>
               <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "T")}
+                {newTerminalShortcut}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewBlock()}>
@@ -660,7 +665,7 @@ export function TabBar({
               />
               <span className="flex-1">{tr("blocks")}</span>
               <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, SHIFT_KEY, "T")}
+                {newBlockShortcut}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewPrivate()}>
@@ -671,7 +676,7 @@ export function TabBar({
               />
               <span className="flex-1">{tr("privacy")}</span>
               <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "R")}
+                {newPrivateShortcut}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewEditor()}>
@@ -682,14 +687,14 @@ export function TabBar({
               />
               <span className="flex-1">{tr("editor")}</span>
               <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "E")}
+                {newEditorShortcut}
               </span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onNewPreview()}>
+            <DropdownMenuItem onSelect={() => onNewWebPreview()}>
               <HugeiconsIcon icon={Globe02Icon} size={14} strokeWidth={1.75} />
-              <span className="flex-1">{tr("preview")}</span>
+              <span className="flex-1">{tr("webPreview")}</span>
               <span className="text-xs text-muted-foreground">
-                {fmtShortcut(MOD_KEY, "P")}
+                {newWebPreviewShortcut}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewGitGraph()}>
@@ -736,7 +741,7 @@ export function TabIcon({ tab }: { tab: Tab }) {
       />
     ) : null;
   }
-  if (tab.kind === "preview") {
+  if (tab.kind === "web-preview") {
     return (
       <HugeiconsIcon
         icon={Globe02Icon}

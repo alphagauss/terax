@@ -33,7 +33,7 @@ type Params = {
   explorerRoot: string | null;
   launchCwd: string | null;
   home: string | null;
-  openPreviewTab: (url: string) => void;
+  openWebPreviewTab: (url: string) => void;
   newAgentTab: (
     cwd: string | undefined,
     title: string,
@@ -104,8 +104,8 @@ export function useAiLiveBridge(params: Params) {
         const t = tabs.find((x) => x.id === activeId);
         return t?.kind === "editor" ? t.path : null;
       },
-      openPreview: (url: string) => {
-        ref.current.openPreviewTab(url);
+      openWebPreview: (url: string) => {
+        ref.current.openWebPreviewTab(url);
         return true;
       },
       spawnManagedAgent: (prompt: string, sessionId: string) => {

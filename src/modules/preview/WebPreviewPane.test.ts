@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  scheduleWebPreviewSuspension,
+  WEB_PREVIEW_SUSPEND_AFTER_MS,
+} from "./WebPreviewPane";
 
 /**
  * Source-level regression test for the preview iframe's security attributes.
@@ -12,7 +16,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(here, "PreviewPane.tsx"), "utf8");
+const src = readFileSync(path.join(here, "WebPreviewPane.tsx"), "utf8");
 const iframeMatch = src.match(/<iframe[\s\S]*?\/>/);
 // Strip JSX comments (`// …` inside `{…}` and `{/* … */}` blocks) so the
 // assertions only see actual attribute syntax — the source explains in a
@@ -22,7 +26,36 @@ const iframeJsx = (iframeMatch?.[0] ?? "")
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/\/\/[^\n]*/g, "");
 
-describe("PreviewPane iframe sandbox", () => {
+describe("WebPreviewPane", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps a hidden iframe alive for five minutes", () => {
+    expect(src).toMatch(
+      /WEB_PREVIEW_SUSPEND_AFTER_MS\s*=\s*5\s*\*\s*60\s*\*\s*1000/,
+    );
+  });
+
+  it("suspends only after the full five-minute grace period", () => {
+    vi.useFakeTimers();
+    const suspend = vi.fn();
+    scheduleWebPreviewSuspension(suspend);
+
+    vi.advanceTimersByTime(WEB_PREVIEW_SUSPEND_AFTER_MS - 1);
+    expect(suspend).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(suspend).toHaveBeenCalledOnce();
+  });
+
+  it("cancels suspension when the preview becomes visible again", () => {
+    vi.useFakeTimers();
+    const suspend = vi.fn();
+    const cancel = scheduleWebPreviewSuspension(suspend);
+
+    cancel();
+    vi.advanceTimersByTime(WEB_PREVIEW_SUSPEND_AFTER_MS);
+    expect(suspend).not.toHaveBeenCalled();
+  });
+
   it("declares an iframe in the source", () => {
     expect(iframeJsx).not.toBe("");
   });

@@ -8,6 +8,7 @@ import {
   useWorkbenchDragSnapshot,
   type WorkbenchDropTarget,
 } from "@/modules/workbench/dragSession";
+import { minimumPanelPercent } from "@/modules/workbench/model";
 import type {
   Tab,
   WorkbenchDirection,
@@ -23,7 +24,7 @@ export type WorkbenchChromeActions = {
   newTerminal: (groupId: number) => void;
   newBlock: (groupId: number) => void;
   newPrivate: (groupId: number) => void;
-  newPreview: (groupId: number) => void;
+  newWebPreview: (groupId: number) => void;
   newEditor: (groupId: number) => void;
   newGitGraph: (groupId: number) => void;
   closeTab: (tabId: number) => void;
@@ -63,6 +64,7 @@ function WorkbenchNode({
   }
 
   const panelIds = node.children.map((child) => `workbench-${child.id}`);
+  const minimumPanelSize = `${minimumPanelPercent(node.children.length)}%`;
   const handleLayout = (layout: Layout, meta: LayoutChangedMeta) => {
     if (!meta.isUserInteraction) return;
     const sizes = panelIds.map((id) => layout[id]);
@@ -80,7 +82,7 @@ function WorkbenchNode({
           {index > 0 && <ResizableHandle />}
           <ResizablePanel
             id={panelIds[index]}
-            minSize="15%"
+            minSize={minimumPanelSize}
             defaultSize={`${node.sizes?.[index] ?? 100 / node.children.length}%`}
           >
             <WorkbenchNode node={child} {...props} />
@@ -119,7 +121,7 @@ function WorkbenchGroup({
           onNew={() => actions.newTerminal(group.id)}
           onNewBlock={() => actions.newBlock(group.id)}
           onNewPrivate={() => actions.newPrivate(group.id)}
-          onNewPreview={() => actions.newPreview(group.id)}
+          onNewWebPreview={() => actions.newWebPreview(group.id)}
           onNewEditor={() => actions.newEditor(group.id)}
           onNewGitGraph={() => actions.newGitGraph(group.id)}
           onClose={actions.closeTab}

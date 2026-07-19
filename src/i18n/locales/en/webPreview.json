@@ -1,8 +1,8 @@
 {
-  "iframeTitle": "Preview",
+  "iframeTitle": "Web Preview",
   "xfoHint": "Many public sites refuse to embed (X-Frame-Options). If the page is blank, open it externally.",
   "suspended": {
-    "title": "Preview suspended",
+    "title": "Web Preview suspended",
     "description": "Released to free memory after sitting in the background.",
     "reload": "Reload"
   },

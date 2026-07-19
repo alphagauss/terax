@@ -1,4 +1,3 @@
-import { findGroupForTab } from "@/modules/workbench/model";
 import type {
   Tab,
   WorkbenchLayoutNode,
@@ -12,6 +11,7 @@ import {
   type RefObject,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -31,22 +31,40 @@ export function WorkbenchViewPool({
   services,
 }: Props) {
   const depotRef = useRef<HTMLDivElement>(null);
+  const owners = useMemo(() => {
+    const result = new Map<
+      number,
+      { spaceId: string; groupId: number; activeTabId: number }
+    >();
+    for (const [spaceId, space] of Object.entries(state.spaces)) {
+      for (const group of Object.values(space.groups)) {
+        for (const tabId of group.tabIds) {
+          result.set(tabId, {
+            spaceId,
+            groupId: group.id,
+            activeTabId: group.activeTabId,
+          });
+        }
+      }
+    }
+    return result;
+  }, [state.spaces]);
   return (
     <>
       <div ref={depotRef} className="hidden" aria-hidden />
       {tabs.map((tab) => {
-        const owner = findGroupForTab(state, tab.id);
+        const owner = owners.get(tab.id);
         if (!owner) return null;
-        const group = owner.group;
         const visible =
-          owner.spaceId === activeSpaceId && group.activeTabId === tab.id;
+          owner.spaceId === activeSpaceId && owner.activeTabId === tab.id;
         const focused =
-          visible && state.spaces[activeSpaceId]?.activeGroupId === group.id;
+          visible &&
+          state.spaces[activeSpaceId]?.activeGroupId === owner.groupId;
         return (
           <PooledView
             key={tab.id}
             tab={tab}
-            groupId={group.id}
+            groupId={owner.groupId}
             layoutRoot={state.spaces[owner.spaceId].root}
             visible={visible}
             focused={focused}

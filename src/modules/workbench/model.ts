@@ -1,6 +1,8 @@
+import { normalizePathForIdentity, titleFromUrl } from "@/lib/utils";
 import type {
   SpaceWorkbench,
   Tab,
+  TabPatch,
   WorkbenchAxis,
   WorkbenchDirection,
   WorkbenchGroup,
@@ -8,11 +10,116 @@ import type {
   WorkbenchState,
 } from "./types";
 
-export function directionAxis(direction: WorkbenchDirection): WorkbenchAxis {
+export function patchTab(
+  state: WorkbenchState,
+  id: number,
+  patch: TabPatch,
+): WorkbenchState {
+  const tab = state.tabs[id];
+  if (!tab) return state;
+  let next: Tab;
+  if (tab.kind === "terminal") {
+    next = {
+      ...tab,
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.cwd !== undefined && { cwd: patch.cwd }),
+      ...(patch.customTitle !== undefined && {
+        customTitle: patch.customTitle || undefined,
+      }),
+    };
+  } else if (tab.kind === "web-preview") {
+    next = {
+      ...tab,
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.url !== undefined && {
+        url: patch.url,
+        title: patch.title ?? titleFromUrl(patch.url),
+      }),
+    };
+  } else if (tab.kind === "markdown") {
+    next = {
+      ...tab,
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.path !== undefined && { path: patch.path }),
+      ...(patch.dirty !== undefined && { dirty: patch.dirty }),
+      ...(patch.explorerRoot !== undefined && {
+        explorerRoot: patch.explorerRoot,
+      }),
+    };
+  } else if (tab.kind === "editor") {
+    next = {
+      ...tab,
+      ...(patch.dirty === true && tab.preview && { preview: false }),
+      ...(patch.preview !== undefined && { preview: patch.preview }),
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.path !== undefined && { path: patch.path }),
+      ...(patch.dirty !== undefined && { dirty: patch.dirty }),
+      ...(patch.overrideLanguage !== undefined && {
+        overrideLanguage: patch.overrideLanguage,
+      }),
+      ...(patch.explorerRoot !== undefined && {
+        explorerRoot: patch.explorerRoot,
+      }),
+    };
+  } else if (tab.kind === "git-diff") {
+    next = {
+      ...tab,
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.originalPath !== undefined && {
+        originalPath: patch.originalPath,
+      }),
+    };
+  } else if (tab.kind === "git-commit-file") {
+    next = {
+      ...tab,
+      ...(patch.title !== undefined && { title: patch.title }),
+      ...(patch.originalPath !== undefined && {
+        originalPath: patch.originalPath,
+      }),
+      ...(patch.shortSha !== undefined && { shortSha: patch.shortSha }),
+      ...(patch.subject !== undefined && { subject: patch.subject }),
+    };
+  } else {
+    if (patch.title === undefined) return state;
+    next = { ...tab, title: patch.title };
+  }
+  const previous = tab as unknown as Record<string, unknown>;
+  const updated = next as unknown as Record<string, unknown>;
+  const keys = Object.keys(updated);
+  if (
+    keys.length === Object.keys(previous).length &&
+    keys.every((key) => updated[key] === previous[key])
+  ) {
+    return state;
+  }
+  return { ...state, tabs: { ...state.tabs, [id]: next } };
+}
+
+export function patchDocumentDirty(
+  state: WorkbenchState,
+  sourceTabId: number,
+  dirty: boolean,
+): WorkbenchState {
+  const source = state.tabs[sourceTabId];
+  if (source?.kind !== "editor" && source?.kind !== "markdown") return state;
+  const resourcePath = normalizePathForIdentity(source.path);
+  let next = state;
+  for (const candidate of Object.values(state.tabs)) {
+    if (
+      (candidate.kind === "editor" || candidate.kind === "markdown") &&
+      normalizePathForIdentity(candidate.path) === resourcePath
+    ) {
+      next = patchTab(next, candidate.id, { dirty });
+    }
+  }
+  return next;
+}
+
+function directionAxis(direction: WorkbenchDirection): WorkbenchAxis {
   return direction === "left" || direction === "right" ? "row" : "col";
 }
 
-export function directionBefore(direction: WorkbenchDirection): boolean {
+function directionBefore(direction: WorkbenchDirection): boolean {
   return direction === "left" || direction === "up";
 }
 
@@ -31,18 +138,6 @@ export function findGroupForTab(
     }
   }
   return null;
-}
-
-export function tabsForGroup(state: WorkbenchState, groupId: number): Tab[] {
-  for (const space of Object.values(state.spaces)) {
-    const group = space.groups[groupId];
-    if (group) {
-      return group.tabIds
-        .map((id) => state.tabs[id])
-        .filter((tab): tab is Tab => tab !== undefined);
-    }
-  }
-  return [];
 }
 
 export function tabsForSpace(state: WorkbenchState, spaceId: string): Tab[] {
@@ -70,7 +165,32 @@ export function activeTabId(
   return space.groups[space.activeGroupId]?.activeTabId ?? null;
 }
 
-export function insertGroupNode(
+export function minimumPanelPercent(childCount: number): number {
+  return Math.min(15, 80 / Math.max(1, childCount));
+}
+
+function normalizedSizes(sizes: number[]): number[] {
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return sizes.map(() => 100 / sizes.length);
+  }
+  return sizes.map((size) => (size / total) * 100);
+}
+
+function sizesForChildren(
+  node: Extract<WorkbenchLayoutNode, { kind: "split" }>,
+) {
+  const sizes = node.sizes;
+  if (
+    sizes?.length === node.children.length &&
+    sizes.every((size) => Number.isFinite(size) && size > 0)
+  ) {
+    return normalizedSizes(sizes);
+  }
+  return node.children.map(() => 100 / node.children.length);
+}
+
+function insertGroupNode(
   node: WorkbenchLayoutNode,
   targetGroupId: number,
   newGroupId: number,
@@ -92,8 +212,13 @@ export function insertGroupNode(
     );
     if (index >= 0) {
       const children = [...node.children];
-      children.splice(before ? index : index + 1, 0, groupNode);
-      return { ...node, children, sizes: undefined };
+      const sizes = sizesForChildren(node);
+      const insertedIndex = before ? index : index + 1;
+      const splitSize = sizes[index] / 2;
+      sizes[index] = splitSize;
+      children.splice(insertedIndex, 0, groupNode);
+      sizes.splice(insertedIndex, 0, splitSize);
+      return { ...node, children, sizes };
     }
   }
 
@@ -104,6 +229,7 @@ export function insertGroupNode(
       id: splitId,
       axis,
       children: before ? [groupNode, node] : [node, groupNode],
+      sizes: [50, 50],
     };
   }
 
@@ -130,10 +256,15 @@ export function removeGroupNode(
   if (node.kind === "group") return node.groupId === groupId ? null : node;
   let changed = false;
   const children: WorkbenchLayoutNode[] = [];
-  for (const child of node.children) {
+  const retainedSizes: number[] = [];
+  const sourceSizes = sizesForChildren(node);
+  for (const [index, child] of node.children.entries()) {
     const next = removeGroupNode(child, groupId);
     if (next !== child) changed = true;
-    if (next) children.push(next);
+    if (next) {
+      children.push(next);
+      retainedSizes.push(sourceSizes[index]);
+    }
   }
   if (!changed) return node;
   if (children.length === 0) return null;
@@ -141,7 +272,10 @@ export function removeGroupNode(
   return {
     ...node,
     children,
-    sizes: children.length === node.children.length ? node.sizes : undefined,
+    sizes:
+      children.length === node.children.length
+        ? node.sizes
+        : normalizedSizes(retainedSizes),
   };
 }
 
@@ -197,6 +331,17 @@ export function activateTab(
   };
 }
 
+export function revealTabInState(
+  state: WorkbenchState,
+  tabId: number,
+  patch?: TabPatch,
+): { state: WorkbenchState; spaceId: string } | null {
+  const owner = findGroupForTab(state, tabId);
+  if (!owner) return null;
+  const patched = patch ? patchTab(state, tabId, patch) : state;
+  return { state: activateTab(patched, tabId), spaceId: owner.spaceId };
+}
+
 export function activateGroup(
   state: WorkbenchState,
   spaceId: string,
@@ -239,7 +384,10 @@ export function addTabToGroup(
   );
   return {
     ...state,
-    tabs: { ...state.tabs, [tab.id]: tab },
+    tabs: {
+      ...state.tabs,
+      [tab.id]: activate && tab.cold ? { ...tab, cold: false } : tab,
+    },
     spaces: {
       ...state.spaces,
       [tab.spaceId]: {
@@ -343,6 +491,12 @@ export function moveTabToGroup(
   );
   if (!targetSpaceEntry) return state;
   const [targetSpaceId] = targetSpaceEntry;
+  if (
+    source.spaceId !== targetSpaceId &&
+    tabsForSpace(state, source.spaceId).length === 1
+  ) {
+    return state;
+  }
 
   if (source.group.id === targetGroupId) {
     if (index === undefined) return state;
@@ -399,6 +553,14 @@ export function splitWithTab(
   );
   if (!targetEntry) return state;
   const [spaceId, space] = targetEntry;
+  const sourceOwner = moveExisting ? findGroupForTab(state, tab.id) : null;
+  if (
+    sourceOwner &&
+    sourceOwner.spaceId !== spaceId &&
+    tabsForSpace(state, sourceOwner.spaceId).length === 1
+  ) {
+    return state;
+  }
   if (
     moveExisting &&
     space.groups[targetGroupId].tabIds.length === 1 &&
@@ -410,7 +572,11 @@ export function splitWithTab(
   let next = state;
   if (moveExisting) next = removeTabFromOwner(next, tab.id, true);
   const currentSpace = next.spaces[spaceId];
-  const moved = { ...tab, spaceId } as Tab;
+  const moved = {
+    ...tab,
+    spaceId,
+    ...(tab.cold && { cold: false }),
+  } as Tab;
   return {
     ...next,
     tabs: { ...next.tabs, [moved.id]: moved },

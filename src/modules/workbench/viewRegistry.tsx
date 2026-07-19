@@ -1,14 +1,18 @@
 import { cn } from "@/lib/utils";
-import type { EditorPaneHandle } from "@/modules/editor";
-import { AiDiffStack, EditorStack, GitDiffStack } from "@/modules/editor";
-import type { GitHistorySearchHandle } from "@/modules/git-history";
-import { GitHistoryStack } from "@/modules/git-history";
-import { MarkdownStack } from "@/modules/markdown";
+import {
+  AiDiffView,
+  type EditorPaneHandle,
+  EditorView,
+  GitDiffView,
+} from "@/modules/editor";
+import {
+  type GitHistorySearchHandle,
+  GitHistoryView,
+} from "@/modules/git-history";
+import { MarkdownView } from "@/modules/markdown";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
-import type { PreviewPaneHandle } from "@/modules/preview";
-import { PreviewStack } from "@/modules/preview";
-import type { TerminalPaneHandle } from "@/modules/terminal";
-import { TerminalView } from "@/modules/terminal";
+import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
+import { type TerminalPaneHandle, TerminalView } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench/types";
 import type { SearchAddon } from "@xterm/addon-search";
 
@@ -40,11 +44,11 @@ export type WorkbenchViewServices = {
   ) => void;
   onEditorDirtyChange: (tabId: number, dirty: boolean) => void;
   onEditorCloseTab: (tabId: number) => void;
-  registerPreviewHandle: (
+  registerWebPreviewHandle: (
     tabId: number,
-    handle: PreviewPaneHandle | null,
+    handle: WebPreviewPaneHandle | null,
   ) => void;
-  onPreviewUrlChange: (tabId: number, url: string) => void;
+  onWebPreviewUrlChange: (tabId: number, url: string) => void;
   onAiDiffAccept: (approvalId: string) => void;
   onAiDiffReject: (approvalId: string) => void;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
@@ -68,7 +72,7 @@ export function WorkbenchRegisteredView({
   services,
 }: Props) {
   if (tab.cold) return null;
-  const tabs = [tab];
+
   return (
     <div
       className={cn(
@@ -89,55 +93,51 @@ export function WorkbenchRegisteredView({
           onSearchReady={services.onSearchReady}
           onCwd={services.onTerminalCwd}
           onExit={services.onTerminalExit}
-          onFocus={services.onFocusTab}
         />
       )}
       {tab.kind === "editor" && (
-        <EditorStack
-          tabs={tabs}
-          activeId={tab.id}
+        <EditorView
+          tab={tab}
+          focused={focused}
           registerHandle={services.registerEditorHandle}
           onDirtyChange={services.onEditorDirtyChange}
           onCloseTab={services.onEditorCloseTab}
         />
       )}
       {tab.kind === "markdown" && (
-        <MarkdownStack
-          tabs={tabs}
-          activeId={tab.id}
+        <MarkdownView
+          tab={tab}
+          visible={visible}
+          focused={focused}
           registerEditorHandle={services.registerEditorHandle}
           registerNavigationHandle={services.registerMarkdownNavigationHandle}
           onDirtyChange={services.onEditorDirtyChange}
           onCloseTab={services.onEditorCloseTab}
         />
       )}
-      {tab.kind === "preview" && (
-        <PreviewStack
-          tabs={tabs}
-          activeId={tab.id}
-          registerHandle={services.registerPreviewHandle}
-          onUrlChange={services.onPreviewUrlChange}
+      {tab.kind === "web-preview" && (
+        <WebPreviewView
+          tab={tab}
+          visible={visible}
+          registerHandle={services.registerWebPreviewHandle}
+          onUrlChange={services.onWebPreviewUrlChange}
         />
       )}
       {tab.kind === "ai-diff" && (
-        <AiDiffStack
-          tabs={tabs}
-          activeId={tab.id}
+        <AiDiffView
+          tab={tab}
           onAccept={services.onAiDiffAccept}
           onReject={services.onAiDiffReject}
         />
       )}
       {(tab.kind === "git-diff" || tab.kind === "git-commit-file") && (
-        <GitDiffStack tabs={tabs} activeId={tab.id} />
+        <GitDiffView tab={tab} visible={visible} />
       )}
       {tab.kind === "git-history" && (
-        <GitHistoryStack
-          tabs={tabs}
-          activeId={tab.id}
+        <GitHistoryView
+          tab={tab}
           onOpenCommitFile={services.onOpenCommitFile}
-          onSearchHandle={(handle) =>
-            services.onGitHistorySearchHandle(tab.id, handle)
-          }
+          onSearchHandle={services.onGitHistorySearchHandle}
         />
       )}
     </div>

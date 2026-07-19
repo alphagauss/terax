@@ -17,7 +17,7 @@
     "tab.new": "新建标签页",
     "tab.newBlock": "新建 Blocks 终端",
     "tab.newPrivate": "新建隐私终端",
-    "tab.newPreview": "新建网页预览",
+    "tab.newWebPreview": "新建网页预览",
     "tab.newEditor": "新建编辑器标签页",
     "tab.close": "关闭标签页",
     "workbench.splitRight": "向右拆分工作组",

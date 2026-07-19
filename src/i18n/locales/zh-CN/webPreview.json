@@ -1,8 +1,8 @@
 {
-  "iframeTitle": "预览",
+  "iframeTitle": "网页预览",
   "xfoHint": "许多公共网站拒绝被嵌入（X-Frame-Options）。如果页面空白，请在外部打开。",
   "suspended": {
-    "title": "预览已挂起",
+    "title": "网页预览已挂起",
     "description": "在后台停留一段时间后已释放以节省内存。",
     "reload": "重新加载"
   },

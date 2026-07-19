@@ -1,268 +1,144 @@
-# 通用 Workbench 工作组破坏式重构计划
+# Workbench 提交审阅修复与优化计划
 
 ## 目标
 
-将主工作区改造成一套统一的工作组布局系统：
+修复 `refactor/workbench-groups` 提交中已经确认的状态一致性、视图生命周期、布局比例和跨 Space 路由问题，并清理重构后遗留的单 Tab Stack 与重复逻辑。
 
-- 主工作区由可递归拆分的工作组组成。
-- 每个工作组拥有自己的 TabBar 和激活 Tab。
-- Terminal、Editor、Markdown、Preview、Git、AI Diff，以及未来的量化、回测页面都作为统一的 Workbench Tab 运行。
-- Tab 可以在组内排序、跨组移动，或拖到工作组上、下、左、右创建新组。
-- Explorer 文件可以拖入指定工作组，或拖到边缘创建新组并打开。
-- Terminal 不再拥有内部 paneTree。一个 Terminal Tab 只对应一个终端会话。
-- 不保留旧布局模型、旧持久化格式或双轨兼容代码。
+本计划只面向当前 Workbench v2 模型，不读取、不迁移、不保留任何旧版 Space、Workbench 或快捷键数据。
 
-工作分支：`refactor/workbench-groups`
+## 已确认的产品决策
+
+- 将网页预览统一命名为 **Web Preview**，与代码编辑器的临时 `preview` tab 明确区分。
+- Web Preview 隐藏后的 iframe 回收时间由 30 秒调整为 5 分钟。
+- 同一路径可以在多个 Group 或 Space 中同时打开。
+- 文档内容、dirty、保存、重载、自动保存和磁盘版本按 `workspace + normalized path` 共享。
+- 每个 Editor/Markdown 视图保留独立的光标、选区、滚动位置和视图模式。
+- Editor/Markdown 的复制拆分使用共享文档，不创建独立缓冲区。
+- 只保证当前 v2 Workbench 状态保存和恢复，不增加兼容分支。
 
 ## 非目标
 
-- 不重写 Rust PTY、shell spawn、OSC、DormantRing 或 xterm 会话层。
-- 不复制 VS Code 的依赖注入和大型 service 体系。
-- 不实现浮动窗口或跨进程拖拽。
-- 不实现工作组内部的第二套拆分系统。
-- 不在本次重构中实现同一脏文件的多个同步编辑视图。
-
-## 最终模型
-
-### Workbench Tab
-
-Tab 是工作区中可打开页面的统一单位。Terminal Tab 保存稳定的 `terminalId`，布局移动不得重启对应会话。
-
-### Workbench Group
-
-每个工作组保存：
-
-- `id`
-- 有序 `tabIds`
-- `activeTabId`
-
-### Workbench Layout
-
-布局使用递归树：
-
-- group leaf 指向一个 Workbench Group
-- split branch 保存 `row` 或 `col`
-- branch 保存稳定 id、children 和最终分栏比例
-
-### Space Workbench
-
-每个 Space 独立保存：
-
-- layout root
-- groups
-- activeGroupId
-
-Tab 实体集中保存，Space 和 Group 只保存归属与顺序。
-
-## 核心不变量
-
-- 每个 Tab 必须且只能属于一个 Group。
-- 每个 Group 必须至少拥有一个 Tab。
-- `activeTabId` 必须存在于所属 Group。
-- `activeGroupId` 必须存在于所属 Space。
-- 最后一个 Group 的最后一个 Tab 不能被普通关闭操作移除。
-- Group 变空时立即移除，单 child split 立即折叠。
-- 相同方向的相邻 split 尽量扁平化。
-- 移动 Terminal Tab 只能改变归属，不能改变 `terminalId`。
-- Tab id、Group id、Layout node id、Terminal id 不承担彼此语义。
-- pointer gesture 期间不写持久化、不重建布局、不反复执行终端 fit。
-
-## 模块结构
-
-```text
-src/modules/workbench/
-├── types.ts
-├── model.ts
-├── model.test.ts
-├── useWorkbench.ts
-├── viewRegistry.tsx
-├── dragSession.ts
-├── dragSession.test.ts
-├── WorkbenchGrid.tsx
-├── WorkbenchSurface.tsx
-├── WorkbenchViewPool.tsx
-├── workbench.css
-└── index.ts
-```
-
-保持模块数量受控。只有纯模型、运行时 hook、布局组件、页面宿主和拖拽协议五类职责。Space 序列化继续由 `modules/spaces` 持有，工作组组件保持在 `WorkbenchGrid.tsx` 内，不为单个小职责增加文件。
-
-## 页面宿主
-
-页面渲染通过统一 registry 分发，不在 App 或 WorkspaceSurface 中继续增加 `kind` 条件分支。
-
-每个页面在 `viewRegistry.tsx` 中集中注册渲染入口。复制拆分策略由纯模型创建函数控制，可恢复页面再显式加入 Space serializer；瞬态页面默认不持久化。
-
-所有已挂载页面使用稳定容器。Tab 跨组移动时只移动容器，不重新创建业务页面，避免终端重启、编辑器脏缓冲丢失、预览刷新或滚动位置重置。
-
-## Terminal 改造
-
-### 保留
-
-- Rust PTY 命令和会话状态
-- `useTerminalSession`
-- renderer pool
-- DormantRing 与 snapshot
-- foreground job 检测
-- xterm 搜索、OSC cwd、agent signal
-
-### 移除
-
-- `TerminalTab.paneTree`
-- `TerminalTab.activeLeafId`
-- `PaneTreeView`
-- terminal `panes.ts`
-- `splitLeaf`、`removeLeaf`、`focusPane` 等终端布局 API
-- terminal context menu 中的内部 pane 拆分
-
-### 新行为
-
-- 一个 Terminal Tab 保存一个 `terminalId`。
-- Split Right 或 Split Down 创建新 Terminal Tab 和新 terminal session，并放入相邻工作组。
-- Split and Move 只移动已有 Terminal Tab，PTY 不重启。
-- 终端退出时关闭对应 Tab；若它是最后一个 Space 的最后一个 Tab，则关闭窗口。
-
-renderer pool 不得驱逐可见终端。缓存上限只限制隐藏 renderer，可见终端数量决定必要 slot 数量。
-
-## TabBar 改造
-
-- 从 Header 移除全局 TabBar。
-- 每个 Workbench Group 顶部渲染自己的 TabBar。
-- Header 只保留全局导航、Space、搜索、AI、设置和窗口控制。
-- TabBar 右键菜单提供快速向右拆分和“拆分和移动”方向菜单。
-- 组内拖拽调整顺序，跨组拖拽移动 Tab，边缘落点创建新组。
-- Group 内容区点击或聚焦时更新 activeGroupId。
-
-## Explorer 拖拽
-
-现有 Explorer 使用 Pointer Events，继续沿用该技术路线，不切换到会被 Tauri 截获的 HTML5 DnD。
-
-统一 drag session 支持：
-
-- `{ kind: "tab", tabId }`
-- `{ kind: "resource", path }`
-
-命中优先级：
-
-1. Group TabBar 插入位置
-2. Group 左、右、上、下边缘
-3. Group 中心
-4. Explorer 自身文件移动目标
-
-边缘命中只更新覆盖层。释放指针时一次提交布局状态。
-
-## 持久化
-
-采用新的非兼容 Space 状态：
-
-```text
-SpaceState
-└── workbench
-    └── recursive layout
-        ├── group tabs
-        └── split children and sizes
-```
-
-- 不读取或迁移旧 `tabs + activeTabIndex + terminal tree` 格式。
-- 遇到旧状态时为 Space 创建新的单工作组 Terminal。
-- 只序列化可恢复 Tab。
-- AI Diff 等瞬态页面不写入持久化。
-- 用户完成 separator 交互后才保存最终 sizes。
-
-## App 路由改造
-
-- `activeId` 改为当前 Space 的 activeGroup 和 activeTab 推导值。
-- 搜索、状态栏、AI live context、selection、编辑器命令都路由到当前 active Tab。
-- Ctrl+Tab 在当前 Space 的全部工作组中按 MRU 切换。
-- Pane focus next/previous 改为工作组 focus next/previous。
-- Pane split right/down 改为 Workbench group split。
-- Block Terminal 输入栏暂时继续服务全局 active Tab，后续如需要可下沉到 Group chrome。
-
-## 删除范围
-
-完成替换后删除：
-
-- `src/modules/tabs/lib/useTabs.ts`
-- terminal pane model 与对应测试
-- `PaneTreeView.tsx`
-- 旧 Space tab serializer 与测试
-- Header 中全局 TabBar props 和渲染
-- App 中 paneTree、activeLeafId、splitPane、closePane、focusPane 相关逻辑
-- 只服务旧扁平 Tab 模型的辅助函数和测试
-
-不保留 deprecated alias、兼容 wrapper 或旧新模型转换层。
-
-## 实施顺序
-
-### 阶段 1：纯模型
-
-- 建立 Workbench types、layout operations 和不变量测试。
-- 覆盖 add、activate、close、move、split、collapse、reorder。
-- 建立单 Terminal Tab 单 terminalId 类型。
-
-### 阶段 2：运行时状态
-
-- 用 `useWorkbench` 替换 `useTabs`。
-- 保留现有打开文件、Preview、Git、AI Diff 等产品行为。
-- 所有创建函数支持明确目标 Group。
-- Space 切换改为选择对应 Space 的 active Group。
-
-### 阶段 3：工作组 UI
-
-- 建立递归 `WorkbenchGrid`。
-- 使用 `react-resizable-panels` 渲染 split branch。
-- 每个 Group 渲染独立 TabBar 和内容 host。
-- 建立稳定页面容器池和 view registry。
-
-### 阶段 4：Terminal 扁平化
-
-- 删除 TerminalStack，改为单 Tab 单 TerminalView。
-- 更新 refs、搜索、cwd、close guard、AI live bridge 和 agent 路由。
-- 删除终端内部布局代码。
-- 调整 renderer pool 的可见 slot 规则。
-
-### 阶段 5：拖拽和菜单
-
-- 统一 Tab 和 Explorer pointer drag session。
-- 实现组内排序、跨组移动、中心投放和四边拆分。
-- 实现右键拆分和拆分移动菜单。
-- 添加中英文文案。
-
-### 阶段 6：持久化和清理
-
-- 替换 Space store、boot 和 persistence。
-- 删除旧 serializer、旧 hooks、旧 tests 和无用 exports。
-- 清理 App 协调器和跨模块 import。
-
-### 阶段 7：验证
-
-- `pnpm exec biome check` 检查变更文件。
+- 不迁移旧的扁平 `tabs + activeTabIndex` Space 状态。
+- 不迁移旧快捷键 id。
+- 不修改 Rust PTY、renderer pool 的会话协议或终端持久化语义。
+- 不保存 AI Diff、Git Diff、Git History 等瞬态页面。
+
+## 阶段 1：Web Preview 命名与生命周期
+
+- 将运行时 Tab 类型、打开函数、组件和 UI 文案中的网页 Preview 改名为 Web Preview。
+- 将 Workbench tab discriminator 和当前 v2 serializer 同步为 `web-preview`。
+- 保留 `EditorTab.preview`，它只表示资源管理器单击产生的临时代码编辑标签。
+- 将 iframe 隐藏回收常量调整为 `5 * 60 * 1000`。
+- 给回收行为增加 fake-timer 测试，覆盖 5 分钟前保留、5 分钟后卸载、重新显示取消回收。
+
+## 阶段 2：页面可见性与遗留 Stack 清理
+
+- `WorkbenchViewPool` 继续作为页面稳定挂载和跨组移动的唯一宿主。
+- `WorkbenchRegisteredView` 将真实 `visible` / `focused` 直接传给页面。
+- 删除只接收单个 Tab 的 `EditorStack`、`MarkdownStack`、`PreviewStack`、`AiDiffStack`、`GitDiffStack` 和 `GitHistoryStack`。
+- Web Preview 隐藏时启动 iframe 回收计时。
+- Markdown 隐藏时暂停渐进渲染和观察器。
+- Git Diff 隐藏时不启动尚未发生的加载。
+- 去掉 `PooledView` 与 `TerminalView` 之间重复的激活捕获。
+
+## 阶段 3：共享文档模型
+
+- 建立按 `workspace + normalized path` 索引的共享文档 registry。
+- registry 统一持有加载状态、文本缓冲区、saved buffer、dirty、EOL、mtime/size、强制读取状态和自动保存计时器。
+- `useDocument` 改为订阅共享模型；多个 Editor/Markdown 视图对同一资源读取和修改同一缓冲区。
+- 仅由当前聚焦的文档视图连接 LSP，避免同一 URI 被多个 CodeMirror 重复 `didOpen/didChange`。
+- 单个视图只保留 CodeMirror 的光标、选区、滚动位置等 UI 状态。
+- 保存、reload、外部文件变化和 AI diff 应用只对共享模型执行一次，并通知所有视图。
+- 最后一个订阅视图卸载后取消计时器并释放干净模型；dirty 模型在显式保存或关闭确认前不得丢失。
+- `openFileTab` / `newMarkdownTab` 仍在目标 Group 内复用已有同类标签，但允许其他 Group/Space 拥有同资源视图。
+- `cloneForSplit` 允许复制干净或脏的 Editor/Markdown tab，因为缓冲区已经共享。
+- 增加多 Group 同文件同步编辑、dirty 同步、单次保存、卸载引用计数和 Editor/Markdown 交叉视图测试。
+
+## 阶段 4：冷标签与模型不变量
+
+- `addTabToGroup` 在 `activate=true` 时自动清除 `cold`。
+- `moveTabToGroup` 和 `splitWithTab` 保证新激活标签已经 warm。
+- 保留启动阶段的 cold hydration；只在页面实际激活时挂载。
+- 增加恢复后拖动未访问标签到中心和边缘的模型测试。
+
+## 阶段 5：布局比例与约束
+
+- 同轴拆分时平分目标 Group 的当前比例，保留其他兄弟比例。
+- 删除 Group 时移除对应尺寸并归一化剩余比例。
+- 新建二叉 split 明确保存 `[50, 50]`。
+- 将固定 `15%` 最小尺寸改为随同轴子节点数量自适应的约束，避免 7 个以上 Group 的最小尺寸总和超过 100%。
+- 增加直接同轴拆分、三节点删除、嵌套折叠和多 Group 约束测试。
+
+## 阶段 6：标签元数据与跨 Space reveal
+
+- 提供统一的 `revealTab` 路径，负责 Space、Group 和 Tab 的完整激活。
+- Git Diff 再次打开时刷新 `title` 和 `originalPath`。
+- Commit File Diff 再次打开时刷新 `title`、`shortSha`、`subject` 和 `originalPath`。
+- Editor/Markdown 再次打开时刷新 `explorerRoot`。
+- 合并 Editor preview pin 与元数据更新，避免连续两次 state commit。
+- Git/AI/History 全局查重命中其他 Space 时使用 `revealTab`，不再只激活隐藏 Group。
+
+## 阶段 7：性能与重复逻辑清理
+
+- `WorkbenchViewPool` 每次 state 变更只构建一次 `tabId -> owner` 索引，避免每个 Tab 重复扫描全部 Space/Group。
+- 清理 `directionAxis`、`directionBefore`、`tabsForGroup`、`insertGroupNode` 等无必要导出或未使用代码。
+- 合并重复的资源标题/路径辅助函数，但不为小函数增加新模块。
+- 保持 `react-resizable-panels` 的 `onLayoutChanged`：该回调已经只在 pointer release 后触发；不添加额外 debounce 或手写 pointer 生命周期。
+
+## 阶段 8：当前 v2 持久化验证
+
+- 保持 `version: 2` 严格校验，不加入旧格式 fallback。
+- round-trip 覆盖：
+  - 递归 row/col 布局；
+  - split sizes；
+  - active Group / active Tab；
+  - Tab 顺序；
+  - Terminal cwd、blocks、自定义标题；
+  - Editor/Markdown 路径和 explorerRoot；
+  - Web Preview URL。
+- 增加当前 v2 `saveState -> loadAll -> hydrate` 的存储层测试或等价边界测试。
+- 确认 private terminal 和瞬态页面仍被丢弃，空分支正确折叠。
+
+## 验收场景
+
+- Web Preview 与 Editor preview 在类型、函数和 UI 文案中不再混淆。
+- 隐藏 Web Preview 5 分钟内保留 iframe，超过 5 分钟释放；重新激活可以恢复。
+- 隐藏 Markdown/Git Diff 收到真实 `visible=false` / `active=false`。
+- 同一路径可以在多个 Group 打开，但只存在一份共享 Editor/Markdown 文档缓冲区。
+- 任一视图编辑后其他视图同步更新，dirty 和保存结果一致。
+- restored cold tab 拖入其他 Group 后立即显示内容。
+- 拆分和关闭 Group 后用户比例不被重置为均分。
+- 任意数量同轴 Group 的最小尺寸约束总和不超过 100%。
+- 在 Space B 打开 Space A 已存在的 Git/AI/History 页面会切换并显示 Space A。
+- Git rename diff 重新打开后使用最新 `originalPath`。
+- 当前 v2 状态重启后恢复布局、比例、Group 和可恢复 Tabs。
+- Terminal Tab 跨 Group 移动仍不重启、不改变 `terminalId`。
+
+## 验证命令
+
+- `pnpm exec biome check <changed-files>`
 - `pnpm check-types`
-- `pnpm lint`
 - `pnpm test`
+- `pnpm lint`
+- `pnpm knip`
+- `pnpm build`
+- `pnpm analyze:eager`
 - `git diff --check`
-- 必要时按 `docs/contributing/ui-runtime-debugging.md` 使用真实 Tauri runtime 验证复杂拖拽、布局、焦点和终端 resize。
-
-## 必测场景
-
-- Terminal 向右和向下拆分，新终端继承 cwd。
-- Terminal Tab 跨组移动不重启、不丢输出。
-- Editor 脏 Tab 跨组移动不丢内容。
-- Tab 拖回另一个组后空 Group 自动折叠。
-- Explorer 文件拖到中心和四个边缘。
-- 多层 row/col 嵌套布局 resize。
-- Space 切换后恢复各自 group layout 和 active tab。
-- 关闭 group 最后一个 Tab 后焦点回退正确。
-- Ctrl+Tab、搜索、AI context 和状态栏只跟随 active Group。
-- 多个可见终端不会互相驱逐 renderer。
-- 应用重启后只恢复新格式中允许持久化的页面。
 
 ## 完成标准
 
-- 主工作区只有一套拆分模型。
-- 每个工作组拥有独立 TabBar。
-- Terminal 不再包含 paneTree。
-- 页面接入只需要新增 Tab 类型和 registry definition，不修改 App 布局分支。
-- 旧模型文件、兼容代码和冗余 API 已删除。
-- 前端类型检查、Lint 和测试通过。
-- 复杂拖拽和多终端布局在真实 Tauri WebView 中通过手工验证。
+- 所有高、中优先级审阅问题均已修复或由明确产品约束关闭。
+- 重构遗留 Stack、重复激活和新增无用导出已清理。
+- 当前 v2 持久化具有可重复的自动化 round-trip 证据。
+- 类型检查和完整测试通过；lint/knip 不新增问题。
+
+## 执行状态（2026-07-19）
+
+- [x] 阶段 1–8 全部完成。
+- [x] Web Preview 命名、5 分钟 iframe 回收及可见性测试完成。
+- [x] 多 Group/Space 共享文档模型、独立视图状态、聚焦视图 LSP 所有权及关闭保护完成。
+- [x] 冷标签 dirty 同步、并发保存补写和最后一个文档视图回收边界完成。
+- [x] Group 比例、最小尺寸、cold tab 激活、跨 Space reveal 和 Git 元数据刷新完成。
+- [x] 当前 v2 `saveState -> loadAll -> hydrate`、递归布局及可恢复 Tab round-trip 测试完成。
+- [x] 类型检查、70 个测试文件 / 429 项测试、lint、生产构建、eager graph 和 diff 检查通过。
+- [x] `pnpm knip` 仍因仓库既有的无关遗留项返回 1；针对本次新增/修改模块的过滤结果为空，未新增 knip 问题。

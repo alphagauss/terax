@@ -17,7 +17,7 @@
     "tab.new": "New tab",
     "tab.newBlock": "New Blocks terminal",
     "tab.newPrivate": "New private terminal",
-    "tab.newPreview": "New web preview",
+    "tab.newWebPreview": "New Web Preview",
     "tab.newEditor": "New editor tab",
     "tab.close": "Close tab",
     "workbench.splitRight": "Split Workbench right",

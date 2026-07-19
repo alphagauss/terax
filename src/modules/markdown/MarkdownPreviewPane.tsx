@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
+import { useDocument } from "@/modules/editor/lib/useDocument";
 import {
   MARKDOWN_ACTIVATION_OFFSET,
   MARKDOWN_CONTENT_CHANGE_EVENT,
@@ -23,21 +24,7 @@ import { MarkdownOutlineToggle } from "@/modules/markdown/MarkdownOutlineToggle"
 import { MarkdownRawPane } from "@/modules/markdown/MarkdownRawPane";
 import { MarkdownSplitLayout } from "@/modules/markdown/MarkdownSplitLayout";
 import { MarkdownViewToggle } from "@/modules/markdown/MarkdownViewToggle";
-import { currentWorkspaceEnv } from "@/modules/workspace";
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-
-type ReadResult =
-  | { kind: "text"; content: string; size: number }
-  | { kind: "binary"; size: number }
-  | { kind: "toolarge"; size: number; limit: number };
-
-type Status =
-  | { kind: "loading" }
-  | { kind: "ready"; document: MarkdownDocument }
-  | { kind: "binary" }
-  | { kind: "toolarge"; size: number; limit: number }
-  | { kind: "error"; message: string };
 
 type ViewMode = "rendered" | "raw";
 
@@ -49,7 +36,7 @@ type Props = {
   id: number;
   path: string;
   visible: boolean;
-  dirty: boolean;
+  focused: boolean;
   registerEditorHandle: (id: number, handle: EditorPaneHandle | null) => void;
   registerNavigationHandle: (
     id: number,
@@ -65,14 +52,18 @@ export function MarkdownPreviewPane({
   id,
   path,
   visible,
-  dirty,
+  focused,
   registerEditorHandle,
   registerNavigationHandle,
   onDirtyChange,
   onCloseTab,
 }: Props) {
-  const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [viewMode, setViewMode] = useState<ViewMode>("rendered");
+  const [preparedDocument, setPreparedDocument] = useState<{
+    path: string;
+    content: string;
+    document: MarkdownDocument;
+  } | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineAvailable, setOutlineAvailable] = useState(true);
   const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
@@ -87,7 +78,6 @@ export function MarkdownPreviewPane({
   const rendererRef = useRef<MarkdownDocumentRendererHandle>(null);
   const editorRef = useRef<EditorPaneHandle>(null);
   const navigationFrameRef = useRef(0);
-  const loadVersionRef = useRef(0);
   const pendingRawSourceLineRef = useRef<number | null>(null);
   const resizeSourceLineRef = useRef<number | null>(null);
   const navigationTargetRef = useRef<(sourceLine: number) => void>(() => {});
@@ -98,6 +88,14 @@ export function MarkdownPreviewPane({
   });
   callbackRef.current = { registerEditorHandle, onDirtyChange, onCloseTab };
   const outlineId = `${useId()}-markdown-outline`;
+  const handleDirtyChange = useCallback(
+    (nextDirty: boolean) => callbackRef.current.onDirtyChange(id, nextDirty),
+    [id],
+  );
+  const { doc, dirty } = useDocument({
+    path,
+    onDirtyChange: handleDirtyChange,
+  });
 
   const cancelPendingNavigation = useCallback(() => {
     if (navigationFrameRef.current === 0) return;
@@ -105,47 +103,11 @@ export function MarkdownPreviewPane({
     navigationFrameRef.current = 0;
   }, []);
 
-  const loadDocument = useCallback(
-    async (showLoading: boolean) => {
-      const version = ++loadVersionRef.current;
-      if (showLoading) setStatus({ kind: "loading" });
-      try {
-        const result = await invoke<ReadResult>("fs_read_file", {
-          path,
-          workspace: currentWorkspaceEnv(),
-        });
-        if (version !== loadVersionRef.current) return;
-        if (result.kind === "text") {
-          setStatus({
-            kind: "ready",
-            document: prepareMarkdownDocument(result.content),
-          });
-        } else if (result.kind === "binary") {
-          setStatus({ kind: "binary" });
-        } else {
-          setStatus({
-            kind: "toolarge",
-            size: result.size,
-            limit: result.limit,
-          });
-        }
-      } catch (error) {
-        if (version === loadVersionRef.current) {
-          setStatus({ kind: "error", message: String(error) });
-        }
-      }
-    },
-    [path],
-  );
-
   useEffect(() => {
+    void path;
     cancelPendingNavigation();
     setActiveOutlineId(null);
-    void loadDocument(true);
-    return () => {
-      loadVersionRef.current += 1;
-    };
-  }, [cancelPendingNavigation, loadDocument]);
+  }, [cancelPendingNavigation, path]);
 
   useEffect(
     () => () => {
@@ -154,11 +116,28 @@ export function MarkdownPreviewPane({
     [cancelPendingNavigation],
   );
 
-  const document = status.kind === "ready" ? status.document : null;
+  useEffect(() => {
+    if (doc.status !== "ready" || !visible || viewMode !== "rendered") return;
+    setPreparedDocument((current) =>
+      current?.path === path && current.content === doc.content
+        ? current
+        : {
+            path,
+            content: doc.content,
+            document: prepareMarkdownDocument(doc.content),
+          },
+    );
+  }, [doc, path, viewMode, visible]);
+  const document =
+    doc.status === "ready" && preparedDocument?.path === path
+      ? preparedDocument.document
+      : null;
   const hasOutline = Boolean(document?.outline.length);
 
   useEffect(() => {
-    if (viewMode !== "rendered" || !scrollContainer || !document) return;
+    if (!visible || viewMode !== "rendered" || !scrollContainer || !document) {
+      return;
+    }
     let frame = 0;
     const updateActiveHeading = () => {
       frame = 0;
@@ -189,7 +168,7 @@ export function MarkdownPreviewPane({
       );
       if (frame !== 0) cancelAnimationFrame(frame);
     };
-  }, [document, scrollContainer, viewMode]);
+  }, [document, scrollContainer, viewMode, visible]);
 
   const requestRenderedRestore = useCallback((sourceLine: number | null) => {
     if (sourceLine == null) return;
@@ -311,9 +290,8 @@ export function MarkdownPreviewPane({
       const sourceLine = editorRef.current?.getViewportSourceLine() ?? null;
       setViewMode("rendered");
       requestRenderedRestore(sourceLine);
-      void loadDocument(false).then(() => requestRenderedRestore(sourceLine));
     },
-    [dirty, loadDocument, requestRenderedRestore, viewMode],
+    [dirty, requestRenderedRestore, viewMode],
   );
 
   const handleEditorRef = useCallback(
@@ -321,10 +299,6 @@ export function MarkdownPreviewPane({
       editorRef.current = handle;
       callbackRef.current.registerEditorHandle(id, handle);
     },
-    [id],
-  );
-  const handleDirtyChange = useCallback(
-    (nextDirty: boolean) => callbackRef.current.onDirtyChange(id, nextDirty),
     [id],
   );
   const handleClose = useCallback(
@@ -422,10 +396,10 @@ export function MarkdownPreviewPane({
             <MarkdownRawPane
               ref={handleEditorRef}
               path={path}
+              lspEnabled={focused}
               initialSourceLine={pendingRawSourceLineRef.current}
               onViewportSourceLineChange={handleRawViewportLine}
               onDirtyChange={handleDirtyChange}
-              onSaved={() => void loadDocument(false)}
               onClose={handleClose}
             />
           ) : (
@@ -437,22 +411,22 @@ export function MarkdownPreviewPane({
                 ref={contentRef}
                 className="mx-auto w-full min-w-0 max-w-[800px] px-4 pt-12 pb-6 sm:px-[26px]"
               >
-                {status.kind === "loading" && (
+                {doc.status === "loading" && (
                   <p className="text-[12px] text-muted-foreground">Loading…</p>
                 )}
-                {status.kind === "error" && (
+                {doc.status === "error" && (
                   <p className="text-[12px] text-destructive">
-                    Failed to read file: {status.message}
+                    Failed to read file: {doc.message}
                   </p>
                 )}
-                {status.kind === "binary" && (
+                {doc.status === "binary" && (
                   <p className="text-[12px] text-muted-foreground">
                     Binary file: cannot render as markdown.
                   </p>
                 )}
-                {status.kind === "toolarge" && (
+                {doc.status === "toolarge" && (
                   <p className="text-[12px] text-muted-foreground">
-                    File is {status.size} bytes; limit {status.limit}.
+                    File is {doc.size} bytes; limit {doc.limit}.
                   </p>
                 )}
                 {document && scrollContainer && (

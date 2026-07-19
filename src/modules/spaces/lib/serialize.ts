@@ -1,10 +1,11 @@
+import { pathBasename, titleFromUrl } from "@/lib/utils";
 import type {
   EditorTab,
   MarkdownTab,
-  PreviewTab,
   SpaceWorkbench,
   Tab,
   TerminalTab,
+  WebPreviewTab,
   WorkbenchLayoutNode,
   WorkbenchState,
 } from "@/modules/workbench";
@@ -17,7 +18,7 @@ export type SerializedTab =
       customTitle?: string;
     }
   | { kind: "editor"; path: string; explorerRoot?: string }
-  | { kind: "preview"; url: string }
+  | { kind: "web-preview"; url: string }
   | { kind: "markdown"; path: string; explorerRoot?: string };
 
 export type SerializedWorkbenchNode =
@@ -34,26 +35,21 @@ export type SerializedWorkbenchNode =
       sizes?: number[];
     };
 
-function basename(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] ?? path;
-}
-
-function titleFromUrl(url: string): string {
-  try {
-    return new URL(url).host || url;
-  } catch {
-    return url || "preview";
-  }
-}
-
 function isSerializableTab(tab: Tab): boolean {
   return (
     (tab.kind === "terminal" && !tab.private) ||
     tab.kind === "editor" ||
-    tab.kind === "preview" ||
+    tab.kind === "web-preview" ||
     tab.kind === "markdown"
   );
+}
+
+function normalizedSizes(sizes: number[]): number[] {
+  const total = sizes.reduce((sum, size) => sum + size, 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return sizes.map(() => 100 / sizes.length);
+  }
+  return sizes.map((size) => (size / total) * 100);
 }
 
 function serializeTab(tab: Tab): SerializedTab | null {
@@ -74,8 +70,8 @@ function serializeTab(tab: Tab): SerializedTab | null {
           explorerRoot: tab.explorerRoot,
         }),
       };
-    case "preview":
-      return { kind: "preview", url: tab.url };
+    case "web-preview":
+      return { kind: "web-preview", url: tab.url };
     case "markdown":
       return {
         kind: "markdown",
@@ -118,16 +114,28 @@ export function serializeSpaceWorkbench(
         ...(space.activeGroupId === group.id && { active: true }),
       };
     }
-    const children = node.children
-      .map(visit)
-      .filter((child): child is SerializedWorkbenchNode => child !== null);
+    const children: SerializedWorkbenchNode[] = [];
+    const retainedSizes: number[] = [];
+    const sourceSizes =
+      node.sizes?.length === node.children.length &&
+      node.sizes.every((size) => Number.isFinite(size) && size > 0)
+        ? node.sizes
+        : null;
+    for (const [index, child] of node.children.entries()) {
+      const serialized = visit(child);
+      if (!serialized) continue;
+      children.push(serialized);
+      if (sourceSizes) retainedSizes.push(sourceSizes[index]);
+    }
     if (children.length === 0) return null;
     if (children.length === 1) return children[0];
     return {
       kind: "split",
       axis: node.axis,
       children,
-      ...(node.sizes?.length === children.length && { sizes: node.sizes }),
+      ...(retainedSizes.length === children.length && {
+        sizes: normalizedSizes(retainedSizes),
+      }),
     };
   };
 
@@ -152,7 +160,7 @@ function hydrateTab(
         title:
           serialized.customTitle ??
           (serialized.cwd
-            ? basename(serialized.cwd)
+            ? pathBasename(serialized.cwd)
             : serialized.blocks
               ? "blocks"
               : "shell"),
@@ -169,7 +177,7 @@ function hydrateTab(
         kind: "editor",
         spaceId,
         cold: true,
-        title: basename(serialized.path),
+        title: pathBasename(serialized.path),
         path: serialized.path,
         dirty: false,
         preview: false,
@@ -177,22 +185,22 @@ function hydrateTab(
           explorerRoot: serialized.explorerRoot,
         }),
       } satisfies EditorTab;
-    case "preview":
+    case "web-preview":
       return {
         id: allocId(),
-        kind: "preview",
+        kind: "web-preview",
         spaceId,
         cold: true,
         title: titleFromUrl(serialized.url),
         url: serialized.url,
-      } satisfies PreviewTab;
+      } satisfies WebPreviewTab;
     case "markdown":
       return {
         id: allocId(),
         kind: "markdown",
         spaceId,
         cold: true,
-        title: basename(serialized.path),
+        title: pathBasename(serialized.path),
         path: serialized.path,
         dirty: false,
         ...(serialized.explorerRoot !== undefined && {
@@ -276,7 +284,7 @@ export function freshSpaceWorkbench(
     kind: "terminal",
     spaceId,
     cold: true,
-    title: cwd ? basename(cwd) : "shell",
+    title: cwd ? pathBasename(cwd) : "shell",
     cwd: cwd ?? undefined,
   };
   return {
@@ -329,7 +337,7 @@ function isSerializedTab(value: unknown): value is SerializedTab {
       (tab.customTitle === undefined || typeof tab.customTitle === "string")
     );
   }
-  if (tab.kind === "preview") return typeof tab.url === "string";
+  if (tab.kind === "web-preview") return typeof tab.url === "string";
   if (tab.kind === "editor" || tab.kind === "markdown") {
     return (
       typeof tab.path === "string" &&

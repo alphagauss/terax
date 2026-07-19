@@ -1,2 +1,2 @@
-export { PreviewStack } from "./PreviewStack";
-export type { PreviewPaneHandle } from "./PreviewPane";
+export type { WebPreviewPaneHandle } from "./WebPreviewPane";
+export { WebPreviewView } from "./WebPreviewView";

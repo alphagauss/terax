@@ -1,5 +1,5 @@
-import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import i18n from "@/i18n";
+import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
@@ -102,6 +102,7 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
+  lspEnabled?: boolean;
   initialSourceLine?: number | null;
   onViewportSourceLineChange?: (line: number) => void;
 };
@@ -142,7 +143,7 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// memo: EditorStack passes identity-stable props, so background editors
+// memo: EditorView passes identity-stable props, so background editors
 // skip re-rendering entirely when App re-renders (terminal events, tab churn).
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
@@ -153,15 +154,23 @@ export const EditorPane = memo(
       onDirtyChange,
       onSaved,
       onClose,
+      lspEnabled = true,
       initialSourceLine,
       onViewportSourceLineChange,
     } = props;
 
-    const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
-      useDocument({
-        path,
-        onDirtyChange,
-      });
+    const {
+      doc,
+      baselineContent,
+      onChange,
+      save,
+      reload,
+      adoptDiskText,
+      openAnyway,
+    } = useDocument({
+      path,
+      onDirtyChange,
+    });
     const reloadRef = useRef(reload);
     reloadRef.current = reload;
     const adoptDiskTextRef = useRef(adoptDiskText);
@@ -510,12 +519,19 @@ export const EditorPane = memo(
       if (!view) return;
       view.dispatch({
         effects: indentCompartment.reconfigure(
-          indentExtension(detectIndentUnit(doc.content)),
+          indentExtension(detectIndentUnit(baselineContent)),
         ),
       });
-    }, [doc]);
+    }, [baselineContent, doc.status]);
 
-    const lspExt = useLspExtension(path, langId, doc.status === "ready");
+    // A shared document can have several CodeMirror views. Only the focused
+    // view may own LSP synchronization, otherwise the same URI is opened and
+    // versioned independently by every view.
+    const lspExt = useLspExtension(
+      path,
+      langId,
+      doc.status === "ready" && lspEnabled,
+    );
     useEffect(() => {
       lspActiveRef.current = lspExt !== null;
       const view = cmRef.current?.view;
