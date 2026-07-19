@@ -1,8 +1,7 @@
-import {
-  normalizePathForIdentity,
-  pathBasename,
-  titleFromUrl,
-} from "@/lib/utils";
+import { documentPathIdentity } from "@/lib/pathIdentity";
+import i18n from "@/i18n";
+import { pathBasename, titleFromUrl } from "@/lib/utils";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   activateGroup,
   activeTabId,
@@ -358,7 +357,13 @@ export function useWorkbench(
   );
 
   const openFileTab = useCallback(
-    (path: string, pin = true, explorerRoot?: string, groupId?: number) => {
+    (
+      path: string,
+      pin = true,
+      explorerRoot?: string,
+      groupId?: number,
+      forceNew = false,
+    ) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
@@ -367,10 +372,13 @@ export function useWorkbench(
       const editorTabs = group.tabIds
         .map((id) => stateRef.current.tabs[id])
         .filter((tab): tab is EditorTab => tab?.kind === "editor");
-      const resourcePath = normalizePathForIdentity(path);
-      const existing = editorTabs.find(
-        (tab) => normalizePathForIdentity(tab.path) === resourcePath,
-      );
+      const workspace = currentWorkspaceEnv();
+      const resourcePath = documentPathIdentity(workspace, path);
+      const existing = forceNew
+        ? undefined
+        : editorTabs.find(
+            (tab) => documentPathIdentity(workspace, tab.path) === resourcePath,
+          );
       if (existing) {
         revealTab(existing.id, {
           ...(pin && { preview: false }),
@@ -389,7 +397,7 @@ export function useWorkbench(
         preview: !pin,
         ...(explorerRoot !== undefined && { explorerRoot }),
       };
-      if (!pin) {
+      if (!pin && !forceNew) {
         const preview = editorTabs.find((candidate) => candidate.preview);
         if (preview) {
           commit((current) =>
@@ -405,20 +413,28 @@ export function useWorkbench(
   );
 
   const newMarkdownTab = useCallback(
-    (path: string, explorerRoot?: string, groupId?: number) => {
+    (
+      path: string,
+      explorerRoot?: string,
+      groupId?: number,
+      forceNew = false,
+    ) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
-      const resourcePath = normalizePathForIdentity(path);
-      const existing = group?.tabIds
-        .map((id) => stateRef.current.tabs[id])
-        .find((tab): tab is MarkdownTab =>
-          Boolean(
-            tab?.kind === "markdown" &&
-              normalizePathForIdentity(tab.path) === resourcePath,
-          ),
-        );
+      const workspace = currentWorkspaceEnv();
+      const resourcePath = documentPathIdentity(workspace, path);
+      const existing = forceNew
+        ? undefined
+        : group?.tabIds
+            .map((id) => stateRef.current.tabs[id])
+            .find((tab): tab is MarkdownTab =>
+              Boolean(
+                tab?.kind === "markdown" &&
+                  documentPathIdentity(workspace, tab.path) === resourcePath,
+              ),
+            );
       if (existing) {
         revealTab(existing.id, {
           ...(explorerRoot !== undefined && { explorerRoot }),
@@ -450,7 +466,7 @@ export function useWorkbench(
         id,
         kind: "web-preview",
         spaceId: activeSpaceIdRef.current,
-        title: titleFromUrl(url),
+        title: titleFromUrl(url, i18n.t("tabs:webPreview")),
         url,
       };
       addPage(tab, groupId);
@@ -636,7 +652,12 @@ export function useWorkbench(
 
   const setDocumentDirty = useCallback(
     (id: number, dirty: boolean) =>
-      commit((current) => patchDocumentDirty(current, id, dirty)),
+      commit((current) => {
+        const workspace = currentWorkspaceEnv();
+        return patchDocumentDirty(current, id, dirty, (path) =>
+          documentPathIdentity(workspace, path),
+        );
+      }),
     [commit],
   );
 

@@ -26,6 +26,24 @@ const KEY_SPACES = "spaces";
 const KEY_ACTIVE = "activeSpaceId";
 const STATE_PREFIX = "spaceState:";
 const stateKey = (id: string) => `${STATE_PREFIX}${id}`;
+const stateWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueStateWrite(
+  id: string,
+  operation: () => Promise<void>,
+): Promise<void> {
+  const previous = stateWriteQueues.get(id) ?? Promise.resolve();
+  const result = previous.then(operation);
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  stateWriteQueues.set(id, tail);
+  void tail.then(() => {
+    if (stateWriteQueues.get(id) === tail) stateWriteQueues.delete(id);
+  });
+  return result;
+}
 
 export type LoadedSpaces = {
   spaces: SpaceMeta[];
@@ -62,11 +80,11 @@ export function saveActiveId(id: string | null): Promise<void> {
 }
 
 export function saveState(id: string, state: SpaceState): Promise<void> {
-  return setWorkspaceValue(stateKey(id), state);
+  return enqueueStateWrite(id, () => setWorkspaceValue(stateKey(id), state));
 }
 
 export function deleteSpaceData(id: string): Promise<void> {
-  return deleteWorkspaceValue(stateKey(id));
+  return enqueueStateWrite(id, () => deleteWorkspaceValue(stateKey(id)));
 }
 
 export function newSpaceId(): string {

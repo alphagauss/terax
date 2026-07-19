@@ -91,6 +91,7 @@ import {
 import {
   clearFocusedTerminal,
   disposeSession,
+  leafHasForegroundProcess,
   navigateFocusedBlocks,
   type TerminalPaneHandle,
   useTerminalFileDrop,
@@ -102,6 +103,7 @@ import {
   findGroupForTab,
   useWorkbench,
   type WorkbenchChromeActions,
+  type TerminalTab,
   WorkbenchSurface,
   type WorkbenchViewServices,
 } from "@/modules/workbench";
@@ -122,6 +124,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { spaceDeleteDocuments } from "./lib/spaceDelete";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
@@ -451,6 +454,11 @@ export default function App() {
     tabsRef,
     flushCompletedSessionRuns,
   );
+  const [pendingSpaceDelete, setPendingSpaceDelete] = useState<{
+    spaceId: string;
+    dirtyDocuments: number;
+    busyTerminal: boolean;
+  } | null>(null);
 
   useEffect(() => {
     const live = new Set<number>();
@@ -632,9 +640,10 @@ export default function App() {
       target: Parameters<WorkbenchChromeActions["dropTab"]>[1],
     ) => {
       const groupId = target.groupId;
+      const forceNew = target.kind !== "tabs" && target.zone !== "center";
       const id = isMarkdownPath(path)
-        ? newMarkdownTab(path, explorerRoot ?? undefined, groupId)
-        : openFileTab(path, true, explorerRoot ?? undefined, groupId);
+        ? newMarkdownTab(path, explorerRoot ?? undefined, groupId, forceNew)
+        : openFileTab(path, true, explorerRoot ?? undefined, groupId, forceNew);
       if (id === null) return;
       if (target.kind === "tabs") {
         reorderTabByGap(id, target.gap);
@@ -1076,17 +1085,68 @@ export default function App() {
     return meta.id;
   }, [activeCwd, createSpace, home]);
 
-  const handleDeleteSpace = useCallback(
+  const deleteSpace = useCallback(
     (id: string) => {
+      const workspace = currentWorkspaceEnv();
+      const { discardPaths } = spaceDeleteDocuments(
+        tabsRef.current,
+        id,
+        workspace,
+      );
       const nextSpaceId = useSpaces.getState().remove(id);
       if (!nextSpaceId) return;
       const root = useSpaces
         .getState()
         .spaces.find((s) => s.id === nextSpaceId)?.root;
       removeSpace(id, nextSpaceId, root ?? undefined);
+      if (discardPaths.length > 0) {
+        void import("@/modules/editor/lib/documentModel").then(
+          ({ discardSharedDocumentModel }) => {
+            for (const path of discardPaths) {
+              discardSharedDocumentModel(workspace, path);
+            }
+          },
+        );
+      }
     },
     [removeSpace],
   );
+
+  const handleDeleteSpace = useCallback(
+    async (id: string) => {
+      const terminalTabs = tabsRef.current.filter(
+        (tab): tab is TerminalTab =>
+          tab.spaceId === id && tab.kind === "terminal",
+      );
+      const busyTerminal = (
+        await Promise.all(
+          terminalTabs.map((tab) =>
+            leafHasForegroundProcess(tab.terminalId).catch(() => true),
+          ),
+        )
+      ).some(Boolean);
+      const { dirtyDocuments } = spaceDeleteDocuments(
+        tabsRef.current,
+        id,
+        currentWorkspaceEnv(),
+      );
+      if (dirtyDocuments > 0 || busyTerminal) {
+        setPendingSpaceDelete({ spaceId: id, dirtyDocuments, busyTerminal });
+        return;
+      }
+      deleteSpace(id);
+    },
+    [deleteSpace],
+  );
+
+  const confirmSpaceDelete = useCallback(() => {
+    if (pendingSpaceDelete) deleteSpace(pendingSpaceDelete.spaceId);
+    setPendingSpaceDelete(null);
+  }, [deleteSpace, pendingSpaceDelete]);
+
+  const cancelSpaceDelete = useCallback(() => {
+    setPendingSpaceDelete(null);
+  }, []);
 
   const handleMoveTab = useCallback(
     (tabId: number, targetSpaceId: string) => {
@@ -1597,6 +1657,9 @@ export default function App() {
             pendingAppClose={pendingAppClose}
             onCancelAppClose={cancelAppClose}
             onConfirmAppClose={confirmAppClose}
+            pendingSpaceDelete={pendingSpaceDelete}
+            onCancelSpaceDelete={cancelSpaceDelete}
+            onConfirmSpaceDelete={confirmSpaceDelete}
           />
         </div>
       </TooltipProvider>

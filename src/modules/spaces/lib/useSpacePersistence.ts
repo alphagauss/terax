@@ -13,6 +13,7 @@ type Params = {
 
 export function useSpacePersistence({ state, enabled }: Params) {
   const last = useRef(new Map<string, string>());
+  const pending = useRef(new Map<string, string>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef(state);
   latest.current = state;
@@ -20,16 +21,39 @@ export function useSpacePersistence({ state, enabled }: Params) {
   const flush = useCallback((snapshot: WorkbenchState) => {
     for (const spaceId of Object.keys(snapshot.spaces)) {
       const workbench = serializeSpaceWorkbench(snapshot, spaceId);
+      const persist = (fingerprint: string, operation: Promise<void>) => {
+        pending.current.set(spaceId, fingerprint);
+        void operation
+          .then(() => {
+            last.current.set(spaceId, fingerprint);
+          })
+          .catch((error) => {
+            console.error(`[spaces] failed to persist ${spaceId}`, error);
+          })
+          .finally(() => {
+            if (pending.current.get(spaceId) === fingerprint) {
+              pending.current.delete(spaceId);
+            }
+          });
+      };
       if (!workbench) {
-        if (last.current.get(spaceId) === EMPTY_STATE) continue;
-        last.current.set(spaceId, EMPTY_STATE);
-        void deleteSpaceData(spaceId);
+        if (
+          last.current.get(spaceId) === EMPTY_STATE ||
+          pending.current.get(spaceId) === EMPTY_STATE
+        ) {
+          continue;
+        }
+        persist(EMPTY_STATE, deleteSpaceData(spaceId));
         continue;
       }
       const json = JSON.stringify(workbench);
-      if (last.current.get(spaceId) === json) continue;
-      last.current.set(spaceId, json);
-      void saveState(spaceId, { version: 2, workbench });
+      if (
+        last.current.get(spaceId) === json ||
+        pending.current.get(spaceId) === json
+      ) {
+        continue;
+      }
+      persist(json, saveState(spaceId, { version: 2, workbench }));
     }
   }, []);
 

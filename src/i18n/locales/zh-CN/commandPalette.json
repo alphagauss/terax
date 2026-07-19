@@ -40,6 +40,7 @@
     "lastTab": "最后一个标签页",
     "noWorkspaceRoot": "无工作区根目录",
     "currentSpace": "当前空间",
+    "cannotCopyView": "无法复制此视图",
     "noSearchableView": "无可搜索视图"
   },
   "ui": {

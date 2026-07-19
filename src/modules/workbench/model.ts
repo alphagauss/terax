@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { normalizePathForIdentity, titleFromUrl } from "@/lib/utils";
 import type {
   SpaceWorkbench,
@@ -33,7 +34,8 @@ export function patchTab(
       ...(patch.title !== undefined && { title: patch.title }),
       ...(patch.url !== undefined && {
         url: patch.url,
-        title: patch.title ?? titleFromUrl(patch.url),
+        title:
+          patch.title ?? titleFromUrl(patch.url, i18n.t("tabs:webPreview")),
       }),
     };
   } else if (tab.kind === "markdown") {
@@ -99,15 +101,16 @@ export function patchDocumentDirty(
   state: WorkbenchState,
   sourceTabId: number,
   dirty: boolean,
+  pathIdentity: (path: string) => string = normalizePathForIdentity,
 ): WorkbenchState {
   const source = state.tabs[sourceTabId];
   if (source?.kind !== "editor" && source?.kind !== "markdown") return state;
-  const resourcePath = normalizePathForIdentity(source.path);
+  const resourcePath = pathIdentity(source.path);
   let next = state;
   for (const candidate of Object.values(state.tabs)) {
     if (
       (candidate.kind === "editor" || candidate.kind === "markdown") &&
-      normalizePathForIdentity(candidate.path) === resourcePath
+      pathIdentity(candidate.path) === resourcePath
     ) {
       next = patchTab(next, candidate.id, { dirty });
     }

@@ -40,6 +40,27 @@ function context(): CommandPaletteActionContext {
 }
 
 describe("command palette commands", () => {
+  it("allows copying a dirty document view", () => {
+    const ctx = context();
+    ctx.tabs = [
+      {
+        id: 1,
+        kind: "editor",
+        spaceId: "space-a",
+        title: "file.ts",
+        path: "file.ts",
+        dirty: true,
+        preview: false,
+      },
+    ];
+    ctx.activeId = 1;
+
+    const split = createCommandItems(ctx).find(
+      (item) => item.id === "workbench.splitRight",
+    );
+    expect(split?.disabledReason).toBeUndefined();
+  });
+
   it("places New Window first and wires its handler", () => {
     const ctx = context();
     const items = createCommandItems(ctx);

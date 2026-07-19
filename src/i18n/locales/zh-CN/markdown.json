@@ -1,4 +1,9 @@
 {
   "rendered": "渲染",
-  "raw": "源码"
+  "raw": "源码",
+  "saveToPreview": "保存后预览",
+  "loading": "加载中…",
+  "readFailed": "读取文件失败:{{message}}",
+  "binaryUnsupported": "二进制文件无法渲染为 Markdown。",
+  "tooLarge": "文件大小为 {{size}} 字节,限制为 {{limit}} 字节。"
 }

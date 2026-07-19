@@ -13,6 +13,7 @@ type CommitFileDiffOpenInput = {
 
 type Props = {
   tab: GitHistoryTab;
+  visible: boolean;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
   onSearchHandle: (
     tabId: number,
@@ -22,6 +23,7 @@ type Props = {
 
 export function GitHistoryView({
   tab,
+  visible,
   onOpenCommitFile,
   onSearchHandle,
 }: Props) {
@@ -33,6 +35,7 @@ export function GitHistoryView({
   return (
     <GitHistoryPane
       repoRoot={tab.repoRoot}
+      visible={visible}
       onOpenCommitFile={onOpenCommitFile}
       onSearchHandle={handleSearch}
     />

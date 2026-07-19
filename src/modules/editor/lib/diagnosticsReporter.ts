@@ -3,8 +3,13 @@ import type { Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useDiagnosticsStore } from "./diagnosticsStore";
 
-export function diagnosticsReporter(getPath: () => string): Extension {
+export function diagnosticsReporter(
+  getPath: () => string,
+  getOwnerId: () => string,
+  isEnabled: () => boolean,
+): Extension {
   return EditorView.updateListener.of((update) => {
+    if (!isEnabled()) return;
     if (
       !update.docChanged &&
       !update.transactions.some((tr) => tr.effects.length > 0)
@@ -20,6 +25,8 @@ export function diagnosticsReporter(getPath: () => string): Extension {
         else if (d.severity === "warning") warnings += 1;
       });
     }
-    useDiagnosticsStore.getState().report(getPath(), { errors, warnings });
+    useDiagnosticsStore
+      .getState()
+      .report(getPath(), getOwnerId(), { errors, warnings });
   });
 }

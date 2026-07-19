@@ -136,6 +136,7 @@ export function WorkbenchRegisteredView({
       {tab.kind === "git-history" && (
         <GitHistoryView
           tab={tab}
+          visible={visible}
           onOpenCommitFile={services.onOpenCommitFile}
           onSearchHandle={services.onGitHistorySearchHandle}
         />

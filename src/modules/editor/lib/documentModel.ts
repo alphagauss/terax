@@ -1,7 +1,8 @@
-import { normalizePathForIdentity } from "@/lib/utils";
+import { documentResourceKey } from "@/lib/pathIdentity";
+import i18n from "@/i18n";
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { type WorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
+import type { WorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
@@ -37,12 +38,7 @@ const MODEL_DISPOSE_DELAY_MS = 30_000;
 
 const models = new Map<string, SharedDocumentModel>();
 
-export function documentResourceKey(
-  workspace: WorkspaceEnv,
-  path: string,
-): string {
-  return `${workspaceScopeKey(workspace)}\u0000${normalizePathForIdentity(path)}`;
-}
+export { documentResourceKey } from "@/lib/pathIdentity";
 
 export function getSharedDocumentModel(
   workspace: WorkspaceEnv,
@@ -282,11 +278,11 @@ class SharedDocumentModel {
       }).catch(() => null);
       if (stat && fileFingerprintChanged(knownMtime, this.diskSize, stat)) {
         const name = this.path.split(/[\\/]/).pop() ?? this.path;
-        toast.warning("File changed on disk", {
+        toast.warning(i18n.t("editor:saveConflict.title"), {
           id: `save-conflict:${this.key}`,
-          description: `${name} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
+          description: i18n.t("editor:saveConflict.description", { name }),
           action: {
-            label: "Overwrite",
+            label: i18n.t("editor:saveConflict.overwrite"),
             onClick: () => void this.writeToDisk(),
           },
         });

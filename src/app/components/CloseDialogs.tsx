@@ -26,21 +26,13 @@ type Props = {
   pendingAppClose: AppCloseBlocker | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
+  pendingSpaceDelete: {
+    dirtyDocuments: number;
+    busyTerminal: boolean;
+  } | null;
+  onCancelSpaceDelete: () => void;
+  onConfirmSpaceDelete: () => void;
 };
-
-function appCloseMessage(blocker: AppCloseBlocker): string {
-  const dirty =
-    blocker.dirtyEditors === 1
-      ? "1 file has unsaved changes"
-      : `${blocker.dirtyEditors} files have unsaved changes`;
-  if (blocker.dirtyEditors > 0 && blocker.busyTerminal) {
-    return `A process is still running and ${dirty}. Quitting will terminate it and discard the changes.`;
-  }
-  if (blocker.dirtyEditors > 0) {
-    return `${dirty.charAt(0).toUpperCase()}${dirty.slice(1)}. Quitting will discard them.`;
-  }
-  return "A process is still running in a terminal. Quitting will terminate it.";
-}
 
 /** Confirmation dialogs for closing dirty editors and terminals with live processes. */
 export function CloseDialogs({
@@ -57,6 +49,9 @@ export function CloseDialogs({
   pendingAppClose,
   onCancelAppClose,
   onConfirmAppClose,
+  pendingSpaceDelete,
+  onCancelSpaceDelete,
+  onConfirmSpaceDelete,
 }: Props) {
   const { t } = useTranslation("app");
   return (
@@ -143,6 +138,37 @@ export function CloseDialogs({
       </AlertDialog>
 
       <AlertDialog
+        open={pendingSpaceDelete !== null}
+        onOpenChange={(open) => !open && onCancelSpaceDelete()}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("close.deleteSpaceTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingSpaceDelete
+                ? t(
+                    pendingSpaceDelete.busyTerminal
+                      ? pendingSpaceDelete.dirtyDocuments > 0
+                        ? "close.deleteSpaceBusyDirty"
+                        : "close.deleteSpaceBusy"
+                      : "close.deleteSpaceDirty",
+                    { count: pendingSpaceDelete.dirtyDocuments },
+                  )
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={onCancelSpaceDelete}>
+              {t("common:cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={onConfirmSpaceDelete}>
+              {t("close.deleteSpaceAnyway")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
         open={pendingAppClose !== null}
         onOpenChange={(open) => !open && onCancelAppClose()}
       >
@@ -150,7 +176,16 @@ export function CloseDialogs({
           <AlertDialogHeader>
             <AlertDialogTitle>{t("close.quitTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingAppClose ? appCloseMessage(pendingAppClose) : ""}
+              {pendingAppClose
+                ? t(
+                    pendingAppClose.busyTerminal
+                      ? pendingAppClose.dirtyEditors > 0
+                        ? "close.quitBusyDirty"
+                        : "close.quitBusy"
+                      : "close.quitDirty",
+                    { count: pendingAppClose.dirtyEditors },
+                  )
+                : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

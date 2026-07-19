@@ -1,4 +1,9 @@
 {
   "rendered": "Rendered",
-  "raw": "Raw"
+  "raw": "Raw",
+  "saveToPreview": "Save to preview",
+  "loading": "Loading…",
+  "readFailed": "Failed to read file: {{message}}",
+  "binaryUnsupported": "Binary file: cannot render as markdown.",
+  "tooLarge": "File is {{size}} bytes; limit {{limit}}."
 }

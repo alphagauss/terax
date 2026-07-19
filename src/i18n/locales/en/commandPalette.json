@@ -40,6 +40,7 @@
     "lastTab": "Last tab",
     "noWorkspaceRoot": "No workspace root",
     "currentSpace": "Current space",
+    "cannotCopyView": "This view cannot be copied",
     "noSearchableView": "No searchable view"
   },
   "ui": {

@@ -548,9 +548,7 @@ export function TabBar({
                 </div>
               );
 
-              const canCopySplit =
-                t.kind !== "ai-diff" &&
-                !((t.kind === "editor" || t.kind === "markdown") && t.dirty);
+              const canCopySplit = t.kind !== "ai-diff";
               const tabNode = (
                 <ContextMenu>
                   <ContextMenuTrigger asChild>{tabCell}</ContextMenuTrigger>

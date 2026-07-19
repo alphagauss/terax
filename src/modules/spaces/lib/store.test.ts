@@ -20,7 +20,7 @@ import {
   hydrateSpaceWorkbench,
   type SerializedWorkbenchNode,
 } from "./serialize";
-import { loadAll, saveState } from "./store";
+import { deleteSpaceData, loadAll, saveState } from "./store";
 
 const workbench: SerializedWorkbenchNode = {
   kind: "split",
@@ -95,5 +95,36 @@ describe("Workbench v2 storage boundary", () => {
 
     const loaded = await loadAll();
     expect(loaded.states.size).toBe(0);
+  });
+
+  it("serializes save and delete operations for one Space", async () => {
+    let releaseFirst: (() => void) | undefined;
+    workspaceStore.set.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        }),
+    );
+
+    const saving = saveState("space-a", { version: 2, workbench });
+    const deleting = deleteSpaceData("space-a");
+    await Promise.resolve();
+    expect(workspaceStore.set).toHaveBeenCalledTimes(1);
+    expect(workspaceStore.remove).not.toHaveBeenCalled();
+
+    releaseFirst?.();
+    await saving;
+    await deleting;
+    expect(workspaceStore.remove).toHaveBeenCalledWith("spaceState:space-a");
+  });
+
+  it("continues a Space queue after a failed write", async () => {
+    workspaceStore.set.mockRejectedValueOnce(new Error("write failed"));
+    const failed = saveState("space-a", { version: 2, workbench });
+    const deleting = deleteSpaceData("space-a");
+
+    await expect(failed).rejects.toThrow("write failed");
+    await expect(deleting).resolves.toBeUndefined();
+    expect(workspaceStore.remove).toHaveBeenCalledWith("spaceState:space-a");
   });
 });

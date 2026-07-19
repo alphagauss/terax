@@ -26,6 +26,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -148,6 +149,7 @@ function formatBytes(n: number): string {
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
     const { t } = useTranslation("editor");
+    const diagnosticsOwnerId = useId();
     const {
       path,
       overrideLanguage,
@@ -431,7 +433,11 @@ export const EditorPane = memo(
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),
         lspCompartment.of([]),
-        diagnosticsReporter(() => pathRef.current),
+        diagnosticsReporter(
+          () => pathRef.current,
+          () => diagnosticsOwnerId,
+          () => lspActiveRef.current,
+        ),
         EditorView.updateListener.of((update) => {
           if (!update.viewportChanged && !update.geometryChanged) return;
           viewportLineChangeRef.current?.(
@@ -492,7 +498,7 @@ export const EditorPane = memo(
           { key: "Ctrl-g", run: gotoLine },
         ]),
       ],
-      [],
+      [diagnosticsOwnerId],
     );
 
     useEffect(() => {
@@ -534,16 +540,20 @@ export const EditorPane = memo(
     );
     useEffect(() => {
       lspActiveRef.current = lspExt !== null;
+      if (lspExt) {
+        useDiagnosticsStore.getState().claim(path, diagnosticsOwnerId);
+      }
       const view = cmRef.current?.view;
       if (!view) return;
       view.dispatch({
         effects: lspCompartment.reconfigure(lspExt ?? []),
       });
-    }, [lspExt]);
+    }, [diagnosticsOwnerId, lspExt, path]);
 
     useEffect(
-      () => () => useDiagnosticsStore.getState().report(pathRef.current, null),
-      [],
+      () => () =>
+        useDiagnosticsStore.getState().clear(path, diagnosticsOwnerId),
+      [diagnosticsOwnerId, path],
     );
 
     // Warm the language chunk while the file is still being read; the

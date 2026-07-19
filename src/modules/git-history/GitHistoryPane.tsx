@@ -69,12 +69,31 @@ export type GitHistorySearchHandle = {
 
 type Props = {
   repoRoot: string;
+  visible: boolean;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
   /** Lets the header search bar drive commit filtering for the active pane. */
   onSearchHandle?: (handle: GitHistorySearchHandle | null) => void;
 };
 
 type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
+
+export function shouldAutoFillGitHistory(input: {
+  visible: boolean;
+  loadStatus: LoadStatus;
+  endReached: boolean;
+  activeSearch: string;
+  commitCount: number;
+  scrollable: number;
+}): boolean {
+  return (
+    input.visible &&
+    input.loadStatus === "idle" &&
+    !input.endReached &&
+    !input.activeSearch &&
+    input.commitCount > 0 &&
+    input.scrollable <= NEAR_BOTTOM_PX
+  );
+}
 
 type FilesEntry = CommitDetailFilesEntry;
 
@@ -160,6 +179,7 @@ function highlight(text: string, query: string): ReactNode {
 
 export function GitHistoryPane({
   repoRoot,
+  visible,
   onOpenCommitFile,
   onSearchHandle,
 }: Props) {
@@ -306,6 +326,7 @@ export function GitHistoryPane({
   }, [repoRoot]);
 
   const loadMore = useCallback(async () => {
+    if (!visible) return;
     if (inflightMoreRef.current || endReached) return;
     if (loadStatus !== "idle" && loadStatus !== "more-error") return;
     const last = commits[commits.length - 1];
@@ -337,7 +358,7 @@ export function GitHistoryPane({
         inflightMoreRef.current = false;
       }
     }
-  }, [commits, endReached, loadStatus, repoRoot]);
+  }, [commits, endReached, loadStatus, repoRoot, visible]);
 
   useEffect(() => {
     filesRequestIdRef.current += 1;
@@ -368,6 +389,7 @@ export function GitHistoryPane({
   }, [repoRoot]);
 
   const handleScroll = useCallback(() => {
+    if (!visible) return;
     const el = scrollRef.current;
     if (!el) return;
     openSequenceRef.current += 1;
@@ -377,25 +399,32 @@ export function GitHistoryPane({
     if (remaining < NEAR_BOTTOM_PX) {
       void loadMore();
     }
-  }, [activeSearch, loadMore]);
+  }, [activeSearch, loadMore, visible]);
 
   // Auto-fill: if the list doesn't fill the viewport (no scroll possible)
   // after a load, keep pulling pages until it does or the end is reached.
   // Scheduled async so we don't fight ongoing state transitions.
   useEffect(() => {
-    if (loadStatus !== "idle") return;
-    if (endReached) return;
-    if (activeSearch) return;
-    if (commits.length === 0) return;
     const el = scrollRef.current;
     if (!el) return;
     const scrollable = el.scrollHeight - el.clientHeight;
-    if (scrollable > NEAR_BOTTOM_PX) return;
+    if (
+      !shouldAutoFillGitHistory({
+        visible,
+        loadStatus,
+        endReached,
+        activeSearch,
+        commitCount: commits.length,
+        scrollable,
+      })
+    ) {
+      return;
+    }
     const id = window.setTimeout(() => {
       void loadMore();
     }, 0);
     return () => window.clearTimeout(id);
-  }, [commits.length, activeSearch, endReached, loadMore, loadStatus]);
+  }, [commits.length, activeSearch, endReached, loadMore, loadStatus, visible]);
 
   const handleRefresh = useCallback(() => {
     filesRequestIdRef.current += 1;

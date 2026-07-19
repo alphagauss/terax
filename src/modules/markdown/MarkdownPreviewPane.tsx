@@ -25,6 +25,7 @@ import { MarkdownRawPane } from "@/modules/markdown/MarkdownRawPane";
 import { MarkdownSplitLayout } from "@/modules/markdown/MarkdownSplitLayout";
 import { MarkdownViewToggle } from "@/modules/markdown/MarkdownViewToggle";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type ViewMode = "rendered" | "raw";
 
@@ -58,6 +59,7 @@ export function MarkdownPreviewPane({
   onDirtyChange,
   onCloseTab,
 }: Props) {
+  const { t } = useTranslation("markdown");
   const [viewMode, setViewMode] = useState<ViewMode>("rendered");
   const [preparedDocument, setPreparedDocument] = useState<{
     path: string;
@@ -389,7 +391,7 @@ export function MarkdownPreviewPane({
             mode={viewMode}
             onChange={handleViewChange}
             renderedDisabled={dirty}
-            renderedHint="Save to preview"
+            renderedHint={t("saveToPreview")}
           />
 
           {viewMode === "raw" ? (
@@ -412,21 +414,23 @@ export function MarkdownPreviewPane({
                 className="mx-auto w-full min-w-0 max-w-[800px] px-4 pt-12 pb-6 sm:px-[26px]"
               >
                 {doc.status === "loading" && (
-                  <p className="text-[12px] text-muted-foreground">Loading…</p>
+                  <p className="text-[12px] text-muted-foreground">
+                    {t("loading")}
+                  </p>
                 )}
                 {doc.status === "error" && (
                   <p className="text-[12px] text-destructive">
-                    Failed to read file: {doc.message}
+                    {t("readFailed", { message: doc.message })}
                   </p>
                 )}
                 {doc.status === "binary" && (
                   <p className="text-[12px] text-muted-foreground">
-                    Binary file: cannot render as markdown.
+                    {t("binaryUnsupported")}
                   </p>
                 )}
                 {doc.status === "toolarge" && (
                   <p className="text-[12px] text-muted-foreground">
-                    File is {doc.size} bytes; limit {doc.limit}.
+                    {t("tooLarge", { size: doc.size, limit: doc.limit })}
                   </p>
                 )}
                 {document && scrollContainer && (

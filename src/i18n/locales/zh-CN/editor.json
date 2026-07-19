@@ -8,6 +8,11 @@
   "formatOnSaveSkipped": "已跳过保存时格式化",
   "formatOnSaveSkippedDescription": "该文件没有活动的语言服务器。请在状态栏中启用一个，或在设置中选择 Biome/Prettier。",
   "formatFailed": "{{formatter}} 格式化失败",
+  "saveConflict": {
+    "title": "磁盘上的文件已更改",
+    "description": "当你有未保存的更改时,{{name}} 被另一个程序修改。覆盖文件以保留你的版本。",
+    "overwrite": "覆盖"
+  },
   "binaryFile": "二进制文件",
   "fileTooLarge": "文件过大",
   "previewNotSupported": "不支持预览",

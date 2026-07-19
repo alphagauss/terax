@@ -1,3 +1,4 @@
+import i18n from "@/i18n";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
 import type {
   EditorTab,
@@ -191,7 +192,7 @@ function hydrateTab(
         kind: "web-preview",
         spaceId,
         cold: true,
-        title: titleFromUrl(serialized.url),
+        title: titleFromUrl(serialized.url, i18n.t("tabs:webPreview")),
         url: serialized.url,
       } satisfies WebPreviewTab;
     case "markdown":

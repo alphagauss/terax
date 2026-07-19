@@ -78,11 +78,8 @@ export function createCommandItems(
     ctx.tabs.filter((tab) => tab.spaceId === activeTab.spaceId).length < 2;
   const noWorkspaceRoot = !ctx.explorerRoot && !ctx.home;
   const splitDisabled =
-    !activeTab ||
-    activeTab.kind === "ai-diff" ||
-    ((activeTab.kind === "editor" || activeTab.kind === "markdown") &&
-      activeTab.dirty)
-      ? "This view cannot be copied"
+    !activeTab || activeTab.kind === "ai-diff"
+      ? t("disabled.cannotCopyView")
       : undefined;
   const closeDisabled = onlyOneTab ? "Last tab" : undefined;
   const windowItems: PaletteItem[] =
