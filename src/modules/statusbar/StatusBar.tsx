@@ -40,7 +40,7 @@ export function StatusBar({
 }: Props) {
   const { t } = useTranslation("statusbar");
   return (
-    <footer className="flex h-8 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-card/60 pl-3 pr-4 text-[11px]">
+    <footer className="flex h-6 shrink-0 items-center justify-between gap-3 border-t border-border/60 bg-card/60 pl-3 pr-4 text-[11px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector
           onSelect={onWorkspaceChange}
