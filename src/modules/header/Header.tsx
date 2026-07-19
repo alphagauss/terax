@@ -2,11 +2,14 @@ import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
+import { useTheme } from "@/modules/theme";
 import {
   CommandIcon,
+  Moon02Icon,
   Settings01Icon,
   SidebarLeftIcon,
   SidebarRightIcon,
+  Sun03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -51,6 +54,7 @@ export function Header({
   searchRef,
 }: Props) {
   const { t } = useTranslation("header");
+  const { resolvedMode, setMode } = useTheme();
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
 
@@ -90,6 +94,23 @@ export function Header({
       <HugeiconsIcon icon={SidebarRightIcon} size={15} strokeWidth={1.75} />
     </Button>
   ) : null;
+
+  const themeButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
+      title={t("toggleTheme")}
+      aria-label={t("toggleTheme")}
+    >
+      <HugeiconsIcon
+        icon={resolvedMode === "dark" ? Sun03Icon : Moon02Icon}
+        size={15}
+        strokeWidth={1.75}
+      />
+    </Button>
+  );
 
   return (
     <div
@@ -149,6 +170,7 @@ export function Header({
             onActivateLocal={onActivateLocalAgent}
           />
           {settingsButton}
+          {themeButton}
           {secondarySidebarButton}
         </>
       )}
@@ -156,6 +178,7 @@ export function Header({
       {!IS_MAC && (
         <>
           {settingsButton}
+          {themeButton}
           {secondarySidebarButton}
         </>
       )}

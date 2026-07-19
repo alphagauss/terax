@@ -1,5 +1,6 @@
 {
   "settings": "Settings",
+  "toggleTheme": "Toggle theme",
   "toggleSidebar": "Toggle sidebar",
   "commandPalette": "Command palette",
   "search": "Search",
