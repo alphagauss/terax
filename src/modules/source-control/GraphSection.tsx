@@ -37,7 +37,7 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 40;
-const ROW_HEIGHT = 30;
+const ROW_HEIGHT = 24;
 const NEAR_BOTTOM_PX = 180;
 const FILES_CACHE_LIMIT = 16;
 
