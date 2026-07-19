@@ -1,5 +1,15 @@
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -100,6 +110,12 @@ type Row =
       tone: "muted" | "error";
       message: string;
     };
+
+type EntryTarget = {
+  path: string;
+  name: string;
+  isDir: boolean;
+};
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
@@ -257,12 +273,11 @@ export const FileExplorer = memo(
     const renameInProgress =
       tree.renaming !== null || tree.pendingCreate !== null;
 
-    const [menuTarget, setMenuTarget] = useState<{
-      path: string;
-      name: string;
-      isDir: boolean;
-    } | null>(null);
+    const [menuTarget, setMenuTarget] = useState<EntryTarget | null>(null);
+    const [contextMenuPath, setContextMenuPath] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
+    const [permanentDeleteTarget, setPermanentDeleteTarget] =
+      useState<EntryTarget | null>(null);
     // Bumped on every right-click so the menu content remounts and the popper
     // re-anchors to the new cursor (floating-ui won't reposition on an anchor
     // change alone, only on scroll/resize).
@@ -415,6 +430,19 @@ export const FileExplorer = memo(
     const pendingAtRoot =
       tree.pendingCreate?.parentPath === rootPath ? tree.pendingCreate : null;
 
+    const requestTrashDelete = useCallback(
+      (target: EntryTarget) => {
+        void tree.trashPath(target.path).then((result) => {
+          if (result.kind === "unavailable") {
+            setPermanentDeleteTarget(target);
+          } else if (result.kind === "error") {
+            toast.error(result.reason);
+          }
+        });
+      },
+      [tree.trashPath],
+    );
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (tree.renaming || tree.pendingCreate || isSearchOpen) return;
       const target = e.target as HTMLElement;
@@ -435,6 +463,27 @@ export const FileExplorer = memo(
       };
 
       switch (e.key) {
+        case "F2": {
+          if (currentIdx < 0) return;
+          e.preventDefault();
+          tree.beginRename(entryPaths[currentIdx]);
+          break;
+        }
+        case "Delete": {
+          if (currentIdx < 0) return;
+          e.preventDefault();
+          const path = entryPaths[currentIdx];
+          const idx = entryIndexByPath.get(path);
+          const row = idx === undefined ? undefined : rows[idx];
+          if (row?.kind === "entry") {
+            requestTrashDelete({
+              path: row.path,
+              name: row.name,
+              isDir: row.isDir,
+            });
+          }
+          break;
+        }
         case "ArrowDown":
           e.preventDefault();
           move(currentIdx < 0 ? 0 : currentIdx + 1);
@@ -503,6 +552,7 @@ export const FileExplorer = memo(
               actions={rowActions}
               renameInProgress={renameInProgress}
               isSelected={selectedPath === row.path}
+              isContextTarget={contextMenuPath === row.path}
               isRenaming={row.kind === "rename"}
               isDropTarget={dropTargetDir === row.path}
               onOpenFile={onOpenFile}
@@ -618,7 +668,10 @@ export const FileExplorer = memo(
         {!isSearchActive ? (
           <ContextMenu
             onOpenChange={(open) => {
-              if (!open) setDeleteConfirm(false);
+              if (!open) {
+                setDeleteConfirm(false);
+                setContextMenuPath(null);
+              }
             }}
           >
             <ContextMenuTrigger asChild>
@@ -629,7 +682,7 @@ export const FileExplorer = memo(
                 }}
                 data-explorer-drop=""
                 role="tree"
-                aria-label="Files"
+                aria-label={t("files")}
                 aria-activedescendant={
                   selectedPath
                     ? `file-tree-item-${encodeURIComponent(selectedPath)}`
@@ -652,6 +705,9 @@ export const FileExplorer = memo(
                   const idx =
                     path != null ? entryIndexByPath.get(path) : undefined;
                   const row = idx !== undefined ? rows[idx] : undefined;
+                  setContextMenuPath(
+                    row && row.kind === "entry" ? row.path : null,
+                  );
                   setMenuTarget(
                     row && row.kind === "entry"
                       ? { path: row.path, name: row.name, isDir: row.isDir }
@@ -699,7 +755,7 @@ export const FileExplorer = memo(
                     tabIndex={-1}
                     className="px-3 py-2 text-[11px] text-muted-foreground"
                   >
-                    Loading…
+                    {t("loading")}
                   </div>
                 )}
                 {root?.status === "error" && (
@@ -762,12 +818,18 @@ export const FileExplorer = memo(
                       {t("menu.open")}
                     </ContextMenuItem>
                   )}
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    onSelect={() => tree.beginRename(menuTarget.path)}
+                  >
+                    {t("common:rename")}
+                  </ContextMenuItem>
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(menuTarget.path)}
                     >
-                      Open in Terminal
+                      {t("menu.openInTerminal")}
                     </ContextMenuItem>
                   )}
                   {workspaceEnv.kind === "ssh" ? (
@@ -776,7 +838,7 @@ export const FileExplorer = memo(
                         className={COMPACT_ITEM}
                         onSelect={() => {
                           const localDir = window.prompt(
-                            "Download to local directory:",
+                            t("menu.downloadPrompt"),
                           );
                           if (!localDir) return;
                           void remoteNative
@@ -786,18 +848,18 @@ export const FileExplorer = memo(
                               localDir,
                             )
                             .then((path) =>
-                              toast.success(`Downloaded to ${path}`),
+                              toast.success(t("menu.downloadedTo", { path })),
                             )
                             .catch((error) => toast.error(String(error)));
                         }}
                       >
-                        Download to Local…
+                        {t("menu.downloadToLocal")}
                       </ContextMenuItem>
                       <ContextMenuItem
                         className={COMPACT_ITEM}
                         onSelect={() => {
                           const localPath = window.prompt(
-                            "Local file or directory to upload:",
+                            t("menu.uploadPrompt"),
                           );
                           if (!localPath) return;
                           const remoteDir = menuTarget.isDir
@@ -811,12 +873,12 @@ export const FileExplorer = memo(
                             )
                             .then(() => {
                               tree.refresh(remoteDir);
-                              toast.success("Upload complete");
+                              toast.success(t("menu.uploadComplete"));
                             })
                             .catch((error) => toast.error(String(error)));
                         }}
                       >
-                        Upload Local Path…
+                        {t("menu.uploadLocalPath")}
                       </ContextMenuItem>
                     </>
                   ) : (
@@ -824,7 +886,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => void revealInFinder(menuTarget.path)}
                     >
-                      Reveal in Finder
+                      {t("menu.revealInFinder")}
                     </ContextMenuItem>
                   )}
                   <ContextMenuSeparator />
@@ -869,15 +931,19 @@ export const FileExplorer = memo(
                       )
                     }
                   >
-                    Copy Relative Path
+                    {t("menu.copyRelativePath")}
                   </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    className={COMPACT_ITEM}
-                    onSelect={() => onAttachToAgent?.(menuTarget.path)}
-                  >
-                    Attach to Agent
-                  </ContextMenuItem>
+                  {!menuTarget.isDir && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => onAttachToAgent?.(menuTarget.path)}
+                      >
+                        {t("menu.attachToAgent")}
+                      </ContextMenuItem>
+                    </>
+                  )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
@@ -905,34 +971,32 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(rootPath)}
                     >
-                      Open in Terminal
+                      {t("menu.openInTerminal")}
                     </ContextMenuItem>
                   )}
                   {workspaceEnv.kind === "ssh" ? (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
                       onSelect={() => {
-                        const localPath = window.prompt(
-                          "Local file or directory to upload:",
-                        );
+                        const localPath = window.prompt(t("menu.uploadPrompt"));
                         if (!localPath) return;
                         void remoteNative
                           .upload(workspaceEnv.profileId, localPath, rootPath)
                           .then(() => {
                             tree.refresh(rootPath);
-                            toast.success("Upload complete");
+                            toast.success(t("menu.uploadComplete"));
                           })
                           .catch((error) => toast.error(String(error)));
                       }}
                     >
-                      Upload Local Path…
+                      {t("menu.uploadLocalPath")}
                     </ContextMenuItem>
                   ) : (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
                       onSelect={() => void revealInFinder(rootPath)}
                     >
-                      Reveal in Finder
+                      {t("menu.revealInFinder")}
                     </ContextMenuItem>
                   )}
                   <ContextMenuSeparator />
@@ -940,32 +1004,67 @@ export const FileExplorer = memo(
                     className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "file")}
                   >
-                    New File
+                    {t("menu.newFile")}
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "dir")}
                   >
-                    New Folder
+                    {t("menu.newFolder")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => void copyToClipboard(rootPath)}
                   >
-                    Copy Path
+                    {t("menu.copyPath")}
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.refresh(rootPath)}
                   >
-                    Refresh
+                    {t("menu.refresh")}
                   </ContextMenuItem>
                 </>
               )}
             </ContextMenuContent>
           </ContextMenu>
         ) : null}
+
+        <AlertDialog
+          open={permanentDeleteTarget !== null}
+          onOpenChange={(open) => {
+            if (!open) setPermanentDeleteTarget(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("menu.deletePermanentlyTitle")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {permanentDeleteTarget
+                  ? t("menu.deletePermanentlyDescription", {
+                      name: permanentDeleteTarget.name,
+                    })
+                  : ""}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  if (!permanentDeleteTarget) return;
+                  void tree.deletePath(permanentDeleteTarget.path);
+                  setPermanentDeleteTarget(null);
+                }}
+              >
+                {t("menu.deletePermanently")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {dnd.dragLabel ? (
           <div

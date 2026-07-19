@@ -26,6 +26,11 @@ export type PendingCreate = {
   kind: "file" | "dir";
 };
 
+export type TrashPathResult =
+  | { kind: "trashed" }
+  | { kind: "unavailable"; reason: string }
+  | { kind: "error"; reason: string };
+
 export function joinPath(parent: string, name: string): string {
   if (parent.endsWith("/")) return `${parent}${name}`;
   return `${parent}/${name}`;
@@ -485,6 +490,24 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     [fetchChildren, options, workspace],
   );
 
+  const trashPath = useCallback(
+    async (path: string): Promise<TrashPathResult> => {
+      try {
+        const result = await invoke<TrashPathResult>("fs_trash", {
+          path,
+          workspace,
+        });
+        if (result.kind !== "trashed") return result;
+        options?.onPathDeleted?.(path);
+        await fetchChildren(dirname(path));
+        return result;
+      } catch (e) {
+        return { kind: "error", reason: String(e) };
+      }
+    },
+    [fetchChildren, options, workspace],
+  );
+
   const movePath = useCallback(
     async (from: string, toDir: string) => {
       const name = from.slice(from.lastIndexOf("/") + 1);
@@ -529,6 +552,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     cancelRename,
     commitRename,
     deletePath,
+    trashPath,
     movePath,
     joinPath,
   };

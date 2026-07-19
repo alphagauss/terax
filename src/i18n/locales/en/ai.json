@@ -68,7 +68,10 @@
   "composer": {
     "placeholder": "Ask Terax anything   -   # for snippets and commands, @ for files",
     "listening": "Listening…",
-    "transcribing": "Transcribing…"
+    "transcribing": "Transcribing…",
+    "fileTooLarge": "{{name}} is too large to attach ({{size}}).",
+    "unsupportedFile": "{{name}} is not a supported text or image file.",
+    "attachFailed": "Could not attach the file: {{error}}"
   },
   "statusBar": {
     "openAiAgent": "Open AI agent",

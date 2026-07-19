@@ -68,7 +68,10 @@
   "composer": {
     "placeholder": "向 Terax 提问   -   输入 # 使用片段和命令，输入 @ 引用文件",
     "listening": "正在聆听…",
-    "transcribing": "正在转写…"
+    "transcribing": "正在转写…",
+    "fileTooLarge": "{{name}} 太大，无法附加（{{size}}）。",
+    "unsupportedFile": "{{name}} 不是支持的文本或图片文件。",
+    "attachFailed": "无法附加文件：{{error}}"
   },
   "statusBar": {
     "openAiAgent": "打开 AI agent",

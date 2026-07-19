@@ -47,6 +47,12 @@ pub struct FileStat {
     pub kind: StatKind,
 }
 
+#[derive(Serialize)]
+pub struct BinaryReadResult {
+    pub bytes: Vec<u8>,
+    pub size: u64,
+}
+
 fn mtime_millis(meta: &fs::Metadata) -> u64 {
     meta.modified()
         .ok()
@@ -81,6 +87,29 @@ pub async fn fs_read_file(
         return classify_bytes(bytes, meta.size, meta.mtime);
     }
     read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
+}
+
+#[tauri::command]
+pub async fn fs_read_binary(
+    remote: tauri::State<'_, RemoteState>,
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<BinaryReadResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        let workspace = remote.manager.workspace(profile_id).await?;
+        let meta = remote::sftp::stat(&workspace, &path).await?;
+        if meta.size > MAX_READ_BYTES {
+            return Err(format!("file is too large: {} bytes", meta.size));
+        }
+        let bytes = remote::sftp::read_file(&workspace, &path, MAX_READ_BYTES).await?;
+        return Ok(BinaryReadResult {
+            size: meta.size,
+            bytes,
+        });
+    }
+
+    read_binary_sync(&resolve_path(&path, &workspace))
 }
 
 fn classify_bytes(bytes: Vec<u8>, size: u64, mtime: u64) -> Result<ReadResult, String> {
@@ -120,6 +149,24 @@ fn read_file_sync(p: &Path, force: bool) -> Result<ReadResult, String> {
     })?;
 
     classify_bytes(bytes, size, mtime_millis(&meta))
+}
+
+fn read_binary_sync(p: &Path) -> Result<BinaryReadResult, String> {
+    let meta = std::fs::metadata(p).map_err(|e| {
+        log::debug!("fs_read_binary stat({}) failed: {e}", p.display());
+        e.to_string()
+    })?;
+    if meta.len() > MAX_READ_BYTES {
+        return Err(format!("file is too large: {} bytes", meta.len()));
+    }
+    let bytes = std::fs::read(p).map_err(|e| {
+        log::debug!("fs_read_binary read({}) failed: {e}", p.display());
+        e.to_string()
+    })?;
+    Ok(BinaryReadResult {
+        size: meta.len(),
+        bytes,
+    })
 }
 
 #[derive(Serialize, Clone)]
@@ -289,6 +336,18 @@ mod tests {
             read_file_sync(&f, false).unwrap(),
             ReadResult::Binary { .. }
         ));
+    }
+
+    #[test]
+    fn read_binary_returns_exact_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("a.png");
+        let expected = [0x89, 0x50, 0x4e, 0x47, 0x00, 0xff];
+        std::fs::write(&f, expected).unwrap();
+
+        let result = read_binary_sync(&f).unwrap();
+        assert_eq!(result.bytes, expected);
+        assert_eq!(result.size, expected.len() as u64);
     }
 
     #[test]

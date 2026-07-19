@@ -54,6 +54,7 @@ tokio = { version = "1", default-features = false, features = [
 	"fs",
 ] }
 tempfile = "3"
+trash = "5.2.6"
 notify = "8.2.0"
 which = "8.0.4"
 russh = { version = "0.61.2", default-features = false, features = [

@@ -1,5 +1,13 @@
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
+use serde::Serialize;
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum TrashResult {
+    Trashed,
+    Unavailable { reason: String },
+}
 
 /// Creates a new empty file. Fails if the file already exists.
 #[tauri::command]
@@ -102,6 +110,37 @@ pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<
         log::warn!("fs_delete({}) failed: {e}", p.display());
         e.to_string()
     })
+}
+
+/// Moves a local path to the operating system trash. Remote workspaces return
+/// an explicit unavailable result so the frontend can ask before permanent deletion.
+#[tauri::command]
+pub async fn fs_trash(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<TrashResult, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    if workspace.ssh_profile_id().is_some() {
+        return Ok(TrashResult::Unavailable {
+            reason: "remote workspace has no local trash service".to_string(),
+        });
+    }
+
+    let p = resolve_path(&path, &workspace);
+    std::fs::symlink_metadata(&p).map_err(|e| {
+        log::debug!("fs_trash stat({}) failed: {e}", p.display());
+        e.to_string()
+    })?;
+
+    match trash::delete(&p) {
+        Ok(()) => Ok(TrashResult::Trashed),
+        Err(error) => {
+            log::warn!("fs_trash({}) failed: {error}", p.display());
+            Ok(TrashResult::Unavailable {
+                reason: error.to_string(),
+            })
+        }
+    }
 }
 
 fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {

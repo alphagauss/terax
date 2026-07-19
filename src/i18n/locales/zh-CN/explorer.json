@@ -1,5 +1,6 @@
 {
   "noCurrentDirectory": "当前无目录",
+  "files": "文件",
   "loading": "加载中…",
   "searchFiles": "搜索文件",
   "newFile": "新建文件",
@@ -13,11 +14,21 @@
     "open": "打开",
     "openInTerminal": "在终端中打开",
     "revealInFinder": "在访达中显示",
+    "downloadPrompt": "下载到本地目录：",
+    "downloadToLocal": "下载到本地…",
+    "downloadedTo": "已下载到 {{path}}",
+    "uploadPrompt": "要上传的本地文件或目录：",
+    "uploadLocalPath": "上传本地路径…",
+    "uploadComplete": "上传完成",
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "copyPath": "复制路径",
     "copyRelativePath": "复制相对路径",
     "attachToAgent": "附加到 Agent",
-    "confirmDelete": "再次点击以确认"
+    "confirmDelete": "再次点击以确认",
+    "refresh": "刷新",
+    "deletePermanentlyTitle": "永久删除？",
+    "deletePermanentlyDescription": "{{name}} 无法移动到回收站。确定要永久删除吗？",
+    "deletePermanently": "永久删除"
   }
 }

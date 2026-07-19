@@ -92,6 +92,10 @@ export type PendingSelection = {
   source: "terminal" | "editor";
 };
 
+export type PendingFileAttachment = {
+  path: string;
+};
+
 export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
@@ -125,6 +129,9 @@ type StoreState = {
   pendingSelections: PendingSelection[];
   attachSelection: (text: string, source: "terminal" | "editor") => void;
   consumeSelections: () => PendingSelection[];
+  pendingFileAttachments: PendingFileAttachment[];
+  attachFile: (path: string) => void;
+  consumeFileAttachments: () => PendingFileAttachment[];
 
   agentMeta: AgentMeta;
   patchAgentMeta: (patch: Partial<AgentMeta>) => void;
@@ -238,6 +245,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
   consumeSelections: () => {
     const v = get().pendingSelections;
     if (v.length > 0) set({ pendingSelections: [] });
+    return v;
+  },
+
+  pendingFileAttachments: [],
+  attachFile: (path) => {
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    set((s) => ({
+      pendingFileAttachments: [...s.pendingFileAttachments, { path: trimmed }],
+    }));
+  },
+  consumeFileAttachments: () => {
+    const v = get().pendingFileAttachments;
+    if (v.length > 0) set({ pendingFileAttachments: [] });
     return v;
   },
 

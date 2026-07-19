@@ -25,6 +25,7 @@ export type EntryRowProps = {
   actions: RowActions;
   renameInProgress: boolean;
   isSelected: boolean;
+  isContextTarget?: boolean;
   isRenaming: boolean;
   isDropTarget?: boolean;
   onOpenFile: (path: string, pin?: boolean) => void;
@@ -44,6 +45,7 @@ function EntryRowImpl(props: EntryRowProps) {
     actions,
     renameInProgress,
     isSelected,
+    isContextTarget = false,
     isRenaming,
     isDropTarget = false,
     onOpenFile,
@@ -99,14 +101,16 @@ function EntryRowImpl(props: EntryRowProps) {
       tabIndex={-1}
       data-fs-path={path}
       onClick={handleClick}
-      onDoubleClick={() => !isDir && actions.beginRename(path)}
+      onDoubleClick={() => !isDir && onOpenFile(path, true)}
       className={cn(
         "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
-        isSelected
-          ? "bg-accent text-foreground"
-          : gitignored
-            ? "text-muted-foreground"
-            : "text-foreground",
+        isContextTarget
+          ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
+          : isSelected
+            ? "bg-accent text-foreground"
+            : gitignored
+              ? "text-muted-foreground"
+              : "text-foreground",
         isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
       )}
       style={{ paddingLeft }}

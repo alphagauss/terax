@@ -549,17 +549,14 @@ export default function App() {
   }, [openAiPanelAndFocus, secondarySidebar.close, secondarySidebar.collapsed]);
 
   const attachSelection = useChatStore((s) => s.attachSelection);
+  const attachFile = useChatStore((s) => s.attachFile);
 
   const handleAttachFileToAgent = useCallback(
     (path: string) => {
-      // Dispatch a window event the composer listens for. Same pattern as
-      // selections — keeps file-explorer decoupled from the AI module.
-      window.dispatchEvent(
-        new CustomEvent<string>("terax:ai-attach-file", { detail: path }),
-      );
+      attachFile(path);
       openAiPanelAndFocus();
     },
-    [openAiPanelAndFocus],
+    [attachFile, openAiPanelAndFocus],
   );
 
   const askFromSelection = useCallback(() => {

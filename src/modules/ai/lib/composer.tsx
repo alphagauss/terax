@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
@@ -34,6 +35,23 @@ type MessagePart =
 export const MAX_TEXT_INLINE = 200_000;
 export const ACCEPTED_FILES =
   "image/*,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile";
+
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  avif: "image/avif",
+  bmp: "image/bmp",
+  gif: "image/gif",
+  heic: "image/heic",
+  heif: "image/heif",
+  ico: "image/x-icon",
+  jfif: "image/jpeg",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  svg: "image/svg+xml",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  webp: "image/webp",
+};
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 
@@ -73,6 +91,7 @@ type ProviderProps = {
 };
 
 export function AiComposerProvider({ children }: ProviderProps) {
+  const { t } = useTranslation("ai");
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore((s) => s.agentMeta.status);
   const isBusy = status === "thinking" || status === "streaming";
@@ -83,47 +102,101 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const attachFileByPath = useCallback(async (path: string) => {
-    try {
-      type ReadResult =
-        | { kind: "text"; content: string; size: number }
-        | { kind: "binary"; size: number }
-        | { kind: "toolarge"; size: number; limit: number };
-      const result = await invoke<ReadResult>("fs_read_file", {
-        path,
-        workspace: currentWorkspaceEnv(),
-      });
-      if (result.kind !== "text") {
-        // Binary/oversize files: skip (could surface a toast in future).
-        console.warn("attachFileByPath: skipped non-text file", path, result);
-        return;
+  const attachFileByPath = useCallback(
+    async (path: string) => {
+      try {
+        const workspace = currentWorkspaceEnv();
+        const name = basename(path);
+        const id = `path-${path}`;
+        type ReadResult =
+          | { kind: "text"; content: string; size: number }
+          | { kind: "binary"; size: number }
+          | { kind: "toolarge"; size: number; limit: number };
+        const result = await invoke<ReadResult>("fs_read_file", {
+          path,
+          workspace,
+        });
+
+        if (result.kind === "toolarge") {
+          toast.error(
+            t("composer.fileTooLarge", {
+              name,
+              size: formatBytes(result.size),
+            }),
+          );
+          return;
+        }
+
+        const mediaType = imageMediaTypeForPath(path);
+        if (mediaType) {
+          const binary = await invoke<{ bytes: number[]; size: number }>(
+            "fs_read_binary",
+            { path, workspace },
+          );
+          const url = await readAsDataURL(
+            new Blob([new Uint8Array(binary.bytes)], { type: mediaType }),
+          );
+          setFiles((prev) => {
+            if (prev.some((f) => f.id === id)) return prev;
+            return [
+              ...prev,
+              {
+                id,
+                name,
+                kind: "image",
+                mediaType,
+                url,
+                size: binary.size,
+              },
+            ];
+          });
+          useChatStore.getState().focusInput();
+          return;
+        }
+
+        if (result.kind === "text") {
+          if (result.size > MAX_TEXT_INLINE) {
+            toast.error(
+              t("composer.fileTooLarge", {
+                name,
+                size: formatBytes(result.size),
+              }),
+            );
+            return;
+          }
+          setFiles((prev) => {
+            if (prev.some((f) => f.id === id)) return prev;
+            return [
+              ...prev,
+              {
+                id,
+                name,
+                kind: "text",
+                mediaType: "text/plain",
+                text: result.content,
+                size: result.size,
+              },
+            ];
+          });
+          useChatStore.getState().focusInput();
+          return;
+        }
+
+        toast.error(t("composer.unsupportedFile", { name }));
+      } catch (e) {
+        toast.error(t("composer.attachFailed", { error: String(e) }));
       }
-      const name = path.split("/").pop() || path;
-      const id = `path-${path}`;
-      setFiles((prev) => {
-        if (prev.some((f) => f.id === id)) return prev;
-        const att: FileAttachment = {
-          id,
-          name,
-          kind: "text",
-          mediaType: "text/plain",
-          text: result.content,
-          size: result.size,
-        };
-        return [...prev, att];
-      });
-      // Open the AI panel & focus the input so the user sees the chip.
-      useChatStore.getState().focusInput();
-    } catch (e) {
-      console.error("attachFileByPath failed:", e);
-    }
-  }, []);
+    },
+    [t],
+  );
 
   const focusSignal = useChatStore((s) => s.focusSignal);
   const pendingPrefill = useChatStore((s) => s.pendingPrefill);
   const consumePrefill = useChatStore((s) => s.consumePrefill);
   const pendingSelections = useChatStore((s) => s.pendingSelections);
   const consumeSelections = useChatStore((s) => s.consumeSelections);
+  const pendingFileAttachments = useChatStore((s) => s.pendingFileAttachments);
+  const consumeFileAttachments = useChatStore((s) => s.consumeFileAttachments);
 
   useEffect(() => {
     if (focusSignal === 0) return;
@@ -143,17 +216,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
     prevIsBusyRef.current = isBusy;
   }, [isBusy]);
 
-  // Listen for explorer's "Attach to Agent" event.
   useEffect(() => {
-    const onAttach = (e: Event) => {
-      const path = (e as CustomEvent<string>).detail;
-      if (typeof path === "string" && path.length > 0) {
-        void attachFileByPath(path);
-      }
-    };
-    window.addEventListener("terax:ai-attach-file", onAttach);
-    return () => window.removeEventListener("terax:ai-attach-file", onAttach);
-  }, [attachFileByPath]);
+    if (pendingFileAttachments.length === 0) return;
+    const drained = consumeFileAttachments();
+    for (const attachment of drained) {
+      void attachFileByPath(attachment.path);
+    }
+  }, [attachFileByPath, consumeFileAttachments, pendingFileAttachments]);
 
   useEffect(() => {
     if (pendingSelections.length === 0) return;
@@ -380,6 +449,23 @@ async function readAttachment(file: File): Promise<FileAttachment | null> {
     text,
     size: file.size,
   };
+}
+
+function basename(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
+
+function imageMediaTypeForPath(path: string): string | null {
+  const name = basename(path).toLowerCase();
+  const dot = name.lastIndexOf(".");
+  return dot === -1 ? null : (IMAGE_MEDIA_TYPES[name.slice(dot + 1)] ?? null);
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function readAsDataURL(file: Blob): Promise<string> {
