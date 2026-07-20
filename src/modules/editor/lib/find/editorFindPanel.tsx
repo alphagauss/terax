@@ -16,7 +16,7 @@ import {
   type SearchQuery,
   setSearchQuery,
 } from "@codemirror/search";
-import { EditorSelection, type Text } from "@codemirror/state";
+import type { Text } from "@codemirror/state";
 import type { EditorView, Panel, ViewUpdate } from "@codemirror/view";
 import { createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -27,6 +27,7 @@ import {
   type FindRange,
   findMatchPosition,
   mapFindRanges,
+  replaceMatchAndSelectNext,
 } from "./editorFindModel";
 import { replacementForMatch } from "./replacement";
 
@@ -369,12 +370,17 @@ class EditorFindPanel implements Panel {
       regexpMatch: match.match,
       preserveCase: true,
     });
+    const replacement = replaceMatchAndSelectNext(
+      this.view.state,
+      this.query,
+      match,
+      insert,
+    );
     this.view.dispatch({
-      changes: { from: match.from, to: match.to, insert },
-      selection: EditorSelection.cursor(match.from + insert.length),
+      ...replacement,
+      scrollIntoView: true,
       userEvent: "input.replace",
     });
-    findNext(this.view);
   }
 
   private replaceEveryMatch(): void {

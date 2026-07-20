@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldAutoFillGitHistory } from "./GitHistoryPane";
+import {
+  shouldAutoFillGitHistory,
+  shouldContinueGitHistorySearch,
+} from "./GitHistoryPane";
 
 describe("Git History pagination", () => {
   it("does not auto-fill a hidden retained view", () => {
@@ -26,5 +29,35 @@ describe("Git History pagination", () => {
         scrollable: 0,
       }),
     ).toBe(true);
+  });
+
+  it("continues loading while a visible history search is incomplete", () => {
+    expect(
+      shouldContinueGitHistorySearch({
+        visible: true,
+        loadStatus: "idle",
+        endReached: false,
+        activeSearch: "target",
+      }),
+    ).toBe(true);
+  });
+
+  it("stops search pagination when the query clears or history ends", () => {
+    expect(
+      shouldContinueGitHistorySearch({
+        visible: true,
+        loadStatus: "idle",
+        endReached: false,
+        activeSearch: "",
+      }),
+    ).toBe(false);
+    expect(
+      shouldContinueGitHistorySearch({
+        visible: true,
+        loadStatus: "idle",
+        endReached: true,
+        activeSearch: "target",
+      }),
+    ).toBe(false);
   });
 });

@@ -54,6 +54,8 @@ const RAIL_RESERVED_PX = railWidth(MAX_VISIBLE_LANES);
 const GRID_TEMPLATE = `${RAIL_RESERVED_PX + 4}px 60px minmax(0, 560px) minmax(12px, 1fr) minmax(140px, max-content) 96px 116px`;
 
 const PAGE_SIZE = 30;
+// Must match the native git-log cap so a clamped page is not mistaken for EOF.
+const SEARCH_PAGE_SIZE = 200;
 const ROW_HEIGHT = 32;
 const TABLE_HEADER_HEIGHT = 24;
 const NEAR_BOTTOM_PX = 240;
@@ -92,6 +94,20 @@ export function shouldAutoFillGitHistory(input: {
     !input.activeSearch &&
     input.commitCount > 0 &&
     input.scrollable <= NEAR_BOTTOM_PX
+  );
+}
+
+export function shouldContinueGitHistorySearch(input: {
+  visible: boolean;
+  loadStatus: LoadStatus;
+  endReached: boolean;
+  activeSearch: string;
+}): boolean {
+  return (
+    input.visible &&
+    input.loadStatus === "idle" &&
+    !input.endReached &&
+    Boolean(input.activeSearch)
   );
 }
 
@@ -342,9 +358,10 @@ export function GitHistoryPane({
     inflightMoreRef.current = true;
     setLoadStatus("more");
     setError(null);
+    const limit = activeSearch ? SEARCH_PAGE_SIZE : PAGE_SIZE;
     try {
       const entries = await native.gitLog(repoRoot, {
-        limit: PAGE_SIZE,
+        limit,
         beforeSha: last.sha,
       });
       if (requestId !== requestIdRef.current) return;
@@ -354,7 +371,7 @@ export function GitHistoryPane({
         for (const e of entries) if (!seen.has(e.sha)) merged.push(e);
         return merged;
       });
-      if (entries.length < PAGE_SIZE) setEndReached(true);
+      if (entries.length < limit) setEndReached(true);
       setLoadStatus("idle");
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
@@ -365,7 +382,7 @@ export function GitHistoryPane({
         inflightMoreRef.current = false;
       }
     }
-  }, [commits, endReached, loadStatus, repoRoot, visible]);
+  }, [activeSearch, commits, endReached, loadStatus, repoRoot, visible]);
 
   useEffect(() => {
     filesRequestIdRef.current += 1;
@@ -432,6 +449,21 @@ export function GitHistoryPane({
     }, 0);
     return () => window.clearTimeout(id);
   }, [commits.length, activeSearch, endReached, loadMore, loadStatus, visible]);
+
+  useEffect(() => {
+    if (
+      !shouldContinueGitHistorySearch({
+        visible,
+        loadStatus,
+        endReached,
+        activeSearch,
+      })
+    ) {
+      return;
+    }
+    const id = window.setTimeout(() => void loadMore(), 0);
+    return () => window.clearTimeout(id);
+  }, [activeSearch, endReached, loadMore, loadStatus, visible]);
 
   const handleRefresh = useCallback(() => {
     filesRequestIdRef.current += 1;
@@ -543,7 +575,11 @@ export function GitHistoryPane({
               className="pointer-events-auto"
               state={findPresence.state}
               query={searchInput}
-              result={searchInput ? { total: filtered.length } : undefined}
+              result={
+                activeSearch && endReached
+                  ? { total: filtered.length }
+                  : undefined
+              }
               onQueryChange={setSearchInput}
               onClose={() => {
                 setFindOpen(false);

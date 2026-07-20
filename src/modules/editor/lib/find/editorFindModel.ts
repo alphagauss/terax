@@ -1,8 +1,10 @@
 import { SearchQuery } from "@codemirror/search";
-import type {
-  ChangeDesc,
-  EditorState,
-  SelectionRange,
+import {
+  type ChangeDesc,
+  type ChangeSet,
+  type EditorState,
+  EditorSelection,
+  type SelectionRange,
 } from "@codemirror/state";
 
 export type FindRange = {
@@ -79,4 +81,43 @@ export function findMatchPosition(
   const next = ranges.findIndex((range) => range.from >= selection.from);
   if (next >= 0) return next + 1;
   return limited ? 0 : ranges.length > 0 ? 1 : 0;
+}
+
+function nextDistinctMatch(
+  cursor: Iterator<FindRange>,
+  current: FindRange,
+): FindRange | null {
+  let next = cursor.next();
+  while (!next.done) {
+    if (next.value.from !== current.from || next.value.to !== current.to) {
+      return next.value;
+    }
+    next = cursor.next();
+  }
+  return null;
+}
+
+function findNextMatch(
+  state: EditorState,
+  query: SearchQuery,
+  current: FindRange,
+): FindRange | null {
+  return (
+    nextDistinctMatch(query.getCursor(state, current.to), current) ??
+    nextDistinctMatch(query.getCursor(state, 0, current.from), current)
+  );
+}
+
+export function replaceMatchAndSelectNext(
+  state: EditorState,
+  query: SearchQuery,
+  match: FindRange,
+  insert: string,
+): { changes: ChangeSet; selection: EditorSelection } {
+  const next = findNextMatch(state, query, match);
+  const changes = state.changes({ ...match, insert });
+  const selection = next
+    ? EditorSelection.single(next.from, next.to).map(changes)
+    : EditorSelection.single(match.from + insert.length);
+  return { changes, selection };
 }

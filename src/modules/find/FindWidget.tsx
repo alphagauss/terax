@@ -94,6 +94,13 @@ type FindButtonProps = {
   className?: string;
 };
 
+export function isFindKeyboardEventComposing(input: {
+  isComposing: boolean;
+  keyCode: number;
+}): boolean {
+  return input.isComposing || input.keyCode === 229;
+}
+
 function FindButton({
   label,
   children,
@@ -184,6 +191,15 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
     );
 
     const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+      if (
+        isFindKeyboardEventComposing({
+          isComposing: event.nativeEvent.isComposing,
+          keyCode: event.keyCode,
+        })
+      ) {
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         event.stopPropagation();

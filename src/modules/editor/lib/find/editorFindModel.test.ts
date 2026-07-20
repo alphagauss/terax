@@ -5,6 +5,7 @@ import {
   collectFindMatches,
   createEditorFindQuery,
   findMatchPosition,
+  replaceMatchAndSelectNext,
 } from "./editorFindModel";
 
 const value = {
@@ -65,5 +66,62 @@ describe("editor find model", () => {
     expect(
       findMatchPosition(matches.ranges, state.selection.main, matches.limited),
     ).toBe(0);
+  });
+
+  it("maps the next scoped match through a length-changing replacement", () => {
+    const state = EditorState.create({
+      doc: "ONE one",
+      selection: { anchor: 0, head: 3 },
+    });
+    const query = createEditorFindQuery(value, [{ from: 0, to: 7 }]);
+    const replacement = replaceMatchAndSelectNext(
+      state,
+      query,
+      { from: 0, to: 3 },
+      "VALUE",
+    );
+    const next = state.update(replacement).state;
+
+    expect(next.doc.toString()).toBe("VALUE one");
+    expect(next.selection.main.from).toBe(6);
+    expect(next.selection.main.to).toBe(9);
+  });
+
+  it("wraps to the first match when replacing the last match", () => {
+    const state = EditorState.create({
+      doc: "one ONE",
+      selection: { anchor: 4, head: 7 },
+    });
+    const query = createEditorFindQuery(value, null);
+    const replacement = replaceMatchAndSelectNext(
+      state,
+      query,
+      { from: 4, to: 7 },
+      "VALUE",
+    );
+    const next = state.update(replacement).state;
+
+    expect(next.doc.toString()).toBe("one VALUE");
+    expect(next.selection.main.from).toBe(0);
+    expect(next.selection.main.to).toBe(3);
+  });
+
+  it("places the cursor after the replacement when there is no next match", () => {
+    const state = EditorState.create({
+      doc: "ONE",
+      selection: { anchor: 0, head: 3 },
+    });
+    const query = createEditorFindQuery(value, null);
+    const replacement = replaceMatchAndSelectNext(
+      state,
+      query,
+      { from: 0, to: 3 },
+      "VALUE",
+    );
+    const next = state.update(replacement).state;
+
+    expect(next.doc.toString()).toBe("VALUE");
+    expect(next.selection.main.from).toBe(5);
+    expect(next.selection.main.to).toBe(5);
   });
 });
