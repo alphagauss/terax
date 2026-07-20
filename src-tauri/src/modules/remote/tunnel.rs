@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use tauri::async_runtime::JoinHandle;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
 use super::models::{TunnelConfig, TunnelInfo, TunnelKind, TunnelStatus};
 use super::session::RemoteWorkspace;
@@ -66,6 +66,7 @@ struct TunnelRuntime {
 pub struct TunnelManager {
     next_id: AtomicU64,
     tunnels: RwLock<HashMap<u64, TunnelRuntime>>,
+    operation_lock: AsyncMutex<()>,
 }
 
 impl Default for TunnelManager {
@@ -73,12 +74,22 @@ impl Default for TunnelManager {
         Self {
             next_id: AtomicU64::new(1),
             tunnels: RwLock::new(HashMap::new()),
+            operation_lock: AsyncMutex::new(()),
         }
     }
 }
 
 impl TunnelManager {
     pub async fn start(
+        &self,
+        workspace: Arc<RemoteWorkspace>,
+        config: TunnelConfig,
+    ) -> Result<TunnelInfo, String> {
+        let _operation = self.operation_lock.lock().await;
+        self.start_unlocked(workspace, config).await
+    }
+
+    async fn start_unlocked(
         &self,
         workspace: Arc<RemoteWorkspace>,
         config: TunnelConfig,
@@ -198,9 +209,18 @@ impl TunnelManager {
         &self,
         id: u64,
         workspace: Option<Arc<RemoteWorkspace>>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<TunnelInfo>, String> {
+        let _operation = self.operation_lock.lock().await;
+        self.stop_unlocked(id, workspace).await
+    }
+
+    async fn stop_unlocked(
+        &self,
+        id: u64,
+        workspace: Option<Arc<RemoteWorkspace>>,
+    ) -> Result<Option<TunnelInfo>, String> {
         let Some(mut runtime) = self.tunnels.write().await.remove(&id) else {
-            return Ok(());
+            return Ok(None);
         };
         if let Some(task) = runtime.task.take() {
             task.abort();
@@ -219,7 +239,7 @@ impl TunnelManager {
                     .await;
             }
         }
-        Ok(())
+        Ok(Some(runtime.info))
     }
 
     pub async fn list(&self, profile_id: Option<&str>) -> Vec<TunnelInfo> {
@@ -247,7 +267,55 @@ impl TunnelManager {
             .collect()
     }
 
-    pub async fn stop_profile(&self, profile_id: &str, workspace: Arc<RemoteWorkspace>) {
+    pub async fn config(&self, id: u64) -> Option<TunnelConfig> {
+        self.tunnels
+            .read()
+            .await
+            .get(&id)
+            .map(|runtime| runtime.config.clone())
+    }
+
+    pub async fn info(&self, id: u64) -> Option<TunnelInfo> {
+        self.tunnels.read().await.get(&id).map(|runtime| {
+            let mut info = runtime.info.clone();
+            info.bytes = runtime.bytes.load(Ordering::Relaxed);
+            info
+        })
+    }
+
+    pub async fn replace(
+        &self,
+        id: u64,
+        workspace: Arc<RemoteWorkspace>,
+        config: TunnelConfig,
+    ) -> Result<TunnelInfo, String> {
+        validate(&config)?;
+        let _operation = self.operation_lock.lock().await;
+        let previous = self
+            .config(id)
+            .await
+            .ok_or_else(|| format!("SSH tunnel {id} was not found"))?;
+        if previous.profile_id != config.profile_id {
+            return Err("SSH tunnel profile cannot be changed".into());
+        }
+        self.stop_unlocked(id, Some(workspace.clone())).await?;
+        match self.start_unlocked(workspace.clone(), config).await {
+            Ok(tunnel) => Ok(tunnel),
+            Err(error) => match self.start_unlocked(workspace, previous).await {
+                Ok(_) => Err(format!("{error}. The previous tunnel was restored.")),
+                Err(restore_error) => Err(format!(
+                    "{error}. The previous tunnel could not be restored: {restore_error}"
+                )),
+            },
+        }
+    }
+
+    pub async fn stop_profile(
+        &self,
+        profile_id: &str,
+        workspace: Arc<RemoteWorkspace>,
+    ) -> Vec<TunnelInfo> {
+        let _operation = self.operation_lock.lock().await;
         let ids: Vec<u64> = self
             .tunnels
             .read()
@@ -255,15 +323,25 @@ impl TunnelManager {
             .iter()
             .filter_map(|(id, runtime)| (runtime.info.profile_id == profile_id).then_some(*id))
             .collect();
+        let mut stopped = Vec::new();
         for id in ids {
-            let _ = self.stop(id, Some(workspace.clone())).await;
+            if let Ok(Some(info)) = self.stop_unlocked(id, Some(workspace.clone())).await {
+                stopped.push(info);
+            }
         }
+        stopped
     }
 }
 
 fn validate(config: &TunnelConfig) -> Result<(), String> {
     if config.profile_id.trim().is_empty() {
         return Err("tunnel profile is required".into());
+    }
+    if config.name.trim().is_empty() {
+        return Err("tunnel name is required".into());
+    }
+    if config.bind_host.trim().chars().any(char::is_whitespace) {
+        return Err("tunnel bind host cannot contain whitespace".into());
     }
     if config.kind != TunnelKind::Dynamic
         && (config.target_host.trim().is_empty() || config.target_port == 0)
@@ -384,4 +462,39 @@ async fn socks5_serve(
 
 fn socks_reply(code: u8) -> [u8; 10] {
     [5, code, 0, 1, 0, 0, 0, 0, 0, 0]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(kind: TunnelKind) -> TunnelConfig {
+        TunnelConfig {
+            profile_id: "ssh-prod".to_string(),
+            name: "App".to_string(),
+            kind,
+            bind_host: "127.0.0.1".to_string(),
+            bind_port: 3000,
+            target_host: "app.internal".to_string(),
+            target_port: 8080,
+        }
+    }
+
+    #[test]
+    fn dynamic_tunnels_do_not_need_a_target() {
+        let mut tunnel = config(TunnelKind::Dynamic);
+        tunnel.target_host.clear();
+        tunnel.target_port = 0;
+        assert!(validate(&tunnel).is_ok());
+    }
+
+    #[test]
+    fn forwarding_tunnels_need_a_target_and_name() {
+        let mut tunnel = config(TunnelKind::Local);
+        tunnel.target_port = 0;
+        assert!(validate(&tunnel).is_err());
+        tunnel.target_port = 8080;
+        tunnel.name.clear();
+        assert!(validate(&tunnel).is_err());
+    }
 }

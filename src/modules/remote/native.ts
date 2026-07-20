@@ -6,6 +6,7 @@ import type {
   ImportedHost,
   SshProfile,
   TunnelConfig,
+  TunnelEvent,
   TunnelInfo,
 } from "./types";
 
@@ -39,12 +40,14 @@ export const remoteNative = {
       remember,
     }),
   importConfig: () => invoke<ImportedHost[]>("ssh_import_config"),
-  listTunnels: (profileId?: string) =>
+  listTunnels: (profileId: string) =>
     invoke<TunnelInfo[]>("ssh_tunnel_list", {
-      profileId: profileId ?? null,
+      profileId,
     }),
   startTunnel: (config: TunnelConfig) =>
     invoke<TunnelInfo>("ssh_tunnel_start", { config }),
+  updateTunnel: (id: number, config: TunnelConfig) =>
+    invoke<TunnelInfo>("ssh_tunnel_update", { id, config }),
   stopTunnel: (id: number) => invoke<void>("ssh_tunnel_stop", { id }),
   upload: (profileId: string, localPath: string, remoteDir: string) =>
     invoke<void>("ssh_upload", { profileId, localPath, remoteDir }),
@@ -77,20 +80,23 @@ export const remoteNative = {
       service: SSH_SECRET_SERVICE,
       account: proxySecretAccount(profileId),
     }),
-  deleteSecret: async (profileId: string) => {
+  deleteAuthSecret: (profileId: string) =>
+    invoke<void>("secrets_delete", {
+      service: SSH_SECRET_SERVICE,
+      account: profileId,
+    }),
+  deleteSecrets: async (profileId: string) => {
     await Promise.all([
-      invoke<void>("secrets_delete", {
-        service: SSH_SECRET_SERVICE,
-        account: profileId,
-      }),
-      invoke<void>("secrets_delete", {
-        service: SSH_SECRET_SERVICE,
-        account: proxySecretAccount(profileId),
-      }),
+      remoteNative.deleteAuthSecret(profileId),
+      remoteNative.deleteProxySecret(profileId),
     ]);
   },
   onStatus: (handler: (info: ConnectionInfo) => void): Promise<UnlistenFn> =>
     listen<ConnectionInfo>("terax://ssh-status", (event) =>
+      handler(event.payload),
+    ),
+  onTunnel: (handler: (event: TunnelEvent) => void): Promise<UnlistenFn> =>
+    listen<TunnelEvent>("terax://ssh-tunnel", (event) =>
       handler(event.payload),
     ),
   onHostKey: (handler: (prompt: HostKeyPrompt) => void): Promise<UnlistenFn> =>

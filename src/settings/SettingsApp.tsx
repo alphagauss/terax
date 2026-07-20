@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -9,6 +10,7 @@ import {
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
+  ServerStack03Icon,
   Settings01Icon,
   SourceCodeIcon,
   UserMultiple02Icon,
@@ -22,6 +24,7 @@ import { AgentsSection } from "./sections/AgentsSection";
 import { EditorSection } from "./sections/EditorSection";
 import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
+import { RemoteSection } from "./sections/RemoteSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
 
@@ -36,6 +39,7 @@ const TABS: {
   { id: "shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
   { id: "models", icon: AiScanIcon, component: ModelsSection },
   { id: "agents", icon: UserMultiple02Icon, component: AgentsSection },
+  { id: "remote", icon: ServerStack03Icon, component: RemoteSection },
   { id: "about", icon: InformationCircleIcon, component: AboutSection },
 ];
 
@@ -46,6 +50,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "remote",
   "about",
 ];
 
@@ -103,7 +108,7 @@ export function SettingsApp() {
           className="flex-1 items-center"
           data-tauri-drag-region
         >
-          <TabsList className="mx-auto h-7 bg-muted/40 px-2">
+          <TabsList className="mx-auto h-7 max-w-full overflow-x-auto bg-muted/40 px-2">
             {TABS.map((tab) => (
               <TabsTrigger
                 key={tab.id}
@@ -120,7 +125,12 @@ export function SettingsApp() {
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="mx-auto w-full max-w-160">
+        <div
+          className={cn(
+            "mx-auto w-full",
+            active === "remote" ? "max-w-[54rem]" : "max-w-160",
+          )}
+        >
           {ActiveSection && <ActiveSection />}
         </div>
       </main>

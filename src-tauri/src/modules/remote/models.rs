@@ -149,6 +149,24 @@ pub struct TunnelInfo {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelEvent {
+    pub kind: TunnelEventKind,
+    pub profile_id: String,
+    pub tunnel: Option<TunnelInfo>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TunnelEventKind {
+    Started,
+    Updated,
+    Stopped,
+    Failed,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelStatus {

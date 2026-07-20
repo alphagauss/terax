@@ -66,3 +66,12 @@ export type TunnelInfo = TunnelConfig & {
   bytes: number;
   error?: string | null;
 };
+
+export type TunnelEventKind = "started" | "updated" | "stopped" | "failed";
+
+export type TunnelEvent = {
+  kind: TunnelEventKind;
+  profileId: string;
+  tunnel?: TunnelInfo | null;
+  message?: string | null;
+};

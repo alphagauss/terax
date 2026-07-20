@@ -7,7 +7,8 @@ use tokio::sync::RwLock;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ConnectionInfo, ConnectionStatus, SshProfile, TunnelConfig, TunnelInfo,
+    ConnectRequest, ConnectionInfo, ConnectionStatus, SshProfile, TunnelConfig, TunnelEvent,
+    TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace};
 use super::tunnel::TunnelManager;
@@ -100,9 +101,19 @@ impl RemoteManager {
             };
         let home = workspace.home().await;
         if let Some(previous) = previous.as_ref() {
-            self.tunnels
+            for tunnel in self
+                .tunnels
                 .stop_profile(&profile_id, previous.clone())
-                .await;
+                .await
+            {
+                Self::emit_tunnel_event(
+                    &app,
+                    TunnelEventKind::Stopped,
+                    &profile_id,
+                    Some(tunnel),
+                    None,
+                );
+            }
         }
         self.workspaces
             .write()
@@ -120,8 +131,24 @@ impl RemoteManager {
         self.set_status(&app, info.clone()).await;
 
         for config in saved_tunnels {
-            if let Err(error) = self.tunnels.start(workspace.clone(), config).await {
-                log::warn!("failed to restore SSH tunnel: {error}");
+            match self.tunnels.start(workspace.clone(), config).await {
+                Ok(tunnel) => Self::emit_tunnel_event(
+                    &app,
+                    TunnelEventKind::Started,
+                    &profile_id,
+                    Some(tunnel),
+                    None,
+                ),
+                Err(error) => {
+                    log::warn!("failed to restore SSH tunnel: {error}");
+                    Self::emit_tunnel_event(
+                        &app,
+                        TunnelEventKind::Failed,
+                        &profile_id,
+                        None,
+                        Some(error),
+                    );
+                }
             }
         }
         self.spawn_monitor(workspace, app);
@@ -217,9 +244,19 @@ impl RemoteManager {
 
     pub async fn disconnect(&self, profile_id: &str, app: &tauri::AppHandle) -> Result<(), String> {
         if let Some(workspace) = self.workspaces.write().await.remove(profile_id) {
-            self.tunnels
+            for tunnel in self
+                .tunnels
                 .stop_profile(profile_id, workspace.clone())
-                .await;
+                .await
+            {
+                Self::emit_tunnel_event(
+                    app,
+                    TunnelEventKind::Stopped,
+                    profile_id,
+                    Some(tunnel),
+                    None,
+                );
+            }
             workspace.disconnect().await;
         }
         self.set_status(
@@ -280,18 +317,52 @@ impl RemoteManager {
         self.tunnels.start(workspace, config).await
     }
 
-    pub async fn stop_tunnel(&self, id: u64) -> Result<(), String> {
-        let info = self
+    pub async fn tunnel_info(&self, id: u64) -> Option<TunnelInfo> {
+        self.tunnels.info(id).await
+    }
+
+    pub async fn list_tunnels(&self, profile_id: &str) -> Vec<TunnelInfo> {
+        self.tunnels.list(Some(profile_id)).await
+    }
+
+    pub async fn update_tunnel(&self, id: u64, config: TunnelConfig) -> Result<TunnelInfo, String> {
+        let previous = self
             .tunnels
-            .list(None)
+            .config(id)
             .await
-            .into_iter()
-            .find(|info| info.id == id);
+            .ok_or_else(|| format!("SSH tunnel {id} was not found"))?;
+        if previous.profile_id != config.profile_id {
+            return Err("SSH tunnel profile cannot be changed".into());
+        }
+        let workspace = self.workspace(&config.profile_id).await?;
+        self.tunnels.replace(id, workspace, config).await
+    }
+
+    pub async fn stop_tunnel(&self, id: u64) -> Result<Option<TunnelInfo>, String> {
+        let info = self.tunnels.info(id).await;
         let workspace = match info {
             Some(info) => self.workspace(&info.profile_id).await.ok(),
             None => None,
         };
         self.tunnels.stop(id, workspace).await
+    }
+
+    pub fn emit_tunnel_event(
+        app: &tauri::AppHandle,
+        kind: TunnelEventKind,
+        profile_id: &str,
+        tunnel: Option<TunnelInfo>,
+        message: Option<String>,
+    ) {
+        let _ = app.emit(
+            "terax://ssh-tunnel",
+            TunnelEvent {
+                kind,
+                profile_id: profile_id.to_string(),
+                tunnel,
+                message,
+            },
+        );
     }
 
     async fn set_status(&self, app: &tauri::AppHandle, info: ConnectionInfo) {

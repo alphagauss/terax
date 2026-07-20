@@ -15,6 +15,7 @@
     "shortcuts": "Shortcuts",
     "models": "Models",
     "agents": "Agents",
+    "remote": "Remote",
     "about": "About"
   },
   "general": {
@@ -330,6 +331,84 @@
       "errRequired": "Required.",
       "errFormat": "Lowercase letters, digits, and dashes only.",
       "errInUse": "Already in use."
+    }
+  },
+  "remote": {
+    "header": {
+      "title": "Remote",
+      "description": "SSH profiles used to open remote workspaces. Tunnels are managed from the primary workspace window."
+    },
+    "actions": {
+      "new": "New profile",
+      "import": "Import SSH config",
+      "saved": "SSH profile saved",
+      "imported": "Imported {{count}} SSH profile",
+      "noImports": "No new SSH profiles found",
+      "deleted": "SSH profile deleted",
+      "delete": "Delete",
+      "openWorkspace": "Open workspace"
+    },
+    "list": {
+      "empty": "No SSH profiles yet. Create one or import your SSH config."
+    },
+    "editor": {
+      "new": "New SSH profile",
+      "edit": "SSH profile",
+      "description": "Connection details and optional stored credentials."
+    },
+    "status": {
+      "loading": "Loading",
+      "connecting": "Connecting",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting",
+      "disconnected": "Disconnected",
+      "error": "Error"
+    },
+    "fields": {
+      "name": "Name",
+      "host": "Host",
+      "port": "Port",
+      "username": "Username",
+      "authentication": "Authentication",
+      "identityFile": "Identity file",
+      "password": "Password",
+      "passphrase": "Passphrase",
+      "rootPath": "Workspace root",
+      "keepalive": "Keepalive (seconds)",
+      "proxyUrl": "Proxy URL",
+      "proxyPassword": "Proxy password",
+      "reconnect": "Reconnect automatically",
+      "reconnectAttempts": "Attempts"
+    },
+    "placeholders": {
+      "name": "Production server",
+      "host": "ssh.example.com"
+    },
+    "auth": {
+      "password": "Password",
+      "privateKey": "Private key",
+      "agent": "SSH agent"
+    },
+    "secret": {
+      "remember": "Store securely in the system keychain",
+      "rememberProxy": "Store proxy password securely in the system keychain"
+    },
+    "advanced": {
+      "title": "Advanced connection settings"
+    },
+    "validation": {
+      "host": "Host is required.",
+      "port": "Enter a port from 1 to 65535.",
+      "username": "Username is required.",
+      "identityFile": "An identity file is required for private-key authentication.",
+      "proxyPassword": "Move the proxy password to the secure password field."
+    },
+    "launch": {
+      "secret": "Store the SSH password before opening a new workspace.",
+      "proxy": "Store the proxy password before opening a new workspace."
+    },
+    "delete": {
+      "confirm": "Delete SSH profile \"{{name}}\"?"
     }
   },
   "about": {

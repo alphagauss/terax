@@ -15,6 +15,63 @@
     "loadingWslDistros": "Loading WSL distros...",
     "wslUnavailable": "WSL unavailable",
     "noWslDistros": "No WSL distros found",
-    "wslDistro": "WSL: {{distro}}"
+    "wslDistro": "WSL: {{distro}}",
+    "local": "Local",
+    "sshProfile": "SSH: {{name}}",
+    "manageSshProfiles": "Manage SSH profiles…",
+    "reconnectCurrentSsh": "Reconnect current SSH",
+    "retryCurrentEnvironment": "Retry current environment",
+    "refreshWsl": "Refresh WSL"
+  },
+  "sshConnection": {
+    "title": "Connect SSH workspace",
+    "description": "Enter credentials for {{name}}.",
+    "profileMissing": "This SSH profile is no longer available.",
+    "password": "Password",
+    "passphrase": "Passphrase",
+    "proxyPassword": "Proxy password",
+    "rememberSecret": "Store securely in the system keychain",
+    "rememberProxySecret": "Store proxy password securely in the system keychain",
+    "agent": "Authentication will use your SSH agent.",
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "homeError": "SSH connected, but the remote workspace home could not be resolved."
+  },
+  "tunnels": {
+    "label": "Tunnels",
+    "count": "Tunnels {{count}}",
+    "managedByPrimary": "Tunnels are managed by the primary SSH workspace window.",
+    "title": "SSH tunnels",
+    "description": "Runtime tunnels for {{name}}. Changes take effect immediately.",
+    "new": "New tunnel",
+    "empty": "No active tunnels for this SSH workspace.",
+    "newTunnel": "New tunnel",
+    "editTunnel": "Edit tunnel",
+    "name": "Name",
+    "type": "Type",
+    "bindAddress": "Bind address",
+    "bindPort": "Bind port (0 = automatic)",
+    "targetHost": "Target host",
+    "targetPort": "Target port",
+    "local": "Local (-L)",
+    "remote": "Remote (-R)",
+    "dynamic": "Dynamic SOCKS (-D)",
+    "start": "Start tunnel",
+    "applyRestart": "Apply and restart",
+    "stopRemove": "Stop and remove",
+    "active": "Active",
+    "traffic": "Traffic {{bytes}}",
+    "status": {
+      "starting": "Starting",
+      "active": "Active",
+      "failed": "Failed",
+      "closed": "Closed"
+    },
+    "validation": {
+      "name": "Tunnel name is required.",
+      "bindPort": "Bind port must be from 0 to 65535.",
+      "targetHost": "Target host is required.",
+      "targetPort": "Target port must be from 1 to 65535."
+    }
   }
 }

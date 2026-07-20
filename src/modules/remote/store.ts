@@ -112,7 +112,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
   },
   deleteProfile: async (profileId) => {
     await remoteNative.disconnect(profileId).catch(() => {});
-    await remoteNative.deleteSecret(profileId).catch(() => {});
+    await remoteNative.deleteSecrets(profileId).catch(() => {});
     const profiles = get().profiles.filter(
       (profile) => profile.id !== profileId,
     );

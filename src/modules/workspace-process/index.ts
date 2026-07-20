@@ -5,8 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 export type WorkspaceBootstrap = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   id: string;
+  isPrimary: boolean;
   env: WorkspaceEnv;
   environmentKey: string;
   launchDir: string | null;

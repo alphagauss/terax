@@ -6,9 +6,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IS_WINDOWS } from "@/lib/platform";
+import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
-  RemoteSshDialog,
   remoteNative,
+  SshConnectionDialog,
   useRemoteStore,
 } from "@/modules/remote";
 import {
@@ -19,6 +20,7 @@ import {
 import { Refresh01Icon, ServerStack03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   onSelect: (env: WorkspaceEnv) => void;
@@ -31,6 +33,7 @@ export function WorkspaceEnvSelector({
   connectionError = null,
   onCurrentConnected,
 }: Props) {
+  const { t } = useTranslation("statusbar");
   const env = useWorkspaceEnvStore((state) => state.env);
   const distros = useWorkspaceEnvStore((state) => state.distros);
   const loading = useWorkspaceEnvStore((state) => state.loading);
@@ -39,10 +42,7 @@ export function WorkspaceEnvSelector({
   const profiles = useRemoteStore((state) => state.profiles);
   const statuses = useRemoteStore((state) => state.statuses);
   const loadProfiles = useRemoteStore((state) => state.load);
-  const [remoteOpen, setRemoteOpen] = useState(false);
-  const [remoteMode, setRemoteMode] = useState<"launch" | "connect-current">(
-    "launch",
-  );
+  const [connectionOpen, setConnectionOpen] = useState(false);
   const promptedError = useRef<string | null>(null);
 
   useEffect(() => {
@@ -67,9 +67,12 @@ export function WorkspaceEnvSelector({
     const fingerprint = `${env.profileId}:${connectionError}`;
     if (promptedError.current === fingerprint) return;
     promptedError.current = fingerprint;
-    setRemoteMode("connect-current");
-    setRemoteOpen(true);
+    setConnectionOpen(true);
   }, [activeProfile, connectionError, env]);
+
+  useEffect(() => {
+    if (env.kind !== "ssh") setConnectionOpen(false);
+  }, [env]);
 
   const handleOpenChange = (open: boolean) => {
     if (IS_WINDOWS && open && distros.length === 0 && !loading) {
@@ -79,12 +82,24 @@ export function WorkspaceEnvSelector({
 
   const label =
     env.kind === "wsl"
-      ? `WSL: ${env.distro}`
+      ? t("workspace.wslDistro", { distro: env.distro })
       : env.kind === "ssh"
-        ? `SSH: ${activeProfile?.name ?? env.profileId}`
+        ? t("workspace.sshProfile", {
+            name: activeProfile?.name ?? env.profileId,
+          })
         : IS_WINDOWS
-          ? "Windows"
-          : "Local";
+          ? t("workspace.windows")
+          : t("workspace.local");
+
+  const reconnectCurrent = () => {
+    if (env.kind !== "ssh") return;
+    void remoteNative
+      .reconnect(env.profileId)
+      .then(async () => {
+        if (!(await onCurrentConnected?.())) setConnectionOpen(true);
+      })
+      .catch(() => setConnectionOpen(true));
+  };
 
   return (
     <>
@@ -93,7 +108,7 @@ export function WorkspaceEnvSelector({
           <button
             type="button"
             className="flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
-            title="Workspace environment"
+            title={t("workspace.environment")}
           >
             <HugeiconsIcon
               icon={ServerStack03Icon}
@@ -119,7 +134,7 @@ export function WorkspaceEnvSelector({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-52">
           <DropdownMenuItem onSelect={() => onSelect(LOCAL_WORKSPACE)}>
-            {IS_WINDOWS ? "Windows Local" : "Local"}
+            {IS_WINDOWS ? t("workspace.windowsLocal") : t("workspace.local")}
           </DropdownMenuItem>
           {IS_WINDOWS ? (
             <>
@@ -127,10 +142,10 @@ export function WorkspaceEnvSelector({
               {distros.length === 0 ? (
                 <DropdownMenuItem disabled>
                   {loading
-                    ? "Loading WSL distros..."
+                    ? t("workspace.loadingWslDistros")
                     : error
-                      ? "WSL unavailable"
-                      : "No WSL distros found"}
+                      ? t("workspace.wslUnavailable")
+                      : t("workspace.noWslDistros")}
                 </DropdownMenuItem>
               ) : (
                 distros.map((distro) => (
@@ -140,64 +155,40 @@ export function WorkspaceEnvSelector({
                       onSelect({ kind: "wsl", distro: distro.name })
                     }
                   >
-                    WSL: {distro.name}
+                    {t("workspace.wslDistro", { distro: distro.name })}
                   </DropdownMenuItem>
                 ))
               )}
             </>
           ) : null}
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              setRemoteMode("launch");
-              setRemoteOpen(true);
-            }}
-          >
-            Add or edit SSH profile...
+          <DropdownMenuItem onSelect={() => void openSettingsWindow("remote")}>
+            {t("workspace.manageSshProfiles")}
           </DropdownMenuItem>
           {profiles.map((profile) => (
             <DropdownMenuItem
               key={profile.id}
-              onSelect={() =>
-                onSelect({ kind: "ssh", profileId: profile.id })
-              }
+              onSelect={() => onSelect({ kind: "ssh", profileId: profile.id })}
             >
-              SSH: {profile.name}
+              {t("workspace.sshProfile", { name: profile.name })}
             </DropdownMenuItem>
           ))}
           {env.kind === "ssh" ? (
-            <DropdownMenuItem
-              onSelect={() => {
-                void remoteNative
-                  .reconnect(env.profileId)
-                  .then(async () => {
-                    const nextHome = await onCurrentConnected?.();
-                    if (!nextHome) {
-                      setRemoteMode("connect-current");
-                      setRemoteOpen(true);
-                    }
-                  })
-                  .catch(() => {
-                    setRemoteMode("connect-current");
-                    setRemoteOpen(true);
-                  });
-              }}
-            >
-              Reconnect current SSH
+            <DropdownMenuItem onSelect={reconnectCurrent}>
+              {t("workspace.reconnectCurrentSsh")}
             </DropdownMenuItem>
           ) : null}
           {connectionError ? (
             <DropdownMenuItem
               onSelect={() => {
                 if (env.kind === "ssh") {
-                  setRemoteMode("connect-current");
-                  setRemoteOpen(true);
+                  setConnectionOpen(true);
                   return;
                 }
                 void onCurrentConnected?.();
               }}
             >
-              Retry current environment
+              {t("workspace.retryCurrentEnvironment")}
             </DropdownMenuItem>
           ) : null}
           {IS_WINDOWS ? (
@@ -209,34 +200,18 @@ export function WorkspaceEnvSelector({
                   size={13}
                   strokeWidth={1.75}
                 />
-                Refresh WSL
+                {t("workspace.refreshWsl")}
               </DropdownMenuItem>
             </>
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <RemoteSshDialog
-        open={remoteOpen}
-        onOpenChange={setRemoteOpen}
-        launchOnly={remoteMode === "launch"}
-        preferredProfileId={
-          remoteMode === "connect-current" && env.kind === "ssh"
-            ? env.profileId
-            : null
-        }
-        onConnected={async (profile) => {
-          if (remoteMode === "launch") {
-            onSelect({ kind: "ssh", profileId: profile.id });
-          } else {
-            const nextHome = await onCurrentConnected?.();
-            if (!nextHome) {
-              throw new Error(
-                "SSH connected, but the remote Workspace home could not be resolved.",
-              );
-            }
-          }
-        }}
+      <SshConnectionDialog
+        open={connectionOpen}
+        onOpenChange={setConnectionOpen}
+        profileId={env.kind === "ssh" ? env.profileId : null}
+        onConnected={async () => (await onCurrentConnected?.()) ?? null}
       />
     </>
   );

@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/tooltip";
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
+import { TunnelStatusControl } from "@/modules/remote";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -68,6 +69,7 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <TunnelStatusControl />
         <AgentStatusPill onClick={onToggleAi} active={aiOpen} />
       </div>
     </footer>

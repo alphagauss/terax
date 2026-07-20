@@ -243,6 +243,7 @@ pub fn run() {
             remote::commands::ssh_import_config,
             remote::commands::ssh_tunnel_start,
             remote::commands::ssh_tunnel_stop,
+            remote::commands::ssh_tunnel_update,
             remote::commands::ssh_tunnel_list,
             remote::commands::ssh_upload,
             remote::commands::ssh_download,

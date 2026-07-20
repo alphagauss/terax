@@ -33,6 +33,7 @@ enum WorkspaceWindowMode {
 pub struct WorkspaceBootstrap {
     pub schema_version: u32,
     pub id: String,
+    pub is_primary: bool,
     pub env: WorkspaceEnv,
     pub environment_key: String,
     pub launch_dir: Option<String>,
@@ -468,6 +469,7 @@ fn make_state(
     launch_files: Vec<String>,
     launch_geometry: Option<WindowGeometry>,
 ) -> Result<WorkspaceProcessState, String> {
+    let is_primary = matches!(&kind, StateKind::Single);
     let id = match kind {
         StateKind::Single => single_id(environment),
         StateKind::Extra(id) => id,
@@ -482,8 +484,9 @@ fn make_state(
             .join(&window_state_filename);
     Ok(WorkspaceProcessState {
         bootstrap: WorkspaceBootstrap {
-            schema_version: 2,
+            schema_version: 3,
             id: id.to_string(),
+            is_primary,
             env,
             environment_key: environment.key.clone(),
             launch_dir,
@@ -576,6 +579,27 @@ pub fn route_local_open_files(files: &[String]) -> Result<(), String> {
 impl WorkspaceProcessState {
     pub fn bootstrap(&self) -> &WorkspaceBootstrap {
         &self.bootstrap
+    }
+
+    pub fn assert_ssh_tunnel_owner(&self, profile_id: &str) -> Result<(), String> {
+        assert_ssh_tunnel_owner(self.bootstrap.is_primary, &self.bootstrap.env, profile_id)
+    }
+}
+
+fn assert_ssh_tunnel_owner(
+    is_primary: bool,
+    environment: &WorkspaceEnv,
+    profile_id: &str,
+) -> Result<(), String> {
+    if !is_primary {
+        return Err("SSH tunnels are managed by the primary Workspace window".into());
+    }
+    match environment {
+        WorkspaceEnv::Ssh {
+            profile_id: active_profile,
+        } if active_profile == profile_id => Ok(()),
+        WorkspaceEnv::Ssh { .. } => Err("SSH tunnel profile does not match this Workspace".into()),
+        _ => Err("SSH tunnels require an SSH Workspace".into()),
     }
 }
 
@@ -785,6 +809,17 @@ mod tests {
             filename_key: "local".to_string(),
         };
         assert_eq!(single_id(&environment), single_id(&environment));
+    }
+
+    #[test]
+    fn only_the_primary_matching_ssh_workspace_owns_tunnels() {
+        let ssh = WorkspaceEnv::Ssh {
+            profile_id: "prod".to_string(),
+        };
+        assert!(assert_ssh_tunnel_owner(true, &ssh, "prod").is_ok());
+        assert!(assert_ssh_tunnel_owner(false, &ssh, "prod").is_err());
+        assert!(assert_ssh_tunnel_owner(true, &ssh, "staging").is_err());
+        assert!(assert_ssh_tunnel_owner(true, &WorkspaceEnv::Local, "prod").is_err());
     }
 
     #[test]

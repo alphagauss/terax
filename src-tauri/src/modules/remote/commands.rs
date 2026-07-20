@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 
+use crate::modules::workspace_process::WorkspaceProcessState;
+
 use super::manager::RemoteState;
-use super::models::{ConnectRequest, ConnectionInfo, ImportedHost, TunnelConfig, TunnelInfo};
+use super::models::{
+    ConnectRequest, ConnectionInfo, ImportedHost, TunnelConfig, TunnelEventKind, TunnelInfo,
+};
 
 #[tauri::command]
 pub async fn ssh_connect(
@@ -68,22 +72,107 @@ pub async fn ssh_import_config() -> Result<Vec<ImportedHost>, String> {
 #[tauri::command]
 pub async fn ssh_tunnel_start(
     state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+    app: tauri::AppHandle,
     config: TunnelConfig,
 ) -> Result<TunnelInfo, String> {
-    state.manager.start_tunnel(config).await
+    workspace.assert_ssh_tunnel_owner(&config.profile_id)?;
+    let profile_id = config.profile_id.clone();
+    match state.manager.start_tunnel(config).await {
+        Ok(tunnel) => {
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Started,
+                &profile_id,
+                Some(tunnel.clone()),
+                None,
+            );
+            Ok(tunnel)
+        }
+        Err(error) => {
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Failed,
+                &profile_id,
+                None,
+                Some(error.clone()),
+            );
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
-pub async fn ssh_tunnel_stop(state: tauri::State<'_, RemoteState>, id: u64) -> Result<(), String> {
-    state.manager.stop_tunnel(id).await
+pub async fn ssh_tunnel_stop(
+    state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+    app: tauri::AppHandle,
+    id: u64,
+) -> Result<(), String> {
+    let Some(existing) = state.manager.tunnel_info(id).await else {
+        return Ok(());
+    };
+    workspace.assert_ssh_tunnel_owner(&existing.profile_id)?;
+    if let Some(tunnel) = state.manager.stop_tunnel(id).await? {
+        let profile_id = tunnel.profile_id.clone();
+        super::manager::RemoteManager::emit_tunnel_event(
+            &app,
+            TunnelEventKind::Stopped,
+            &profile_id,
+            Some(tunnel),
+            None,
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_tunnel_update(
+    state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+    app: tauri::AppHandle,
+    id: u64,
+    config: TunnelConfig,
+) -> Result<TunnelInfo, String> {
+    let Some(existing) = state.manager.tunnel_info(id).await else {
+        return Err(format!("SSH tunnel {id} was not found"));
+    };
+    workspace.assert_ssh_tunnel_owner(&existing.profile_id)?;
+    if config.profile_id != existing.profile_id {
+        return Err("SSH tunnel profile cannot be changed".into());
+    }
+    match state.manager.update_tunnel(id, config).await {
+        Ok(tunnel) => {
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Updated,
+                &tunnel.profile_id,
+                Some(tunnel.clone()),
+                None,
+            );
+            Ok(tunnel)
+        }
+        Err(error) => {
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Failed,
+                &existing.profile_id,
+                None,
+                Some(error.clone()),
+            );
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn ssh_tunnel_list(
     state: tauri::State<'_, RemoteState>,
-    profile_id: Option<String>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+    profile_id: String,
 ) -> Result<Vec<TunnelInfo>, String> {
-    Ok(state.manager.tunnels.list(profile_id.as_deref()).await)
+    workspace.assert_ssh_tunnel_owner(&profile_id)?;
+    Ok(state.manager.list_tunnels(&profile_id).await)
 }
 
 #[tauri::command]

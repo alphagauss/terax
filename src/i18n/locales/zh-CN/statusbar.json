@@ -15,6 +15,63 @@
     "loadingWslDistros": "正在加载 WSL 发行版...",
     "wslUnavailable": "WSL 不可用",
     "noWslDistros": "未找到 WSL 发行版",
-    "wslDistro": "WSL: {{distro}}"
+    "wslDistro": "WSL: {{distro}}",
+    "local": "本地",
+    "sshProfile": "SSH: {{name}}",
+    "manageSshProfiles": "管理 SSH 配置…",
+    "reconnectCurrentSsh": "重连当前 SSH",
+    "retryCurrentEnvironment": "重试当前环境",
+    "refreshWsl": "刷新 WSL"
+  },
+  "sshConnection": {
+    "title": "连接 SSH 工作区",
+    "description": "请输入 {{name}} 的凭据。",
+    "profileMissing": "此 SSH 配置已不可用。",
+    "password": "密码",
+    "passphrase": "私钥口令",
+    "proxyPassword": "代理密码",
+    "rememberSecret": "安全保存到系统钥匙串",
+    "rememberProxySecret": "安全保存代理密码到系统钥匙串",
+    "agent": "将使用你的 SSH Agent 进行认证。",
+    "connect": "连接",
+    "connecting": "连接中…",
+    "homeError": "SSH 已连接，但无法解析远程工作区根目录。"
+  },
+  "tunnels": {
+    "label": "隧道",
+    "count": "隧道 {{count}}",
+    "managedByPrimary": "隧道由主 SSH 工作区窗口管理。",
+    "title": "SSH 隧道",
+    "description": "{{name}} 的运行时隧道。修改会立即生效。",
+    "new": "新建隧道",
+    "empty": "这个 SSH 工作区没有活动隧道。",
+    "newTunnel": "新建隧道",
+    "editTunnel": "编辑隧道",
+    "name": "名称",
+    "type": "类型",
+    "bindAddress": "监听地址",
+    "bindPort": "监听端口（0 = 自动）",
+    "targetHost": "目标主机",
+    "targetPort": "目标端口",
+    "local": "本地 (-L)",
+    "remote": "远程 (-R)",
+    "dynamic": "动态 SOCKS (-D)",
+    "start": "启动隧道",
+    "applyRestart": "应用并重启",
+    "stopRemove": "停止并移除",
+    "active": "运行中",
+    "traffic": "流量 {{bytes}}",
+    "status": {
+      "starting": "启动中",
+      "active": "运行中",
+      "failed": "失败",
+      "closed": "已关闭"
+    },
+    "validation": {
+      "name": "必须填写隧道名称。",
+      "bindPort": "监听端口必须在 0 到 65535 之间。",
+      "targetHost": "必须填写目标主机。",
+      "targetPort": "目标端口必须在 1 到 65535 之间。"
+    }
   }
 }
