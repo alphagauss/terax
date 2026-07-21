@@ -62,11 +62,9 @@ import {
   useGlobalShortcuts,
 } from "@/modules/shortcuts";
 import {
-  SECONDARY_SIDEBAR_MAX_WIDTH,
   SECONDARY_SIDEBAR_MIN_WIDTH,
   SecondarySidebar,
   type SecondarySidebarView,
-  SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   SidebarRail,
   useSecondarySidebarPanel,
@@ -1469,7 +1467,6 @@ export default function App() {
                     : `${sidebarWidthRef.current}px`
                 }
                 minSize={`${SIDEBAR_MIN_WIDTH}px`}
-                maxSize={`${SIDEBAR_MAX_WIDTH}px`}
                 collapsible
                 collapsedSize={0}
               >
@@ -1561,7 +1558,6 @@ export default function App() {
                     : `${secondarySidebar.widthRef.current}px`
                 }
                 minSize={`${SECONDARY_SIDEBAR_MIN_WIDTH}px`}
-                maxSize={`${SECONDARY_SIDEBAR_MAX_WIDTH}px`}
                 collapsible
                 collapsedSize={0}
               >

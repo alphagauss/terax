@@ -7,7 +7,6 @@ import {
 import {
   clampPanelWidth,
   SECONDARY_SIDEBAR_DEFAULT_WIDTH,
-  SECONDARY_SIDEBAR_MAX_WIDTH,
   SECONDARY_SIDEBAR_MIN_WIDTH,
 } from "./layout";
 
@@ -21,7 +20,6 @@ function readWidth(): number {
     ? clampPanelWidth(
         stored as number,
         SECONDARY_SIDEBAR_MIN_WIDTH,
-        SECONDARY_SIDEBAR_MAX_WIDTH,
       )
     : SECONDARY_SIDEBAR_DEFAULT_WIDTH;
 }
@@ -72,7 +70,6 @@ export function useSecondarySidebarPanel(viewIds: readonly string[]) {
       const width = clampPanelWidth(
         size,
         SECONDARY_SIDEBAR_MIN_WIDTH,
-        SECONDARY_SIDEBAR_MAX_WIDTH,
       );
       if (widthRef.current !== width) {
         widthRef.current = width;
