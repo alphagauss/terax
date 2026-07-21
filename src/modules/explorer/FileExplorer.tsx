@@ -399,6 +399,19 @@ export const FileExplorer = memo(
       [entryPaths, scrollEntryIntoView, selectedPath, tree.collapseAll],
     );
 
+    const requestTrashDelete = useCallback(
+      (target: EntryTarget) => {
+        void tree.trashPath(target.path).then((result) => {
+          if (result.kind === "unavailable") {
+            setPermanentDeleteTarget(target);
+          } else if (result.kind === "error") {
+            toast.error(result.reason);
+          }
+        });
+      },
+      [tree.trashPath],
+    );
+
     useGlobalShortcuts({
       "explorer.search": () => {
         if (searchRef.current?.isFocused()) {
@@ -429,19 +442,6 @@ export const FileExplorer = memo(
     const root = tree.nodes[rootPath];
     const pendingAtRoot =
       tree.pendingCreate?.parentPath === rootPath ? tree.pendingCreate : null;
-
-    const requestTrashDelete = useCallback(
-      (target: EntryTarget) => {
-        void tree.trashPath(target.path).then((result) => {
-          if (result.kind === "unavailable") {
-            setPermanentDeleteTarget(target);
-          } else if (result.kind === "error") {
-            toast.error(result.reason);
-          }
-        });
-      },
-      [tree.trashPath],
-    );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (tree.renaming || tree.pendingCreate || isSearchOpen) return;

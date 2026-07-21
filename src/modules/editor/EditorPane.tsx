@@ -13,7 +13,6 @@ import { gotoLine } from "@codemirror/search";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
   forwardRef,
@@ -61,6 +60,7 @@ import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+import { previewMediaKind, usePreviewAssetUrl } from "./lib/usePreviewAssetUrl";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
 
 initVimGlobals();
@@ -172,9 +172,8 @@ export const EditorPane = memo(
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
-    const workspaceScope = useWorkspaceEnvStore((s) =>
-      workspaceScopeKey(s.env),
-    );
+    const workspace = useWorkspaceEnvStore((s) => s.env);
+    const workspaceScope = workspaceScopeKey(workspace);
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
@@ -652,6 +651,13 @@ export const EditorPane = memo(
       [path, applyPendingGoto],
     );
 
+    const previewKind = previewMediaKind(path);
+    const previewEnabled =
+      previewKind !== null &&
+      (doc.status === "binary" ||
+        (doc.status === "toolarge" && workspace.kind !== "ssh"));
+    const previewAsset = usePreviewAssetUrl(path, workspace, previewEnabled);
+
     if (doc.status === "loading") {
       return (
         <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
@@ -667,27 +673,26 @@ export const EditorPane = memo(
       );
     }
     if (doc.status === "binary" || doc.status === "toolarge") {
-      const ext = path.split(".").pop()?.toLowerCase() ?? "";
-      const isImage = [
-        "png",
-        "jpg",
-        "jpeg",
-        "gif",
-        "webp",
-        "svg",
-        "ico",
-      ].includes(ext);
-      const isVideo = ["mp4", "webm", "ogg", "mov"].includes(ext);
-      const isAudio = ["mp3", "wav", "flac", "aac", "m4a"].includes(ext);
-      const isPdf = ext === "pdf";
-
-      if (isImage || isVideo || isAudio || isPdf) {
-        const assetUrl = convertFileSrc(path);
+      if (previewEnabled) {
+        if (previewAsset.error) {
+          return (
+            <div className="flex h-full items-center justify-center px-6 text-center text-xs text-destructive">
+              {previewAsset.error}
+            </div>
+          );
+        }
+        if (!previewAsset.url) {
+          return (
+            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+              {t("common:loading")}
+            </div>
+          );
+        }
         return (
           <div className="app-scrollbar flex h-full min-h-0 flex-col items-center justify-center bg-background p-4 overflow-auto">
-            {isImage && (
+            {previewKind === "image" && (
               <img
-                src={assetUrl}
+                src={previewAsset.url}
                 loading="lazy"
                 decoding="async"
                 className="max-w-full max-h-full object-contain rounded-md border border-border shadow-sm"
@@ -699,27 +704,27 @@ export const EditorPane = memo(
                 alt={path.split("/").pop()}
               />
             )}
-            {isVideo && (
+            {previewKind === "video" && (
               // biome-ignore lint/a11y/useMediaCaption: local media preview opens arbitrary files with no caption track
               <video
                 controls
                 preload="metadata"
                 className="max-w-full max-h-full"
-                src={assetUrl}
+                src={previewAsset.url}
               />
             )}
-            {isAudio && (
+            {previewKind === "audio" && (
               // biome-ignore lint/a11y/useMediaCaption: local media preview opens arbitrary files with no caption track
               <audio
                 controls
                 preload="metadata"
                 className="w-full max-w-md"
-                src={assetUrl}
+                src={previewAsset.url}
               />
             )}
-            {isPdf && (
+            {previewKind === "pdf" && (
               <iframe
-                src={assetUrl}
+                src={previewAsset.url}
                 className="w-full h-full border-none"
                 title={path.split("/").pop()}
               />
