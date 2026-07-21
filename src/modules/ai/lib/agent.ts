@@ -1,3 +1,8 @@
+/**
+ * 本文件负责创建语言模型并运行 AI Agent 的流式响应。
+ * 它组装系统提示词、项目指令、工具和消息历史，是 AI 调用的核心边界。
+ */
+
 import {
   convertToModelMessages,
   pruneMessages,
@@ -301,11 +306,16 @@ export function buildConfiguredLanguageModel(
 const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
 Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
 
+/**
+ * 组装一次会话中可复用的系统提示词。
+ *
+ * 项目指令位于基础提示词之后，使 AGENTS.md 约束在每次模型调用时保持可见。
+ */
 function buildStableSystem(
   modelId: string,
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
-  projectMemory: string | null,
+  projectInstructions: string | null,
 ): string {
   const base = selectSystemPrompt(modelId);
   const personaBlock = persona?.instructions.trim()
@@ -314,11 +324,11 @@ function buildStableSystem(
   const customBlock = customInstructions?.trim()
     ? `\n\n## USER CUSTOM INSTRUCTIONS — follow unless they conflict with safety rules above\n${customInstructions.trim()}`
     : "";
-  const memoryBlock =
-    projectMemory && projectMemory.trim().length > 0
-      ? `\n\n## PROJECT — TERAX.md\n${projectMemory.trim()}`
+  const instructionsBlock =
+    projectInstructions && projectInstructions.trim().length > 0
+      ? `\n\n## PROJECT INSTRUCTIONS: AGENTS.md\n${projectInstructions.trim()}`
       : "";
-  return `${base}${memoryBlock}${personaBlock}${customBlock}`;
+  return `${base}${instructionsBlock}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -361,11 +371,16 @@ export type RunAgentOptions = {
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
   planMode?: boolean;
-  projectMemory?: string | null;
+  projectInstructions?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
 
+/**
+ * 使用当前模型配置启动一次 Agent 流式响应。
+ *
+ * 项目指令在消息转换前进入稳定系统提示词，不会作为用户消息参与历史裁剪。
+ */
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
   const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
@@ -389,7 +404,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     modelId,
     opts.agentPersona ?? null,
     opts.customInstructions,
-    opts.projectMemory ?? null,
+    opts.projectInstructions ?? null,
   );
 
   const history = await convertToModelMessages(opts.uiMessages);

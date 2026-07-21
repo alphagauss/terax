@@ -1,6 +1,6 @@
 # Security model
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 Terax runs shells, reads and writes files, and sends data to AI providers. The security model is defense-in-depth: no single guard is enough, so every boundary validates input before acting on it.
 
@@ -90,7 +90,7 @@ The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OS
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [Two-process model](two-process-model.md) - IPC boundary and command catalog
 - [AI subsystem](ai-subsystem.md) - tools, approval flow, and provider handling

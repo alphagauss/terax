@@ -1,6 +1,6 @@
 # AI subsystem
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## Overview
 
@@ -36,7 +36,7 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 `runAgentStream` (`agent.ts:391`):
 
 1. Resolves the model via `buildConfiguredLanguageModel`.
-2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `TERAX.md` project memory.
+2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `AGENTS.md` project instructions.
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
 4. Streams via `streamText` with the tool set from `buildTools(ctx)` and `stopWhen: stepCountIs(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
@@ -94,7 +94,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [Two-process model](two-process-model.md) - IPC boundary and command catalog
 - [Security model](security-model.md) - the boundaries every tool must respect

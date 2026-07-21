@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 输入区的共享状态和提交流程。
+ * 草稿、附件、语音与命令状态在侧边栏关闭时仍需保留，因此由根级 Provider 持有。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   createContext,
@@ -90,6 +95,11 @@ type ProviderProps = {
   children: React.ReactNode;
 };
 
+/**
+ * 为 AI 输入框提供跨面板持久化的草稿、附件和命令状态。
+ *
+ * Provider 始终挂载，因此关闭侧边栏不会丢失尚未发送的输入。
+ */
 export function AiComposerProvider({ children }: ProviderProps) {
   const { t } = useTranslation("ai");
   const sessionId = useChatStore((s) => s.activeSessionId);
@@ -293,8 +303,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     )
       return;
 
-    // Slash-command interception. `/plan` toggles plan mode; `/init` rewrites
-    // the prompt to the TERAX.md scan template before sending.
+    // `/plan` 在本地切换规划模式；`/init` 则改写为生成 AGENTS.md 的扫描提示词。
     let effectiveText = trimmed;
     let commandMarker: string | null = null;
     let commandSource = trimmed;

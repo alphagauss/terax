@@ -88,7 +88,7 @@ Terax is a lightweight open-source terminal (ADE) built on Tauri 2 + Rust and Re
 
 - **BYOK providers:** OpenAI, Anthropic, Google (Gemini), Groq, xAI (Grok), Cerebras, OpenRouter, DeepSeek, Mistral, plus any OpenAI-compatible endpoint
 - **Local / offline:** LM Studio, MLX, Ollama
-- **Agentic workflow:** plans, sub-agents, project memory via `TERAX.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
+- **Agentic workflow:** plans, sub-agents, project instructions via `AGENTS.md`, file read / write / edit / multi-edit / grep / glob, bash with approval gating, background processes
 - **Composer:** snippets via `#handle`, files via `@path`, slash commands, voice input, attach-to-agent from explorer or selection
 - **Custom agents** with their own system prompt and tool subset
 - **Plan mode** for multi-step work, generates and confirms before doing

@@ -1,37 +1,15 @@
+/**
+ * 本文件连接聊天 UI 与 Agent 流式运行时。
+ * 每次发送前注入实时终端环境和工作区项目指令，保持模型上下文与当前界面一致。
+ */
+
 import type { UIMessage } from "@ai-sdk/react";
 import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
-import { native } from "./native";
+import { readAgentsMd } from "./projectInstructions";
 import type { ToolContext } from "../tools/tools";
-
-const TERAX_MD_MAX_BYTES = 32 * 1024;
-type MemoryCacheEntry = { content: string | null; mtime: number };
-const projectMemoryCache = new Map<string, MemoryCacheEntry>();
-
-async function readTeraxMd(workspaceRoot: string | null): Promise<string | null> {
-  if (!workspaceRoot) return null;
-  const path = `${workspaceRoot.replace(/\/$/, "")}/TERAX.md`;
-  const cached = projectMemoryCache.get(workspaceRoot);
-  if (cached && Date.now() - cached.mtime < 30_000) return cached.content;
-  try {
-    const r = await native.readFile(path);
-    if (r.kind !== "text") {
-      projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
-      return null;
-    }
-    const content =
-      r.content.length > TERAX_MD_MAX_BYTES
-        ? r.content.slice(0, TERAX_MD_MAX_BYTES)
-        : r.content;
-    projectMemoryCache.set(workspaceRoot, { content, mtime: Date.now() });
-    return content;
-  } catch {
-    projectMemoryCache.set(workspaceRoot, { content: null, mtime: Date.now() });
-    return null;
-  }
-}
 
 type LiveSnapshot = {
   cwd: string | null;
@@ -72,10 +50,15 @@ type SendOptions = {
   [k: string]: unknown;
 };
 
+/**
+ * 创建能够注入实时环境和项目指令的聊天传输层。
+ *
+ * 每次发送前读取工作区根目录的 AGENTS.md，读取结果由底层短暂缓存。
+ */
 export function createContextAwareTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const live = deps.getLive();
-    const projectMemory = await readTeraxMd(live.workspaceRoot);
+    const projectInstructions = await readAgentsMd(live.workspaceRoot);
     const envBlock = formatEnvBlock(live);
     const messagesForRun = envBlock
       ? injectEnvIntoLastUser(options.messages, envBlock)
@@ -103,7 +86,7 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
-      projectMemory,
+      projectInstructions,
       uiMessages: messagesForRun,
       abortSignal: options.abortSignal,
     });

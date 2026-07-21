@@ -1,3 +1,8 @@
+/**
+ * 本文件定义输入框支持的斜杠命令及其解析规则。
+ * 命令只负责本地状态切换或生成提示词，不直接绕过工具审批执行写操作。
+ */
+
 import {
   CheckListIcon,
   ClaudeIcon,
@@ -31,7 +36,7 @@ You are the orchestrator, not the implementer. Do not write the code yourself.
 Sharpen vague requests into precise engineering instructions; keep each agent prompt focused on one coherent unit of work.`;
 }
 
-const INIT_PROMPT = `Scan this workspace and produce TERAX.md at the workspace root with:
+const INIT_PROMPT = `Scan this workspace and create or update AGENTS.md at the workspace root with:
 
 - One-paragraph project description.
 - Build / test / dev commands.
@@ -39,7 +44,9 @@ const INIT_PROMPT = `Scan this workspace and produce TERAX.md at the workspace r
 - Conventions worth knowing (naming, patterns, gotchas).
 - Paths to entry points.
 
-Use grep/glob/list_directory/read_file to explore. Cap TERAX.md under 200 lines. Use write_file to create it (will go through normal approval).`;
+If AGENTS.md already exists, preserve valid project-specific instructions and update it surgically instead of replacing it blindly.
+
+Use grep/glob/list_directory/read_file to explore. Cap AGENTS.md under 200 lines. Use write_file to create or update it (will go through normal approval).`;
 
 export type SlashCommandMeta = {
   name: string;
@@ -76,6 +83,11 @@ export function wrapWithCommandMarker(prompt: string, name: string): string {
   return `<terax-command name="${name}" />\n\n${prompt}`;
 }
 
+/**
+ * 解析并执行输入框中的斜杠命令或命令选择器标记。
+ *
+ * `/init` 会转换为生成 AGENTS.md 的工作区扫描提示词，其他普通输入保持不变。
+ */
 export function tryRunSlashCommand(input: string): SlashOutcome {
   const trimmed = input.trim();
   const lead = trimmed[0];

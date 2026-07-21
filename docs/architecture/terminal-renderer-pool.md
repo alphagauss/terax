@@ -1,6 +1,6 @@
 # Terminal renderer pool
 
-This guide elaborates on `TERAX.md`. If anything here conflicts with `TERAX.md`, `TERAX.md` wins.
+This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
 
 ## Why a pool exists
 
@@ -60,6 +60,6 @@ WebGL addons are created when a slot becomes visible and reaped after a grace pe
 
 ## See also
 
-- [`TERAX.md`](../../TERAX.md) - the architecture source of truth
+- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`docs/README.md`](../README.md) - index of contributor guides
 - [PTY shell integration](pty-shell-integration.md) - sessions, OSC sequences, and ConPTY
