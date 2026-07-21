@@ -6641,6 +6641,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-socks",
+ "tokio-util",
  "trash",
  "uuid",
  "which",

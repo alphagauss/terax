@@ -16,6 +16,8 @@ use tauri::async_runtime::JoinHandle;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex as AsyncMutex, RwLock};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 use super::models::{TunnelConfig, TunnelInfo, TunnelKind, TunnelStatus};
 use super::session::RemoteWorkspace;
@@ -25,6 +27,7 @@ pub(super) struct LocalTarget {
     pub(super) host: String,
     pub(super) port: u16,
     pub(super) bytes: Arc<AtomicU64>,
+    pub(super) connections: TunnelConnections,
 }
 
 #[derive(Clone, Default)]
@@ -58,6 +61,58 @@ impl RemoteForwardRegistry {
             .map(|(_, target)| target);
         let target = matches.next()?;
         matches.next().is_none().then(|| target.clone())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TunnelConnections {
+    cancel: CancellationToken,
+    tasks: TaskTracker,
+    accepting: Arc<Mutex<bool>>,
+}
+
+impl Default for TunnelConnections {
+    fn default() -> Self {
+        Self {
+            cancel: CancellationToken::new(),
+            tasks: TaskTracker::new(),
+            accepting: Arc::new(Mutex::new(true)),
+        }
+    }
+}
+
+impl TunnelConnections {
+    pub(super) fn spawn<F>(&self, task: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let accepting = self.accepting.lock().unwrap();
+        if !*accepting {
+            return;
+        }
+        let cancel = self.cancel.clone();
+        let _task = self.tasks.spawn(async move {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => {}
+                _ = task => {}
+            }
+        });
+    }
+
+    async fn cancelled(&self) {
+        self.cancel.cancelled().await;
+    }
+
+    fn cancel(&self) {
+        let mut accepting = self.accepting.lock().unwrap();
+        *accepting = false;
+        self.cancel.cancel();
+        self.tasks.close();
+    }
+
+    async fn wait(&self) {
+        self.tasks.wait().await;
     }
 }
 
@@ -137,6 +192,7 @@ struct TunnelRuntime {
     info: TunnelInfo,
     config: TunnelConfig,
     bytes: Arc<AtomicU64>,
+    connections: TunnelConnections,
     task: Option<JoinHandle<()>>,
 }
 
@@ -144,6 +200,11 @@ pub(super) struct TunnelManager {
     next_id: AtomicU64,
     tunnels: RwLock<HashMap<u64, TunnelRuntime>>,
     operation_lock: AsyncMutex<()>,
+}
+
+pub(super) struct ProfileTunnelRestart {
+    pub(super) stopped: Vec<TunnelInfo>,
+    pub(super) started: Vec<Result<TunnelInfo, TunnelFailure>>,
 }
 
 impl Default for TunnelManager {
@@ -175,6 +236,7 @@ impl TunnelManager {
         config: TunnelConfig,
     ) -> Result<TunnelInfo, TunnelFailure> {
         let bytes = Arc::new(AtomicU64::new(0));
+        let connections = TunnelConnections::default();
         let mut info = TunnelInfo {
             id,
             profile_id: config.profile_id.clone(),
@@ -199,12 +261,20 @@ impl TunnelManager {
                     let target_host = config.target_host.clone();
                     let target_port = config.target_port;
                     let bytes = bytes.clone();
+                    let connections = connections.clone();
                     Some(tauri::async_runtime::spawn(async move {
-                        while let Ok((mut inbound, peer)) = listener.accept().await {
+                        loop {
+                            let accepted = tokio::select! {
+                                _ = connections.cancelled() => break,
+                                accepted = listener.accept() => accepted,
+                            };
+                            let Ok((mut inbound, peer)) = accepted else {
+                                break;
+                            };
                             let workspace = workspace.clone();
                             let target_host = target_host.clone();
                             let bytes = bytes.clone();
-                            tauri::async_runtime::spawn(async move {
+                            connections.spawn(async move {
                                 let channel = {
                                     let handle = workspace.handle.lock().await;
                                     handle
@@ -234,11 +304,19 @@ impl TunnelManager {
                     info.bind_port = listener.local_addr().map_err(|e| e.to_string())?.port();
                     let workspace = workspace.clone();
                     let bytes = bytes.clone();
+                    let connections = connections.clone();
                     Some(tauri::async_runtime::spawn(async move {
-                        while let Ok((inbound, peer)) = listener.accept().await {
+                        loop {
+                            let accepted = tokio::select! {
+                                _ = connections.cancelled() => break,
+                                accepted = listener.accept() => accepted,
+                            };
+                            let Ok((inbound, peer)) = accepted else {
+                                break;
+                            };
                             let workspace = workspace.clone();
                             let bytes = bytes.clone();
-                            tauri::async_runtime::spawn(async move {
+                            connections.spawn(async move {
                                 let _ = socks5_serve(workspace, inbound, peer, bytes).await;
                             });
                         }
@@ -279,6 +357,7 @@ impl TunnelManager {
                             host: config.target_host.clone(),
                             port: config.target_port,
                             bytes: bytes.clone(),
+                            connections: connections.clone(),
                         },
                     );
                     None
@@ -292,12 +371,12 @@ impl TunnelManager {
             Err(message) => {
                 info.status = TunnelStatus::Failed;
                 info.error = Some(message.clone());
-                self.insert_runtime(id, info.clone(), config, bytes, None)
+                self.insert_runtime(id, info.clone(), config, bytes, connections, None)
                     .await;
                 return Err(TunnelFailure::new(Some(info), message));
             }
         };
-        self.insert_runtime(id, info.clone(), config, bytes, task)
+        self.insert_runtime(id, info.clone(), config, bytes, connections, task)
             .await;
         Ok(info)
     }
@@ -308,6 +387,7 @@ impl TunnelManager {
         info: TunnelInfo,
         config: TunnelConfig,
         bytes: Arc<AtomicU64>,
+        connections: TunnelConnections,
         task: Option<JoinHandle<()>>,
     ) {
         self.tunnels.write().await.insert(
@@ -316,6 +396,7 @@ impl TunnelManager {
                 info,
                 config,
                 bytes,
+                connections,
                 task,
             },
         );
@@ -336,7 +417,7 @@ impl TunnelManager {
         workspace: Option<Arc<RemoteWorkspace>>,
         require_remote_cancel: bool,
     ) -> Result<Option<TunnelInfo>, TunnelFailure> {
-        let Some(current) = self.info(id).await else {
+        let Some(current) = self.info_unlocked(id).await else {
             return Ok(None);
         };
 
@@ -367,10 +448,6 @@ impl TunnelManager {
         let Some(mut runtime) = self.tunnels.write().await.remove(&id) else {
             return Ok(None);
         };
-        if let Some(task) = runtime.task.take() {
-            task.abort();
-            let _ = task.await;
-        }
         if runtime.info.kind == TunnelKind::Remote {
             if let Some(workspace) = workspace {
                 workspace
@@ -378,6 +455,11 @@ impl TunnelManager {
                     .remove(&runtime.info.bind_host, runtime.info.bind_port as u32);
             }
         }
+        runtime.connections.cancel();
+        if let Some(task) = runtime.task.take() {
+            let _ = task.await;
+        }
+        runtime.connections.wait().await;
         let mut info = runtime_info(&runtime);
         info.status = TunnelStatus::Closed;
         info.error = None;
@@ -392,6 +474,11 @@ impl TunnelManager {
     }
 
     pub(super) async fn list(&self, profile_id: &str) -> Vec<TunnelInfo> {
+        let _operation = self.operation_lock.lock().await;
+        self.list_unlocked(profile_id).await
+    }
+
+    async fn list_unlocked(&self, profile_id: &str) -> Vec<TunnelInfo> {
         let tunnels = self.tunnels.read().await;
         let mut result: Vec<_> = tunnels
             .values()
@@ -402,7 +489,14 @@ impl TunnelManager {
         result
     }
 
-    pub(super) async fn active_configs(&self, profile_id: &str) -> Vec<TunnelConfig> {
+    #[cfg(test)]
+    async fn active_configs(&self, profile_id: &str) -> Vec<TunnelConfig> {
+        let _operation = self.operation_lock.lock().await;
+        self.active_configs_unlocked(profile_id).await
+    }
+
+    #[cfg(test)]
+    async fn active_configs_unlocked(&self, profile_id: &str) -> Vec<TunnelConfig> {
         self.tunnels
             .read()
             .await
@@ -415,6 +509,11 @@ impl TunnelManager {
     }
 
     pub(super) async fn info(&self, id: u64) -> Option<TunnelInfo> {
+        let _operation = self.operation_lock.lock().await;
+        self.info_unlocked(id).await
+    }
+
+    async fn info_unlocked(&self, id: u64) -> Option<TunnelInfo> {
         self.tunnels.read().await.get(&id).map(runtime_info)
     }
 
@@ -453,6 +552,14 @@ impl TunnelManager {
         workspace: Arc<RemoteWorkspace>,
     ) -> Vec<TunnelInfo> {
         let _operation = self.operation_lock.lock().await;
+        self.stop_profile_unlocked(profile_id, workspace).await
+    }
+
+    async fn stop_profile_unlocked(
+        &self,
+        profile_id: &str,
+        workspace: Arc<RemoteWorkspace>,
+    ) -> Vec<TunnelInfo> {
         let ids: Vec<u64> = self
             .tunnels
             .read()
@@ -469,6 +576,34 @@ impl TunnelManager {
             }
         }
         stopped
+    }
+
+    pub(super) async fn restart_profile(
+        &self,
+        profile_id: &str,
+        previous: Arc<RemoteWorkspace>,
+        replacement: Arc<RemoteWorkspace>,
+    ) -> ProfileTunnelRestart {
+        let _operation = self.operation_lock.lock().await;
+        let active: Vec<_> = self
+            .tunnels
+            .read()
+            .await
+            .iter()
+            .filter(|(_, runtime)| {
+                runtime.info.profile_id == profile_id && runtime.info.status == TunnelStatus::Active
+            })
+            .map(|(id, runtime)| (*id, runtime.config.clone()))
+            .collect();
+        let stopped = self.stop_profile_unlocked(profile_id, previous).await;
+        let mut started = Vec::with_capacity(active.len());
+        for (id, config) in active {
+            started.push(
+                self.start_with_id_unlocked(id, replacement.clone(), config)
+                    .await,
+            );
+        }
+        ProfileTunnelRestart { stopped, started }
     }
 }
 
@@ -676,8 +811,10 @@ fn socks_reply(code: u8) -> [u8; 10] {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::atomic::AtomicBool;
 
     use super::*;
+    use tokio::sync::oneshot;
 
     fn config(kind: TunnelKind) -> TunnelConfig {
         TunnelConfig {
@@ -881,6 +1018,7 @@ mod tests {
                 info(1, &active, TunnelStatus::Active),
                 active.clone(),
                 Arc::new(AtomicU64::new(0)),
+                TunnelConnections::default(),
                 None,
             )
             .await;
@@ -890,11 +1028,64 @@ mod tests {
                 info(2, &failed, TunnelStatus::Failed),
                 failed,
                 Arc::new(AtomicU64::new(0)),
+                TunnelConnections::default(),
                 None,
             )
             .await;
 
         assert_eq!(manager.list("ssh-prod").await.len(), 2);
         assert_eq!(manager.active_configs("ssh-prod").await, vec![active]);
+    }
+
+    #[tokio::test]
+    async fn cancelling_connections_waits_for_existing_tasks_and_rejects_late_tasks() {
+        let connections = TunnelConnections::default();
+        let (started_tx, started_rx) = oneshot::channel();
+        let (mut peer, mut stream) = tokio::io::duplex(16);
+        connections.spawn(async move {
+            let _ = started_tx.send(());
+            let mut byte = [0; 1];
+            let _ = stream.read(&mut byte).await;
+        });
+        started_rx.await.unwrap();
+
+        connections.cancel();
+        connections.wait().await;
+
+        let mut byte = [0; 1];
+        assert_eq!(peer.read(&mut byte).await.unwrap(), 0);
+        assert!(connections.tasks.is_empty());
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let late_ran = ran.clone();
+        connections.spawn(async move {
+            late_ran.store(true, Ordering::Relaxed);
+        });
+        tokio::task::yield_now().await;
+        assert!(!ran.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn list_waits_for_the_current_tunnel_operation() {
+        let manager = Arc::new(TunnelManager::default());
+        let active = config(TunnelKind::Local);
+        manager
+            .insert_runtime(
+                1,
+                info(1, &active, TunnelStatus::Active),
+                active,
+                Arc::new(AtomicU64::new(0)),
+                TunnelConnections::default(),
+                None,
+            )
+            .await;
+        let operation = manager.operation_lock.lock().await;
+        let reader_manager = manager.clone();
+        let reader = tokio::spawn(async move { reader_manager.list("ssh-prod").await });
+        tokio::task::yield_now().await;
+
+        assert!(!reader.is_finished());
+        drop(operation);
+        assert_eq!(reader.await.unwrap().len(), 1);
     }
 }

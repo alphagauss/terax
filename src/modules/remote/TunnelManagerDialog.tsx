@@ -50,10 +50,18 @@ export function TunnelManagerDialog({
 
   useEffect(() => {
     if (!open) return;
+    let active = true;
+    let timer: number | undefined;
     setError(null);
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), 1_000);
-    return () => window.clearInterval(interval);
+    const poll = async () => {
+      await refresh();
+      if (active) timer = window.setTimeout(() => void poll(), 1_000);
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [open, refresh]);
 
   useEffect(() => {

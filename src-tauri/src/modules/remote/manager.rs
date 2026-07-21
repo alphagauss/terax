@@ -61,7 +61,6 @@ impl RemoteManager {
         // tunnel configs across a failed attempt instead of turning one network
         // hiccup into a permanently disconnected workspace.
         let previous = self.workspaces.read().await.get(&profile_id).cloned();
-        let saved_tunnels = self.tunnels.active_configs(&profile_id).await;
 
         let workspace =
             match RemoteWorkspace::connect(request, app.clone(), self.host_keys.clone()).await {
@@ -100,28 +99,21 @@ impl RemoteManager {
                 }
             };
         let home = workspace.home().await;
-        if let Some(previous) = previous.as_ref() {
-            for tunnel in self
-                .tunnels
-                .stop_profile(&profile_id, previous.clone())
-                .await
-            {
-                Self::emit_tunnel_event(
-                    &app,
-                    TunnelEventKind::Stopped,
-                    &profile_id,
-                    Some(tunnel),
-                    None,
-                );
-            }
-        }
         self.workspaces
             .write()
             .await
             .insert(profile_id.clone(), workspace.clone());
-        if let Some(previous) = previous {
-            previous.disconnect().await;
-        }
+        let restarted = match previous {
+            Some(previous) => {
+                let restarted = self
+                    .tunnels
+                    .restart_profile(&profile_id, previous.clone(), workspace.clone())
+                    .await;
+                previous.disconnect().await;
+                Some(restarted)
+            }
+            None => None,
+        };
         let info = ConnectionInfo {
             profile_id: profile_id.clone(),
             status: ConnectionStatus::Connected,
@@ -130,24 +122,35 @@ impl RemoteManager {
         };
         self.set_status(&app, info.clone()).await;
 
-        for config in saved_tunnels {
-            match self.tunnels.start(workspace.clone(), config).await {
-                Ok(tunnel) => Self::emit_tunnel_event(
+        if let Some(restarted) = restarted {
+            for tunnel in restarted.stopped {
+                Self::emit_tunnel_event(
                     &app,
-                    TunnelEventKind::Started,
+                    TunnelEventKind::Stopped,
                     &profile_id,
                     Some(tunnel),
                     None,
-                ),
-                Err(error) => {
-                    log::warn!("failed to restore SSH tunnel: {}", error.message);
-                    Self::emit_tunnel_event(
+                );
+            }
+            for result in restarted.started {
+                match result {
+                    Ok(tunnel) => Self::emit_tunnel_event(
                         &app,
-                        TunnelEventKind::Failed,
+                        TunnelEventKind::Started,
                         &profile_id,
-                        error.info,
-                        Some(error.message),
-                    );
+                        Some(tunnel),
+                        None,
+                    ),
+                    Err(error) => {
+                        log::warn!("failed to restore SSH tunnel: {}", error.message);
+                        Self::emit_tunnel_event(
+                            &app,
+                            TunnelEventKind::Failed,
+                            &profile_id,
+                            error.info,
+                            Some(error.message),
+                        );
+                    }
                 }
             }
         }
@@ -243,6 +246,8 @@ impl RemoteManager {
     }
 
     pub async fn disconnect(&self, profile_id: &str, app: &tauri::AppHandle) -> Result<(), String> {
+        let connect_lock = self.connect_lock(profile_id);
+        let _connect_guard = connect_lock.lock().await;
         if let Some(workspace) = self.workspaces.write().await.remove(profile_id) {
             for tunnel in self
                 .tunnels
@@ -316,6 +321,8 @@ impl RemoteManager {
         &self,
         config: TunnelConfig,
     ) -> Result<TunnelInfo, TunnelFailure> {
+        let connect_lock = self.connect_lock(&config.profile_id);
+        let _connect_guard = connect_lock.lock().await;
         let workspace = self
             .workspace(&config.profile_id)
             .await
@@ -336,6 +343,8 @@ impl RemoteManager {
         id: u64,
         config: TunnelConfig,
     ) -> Result<TunnelInfo, TunnelFailure> {
+        let connect_lock = self.connect_lock(&config.profile_id);
+        let _connect_guard = connect_lock.lock().await;
         let workspace = self
             .workspace(&config.profile_id)
             .await
@@ -344,10 +353,17 @@ impl RemoteManager {
     }
 
     pub(super) async fn stop_tunnel(&self, id: u64) -> Result<Option<TunnelInfo>, TunnelFailure> {
+        let Some(initial) = self.tunnels.info(id).await else {
+            return Ok(None);
+        };
+        let connect_lock = self.connect_lock(&initial.profile_id);
+        let _connect_guard = connect_lock.lock().await;
         let info = self.tunnels.info(id).await;
         let workspace = match info {
-            Some(info) => self.workspace(&info.profile_id).await.ok(),
-            None => None,
+            Some(info) if info.profile_id == initial.profile_id => {
+                self.workspace(&info.profile_id).await.ok()
+            }
+            _ => None,
         };
         self.tunnels.stop(id, workspace).await
     }

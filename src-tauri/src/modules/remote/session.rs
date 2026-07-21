@@ -61,7 +61,8 @@ impl Handler for ClientHandler {
         let connected_address = connected_address.to_string();
         async move {
             if let Some(target) = target {
-                tauri::async_runtime::spawn(async move {
+                let connections = target.connections.clone();
+                connections.spawn(async move {
                     match tokio::net::TcpStream::connect((target.host.as_str(), target.port)).await
                     {
                         Ok(mut socket) => {
