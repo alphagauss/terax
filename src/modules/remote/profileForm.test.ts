@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  credentialMutation,
   emptySshProfileForm,
   launchSecretIssue,
   profileValidationIssue,
@@ -32,6 +33,12 @@ describe("SSH profile form", () => {
     form.username = "deploy";
     form.authMethod = "private_key";
     expect(profileValidationIssue(form)).toBe("identityFile");
+    form.identityFile = "~/.ssh/id_ed25519";
+    form.keepaliveSeconds = "0.5";
+    expect(profileValidationIssue(form)).toBe("keepalive");
+    form.keepaliveSeconds = "30";
+    form.reconnectMaxAttempts = "21";
+    expect(profileValidationIssue(form)).toBe("reconnectAttempts");
   });
 
   it("keeps launch-only secrets in the credential vault", () => {
@@ -43,5 +50,32 @@ describe("SSH profile form", () => {
     form.proxySecret = "proxy";
     form.rememberProxySecret = false;
     expect(launchSecretIssue(form)).toBe("proxy");
+  });
+
+  it("does not mutate a stored credential until the user changes its state", () => {
+    expect(
+      credentialMutation({
+        value: "",
+        dirty: false,
+        remember: true,
+        applicable: true,
+      }),
+    ).toEqual({ kind: "keep" });
+    expect(
+      credentialMutation({
+        value: "",
+        dirty: true,
+        remember: true,
+        applicable: true,
+      }),
+    ).toEqual({ kind: "delete" });
+    expect(
+      credentialMutation({
+        value: "new secret",
+        dirty: true,
+        remember: true,
+        applicable: true,
+      }),
+    ).toEqual({ kind: "set", value: "new secret" });
   });
 });

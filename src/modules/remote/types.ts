@@ -48,7 +48,7 @@ export type ImportedHost = {
 };
 
 export type TunnelKind = "local" | "remote" | "dynamic";
-export type TunnelStatus = "starting" | "active" | "failed" | "closed";
+export type TunnelStatus = "active" | "failed" | "closed";
 
 export type TunnelConfig = {
   profileId: string;
@@ -60,9 +60,17 @@ export type TunnelConfig = {
   targetPort: number;
 };
 
-export type TunnelInfo = TunnelConfig & {
+export type TunnelInfo = {
   id: number;
+  profileId: string;
+  name: string;
+  kind: TunnelKind;
   status: TunnelStatus;
+  bindHost: string;
+  bindPort: number;
+  requestedBindPort: number;
+  targetHost: string;
+  targetPort: number;
   bytes: number;
   error?: string | null;
 };

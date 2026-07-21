@@ -44,7 +44,7 @@
     "title": "SSH tunnels",
     "description": "Runtime tunnels for {{name}}. Changes take effect immediately.",
     "new": "New tunnel",
-    "empty": "No active tunnels for this SSH workspace.",
+    "empty": "No runtime tunnels for this SSH workspace.",
     "newTunnel": "New tunnel",
     "editTunnel": "Edit tunnel",
     "name": "Name",
@@ -59,18 +59,17 @@
     "start": "Start tunnel",
     "applyRestart": "Apply and restart",
     "stopRemove": "Stop and remove",
-    "active": "Active",
     "traffic": "Traffic {{bytes}}",
     "status": {
-      "starting": "Starting",
       "active": "Active",
       "failed": "Failed",
       "closed": "Closed"
     },
     "validation": {
       "name": "Tunnel name is required.",
+      "bindHost": "Bind address cannot contain whitespace.",
       "bindPort": "Bind port must be from 0 to 65535.",
-      "targetHost": "Target host is required.",
+      "targetHost": "Target host is required and cannot contain whitespace.",
       "targetPort": "Target port must be from 1 to 65535."
     }
   }

@@ -90,14 +90,15 @@ pub async fn ssh_tunnel_start(
             Ok(tunnel)
         }
         Err(error) => {
+            let message = error.message;
             super::manager::RemoteManager::emit_tunnel_event(
                 &app,
                 TunnelEventKind::Failed,
                 &profile_id,
-                None,
-                Some(error.clone()),
+                error.info,
+                Some(message.clone()),
             );
-            Err(error)
+            Err(message)
         }
     }
 }
@@ -113,15 +114,29 @@ pub async fn ssh_tunnel_stop(
         return Ok(());
     };
     workspace.assert_ssh_tunnel_owner(&existing.profile_id)?;
-    if let Some(tunnel) = state.manager.stop_tunnel(id).await? {
-        let profile_id = tunnel.profile_id.clone();
-        super::manager::RemoteManager::emit_tunnel_event(
-            &app,
-            TunnelEventKind::Stopped,
-            &profile_id,
-            Some(tunnel),
-            None,
-        );
+    match state.manager.stop_tunnel(id).await {
+        Ok(Some(tunnel)) => {
+            let profile_id = tunnel.profile_id.clone();
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Stopped,
+                &profile_id,
+                Some(tunnel),
+                None,
+            );
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let message = error.message;
+            super::manager::RemoteManager::emit_tunnel_event(
+                &app,
+                TunnelEventKind::Failed,
+                &existing.profile_id,
+                error.info,
+                Some(message.clone()),
+            );
+            return Err(message);
+        }
     }
     Ok(())
 }
@@ -153,14 +168,15 @@ pub async fn ssh_tunnel_update(
             Ok(tunnel)
         }
         Err(error) => {
+            let message = error.message;
             super::manager::RemoteManager::emit_tunnel_event(
                 &app,
                 TunnelEventKind::Failed,
                 &existing.profile_id,
-                None,
-                Some(error.clone()),
+                error.info,
+                Some(message.clone()),
             );
-            Err(error)
+            Err(message)
         }
     }
 }

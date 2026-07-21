@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{ConnectRequest, ProxyConfig, SshAuthMethod, SshProfile};
-use super::tunnel::RemoteForwardRegistry;
+use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
 
@@ -27,7 +27,7 @@ pub struct ClientHandler {
     pub host: String,
     pub port: u16,
     pub host_keys: Arc<HostKeyVerifier>,
-    pub remote_forwards: RemoteForwardRegistry,
+    pub(super) remote_forwards: RemoteForwardRegistry,
 }
 
 impl Handler for ClientHandler {
@@ -66,7 +66,9 @@ impl Handler for ClientHandler {
                     {
                         Ok(mut socket) => {
                             let mut stream = channel.into_stream();
-                            let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                            let _ =
+                                copy_bidirectional_counted(&mut socket, &mut stream, target.bytes)
+                                    .await;
                         }
                         Err(error) => log::warn!(
                             "remote tunnel target {}:{} failed: {error}",
@@ -88,7 +90,7 @@ impl Handler for ClientHandler {
 pub struct RemoteWorkspace {
     pub profile: SshProfile,
     pub handle: Arc<Mutex<Handle<ClientHandler>>>,
-    pub remote_forwards: RemoteForwardRegistry,
+    pub(super) remote_forwards: RemoteForwardRegistry,
     pub(crate) sftp: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     home: RwLock<String>,
     login_home: RwLock<String>,

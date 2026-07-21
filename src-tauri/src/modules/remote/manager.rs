@@ -11,14 +11,14 @@ use super::models::{
     TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace};
-use super::tunnel::TunnelManager;
+use super::tunnel::{TunnelFailure, TunnelManager};
 
 pub struct RemoteManager {
     workspaces: RwLock<HashMap<String, Arc<RemoteWorkspace>>>,
     statuses: RwLock<HashMap<String, ConnectionInfo>>,
     connect_locks: StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub host_keys: Arc<HostKeyVerifier>,
-    pub tunnels: TunnelManager,
+    tunnels: TunnelManager,
 }
 
 impl Default for RemoteManager {
@@ -140,13 +140,13 @@ impl RemoteManager {
                     None,
                 ),
                 Err(error) => {
-                    log::warn!("failed to restore SSH tunnel: {error}");
+                    log::warn!("failed to restore SSH tunnel: {}", error.message);
                     Self::emit_tunnel_event(
                         &app,
                         TunnelEventKind::Failed,
                         &profile_id,
-                        None,
-                        Some(error),
+                        error.info,
+                        Some(error.message),
                     );
                 }
             }
@@ -312,33 +312,38 @@ impl RemoteManager {
             .await
     }
 
-    pub async fn start_tunnel(&self, config: TunnelConfig) -> Result<TunnelInfo, String> {
-        let workspace = self.workspace(&config.profile_id).await?;
+    pub(super) async fn start_tunnel(
+        &self,
+        config: TunnelConfig,
+    ) -> Result<TunnelInfo, TunnelFailure> {
+        let workspace = self
+            .workspace(&config.profile_id)
+            .await
+            .map_err(|message| TunnelFailure::new(None, message))?;
         self.tunnels.start(workspace, config).await
     }
 
-    pub async fn tunnel_info(&self, id: u64) -> Option<TunnelInfo> {
+    pub(super) async fn tunnel_info(&self, id: u64) -> Option<TunnelInfo> {
         self.tunnels.info(id).await
     }
 
-    pub async fn list_tunnels(&self, profile_id: &str) -> Vec<TunnelInfo> {
-        self.tunnels.list(Some(profile_id)).await
+    pub(super) async fn list_tunnels(&self, profile_id: &str) -> Vec<TunnelInfo> {
+        self.tunnels.list(profile_id).await
     }
 
-    pub async fn update_tunnel(&self, id: u64, config: TunnelConfig) -> Result<TunnelInfo, String> {
-        let previous = self
-            .tunnels
-            .config(id)
+    pub(super) async fn update_tunnel(
+        &self,
+        id: u64,
+        config: TunnelConfig,
+    ) -> Result<TunnelInfo, TunnelFailure> {
+        let workspace = self
+            .workspace(&config.profile_id)
             .await
-            .ok_or_else(|| format!("SSH tunnel {id} was not found"))?;
-        if previous.profile_id != config.profile_id {
-            return Err("SSH tunnel profile cannot be changed".into());
-        }
-        let workspace = self.workspace(&config.profile_id).await?;
+            .map_err(|message| TunnelFailure::new(None, message))?;
         self.tunnels.replace(id, workspace, config).await
     }
 
-    pub async fn stop_tunnel(&self, id: u64) -> Result<Option<TunnelInfo>, String> {
+    pub(super) async fn stop_tunnel(&self, id: u64) -> Result<Option<TunnelInfo>, TunnelFailure> {
         let info = self.tunnels.info(id).await;
         let workspace = match info {
             Some(info) => self.workspace(&info.profile_id).await.ok(),

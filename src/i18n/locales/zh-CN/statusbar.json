@@ -44,7 +44,7 @@
     "title": "SSH 隧道",
     "description": "{{name}} 的运行时隧道。修改会立即生效。",
     "new": "新建隧道",
-    "empty": "这个 SSH 工作区没有活动隧道。",
+    "empty": "这个 SSH 工作区没有运行时隧道。",
     "newTunnel": "新建隧道",
     "editTunnel": "编辑隧道",
     "name": "名称",
@@ -59,18 +59,17 @@
     "start": "启动隧道",
     "applyRestart": "应用并重启",
     "stopRemove": "停止并移除",
-    "active": "运行中",
     "traffic": "流量 {{bytes}}",
     "status": {
-      "starting": "启动中",
       "active": "运行中",
       "failed": "失败",
       "closed": "已关闭"
     },
     "validation": {
       "name": "必须填写隧道名称。",
+      "bindHost": "监听地址不能包含空白字符。",
       "bindPort": "监听端口必须在 0 到 65535 之间。",
-      "targetHost": "必须填写目标主机。",
+      "targetHost": "必须填写目标主机，且不能包含空白字符。",
       "targetPort": "目标端口必须在 1 到 65535 之间。"
     }
   }

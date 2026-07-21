@@ -356,14 +356,6 @@
       "edit": "SSH profile",
       "description": "Connection details and optional stored credentials."
     },
-    "status": {
-      "loading": "Loading",
-      "connecting": "Connecting",
-      "connected": "Connected",
-      "reconnecting": "Reconnecting",
-      "disconnected": "Disconnected",
-      "error": "Error"
-    },
     "fields": {
       "name": "Name",
       "host": "Host",
@@ -397,11 +389,13 @@
       "title": "Advanced connection settings"
     },
     "validation": {
-      "host": "Host is required.",
+      "host": "Host is required and cannot contain whitespace.",
       "port": "Enter a port from 1 to 65535.",
       "username": "Username is required.",
       "identityFile": "An identity file is required for private-key authentication.",
-      "proxyPassword": "Move the proxy password to the secure password field."
+      "proxyPassword": "Move the proxy password to the secure password field.",
+      "keepalive": "Keepalive must be a whole number of seconds greater than or equal to 0.",
+      "reconnectAttempts": "Reconnect attempts must be a whole number from 1 to 20."
     },
     "launch": {
       "secret": "Store the SSH password before opening a new workspace.",

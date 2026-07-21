@@ -28,17 +28,37 @@ function removeInlineProxyPassword(value?: string | null): string | null {
 }
 
 function normalizeProfile(profile: SshProfile): SshProfile {
-  const keepalive = Number(profile.keepaliveSeconds);
   return {
     ...profile,
     proxyUrl: removeInlineProxyPassword(profile.proxyUrl),
-    port: Number(profile.port) || 22,
-    keepaliveSeconds:
-      Number.isFinite(keepalive) && keepalive >= 0 ? keepalive : 30,
-    reconnectMaxAttempts: Number(profile.reconnectMaxAttempts) || 5,
+    port: normalizeInteger(profile.port, 1, 65535, 22),
+    keepaliveSeconds: normalizeInteger(
+      profile.keepaliveSeconds,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      30,
+    ),
+    reconnectMaxAttempts: normalizeInteger(
+      profile.reconnectMaxAttempts,
+      1,
+      20,
+      5,
+    ),
     reconnectEnabled: Boolean(profile.reconnectEnabled),
     rootPath: profile.rootPath?.trim() || "~",
   };
+}
+
+function normalizeInteger(
+  value: number,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum
+    ? parsed
+    : fallback;
 }
 
 export const useRemoteStore = create<RemoteState>((set, get) => ({

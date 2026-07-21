@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
 import {
+  applyCredentialMutation,
+  credentialMutation,
   emptySshProfileForm,
   launchSecretIssue,
   profileValidationIssue,
@@ -21,7 +23,7 @@ import {
   FloppyDiskIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
@@ -29,7 +31,6 @@ import { SectionHeader } from "../components/SectionHeader";
 export function RemoteSection() {
   const { t } = useTranslation("settings");
   const profiles = useRemoteStore((state) => state.profiles);
-  const statuses = useRemoteStore((state) => state.statuses);
   const load = useRemoteStore((state) => state.load);
   const saveProfile = useRemoteStore((state) => state.saveProfile);
   const saveProfiles = useRemoteStore((state) => state.saveProfiles);
@@ -41,6 +42,7 @@ export function RemoteSection() {
   const [newDraft, setNewDraft] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectionRevision = useRef(0);
 
   const selected = useMemo(
     () => profiles.find((profile) => profile.id === selectedId) ?? null,
@@ -48,26 +50,35 @@ export function RemoteSection() {
   );
 
   const selectProfile = useCallback(async (profile: SshProfile) => {
+    const revision = ++selectionRevision.current;
     setSelectedId(profile.id);
     setNewDraft(false);
     setForm(sshProfileFormFrom(profile));
     setError(null);
-    const [secret, proxySecret] = await Promise.all([
-      remoteNative.getSecret(profile.id).catch(() => null),
-      remoteNative.getProxySecret(profile.id).catch(() => null),
-    ]);
-    setForm((current) =>
-      current.id === profile.id
-        ? {
-            ...current,
-            secret: secret ?? "",
-            proxySecret: proxySecret ?? "",
-          }
-        : current,
-    );
+    try {
+      const [secret, proxySecret] = await Promise.all([
+        remoteNative.getSecret(profile.id),
+        remoteNative.getProxySecret(profile.id),
+      ]);
+      if (selectionRevision.current !== revision) return;
+      setForm((current) =>
+        current.id === profile.id
+          ? {
+              ...current,
+              secret: current.secretDirty ? current.secret : (secret ?? ""),
+              proxySecret: current.proxySecretDirty
+                ? current.proxySecret
+                : (proxySecret ?? ""),
+            }
+          : current,
+      );
+    } catch (cause) {
+      if (selectionRevision.current === revision) setError(String(cause));
+    }
   }, []);
 
   const startNew = useCallback(() => {
+    selectionRevision.current += 1;
     setSelectedId(null);
     setNewDraft(true);
     setForm(emptySshProfileForm(newProfileId()));
@@ -75,73 +86,111 @@ export function RemoteSection() {
   }, []);
 
   useEffect(() => {
-    void load().then((loaded) => {
-      if (!newDraft && !selectedId && loaded[0]) {
-        void selectProfile(loaded[0]);
-      }
-      if (selectedId && !loaded.some((profile) => profile.id === selectedId)) {
-        startNew();
-      }
+    let active = true;
+    void load().catch((cause) => {
+      if (active) setError(String(cause));
     });
-  }, [load, newDraft, selectedId, selectProfile, startNew]);
+    return () => {
+      active = false;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (selectedId && !profiles.some((profile) => profile.id === selectedId)) {
+      startNew();
+    }
+  }, [profiles, selectedId, startNew]);
 
   const persistSecrets = async (profile: SshProfile, value: SshProfileForm) => {
-    if (profile.authMethod === "agent" || !value.rememberSecret) {
-      await remoteNative.deleteAuthSecret(profile.id).catch(() => {});
-    } else if (value.secret) {
-      await remoteNative.setSecret(profile.id, value.secret);
-    } else {
-      await remoteNative.deleteAuthSecret(profile.id).catch(() => {});
-    }
-    if (!profile.proxyUrl || !value.rememberProxySecret) {
-      await remoteNative.deleteProxySecret(profile.id).catch(() => {});
-    } else if (value.proxySecret) {
-      await remoteNative.setProxySecret(profile.id, value.proxySecret);
-    } else {
-      await remoteNative.deleteProxySecret(profile.id).catch(() => {});
-    }
+    await applyCredentialMutation(
+      credentialMutation({
+        value: value.secret,
+        dirty: value.secretDirty,
+        remember: value.rememberSecret,
+        applicable: profile.authMethod !== "agent",
+      }),
+      (secret) => remoteNative.setSecret(profile.id, secret),
+      () => remoteNative.deleteAuthSecret(profile.id),
+    );
+    await applyCredentialMutation(
+      credentialMutation({
+        value: value.proxySecret,
+        dirty: value.proxySecretDirty,
+        remember: value.rememberProxySecret,
+        applicable: Boolean(profile.proxyUrl),
+      }),
+      (secret) => remoteNative.setProxySecret(profile.id, secret),
+      () => remoteNative.deleteProxySecret(profile.id),
+    );
   };
 
-  const save = async (): Promise<SshProfile | null> => {
-    const issue = profileValidationIssue(form);
+  const profileFromValidForm = (value: SshProfileForm) => {
+    const issue = profileValidationIssue(value);
     if (issue) {
       setError(t(`remote.validation.${issue}`));
       return null;
     }
-    const profile = sshProfileFromForm(form);
+    return sshProfileFromForm(value);
+  };
+
+  const persistProfile = async (profile: SshProfile, value: SshProfileForm) => {
+    await saveProfile(profile);
+    await persistSecrets(profile, value);
+    setSelectedId(profile.id);
+    setNewDraft(false);
+    setForm((current) =>
+      current.id === value.id
+        ? {
+            ...current,
+            name: current.name === value.name ? profile.name : current.name,
+            secretDirty:
+              current.secret === value.secret ? false : current.secretDirty,
+            proxySecretDirty:
+              current.proxySecret === value.proxySecret
+                ? false
+                : current.proxySecretDirty,
+          }
+        : current,
+    );
+    toast.success(t("remote.actions.saved"));
+  };
+
+  const save = async () => {
+    const value = form;
+    const profile = profileFromValidForm(value);
+    if (!profile) return;
     setBusy(true);
     setError(null);
     try {
-      await saveProfile(profile);
-      await persistSecrets(profile, form);
-      setSelectedId(profile.id);
-      setNewDraft(false);
-      setForm((current) => ({ ...current, name: profile.name }));
-      toast.success(t("remote.actions.saved"));
-      return profile;
+      await persistProfile(profile, value);
     } catch (cause) {
       setError(String(cause));
-      return null;
     } finally {
       setBusy(false);
     }
   };
 
   const openWorkspace = async () => {
-    const issue = launchSecretIssue(form);
+    const value = form;
+    const issue = launchSecretIssue(value);
     if (issue) {
       setError(t(`remote.launch.${issue}`));
       return;
     }
-    const profile = await save();
+    const profile = profileFromValidForm(value);
     if (!profile) return;
+    setBusy(true);
+    setError(null);
     try {
+      await persistProfile(profile, value);
       await spawnWorkspaceProcess(
         { kind: "ssh", profileId: profile.id },
         "recent",
       );
     } catch (cause) {
       setError(String(cause));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -222,7 +271,12 @@ export function RemoteSection() {
       <div className="grid min-w-0 gap-5 md:grid-cols-[13rem_minmax(0,1fr)]">
         <aside className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-card/60">
           <div className="flex gap-2 border-b border-border/60 p-2.5">
-            <Button size="sm" className="min-w-0 flex-1" onClick={startNew}>
+            <Button
+              size="sm"
+              className="min-w-0 flex-1"
+              disabled={busy}
+              onClick={startNew}
+            >
               <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
               {t("remote.actions.new")}
             </Button>
@@ -243,44 +297,35 @@ export function RemoteSection() {
                 {t("remote.list.empty")}
               </p>
             ) : (
-              profiles.map((profile) => {
-                const status = statuses[profile.id]?.status;
-                return (
-                  <button
-                    key={profile.id}
-                    type="button"
-                    onClick={() => void selectProfile(profile)}
-                    className={cn(
-                      "mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent",
-                      selectedId === profile.id && "bg-accent",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full bg-muted-foreground/40",
-                        status === "connected" && "bg-emerald-500",
-                        (status === "connecting" ||
-                          status === "reconnecting") &&
-                          "bg-amber-500",
-                        status === "error" && "bg-destructive",
-                      )}
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-[12px] font-medium">
-                        {profile.name}
-                      </span>
-                      <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                        {profile.username}@{profile.host}:{profile.port}
-                      </span>
+              profiles.map((profile) => (
+                <button
+                  key={profile.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void selectProfile(profile)}
+                  className={cn(
+                    "mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent",
+                    selectedId === profile.id && "bg-accent",
+                  )}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12px] font-medium">
+                      {profile.name}
                     </span>
-                  </button>
-                );
-              })
+                    <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                      {profile.username}@{profile.host}:{profile.port}
+                    </span>
+                  </span>
+                </button>
+              ))
             )}
           </div>
         </aside>
 
-        <section className="min-w-0 rounded-xl border border-border/60 bg-card/60 p-4">
+        <section
+          className="min-w-0 rounded-xl border border-border/60 bg-card/60 p-4"
+          aria-busy={busy}
+        >
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[13px] font-medium">
@@ -290,13 +335,6 @@ export function RemoteSection() {
                 {t("remote.editor.description")}
               </p>
             </div>
-            {selected ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] capitalize text-muted-foreground">
-                {t(
-                  `remote.status.${statuses[selected.id]?.status ?? "loading"}`,
-                )}
-              </span>
-            ) : null}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -376,7 +414,13 @@ export function RemoteSection() {
                 <Input
                   type="password"
                   value={form.secret}
-                  onChange={(event) => update("secret", event.target.value)}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      secret: event.target.value,
+                      secretDirty: true,
+                    }))
+                  }
                   autoComplete="off"
                 />
                 <SecretToggle
@@ -432,7 +476,11 @@ export function RemoteSection() {
                     type="password"
                     value={form.proxySecret}
                     onChange={(event) =>
-                      update("proxySecret", event.target.value)
+                      setForm((current) => ({
+                        ...current,
+                        proxySecret: event.target.value,
+                        proxySecretDirty: true,
+                      }))
                     }
                     autoComplete="off"
                   />

@@ -68,6 +68,9 @@ impl SshProfile {
         {
             return Err("A private-key path is required".into());
         }
+        if !(1..=20).contains(&self.reconnect_max_attempts) {
+            return Err("SSH reconnect attempts must be between 1 and 20".into());
+        }
         Ok(())
     }
 }
@@ -111,7 +114,7 @@ pub struct ImportedHost {
     pub identity_file: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TunnelConfig {
     pub profile_id: String,
@@ -143,6 +146,7 @@ pub struct TunnelInfo {
     pub status: TunnelStatus,
     pub bind_host: String,
     pub bind_port: u16,
+    pub requested_bind_port: u16,
     pub target_host: String,
     pub target_port: u16,
     pub bytes: u64,
@@ -170,7 +174,6 @@ pub enum TunnelEventKind {
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TunnelStatus {
-    Starting,
     Active,
     Failed,
     Closed,
@@ -284,13 +287,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_profile_fields() {
-        let profile = SshProfile {
-            id: String::new(),
-            name: String::new(),
-            host: String::new(),
+    fn rejects_profile_values_outside_the_supported_contract() {
+        let mut profile = SshProfile {
+            id: "profile-1".into(),
+            name: "server".into(),
+            host: "example.com".into(),
             port: 22,
-            username: String::new(),
+            username: "alice".into(),
             auth_method: SshAuthMethod::Password,
             identity_file: None,
             proxy_url: None,
@@ -299,6 +302,19 @@ mod tests {
             reconnect_max_attempts: 5,
             root_path: None,
         };
-        assert!(profile.validate().is_err());
+
+        profile.host = "example .com".into();
+        assert_eq!(
+            profile.validate().unwrap_err(),
+            "SSH host is required and cannot contain whitespace"
+        );
+        profile.host = "example.com".into();
+        for attempts in [0, 21] {
+            profile.reconnect_max_attempts = attempts;
+            assert_eq!(
+                profile.validate().unwrap_err(),
+                "SSH reconnect attempts must be between 1 and 20"
+            );
+        }
     }
 }

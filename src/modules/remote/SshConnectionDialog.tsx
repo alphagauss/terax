@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { remoteNative } from "./native";
+import { applyCredentialMutation, credentialMutation } from "./profileForm";
 import { useRemoteStore } from "./store";
 
 type Props = {
@@ -37,7 +38,9 @@ export function SshConnectionDialog({
     [profileId, profiles],
   );
   const [secret, setSecret] = useState("");
+  const [secretDirty, setSecretDirty] = useState(false);
   const [proxySecret, setProxySecret] = useState("");
+  const [proxySecretDirty, setProxySecretDirty] = useState(false);
   const [rememberSecret, setRememberSecret] = useState(true);
   const [rememberProxySecret, setRememberProxySecret] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -49,16 +52,27 @@ export function SshConnectionDialog({
     let active = true;
     setReady(false);
     setError(null);
+    setSecret("");
+    setSecretDirty(false);
+    setProxySecret("");
+    setProxySecretDirty(false);
+    setRememberSecret(true);
+    setRememberProxySecret(true);
     void (async () => {
       try {
         const loaded = await load();
-        if (!loaded.some((item) => item.id === profileId)) {
+        const loadedProfile = loaded.find((item) => item.id === profileId);
+        if (!loadedProfile) {
           if (active) setError(t("sshConnection.profileMissing"));
           return;
         }
         const [savedSecret, savedProxySecret] = await Promise.all([
-          remoteNative.getSecret(profileId).catch(() => null),
-          remoteNative.getProxySecret(profileId).catch(() => null),
+          loadedProfile.authMethod === "agent"
+            ? null
+            : remoteNative.getSecret(profileId),
+          loadedProfile.proxyUrl
+            ? remoteNative.getProxySecret(profileId)
+            : null,
         ]);
         if (active) {
           setSecret(savedSecret ?? "");
@@ -77,20 +91,26 @@ export function SshConnectionDialog({
 
   const persistSecrets = async () => {
     if (!profile) return;
-    if (profile.authMethod !== "agent") {
-      if (rememberSecret && secret) {
-        await remoteNative.setSecret(profile.id, secret);
-      } else {
-        await remoteNative.deleteAuthSecret(profile.id).catch(() => {});
-      }
-    }
-    if (!profile.proxyUrl) {
-      await remoteNative.deleteProxySecret(profile.id).catch(() => {});
-    } else if (rememberProxySecret && proxySecret) {
-      await remoteNative.setProxySecret(profile.id, proxySecret);
-    } else {
-      await remoteNative.deleteProxySecret(profile.id).catch(() => {});
-    }
+    await applyCredentialMutation(
+      credentialMutation({
+        value: secret,
+        dirty: secretDirty,
+        remember: rememberSecret,
+        applicable: profile.authMethod !== "agent",
+      }),
+      (value) => remoteNative.setSecret(profile.id, value),
+      () => remoteNative.deleteAuthSecret(profile.id),
+    );
+    await applyCredentialMutation(
+      credentialMutation({
+        value: proxySecret,
+        dirty: proxySecretDirty,
+        remember: rememberProxySecret,
+        applicable: Boolean(profile.proxyUrl),
+      }),
+      (value) => remoteNative.setProxySecret(profile.id, value),
+      () => remoteNative.deleteProxySecret(profile.id),
+    );
   };
 
   const connect = async () => {
@@ -149,7 +169,10 @@ export function SshConnectionDialog({
                 type="password"
                 disabled={!ready || busy || !profile}
                 value={secret}
-                onChange={(event) => setSecret(event.target.value)}
+                onChange={(event) => {
+                  setSecret(event.target.value);
+                  setSecretDirty(true);
+                }}
                 autoComplete="off"
               />
               <SecretToggle
@@ -171,7 +194,10 @@ export function SshConnectionDialog({
                 type="password"
                 disabled={!ready || busy}
                 value={proxySecret}
-                onChange={(event) => setProxySecret(event.target.value)}
+                onChange={(event) => {
+                  setProxySecret(event.target.value);
+                  setProxySecretDirty(true);
+                }}
                 autoComplete="off"
               />
               <SecretToggle

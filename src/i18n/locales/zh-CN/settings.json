@@ -356,14 +356,6 @@
       "edit": "SSH 配置",
       "description": "连接详情与可选的已保存凭据。"
     },
-    "status": {
-      "loading": "加载中",
-      "connecting": "连接中",
-      "connected": "已连接",
-      "reconnecting": "重连中",
-      "disconnected": "未连接",
-      "error": "错误"
-    },
     "fields": {
       "name": "名称",
       "host": "主机",
@@ -397,11 +389,13 @@
       "title": "高级连接设置"
     },
     "validation": {
-      "host": "必须填写主机。",
+      "host": "必须填写主机，且不能包含空白字符。",
       "port": "请输入 1 到 65535 之间的端口。",
       "username": "必须填写用户名。",
       "identityFile": "私钥认证必须填写私钥文件。",
-      "proxyPassword": "请将代理密码移到安全密码字段中。"
+      "proxyPassword": "请将代理密码移到安全密码字段中。",
+      "keepalive": "保活间隔必须是大于或等于 0 的整数秒。",
+      "reconnectAttempts": "重试次数必须是 1 到 20 之间的整数。"
     },
     "launch": {
       "secret": "打开新工作区前，请先保存 SSH 密码。",

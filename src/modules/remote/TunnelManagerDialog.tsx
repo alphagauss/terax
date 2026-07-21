@@ -27,6 +27,7 @@ type Props = {
   profileId: string;
   profileName: string;
   tunnels: TunnelInfo[];
+  lifecycleError: string | null;
   refresh: () => Promise<void>;
 };
 
@@ -36,6 +37,7 @@ export function TunnelManagerDialog({
   profileId,
   profileName,
   tunnels,
+  lifecycleError,
   refresh,
 }: Props) {
   const { t } = useTranslation("statusbar");
@@ -44,6 +46,7 @@ export function TunnelManagerDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedTunnel = tunnels.find((tunnel) => tunnel.id === selectedId);
+  const visibleError = error ?? selectedTunnel?.error ?? lifecycleError;
 
   useEffect(() => {
     if (!open) return;
@@ -126,7 +129,12 @@ export function TunnelManagerDialog({
         <div className="grid min-h-0 md:grid-cols-[14rem_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b border-border/60 bg-muted/20 md:border-r md:border-b-0">
             <div className="border-b border-border/60 p-3">
-              <Button size="sm" className="w-full" onClick={startNew}>
+              <Button
+                size="sm"
+                className="w-full"
+                disabled={busy}
+                onClick={startNew}
+              >
                 {t("tunnels.new")}
               </Button>
             </div>
@@ -140,10 +148,13 @@ export function TunnelManagerDialog({
                   <button
                     key={tunnel.id}
                     type="button"
+                    disabled={busy}
                     onClick={() => selectTunnel(tunnel)}
                     className={cn(
                       "mb-1 w-full rounded-md px-2.5 py-2 text-left hover:bg-accent",
                       selectedId === tunnel.id && "bg-accent",
+                      (tunnel.status === "failed" || tunnel.error) &&
+                        "text-destructive",
                     )}
                   >
                     <span className="block truncate text-[12px] font-medium">
@@ -176,7 +187,16 @@ export function TunnelManagerDialog({
                 {selectedId ? t("tunnels.editTunnel") : t("tunnels.newTunnel")}
               </h2>
               {selectedTunnel ? (
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px]",
+                    selectedTunnel.status === "active"
+                      ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : selectedTunnel.status === "failed"
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-muted text-muted-foreground",
+                  )}
+                >
                   {t(`tunnels.status.${selectedTunnel.status}`)}
                 </span>
               ) : null}
@@ -257,9 +277,9 @@ export function TunnelManagerDialog({
                 })}
               </p>
             ) : null}
-            {error ? (
+            {visibleError ? (
               <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
-                {error}
+                {visibleError}
               </p>
             ) : null}
 
