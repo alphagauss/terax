@@ -1,8 +1,7 @@
-//! SFTP-backed remote filesystem.
+//! 基于 SFTP 的远程文件系统实现。
 //!
-//! The public operations follow CrabPort's SFTP API boundaries. Recursive
-//! transfer and deletion behavior is adapted from meatshell's `sftp.rs`, while
-//! the implementation uses russh-sftp's current high-level async API.
+//! 普通 Explorer 操作复用缓存会话，长时间后台传输使用独立 channel，避免目录读取
+//! 被大文件复制阻塞。递归删除与传输均拒绝符号链接和危险根路径。
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -103,6 +102,7 @@ pub async fn walk(
     Ok((output, truncated))
 }
 
+/// 返回文件浏览和普通文件操作共享的缓存 SFTP 会话。
 pub async fn session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
@@ -110,6 +110,17 @@ pub async fn session(
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
     }
+    let session = open_session(workspace).await?;
+    *cached = Some(session.clone());
+    Ok(session)
+}
+
+/// 为后台传输创建独立 SFTP channel。
+///
+/// 大文件复制不得占用 Explorer 的缓存会话，否则目录读取会排在传输请求之后。
+pub async fn open_session(
+    workspace: &Arc<RemoteWorkspace>,
+) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
     let channel = {
         let handle = workspace.handle.lock().await;
         handle
@@ -125,9 +136,7 @@ pub async fn session(
         .await
         .map_err(|e| format!("initialize SFTP: {e}"))?;
     session.set_timeout(30);
-    let session = Arc::new(session);
-    *cached = Some(session.clone());
-    Ok(session)
+    Ok(Arc::new(session))
 }
 
 async fn invalidate_session(
@@ -882,7 +891,8 @@ fn local_name(path: &Path) -> Result<String, String> {
         .ok_or_else(|| format!("invalid local path: {}", path.display()))
 }
 
-fn sanitize_local_name(name: &str) -> String {
+/// 将远端文件名转换为 Windows、macOS 和 Linux 均可创建的本地名称。
+pub(crate) fn sanitize_local_name(name: &str) -> String {
     let mut value: String = name
         .chars()
         .map(|character| match character {

@@ -1,65 +1,145 @@
-# SSH Profiles and tunnel management redesign
+# 文件传输基础版本计划与实现记录
 
-## Goal
+## 目标
 
-Replace the overloaded Remote SSH dialog with three clear surfaces:
+为 WSL 和 SSH Workspace 建立不阻塞终端的后台文件传输基础能力，先完成可靠、简洁的 Direct 直传链路，再在同一任务模型上扩展压缩传输、中断恢复和文件夹同步。
 
-1. **Settings > Remote** manages persistent SSH profiles and credentials.
-2. **Workspace environment selector** chooses or reconnects an SSH workspace.
-3. **Tunnel manager** controls runtime tunnels from the status bar, but only in the SSH environment's primary window.
+本次选择复用现有 Explorer、状态栏和系统原生文件选择器，不新增类似 Xftp 的本地与远端双栏文件管理器。
 
-The Remote tab is inserted after Agents and before About. The design must remain compact, translated, and usable in the 900 by 700 Settings window.
+## 本次完成内容
 
-## Ownership model
+### 后台任务模型
 
-- A tunnel belongs to the primary `single` Workspace process for one SSH environment, not to every window using that profile.
-- Extra windows cannot create, edit, stop, or list the primary window's tunnels. Their status-bar control explains that the primary window owns tunnel management.
-- Rust enforces ownership for every tunnel command. Hiding controls in React is not an authorization boundary.
-- Tunnels remain runtime state. They stop when the primary process exits and are restored only across reconnects in that process. Saved tunnel templates and auto-start are out of scope.
+- 新增当前 Workspace 进程内的文件传输管理器。
+- 支持排队、扫描、传输、校验、提交和结束阶段。
+- 支持运行、暂停、继续、取消、完成、失败和已取消状态。
+- 全局最多并发执行两个任务，避免多个大文件同时占满磁盘或 SSH 连接。
+- Rust 持有任务和控制状态，关闭传输面板或切换标签页不会中断任务。
+- 进度事件按 200ms 聚合，批量小文件不会为每个文件产生高频 IPC 和 React 更新。
+- 任务更新时间严格递增，前端初始化列表不会覆盖监听期间收到的新状态。
 
-## UI design
+### Direct 直传执行器
 
-### Remote settings
+- 支持文件、文件夹和多来源批量任务。
+- 文件以固定大小数据块流式复制，不会将完整文件读入内存。
+- 文件夹先递归扫描，统计总文件数和总字节数，再顺序传输文件。
+- WSL 通过宿主机路径桥接执行本地与 WSL 文件系统之间的双向传输。
+- SSH 为后台传输创建独立 SFTP channel，避免占用 Explorer 的缓存会话。
+- 上传完成后发送文件系统变更事件，刷新已加载的 Explorer 目录。
 
-- Add a full-width Remote section with a profile list and a detail editor.
-- Keep profile name, host, port, user, authentication, and credential storage in the basic form.
-- Put remote root, proxy, keepalive, and reconnect behavior in an Advanced section.
-- Include Import, New, Save, Delete, and a direct action to open an SSH workspace.
-- Keep tunnel controls out of Settings.
+### 安全提交与校验
 
-### Status bar tunnel manager
+- 每个顶层来源先写入目标目录中的固定长度 staging 路径。
+- 全部文件完成并通过大小校验后，才将 staging 路径重命名为最终目标。
+- 目标已存在时直接失败，不进行静默覆盖。
+- 批量任务在提交中途失败时，会回滚本任务已经提交的顶层目标。
+- 失败或取消时清理本任务创建的 staging 文件和目录。
+- 拒绝传输符号链接和不支持的特殊文件类型。
+- 拒绝来源目录复制到自身或其子目录，避免递归复制。
+- SSH 上传目标和下载来源必须位于配置的 Workspace 根目录内。
+- WSL 逻辑路径必须为规范绝对路径，拒绝父目录遍历、反斜杠和 NUL 字符。
+- SSH 下载时处理 Windows 非法文件名、保留名称和名称碰撞。
 
-- Add a tunnel count/status control immediately left of the AI status pill.
-- In the primary SSH window it opens a dedicated tunnel manager dialog, not a small dropdown.
-- The dialog lists name, direction, bind endpoint, target endpoint, status, traffic, and actions.
-- New and edit share one compact form. Dynamic tunnels hide target fields.
-- Editing an active tunnel is labelled "Apply and restart": validate first, stop the old listener, start the replacement, and restore the old configuration when replacement startup fails.
-- Extra SSH windows show a disabled owner hint. Local and WSL windows do not show the control.
+### Explorer 与系统选择器
 
-## Backend design
+- WSL 和 SSH Explorer 右键菜单新增“上传文件”和“上传文件夹”。
+- 远端文件或文件夹右键菜单新增“下载到本地”。
+- 支持将宿主机文件和文件夹拖放到 WSL 或 SSH Explorer 中创建上传任务。
+- 上传文件和文件夹支持系统原生多选。
+- 下载目标使用系统原生目录选择器。
+- Windows 的桌面、文档、下载等已知文件夹由系统选择器提供，不在 Terax 内重复实现本地目录树。
+- Local Workspace 不挂载传输事件监听，也不显示传输入口。
 
-- Expose primary-window identity in the Workspace bootstrap state.
-- Add one central ownership check for tunnel commands: primary Workspace, SSH environment, and matching profile id are all required.
-- Add tunnel lifecycle events for started, updated, failed, and stopped states. Do not emit per-byte events.
-- Add an update command with restart and rollback semantics.
-- Keep byte counters inexpensive: refresh them only while the manager is visible.
+### 状态栏传输面板
 
-## Reproduction contract
+- 在状态栏新增“文件传输”入口，非模态展示当前 Workspace 的任务。
+- 展示任务方向、名称、当前文件、阶段、文件数、字节进度、速度和错误。
+- 支持暂停、继续、取消和移除终态任务记录。
+- 活动任务优先显示，完成和失败记录按创建时间排列。
+- 面板宽度适配窄窗口，关闭面板不会影响后台执行。
 
-Given: a 900 by 700 Settings window and an SSH profile with password, key, and advanced options.
+### 国际化、文档与测试
 
-When: opening Settings > Remote, selecting profiles, editing values, and resizing within the supported minimum window size.
+- 新增英文和简体中文传输文案。
+- 将 Explorer 原有 SSH 浏览器弹窗上传下载替换为后台任务入口。
+- 为新增及实质修改的 Rust、TypeScript 和 TSX 文件补充中文文件级与重要逻辑文档。
+- 新增任务状态、暂停取消、版本合并、路径边界、目标不覆盖和 staging 路径测试。
+- 前端完整测试通过，共 97 个测试文件、564 项测试。
+- Rust 完整测试通过，库测试 255 项，集成测试 25 项和 35 项。
+- `pnpm lint`、`pnpm check-types`、`pnpm test` 和 Rust Clippy 均通过。
+- 本地未安装 cargo-nextest，因此按项目约定使用 `cargo test --all-targets --locked`。
 
-Expected: the profile editor remains readable, scrolls only within its intended regions, and all primary actions remain visible.
+## 当前使用方式
 
-Given: one primary SSH Workspace and one extra Workspace for the same SSH environment.
+在 WSL 或 SSH Workspace 中：
 
-When: creating, updating, stopping, reconnecting, and closing tunnels.
+1. 右键 Explorer 空白处或目录，选择“上传文件”或“上传文件夹”。
+2. 右键远端文件或文件夹，选择“下载到本地”。
+3. 也可以把宿主机文件或文件夹直接拖入 Explorer 上传。
+4. 点击底部状态栏的“传输”查看进度，并执行暂停、继续、取消或移除记录。
 
-Expected: only the primary window can mutate tunnels; the extra window cannot bypass that rule; lifecycle changes are reflected immediately; a failed update restores the previous tunnel when possible.
+## 当前限制
 
-## Verification
+- 首版只实现 Direct 顺序直传，尚未实现打包压缩传输。
+- 后端任务协议支持多来源下载，但 Explorer 当前只提供单个远端文件或文件夹下载入口。
+- 校验方式为来源和目标文件大小校验，尚未提供可选哈希校验。
+- 冲突策略固定为拒绝覆盖，尚未提供跳过、自动重命名、覆盖或逐项询问。
+- 暂停和继续只在当前应用进程有效，应用退出后不能恢复任务。
+- 进程异常退出可能留下隐藏 staging 路径，尚未实现 journal 扫描和恢复清理。
+- SSH 连接中断后任务进入失败状态，尚未实现自动重连和续传。
+- 尚未实现带宽限制、任务优先级、文件级并发和自动重试。
+- 尚未实现类似 Xftp 的本地与远端双栏文件管理面板。
+- 尚未针对真实 SSH 服务器和 WSL 环境完成手工端到端验证。
 
-- Add focused TypeScript and Rust tests for primary ownership, update rollback, and tunnel payload validation.
-- Run `pnpm lint`, `pnpm check-types`, `pnpm test`, Rust formatting and targeted tunnel/workspace tests, then the full required Rust checks when feasible.
-- Start the real Tauri application with WebView debugging, measure the old and new affected layouts, and verify the primary and extra-window tunnel flows in the actual WebView.
+## 后续预留
+
+### Archive 打包传输策略
+
+- 在现有任务生命周期上增加 `archive` 执行策略，不改变状态栏和控制命令。
+- 针对大量小文件，根据文件数量、平均大小、远端工具和可用空间决定是否建议或自动使用 Archive。
+- 上传流程为本地打包、单流上传、远端安全解压和最终提交。
+- 下载流程为远端打包、单流下载、本地安全解压和最终提交。
+- 解压前校验归档条目，拒绝绝对路径、父目录遍历、符号链接和设备文件。
+- 保留 Direct 手动选择和失败回退能力。
+
+### 跨进程中断恢复
+
+- 在 `~/.terax` 中增加按 Workspace 隔离的任务 journal。
+- 持久化任务规格、策略、来源快照、目标、staging 标识、完成文件和字节偏移。
+- 使用原子写入和单任务锁，避免多个 Terax 进程恢复同一个任务。
+- Direct 文件续传需要重新验证来源大小、修改时间和已写入前缀。
+- Archive 续传需要远端临时包、Range 能力和解压提交状态。
+- 启动时识别可恢复、已失效和仅可清理的 staging 任务，由用户决定继续或清理。
+
+### 文件夹同步
+
+- 在传输任务之上新增独立的同步计划，不把同步逻辑直接放进 Explorer 组件。
+- 首次同步生成双方清单，记录相对路径、类型、大小、修改时间和可选哈希。
+- 后续同步基于上次基线区分新增、修改、删除和冲突。
+- 支持单向镜像、双向同步、排除规则、删除保护和预览确认。
+- 文件监听只作为变更提示，最终结果仍由重新扫描确认。
+- 同步产生的文件复制继续复用 Direct 或 Archive 执行策略。
+
+### UI 与管理能力
+
+- 为 Explorer 增加多选后，开放多来源批量下载入口。
+- 增加冲突处理面板、失败重试、任务清理和历史记录上限。
+- 根据真实使用反馈决定是否增加双栏文件管理器，不在缺少需求验证时复制完整 Xftp 交互。
+- 如果增加双栏面板，本地侧继续优先复用系统已知文件夹和原生路径能力，远端侧复用现有 Explorer 数据模型。
+
+### 完整性与性能
+
+- 增加可选 SHA-256 或 BLAKE3 校验，并明确额外磁盘和网络开销。
+- 针对大量小文件增加 Archive 自动建议。
+- 针对多个大文件评估受控文件级并发，默认仍限制总并发。
+- 增加速度平滑、剩余时间估算、带宽限制和任务优先级。
+- 使用真实 WSL、局域网 SSH、高延迟 SSH、连接中断和磁盘空间不足场景建立基准与回归测试。
+
+## 后续实现约束
+
+- Rust 始终是任务状态和文件系统操作的事实来源，WebView 不直接访问文件系统。
+- SSH profile 和 Workspace 环境由进程启动上下文决定，前端任务参数不能切换后端。
+- 新策略复用现有任务状态、控制命令、事件节流和状态栏面板，不建立平行任务系统。
+- 未启用的 Archive、恢复和同步能力不得启动进程、扫描目录或增加常驻资源。
+- 所有最终写入继续使用 staging、校验和无覆盖提交，取消与失败路径必须可清理。
+- 同步删除、覆盖和跨进程恢复必须经过明确确认，并增加测试锁定安全不变量。

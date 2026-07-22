@@ -7,7 +7,7 @@ pub mod modules;
 
 use modules::{
     agent, ai_sessions, app_data, fs, git, history, lsp, net, open_with, pty, remote, secrets,
-    shared_store, shell, workspace, workspace_process,
+    shared_store, shell, transfers, workspace, workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -106,6 +106,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     Ok(())
 }
 
+/// 启动 Terax 原生进程并注册共享状态、插件和全部 IPC 命令。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(windows)]
@@ -209,6 +210,7 @@ pub fn run() {
         .manage(ai_sessions::AiSessionsState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
+        .manage(transfers::TransferState::default())
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
@@ -252,6 +254,12 @@ pub fn run() {
             remote::commands::ssh_tunnel_list,
             remote::commands::ssh_upload,
             remote::commands::ssh_download,
+            transfers::commands::transfer_enqueue,
+            transfers::commands::transfer_list,
+            transfers::commands::transfer_pause,
+            transfers::commands::transfer_resume,
+            transfers::commands::transfer_cancel,
+            transfers::commands::transfer_remove,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

@@ -39,6 +39,45 @@
     "connecting": "连接中…",
     "homeError": "SSH 已连接，但无法解析远程工作区根目录。"
   },
+  "transfers": {
+    "label": "传输",
+    "title": "文件传输",
+    "activeSummary_one": "{{count}} 项 · {{progress}}%",
+    "activeSummary_other": "{{count}} 项 · {{progress}}%",
+    "activeCount_one": "{{count}} 项进行中",
+    "activeCount_other": "{{count}} 项进行中",
+    "failedCount_one": "{{count}} 项失败",
+    "failedCount_other": "{{count}} 项失败",
+    "runningCount_one": "{{count}} 个传输任务进行中",
+    "runningCount_other": "{{count}} 个传输任务进行中",
+    "noActive": "没有进行中的传输",
+    "empty": "暂无传输任务。",
+    "items_one": "{{count}} 个项目",
+    "items_other": "{{count}} 个项目",
+    "filesProgress_one": "{{completed}} / {{total}} 个文件",
+    "filesProgress_other": "{{completed}} / {{total}} 个文件",
+    "pause": "暂停",
+    "resume": "继续",
+    "cancel": "取消",
+    "remove": "移除",
+    "operationFailed": "传输操作失败：{{error}}",
+    "failureDetail": "错误：{{error}}",
+    "status": {
+      "failed": "失败",
+      "canceled": "已取消",
+      "completed": "已完成",
+      "paused": "已暂停",
+      "canceling": "正在取消…"
+    },
+    "stage": {
+      "queued": "排队中",
+      "scanning": "正在扫描…",
+      "transferring": "正在传输…",
+      "verifying": "正在校验…",
+      "finalizing": "正在完成…",
+      "finished": "已完成"
+    }
+  },
   "tunnels": {
     "label": "隧道",
     "count": "隧道 {{count}}",
