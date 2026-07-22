@@ -1,3 +1,8 @@
+//! 工作区路径授权、环境解析与启动目录校验。
+//!
+//! 本模块将外部传入的路径规范化后与已授权根目录比较，避免符号链接、junction
+//! 与父目录遍历绕过文件系统和进程启动边界。
+
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -908,7 +913,7 @@ mod auth_tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&outside, &link).expect("symlink");
         #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&outside, &link).expect("symlink");
+        junction::create(&outside, &link).expect("junction");
         let reg = WorkspaceRegistry::default();
         reg.authorize(&allowed).expect("authorize root");
         let s = link.to_string_lossy().into_owned();
