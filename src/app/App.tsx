@@ -1,8 +1,14 @@
+/**
+ * 本文件协调 Terax 主窗口的工作区、终端、侧栏和全局交互状态。
+ * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
+ */
+
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -118,6 +124,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { CloseDialogs } from "./components/CloseDialogs";
 import { spaceDeleteDocuments } from "./lib/spaceDelete";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
@@ -158,6 +165,7 @@ function parentDirectory(path: string): string | null {
 }
 
 export default function App() {
+  const { t } = useTranslation("common");
   const initialLaunchCwd =
     currentWorkspaceEnv().kind === "local" ? getLaunchDir() : null;
   const revealWorkbenchSpace = useCallback((spaceId: string) => {
@@ -1556,7 +1564,13 @@ export default function App() {
             onActivate={onActivateAgent}
           />
           <HostKeyDialog prompt={hostPrompt} onResolved={clearHostPrompt} />
-          <Toaster position="bottom-right" />
+          <ToastDismissOnClick />
+          <Toaster
+            position="bottom-right"
+            duration={3000}
+            closeButton
+            toastOptions={{ closeButtonAriaLabel: t("close") }}
+          />
 
           {hasComposer ? (
             <>
