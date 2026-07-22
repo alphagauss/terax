@@ -6,6 +6,16 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -90,6 +100,11 @@ export function RemoteSection() {
   const [groupEditor, setGroupEditor] = useState<{
     id: string | null;
     name: string;
+  } | null>(null);
+  const [groupDeleteTarget, setGroupDeleteTarget] = useState<{
+    id: string;
+    name: string;
+    count: number;
   } | null>(null);
   const [groupEditorError, setGroupEditorError] = useState<string | null>(null);
   const selectionRevision = useRef(0);
@@ -348,13 +363,19 @@ export function RemoteSection() {
     }
   };
 
-  const removeGroup = async (groupId: string, name: string) => {
+  /** 打开分组删除确认框，不在用户确认前修改远程配置。 */
+  const removeGroup = (groupId: string, name: string) => {
     const count = profiles.filter(
       (profile) => profile.groupId === groupId,
     ).length;
-    if (!window.confirm(t("remote.groups.delete.confirm", { name, count }))) {
-      return;
-    }
+    setGroupDeleteTarget({ id: groupId, name, count });
+  };
+
+  /** 删除已确认的分组，并将当前编辑表单回落到默认分组。 */
+  const confirmRemoveGroup = async () => {
+    if (!groupDeleteTarget) return;
+    const { id: groupId } = groupDeleteTarget;
+    setGroupDeleteTarget(null);
     setBusy(true);
     setError(null);
     try {
@@ -529,7 +550,7 @@ export function RemoteSection() {
                             <DropdownMenuItem
                               variant="destructive"
                               className="text-[12px]"
-                              onSelect={() => void removeGroup(group.id, name)}
+                              onSelect={() => removeGroup(group.id, name)}
                             >
                               <HugeiconsIcon
                                 icon={Delete02Icon}
@@ -929,6 +950,38 @@ export function RemoteSection() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={groupDeleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setGroupDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("remote.groups.actions.delete")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {groupDeleteTarget
+                ? t("remote.groups.delete.confirm", groupDeleteTarget)
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmRemoveGroup()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={busy}
+            >
+              {t("remote.groups.actions.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
