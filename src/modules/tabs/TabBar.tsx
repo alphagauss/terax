@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Workbench 标签栏及其标签操作菜单。
+ * 负责标签切换、拖拽和新建入口展示，菜单内容必须在不同语言和快捷键长度下保持可读。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
@@ -91,6 +96,11 @@ type Props = {
   compact?: boolean;
 };
 
+/**
+ * Workbench 标签栏组件。
+ *
+ * 负责标签展示和交互入口。新建 Tab 菜单为名称与快捷键预留稳定宽度，并禁止单项内容折行。
+ */
 export function TabBar({
   groupId,
   tabs,
@@ -641,7 +651,7 @@ export function TabBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="min-w-44"
+            className="min-w-56"
             onCloseAutoFocus={(e) => e.preventDefault()}
           >
             <DropdownMenuItem onSelect={() => onNew()}>
@@ -650,8 +660,10 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">{tr("terminal")}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 whitespace-nowrap">
+                {tr("terminal")}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                 {newTerminalShortcut}
               </span>
             </DropdownMenuItem>
@@ -661,8 +673,10 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">{tr("blocks")}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 whitespace-nowrap">
+                {tr("blocks")}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                 {newBlockShortcut}
               </span>
             </DropdownMenuItem>
@@ -672,8 +686,10 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">{tr("privacy")}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 whitespace-nowrap">
+                {tr("privacy")}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                 {newPrivateShortcut}
               </span>
             </DropdownMenuItem>
@@ -683,15 +699,19 @@ export function TabBar({
                 size={14}
                 strokeWidth={1.75}
               />
-              <span className="flex-1">{tr("editor")}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 whitespace-nowrap">
+                {tr("editor")}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                 {newEditorShortcut}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onNewWebPreview()}>
               <HugeiconsIcon icon={Globe02Icon} size={14} strokeWidth={1.75} />
-              <span className="flex-1">{tr("webPreview")}</span>
-              <span className="text-xs text-muted-foreground">
+              <span className="min-w-0 flex-1 whitespace-nowrap">
+                {tr("webPreview")}
+              </span>
+              <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
                 {newWebPreviewShortcut}
               </span>
             </DropdownMenuItem>
