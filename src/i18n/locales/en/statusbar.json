@@ -18,7 +18,7 @@
     "wslDistro": "WSL: {{distro}}",
     "local": "Local",
     "sshProfile": "SSH: {{name}}",
-    "manageSshProfiles": "Manage SSH profiles…",
+    "manageSshProfiles": "Manage SSH profiles",
     "reconnectCurrentSsh": "Reconnect current SSH",
     "retryCurrentEnvironment": "Retry current environment",
     "refreshWsl": "Refresh WSL"
