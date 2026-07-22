@@ -1,3 +1,8 @@
+/**
+ * 本文件定义应用内快捷键及其默认按键。
+ * 作为快捷键注册与设置页展示的单一来源，不在此处决定某个工作区环境是否可执行。
+ */
+
 import { IS_MAC, MOD_PROP } from "@/lib/platform";
 
 /**
@@ -39,6 +44,7 @@ export type ShortcutId =
   | "ai.askSelection"
   | "agent.focusAttention"
   | "settings.open"
+  | "folder.open"
   | "sidebar.toggle"
   | "editor.undo"
   | "editor.redo"
@@ -72,6 +78,7 @@ export type Shortcut = {
   allowRepeat?: boolean;
 };
 
+/** 应用可注册的快捷键及其默认绑定。 */
 export const SHORTCUTS: Shortcut[] = [
   {
     id: "commandPalette.open",
@@ -96,6 +103,12 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Open settings",
     group: "General",
     defaultBindings: [{ [MOD_PROP]: true, key: "," }],
+  },
+  {
+    id: "folder.open",
+    label: "Open folder",
+    group: "General",
+    defaultBindings: [{ [MOD_PROP]: true, key: "o" }],
   },
   {
     id: "tab.new",

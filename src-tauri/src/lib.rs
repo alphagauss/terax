@@ -193,6 +193,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|_app| {
             // Localized native menu bar, built from the persisted `language`
             // preference. No-op off macOS.

@@ -14,5 +14,7 @@
   "save": "Save",
   "remove": "Remove",
   "edit": "Edit",
-  "home": "Home"
+  "home": "Home",
+  "openFolder": "Open Folder",
+  "openFolderFailed": "Could not open folder picker"
 }

@@ -1,3 +1,8 @@
+/**
+ * 本文件实现工作区文件资源管理器。
+ * 负责文件树、搜索和文件操作入口；目录选择入口由上层仅在 Local 工作区传入，避免组件自行判断运行环境。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -27,6 +32,7 @@ import {
   FileAddIcon,
   Folder01Icon,
   FolderAddIcon,
+  FolderOpenIcon,
   ListChevronsDownUpIcon,
   Refresh01Icon,
   Search01Icon,
@@ -70,6 +76,7 @@ export type FileExplorerHandle = {
 
 type Props = {
   rootPath: string | null;
+  onOpenFolder?: () => void;
   activeFilePath?: string | null;
   onOpenFile: (path: string, pin?: boolean) => void;
   onPathRenamed?: (from: string, to: string) => void;
@@ -211,10 +218,16 @@ function buildRows(
   return { rows, entryIndexByPath };
 }
 
+/**
+ * 文件资源管理器组件。
+ *
+ * 展示当前终端驱动的目录树，并在上层提供 Local 专用回调时显示原生目录选择入口。
+ */
 export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
     {
       rootPath,
+      onOpenFolder,
       activeFilePath,
       onOpenFile,
       onPathRenamed,
@@ -435,6 +448,17 @@ export const FileExplorer = memo(
           <div className="text-xs text-muted-foreground">
             {t("noCurrentDirectory")}
           </div>
+          {onOpenFolder ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 gap-1.5 text-xs"
+              onClick={onOpenFolder}
+            >
+              <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
+              {t("openFolder")}
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -598,6 +622,19 @@ export const FileExplorer = memo(
             />
             {basename(rootPath)}
           </span>
+
+          {onOpenFolder ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              onClick={onOpenFolder}
+              title={t("openFolder")}
+              aria-label={t("openFolder")}
+            >
+              <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
+            </Button>
+          ) : null}
 
           <Button
             variant="ghost"

@@ -1,3 +1,8 @@
+/**
+ * 本文件验证文件资源管理器在目录根异步变化时保持 Hook 顺序，
+ * 并锁定仅由上层提供的 Local 目录选择入口。
+ */
+
 // @vitest-environment happy-dom
 
 import { readFileSync } from "node:fs";
@@ -52,6 +57,7 @@ vi.mock("@hugeicons/core-free-icons", () => ({
   FileAddIcon: {},
   Folder01Icon: {},
   FolderAddIcon: {},
+  FolderOpenIcon: {},
   ListChevronsDownUpIcon: {},
   Refresh01Icon: {},
   Search01Icon: {},
@@ -167,6 +173,26 @@ describe("file opening render path", () => {
       ),
     );
     expect(container.textContent).toContain("remote");
+    act(() => root.unmount());
+  });
+
+  it("only renders the folder picker entry when the parent supplies it", () => {
+    const props = { rootPath: null, onOpenFile: vi.fn() };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() => root.render(createElement(FileExplorer, props)));
+    expect(container.textContent).not.toContain("openFolder");
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          ...props,
+          onOpenFolder: vi.fn(),
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("openFolder");
     act(() => root.unmount());
   });
 

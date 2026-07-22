@@ -14,6 +14,7 @@
     "commandPalette.open": "Open command palette",
     "commandPalette.content": "Find in files",
     "settings.open": "Open settings",
+    "folder.open": "Open folder",
     "tab.new": "New tab",
     "tab.newBlock": "New Blocks terminal",
     "tab.newPrivate": "New private terminal",

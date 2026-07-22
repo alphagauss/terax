@@ -120,6 +120,7 @@ import {
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
 import { AiChat01Icon } from "@hugeicons/core-free-icons";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
@@ -164,6 +165,11 @@ function parentDirectory(path: string): string | null {
   return path.slice(0, index);
 }
 
+/**
+ * Terax 主窗口组件。
+ *
+ * 负责组合工作区、终端和侧栏。目录选择仅在 Local 进程中创建当前窗口内的新终端标签页，避免将宿主机路径传给 WSL 或 SSH。
+ */
 export default function App() {
   const { t } = useTranslation("common");
   const initialLaunchCwd =
@@ -587,6 +593,28 @@ export default function App() {
     newTab(inheritedCwdForNewTab());
   }, [newTab, inheritedCwdForNewTab]);
 
+  /**
+   * 通过原生目录选择器在当前 Local 工作区打开一个终端标签页。
+   *
+   * 选择器返回宿主机路径，因此 WSL 和 SSH 进程不得调用。路径统一为正斜杠，保持前端工作区路径约定。
+   */
+  const openFolder = useCallback(async () => {
+    if (workspaceEnv.kind !== "local") return;
+
+    try {
+      const selected = await openFolderDialog({
+        directory: true,
+        multiple: false,
+        title: t("openFolder"),
+      });
+      if (typeof selected === "string") {
+        newTab(selected.replace(/\\/g, "/"));
+      }
+    } catch {
+      toast.error(t("openFolderFailed"));
+    }
+  }, [newTab, t, workspaceEnv.kind]);
+
   const openNewPrivateTab = useCallback(() => {
     newPrivateTab(inheritedCwdForNewTab());
   }, [newPrivateTab, inheritedCwdForNewTab]);
@@ -845,6 +873,7 @@ export default function App() {
         if (t) activateAgentTarget(t.tabId, t.leafId);
       },
       "settings.open": () => void openSettingsWindow(),
+      "folder.open": () => void openFolder(),
       "sidebar.toggle": toggleSidebar,
       "explorer.focus": toggleExplorerFocus,
       "view.zoomIn": zoomIn,
@@ -877,6 +906,7 @@ export default function App() {
       toggleSourceControl,
       toggleAiPanel,
       askFromSelection,
+      openFolder,
       toggleSidebar,
       toggleExplorerFocus,
       zoomIn,
@@ -890,6 +920,9 @@ export default function App() {
     (id: ShortcutId, e: KeyboardEvent) => {
       if (id === "search.focus") {
         return activeFindHandle() === null;
+      }
+      if (id === "folder.open") {
+        return workspaceEnv.kind !== "local";
       }
       if (
         id === "editor.undo" ||
@@ -934,7 +967,13 @@ export default function App() {
       }
       return false;
     },
-    [activeFindHandle, activeTab, captureActiveSelection, isEditorTab],
+    [
+      activeFindHandle,
+      activeTab,
+      captureActiveSelection,
+      isEditorTab,
+      workspaceEnv.kind,
+    ],
   );
 
   useGlobalShortcuts(shortcutHandlers, { isDisabled: shortcutsDisabled });
@@ -1452,6 +1491,11 @@ export default function App() {
                       <FileExplorer
                         ref={explorerRef}
                         rootPath={explorerRoot}
+                        onOpenFolder={
+                          workspaceEnv.kind === "local"
+                            ? openFolder
+                            : undefined
+                        }
                         gitStatus={
                           explorerGitDecorations ? sourceControl.status : null
                         }

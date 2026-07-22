@@ -14,6 +14,7 @@
     "commandPalette.open": "打开命令面板",
     "commandPalette.content": "在文件中查找",
     "settings.open": "打开设置",
+    "folder.open": "打开文件夹",
     "tab.new": "新建标签页",
     "tab.newBlock": "新建 Blocks 终端",
     "tab.newPrivate": "新建隐私终端",
