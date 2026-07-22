@@ -1,3 +1,8 @@
+//! SSH 连接、重连与隧道运行时生命周期协调。
+//!
+//! 连接成功后从 profile 的持久化隧道配置逐条启动已启用项。单条失败会被
+//! 记录并通知前端，但不会中断其他隧道或使 SSH 连接失败。
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
@@ -43,6 +48,7 @@ impl RemoteManager {
         app: tauri::AppHandle,
     ) -> Result<ConnectionInfo, String> {
         let profile_id = request.profile.id.clone();
+        let auto_start_tunnels = request.profile.enabled_tunnel_configs();
         let connect_lock = self.connect_lock(&profile_id);
         let _connect_guard = connect_lock.lock().await;
         self.set_status(
@@ -107,12 +113,21 @@ impl RemoteManager {
             Some(previous) => {
                 let restarted = self
                     .tunnels
-                    .restart_profile(&profile_id, previous.clone(), workspace.clone())
+                    .restart_profile(
+                        &profile_id,
+                        previous.clone(),
+                        workspace.clone(),
+                        auto_start_tunnels,
+                    )
                     .await;
                 previous.disconnect().await;
                 Some(restarted)
             }
-            None => None,
+            None => Some(
+                self.tunnels
+                    .start_profile(workspace.clone(), auto_start_tunnels)
+                    .await,
+            ),
         };
         let info = ConnectionInfo {
             profile_id: profile_id.clone(),

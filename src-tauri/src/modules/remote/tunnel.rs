@@ -1,5 +1,7 @@
-//! Local, remote and dynamic SSH forwarding.
+//! SSH 隧道的运行时网络资源和生命周期管理。
 //!
+//! 每条隧道独立启动、停止和重启。持久化配置 ID 仅用于回传状态，运行时 ID
+//! 用于释放当前进程的 socket、转发任务与远端转发注册，不会写入磁盘。
 //! Local/Dynamic forwarding is adapted from meatshell `forward.rs`; lifecycle
 //! and public DTO separation follows CrabPort's tunnel crate.
 
@@ -239,6 +241,7 @@ impl TunnelManager {
         let connections = TunnelConnections::default();
         let mut info = TunnelInfo {
             id,
+            config_id: config.config_id.clone(),
             profile_id: config.profile_id.clone(),
             name: config.name.clone(),
             kind: config.kind,
@@ -578,26 +581,39 @@ impl TunnelManager {
         stopped
     }
 
+    /// 启动同一 SSH profile 中已启用的持久化配置。
+    ///
+    /// 每条配置独立处理，端口占用等失败会保留失败状态，不会阻断后续配置。
+    pub(super) async fn start_profile(
+        &self,
+        workspace: Arc<RemoteWorkspace>,
+        configs: Vec<TunnelConfig>,
+    ) -> ProfileTunnelRestart {
+        let _operation = self.operation_lock.lock().await;
+        let mut started = Vec::with_capacity(configs.len());
+        for config in configs {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            started.push(self.start_with_id_unlocked(id, workspace.clone(), config).await);
+        }
+        ProfileTunnelRestart {
+            stopped: Vec::new(),
+            started,
+        }
+    }
+
+    /// 用最新持久化配置替换某个 profile 的全部运行时隧道。
     pub(super) async fn restart_profile(
         &self,
         profile_id: &str,
         previous: Arc<RemoteWorkspace>,
         replacement: Arc<RemoteWorkspace>,
+        configs: Vec<TunnelConfig>,
     ) -> ProfileTunnelRestart {
         let _operation = self.operation_lock.lock().await;
-        let active: Vec<_> = self
-            .tunnels
-            .read()
-            .await
-            .iter()
-            .filter(|(_, runtime)| {
-                runtime.info.profile_id == profile_id && runtime.info.status == TunnelStatus::Active
-            })
-            .map(|(id, runtime)| (*id, runtime.config.clone()))
-            .collect();
         let stopped = self.stop_profile_unlocked(profile_id, previous).await;
-        let mut started = Vec::with_capacity(active.len());
-        for (id, config) in active {
+        let mut started = Vec::with_capacity(configs.len());
+        for config in configs {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             started.push(
                 self.start_with_id_unlocked(id, replacement.clone(), config)
                     .await,
@@ -672,11 +688,11 @@ async fn replace_with_rollback<O: ReplaceOperations>(
 }
 
 fn validate(config: &TunnelConfig) -> Result<(), String> {
+    if config.config_id.trim().is_empty() {
+        return Err("tunnel config id is required".into());
+    }
     if config.profile_id.trim().is_empty() {
         return Err("tunnel profile is required".into());
-    }
-    if config.name.trim().is_empty() {
-        return Err("tunnel name is required".into());
     }
     if config.bind_host.trim().chars().any(char::is_whitespace) {
         return Err("tunnel bind host cannot contain whitespace".into());
@@ -818,6 +834,7 @@ mod tests {
 
     fn config(kind: TunnelKind) -> TunnelConfig {
         TunnelConfig {
+            config_id: "tunnel-app".to_string(),
             profile_id: "ssh-prod".to_string(),
             name: "App".to_string(),
             kind,
@@ -837,18 +854,19 @@ mod tests {
     }
 
     #[test]
-    fn forwarding_tunnels_need_a_target_and_name() {
+    fn forwarding_tunnels_need_a_target_but_allow_an_empty_name() {
         let mut tunnel = config(TunnelKind::Local);
         tunnel.target_port = 0;
         assert!(validate(&tunnel).is_err());
         tunnel.target_port = 8080;
         tunnel.name.clear();
-        assert!(validate(&tunnel).is_err());
+        assert!(validate(&tunnel).is_ok());
     }
 
     fn info(id: u64, config: &TunnelConfig, status: TunnelStatus) -> TunnelInfo {
         TunnelInfo {
             id,
+            config_id: config.config_id.clone(),
             profile_id: config.profile_id.clone(),
             name: config.name.clone(),
             kind: config.kind,

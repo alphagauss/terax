@@ -1,3 +1,8 @@
+/**
+ * 本文件负责 SSH profile 表单与持久化配置之间的转换和校验。
+ * 隧道不在 profile 编辑表单中修改，但转换时必须保留已有的持久化隧道。
+ */
+
 import type { SshAuthMethod, SshProfile } from "./types";
 
 export type SshProfileForm = {
@@ -94,6 +99,7 @@ export function sshProfileFromForm(form: SshProfileForm): SshProfile {
     reconnectEnabled: form.reconnectEnabled,
     reconnectMaxAttempts: Number(form.reconnectMaxAttempts),
     rootPath: form.rootPath.trim() || "~",
+    tunnels: [],
   };
 }
 

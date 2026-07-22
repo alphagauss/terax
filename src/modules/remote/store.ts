@@ -6,7 +6,7 @@ import {
 } from "@/lib/sharedStore";
 import { create } from "zustand";
 import { remoteNative } from "./native";
-import type { ConnectionInfo, SshProfile } from "./types";
+import type { ConnectionInfo, SshProfile, SshTunnel } from "./types";
 
 const profileKey = (id: string) => `profile:${id}`;
 let subscribed = false;
@@ -46,6 +46,20 @@ function normalizeProfile(profile: SshProfile): SshProfile {
     ),
     reconnectEnabled: Boolean(profile.reconnectEnabled),
     rootPath: profile.rootPath?.trim() || "~",
+    tunnels: (profile.tunnels ?? []).map(normalizeTunnel),
+  };
+}
+
+/** 将旧 profile 中缺失的隧道字段补为安全的默认值。 */
+function normalizeTunnel(tunnel: SshTunnel): SshTunnel {
+  return {
+    ...tunnel,
+    enabled: tunnel.enabled !== false,
+    name: tunnel.name?.trim() ?? "",
+    bindHost: tunnel.bindHost?.trim() || "127.0.0.1",
+    bindPort: normalizeInteger(tunnel.bindPort, 0, 65535, 0),
+    targetHost: tunnel.targetHost?.trim() ?? "",
+    targetPort: normalizeInteger(tunnel.targetPort, 0, 65535, 0),
   };
 }
 
@@ -150,3 +164,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
 export function newProfileId(): string {
   return `ssh-${crypto.randomUUID()}`;
 }
+/**
+ * 本文件维护跨 Workspace 进程共享的 SSH profile 状态。
+ * profile 中的隧道配置通过共享存储原子保存，运行时连接状态不写入磁盘。
+ */

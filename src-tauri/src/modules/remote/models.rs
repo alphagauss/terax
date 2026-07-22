@@ -1,3 +1,9 @@
+//! SSH 配置、连接和隧道的跨进程数据模型。
+//!
+//! 本模块定义写入共享 SSH profile 存储的持久化隧道，以及仅在当前
+//! Workspace 进程中有效的运行时隧道信息。持久化 ID 与运行时 ID 分离，
+//! 避免窗口重启后将旧的网络资源标识误作有效状态。
+
 use serde::{Deserialize, Serialize};
 
 fn default_port() -> u16 {
@@ -12,6 +18,10 @@ fn default_reconnect_attempts() -> u32 {
     5
 }
 
+fn default_tunnel_enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SshAuthMethod {
@@ -22,6 +32,9 @@ pub enum SshAuthMethod {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// 可由多个 Workspace 进程共享的 SSH 连接配置。
+///
+/// `tunnels` 仅保存持久化定义和启用意图，实际 socket 与流量状态由当前进程管理。
 pub struct SshProfile {
     pub id: String,
     pub name: String,
@@ -42,6 +55,8 @@ pub struct SshProfile {
     pub reconnect_max_attempts: u32,
     #[serde(default)]
     pub root_path: Option<String>,
+    #[serde(default)]
+    pub tunnels: Vec<SshTunnel>,
 }
 
 impl SshProfile {
@@ -72,6 +87,54 @@ impl SshProfile {
             return Err("SSH reconnect attempts must be between 1 and 20".into());
         }
         Ok(())
+    }
+
+    /// 返回当前连接成功后应自动启动的隧道配置。
+    ///
+    /// 关闭项保留在 profile 中以供后续编辑，但不会占用本地或远端端口。
+    pub fn enabled_tunnel_configs(&self) -> Vec<TunnelConfig> {
+        self.tunnels
+            .iter()
+            .filter(|tunnel| tunnel.enabled)
+            .map(|tunnel| tunnel.config(&self.id))
+            .collect()
+    }
+}
+
+/// SSH profile 中持久化的一条隧道配置。
+///
+/// `id` 在配置保存后保持不变，用于将启动后的运行时状态关联回这条配置。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTunnel {
+    pub id: String,
+    #[serde(default = "default_tunnel_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub name: String,
+    pub kind: TunnelKind,
+    #[serde(default)]
+    pub bind_host: String,
+    pub bind_port: u16,
+    #[serde(default)]
+    pub target_host: String,
+    #[serde(default)]
+    pub target_port: u16,
+}
+
+impl SshTunnel {
+    /// 转换为当前 SSH profile 可直接启动的运行时配置。
+    pub fn config(&self, profile_id: &str) -> TunnelConfig {
+        TunnelConfig {
+            config_id: self.id.clone(),
+            profile_id: profile_id.to_string(),
+            name: self.name.clone(),
+            kind: self.kind,
+            bind_host: self.bind_host.clone(),
+            bind_port: self.bind_port,
+            target_host: self.target_host.clone(),
+            target_port: self.target_port,
+        }
     }
 }
 
@@ -116,7 +179,11 @@ pub struct ImportedHost {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+/// 启动隧道所需的当前 profile 运行时配置。
+///
+/// `config_id` 对应持久化配置，`profile_id` 限定当前 SSH Workspace，二者均不等同于运行时 ID。
 pub struct TunnelConfig {
+    pub config_id: String,
     pub profile_id: String,
     pub name: String,
     pub kind: TunnelKind,
@@ -138,8 +205,12 @@ pub enum TunnelKind {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+/// 当前进程中一条隧道的可观测状态。
+///
+/// `id` 只用于停止或更新此进程内的资源，`config_id` 用于关联持久化列表项。
 pub struct TunnelInfo {
     pub id: u64,
+    pub config_id: String,
     pub profile_id: String,
     pub name: String,
     pub kind: TunnelKind,
@@ -301,6 +372,7 @@ mod tests {
             reconnect_enabled: false,
             reconnect_max_attempts: 5,
             root_path: None,
+            tunnels: Vec::new(),
         };
 
         profile.host = "example .com".into();
@@ -316,5 +388,48 @@ mod tests {
                 "SSH reconnect attempts must be between 1 and 20"
             );
         }
+    }
+
+    #[test]
+    fn profile_tunnel_defaults_to_enabled_and_only_enabled_configs_start() {
+        let profile: SshProfile = serde_json::from_value(serde_json::json!({
+            "id": "profile-1",
+            "name": "server",
+            "host": "example.com",
+            "username": "alice",
+            "authMethod": "agent",
+            "tunnels": [
+                {
+                    "id": "tunnel-db",
+                    "kind": "local",
+                    "bindHost": "127.0.0.1",
+                    "bindPort": 5432,
+                    "targetHost": "db.internal",
+                    "targetPort": 5432
+                },
+                {
+                    "id": "tunnel-off",
+                    "enabled": false,
+                    "kind": "dynamic",
+                    "bindPort": 1080
+                }
+            ]
+        }))
+        .unwrap();
+
+        assert!(profile.tunnels[0].enabled);
+        assert_eq!(
+            profile.enabled_tunnel_configs(),
+            vec![TunnelConfig {
+                config_id: "tunnel-db".into(),
+                profile_id: "profile-1".into(),
+                name: "".into(),
+                kind: TunnelKind::Local,
+                bind_host: "127.0.0.1".into(),
+                bind_port: 5432,
+                target_host: "db.internal".into(),
+                target_port: 5432,
+            }]
+        );
     }
 }

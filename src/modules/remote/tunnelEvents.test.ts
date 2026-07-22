@@ -1,9 +1,15 @@
+/**
+ * 本文件验证 SSH 隧道运行时事件对列表状态的更新。
+ * 测试锁定更新失败时恢复后的隧道仍可见这一不变量。
+ */
+
 import { describe, expect, it } from "vitest";
 import { applyTunnelEvent } from "./tunnelEvents";
 import type { TunnelInfo } from "./types";
 
 const tunnel = (id: number, name: string): TunnelInfo => ({
   id,
+  configId: `tunnel-${id}`,
   profileId: "profile-1",
   name,
   kind: "local",

@@ -130,7 +130,12 @@ export function RemoteSection() {
       setError(t(`remote.validation.${issue}`));
       return null;
     }
-    return sshProfileFromForm(value);
+    const profile = sshProfileFromForm(value);
+    return {
+      ...profile,
+      tunnels:
+        profiles.find((item) => item.id === profile.id)?.tunnels ?? [],
+    };
   };
 
   const persistProfile = async (profile: SshProfile, value: SshProfileForm) => {
@@ -222,6 +227,7 @@ export function RemoteSection() {
             reconnectEnabled: true,
             reconnectMaxAttempts: 5,
             rootPath: null,
+            tunnels: [],
           }),
         );
       await saveProfiles(additions);
@@ -609,3 +615,7 @@ function SecretToggle({
     </div>
   );
 }
+/**
+ * 本文件提供 SSH profile 的创建、编辑、导入与凭据保存界面。
+ * 隧道配置由主 SSH Workspace 管理，编辑 profile 时保留其已保存的隧道。
+ */
