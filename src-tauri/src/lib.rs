@@ -1,3 +1,7 @@
+//! Terax Tauri 后端入口。
+//!
+//! 本模块注册原生命令、共享状态和插件，并建立 WebView 与系统能力之间的边界。
+
 pub mod menu;
 pub mod modules;
 
@@ -320,6 +324,7 @@ pub fn run() {
             shared_store::shared_store_read,
             shared_store::shared_store_set,
             shared_store::shared_store_delete,
+            shared_store::shared_store_mutate,
             shared_store::shared_store_revision,
             open_with::open_with_register,
             open_with::open_with_unregister,

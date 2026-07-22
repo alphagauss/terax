@@ -1,3 +1,8 @@
+//! 跨 Terax 进程共享的白名单配置存储。
+//!
+//! 所有变更都在文件锁内读取最新值并原子替换文件。批量接口仅修改明确列出的键，
+//! 用于保持跨键业务不变量，不允许调用方整表覆盖。
+
 use crate::modules::storage::{write_atomic, FileLock};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
@@ -37,6 +42,14 @@ pub struct SharedStoreState {
 struct SharedStoreChanged {
     store: String,
     revision: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+/// 一次共享存储批量提交中的精确键变更。
+pub enum SharedStoreMutation {
+    Set { key: String, value: Value },
+    Delete { key: String },
 }
 
 fn filename(store: &str) -> Result<&'static str, String> {
@@ -86,6 +99,33 @@ fn mutate<T>(
     let bytes = serde_json::to_vec(&map).map_err(|error| error.to_string())?;
     write_atomic(&path, &bytes).map_err(|error| error.to_string())?;
     Ok(result)
+}
+
+/// 校验并应用一组精确的键变更。
+///
+/// 调用方必须在 `mutate` 持有文件锁期间调用，避免其他进程观察到部分结果。
+fn apply_mutations(
+    map: &mut Map<String, Value>,
+    mutations: Vec<SharedStoreMutation>,
+) -> Result<(), String> {
+    if mutations.iter().any(|mutation| match mutation {
+        SharedStoreMutation::Set { key, .. } | SharedStoreMutation::Delete { key } => {
+            key.is_empty()
+        }
+    }) {
+        return Err("shared store key cannot be empty".to_string());
+    }
+    for mutation in mutations {
+        match mutation {
+            SharedStoreMutation::Set { key, value } => {
+                map.insert(key, value);
+            }
+            SharedStoreMutation::Delete { key } => {
+                map.remove(&key);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
@@ -282,6 +322,20 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
 }
 
 #[tauri::command]
+pub fn shared_store_mutate(
+    app: AppHandle,
+    store: String,
+    mutations: Vec<SharedStoreMutation>,
+) -> Result<(), String> {
+    if mutations.is_empty() {
+        return Ok(());
+    }
+    let root = store_dir()?;
+    mutate(&root, &store, |map| apply_mutations(map, mutations))??;
+    emit_changed(&app, &root, &store)
+}
+
+#[tauri::command]
 pub fn shared_store_revision(store: String) -> Result<String, String> {
     Ok(revision(&store_path(&store_dir()?, &store)?))
 }
@@ -338,6 +392,48 @@ mod tests {
         let map = read_map(&dir.path().join("terax-settings.json")).unwrap();
         assert_eq!(map.get("font"), Some(&Value::from("mono")));
         assert_eq!(map.get("theme"), Some(&Value::from("dark")));
+    }
+
+    #[test]
+    fn batch_mutation_applies_sets_and_deletes_to_one_snapshot() {
+        let mut map = Map::from_iter([
+            ("group:prod".to_string(), Value::from("Production")),
+            ("profile:web".to_string(), Value::from("prod")),
+        ]);
+        apply_mutations(
+            &mut map,
+            vec![
+                SharedStoreMutation::Set {
+                    key: "profile:web".to_string(),
+                    value: Value::from("default"),
+                },
+                SharedStoreMutation::Delete {
+                    key: "group:prod".to_string(),
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(map.get("profile:web"), Some(&Value::from("default")));
+        assert!(!map.contains_key("group:prod"));
+    }
+
+    #[test]
+    fn batch_mutation_rejects_every_change_before_applying_any() {
+        let mut map = Map::new();
+        let result = apply_mutations(
+            &mut map,
+            vec![
+                SharedStoreMutation::Set {
+                    key: "valid".to_string(),
+                    value: Value::Bool(true),
+                },
+                SharedStoreMutation::Delete { key: String::new() },
+            ],
+        );
+
+        assert!(result.is_err());
+        assert!(map.is_empty());
     }
 
     #[test]

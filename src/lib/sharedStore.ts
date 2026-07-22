@@ -1,3 +1,8 @@
+/**
+ * 本文件封装跨 Terax 进程共享的白名单配置存储。
+ * 单键和批量精确变更均由 Rust 端加锁并原子替换，禁止前端整表覆盖。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -28,6 +33,18 @@ export function deleteSharedStoreKey(
   key: string,
 ): Promise<void> {
   return invoke("shared_store_delete", { store, key });
+}
+
+export type SharedStoreMutation =
+  | { kind: "set"; key: string; value: unknown }
+  | { kind: "delete"; key: string };
+
+/** 在同一把文件锁内原子应用一组精确的共享存储键变更。 */
+export function mutateSharedStore(
+  store: SharedStoreName,
+  mutations: SharedStoreMutation[],
+): Promise<void> {
+  return invoke("shared_store_mutate", { store, mutations });
 }
 
 function sharedStoreRevision(store: SharedStoreName): Promise<string> {

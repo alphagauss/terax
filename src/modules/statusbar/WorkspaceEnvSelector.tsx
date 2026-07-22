@@ -1,8 +1,16 @@
+/**
+ * 本文件实现状态栏 Workspace 环境选择器。
+ * SSH 配置按分组进入二级菜单，连接仍通过稳定 profile ID 启动独立进程。
+ */
+
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IS_WINDOWS } from "@/lib/platform";
@@ -12,12 +20,18 @@ import {
   SshConnectionDialog,
   useRemoteStore,
 } from "@/modules/remote";
+import { groupSshProfiles } from "@/modules/remote/groups";
 import {
   LOCAL_WORKSPACE,
   useWorkspaceEnvStore,
   type WorkspaceEnv,
 } from "@/modules/workspace";
-import { Refresh01Icon, ServerStack03Icon } from "@hugeicons/core-free-icons";
+import {
+  Folder01Icon,
+  Refresh01Icon,
+  ServerStack03Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +42,7 @@ type Props = {
   onCurrentConnected?: () => Promise<string | null>;
 };
 
+/** 在状态栏展示当前环境，并提供本地、WSL 与分组 SSH Workspace 入口。 */
 export function WorkspaceEnvSelector({
   onSelect,
   connectionError = null,
@@ -40,6 +55,7 @@ export function WorkspaceEnvSelector({
   const error = useWorkspaceEnvStore((state) => state.error);
   const refreshDistros = useWorkspaceEnvStore((state) => state.refreshDistros);
   const profiles = useRemoteStore((state) => state.profiles);
+  const groups = useRemoteStore((state) => state.groups);
   const statuses = useRemoteStore((state) => state.statuses);
   const loadProfiles = useRemoteStore((state) => state.load);
   const [connectionOpen, setConnectionOpen] = useState(false);
@@ -58,6 +74,10 @@ export function WorkspaceEnvSelector({
   );
   const activeStatus =
     env.kind === "ssh" ? statuses[env.profileId]?.status : undefined;
+  const groupedProfiles = useMemo(
+    () => groupSshProfiles(groups, profiles),
+    [groups, profiles],
+  );
 
   useEffect(() => {
     if (env.kind !== "ssh" || !activeProfile || !connectionError) {
@@ -162,17 +182,66 @@ export function WorkspaceEnvSelector({
             </>
           ) : null}
           <DropdownMenuSeparator />
+          {profiles.length === 0 ? (
+            <DropdownMenuItem disabled>
+              {t("workspace.noSshProfiles")}
+            </DropdownMenuItem>
+          ) : (
+            groupedProfiles
+              .filter((group) => group.profiles.length > 0)
+              .map((group) => (
+                <DropdownMenuSub key={group.id}>
+                  <DropdownMenuSubTrigger>
+                    <HugeiconsIcon
+                      icon={Folder01Icon}
+                      size={13}
+                      strokeWidth={1.75}
+                    />
+                    <span className="max-w-40 truncate">
+                      {group.name ?? t("workspace.defaultSshGroup")}
+                    </span>
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="max-h-(--radix-dropdown-menu-content-available-height) min-w-64 overflow-y-auto">
+                    {group.profiles.map((profile) => {
+                      const active =
+                        env.kind === "ssh" && env.profileId === profile.id;
+                      return (
+                        <DropdownMenuItem
+                          key={profile.id}
+                          onSelect={() =>
+                            onSelect({
+                              kind: "ssh",
+                              profileId: profile.id,
+                            })
+                          }
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">
+                              {profile.name}
+                            </span>
+                            <span className="block truncate font-mono text-[10px] font-normal text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground/70">
+                              {profile.username}@{profile.host}:{profile.port}
+                            </span>
+                          </span>
+                          {active ? (
+                            <HugeiconsIcon
+                              icon={Tick02Icon}
+                              size={13}
+                              strokeWidth={2}
+                              className="ml-auto"
+                            />
+                          ) : null}
+                        </DropdownMenuItem>
+                      );
+                    })}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ))
+          )}
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => void openSettingsWindow("remote")}>
             {t("workspace.manageSshProfiles")}
           </DropdownMenuItem>
-          {profiles.map((profile) => (
-            <DropdownMenuItem
-              key={profile.id}
-              onSelect={() => onSelect({ kind: "ssh", profileId: profile.id })}
-            >
-              {t("workspace.sshProfile", { name: profile.name })}
-            </DropdownMenuItem>
-          ))}
           {env.kind === "ssh" ? (
             <DropdownMenuItem onSelect={reconnectCurrent}>
               {t("workspace.reconnectCurrentSsh")}

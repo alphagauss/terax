@@ -1,21 +1,32 @@
+/**
+ * 本文件维护跨 Workspace 进程共享的 SSH 配置、分组和连接状态。
+ * 分组只影响配置管理与导航，运行时连接仍由稳定的 profile ID 标识。
+ */
+
 import {
   deleteSharedStoreKey,
+  mutateSharedStore,
   onSharedStoreChange,
   readSharedStore,
   setSharedStoreKey,
 } from "@/lib/sharedStore";
 import { create } from "zustand";
 import { remoteNative } from "./native";
-import type { ConnectionInfo, SshProfile, SshTunnel } from "./types";
+import { DEFAULT_SSH_GROUP_ID } from "./groups";
+import type { ConnectionInfo, SshGroup, SshProfile, SshTunnel } from "./types";
 
 const profileKey = (id: string) => `profile:${id}`;
+const groupKey = (id: string) => `group:${id}`;
 let subscribed = false;
 
 type RemoteState = {
+  groups: SshGroup[];
   profiles: SshProfile[];
   statuses: Record<string, ConnectionInfo>;
   loaded: boolean;
   load: () => Promise<SshProfile[]>;
+  saveGroup: (group: SshGroup) => Promise<void>;
+  deleteGroup: (groupId: string) => Promise<void>;
   saveProfile: (profile: SshProfile) => Promise<void>;
   saveProfiles: (profiles: SshProfile[]) => Promise<void>;
   deleteProfile: (profileId: string) => Promise<void>;
@@ -27,9 +38,16 @@ function removeInlineProxyPassword(value?: string | null): string | null {
   return value.replace(/^([a-z][a-z0-9+.-]*:\/\/[^/@:\s]+):[^@/]*@/i, "$1@");
 }
 
-function normalizeProfile(profile: SshProfile): SshProfile {
+function normalizeProfile(
+  profile: SshProfile,
+  knownGroupIds: ReadonlySet<string>,
+): SshProfile {
   return {
     ...profile,
+    groupId: knownGroupIds.has(profile.groupId)
+      ? profile.groupId
+      : DEFAULT_SSH_GROUP_ID,
+    name: profile.name?.trim() || `${profile.username}@${profile.host}`,
     proxyUrl: removeInlineProxyPassword(profile.proxyUrl),
     port: normalizeInteger(profile.port, 1, 65535, 22),
     keepaliveSeconds: normalizeInteger(
@@ -76,16 +94,32 @@ function normalizeInteger(
 }
 
 export const useRemoteStore = create<RemoteState>((set, get) => ({
+  groups: [],
   profiles: [],
   statuses: {},
   loaded: false,
   load: async () => {
     const values = await readSharedStore("ssh-profiles");
+    const groups = Object.entries(values)
+      .filter(([key]) => key.startsWith("group:"))
+      .map(([, value]) => value as SshGroup)
+      .filter(
+        (group) =>
+          group.id !== DEFAULT_SSH_GROUP_ID && Boolean(group.name?.trim()),
+      )
+      .map((group) => ({ ...group, name: group.name.trim() }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const knownGroupIds = new Set([
+      DEFAULT_SSH_GROUP_ID,
+      ...groups.map((group) => group.id),
+    ]);
     const records = Object.entries(values)
       .filter(([key]) => key.startsWith("profile:"))
       .map(([, value]) => value as SshProfile);
-    const profiles = records.map(normalizeProfile);
-    set({ profiles, loaded: true });
+    const profiles = records
+      .map((profile) => normalizeProfile(profile, knownGroupIds))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    set({ groups, profiles, loaded: true });
     if (!subscribed) {
       subscribed = true;
       void onSharedStoreChange("ssh-profiles", () => {
@@ -110,8 +144,71 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     });
     return profiles;
   },
+  saveGroup: async (group) => {
+    const normalized = { ...group, name: group.name.trim() };
+    if (!normalized.name) throw new Error("SSH group name is required");
+    if (!normalized.id || normalized.id === DEFAULT_SSH_GROUP_ID) {
+      throw new Error("SSH group id is invalid");
+    }
+    if (
+      get().groups.some(
+        (item) =>
+          item.id !== normalized.id &&
+          item.name.localeCompare(normalized.name, undefined, {
+            sensitivity: "base",
+          }) === 0,
+      )
+    ) {
+      throw new Error("SSH group name already exists");
+    }
+    const groups = [
+      ...get().groups.filter((item) => item.id !== normalized.id),
+      normalized,
+    ].sort((left, right) => left.name.localeCompare(right.name));
+    await setSharedStoreKey(
+      "ssh-profiles",
+      groupKey(normalized.id),
+      normalized,
+    );
+    set({ groups, loaded: true });
+  },
+  deleteGroup: async (groupId) => {
+    if (groupId === DEFAULT_SSH_GROUP_ID) return;
+    const current = get();
+    const movedProfiles = current.profiles
+      .filter((profile) => profile.groupId === groupId)
+      .map((profile) => ({
+        ...profile,
+        groupId: DEFAULT_SSH_GROUP_ID,
+      }));
+    const movedById = new Map(
+      movedProfiles.map((profile) => [profile.id, profile]),
+    );
+    const nextProfiles = current.profiles.map((profile) =>
+      profile.groupId === groupId
+        ? (movedById.get(profile.id) ?? profile)
+        : profile,
+    );
+    await mutateSharedStore("ssh-profiles", [
+      ...movedProfiles.map((profile) => ({
+        kind: "set" as const,
+        key: profileKey(profile.id),
+        value: profile,
+      })),
+      { kind: "delete", key: groupKey(groupId) },
+    ]);
+    set({
+      groups: current.groups.filter((group) => group.id !== groupId),
+      profiles: nextProfiles,
+      loaded: true,
+    });
+  },
   saveProfile: async (profile) => {
-    const normalized = normalizeProfile(profile);
+    const knownGroupIds = new Set([
+      DEFAULT_SSH_GROUP_ID,
+      ...get().groups.map((group) => group.id),
+    ]);
+    const normalized = normalizeProfile(profile, knownGroupIds);
     const profiles = [
       ...get().profiles.filter((item) => item.id !== normalized.id),
       normalized,
@@ -124,18 +221,22 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     );
   },
   saveProfiles: async (incoming) => {
+    const knownGroupIds = new Set([
+      DEFAULT_SSH_GROUP_ID,
+      ...get().groups.map((group) => group.id),
+    ]);
     const byId = new Map(
       get().profiles.map((profile) => [profile.id, profile]),
     );
     for (const profile of incoming)
-      byId.set(profile.id, normalizeProfile(profile));
+      byId.set(profile.id, normalizeProfile(profile, knownGroupIds));
     const profiles = [...byId.values()].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
     set({ profiles, loaded: true });
     await Promise.all(
       incoming.map((profile) => {
-        const normalized = normalizeProfile(profile);
+        const normalized = normalizeProfile(profile, knownGroupIds);
         return setSharedStoreKey(
           "ssh-profiles",
           profileKey(normalized.id),
@@ -164,7 +265,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
 export function newProfileId(): string {
   return `ssh-${crypto.randomUUID()}`;
 }
-/**
- * 本文件维护跨 Workspace 进程共享的 SSH profile 状态。
- * profile 中的隧道配置通过共享存储原子保存，运行时连接状态不写入磁盘。
- */
+
+export function newGroupId(): string {
+  return `ssh-group-${crypto.randomUUID()}`;
+}

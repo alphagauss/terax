@@ -18,6 +18,8 @@
     "wslDistro": "WSL: {{distro}}",
     "local": "本地",
     "sshProfile": "SSH: {{name}}",
+    "defaultSshGroup": "默认",
+    "noSshProfiles": "尚无 SSH 配置",
     "manageSshProfiles": "管理 SSH 配置",
     "reconnectCurrentSsh": "重连当前 SSH",
     "retryCurrentEnvironment": "重试当前环境",

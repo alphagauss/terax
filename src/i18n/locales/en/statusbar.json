@@ -18,6 +18,8 @@
     "wslDistro": "WSL: {{distro}}",
     "local": "Local",
     "sshProfile": "SSH: {{name}}",
+    "defaultSshGroup": "Default",
+    "noSshProfiles": "No SSH profiles",
     "manageSshProfiles": "Manage SSH profiles",
     "reconnectCurrentSsh": "Reconnect current SSH",
     "retryCurrentEnvironment": "Retry current environment",

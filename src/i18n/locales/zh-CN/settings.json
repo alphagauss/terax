@@ -358,6 +358,7 @@
     },
     "fields": {
       "name": "名称",
+      "group": "分组",
       "host": "主机",
       "port": "端口",
       "username": "用户名",
@@ -375,6 +376,35 @@
     "placeholders": {
       "name": "生产服务器",
       "host": "ssh.example.com"
+    },
+    "hints": {
+      "name": "可留空，保存时将使用“用户名@主机”。"
+    },
+    "groups": {
+      "defaultName": "默认",
+      "actions": {
+        "new": "新建分组",
+        "menu": "管理分组“{{name}}”",
+        "newProfile": "在此分组中新建配置",
+        "rename": "重命名分组",
+        "delete": "删除分组",
+        "created": "SSH 分组已创建",
+        "renamed": "SSH 分组已重命名",
+        "deleted": "SSH 分组已删除"
+      },
+      "editor": {
+        "newTitle": "新建 SSH 分组",
+        "renameTitle": "重命名 SSH 分组",
+        "description": "分组用于在设置和状态栏连接菜单中整理 SSH 配置。",
+        "name": "分组名称"
+      },
+      "validation": {
+        "required": "请输入分组名称。",
+        "duplicate": "已存在同名分组。"
+      },
+      "delete": {
+        "confirm": "删除分组“{{name}}”？其中 {{count}} 个配置将移动到默认分组。"
+      }
     },
     "auth": {
       "password": "密码",

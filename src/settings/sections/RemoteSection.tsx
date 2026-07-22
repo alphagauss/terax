@@ -1,7 +1,34 @@
+/**
+ * 本文件提供 SSH 配置与分组的创建、编辑、导入和凭据保存界面。
+ * 分组只用于管理和导航；隧道仍由主 SSH Workspace 管理并随配置保存。
+ */
+
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
 import {
@@ -15,12 +42,23 @@ import {
   type SshProfileForm,
 } from "@/modules/remote/profileForm";
 import type { SshProfile } from "@/modules/remote/types";
-import { newProfileId } from "@/modules/remote/store";
+import {
+  DEFAULT_SSH_GROUP_ID,
+  groupNameIssue,
+  groupSshProfiles,
+} from "@/modules/remote/groups";
+import { newGroupId, newProfileId } from "@/modules/remote/store";
 import { spawnWorkspaceProcess } from "@/modules/workspace-process";
 import {
   Add01Icon,
+  ArrowDown01Icon,
+  ArrowRight01Icon,
   Download01Icon,
+  Edit02Icon,
   FloppyDiskIcon,
+  FolderAddIcon,
+  MoreHorizontalIcon,
+  Delete02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -28,11 +66,15 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
 
+/** 管理 SSH 配置、分组、凭据和远程 Workspace 启动。 */
 export function RemoteSection() {
   const { t } = useTranslation("settings");
   const profiles = useRemoteStore((state) => state.profiles);
+  const groups = useRemoteStore((state) => state.groups);
   const load = useRemoteStore((state) => state.load);
   const saveProfile = useRemoteStore((state) => state.saveProfile);
+  const saveGroup = useRemoteStore((state) => state.saveGroup);
+  const deleteGroup = useRemoteStore((state) => state.deleteGroup);
   const saveProfiles = useRemoteStore((state) => state.saveProfiles);
   const deleteProfile = useRemoteStore((state) => state.deleteProfile);
   const [form, setForm] = useState<SshProfileForm>(() =>
@@ -42,11 +84,23 @@ export function RemoteSection() {
   const [newDraft, setNewDraft] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [groupEditor, setGroupEditor] = useState<{
+    id: string | null;
+    name: string;
+  } | null>(null);
+  const [groupEditorError, setGroupEditorError] = useState<string | null>(null);
   const selectionRevision = useRef(0);
 
   const selected = useMemo(
     () => profiles.find((profile) => profile.id === selectedId) ?? null,
     [profiles, selectedId],
+  );
+  const groupedProfiles = useMemo(
+    () => groupSshProfiles(groups, profiles),
+    [groups, profiles],
   );
 
   const selectProfile = useCallback(async (profile: SshProfile) => {
@@ -77,11 +131,11 @@ export function RemoteSection() {
     }
   }, []);
 
-  const startNew = useCallback(() => {
+  const startNew = useCallback((groupId = DEFAULT_SSH_GROUP_ID) => {
     selectionRevision.current += 1;
     setSelectedId(null);
     setNewDraft(true);
-    setForm(emptySshProfileForm(newProfileId()));
+    setForm({ ...emptySshProfileForm(newProfileId()), groupId });
     setError(null);
   }, []);
 
@@ -100,6 +154,18 @@ export function RemoteSection() {
       startNew();
     }
   }, [profiles, selectedId, startNew]);
+
+  useEffect(() => {
+    if (
+      form.groupId !== DEFAULT_SSH_GROUP_ID &&
+      !groups.some((group) => group.id === form.groupId)
+    ) {
+      setForm((current) => ({
+        ...current,
+        groupId: DEFAULT_SSH_GROUP_ID,
+      }));
+    }
+  }, [form.groupId, groups]);
 
   const persistSecrets = async (profile: SshProfile, value: SshProfileForm) => {
     await applyCredentialMutation(
@@ -133,8 +199,7 @@ export function RemoteSection() {
     const profile = sshProfileFromForm(value);
     return {
       ...profile,
-      tunnels:
-        profiles.find((item) => item.id === profile.id)?.tunnels ?? [],
+      tunnels: profiles.find((item) => item.id === profile.id)?.tunnels ?? [],
     };
   };
 
@@ -216,6 +281,7 @@ export function RemoteSection() {
         .map(
           (host): SshProfile => ({
             id: newProfileId(),
+            groupId: DEFAULT_SSH_GROUP_ID,
             name: host.alias,
             host: host.hostname,
             port: host.port,
@@ -241,6 +307,78 @@ export function RemoteSection() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const submitGroup = async () => {
+    if (!groupEditor) return;
+    const issue = groupNameIssue(
+      groupEditor.name,
+      groups,
+      groupEditor.id ?? undefined,
+    );
+    if (issue) {
+      setGroupEditorError(t(`remote.groups.validation.${issue}`));
+      return;
+    }
+    const id = groupEditor.id ?? newGroupId();
+    setBusy(true);
+    setGroupEditorError(null);
+    try {
+      await saveGroup({ id, name: groupEditor.name });
+      setCollapsedGroups((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      if (!groupEditor.id && newDraft) {
+        setForm((current) => ({ ...current, groupId: id }));
+      }
+      setGroupEditor(null);
+      toast.success(
+        t(
+          groupEditor.id
+            ? "remote.groups.actions.renamed"
+            : "remote.groups.actions.created",
+        ),
+      );
+    } catch (cause) {
+      setGroupEditorError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeGroup = async (groupId: string, name: string) => {
+    const count = profiles.filter(
+      (profile) => profile.groupId === groupId,
+    ).length;
+    if (!window.confirm(t("remote.groups.delete.confirm", { name, count }))) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteGroup(groupId);
+      setForm((current) =>
+        current.groupId === groupId
+          ? { ...current, groupId: DEFAULT_SSH_GROUP_ID }
+          : current,
+      );
+      toast.success(t("remote.groups.actions.deleted"));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleGroup = (groupId: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   };
 
   const remove = async () => {
@@ -274,20 +412,33 @@ export function RemoteSection() {
         description={t("remote.header.description")}
       />
 
-      <div className="grid min-w-0 gap-5 md:grid-cols-[13rem_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-card/60">
           <div className="flex gap-2 border-b border-border/60 p-2.5">
             <Button
               size="sm"
               className="min-w-0 flex-1"
               disabled={busy}
-              onClick={startNew}
+              onClick={() => startNew()}
             >
               <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
               {t("remote.actions.new")}
             </Button>
             <Button
-              size="sm"
+              size="icon-sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setGroupEditor({ id: null, name: "" });
+                setGroupEditorError(null);
+              }}
+              title={t("remote.groups.actions.new")}
+              aria-label={t("remote.groups.actions.new")}
+            >
+              <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
+            </Button>
+            <Button
+              size="icon-sm"
               variant="outline"
               disabled={busy}
               onClick={() => void importProfiles()}
@@ -298,33 +449,131 @@ export function RemoteSection() {
             </Button>
           </div>
           <div className="max-h-[calc(100vh-13rem)] min-h-28 overflow-y-auto p-1.5">
+            {groupedProfiles.map((group) => {
+              const collapsed = collapsedGroups.has(group.id);
+              const name = group.name ?? t("remote.groups.defaultName");
+              return (
+                <div key={group.id} data-ssh-group-id={group.id}>
+                  <div className="mb-0.5 flex min-w-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium hover:bg-accent"
+                      aria-expanded={!collapsed}
+                      onClick={() => toggleGroup(group.id)}
+                    >
+                      <HugeiconsIcon
+                        icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+                        size={11}
+                        strokeWidth={2}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{name}</span>
+                      <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
+                        {group.profiles.length}
+                      </span>
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          disabled={busy}
+                          title={t("remote.groups.actions.menu", { name })}
+                          aria-label={t("remote.groups.actions.menu", {
+                            name,
+                          })}
+                        >
+                          <HugeiconsIcon
+                            icon={MoreHorizontalIcon}
+                            size={12}
+                            strokeWidth={2}
+                          />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent
+                        align="start"
+                        className="min-w-44 p-1"
+                      >
+                        <DropdownMenuItem
+                          className="text-[12px]"
+                          onSelect={() => startNew(group.id)}
+                        >
+                          <HugeiconsIcon
+                            icon={Add01Icon}
+                            size={13}
+                            strokeWidth={2}
+                          />
+                          {t("remote.groups.actions.newProfile")}
+                        </DropdownMenuItem>
+                        {group.id !== DEFAULT_SSH_GROUP_ID ? (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-[12px]"
+                              onSelect={() => {
+                                setGroupEditor({
+                                  id: group.id,
+                                  name: group.name ?? "",
+                                });
+                                setGroupEditorError(null);
+                              }}
+                            >
+                              <HugeiconsIcon
+                                icon={Edit02Icon}
+                                size={13}
+                                strokeWidth={2}
+                              />
+                              {t("remote.groups.actions.rename")}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              variant="destructive"
+                              className="text-[12px]"
+                              onSelect={() => void removeGroup(group.id, name)}
+                            >
+                              <HugeiconsIcon
+                                icon={Delete02Icon}
+                                size={13}
+                                strokeWidth={2}
+                              />
+                              {t("remote.groups.actions.delete")}
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  {!collapsed
+                    ? group.profiles.map((profile) => (
+                        <button
+                          key={profile.id}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void selectProfile(profile)}
+                          className={cn(
+                            "mb-1 ml-5 flex w-[calc(100%-1.25rem)] items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent",
+                            selectedId === profile.id && "bg-accent",
+                          )}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-[12px] font-medium">
+                              {profile.name}
+                            </span>
+                            <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                              {profile.username}@{profile.host}:{profile.port}
+                            </span>
+                          </span>
+                        </button>
+                      ))
+                    : null}
+                </div>
+              );
+            })}
             {profiles.length === 0 ? (
               <p className="px-2 py-4 text-[11px] text-muted-foreground">
                 {t("remote.list.empty")}
               </p>
-            ) : (
-              profiles.map((profile) => (
-                <button
-                  key={profile.id}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void selectProfile(profile)}
-                  className={cn(
-                    "mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent",
-                    selectedId === profile.id && "bg-accent",
-                  )}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-[12px] font-medium">
-                      {profile.name}
-                    </span>
-                    <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                      {profile.username}@{profile.host}:{profile.port}
-                    </span>
-                  </span>
-                </button>
-              ))
-            )}
+            ) : null}
           </div>
         </aside>
 
@@ -343,13 +592,47 @@ export function RemoteSection() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label={t("remote.fields.name")} className="sm:col-span-2">
+          <div className="grid items-start gap-3 sm:grid-cols-2">
+            <Field label={t("remote.fields.name")}>
               <Input
                 value={form.name}
                 onChange={(event) => update("name", event.target.value)}
                 placeholder={t("remote.placeholders.name")}
               />
+              <p className="text-[10px] text-muted-foreground">
+                {t("remote.hints.name")}
+              </p>
+            </Field>
+            <Field label={t("remote.fields.group")}>
+              <Select
+                value={form.groupId}
+                onValueChange={(value) => update("groupId", value)}
+              >
+                <SelectTrigger className="w-full text-[12px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  className="[&_[data-position=popper]]:h-auto"
+                >
+                  <SelectItem
+                    value={DEFAULT_SSH_GROUP_ID}
+                    className="text-[12px]"
+                  >
+                    {t("remote.groups.defaultName")}
+                  </SelectItem>
+                  {groups.map((group) => (
+                    <SelectItem
+                      key={group.id}
+                      value={group.id}
+                      className="text-[12px]"
+                    >
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
             <Field label={t("remote.fields.host")}>
               <Input
@@ -376,22 +659,34 @@ export function RemoteSection() {
               />
             </Field>
             <Field label={t("remote.fields.authentication")}>
-              <select
+              <Select
                 value={form.authMethod}
-                onChange={(event) =>
+                onValueChange={(value) =>
                   update(
                     "authMethod",
-                    event.target.value as SshProfile["authMethod"],
+                    value as SshProfile["authMethod"],
                   )
                 }
-                className="h-9 rounded-md border bg-background px-3 text-sm"
               >
-                <option value="password">{t("remote.auth.password")}</option>
-                <option value="private_key">
-                  {t("remote.auth.privateKey")}
-                </option>
-                <option value="agent">{t("remote.auth.agent")}</option>
-              </select>
+                <SelectTrigger className="w-full text-[12px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  className="[&_[data-position=popper]]:h-auto"
+                >
+                  <SelectItem value="password" className="text-[12px]">
+                    {t("remote.auth.password")}
+                  </SelectItem>
+                  <SelectItem value="private_key" className="text-[12px]">
+                    {t("remote.auth.privateKey")}
+                  </SelectItem>
+                  <SelectItem value="agent" className="text-[12px]">
+                    {t("remote.auth.agent")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </Field>
             {form.authMethod === "private_key" ? (
               <Field
@@ -565,6 +860,75 @@ export function RemoteSection() {
           </div>
         </section>
       </div>
+
+      <Dialog
+        open={groupEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setGroupEditor(null);
+            setGroupEditorError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitGroup();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle className="text-sm">
+                {t(
+                  groupEditor?.id
+                    ? "remote.groups.editor.renameTitle"
+                    : "remote.groups.editor.newTitle",
+                )}
+              </DialogTitle>
+              <DialogDescription className="text-[11px]">
+                {t("remote.groups.editor.description")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="mt-4 grid gap-1.5">
+              <Label htmlFor="ssh-group-name" className="text-[11px]">
+                {t("remote.groups.editor.name")}
+              </Label>
+              <Input
+                id="ssh-group-name"
+                autoFocus
+                value={groupEditor?.name ?? ""}
+                onChange={(event) => {
+                  setGroupEditor((current) =>
+                    current
+                      ? { ...current, name: event.target.value }
+                      : current,
+                  );
+                  setGroupEditorError(null);
+                }}
+              />
+              {groupEditorError ? (
+                <p className="text-[11px] text-destructive">
+                  {groupEditorError}
+                </p>
+              ) : null}
+            </div>
+            <DialogFooter className="mt-5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setGroupEditor(null)}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" size="sm" disabled={busy}>
+                {t("common.save")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -615,7 +979,3 @@ function SecretToggle({
     </div>
   );
 }
-/**
- * 本文件提供 SSH profile 的创建、编辑、导入与凭据保存界面。
- * 隧道配置由主 SSH Workspace 管理，编辑 profile 时保留其已保存的隧道。
- */

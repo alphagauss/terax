@@ -5,8 +5,14 @@
 
 export type SshAuthMethod = "password" | "private_key" | "agent";
 
+export type SshGroup = {
+  id: string;
+  name: string;
+};
+
 export type SshProfile = {
   id: string;
+  groupId: string;
   name: string;
   host: string;
   port: number;

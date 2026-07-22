@@ -1,4 +1,10 @@
+/**
+ * 本文件测试 SSH 配置表单的默认值、转换、校验和凭据变更规则。
+ * 锁定空名称自动使用“用户名@主机”以及默认分组归属。
+ */
+
 import { describe, expect, it } from "vitest";
+import { DEFAULT_SSH_GROUP_ID } from "./groups";
 import {
   credentialMutation,
   emptySshProfileForm,
@@ -17,6 +23,7 @@ describe("SSH profile form", () => {
 
     expect(sshProfileFromForm(form)).toMatchObject({
       id: "ssh-prod",
+      groupId: DEFAULT_SSH_GROUP_ID,
       name: "deploy@prod.example.com",
       port: 22,
       rootPath: "~",

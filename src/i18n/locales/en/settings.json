@@ -358,6 +358,7 @@
     },
     "fields": {
       "name": "Name",
+      "group": "Group",
       "host": "Host",
       "port": "Port",
       "username": "Username",
@@ -375,6 +376,35 @@
     "placeholders": {
       "name": "Production server",
       "host": "ssh.example.com"
+    },
+    "hints": {
+      "name": "Optional. Empty names are saved as username@host."
+    },
+    "groups": {
+      "defaultName": "Default",
+      "actions": {
+        "new": "New group",
+        "menu": "Manage group {{name}}",
+        "newProfile": "New profile in this group",
+        "rename": "Rename group",
+        "delete": "Delete group",
+        "created": "SSH group created",
+        "renamed": "SSH group renamed",
+        "deleted": "SSH group deleted"
+      },
+      "editor": {
+        "newTitle": "New SSH group",
+        "renameTitle": "Rename SSH group",
+        "description": "Groups organize SSH profiles in settings and the status bar connection menu.",
+        "name": "Group name"
+      },
+      "validation": {
+        "required": "Enter a group name.",
+        "duplicate": "A group with this name already exists."
+      },
+      "delete": {
+        "confirm": "Delete group {{name}}? Its {{count}} profiles will move to the Default group."
+      }
     },
     "auth": {
       "password": "Password",

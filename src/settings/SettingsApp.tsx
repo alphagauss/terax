@@ -1,3 +1,8 @@
+/**
+ * 本文件实现独立设置窗口的标签导航与内容布局。
+ * 设置窗口只协调各设置分区，不直接持有分区业务状态。
+ */
+
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
@@ -64,6 +69,7 @@ function readInitialTab(): SettingsTab {
   return "general";
 }
 
+/** 渲染独立设置窗口，并响应主窗口发来的设置分区切换事件。 */
 export function SettingsApp() {
   const { t } = useTranslation();
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
@@ -128,7 +134,7 @@ export function SettingsApp() {
         <div
           className={cn(
             "mx-auto w-full",
-            active === "remote" ? "max-w-[54rem]" : "max-w-160",
+            active === "remote" ? "max-w-[58rem]" : "max-w-160",
           )}
         >
           {ActiveSection && <ActiveSection />}

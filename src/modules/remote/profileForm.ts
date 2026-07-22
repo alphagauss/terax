@@ -4,9 +4,11 @@
  */
 
 import type { SshAuthMethod, SshProfile } from "./types";
+import { DEFAULT_SSH_GROUP_ID } from "./groups";
 
 export type SshProfileForm = {
   id: string;
+  groupId: string;
   name: string;
   host: string;
   port: string;
@@ -40,6 +42,7 @@ export type LaunchSecretIssue = "secret" | "proxy";
 export function emptySshProfileForm(id: string): SshProfileForm {
   return {
     id,
+    groupId: DEFAULT_SSH_GROUP_ID,
     name: "",
     host: "",
     port: "22",
@@ -63,6 +66,7 @@ export function emptySshProfileForm(id: string): SshProfileForm {
 export function sshProfileFormFrom(profile: SshProfile): SshProfileForm {
   return {
     id: profile.id,
+    groupId: profile.groupId,
     name: profile.name,
     host: profile.host,
     port: String(profile.port),
@@ -88,6 +92,7 @@ export function sshProfileFromForm(form: SshProfileForm): SshProfile {
   const username = form.username.trim();
   return {
     id: form.id,
+    groupId: form.groupId,
     name: form.name.trim() || `${username}@${host}`,
     host,
     port: Number(form.port),
