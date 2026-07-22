@@ -42,6 +42,14 @@ type Props = {
   onCurrentConnected?: () => Promise<string | null>;
 };
 
+const COMPACT_MENU_CONTENT = "min-w-52 rounded-xl p-1";
+const COMPACT_MENU_ITEM = "h-7 gap-1.5 rounded-lg px-2 text-[13px] font-normal";
+const COMPACT_MENU_SEPARATOR = "-mx-1 my-1";
+const COMPACT_MENU_SUB_TRIGGER =
+  "h-7 gap-1.5 rounded-lg px-2 text-[13px] font-normal";
+const COMPACT_SSH_MENU_ITEM =
+  "min-h-10 gap-1.5 rounded-lg px-2 py-1 text-[12px] font-semibold";
+
 /** 在状态栏展示当前环境，并提供本地、WSL 与分组 SSH Workspace 入口。 */
 export function WorkspaceEnvSelector({
   onSelect,
@@ -152,15 +160,18 @@ export function WorkspaceEnvSelector({
             <span className="max-w-36 truncate">{label}</span>
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-52">
-          <DropdownMenuItem onSelect={() => onSelect(LOCAL_WORKSPACE)}>
+        <DropdownMenuContent align="start" className={COMPACT_MENU_CONTENT}>
+          <DropdownMenuItem
+            onSelect={() => onSelect(LOCAL_WORKSPACE)}
+            className={COMPACT_MENU_ITEM}
+          >
             {IS_WINDOWS ? t("workspace.windowsLocal") : t("workspace.local")}
           </DropdownMenuItem>
           {IS_WINDOWS ? (
             <>
-              <DropdownMenuSeparator />
+              <DropdownMenuSeparator className={COMPACT_MENU_SEPARATOR} />
               {distros.length === 0 ? (
-                <DropdownMenuItem disabled>
+                <DropdownMenuItem disabled className={COMPACT_MENU_ITEM}>
                   {loading
                     ? t("workspace.loadingWslDistros")
                     : error
@@ -174,6 +185,7 @@ export function WorkspaceEnvSelector({
                     onSelect={() =>
                       onSelect({ kind: "wsl", distro: distro.name })
                     }
+                    className={COMPACT_MENU_ITEM}
                   >
                     {t("workspace.wslDistro", { distro: distro.name })}
                   </DropdownMenuItem>
@@ -181,9 +193,9 @@ export function WorkspaceEnvSelector({
               )}
             </>
           ) : null}
-          <DropdownMenuSeparator />
+          <DropdownMenuSeparator className={COMPACT_MENU_SEPARATOR} />
           {profiles.length === 0 ? (
-            <DropdownMenuItem disabled>
+            <DropdownMenuItem disabled className={COMPACT_MENU_ITEM}>
               {t("workspace.noSshProfiles")}
             </DropdownMenuItem>
           ) : (
@@ -191,7 +203,7 @@ export function WorkspaceEnvSelector({
               .filter((group) => group.profiles.length > 0)
               .map((group) => (
                 <DropdownMenuSub key={group.id}>
-                  <DropdownMenuSubTrigger>
+                  <DropdownMenuSubTrigger className={COMPACT_MENU_SUB_TRIGGER}>
                     <HugeiconsIcon
                       icon={Folder01Icon}
                       size={13}
@@ -201,7 +213,7 @@ export function WorkspaceEnvSelector({
                       {group.name ?? t("workspace.defaultSshGroup")}
                     </span>
                   </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="max-h-(--radix-dropdown-menu-content-available-height) min-w-64 overflow-y-auto">
+                  <DropdownMenuSubContent className="max-h-(--radix-dropdown-menu-content-available-height) min-w-44 max-w-64 overflow-y-auto rounded-xl p-1">
                     {group.profiles.map((profile) => {
                       const active =
                         env.kind === "ssh" && env.profileId === profile.id;
@@ -214,12 +226,13 @@ export function WorkspaceEnvSelector({
                               profileId: profile.id,
                             })
                           }
+                          className={COMPACT_SSH_MENU_ITEM}
                         >
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate">
+                            <span className="block truncate leading-tight">
                               {profile.name}
                             </span>
-                            <span className="block truncate font-mono text-[10px] font-normal text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground/70">
+                            <span className="block truncate font-mono text-[11px] leading-tight font-normal text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground/70">
                               {profile.username}@{profile.host}:{profile.port}
                             </span>
                           </span>
@@ -238,12 +251,18 @@ export function WorkspaceEnvSelector({
                 </DropdownMenuSub>
               ))
           )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => void openSettingsWindow("remote")}>
+          <DropdownMenuSeparator className={COMPACT_MENU_SEPARATOR} />
+          <DropdownMenuItem
+            onSelect={() => void openSettingsWindow("remote")}
+            className={COMPACT_MENU_ITEM}
+          >
             {t("workspace.manageSshProfiles")}
           </DropdownMenuItem>
           {env.kind === "ssh" ? (
-            <DropdownMenuItem onSelect={reconnectCurrent}>
+            <DropdownMenuItem
+              onSelect={reconnectCurrent}
+              className={COMPACT_MENU_ITEM}
+            >
               {t("workspace.reconnectCurrentSsh")}
             </DropdownMenuItem>
           ) : null}
@@ -256,14 +275,18 @@ export function WorkspaceEnvSelector({
                 }
                 void onCurrentConnected?.();
               }}
+              className={COMPACT_MENU_ITEM}
             >
               {t("workspace.retryCurrentEnvironment")}
             </DropdownMenuItem>
           ) : null}
           {IS_WINDOWS ? (
             <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => void refreshDistros()}>
+              <DropdownMenuSeparator className={COMPACT_MENU_SEPARATOR} />
+              <DropdownMenuItem
+                onSelect={() => void refreshDistros()}
+                className={COMPACT_MENU_ITEM}
+              >
                 <HugeiconsIcon
                   icon={Refresh01Icon}
                   size={13}
