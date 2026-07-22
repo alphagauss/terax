@@ -199,6 +199,28 @@ impl RemoteManager {
                     continue;
                 }
                 let profile = workspace.profile.clone();
+                let failed_tunnels = {
+                    // 与显式重连串行化，避免旧 monitor 在新 transport 已替换后
+                    // 将刚启动的隧道误标记为失败。
+                    let connect_lock = manager.connect_lock(&profile.id);
+                    let _connect_guard = connect_lock.lock().await;
+                    if !manager.is_current(&workspace).await || !workspace.is_closed().await {
+                        return;
+                    }
+                    manager
+                        .tunnels
+                        .fail_profile(&profile.id, &workspace.remote_forwards)
+                        .await
+                };
+                for tunnel in failed_tunnels {
+                    Self::emit_tunnel_event(
+                        &app,
+                        TunnelEventKind::Failed,
+                        &profile.id,
+                        Some(tunnel),
+                        None,
+                    );
+                }
                 manager
                     .set_status(
                         &app,

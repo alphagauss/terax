@@ -581,6 +581,59 @@ impl TunnelManager {
         stopped
     }
 
+    /// 将因 SSH transport 关闭而失效的活动隧道转为失败状态。
+    ///
+    /// 本地和动态隧道必须停止监听，避免继续占用端口并接受无法转发的连接。
+    /// 运行时记录会保留为失败状态，供前端在重连成功前准确显示；已有失败项保持
+    /// 原因不变，后续重连会通过 `restart_profile` 统一清理并重建。
+    pub(super) async fn fail_profile(
+        &self,
+        profile_id: &str,
+        remote_forwards: &RemoteForwardRegistry,
+    ) -> Vec<TunnelInfo> {
+        let _operation = self.operation_lock.lock().await;
+        let ids: Vec<u64> = self
+            .tunnels
+            .read()
+            .await
+            .iter()
+            .filter_map(|(id, runtime)| {
+                (runtime.info.profile_id == profile_id
+                    && runtime.info.status == TunnelStatus::Active)
+                    .then_some(*id)
+            })
+            .collect();
+        let mut failed = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(info) = self.fail_unlocked(id, remote_forwards).await {
+                failed.push(info);
+            }
+        }
+        failed
+    }
+
+    /// 释放已失效隧道的网络资源，同时保留失败状态用于查询和重试。
+    async fn fail_unlocked(
+        &self,
+        id: u64,
+        remote_forwards: &RemoteForwardRegistry,
+    ) -> Option<TunnelInfo> {
+        let mut runtime = self.tunnels.write().await.remove(&id)?;
+        if runtime.info.kind == TunnelKind::Remote {
+            remote_forwards.remove(&runtime.info.bind_host, runtime.info.bind_port as u32);
+        }
+        runtime.connections.cancel();
+        if let Some(task) = runtime.task.take() {
+            let _ = task.await;
+        }
+        runtime.connections.wait().await;
+        runtime.info.status = TunnelStatus::Failed;
+        runtime.info.error = None;
+        let info = runtime_info(&runtime);
+        self.tunnels.write().await.insert(id, runtime);
+        Some(info)
+    }
+
     /// 启动同一 SSH profile 中已启用的持久化配置。
     ///
     /// 每条配置独立处理，端口占用等失败会保留失败状态，不会阻断后续配置。
@@ -593,7 +646,10 @@ impl TunnelManager {
         let mut started = Vec::with_capacity(configs.len());
         for config in configs {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            started.push(self.start_with_id_unlocked(id, workspace.clone(), config).await);
+            started.push(
+                self.start_with_id_unlocked(id, workspace.clone(), config)
+                    .await,
+            );
         }
         ProfileTunnelRestart {
             stopped: Vec::new(),
@@ -1053,6 +1109,55 @@ mod tests {
 
         assert_eq!(manager.list("ssh-prod").await.len(), 2);
         assert_eq!(manager.active_configs("ssh-prod").await, vec![active]);
+    }
+
+    #[tokio::test]
+    async fn closed_ssh_transport_marks_active_tunnels_failed_and_preserves_existing_failures() {
+        let manager = TunnelManager::default();
+        let active = config(TunnelKind::Local);
+        let mut already_failed = active.clone();
+        already_failed.name = "already-failed".into();
+        already_failed.bind_port = 3001;
+        manager
+            .insert_runtime(
+                1,
+                info(1, &active, TunnelStatus::Active),
+                active,
+                Arc::new(AtomicU64::new(0)),
+                TunnelConnections::default(),
+                None,
+            )
+            .await;
+        let mut failed_info = info(2, &already_failed, TunnelStatus::Failed);
+        failed_info.error = Some("port is already in use".into());
+        manager
+            .insert_runtime(
+                2,
+                failed_info,
+                already_failed,
+                Arc::new(AtomicU64::new(0)),
+                TunnelConnections::default(),
+                None,
+            )
+            .await;
+
+        let failed = manager
+            .fail_profile("ssh-prod", &RemoteForwardRegistry::default())
+            .await;
+
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].id, 1);
+        assert_eq!(failed[0].status, TunnelStatus::Failed);
+        assert!(failed[0].error.is_none());
+        let listed = manager.list("ssh-prod").await;
+        assert_eq!(listed.len(), 2);
+        assert!(listed
+            .iter()
+            .all(|tunnel| tunnel.status == TunnelStatus::Failed));
+        assert_eq!(
+            listed.iter().find(|tunnel| tunnel.id == 2).unwrap().error,
+            Some("port is already in use".into())
+        );
     }
 
     #[tokio::test]
