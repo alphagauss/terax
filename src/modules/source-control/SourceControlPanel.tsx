@@ -1306,7 +1306,7 @@ const EntryRow = memo(function EntryRow({
             <div className="flex min-w-0 flex-1 items-baseline gap-1 leading-none">
               <span
                 className={cn(
-                  "truncate text-[12px] leading-none",
+                  "truncate text-[13px] leading-none",
                   isSelected || focused
                     ? "font-semibold text-foreground"
                     : "font-medium text-foreground/95",

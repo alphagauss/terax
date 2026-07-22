@@ -404,7 +404,7 @@ export const GraphSection = memo(function GraphSection({
                     maxLaneCount={maxLaneCount}
                     active={openAnchor?.sha === commit.sha}
                   />
-                  <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-foreground/90">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/90">
                     {commit.subject || "(no subject)"}
                   </span>
                   {refs.map((value) => (
