@@ -338,6 +338,37 @@ impl TransferManager {
         Ok(())
     }
 
+    /// 清理已完成的历史任务，并返回实际删除的任务 ID。
+    pub(crate) async fn clear_completed(&self, app: &AppHandle) -> Vec<String> {
+        self.clear_matching(app, |status| status == TransferStatus::Completed)
+            .await
+    }
+
+    /// 清理全部终态历史任务，并返回实际删除的任务 ID。
+    pub(crate) async fn clear_all(&self, app: &AppHandle) -> Vec<String> {
+        self.clear_matching(app, TransferStatus::is_terminal).await
+    }
+
+    /// 在持有任务写锁时一次性筛选并删除历史，释放锁后再发布逐项移除事件。
+    async fn clear_matching(
+        &self,
+        app: &AppHandle,
+        matches: impl Fn(TransferStatus) -> bool,
+    ) -> Vec<String> {
+        let removed = {
+            let mut tasks = self.tasks.write().await;
+            let removed = history_matching_ids(&tasks, matches);
+            for id in &removed {
+                tasks.remove(id);
+            }
+            removed
+        };
+        for id in &removed {
+            emit_removed(app, id);
+        }
+        removed
+    }
+
     /// 使用终态任务保留的原始请求创建一个全新的重试任务。
     pub(crate) async fn retry(
         self: &Arc<Self>,
@@ -524,10 +555,9 @@ fn task_not_found(id: &str) -> TransferFailure {
 }
 
 fn history_prune_ids(tasks: &HashMap<String, ManagedTask>, limit: usize) -> Vec<String> {
-    let mut terminal: Vec<_> = tasks
-        .iter()
-        .filter(|(_, task)| task.snapshot.status.is_terminal())
-        .map(|(id, task)| (task.snapshot.created_at, id.clone()))
+    let mut terminal: Vec<_> = history_matching_ids(tasks, TransferStatus::is_terminal)
+        .into_iter()
+        .filter_map(|id| tasks.get(&id).map(|task| (task.snapshot.created_at, id)))
         .collect();
     terminal.sort();
     let remove_count = terminal.len().saturating_sub(limit);
@@ -536,6 +566,19 @@ fn history_prune_ids(tasks: &HashMap<String, ManagedTask>, limit: usize) -> Vec<
         .take(remove_count)
         .map(|(_, id)| id)
         .collect()
+}
+
+fn history_matching_ids(
+    tasks: &HashMap<String, ManagedTask>,
+    matches: impl Fn(TransferStatus) -> bool,
+) -> Vec<String> {
+    let mut ids: Vec<_> = tasks
+        .iter()
+        .filter(|(_, task)| matches(task.snapshot.status))
+        .map(|(id, task)| (task.snapshot.created_at, id.clone()))
+        .collect();
+    ids.sort_by_key(|(created_at, id)| (*created_at, id.clone()));
+    ids.into_iter().map(|(_, id)| id).collect()
 }
 
 fn now_ms() -> u64 {
@@ -660,6 +703,37 @@ mod tests {
         assert_eq!(
             resumed_status(TransferStage::Transferring),
             TransferStatus::Running
+        );
+    }
+
+    #[test]
+    fn history_clear_filters_only_requested_terminal_states() {
+        let tasks = HashMap::from([
+            (
+                "active".into(),
+                managed_task("active", TransferStatus::Running, 0),
+            ),
+            (
+                "completed".into(),
+                managed_task("completed", TransferStatus::Completed, 1),
+            ),
+            (
+                "failed".into(),
+                managed_task("failed", TransferStatus::Failed, 2),
+            ),
+            (
+                "canceled".into(),
+                managed_task("canceled", TransferStatus::Canceled, 3),
+            ),
+        ]);
+
+        assert_eq!(
+            history_matching_ids(&tasks, |status| status == TransferStatus::Completed),
+            vec!["completed"]
+        );
+        assert_eq!(
+            history_matching_ids(&tasks, TransferStatus::is_terminal),
+            vec!["completed", "failed", "canceled"]
         );
     }
 

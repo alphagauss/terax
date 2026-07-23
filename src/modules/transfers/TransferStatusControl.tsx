@@ -5,6 +5,16 @@
 
 import { Button } from "@/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -16,6 +26,7 @@ import { useWorkspaceEnvStore } from "@/modules/workspace";
 import {
   ArrowDataTransferVerticalIcon,
   Cancel01Icon,
+  CleanIcon,
   Delete02Icon,
   Download01Icon,
   PauseIcon,
@@ -25,13 +36,10 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { TFunction } from "i18next";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  formatTransferError,
-  formatTransferFailure,
-} from "./errors";
+import { formatTransferError, formatTransferFailure } from "./errors";
 import { transferNative } from "./native";
 import { useTransferBridge, useTransferStore } from "./store";
 import { isActiveTransfer, type TransferTask } from "./types";
@@ -47,8 +55,11 @@ export function TransferStatusControl() {
 function TransferStatusPanel() {
   const { t } = useTranslation("statusbar");
   const taskMap = useTransferStore((state) => state.tasks);
+  const removeLocalMany = useTransferStore((state) => state.removeLocalMany);
   const panelOpen = useTransferStore((state) => state.panelOpen);
   const setPanelOpen = useTransferStore((state) => state.setPanelOpen);
+  const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
+  const [clearing, setClearing] = useState<"completed" | "all" | null>(null);
   useTransferBridge();
   const tasks = useMemo(
     () =>
@@ -72,6 +83,30 @@ function TransferStatusPanel() {
     active.every(
       (task) => task.stage !== "queued" && task.stage !== "scanning",
     );
+  const completedCount = tasks.filter(
+    (task) => task.status === "completed",
+  ).length;
+  const clearableCount = tasks.filter((task) => !isActiveTransfer(task)).length;
+
+  /** 清理指定范围的终态任务，并在成功后即时同步本地快照。 */
+  const clearTasks = async (kind: "completed" | "all") => {
+    setClearing(kind);
+    try {
+      const ids =
+        kind === "completed"
+          ? await transferNative.clearCompleted()
+          : await transferNative.clearAll();
+      removeLocalMany(ids);
+    } catch (error) {
+      toast.error(
+        t("transfers.operationFailed", {
+          error: formatTransferError(error, t),
+        }),
+      );
+    } finally {
+      setClearing(null);
+    }
+  };
 
   return (
     <Popover open={panelOpen} onOpenChange={setPanelOpen}>
@@ -114,7 +149,7 @@ function TransferStatusPanel() {
         className="w-[430px] max-w-[calc(100vw-16px)] gap-0 overflow-hidden rounded-xl p-0"
       >
         <div className="flex items-center justify-between border-b border-border/60 px-3 py-2.5">
-          <div>
+          <div className="min-w-0">
             <div className="text-sm font-medium">{t("transfers.title")}</div>
             <div className="text-[11px] text-muted-foreground">
               {active.length > 0
@@ -122,11 +157,37 @@ function TransferStatusPanel() {
                 : t("transfers.noActive")}
             </div>
           </div>
-          {showAggregateProgress ? (
-            <div className="text-xs tabular-nums text-muted-foreground">
-              {Math.round(progress)}%
-            </div>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-1">
+            {showAggregateProgress ? (
+              <div className="mr-1 text-xs tabular-nums text-muted-foreground">
+                {Math.round(progress)}%
+              </div>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              title={t("transfers.clearCompleted")}
+              aria-label={t("transfers.clearCompleted")}
+              disabled={completedCount === 0 || clearing !== null}
+              onClick={() => void clearTasks("completed")}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <HugeiconsIcon icon={CleanIcon} size={13} strokeWidth={1.8} />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              title={t("transfers.clearAll")}
+              aria-label={t("transfers.clearAll")}
+              disabled={clearableCount === 0 || clearing !== null}
+              onClick={() => setConfirmClearAllOpen(true)}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={13} strokeWidth={1.8} />
+            </Button>
+          </div>
         </div>
         {tasks.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -142,6 +203,33 @@ function TransferStatusPanel() {
           </ScrollArea>
         )}
       </PopoverContent>
+      <AlertDialog
+        open={confirmClearAllOpen}
+        onOpenChange={(open) => {
+          if (!open && clearing === null) setConfirmClearAllOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("transfers.clearAllTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("transfers.clearAllDescription")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("transfers.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                setConfirmClearAllOpen(false);
+                void clearTasks("all");
+              }}
+            >
+              {t("transfers.clearAll")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Popover>
   );
 }

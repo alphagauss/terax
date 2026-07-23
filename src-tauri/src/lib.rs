@@ -260,6 +260,8 @@ pub fn run() {
             transfers::commands::transfer_cancel,
             transfers::commands::transfer_retry,
             transfers::commands::transfer_remove,
+            transfers::commands::transfer_clear_completed,
+            transfers::commands::transfer_clear_all,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

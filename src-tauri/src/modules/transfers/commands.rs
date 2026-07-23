@@ -97,6 +97,24 @@ pub async fn transfer_remove(
     state.manager().remove(&app, &id).await
 }
 
+/// 清理已完成的传输任务记录，不影响失败、取消或仍在运行的任务。
+#[tauri::command]
+pub async fn transfer_clear_completed(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+) -> Result<Vec<String>, String> {
+    Ok(state.manager().clear_completed(&app).await)
+}
+
+/// 清理全部终态传输任务记录，不影响仍在运行的任务。
+#[tauri::command]
+pub async fn transfer_clear_all(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+) -> Result<Vec<String>, String> {
+    Ok(state.manager().clear_all(&app).await)
+}
+
 /// 使用失败或取消任务的原始参数创建一个新的后台任务。
 #[tauri::command]
 pub async fn transfer_retry(

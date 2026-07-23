@@ -14,6 +14,7 @@ type TransferStore = {
   mergeList: (tasks: TransferTask[]) => void;
   upsert: (task: TransferTask) => void;
   removeLocal: (id: string) => void;
+  removeLocalMany: (ids: readonly string[]) => void;
   setPanelOpen: (open: boolean) => void;
 };
 
@@ -50,6 +51,17 @@ export const useTransferStore = create<TransferStore>((set) => ({
       const tasks = { ...state.tasks };
       delete tasks[id];
       return { tasks };
+    }),
+  removeLocalMany: (ids) =>
+    set((state) => {
+      const tasks = { ...state.tasks };
+      let changed = false;
+      for (const id of ids) {
+        if (!tasks[id]) continue;
+        delete tasks[id];
+        changed = true;
+      }
+      return changed ? { tasks } : state;
     }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
 }));

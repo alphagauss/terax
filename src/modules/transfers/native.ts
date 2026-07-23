@@ -20,9 +20,10 @@ export const transferNative = {
   pause: (id: string) => invoke<void>("transfer_pause", { id }),
   resume: (id: string) => invoke<void>("transfer_resume", { id }),
   cancel: (id: string) => invoke<void>("transfer_cancel", { id }),
-  retry: (id: string) =>
-    invoke<TransferTask>("transfer_retry", { id }),
+  retry: (id: string) => invoke<TransferTask>("transfer_retry", { id }),
   remove: (id: string) => invoke<void>("transfer_remove", { id }),
+  clearCompleted: () => invoke<string[]>("transfer_clear_completed"),
+  clearAll: () => invoke<string[]>("transfer_clear_all"),
   onUpdated: (handler: (task: TransferTask) => void): Promise<UnlistenFn> =>
     listen<TransferTask>(TRANSFER_EVENT, (event) => handler(event.payload)),
   onRemoved: (handler: (id: string) => void): Promise<UnlistenFn> =>

@@ -8,7 +8,11 @@ import type { TransferTask } from "./types";
 
 vi.mock("./native", () => ({ transferNative: {} }));
 
-import { mergeTransferTasks, openTransferPanel, useTransferStore } from "./store";
+import {
+  mergeTransferTasks,
+  openTransferPanel,
+  useTransferStore,
+} from "./store";
 
 function task(id: string, updatedAt: number): TransferTask {
   return {
@@ -60,11 +64,7 @@ describe("transfer snapshot merge", () => {
     const current = { active: task("active", 20) };
     const incoming = [task("removed", 10), task("queued", 15)];
 
-    const merged = mergeTransferTasks(
-      current,
-      incoming,
-      new Set(["removed"]),
-    );
+    const merged = mergeTransferTasks(current, incoming, new Set(["removed"]));
 
     expect(merged.removed).toBeUndefined();
     expect(merged.queued.updatedAt).toBe(15);
@@ -78,5 +78,21 @@ describe("transfer panel state", () => {
     openTransferPanel();
 
     expect(useTransferStore.getState().panelOpen).toBe(true);
+  });
+
+  it("removes a batch of local task snapshots in one update", () => {
+    useTransferStore.setState({
+      tasks: {
+        first: task("first", 1),
+        second: task("second", 2),
+      },
+    });
+
+    useTransferStore.getState().removeLocalMany(["first", "missing"]);
+
+    expect(useTransferStore.getState().tasks).toEqual({
+      second: task("second", 2),
+    });
+    useTransferStore.setState({ tasks: {} });
   });
 });
