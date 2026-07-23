@@ -74,6 +74,18 @@ Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
 - `fs_grep_interactive` - interactive content search
 - `fs_glob` - glob matching
 
+### File transfers (`src-tauri/src/modules/transfers/`)
+
+Background transfer tasks are process-local and bound to the immutable Workspace environment. Direct and Archive are explicit strategies and share the same planner, scheduler, staging, and no-replace commit protocol.
+
+- `transfer_enqueue_direct` / `transfer_enqueue_archive` - create a task with the selected strategy
+- `transfer_list` - list current process-local task snapshots
+- `transfer_pause` / `transfer_resume` / `transfer_cancel` - control queued or running tasks
+- `transfer_retry` - create a new task from a failed or canceled request
+- `transfer_remove` - remove a terminal history entry
+
+See [File transfers](file-transfers.md) for safety invariants and resource limits.
+
 ### Git (`src-tauri/src/modules/git/`)
 
 All git commands are gated through the workspace authorization registry.

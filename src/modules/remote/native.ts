@@ -1,3 +1,8 @@
+/**
+ * 本文件封装 SSH 连接、终端和隧道相关的 Tauri IPC。
+ * 文件传输统一由 transfers 模块管理，这里不暴露平行上传或下载入口。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
@@ -49,10 +54,6 @@ export const remoteNative = {
   updateTunnel: (id: number, config: TunnelConfig) =>
     invoke<TunnelInfo>("ssh_tunnel_update", { id, config }),
   stopTunnel: (id: number) => invoke<void>("ssh_tunnel_stop", { id }),
-  upload: (profileId: string, localPath: string, remoteDir: string) =>
-    invoke<void>("ssh_upload", { profileId, localPath, remoteDir }),
-  download: (profileId: string, remotePath: string, localDir: string) =>
-    invoke<string>("ssh_download", { profileId, remotePath, localDir }),
   getSecret: (profileId: string) =>
     invoke<string | null>("secrets_get", {
       service: SSH_SECRET_SERVICE,

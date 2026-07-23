@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+//! SSH 连接、终端与隧道的 Tauri command 适配层。
+//!
+//! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
 use crate::modules::workspace_process::WorkspaceProcessState;
 
@@ -189,28 +191,4 @@ pub async fn ssh_tunnel_list(
 ) -> Result<Vec<TunnelInfo>, String> {
     workspace.assert_ssh_tunnel_owner(&profile_id)?;
     Ok(state.manager.list_tunnels(&profile_id).await)
-}
-
-#[tauri::command]
-pub async fn ssh_upload(
-    state: tauri::State<'_, RemoteState>,
-    profile_id: String,
-    local_path: String,
-    remote_dir: String,
-) -> Result<(), String> {
-    let workspace = state.manager.workspace(&profile_id).await?;
-    super::sftp::upload_path(&workspace, PathBuf::from(local_path).as_path(), &remote_dir).await
-}
-
-#[tauri::command]
-pub async fn ssh_download(
-    state: tauri::State<'_, RemoteState>,
-    profile_id: String,
-    remote_path: String,
-    local_dir: String,
-) -> Result<String, String> {
-    let workspace = state.manager.workspace(&profile_id).await?;
-    super::sftp::download_path(&workspace, &remote_path, PathBuf::from(local_dir).as_path())
-        .await
-        .map(|path| path.to_string_lossy().into_owned())
 }

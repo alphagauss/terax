@@ -1,6 +1,6 @@
 /**
  * 本文件验证文件资源管理器在目录根异步变化时保持 Hook 顺序，
- * 并锁定仅由上层提供的 Local 目录选择入口。
+ * 并锁定 Local 目录选择入口与非本地 Workspace 的后台传输入口。
  */
 
 // @vitest-environment happy-dom
@@ -10,7 +10,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, createElement, forwardRef } from "react";
 import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({ environmentKind: "local" }));
+
+afterEach(() => {
+  mocks.environmentKind = "local";
+});
 
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children }: { children?: React.ReactNode }) => children,
@@ -37,11 +43,21 @@ vi.mock("@/components/ui/context-menu", () => {
     ContextMenuContent: Pass,
     ContextMenuItem: Pass,
     ContextMenuSeparator: Pass,
+    ContextMenuSub: Pass,
+    ContextMenuSubContent: Pass,
+    ContextMenuSubTrigger: Pass,
     ContextMenuTrigger: Pass,
   };
 });
 
-vi.mock("@/modules/remote", () => ({ remoteNative: {} }));
+vi.mock("@/modules/transfers/dialogs", () => ({
+  pickDownloadDirectory: vi.fn(),
+  pickUploadFiles: vi.fn(),
+  pickUploadFolders: vi.fn(),
+}));
+vi.mock("@/modules/transfers/native", () => ({
+  transferNative: { enqueueDirect: vi.fn(), enqueueArchive: vi.fn() },
+}));
 vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: (
     select: (state: { explorerGitDecorations: boolean }) => unknown,
@@ -51,7 +67,7 @@ vi.mock("@/modules/shortcuts", () => ({ useGlobalShortcuts: vi.fn() }));
 vi.mock("@/modules/workspace", () => ({
   useWorkspaceEnvStore: (
     select: (state: { env: { kind: string } }) => unknown,
-  ) => select({ env: { kind: "local" } }),
+  ) => select({ env: { kind: mocks.environmentKind } }),
 }));
 vi.mock("@hugeicons/core-free-icons", () => ({
   FileAddIcon: {},
@@ -201,5 +217,27 @@ describe("file opening render path", () => {
     expect(viewRegistrySource).toContain("<EditorView");
     expect(viewRegistrySource).toContain('tab.kind === "markdown"');
     expect(viewRegistrySource).toContain("<MarkdownView");
+  });
+
+  it("offers Direct and Archive transfers in a WSL workspace", () => {
+    mocks.environmentKind = "wsl";
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("menu.uploadFiles");
+    expect(container.textContent).toContain("menu.uploadFolder");
+    expect(source).toContain("enqueueDownload(menuTarget.path, strategy)");
+    expect(source).toContain("<TransferStrategyMenu");
+    expect(source).toContain("transferNative.enqueueArchive");
+    act(() => root.unmount());
   });
 });

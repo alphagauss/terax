@@ -1,3 +1,8 @@
+/**
+ * 本文件实现应用底部状态栏。
+ * 负责组合工作区、诊断、隐私、后台传输、SSH 隧道和 Agent 状态，不持有各子系统业务状态。
+ */
+
 import {
   Tooltip,
   TooltipContent,
@@ -6,6 +11,7 @@ import {
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
 import { TunnelStatusControl } from "@/modules/remote";
+import { TransferStatusControl } from "@/modules/transfers";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -27,6 +33,7 @@ type Props = {
   privateActive: boolean;
 };
 
+/** 组合应用级状态、后台任务入口与当前 Workspace 导航。 */
 export function StatusBar({
   cwd,
   filePath,
@@ -69,6 +76,7 @@ export function StatusBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <TransferStatusControl />
         <TunnelStatusControl />
         <AgentStatusPill onClick={onToggleAi} active={aiOpen} />
       </div>

@@ -1,6 +1,7 @@
 /**
  * 本文件实现工作区文件资源管理器。
- * 负责文件树、搜索和文件操作入口；目录选择入口由上层仅在 Local 工作区传入，避免组件自行判断运行环境。
+ * 负责文件树、搜索、常规文件操作和非本地 Workspace 的后台传输入口。
+ * Workspace 根目录选择仍由上层仅在 Local 环境传入。
  */
 
 import { Button } from "@/components/ui/button";
@@ -19,13 +20,23 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
-import { remoteNative } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
+import {
+  pickDownloadDirectory,
+  pickUploadFiles,
+  pickUploadFolders,
+} from "@/modules/transfers/dialogs";
+import { formatTransferError } from "@/modules/transfers/errors";
+import { transferNative } from "@/modules/transfers/native";
+import type { TransferStrategy } from "@/modules/transfers/types";
 import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import {
@@ -73,6 +84,39 @@ export type FileExplorerHandle = {
   focusSearch: () => void;
   collapseAll: () => void;
 };
+
+/** 在 WSL 与 SSH 菜单中要求用户明确选择 Direct 或 Archive。 */
+function TransferStrategyMenu({
+  label,
+  onSelect,
+}: {
+  label: string;
+  onSelect: (strategy: TransferStrategy) => void;
+}) {
+  const { t } = useTranslation("explorer");
+  return (
+    <ContextMenuSub>
+      <ContextMenuSubTrigger className={COMPACT_ITEM}>
+        {label}
+      </ContextMenuSubTrigger>
+      <ContextMenuSubContent className={COMPACT_CONTENT}>
+        {(["direct", "archive"] as const).map((strategy) => (
+          <ContextMenuItem
+            key={strategy}
+            className={COMPACT_ITEM}
+            onSelect={() => onSelect(strategy)}
+          >
+            {t(
+              strategy === "direct"
+                ? "menu.directTransfer"
+                : "menu.archiveTransfer",
+            )}
+          </ContextMenuItem>
+        ))}
+      </ContextMenuSubContent>
+    </ContextMenuSub>
+  );
+}
 
 type Props = {
   rootPath: string | null;
@@ -221,7 +265,7 @@ function buildRows(
 /**
  * 文件资源管理器组件。
  *
- * 展示当前终端驱动的目录树，并在上层提供 Local 专用回调时显示原生目录选择入口。
+ * 展示当前终端驱动的目录树，并按运行环境提供本地根目录选择或后台传输操作。
  */
 export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
@@ -239,9 +283,72 @@ export const FileExplorer = memo(
     },
     ref,
   ) {
-    const { t } = useTranslation("explorer");
+    const { t } = useTranslation(["explorer", "statusbar"]);
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
+
+    /** 通过原生选择器创建文件或文件夹后台上传任务。 */
+    const enqueueUpload = useCallback(
+      async (
+        destination: string,
+        kind: "files" | "folders",
+        strategy: TransferStrategy = "direct",
+      ) => {
+        try {
+          const sources =
+            kind === "files"
+              ? await pickUploadFiles(t("menu.uploadFiles"))
+              : await pickUploadFolders(t("menu.uploadFolder"));
+          if (sources.length === 0) return;
+          const enqueue =
+            strategy === "archive"
+              ? transferNative.enqueueArchive
+              : transferNative.enqueueDirect;
+          await enqueue({
+            direction: "upload",
+            sources,
+            destination,
+          });
+          toast.success(t("menu.transferQueued"));
+        } catch (error) {
+          toast.error(
+            t("menu.transferFailed", {
+              error: formatTransferError(error, t),
+            }),
+          );
+        }
+      },
+      [t],
+    );
+
+    /** 选择宿主机目录并创建后台下载任务。 */
+    const enqueueDownload = useCallback(
+      async (source: string, strategy: TransferStrategy = "direct") => {
+        try {
+          const destination = await pickDownloadDirectory(
+            t("menu.downloadToLocal"),
+          );
+          if (!destination) return;
+          const enqueue =
+            strategy === "archive"
+              ? transferNative.enqueueArchive
+              : transferNative.enqueueDirect;
+          await enqueue({
+            direction: "download",
+            sources: [source],
+            destination,
+          });
+          toast.success(t("menu.transferQueued"));
+        } catch (error) {
+          toast.error(
+            t("menu.transferFailed", {
+              error: formatTransferError(error, t),
+            }),
+          );
+        }
+      },
+      [t],
+    );
     const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
     const { lookup: lookupGitStatus } = useGitStatus(
       rootPath,
@@ -869,54 +976,30 @@ export const FileExplorer = memo(
                       {t("menu.openInTerminal")}
                     </ContextMenuItem>
                   )}
-                  {workspaceEnv.kind === "ssh" ? (
+                  {workspaceEnv.kind !== "local" ? (
                     <>
-                      <ContextMenuItem
-                        className={COMPACT_ITEM}
-                        onSelect={() => {
-                          const localDir = window.prompt(
-                            t("menu.downloadPrompt"),
-                          );
-                          if (!localDir) return;
-                          void remoteNative
-                            .download(
-                              workspaceEnv.profileId,
-                              menuTarget.path,
-                              localDir,
-                            )
-                            .then((path) =>
-                              toast.success(t("menu.downloadedTo", { path })),
-                            )
-                            .catch((error) => toast.error(String(error)));
-                        }}
-                      >
-                        {t("menu.downloadToLocal")}
-                      </ContextMenuItem>
-                      <ContextMenuItem
-                        className={COMPACT_ITEM}
-                        onSelect={() => {
-                          const localPath = window.prompt(
-                            t("menu.uploadPrompt"),
-                          );
-                          if (!localPath) return;
-                          const remoteDir = menuTarget.isDir
-                            ? menuTarget.path
-                            : parentOf(menuTarget.path, rootPath);
-                          void remoteNative
-                            .upload(
-                              workspaceEnv.profileId,
-                              localPath,
-                              remoteDir,
-                            )
-                            .then(() => {
-                              tree.refresh(remoteDir);
-                              toast.success(t("menu.uploadComplete"));
-                            })
-                            .catch((error) => toast.error(String(error)));
-                        }}
-                      >
-                        {t("menu.uploadLocalPath")}
-                      </ContextMenuItem>
+                      <TransferStrategyMenu
+                        label={t("menu.downloadToLocal")}
+                        onSelect={(strategy) =>
+                          void enqueueDownload(menuTarget.path, strategy)
+                        }
+                      />
+                      {(["files", "folders"] as const).map((kind) => (
+                        <TransferStrategyMenu
+                          key={kind}
+                          label={t(
+                            kind === "files"
+                              ? "menu.uploadFiles"
+                              : "menu.uploadFolder",
+                          )}
+                          onSelect={(strategy) => {
+                            const remoteDir = menuTarget.isDir
+                              ? menuTarget.path
+                              : parentOf(menuTarget.path, rootPath);
+                            void enqueueUpload(remoteDir, kind, strategy);
+                          }}
+                        />
+                      ))}
                     </>
                   ) : (
                     <ContextMenuItem
@@ -1011,23 +1094,22 @@ export const FileExplorer = memo(
                       {t("menu.openInTerminal")}
                     </ContextMenuItem>
                   )}
-                  {workspaceEnv.kind === "ssh" ? (
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => {
-                        const localPath = window.prompt(t("menu.uploadPrompt"));
-                        if (!localPath) return;
-                        void remoteNative
-                          .upload(workspaceEnv.profileId, localPath, rootPath)
-                          .then(() => {
-                            tree.refresh(rootPath);
-                            toast.success(t("menu.uploadComplete"));
-                          })
-                          .catch((error) => toast.error(String(error)));
-                      }}
-                    >
-                      {t("menu.uploadLocalPath")}
-                    </ContextMenuItem>
+                  {workspaceEnv.kind !== "local" ? (
+                    <>
+                      {(["files", "folders"] as const).map((kind) => (
+                        <TransferStrategyMenu
+                          key={kind}
+                          label={t(
+                            kind === "files"
+                              ? "menu.uploadFiles"
+                              : "menu.uploadFolder",
+                          )}
+                          onSelect={(strategy) =>
+                            void enqueueUpload(rootPath, kind, strategy)
+                          }
+                        />
+                      ))}
+                    </>
                   ) : (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
