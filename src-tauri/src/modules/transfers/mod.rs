@@ -7,6 +7,7 @@ mod archive;
 pub mod commands;
 mod commit;
 mod direct;
+mod errors;
 mod local;
 mod manager;
 mod metadata;

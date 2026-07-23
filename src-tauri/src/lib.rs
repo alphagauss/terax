@@ -258,6 +258,7 @@ pub fn run() {
             transfers::commands::transfer_pause,
             transfers::commands::transfer_resume,
             transfers::commands::transfer_cancel,
+            transfers::commands::transfer_retry,
             transfers::commands::transfer_remove,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,

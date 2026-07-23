@@ -5,6 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::errors::{TransferErrorCode, TransferFailure};
+
+const MAX_TRANSFER_SOURCES: usize = 1_024;
+const MAX_TRANSFER_PATH_BYTES: usize = 32 * 1_024;
+
 /// 文件传输方向。
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -66,13 +71,36 @@ pub struct EnqueueTransferRequest {
 
 impl EnqueueTransferRequest {
     /// 校验不依赖文件系统的请求边界，并保留路径首尾的合法空格。
-    pub fn normalize(mut self) -> Result<Self, String> {
+    pub fn normalize(mut self) -> Result<Self, TransferFailure> {
         self.sources.retain(|source| !source.trim().is_empty());
         if self.sources.is_empty() {
-            return Err("transfer requires at least one source".into());
+            return Err(TransferFailure::new(
+                TransferErrorCode::InvalidRequest,
+                "transfer requires at least one source",
+            ));
+        }
+        if self.sources.len() > MAX_TRANSFER_SOURCES {
+            return Err(TransferFailure::new(
+                TransferErrorCode::ResourceLimit,
+                format!("transfer source count exceeds {MAX_TRANSFER_SOURCES}"),
+            ));
         }
         if self.destination.trim().is_empty() {
-            return Err("transfer destination is required".into());
+            return Err(TransferFailure::new(
+                TransferErrorCode::InvalidRequest,
+                "transfer destination is required",
+            ));
+        }
+        if self.destination.len() > MAX_TRANSFER_PATH_BYTES
+            || self
+                .sources
+                .iter()
+                .any(|source| source.len() > MAX_TRANSFER_PATH_BYTES)
+        {
+            return Err(TransferFailure::new(
+                TransferErrorCode::ResourceLimit,
+                "transfer path exceeds the IPC safety limit",
+            ));
         }
         Ok(self)
     }
@@ -98,7 +126,7 @@ pub struct TransferTaskSnapshot {
     pub committed_roots: u64,
     pub speed_bytes_per_second: u64,
     pub current_file: Option<String>,
-    pub error: Option<String>,
+    pub failure: Option<TransferFailure>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -135,5 +163,19 @@ mod tests {
         assert!(TransferStatus::Canceled.is_terminal());
         assert!(!TransferStatus::Paused.is_terminal());
         assert!(!TransferStatus::Canceling.is_terminal());
+    }
+
+    #[test]
+    fn normalize_caps_untrusted_request_size() {
+        let error = EnqueueTransferRequest {
+            direction: TransferDirection::Upload,
+            sources: (0..=MAX_TRANSFER_SOURCES)
+                .map(|index| format!("/{index}"))
+                .collect(),
+            destination: "/tmp".into(),
+        }
+        .normalize()
+        .unwrap_err();
+        assert_eq!(error.code, TransferErrorCode::ResourceLimit);
     }
 }

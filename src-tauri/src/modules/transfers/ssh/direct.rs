@@ -8,14 +8,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use russh_sftp::client::error::Error as SftpError;
 use russh_sftp::client::{RawSftpSession, SftpSession};
-use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
+use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::modules::transfers::commit::{
     cleanup_local_staging, cleanup_remote_staging, commit_local_root, commit_remote_root,
 };
+use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::TransferRunError;
 use crate::modules::transfers::models::TransferStage;
 use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadFile, RemoteUploadPlan};
@@ -43,9 +43,9 @@ pub(crate) async fn download_file(
     {
         Ok(writer) => writer,
         Err(error) => {
-            return Err(message(format!(
-                "create destination {}: {error}",
-                local.display()
+            return Err(TransferRunError::Failed(io_failure(
+                format!("create destination {}", local.display()),
+                &error,
             )))
         }
     };
@@ -66,11 +66,12 @@ pub(crate) async fn download_file_into(
     expected_size: u64,
     context: &mut ExecutionContext,
 ) -> Result<(), TransferRunError> {
-    let handle = session
-        .open(remote, OpenFlags::READ, FileAttributes::default())
-        .await
-        .map_err(|error| message(format!("open remote source {remote}: {error}")))?
-        .handle;
+    let handle = super::io::run(
+        format!("open remote source {remote}"),
+        session.open(remote, OpenFlags::READ, FileAttributes::default()),
+    )
+    .await?
+    .handle;
     let mut next_offset = 0u64;
     let mut completed = 0u64;
     let mut canceled = false;
@@ -100,22 +101,18 @@ pub(crate) async fn download_file_into(
                 let mut cursor = offset;
                 let end = offset + length as u64;
                 while cursor < end {
-                    match session
-                        .read(handle.clone(), cursor, (end - cursor) as u32)
-                        .await
-                    {
-                        Ok(chunk) if chunk.data.is_empty() => break,
-                        Ok(chunk) => {
-                            cursor += chunk.data.len() as u64;
-                            data.extend_from_slice(&chunk.data);
-                        }
-                        Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => {
-                            break;
-                        }
-                        Err(error) => return Err(error),
+                    let chunk = super::io::run(
+                        format!("read remote source {remote}"),
+                        session.read(handle.clone(), cursor, (end - cursor) as u32),
+                    )
+                    .await?;
+                    if chunk.data.is_empty() {
+                        break;
                     }
+                    cursor += chunk.data.len() as u64;
+                    data.extend_from_slice(&chunk.data);
                 }
-                Ok::<_, SftpError>((offset, data))
+                Ok::<_, TransferRunError>((offset, data))
             });
         }
 
@@ -128,49 +125,59 @@ pub(crate) async fn download_file_into(
         match result {
             Ok((offset, data)) => {
                 if data.is_empty() {
-                    failure = Some(message(format!(
+                    failure = Some(source_changed(format!(
                         "remote source ended before {expected_size} bytes: {remote}"
                     )));
                     continue;
                 }
                 if let Err(error) = writer.seek(std::io::SeekFrom::Start(offset)).await {
-                    failure = Some(message(format!("seek destination {}: {error}", remote)));
+                    failure = Some(TransferRunError::Failed(io_failure(
+                        format!("seek download destination for {remote}"),
+                        &error,
+                    )));
                 } else if let Err(error) = writer.write_all(&data).await {
-                    failure = Some(message(format!(
-                        "write download destination for {remote}: {error}"
+                    failure = Some(TransferRunError::Failed(io_failure(
+                        format!("write download destination for {remote}"),
+                        &error,
                     )));
                 } else {
                     completed = completed.saturating_add(data.len() as u64);
                     context.report_bytes(data.len() as u64).await;
                 }
             }
-            Err(error) => {
-                failure = Some(message(format!("read remote source {remote}: {error}")));
-            }
+            Err(error) => failure = Some(error),
         }
     }
 
-    let close_result = session.close(handle).await;
+    let close_result = super::io::run(
+        format!("close remote source {remote}"),
+        session.close(handle),
+    )
+    .await;
     if let Some(error) = failure {
         return Err(error);
     }
     if canceled {
         return Err(TransferRunError::Canceled);
     }
-    close_result.map_err(|error| message(format!("close remote source {remote}: {error}")))?;
+    close_result?;
     if completed != expected_size {
-        return Err(message(format!(
+        return Err(source_changed(format!(
             "remote source size changed during transfer: {remote} (expected {expected_size} bytes, received {completed})"
         )));
     }
-    writer
-        .flush()
-        .await
-        .map_err(|error| message(format!("flush download destination for {remote}: {error}")))?;
-    writer
-        .sync_all()
-        .await
-        .map_err(|error| message(format!("sync download destination for {remote}: {error}")))?;
+    writer.flush().await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("flush download destination for {remote}"),
+            &error,
+        ))
+    })?;
+    writer.sync_all().await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("sync download destination for {remote}"),
+            &error,
+        ))
+    })?;
     Ok(())
 }
 
@@ -183,15 +190,11 @@ pub(crate) async fn execute_upload(
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
-            plan.session
-                .create_dir(directory.destination.clone())
-                .await
-                .map_err(|error| {
-                    message(format!(
-                        "create remote directory {}: {error}",
-                        directory.destination
-                    ))
-                })?;
+            super::io::run(
+                format!("create remote directory {}", directory.destination),
+                plan.session.create_dir(directory.destination.clone()),
+            )
+            .await?;
         }
         for file in &plan.files {
             copy_remote_upload_file(&plan.session, file, context).await?;
@@ -218,7 +221,12 @@ pub(crate) async fn execute_upload(
     }
     .await;
     if result.is_err() {
-        cleanup_remote_staging(&plan.session, &plan.roots).await;
+        let pending = if is_connection_lost(&result) {
+            plan.roots.iter().map(|root| root.stage.clone()).collect()
+        } else {
+            cleanup_remote_staging(&plan.session, &plan.roots).await
+        };
+        super::cleanup::schedule(plan.workspace.profile.id.clone(), pending);
     }
     close_sftp(&plan.session).await;
     result
@@ -237,9 +245,9 @@ pub(crate) async fn execute_download(
             tokio::fs::create_dir(&directory.destination)
                 .await
                 .map_err(|error| {
-                    message(format!(
-                        "create directory {}: {error}",
-                        directory.destination.display()
+                    TransferRunError::Failed(io_failure(
+                        format!("create directory {}", directory.destination.display()),
+                        &error,
                     ))
                 })?;
         }
@@ -315,26 +323,30 @@ async fn copy_remote_upload_file(
         file.metadata.modified(),
     )
     .await?;
-    let mut writer = session
-        .open_with_flags(
+    let mut writer = super::io::run(
+        format!("create remote file {}", file.destination),
+        session.open_with_flags(
             file.destination.clone(),
             OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
-        )
-        .await
-        .map_err(|error| message(format!("create remote file {}: {error}", file.destination)))?;
+        ),
+    )
+    .await?;
     copy_stream(&mut reader, &mut writer, context).await?;
-    writer
-        .flush()
-        .await
-        .map_err(|error| message(format!("flush remote file {}: {error}", file.destination)))?;
-    writer
-        .sync_all()
-        .await
-        .map_err(|error| message(format!("sync remote file {}: {error}", file.destination)))?;
-    writer
-        .shutdown()
-        .await
-        .map_err(|error| message(format!("close remote file {}: {error}", file.destination)))?;
+    super::io::run(
+        format!("flush remote file {}", file.destination),
+        writer.flush(),
+    )
+    .await?;
+    super::io::run(
+        format!("sync remote file {}", file.destination),
+        writer.sync_all(),
+    )
+    .await?;
+    super::io::run(
+        format!("close remote file {}", file.destination),
+        writer.shutdown(),
+    )
+    .await?;
     crate::modules::transfers::source::verify_opened_file(
         &reader,
         &file.source,
@@ -363,17 +375,17 @@ where
     let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
     loop {
         context.checkpoint().await?;
-        let read = reader
-            .read(&mut buffer)
-            .await
-            .map_err(|error| message(format!("read transfer source: {error}")))?;
+        let read = reader.read(&mut buffer).await.map_err(|error| {
+            TransferRunError::Failed(io_failure("read transfer source", &error))
+        })?;
         if read == 0 {
             return Ok(());
         }
-        writer
-            .write_all(&buffer[..read])
-            .await
-            .map_err(|error| message(format!("write transfer destination: {error}")))?;
+        super::io::run(
+            "write remote transfer destination",
+            writer.write_all(&buffer[..read]),
+        )
+        .await?;
         context.report_bytes(read as u64).await;
     }
 }
@@ -385,15 +397,16 @@ async fn verify_remote_source(
     expected_size: u64,
     expected_modified: Option<std::time::SystemTime>,
 ) -> RunResult<()> {
-    let actual = session
-        .symlink_metadata(path.to_string())
-        .await
-        .map_err(|error| message(format!("verify remote source {path}: {error}")))?;
+    let actual = super::io::run(
+        format!("verify remote source {path}"),
+        session.symlink_metadata(path.to_string()),
+    )
+    .await?;
     if !actual.file_type().is_file()
         || actual.size != Some(expected_size)
         || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
     {
-        return Err(message(format!(
+        return Err(source_changed(format!(
             "remote source changed during transfer: {path}"
         )));
     }
@@ -404,7 +417,12 @@ async fn verify_remote_source(
 async fn verify_local_file(path: &Path, expected: u64) -> RunResult<()> {
     let actual = tokio::fs::metadata(path)
         .await
-        .map_err(|error| message(format!("verify destination {}: {error}", path.display())))?
+        .map_err(|error| {
+            TransferRunError::Failed(io_failure(
+                format!("verify destination {}", path.display()),
+                &error,
+            ))
+        })?
         .len();
     if actual != expected {
         return Err(message(format!(
@@ -421,10 +439,11 @@ async fn verify_remote_file(
     path: &str,
     expected: u64,
 ) -> RunResult<()> {
-    let metadata = session
-        .metadata(path.to_string())
-        .await
-        .map_err(|error| message(format!("verify remote destination {path}: {error}")))?;
+    let metadata = super::io::run(
+        format!("verify remote destination {path}"),
+        session.metadata(path.to_string()),
+    )
+    .await?;
     let actual = metadata
         .size
         .ok_or_else(|| message(format!("remote destination size is unavailable: {path}")))?;
@@ -441,5 +460,17 @@ async fn close_sftp(session: &Arc<SftpSession>) {
 }
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::IntegrityCheckFailed, value)
+}
+
+fn source_changed(value: String) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::SourceChanged, value)
+}
+
+fn is_connection_lost(result: &RunResult<()>) -> bool {
+    matches!(
+        result,
+        Err(TransferRunError::Failed(failure))
+            if failure.code == TransferErrorCode::ConnectionLost
+    )
 }

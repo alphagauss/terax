@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { useTranslation } from "react-i18next";
@@ -53,7 +54,7 @@ function dirAt(
  * Local 工作区直接复制，WSL 与 SSH 工作区只负责创建 Direct 后台传输任务。
  */
 export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
-  const { t } = useTranslation("explorer");
+  const { t } = useTranslation(["explorer", "statusbar"]);
   const [targetDir, setTargetDir] = useState<string | null>(null);
   const optsRef = useRef({ rootPath, isDir, onCopied });
   optsRef.current = { rootPath, isDir, onCopied };
@@ -88,7 +89,11 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
               })
               .then(() => toast.success(t("menu.transferQueued")))
               .catch((error) =>
-                toast.error(t("menu.transferFailed", { error: String(error) })),
+                toast.error(
+                  t("menu.transferFailed", {
+                    error: formatTransferError(error, t),
+                  }),
+                ),
               );
             return;
           }

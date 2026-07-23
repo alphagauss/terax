@@ -29,6 +29,7 @@ The `storage`, `workspace_process`, `ai_sessions`, and `shared_store` Rust suite
 - Git command layer (repo-root resolution, pathspec/argument guards, status parsing)
 - Filesystem mutation (atomic writes, symlink handling, no-data-loss on partial failure)
 - IPC command surface and AI tool surface
+- File transfer planning and mutation (Workspace boundaries, source identity, staging ownership, no-replace publication, cancellation, and bounded failure)
 - Pure logic with wide reach (cwd inheritance, tab/split tree transforms, OSC/prompt parsing, command guard)
 
 The bar is real coverage of the contract, not a placeholder. Test the edge, the deny path, the "what happens one level above home".
@@ -71,6 +72,20 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 4. NTFS alternate data streams and trailing dot/space variants are normalized.
 5. Write-only deny prefixes block writes but allow reads where appropriate.
 
+## File transfer tests
+
+File transfer changes must preserve these invariants:
+
+1. Paths cannot leave the immutable WSL or SSH Workspace root.
+2. A failed or canceled task removes only its task-owned staging paths.
+3. Final publication cannot replace a destination created by another task or process.
+4. Source identity and expected size are rechecked after planning.
+5. A paused queued task does not consume a scheduler permit, and cancellation wakes all waiters.
+6. SSH connection loss reaches a terminal state within the remote I/O bound.
+7. Archive extraction is driven by the manifest, not by untrusted archive paths.
+
+Use a real Tauri process for WSL or SSH verification because a Vite-only page cannot exercise Workspace bootstrap, native commands, task-exclusive SFTP sessions, or filesystem notifications. For release-level transfer changes, cover both directions, files and directories, Unicode and empty entries, pause/resume, cancellation, destination conflicts, connection loss, retry, and insufficient destination space. Compare file hashes across the boundary.
+
 ## Invariants
 
 - A local fix with global blast radius must be caught by a test; review alone is not enough.
@@ -82,3 +97,4 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 - [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) - quality bar, project layout, how to contribute
 - [`docs/README.md`](../README.md) - index of contributor guides
+- [File transfers](../architecture/file-transfers.md) - lifecycle, safety boundaries, resource limits, and verification matrix

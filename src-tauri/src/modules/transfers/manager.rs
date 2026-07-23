@@ -1,7 +1,7 @@
 //! 后台文件传输队列与任务生命周期管理。
 //!
-//! 管理器持有任务快照与控制信号，并把等待执行、目标 reservation 和终态收敛
-//! 串成统一生命周期。具体扫描、复制和进度聚合由低依赖模块负责。
+//! 管理器持有有界任务历史、原始请求与控制信号，并把等待执行、目标 reservation、
+//! 重试和终态收敛串成统一生命周期。具体扫描、复制和进度聚合由低依赖模块负责。
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::modules::workspace::WorkspaceEnv;
 
+use super::errors::{TransferErrorCode, TransferFailure};
 use super::models::{
     EnqueueTransferRequest, TransferDirection, TransferStage, TransferStatus, TransferStrategy,
     TransferTaskSnapshot,
@@ -27,7 +28,10 @@ use super::scheduler::TransferScheduler;
 use super::{archive, direct};
 
 const MAX_CONCURRENT_TASKS: usize = 2;
+const MAX_ACTIVE_TASKS: usize = 64;
+const MAX_HISTORY_TASKS: usize = 100;
 const TRANSFER_EVENT: &str = "terax://transfer-updated";
+const TRANSFER_REMOVED_EVENT: &str = "terax://transfer-removed";
 
 #[derive(Clone, Serialize)]
 struct FsChangedPayload {
@@ -58,12 +62,25 @@ impl TransferState {
 #[derive(Debug)]
 pub(crate) enum TransferRunError {
     Canceled,
-    Message(String),
+    Failed(TransferFailure),
 }
 
 impl From<String> for TransferRunError {
     fn from(value: String) -> Self {
-        Self::Message(value)
+        Self::failed(TransferErrorCode::Internal, value)
+    }
+}
+
+impl From<TransferFailure> for TransferRunError {
+    fn from(value: TransferFailure) -> Self {
+        Self::Failed(value)
+    }
+}
+
+impl TransferRunError {
+    /// 创建带稳定错误码的执行失败。
+    pub(crate) fn failed(code: TransferErrorCode, detail: impl Into<String>) -> Self {
+        Self::Failed(TransferFailure::new(code, detail))
     }
 }
 
@@ -154,9 +171,14 @@ impl TaskControl {
 
 /// 保存当前进程任务快照、控制句柄和全局并发许可。
 pub(crate) struct TransferManager {
-    tasks: RwLock<HashMap<String, TransferTaskSnapshot>>,
+    tasks: RwLock<HashMap<String, ManagedTask>>,
     controls: RwLock<HashMap<String, Arc<TaskControl>>>,
     scheduler: TransferScheduler,
+}
+
+struct ManagedTask {
+    snapshot: TransferTaskSnapshot,
+    request: EnqueueTransferRequest,
 }
 
 impl TransferManager {
@@ -176,10 +198,13 @@ impl TransferManager {
         workspace: WorkspaceEnv,
         request: EnqueueTransferRequest,
         strategy: TransferStrategy,
-    ) -> Result<TransferTaskSnapshot, String> {
+    ) -> Result<TransferTaskSnapshot, TransferFailure> {
         let request = request.normalize()?;
         if matches!(workspace, WorkspaceEnv::Local) {
-            return Err("file transfer is only available in WSL or SSH workspaces".into());
+            return Err(TransferFailure::new(
+                TransferErrorCode::WorkspaceUnavailable,
+                "file transfer is only available in WSL or SSH workspaces",
+            ));
         }
         let id = Uuid::new_v4().to_string();
         let now = now_ms();
@@ -200,15 +225,31 @@ impl TransferManager {
             committed_roots: 0,
             speed_bytes_per_second: 0,
             current_file: None,
-            error: None,
+            failure: None,
             created_at: now,
             updated_at: now,
         };
         let control = Arc::new(TaskControl::new());
-        self.tasks
-            .write()
-            .await
-            .insert(id.clone(), snapshot.clone());
+        {
+            let mut tasks = self.tasks.write().await;
+            let active_count = tasks
+                .values()
+                .filter(|task| !task.snapshot.status.is_terminal())
+                .count();
+            if active_count >= MAX_ACTIVE_TASKS {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::ResourceLimit,
+                    format!("active transfer task count exceeds {MAX_ACTIVE_TASKS}"),
+                ));
+            }
+            tasks.insert(
+                id.clone(),
+                ManagedTask {
+                    snapshot: snapshot.clone(),
+                    request: request.clone(),
+                },
+            );
+        }
         self.controls
             .write()
             .await
@@ -226,13 +267,19 @@ impl TransferManager {
 
     /// 返回按创建时间倒序排列的当前任务快照。
     pub(crate) async fn list(&self) -> Vec<TransferTaskSnapshot> {
-        let mut tasks: Vec<_> = self.tasks.read().await.values().cloned().collect();
+        let mut tasks: Vec<_> = self
+            .tasks
+            .read()
+            .await
+            .values()
+            .map(|task| task.snapshot.clone())
+            .collect();
         tasks.sort_by_key(|task| Reverse(task.created_at));
         tasks
     }
 
     /// 暂停尚未结束的任务。
-    pub(crate) async fn pause(&self, app: &AppHandle, id: &str) -> Result<(), String> {
+    pub(crate) async fn pause(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.pause();
         self.mutate_task(app, id, |task| {
@@ -249,7 +296,7 @@ impl TransferManager {
     }
 
     /// 恢复一个已暂停的任务。
-    pub(crate) async fn resume(&self, app: &AppHandle, id: &str) -> Result<(), String> {
+    pub(crate) async fn resume(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.resume();
         self.mutate_task(app, id, |task| {
@@ -262,7 +309,7 @@ impl TransferManager {
     }
 
     /// 请求取消任务，执行器会在下一个安全检查点清理临时目标。
-    pub(crate) async fn cancel(&self, app: &AppHandle, id: &str) -> Result<(), String> {
+    pub(crate) async fn cancel(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let control = self.control(id).await?;
         control.cancel();
         self.mutate_task(app, id, |task| {
@@ -276,16 +323,46 @@ impl TransferManager {
     }
 
     /// 移除单个终态任务的历史记录。
-    pub(crate) async fn remove(&self, id: &str) -> Result<(), String> {
+    pub(crate) async fn remove(&self, app: &AppHandle, id: &str) -> Result<(), TransferFailure> {
         let mut tasks = self.tasks.write().await;
-        let task = tasks
-            .get(id)
-            .ok_or_else(|| format!("transfer task {id} was not found"))?;
-        if !task.status.is_terminal() {
-            return Err("active transfer task cannot be removed".into());
+        let task = tasks.get(id).ok_or_else(|| task_not_found(id))?;
+        if !task.snapshot.status.is_terminal() {
+            return Err(TransferFailure::new(
+                TransferErrorCode::InvalidTaskState,
+                "active transfer task cannot be removed",
+            ));
         }
         tasks.remove(id);
+        drop(tasks);
+        emit_removed(app, id);
         Ok(())
+    }
+
+    /// 使用终态任务保留的原始请求创建一个全新的重试任务。
+    pub(crate) async fn retry(
+        self: &Arc<Self>,
+        app: AppHandle,
+        workspace: WorkspaceEnv,
+        id: &str,
+    ) -> Result<TransferTaskSnapshot, TransferFailure> {
+        let (request, strategy) = {
+            let tasks = self.tasks.read().await;
+            let task = tasks.get(id).ok_or_else(|| task_not_found(id))?;
+            let can_retry = task.snapshot.status == TransferStatus::Canceled
+                || task
+                    .snapshot
+                    .failure
+                    .as_ref()
+                    .is_some_and(|failure| failure.retryable);
+            if !can_retry {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::InvalidTaskState,
+                    "transfer task is not retryable",
+                ));
+            }
+            (task.request.clone(), task.snapshot.strategy)
+        };
+        self.enqueue(app, workspace, request, strategy).await
     }
 
     /// 等待并发许可后运行任务，并统一发布文件系统变更和终态。
@@ -351,30 +428,31 @@ impl TransferManager {
                         task.transferred_bytes = task.total_bytes;
                         task.completed_files = task.total_files;
                         task.committed_roots = task.total_roots;
-                        task.error = None;
+                        task.failure = None;
                     }
                     Err(TransferRunError::Canceled) => {
                         task.status = TransferStatus::Canceled;
-                        task.error = None;
+                        task.failure = None;
                     }
-                    Err(TransferRunError::Message(error)) => {
+                    Err(TransferRunError::Failed(failure)) => {
                         task.status = TransferStatus::Failed;
-                        task.error = Some(error.clone());
+                        task.failure = Some(failure.clone());
                     }
                 }
             })
             .await;
         self.controls.write().await.remove(id);
+        self.prune_history(app).await;
     }
 
     /// 取得仍处于活动期的任务控制句柄。
-    async fn control(&self, id: &str) -> Result<Arc<TaskControl>, String> {
+    async fn control(&self, id: &str) -> Result<Arc<TaskControl>, TransferFailure> {
         self.controls
             .read()
             .await
             .get(id)
             .cloned()
-            .ok_or_else(|| format!("active transfer task {id} was not found"))
+            .ok_or_else(|| task_not_found(id))
     }
 
     /// 推进任务阶段，首次离开队列时同步进入运行态。
@@ -395,18 +473,34 @@ impl TransferManager {
         app: &AppHandle,
         id: &str,
         mutate: impl FnOnce(&mut TransferTaskSnapshot),
-    ) -> Result<TransferTaskSnapshot, String> {
+    ) -> Result<TransferTaskSnapshot, TransferFailure> {
         let snapshot = {
             let mut tasks = self.tasks.write().await;
-            let task = tasks
-                .get_mut(id)
-                .ok_or_else(|| format!("transfer task {id} was not found"))?;
-            mutate(task);
-            task.updated_at = next_updated_at(task.updated_at);
-            task.clone()
+            let task = tasks.get_mut(id).ok_or_else(|| task_not_found(id))?;
+            mutate(&mut task.snapshot);
+            task.snapshot.updated_at = next_updated_at(task.snapshot.updated_at);
+            task.snapshot.clone()
         };
         emit_snapshot(app, &snapshot);
         Ok(snapshot)
+    }
+
+    /// 保留全部活动任务和最近终态记录，并通知前端同步淘汰结果。
+    async fn prune_history(&self, app: &AppHandle) {
+        let removed = {
+            let mut tasks = self.tasks.write().await;
+            let removed = history_prune_ids(&tasks, MAX_HISTORY_TASKS);
+            if removed.is_empty() {
+                return;
+            }
+            for id in &removed {
+                tasks.remove(id);
+            }
+            removed
+        };
+        for id in removed {
+            emit_removed(app, &id);
+        }
     }
 }
 
@@ -414,6 +508,34 @@ fn emit_snapshot(app: &AppHandle, snapshot: &TransferTaskSnapshot) {
     if let Err(error) = app.emit(TRANSFER_EVENT, snapshot) {
         log::warn!("failed to emit transfer update: {error}");
     }
+}
+
+fn emit_removed(app: &AppHandle, id: &str) {
+    if let Err(error) = app.emit(TRANSFER_REMOVED_EVENT, id) {
+        log::warn!("failed to emit transfer removal: {error}");
+    }
+}
+
+fn task_not_found(id: &str) -> TransferFailure {
+    TransferFailure::new(
+        TransferErrorCode::TaskNotFound,
+        format!("transfer task {id} was not found"),
+    )
+}
+
+fn history_prune_ids(tasks: &HashMap<String, ManagedTask>, limit: usize) -> Vec<String> {
+    let mut terminal: Vec<_> = tasks
+        .iter()
+        .filter(|(_, task)| task.snapshot.status.is_terminal())
+        .map(|(id, task)| (task.snapshot.created_at, id.clone()))
+        .collect();
+    terminal.sort();
+    let remove_count = terminal.len().saturating_sub(limit);
+    terminal
+        .into_iter()
+        .take(remove_count)
+        .map(|(_, id)| id)
+        .collect()
 }
 
 fn now_ms() -> u64 {
@@ -459,6 +581,37 @@ fn should_emit_fs_changed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn managed_task(id: &str, status: TransferStatus, created_at: u64) -> ManagedTask {
+        ManagedTask {
+            snapshot: TransferTaskSnapshot {
+                id: id.into(),
+                direction: TransferDirection::Upload,
+                strategy: TransferStrategy::Direct,
+                status,
+                stage: TransferStage::Finished,
+                source_count: 1,
+                destination: "/tmp".into(),
+                name: id.into(),
+                total_bytes: 0,
+                transferred_bytes: 0,
+                total_files: 0,
+                completed_files: 0,
+                total_roots: 0,
+                committed_roots: 0,
+                speed_bytes_per_second: 0,
+                current_file: None,
+                failure: None,
+                created_at,
+                updated_at: created_at,
+            },
+            request: EnqueueTransferRequest {
+                direction: TransferDirection::Upload,
+                sources: vec![id.into()],
+                destination: "/tmp".into(),
+            },
+        }
+    }
 
     #[tokio::test]
     async fn task_control_resumes_and_cancels_waiters() {
@@ -527,5 +680,21 @@ mod tests {
             true,
             true
         ));
+    }
+
+    #[test]
+    fn history_pruning_keeps_active_tasks_and_newest_terminal_tasks() {
+        let tasks = HashMap::from([
+            (
+                "active".into(),
+                managed_task("active", TransferStatus::Running, 0),
+            ),
+            (
+                "old".into(),
+                managed_task("old", TransferStatus::Completed, 1),
+            ),
+            ("new".into(), managed_task("new", TransferStatus::Failed, 2)),
+        ]);
+        assert_eq!(history_prune_ids(&tasks, 1), vec!["old"]);
     }
 }

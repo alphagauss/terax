@@ -20,6 +20,7 @@ import {
   Download01Icon,
   PauseIcon,
   PlayIcon,
+  Refresh01Icon,
   Upload01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -27,6 +28,10 @@ import type { TFunction } from "i18next";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  formatTransferError,
+  formatTransferFailure,
+} from "./errors";
 import { transferNative } from "./native";
 import { useTransferBridge, useTransferStore } from "./store";
 import { isActiveTransfer, type TransferTask } from "./types";
@@ -154,10 +159,17 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
   const hasPartialResult =
     (task.status === "failed" || task.status === "canceled") &&
     task.committedRoots > 0;
+  const failureMessage = task.failure
+    ? formatTransferFailure(task.failure, t)
+    : null;
 
   const run = (operation: Promise<void>) => {
     void operation.catch((error) =>
-      toast.error(t("transfers.operationFailed", { error: String(error) })),
+      toast.error(
+        t("transfers.operationFailed", {
+          error: formatTransferError(error, t),
+        }),
+      ),
     );
   };
   const remove = () => {
@@ -165,7 +177,11 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
       .remove(task.id)
       .then(() => removeLocal(task.id))
       .catch((error) =>
-        toast.error(t("transfers.operationFailed", { error: String(error) })),
+        toast.error(
+          t("transfers.operationFailed", {
+            error: formatTransferError(error, t),
+          }),
+        ),
       );
   };
 
@@ -222,10 +238,10 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
           <div className="mt-1.5 flex min-h-5 items-center justify-between gap-2">
             <div
               className="min-w-0 truncate text-[10px] tabular-nums text-muted-foreground"
-              title={task.error ?? undefined}
+              title={task.failure?.detail}
             >
-              {task.error
-                ? t("transfers.failureDetail", { error: task.error })
+              {failureMessage
+                ? t("transfers.failureDetail", { error: failureMessage })
                 : task.totalBytes > 0
                   ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
                   : t("transfers.filesProgress", {
@@ -258,11 +274,23 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
                   onClick={() => run(transferNative.cancel(task.id))}
                 />
               ) : (
-                <TaskButton
-                  label={t("transfers.remove")}
-                  icon={Delete02Icon}
-                  onClick={remove}
-                />
+                <>
+                  {(task.status === "canceled" ||
+                    task.failure?.retryable === true) && (
+                    <TaskButton
+                      label={t("transfers.retry")}
+                      icon={Refresh01Icon}
+                      onClick={() =>
+                        run(transferNative.retry(task.id).then(() => undefined))
+                      }
+                    />
+                  )}
+                  <TaskButton
+                    label={t("transfers.remove")}
+                    icon={Delete02Icon}
+                    onClick={remove}
+                  />
+                </>
               )}
             </div>
           </div>

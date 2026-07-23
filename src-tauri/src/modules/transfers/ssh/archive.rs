@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use russh::{ChannelMsg, Sig};
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::{FileAttributes, OpenFlags};
+use russh_sftp::protocol::OpenFlags;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
@@ -22,6 +22,7 @@ use crate::modules::transfers::commit::{
     cleanup_local_staging, cleanup_remote_owned_path, cleanup_remote_staging, commit_local_root,
     commit_remote_root, ensure_remote_target_available,
 };
+use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
 use crate::modules::transfers::models::TransferStage;
 use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadPlan};
@@ -46,6 +47,7 @@ pub(crate) async fn execute_upload(
             .as_slice(),
     )?;
     let mut remote_work: Option<String> = None;
+    let mut pending_cleanup = Vec::new();
     let result = async {
         ensure_archive_capability(&plan.workspace, context, false).await?;
         let archive = build_upload_archive(&plan, &remote_parent, context).await?;
@@ -56,21 +58,10 @@ pub(crate) async fn execute_upload(
             &format!(".terax-archive-{}", Uuid::new_v4()),
         );
         ensure_remote_target_available(&plan.session, &work_dir).await?;
-        plan.session
-            .create_dir(work_dir.clone())
-            .await
-            .map_err(|error| message(format!("create remote archive directory: {error}")))?;
+        let command = format!("umask 077; mkdir -- {}", shell_quote(&work_dir));
+        run_checked(&plan.workspace, &command, context).await?;
         remote_work = Some(work_dir.clone());
-        plan.session
-            .set_metadata(
-                work_dir.clone(),
-                FileAttributes {
-                    permissions: Some(0o700),
-                    ..FileAttributes::default()
-                },
-            )
-            .await
-            .map_err(|error| message(format!("secure remote archive directory: {error}")))?;
+        verify_private_work_dir(&plan.session, &work_dir).await?;
 
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
         upload_archive(&plan.session, &archive.path, &archive_path, context).await?;
@@ -82,24 +73,26 @@ pub(crate) async fn execute_upload(
             directory = shell_quote(&work_dir),
         );
         run_checked(&plan.workspace, &command, context).await?;
-        plan.session
-            .remove_file(archive_path)
-            .await
-            .map_err(|error| message(format!("remove remote archive payload: {error}")))?;
+        super::io::run(
+            "remove remote archive payload",
+            plan.session.remove_file(archive_path),
+        )
+        .await?;
 
         for root in &plan.roots {
             context.checkpoint().await?;
             let name = remote_name(&root.stage)?;
             let extracted = join_remote(&work_dir, name);
             ensure_remote_target_available(&plan.session, &root.stage).await?;
-            plan.session
-                .rename(extracted, root.stage.clone())
-                .await
-                .map_err(|error| {
-                    message(format!("publish extracted staging {}: {error}", root.stage))
-                })?;
+            super::io::run(
+                format!("publish extracted staging {}", root.stage),
+                plan.session.rename(extracted, root.stage.clone()),
+            )
+            .await?;
         }
-        cleanup_remote_owned_path(&plan.session, &work_dir).await;
+        if !cleanup_remote_owned_path(&plan.session, &work_dir).await {
+            pending_cleanup.push(work_dir.clone());
+        }
         remote_work = None;
 
         context.set_stage(TransferStage::Verifying).await;
@@ -113,12 +106,20 @@ pub(crate) async fn execute_upload(
         Ok(())
     }
     .await;
-    if let Some(path) = remote_work {
-        cleanup_remote_owned_path(&plan.session, &path).await;
+    if is_connection_lost(&result) {
+        pending_cleanup.extend(remote_work);
+        pending_cleanup.extend(plan.roots.iter().map(|root| root.stage.clone()));
+    } else {
+        if let Some(path) = remote_work {
+            if !cleanup_remote_owned_path(&plan.session, &path).await {
+                pending_cleanup.push(path);
+            }
+        }
+        if result.is_err() {
+            pending_cleanup.extend(cleanup_remote_staging(&plan.session, &plan.roots).await);
+        }
     }
-    if result.is_err() {
-        cleanup_remote_staging(&plan.session, &plan.roots).await;
-    }
+    super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
     close_sftp(&plan.session).await;
     result
 }
@@ -129,6 +130,7 @@ pub(crate) async fn execute_download(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     let mut remote_work: Option<String> = None;
+    let mut pending_cleanup = Vec::new();
     let result = async {
         ensure_archive_capability(&plan.workspace, context, true).await?;
         context.set_stage(TransferStage::Archiving).await;
@@ -142,24 +144,24 @@ pub(crate) async fn execute_download(
             let relative = source
                 .strip_prefix('/')
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| message(format!("invalid remote archive source: {source}")))?;
+                .ok_or_else(|| invalid(format!("invalid remote archive source: {source}")))?;
             command.push(' ');
             command.push_str(&shell_quote(&format!("./{relative}")));
         }
         run_checked(&plan.workspace, &command, context).await?;
         verify_remote_download_sources(&plan, context).await?;
 
-        let archive_metadata = plan
-            .session
-            .symlink_metadata(archive_path.clone())
-            .await
-            .map_err(|error| message(format!("stat remote archive: {error}")))?;
+        let archive_metadata = super::io::run(
+            "stat remote archive",
+            plan.session.symlink_metadata(archive_path.clone()),
+        )
+        .await?;
         if !archive_metadata.file_type().is_file() {
-            return Err(message("remote archive is not a regular file"));
+            return Err(integrity("remote archive is not a regular file"));
         }
         let archive_size = archive_metadata
             .size
-            .ok_or_else(|| message("remote archive size is unavailable"))?;
+            .ok_or_else(|| integrity("remote archive size is unavailable"))?;
         context.set_archive_size(archive_size).await;
         context.set_stage(TransferStage::Transferring).await;
 
@@ -167,11 +169,13 @@ pub(crate) async fn execute_download(
             .prefix("terax-archive-")
             .suffix(".tar.gz")
             .tempfile()
-            .map_err(|error| message(format!("create local archive: {error}")))?;
+            .map_err(|error| {
+                TransferRunError::Failed(io_failure("create local archive", &error))
+            })?;
         let archive_local_path = temporary.path().to_path_buf();
         let output = temporary
             .reopen()
-            .map_err(|error| message(format!("open local archive: {error}")))?;
+            .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
         let mut output = tokio::fs::File::from_std(output);
         let raw = super::session::open_raw(&plan.workspace).await?;
         let downloaded = super::direct::download_file_into(
@@ -184,7 +188,9 @@ pub(crate) async fn execute_download(
         .await;
         let _ = raw.close_session();
         downloaded?;
-        cleanup_remote_owned_path(&plan.session, &work_dir).await;
+        if !cleanup_remote_owned_path(&plan.session, &work_dir).await {
+            pending_cleanup.push(work_dir.clone());
+        }
         remote_work = None;
 
         let expected = download_extract_manifest(&plan)?;
@@ -200,12 +206,17 @@ pub(crate) async fn execute_download(
         Ok(())
     }
     .await;
-    if let Some(path) = remote_work {
-        cleanup_remote_owned_path(&plan.session, &path).await;
+    if is_connection_lost(&result) {
+        pending_cleanup.extend(remote_work);
+    } else if let Some(path) = remote_work {
+        if !cleanup_remote_owned_path(&plan.session, &path).await {
+            pending_cleanup.push(path);
+        }
     }
     if result.is_err() {
         cleanup_local_staging(&plan.roots).await;
     }
+    super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
     close_sftp(&plan.session).await;
     result
 }
@@ -219,42 +230,31 @@ async fn upload_archive(
     context.set_stage(TransferStage::Transferring).await;
     let mut reader = tokio::fs::File::open(local)
         .await
-        .map_err(|error| message(format!("open local archive: {error}")))?;
-    let mut writer = session
-        .open_with_flags(
+        .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
+    let mut writer = super::io::run(
+        "create remote archive",
+        session.open_with_flags(
             remote.to_string(),
             OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
-        )
-        .await
-        .map_err(|error| message(format!("create remote archive: {error}")))?;
+        ),
+    )
+    .await?;
     let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
     loop {
         context.checkpoint().await?;
         let read = reader
             .read(&mut buffer)
             .await
-            .map_err(|error| message(format!("read local archive: {error}")))?;
+            .map_err(|error| TransferRunError::Failed(io_failure("read local archive", &error)))?;
         if read == 0 {
             break;
         }
-        writer
-            .write_all(&buffer[..read])
-            .await
-            .map_err(|error| message(format!("write remote archive: {error}")))?;
+        super::io::run("write remote archive", writer.write_all(&buffer[..read])).await?;
         context.report_bytes(read as u64).await;
     }
-    writer
-        .flush()
-        .await
-        .map_err(|error| message(format!("flush remote archive: {error}")))?;
-    writer
-        .sync_all()
-        .await
-        .map_err(|error| message(format!("sync remote archive: {error}")))?;
-    writer
-        .shutdown()
-        .await
-        .map_err(|error| message(format!("close remote archive: {error}")))
+    super::io::run("flush remote archive", writer.flush()).await?;
+    super::io::run("sync remote archive", writer.sync_all()).await?;
+    super::io::run("close remote archive", writer.shutdown()).await
 }
 
 async fn ensure_archive_capability(
@@ -275,8 +275,9 @@ async fn ensure_archive_capability(
     )
     .await?;
     if output.exit_code != Some(0) {
-        return Err(message(
-            "ARCHIVE_UNAVAILABLE: remote tar, gzip or mktemp is unavailable; use Direct transfer",
+        return Err(TransferRunError::failed(
+            TransferErrorCode::ArchiveUnavailable,
+            "remote tar, gzip or mktemp is unavailable",
         ));
     }
     Ok(())
@@ -300,7 +301,7 @@ async fn create_remote_work_dir(
         ));
     }
     let path = String::from_utf8(output.stdout)
-        .map_err(|_| message("remote temporary path is not valid UTF-8"))?
+        .map_err(|_| integrity("remote temporary path is not valid UTF-8"))?
         .trim()
         .to_string();
     let name = path.rsplit('/').next().unwrap_or_default();
@@ -313,9 +314,26 @@ async fn create_remote_work_dir(
         || suffix.len() != 8
         || !suffix.bytes().all(|value| value.is_ascii_alphanumeric())
     {
-        return Err(message("remote mktemp returned an invalid path"));
+        return Err(integrity("remote mktemp returned an invalid path"));
     }
     Ok(path)
+}
+
+/// 确认命令通道创建的上传临时目录没有被替换或放宽访问权限。
+async fn verify_private_work_dir(session: &Arc<SftpSession>, path: &str) -> RunResult<()> {
+    let metadata = super::io::run(
+        "stat remote archive directory",
+        session.symlink_metadata(path.to_string()),
+    )
+    .await?;
+    let permissions = metadata.permissions.unwrap_or_default() & 0o777;
+    if !metadata.file_type().is_dir() || permissions != 0o700 {
+        return Err(TransferRunError::failed(
+            TransferErrorCode::PermissionDenied,
+            format!("remote archive directory is not private: {path}"),
+        ));
+    }
+    Ok(())
 }
 
 async fn run_checked(
@@ -399,13 +417,13 @@ async fn verify_remote_upload(
 ) -> RunResult<()> {
     for file in &plan.files {
         context.checkpoint().await?;
-        let metadata = plan
-            .session
-            .symlink_metadata(file.destination.clone())
-            .await
-            .map_err(|error| message(format!("verify remote file: {error}")))?;
+        let metadata = super::io::run(
+            "verify remote archive file",
+            plan.session.symlink_metadata(file.destination.clone()),
+        )
+        .await?;
         if !metadata.file_type().is_file() || metadata.size != Some(file.size) {
-            return Err(message(format!(
+            return Err(integrity(format!(
                 "remote archive output mismatch: {}",
                 file.destination
             )));
@@ -417,13 +435,13 @@ async fn verify_remote_upload(
     }
     for directory in plan.directories.iter().rev() {
         context.checkpoint().await?;
-        let metadata = plan
-            .session
-            .symlink_metadata(directory.destination.clone())
-            .await
-            .map_err(|error| message(format!("verify remote directory: {error}")))?;
+        let metadata = super::io::run(
+            "verify remote archive directory",
+            plan.session.symlink_metadata(directory.destination.clone()),
+        )
+        .await?;
         if !metadata.file_type().is_dir() {
-            return Err(message(format!(
+            return Err(integrity(format!(
                 "remote archive directory mismatch: {}",
                 directory.destination
             )));
@@ -442,11 +460,11 @@ async fn verify_remote_download_sources(
 ) -> RunResult<()> {
     for file in &plan.files {
         context.checkpoint().await?;
-        let metadata = plan
-            .session
-            .symlink_metadata(file.source.clone())
-            .await
-            .map_err(|error| message(format!("verify remote source: {error}")))?;
+        let metadata = super::io::run(
+            "verify remote archive source",
+            plan.session.symlink_metadata(file.source.clone()),
+        )
+        .await?;
         if !metadata.file_type().is_file()
             || metadata.size != Some(file.size)
             || file
@@ -454,7 +472,7 @@ async fn verify_remote_download_sources(
                 .modified()
                 .is_some_and(|expected| metadata.modified().ok() != Some(expected))
         {
-            return Err(message(format!(
+            return Err(source_changed(format!(
                 "remote source changed while archiving: {}",
                 file.source
             )));
@@ -462,13 +480,13 @@ async fn verify_remote_download_sources(
     }
     for directory in &plan.directories {
         context.checkpoint().await?;
-        let metadata = plan
-            .session
-            .symlink_metadata(directory.source.clone())
-            .await
-            .map_err(|error| message(format!("verify remote directory: {error}")))?;
+        let metadata = super::io::run(
+            "verify remote archive source directory",
+            plan.session.symlink_metadata(directory.source.clone()),
+        )
+        .await?;
         if !metadata.file_type().is_dir() {
-            return Err(message(format!(
+            return Err(source_changed(format!(
                 "remote source changed while archiving: {}",
                 directory.source
             )));
@@ -512,7 +530,7 @@ fn insert_extract_entry(
     entry: ExtractEntry,
 ) -> RunResult<()> {
     if expected.insert(path.clone(), entry).is_some() {
-        Err(message(format!("duplicate archive source path: {path}")))
+        Err(internal(format!("duplicate archive source path: {path}")))
     } else {
         Ok(())
     }
@@ -527,9 +545,11 @@ async fn apply_download_metadata(
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(&file.destination)
             .await
-            .map_err(|error| message(format!("verify extracted file: {error}")))?;
+            .map_err(|error| {
+                TransferRunError::Failed(io_failure("verify extracted file", &error))
+            })?;
         if !metadata.is_file() || metadata.len() != file.size {
-            return Err(message(format!(
+            return Err(integrity(format!(
                 "local archive output mismatch: {}",
                 file.destination.display()
             )));
@@ -541,9 +561,11 @@ async fn apply_download_metadata(
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(&directory.destination)
             .await
-            .map_err(|error| message(format!("verify extracted directory: {error}")))?;
+            .map_err(|error| {
+                TransferRunError::Failed(io_failure("verify extracted directory", &error))
+            })?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(message(format!(
+            return Err(integrity(format!(
                 "local archive directory mismatch: {}",
                 directory.destination.display()
             )));
@@ -570,7 +592,7 @@ fn download_root_sources(plan: &RemoteDownloadPlan) -> RunResult<Vec<String>> {
                     .find(|directory| directory.destination == root.stage)
                     .map(|directory| directory.source.clone())
             })
-            .ok_or_else(|| message("archive root is missing from the manifest"))?;
+            .ok_or_else(|| internal("archive root is missing from the manifest"))?;
         sources.push(source);
     }
     Ok(sources)
@@ -581,20 +603,20 @@ fn archive_source_path(source: &str) -> RunResult<String> {
         .strip_prefix('/')
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| message(format!("invalid remote archive source: {source}")))
+        .ok_or_else(|| invalid(format!("invalid remote archive source: {source}")))
 }
 
 fn common_remote_parent(paths: &[&str]) -> RunResult<String> {
     let first = paths
         .first()
-        .ok_or_else(|| message("archive manifest has no roots"))?;
+        .ok_or_else(|| internal("archive manifest has no roots"))?;
     let parent = remote_parent(first)?;
     if paths
         .iter()
         .skip(1)
         .any(|path| remote_parent(path).ok().as_deref() != Some(parent.as_str()))
     {
-        return Err(message("archive roots do not share one destination"));
+        return Err(internal("archive roots do not share one destination"));
     }
     Ok(parent)
 }
@@ -603,9 +625,9 @@ fn remote_parent(path: &str) -> RunResult<String> {
     let (parent, name) = path
         .trim_end_matches('/')
         .rsplit_once('/')
-        .ok_or_else(|| message(format!("invalid remote path: {path}")))?;
+        .ok_or_else(|| internal(format!("invalid remote path: {path}")))?;
     if name.is_empty() {
-        return Err(message(format!("invalid remote path: {path}")));
+        return Err(internal(format!("invalid remote path: {path}")));
     }
     Ok(if parent.is_empty() {
         "/".to_string()
@@ -619,7 +641,7 @@ fn remote_name(path: &str) -> RunResult<&str> {
         .rsplit('/')
         .next()
         .filter(|name| !name.is_empty())
-        .ok_or_else(|| message(format!("invalid remote path: {path}")))
+        .ok_or_else(|| internal(format!("invalid remote path: {path}")))
 }
 
 fn remote_command_error(action: &str, output: &ExecOutput) -> TransferRunError {
@@ -637,7 +659,12 @@ fn remote_command_error(action: &str, output: &ExecOutput) -> TransferRunError {
     } else {
         detail
     };
-    message(format!("{action}: {reason}"))
+    let code = if output.timed_out {
+        TransferErrorCode::ConnectionLost
+    } else {
+        TransferErrorCode::IntegrityCheckFailed
+    };
+    TransferRunError::failed(code, format!("{action}: {reason}"))
 }
 
 fn append_output(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool) {
@@ -653,7 +680,31 @@ async fn close_sftp(session: &Arc<SftpSession>) {
 }
 
 fn message(value: impl Into<String>) -> TransferRunError {
-    TransferRunError::Message(value.into())
+    TransferRunError::failed(TransferErrorCode::ConnectionLost, value)
+}
+
+fn invalid(value: impl Into<String>) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::InvalidRequest, value)
+}
+
+fn source_changed(value: impl Into<String>) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::SourceChanged, value)
+}
+
+fn integrity(value: impl Into<String>) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::IntegrityCheckFailed, value)
+}
+
+fn internal(value: impl Into<String>) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::Internal, value)
+}
+
+fn is_connection_lost(result: &RunResult<()>) -> bool {
+    matches!(
+        result,
+        Err(TransferRunError::Failed(failure))
+            if failure.code == TransferErrorCode::ConnectionLost
+    )
 }
 
 #[cfg(test)]

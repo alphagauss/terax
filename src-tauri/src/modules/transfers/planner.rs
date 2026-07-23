@@ -19,6 +19,7 @@ use super::commit::{
     ensure_local_target_available, ensure_remote_target_available, local_stage_path,
     remote_stage_path, LocalRoot, RemoteRoot,
 };
+use super::errors::TransferErrorCode;
 use super::manager::TransferRunError;
 use super::metadata::EntryMetadata;
 use super::models::{EnqueueTransferRequest, TransferDirection};
@@ -165,8 +166,8 @@ impl PreparedTransfer {
 
 /// 扫描传输来源并生成不产生写入副作用的执行计划。
 ///
-/// 返回值是发生工作区写入的路径，供 Explorer 精确刷新。下载只写宿主机目录，
-/// 因此返回空列表。
+/// 返回值包含不可变 Manifest、任务私有 staging 路径和需要由 Scheduler 独占的
+/// 最终目标；规划阶段不创建目录或文件。
 pub(crate) async fn prepare(
     workspace: &WorkspaceEnv,
     request: &EnqueueTransferRequest,
@@ -176,8 +177,9 @@ pub(crate) async fn prepare(
     context.checkpoint().await?;
     let plan = match workspace {
         WorkspaceEnv::Local => {
-            return Err(TransferRunError::Message(
-                "local workspaces do not require file transfer".into(),
+            return Err(TransferRunError::failed(
+                TransferErrorCode::WorkspaceUnavailable,
+                "local workspaces do not require file transfer",
             ));
         }
         WorkspaceEnv::Wsl { distro } => {
@@ -448,7 +450,7 @@ async fn plan_remote_upload(
             .ok_or_else(|| message(format!("invalid local source: {}", source.display())))?
             .to_string();
         if !root_names.insert(name.clone()) {
-            return Err(message(format!("duplicate destination name: {name}")));
+            return Err(invalid(format!("duplicate destination name: {name}")));
         }
         let final_path = join_remote(&destination_parent, &name);
         ensure_remote_target_available(&plan.session, &final_path).await?;
@@ -551,10 +553,7 @@ async fn plan_remote_download(
         .await
         .map_err(|error| message(format!("canonicalize destination: {error}")))?;
     let home = workspace.home().await;
-    let home = session
-        .canonicalize(home)
-        .await
-        .map_err(|error| message(format!("canonicalize remote root: {error}")))?;
+    let home = super::ssh::io::run("canonicalize remote root", session.canonicalize(home)).await?;
     let mut plan = RemoteDownloadPlan {
         workspace,
         session,
@@ -567,26 +566,26 @@ async fn plan_remote_download(
     for source in sources {
         context.checkpoint().await?;
         validate_remote_workspace_path(source, &home)?;
-        let source_metadata = plan
-            .session
-            .symlink_metadata(source.clone())
-            .await
-            .map_err(|error| message(format!("stat remote source {source}: {error}")))?;
+        let source_metadata = super::ssh::io::run(
+            format!("stat remote source {source}"),
+            plan.session.symlink_metadata(source.clone()),
+        )
+        .await?;
         reject_remote_symlink_or_special(source, source_metadata.file_type())?;
-        let source = plan
-            .session
-            .canonicalize(source.clone())
-            .await
-            .map_err(|error| message(format!("canonicalize remote source {source}: {error}")))?;
+        let source = super::ssh::io::run(
+            format!("canonicalize remote source {source}"),
+            plan.session.canonicalize(source.clone()),
+        )
+        .await?;
         if !remote_path_within(&source, &home) {
-            return Err(message(format!(
+            return Err(invalid(format!(
                 "remote source is outside workspace root: {source}"
             )));
         }
         let source_name = remote_name(&source)?.to_string();
         let destination_name = remote::sftp::sanitize_local_name(&source_name);
         if !root_names.insert(local_name_identity(OsStr::new(&destination_name))) {
-            return Err(message(format!(
+            return Err(invalid(format!(
                 "multiple remote sources map to the same local name: {destination_name}"
             )));
         }
@@ -618,11 +617,11 @@ async fn plan_remote_download(
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
             context.checkpoint().await?;
-            let entries = plan
-                .session
-                .read_dir(source_dir.clone())
-                .await
-                .map_err(|error| message(format!("read remote directory {source_dir}: {error}")))?;
+            let entries = super::ssh::io::run(
+                format!("read remote directory {source_dir}"),
+                plan.session.read_dir(source_dir.clone()),
+            )
+            .await?;
             let mut destination_names = HashSet::new();
             for entry in entries {
                 context.checkpoint().await?;
@@ -631,7 +630,7 @@ async fn plan_remote_download(
                 reject_remote_symlink_or_special(&source_path, entry_type)?;
                 let destination_name = remote::sftp::sanitize_local_name(&entry.file_name());
                 if !destination_names.insert(local_name_identity(OsStr::new(&destination_name))) {
-                    return Err(message(format!(
+                    return Err(invalid(format!(
                         "remote names collide after local filename sanitization in {source_dir}"
                     )));
                 }
@@ -666,26 +665,29 @@ async fn canonical_remote_directory(
     session: &Arc<SftpSession>,
     path: &str,
 ) -> RunResult<String> {
-    let home = session
-        .canonicalize(workspace.home().await)
-        .await
-        .map_err(|error| message(format!("canonicalize remote root: {error}")))?;
+    let home = super::ssh::io::run(
+        "canonicalize remote root",
+        session.canonicalize(workspace.home().await),
+    )
+    .await?;
     validate_remote_workspace_path(path, &home)?;
-    let canonical = session
-        .canonicalize(path.to_string())
-        .await
-        .map_err(|error| message(format!("canonicalize remote destination {path}: {error}")))?;
-    let metadata = session
-        .metadata(canonical.clone())
-        .await
-        .map_err(|error| message(format!("stat remote destination {canonical}: {error}")))?;
+    let canonical = super::ssh::io::run(
+        format!("canonicalize remote destination {path}"),
+        session.canonicalize(path.to_string()),
+    )
+    .await?;
+    let metadata = super::ssh::io::run(
+        format!("stat remote destination {canonical}"),
+        session.metadata(canonical.clone()),
+    )
+    .await?;
     if !metadata.file_type().is_dir() {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "remote destination is not a directory: {canonical}"
         )));
     }
     if !remote_path_within(&canonical, &home) {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "remote destination is outside workspace root: {canonical}"
         )));
     }
@@ -711,7 +713,7 @@ fn validate_remote_workspace_path(path: &str, root: &str) -> RunResult<()> {
             .any(|component| matches!(component, "." | ".."))
         || !remote_path_within(path, root)
     {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "remote path is outside workspace root: {path}"
         )));
     }
@@ -726,20 +728,20 @@ fn validate_wsl_path(path: &str) -> RunResult<()> {
             .split('/')
             .any(|component| matches!(component, "." | ".."))
     {
-        return Err(message(format!("invalid WSL workspace path: {path}")));
+        return Err(invalid(format!("invalid WSL workspace path: {path}")));
     }
     Ok(())
 }
 
 fn reject_local_symlink_or_special(path: &Path, metadata: &std::fs::Metadata) -> RunResult<()> {
     if metadata.file_type().is_symlink() {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "symbolic-link transfer is not supported: {}",
             path.display()
         )));
     }
     if !metadata.is_file() && !metadata.is_dir() {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "unsupported source type: {}",
             path.display()
         )));
@@ -752,12 +754,12 @@ fn reject_remote_symlink_or_special(
     file_type: russh_sftp::protocol::FileType,
 ) -> RunResult<()> {
     if file_type.is_symlink() {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "symbolic-link transfer is not supported: {path}"
         )));
     }
     if !file_type.is_file() && !file_type.is_dir() {
-        return Err(message(format!("unsupported remote source type: {path}")));
+        return Err(invalid(format!("unsupported remote source type: {path}")));
     }
     Ok(())
 }
@@ -791,7 +793,7 @@ fn validate_local_relationship(
     source_is_dir: bool,
 ) -> RunResult<()> {
     if source == destination || source_is_dir && destination.starts_with(source) {
-        return Err(message(format!(
+        return Err(invalid(format!(
             "destination cannot be the source or its descendant: {}",
             destination.display()
         )));
@@ -818,7 +820,11 @@ fn totals(sizes: impl Iterator<Item = u64>) -> (u64, u64) {
 }
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::SourceUnavailable, value)
+}
+
+fn invalid(value: String) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::InvalidRequest, value)
 }
 
 #[cfg(test)]
@@ -844,10 +850,12 @@ mod tests {
             "/home/mean",
             "/home/me/file\0name",
         ] {
-            assert!(
-                validate_remote_workspace_path(path, "/home/me").is_err(),
-                "accepted {path:?}"
-            );
+            let TransferRunError::Failed(failure) =
+                validate_remote_workspace_path(path, "/home/me").unwrap_err()
+            else {
+                panic!("expected a structured failure");
+            };
+            assert_eq!(failure.code, TransferErrorCode::InvalidRequest);
         }
     }
 
@@ -855,7 +863,10 @@ mod tests {
     fn wsl_paths_are_absolute_and_cannot_traverse() {
         assert!(validate_wsl_path("/home/me/project").is_ok());
         for path in ["home/me", "/home/../etc", "/home\\me", "/tmp\0file"] {
-            assert!(validate_wsl_path(path).is_err(), "accepted {path:?}");
+            let TransferRunError::Failed(failure) = validate_wsl_path(path).unwrap_err() else {
+                panic!("expected a structured failure");
+            };
+            assert_eq!(failure.code, TransferErrorCode::InvalidRequest);
         }
     }
 

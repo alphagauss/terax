@@ -34,6 +34,7 @@ import {
   pickUploadFiles,
   pickUploadFolders,
 } from "@/modules/transfers/dialogs";
+import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
 import type { TransferStrategy } from "@/modules/transfers/types";
 import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
@@ -282,7 +283,7 @@ export const FileExplorer = memo(
     },
     ref,
   ) {
-    const { t } = useTranslation("explorer");
+    const { t } = useTranslation(["explorer", "statusbar"]);
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
 
@@ -310,7 +311,11 @@ export const FileExplorer = memo(
           });
           toast.success(t("menu.transferQueued"));
         } catch (error) {
-          toast.error(t("menu.transferFailed", { error: String(error) }));
+          toast.error(
+            t("menu.transferFailed", {
+              error: formatTransferError(error, t),
+            }),
+          );
         }
       },
       [t],
@@ -335,7 +340,11 @@ export const FileExplorer = memo(
           });
           toast.success(t("menu.transferQueued"));
         } catch (error) {
-          toast.error(t("menu.transferFailed", { error: String(error) }));
+          toast.error(
+            t("menu.transferFailed", {
+              error: formatTransferError(error, t),
+            }),
+          );
         }
       },
       [t],

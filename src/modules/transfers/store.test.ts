@@ -28,7 +28,7 @@ function task(id: string, updatedAt: number): TransferTask {
     committedRoots: 0,
     speedBytesPerSecond: 0,
     currentFile: null,
-    error: null,
+    failure: null,
     createdAt: 1,
     updatedAt,
   };
@@ -54,5 +54,19 @@ describe("transfer snapshot merge", () => {
     expect(mergeTransferTasks(current, [incoming]).active.status).toBe(
       "paused",
     );
+  });
+
+  it("does not restore tasks removed while the initial list was loading", () => {
+    const current = { active: task("active", 20) };
+    const incoming = [task("removed", 10), task("queued", 15)];
+
+    const merged = mergeTransferTasks(
+      current,
+      incoming,
+      new Set(["removed"]),
+    );
+
+    expect(merged.removed).toBeUndefined();
+    expect(merged.queued.updatedAt).toBe(15);
   });
 });

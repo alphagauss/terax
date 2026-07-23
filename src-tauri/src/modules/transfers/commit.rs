@@ -6,12 +6,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use russh_sftp::client::error::Error as SftpError;
 use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::StatusCode;
 
 use crate::modules::remote::session::join_remote;
 
+use super::errors::TransferErrorCode;
 use super::manager::TransferRunError;
 
 /// 本地顶层来源的 staging 与最终目标。
@@ -29,10 +28,10 @@ pub(crate) struct RemoteRoot {
 /// 确认本地目标尚不存在，未知元数据错误不得被当作空闲目标。
 pub(crate) async fn ensure_local_target_available(path: &Path) -> RunResult<()> {
     match tokio::fs::symlink_metadata(path).await {
-        Ok(_) => Err(message(format!(
-            "destination already exists: {}",
-            path.display()
-        ))),
+        Ok(_) => Err(TransferRunError::failed(
+            TransferErrorCode::DestinationExists,
+            format!("destination already exists: {}", path.display()),
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(message(format!(
             "stat destination {}: {error}",
@@ -46,12 +45,16 @@ pub(crate) async fn ensure_remote_target_available(
     session: &Arc<SftpSession>,
     path: &str,
 ) -> RunResult<()> {
-    let exists = session
-        .try_exists(path.to_string())
-        .await
-        .map_err(|error| message(format!("stat remote destination {path}: {error}")))?;
+    let exists = super::ssh::io::run(
+        format!("stat remote destination {path}"),
+        session.try_exists(path.to_string()),
+    )
+    .await?;
     if exists {
-        Err(message(format!("destination already exists: {path}")))
+        Err(TransferRunError::failed(
+            TransferErrorCode::DestinationExists,
+            format!("destination already exists: {path}"),
+        ))
     } else {
         Ok(())
     }
@@ -114,15 +117,11 @@ pub(crate) async fn commit_remote_root(
     root: &RemoteRoot,
 ) -> RunResult<()> {
     ensure_remote_target_available(session, &root.final_path).await?;
-    session
-        .rename(root.stage.clone(), root.final_path.clone())
-        .await
-        .map_err(|error| {
-            message(format!(
-                "commit remote transfer {}: {error}",
-                root.final_path
-            ))
-        })
+    super::ssh::io::run(
+        format!("commit remote transfer {}", root.final_path),
+        session.rename(root.stage.clone(), root.final_path.clone()),
+    )
+    .await
 }
 
 /// 失败或取消后只清理任务私有 staging，不删除已经提交的最终目标。
@@ -133,21 +132,30 @@ pub(crate) async fn cleanup_local_staging(roots: &[LocalRoot]) {
 }
 
 /// 使用任务独占会话清理 SSH staging，避免占用 Explorer 的缓存会话。
-pub(crate) async fn cleanup_remote_staging(session: &Arc<SftpSession>, roots: &[RemoteRoot]) {
+pub(crate) async fn cleanup_remote_staging(
+    session: &Arc<SftpSession>,
+    roots: &[RemoteRoot],
+) -> Vec<String> {
+    let mut pending = Vec::new();
     for root in roots {
         if let Err(error) = remove_remote_path(session, &root.stage).await {
             log::warn!(
                 "failed to clean remote transfer path {}: {error:?}",
                 root.stage
             );
+            pending.push(root.stage.clone());
         }
     }
+    pending
 }
 
 /// 清理当前任务明确拥有的单个远端临时路径。
-pub(crate) async fn cleanup_remote_owned_path(session: &Arc<SftpSession>, path: &str) {
+pub(crate) async fn cleanup_remote_owned_path(session: &Arc<SftpSession>, path: &str) -> bool {
     if let Err(error) = remove_remote_path(session, path).await {
         log::warn!("failed to clean remote transfer path {path}: {error:?}");
+        false
+    } else {
+        true
     }
 }
 
@@ -171,18 +179,20 @@ async fn remove_local_path(path: &Path) {
 }
 
 async fn remove_remote_path(session: &Arc<SftpSession>, root: &str) -> RunResult<()> {
-    let metadata = match session.symlink_metadata(root.to_string()).await {
-        Ok(metadata) => metadata,
-        Err(SftpError::Status(status)) if status.status_code == StatusCode::NoSuchFile => {
-            return Ok(())
-        }
-        Err(error) => return Err(message(format!("stat remote staging path {root}: {error}"))),
+    let Some(metadata) = super::ssh::io::run_optional(
+        format!("stat remote staging path {root}"),
+        session.symlink_metadata(root.to_string()),
+    )
+    .await?
+    else {
+        return Ok(());
     };
     if !metadata.file_type().is_dir() {
-        return session
-            .remove_file(root.to_string())
-            .await
-            .map_err(|error| message(format!("remove remote staging file {root}: {error}")));
+        return super::ssh::io::run(
+            format!("remove remote staging file {root}"),
+            session.remove_file(root.to_string()),
+        )
+        .await;
     }
 
     let mut directories = vec![root.trim_end_matches('/').to_string()];
@@ -190,31 +200,30 @@ async fn remove_remote_path(session: &Arc<SftpSession>, root: &str) -> RunResult
     while index < directories.len() {
         let directory = directories[index].clone();
         index += 1;
-        let entries = session.read_dir(directory.clone()).await.map_err(|error| {
-            message(format!(
-                "read remote staging directory {directory}: {error}"
-            ))
-        })?;
+        let entries = super::ssh::io::run(
+            format!("read remote staging directory {directory}"),
+            session.read_dir(directory.clone()),
+        )
+        .await?;
         for entry in entries {
             let child = entry.path();
             if entry.file_type().is_dir() {
                 directories.push(child);
             } else {
-                session.remove_file(child.clone()).await.map_err(|error| {
-                    message(format!("remove remote staging file {child}: {error}"))
-                })?;
+                super::ssh::io::run(
+                    format!("remove remote staging file {child}"),
+                    session.remove_file(child.clone()),
+                )
+                .await?;
             }
         }
     }
     for directory in directories.into_iter().rev() {
-        session
-            .remove_dir(directory.clone())
-            .await
-            .map_err(|error| {
-                message(format!(
-                    "remove remote staging directory {directory}: {error}"
-                ))
-            })?;
+        super::ssh::io::run(
+            format!("remove remote staging directory {directory}"),
+            session.remove_dir(directory.clone()),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -294,7 +303,7 @@ fn rename_no_replace(_source: &Path, _target: &Path) -> std::io::Result<()> {
 type RunResult<T> = Result<T, TransferRunError>;
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::IoFailed, value)
 }
 
 #[cfg(test)]

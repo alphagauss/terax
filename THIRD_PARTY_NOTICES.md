@@ -1,4 +1,4 @@
-# Third-party notices for the Remote SSH migration
+# Third-party notices for Remote SSH and file transfers
 
 The Remote SSH implementation in Terax was produced from the three reference
 projects listed below. The code was reorganized, reduced, and modified to fit
@@ -19,12 +19,14 @@ The Apache License 2.0 text is included in the root `LICENSE` file.
 ## CrabPort
 
 - Project: CrabPort, https://github.com/chi11321/CrabPort
-- Reviewed revision: `8666047ebd6e72bd1ee9b04b08204f114a818361`
+- Reviewed revisions: `8666047ebd6e72bd1ee9b04b08204f114a818361`,
+  `1d66518`
 - License: Apache License 2.0
 - Used as the main reference for the SSH/SFTP/proxy/tunnel module boundaries,
   proxy transport, transfer operations, and connection/tunnel lifecycle.
 - Relevant Terax files: `src-tauri/src/modules/remote/proxy.rs`, `sftp.rs`,
-  `tunnel.rs`, `manager.rs`, and `models.rs`.
+  `tunnel.rs`, `manager.rs`, and `models.rs`, plus
+  `src-tauri/src/modules/transfers/archive.rs` and `transfers/ssh/archive.rs`.
 - Modifications: removed the GPUI/application persistence layers, consolidated
   the crates into the Terax backend, replaced project-specific DTOs, and wired
   the operations into Terax's existing commands and workspace model.
@@ -70,7 +72,8 @@ SOFTWARE.
 ## meatshell
 
 - Project: meatshell, https://github.com/jeff141/meatshell
-- Reviewed revision: `8c5eeef7b4f0326644606aef3c5a89bfec342455`
+- Reviewed revisions: `8c5eeef7b4f0326644606aef3c5a89bfec342455`,
+  `d4246a9`
 - Copyright: meatshell contributors
 - License declared by its Cargo package: MIT OR Apache-2.0. Terax uses the
   Apache-2.0 option for the adapted material.
@@ -78,7 +81,8 @@ SOFTWARE.
   password/private-key/agent authentication details, recursive SFTP transfer,
   keepalive, outbound proxy options, and local/remote/dynamic forwarding.
 - Relevant Terax files: `src-tauri/src/modules/remote/ssh_config.rs`,
-  `host_key.rs`, `session.rs`, `sftp.rs`, and `tunnel.rs`.
+  `host_key.rs`, `session.rs`, `sftp.rs`, and `tunnel.rs`, plus
+  `src-tauri/src/modules/transfers/ssh/`.
 - Modifications: removed the Slint UI and all Telnet/serial/XMODEM features,
   moved secrets to Terax's OS credential-vault commands, and adapted the
   remaining behavior to russh and Terax's workspace APIs.

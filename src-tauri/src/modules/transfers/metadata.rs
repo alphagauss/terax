@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileAttributes;
 
+use super::errors::TransferErrorCode;
 use super::manager::TransferRunError;
 
 /// 可安全跨环境复制的基础元数据快照。
@@ -90,10 +91,11 @@ impl EntryMetadata {
         session: &Arc<SftpSession>,
         path: &str,
     ) -> Result<(), TransferRunError> {
-        session
-            .set_metadata(path.to_string(), self.remote_attributes())
-            .await
-            .map_err(|error| message(format!("set remote metadata for {path}: {error}")))
+        super::ssh::io::run(
+            format!("set remote metadata for {path}"),
+            session.set_metadata(path.to_string(), self.remote_attributes()),
+        )
+        .await
     }
 
     fn remote_attributes(&self) -> FileAttributes {
@@ -192,7 +194,7 @@ fn sftp_time(value: SystemTime) -> u32 {
 }
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::IoFailed, value)
 }
 
 #[cfg(test)]

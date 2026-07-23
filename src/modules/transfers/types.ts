@@ -6,6 +6,30 @@
 export type TransferDirection = "upload" | "download";
 export type TransferStrategy = "direct" | "archive";
 
+export type TransferErrorCode =
+  | "invalid_request"
+  | "workspace_unavailable"
+  | "source_unavailable"
+  | "source_changed"
+  | "destination_exists"
+  | "destination_busy"
+  | "archive_unavailable"
+  | "integrity_check_failed"
+  | "permission_denied"
+  | "connection_lost"
+  | "storage_full"
+  | "resource_limit"
+  | "task_not_found"
+  | "invalid_task_state"
+  | "io_failed"
+  | "internal";
+
+export type TransferFailure = {
+  code: TransferErrorCode;
+  detail: string;
+  retryable: boolean;
+};
+
 export type TransferStatus =
   | "queued"
   | "running"
@@ -48,7 +72,7 @@ export type TransferTask = {
   committedRoots: number;
   speedBytesPerSecond: number;
   currentFile: string | null;
-  error: string | null;
+  failure: TransferFailure | null;
   createdAt: number;
   updatedAt: number;
 };

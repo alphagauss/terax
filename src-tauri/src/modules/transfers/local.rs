@@ -6,6 +6,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::commit::{cleanup_local_staging, commit_local_root};
+use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
 use super::models::TransferStage;
 use super::planner::{LocalFile, LocalPlan};
@@ -103,22 +104,22 @@ async fn copy_local_file(file: &LocalFile, context: &mut ExecutionContext) -> Ru
         .open(&file.destination)
         .await
         .map_err(|error| {
-            message(format!(
-                "create destination {}: {error}",
-                file.destination.display()
+            TransferRunError::Failed(io_failure(
+                format!("create destination {}", file.destination.display()),
+                &error,
             ))
         })?;
     copy_stream(&mut reader, &mut writer, context).await?;
     writer.flush().await.map_err(|error| {
-        message(format!(
-            "flush destination {}: {error}",
-            file.destination.display()
+        TransferRunError::Failed(io_failure(
+            format!("flush destination {}", file.destination.display()),
+            &error,
         ))
     })?;
     writer.sync_all().await.map_err(|error| {
-        message(format!(
-            "sync destination {}: {error}",
-            file.destination.display()
+        TransferRunError::Failed(io_failure(
+            format!("sync destination {}", file.destination.display()),
+            &error,
         ))
     })?;
     super::source::verify_opened_file(
@@ -152,10 +153,9 @@ where
         if read == 0 {
             return Ok(());
         }
-        writer
-            .write_all(&buffer[..read])
-            .await
-            .map_err(|error| message(format!("write transfer destination: {error}")))?;
+        writer.write_all(&buffer[..read]).await.map_err(|error| {
+            TransferRunError::Failed(io_failure("write transfer destination", &error))
+        })?;
         context.report_bytes(read as u64).await;
     }
 }
@@ -176,7 +176,7 @@ async fn verify_local_file(path: &std::path::Path, expected: u64) -> RunResult<(
 }
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::IoFailed, value)
 }
 
 #[cfg(test)]

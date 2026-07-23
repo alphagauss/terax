@@ -7,6 +7,7 @@ use tauri::{AppHandle, State};
 
 use crate::modules::workspace_process::WorkspaceProcessState;
 
+use super::errors::TransferFailure;
 use super::models::{EnqueueTransferRequest, TransferStrategy, TransferTaskSnapshot};
 use super::TransferState;
 
@@ -17,7 +18,7 @@ pub async fn transfer_enqueue_direct(
     state: State<'_, TransferState>,
     workspace: State<'_, WorkspaceProcessState>,
     request: EnqueueTransferRequest,
-) -> Result<TransferTaskSnapshot, String> {
+) -> Result<TransferTaskSnapshot, TransferFailure> {
     state
         .manager()
         .enqueue(
@@ -36,7 +37,7 @@ pub async fn transfer_enqueue_archive(
     state: State<'_, TransferState>,
     workspace: State<'_, WorkspaceProcessState>,
     request: EnqueueTransferRequest,
-) -> Result<TransferTaskSnapshot, String> {
+) -> Result<TransferTaskSnapshot, TransferFailure> {
     state
         .manager()
         .enqueue(
@@ -62,7 +63,7 @@ pub async fn transfer_pause(
     app: AppHandle,
     state: State<'_, TransferState>,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), TransferFailure> {
     state.manager().pause(&app, &id).await
 }
 
@@ -72,7 +73,7 @@ pub async fn transfer_resume(
     app: AppHandle,
     state: State<'_, TransferState>,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), TransferFailure> {
     state.manager().resume(&app, &id).await
 }
 
@@ -82,12 +83,30 @@ pub async fn transfer_cancel(
     app: AppHandle,
     state: State<'_, TransferState>,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), TransferFailure> {
     state.manager().cancel(&app, &id).await
 }
 
 /// 移除一个已经结束的任务记录。
 #[tauri::command]
-pub async fn transfer_remove(state: State<'_, TransferState>, id: String) -> Result<(), String> {
-    state.manager().remove(&id).await
+pub async fn transfer_remove(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+    id: String,
+) -> Result<(), TransferFailure> {
+    state.manager().remove(&app, &id).await
+}
+
+/// 使用失败或取消任务的原始参数创建一个新的后台任务。
+#[tauri::command]
+pub async fn transfer_retry(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+    workspace: State<'_, WorkspaceProcessState>,
+    id: String,
+) -> Result<TransferTaskSnapshot, TransferFailure> {
+    state
+        .manager()
+        .retry(app, workspace.bootstrap().env.clone(), &id)
+        .await
 }

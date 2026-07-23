@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
+use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
 
 /// 当前平台可用于识别本地文件系统对象的身份信号。
@@ -159,14 +160,20 @@ pub(crate) async fn open_verified_file(
     expected_size: u64,
     expected_modified: Option<SystemTime>,
 ) -> Result<tokio::fs::File, TransferRunError> {
-    let before = tokio::fs::symlink_metadata(path)
-        .await
-        .map_err(|error| message(format!("stat source {}: {error}", path.display())))?;
+    let before = tokio::fs::symlink_metadata(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("stat source {}", path.display()),
+            &error,
+        ))
+    })?;
     verify_path_metadata(path, &before, expected_identity, true)?;
 
-    let file = tokio::fs::File::open(path)
-        .await
-        .map_err(|error| message(format!("open source {}: {error}", path.display())))?;
+    let file = tokio::fs::File::open(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("open source {}", path.display()),
+            &error,
+        ))
+    })?;
     let opened = file
         .metadata()
         .await
@@ -353,10 +360,10 @@ fn windows_handle_identity(handle: std::os::windows::io::RawHandle) -> Option<(u
 }
 
 fn changed(path: &Path) -> TransferRunError {
-    message(format!(
-        "source changed after transfer planning: {}",
-        path.display()
-    ))
+    TransferRunError::failed(
+        TransferErrorCode::SourceChanged,
+        format!("source changed after transfer planning: {}", path.display()),
+    )
 }
 
 fn changed_io(path: &Path) -> std::io::Error {
@@ -367,7 +374,7 @@ fn changed_io(path: &Path) -> std::io::Error {
 }
 
 fn message(value: String) -> TransferRunError {
-    TransferRunError::Message(value)
+    TransferRunError::failed(TransferErrorCode::IoFailed, value)
 }
 
 #[cfg(test)]

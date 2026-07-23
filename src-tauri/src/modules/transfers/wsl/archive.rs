@@ -16,6 +16,7 @@ use crate::modules::transfers::archive::{
     build_wsl_upload_archive, extract_download_archive, ExtractEntry,
 };
 use crate::modules::transfers::commit::{cleanup_local_staging, commit_local_root, LocalRoot};
+use crate::modules::transfers::errors::TransferErrorCode;
 use crate::modules::transfers::local::verify_apply_commit;
 use crate::modules::transfers::manager::TransferRunError;
 use crate::modules::transfers::models::TransferStage;
@@ -241,7 +242,10 @@ async fn ensure_capability(distro: &str) -> RunResult<()> {
     .await
     .map(|_| ())
     .map_err(|_| {
-        message("WSL Archive requires tar, gzip, and mktemp; use Direct transfer instead")
+        TransferRunError::failed(
+            TransferErrorCode::ArchiveUnavailable,
+            "WSL Archive requires tar, gzip, and mktemp",
+        )
     })
 }
 
@@ -652,7 +656,7 @@ fn insert_extract_entry(
 }
 
 fn message(value: impl Into<String>) -> TransferRunError {
-    TransferRunError::Message(value.into())
+    TransferRunError::failed(TransferErrorCode::IoFailed, value)
 }
 
 #[cfg(test)]

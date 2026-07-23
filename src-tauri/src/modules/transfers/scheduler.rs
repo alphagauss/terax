@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+use super::errors::TransferErrorCode;
 use super::manager::{TaskControl, TransferRunError};
 
 /// 统一管理传输并发和当前进程正在写入的最终目标。
@@ -35,7 +36,10 @@ impl TransferScheduler {
             tokio::select! {
                 permit = self.permits.clone().acquire_owned() => {
                     let permit = permit.map_err(|_| {
-                        TransferRunError::Message("transfer scheduler is closed".into())
+                        TransferRunError::failed(
+                            TransferErrorCode::Internal,
+                            "transfer scheduler is closed",
+                        )
                     })?;
                     if control.is_paused() {
                         drop(permit);
@@ -61,9 +65,10 @@ impl TransferScheduler {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(target) = targets.iter().find(|target| reserved.contains(*target)) {
-            return Err(TransferRunError::Message(format!(
-                "another transfer is already writing to {target}"
-            )));
+            return Err(TransferRunError::failed(
+                TransferErrorCode::DestinationBusy,
+                format!("another transfer is already writing to {target}"),
+            ));
         }
         reserved.extend(targets.iter().cloned());
         Ok(TargetReservation {

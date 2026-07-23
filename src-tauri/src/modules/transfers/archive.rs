@@ -16,6 +16,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use tar::{Archive, Builder, EntryType, Header};
 
+use super::errors::{io_failure, TransferErrorCode};
 use super::manager::{TaskControl, TransferRunError};
 use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
@@ -158,7 +159,7 @@ async fn build_archive(
         .prefix("terax-archive-")
         .suffix(".tar.gz")
         .tempfile()
-        .map_err(|error| message(format!("create local archive: {error}")))?;
+        .map_err(|error| TransferRunError::Failed(io_failure("create local archive", &error)))?;
     let path = temporary.into_temp_path();
     let build_path = path.to_path_buf();
     let control = context.control();
@@ -183,7 +184,7 @@ async fn build_archive(
         return Err(blocking_error(error, &control));
     }
     let size = std::fs::metadata(&path)
-        .map_err(|error| message(format!("stat local archive: {error}")))?
+        .map_err(|error| TransferRunError::Failed(io_failure("stat local archive", &error)))?
         .len();
     Ok(LocalArchive { path, size })
 }
@@ -584,7 +585,7 @@ fn control_io(control: &TaskControl) -> io::Result<()> {
             io::ErrorKind::Interrupted,
             match error {
                 TransferRunError::Canceled => "archive task canceled".to_string(),
-                TransferRunError::Message(value) => value,
+                TransferRunError::Failed(failure) => failure.detail,
             },
         )
     })
@@ -593,13 +594,18 @@ fn control_io(control: &TaskControl) -> io::Result<()> {
 fn blocking_error(error: io::Error, control: &TaskControl) -> TransferRunError {
     if control.is_cancelled() {
         TransferRunError::Canceled
+    } else if matches!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::StorageFull
+    ) {
+        TransferRunError::Failed(io_failure("archive operation", &error))
     } else {
         message(format!("archive operation failed: {error}"))
     }
 }
 
 fn message(value: impl Into<String>) -> TransferRunError {
-    TransferRunError::Message(value.into())
+    TransferRunError::failed(TransferErrorCode::IntegrityCheckFailed, value)
 }
 
 #[cfg(test)]
