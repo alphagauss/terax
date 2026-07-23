@@ -13,7 +13,7 @@ type RunResult<T> = Result<T, TransferRunError>;
 pub(crate) async fn execute(
     prepared: PreparedTransfer,
     context: &mut ExecutionContext,
-) -> RunResult<Vec<String>> {
+) -> RunResult<()> {
     let result = match prepared.manifest {
         TransferManifest::Local(plan) => super::local::execute(plan, context).await,
         TransferManifest::RemoteUpload(plan) => {
@@ -23,6 +23,5 @@ pub(crate) async fn execute(
             super::ssh::direct::execute_download(plan, context).await
         }
     };
-    result?;
-    Ok(prepared.changed_paths)
+    result
 }

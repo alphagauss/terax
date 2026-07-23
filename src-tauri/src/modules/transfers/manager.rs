@@ -196,6 +196,8 @@ impl TransferManager {
             transferred_bytes: 0,
             total_files: 0,
             completed_files: 0,
+            total_roots: 0,
+            committed_roots: 0,
             speed_bytes_per_second: 0,
             current_file: None,
             error: None,
@@ -252,7 +254,7 @@ impl TransferManager {
         control.resume();
         self.mutate_task(app, id, |task| {
             if task.status == TransferStatus::Paused {
-                task.status = TransferStatus::Running;
+                task.status = resumed_status(task.stage);
             }
         })
         .await?;
@@ -321,17 +323,19 @@ impl TransferManager {
             Err(error) => Err(error),
         };
         context.flush_pending().await;
-        if let Ok(changed_paths) = &result {
-            if request.direction == TransferDirection::Upload && !changed_paths.is_empty() {
-                let _ = app.emit(
-                    "fs:changed",
-                    FsChangedPayload {
-                        paths: changed_paths.clone(),
-                    },
-                );
-            }
+        if should_emit_fs_changed(
+            request.direction,
+            result.is_ok(),
+            context.has_committed_roots(),
+        ) {
+            let _ = app.emit(
+                "fs:changed",
+                FsChangedPayload {
+                    paths: vec![request.destination.clone()],
+                },
+            );
         }
-        self.finish_task(&app, &id, result.map(|_| ())).await;
+        self.finish_task(&app, &id, result).await;
     }
 
     /// 将执行结果转换为稳定终态，并移除暂停和取消控制句柄。
@@ -346,6 +350,7 @@ impl TransferManager {
                         task.status = TransferStatus::Completed;
                         task.transferred_bytes = task.total_bytes;
                         task.completed_files = task.total_files;
+                        task.committed_roots = task.total_roots;
                         task.error = None;
                     }
                     Err(TransferRunError::Canceled) => {
@@ -435,6 +440,22 @@ fn task_name(sources: &[String]) -> String {
         .to_string()
 }
 
+fn resumed_status(stage: TransferStage) -> TransferStatus {
+    if stage == TransferStage::Queued {
+        TransferStatus::Queued
+    } else {
+        TransferStatus::Running
+    }
+}
+
+fn should_emit_fs_changed(
+    direction: TransferDirection,
+    succeeded: bool,
+    has_committed_roots: bool,
+) -> bool {
+    direction == TransferDirection::Upload && (succeeded || has_committed_roots)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +496,36 @@ mod tests {
     fn task_updates_are_strictly_monotonic() {
         let previous = now_ms().saturating_add(1_000);
         assert!(next_updated_at(previous) > previous);
+    }
+
+    #[test]
+    fn queued_tasks_resume_as_queued_until_the_scheduler_runs_them() {
+        assert_eq!(
+            resumed_status(TransferStage::Queued),
+            TransferStatus::Queued
+        );
+        assert_eq!(
+            resumed_status(TransferStage::Transferring),
+            TransferStatus::Running
+        );
+    }
+
+    #[test]
+    fn partial_uploads_still_notify_the_workspace() {
+        assert!(should_emit_fs_changed(
+            TransferDirection::Upload,
+            false,
+            true
+        ));
+        assert!(!should_emit_fs_changed(
+            TransferDirection::Upload,
+            false,
+            false
+        ));
+        assert!(!should_emit_fs_changed(
+            TransferDirection::Download,
+            true,
+            true
+        ));
     }
 }

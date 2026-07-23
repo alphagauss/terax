@@ -21,6 +21,7 @@ pub(crate) struct ExecutionContext {
     pending_bytes: u64,
     pending_files: u64,
     pending_current_file: Option<String>,
+    committed_roots: u64,
     sample_started: Instant,
 }
 
@@ -40,6 +41,7 @@ impl ExecutionContext {
             pending_bytes: 0,
             pending_files: 0,
             pending_current_file: None,
+            committed_roots: 0,
             sample_started: Instant::now(),
         }
     }
@@ -63,14 +65,32 @@ impl ExecutionContext {
     }
 
     /// 在扫描完成后发布稳定的文件数和总字节数。
-    pub(crate) async fn set_totals(&self, total_files: u64, total_bytes: u64) {
+    pub(crate) async fn set_totals(&self, total_files: u64, total_bytes: u64, total_roots: u64) {
         let _ = self
             .manager
             .mutate_task(&self.app, &self.task_id, |task| {
                 task.total_files = total_files;
                 task.total_bytes = total_bytes;
+                task.total_roots = total_roots;
             })
             .await;
+    }
+
+    /// 记录一个已经公开到最终路径、后续失败也不会回滚的顶层项目。
+    pub(crate) async fn root_committed(&mut self) {
+        self.committed_roots = self.committed_roots.saturating_add(1);
+        let committed_roots = self.committed_roots;
+        let _ = self
+            .manager
+            .mutate_task(&self.app, &self.task_id, |task| {
+                task.committed_roots = committed_roots.min(task.total_roots);
+            })
+            .await;
+    }
+
+    /// 返回任务是否已经产生不可回滚的最终输出。
+    pub(crate) fn has_committed_roots(&self) -> bool {
+        self.committed_roots > 0
     }
 
     /// Archive 完成打包后把字节进度切换为实际单流归档大小。

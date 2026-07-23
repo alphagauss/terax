@@ -62,6 +62,8 @@
     "remove": "Remove",
     "operationFailed": "Transfer action failed: {{error}}",
     "failureDetail": "Error: {{error}}",
+    "partialResult_one": "{{committed}} of {{total}} top-level items was saved before the task stopped.",
+    "partialResult_other": "{{committed}} of {{total}} top-level items were saved before the task stopped.",
     "strategy": {
       "direct": "Direct",
       "archive": "Archive"

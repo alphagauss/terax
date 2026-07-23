@@ -62,6 +62,8 @@
     "remove": "移除",
     "operationFailed": "传输操作失败：{{error}}",
     "failureDetail": "错误：{{error}}",
+    "partialResult_one": "任务停止前已保存 {{committed}} / {{total}} 个顶层项目。",
+    "partialResult_other": "任务停止前已保存 {{committed}} / {{total}} 个顶层项目。",
     "strategy": {
       "direct": "直接传输",
       "archive": "打包传输"

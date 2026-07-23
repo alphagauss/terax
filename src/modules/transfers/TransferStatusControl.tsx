@@ -151,6 +151,9 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
     task.sourceCount > 1
       ? t("transfers.items", { count: task.sourceCount })
       : task.name;
+  const hasPartialResult =
+    (task.status === "failed" || task.status === "canceled") &&
+    task.committedRoots > 0;
 
   const run = (operation: Promise<void>) => {
     void operation.catch((error) =>
@@ -204,6 +207,15 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
           >
             {detail}
           </div>
+          {hasPartialResult ? (
+            <div className="mt-1 text-[10px] text-foreground">
+              {t("transfers.partialResult", {
+                count: task.committedRoots,
+                committed: task.committedRoots,
+                total: task.totalRoots,
+              })}
+            </div>
+          ) : null}
           {active || task.status === "completed" ? (
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}

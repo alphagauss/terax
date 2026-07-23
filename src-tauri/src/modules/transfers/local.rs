@@ -3,8 +3,6 @@
 //! 来源与目标均已由 Planner 规范化。本模块只向任务私有 staging 写入数据，校验
 //! 文件长度后通过 Committer 公开顶层目标。
 
-use std::path::Path;
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::commit::{cleanup_local_staging, commit_local_root};
@@ -82,6 +80,7 @@ pub(crate) async fn verify_apply_commit(
     for root in &plan.roots {
         context.checkpoint().await?;
         commit_local_root(root).await?;
+        context.root_committed().await;
     }
     Ok(())
 }
@@ -91,9 +90,13 @@ async fn copy_local_file(file: &LocalFile, context: &mut ExecutionContext) -> Ru
     context
         .set_current_file(file.source.to_string_lossy().into_owned())
         .await;
-    let mut reader = tokio::fs::File::open(&file.source)
-        .await
-        .map_err(|error| message(format!("open source {}: {error}", file.source.display())))?;
+    let mut reader = super::source::open_verified_file(
+        &file.source,
+        file.source_identity,
+        file.size,
+        file.metadata.modified(),
+    )
+    .await?;
     let mut writer = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -118,7 +121,14 @@ async fn copy_local_file(file: &LocalFile, context: &mut ExecutionContext) -> Ru
             file.destination.display()
         ))
     })?;
-    verify_source_size(&file.source, file.size, file.metadata.modified()).await?;
+    super::source::verify_opened_file(
+        &reader,
+        &file.source,
+        file.source_identity,
+        file.size,
+        file.metadata.modified(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -150,28 +160,8 @@ where
     }
 }
 
-/// 检查本地来源在复制期间是否发生长度变化。
-async fn verify_source_size(
-    path: &Path,
-    expected_size: u64,
-    expected_modified: Option<std::time::SystemTime>,
-) -> RunResult<()> {
-    let actual = tokio::fs::metadata(path)
-        .await
-        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?;
-    if actual.len() != expected_size
-        || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
-    {
-        return Err(message(format!(
-            "source changed during transfer: {}",
-            path.display(),
-        )));
-    }
-    Ok(())
-}
-
 /// 校验本地 staging 文件长度与扫描结果一致。
-async fn verify_local_file(path: &Path, expected: u64) -> RunResult<()> {
+async fn verify_local_file(path: &std::path::Path, expected: u64) -> RunResult<()> {
     let actual = tokio::fs::metadata(path)
         .await
         .map_err(|error| message(format!("verify destination {}: {error}", path.display())))?
@@ -196,15 +186,10 @@ mod tests {
     #[tokio::test]
     async fn verification_rejects_changed_file_sizes() {
         let directory = tempfile::tempdir().unwrap();
-        let source = directory.path().join("source");
         let destination = directory.path().join("destination");
-        tokio::fs::write(&source, b"source").await.unwrap();
         tokio::fs::write(&destination, b"target").await.unwrap();
 
-        let modified = tokio::fs::metadata(&source).await.unwrap().modified().ok();
-        assert!(verify_source_size(&source, 1, modified).await.is_err());
         assert!(verify_local_file(&destination, 1).await.is_err());
-        assert!(verify_source_size(&source, 6, modified).await.is_ok());
         assert!(verify_local_file(&destination, 6).await.is_ok());
     }
 }

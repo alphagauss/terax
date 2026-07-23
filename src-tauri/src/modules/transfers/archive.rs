@@ -19,8 +19,10 @@ use tar::{Archive, Builder, EntryType, Header};
 use super::manager::{TaskControl, TransferRunError};
 use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
+use super::source::LocalSourceIdentity;
 
 type RunResult<T> = Result<T, TransferRunError>;
+const MAX_ARCHIVE_TRAILING_BYTES: u64 = 1024 * 1024;
 
 /// 构建完成后由 `TempPath` 自动清理的本地归档。
 pub(crate) struct LocalArchive {
@@ -42,6 +44,7 @@ struct PackEntry {
     mode: u32,
     mtime: u64,
     modified: Option<SystemTime>,
+    source_identity: Option<LocalSourceIdentity>,
 }
 
 /// 本地安全解包时唯一允许写入的 Manifest 条目。
@@ -56,7 +59,7 @@ pub(crate) struct ExtractEntry {
 pub(crate) async fn execute(
     prepared: PreparedTransfer,
     context: &mut ExecutionContext,
-) -> RunResult<Vec<String>> {
+) -> RunResult<()> {
     let result = match prepared.manifest {
         TransferManifest::RemoteUpload(plan) => {
             super::ssh::archive::execute_upload(plan, context).await
@@ -66,8 +69,7 @@ pub(crate) async fn execute(
         }
         TransferManifest::Local(plan) => super::wsl::archive::execute(plan, context).await,
     };
-    result?;
-    Ok(prepared.changed_paths)
+    result
 }
 
 /// 按远端 staging 相对路径创建本地 tar.gz，并在上传前重新解析全部条目。
@@ -86,6 +88,7 @@ pub(crate) async fn build_upload_archive(
             mode: directory.metadata.archive_mode(),
             mtime: directory.metadata.archive_mtime(),
             modified: directory.metadata.modified(),
+            source_identity: directory.source_identity,
         });
     }
     for file in &plan.files {
@@ -97,6 +100,7 @@ pub(crate) async fn build_upload_archive(
             mode: file.metadata.archive_mode(),
             mtime: file.metadata.archive_mtime(),
             modified: file.metadata.modified(),
+            source_identity: file.source_identity,
         });
     }
     build_archive(entries, context).await
@@ -117,6 +121,7 @@ pub(crate) async fn build_wsl_upload_archive(
             mode: directory.metadata.archive_mode(),
             mtime: directory.metadata.archive_mtime(),
             modified: directory.metadata.modified(),
+            source_identity: directory.source_identity,
         });
     }
     for file in &plan.files {
@@ -128,6 +133,7 @@ pub(crate) async fn build_wsl_upload_archive(
             mode: file.metadata.archive_mode(),
             mtime: file.metadata.archive_mtime(),
             modified: file.metadata.modified(),
+            source_identity: file.source_identity,
         });
     }
     build_archive(entries, context).await
@@ -169,7 +175,6 @@ async fn build_archive(
     let validate_path = path.to_path_buf();
     let validate_control = control.clone();
     let validated = tokio::task::spawn_blocking(move || {
-        verify_gzip(&validate_path, &validate_control)?;
         validate_archive(&validate_path, &expected, &validate_control)
     })
     .await
@@ -195,12 +200,10 @@ pub(crate) async fn extract_download_archive(
     let archive = archive.to_path_buf();
     let control = context.control();
     let extract_control = control.clone();
-    let extracted = tokio::task::spawn_blocking(move || {
-        verify_gzip(&archive, &extract_control)?;
-        extract_archive(&archive, expected, &extract_control)
-    })
-    .await
-    .map_err(|error| message(format!("join archive extraction: {error}")))?;
+    let extracted =
+        tokio::task::spawn_blocking(move || extract_archive(&archive, expected, &extract_control))
+            .await
+            .map_err(|error| message(format!("join archive extraction: {error}")))?;
     extracted.map_err(|error| blocking_error(error, &control))
 }
 
@@ -227,6 +230,9 @@ fn build_archive_blocking(
         };
         if metadata.file_type().is_symlink()
             || actual_kind != entry.kind
+            || entry
+                .source_identity
+                .is_some_and(|expected| !expected.matches_metadata(&metadata))
             || (entry.kind == ArchiveEntryKind::File && metadata.len() != entry.size)
             || entry
                 .modified
@@ -256,13 +262,35 @@ fn build_archive_blocking(
                 archive.append_data(&mut header, entry.path, io::empty())?;
             }
             ArchiveEntryKind::File => {
-                let file = File::open(&entry.source)?;
-                let reader = ControlledReader::new(file, control.clone());
+                let mut file = super::source::open_verified_file_blocking(
+                    &entry.source,
+                    entry.source_identity,
+                    entry.size,
+                    entry.modified,
+                )?;
+                let reader = ControlledReader::new(&mut file, control.clone());
                 archive.append_data(&mut header, entry.path, reader)?;
+                let opened = file.metadata()?;
+                if opened.len() != entry.size
+                    || entry
+                        .modified
+                        .is_some_and(|expected| opened.modified().ok() != Some(expected))
+                    || entry
+                        .source_identity
+                        .is_some_and(|expected| !expected.matches_std_file(&file, &opened))
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("source changed while archiving: {}", entry.source.display()),
+                    ));
+                }
             }
         }
         let current = std::fs::symlink_metadata(&entry.source)?;
         if current.file_type().is_symlink()
+            || entry
+                .source_identity
+                .is_some_and(|expected| !expected.matches_metadata(&current))
             || (entry.kind == ArchiveEntryKind::File && current.len() != entry.size)
             || entry
                 .modified
@@ -280,13 +308,6 @@ fn build_archive_blocking(
     file.sync_all()
 }
 
-fn verify_gzip(path: &Path, control: &Arc<TaskControl>) -> io::Result<()> {
-    let decoder = GzDecoder::new(File::open(path)?);
-    let mut reader = ControlledReader::new(decoder, control.clone());
-    io::copy(&mut reader, &mut io::sink())?;
-    Ok(())
-}
-
 fn validate_archive(
     path: &Path,
     expected: &HashMap<String, (ArchiveEntryKind, u64)>,
@@ -297,7 +318,7 @@ fn validate_archive(
     let mut seen = HashSet::new();
     for entry in archive.entries()? {
         control_io(control)?;
-        let entry = entry?;
+        let mut entry = entry?;
         let path = normalize_archive_path(&entry.path()?)?;
         let kind = entry_kind(entry.header().entry_type())?;
         let (expected_kind, expected_size) = expected.get(&path).ok_or_else(|| {
@@ -315,7 +336,19 @@ fn validate_archive(
                 format!("invalid archive entry: {path}"),
             ));
         }
+        let copied = io::copy(
+            &mut ControlledReader::new(&mut entry, control.clone()),
+            &mut io::sink(),
+        )?;
+        if kind == ArchiveEntryKind::File && copied != *expected_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid archive entry length: {path}"),
+            ));
+        }
     }
+    let decoder = archive.into_inner();
+    consume_archive_tail(decoder, control)?;
     if seen.len() != expected.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -383,10 +416,27 @@ fn extract_archive(
         writer.flush()?;
         writer.get_ref().sync_all()?;
     }
+    let decoder = archive.into_inner();
+    consume_archive_tail(decoder, control)?;
     if seen.len() != expected.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "archive is missing manifest entries",
+        ));
+    }
+    Ok(())
+}
+
+fn consume_archive_tail(decoder: GzDecoder<File>, control: &Arc<TaskControl>) -> io::Result<()> {
+    let reader = ControlledReader::new(decoder, control.clone());
+    let copied = io::copy(
+        &mut reader.take(MAX_ARCHIVE_TRAILING_BYTES + 1),
+        &mut io::sink(),
+    )?;
+    if copied > MAX_ARCHIVE_TRAILING_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "archive contains excessive data after the tar end marker",
         ));
     }
     Ok(())
@@ -607,6 +657,20 @@ mod tests {
         let link = directory.path().join("link.tar.gz");
         write_test_archive(&link, b"link", EntryType::Symlink);
         assert!(validate_archive(&link, &HashMap::new(), &control).is_err());
+    }
+
+    #[test]
+    fn archive_validation_consumes_the_stream_and_checks_gzip_integrity() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive_path = directory.path().join("corrupt.tar.gz");
+        write_test_archive(&archive_path, b"file.txt", EntryType::Regular);
+        let mut bytes = std::fs::read(&archive_path).unwrap();
+        let last = bytes.last_mut().unwrap();
+        *last ^= 0xff;
+        std::fs::write(&archive_path, bytes).unwrap();
+
+        let expected = HashMap::from([("file.txt".to_string(), (ArchiveEntryKind::File, 0))]);
+        assert!(validate_archive(&archive_path, &expected, &Arc::new(TaskControl::new())).is_err());
     }
 
     #[test]

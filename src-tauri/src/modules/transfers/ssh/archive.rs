@@ -45,6 +45,7 @@ pub(crate) async fn execute_upload(
             .collect::<Vec<_>>()
             .as_slice(),
     )?;
+    let mut remote_work: Option<String> = None;
     let result = async {
         ensure_archive_capability(&plan.workspace, context, false).await?;
         let archive = build_upload_archive(&plan, &remote_parent, context).await?;
@@ -59,6 +60,7 @@ pub(crate) async fn execute_upload(
             .create_dir(work_dir.clone())
             .await
             .map_err(|error| message(format!("create remote archive directory: {error}")))?;
+        remote_work = Some(work_dir.clone());
         plan.session
             .set_metadata(
                 work_dir.clone(),
@@ -71,24 +73,15 @@ pub(crate) async fn execute_upload(
             .map_err(|error| message(format!("secure remote archive directory: {error}")))?;
 
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
-        let transferred =
-            upload_archive(&plan.session, &archive.path, &archive_path, context).await;
-        if let Err(error) = transferred {
-            cleanup_remote_owned_path(&plan.session, &work_dir).await;
-            return Err(error);
-        }
+        upload_archive(&plan.session, &archive.path, &archive_path, context).await?;
 
         context.set_stage(TransferStage::Extracting).await;
         let command = format!(
-            "gzip -t -- {archive} && tar -xzf {archive} -C {directory}",
+            "tar -xzf {archive} -C {directory}",
             archive = shell_quote(&archive_path),
             directory = shell_quote(&work_dir),
         );
-        let extracted = run_checked(&plan.workspace, &command, context).await;
-        if let Err(error) = extracted {
-            cleanup_remote_owned_path(&plan.session, &work_dir).await;
-            return Err(error);
-        }
+        run_checked(&plan.workspace, &command, context).await?;
         plan.session
             .remove_file(archive_path)
             .await
@@ -107,6 +100,7 @@ pub(crate) async fn execute_upload(
                 })?;
         }
         cleanup_remote_owned_path(&plan.session, &work_dir).await;
+        remote_work = None;
 
         context.set_stage(TransferStage::Verifying).await;
         verify_remote_upload(&plan, context).await?;
@@ -114,10 +108,14 @@ pub(crate) async fn execute_upload(
         for root in &plan.roots {
             context.checkpoint().await?;
             commit_remote_root(&plan.session, root).await?;
+            context.root_committed().await;
         }
         Ok(())
     }
     .await;
+    if let Some(path) = remote_work {
+        cleanup_remote_owned_path(&plan.session, &path).await;
+    }
     if result.is_err() {
         cleanup_remote_staging(&plan.session, &plan.roots).await;
     }
@@ -138,6 +136,7 @@ pub(crate) async fn execute_download(
         remote_work = Some(work_dir.clone());
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
         let sources = download_root_sources(&plan)?;
+        verify_remote_download_sources(&plan, context).await?;
         let mut command = format!("tar -czf {} -C / --", shell_quote(&archive_path));
         for source in sources {
             let relative = source
@@ -147,7 +146,6 @@ pub(crate) async fn execute_download(
             command.push(' ');
             command.push_str(&shell_quote(&format!("./{relative}")));
         }
-        command.push_str(&format!(" && gzip -t -- {}", shell_quote(&archive_path)));
         run_checked(&plan.workspace, &command, context).await?;
         verify_remote_download_sources(&plan, context).await?;
 
@@ -197,6 +195,7 @@ pub(crate) async fn execute_download(
         for root in &plan.roots {
             context.checkpoint().await?;
             commit_local_root(root).await?;
+            context.root_committed().await;
         }
         Ok(())
     }

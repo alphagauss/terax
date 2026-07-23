@@ -44,6 +44,8 @@ export type TransferTask = {
   transferredBytes: number;
   totalFiles: number;
   completedFiles: number;
+  totalRoots: number;
+  committedRoots: number;
   speedBytesPerSecond: number;
   currentFile: string | null;
   error: string | null;

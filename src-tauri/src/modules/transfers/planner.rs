@@ -23,6 +23,7 @@ use super::manager::TransferRunError;
 use super::metadata::EntryMetadata;
 use super::models::{EnqueueTransferRequest, TransferDirection};
 use super::progress::ExecutionContext;
+use super::source::LocalSourceIdentity;
 
 type RunResult<T> = Result<T, TransferRunError>;
 
@@ -32,6 +33,7 @@ pub(crate) struct LocalFile {
     pub(crate) destination: PathBuf,
     pub(crate) size: u64,
     pub(crate) metadata: EntryMetadata,
+    pub(crate) source_identity: Option<LocalSourceIdentity>,
 }
 
 /// 创建后需要在子项完成时恢复元数据的目录。
@@ -39,6 +41,7 @@ pub(crate) struct PlannedDirectory<S, D> {
     pub(crate) source: S,
     pub(crate) destination: D,
     pub(crate) metadata: EntryMetadata,
+    pub(crate) source_identity: Option<LocalSourceIdentity>,
 }
 
 /// Host 与 WSL 之间由 Direct 和 Archive 共用的完整计划。
@@ -68,6 +71,7 @@ pub(crate) struct RemoteUploadFile {
     pub(crate) destination: String,
     pub(crate) size: u64,
     pub(crate) metadata: EntryMetadata,
+    pub(crate) source_identity: Option<LocalSourceIdentity>,
 }
 
 /// SSH 上传 Manifest 及其任务独占 SFTP 会话和命令 transport。
@@ -123,6 +127,14 @@ impl TransferManifest {
                 .collect(),
         }
     }
+
+    fn root_count(&self) -> u64 {
+        match self {
+            Self::Local(plan) => plan.roots.len() as u64,
+            Self::RemoteUpload(plan) => plan.roots.len() as u64,
+            Self::RemoteDownload(plan) => plan.roots.len() as u64,
+        }
+    }
 }
 
 fn local_target_keys(roots: &[LocalRoot]) -> Vec<String> {
@@ -142,7 +154,6 @@ fn local_target_keys(roots: &[LocalRoot]) -> Vec<String> {
 /// 扫描完成且尚未写入目标的通用传输 Manifest。
 pub(crate) struct PreparedTransfer {
     pub(crate) manifest: TransferManifest,
-    pub(crate) changed_paths: Vec<String>,
 }
 
 impl PreparedTransfer {
@@ -253,16 +264,10 @@ pub(crate) async fn prepare(
     };
 
     let (total_files, total_bytes) = plan.totals();
-    context.set_totals(total_files, total_bytes).await;
-    let changed_paths = if request.direction == TransferDirection::Upload {
-        vec![request.destination.clone()]
-    } else {
-        Vec::new()
-    };
-    Ok(PreparedTransfer {
-        manifest: plan,
-        changed_paths,
-    })
+    context
+        .set_totals(total_files, total_bytes, plan.root_count())
+        .await;
+    Ok(PreparedTransfer { manifest: plan })
 }
 
 /// 扫描同一宿主文件系统中的来源，并为每个顶层项目生成同级 staging 目标。
@@ -313,6 +318,7 @@ async fn plan_local(
             .await
             .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
         reject_local_symlink_or_special(&source, &metadata)?;
+        let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
         let source_name = source
             .file_name()
             .ok_or_else(|| message(format!("invalid source path: {}", source.display())))?;
@@ -340,6 +346,7 @@ async fn plan_local(
                 destination: stage,
                 size: metadata.len(),
                 metadata: EntryMetadata::from_local(&metadata),
+                source_identity,
             });
             continue;
         }
@@ -348,13 +355,13 @@ async fn plan_local(
             source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_local(&metadata),
+            source_identity,
         });
-        let mut pending = vec![(source, stage)];
-        while let Some((source_dir, destination_dir)) = pending.pop() {
+        let mut pending = vec![(source, stage, source_identity)];
+        while let Some((source_dir, destination_dir, source_identity)) = pending.pop() {
             context.checkpoint().await?;
-            let mut entries = tokio::fs::read_dir(&source_dir).await.map_err(|error| {
-                message(format!("read directory {}: {error}", source_dir.display()))
-            })?;
+            let mut entries =
+                super::source::read_verified_directory(&source_dir, source_identity).await?;
             let mut destination_names = HashSet::new();
             while let Some(entry) = entries.next_entry().await.map_err(|error| {
                 message(format!("read directory {}: {error}", source_dir.display()))
@@ -368,6 +375,7 @@ async fn plan_local(
                             message(format!("stat source {}: {error}", source_path.display()))
                         })?;
                 reject_local_symlink_or_special(&source_path, &metadata)?;
+                let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
                 let name = local_destination_name(&entry.file_name(), sanitize_names);
                 if !destination_names.insert(local_name_identity(&name)) {
                     return Err(message(format!(
@@ -381,14 +389,16 @@ async fn plan_local(
                         source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
+                        source_identity,
                     });
-                    pending.push((source_path, destination_path));
+                    pending.push((source_path, destination_path, source_identity));
                 } else {
                     plan.files.push(LocalFile {
                         source: source_path,
                         destination: destination_path,
                         size: metadata.len(),
                         metadata: EntryMetadata::from_local(&metadata),
+                        source_identity,
                     });
                 }
             }
@@ -430,6 +440,7 @@ async fn plan_remote_upload(
             .await
             .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
         reject_local_symlink_or_special(&source, &metadata)?;
+        let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
         let name = source
             .file_name()
             .and_then(OsStr::to_str)
@@ -454,6 +465,7 @@ async fn plan_remote_upload(
                 destination: stage,
                 size: metadata.len(),
                 metadata: EntryMetadata::from_local(&metadata),
+                source_identity,
             });
             continue;
         }
@@ -462,13 +474,13 @@ async fn plan_remote_upload(
             source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_local(&metadata),
+            source_identity,
         });
-        let mut pending = vec![(source, stage)];
-        while let Some((source_dir, destination_dir)) = pending.pop() {
+        let mut pending = vec![(source, stage, source_identity)];
+        while let Some((source_dir, destination_dir, source_identity)) = pending.pop() {
             context.checkpoint().await?;
-            let mut entries = tokio::fs::read_dir(&source_dir).await.map_err(|error| {
-                message(format!("read directory {}: {error}", source_dir.display()))
-            })?;
+            let mut entries =
+                super::source::read_verified_directory(&source_dir, source_identity).await?;
             while let Some(entry) = entries.next_entry().await.map_err(|error| {
                 message(format!("read directory {}: {error}", source_dir.display()))
             })? {
@@ -481,6 +493,7 @@ async fn plan_remote_upload(
                             message(format!("stat source {}: {error}", source_path.display()))
                         })?;
                 reject_local_symlink_or_special(&source_path, &metadata)?;
+                let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
                 let name = entry.file_name().into_string().map_err(|_| {
                     message(format!(
                         "non-UTF-8 filename is not supported: {}",
@@ -493,14 +506,16 @@ async fn plan_remote_upload(
                         source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
+                        source_identity,
                     });
-                    pending.push((source_path, destination_path));
+                    pending.push((source_path, destination_path, source_identity));
                 } else {
                     plan.files.push(RemoteUploadFile {
                         source: source_path,
                         destination: destination_path,
                         size: metadata.len(),
                         metadata: EntryMetadata::from_local(&metadata),
+                        source_identity,
                     });
                 }
             }
@@ -598,6 +613,7 @@ async fn plan_remote_download(
             source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_remote(&source_metadata),
+            source_identity: None,
         });
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
@@ -626,6 +642,7 @@ async fn plan_remote_download(
                         source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_remote(&metadata),
+                        source_identity: None,
                     });
                     pending.push((source_path, destination_path));
                 } else {

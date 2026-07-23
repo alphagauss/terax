@@ -212,6 +212,7 @@ pub(crate) async fn execute_upload(
         for root in &plan.roots {
             context.checkpoint().await?;
             commit_remote_root(&plan.session, root).await?;
+            context.root_committed().await;
         }
         Ok(())
     }
@@ -244,6 +245,13 @@ pub(crate) async fn execute_download(
         }
         for file in &plan.files {
             context.set_current_file(file.source.clone()).await;
+            verify_remote_source(
+                &plan.session,
+                &file.source,
+                file.size,
+                file.metadata.modified(),
+            )
+            .await?;
             download_file(
                 &raw_session,
                 &file.source,
@@ -278,6 +286,7 @@ pub(crate) async fn execute_download(
         for root in &plan.roots {
             context.checkpoint().await?;
             commit_local_root(root).await?;
+            context.root_committed().await;
         }
         Ok(())
     }
@@ -299,9 +308,13 @@ async fn copy_remote_upload_file(
     context
         .set_current_file(file.source.to_string_lossy().into_owned())
         .await;
-    let mut reader = tokio::fs::File::open(&file.source)
-        .await
-        .map_err(|error| message(format!("open source {}: {error}", file.source.display())))?;
+    let mut reader = crate::modules::transfers::source::open_verified_file(
+        &file.source,
+        file.source_identity,
+        file.size,
+        file.metadata.modified(),
+    )
+    .await?;
     let mut writer = session
         .open_with_flags(
             file.destination.clone(),
@@ -322,7 +335,14 @@ async fn copy_remote_upload_file(
         .shutdown()
         .await
         .map_err(|error| message(format!("close remote file {}: {error}", file.destination)))?;
-    verify_source_size(&file.source, file.size, file.metadata.modified()).await?;
+    crate::modules::transfers::source::verify_opened_file(
+        &reader,
+        &file.source,
+        file.source_identity,
+        file.size,
+        file.metadata.modified(),
+    )
+    .await?;
     file.metadata
         .apply_remote(session, &file.destination)
         .await?;
@@ -356,26 +376,6 @@ where
             .map_err(|error| message(format!("write transfer destination: {error}")))?;
         context.report_bytes(read as u64).await;
     }
-}
-
-/// 检查本地来源在复制期间是否发生长度变化。
-async fn verify_source_size(
-    path: &Path,
-    expected_size: u64,
-    expected_modified: Option<std::time::SystemTime>,
-) -> RunResult<()> {
-    let actual = tokio::fs::metadata(path)
-        .await
-        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?;
-    if actual.len() != expected_size
-        || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
-    {
-        return Err(message(format!(
-            "source changed during transfer: {}",
-            path.display(),
-        )));
-    }
-    Ok(())
 }
 
 /// 校验远端来源在 raw SFTP 下载期间没有改变长度、类型或修改时间。

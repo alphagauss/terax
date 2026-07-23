@@ -73,8 +73,6 @@ async fn execute_upload(
             },
         );
         copy_archive_to_new(&archive.path, &host_archive, archive.size, context).await?;
-        run_wsl_program(distro, "gzip", &["-t", "--", &remote_archive], context).await?;
-
         context.set_stage(TransferStage::Extracting).await;
         run_wsl_program(
             distro,
@@ -115,6 +113,7 @@ async fn execute_download(
         let directory = create_work_dir(distro).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
+        verify_sources(plan, context).await?;
         let mut arguments = vec![
             "-czf".to_string(),
             remote_archive.clone(),
@@ -127,7 +126,6 @@ async fn execute_download(
         }
         let argument_refs: Vec<_> = arguments.iter().map(String::as_str).collect();
         run_wsl_program(distro, "tar", &argument_refs, context).await?;
-        run_wsl_program(distro, "gzip", &["-t", "--", &remote_archive], context).await?;
         verify_sources(plan, context).await?;
 
         let host_archive = resolve_path(
@@ -502,6 +500,9 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
             .await
             .map_err(|error| message(format!("verify WSL source: {error}")))?;
         if !metadata.is_file()
+            || file
+                .source_identity
+                .is_some_and(|expected| !expected.matches_metadata(&metadata))
             || metadata.len() != file.size
             || file
                 .metadata
@@ -519,7 +520,12 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
         let metadata = tokio::fs::symlink_metadata(&directory.source)
             .await
             .map_err(|error| message(format!("verify WSL directory: {error}")))?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || directory
+                .source_identity
+                .is_some_and(|expected| !expected.matches_metadata(&metadata))
+        {
             return Err(message(format!(
                 "WSL source changed while archiving: {}",
                 directory.source.display()

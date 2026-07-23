@@ -14,6 +14,7 @@ pub mod models;
 mod planner;
 mod progress;
 mod scheduler;
+mod source;
 mod ssh;
 mod wsl;
 

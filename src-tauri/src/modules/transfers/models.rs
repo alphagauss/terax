@@ -94,6 +94,8 @@ pub struct TransferTaskSnapshot {
     pub transferred_bytes: u64,
     pub total_files: u64,
     pub completed_files: u64,
+    pub total_roots: u64,
+    pub committed_roots: u64,
     pub speed_bytes_per_second: u64,
     pub current_file: Option<String>,
     pub error: Option<String>,

@@ -24,6 +24,8 @@ function task(id: string, updatedAt: number): TransferTask {
     transferredBytes: updatedAt,
     totalFiles: 1,
     completedFiles: 0,
+    totalRoots: 1,
+    committedRoots: 0,
     speedBytesPerSecond: 0,
     currentFile: null,
     error: null,
