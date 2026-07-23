@@ -2,9 +2,11 @@
 
 ## 分支目标
 
-为 WSL 和 SSH Workspace 建立统一、可靠且不阻塞终端与 Explorer 的后台文件传输内核。先完成领域边界、调度、数据面和安全提交，再在同一任务模型上增加 Archive、中断恢复和文件夹同步。
+为 WSL 和 SSH Workspace 建立统一、可靠且不阻塞终端与 Explorer 的后台文件传输内核。先完成领域边界、调度、数据面和安全提交，再在同一任务模型上增加由用户显式选择的 Archive、中断恢复和文件夹同步。
 
 本文件是当前分支的临时执行账本。每个后续提交登记前一个实现提交的哈希、完成内容、验证结果和计划偏差。全部目标完成后删除本文件，再合并到主分支。
+
+本次重构同时完成三个参考项目中与 Terax 目标相关的能力吸收。完成时所有采用或拒绝的能力均有明确记录，源码、依赖、测试和构建脚本不读取参考项目目录；即使手动移除三个参考项目，Terax 也能继续独立开发。
 
 ## 成功标准与关键不变量
 
@@ -13,7 +15,8 @@
 - Workspace 环境由进程启动上下文确定，前端任务参数不能指定或切换 SSH profile。
 - Explorer 使用缓存 SFTP 会话；传输的扫描、复制、提交和清理全部使用任务独占会话。
 - Task、Scheduler、Planner、Transport、Committer 和 Progress 的职责分离，Tauri command 保持为薄适配层。
-- Direct 与 Archive 是同一任务协议下的执行策略，不建立第二套生命周期和 UI 状态。
+- Direct 与 Archive 使用独立 IPC 入口，由用户在前端显式选择；两种策略复用同一任务生命周期、Manifest、调度、提交和 UI 状态。
+- 不根据文件数、平均大小、远端空间或经验阈值自动选择策略。Archive 不可用时明确失败，不静默回退 Direct。
 - 暂停的排队任务不占用运行许可；取消必须唤醒排队和暂停任务。
 - 同一进程内先 reservation 最终目标，禁止多个任务为同一目标重复传输。
 - 最终提交不覆盖已有目标；已提交的顶层目标不做破坏性批量回滚，失败任务明确保留已成功提交的项目。
@@ -28,10 +31,12 @@ transfers/
   models.rs         IPC 请求、任务快照和领域枚举
   manager.rs        任务事实状态、控制命令和事件发布
   scheduler.rs      排队、公平调度、并发许可和目标 reservation
-  planner.rs        来源扫描、名称映射、边界校验和 manifest
+  planner.rs        来源扫描、名称映射、边界校验和通用 manifest
   progress.rs       进度聚合、速度采样和单调 updatedAt
   commit.rs         staging、no-replace 提交和任务所有权清理
-  local.rs          Host 与 WSL 路径桥接的数据面
+  direct.rs         Direct 策略入口
+  archive.rs        Archive 策略入口
+  local.rs          Host 与 WSL Direct 数据面
   ssh/
     mod.rs           SSH 执行策略入口
     session.rs       任务独占 SFTP channel
@@ -51,7 +56,8 @@ transfers/
 
 ### CrabPort `1d66518`
 
-- 吸收本地 tar.gz 构建、gzip 完整性验证、远端工具探测、Archive 阶段和失败回退思路。
+- 吸收本地 tar.gz 构建、gzip 完整性验证、远端工具探测和 Archive 阶段。
+- Archive 仅在用户明确选择时探测并执行；远端不支持时返回明确错误，由用户决定是否改用 Direct。
 - 不吸收已因 seek/read 数据损坏而停用的 segmented download，也不采用其缓存 SFTP 会话所有权模型。
 
 ### eussh `4317499`
@@ -81,11 +87,14 @@ transfers/
 
 ### M3 Archive 策略
 
-- [ ] 根据文件数、平均大小、远端能力和空间选择 Direct 或 Archive。
+- [ ] 增加独立 `transfer_enqueue_direct`、`transfer_enqueue_archive`，移除含糊的通用入队入口。
+- [ ] Planner 生成与策略无关的通用 Manifest，Direct 与 Archive 复用安全校验、reservation 和提交。
+- [ ] 前端明确提供 Direct 与 Archive 操作；拖放默认 Direct，不弹出策略选择。
 - [ ] 上传使用本地安全打包、单流上传、远端校验解包和最终提交。
 - [ ] 下载使用远端安全打包、单流下载、本地校验解包和最终提交。
 - [ ] 拒绝归档绝对路径、父目录遍历、符号链接、硬链接和特殊文件。
-- [ ] Archive 不可用时显式回退 Direct。
+- [ ] Archive 不可用时明确失败并提示改用 Direct，不自动回退。
+- [ ] 静态确认源码、依赖、测试和构建脚本不读取三个参考项目目录。
 
 ### M4 功能完善
 
@@ -113,3 +122,4 @@ transfers/
 | --- | --- | --- | --- | --- |
 | `355eea8` | 初始基础 | 增加进程内任务、Direct 传输、staging、状态栏面板和 Explorer 入口 | 提交记录声明前后端完整检查通过 | 架构尚未收口，旧入口仍可绕过管理器，提交和回滚存在竞争窗口 |
 | `5bd9678` | M1、M2 Direct | 收口 Manager、Scheduler、Planner、Progress、Commit、Local 和 SSH 边界；增加目标 reservation、原生 no-replace 提交、任务独占会话与有界 SFTP 流水线 | 前端 97 个文件 564 项测试通过；Rust 260 项库测试及集成测试通过；Clippy 通过 | nextest 未安装，使用 `cargo test --all-targets --locked`；尚未保留元数据或建立真实网络基准 |
+| `6323818` | M2 Direct | 保留跨 Host、WSL 与 SSH 可移植的权限、只读状态和时间元数据，并在复制后复验来源 | Rust 262 项库测试及集成测试通过；Clippy、格式检查通过 | 不复制 uid、gid、ACL、扩展属性和平台专有标志 |
