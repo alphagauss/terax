@@ -1,6 +1,6 @@
 /**
  * 本文件处理从操作系统拖放到 Explorer 的文件和文件夹。
- * Local 工作区继续直接复制，WSL 与 SSH 工作区改为创建后台上传任务。
+ * Local 工作区继续直接复制，WSL 与 SSH 拖放固定创建 Direct 后台上传任务。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -50,7 +50,7 @@ function dirAt(
 
 /**
  * 接收拖放到 Explorer 目录的宿主机路径。
- * Local 工作区直接复制，WSL 与 SSH 工作区只负责创建后台传输任务。
+ * Local 工作区直接复制，WSL 与 SSH 工作区只负责创建 Direct 后台传输任务。
  */
 export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
   const { t } = useTranslation("explorer");
@@ -81,7 +81,7 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
           const workspace = currentWorkspaceEnv();
           if (workspace.kind !== "local") {
             void transferNative
-              .enqueue({
+              .enqueueDirect({
                 direction: "upload",
                 sources: p.paths,
                 destination: dir,

@@ -7,12 +7,12 @@ use tauri::{AppHandle, State};
 
 use crate::modules::workspace_process::WorkspaceProcessState;
 
-use super::models::{EnqueueTransferRequest, TransferTaskSnapshot};
+use super::models::{EnqueueTransferRequest, TransferStrategy, TransferTaskSnapshot};
 use super::TransferState;
 
-/// 将文件、文件夹或批量来源加入当前 Workspace 的后台传输队列。
+/// 将文件、文件夹或批量来源作为 Direct 任务加入后台队列。
 #[tauri::command]
-pub async fn transfer_enqueue(
+pub async fn transfer_enqueue_direct(
     app: AppHandle,
     state: State<'_, TransferState>,
     workspace: State<'_, WorkspaceProcessState>,
@@ -20,7 +20,31 @@ pub async fn transfer_enqueue(
 ) -> Result<TransferTaskSnapshot, String> {
     state
         .manager()
-        .enqueue(app, workspace.bootstrap().env.clone(), request)
+        .enqueue(
+            app,
+            workspace.bootstrap().env.clone(),
+            request,
+            TransferStrategy::Direct,
+        )
+        .await
+}
+
+/// 将 SSH 文件、文件夹或批量来源作为 Archive 任务加入后台队列。
+#[tauri::command]
+pub async fn transfer_enqueue_archive(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+    workspace: State<'_, WorkspaceProcessState>,
+    request: EnqueueTransferRequest,
+) -> Result<TransferTaskSnapshot, String> {
+    state
+        .manager()
+        .enqueue(
+            app,
+            workspace.bootstrap().env.clone(),
+            request,
+            TransferStrategy::Archive,
+        )
         .await
 }
 

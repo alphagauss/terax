@@ -62,6 +62,10 @@
     "remove": "移除",
     "operationFailed": "传输操作失败：{{error}}",
     "failureDetail": "错误：{{error}}",
+    "strategy": {
+      "direct": "直接传输",
+      "archive": "打包传输"
+    },
     "status": {
       "failed": "失败",
       "canceled": "已取消",
@@ -72,7 +76,9 @@
     "stage": {
       "queued": "排队中",
       "scanning": "正在扫描…",
+      "archiving": "正在创建归档…",
       "transferring": "正在传输…",
+      "extracting": "正在解包…",
       "verifying": "正在校验…",
       "finalizing": "正在完成…",
       "finished": "已完成"

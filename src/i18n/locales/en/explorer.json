@@ -18,6 +18,8 @@
     "downloadToLocal": "Download to Local…",
     "uploadFiles": "Upload Files…",
     "uploadFolder": "Upload Folder…",
+    "directTransfer": "Direct transfer",
+    "archiveTransfer": "Archive transfer",
     "transferQueued": "Transfer added to the background queue",
     "transferFailed": "Could not start transfer: {{error}}",
     "copyFailed": "Could not copy item: {{error}}",

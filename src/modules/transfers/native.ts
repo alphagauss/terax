@@ -1,6 +1,6 @@
 /**
  * 本文件封装文件传输 Tauri IPC 与运行时事件。
- * 环境归属由 Rust Workspace 状态决定，前端请求不携带 SSH profile。
+ * Direct 与 Archive 使用独立入队命令；环境归属仍由 Rust Workspace 状态决定。
  */
 
 import { invoke } from "@tauri-apps/api/core";
@@ -11,8 +11,10 @@ const TRANSFER_EVENT = "terax://transfer-updated";
 
 /** 文件传输命令与增量事件的原生适配器。 */
 export const transferNative = {
-  enqueue: (request: EnqueueTransferRequest) =>
-    invoke<TransferTask>("transfer_enqueue", { request }),
+  enqueueDirect: (request: EnqueueTransferRequest) =>
+    invoke<TransferTask>("transfer_enqueue_direct", { request }),
+  enqueueArchive: (request: EnqueueTransferRequest) =>
+    invoke<TransferTask>("transfer_enqueue_archive", { request }),
   list: () => invoke<TransferTask[]>("transfer_list"),
   pause: (id: string) => invoke<void>("transfer_pause", { id }),
   resume: (id: string) => invoke<void>("transfer_resume", { id }),

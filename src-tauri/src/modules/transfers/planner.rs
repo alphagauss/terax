@@ -1,4 +1,4 @@
-//! Direct 传输的只读扫描与执行计划生成。
+//! Direct 与 Archive 共用的只读扫描与 Manifest 生成。
 //!
 //! 本模块在写入目标前解析来源、校验 Workspace 边界、拒绝符号链接与特殊文件，
 //! 并生成带私有 staging 路径的不可变计划。规划阶段不创建或修改文件。
@@ -35,14 +35,15 @@ pub(crate) struct LocalFile {
 }
 
 /// 创建后需要在子项完成时恢复元数据的目录。
-pub(crate) struct PlannedDirectory<T> {
-    pub(crate) destination: T,
+pub(crate) struct PlannedDirectory<S, D> {
+    pub(crate) source: S,
+    pub(crate) destination: D,
     pub(crate) metadata: EntryMetadata,
 }
 
 /// Host 与 WSL 之间的完整 Direct 计划。
 pub(crate) struct LocalPlan {
-    pub(crate) directories: Vec<PlannedDirectory<PathBuf>>,
+    pub(crate) directories: Vec<PlannedDirectory<PathBuf, PathBuf>>,
     pub(crate) files: Vec<LocalFile>,
     pub(crate) roots: Vec<LocalRoot>,
 }
@@ -55,10 +56,11 @@ pub(crate) struct RemoteUploadFile {
     pub(crate) metadata: EntryMetadata,
 }
 
-/// SSH 上传计划及其任务独占 SFTP 会话。
+/// SSH 上传 Manifest 及其任务独占 SFTP 会话和命令 transport。
 pub(crate) struct RemoteUploadPlan {
+    pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
-    pub(crate) directories: Vec<PlannedDirectory<String>>,
+    pub(crate) directories: Vec<PlannedDirectory<PathBuf, String>>,
     pub(crate) files: Vec<RemoteUploadFile>,
     pub(crate) roots: Vec<RemoteRoot>,
 }
@@ -75,19 +77,19 @@ pub(crate) struct RemoteDownloadFile {
 pub(crate) struct RemoteDownloadPlan {
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
-    pub(crate) directories: Vec<PlannedDirectory<PathBuf>>,
+    pub(crate) directories: Vec<PlannedDirectory<String, PathBuf>>,
     pub(crate) files: Vec<RemoteDownloadFile>,
     pub(crate) roots: Vec<LocalRoot>,
 }
 
-/// 按当前 Workspace 环境选择的 Direct 数据面计划。
-pub(crate) enum DirectPlan {
+/// 按当前 Workspace 环境选择的数据面 Manifest。
+pub(crate) enum TransferManifest {
     Local(LocalPlan),
     RemoteUpload(RemoteUploadPlan),
     RemoteDownload(RemoteDownloadPlan),
 }
 
-impl DirectPlan {
+impl TransferManifest {
     fn totals(&self) -> (u64, u64) {
         match self {
             Self::Local(plan) => totals(plan.files.iter().map(|file| file.size)),
@@ -123,16 +125,16 @@ fn local_target_keys(roots: &[LocalRoot]) -> Vec<String> {
         .collect()
 }
 
-/// 扫描完成且尚未写入目标的 Direct 传输计划。
+/// 扫描完成且尚未写入目标的通用传输 Manifest。
 pub(crate) struct PreparedTransfer {
-    pub(crate) plan: DirectPlan,
+    pub(crate) manifest: TransferManifest,
     pub(crate) changed_paths: Vec<String>,
 }
 
 impl PreparedTransfer {
     /// 返回需要由当前任务独占的规范最终目标。
     pub(crate) fn target_keys(&self) -> Vec<String> {
-        self.plan.target_keys()
+        self.manifest.target_keys()
     }
 }
 
@@ -178,7 +180,7 @@ pub(crate) async fn prepare(
                     )
                 }
             };
-            DirectPlan::Local(
+            TransferManifest::Local(
                 plan_local(sources, destination, sanitize_names, task_id, context).await?,
             )
         }
@@ -196,7 +198,7 @@ pub(crate) async fn prepare(
                     context,
                 )
                 .await
-                .map(DirectPlan::RemoteUpload),
+                .map(TransferManifest::RemoteUpload),
                 TransferDirection::Download => plan_remote_download(
                     remote_workspace,
                     session.clone(),
@@ -206,7 +208,7 @@ pub(crate) async fn prepare(
                     context,
                 )
                 .await
-                .map(DirectPlan::RemoteDownload),
+                .map(TransferManifest::RemoteDownload),
             };
             match planned {
                 Ok(plan) => plan,
@@ -226,7 +228,7 @@ pub(crate) async fn prepare(
         Vec::new()
     };
     Ok(PreparedTransfer {
-        plan,
+        manifest: plan,
         changed_paths,
     })
 }
@@ -308,6 +310,7 @@ async fn plan_local(
         }
 
         plan.directories.push(PlannedDirectory {
+            source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_local(&metadata),
         });
@@ -340,6 +343,7 @@ async fn plan_local(
                 let destination_path = destination_dir.join(name);
                 if metadata.is_dir() {
                     plan.directories.push(PlannedDirectory {
+                        source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
                     });
@@ -370,6 +374,7 @@ async fn plan_remote_upload(
     let destination_parent =
         canonical_remote_directory(&workspace, &session, destination_parent).await?;
     let mut plan = RemoteUploadPlan {
+        workspace,
         session,
         directories: Vec::new(),
         files: Vec::new(),
@@ -419,6 +424,7 @@ async fn plan_remote_upload(
         }
 
         plan.directories.push(PlannedDirectory {
+            source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_local(&metadata),
         });
@@ -449,6 +455,7 @@ async fn plan_remote_upload(
                 let destination_path = join_remote(&destination_dir, &name);
                 if metadata.is_dir() {
                     plan.directories.push(PlannedDirectory {
+                        source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
                     });
@@ -553,6 +560,7 @@ async fn plan_remote_download(
         }
 
         plan.directories.push(PlannedDirectory {
+            source: source.clone(),
             destination: stage.clone(),
             metadata: EntryMetadata::from_remote(&source_metadata),
         });
@@ -580,6 +588,7 @@ async fn plan_remote_download(
                 if entry_type.is_dir() {
                     let metadata = entry.metadata();
                     plan.directories.push(PlannedDirectory {
+                        source: source_path.clone(),
                         destination: destination_path.clone(),
                         metadata: EntryMetadata::from_remote(&metadata),
                     });

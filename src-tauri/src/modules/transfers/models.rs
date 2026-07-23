@@ -1,7 +1,7 @@
 //! 文件传输命令与前端共享的数据模型。
 //!
-//! 模型只描述当前 Workspace 进程内的 Direct 传输任务，不持久化凭据，
-//! 也不暴露可由前端任意切换的 SSH profile。
+//! 模型只描述当前 Workspace 进程内的传输任务，不持久化凭据，也不暴露可由
+//! 前端任意切换的 SSH profile。Direct 与 Archive 由不同命令显式选择。
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,14 @@ use serde::{Deserialize, Serialize};
 pub enum TransferDirection {
     Upload,
     Download,
+}
+
+/// 用户显式选择的传输策略。
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferStrategy {
+    Direct,
+    Archive,
 }
 
 /// 传输任务的外部生命周期状态。
@@ -39,7 +47,9 @@ impl TransferStatus {
 pub enum TransferStage {
     Queued,
     Scanning,
+    Archiving,
     Transferring,
+    Extracting,
     Verifying,
     Finalizing,
     Finished,
@@ -74,6 +84,7 @@ impl EnqueueTransferRequest {
 pub struct TransferTaskSnapshot {
     pub id: String,
     pub direction: TransferDirection,
+    pub strategy: TransferStrategy,
     pub status: TransferStatus,
     pub stage: TransferStage,
     pub source_count: u64,

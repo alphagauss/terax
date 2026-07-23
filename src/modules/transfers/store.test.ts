@@ -14,6 +14,7 @@ function task(id: string, updatedAt: number): TransferTask {
   return {
     id,
     direction: "upload",
+    strategy: "direct",
     status: "running",
     stage: "transferring",
     sourceCount: 1,

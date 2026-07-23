@@ -55,6 +55,24 @@ impl EntryMetadata {
         self.modified
     }
 
+    /// 返回归档头使用的可移植权限位。
+    pub(crate) fn archive_mode(&self) -> u32 {
+        self.mode.unwrap_or(match (self.is_dir, self.readonly) {
+            (true, true) => 0o555,
+            (true, false) => 0o755,
+            (false, true) => 0o444,
+            (false, false) => 0o644,
+        })
+    }
+
+    /// 返回归档头使用的秒级修改时间。
+    pub(crate) fn archive_mtime(&self) -> u64 {
+        self.modified
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_secs())
+            .unwrap_or(0)
+    }
+
     /// 将元数据应用到本地或 WSL staging 路径。
     pub(crate) async fn apply_local(&self, path: &Path) -> Result<(), TransferRunError> {
         let path = path.to_path_buf();
@@ -79,13 +97,7 @@ impl EntryMetadata {
     }
 
     fn remote_attributes(&self) -> FileAttributes {
-        let fallback_mode = match (self.is_dir, self.readonly) {
-            (true, true) => 0o555,
-            (true, false) => 0o755,
-            (false, true) => 0o444,
-            (false, false) => 0o644,
-        };
-        let permissions = Some(self.mode.unwrap_or(fallback_mode));
+        let permissions = Some(self.archive_mode());
         let (atime, mtime) = match (self.accessed, self.modified) {
             (Some(accessed), Some(modified)) => {
                 (Some(sftp_time(accessed)), Some(sftp_time(modified)))

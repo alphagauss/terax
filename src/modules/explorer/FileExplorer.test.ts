@@ -53,7 +53,7 @@ vi.mock("@/modules/transfers/dialogs", () => ({
   pickUploadFolders: vi.fn(),
 }));
 vi.mock("@/modules/transfers/native", () => ({
-  transferNative: { enqueue: vi.fn() },
+  transferNative: { enqueueDirect: vi.fn(), enqueueArchive: vi.fn() },
 }));
 vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: (
@@ -233,6 +233,7 @@ describe("file opening render path", () => {
     expect(container.textContent).toContain("menu.uploadFiles");
     expect(container.textContent).toContain("menu.uploadFolder");
     expect(source).toContain("enqueueDownload(menuTarget.path)");
+    expect(source).toContain("transferNative.enqueueArchive");
     act(() => root.unmount());
   });
 });

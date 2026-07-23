@@ -17,13 +17,14 @@ use uuid::Uuid;
 
 use crate::modules::workspace::WorkspaceEnv;
 
-use super::direct;
 use super::models::{
-    EnqueueTransferRequest, TransferDirection, TransferStage, TransferStatus, TransferTaskSnapshot,
+    EnqueueTransferRequest, TransferDirection, TransferStage, TransferStatus, TransferStrategy,
+    TransferTaskSnapshot,
 };
 use super::planner;
 use super::progress::ExecutionContext;
 use super::scheduler::TransferScheduler;
+use super::{archive, direct};
 
 const MAX_CONCURRENT_TASKS: usize = 2;
 const TRANSFER_EVENT: &str = "terax://transfer-updated";
@@ -106,6 +107,24 @@ impl TaskControl {
         self.paused.load(Ordering::Acquire)
     }
 
+    /// 在阻塞归档线程中等待暂停结束，并及时观察取消信号。
+    pub(crate) fn checkpoint_blocking(&self) -> Result<(), TransferRunError> {
+        loop {
+            if self.cancellation.is_cancelled() {
+                return Err(TransferRunError::Canceled);
+            }
+            if !self.is_paused() {
+                return Ok(());
+            }
+            std::thread::park_timeout(std::time::Duration::from_millis(20));
+        }
+    }
+
+    /// 返回任务是否已经收到取消请求。
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
     /// 标记任务暂停并唤醒可能正在竞争许可的执行器。
     pub(crate) fn pause(&self) {
         self.paused.store(true, Ordering::Release);
@@ -156,16 +175,21 @@ impl TransferManager {
         app: AppHandle,
         workspace: WorkspaceEnv,
         request: EnqueueTransferRequest,
+        strategy: TransferStrategy,
     ) -> Result<TransferTaskSnapshot, String> {
         let request = request.normalize()?;
         if matches!(workspace, WorkspaceEnv::Local) {
             return Err("file transfer is only available in WSL or SSH workspaces".into());
+        }
+        if strategy == TransferStrategy::Archive && !workspace.is_ssh() {
+            return Err("archive transfer is only available in SSH workspaces".into());
         }
         let id = Uuid::new_v4().to_string();
         let now = now_ms();
         let snapshot = TransferTaskSnapshot {
             id: id.clone(),
             direction: request.direction,
+            strategy,
             status: TransferStatus::Queued,
             stage: TransferStage::Queued,
             source_count: request.sources.len() as u64,
@@ -194,7 +218,9 @@ impl TransferManager {
 
         let manager = self.clone();
         tauri::async_runtime::spawn(async move {
-            manager.run_task(app, workspace, request, id, control).await;
+            manager
+                .run_task(app, workspace, request, strategy, id, control)
+                .await;
         });
         Ok(snapshot)
     }
@@ -269,6 +295,7 @@ impl TransferManager {
         app: AppHandle,
         workspace: WorkspaceEnv,
         request: EnqueueTransferRequest,
+        strategy: TransferStrategy,
         id: String,
         control: Arc<TaskControl>,
     ) {
@@ -288,7 +315,10 @@ impl TransferManager {
         let mut context = ExecutionContext::new(self.clone(), app.clone(), id.clone(), control);
         let result = match planner::prepare(&workspace, &request, &id, &context).await {
             Ok(prepared) => match self.scheduler.reserve(prepared.target_keys()) {
-                Ok(_reservation) => direct::execute(prepared, &mut context).await,
+                Ok(_reservation) => match strategy {
+                    TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
+                    TransferStrategy::Archive => archive::execute(prepared, &mut context).await,
+                },
                 Err(error) => Err(error),
             },
             Err(error) => Err(error),

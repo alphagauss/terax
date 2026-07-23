@@ -183,7 +183,12 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-xs font-medium">{displayName}</span>
+            <span className="min-w-0 truncate text-xs font-medium">
+              {displayName}
+              <span className="ml-1 font-normal text-muted-foreground">
+                · {t(`transfers.strategy.${task.strategy}`)}
+              </span>
+            </span>
             <span
               className={cn(
                 "shrink-0 text-[10px] text-muted-foreground",

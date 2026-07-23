@@ -18,6 +18,8 @@
     "downloadToLocal": "下载到本地…",
     "uploadFiles": "上传文件…",
     "uploadFolder": "上传文件夹…",
+    "directTransfer": "直接传输",
+    "archiveTransfer": "打包传输",
     "transferQueued": "已加入后台传输队列",
     "transferFailed": "无法启动传输：{{error}}",
     "copyFailed": "无法复制项目：{{error}}",

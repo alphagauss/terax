@@ -144,6 +144,13 @@ pub(crate) async fn cleanup_remote_staging(session: &Arc<SftpSession>, roots: &[
     }
 }
 
+/// 清理当前任务明确拥有的单个远端临时路径。
+pub(crate) async fn cleanup_remote_owned_path(session: &Arc<SftpSession>, path: &str) {
+    if let Err(error) = remove_remote_path(session, path).await {
+        log::warn!("failed to clean remote transfer path {path}: {error:?}");
+    }
+}
+
 async fn remove_local_path(path: &Path) {
     let metadata = match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) => metadata,

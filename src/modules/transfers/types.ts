@@ -1,9 +1,10 @@
 /**
  * 本文件定义文件传输前后端共享的 TypeScript 模型。
- * 首版仅描述 Direct 任务，状态字段保持完整以便后续接入持久化恢复和同步任务。
+ * Direct 与 Archive 由用户显式选择，但共享同一任务生命周期和状态字段。
  */
 
 export type TransferDirection = "upload" | "download";
+export type TransferStrategy = "direct" | "archive";
 
 export type TransferStatus =
   | "queued"
@@ -17,7 +18,9 @@ export type TransferStatus =
 export type TransferStage =
   | "queued"
   | "scanning"
+  | "archiving"
   | "transferring"
+  | "extracting"
   | "verifying"
   | "finalizing"
   | "finished";
@@ -31,6 +34,7 @@ export type EnqueueTransferRequest = {
 export type TransferTask = {
   id: string;
   direction: TransferDirection;
+  strategy: TransferStrategy;
   status: TransferStatus;
   stage: TransferStage;
   sourceCount: number;

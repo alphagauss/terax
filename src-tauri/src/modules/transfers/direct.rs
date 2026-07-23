@@ -4,7 +4,7 @@
 //! staging 路径，已经原子提交的顶层目标不会被回滚删除。
 
 use super::manager::TransferRunError;
-use super::planner::{DirectPlan, PreparedTransfer};
+use super::planner::{PreparedTransfer, TransferManifest};
 use super::progress::ExecutionContext;
 
 type RunResult<T> = Result<T, TransferRunError>;
@@ -14,10 +14,12 @@ pub(crate) async fn execute(
     prepared: PreparedTransfer,
     context: &mut ExecutionContext,
 ) -> RunResult<Vec<String>> {
-    let result = match prepared.plan {
-        DirectPlan::Local(plan) => super::local::execute(plan, context).await,
-        DirectPlan::RemoteUpload(plan) => super::ssh::direct::execute_upload(plan, context).await,
-        DirectPlan::RemoteDownload(plan) => {
+    let result = match prepared.manifest {
+        TransferManifest::Local(plan) => super::local::execute(plan, context).await,
+        TransferManifest::RemoteUpload(plan) => {
+            super::ssh::direct::execute_upload(plan, context).await
+        }
+        TransferManifest::RemoteDownload(plan) => {
             super::ssh::direct::execute_download(plan, context).await
         }
     };

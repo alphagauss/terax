@@ -35,11 +35,6 @@ pub(crate) async fn download_file(
     expected_size: u64,
     context: &mut ExecutionContext,
 ) -> Result<(), TransferRunError> {
-    let handle = session
-        .open(remote, OpenFlags::READ, FileAttributes::default())
-        .await
-        .map_err(|error| message(format!("open remote source {remote}: {error}")))?
-        .handle;
     let mut writer = match tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -48,14 +43,34 @@ pub(crate) async fn download_file(
     {
         Ok(writer) => writer,
         Err(error) => {
-            let _ = session.close(handle).await;
             return Err(message(format!(
                 "create destination {}: {error}",
                 local.display()
-            )));
+            )))
         }
     };
 
+    let result = download_file_into(session, remote, &mut writer, expected_size, context).await;
+    if result.is_err() {
+        drop(writer);
+        let _ = tokio::fs::remove_file(local).await;
+    }
+    result
+}
+
+/// 通过有界 raw SFTP 流水线下载到调用方持有的排他文件。
+pub(crate) async fn download_file_into(
+    session: &Arc<RawSftpSession>,
+    remote: &str,
+    writer: &mut tokio::fs::File,
+    expected_size: u64,
+    context: &mut ExecutionContext,
+) -> Result<(), TransferRunError> {
+    let handle = session
+        .open(remote, OpenFlags::READ, FileAttributes::default())
+        .await
+        .map_err(|error| message(format!("open remote source {remote}: {error}")))?
+        .handle;
     let mut next_offset = 0u64;
     let mut completed = 0u64;
     let mut canceled = false;
@@ -119,14 +134,10 @@ pub(crate) async fn download_file(
                     continue;
                 }
                 if let Err(error) = writer.seek(std::io::SeekFrom::Start(offset)).await {
-                    failure = Some(message(format!(
-                        "seek destination {}: {error}",
-                        local.display()
-                    )));
+                    failure = Some(message(format!("seek destination {}: {error}", remote)));
                 } else if let Err(error) = writer.write_all(&data).await {
                     failure = Some(message(format!(
-                        "write destination {}: {error}",
-                        local.display()
+                        "write download destination for {remote}: {error}"
                     )));
                 } else {
                     completed = completed.saturating_add(data.len() as u64);
@@ -155,11 +166,11 @@ pub(crate) async fn download_file(
     writer
         .flush()
         .await
-        .map_err(|error| message(format!("flush destination {}: {error}", local.display())))?;
+        .map_err(|error| message(format!("flush download destination for {remote}: {error}")))?;
     writer
         .sync_all()
         .await
-        .map_err(|error| message(format!("sync destination {}: {error}", local.display())))?;
+        .map_err(|error| message(format!("sync download destination for {remote}: {error}")))?;
     Ok(())
 }
 

@@ -87,14 +87,14 @@ transfers/
 
 ### M3 Archive 策略
 
-- [ ] 增加独立 `transfer_enqueue_direct`、`transfer_enqueue_archive`，移除含糊的通用入队入口。
-- [ ] Planner 生成与策略无关的通用 Manifest，Direct 与 Archive 复用安全校验、reservation 和提交。
-- [ ] 前端明确提供 Direct 与 Archive 操作；拖放默认 Direct，不弹出策略选择。
-- [ ] 上传使用本地安全打包、单流上传、远端校验解包和最终提交。
-- [ ] 下载使用远端安全打包、单流下载、本地校验解包和最终提交。
-- [ ] 拒绝归档绝对路径、父目录遍历、符号链接、硬链接和特殊文件。
-- [ ] Archive 不可用时明确失败并提示改用 Direct，不自动回退。
-- [ ] 静态确认源码、依赖、测试和构建脚本不读取三个参考项目目录。
+- [x] 增加独立 `transfer_enqueue_direct`、`transfer_enqueue_archive`，移除含糊的通用入队入口。
+- [x] Planner 生成与策略无关的通用 Manifest，Direct 与 Archive 复用安全校验、reservation 和提交。
+- [x] 前端明确提供 Direct 与 Archive 操作；拖放默认 Direct，不弹出策略选择。
+- [x] 上传使用本地安全打包、单流上传、远端校验解包和最终提交。
+- [x] 下载使用远端安全打包、单流下载、本地校验解包和最终提交。
+- [x] 拒绝归档绝对路径、父目录遍历、符号链接、硬链接和特殊文件。
+- [x] Archive 不可用时明确失败并提示改用 Direct，不自动回退。
+- [x] 静态确认源码、依赖、测试和构建脚本不读取三个参考项目目录。
 
 ### M4 功能完善
 
@@ -123,3 +123,4 @@ transfers/
 | `355eea8` | 初始基础 | 增加进程内任务、Direct 传输、staging、状态栏面板和 Explorer 入口 | 提交记录声明前后端完整检查通过 | 架构尚未收口，旧入口仍可绕过管理器，提交和回滚存在竞争窗口 |
 | `5bd9678` | M1、M2 Direct | 收口 Manager、Scheduler、Planner、Progress、Commit、Local 和 SSH 边界；增加目标 reservation、原生 no-replace 提交、任务独占会话与有界 SFTP 流水线 | 前端 97 个文件 564 项测试通过；Rust 260 项库测试及集成测试通过；Clippy 通过 | nextest 未安装，使用 `cargo test --all-targets --locked`；尚未保留元数据或建立真实网络基准 |
 | `6323818` | M2 Direct | 保留跨 Host、WSL 与 SSH 可移植的权限、只读状态和时间元数据，并在复制后复验来源 | Rust 262 项库测试及集成测试通过；Clippy、格式检查通过 | 不复制 uid、gid、ACL、扩展属性和平台专有标志 |
+| `9e2a8f0` | M3 设计 | 改为用户显式选择 Direct 或 Archive，删除自动阈值选择和隐式回退计划；定义参考项目可移除标准 | 文档变更，未运行代码检查 | Archive 首期只用于 SSH；WSL 保持 Direct，后续依据实测需求决定是否扩展 |

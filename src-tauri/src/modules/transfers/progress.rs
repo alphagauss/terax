@@ -49,6 +49,11 @@ impl ExecutionContext {
         self.control.checkpoint().await
     }
 
+    /// 返回阻塞归档读写使用的任务控制句柄。
+    pub(crate) fn control(&self) -> Arc<TaskControl> {
+        self.control.clone()
+    }
+
     /// 设置任务阶段并保留暂停状态。
     pub(crate) async fn set_stage(&mut self, stage: TransferStage) {
         self.flush_progress().await;
@@ -64,6 +69,19 @@ impl ExecutionContext {
             .mutate_task(&self.app, &self.task_id, |task| {
                 task.total_files = total_files;
                 task.total_bytes = total_bytes;
+            })
+            .await;
+    }
+
+    /// Archive 完成打包后把字节进度切换为实际单流归档大小。
+    pub(crate) async fn set_archive_size(&mut self, total_bytes: u64) {
+        self.flush_progress().await;
+        let _ = self
+            .manager
+            .mutate_task(&self.app, &self.task_id, |task| {
+                task.total_bytes = total_bytes;
+                task.transferred_bytes = 0;
+                task.speed_bytes_per_second = 0;
             })
             .await;
     }
