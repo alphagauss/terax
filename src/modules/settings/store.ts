@@ -1,3 +1,8 @@
+/**
+ * 本文件定义应用偏好设置、默认值及共享设置存取逻辑。
+ * 负责将持久化设置归一化为前端可用状态，不覆盖用户已保存的偏好。
+ */
+
 import {
   type AutocompleteProviderId,
   type CustomEndpoint,
@@ -348,8 +353,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   zoomLevel: 1.0,
   agentNotifications: true,
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
-  editorAutoSave: false,
-  editorAutoSaveDelay: 1000,
+  editorAutoSave: true,
+  editorAutoSaveDelay: 500,
   editorFormatOnSave: false,
   editorFormatter: "lsp",
   editorFormatterByLang: {},
