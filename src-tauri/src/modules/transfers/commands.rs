@@ -29,7 +29,7 @@ pub async fn transfer_enqueue_direct(
         .await
 }
 
-/// 将 SSH 文件、文件夹或批量来源作为 Archive 任务加入后台队列。
+/// 将 WSL 或 SSH 文件、文件夹或批量来源作为 Archive 任务加入后台队列。
 #[tauri::command]
 pub async fn transfer_enqueue_archive(
     app: AppHandle,

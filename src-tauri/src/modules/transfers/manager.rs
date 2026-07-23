@@ -181,9 +181,6 @@ impl TransferManager {
         if matches!(workspace, WorkspaceEnv::Local) {
             return Err("file transfer is only available in WSL or SSH workspaces".into());
         }
-        if strategy == TransferStrategy::Archive && !workspace.is_ssh() {
-            return Err("archive transfer is only available in SSH workspaces".into());
-        }
         let id = Uuid::new_v4().to_string();
         let now = now_ms();
         let snapshot = TransferTaskSnapshot {

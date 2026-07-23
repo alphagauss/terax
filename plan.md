@@ -42,6 +42,9 @@ transfers/
     session.rs       任务独占 SFTP channel
     direct.rs        Direct 流水线读写
     archive.rs       Archive 打包、传输和安全解包
+  wsl/
+    mod.rs           WSL 执行策略入口
+    archive.rs       WSL 内打包解包和单归档流传输
 ```
 
 实现时允许合并职责过薄的文件，不为目录结构本身增加抽象。Local/WSL 与 SSH 优先使用 enum dispatch，不引入只为动态分发服务的运行时依赖。
@@ -100,6 +103,7 @@ transfers/
 - [x] 前端明确提供 Direct 与 Archive 操作；拖放默认 Direct，不弹出策略选择。
 - [x] 上传使用本地安全打包、单流上传、远端校验解包和最终提交。
 - [x] 下载使用远端安全打包、单流下载、本地校验解包和最终提交。
+- [x] WSL 上传和下载提供相同的手动策略菜单，Archive 只以单归档流跨越 WSL 文件系统边界。
 - [x] 拒绝归档绝对路径、父目录遍历、符号链接、硬链接和特殊文件。
 - [x] Archive 不可用时明确失败并提示改用 Direct，不自动回退。
 - [x] 静态确认源码、依赖、测试和构建脚本不读取三个参考项目目录。
@@ -133,3 +137,4 @@ transfers/
 | `6323818` | M2 Direct | 保留跨 Host、WSL 与 SSH 可移植的权限、只读状态和时间元数据，并在复制后复验来源 | Rust 262 项库测试及集成测试通过；Clippy、格式检查通过 | 不复制 uid、gid、ACL、扩展属性和平台专有标志 |
 | `9e2a8f0` | M3 设计 | 改为用户显式选择 Direct 或 Archive，删除自动阈值选择和隐式回退计划；定义参考项目可移除标准 | 文档变更，未运行代码检查 | Archive 首期只用于 SSH；WSL 保持 Direct，后续依据实测需求决定是否扩展 |
 | `d49fb9d` | M3 Archive | 增加独立 Direct/Archive IPC、通用 Manifest、手动策略菜单、本地安全归档、单流 SFTP、远端能力探测、暂停取消、受控解包和统一提交 | 前端 97 个文件 564 项测试通过；Rust 267 项库测试及全部集成测试通过；Clippy、格式检查通过 | 未做真实 SSH 运行验证；远端需要 Linux、bash、tar、gzip，Archive 不可用时明确提示使用 Direct |
+| `794dbfb` | 分支账本 | 记录三个参考项目的能力吸收边界与本地目录可移除结论 | 文档变更，未运行代码检查 | 许可证、真实环境验证和 M4 功能仍按计划后续完成 |

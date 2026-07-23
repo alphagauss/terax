@@ -84,7 +84,7 @@ export type FileExplorerHandle = {
   collapseAll: () => void;
 };
 
-/** 在 SSH 菜单中要求用户明确选择 Direct 或 Archive。 */
+/** 在 WSL 与 SSH 菜单中要求用户明确选择 Direct 或 Archive。 */
 function TransferStrategyMenu({
   label,
   onSelect,
@@ -969,69 +969,28 @@ export const FileExplorer = memo(
                   )}
                   {workspaceEnv.kind !== "local" ? (
                     <>
-                      {workspaceEnv.kind === "ssh" ? (
-                        <>
-                          <TransferStrategyMenu
-                            label={t("menu.downloadToLocal")}
-                            onSelect={(strategy) =>
-                              void enqueueDownload(menuTarget.path, strategy)
-                            }
-                          />
-                          {(["files", "folders"] as const).map((kind) => (
-                            <TransferStrategyMenu
-                              key={kind}
-                              label={t(
-                                kind === "files"
-                                  ? "menu.uploadFiles"
-                                  : "menu.uploadFolder",
-                              )}
-                              onSelect={(strategy) => {
-                                const remoteDir = menuTarget.isDir
-                                  ? menuTarget.path
-                                  : parentOf(menuTarget.path, rootPath);
-                                void enqueueUpload(
-                                  remoteDir,
-                                  kind,
-                                  strategy,
-                                );
-                              }}
-                            />
-                          ))}
-                        </>
-                      ) : (
-                        <>
-                          <ContextMenuItem
-                            className={COMPACT_ITEM}
-                            onSelect={() =>
-                              void enqueueDownload(menuTarget.path)
-                            }
-                          >
-                            {t("menu.downloadToLocal")}
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            className={COMPACT_ITEM}
-                            onSelect={() => {
-                              const remoteDir = menuTarget.isDir
-                                ? menuTarget.path
-                                : parentOf(menuTarget.path, rootPath);
-                              void enqueueUpload(remoteDir, "files");
-                            }}
-                          >
-                            {t("menu.uploadFiles")}
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            className={COMPACT_ITEM}
-                            onSelect={() => {
-                              const remoteDir = menuTarget.isDir
-                                ? menuTarget.path
-                                : parentOf(menuTarget.path, rootPath);
-                              void enqueueUpload(remoteDir, "folders");
-                            }}
-                          >
-                            {t("menu.uploadFolder")}
-                          </ContextMenuItem>
-                        </>
-                      )}
+                      <TransferStrategyMenu
+                        label={t("menu.downloadToLocal")}
+                        onSelect={(strategy) =>
+                          void enqueueDownload(menuTarget.path, strategy)
+                        }
+                      />
+                      {(["files", "folders"] as const).map((kind) => (
+                        <TransferStrategyMenu
+                          key={kind}
+                          label={t(
+                            kind === "files"
+                              ? "menu.uploadFiles"
+                              : "menu.uploadFolder",
+                          )}
+                          onSelect={(strategy) => {
+                            const remoteDir = menuTarget.isDir
+                              ? menuTarget.path
+                              : parentOf(menuTarget.path, rootPath);
+                            void enqueueUpload(remoteDir, kind, strategy);
+                          }}
+                        />
+                      ))}
                     </>
                   ) : (
                     <ContextMenuItem
@@ -1128,33 +1087,19 @@ export const FileExplorer = memo(
                   )}
                   {workspaceEnv.kind !== "local" ? (
                     <>
-                      {(["files", "folders"] as const).map((kind) =>
-                        workspaceEnv.kind === "ssh" ? (
-                          <TransferStrategyMenu
-                            key={kind}
-                            label={t(
-                              kind === "files"
-                                ? "menu.uploadFiles"
-                                : "menu.uploadFolder",
-                            )}
-                            onSelect={(strategy) =>
-                              void enqueueUpload(rootPath, kind, strategy)
-                            }
-                          />
-                        ) : (
-                          <ContextMenuItem
-                            key={kind}
-                            className={COMPACT_ITEM}
-                            onSelect={() => void enqueueUpload(rootPath, kind)}
-                          >
-                            {t(
-                              kind === "files"
-                                ? "menu.uploadFiles"
-                                : "menu.uploadFolder",
-                            )}
-                          </ContextMenuItem>
-                        ),
-                      )}
+                      {(["files", "folders"] as const).map((kind) => (
+                        <TransferStrategyMenu
+                          key={kind}
+                          label={t(
+                            kind === "files"
+                              ? "menu.uploadFiles"
+                              : "menu.uploadFolder",
+                          )}
+                          onSelect={(strategy) =>
+                            void enqueueUpload(rootPath, kind, strategy)
+                          }
+                        />
+                      ))}
                     </>
                   ) : (
                     <ContextMenuItem

@@ -1,6 +1,6 @@
 //! Archive 传输策略与本地安全归档。
 //!
-//! Archive 仅用于用户显式创建的 SSH 任务。它消费与 Direct 相同的 Manifest、
+//! Archive 仅用于用户显式创建的 WSL 或 SSH 任务。它消费与 Direct 相同的 Manifest、
 //! reservation 和提交协议。本模块负责本地 tar.gz 的生成、完整性检查和受控解包，
 //! 不把归档条目提供的路径直接交给文件系统。
 
@@ -17,7 +17,7 @@ use flate2::Compression;
 use tar::{Archive, Builder, EntryType, Header};
 
 use super::manager::{TaskControl, TransferRunError};
-use super::planner::{PreparedTransfer, RemoteUploadPlan, TransferManifest};
+use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
 
 type RunResult<T> = Result<T, TransferRunError>;
@@ -64,11 +64,7 @@ pub(crate) async fn execute(
         TransferManifest::RemoteDownload(plan) => {
             super::ssh::archive::execute_download(plan, context).await
         }
-        TransferManifest::Local(_) => {
-            return Err(TransferRunError::Message(
-                "archive transfer is only available in SSH workspaces".into(),
-            ));
-        }
+        TransferManifest::Local(plan) => super::wsl::archive::execute(plan, context).await,
     };
     result?;
     Ok(prepared.changed_paths)
@@ -103,6 +99,44 @@ pub(crate) async fn build_upload_archive(
             modified: file.metadata.modified(),
         });
     }
+    build_archive(entries, context).await
+}
+
+/// 按 WSL staging 相对路径创建本地 tar.gz，跨边界时只传输这一条归档流。
+pub(crate) async fn build_wsl_upload_archive(
+    plan: &LocalPlan,
+    context: &mut ExecutionContext,
+) -> RunResult<LocalArchive> {
+    let mut entries = Vec::with_capacity(plan.directories.len() + plan.files.len());
+    for directory in &plan.directories {
+        entries.push(PackEntry {
+            source: directory.source.clone(),
+            path: local_relative(&directory.destination, &plan.destination_parent)?,
+            kind: ArchiveEntryKind::Directory,
+            size: 0,
+            mode: directory.metadata.archive_mode(),
+            mtime: directory.metadata.archive_mtime(),
+            modified: directory.metadata.modified(),
+        });
+    }
+    for file in &plan.files {
+        entries.push(PackEntry {
+            source: file.source.clone(),
+            path: local_relative(&file.destination, &plan.destination_parent)?,
+            kind: ArchiveEntryKind::File,
+            size: file.size,
+            mode: file.metadata.archive_mode(),
+            mtime: file.metadata.archive_mtime(),
+            modified: file.metadata.modified(),
+        });
+    }
+    build_archive(entries, context).await
+}
+
+async fn build_archive(
+    entries: Vec<PackEntry>,
+    context: &mut ExecutionContext,
+) -> RunResult<LocalArchive> {
     let expected: HashMap<_, _> = entries
         .iter()
         .map(|entry| (entry.path.clone(), (entry.kind, entry.size)))
@@ -432,6 +466,48 @@ fn remote_relative(path: &str, parent: &str) -> RunResult<String> {
         return Err(message(format!("invalid archive destination path: {path}")));
     }
     Ok(relative.to_string())
+}
+
+fn local_relative(path: &Path, parent: &Path) -> RunResult<String> {
+    let relative = path.strip_prefix(parent).map_err(|_| {
+        message(format!(
+            "archive path is outside destination: {}",
+            path.display()
+        ))
+    })?;
+    let mut parts = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(value) => {
+                let value = value.to_str().ok_or_else(|| {
+                    message(format!(
+                        "archive destination is not valid UTF-8: {}",
+                        path.display()
+                    ))
+                })?;
+                if value.is_empty() || matches!(value, "." | "..") {
+                    return Err(message(format!(
+                        "invalid archive destination path: {}",
+                        path.display()
+                    )));
+                }
+                parts.push(value);
+            }
+            _ => {
+                return Err(message(format!(
+                    "invalid archive destination path: {}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(message(format!(
+            "archive path equals destination root: {}",
+            path.display()
+        )));
+    }
+    Ok(parts.join("/"))
 }
 
 struct ControlledReader<R> {

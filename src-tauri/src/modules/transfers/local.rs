@@ -35,23 +35,7 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
         for file in &plan.files {
             copy_local_file(file, context).await?;
         }
-        context.set_stage(TransferStage::Verifying).await;
-        for file in &plan.files {
-            context.checkpoint().await?;
-            verify_local_file(&file.destination, file.size).await?;
-        }
-        for directory in plan.directories.iter().rev() {
-            context.checkpoint().await?;
-            directory
-                .metadata
-                .apply_local(&directory.destination)
-                .await?;
-        }
-        context.set_stage(TransferStage::Finalizing).await;
-        for root in &plan.roots {
-            context.checkpoint().await?;
-            commit_local_root(root).await?;
-        }
+        verify_apply_commit(&plan, context).await?;
         Ok(())
     }
     .await;
@@ -59,6 +43,47 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
         cleanup_local_staging(&plan.roots).await;
     }
     result
+}
+
+/// 复验 staging、恢复 Manifest 元数据并以 no-replace 方式提交全部顶层目标。
+pub(crate) async fn verify_apply_commit(
+    plan: &LocalPlan,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    context.set_stage(TransferStage::Verifying).await;
+    for file in &plan.files {
+        context.checkpoint().await?;
+        verify_local_file(&file.destination, file.size).await?;
+        file.metadata.apply_local(&file.destination).await?;
+        context.complete_file().await;
+    }
+    for directory in plan.directories.iter().rev() {
+        context.checkpoint().await?;
+        let metadata = tokio::fs::symlink_metadata(&directory.destination)
+            .await
+            .map_err(|error| {
+                message(format!(
+                    "verify directory {}: {error}",
+                    directory.destination.display()
+                ))
+            })?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err(message(format!(
+                "destination is not a directory: {}",
+                directory.destination.display()
+            )));
+        }
+        directory
+            .metadata
+            .apply_local(&directory.destination)
+            .await?;
+    }
+    context.set_stage(TransferStage::Finalizing).await;
+    for root in &plan.roots {
+        context.checkpoint().await?;
+        commit_local_root(root).await?;
+    }
+    Ok(())
 }
 
 /// 复制一个同宿主文件并在关闭前同步目标数据。
@@ -94,8 +119,6 @@ async fn copy_local_file(file: &LocalFile, context: &mut ExecutionContext) -> Ru
         ))
     })?;
     verify_source_size(&file.source, file.size, file.metadata.modified()).await?;
-    file.metadata.apply_local(&file.destination).await?;
-    context.complete_file().await;
     Ok(())
 }
 

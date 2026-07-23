@@ -43,6 +43,9 @@ vi.mock("@/components/ui/context-menu", () => {
     ContextMenuContent: Pass,
     ContextMenuItem: Pass,
     ContextMenuSeparator: Pass,
+    ContextMenuSub: Pass,
+    ContextMenuSubContent: Pass,
+    ContextMenuSubTrigger: Pass,
     ContextMenuTrigger: Pass,
   };
 });
@@ -216,7 +219,7 @@ describe("file opening render path", () => {
     expect(viewRegistrySource).toContain("<MarkdownView");
   });
 
-  it("offers native background transfers in a non-local workspace", () => {
+  it("offers Direct and Archive transfers in a WSL workspace", () => {
     mocks.environmentKind = "wsl";
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -232,7 +235,8 @@ describe("file opening render path", () => {
 
     expect(container.textContent).toContain("menu.uploadFiles");
     expect(container.textContent).toContain("menu.uploadFolder");
-    expect(source).toContain("enqueueDownload(menuTarget.path)");
+    expect(source).toContain("enqueueDownload(menuTarget.path, strategy)");
+    expect(source).toContain("<TransferStrategyMenu");
     expect(source).toContain("transferNative.enqueueArchive");
     act(() => root.unmount());
   });

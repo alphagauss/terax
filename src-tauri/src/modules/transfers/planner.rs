@@ -41,11 +41,25 @@ pub(crate) struct PlannedDirectory<S, D> {
     pub(crate) metadata: EntryMetadata,
 }
 
-/// Host 与 WSL 之间的完整 Direct 计划。
+/// Host 与 WSL 之间由 Direct 和 Archive 共用的完整计划。
 pub(crate) struct LocalPlan {
+    pub(crate) wsl: WslArchiveContext,
+    pub(crate) destination_parent: PathBuf,
     pub(crate) directories: Vec<PlannedDirectory<PathBuf, PathBuf>>,
     pub(crate) files: Vec<LocalFile>,
     pub(crate) roots: Vec<LocalRoot>,
+}
+
+/// WSL Archive 执行时保留的 Linux 路径，不允许执行器从 UNC 路径反向猜测。
+pub(crate) enum WslArchiveContext {
+    Upload {
+        distro: String,
+        destination_parent: String,
+    },
+    Download {
+        distro: String,
+        sources: Vec<String>,
+    },
 }
 
 /// 从宿主机写入 SSH staging 的单文件复制项。
@@ -155,7 +169,7 @@ pub(crate) async fn prepare(
                 "local workspaces do not require file transfer".into(),
             ));
         }
-        WorkspaceEnv::Wsl { .. } => {
+        WorkspaceEnv::Wsl { distro } => {
             let (sources, destination, sanitize_names) = match request.direction {
                 TransferDirection::Upload => {
                     validate_wsl_path(&request.destination)?;
@@ -180,8 +194,26 @@ pub(crate) async fn prepare(
                     )
                 }
             };
+            let archive = match request.direction {
+                TransferDirection::Upload => WslArchiveContext::Upload {
+                    distro: distro.clone(),
+                    destination_parent: request.destination.clone(),
+                },
+                TransferDirection::Download => WslArchiveContext::Download {
+                    distro: distro.clone(),
+                    sources: request.sources.clone(),
+                },
+            };
             TransferManifest::Local(
-                plan_local(sources, destination, sanitize_names, task_id, context).await?,
+                plan_local(
+                    sources,
+                    destination,
+                    sanitize_names,
+                    archive,
+                    task_id,
+                    context,
+                )
+                .await?,
             )
         }
         WorkspaceEnv::Ssh { profile_id } => {
@@ -238,6 +270,7 @@ async fn plan_local(
     sources: Vec<PathBuf>,
     destination_parent: PathBuf,
     sanitize_names: bool,
+    wsl: WslArchiveContext,
     task_id: &str,
     context: &ExecutionContext,
 ) -> RunResult<LocalPlan> {
@@ -259,6 +292,8 @@ async fn plan_local(
         .await
         .map_err(|error| message(format!("canonicalize destination: {error}")))?;
     let mut plan = LocalPlan {
+        wsl,
+        destination_parent: destination_parent.clone(),
         directories: Vec::new(),
         files: Vec::new(),
         roots: Vec::new(),

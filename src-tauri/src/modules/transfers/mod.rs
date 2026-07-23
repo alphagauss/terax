@@ -15,5 +15,6 @@ mod planner;
 mod progress;
 mod scheduler;
 mod ssh;
+mod wsl;
 
 pub use manager::TransferState;
