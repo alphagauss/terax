@@ -160,7 +160,6 @@ pub(crate) async fn download_file(
         .sync_all()
         .await
         .map_err(|error| message(format!("sync destination {}: {error}", local.display())))?;
-    context.complete_file().await;
     Ok(())
 }
 
@@ -174,10 +173,13 @@ pub(crate) async fn execute_upload(
         for directory in &plan.directories {
             context.checkpoint().await?;
             plan.session
-                .create_dir(directory.clone())
+                .create_dir(directory.destination.clone())
                 .await
                 .map_err(|error| {
-                    message(format!("create remote directory {directory}: {error}"))
+                    message(format!(
+                        "create remote directory {}: {error}",
+                        directory.destination
+                    ))
                 })?;
         }
         for file in &plan.files {
@@ -187,6 +189,13 @@ pub(crate) async fn execute_upload(
         for file in &plan.files {
             context.checkpoint().await?;
             verify_remote_file(&plan.session, &file.destination, file.size).await?;
+        }
+        for directory in plan.directories.iter().rev() {
+            context.checkpoint().await?;
+            directory
+                .metadata
+                .apply_remote(&plan.session, &directory.destination)
+                .await?;
         }
         context.set_stage(TransferStage::Finalizing).await;
         for root in &plan.roots {
@@ -213,9 +222,14 @@ pub(crate) async fn execute_download(
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
-            tokio::fs::create_dir(directory).await.map_err(|error| {
-                message(format!("create directory {}: {error}", directory.display()))
-            })?;
+            tokio::fs::create_dir(&directory.destination)
+                .await
+                .map_err(|error| {
+                    message(format!(
+                        "create directory {}: {error}",
+                        directory.destination.display()
+                    ))
+                })?;
         }
         for file in &plan.files {
             context.set_current_file(file.source.clone()).await;
@@ -227,11 +241,27 @@ pub(crate) async fn execute_download(
                 context,
             )
             .await?;
+            verify_remote_source(
+                &plan.session,
+                &file.source,
+                file.size,
+                file.metadata.modified(),
+            )
+            .await?;
+            file.metadata.apply_local(&file.destination).await?;
+            context.complete_file().await;
         }
         context.set_stage(TransferStage::Verifying).await;
         for file in &plan.files {
             context.checkpoint().await?;
             verify_local_file(&file.destination, file.size).await?;
+        }
+        for directory in plan.directories.iter().rev() {
+            context.checkpoint().await?;
+            directory
+                .metadata
+                .apply_local(&directory.destination)
+                .await?;
         }
         context.set_stage(TransferStage::Finalizing).await;
         for root in &plan.roots {
@@ -281,7 +311,10 @@ async fn copy_remote_upload_file(
         .shutdown()
         .await
         .map_err(|error| message(format!("close remote file {}: {error}", file.destination)))?;
-    verify_source_size(&file.source, file.size).await?;
+    verify_source_size(&file.source, file.size, file.metadata.modified()).await?;
+    file.metadata
+        .apply_remote(session, &file.destination)
+        .await?;
     context.complete_file().await;
     Ok(())
 }
@@ -315,15 +348,42 @@ where
 }
 
 /// 检查本地来源在复制期间是否发生长度变化。
-async fn verify_source_size(path: &Path, expected: u64) -> RunResult<()> {
+async fn verify_source_size(
+    path: &Path,
+    expected_size: u64,
+    expected_modified: Option<std::time::SystemTime>,
+) -> RunResult<()> {
     let actual = tokio::fs::metadata(path)
         .await
-        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?
-        .len();
-    if actual != expected {
+        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?;
+    if actual.len() != expected_size
+        || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
+    {
         return Err(message(format!(
-            "source changed during transfer: {} (expected {expected} bytes, found {actual})",
-            path.display()
+            "source changed during transfer: {}",
+            path.display(),
+        )));
+    }
+    Ok(())
+}
+
+/// 校验远端来源在 raw SFTP 下载期间没有改变长度、类型或修改时间。
+async fn verify_remote_source(
+    session: &Arc<SftpSession>,
+    path: &str,
+    expected_size: u64,
+    expected_modified: Option<std::time::SystemTime>,
+) -> RunResult<()> {
+    let actual = session
+        .symlink_metadata(path.to_string())
+        .await
+        .map_err(|error| message(format!("verify remote source {path}: {error}")))?;
+    if !actual.file_type().is_file()
+        || actual.size != Some(expected_size)
+        || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
+    {
+        return Err(message(format!(
+            "remote source changed during transfer: {path}"
         )));
     }
     Ok(())

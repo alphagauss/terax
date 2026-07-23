@@ -8,6 +8,7 @@ mod commit;
 mod direct;
 mod local;
 mod manager;
+mod metadata;
 pub mod models;
 mod planner;
 mod progress;

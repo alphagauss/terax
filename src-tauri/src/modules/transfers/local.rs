@@ -23,9 +23,14 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
-            tokio::fs::create_dir(directory).await.map_err(|error| {
-                message(format!("create directory {}: {error}", directory.display()))
-            })?;
+            tokio::fs::create_dir(&directory.destination)
+                .await
+                .map_err(|error| {
+                    message(format!(
+                        "create directory {}: {error}",
+                        directory.destination.display()
+                    ))
+                })?;
         }
         for file in &plan.files {
             copy_local_file(file, context).await?;
@@ -34,6 +39,13 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
         for file in &plan.files {
             context.checkpoint().await?;
             verify_local_file(&file.destination, file.size).await?;
+        }
+        for directory in plan.directories.iter().rev() {
+            context.checkpoint().await?;
+            directory
+                .metadata
+                .apply_local(&directory.destination)
+                .await?;
         }
         context.set_stage(TransferStage::Finalizing).await;
         for root in &plan.roots {
@@ -81,7 +93,8 @@ async fn copy_local_file(file: &LocalFile, context: &mut ExecutionContext) -> Ru
             file.destination.display()
         ))
     })?;
-    verify_source_size(&file.source, file.size).await?;
+    verify_source_size(&file.source, file.size, file.metadata.modified()).await?;
+    file.metadata.apply_local(&file.destination).await?;
     context.complete_file().await;
     Ok(())
 }
@@ -115,15 +128,20 @@ where
 }
 
 /// 检查本地来源在复制期间是否发生长度变化。
-async fn verify_source_size(path: &Path, expected: u64) -> RunResult<()> {
+async fn verify_source_size(
+    path: &Path,
+    expected_size: u64,
+    expected_modified: Option<std::time::SystemTime>,
+) -> RunResult<()> {
     let actual = tokio::fs::metadata(path)
         .await
-        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?
-        .len();
-    if actual != expected {
+        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?;
+    if actual.len() != expected_size
+        || expected_modified.is_some_and(|expected| actual.modified().ok() != Some(expected))
+    {
         return Err(message(format!(
-            "source changed during transfer: {} (expected {expected} bytes, found {actual})",
-            path.display()
+            "source changed during transfer: {}",
+            path.display(),
         )));
     }
     Ok(())
@@ -160,9 +178,10 @@ mod tests {
         tokio::fs::write(&source, b"source").await.unwrap();
         tokio::fs::write(&destination, b"target").await.unwrap();
 
-        assert!(verify_source_size(&source, 1).await.is_err());
+        let modified = tokio::fs::metadata(&source).await.unwrap().modified().ok();
+        assert!(verify_source_size(&source, 1, modified).await.is_err());
         assert!(verify_local_file(&destination, 1).await.is_err());
-        assert!(verify_source_size(&source, 6).await.is_ok());
+        assert!(verify_source_size(&source, 6, modified).await.is_ok());
         assert!(verify_local_file(&destination, 6).await.is_ok());
     }
 }

@@ -76,7 +76,7 @@ transfers/
 
 - [x] SSH 下载使用有界 raw SFTP 流水线。
 - [x] SSH 上传复用 russh-sftp 2.3 的有界并发写入并验证关闭结果。
-- [ ] 保留文件权限和修改时间等基础元数据。
+- [x] 保留文件权限和修改时间等基础元数据。
 - [ ] 建立高延迟和大文件基准。
 
 ### M3 Archive 策略
@@ -112,3 +112,4 @@ transfers/
 | Commit | 里程碑 | 完成内容 | 验证 | 偏差与后续 |
 | --- | --- | --- | --- | --- |
 | `355eea8` | 初始基础 | 增加进程内任务、Direct 传输、staging、状态栏面板和 Explorer 入口 | 提交记录声明前后端完整检查通过 | 架构尚未收口，旧入口仍可绕过管理器，提交和回滚存在竞争窗口 |
+| `5bd9678` | M1、M2 Direct | 收口 Manager、Scheduler、Planner、Progress、Commit、Local 和 SSH 边界；增加目标 reservation、原生 no-replace 提交、任务独占会话与有界 SFTP 流水线 | 前端 97 个文件 564 项测试通过；Rust 260 项库测试及集成测试通过；Clippy 通过 | nextest 未安装，使用 `cargo test --all-targets --locked`；尚未保留元数据或建立真实网络基准 |

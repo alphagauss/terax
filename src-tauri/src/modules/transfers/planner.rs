@@ -20,6 +20,7 @@ use super::commit::{
     remote_stage_path, LocalRoot, RemoteRoot,
 };
 use super::manager::TransferRunError;
+use super::metadata::EntryMetadata;
 use super::models::{EnqueueTransferRequest, TransferDirection};
 use super::progress::ExecutionContext;
 
@@ -30,11 +31,18 @@ pub(crate) struct LocalFile {
     pub(crate) source: PathBuf,
     pub(crate) destination: PathBuf,
     pub(crate) size: u64,
+    pub(crate) metadata: EntryMetadata,
+}
+
+/// 创建后需要在子项完成时恢复元数据的目录。
+pub(crate) struct PlannedDirectory<T> {
+    pub(crate) destination: T,
+    pub(crate) metadata: EntryMetadata,
 }
 
 /// Host 与 WSL 之间的完整 Direct 计划。
 pub(crate) struct LocalPlan {
-    pub(crate) directories: Vec<PathBuf>,
+    pub(crate) directories: Vec<PlannedDirectory<PathBuf>>,
     pub(crate) files: Vec<LocalFile>,
     pub(crate) roots: Vec<LocalRoot>,
 }
@@ -44,12 +52,13 @@ pub(crate) struct RemoteUploadFile {
     pub(crate) source: PathBuf,
     pub(crate) destination: String,
     pub(crate) size: u64,
+    pub(crate) metadata: EntryMetadata,
 }
 
 /// SSH 上传计划及其任务独占 SFTP 会话。
 pub(crate) struct RemoteUploadPlan {
     pub(crate) session: Arc<SftpSession>,
-    pub(crate) directories: Vec<String>,
+    pub(crate) directories: Vec<PlannedDirectory<String>>,
     pub(crate) files: Vec<RemoteUploadFile>,
     pub(crate) roots: Vec<RemoteRoot>,
 }
@@ -59,13 +68,14 @@ pub(crate) struct RemoteDownloadFile {
     pub(crate) source: String,
     pub(crate) destination: PathBuf,
     pub(crate) size: u64,
+    pub(crate) metadata: EntryMetadata,
 }
 
 /// SSH 下载计划及扫描、复制所需的任务连接上下文。
 pub(crate) struct RemoteDownloadPlan {
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
-    pub(crate) directories: Vec<PathBuf>,
+    pub(crate) directories: Vec<PlannedDirectory<PathBuf>>,
     pub(crate) files: Vec<RemoteDownloadFile>,
     pub(crate) roots: Vec<LocalRoot>,
 }
@@ -292,11 +302,15 @@ async fn plan_local(
                 source,
                 destination: stage,
                 size: metadata.len(),
+                metadata: EntryMetadata::from_local(&metadata),
             });
             continue;
         }
 
-        plan.directories.push(stage.clone());
+        plan.directories.push(PlannedDirectory {
+            destination: stage.clone(),
+            metadata: EntryMetadata::from_local(&metadata),
+        });
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
             context.checkpoint().await?;
@@ -325,13 +339,17 @@ async fn plan_local(
                 }
                 let destination_path = destination_dir.join(name);
                 if metadata.is_dir() {
-                    plan.directories.push(destination_path.clone());
+                    plan.directories.push(PlannedDirectory {
+                        destination: destination_path.clone(),
+                        metadata: EntryMetadata::from_local(&metadata),
+                    });
                     pending.push((source_path, destination_path));
                 } else {
                     plan.files.push(LocalFile {
                         source: source_path,
                         destination: destination_path,
                         size: metadata.len(),
+                        metadata: EntryMetadata::from_local(&metadata),
                     });
                 }
             }
@@ -395,11 +413,15 @@ async fn plan_remote_upload(
                 source,
                 destination: stage,
                 size: metadata.len(),
+                metadata: EntryMetadata::from_local(&metadata),
             });
             continue;
         }
 
-        plan.directories.push(stage.clone());
+        plan.directories.push(PlannedDirectory {
+            destination: stage.clone(),
+            metadata: EntryMetadata::from_local(&metadata),
+        });
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
             context.checkpoint().await?;
@@ -426,13 +448,17 @@ async fn plan_remote_upload(
                 })?;
                 let destination_path = join_remote(&destination_dir, &name);
                 if metadata.is_dir() {
-                    plan.directories.push(destination_path.clone());
+                    plan.directories.push(PlannedDirectory {
+                        destination: destination_path.clone(),
+                        metadata: EntryMetadata::from_local(&metadata),
+                    });
                     pending.push((source_path, destination_path));
                 } else {
                     plan.files.push(RemoteUploadFile {
                         source: source_path,
                         destination: destination_path,
                         size: metadata.len(),
+                        metadata: EntryMetadata::from_local(&metadata),
                     });
                 }
             }
@@ -521,11 +547,15 @@ async fn plan_remote_download(
                 source,
                 destination: stage,
                 size: remote_size(&source_metadata, &source_name)?,
+                metadata: EntryMetadata::from_remote(&source_metadata),
             });
             continue;
         }
 
-        plan.directories.push(stage.clone());
+        plan.directories.push(PlannedDirectory {
+            destination: stage.clone(),
+            metadata: EntryMetadata::from_remote(&source_metadata),
+        });
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
             context.checkpoint().await?;
@@ -548,7 +578,11 @@ async fn plan_remote_download(
                 }
                 let destination_path = destination_dir.join(destination_name);
                 if entry_type.is_dir() {
-                    plan.directories.push(destination_path.clone());
+                    let metadata = entry.metadata();
+                    plan.directories.push(PlannedDirectory {
+                        destination: destination_path.clone(),
+                        metadata: EntryMetadata::from_remote(&metadata),
+                    });
                     pending.push((source_path, destination_path));
                 } else {
                     let metadata = entry.metadata();
@@ -556,6 +590,7 @@ async fn plan_remote_download(
                         source: source_path.clone(),
                         destination: destination_path,
                         size: remote_size(&metadata, &source_path)?,
+                        metadata: EntryMetadata::from_remote(&metadata),
                     });
                 }
             }
