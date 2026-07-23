@@ -138,3 +138,4 @@ transfers/
 | `9e2a8f0` | M3 设计 | 改为用户显式选择 Direct 或 Archive，删除自动阈值选择和隐式回退计划；定义参考项目可移除标准 | 文档变更，未运行代码检查 | Archive 首期只用于 SSH；WSL 保持 Direct，后续依据实测需求决定是否扩展 |
 | `d49fb9d` | M3 Archive | 增加独立 Direct/Archive IPC、通用 Manifest、手动策略菜单、本地安全归档、单流 SFTP、远端能力探测、暂停取消、受控解包和统一提交 | 前端 97 个文件 564 项测试通过；Rust 267 项库测试及全部集成测试通过；Clippy、格式检查通过 | 未做真实 SSH 运行验证；远端需要 Linux、bash、tar、gzip，Archive 不可用时明确提示使用 Direct |
 | `794dbfb` | 分支账本 | 记录三个参考项目的能力吸收边界与本地目录可移除结论 | 文档变更，未运行代码检查 | 许可证、真实环境验证和 M4 功能仍按计划后续完成 |
+| `8f940bf` | M3 WSL Archive | WSL 资源管理器增加手动 Direct/Archive 选择；上传和下载使用 WSL 内 tar/gzip、单归档跨边界、可暂停取消命令和两阶段 no-replace 提交 | 前端 97 个文件 564 项测试通过；Rust 270 项库测试及全部集成测试通过；Clippy、格式检查通过 | 按约定未做真实 WSL 运行验证；WSL 缺少 tar、gzip 或 mktemp 时明确提示使用 Direct |
