@@ -1,17 +1,17 @@
 //! 后台文件传输队列与任务生命周期管理。
 //!
-//! 管理器限制并发任务数，并通过协作式检查点实现暂停和取消。进度事件经过
-//! 节流后发送给 WebView，避免大文件复制产生逐块 IPC 压力。
+//! 管理器持有任务快照与控制信号，并把等待执行、目标 reservation 和终态收敛
+//! 串成统一生命周期。具体扫描、复制和进度聚合由低依赖模块负责。
 
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Notify, RwLock, Semaphore};
+use tokio::sync::{Notify, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -21,9 +21,11 @@ use super::direct;
 use super::models::{
     EnqueueTransferRequest, TransferDirection, TransferStage, TransferStatus, TransferTaskSnapshot,
 };
+use super::planner;
+use super::progress::ExecutionContext;
+use super::scheduler::TransferScheduler;
 
 const MAX_CONCURRENT_TASKS: usize = 2;
-const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(200);
 const TRANSFER_EVENT: &str = "terax://transfer-updated";
 
 #[derive(Clone, Serialize)]
@@ -65,14 +67,15 @@ impl From<String> for TransferRunError {
 }
 
 /// 单任务的协作式暂停与取消信号。
-struct TaskControl {
+pub(crate) struct TaskControl {
     paused: AtomicBool,
     pause_changed: Notify,
     cancellation: CancellationToken,
 }
 
 impl TaskControl {
-    fn new() -> Self {
+    /// 创建未暂停且未取消的任务控制信号。
+    pub(crate) fn new() -> Self {
         Self {
             paused: AtomicBool::new(false),
             pause_changed: Notify::new(),
@@ -81,7 +84,7 @@ impl TaskControl {
     }
 
     /// 在每个文件块和目录项之间执行协作式暂停与取消。
-    async fn checkpoint(&self) -> Result<(), TransferRunError> {
+    pub(crate) async fn checkpoint(&self) -> Result<(), TransferRunError> {
         loop {
             if self.cancellation.is_cancelled() {
                 return Err(TransferRunError::Canceled);
@@ -97,13 +100,44 @@ impl TaskControl {
             }
         }
     }
+
+    /// 返回任务是否正处于暂停状态。
+    pub(crate) fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Acquire)
+    }
+
+    /// 标记任务暂停并唤醒可能正在竞争许可的执行器。
+    pub(crate) fn pause(&self) {
+        self.paused.store(true, Ordering::Release);
+        self.pause_changed.notify_one();
+    }
+
+    /// 恢复任务并唤醒唯一执行器。
+    pub(crate) fn resume(&self) {
+        self.paused.store(false, Ordering::Release);
+        self.pause_changed.notify_one();
+    }
+
+    /// 请求取消并唤醒暂停中的执行器。
+    pub(crate) fn cancel(&self) {
+        self.cancellation.cancel();
+        self.pause_changed.notify_one();
+    }
+
+    /// 等待暂停状态变化或任务取消。
+    pub(crate) async fn wait_for_change(&self) -> Result<(), TransferRunError> {
+        tokio::select! {
+            _ = self.pause_changed.notified() => Ok(()),
+            _ = self.cancellation.cancelled() => Err(TransferRunError::Canceled),
+        }
+    }
 }
 
 /// 保存当前进程任务快照、控制句柄和全局并发许可。
 pub(crate) struct TransferManager {
     tasks: RwLock<HashMap<String, TransferTaskSnapshot>>,
     controls: RwLock<HashMap<String, Arc<TaskControl>>>,
-    semaphore: Arc<Semaphore>,
+    scheduler: TransferScheduler,
 }
 
 impl TransferManager {
@@ -112,7 +146,7 @@ impl TransferManager {
         Self {
             tasks: RwLock::new(HashMap::new()),
             controls: RwLock::new(HashMap::new()),
-            semaphore: Arc::new(Semaphore::new(concurrency.max(1))),
+            scheduler: TransferScheduler::new(concurrency),
         }
     }
 
@@ -175,7 +209,7 @@ impl TransferManager {
     /// 暂停尚未结束的任务。
     pub(crate) async fn pause(&self, app: &AppHandle, id: &str) -> Result<(), String> {
         let control = self.control(id).await?;
-        control.paused.store(true, Ordering::Release);
+        control.pause();
         self.mutate_task(app, id, |task| {
             if matches!(
                 task.status,
@@ -192,9 +226,7 @@ impl TransferManager {
     /// 恢复一个已暂停的任务。
     pub(crate) async fn resume(&self, app: &AppHandle, id: &str) -> Result<(), String> {
         let control = self.control(id).await?;
-        control.paused.store(false, Ordering::Release);
-        // 每个任务只有一个执行器，notify_one 会在尚未进入等待时保留许可，避免丢失恢复信号。
-        control.pause_changed.notify_one();
+        control.resume();
         self.mutate_task(app, id, |task| {
             if task.status == TransferStatus::Paused {
                 task.status = TransferStatus::Running;
@@ -207,8 +239,7 @@ impl TransferManager {
     /// 请求取消任务，执行器会在下一个安全检查点清理临时目标。
     pub(crate) async fn cancel(&self, app: &AppHandle, id: &str) -> Result<(), String> {
         let control = self.control(id).await?;
-        control.cancellation.cancel();
-        control.pause_changed.notify_one();
+        control.cancel();
         self.mutate_task(app, id, |task| {
             if !task.status.is_terminal() {
                 task.status = TransferStatus::Canceling;
@@ -241,14 +272,12 @@ impl TransferManager {
         id: String,
         control: Arc<TaskControl>,
     ) {
-        let permit = tokio::select! {
-            permit = self.semaphore.clone().acquire_owned() => permit.ok(),
-            _ = control.cancellation.cancelled() => None,
-        };
-        let Some(_permit) = permit else {
-            self.finish_task(&app, &id, Err(TransferRunError::Canceled))
-                .await;
-            return;
+        let _permit = match self.scheduler.acquire(&control).await {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.finish_task(&app, &id, Err(error)).await;
+                return;
+            }
         };
         if let Err(error) = control.checkpoint().await {
             self.finish_task(&app, &id, Err(error)).await;
@@ -257,7 +286,14 @@ impl TransferManager {
 
         self.set_stage(&app, &id, TransferStage::Scanning).await;
         let mut context = ExecutionContext::new(self.clone(), app.clone(), id.clone(), control);
-        let result = direct::execute(&workspace, &request, &id, &mut context).await;
+        let result = match planner::prepare(&workspace, &request, &id, &context).await {
+            Ok(prepared) => match self.scheduler.reserve(prepared.target_keys()) {
+                Ok(_reservation) => direct::execute(prepared, &mut context).await,
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        };
+        context.flush_pending().await;
         if let Ok(changed_paths) = &result {
             if request.direction == TransferDirection::Upload && !changed_paths.is_empty() {
                 let _ = app.emit(
@@ -310,7 +346,7 @@ impl TransferManager {
     }
 
     /// 推进任务阶段，首次离开队列时同步进入运行态。
-    async fn set_stage(&self, app: &AppHandle, id: &str, stage: TransferStage) {
+    pub(crate) async fn set_stage(&self, app: &AppHandle, id: &str, stage: TransferStage) {
         let _ = self
             .mutate_task(app, id, |task| {
                 task.stage = stage;
@@ -322,7 +358,7 @@ impl TransferManager {
     }
 
     /// 在写锁内完成一次快照变更，并用严格递增版本向 WebView 发布。
-    async fn mutate_task(
+    pub(crate) async fn mutate_task(
         &self,
         app: &AppHandle,
         id: &str,
@@ -339,116 +375,6 @@ impl TransferManager {
         };
         emit_snapshot(app, &snapshot);
         Ok(snapshot)
-    }
-}
-
-/// Direct 执行器使用的任务上下文。
-pub(crate) struct ExecutionContext {
-    manager: Arc<TransferManager>,
-    app: AppHandle,
-    task_id: String,
-    control: Arc<TaskControl>,
-    pending_bytes: u64,
-    pending_files: u64,
-    pending_current_file: Option<String>,
-    sample_started: Instant,
-}
-
-impl ExecutionContext {
-    fn new(
-        manager: Arc<TransferManager>,
-        app: AppHandle,
-        task_id: String,
-        control: Arc<TaskControl>,
-    ) -> Self {
-        Self {
-            manager,
-            app,
-            task_id,
-            control,
-            pending_bytes: 0,
-            pending_files: 0,
-            pending_current_file: None,
-            sample_started: Instant::now(),
-        }
-    }
-
-    /// 等待暂停结束或返回取消信号。
-    pub(crate) async fn checkpoint(&self) -> Result<(), TransferRunError> {
-        self.control.checkpoint().await
-    }
-
-    /// 设置任务阶段并保留暂停状态。
-    pub(crate) async fn set_stage(&mut self, stage: TransferStage) {
-        self.flush_progress().await;
-        self.manager
-            .set_stage(&self.app, &self.task_id, stage)
-            .await;
-    }
-
-    /// 在扫描完成后发布稳定的文件数和总字节数。
-    pub(crate) async fn set_totals(&self, total_files: u64, total_bytes: u64) {
-        let _ = self
-            .manager
-            .mutate_task(&self.app, &self.task_id, |task| {
-                task.total_files = total_files;
-                task.total_bytes = total_bytes;
-            })
-            .await;
-    }
-
-    /// 聚合当前处理路径，前端展示时仅截取 basename。
-    pub(crate) async fn set_current_file(&mut self, path: String) {
-        self.pending_current_file = Some(path);
-        if self.sample_started.elapsed() >= PROGRESS_EVENT_INTERVAL {
-            self.flush_progress().await;
-        }
-    }
-
-    /// 聚合字节增量，并以固定频率更新前端快照。
-    pub(crate) async fn report_bytes(&mut self, bytes: u64) {
-        self.pending_bytes = self.pending_bytes.saturating_add(bytes);
-        if self.sample_started.elapsed() >= PROGRESS_EVENT_INTERVAL {
-            self.flush_progress().await;
-        }
-    }
-
-    /// 聚合文件完成计数，小文件批量传输时同样遵循进度节流。
-    pub(crate) async fn complete_file(&mut self) {
-        self.pending_files = self.pending_files.saturating_add(1);
-        if self.sample_started.elapsed() >= PROGRESS_EVENT_INTERVAL {
-            self.flush_progress().await;
-        }
-    }
-
-    /// 一次性提交节流窗口内累计的字节、文件数与当前文件。
-    async fn flush_progress(&mut self) {
-        if self.pending_bytes == 0 && self.pending_files == 0 && self.pending_current_file.is_none()
-        {
-            self.sample_started = Instant::now();
-            return;
-        }
-        let elapsed = self.sample_started.elapsed().as_secs_f64().max(0.001);
-        let bytes = std::mem::take(&mut self.pending_bytes);
-        let files = std::mem::take(&mut self.pending_files);
-        let current_file = self.pending_current_file.take();
-        let speed = if bytes == 0 {
-            0
-        } else {
-            (bytes as f64 / elapsed) as u64
-        };
-        self.sample_started = Instant::now();
-        let _ = self
-            .manager
-            .mutate_task(&self.app, &self.task_id, |task| {
-                task.transferred_bytes = task.transferred_bytes.saturating_add(bytes);
-                task.completed_files = task.completed_files.saturating_add(files);
-                task.speed_bytes_per_second = speed;
-                if current_file.is_some() {
-                    task.current_file = current_file;
-                }
-            })
-            .await;
     }
 }
 
@@ -489,23 +415,22 @@ mod tests {
     #[tokio::test]
     async fn task_control_resumes_and_cancels_waiters() {
         let control = Arc::new(TaskControl::new());
-        control.paused.store(true, Ordering::Release);
+        control.pause();
         let waiter = {
             let control = control.clone();
             tokio::spawn(async move { control.checkpoint().await })
         };
         tokio::task::yield_now().await;
-        control.paused.store(false, Ordering::Release);
-        control.pause_changed.notify_one();
+        control.resume();
         assert!(waiter.await.unwrap().is_ok());
 
-        control.paused.store(true, Ordering::Release);
+        control.pause();
         let canceled = {
             let control = control.clone();
             tokio::spawn(async move { control.checkpoint().await })
         };
         tokio::task::yield_now().await;
-        control.cancellation.cancel();
+        control.cancel();
         assert!(matches!(
             canceled.await.unwrap(),
             Err(TransferRunError::Canceled)

@@ -1,11 +1,9 @@
 //! 基于 SFTP 的远程文件系统实现。
 //!
-//! 普通 Explorer 操作复用缓存会话，长时间后台传输使用独立 channel，避免目录读取
-//! 被大文件复制阻塞。递归删除与传输均拒绝符号链接和危险根路径。
+//! 普通 Explorer 操作复用缓存会话。后台传输的独占会话和数据流由 transfers 子系统
+//! 持有，避免目录读取被大文件复制阻塞。本模块的破坏性操作拒绝符号链接和危险根路径。
 
-use std::collections::HashSet;
 use std::future::Future;
-use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -110,15 +108,13 @@ pub async fn session(
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
     }
-    let session = open_session(workspace).await?;
+    let session = open_cached_session(workspace).await?;
     *cached = Some(session.clone());
     Ok(session)
 }
 
-/// 为后台传输创建独立 SFTP channel。
-///
-/// 大文件复制不得占用 Explorer 的缓存会话，否则目录读取会排在传输请求之后。
-pub async fn open_session(
+/// 创建仅供 Explorer 和普通文件操作复用的缓存 SFTP 会话。
+async fn open_cached_session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
     let channel = {
@@ -126,15 +122,15 @@ pub async fn open_session(
         handle
             .channel_open_session()
             .await
-            .map_err(|e| format!("open SFTP channel: {e}"))?
+            .map_err(|error| format!("open SFTP channel: {error}"))?
     };
     channel
         .request_subsystem(true, "sftp")
         .await
-        .map_err(|e| format!("request SFTP subsystem: {e}"))?;
+        .map_err(|error| format!("request SFTP subsystem: {error}"))?;
     let session = russh_sftp::client::SftpSession::new(channel.into_stream())
         .await
-        .map_err(|e| format!("initialize SFTP: {e}"))?;
+        .map_err(|error| format!("initialize SFTP: {error}"))?;
     session.set_timeout(30);
     Ok(Arc::new(session))
 }
@@ -600,228 +596,6 @@ pub async fn delete(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), 
     Ok(())
 }
 
-pub async fn upload_sources(
-    workspace: &Arc<RemoteWorkspace>,
-    sources: &[String],
-    remote_dir: &str,
-) -> Result<(), String> {
-    for source in sources {
-        upload_path(workspace, Path::new(source), remote_dir).await?;
-    }
-    Ok(())
-}
-
-pub async fn upload_path(
-    workspace: &Arc<RemoteWorkspace>,
-    local_path: &Path,
-    remote_parent: &str,
-) -> Result<(), String> {
-    validate_remote_path(remote_parent)?;
-    let local_metadata = tokio::fs::symlink_metadata(local_path)
-        .await
-        .map_err(|error| format!("stat local path {}: {error}", local_path.display()))?;
-    if local_metadata.file_type().is_symlink() {
-        return Err(format!(
-            "symbolic-link upload is not supported: {}",
-            local_path.display()
-        ));
-    }
-    let name = local_name(local_path)?;
-    let remote_root = join_remote(remote_parent, &name);
-    if local_metadata.is_file() {
-        return upload_file_exclusive(workspace, local_path, &remote_root).await;
-    }
-    if !local_metadata.is_dir() {
-        return Err(format!("unsupported local path: {}", local_path.display()));
-    }
-    let sftp = session(workspace).await?;
-    if sftp_result(
-        workspace,
-        &sftp,
-        format!("stat remote path {remote_root}"),
-        sftp.try_exists(&remote_root).await,
-    )
-    .await?
-    {
-        return Err(format!("already exists: {remote_root}"));
-    }
-    sftp_result(
-        workspace,
-        &sftp,
-        format!("create remote directory {remote_root}"),
-        sftp.create_dir(&remote_root).await,
-    )
-    .await?;
-    let mut pending = vec![(local_path.to_path_buf(), remote_root)];
-    while let Some((local_dir, remote_dir)) = pending.pop() {
-        let mut entries = tokio::fs::read_dir(&local_dir)
-            .await
-            .map_err(|e| format!("read local directory {}: {e}", local_dir.display()))?;
-        while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-            let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
-            let name = local_name(&entry.path())?;
-            let remote = join_remote(&remote_dir, &name);
-            if file_type.is_symlink() {
-                return Err(format!(
-                    "symbolic-link upload is not supported: {}",
-                    entry.path().display()
-                ));
-            } else if file_type.is_dir() {
-                sftp_result(
-                    workspace,
-                    &sftp,
-                    format!("create remote directory {remote}"),
-                    sftp.create_dir(&remote).await,
-                )
-                .await?;
-                pending.push((entry.path(), remote));
-            } else if file_type.is_file() {
-                upload_file_exclusive(workspace, &entry.path(), &remote).await?;
-            } else {
-                return Err(format!(
-                    "unsupported local path: {}",
-                    entry.path().display()
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-pub async fn download_path(
-    workspace: &Arc<RemoteWorkspace>,
-    remote_path: &str,
-    local_parent: &Path,
-) -> Result<PathBuf, String> {
-    let metadata = stat(workspace, remote_path).await?;
-    if metadata.kind == RemoteEntryKind::Symlink {
-        return Err(format!(
-            "symbolic-link download is not supported: {remote_path}"
-        ));
-    }
-    let name = remote_path
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| "cannot download remote root".to_string())?;
-    let local_root = local_parent.join(sanitize_local_name(name));
-    if metadata.kind != RemoteEntryKind::Dir {
-        download_file_exclusive(workspace, remote_path, &local_root).await?;
-        return Ok(local_root);
-    }
-    tokio::fs::create_dir(&local_root)
-        .await
-        .map_err(|error| format!("create local directory {}: {error}", local_root.display()))?;
-    let mut pending = vec![(remote_path.to_string(), local_root.clone())];
-    while let Some((remote_dir, local_dir)) = pending.pop() {
-        let mut local_names = HashSet::new();
-        for entry in read_dir(workspace, &remote_dir, true).await? {
-            let remote = join_remote(&remote_dir, &entry.name);
-            let sanitized = sanitize_local_name(&entry.name);
-            if !local_names.insert(sanitized.to_ascii_lowercase()) {
-                return Err(format!(
-                    "remote names collide after local filename sanitization in {remote_dir}: {}",
-                    entry.name
-                ));
-            }
-            let local = local_dir.join(sanitized);
-            if entry.kind == RemoteEntryKind::Dir {
-                tokio::fs::create_dir(&local).await.map_err(|error| {
-                    format!("create local directory {}: {error}", local.display())
-                })?;
-                pending.push((remote, local));
-            } else if entry.kind == RemoteEntryKind::Symlink {
-                return Err(format!("symbolic-link download is not supported: {remote}"));
-            } else {
-                download_file_exclusive(workspace, &remote, &local).await?;
-            }
-        }
-    }
-    Ok(local_root)
-}
-
-async fn upload_file_exclusive(
-    workspace: &Arc<RemoteWorkspace>,
-    local_path: &Path,
-    remote_path: &str,
-) -> Result<(), String> {
-    let mut local = tokio::fs::File::open(local_path)
-        .await
-        .map_err(|error| format!("open local file {}: {error}", local_path.display()))?;
-    let sftp = session(workspace).await?;
-    let mut remote = sftp_result(
-        workspace,
-        &sftp,
-        format!("create remote file {remote_path}"),
-        sftp.open_with_flags(
-            remote_path,
-            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
-        )
-        .await,
-    )
-    .await?;
-    if let Err(error) = tokio::io::copy(&mut local, &mut remote).await {
-        invalidate_session(workspace, &sftp).await;
-        let _ = sftp.remove_file(remote_path).await;
-        return Err(format!(
-            "upload {} to {remote_path}: {error}",
-            local_path.display()
-        ));
-    }
-    if let Err(error) = remote.flush().await {
-        invalidate_session(workspace, &sftp).await;
-        let _ = sftp.remove_file(remote_path).await;
-        return Err(format!("flush uploaded remote file {remote_path}: {error}"));
-    }
-    if let Err(error) = remote.sync_all().await {
-        invalidate_session(workspace, &sftp).await;
-        let _ = sftp.remove_file(remote_path).await;
-        return Err(format!("sync uploaded remote file {remote_path}: {error}"));
-    }
-    if let Err(error) = remote.shutdown().await {
-        invalidate_session(workspace, &sftp).await;
-        let _ = sftp.remove_file(remote_path).await;
-        return Err(format!("close uploaded remote file {remote_path}: {error}"));
-    }
-    Ok(())
-}
-
-async fn download_file_exclusive(
-    workspace: &Arc<RemoteWorkspace>,
-    remote_path: &str,
-    local_path: &Path,
-) -> Result<(), String> {
-    let sftp = session(workspace).await?;
-    let mut remote = sftp_result(
-        workspace,
-        &sftp,
-        format!("open remote file {remote_path}"),
-        sftp.open(remote_path).await,
-    )
-    .await?;
-    let mut local = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(local_path)
-        .await
-        .map_err(|error| format!("create local file {}: {error}", local_path.display()))?;
-    if let Err(error) = tokio::io::copy(&mut remote, &mut local).await {
-        invalidate_session(workspace, &sftp).await;
-        drop(local);
-        let _ = tokio::fs::remove_file(local_path).await;
-        return Err(format!(
-            "download {remote_path} to {}: {error}",
-            local_path.display()
-        ));
-    }
-    local
-        .sync_all()
-        .await
-        .map_err(|error| format!("sync local file {}: {error}", local_path.display()))?;
-    Ok(())
-}
-
 async fn canonical_target_for_new_file(
     workspace: &Arc<RemoteWorkspace>,
     sftp: &Arc<russh_sftp::client::SftpSession>,
@@ -881,14 +655,6 @@ fn validate_destructive_path(path: &str) -> Result<(), String> {
         return Err("refusing to delete remote root or empty path".into());
     }
     Ok(())
-}
-
-fn local_name(path: &Path) -> Result<String, String> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| format!("invalid local path: {}", path.display()))
 }
 
 /// 将远端文件名转换为 Windows、macOS 和 Linux 均可创建的本地名称。

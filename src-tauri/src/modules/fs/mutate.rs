@@ -1,3 +1,8 @@
+//! 本地、WSL 与 SSH Workspace 的文件系统变更命令。
+//!
+//! 路径由当前 Workspace 环境解析。跨环境后台传输不在这里执行，而由 transfers
+//! 子系统统一管理任务、取消、进度和提交。
+
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use serde::Serialize;
@@ -156,9 +161,10 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
     }
 }
 
-/// Copies external files/dirs into a destination directory, recursively for
-/// dirs. Sources are absolute OS paths (from a drag-drop); only the destination
-/// is workspace-resolved. Refuses to overwrite existing entries.
+/// 将外部文件或目录递归复制到本地或 WSL 目标目录。
+///
+/// 来源是拖放提供的宿主机绝对路径，只有目标经过 Workspace 路径解析。SSH 跨环境
+/// 复制必须进入 transfers 子系统，本命令拒绝覆盖已有目标。
 #[tauri::command]
 pub async fn fs_copy(
     sources: Vec<String>,
@@ -166,11 +172,8 @@ pub async fn fs_copy(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
-    if let Some(profile_id) = workspace.ssh_profile_id() {
-        let profile_id = profile_id.to_string();
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(&profile_id).await?;
-        return remote::sftp::upload_sources(&workspace, &sources, &dest_dir).await;
+    if workspace.is_ssh() {
+        return Err("fs_copy is only available for local and WSL paths".into());
     }
     let dest = resolve_path(&dest_dir, &workspace);
     for source in &sources {
