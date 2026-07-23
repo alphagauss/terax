@@ -8,6 +8,7 @@
   "formatOnSaveSkipped": "Format on save skipped",
   "formatOnSaveSkippedDescription": "No active language server for this file. Enable one in the statusbar, or pick Biome/Prettier in Settings.",
   "formatFailed": "{{formatter}} format failed",
+  "saveFailed": "Failed to save",
   "saveConflict": {
     "title": "File changed on disk",
     "description": "{{name}} was modified by another program while you had unsaved changes. Overwrite to keep your version.",

@@ -1,3 +1,9 @@
+/**
+ * 本文件实现 CodeMirror 编辑器面板及其保存、格式化、语言服务和预览交互。
+ *
+ * 负责将共享文档模型连接到编辑器视图。保存失败必须向用户提示，不能静默丢失远程写入错误。
+ */
+
 import i18n from "@/i18n";
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
@@ -133,8 +139,11 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-// memo: EditorView passes identity-stable props, so background editors
-// skip re-rendering entirely when App re-renders (terminal events, tab churn).
+/**
+ * 代码编辑器面板。
+ *
+ * 负责渲染共享文档、处理保存和格式化，并在后台标签页中保持编辑器状态不被重建。
+ */
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
     const { t } = useTranslation("editor");
@@ -266,7 +275,15 @@ export const EditorPane = memo(
       // Snapshot before save: edits typed during the formatter round-trip
       // must not be clobbered by the disk read-back.
       const docAtSave = view?.state.doc;
-      const saved = await saveRef.current();
+      let saved: boolean;
+      try {
+        saved = await saveRef.current();
+      } catch (error) {
+        toast.error(i18n.t("editor:saveFailed"), {
+          description: String(error),
+        });
+        return;
+      }
       if (!saved) return;
       if (prefs.editorFormatOnSave && formatter !== "lsp") {
         const error = await runExternalFormatter(

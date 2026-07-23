@@ -339,6 +339,10 @@ pub async fn read_file(
     Ok(output)
 }
 
+/// 原子写入远程文件并保留已有文件的权限。
+///
+/// 临时文件只能显式设置权限。`FileAttributes::default()` 会携带大小、属主和时间戳，
+/// 在 SFTP `setstat` 中可能清空内容或因无权修改属主而导致保存失败。
 pub async fn write_file(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
@@ -409,10 +413,7 @@ pub async fn write_file(
         return Err(format!("close temporary remote file {temporary}: {error}"));
     }
     if let Some(permissions) = permissions {
-        let attributes = FileAttributes {
-            permissions: Some(permissions),
-            ..FileAttributes::default()
-        };
+        let attributes = permission_attributes(permissions);
         if let Err(error) = sftp.set_metadata(&temporary, attributes).await {
             if should_invalidate_session(&error) {
                 invalidate_session(workspace, &sftp).await;
@@ -443,6 +444,16 @@ pub async fn write_file(
         });
     }
     Ok(stat(workspace, &target).await?.mtime)
+}
+
+/// 构造仅包含权限位的 SFTP 属性。
+///
+/// 必须从空属性开始，避免 `setstat` 隐式修改临时文件的大小、属主或时间戳。
+fn permission_attributes(permissions: u32) -> FileAttributes {
+    FileAttributes {
+        permissions: Some(permissions),
+        ..FileAttributes::empty()
+    }
 }
 
 pub async fn create_file(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), String> {
@@ -692,7 +703,7 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        remote_parent_name, sanitize_local_name, should_invalidate_session,
+        permission_attributes, remote_parent_name, sanitize_local_name, should_invalidate_session,
         validate_destructive_path,
     };
 
@@ -745,5 +756,17 @@ mod tests {
         assert!(!should_invalidate_session(&status_error(
             russh_sftp::protocol::StatusCode::PermissionDenied
         )));
+    }
+
+    #[test]
+    fn preserved_permissions_do_not_overwrite_remote_metadata() {
+        let attributes = permission_attributes(0o100644);
+
+        assert_eq!(attributes.permissions, Some(0o100644));
+        assert_eq!(attributes.size, None);
+        assert_eq!(attributes.uid, None);
+        assert_eq!(attributes.gid, None);
+        assert_eq!(attributes.atime, None);
+        assert_eq!(attributes.mtime, None);
     }
 }
