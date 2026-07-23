@@ -65,6 +65,14 @@ transfers/
 - 参考与 Terax 相近的 russh 0.61 exec channel，用于后续 tar 流和远端能力探测。
 - 不吸收整文件或归档进入 `Vec<u8>`、大块 IPC、高频进度事件和直接 `cat > target` 的实现。
 
+### 吸收完成结论
+
+- meatshell 的独占 raw SFTP、有界 offset 下载、取消排空和高延迟写入思路已经进入 Direct 数据面。
+- CrabPort 的本地 tar.gz、gzip 完整性验证、远端工具探测和 Archive 阶段已经按 Terax Manifest 与提交协议重写。
+- eussh 的独立 exec channel 思路由现有 `RemoteWorkspace::exec` 和 Archive 可暂停、可取消命令 channel 覆盖。
+- 未采用的整文件缓冲、直接写最终目标、缓存传输会话、自动回退和不安全解包均保持排除。
+- 静态扫描确认 Terax 源码、依赖、测试和构建脚本不含三个本地参考目录路径，参考项目可以手动移除。
+
 许可证与第三方声明在全部代码吸收完成后统一核对和补充，当前阶段只记录来源提交和采用范围。
 
 ## 里程碑
@@ -124,3 +132,4 @@ transfers/
 | `5bd9678` | M1、M2 Direct | 收口 Manager、Scheduler、Planner、Progress、Commit、Local 和 SSH 边界；增加目标 reservation、原生 no-replace 提交、任务独占会话与有界 SFTP 流水线 | 前端 97 个文件 564 项测试通过；Rust 260 项库测试及集成测试通过；Clippy 通过 | nextest 未安装，使用 `cargo test --all-targets --locked`；尚未保留元数据或建立真实网络基准 |
 | `6323818` | M2 Direct | 保留跨 Host、WSL 与 SSH 可移植的权限、只读状态和时间元数据，并在复制后复验来源 | Rust 262 项库测试及集成测试通过；Clippy、格式检查通过 | 不复制 uid、gid、ACL、扩展属性和平台专有标志 |
 | `9e2a8f0` | M3 设计 | 改为用户显式选择 Direct 或 Archive，删除自动阈值选择和隐式回退计划；定义参考项目可移除标准 | 文档变更，未运行代码检查 | Archive 首期只用于 SSH；WSL 保持 Direct，后续依据实测需求决定是否扩展 |
+| `d49fb9d` | M3 Archive | 增加独立 Direct/Archive IPC、通用 Manifest、手动策略菜单、本地安全归档、单流 SFTP、远端能力探测、暂停取消、受控解包和统一提交 | 前端 97 个文件 564 项测试通过；Rust 267 项库测试及全部集成测试通过；Clippy、格式检查通过 | 未做真实 SSH 运行验证；远端需要 Linux、bash、tar、gzip，Archive 不可用时明确提示使用 Direct |
