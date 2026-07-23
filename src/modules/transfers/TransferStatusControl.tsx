@@ -47,6 +47,8 @@ export function TransferStatusControl() {
 function TransferStatusPanel() {
   const { t } = useTranslation("statusbar");
   const taskMap = useTransferStore((state) => state.tasks);
+  const panelOpen = useTransferStore((state) => state.panelOpen);
+  const setPanelOpen = useTransferStore((state) => state.setPanelOpen);
   useTransferBridge();
   const tasks = useMemo(
     () =>
@@ -72,7 +74,7 @@ function TransferStatusPanel() {
     );
 
   return (
-    <Popover>
+    <Popover open={panelOpen} onOpenChange={setPanelOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"

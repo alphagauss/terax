@@ -10,9 +10,11 @@ import type { TransferTask } from "./types";
 
 type TransferStore = {
   tasks: Record<string, TransferTask>;
+  panelOpen: boolean;
   mergeList: (tasks: TransferTask[]) => void;
   upsert: (task: TransferTask) => void;
   removeLocal: (id: string) => void;
+  setPanelOpen: (open: boolean) => void;
 };
 
 /** 合并后端列表，同时保留监听期间收到的更新版本。 */
@@ -33,6 +35,7 @@ export function mergeTransferTasks(
 /** 当前 Workspace 进程内的传输任务视图。 */
 export const useTransferStore = create<TransferStore>((set) => ({
   tasks: {},
+  panelOpen: false,
   mergeList: (tasks) =>
     set((state) => ({ tasks: mergeTransferTasks(state.tasks, tasks) })),
   upsert: (task) =>
@@ -48,7 +51,13 @@ export const useTransferStore = create<TransferStore>((set) => ({
       delete tasks[id];
       return { tasks };
     }),
+  setPanelOpen: (panelOpen) => set({ panelOpen }),
 }));
+
+/** 请求打开状态栏传输面板，供资源管理器等非状态栏模块调用。 */
+export function openTransferPanel(): void {
+  useTransferStore.getState().setPanelOpen(true);
+}
 
 /** 在状态栏挂载期间订阅传输事件，并在订阅建立后读取完整快照。 */
 export function useTransferBridge(): void {

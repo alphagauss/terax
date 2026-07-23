@@ -8,7 +8,7 @@ import type { TransferTask } from "./types";
 
 vi.mock("./native", () => ({ transferNative: {} }));
 
-import { mergeTransferTasks } from "./store";
+import { mergeTransferTasks, openTransferPanel, useTransferStore } from "./store";
 
 function task(id: string, updatedAt: number): TransferTask {
   return {
@@ -68,5 +68,15 @@ describe("transfer snapshot merge", () => {
 
     expect(merged.removed).toBeUndefined();
     expect(merged.queued.updatedAt).toBe(15);
+  });
+});
+
+describe("transfer panel state", () => {
+  it("opens the status panel when a transfer is queued elsewhere", () => {
+    useTransferStore.getState().setPanelOpen(false);
+
+    openTransferPanel();
+
+    expect(useTransferStore.getState().panelOpen).toBe(true);
   });
 });

@@ -36,6 +36,7 @@ import {
 } from "@/modules/transfers/dialogs";
 import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
+import { openTransferPanel } from "@/modules/transfers/store";
 import type { TransferStrategy } from "@/modules/transfers/types";
 import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
@@ -309,7 +310,7 @@ export const FileExplorer = memo(
             sources,
             destination,
           });
-          toast.success(t("menu.transferQueued"));
+          openTransferPanel();
         } catch (error) {
           toast.error(
             t("menu.transferFailed", {
@@ -338,7 +339,7 @@ export const FileExplorer = memo(
             sources: [source],
             destination,
           });
-          toast.success(t("menu.transferQueued"));
+          openTransferPanel();
         } catch (error) {
           toast.error(
             t("menu.transferFailed", {
