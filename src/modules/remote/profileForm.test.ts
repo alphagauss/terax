@@ -26,6 +26,7 @@ describe("SSH profile form", () => {
       groupId: DEFAULT_SSH_GROUP_ID,
       name: "deploy@prod.example.com",
       port: 22,
+      reconnectMaxAttempts: 2,
       rootPath: "~",
     });
   });

@@ -76,6 +76,13 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
 
+const NUMBER_INPUT_CLASS =
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
+
+function blurNumberInputOnWheel(event: React.WheelEvent<HTMLInputElement>) {
+  event.currentTarget.blur();
+}
+
 /** 管理 SSH 配置、分组、凭据和远程 Workspace 启动。 */
 export function RemoteSection() {
   const { t } = useTranslation("settings");
@@ -306,7 +313,7 @@ export function RemoteSection() {
             proxyUrl: null,
             keepaliveSeconds: 30,
             reconnectEnabled: true,
-            reconnectMaxAttempts: 5,
+            reconnectMaxAttempts: 2,
             rootPath: null,
             tunnels: [],
           }),
@@ -670,6 +677,8 @@ export function RemoteSection() {
                 max={65535}
                 value={form.port}
                 onChange={(event) => update("port", event.target.value)}
+                className={NUMBER_INPUT_CLASS}
+                onWheel={blurNumberInputOnWheel}
               />
             </Field>
             <Field label={t("remote.fields.username")}>
@@ -772,10 +781,12 @@ export function RemoteSection() {
                 <Input
                   type="number"
                   min={0}
-                  value={form.keepaliveSeconds}
-                  onChange={(event) =>
-                    update("keepaliveSeconds", event.target.value)
-                  }
+                value={form.keepaliveSeconds}
+                onChange={(event) =>
+                  update("keepaliveSeconds", event.target.value)
+                }
+                className={NUMBER_INPUT_CLASS}
+                onWheel={blurNumberInputOnWheel}
                 />
               </Field>
               <Field
@@ -785,7 +796,7 @@ export function RemoteSection() {
                 <Input
                   value={form.proxyUrl}
                   onChange={(event) => update("proxyUrl", event.target.value)}
-                  placeholder="socks5://user@127.0.0.1:1080"
+                  placeholder={t("remote.placeholders.proxyUrl")}
                   spellCheck={false}
                 />
               </Field>
@@ -837,12 +848,13 @@ export function RemoteSection() {
                   type="number"
                   min={1}
                   max={20}
-                  className="h-8 w-20"
+                  className={`h-8 w-20 ${NUMBER_INPUT_CLASS}`}
                   disabled={!form.reconnectEnabled}
                   value={form.reconnectMaxAttempts}
                   onChange={(event) =>
                     update("reconnectMaxAttempts", event.target.value)
                   }
+                  onWheel={blurNumberInputOnWheel}
                 />
               </div>
             </div>

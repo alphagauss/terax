@@ -368,14 +368,15 @@
       "passphrase": "私钥口令",
       "rootPath": "工作区根目录",
       "keepalive": "保活间隔（秒）",
-      "proxyUrl": "代理 URL",
+      "proxyUrl": "代理 URL（SOCKS5、HTTP、HTTPS）",
       "proxyPassword": "代理密码",
       "reconnect": "自动重连",
-      "reconnectAttempts": "重试次数"
+      "reconnectAttempts": "自动重连次数"
     },
     "placeholders": {
       "name": "生产服务器",
-      "host": "ssh.example.com"
+      "host": "ssh.example.com",
+      "proxyUrl": "socks5://127.0.0.1:1080"
     },
     "hints": {
       "name": "可留空，保存时将使用“用户名@主机”。"

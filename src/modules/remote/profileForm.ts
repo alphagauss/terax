@@ -58,7 +58,7 @@ export function emptySshProfileForm(id: string): SshProfileForm {
     rememberProxySecret: true,
     keepaliveSeconds: "30",
     reconnectEnabled: true,
-    reconnectMaxAttempts: "5",
+    reconnectMaxAttempts: "2",
     rootPath: "~",
   };
 }

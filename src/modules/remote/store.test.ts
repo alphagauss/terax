@@ -98,6 +98,27 @@ describe("SSH remote store", () => {
     expect(mocks.readSharedStore).toHaveBeenCalledOnce();
   });
 
+  it("uses two reconnect attempts when a legacy profile omits the value", async () => {
+    mocks.readSharedStore.mockResolvedValueOnce({
+      "profile:web": {
+        ...profile("web", DEFAULT_SSH_GROUP_ID),
+        reconnectMaxAttempts: undefined,
+      },
+    });
+    useRemoteStore.setState({
+      groups: [],
+      profiles: [],
+      statuses: {},
+      loaded: false,
+    });
+
+    await useRemoteStore.getState().load();
+
+    expect(useRemoteStore.getState().profiles[0]?.reconnectMaxAttempts).toBe(
+      2,
+    );
+  });
+
   it("waits for the in-flight status snapshot even after profiles are loaded", async () => {
     let resolveStatus: ((status: ConnectionInfo) => void) | undefined;
     mocks.readSharedStore.mockResolvedValueOnce({

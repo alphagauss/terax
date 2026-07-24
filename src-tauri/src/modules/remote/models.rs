@@ -15,7 +15,7 @@ fn default_keepalive() -> u64 {
 }
 
 fn default_reconnect_attempts() -> u32 {
-    5
+    2
 }
 
 fn default_tunnel_enabled() -> bool {
@@ -370,7 +370,7 @@ mod tests {
             proxy_url: None,
             keepalive_seconds: 30,
             reconnect_enabled: false,
-            reconnect_max_attempts: 5,
+            reconnect_max_attempts: 2,
             root_path: None,
             tunnels: Vec::new(),
         };
@@ -417,6 +417,7 @@ mod tests {
         }))
         .unwrap();
 
+        assert_eq!(profile.reconnect_max_attempts, 2);
         assert!(profile.tunnels[0].enabled);
         assert_eq!(
             profile.enabled_tunnel_configs(),

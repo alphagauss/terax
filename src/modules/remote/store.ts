@@ -62,7 +62,7 @@ function normalizeProfile(
       profile.reconnectMaxAttempts,
       1,
       20,
-      5,
+      2,
     ),
     reconnectEnabled: Boolean(profile.reconnectEnabled),
     rootPath: profile.rootPath?.trim() || "~",

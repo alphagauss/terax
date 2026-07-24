@@ -368,14 +368,15 @@
       "passphrase": "Passphrase",
       "rootPath": "Workspace root",
       "keepalive": "Keepalive (seconds)",
-      "proxyUrl": "Proxy URL",
+      "proxyUrl": "Proxy URL (SOCKS5, HTTP, HTTPS)",
       "proxyPassword": "Proxy password",
       "reconnect": "Reconnect automatically",
-      "reconnectAttempts": "Attempts"
+      "reconnectAttempts": "Auto-reconnect attempts"
     },
     "placeholders": {
       "name": "Production server",
-      "host": "ssh.example.com"
+      "host": "ssh.example.com",
+      "proxyUrl": "socks5://127.0.0.1:1080"
     },
     "hints": {
       "name": "Optional. Empty names are saved as username@host."
