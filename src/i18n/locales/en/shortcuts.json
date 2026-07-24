@@ -48,6 +48,7 @@
     "view.zoomReset": "Reset zoom",
     "view.zenMode": "Toggle zen mode",
     "editor.undo": "Undo",
-    "editor.redo": "Redo"
+    "editor.redo": "Redo",
+    "editor.toggleWordWrap": "Toggle word wrap"
   }
 }

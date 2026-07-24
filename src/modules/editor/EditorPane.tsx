@@ -12,6 +12,7 @@ import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
+import { matchBinding, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -109,6 +110,20 @@ export type EditorPaneProps = Props;
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
 const VIEWPORT_SOURCE_LINE_OFFSET = 32;
+const TEMPORARY_WORD_WRAP_SHORTCUT = SHORTCUTS.find(
+  (shortcut) => shortcut.id === "editor.toggleWordWrap",
+);
+
+/** 判断键盘事件是否匹配用户为临时自动换行设置的绑定。 */
+function matchesTemporaryWordWrapShortcut(event: KeyboardEvent): boolean {
+  const bindings =
+    usePreferencesStore.getState().shortcuts["editor.toggleWordWrap"] ??
+    TEMPORARY_WORD_WRAP_SHORTCUT?.defaultBindings ??
+    [];
+  return bindings.some((binding) =>
+    matchBinding(event, binding, "editor.toggleWordWrap"),
+  );
+}
 
 function editorViewportSourceLine(view: EditorView): number {
   const scrollRect = view.scrollDOM.getBoundingClientRect();
@@ -176,16 +191,48 @@ export const EditorPane = memo(
     const adoptDiskTextRef = useRef(adoptDiskText);
     adoptDiskTextRef.current = adoptDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
+    const editorContainerRef = useRef<HTMLDivElement>(null);
     const viewportLineChangeRef = useRef(onViewportSourceLineChange);
     viewportLineChangeRef.current = onViewportSourceLineChange;
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
+    // 覆盖值只存在于当前编辑器视图，关闭后不影响全局偏好或其他文件。
+    const [temporaryWordWrap, setTemporaryWordWrap] = useState<
+      boolean | null
+    >(null);
     const workspace = useWorkspaceEnvStore((s) => s.env);
     const workspaceScope = workspaceScopeKey(workspace);
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
+
+    /** 切换当前编辑器视图的自动换行，不持久化到偏好设置。 */
+    const toggleTemporaryWordWrap = useCallback(() => {
+      setTemporaryWordWrap(
+        (current) => !(current ?? usePreferencesStore.getState().editorWordWrap),
+      );
+    }, []);
+    const toggleTemporaryWordWrapRef = useRef(toggleTemporaryWordWrap);
+    toggleTemporaryWordWrapRef.current = toggleTemporaryWordWrap;
+
+    useEffect(() => {
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (
+          event.isComposing ||
+          event.keyCode === 229 ||
+          !editorContainerRef.current?.matches(":hover") ||
+          !matchesTemporaryWordWrapShortcut(event)
+        )
+          return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        toggleTemporaryWordWrapRef.current();
+      };
+      window.addEventListener("keydown", onKeyDown, { capture: true });
+      return () =>
+        window.removeEventListener("keydown", onKeyDown, { capture: true });
+    }, []);
 
     useEffect(() => {
       let cancelled = false;
@@ -449,6 +496,14 @@ export const EditorPane = memo(
             editorViewportSourceLine(update.view),
           );
         }),
+        EditorView.domEventHandlers({
+          keydown: (event) => {
+            if (!matchesTemporaryWordWrapShortcut(event)) return false;
+            event.preventDefault();
+            toggleTemporaryWordWrapRef.current();
+            return true;
+          },
+        }),
         // Before inlineCompletion so an open popup wins Tab over the ghost.
         Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
         inlineCompletion({
@@ -519,10 +574,12 @@ export const EditorPane = memo(
       if (!view) return;
       view.dispatch({
         effects: wrapCompartment.reconfigure(
-          editorWordWrap ? EditorView.lineWrapping : [],
+          (temporaryWordWrap ?? editorWordWrap)
+            ? EditorView.lineWrapping
+            : [],
         ),
       });
-    }, [editorWordWrap]);
+    }, [editorWordWrap, temporaryWordWrap]);
 
     useEffect(() => {
       if (doc.status !== "ready") return;
@@ -775,7 +832,10 @@ export const EditorPane = memo(
     }
 
     return (
-      <div className="flex h-full min-h-0 flex-col zoom-exempt">
+      <div
+        ref={editorContainerRef}
+        className="flex h-full min-h-0 flex-col zoom-exempt"
+      >
         <CodeMirror
           ref={cmRef}
           value={doc.content}

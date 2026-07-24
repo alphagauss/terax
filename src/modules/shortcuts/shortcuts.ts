@@ -48,6 +48,7 @@ export type ShortcutId =
   | "sidebar.toggle"
   | "editor.undo"
   | "editor.redo"
+  | "editor.toggleWordWrap"
   | "editor.aiComplete"
   | "editor.codeComplete";
 
@@ -318,11 +319,8 @@ export const SHORTCUTS: Shortcut[] = [
     group: "View",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "'" }],
   },
-  // Editor entries are display-only: CodeMirror's historyKeymap binds these
-  // keys natively. We register them here so the shortcuts dialog can surface
-  // them — they don't have App-level handlers, so `useGlobalShortcuts` falls
-  // through without `preventDefault`, leaving CodeMirror to handle the event.
-  // Also excluded from the customization UI in ShortcutsSection.
+  // 编辑器动作由各个 CodeMirror 视图处理。全局快捷键监听器不阻止这些按键，
+  // 因此焦点编辑器仍可接收事件；这里只提供设置页和默认绑定的单一来源。
   {
     id: "editor.undo",
     label: "Undo",
@@ -334,6 +332,12 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Redo",
     group: "Editor",
     defaultBindings: [{ [MOD_PROP]: true, key: "y" }],
+  },
+  {
+    id: "editor.toggleWordWrap",
+    label: "Toggle word wrap",
+    group: "Editor",
+    defaultBindings: [{ alt: true, key: "z" }],
   },
   {
     id: "editor.aiComplete",

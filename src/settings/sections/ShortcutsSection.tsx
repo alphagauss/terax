@@ -1,3 +1,9 @@
+/**
+ * 本文件实现设置窗口的快捷键查询、录制和重置界面。
+ *
+ * 快捷键定义由 modules/shortcuts 提供，本文件只编辑用户偏好中的绑定覆盖值。
+ */
+
 import {
   AlertDialog,
   AlertDialogAction,

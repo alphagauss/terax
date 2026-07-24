@@ -1,6 +1,6 @@
 /**
- * 本文件验证全局快捷键注册表中目录选择动作的默认绑定。
- * 锁定 Cmd/Ctrl+O 仍由环境层决定是否执行，注册表只提供统一的默认按键。
+ * 本文件验证全局快捷键注册表中的默认绑定。
+ * 锁定设置页展示与各模块实际处理快捷键时共用同一份注册表定义。
  */
 
 import { MOD_PROP } from "@/lib/platform";
@@ -14,6 +14,17 @@ describe("folder picker shortcut", () => {
       label: "Open folder",
       group: "General",
       defaultBindings: [{ [MOD_PROP]: true, key: "o" }],
+    });
+  });
+});
+
+describe("temporary word wrap shortcut", () => {
+  it("registers Alt+Z as the default editor binding", () => {
+    expect(SHORTCUTS).toContainEqual({
+      id: "editor.toggleWordWrap",
+      label: "Toggle word wrap",
+      group: "Editor",
+      defaultBindings: [{ alt: true, key: "z" }],
     });
   });
 });

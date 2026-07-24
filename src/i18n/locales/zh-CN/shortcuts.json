@@ -48,6 +48,7 @@
     "view.zoomReset": "重置缩放",
     "view.zenMode": "切换禅模式",
     "editor.undo": "撤销",
-    "editor.redo": "重做"
+    "editor.redo": "重做",
+    "editor.toggleWordWrap": "切换自动换行"
   }
 }
