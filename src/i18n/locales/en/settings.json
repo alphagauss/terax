@@ -49,6 +49,13 @@
         "description": "Tint changed files and dim gitignored entries in the file explorer."
       }
     },
+    "sourceControl": {
+      "label": "Source Control",
+      "showUndoCommit": {
+        "title": "Show Undo Commit",
+        "description": "Show an action on the latest commit that moves HEAD to its parent and keeps the changes staged."
+      }
+    },
     "terminal": {
       "label": "Terminal",
       "webgl": {
@@ -117,7 +124,24 @@
       "restoreWindow": {
         "title": "Restore window position & size",
         "description": "Reopen the main window where you left it. Applies on next launch."
+      },
+      "workspaceWindows": {
+        "title": "Workspace windows",
+        "description": "Single window reuses one window per Local, WSL, or SSH environment. Changes apply to windows opened afterwards.",
+        "single": "Single window per environment",
+        "multiple": "Multiple windows per environment"
       }
+    },
+    "openWith": {
+      "label": "Open With",
+      "fileAssociations": {
+        "title": "File associations",
+        "description": "Add Open with Terax for files and folders, including multi-file selections. This does not change default apps."
+      },
+      "register": "Register",
+      "registering": "Registering...",
+      "unregister": "Unregister",
+      "unregistering": "Unregistering..."
     }
   },
   "editor": {
@@ -141,6 +165,12 @@
       "wordWrap": {
         "title": "Word wrap",
         "description": "Wrap long lines instead of scrolling horizontally."
+      },
+      "diffView": {
+        "title": "Git diff view",
+        "description": "Show Git diffs inline or side by side.",
+        "inline": "Inline",
+        "sideBySide": "Side by side"
       }
     },
     "saving": {
@@ -161,7 +191,18 @@
       "formatter": {
         "title": "Formatter",
         "description": "Language server formats the buffer before writing; Biome and Prettier run on the saved file from your PATH.",
-        "lsp": "Language server"
+        "lsp": "Language server",
+        "custom": "Custom command"
+      },
+      "customCommand": {
+        "title": "Custom command",
+        "description": "Runs on the saved file; {file} is replaced with the quoted path (appended when omitted)."
+      },
+      "languageOverrides": {
+        "title": "Language overrides",
+        "description": "Use a different formatter for specific languages (e.g. Ruff for Python).",
+        "add": "Add override",
+        "remove": "Remove override"
       }
     },
     "lsp": {
@@ -190,6 +231,7 @@
       "label": "Theme",
       "create": "Create",
       "import": "Import .terax-theme",
+      "filesAria": "Theme files",
       "editAria": "Edit {{name}}",
       "removeAria": "Remove {{name}}"
     },
@@ -205,7 +247,14 @@
       "choose": "Choose image",
       "opacity": "Opacity",
       "blur": "Blur",
-      "dropHint": "Drop an image here or pick one. Stored locally; doesn't affect the default look until set."
+      "dropHint": "Drop an image here or pick one. Stored locally; doesn't affect the default look until set.",
+      "filesAria": "Background image files"
+    },
+    "errors": {
+      "unknown": "unknown error",
+      "read": "Failed to read {{name}}: {{error}}",
+      "notImage": "{{name}} is not an image",
+      "importImage": "Failed to import image"
     }
   },
   "shortcuts": {
@@ -235,7 +284,34 @@
       "label": "Defaults",
       "chatModel": "Chat model",
       "autocomplete": "Autocomplete",
-      "notConnectedHint": "{{provider}} isn't connected - add it below."
+      "notConnectedHint": "{{provider}} isn't connected - add it below.",
+      "trigger": {
+        "label": "Trigger",
+        "automatic": "Automatic (as you type)",
+        "manual": "Manual ({{shortcut}})",
+        "shortcut": "shortcut"
+      }
+    },
+    "local": {
+      "lmstudio": {
+        "description": "Run GGUF models via LM Studio's HTTP server (enable it from the Developer tab).",
+        "modelHint": "The model ID loaded in LM Studio. See the server's /v1/models page."
+      },
+      "mlx": {
+        "description": "Apple silicon inference via mlx_lm.server (pip install mlx-lm).",
+        "modelHint": "The Hugging Face repository path used to launch mlx_lm.server."
+      },
+      "ollama": {
+        "description": "Local models via Ollama's built-in OpenAI-compatible API.",
+        "modelHint": "The model name from ollama list or ollama pull."
+      },
+      "openaiCompatible": {
+        "description": "Any OpenAI-compatible endpoint, including vLLM, Z.AI, and Fireworks."
+      },
+      "openrouter": {
+        "description": "Any model on OpenRouter. Enter its full provider/model ID.",
+        "modelHint": "Browse IDs at openrouter.ai/models."
+      }
     },
     "voice": {
       "title": "Voice input",

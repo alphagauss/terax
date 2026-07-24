@@ -90,7 +90,7 @@ export function ShortcutsSection() {
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 px-2.5 text-[11px]"
+          className="h-8 gap-1.5 px-2.5 text-[11px] duration-control ease-standard"
           onClick={() => setResetDialogOpen(true)}
         >
           <HugeiconsIcon
@@ -193,7 +193,7 @@ function ShortcutRow({
   onReset: () => void;
   userBindings?: KeyBinding[];
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation("settings");
   const bindings =
     userBindings !== undefined ? userBindings : shortcut.defaultBindings;
   const isModified = userBindings !== undefined;
@@ -230,7 +230,7 @@ function ShortcutRow({
                 </KbdGroup>
               ) : (
                 <span className="text-[11px] text-muted-foreground italic">
-                  Unassigned
+                  {t("shortcuts.unassigned")}
                 </span>
               )}
             </button>
@@ -240,7 +240,7 @@ function ShortcutRow({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="size-7 text-muted-foreground hover:text-foreground"
+                  className="size-7 text-muted-foreground duration-control ease-standard hover:text-foreground"
                   onClick={onReset}
                   title={t("shortcuts.resetToDefault")}
                 >
@@ -250,7 +250,7 @@ function ShortcutRow({
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-7 text-muted-foreground hover:text-destructive opacity-0 transition-opacity group-hover:opacity-100"
+                className="size-7 text-muted-foreground opacity-0 transition-opacity duration-control ease-standard hover:text-destructive group-hover:opacity-100"
                 onClick={onClear}
                 title={t("shortcuts.clearShortcut")}
               >

@@ -1,3 +1,8 @@
+/**
+ * 本文件呈现编辑器设置，包括编辑行为、保存和格式化选项。
+ * 仅负责将偏好状态绑定到界面，所有用户可见的固定文案均由翻译资源提供。
+ */
+
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -111,8 +116,8 @@ export function EditorSection() {
           />
         </SettingRow>
         <SettingRow
-          title="Git diff view"
-          description="Show Git diffs inline or side by side."
+          title={t("editor.editing.diffView.title")}
+          description={t("editor.editing.diffView.description")}
         >
           <Select
             value={diffViewMode}
@@ -123,10 +128,10 @@ export function EditorSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="inline" className="text-[12px]">
-                Inline
+                {t("editor.editing.diffView.inline")}
               </SelectItem>
               <SelectItem value="split" className="text-[12px]">
-                Side by side
+                {t("editor.editing.diffView.sideBySide")}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -194,6 +199,8 @@ function FormatterSelect({
   value: EditorFormatter;
   onChange: (v: EditorFormatter) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <Select value={value} onValueChange={(v) => onChange(v as EditorFormatter)}>
       <SelectTrigger className="h-8 w-40 text-[12px]">
@@ -202,7 +209,11 @@ function FormatterSelect({
       <SelectContent>
         {FORMATTER_OPTIONS.map((id) => (
           <SelectItem key={id} value={id}>
-            {FORMATTER_LABELS[id]}
+            {id === "lsp"
+              ? t("editor.saving.formatter.lsp")
+              : id === "custom"
+                ? t("editor.saving.formatter.custom")
+                : FORMATTER_LABELS[id]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -211,6 +222,7 @@ function FormatterSelect({
 }
 
 function CustomFormatCommandInput() {
+  const { t } = useTranslation();
   const stored = usePreferencesStore((s) => s.editorCustomFormatCommand);
   const [draft, setDraft] = useState(stored);
 
@@ -220,8 +232,8 @@ function CustomFormatCommandInput() {
 
   return (
     <SettingRow
-      title="Custom command"
-      description="Runs on the saved file; {file} is replaced with the quoted path (appended when omitted)."
+      title={t("editor.saving.customCommand.title")}
+      description={t("editor.saving.customCommand.description")}
     >
       <Input
         value={draft}
@@ -240,6 +252,7 @@ function CustomFormatCommandInput() {
 }
 
 function FormatterOverrides() {
+  const { t } = useTranslation();
   const byLang = usePreferencesStore((s) => s.editorFormatterByLang);
   const entries = Object.entries(byLang);
   const unused = EXPOSED_LANGUAGES.filter((l) => !(l.ext in byLang));
@@ -250,8 +263,8 @@ function FormatterOverrides() {
   return (
     <>
       <SettingRow
-        title="Language overrides"
-        description="Use a different formatter for specific languages (e.g. Ruff for Python)."
+        title={t("editor.saving.languageOverrides.title")}
+        description={t("editor.saving.languageOverrides.description")}
       >
         <button
           type="button"
@@ -262,7 +275,7 @@ function FormatterOverrides() {
             if (first) update({ ...byLang, [first.ext]: "lsp" });
           }}
         >
-          Add override
+          {t("editor.saving.languageOverrides.add")}
         </button>
       </SettingRow>
       {entries.map(([lang, formatter]) => (
@@ -300,7 +313,7 @@ function FormatterOverrides() {
           <button
             type="button"
             className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="Remove override"
+            title={t("editor.saving.languageOverrides.remove")}
             onClick={() => {
               const next = { ...byLang };
               delete next[lang];

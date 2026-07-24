@@ -13,6 +13,7 @@
   "label": {
     "commandPalette.open": "Open command palette",
     "commandPalette.content": "Find in files",
+    "window.new": "New window",
     "settings.open": "Open settings",
     "folder.open": "Open folder",
     "tab.new": "New tab",
@@ -49,6 +50,8 @@
     "view.zenMode": "Toggle zen mode",
     "editor.undo": "Undo",
     "editor.redo": "Redo",
-    "editor.toggleWordWrap": "Toggle word wrap"
+    "editor.toggleWordWrap": "Toggle word wrap",
+    "editor.aiComplete": "Trigger AI completion",
+    "editor.codeComplete": "Trigger code completion"
   }
 }

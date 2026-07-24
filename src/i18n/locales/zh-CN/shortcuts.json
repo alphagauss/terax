@@ -13,6 +13,7 @@
   "label": {
     "commandPalette.open": "打开命令面板",
     "commandPalette.content": "在文件中查找",
+    "window.new": "新建窗口",
     "settings.open": "打开设置",
     "folder.open": "打开文件夹",
     "tab.new": "新建标签页",
@@ -49,6 +50,8 @@
     "view.zenMode": "切换禅模式",
     "editor.undo": "撤销",
     "editor.redo": "重做",
-    "editor.toggleWordWrap": "切换自动换行"
+    "editor.toggleWordWrap": "切换自动换行",
+    "editor.aiComplete": "触发 AI 补全",
+    "editor.codeComplete": "触发代码补全"
   }
 }

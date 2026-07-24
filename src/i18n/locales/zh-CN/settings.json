@@ -49,6 +49,13 @@
         "description": "在文件资源管理器中为改动文件着色，并淡化被 gitignore 忽略的条目。"
       }
     },
+    "sourceControl": {
+      "label": "源代码管理",
+      "showUndoCommit": {
+        "title": "显示撤销提交",
+        "description": "在最新提交上显示一个操作，将 HEAD 移至其父提交，并保留已暂存的更改。"
+      }
+    },
     "terminal": {
       "label": "终端",
       "webgl": {
@@ -117,7 +124,24 @@
       "restoreWindow": {
         "title": "恢复窗口位置与大小",
         "description": "在你上次离开的位置重新打开主窗口。下次启动时生效。"
+      },
+      "workspaceWindows": {
+        "title": "工作区窗口",
+        "description": "单窗口模式会为每个本地、WSL 或 SSH 环境复用一个窗口。修改仅对之后打开的窗口生效。",
+        "single": "每个环境使用单个窗口",
+        "multiple": "每个环境使用多个窗口"
       }
+    },
+    "openWith": {
+      "label": "打开方式",
+      "fileAssociations": {
+        "title": "文件关联",
+        "description": "为文件和文件夹添加“使用 Terax 打开”，包括多文件选择。不会更改默认应用。"
+      },
+      "register": "注册",
+      "registering": "注册中...",
+      "unregister": "取消注册",
+      "unregistering": "取消注册中..."
     }
   },
   "editor": {
@@ -141,6 +165,12 @@
       "wordWrap": {
         "title": "自动换行",
         "description": "换行显示长行，而非水平滚动。"
+      },
+      "diffView": {
+        "title": "Git 差异视图",
+        "description": "以内联或并排方式显示 Git 差异。",
+        "inline": "内联",
+        "sideBySide": "并排"
       }
     },
     "saving": {
@@ -161,7 +191,18 @@
       "formatter": {
         "title": "格式化工具",
         "description": "语言服务器在写入前格式化缓冲区；Biome 和 Prettier 从你的 PATH 中对已保存文件运行。",
-        "lsp": "语言服务器"
+        "lsp": "语言服务器",
+        "custom": "自定义命令"
+      },
+      "customCommand": {
+        "title": "自定义命令",
+        "description": "在已保存的文件上运行；{file} 会替换为带引号的路径，省略时自动追加。"
+      },
+      "languageOverrides": {
+        "title": "语言覆盖",
+        "description": "为特定语言使用不同的格式化工具，例如为 Python 使用 Ruff。",
+        "add": "添加覆盖",
+        "remove": "移除覆盖"
       }
     },
     "lsp": {
@@ -190,6 +231,7 @@
       "label": "主题",
       "create": "新建",
       "import": "导入 .terax-theme",
+      "filesAria": "主题文件",
       "editAria": "编辑 {{name}}",
       "removeAria": "移除 {{name}}"
     },
@@ -205,7 +247,14 @@
       "choose": "选择图片",
       "opacity": "不透明度",
       "blur": "模糊",
-      "dropHint": "将图片拖到此处或选择一张。仅存储在本地；未设置前不影响默认外观。"
+      "dropHint": "将图片拖到此处或选择一张。仅存储在本地；未设置前不影响默认外观。",
+      "filesAria": "背景图片文件"
+    },
+    "errors": {
+      "unknown": "未知错误",
+      "read": "无法读取 {{name}}：{{error}}",
+      "notImage": "{{name}} 不是图片",
+      "importImage": "无法导入图片"
     }
   },
   "shortcuts": {
@@ -235,7 +284,34 @@
       "label": "默认设置",
       "chatModel": "对话模型",
       "autocomplete": "自动补全",
-      "notConnectedHint": "{{provider}} 尚未连接，请在下方添加。"
+      "notConnectedHint": "{{provider}} 尚未连接，请在下方添加。",
+      "trigger": {
+        "label": "触发方式",
+        "automatic": "自动（输入时）",
+        "manual": "手动（{{shortcut}}）",
+        "shortcut": "快捷键"
+      }
+    },
+    "local": {
+      "lmstudio": {
+        "description": "通过 LM Studio 的 HTTP 服务器运行 GGUF 模型，请在开发者标签页中启用。",
+        "modelHint": "LM Studio 中已加载的模型 ID，可查看服务器的 /v1/models 页面。"
+      },
+      "mlx": {
+        "description": "通过 mlx_lm.server 在 Apple 芯片设备上推理，需要安装 mlx-lm。",
+        "modelHint": "启动 mlx_lm.server 时使用的 Hugging Face 仓库路径。"
+      },
+      "ollama": {
+        "description": "通过 Ollama 内置的 OpenAI 兼容 API 使用本地模型。",
+        "modelHint": "ollama list 或 ollama pull 中显示的模型名称。"
+      },
+      "openaiCompatible": {
+        "description": "任意 OpenAI 兼容端点，包括 vLLM、Z.AI 和 Fireworks。"
+      },
+      "openrouter": {
+        "description": "OpenRouter 上的任意模型，请输入完整的提供商/模型 ID。",
+        "modelHint": "可在 openrouter.ai/models 浏览模型 ID。"
+      }
     },
     "voice": {
       "title": "语音输入",

@@ -1,3 +1,8 @@
+/**
+ * 本文件呈现模型、提供商和语音输入设置。
+ * 负责绑定已有偏好与密钥状态，固定界面文案从翻译资源读取，不改变连接或保存流程。
+ */
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -130,52 +135,42 @@ type LocalMeta = {
   modelHint: React.ReactNode;
 };
 
-const LOCAL_META: Partial<Record<ProviderId, LocalMeta>> = {
+const getLocalMeta = (t: TFn): Partial<Record<ProviderId, LocalMeta>> => ({
   lmstudio: {
     urlPlaceholder: "http://localhost:1234/v1",
     modelPlaceholder: "qwen2.5-coder-7b-instruct",
-    description:
-      "Run GGUF models via LM Studio's HTTP server (Developer tab → enable).",
-    modelHint: (
-      <>
-        The model id loaded in LM Studio — see the server's{" "}
-        <span className="font-mono">/v1/models</span> page.
-      </>
-    ),
+    description: t("models.local.lmstudio.description"),
+    modelHint: t("models.local.lmstudio.modelHint"),
   },
   mlx: {
     urlPlaceholder: "http://127.0.0.1:8080/v1",
     modelPlaceholder: "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
-    description:
-      "Apple-silicon inference via mlx_lm.server (pip install mlx-lm).",
-    modelHint: <>The Hugging Face repo path you launched mlx_lm.server with.</>,
+    description: t("models.local.mlx.description"),
+    modelHint: t("models.local.mlx.modelHint"),
   },
   ollama: {
     urlPlaceholder: "http://localhost:11434/v1",
     modelPlaceholder: "qwen2.5-coder:7b",
-    description: "Local models via Ollama's built-in OpenAI-compatible API.",
-    modelHint: <>The model name from `ollama list` / `ollama pull`.</>,
+    description: t("models.local.ollama.description"),
+    modelHint: t("models.local.ollama.modelHint"),
   },
   "openai-compatible": {
     urlPlaceholder: "https://api.example.com/v1",
     modelPlaceholder: "gpt-4o, qwen3-max, glm-4.6, …",
-    description: "Any OpenAI-compatible endpoint — vLLM, Z.AI, Fireworks, etc.",
+    description: t("models.local.openaiCompatible.description"),
     modelHint: null,
   },
   openrouter: {
     urlPlaceholder: "",
     modelPlaceholder: "anthropic/claude-sonnet-5, openai/gpt-5.6, …",
-    description: "Any model on OpenRouter — type its full provider/model id.",
-    modelHint: (
-      <>
-        Browse ids at <span className="font-mono">openrouter.ai/models</span>.
-      </>
-    ),
+    description: t("models.local.openrouter.description"),
+    modelHint: t("models.local.openrouter.modelHint"),
   },
-};
+});
 
 export function ModelsSection() {
   const { t } = useTranslation();
+  const localMeta = getLocalMeta(t);
   const [keys, setKeys] = useState<KeysMap | null>(null);
   const [epKeys, setEpKeys] = useState<CustomEndpointKeys>({});
   const [adding, setAdding] = useState<Set<ProviderId>>(new Set());
@@ -424,7 +419,7 @@ export function ModelsSection() {
                   provider={p}
                   configured={configuredIds.has(p.id)}
                   config={localConfig(p.id)!}
-                  meta={LOCAL_META[p.id]!}
+                  meta={localMeta[p.id]!}
                   compatKey={keys[p.id]}
                   onSaveKey={(v) => onSaveKey(p.id, v)}
                   onClearKey={() => onClearKey(p.id)}
@@ -436,7 +431,7 @@ export function ModelsSection() {
                   provider={p}
                   configured={configuredIds.has(p.id)}
                   config={localConfig(p.id)!}
-                  meta={LOCAL_META[p.id]!}
+                  meta={localMeta[p.id]!}
                   onSaveKey={(v) => onSaveKey(p.id, v)}
                   onClearKey={() => onClearKey(p.id)}
                   onRemove={() => removeProvider(p.id)}
@@ -820,7 +815,7 @@ function AutocompleteRow({
         </div>
       </FieldRow>
       {enabled ? (
-        <FieldRow label="Trigger">
+        <FieldRow label={t("models.defaults.trigger.label")}>
           <Select
             value={trigger}
             onValueChange={(v) =>
@@ -831,9 +826,13 @@ function AutocompleteRow({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="auto">Automatic (as you type)</SelectItem>
+              <SelectItem value="auto">
+                {t("models.defaults.trigger.automatic")}
+              </SelectItem>
               <SelectItem value="manual">
-                Manual ({aiCompleteShortcut || "shortcut"})
+                {t("models.defaults.trigger.manual", {
+                  shortcut: aiCompleteShortcut || t("models.defaults.trigger.shortcut"),
+                })}
               </SelectItem>
             </SelectContent>
           </Select>

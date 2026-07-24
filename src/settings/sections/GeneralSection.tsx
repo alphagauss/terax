@@ -292,10 +292,10 @@ export function GeneralSection() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Source Control</Label>
+        <Label>{t("general.sourceControl.label")}</Label>
         <SettingRow
-          title="Show Undo Commit"
-          description="Show an action on the latest commit that moves HEAD to its parent and keeps the changes staged."
+          title={t("general.sourceControl.showUndoCommit.title")}
+          description={t("general.sourceControl.showUndoCommit.description")}
         >
           <Switch
             checked={sourceControlShowUndoCommit}
@@ -307,34 +307,30 @@ export function GeneralSection() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label>Terminal</Label>
+        <Label>{t("general.terminal.label")}</Label>
         <SettingRow
           title={
             <span className="inline-flex items-center gap-1.5">
-              Use WebGL renderer
+              {t("general.terminal.webgl.title")}
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span
                       role="img"
                       className="cursor-help text-[11px] text-muted-foreground/70 leading-none"
-                      aria-label="More info about WebGL renderer"
+                      aria-label={t("general.terminal.webgl.moreInfo")}
                     >
                       ⓘ
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-65 text-[11px]">
-                    xterm's WebGL renderer caches glyphs in a GPU texture atlas.
-                    On some macOS setups (especially with Nerd Fonts), the atlas
-                    corrupts and terminal text becomes unreadable. Turn this off
-                    as a fallback — performance dips slightly, but text renders
-                    correctly via the DOM renderer.
+                    {t("general.terminal.webgl.tooltip")}
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </span>
           }
-          description="Hardware-accelerated rendering. Turn off if text shows corruption or blank tiles."
+          description={t("general.terminal.webgl.description")}
         >
           <Switch
             checked={terminalWebglEnabled}
@@ -416,8 +412,8 @@ export function GeneralSection() {
           </Select>
         </SettingRow>
         <SettingRow
-          title="Letter spacing"
-          description="Extra horizontal space between characters (px). Use negative values to tighten Nerd Fonts."
+          title={t("general.terminal.letterSpacing.title")}
+          description={t("general.terminal.letterSpacing.description")}
         >
           <Select
             value={String(terminalLetterSpacing)}
@@ -522,8 +518,8 @@ export function GeneralSection() {
             />
           </SettingRow>
           <SettingRow
-            title="Workspace windows"
-            description="Single window reuses one window per Local, WSL, or SSH environment. Changes apply to windows opened afterwards."
+            title={t("general.startup.workspaceWindows.title")}
+            description={t("general.startup.workspaceWindows.description")}
           >
             <Select
               value={workspaceWindowMode}
@@ -538,10 +534,10 @@ export function GeneralSection() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="single" className="text-[12px]">
-                  Single window per environment
+                  {t("general.startup.workspaceWindows.single")}
                 </SelectItem>
                 <SelectItem value="multiple" className="text-[12px]">
-                  Multiple windows per environment
+                  {t("general.startup.workspaceWindows.multiple")}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -551,10 +547,10 @@ export function GeneralSection() {
 
       {IS_WINDOWS ? (
         <div className="flex flex-col gap-2">
-          <Label>Open With</Label>
+          <Label>{t("general.openWith.label")}</Label>
           <SettingRow
-            title="File associations"
-            description="Add Open with Terax for files and folders, including multi-file selections. This does not change default apps."
+            title={t("general.openWith.fileAssociations.title")}
+            description={t("general.openWith.fileAssociations.description")}
           >
             <div className="flex gap-2">
               <Button
@@ -562,7 +558,9 @@ export function GeneralSection() {
                 onClick={() => void registerOpenWith()}
                 disabled={openWithAction !== null}
               >
-                {openWithAction === "register" ? "Registering..." : "Register"}
+                {openWithAction === "register"
+                  ? t("general.openWith.registering")
+                  : t("general.openWith.register")}
               </Button>
               <Button
                 size="sm"
@@ -571,8 +569,8 @@ export function GeneralSection() {
                 disabled={openWithAction !== null}
               >
                 {openWithAction === "remove"
-                  ? "Unregistering..."
-                  : "Unregister"}
+                  ? t("general.openWith.unregistering")
+                  : t("general.openWith.unregister")}
               </Button>
             </div>
           </SettingRow>
