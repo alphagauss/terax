@@ -1,9 +1,9 @@
-//! Shared SSH transport and remote command execution.
+//! SSH transport、认证、远端环境探测与命令执行。
 //!
-//! The command/channel lifecycle is adapted from Eussh's `ssh/session.rs`; the
-//! authentication, proxy and remote-forwarding behavior is supplemented from
-//! meatshell. This version keeps one transport per Terax Remote Workspace and
-//! opens independent channels for terminals, SFTP, commands and tunnels.
+//! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
+//! channel。连接关键路径只确认 shell 与 Workspace root，SFTP 保持按需初始化。
+//! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
+//! 补充参考 meatshell。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -100,6 +100,9 @@ pub struct RemoteWorkspace {
 }
 
 impl RemoteWorkspace {
+    /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
+    ///
+    /// SFTP 在 Explorer 首次读取时按需创建，不属于认证后的连接关键路径。
     pub async fn connect(
         request: ConnectRequest,
         app: tauri::AppHandle,
@@ -184,24 +187,13 @@ impl RemoteWorkspace {
             .filter(|value| !value.is_empty())
             .map(|value| expand_remote_home(value, &detected_home))
             .unwrap_or(detected_home);
-        let root = match super::sftp::canonicalize(&workspace, &requested_root).await {
+        let root = match resolve_workspace_root(&workspace, &requested_root).await {
             Ok(root) => root,
             Err(error) => {
                 workspace.disconnect().await;
                 return Err(format!("invalid SSH rootPath {requested_root}: {error}"));
             }
         };
-        let root_stat = match super::sftp::stat(&workspace, &root).await {
-            Ok(stat) => stat,
-            Err(error) => {
-                workspace.disconnect().await;
-                return Err(format!("cannot access SSH rootPath {root}: {error}"));
-            }
-        };
-        if root_stat.kind != super::sftp::RemoteEntryKind::Dir {
-            workspace.disconnect().await;
-            return Err(format!("SSH rootPath is not a directory: {root}"));
-        }
         *workspace.home.write().await = root;
         Ok(workspace)
     }
@@ -378,6 +370,49 @@ async fn detect_linux_bash_home(workspace: &RemoteWorkspace) -> Result<String, S
         return Err(format!("Remote SSH HOME is not an absolute path: {home}"));
     }
     Ok(home)
+}
+
+/// 通过远端 shell 确认 Workspace root 可进入，并返回物理规范路径。
+///
+/// 该探测不启动 SFTP，使认证后的前台终端无需等待文件管理协议初始化。
+async fn resolve_workspace_root(
+    workspace: &RemoteWorkspace,
+    requested_root: &str,
+) -> Result<String, String> {
+    validate_remote_path(requested_root)?;
+    let output = workspace
+        .exec("pwd -P", Some(requested_root), Duration::from_secs(10))
+        .await?;
+    parse_workspace_root(output)
+}
+
+/// 解析 root 探测结果并锁定绝对、无控制字符的远端路径。
+fn parse_workspace_root(output: ExecOutput) -> Result<String, String> {
+    if output.timed_out {
+        return Err("timed out while resolving the remote Workspace root".into());
+    }
+    if output.truncated {
+        return Err("remote Workspace root output exceeded the size limit".into());
+    }
+    if output.exit_code != Some(0) {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "remote Workspace root is not an accessible directory".into()
+        } else {
+            format!("remote Workspace root is not accessible: {detail}")
+        });
+    }
+    let root = std::str::from_utf8(&output.stdout)
+        .map_err(|_| "remote Workspace root is not valid UTF-8".to_string())?;
+    let root = root.strip_suffix('\n').unwrap_or(root);
+    let root = root.strip_suffix('\r').unwrap_or(root).to_string();
+    validate_remote_path(&root)?;
+    if !root.starts_with('/') {
+        return Err(format!(
+            "remote Workspace root is not an absolute path: {root}"
+        ));
+    }
+    Ok(root)
 }
 
 #[derive(Default, Debug)]
@@ -620,7 +655,10 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod path_tests {
-    use super::{client_config, expand_remote_home, password_auth_result, PrimaryAuthResult};
+    use super::{
+        client_config, expand_remote_home, parse_workspace_root, password_auth_result, ExecOutput,
+        PrimaryAuthResult,
+    };
 
     #[test]
     fn expands_common_remote_home_forms() {
@@ -648,5 +686,47 @@ mod path_tests {
         let banner = format!("{:?}", client_config(30).client_id);
         assert!(!banner.contains("OpenSSH"), "unexpected banner: {banner}");
         assert!(banner.contains("russh"), "unexpected banner: {banner}");
+    }
+
+    #[test]
+    fn workspace_root_probe_requires_a_successful_absolute_path() {
+        let valid = parse_workspace_root(ExecOutput {
+            stdout: b"/srv/project\n".to_vec(),
+            exit_code: Some(0),
+            ..ExecOutput::default()
+        })
+        .unwrap();
+        assert_eq!(valid, "/srv/project");
+
+        let trailing_space = parse_workspace_root(ExecOutput {
+            stdout: b"/srv/project \n".to_vec(),
+            exit_code: Some(0),
+            ..ExecOutput::default()
+        })
+        .unwrap();
+        assert_eq!(trailing_space, "/srv/project ");
+
+        let newline_in_path = parse_workspace_root(ExecOutput {
+            stdout: b"/srv/project\n\n".to_vec(),
+            exit_code: Some(0),
+            ..ExecOutput::default()
+        });
+        assert!(newline_in_path.is_err());
+
+        let relative = parse_workspace_root(ExecOutput {
+            stdout: b"project\n".to_vec(),
+            exit_code: Some(0),
+            ..ExecOutput::default()
+        })
+        .unwrap_err();
+        assert!(relative.contains("absolute"));
+
+        let failed = parse_workspace_root(ExecOutput {
+            stderr: b"cd: no such file or directory".to_vec(),
+            exit_code: Some(1),
+            ..ExecOutput::default()
+        })
+        .unwrap_err();
+        assert!(failed.contains("no such file"));
     }
 }

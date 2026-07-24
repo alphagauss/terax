@@ -95,6 +95,7 @@ import {
   navigateFocusedBlocks,
   type TerminalPaneHandle,
   useTerminalFileDrop,
+  whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
@@ -387,6 +388,26 @@ export default function App() {
     tabs,
     home,
   );
+  const [explorerStartupReady, setExplorerStartupReady] = useState(
+    () => currentWorkspaceEnv().kind === "local",
+  );
+
+  useEffect(() => {
+    if (explorerStartupReady || !spacesHydrated) return;
+    if (workspaceEnv.kind === "local" || activeTab?.kind !== "terminal") {
+      setExplorerStartupReady(true);
+      return;
+    }
+
+    let active = true;
+    // 只在首次远端启动且前台页为终端时排序，后续切换标签不重复阻塞 Explorer。
+    void whenSessionReady(activeTab.terminalId).then(() => {
+      if (active) setExplorerStartupReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeTab, explorerStartupReady, spacesHydrated, workspaceEnv.kind]);
 
   useWindowTitle(activeTab, explorerRoot);
 
@@ -1487,11 +1508,10 @@ export default function App() {
                     {sidebarView === "explorer" ? (
                       <FileExplorer
                         ref={explorerRef}
-                        rootPath={explorerRoot}
+                        rootPath={explorerStartupReady ? explorerRoot : null}
+                        loadingRoot={!explorerStartupReady && !environmentError}
                         onOpenFolder={
-                          workspaceEnv.kind === "local"
-                            ? openFolder
-                            : undefined
+                          workspaceEnv.kind === "local" ? openFolder : undefined
                         }
                         gitStatus={
                           explorerGitDecorations ? sourceControl.status : null

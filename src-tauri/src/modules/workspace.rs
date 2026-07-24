@@ -530,6 +530,75 @@ fn run_wsl_sh(distro: &str, script: &str) -> Result<String, String> {
 }
 
 #[cfg(windows)]
+#[derive(Clone)]
+struct WslRuntimeInfo {
+    home: String,
+    login_shell: String,
+}
+
+#[cfg(windows)]
+static WSL_RUNTIME_CACHE: OnceLock<Mutex<HashMap<String, WslRuntimeInfo>>> = OnceLock::new();
+
+#[cfg(windows)]
+const WSL_RUNTIME_PROBE: &str = r#"uid="$(id -u 2>/dev/null || printf '')"
+entry=''
+if [ -n "$uid" ] && command -v getent >/dev/null 2>&1; then
+  entry="$(getent passwd "$uid" 2>/dev/null || true)"
+fi
+if [ -z "$entry" ] && [ -n "$uid" ] && [ -r /etc/passwd ]; then
+  entry="$(awk -F: -v u="$uid" '$3 == u { print; exit }' /etc/passwd 2>/dev/null)"
+fi
+shell=''
+if [ -n "$entry" ]; then
+  shell="${entry##*:}"
+fi
+if [ -z "$shell" ] && [ -n "$SHELL" ]; then
+  shell="$SHELL"
+fi
+if [ -z "$shell" ]; then
+  shell=/bin/sh
+fi
+printf '%s\000%s' "$HOME" "$shell""#;
+
+#[cfg(windows)]
+/// 解析一次 WSL 探测返回的 HOME 与登录 shell。
+fn parse_wsl_runtime_info(output: &str) -> Result<WslRuntimeInfo, String> {
+    let (home, login_shell) = output
+        .split_once('\0')
+        .ok_or_else(|| "invalid WSL runtime probe output".to_string())?;
+    let home = home.trim().to_string();
+    let login_shell = login_shell.trim().to_string();
+    if home.is_empty() {
+        return Err("WSL home directory is unavailable".into());
+    }
+    Ok(WslRuntimeInfo {
+        home,
+        login_shell: if login_shell.is_empty() {
+            "/bin/sh".into()
+        } else {
+            login_shell
+        },
+    })
+}
+
+#[cfg(windows)]
+/// 在当前进程内复用同一发行版的 HOME 与登录 shell 探测结果。
+///
+/// 锁覆盖探测过程，避免首个终端与环境初始化并发启动两个 `wsl.exe`。
+fn wsl_runtime_info(distro: &str) -> Result<WslRuntimeInfo, String> {
+    let cache = WSL_RUNTIME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache
+        .lock()
+        .map_err(|_| "WSL runtime cache is poisoned".to_string())?;
+    if let Some(info) = cache.get(distro) {
+        return Ok(info.clone());
+    }
+    let info = parse_wsl_runtime_info(&run_wsl_sh(distro, WSL_RUNTIME_PROBE)?)?;
+    cache.insert(distro.to_string(), info.clone());
+    Ok(info)
+}
+
+#[cfg(windows)]
 pub(crate) fn normalize_wsl_value(output: String, fallback: &str) -> String {
     let value = output
         .lines()
@@ -607,6 +676,9 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+/// 返回指定 WSL 发行版的用户主目录。
+///
+/// 首次调用会同时探测登录 shell，后续终端启动复用同一进程内的结果。
 pub fn wsl_home(distro: String) -> Result<String, String> {
     #[cfg(not(windows))]
     {
@@ -615,40 +687,14 @@ pub fn wsl_home(distro: String) -> Result<String, String> {
     }
     #[cfg(windows)]
     {
-        let out = run_wsl_sh(&distro, "printf %s \"$HOME\"")?;
-        let home = normalize_wsl_value(out, "");
-        if home.is_empty() {
-            Err(format!("could not resolve WSL home for {distro}"))
-        } else {
-            Ok(home)
-        }
+        Ok(wsl_runtime_info(&distro)?.home)
     }
 }
 
 #[cfg(windows)]
+/// 返回指定 WSL 发行版的登录 shell，并复用环境初始化阶段的探测结果。
 pub fn wsl_login_shell(distro: String) -> Result<String, String> {
-    const SCRIPT: &str = r#"uid="$(id -u 2>/dev/null || printf '')"
-entry=''
-if [ -n "$uid" ] && command -v getent >/dev/null 2>&1; then
-  entry="$(getent passwd "$uid" 2>/dev/null || true)"
-fi
-if [ -z "$entry" ] && [ -n "$uid" ] && [ -r /etc/passwd ]; then
-  entry="$(awk -F: -v u="$uid" '$3 == u { print; exit }' /etc/passwd 2>/dev/null)"
-fi
-shell=''
-if [ -n "$entry" ]; then
-  shell="${entry##*:}"
-fi
-if [ -z "$shell" ] && [ -n "$SHELL" ]; then
-  shell="$SHELL"
-fi
-if [ -z "$shell" ]; then
-  shell=/bin/sh
-fi
-printf %s "$shell""#;
-
-    let out = run_wsl_sh(&distro, SCRIPT)?;
-    Ok(normalize_wsl_value(out, "/bin/sh"))
+    Ok(wsl_runtime_info(&distro)?.login_shell)
 }
 
 #[cfg(all(test, windows))]
@@ -751,6 +797,17 @@ mod tests {
     #[test]
     fn normalize_wsl_value_falls_back_when_empty() {
         assert_eq!(normalize_wsl_value(" \n".into(), "/bin/sh"), "/bin/sh");
+    }
+
+    #[test]
+    fn parses_wsl_runtime_probe_and_defaults_an_empty_shell() {
+        let parsed = parse_wsl_runtime_info("/home/alice\0/bin/fish").unwrap();
+        assert_eq!(parsed.home, "/home/alice");
+        assert_eq!(parsed.login_shell, "/bin/fish");
+
+        let fallback = parse_wsl_runtime_info("/home/alice\0").unwrap();
+        assert_eq!(fallback.login_shell, "/bin/sh");
+        assert!(parse_wsl_runtime_info("missing-delimiter").is_err());
     }
 }
 

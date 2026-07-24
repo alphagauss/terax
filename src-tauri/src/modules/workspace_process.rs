@@ -1,3 +1,7 @@
+//! Workspace 子进程的启动参数、环境身份、单实例锁和持久化状态管理。
+//!
+//! 启动阶段只执行本地且有界的校验，远端或 WSL 可用性由窗口显示后的环境初始化负责。
+
 use crate::modules::storage::{write_atomic, FileLock};
 use crate::modules::workspace::{validate_wsl_distro_name, WorkspaceEnv};
 use serde::{Deserialize, Serialize};
@@ -335,18 +339,17 @@ fn filename_component(value: &str) -> String {
     }
 }
 
+/// 执行窗口创建前不需要启动外部环境的轻量校验。
+///
+/// WSL 发行版是否可用留给窗口出现后的环境初始化确认。
 fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
     match env {
         WorkspaceEnv::Local => Ok(()),
         WorkspaceEnv::Wsl { distro } => {
             #[cfg(windows)]
             {
-                let installed = crate::modules::workspace::list_distros_blocking()?;
-                if installed.iter().any(|item| item.name == *distro) {
-                    Ok(())
-                } else {
-                    Err(format!("WSL distribution is not installed: {distro}"))
-                }
+                let _ = distro;
+                Ok(())
             }
             #[cfg(not(windows))]
             {
@@ -610,6 +613,13 @@ pub fn get_workspace_bootstrap(
     state.bootstrap.clone()
 }
 
+/// 判断 Workspace 是否需要在主应用挂载前显示轻量加载窗口。
+///
+/// 本地环境保持隐藏以维持直接进入主界面的启动体验，WSL 和 SSH 则提前提供连接反馈。
+pub(crate) fn should_show_loading_window(environment: &WorkspaceEnv) -> bool {
+    !matches!(environment, WorkspaceEnv::Local)
+}
+
 #[tauri::command]
 pub fn take_workspace_open_files(
     state: tauri::State<'_, WorkspaceProcessState>,
@@ -693,6 +703,17 @@ pub fn spawn_workspace_process(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_remote_workspaces_show_the_loading_window_early() {
+        assert!(!should_show_loading_window(&WorkspaceEnv::Local));
+        assert!(should_show_loading_window(&WorkspaceEnv::Wsl {
+            distro: "Ubuntu".to_string(),
+        }));
+        assert!(should_show_loading_window(&WorkspaceEnv::Ssh {
+            profile_id: "profile-1".to_string(),
+        }));
+    }
 
     #[test]
     fn parser_rejects_unknown_duplicate_and_conflicting_arguments() {

@@ -1,3 +1,8 @@
+/**
+ * 本文件在 Workspace 启动数据就绪后挂载 Terax 主应用，并显示完成初始化的窗口。
+ * WSL 与 SSH 可由原生端提前显示冷启动占位，本地窗口保持隐藏直至主应用挂载。
+ */
+
 import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
 import "./i18n";
@@ -44,14 +49,12 @@ if ("requestIdleCallback" in window) {
   setTimeout(preloadChinese, 0);
 }
 
-// Window starts hidden (per tauri.conf.json) so users never see a transparent
-// shadow-only frame before React paints. Use setTimeout — rAF is throttled
-// while the window is hidden and would never fire.
+// 隐藏窗口中的 rAF 可能被限流，使用短定时器确保本地窗口在主应用挂载后显示。
 const showWindow = () => {
   getCurrentWindow()
     .show()
-    .catch((e) => console.error("window.show failed:", e));
+    .catch((error) => console.error("window.show failed:", error));
 };
 setTimeout(showWindow, 50);
-// Safety net: if the first show somehow fails to take effect, force again.
+// 幂等兜底，避免个别平台首次调用成功但窗口尚未真正显示。
 setTimeout(showWindow, 500);

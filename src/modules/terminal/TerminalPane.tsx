@@ -1,3 +1,9 @@
+/**
+ * 本文件渲染单个终端叶子视图及其查找、命令块和启动反馈。
+ * 终端会话由模块级池持有，视图隐藏时不会销毁 PTY。
+ */
+
+import { Spinner } from "@/components/ui/spinner";
 import { usePresence } from "@/lib/usePresence";
 import {
   FIND_PRESENCE_MS,
@@ -8,6 +14,7 @@ import {
   type FindWidgetHandle,
 } from "@/modules/find";
 import { useTheme } from "@/modules/theme";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { SearchAddon } from "@xterm/addon-search";
 import {
   forwardRef,
@@ -19,12 +26,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { BlockOverlay } from "./block/BlockOverlay";
 import { BlockWatermark } from "./block/BlockWatermark";
 import {
   focusLeafInput,
   submitToLeaf,
   useTerminalSession,
+  whenSessionReady,
 } from "./lib/useTerminalSession";
 
 const TERM_DECORATIONS = {
@@ -62,7 +71,7 @@ type Props = {
   leafId: number;
   /** Tab containing this pane is on screen. */
   visible: boolean;
-  /** This leaf is the active pane within its tab — receives auto-focus. */
+  /** 当前叶子在标签页内激活时接收自动聚焦。 */
   focused?: boolean;
   initialCwd?: string;
   /** Enable command-block decorations (OSC 133) for this terminal. */
@@ -71,6 +80,11 @@ type Props = {
   onCwd?: (leafId: number, cwd: string) => void;
 };
 
+/**
+ * 单个终端叶子组件。
+ *
+ * 复用模块级 PTY 会话，并在前台 shell 首次就绪前显示局部加载反馈。
+ */
 export const TerminalPane = memo(
   forwardRef<TerminalPaneHandle, Props>(function TerminalPane(
     {
@@ -93,8 +107,11 @@ export const TerminalPane = memo(
       useState<FindOptions>(DEFAULT_FIND_OPTIONS);
     const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
     const [findResult, setFindResult] = useState<FindResult>();
+    const remoteWorkspace = currentWorkspaceEnv().kind !== "local";
+    const [shellReady, setShellReady] = useState(!remoteWorkspace);
     const findPresence = usePresence(findOpen, FIND_PRESENCE_MS);
     const { resolvedMode, themeId, customThemes } = useTheme();
+    const { t } = useTranslation("common");
 
     const session = useTerminalSession({
       leafId,
@@ -107,6 +124,21 @@ export const TerminalPane = memo(
       onExit: (c) => onExit?.(leafId, c),
       onCwd: (c) => onCwd?.(leafId, c),
     });
+
+    useEffect(() => {
+      if (!remoteWorkspace) {
+        setShellReady(true);
+        return;
+      }
+      let active = true;
+      setShellReady(false);
+      void whenSessionReady(leafId).then(() => {
+        if (active) setShellReady(true);
+      });
+      return () => {
+        active = false;
+      };
+    }, [leafId, remoteWorkspace]);
 
     useEffect(() => {
       // Defer one frame so CSS-variable token resolution sees the new class.
@@ -193,6 +225,15 @@ export const TerminalPane = memo(
     };
 
     const promptReady = session.blockMode === "prompt";
+    const loadingIndicator =
+      visible && !shellReady ? (
+        <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-background">
+          <Spinner
+            className="size-4 motion-reduce:animate-none"
+            aria-label={t("loading")}
+          />
+        </div>
+      ) : null;
     const findWidget =
       findPresence.mounted && visible ? (
         <div className="pointer-events-none absolute top-1 right-6 left-2 z-30 flex justify-end">
@@ -232,6 +273,7 @@ export const TerminalPane = memo(
           style={hideStyle}
         >
           <div className="relative min-h-0 flex-1">
+            {loadingIndicator}
             {findWidget}
             {/* biome-ignore lint/a11y/noStaticElementInteractions: terminal surface; pointer selects command blocks */}
             <div
@@ -273,6 +315,7 @@ export const TerminalPane = memo(
 
     return (
       <div className="zoom-exempt relative h-full w-full" style={hideStyle}>
+        {loadingIndicator}
         {findWidget}
         <div ref={containerRef} className="absolute inset-0" />
       </div>

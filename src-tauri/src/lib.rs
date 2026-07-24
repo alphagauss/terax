@@ -144,6 +144,8 @@ pub fn run() {
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
     let launch_files = workspace_process.bootstrap().launch_files.clone();
     let window_geometry = workspace_process.bootstrap().window_geometry;
+    let show_loading_window =
+        workspace_process::should_show_loading_window(&workspace_process.bootstrap().env);
     let window_state_path = app_data::directory(app_data::Directory::WindowState)
         .map(|directory| directory.join(&workspace_process.bootstrap().window_state_filename))
         .unwrap_or_else(|error| {
@@ -163,9 +165,7 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     builder
         .plugin(tauri_plugin_process::init())
-        // Skip restoring VISIBLE — frontend calls window.show() after first
-        // paint so the user never sees a transparent window-shadow flash on
-        // Windows/Linux.
+        // 不恢复 VISIBLE。本地窗口等待前端首屏挂载，远端窗口在 Ready 阶段显示加载反馈。
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_filename(window_state_path.to_string_lossy().into_owned())
@@ -361,11 +361,14 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(move |app, event| {
             if let tauri::RunEvent::Ready = event {
-                if let (Some(geometry), Some(main)) =
-                    (window_geometry, app.get_webview_window("main"))
-                {
-                    let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));
-                    let _ = main.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+                if let Some(main) = app.get_webview_window("main") {
+                    if let Some(geometry) = window_geometry {
+                        let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));
+                        let _ = main.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+                    }
+                    if show_loading_window {
+                        let _ = main.show();
+                    }
                 }
             }
             // Servers exit on stdin EOF, but destructors are not guaranteed

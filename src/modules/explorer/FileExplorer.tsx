@@ -5,6 +5,7 @@
  */
 
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,6 +122,7 @@ function TransferStrategyMenu({
 
 type Props = {
   rootPath: string | null;
+  loadingRoot?: boolean;
   onOpenFolder?: () => void;
   activeFilePath?: string | null;
   onOpenFile: (path: string, pin?: boolean) => void;
@@ -272,6 +274,7 @@ export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
     {
       rootPath,
+      loadingRoot = false,
       onOpenFolder,
       activeFilePath,
       onOpenFile,
@@ -545,6 +548,17 @@ export const FileExplorer = memo(
     });
 
     if (!rootPath) {
+      if (loadingRoot) {
+        return (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
+            <Spinner
+              className="size-4 motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+            <span>{t("loading")}</span>
+          </div>
+        );
+      }
       return (
         <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
           <HugeiconsIcon
@@ -898,9 +912,13 @@ export const FileExplorer = memo(
                     aria-level={1}
                     aria-disabled
                     tabIndex={-1}
-                    className="px-3 py-2 text-[11px] text-muted-foreground"
+                    className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
                   >
-                    {t("loading")}
+                    <Spinner
+                      className="size-3 motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
+                    <span>{t("loading")}</span>
                   </div>
                 )}
                 {root?.status === "error" && (

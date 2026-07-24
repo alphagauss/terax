@@ -12,14 +12,21 @@ import { act, createElement, forwardRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ environmentKind: "local" }));
+const mocks = vi.hoisted(() => ({
+  environmentKind: "local",
+  rootStatus: "loaded",
+}));
 
 afterEach(() => {
   mocks.environmentKind = "local";
+  mocks.rootStatus = "loaded";
 });
 
 vi.mock("@/components/ui/button", () => ({
   Button: ({ children }: { children?: React.ReactNode }) => children,
+}));
+vi.mock("@/components/ui/spinner", () => ({
+  Spinner: () => createElement("span", null, "spinner"),
 }));
 
 vi.mock("@/components/ui/alert-dialog", () => {
@@ -139,7 +146,7 @@ vi.mock("./lib/useFileTree", () => ({
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     movePath: vi.fn(),
     nodes: {
-      "/home/remote": { status: "loaded", entries: [] },
+      "/home/remote": { status: mocks.rootStatus, entries: [] },
     },
     pendingCreate: null,
     refresh: vi.fn(),
@@ -192,6 +199,44 @@ describe("file opening render path", () => {
     act(() => root.unmount());
   });
 
+  it("shows the Explorer loading state instead of the missing-directory state", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: null,
+          loadingRoot: true,
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("spinner");
+    expect(container.textContent).toContain("loading");
+    expect(container.textContent).not.toContain("noCurrentDirectory");
+    act(() => root.unmount());
+  });
+
+  it("keeps an animated indicator while the first root directory is loading", () => {
+    mocks.rootStatus = "loading";
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+    expect(container.textContent).toContain("spinner");
+    expect(container.textContent).toContain("loading");
+    act(() => root.unmount());
+  });
+
   it("only renders the folder picker entry when the parent supplies it", () => {
     const props = { rootPath: null, onOpenFile: vi.fn() };
     const container = document.createElement("div");
@@ -217,6 +262,14 @@ describe("file opening render path", () => {
     expect(viewRegistrySource).toContain("<EditorView");
     expect(viewRegistrySource).toContain('tab.kind === "markdown"');
     expect(viewRegistrySource).toContain("<MarkdownView");
+  });
+
+  it("keeps a loading surface for the visible cold terminal", () => {
+    expect(viewRegistrySource).toContain(
+      'currentWorkspaceEnv().kind === "local"',
+    );
+    expect(viewRegistrySource).toContain('tab.kind !== "terminal"');
+    expect(viewRegistrySource).toContain("<Spinner");
   });
 
   it("offers Direct and Archive transfers in a WSL workspace", () => {

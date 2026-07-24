@@ -1,3 +1,11 @@
+/**
+ * 本文件集中注册 Workbench 页面类型及其渲染入口。
+ *
+ * 冷启动页面不会提前挂载昂贵内容，仅为前台终端保留轻量加载反馈。
+ */
+
+import { useTranslation } from "react-i18next";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
   AiDiffView,
@@ -12,6 +20,7 @@ import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPrevi
 import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
 import { type TerminalPaneHandle, TerminalView } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench/types";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -58,13 +67,37 @@ type Props = {
   services: WorkbenchViewServices;
 };
 
+/**
+ * 渲染一个已注册的 Workbench 页面。
+ *
+ * 冷启动终端仅在前台显示轻量加载反馈，其余页面仍按原有激活流程挂载。
+ */
 export function WorkbenchRegisteredView({
   tab,
   visible,
   focused,
   services,
 }: Props) {
-  if (tab.cold) return null;
+  const { t } = useTranslation("common");
+
+  if (tab.cold) {
+    if (
+      currentWorkspaceEnv().kind === "local" ||
+      tab.kind !== "terminal" ||
+      !visible
+    ) {
+      return null;
+    }
+
+    return (
+      <div className="workspace-surface absolute inset-0 grid place-items-center">
+        <Spinner
+          className="size-4 motion-reduce:animate-none"
+          aria-label={t("loading")}
+        />
+      </div>
+    );
+  }
 
   return (
     <div

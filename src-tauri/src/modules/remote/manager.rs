@@ -1,7 +1,7 @@
 //! SSH 连接、重连与隧道运行时生命周期协调。
 //!
-//! 连接成功后从 profile 的持久化隧道配置逐条启动已启用项。单条失败会被
-//! 记录并通知前端，但不会中断其他隧道或使 SSH 连接失败。
+//! 认证和 Workspace root 就绪后立即发布连接状态，持久化隧道随后在后台恢复。
+//! 单条隧道失败会被记录并通知前端，但不会中断其他隧道或使 SSH 连接失败。
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
@@ -42,6 +42,9 @@ impl Default for RemoteManager {
 }
 
 impl RemoteManager {
+    /// 建立或替换一个 SSH Workspace 连接。
+    ///
+    /// 认证与 root 探测成功后立即返回，隧道恢复转入受 profile 连接锁保护的后台任务。
     pub async fn connect(
         self: &Arc<Self>,
         request: ConnectRequest,
@@ -109,26 +112,6 @@ impl RemoteManager {
             .write()
             .await
             .insert(profile_id.clone(), workspace.clone());
-        let restarted = match previous {
-            Some(previous) => {
-                let restarted = self
-                    .tunnels
-                    .restart_profile(
-                        &profile_id,
-                        previous.clone(),
-                        workspace.clone(),
-                        auto_start_tunnels,
-                    )
-                    .await;
-                previous.disconnect().await;
-                Some(restarted)
-            }
-            None => Some(
-                self.tunnels
-                    .start_profile(workspace.clone(), auto_start_tunnels)
-                    .await,
-            ),
-        };
         let info = ConnectionInfo {
             profile_id: profile_id.clone(),
             status: ConnectionStatus::Connected,
@@ -136,41 +119,85 @@ impl RemoteManager {
             message: None,
         };
         self.set_status(&app, info.clone()).await;
+        self.spawn_monitor(workspace.clone(), app.clone());
+        self.spawn_tunnel_restore(profile_id, previous, workspace, auto_start_tunnels, app);
+        Ok(info)
+    }
 
-        if let Some(restarted) = restarted {
-            for tunnel in restarted.stopped {
-                Self::emit_tunnel_event(
-                    &app,
-                    TunnelEventKind::Stopped,
-                    &profile_id,
+    /// 在连接返回后恢复隧道，避免端口转发阻塞终端和 Explorer 首屏。
+    ///
+    /// 任务重新获取 profile 连接锁并确认 workspace 仍是当前实例，防止快速断开或
+    /// 重连时把旧 transport 的隧道发布到新连接。
+    fn spawn_tunnel_restore(
+        self: &Arc<Self>,
+        profile_id: String,
+        previous: Option<Arc<RemoteWorkspace>>,
+        workspace: Arc<RemoteWorkspace>,
+        configs: Vec<TunnelConfig>,
+        app: tauri::AppHandle,
+    ) {
+        let manager = Arc::clone(self);
+        tauri::async_runtime::spawn(async move {
+            let connect_lock = manager.connect_lock(&profile_id);
+            let _connect_guard = connect_lock.lock().await;
+            if !manager.is_current(&workspace).await {
+                if let Some(previous) = previous {
+                    previous.disconnect().await;
+                }
+                return;
+            }
+
+            let restarted = match previous {
+                Some(previous) => {
+                    let restarted = manager
+                        .tunnels
+                        .restart_profile(&profile_id, previous.clone(), workspace, configs)
+                        .await;
+                    previous.disconnect().await;
+                    restarted
+                }
+                None => manager.tunnels.start_profile(workspace, configs).await,
+            };
+            Self::emit_tunnel_restart(&app, &profile_id, restarted);
+        });
+    }
+
+    /// 发布一次后台隧道恢复产生的停止、启动和失败事件。
+    fn emit_tunnel_restart(
+        app: &tauri::AppHandle,
+        profile_id: &str,
+        restarted: super::tunnel::ProfileTunnelRestart,
+    ) {
+        for tunnel in restarted.stopped {
+            Self::emit_tunnel_event(
+                app,
+                TunnelEventKind::Stopped,
+                profile_id,
+                Some(tunnel),
+                None,
+            );
+        }
+        for result in restarted.started {
+            match result {
+                Ok(tunnel) => Self::emit_tunnel_event(
+                    app,
+                    TunnelEventKind::Started,
+                    profile_id,
                     Some(tunnel),
                     None,
-                );
-            }
-            for result in restarted.started {
-                match result {
-                    Ok(tunnel) => Self::emit_tunnel_event(
-                        &app,
-                        TunnelEventKind::Started,
-                        &profile_id,
-                        Some(tunnel),
-                        None,
-                    ),
-                    Err(error) => {
-                        log::warn!("failed to restore SSH tunnel: {}", error.message);
-                        Self::emit_tunnel_event(
-                            &app,
-                            TunnelEventKind::Failed,
-                            &profile_id,
-                            error.info,
-                            Some(error.message),
-                        );
-                    }
+                ),
+                Err(error) => {
+                    log::warn!("failed to restore SSH tunnel: {}", error.message);
+                    Self::emit_tunnel_event(
+                        app,
+                        TunnelEventKind::Failed,
+                        profile_id,
+                        error.info,
+                        Some(error.message),
+                    );
                 }
             }
         }
-        self.spawn_monitor(workspace, app);
-        Ok(info)
     }
 
     fn connect_lock(&self, profile_id: &str) -> Arc<tokio::sync::Mutex<()>> {

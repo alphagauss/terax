@@ -18,13 +18,15 @@ import type { ConnectionInfo, SshGroup, SshProfile, SshTunnel } from "./types";
 const profileKey = (id: string) => `profile:${id}`;
 const groupKey = (id: string) => `group:${id}`;
 let subscribed = false;
+let loadInFlight: Promise<SshProfile[]> | null = null;
 
 type RemoteState = {
   groups: SshGroup[];
   profiles: SshProfile[];
   statuses: Record<string, ConnectionInfo>;
   loaded: boolean;
-  load: () => Promise<SshProfile[]>;
+  /** 读取并归一化 SSH 配置；常规调用复用已完成或正在进行的加载。 */
+  load: (force?: boolean) => Promise<SshProfile[]>;
   saveGroup: (group: SshGroup) => Promise<void>;
   deleteGroup: (groupId: string) => Promise<void>;
   saveProfile: (profile: SshProfile) => Promise<void>;
@@ -98,51 +100,65 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
   profiles: [],
   statuses: {},
   loaded: false,
-  load: async () => {
-    const values = await readSharedStore("ssh-profiles");
-    const groups = Object.entries(values)
-      .filter(([key]) => key.startsWith("group:"))
-      .map(([, value]) => value as SshGroup)
-      .filter(
-        (group) =>
-          group.id !== DEFAULT_SSH_GROUP_ID && Boolean(group.name?.trim()),
-      )
-      .map((group) => ({ ...group, name: group.name.trim() }))
-      .sort((left, right) => left.name.localeCompare(right.name));
-    const knownGroupIds = new Set([
-      DEFAULT_SSH_GROUP_ID,
-      ...groups.map((group) => group.id),
-    ]);
-    const records = Object.entries(values)
-      .filter(([key]) => key.startsWith("profile:"))
-      .map(([, value]) => value as SshProfile);
-    const profiles = records
-      .map((profile) => normalizeProfile(profile, knownGroupIds))
-      .sort((left, right) => left.name.localeCompare(right.name));
-    set({ groups, profiles, loaded: true });
-    if (!subscribed) {
-      subscribed = true;
-      void onSharedStoreChange("ssh-profiles", () => {
-        void useRemoteStore.getState().load();
-      });
+  load: async (force = false) => {
+    if (loadInFlight) {
+      const profiles = await loadInFlight;
+      if (!force) return profiles;
     }
-    const statuses = await Promise.all(
-      profiles.map((profile) =>
-        remoteNative.status(profile.id).catch(
-          () =>
-            ({
-              profileId: profile.id,
-              status: "disconnected",
-            }) satisfies ConnectionInfo,
+    if (!force && get().loaded) return get().profiles;
+
+    const task = (async () => {
+      const values = await readSharedStore("ssh-profiles");
+      const groups = Object.entries(values)
+        .filter(([key]) => key.startsWith("group:"))
+        .map(([, value]) => value as SshGroup)
+        .filter(
+          (group) =>
+            group.id !== DEFAULT_SSH_GROUP_ID && Boolean(group.name?.trim()),
+        )
+        .map((group) => ({ ...group, name: group.name.trim() }))
+        .sort((left, right) => left.name.localeCompare(right.name));
+      const knownGroupIds = new Set([
+        DEFAULT_SSH_GROUP_ID,
+        ...groups.map((group) => group.id),
+      ]);
+      const records = Object.entries(values)
+        .filter(([key]) => key.startsWith("profile:"))
+        .map(([, value]) => value as SshProfile);
+      const profiles = records
+        .map((profile) => normalizeProfile(profile, knownGroupIds))
+        .sort((left, right) => left.name.localeCompare(right.name));
+      set({ groups, profiles, loaded: true });
+      if (!subscribed) {
+        subscribed = true;
+        void onSharedStoreChange("ssh-profiles", () => {
+          void useRemoteStore.getState().load(true);
+        });
+      }
+      const statuses = await Promise.all(
+        profiles.map((profile) =>
+          remoteNative.status(profile.id).catch(
+            () =>
+              ({
+                profileId: profile.id,
+                status: "disconnected",
+              }) satisfies ConnectionInfo,
+          ),
         ),
-      ),
-    );
-    set({
-      statuses: Object.fromEntries(
-        statuses.map((status) => [status.profileId, status]),
-      ),
-    });
-    return profiles;
+      );
+      set({
+        statuses: Object.fromEntries(
+          statuses.map((status) => [status.profileId, status]),
+        ),
+      });
+      return profiles;
+    })();
+    loadInFlight = task;
+    try {
+      return await task;
+    } finally {
+      if (loadInFlight === task) loadInFlight = null;
+    }
   },
   saveGroup: async (group) => {
     const normalized = { ...group, name: group.name.trim() };
@@ -170,7 +186,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
       groupKey(normalized.id),
       normalized,
     );
-    set({ groups, loaded: true });
+    set({ groups });
   },
   deleteGroup: async (groupId) => {
     if (groupId === DEFAULT_SSH_GROUP_ID) return;
@@ -200,7 +216,6 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     set({
       groups: current.groups.filter((group) => group.id !== groupId),
       profiles: nextProfiles,
-      loaded: true,
     });
   },
   saveProfile: async (profile) => {
@@ -213,7 +228,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
       ...get().profiles.filter((item) => item.id !== normalized.id),
       normalized,
     ].sort((a, b) => a.name.localeCompare(b.name));
-    set({ profiles, loaded: true });
+    set({ profiles });
     await setSharedStoreKey(
       "ssh-profiles",
       profileKey(normalized.id),
@@ -233,7 +248,7 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     const profiles = [...byId.values()].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
-    set({ profiles, loaded: true });
+    set({ profiles });
     await Promise.all(
       incoming.map((profile) => {
         const normalized = normalizeProfile(profile, knownGroupIds);

@@ -21,12 +21,46 @@
         } catch (e) {}
       })();
     </script>
+    <style>
+      #workspace-bootstrap {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #737373;
+      }
+
+      html.dark #workspace-bootstrap {
+        color: #a3a3a3;
+      }
+
+      #workspace-bootstrap::before {
+        width: 16px;
+        height: 16px;
+        box-sizing: border-box;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 9999px;
+        content: "";
+        animation: workspace-bootstrap-spin 800ms linear infinite;
+      }
+
+      @keyframes workspace-bootstrap-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #workspace-bootstrap::before {
+          animation: none;
+        }
+      }
+    </style>
   </head>
 
   <body>
-    <div id="root">
-      <div id="terminal"></div>
-    </div>
+    <div id="root"><div id="workspace-bootstrap" aria-hidden="true"></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
