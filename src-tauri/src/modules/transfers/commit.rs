@@ -131,34 +131,6 @@ pub(crate) async fn cleanup_local_staging(roots: &[LocalRoot]) {
     }
 }
 
-/// 使用任务独占会话清理 SSH staging，避免占用 Explorer 的缓存会话。
-pub(crate) async fn cleanup_remote_staging(
-    session: &Arc<SftpSession>,
-    roots: &[RemoteRoot],
-) -> Vec<String> {
-    let mut pending = Vec::new();
-    for root in roots {
-        if let Err(error) = remove_remote_path(session, &root.stage).await {
-            log::warn!(
-                "failed to clean remote transfer path {}: {error:?}",
-                root.stage
-            );
-            pending.push(root.stage.clone());
-        }
-    }
-    pending
-}
-
-/// 清理当前任务明确拥有的单个远端临时路径。
-pub(crate) async fn cleanup_remote_owned_path(session: &Arc<SftpSession>, path: &str) -> bool {
-    if let Err(error) = remove_remote_path(session, path).await {
-        log::warn!("failed to clean remote transfer path {path}: {error:?}");
-        false
-    } else {
-        true
-    }
-}
-
 async fn remove_local_path(path: &Path) {
     let metadata = match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) => metadata,
@@ -176,56 +148,6 @@ async fn remove_local_path(path: &Path) {
     if let Err(error) = result {
         log::warn!("failed to clean transfer path {}: {error}", path.display());
     }
-}
-
-async fn remove_remote_path(session: &Arc<SftpSession>, root: &str) -> RunResult<()> {
-    let Some(metadata) = super::ssh::io::run_optional(
-        format!("stat remote staging path {root}"),
-        session.symlink_metadata(root.to_string()),
-    )
-    .await?
-    else {
-        return Ok(());
-    };
-    if !metadata.file_type().is_dir() {
-        return super::ssh::io::run(
-            format!("remove remote staging file {root}"),
-            session.remove_file(root.to_string()),
-        )
-        .await;
-    }
-
-    let mut directories = vec![root.trim_end_matches('/').to_string()];
-    let mut index = 0;
-    while index < directories.len() {
-        let directory = directories[index].clone();
-        index += 1;
-        let entries = super::ssh::io::run(
-            format!("read remote staging directory {directory}"),
-            session.read_dir(directory.clone()),
-        )
-        .await?;
-        for entry in entries {
-            let child = entry.path();
-            if entry.file_type().is_dir() {
-                directories.push(child);
-            } else {
-                super::ssh::io::run(
-                    format!("remove remote staging file {child}"),
-                    session.remove_file(child.clone()),
-                )
-                .await?;
-            }
-        }
-    }
-    for directory in directories.into_iter().rev() {
-        super::ssh::io::run(
-            format!("remove remote staging directory {directory}"),
-            session.remove_dir(directory.clone()),
-        )
-        .await?;
-    }
-    Ok(())
 }
 
 #[cfg(windows)]

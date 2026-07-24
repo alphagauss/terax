@@ -1,19 +1,20 @@
 //! WSL Archive 文件传输数据面。
 //!
-//! 上传先在宿主机生成并校验归档，再以单流复制到 WSL 私有临时目录；下载先在
-//! WSL 内生成归档，再以单流复制到宿主机。解包结果始终进入 Planner 指定的
-//! staging，最终仍使用通用 no-replace 提交。
+//! 上传先在宿主机生成归档并以单流复制到 WSL 私有临时目录；下载先在 WSL 内生成
+//! 归档，再以单流复制到宿主机。两端 SHA-256 一致后才安全解包，结果始终进入
+//! Planner 指定的 staging，最终仍使用通用 no-replace 提交。
 
-use std::collections::HashMap;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+#[cfg(windows)]
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
 use crate::modules::transfers::archive::{
-    build_wsl_upload_archive, extract_download_archive, ExtractEntry,
+    build_wsl_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{cleanup_local_staging, commit_local_root, LocalRoot};
 use crate::modules::transfers::errors::TransferErrorCode;
@@ -63,6 +64,7 @@ async fn execute_upload(
         ensure_capability(distro).await?;
         let archive = build_wsl_upload_archive(plan, context).await?;
         context.set_archive_size(archive.size).await;
+        context.set_archive_file_count(archive.file_count).await;
 
         let directory = create_upload_work_dir(distro, destination_parent).await?;
         work_dir = Some(directory.clone());
@@ -73,26 +75,34 @@ async fn execute_upload(
                 distro: distro.to_string(),
             },
         );
-        copy_archive_to_new(&archive.path, &host_archive, archive.size, context).await?;
-        context.set_stage(TransferStage::Extracting).await;
-        run_wsl_program(
+        let copied_sha256 =
+            copy_archive_to_new(&archive.path, &host_archive, archive.size, context).await?;
+        if copied_sha256 != archive.sha256 {
+            return Err(message("WSL archive changed during transfer"));
+        }
+        context.set_stage(TransferStage::Verifying).await;
+        verify_and_extract_wsl_archive(
             distro,
-            "tar",
-            &["-xzf", &remote_archive, "-C", &directory],
+            &remote_archive,
+            &directory,
+            archive.size,
+            &archive.sha256,
             context,
         )
         .await?;
-        tokio::fs::remove_file(&host_archive)
-            .await
-            .map_err(|error| message(format!("remove WSL archive payload: {error}")))?;
         publish_upload_staging(plan, distro, &directory, context).await?;
         cleanup_work_dir(distro, &directory).await;
         work_dir = None;
+        context.complete_files(archive.file_count).await;
         verify_apply_commit(plan, context).await
     }
     .await;
     if let Some(directory) = work_dir {
-        cleanup_work_dir(distro, &directory).await;
+        if matches!(&result, Err(TransferRunError::Canceled)) {
+            schedule_cleanup_work_dir(distro.to_string(), directory);
+        } else {
+            cleanup_work_dir(distro, &directory).await;
+        }
     }
     if result.is_err() {
         cleanup_local_staging(&plan.roots).await;
@@ -114,19 +124,8 @@ async fn execute_download(
         let directory = create_work_dir(distro).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
-        verify_sources(plan, context).await?;
-        let mut arguments = vec![
-            "-czf".to_string(),
-            remote_archive.clone(),
-            "-C".to_string(),
-            "/".to_string(),
-            "--".to_string(),
-        ];
-        for source in sources {
-            arguments.push(format!("./{}", archive_source_path(source)?));
-        }
-        let argument_refs: Vec<_> = arguments.iter().map(String::as_str).collect();
-        run_wsl_program(distro, "tar", &argument_refs, context).await?;
+        context.set_stage(TransferStage::Verifying).await;
+        let remote_sha256 = create_wsl_archive(distro, &remote_archive, sources, context).await?;
         verify_sources(plan, context).await?;
 
         let host_archive = resolve_path(
@@ -150,17 +149,26 @@ async fn execute_download(
             .reopen()
             .map_err(|error| message(format!("open local archive: {error}")))?;
         let mut output = tokio::fs::File::from_std(output);
-        copy_archive(&host_archive, &mut output, archive_size, context).await?;
+        let local_sha256 = copy_archive(&host_archive, &mut output, archive_size, context).await?;
+        if local_sha256 != remote_sha256 {
+            return Err(message("downloaded WSL archive checksum mismatch"));
+        }
         cleanup_work_dir(distro, &directory).await;
         work_dir = None;
 
-        let expected = download_extract_manifest(plan, sources)?;
-        extract_download_archive(&local_archive, expected, context).await?;
+        let roots = download_extract_roots(plan, sources)?;
+        let file_count = extract_download_archive_roots(&local_archive, roots, context).await?;
+        context.set_archive_file_count(file_count).await;
+        context.complete_files(file_count).await;
         verify_apply_commit(plan, context).await
     }
     .await;
     if let Some(directory) = work_dir {
-        cleanup_work_dir(distro, &directory).await;
+        if matches!(&result, Err(TransferRunError::Canceled)) {
+            schedule_cleanup_work_dir(distro.to_string(), directory);
+        } else {
+            cleanup_work_dir(distro, &directory).await;
+        }
     }
     if result.is_err() {
         cleanup_local_staging(&plan.roots).await;
@@ -169,12 +177,13 @@ async fn execute_download(
 }
 
 #[cfg(windows)]
+/// 排他创建 WSL 侧归档目标，并在复制过程中返回实际数据流的 SHA-256。
 async fn copy_archive_to_new(
     source: &Path,
     destination: &Path,
     expected: u64,
     context: &mut ExecutionContext,
-) -> RunResult<()> {
+) -> RunResult<String> {
     let mut output = tokio::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -185,17 +194,19 @@ async fn copy_archive_to_new(
 }
 
 #[cfg(windows)]
+/// 复制一条 WSL 归档流，同时统计长度和计算 SHA-256，避免完成后再次读取。
 async fn copy_archive(
     source: &Path,
     output: &mut tokio::fs::File,
     expected: u64,
     context: &mut ExecutionContext,
-) -> RunResult<()> {
+) -> RunResult<String> {
     context.set_stage(TransferStage::Transferring).await;
     let mut input = tokio::fs::File::open(source)
         .await
         .map_err(|error| message(format!("open archive source: {error}")))?;
     let mut copied = 0u64;
+    let mut digest = Sha256::new();
     let mut buffer = vec![0; COPY_BUFFER_BYTES];
     loop {
         context.checkpoint().await?;
@@ -210,6 +221,7 @@ async fn copy_archive(
             .write_all(&buffer[..read])
             .await
             .map_err(|error| message(format!("write archive stream: {error}")))?;
+        digest.update(&buffer[..read]);
         copied = copied.saturating_add(read as u64);
         context.report_bytes(read as u64).await;
     }
@@ -226,7 +238,7 @@ async fn copy_archive(
             "archive size changed during transfer: expected {expected}, found {copied}"
         )));
     }
-    Ok(())
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 #[cfg(windows)]
@@ -236,7 +248,7 @@ async fn ensure_capability(distro: &str) -> RunResult<()> {
         "sh",
         &[
             "-c",
-            "command -v tar >/dev/null && command -v gzip >/dev/null && command -v mktemp >/dev/null",
+            "command -v tar >/dev/null && command -v gzip >/dev/null && command -v mktemp >/dev/null && (command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null)",
         ],
     )
     .await
@@ -244,9 +256,94 @@ async fn ensure_capability(distro: &str) -> RunResult<()> {
     .map_err(|_| {
         TransferRunError::failed(
             TransferErrorCode::ArchiveUnavailable,
-            "WSL Archive requires tar, gzip, and mktemp",
+            "WSL Archive requires tar, gzip, mktemp, and a SHA-256 tool",
         )
     })
+}
+
+#[cfg(windows)]
+/// 在一个 WSL 进程中校验归档大小和 SHA-256，成功后解压并删除压缩包。
+async fn verify_and_extract_wsl_archive(
+    distro: &str,
+    archive: &str,
+    directory: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+    context: &ExecutionContext,
+) -> RunResult<()> {
+    const SCRIPT: &str = r#"
+set -e
+archive=$1
+directory=$2
+expected_size=$3
+expected_sha256=$4
+size=$(wc -c < "$archive")
+[ "$size" = "$expected_size" ] || exit 73
+if command -v sha256sum >/dev/null 2>&1; then
+  checksum=$(sha256sum -- "$archive")
+  checksum=${checksum%% *}
+elif command -v shasum >/dev/null 2>&1; then
+  checksum=$(shasum -a 256 -- "$archive")
+  checksum=${checksum%% *}
+else
+  checksum=$(openssl dgst -sha256 "$archive")
+  checksum=${checksum##* }
+fi
+[ "$checksum" = "$expected_sha256" ] || exit 74
+tar -xzf "$archive" -C "$directory"
+rm -f -- "$archive"
+"#;
+    run_wsl_program(
+        distro,
+        "sh",
+        &[
+            "-c",
+            SCRIPT,
+            "terax-wsl-archive-verify",
+            archive,
+            directory,
+            &expected_size.to_string(),
+            expected_sha256,
+        ],
+        context,
+    )
+    .await
+    .map(|_| ())
+}
+
+#[cfg(windows)]
+/// 在一个 WSL 进程中创建归档并返回服务器本地计算的 SHA-256。
+async fn create_wsl_archive(
+    distro: &str,
+    archive: &str,
+    sources: &[String],
+    context: &ExecutionContext,
+) -> RunResult<String> {
+    const SCRIPT: &str = r#"
+set -e
+archive=$1
+shift
+tar -czf "$archive" -C / -- "$@"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -- "$archive"
+elif command -v shasum >/dev/null 2>&1; then
+  shasum -a 256 -- "$archive"
+else
+  openssl dgst -sha256 "$archive"
+fi
+"#;
+    let mut arguments = vec![
+        "-c".to_string(),
+        SCRIPT.to_string(),
+        "terax-wsl-archive-create".to_string(),
+        archive.to_string(),
+    ];
+    for source in sources {
+        arguments.push(format!("./{}", archive_source_path(source)?));
+    }
+    let arguments: Vec<_> = arguments.iter().map(String::as_str).collect();
+    let output = run_wsl_program(distro, "sh", &arguments, context).await?;
+    parse_sha256(&output)
 }
 
 #[cfg(windows)]
@@ -288,6 +385,14 @@ async fn cleanup_work_dir(distro: &str, directory: &str) {
     if let Err(error) = capture_wsl(distro, "rm", &["-rf", "--", directory]).await {
         log::warn!("failed to clean WSL archive directory {directory}: {error:?}");
     }
+}
+
+#[cfg(windows)]
+/// 取消后在后台执行单个 WSL 本地递归删除，避免清理阻塞任务进入 Canceled。
+fn schedule_cleanup_work_dir(distro: String, directory: String) {
+    tauri::async_runtime::spawn(async move {
+        cleanup_work_dir(&distro, &directory).await;
+    });
 }
 
 #[cfg(windows)]
@@ -336,7 +441,7 @@ async fn run_wsl_program(
     program: &str,
     args: &[&str],
     context: &ExecutionContext,
-) -> RunResult<()> {
+) -> RunResult<Vec<u8>> {
     crate::modules::workspace::validate_wsl_distro_name(distro)
         .map_err(|error| message(format!("invalid WSL archive environment: {error}")))?;
     let mut command = tokio::process::Command::new("wsl.exe");
@@ -430,7 +535,7 @@ async fn run_wsl_program(
         .await
         .map_err(|error| message(format!("join WSL archive stderr: {error}")))??;
     if status.success() {
-        Ok(())
+        Ok(stdout)
     } else {
         let detail = if stderr.is_empty() { stdout } else { stderr };
         Err(message(format!(
@@ -442,12 +547,16 @@ async fn run_wsl_program(
 
 #[cfg(windows)]
 async fn signal_wsl(distro: &str, pid: u32, signal: &str) -> RunResult<()> {
-    capture_wsl(
-        distro,
-        "kill",
-        &[&format!("-{signal}"), "--", &pid.to_string()],
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        capture_wsl(
+            distro,
+            "kill",
+            &[&format!("-{signal}"), "--", &pid.to_string()],
+        ),
     )
     .await
+    .map_err(|_| message("signal WSL archive command timed out"))?
     .map(|_| ())
 }
 
@@ -539,92 +648,25 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
     Ok(())
 }
 
-#[cfg(windows)]
-fn download_extract_manifest(
-    plan: &LocalPlan,
-    sources: &[String],
-) -> RunResult<HashMap<String, ExtractEntry>> {
+fn download_extract_roots(plan: &LocalPlan, sources: &[String]) -> RunResult<Vec<ExtractRoot>> {
     if sources.len() != plan.roots.len() {
         return Err(message("WSL archive root count changed"));
     }
-    let roots = local_source_roots(plan)?;
-    let mut expected = HashMap::with_capacity(plan.directories.len() + plan.files.len());
-    for directory in &plan.directories {
-        insert_extract_entry(
-            &mut expected,
-            logical_archive_path(&directory.source, &roots, sources)?,
-            ExtractEntry {
-                destination: directory.destination.clone(),
-                size: 0,
-                is_dir: true,
-            },
-        )?;
-    }
-    for file in &plan.files {
-        insert_extract_entry(
-            &mut expected,
-            logical_archive_path(&file.source, &roots, sources)?,
-            ExtractEntry {
-                destination: file.destination.clone(),
-                size: file.size,
-                is_dir: false,
-            },
-        )?;
-    }
-    Ok(expected)
-}
-
-#[cfg(windows)]
-fn local_source_roots(plan: &LocalPlan) -> RunResult<Vec<PathBuf>> {
-    plan.roots
+    sources
         .iter()
-        .map(|root| {
-            plan.files
-                .iter()
-                .find(|file| file.destination == root.stage)
-                .map(|file| file.source.clone())
-                .or_else(|| {
-                    plan.directories
-                        .iter()
-                        .find(|directory| directory.destination == root.stage)
-                        .map(|directory| directory.source.clone())
-                })
-                .ok_or_else(|| message("WSL archive root is missing from the manifest"))
+        .zip(&plan.roots)
+        .map(|(source, root)| {
+            Ok(ExtractRoot {
+                archive_path: archive_source_path(source)?,
+                destination: root.stage.clone(),
+                kind: if plan.files.iter().any(|file| file.destination == root.stage) {
+                    ArchiveEntryKind::File
+                } else {
+                    ArchiveEntryKind::Directory
+                },
+            })
         })
         .collect()
-}
-
-#[cfg(windows)]
-fn logical_archive_path(
-    path: &Path,
-    roots: &[PathBuf],
-    logical_roots: &[String],
-) -> RunResult<String> {
-    for (root, logical_root) in roots.iter().zip(logical_roots) {
-        if let Ok(relative) = path.strip_prefix(root) {
-            let mut logical = archive_source_path(logical_root)?;
-            for component in relative.components() {
-                match component {
-                    Component::Normal(value) => {
-                        let value = value.to_str().ok_or_else(|| {
-                            message(format!(
-                                "WSL archive path is not valid UTF-8: {}",
-                                path.display()
-                            ))
-                        })?;
-                        logical.push('/');
-                        logical.push_str(value);
-                    }
-                    _ => return Err(message("invalid WSL archive relative path")),
-                }
-            }
-            return Ok(logical);
-        }
-    }
-    Err(message(format!(
-        "WSL archive source is outside its root: {}",
-        path.display()
-    )))
 }
 
 fn archive_source_path(source: &str) -> RunResult<String> {
@@ -642,17 +684,16 @@ fn archive_source_path(source: &str) -> RunResult<String> {
     Ok(relative.to_string())
 }
 
-#[cfg(windows)]
-fn insert_extract_entry(
-    expected: &mut HashMap<String, ExtractEntry>,
-    path: String,
-    entry: ExtractEntry,
-) -> RunResult<()> {
-    if expected.insert(path.clone(), entry).is_some() {
-        Err(message(format!("duplicate WSL archive path: {path}")))
-    } else {
-        Ok(())
-    }
+/// 解析 WSL sha256sum 的首个完整十六进制摘要。
+fn parse_sha256(output: &[u8]) -> RunResult<String> {
+    std::str::from_utf8(output)
+        .map_err(|_| message("WSL archive checksum output is not UTF-8"))?
+        .split_whitespace()
+        .find_map(|value| {
+            (value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                .then(|| value.to_ascii_lowercase())
+        })
+        .ok_or_else(|| message("WSL archive checksum is invalid"))
 }
 
 fn message(value: impl Into<String>) -> TransferRunError {
@@ -698,19 +739,13 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
-    fn local_paths_map_back_to_manifest_wsl_paths() {
-        let root = PathBuf::from(r"\\wsl.localhost\Ubuntu\home\user\project");
-        let child = root.join("src").join("main.rs");
+    fn sha256sum_output_requires_a_complete_digest() {
+        let digest = "A".repeat(64);
         assert_eq!(
-            logical_archive_path(
-                &child,
-                std::slice::from_ref(&root),
-                &["/home/user/project".into()],
-            )
-            .unwrap(),
-            "home/user/project/src/main.rs"
+            parse_sha256(format!("{digest}  payload.tar.gz\n").as_bytes()).unwrap(),
+            digest.to_lowercase()
         );
+        assert!(parse_sha256(b"short payload.tar.gz\n").is_err());
     }
 }

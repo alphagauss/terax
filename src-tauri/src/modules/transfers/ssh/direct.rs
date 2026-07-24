@@ -3,6 +3,7 @@
 //! 上传复用高层 SFTP 的有界写入队列，下载在任务独占 raw SFTP channel 中保持有限
 //! 数量的 READ 请求并发。两种方向只写 staging，并由统一提交层公开最终目标。
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,10 +11,11 @@ use std::time::Duration;
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use russh_sftp::client::{RawSftpSession, SftpSession};
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, cleanup_remote_staging, commit_local_root, commit_remote_root,
+    cleanup_local_staging, commit_local_root, commit_remote_root,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::TransferRunError;
@@ -26,6 +28,39 @@ const MAX_INFLIGHT_READS: usize = 32;
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
 
 type RunResult<T> = Result<T, TransferRunError>;
+
+struct OrderedSha256 {
+    digest: Sha256,
+    pending: BTreeMap<u64, Vec<u8>>,
+    hashed_until: u64,
+}
+
+impl OrderedSha256 {
+    fn new() -> Self {
+        Self {
+            digest: Sha256::new(),
+            pending: BTreeMap::new(),
+            hashed_until: 0,
+        }
+    }
+
+    /// 接收一个可能乱序完成的 READ 块，并尽快推进连续摘要前缀。
+    fn push(&mut self, offset: u64, data: Vec<u8>) -> bool {
+        if self.pending.insert(offset, data).is_some() {
+            return false;
+        }
+        while let Some(chunk) = self.pending.remove(&self.hashed_until) {
+            self.digest.update(&chunk);
+            self.hashed_until = self.hashed_until.saturating_add(chunk.len() as u64);
+        }
+        true
+    }
+
+    fn finish(self, expected_size: u64) -> Option<String> {
+        (self.hashed_until == expected_size && self.pending.is_empty())
+            .then(|| format!("{:x}", self.digest.finalize()))
+    }
+}
 
 /// 通过有界 raw SFTP 流水线下载一个文件到排他 staging 目标。
 pub(crate) async fn download_file(
@@ -66,9 +101,45 @@ pub(crate) async fn download_file_into(
     expected_size: u64,
     context: &mut ExecutionContext,
 ) -> Result<(), TransferRunError> {
-    let handle = super::io::run(
+    download_file_into_inner(session, remote, writer, expected_size, context, false)
+        .await
+        .map(|_| ())
+}
+
+/// 通过同一条有界下载流水线写入文件并按远端字节顺序计算 SHA-256。
+///
+/// READ 请求允许乱序完成，函数最多暂存一个并发窗口的数据并按 offset 喂给摘要，
+/// 因此不会为了校验再次读取已经落盘的归档。
+pub(crate) async fn download_file_into_sha256(
+    session: &Arc<RawSftpSession>,
+    remote: &str,
+    writer: &mut tokio::fs::File,
+    expected_size: u64,
+    context: &mut ExecutionContext,
+) -> Result<String, TransferRunError> {
+    download_file_into_inner(session, remote, writer, expected_size, context, true)
+        .await?
+        .ok_or_else(|| {
+            TransferRunError::failed(
+                TransferErrorCode::IntegrityCheckFailed,
+                "download checksum state is unavailable",
+            )
+        })
+}
+
+async fn download_file_into_inner(
+    session: &Arc<RawSftpSession>,
+    remote: &str,
+    writer: &mut tokio::fs::File,
+    expected_size: u64,
+    context: &mut ExecutionContext,
+    hash_download: bool,
+) -> Result<Option<String>, TransferRunError> {
+    let control = context.control();
+    let handle = super::io::run_cancellable(
         format!("open remote source {remote}"),
         session.open(remote, OpenFlags::READ, FileAttributes::default()),
+        control.as_ref(),
     )
     .await?
     .handle;
@@ -77,6 +148,7 @@ pub(crate) async fn download_file_into(
     let mut canceled = false;
     let mut failure = None;
     let mut inflight = FuturesUnordered::new();
+    let mut digest = hash_download.then(OrderedSha256::new);
 
     while next_offset < expected_size || !inflight.is_empty() {
         if !canceled && failure.is_none() {
@@ -116,7 +188,14 @@ pub(crate) async fn download_file_into(
             });
         }
 
-        let Some(result) = inflight.next().await else {
+        let result = tokio::select! {
+            result = inflight.next() => result,
+            _ = control.cancelled() => {
+                canceled = true;
+                None
+            }
+        };
+        let Some(result) = result else {
             break;
         };
         if canceled || failure.is_some() {
@@ -141,25 +220,34 @@ pub(crate) async fn download_file_into(
                         &error,
                     )));
                 } else {
-                    completed = completed.saturating_add(data.len() as u64);
-                    context.report_bytes(data.len() as u64).await;
+                    let data_len = data.len() as u64;
+                    if let Some(digest) = digest.as_mut() {
+                        if !digest.push(offset, data) {
+                            failure = Some(source_changed(format!(
+                                "remote source returned a duplicate block: {remote}"
+                            )));
+                            continue;
+                        }
+                    }
+                    completed = completed.saturating_add(data_len);
+                    context.report_bytes(data_len).await;
                 }
             }
             Err(error) => failure = Some(error),
         }
     }
 
-    let close_result = super::io::run(
-        format!("close remote source {remote}"),
-        session.close(handle),
-    )
-    .await;
     if let Some(error) = failure {
         return Err(error);
     }
     if canceled {
         return Err(TransferRunError::Canceled);
     }
+    let close_result = super::io::run(
+        format!("close remote source {remote}"),
+        session.close(handle),
+    )
+    .await;
     close_result?;
     if completed != expected_size {
         return Err(source_changed(format!(
@@ -178,7 +266,13 @@ pub(crate) async fn download_file_into(
             &error,
         ))
     })?;
-    Ok(())
+    digest
+        .map(|digest| {
+            digest.finish(expected_size).ok_or_else(|| {
+                source_changed(format!("remote source hash stream is incomplete: {remote}"))
+            })
+        })
+        .transpose()
 }
 
 /// 执行 SSH 上传并确保独立 SFTP channel 在终态前关闭。
@@ -221,11 +315,7 @@ pub(crate) async fn execute_upload(
     }
     .await;
     if result.is_err() {
-        let pending = if is_connection_lost(&result) {
-            plan.roots.iter().map(|root| root.stage.clone()).collect()
-        } else {
-            cleanup_remote_staging(&plan.session, &plan.roots).await
-        };
+        let pending = plan.roots.iter().map(|root| root.stage.clone()).collect();
         super::cleanup::schedule(plan.workspace.profile.id.clone(), pending);
     }
     close_sftp(&plan.session).await;
@@ -467,10 +557,29 @@ fn source_changed(value: String) -> TransferRunError {
     TransferRunError::failed(TransferErrorCode::SourceChanged, value)
 }
 
-fn is_connection_lost(result: &RunResult<()>) -> bool {
-    matches!(
-        result,
-        Err(TransferRunError::Failed(failure))
-            if failure.code == TransferErrorCode::ConnectionLost
-    )
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordered_sha256_accepts_out_of_order_download_blocks() {
+        let mut digest = OrderedSha256::new();
+        assert!(digest.push(4, b"efgh".to_vec()));
+        assert!(digest.push(0, b"abcd".to_vec()));
+        assert_eq!(
+            digest.finish(8).unwrap(),
+            format!("{:x}", Sha256::digest(b"abcdefgh"))
+        );
+    }
+
+    #[test]
+    fn ordered_sha256_rejects_duplicate_or_incomplete_blocks() {
+        let mut duplicate = OrderedSha256::new();
+        assert!(duplicate.push(4, b"efgh".to_vec()));
+        assert!(!duplicate.push(4, b"other".to_vec()));
+
+        let mut incomplete = OrderedSha256::new();
+        assert!(incomplete.push(4, b"efgh".to_vec()));
+        assert!(incomplete.finish(8).is_none());
+    }
 }

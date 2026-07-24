@@ -1,9 +1,9 @@
 //! SSH Archive 文件传输数据面。
 //!
-//! 上传在本地生成并校验 tar.gz，下载在远端任务私有目录生成 tar.gz。归档只通过
-//! 一个任务独占 SFTP 流传输，解包结果仍进入通用 staging 并使用 no-replace 提交。
+//! 上传在本地生成 tar.gz，下载在远端任务私有目录生成 tar.gz。归档只通过一个任务
+//! 独占 SFTP 流传输，两端以 SHA-256 校验同一归档字节；解包结果仍进入通用 staging
+//! 并使用 no-replace 提交。
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,11 +16,10 @@ use uuid::Uuid;
 
 use crate::modules::remote::session::{join_remote, shell_quote, ExecOutput, RemoteWorkspace};
 use crate::modules::transfers::archive::{
-    build_upload_archive, extract_download_archive, ExtractEntry,
+    build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, cleanup_remote_owned_path, cleanup_remote_staging, commit_local_root,
-    commit_remote_root, ensure_remote_target_available,
+    cleanup_local_staging, commit_local_root, commit_remote_root, ensure_remote_target_available,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
@@ -52,6 +51,7 @@ pub(crate) async fn execute_upload(
         ensure_archive_capability(&plan.workspace, context, false).await?;
         let archive = build_upload_archive(&plan, &remote_parent, context).await?;
         context.set_archive_size(archive.size).await;
+        context.set_archive_file_count(archive.file_count).await;
 
         let work_dir = join_remote(
             &remote_parent,
@@ -66,16 +66,14 @@ pub(crate) async fn execute_upload(
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
         upload_archive(&plan.session, &archive.path, &archive_path, context).await?;
 
-        context.set_stage(TransferStage::Extracting).await;
-        let command = format!(
-            "tar -xzf {archive} -C {directory}",
-            archive = shell_quote(&archive_path),
-            directory = shell_quote(&work_dir),
-        );
-        run_checked(&plan.workspace, &command, context).await?;
-        super::io::run(
-            "remove remote archive payload",
-            plan.session.remove_file(archive_path),
+        context.set_stage(TransferStage::Verifying).await;
+        verify_and_extract_remote_archive(
+            &plan.workspace,
+            &archive_path,
+            &work_dir,
+            archive.size,
+            &archive.sha256,
+            context,
         )
         .await?;
 
@@ -90,13 +88,12 @@ pub(crate) async fn execute_upload(
             )
             .await?;
         }
-        if !cleanup_remote_owned_path(&plan.session, &work_dir).await {
+        if !super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await {
             pending_cleanup.push(work_dir.clone());
         }
         remote_work = None;
 
-        context.set_stage(TransferStage::Verifying).await;
-        verify_remote_upload(&plan, context).await?;
+        context.complete_files(archive.file_count).await;
         context.set_stage(TransferStage::Finalizing).await;
         for root in &plan.roots {
             context.checkpoint().await?;
@@ -106,18 +103,9 @@ pub(crate) async fn execute_upload(
         Ok(())
     }
     .await;
-    if is_connection_lost(&result) {
+    if result.is_err() {
         pending_cleanup.extend(remote_work);
         pending_cleanup.extend(plan.roots.iter().map(|root| root.stage.clone()));
-    } else {
-        if let Some(path) = remote_work {
-            if !cleanup_remote_owned_path(&plan.session, &path).await {
-                pending_cleanup.push(path);
-            }
-        }
-        if result.is_err() {
-            pending_cleanup.extend(cleanup_remote_staging(&plan.session, &plan.roots).await);
-        }
     }
     super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
     close_sftp(&plan.session).await;
@@ -138,7 +126,6 @@ pub(crate) async fn execute_download(
         remote_work = Some(work_dir.clone());
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
         let sources = download_root_sources(&plan)?;
-        verify_remote_download_sources(&plan, context).await?;
         let mut command = format!("tar -czf {} -C / --", shell_quote(&archive_path));
         for source in sources {
             let relative = source
@@ -148,20 +135,10 @@ pub(crate) async fn execute_download(
             command.push(' ');
             command.push_str(&shell_quote(&format!("./{relative}")));
         }
-        run_checked(&plan.workspace, &command, context).await?;
+        context.set_stage(TransferStage::Verifying).await;
+        let (archive_size, archive_sha256) =
+            create_remote_archive(&plan.workspace, &command, &archive_path, context).await?;
         verify_remote_download_sources(&plan, context).await?;
-
-        let archive_metadata = super::io::run(
-            "stat remote archive",
-            plan.session.symlink_metadata(archive_path.clone()),
-        )
-        .await?;
-        if !archive_metadata.file_type().is_file() {
-            return Err(integrity("remote archive is not a regular file"));
-        }
-        let archive_size = archive_metadata
-            .size
-            .ok_or_else(|| integrity("remote archive size is unavailable"))?;
         context.set_archive_size(archive_size).await;
         context.set_stage(TransferStage::Transferring).await;
 
@@ -178,7 +155,7 @@ pub(crate) async fn execute_download(
             .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
         let mut output = tokio::fs::File::from_std(output);
         let raw = super::session::open_raw(&plan.workspace).await?;
-        let downloaded = super::direct::download_file_into(
+        let downloaded = super::direct::download_file_into_sha256(
             &raw,
             &archive_path,
             &mut output,
@@ -187,15 +164,20 @@ pub(crate) async fn execute_download(
         )
         .await;
         let _ = raw.close_session();
-        downloaded?;
-        if !cleanup_remote_owned_path(&plan.session, &work_dir).await {
+        let local_sha256 = downloaded?;
+        if local_sha256 != archive_sha256 {
+            return Err(integrity("downloaded archive checksum mismatch"));
+        }
+        if !super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await {
             pending_cleanup.push(work_dir.clone());
         }
         remote_work = None;
 
-        let expected = download_extract_manifest(&plan)?;
-        extract_download_archive(&archive_local_path, expected, context).await?;
-        apply_download_metadata(&plan, context).await?;
+        let roots = download_extract_roots(&plan)?;
+        let file_count =
+            extract_download_archive_roots(&archive_local_path, roots, context).await?;
+        context.set_archive_file_count(file_count).await;
+        context.complete_files(file_count).await;
 
         context.set_stage(TransferStage::Finalizing).await;
         for root in &plan.roots {
@@ -206,12 +188,8 @@ pub(crate) async fn execute_download(
         Ok(())
     }
     .await;
-    if is_connection_lost(&result) {
+    if result.is_err() {
         pending_cleanup.extend(remote_work);
-    } else if let Some(path) = remote_work {
-        if !cleanup_remote_owned_path(&plan.session, &path).await {
-            pending_cleanup.push(path);
-        }
     }
     if result.is_err() {
         cleanup_local_staging(&plan.roots).await;
@@ -228,15 +206,17 @@ async fn upload_archive(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context.set_stage(TransferStage::Transferring).await;
+    let control = context.control();
     let mut reader = tokio::fs::File::open(local)
         .await
         .map_err(|error| TransferRunError::Failed(io_failure("open local archive", &error)))?;
-    let mut writer = super::io::run(
+    let mut writer = super::io::run_cancellable(
         "create remote archive",
         session.open_with_flags(
             remote.to_string(),
             OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
         ),
+        control.as_ref(),
     )
     .await?;
     let mut buffer = vec![0u8; COPY_BUFFER_BYTES];
@@ -249,12 +229,17 @@ async fn upload_archive(
         if read == 0 {
             break;
         }
-        super::io::run("write remote archive", writer.write_all(&buffer[..read])).await?;
+        super::io::run_cancellable(
+            "write remote archive",
+            writer.write_all(&buffer[..read]),
+            control.as_ref(),
+        )
+        .await?;
         context.report_bytes(read as u64).await;
     }
-    super::io::run("flush remote archive", writer.flush()).await?;
-    super::io::run("sync remote archive", writer.sync_all()).await?;
-    super::io::run("close remote archive", writer.shutdown()).await
+    super::io::run_cancellable("flush remote archive", writer.flush(), control.as_ref()).await?;
+    super::io::run_cancellable("sync remote archive", writer.sync_all(), control.as_ref()).await?;
+    super::io::run_cancellable("close remote archive", writer.shutdown(), control.as_ref()).await
 }
 
 async fn ensure_archive_capability(
@@ -263,9 +248,9 @@ async fn ensure_archive_capability(
     require_mktemp: bool,
 ) -> RunResult<()> {
     let command = if require_mktemp {
-        "command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 && command -v mktemp >/dev/null 2>&1"
+        "command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 && command -v mktemp >/dev/null 2>&1 && (command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1)"
     } else {
-        "command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1"
+        "command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 && (command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1)"
     };
     let output = run_remote(
         workspace,
@@ -277,7 +262,7 @@ async fn ensure_archive_capability(
     if output.exit_code != Some(0) {
         return Err(TransferRunError::failed(
             TransferErrorCode::ArchiveUnavailable,
-            "remote tar, gzip or mktemp is unavailable",
+            "remote tar, gzip, checksum tool or mktemp is unavailable",
         ));
     }
     Ok(())
@@ -289,7 +274,7 @@ async fn create_remote_work_dir(
 ) -> RunResult<String> {
     let output = run_remote(
         workspace,
-        "umask 077; mktemp -d \"${TMPDIR:-/tmp}/terax-archive.XXXXXXXX\"",
+        "umask 077; mktemp -d \"/tmp/terax-archive.XXXXXXXX\"",
         context.control(),
         Duration::from_secs(30),
     )
@@ -306,7 +291,7 @@ async fn create_remote_work_dir(
         .to_string();
     let name = path.rsplit('/').next().unwrap_or_default();
     let suffix = name.strip_prefix("terax-archive.").unwrap_or_default();
-    if !path.starts_with('/')
+    if path.strip_suffix(name) != Some("/tmp/")
         || path == "/"
         || path.contains('\n')
         || path.contains('\0')
@@ -411,49 +396,94 @@ async fn run_remote(
     }
 }
 
-async fn verify_remote_upload(
-    plan: &RemoteUploadPlan,
-    context: &mut ExecutionContext,
-) -> RunResult<()> {
-    for file in &plan.files {
-        context.checkpoint().await?;
-        let metadata = super::io::run(
-            "verify remote archive file",
-            plan.session.symlink_metadata(file.destination.clone()),
-        )
-        .await?;
-        if !metadata.file_type().is_file() || metadata.size != Some(file.size) {
-            return Err(integrity(format!(
-                "remote archive output mismatch: {}",
-                file.destination
-            )));
-        }
-        file.metadata
-            .apply_remote(&plan.session, &file.destination)
-            .await?;
-        context.complete_file().await;
+/// 用一个远端命令完成打包、大小读取和 SHA-256 计算。
+///
+/// 文件树只由 tar 遍历一次，后续操作均针对服务器本地归档，不产生按文件的 SSH
+/// 往返；大小和摘要通过固定两行输出返回。
+async fn create_remote_archive(
+    workspace: &Arc<RemoteWorkspace>,
+    archive_command: &str,
+    archive: &str,
+    context: &ExecutionContext,
+) -> RunResult<(u64, String)> {
+    let archive = shell_quote(archive);
+    let command = format!(
+        "set -e; {archive_command}; wc -c < {archive}; {}",
+        remote_checksum_command(&archive)
+    );
+    let output = run_remote(workspace, &command, context.control(), COMMAND_TIMEOUT).await?;
+    if output.exit_code != Some(0) || output.timed_out || output.truncated {
+        return Err(remote_command_error("create remote archive", &output));
     }
-    for directory in plan.directories.iter().rev() {
-        context.checkpoint().await?;
-        let metadata = super::io::run(
-            "verify remote archive directory",
-            plan.session.symlink_metadata(directory.destination.clone()),
-        )
-        .await?;
-        if !metadata.file_type().is_dir() {
-            return Err(integrity(format!(
-                "remote archive directory mismatch: {}",
-                directory.destination
-            )));
-        }
-        directory
-            .metadata
-            .apply_remote(&plan.session, &directory.destination)
-            .await?;
-    }
-    Ok(())
+    parse_remote_archive_info(&output.stdout)
 }
 
+/// 在同一个远端命令中校验上传归档、解压到私有目录并删除压缩包。
+async fn verify_and_extract_remote_archive(
+    workspace: &Arc<RemoteWorkspace>,
+    archive: &str,
+    directory: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+    context: &ExecutionContext,
+) -> RunResult<()> {
+    let archive = shell_quote(archive);
+    let directory = shell_quote(directory);
+    let command = format!(
+        "set -e; size=$(wc -c < {archive}); [ \"$size\" = {expected_size} ] || exit 73; \
+         if command -v sha256sum >/dev/null 2>&1; then checksum=$(sha256sum -- {archive}); checksum=${{checksum%% *}}; \
+         elif command -v shasum >/dev/null 2>&1; then checksum=$(shasum -a 256 -- {archive}); checksum=${{checksum%% *}}; \
+         else checksum=$(openssl dgst -sha256 {archive}); checksum=${{checksum##* }}; fi; \
+         [ \"$checksum\" = {expected_sha256} ] || exit 74; \
+         tar -xzf {archive} -C {directory}; rm -f -- {archive}",
+        expected_sha256 = shell_quote(expected_sha256),
+    );
+    let output = run_remote(workspace, &command, context.control(), COMMAND_TIMEOUT).await?;
+    if output.exit_code == Some(0) && !output.timed_out && !output.truncated {
+        return Ok(());
+    }
+    if matches!(output.exit_code, Some(73 | 74)) {
+        return Err(integrity("uploaded archive checksum mismatch"));
+    }
+    Err(remote_command_error(
+        "verify and extract remote archive",
+        &output,
+    ))
+}
+
+fn remote_checksum_command(archive: &str) -> String {
+    format!(
+        "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {archive}; \
+         elif command -v shasum >/dev/null 2>&1; then shasum -a 256 -- {archive}; \
+         else openssl dgst -sha256 {archive}; fi"
+    )
+}
+
+/// 解析远端 checksum 命令的稳定两行输出，兼容 sha256sum、shasum 与 openssl。
+fn parse_remote_archive_info(output: &[u8]) -> RunResult<(u64, String)> {
+    let output = std::str::from_utf8(output)
+        .map_err(|_| integrity("remote archive checksum output is not UTF-8"))?;
+    let mut lines = output.lines();
+    let size = lines
+        .next()
+        .map(str::trim)
+        .ok_or_else(|| integrity("remote archive size is unavailable"))?
+        .parse::<u64>()
+        .map_err(|_| integrity("remote archive size is invalid"))?;
+    let sha256 = lines
+        .flat_map(str::split_whitespace)
+        .find_map(normalize_sha256)
+        .ok_or_else(|| integrity("remote archive checksum is invalid"))?;
+    Ok((size, sha256))
+}
+
+/// 只接受完整的十六进制 SHA-256，并统一为小写便于跨工具比对。
+fn normalize_sha256(value: &str) -> Option<String> {
+    (value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| value.to_ascii_lowercase())
+}
+
+/// 打包完成后只复验顶层来源，保持来源身份不变量而不恢复对子树的逐项 SFTP 扫描。
 async fn verify_remote_download_sources(
     plan: &RemoteDownloadPlan,
     context: &ExecutionContext,
@@ -495,89 +525,6 @@ async fn verify_remote_download_sources(
     Ok(())
 }
 
-fn download_extract_manifest(
-    plan: &RemoteDownloadPlan,
-) -> RunResult<HashMap<String, ExtractEntry>> {
-    let mut expected = HashMap::with_capacity(plan.directories.len() + plan.files.len());
-    for directory in &plan.directories {
-        insert_extract_entry(
-            &mut expected,
-            archive_source_path(&directory.source)?,
-            ExtractEntry {
-                destination: directory.destination.clone(),
-                size: 0,
-                is_dir: true,
-            },
-        )?;
-    }
-    for file in &plan.files {
-        insert_extract_entry(
-            &mut expected,
-            archive_source_path(&file.source)?,
-            ExtractEntry {
-                destination: file.destination.clone(),
-                size: file.size,
-                is_dir: false,
-            },
-        )?;
-    }
-    Ok(expected)
-}
-
-fn insert_extract_entry(
-    expected: &mut HashMap<String, ExtractEntry>,
-    path: String,
-    entry: ExtractEntry,
-) -> RunResult<()> {
-    if expected.insert(path.clone(), entry).is_some() {
-        Err(internal(format!("duplicate archive source path: {path}")))
-    } else {
-        Ok(())
-    }
-}
-
-async fn apply_download_metadata(
-    plan: &RemoteDownloadPlan,
-    context: &mut ExecutionContext,
-) -> RunResult<()> {
-    context.set_stage(TransferStage::Verifying).await;
-    for file in &plan.files {
-        context.checkpoint().await?;
-        let metadata = tokio::fs::symlink_metadata(&file.destination)
-            .await
-            .map_err(|error| {
-                TransferRunError::Failed(io_failure("verify extracted file", &error))
-            })?;
-        if !metadata.is_file() || metadata.len() != file.size {
-            return Err(integrity(format!(
-                "local archive output mismatch: {}",
-                file.destination.display()
-            )));
-        }
-        file.metadata.apply_local(&file.destination).await?;
-        context.complete_file().await;
-    }
-    for directory in plan.directories.iter().rev() {
-        context.checkpoint().await?;
-        let metadata = tokio::fs::symlink_metadata(&directory.destination)
-            .await
-            .map_err(|error| {
-                TransferRunError::Failed(io_failure("verify extracted directory", &error))
-            })?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(integrity(format!(
-                "local archive directory mismatch: {}",
-                directory.destination.display()
-            )));
-        }
-        directory
-            .metadata
-            .apply_local(&directory.destination)
-            .await?;
-    }
-    Ok(())
-}
-
 fn download_root_sources(plan: &RemoteDownloadPlan) -> RunResult<Vec<String>> {
     let mut sources = Vec::with_capacity(plan.roots.len());
     for root in &plan.roots {
@@ -596,6 +543,29 @@ fn download_root_sources(plan: &RemoteDownloadPlan) -> RunResult<Vec<String>> {
         sources.push(source);
     }
     Ok(sources)
+}
+
+/// 将归档内的远端绝对路径根映射到任务私有本地 staging。
+fn download_extract_roots(plan: &RemoteDownloadPlan) -> RunResult<Vec<ExtractRoot>> {
+    let sources = download_root_sources(plan)?;
+    if sources.len() != plan.roots.len() {
+        return Err(internal("archive root count changed"));
+    }
+    sources
+        .into_iter()
+        .zip(&plan.roots)
+        .map(|(source, root)| {
+            Ok(ExtractRoot {
+                archive_path: archive_source_path(&source)?,
+                destination: root.stage.clone(),
+                kind: if plan.files.iter().any(|file| file.destination == root.stage) {
+                    ArchiveEntryKind::File
+                } else {
+                    ArchiveEntryKind::Directory
+                },
+            })
+        })
+        .collect()
 }
 
 fn archive_source_path(source: &str) -> RunResult<String> {
@@ -699,14 +669,6 @@ fn internal(value: impl Into<String>) -> TransferRunError {
     TransferRunError::failed(TransferErrorCode::Internal, value)
 }
 
-fn is_connection_lost(result: &RunResult<()>) -> bool {
-    matches!(
-        result,
-        Err(TransferRunError::Failed(failure))
-            if failure.code == TransferErrorCode::ConnectionLost
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,5 +682,22 @@ mod tests {
         assert_eq!(remote_parent("/home/user/file.txt").unwrap(), "/home/user");
         assert_eq!(remote_parent("/file.txt").unwrap(), "/");
         assert_eq!(remote_name("/home/user/file.txt").unwrap(), "file.txt");
+    }
+
+    #[test]
+    fn remote_archive_info_accepts_sha256sum_and_openssl_output() {
+        let digest = "a".repeat(64);
+        assert_eq!(
+            parse_remote_archive_info(format!("42\n{digest}  payload.tar.gz\n").as_bytes())
+                .unwrap(),
+            (42, digest.clone())
+        );
+        assert_eq!(
+            parse_remote_archive_info(
+                format!("7\nSHA2-256(payload.tar.gz)= {digest}\n").as_bytes()
+            )
+            .unwrap(),
+            (7, digest)
+        );
     }
 }

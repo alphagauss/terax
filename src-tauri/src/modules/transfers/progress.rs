@@ -114,6 +114,23 @@ impl ExecutionContext {
         }
     }
 
+    /// Archive 在不预扫描子树时，打包或安全解包完成后再发布实际文件总数。
+    pub(crate) async fn set_archive_file_count(&self, total_files: u64) {
+        let _ = self
+            .manager
+            .mutate_task(&self.app, &self.task_id, |task| {
+                task.total_files = total_files;
+                task.completed_files = task.completed_files.min(total_files);
+            })
+            .await;
+    }
+
+    /// 将已经由整包校验和安全解包共同确认的文件数一次性计入进度。
+    pub(crate) async fn complete_files(&mut self, files: u64) {
+        self.pending_files = self.pending_files.saturating_add(files);
+        self.flush_progress().await;
+    }
+
     /// 聚合字节增量，并以固定频率更新前端快照。
     pub(crate) async fn report_bytes(&mut self, bytes: u64) {
         self.pending_bytes = self.pending_bytes.saturating_add(bytes);

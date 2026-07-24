@@ -1,7 +1,8 @@
 //! SSH 文件传输的有界远端 I/O。
 //!
 //! russh-sftp 的单次请求在 transport 异常断开时可能长期不返回。本模块为每次远端
-//! 文件操作设置空闲上限，使任务能够进入失败终态并交还调度许可。
+//! 文件操作设置空闲上限；Archive 的长 I/O 还可与取消信号竞争，避免 Canceling
+//! 被单个高延迟请求长期阻塞。
 
 use std::future::Future;
 use std::time::Duration;
@@ -10,7 +11,7 @@ use russh_sftp::client::error::Error as SftpError;
 use russh_sftp::protocol::StatusCode;
 
 use super::super::errors::TransferErrorCode;
-use super::super::manager::TransferRunError;
+use super::super::manager::{TaskControl, TransferRunError};
 
 const REMOTE_IO_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -67,25 +68,32 @@ where
     }
 }
 
-/// 执行允许目标不存在的远端操作，供幂等清理使用。
-pub(crate) async fn run_optional<T>(
+/// 执行可被任务取消立即中断等待的远端操作。
+///
+/// 取消时丢弃仍在等待的 SFTP future，由任务关闭专用会话并清理 staging。这样高
+/// RTT 链路不必等到单次 15 秒 I/O 超时才把任务从 Canceling 推进到 Canceled。
+pub(crate) async fn run_cancellable<T, E>(
     operation: impl Into<String>,
-    future: impl Future<Output = Result<T, SftpError>>,
-) -> Result<Option<T>, TransferRunError> {
+    future: impl Future<Output = Result<T, E>>,
+    control: &TaskControl,
+) -> Result<T, TransferRunError>
+where
+    E: RemoteOperationError,
+{
     let operation = operation.into();
-    match tokio::time::timeout(REMOTE_IO_TIMEOUT, future).await {
-        Ok(Ok(value)) => Ok(Some(value)),
-        Ok(Err(SftpError::Status(status))) if status.status_code == StatusCode::NoSuchFile => {
-            Ok(None)
-        }
-        Ok(Err(error)) => Err(TransferRunError::failed(
-            TransferErrorCode::ConnectionLost,
-            format!("{operation}: {error}"),
-        )),
-        Err(_) => Err(TransferRunError::failed(
-            TransferErrorCode::ConnectionLost,
-            format!("{operation} timed out"),
-        )),
+    tokio::select! {
+        _ = control.cancelled() => Err(TransferRunError::Canceled),
+        result = tokio::time::timeout(REMOTE_IO_TIMEOUT, future) => match result {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(error)) => Err(TransferRunError::failed(
+                error.code(),
+                format!("{operation}: {error}"),
+            )),
+            Err(_) => Err(TransferRunError::failed(
+                TransferErrorCode::ConnectionLost,
+                format!("{operation} timed out"),
+            )),
+        },
     }
 }
 
@@ -113,23 +121,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn optional_remote_operations_treat_missing_paths_as_success() {
-        let missing = SftpError::Status(russh_sftp::protocol::Status {
-            id: 1,
-            status_code: StatusCode::NoSuchFile,
-            error_message: "missing".into(),
-            language_tag: "en".into(),
-        });
-        let result = run_optional(
-            "stat remote staging path",
-            std::future::ready(Err::<(), _>(missing)),
-        )
-        .await
-        .unwrap();
-        assert!(result.is_none());
-    }
-
-    #[tokio::test]
     async fn remote_permission_errors_are_not_reported_as_disconnects() {
         let denied = SftpError::Status(russh_sftp::protocol::Status {
             id: 1,
@@ -148,5 +139,19 @@ mod tests {
         };
         assert_eq!(failure.code, TransferErrorCode::PermissionDenied);
         assert!(!failure.retryable);
+    }
+
+    #[tokio::test]
+    async fn cancellable_remote_operation_does_not_wait_for_io_timeout() {
+        let control = TaskControl::new();
+        control.cancel();
+        let error = run_cancellable(
+            "blocked remote operation",
+            std::future::pending::<Result<(), std::io::Error>>(),
+            &control,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, TransferRunError::Canceled));
     }
 }

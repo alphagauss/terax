@@ -1,7 +1,8 @@
 //! Direct 与 Archive 共用的只读扫描与 Manifest 生成。
 //!
-//! 本模块在写入目标前解析来源、校验 Workspace 边界、拒绝符号链接与特殊文件，
-//! 并生成带私有 staging 路径的不可变计划。规划阶段不创建或修改文件。
+//! 本模块在写入目标前解析来源、校验 Workspace 边界并生成带私有 staging 路径的
+//! 不可变计划。Direct 会递归扫描全部条目；Archive 只确认顶层根，子树交给打包或
+//! 接收端安全解压处理，从而避免高延迟环境中的重复遍历。规划阶段不创建或修改文件。
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
@@ -22,7 +23,7 @@ use super::commit::{
 use super::errors::TransferErrorCode;
 use super::manager::TransferRunError;
 use super::metadata::EntryMetadata;
-use super::models::{EnqueueTransferRequest, TransferDirection};
+use super::models::{EnqueueTransferRequest, TransferDirection, TransferStrategy};
 use super::progress::ExecutionContext;
 use super::source::LocalSourceIdentity;
 
@@ -172,9 +173,11 @@ pub(crate) async fn prepare(
     workspace: &WorkspaceEnv,
     request: &EnqueueTransferRequest,
     task_id: &str,
+    strategy: TransferStrategy,
     context: &ExecutionContext,
 ) -> RunResult<PreparedTransfer> {
     context.checkpoint().await?;
+    let scan_contents = scans_subtree(strategy);
     let plan = match workspace {
         WorkspaceEnv::Local => {
             return Err(TransferRunError::failed(
@@ -224,6 +227,7 @@ pub(crate) async fn prepare(
                     sanitize_names,
                     archive,
                     task_id,
+                    scan_contents,
                     context,
                 )
                 .await?,
@@ -240,6 +244,7 @@ pub(crate) async fn prepare(
                     &request.sources,
                     &request.destination,
                     task_id,
+                    scan_contents,
                     context,
                 )
                 .await
@@ -250,6 +255,7 @@ pub(crate) async fn prepare(
                     &request.sources,
                     Path::new(&request.destination),
                     task_id,
+                    scan_contents,
                     context,
                 )
                 .await
@@ -279,6 +285,7 @@ async fn plan_local(
     sanitize_names: bool,
     wsl: WslArchiveContext,
     task_id: &str,
+    scan_contents: bool,
     context: &ExecutionContext,
 ) -> RunResult<LocalPlan> {
     let destination_metadata = tokio::fs::metadata(&destination_parent)
@@ -306,6 +313,7 @@ async fn plan_local(
         roots: Vec::new(),
     };
     let mut root_names = HashSet::new();
+    let mut source_roots: Vec<PathBuf> = Vec::new();
 
     for source in sources {
         context.checkpoint().await?;
@@ -320,6 +328,17 @@ async fn plan_local(
             .await
             .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
         reject_local_symlink_or_special(&source, &metadata)?;
+        if !scan_contents
+            && source_roots
+                .iter()
+                .any(|root| local_paths_overlap(root, &source))
+        {
+            return Err(invalid(format!(
+                "archive source roots cannot overlap: {}",
+                source.display()
+            )));
+        }
+        source_roots.push(source.clone());
         let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
         let source_name = source
             .file_name()
@@ -359,6 +378,9 @@ async fn plan_local(
             metadata: EntryMetadata::from_local(&metadata),
             source_identity,
         });
+        if !scan_contents {
+            continue;
+        }
         let mut pending = vec![(source, stage, source_identity)];
         while let Some((source_dir, destination_dir, source_identity)) = pending.pop() {
             context.checkpoint().await?;
@@ -416,6 +438,7 @@ async fn plan_remote_upload(
     sources: &[String],
     destination_parent: &str,
     task_id: &str,
+    scan_contents: bool,
     context: &ExecutionContext,
 ) -> RunResult<RemoteUploadPlan> {
     let destination_parent =
@@ -428,6 +451,7 @@ async fn plan_remote_upload(
         roots: Vec::new(),
     };
     let mut root_names = HashSet::new();
+    let mut source_roots: Vec<PathBuf> = Vec::new();
 
     for source in sources {
         context.checkpoint().await?;
@@ -442,6 +466,17 @@ async fn plan_remote_upload(
             .await
             .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
         reject_local_symlink_or_special(&source, &metadata)?;
+        if !scan_contents
+            && source_roots
+                .iter()
+                .any(|root| local_paths_overlap(root, &source))
+        {
+            return Err(invalid(format!(
+                "archive source roots cannot overlap: {}",
+                source.display()
+            )));
+        }
+        source_roots.push(source.clone());
         let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
         let name = source
             .file_name()
@@ -478,6 +513,9 @@ async fn plan_remote_upload(
             metadata: EntryMetadata::from_local(&metadata),
             source_identity,
         });
+        if !scan_contents {
+            continue;
+        }
         let mut pending = vec![(source, stage, source_identity)];
         while let Some((source_dir, destination_dir, source_identity)) = pending.pop() {
             context.checkpoint().await?;
@@ -533,6 +571,7 @@ async fn plan_remote_download(
     sources: &[String],
     destination_parent: &Path,
     task_id: &str,
+    scan_contents: bool,
     context: &ExecutionContext,
 ) -> RunResult<RemoteDownloadPlan> {
     let destination_metadata = tokio::fs::metadata(destination_parent)
@@ -562,6 +601,7 @@ async fn plan_remote_download(
         roots: Vec::new(),
     };
     let mut root_names = HashSet::new();
+    let mut source_roots: Vec<String> = Vec::new();
 
     for source in sources {
         context.checkpoint().await?;
@@ -582,6 +622,16 @@ async fn plan_remote_download(
                 "remote source is outside workspace root: {source}"
             )));
         }
+        if !scan_contents
+            && source_roots
+                .iter()
+                .any(|root| remote_path_within(root, &source) || remote_path_within(&source, root))
+        {
+            return Err(invalid(format!(
+                "archive source roots cannot overlap: {source}"
+            )));
+        }
+        source_roots.push(source.clone());
         let source_name = remote_name(&source)?.to_string();
         let destination_name = remote::sftp::sanitize_local_name(&source_name);
         if !root_names.insert(local_name_identity(OsStr::new(&destination_name))) {
@@ -614,6 +664,9 @@ async fn plan_remote_download(
             metadata: EntryMetadata::from_remote(&source_metadata),
             source_identity: None,
         });
+        if !scan_contents {
+            continue;
+        }
         let mut pending = vec![(source, stage)];
         while let Some((source_dir, destination_dir)) = pending.pop() {
             context.checkpoint().await?;
@@ -801,6 +854,11 @@ fn validate_local_relationship(
     Ok(())
 }
 
+/// 判断两个已规范化本地来源是否相同或互为祖先，避免归档中出现重复子树。
+fn local_paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
 fn remote_name(path: &str) -> RunResult<&str> {
     path.trim_end_matches('/')
         .rsplit('/')
@@ -817,6 +875,14 @@ fn totals(sizes: impl Iterator<Item = u64>) -> (u64, u64) {
     sizes.fold((0, 0), |(files, bytes), size| {
         (files + 1, bytes.saturating_add(size))
     })
+}
+
+/// 返回策略是否需要在规划阶段递归扫描子树。
+///
+/// Direct 必须提前取得每个写入项的大小和元数据；Archive 只确认顶层根，子树由
+/// 打包或接收端安全解压时处理，避免跨 WSL/SSH 的重复逐文件访问。
+fn scans_subtree(strategy: TransferStrategy) -> bool {
+    strategy == TransferStrategy::Direct
 }
 
 fn message(value: String) -> TransferRunError {
@@ -877,5 +943,23 @@ mod tests {
             validate_local_relationship(source, Path::new("C:/work/project/copy"), true).is_err()
         );
         assert!(validate_local_relationship(source, Path::new("C:/work/other"), true).is_ok());
+    }
+
+    #[test]
+    fn archive_planning_does_not_prescan_descendants() {
+        assert!(scans_subtree(TransferStrategy::Direct));
+        assert!(!scans_subtree(TransferStrategy::Archive));
+    }
+
+    #[test]
+    fn archive_source_roots_cannot_overlap() {
+        assert!(local_paths_overlap(
+            Path::new("C:/work/project"),
+            Path::new("C:/work/project/src")
+        ));
+        assert!(!local_paths_overlap(
+            Path::new("C:/work/project"),
+            Path::new("C:/work/other")
+        ));
     }
 }

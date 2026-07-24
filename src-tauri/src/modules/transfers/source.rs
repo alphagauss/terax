@@ -1,7 +1,8 @@
 //! 本地传输来源的身份校验与安全打开。
 //!
-//! Planner 记录稳定文件身份；执行器打开来源后同时复验路径和句柄，避免扫描后的
-//! 符号链接替换或同名文件替换把传输范围扩展到原始 Manifest 之外。
+//! Direct 的 Planner 记录稳定文件身份；执行器打开来源后同时复验路径和句柄。
+//! Archive 不预扫描子树，本模块则在打包遍历时复验目录和文件，避免符号链接替换或
+//! 同名替换把传输范围扩展到用户选定的根之外。
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -227,6 +228,34 @@ pub(crate) fn open_verified_file_blocking(
         return Err(changed_io(path));
     }
     Ok(file)
+}
+
+/// 在阻塞归档线程中打开目录迭代器，并在前后复验目录没有变成链接或其他对象。
+///
+/// Archive 不预扫描子树，因此此函数在实际遍历时承担与异步规划器相同的链接替换
+/// 防护。调用者必须把读取时捕获的身份传入，避免沿着被同名替换的目录继续打包。
+pub(crate) fn read_verified_directory_blocking(
+    path: &Path,
+    expected_identity: Option<LocalSourceIdentity>,
+) -> std::io::Result<std::fs::ReadDir> {
+    let before = std::fs::symlink_metadata(path)?;
+    verify_path_metadata_io(path, &before, expected_identity, false)?;
+    let entries = std::fs::read_dir(path)?;
+    let after = std::fs::symlink_metadata(path)?;
+    verify_path_metadata_io(path, &after, expected_identity, false)?;
+    Ok(entries)
+}
+
+/// 在归档完成一个目录的遍历后重新确认路径仍指向同一目录。
+///
+/// `ReadDir` 只固定迭代句柄，子项路径仍通过目录名访问；结束时复验可以发现遍历期间
+/// 发生的同名替换，避免把替换目录中的内容静默纳入归档。
+pub(crate) fn verify_directory_blocking(
+    path: &Path,
+    expected_identity: Option<LocalSourceIdentity>,
+) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    verify_path_metadata_io(path, &metadata, expected_identity, false)
 }
 
 /// 打开目录迭代器后复验路径身份，避免 Planner 沿扫描后替换的链接继续遍历。

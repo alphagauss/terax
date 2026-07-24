@@ -142,6 +142,11 @@ impl TaskControl {
         self.cancellation.is_cancelled()
     }
 
+    /// 异步等待取消请求，供单个远端 I/O 与取消信号竞争。
+    pub(crate) async fn cancelled(&self) {
+        self.cancellation.cancelled().await;
+    }
+
     /// 标记任务暂停并唤醒可能正在竞争许可的执行器。
     pub(crate) fn pause(&self) {
         self.paused.store(true, Ordering::Release);
@@ -420,7 +425,7 @@ impl TransferManager {
 
         self.set_stage(&app, &id, TransferStage::Scanning).await;
         let mut context = ExecutionContext::new(self.clone(), app.clone(), id.clone(), control);
-        let result = match planner::prepare(&workspace, &request, &id, &context).await {
+        let result = match planner::prepare(&workspace, &request, &id, strategy, &context).await {
             Ok(prepared) => match self.scheduler.reserve(prepared.target_keys()) {
                 Ok(_reservation) => match strategy {
                     TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
