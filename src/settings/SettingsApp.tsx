@@ -138,7 +138,11 @@ export function SettingsApp() {
             active === "remote" ? "max-w-[58rem]" : "max-w-160",
           )}
         >
-          {ActiveSection && <ActiveSection />}
+          {ActiveSection ? (
+            <div key={active} className="terax-tab-in">
+              <ActiveSection />
+            </div>
+          ) : null}
         </div>
       </main>
       <ToastDismissOnClick />

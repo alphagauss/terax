@@ -6,6 +6,11 @@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -62,7 +67,6 @@ import { spawnWorkspaceProcess } from "@/modules/workspace-process";
 import {
   Add01Icon,
   ArrowDown01Icon,
-  ArrowRight01Icon,
   Download01Icon,
   Edit02Icon,
   FloppyDiskIcon,
@@ -100,6 +104,7 @@ export function RemoteSection() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newDraft, setNewDraft] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     () => new Set(),
@@ -400,6 +405,7 @@ export function RemoteSection() {
     }
   };
 
+  /** 切换 SSH 分组的展开状态，由可折叠内容组件负责平滑过渡。 */
   const toggleGroup = (groupId: string) => {
     setCollapsedGroups((current) => {
       const next = new Set(current);
@@ -485,15 +491,18 @@ export function RemoteSection() {
                   <div className="mb-0.5 flex min-w-0 items-center gap-0.5">
                     <button
                       type="button"
-                      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium hover:bg-accent"
+                      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium transition-colors duration-control ease-standard hover:bg-accent"
                       aria-expanded={!collapsed}
                       onClick={() => toggleGroup(group.id)}
                     >
                       <HugeiconsIcon
-                        icon={collapsed ? ArrowRight01Icon : ArrowDown01Icon}
+                        icon={ArrowDown01Icon}
                         size={11}
                         strokeWidth={2}
-                        className="shrink-0 text-muted-foreground"
+                        className={cn(
+                          "shrink-0 text-muted-foreground transition-transform duration-control ease-standard",
+                          collapsed && "-rotate-90",
+                        )}
                       />
                       <span className="min-w-0 flex-1 truncate">{name}</span>
                       <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
@@ -571,29 +580,33 @@ export function RemoteSection() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  {!collapsed
-                    ? group.profiles.map((profile) => (
-                        <button
-                          key={profile.id}
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void selectProfile(profile)}
-                          className={cn(
-                            "mb-1 ml-5 flex w-[calc(100%-1.25rem)] items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-accent",
-                            selectedId === profile.id && "bg-accent",
-                          )}
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-[12px] font-medium">
-                              {profile.name}
+                  <Collapsible open={!collapsed}>
+                    <CollapsibleContent className="terax-collapsible-content">
+                      <div>
+                        {group.profiles.map((profile) => (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void selectProfile(profile)}
+                            className={cn(
+                              "mb-1 ml-5 flex w-[calc(100%-1.25rem)] items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-control ease-standard hover:bg-accent",
+                              selectedId === profile.id && "bg-accent",
+                            )}
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] font-medium">
+                                {profile.name}
+                              </span>
+                              <span className="block truncate font-mono text-[10px] text-muted-foreground">
+                                {profile.username}@{profile.host}:{profile.port}
+                              </span>
                             </span>
-                            <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                              {profile.username}@{profile.host}:{profile.port}
-                            </span>
-                          </span>
-                        </button>
-                      ))
-                    : null}
+                          </button>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
               );
             })}
@@ -692,10 +705,7 @@ export function RemoteSection() {
               <Select
                 value={form.authMethod}
                 onValueChange={(value) =>
-                  update(
-                    "authMethod",
-                    value as SshProfile["authMethod"],
-                  )
+                  update("authMethod", value as SshProfile["authMethod"])
                 }
               >
                 <SelectTrigger className="w-full text-[12px]">
@@ -764,101 +774,121 @@ export function RemoteSection() {
             ) : null}
           </div>
 
-          <details className="mt-4 rounded-lg border border-border/60">
-            <summary className="cursor-pointer px-3 py-2 text-[11.5px] font-medium text-muted-foreground">
-              {t("remote.advanced.title")}
-            </summary>
-            <div className="grid gap-3 border-t border-border/60 p-3 sm:grid-cols-2">
-              <Field label={t("remote.fields.rootPath")}>
-                <Input
-                  value={form.rootPath}
-                  onChange={(event) => update("rootPath", event.target.value)}
-                  placeholder="~"
-                  spellCheck={false}
-                />
-              </Field>
-              <Field label={t("remote.fields.keepalive")}>
-                <Input
-                  type="number"
-                  min={0}
-                value={form.keepaliveSeconds}
-                onChange={(event) =>
-                  update("keepaliveSeconds", event.target.value)
-                }
-                className={NUMBER_INPUT_CLASS}
-                onWheel={blurNumberInputOnWheel}
-                />
-              </Field>
-              <Field
-                label={t("remote.fields.proxyUrl")}
-                className="sm:col-span-2"
+          <Collapsible
+            open={advancedOpen}
+            onOpenChange={setAdvancedOpen}
+            className="mt-4 rounded-lg border border-border/60"
+          >
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-muted-foreground transition-colors duration-control ease-standard hover:bg-accent/30"
               >
-                <Input
-                  value={form.proxyUrl}
-                  onChange={(event) => update("proxyUrl", event.target.value)}
-                  placeholder={t("remote.placeholders.proxyUrl")}
-                  spellCheck={false}
+                {t("remote.advanced.title")}
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={12}
+                  strokeWidth={2}
+                  className={cn(
+                    "transition-transform duration-control ease-standard",
+                    !advancedOpen && "-rotate-90",
+                  )}
                 />
-              </Field>
-              {form.proxyUrl.trim() ? (
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="terax-collapsible-content border-t border-border/60">
+              <div className="grid gap-3 p-3 sm:grid-cols-2">
+                <Field label={t("remote.fields.rootPath")}>
+                  <Input
+                    value={form.rootPath}
+                    onChange={(event) => update("rootPath", event.target.value)}
+                    placeholder="~"
+                    spellCheck={false}
+                  />
+                </Field>
+                <Field label={t("remote.fields.keepalive")}>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.keepaliveSeconds}
+                    onChange={(event) =>
+                      update("keepaliveSeconds", event.target.value)
+                    }
+                    className={NUMBER_INPUT_CLASS}
+                    onWheel={blurNumberInputOnWheel}
+                  />
+                </Field>
                 <Field
-                  label={t("remote.fields.proxyPassword")}
+                  label={t("remote.fields.proxyUrl")}
                   className="sm:col-span-2"
                 >
                   <Input
-                    type="password"
-                    value={form.proxySecret}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        proxySecret: event.target.value,
-                        proxySecretDirty: true,
-                      }))
-                    }
-                    autoComplete="off"
-                  />
-                  <SecretToggle
-                    id={`ssh-proxy-secret-${form.id}`}
-                    checked={form.rememberProxySecret}
-                    onCheckedChange={(value) =>
-                      update("rememberProxySecret", value)
-                    }
-                    label={t("remote.secret.rememberProxy")}
+                    value={form.proxyUrl}
+                    onChange={(event) => update("proxyUrl", event.target.value)}
+                    placeholder={t("remote.placeholders.proxyUrl")}
+                    spellCheck={false}
                   />
                 </Field>
-              ) : null}
-              <div className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2 sm:col-span-2">
-                <Checkbox
-                  id={`ssh-reconnect-${form.id}`}
-                  checked={form.reconnectEnabled}
-                  onCheckedChange={(value) =>
-                    update("reconnectEnabled", value === true)
-                  }
-                />
-                <Label
-                  htmlFor={`ssh-reconnect-${form.id}`}
-                  className="flex-1 text-[11.5px] font-normal"
-                >
-                  {t("remote.fields.reconnect")}
-                </Label>
-                <Label className="text-[10.5px] text-muted-foreground">
-                  {t("remote.fields.reconnectAttempts")}
-                </Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={20}
-                  className={`h-8 w-20 ${NUMBER_INPUT_CLASS}`}
-                  disabled={!form.reconnectEnabled}
-                  value={form.reconnectMaxAttempts}
-                  onChange={(event) =>
-                    update("reconnectMaxAttempts", event.target.value)
-                  }
-                  onWheel={blurNumberInputOnWheel}
-                />
+                {form.proxyUrl.trim() ? (
+                  <Field
+                    label={t("remote.fields.proxyPassword")}
+                    className="sm:col-span-2"
+                  >
+                    <Input
+                      type="password"
+                      value={form.proxySecret}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          proxySecret: event.target.value,
+                          proxySecretDirty: true,
+                        }))
+                      }
+                      autoComplete="off"
+                    />
+                    <SecretToggle
+                      id={`ssh-proxy-secret-${form.id}`}
+                      checked={form.rememberProxySecret}
+                      onCheckedChange={(value) =>
+                        update("rememberProxySecret", value)
+                      }
+                      label={t("remote.secret.rememberProxy")}
+                    />
+                  </Field>
+                ) : null}
+                <div className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2 sm:col-span-2">
+                  <Checkbox
+                    id={`ssh-reconnect-${form.id}`}
+                    checked={form.reconnectEnabled}
+                    onCheckedChange={(value) =>
+                      update("reconnectEnabled", value === true)
+                    }
+                  />
+                  <Label
+                    htmlFor={`ssh-reconnect-${form.id}`}
+                    className="flex-1 text-[11.5px] font-normal"
+                  >
+                    {t("remote.fields.reconnect")}
+                  </Label>
+                  <Label className="text-[10.5px] text-muted-foreground">
+                    {t("remote.fields.reconnectAttempts")}
+                  </Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    className={`h-8 w-20 ${NUMBER_INPUT_CLASS}`}
+                    disabled={!form.reconnectEnabled}
+                    value={form.reconnectMaxAttempts}
+                    onChange={(event) =>
+                      update("reconnectMaxAttempts", event.target.value)
+                    }
+                    onWheel={blurNumberInputOnWheel}
+                  />
+                </div>
               </div>
-            </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
 
           {error ? (
             <p className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive">

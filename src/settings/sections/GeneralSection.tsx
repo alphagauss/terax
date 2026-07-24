@@ -1,3 +1,8 @@
+/**
+ * 本文件呈现常规设置并连接对应的持久化偏好。
+ * 外观选项的状态切换使用项目控制级动效，其他设置行为保持不变。
+ */
+
 import {
   Select,
   SelectContent,
@@ -82,6 +87,7 @@ const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 const ZOOM_STEP = 0.05;
 
+/** 常规设置分区。 */
 export function GeneralSection() {
   const { t } = useTranslation("settings");
   const { mode, setMode } = useTheme();
@@ -195,7 +201,7 @@ export function GeneralSection() {
               type="button"
               onClick={() => setMode(o.id)}
               className={cn(
-                "group flex h-20 flex-col items-center justify-center gap-1.5 rounded-lg border bg-card transition-[color,background-color,border-color,box-shadow]",
+                "group flex h-20 flex-col items-center justify-center gap-1.5 rounded-lg border bg-card transition-[color,background-color,border-color,box-shadow] duration-control ease-standard",
                 mode === o.id
                   ? "border-foreground/60 ring-1 ring-foreground/20"
                   : "border-border/60 hover:border-border",

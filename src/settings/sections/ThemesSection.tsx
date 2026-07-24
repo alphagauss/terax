@@ -1,3 +1,8 @@
+/**
+ * 本文件呈现主题、编辑器配色和背景图片设置。
+ * 主题卡片及其操作控件使用项目控制级动效，避免与设置页其他分区出现不同节奏。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -42,6 +47,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SectionHeader } from "../components/SectionHeader";
 
+/** 主题设置分区。 */
 export function ThemesSection() {
   const { t } = useTranslation();
   const { themeId, setThemeId, resolvedMode, customThemes } = useTheme();
@@ -213,7 +219,7 @@ export function ThemesSection() {
                   aria-pressed={selected}
                   onClick={() => setThemeId(t.id)}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-[color,background-color,border-color,box-shadow] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-[color,background-color,border-color,box-shadow] duration-control ease-standard focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                     isCustom && "pr-16",
                     selected
                       ? "border-foreground/60 ring-1 ring-foreground/20"
@@ -249,7 +255,7 @@ export function ThemesSection() {
                   </div>
                 </button>
                 {isCustom ? (
-                  <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                  <span className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-opacity duration-control ease-standard group-hover:opacity-100 group-focus-within:opacity-100">
                     <button
                       type="button"
                       aria-label={`Edit ${t.name}`}

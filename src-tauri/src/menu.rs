@@ -12,7 +12,7 @@ use crate::modules::shared_store;
 use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
-/// Read the UI language from the settings store; defaults to "en".
+/// 从设置存储读取界面语言；未设置时默认使用简体中文。
 #[cfg(target_os = "macos")]
 fn current_language<R: Runtime>(app: &AppHandle<R>) -> String {
     let _ = app;
@@ -21,7 +21,7 @@ fn current_language<R: Runtime>(app: &AppHandle<R>) -> String {
             return s.to_string();
         }
     }
-    "en".to_string()
+    "zh-CN".to_string()
 }
 
 /// Localized labels. `None` on a predefined item means "use the OS default

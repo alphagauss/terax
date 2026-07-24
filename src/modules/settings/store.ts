@@ -304,7 +304,7 @@ export const TERMINAL_SCROLLBACK_PRESETS = [
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "dark",
   themeId: DEFAULT_THEME_ID,
-  language: "en",
+  language: "zh-CN",
   backgroundKind: "none",
   backgroundImageId: null,
   backgroundOpacity: 0.5,

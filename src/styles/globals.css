@@ -506,6 +506,38 @@ html *::-webkit-scrollbar {
   animation: terax-collapsible-up var(--dur-control) var(--ease-standard);
 }
 
+/* 生成的菜单组件保留现有 tw-animate 效果，只统一到控制级动效契约。 */
+:where(
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="menubar-content"],
+  [data-slot="popover-content"]
+) {
+  --tw-duration: var(--dur-control);
+  --tw-ease: var(--ease-standard);
+}
+
+:where(
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="menubar-content"],
+  [data-slot="popover-content"]
+)[data-state="open"] {
+  animation: var(--animate-in);
+}
+
+:where(
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"],
+  [data-slot="menubar-content"],
+  [data-slot="popover-content"]
+)[data-state="closed"] {
+  animation: var(--animate-out);
+}
+
 /* Height auto<->0 reveal without JS measuring: animate the grid track from 0fr
  * to 1fr. The inner child must be the sole grid row with min-height:0. Used by
  * the docked AI input bar and the composer voice-status row. */
@@ -529,15 +561,10 @@ html *::-webkit-scrollbar {
 @keyframes terax-tab-in {
   from {
     opacity: 0;
-    transform: scale(0.86);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
   }
 }
 .terax-tab-in {
-  animation: terax-tab-in var(--dur-control) var(--ease-emphasized);
+  animation: terax-tab-in var(--dur-feedback) var(--ease-standard);
 }
 
 @keyframes terax-pill-in {
