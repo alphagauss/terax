@@ -44,7 +44,6 @@ import {
   hasOtherDocumentView,
   isDocumentTab,
   NewEditorDialog,
-  useApplyEditorFontSize,
   useEditorFileSync,
 } from "@/modules/editor";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
@@ -245,7 +244,6 @@ export default function App() {
     useState<EditorPaneHandle | null>(null);
   const gitHistoryRefs = useRef(new Map<number, FindHandle>());
   const { zoomIn, zoomOut, zoomReset } = useZoom();
-  useApplyEditorFontSize();
   useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
 
