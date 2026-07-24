@@ -13,6 +13,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
@@ -28,6 +35,9 @@ import {
 } from "./tunnelForm";
 import { remoteNative } from "./native";
 import type { SshTunnel, TunnelInfo, TunnelStatus } from "./types";
+
+const NUMBER_INPUT_CLASS =
+  "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
 type Props = {
   open: boolean;
@@ -180,7 +190,7 @@ export function TunnelManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-none">
+      <DialogContent className="grid h-[min(42rem,calc(100vh-3rem))] w-[min(48rem,calc(100vw-2rem))] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 duration-surface ease-emphasized data-open:slide-in-from-bottom-1 data-closed:slide-out-to-bottom-1 sm:max-w-none">
         <DialogHeader className="border-b border-border/60 px-5 py-4">
           <DialogTitle>{t("tunnels.title")}</DialogTitle>
           <DialogDescription>
@@ -216,7 +226,7 @@ export function TunnelManagerDialog({
                       disabled={busy}
                       onClick={() => selectTunnel(tunnel)}
                       className={cn(
-                        "mb-1 w-full rounded-md px-2.5 py-2 text-left hover:bg-accent",
+                        "mb-1 w-full rounded-md px-2.5 py-2 text-left transition-[background-color,color,box-shadow] duration-control ease-standard hover:bg-accent",
                         selectedId === tunnel.id && "bg-accent",
                       )}
                     >
@@ -224,7 +234,10 @@ export function TunnelManagerDialog({
                         <span className="truncate text-[12px] font-medium">
                           {tunnelDisplayName(runtime ?? tunnel)}
                         </span>
-                        <StatusDot status={status} label={t(`tunnels.status.${status}`)} />
+                        <StatusDot
+                          status={status}
+                          label={t(`tunnels.status.${status}`)}
+                        />
                       </span>
                       <span className="block truncate font-mono text-[10px] text-muted-foreground">
                         {tunnel.kind === "local"
@@ -263,44 +276,57 @@ export function TunnelManagerDialog({
                   placeholder={t("tunnels.namePlaceholder")}
                 />
               </Field>
-              <Field label={t("tunnels.type")}>
-                <select
+              <Field label={t("tunnels.type")} className="sm:col-span-2">
+                <Select
                   value={form.kind}
-                  onChange={(event) =>
-                    update("kind", event.target.value as TunnelForm["kind"])
+                  onValueChange={(value) =>
+                    update("kind", value as TunnelForm["kind"])
                   }
                   disabled={busy}
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
                 >
-                  <option value="local">{t("tunnels.local")}</option>
-                  <option value="remote">{t("tunnels.remote")}</option>
-                  <option value="dynamic">{t("tunnels.dynamic")}</option>
-                </select>
+                  <SelectTrigger className="w-full sm:max-w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">{t("tunnels.local")}</SelectItem>
+                    <SelectItem value="remote">
+                      {t("tunnels.remote")}
+                    </SelectItem>
+                    <SelectItem value="dynamic">
+                      {t("tunnels.dynamic")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
-              <Field label={t("tunnels.bindAddress")}>
-                <Input
-                  value={form.bindHost}
-                  onChange={(event) => update("bindHost", event.target.value)}
-                  disabled={busy}
-                  spellCheck={false}
-                />
-              </Field>
-              <Field label={t("tunnels.bindPort")}>
-                <Input
-                  type="number"
-                  min={0}
-                  max={65535}
-                  value={form.bindPort}
-                  onChange={(event) => update("bindPort", event.target.value)}
-                  disabled={busy}
-                />
-              </Field>
+              <div className="grid gap-3 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                <Field label={t("tunnels.bindAddress")}>
+                  <Input
+                    value={form.bindHost}
+                    onChange={(event) => update("bindHost", event.target.value)}
+                    disabled={busy}
+                    spellCheck={false}
+                  />
+                </Field>
+                <Field label={t("tunnels.bindPort")}>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={65535}
+                    value={form.bindPort}
+                    onChange={(event) => update("bindPort", event.target.value)}
+                    disabled={busy}
+                    className={NUMBER_INPUT_CLASS}
+                  />
+                </Field>
+              </div>
               {form.kind !== "dynamic" ? (
-                <>
+                <div className="grid gap-3 sm:col-span-2 sm:grid-cols-[minmax(0,1fr)_8rem]">
                   <Field label={t("tunnels.targetHost")}>
                     <Input
                       value={form.targetHost}
-                      onChange={(event) => update("targetHost", event.target.value)}
+                      onChange={(event) =>
+                        update("targetHost", event.target.value)
+                      }
                       disabled={busy}
                       spellCheck={false}
                     />
@@ -311,11 +337,14 @@ export function TunnelManagerDialog({
                       min={1}
                       max={65535}
                       value={form.targetPort}
-                      onChange={(event) => update("targetPort", event.target.value)}
+                      onChange={(event) =>
+                        update("targetPort", event.target.value)
+                      }
                       disabled={busy}
+                      className={NUMBER_INPUT_CLASS}
                     />
                   </Field>
-                </>
+                </div>
               ) : null}
             </div>
 
@@ -327,7 +356,10 @@ export function TunnelManagerDialog({
                 disabled={busy}
                 onCheckedChange={setEnabled}
               />
-              <Label htmlFor="ssh-tunnel-enabled" className="text-[11px] font-normal">
+              <Label
+                htmlFor="ssh-tunnel-enabled"
+                className="text-[11px] font-normal"
+              >
                 {t("tunnels.enabled")}
               </Label>
             </div>
@@ -343,7 +375,7 @@ export function TunnelManagerDialog({
               </p>
             ) : null}
             {visibleError ? (
-              <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+              <p className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-[11px] text-destructive animate-in fade-in-0 slide-in-from-top-1 duration-control ease-standard">
                 {visibleError}
               </p>
             ) : null}
@@ -379,7 +411,7 @@ function StatusDot({ status, label }: { status: TunnelStatus; label: string }) {
       aria-label={label}
       title={label}
       className={cn(
-        "size-1.5 shrink-0 rounded-full",
+        "size-1.5 shrink-0 rounded-full transition-colors duration-control ease-standard",
         status === "active"
           ? "bg-emerald-500"
           : status === "failed"
