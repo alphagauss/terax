@@ -338,7 +338,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   recentModelIds: [],
   vimMode: false,
   editorWordWrap: false,
-  diffViewMode: "inline",
+  diffViewMode: "split",
   showHidden: false,
   explorerGitDecorations: true,
   sourceControlShowUndoCommit: true,
