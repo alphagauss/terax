@@ -322,6 +322,11 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
               })}
             </div>
           ) : null}
+          {task.failure ? (
+            <div className="mt-1 whitespace-pre-wrap break-all text-[10px] leading-4 text-destructive">
+              {task.failure.detail}
+            </div>
+          ) : null}
           {active || task.status === "completed" ? (
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}

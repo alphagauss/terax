@@ -9,9 +9,13 @@ use std::time::Duration;
 use crate::modules::remote::manager::global_manager;
 use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
 
+use super::super::errors::TransferErrorCode;
+use super::super::manager::TransferRunError;
+
 const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
 const CLEANUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const MAX_CLEANUP_COMMAND_BYTES: usize = 64 * 1024;
 
 /// 在后台等待同一 SSH profile 恢复，并清理当前任务明确拥有的路径。
 pub(crate) fn schedule(profile_id: String, mut paths: Vec<String>) {
@@ -36,13 +40,13 @@ pub(crate) fn schedule(profile_id: String, mut paths: Vec<String>) {
     });
 }
 
-/// 用一个服务器本地命令删除经过验证的任务私有路径。
+/// 用少量服务器本地命令删除经过验证的任务私有路径，并返回仍需重试的路径。
 ///
 /// 此入口只接受 Terax 生成的固定命名，拒绝任意用户路径。`rm -rf` 在远端本地递归，
 /// 不会把目录中文件数量放大为逐项 SFTP 往返。
-pub(crate) async fn remove_now(workspace: &Arc<RemoteWorkspace>, paths: &[String]) -> bool {
+pub(crate) async fn remove_now(workspace: &Arc<RemoteWorkspace>, paths: &[String]) -> Vec<String> {
     if paths.is_empty() {
-        return true;
+        return Vec::new();
     }
     let home = workspace.home().await;
     if let Some(path) = paths
@@ -50,47 +54,89 @@ pub(crate) async fn remove_now(workspace: &Arc<RemoteWorkspace>, paths: &[String
         .find(|path| !is_owned_cleanup_path(path, &home))
     {
         log::warn!("refused to clean invalid remote transfer path: {path}");
-        return false;
+        return paths.to_vec();
     }
-    let mut command = String::from("rm -rf --");
-    for path in paths {
-        command.push(' ');
-        command.push_str(&shell_quote(path));
-    }
-    match workspace
-        .exec(&command, None, CLEANUP_COMMAND_TIMEOUT)
-        .await
-    {
-        Ok(output) if output.exit_code == Some(0) && !output.timed_out && !output.truncated => true,
-        Ok(output) => {
-            log::warn!(
-                "remote transfer cleanup command failed with exit {:?}: {}",
-                output.exit_code,
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-            false
+
+    let mut remaining = Vec::new();
+    for batch in cleanup_batches(paths) {
+        let command = cleanup_command(&batch);
+        match workspace
+            .exec(&command, None, CLEANUP_COMMAND_TIMEOUT)
+            .await
+        {
+            Ok(output) if output.exit_code == Some(0) && !output.timed_out && !output.truncated => {
+            }
+            Ok(output) => {
+                log::warn!(
+                    "remote transfer cleanup command failed with exit {:?}: {}",
+                    output.exit_code,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+                remaining.extend(batch.into_iter().cloned());
+            }
+            Err(error) => {
+                log::warn!("failed to start remote transfer cleanup: {error}");
+                remaining.extend(batch.into_iter().cloned());
+            }
         }
-        Err(error) => {
-            log::warn!("failed to start remote transfer cleanup: {error}");
-            false
-        }
     }
+    remaining
 }
 
 /// 循环等待 Workspace 重连，并用服务器本地递归删除重试尚未清理的路径。
 async fn cleanup_after_reconnect(profile_id: &str, paths: &[String]) {
+    let mut remaining = paths.to_vec();
     loop {
         let workspace = match global_manager() {
             Ok(manager) => manager.workspace(profile_id).await.ok(),
             Err(_) => None,
         };
         if let Some(workspace) = workspace {
-            if remove_now(&workspace, paths).await {
+            remaining = remove_now(&workspace, &remaining).await;
+            if remaining.is_empty() {
                 return;
             }
         }
         tokio::time::sleep(CLEANUP_RETRY_INTERVAL).await;
     }
+}
+
+/// 判断当前失败是否无法可靠使用现有 SSH 连接立即清理。
+pub(crate) fn should_defer(result: &Result<(), TransferRunError>) -> bool {
+    matches!(result, Err(TransferRunError::Canceled))
+        || matches!(
+            result,
+            Err(TransferRunError::Failed(failure))
+                if failure.code == TransferErrorCode::ConnectionLost
+        )
+}
+
+fn cleanup_batches(paths: &[String]) -> Vec<Vec<&String>> {
+    let mut batches = Vec::new();
+    let mut batch = Vec::new();
+    let mut command_bytes = "rm -rf --".len();
+    for path in paths {
+        let argument_bytes = 1 + shell_quote(path).len();
+        if !batch.is_empty() && command_bytes + argument_bytes > MAX_CLEANUP_COMMAND_BYTES {
+            batches.push(std::mem::take(&mut batch));
+            command_bytes = "rm -rf --".len();
+        }
+        command_bytes += argument_bytes;
+        batch.push(path);
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
+}
+
+fn cleanup_command(paths: &[&String]) -> String {
+    let mut command = String::from("rm -rf --");
+    for path in paths {
+        command.push(' ');
+        command.push_str(&shell_quote(path));
+    }
+    command
 }
 
 /// 只认可任务 UUID 派生的 staging、相邻归档目录和 mktemp 归档目录。
@@ -165,5 +211,25 @@ mod tests {
             "/home/user/../.terax-archive-a1B2c3D4",
             home
         ));
+    }
+
+    #[test]
+    fn cleanup_commands_are_split_before_the_byte_limit() {
+        let paths = vec![
+            format!(
+                "/home/user/{}/.terax-part-{}-0",
+                "a".repeat(40_000),
+                uuid::Uuid::new_v4()
+            ),
+            format!(
+                "/home/user/{}/.terax-part-{}-1",
+                "b".repeat(40_000),
+                uuid::Uuid::new_v4()
+            ),
+        ];
+        let batches = cleanup_batches(&paths);
+        assert_eq!(batches.len(), 2);
+        assert!(cleanup_command(&batches[0]).len() <= MAX_CLEANUP_COMMAND_BYTES);
+        assert!(cleanup_command(&batches[1]).len() <= MAX_CLEANUP_COMMAND_BYTES);
     }
 }

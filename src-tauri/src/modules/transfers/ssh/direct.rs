@@ -60,6 +60,10 @@ impl OrderedSha256 {
         (self.hashed_until == expected_size && self.pending.is_empty())
             .then(|| format!("{:x}", self.digest.finalize()))
     }
+
+    fn buffered_chunks(&self) -> usize {
+        self.pending.len()
+    }
 }
 
 /// 通过有界 raw SFTP 流水线下载一个文件到排他 staging 目标。
@@ -161,7 +165,8 @@ async fn download_file_into_inner(
         while !canceled
             && failure.is_none()
             && next_offset < expected_size
-            && inflight.len() < MAX_INFLIGHT_READS
+            && inflight.len() + digest.as_ref().map_or(0, OrderedSha256::buffered_chunks)
+                < MAX_INFLIGHT_READS
         {
             let offset = next_offset;
             let length = ((expected_size - offset) as usize).min(DOWNLOAD_CHUNK_BYTES);
@@ -315,7 +320,10 @@ pub(crate) async fn execute_upload(
     }
     .await;
     if result.is_err() {
-        let pending = plan.roots.iter().map(|root| root.stage.clone()).collect();
+        let mut pending: Vec<_> = plan.roots.iter().map(|root| root.stage.clone()).collect();
+        if !super::cleanup::should_defer(&result) {
+            pending = super::cleanup::remove_now(&plan.workspace, &pending).await;
+        }
         super::cleanup::schedule(plan.workspace.profile.id.clone(), pending);
     }
     close_sftp(&plan.session).await;
@@ -581,5 +589,16 @@ mod tests {
         let mut incomplete = OrderedSha256::new();
         assert!(incomplete.push(4, b"efgh".to_vec()));
         assert!(incomplete.finish(8).is_none());
+    }
+
+    #[test]
+    fn ordered_sha256_reports_out_of_order_buffer_usage() {
+        let mut digest = OrderedSha256::new();
+        for offset in 1..MAX_INFLIGHT_READS {
+            assert!(digest.push(offset as u64, vec![0]));
+        }
+        assert_eq!(digest.buffered_chunks(), MAX_INFLIGHT_READS - 1);
+        assert!(digest.push(0, vec![0]));
+        assert_eq!(digest.buffered_chunks(), 0);
     }
 }

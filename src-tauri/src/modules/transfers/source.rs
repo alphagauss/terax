@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::time::SystemTime;
 
-use super::errors::{io_failure, TransferErrorCode};
+use super::errors::{contextual_io_error, io_failure, source_changed_io, TransferErrorCode};
 use super::manager::TransferRunError;
 
 /// 当前平台可用于识别本地文件系统对象的身份信号。
@@ -175,13 +175,18 @@ pub(crate) async fn open_verified_file(
             &error,
         ))
     })?;
-    let opened = file
-        .metadata()
-        .await
-        .map_err(|error| message(format!("stat opened source {}: {error}", path.display())))?;
-    let after = tokio::fs::symlink_metadata(path)
-        .await
-        .map_err(|error| message(format!("restat source {}: {error}", path.display())))?;
+    let opened = file.metadata().await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("stat opened source {}", path.display()),
+            &error,
+        ))
+    })?;
+    let after = tokio::fs::symlink_metadata(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("restat source {}", path.display()),
+            &error,
+        ))
+    })?;
     verify_path_metadata(path, &after, expected_identity, true)?;
     verify_opened_metadata(path, &opened, expected_size, expected_modified)?;
     if expected_identity.is_some_and(|expected| !expected.matches_tokio_file(&file, &opened)) {
@@ -198,10 +203,12 @@ pub(crate) async fn verify_opened_file(
     expected_size: u64,
     expected_modified: Option<SystemTime>,
 ) -> Result<(), TransferRunError> {
-    let metadata = file
-        .metadata()
-        .await
-        .map_err(|error| message(format!("verify source {}: {error}", path.display())))?;
+    let metadata = file.metadata().await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("verify source {}", path.display()),
+            &error,
+        ))
+    })?;
     verify_opened_metadata(path, &metadata, expected_size, expected_modified)?;
     if expected_identity.is_some_and(|expected| !expected.matches_tokio_file(file, &metadata)) {
         return Err(changed(path));
@@ -216,11 +223,16 @@ pub(crate) fn open_verified_file_blocking(
     expected_size: u64,
     expected_modified: Option<SystemTime>,
 ) -> std::io::Result<std::fs::File> {
-    let before = std::fs::symlink_metadata(path)?;
+    let before = std::fs::symlink_metadata(path)
+        .map_err(|error| contextual_io_error(format!("stat source {}", path.display()), error))?;
     verify_path_metadata_io(path, &before, expected_identity, true)?;
-    let file = std::fs::File::open(path)?;
-    let opened = file.metadata()?;
-    let after = std::fs::symlink_metadata(path)?;
+    let file = std::fs::File::open(path)
+        .map_err(|error| contextual_io_error(format!("open source {}", path.display()), error))?;
+    let opened = file.metadata().map_err(|error| {
+        contextual_io_error(format!("stat opened source {}", path.display()), error)
+    })?;
+    let after = std::fs::symlink_metadata(path)
+        .map_err(|error| contextual_io_error(format!("restat source {}", path.display()), error))?;
     verify_path_metadata_io(path, &after, expected_identity, true)?;
     if !metadata_matches(&opened, expected_size, expected_modified)
         || expected_identity.is_some_and(|expected| !expected.matches_std_file(&file, &opened))
@@ -238,10 +250,16 @@ pub(crate) fn read_verified_directory_blocking(
     path: &Path,
     expected_identity: Option<LocalSourceIdentity>,
 ) -> std::io::Result<std::fs::ReadDir> {
-    let before = std::fs::symlink_metadata(path)?;
+    let before = std::fs::symlink_metadata(path).map_err(|error| {
+        contextual_io_error(format!("stat directory {}", path.display()), error)
+    })?;
     verify_path_metadata_io(path, &before, expected_identity, false)?;
-    let entries = std::fs::read_dir(path)?;
-    let after = std::fs::symlink_metadata(path)?;
+    let entries = std::fs::read_dir(path).map_err(|error| {
+        contextual_io_error(format!("read directory {}", path.display()), error)
+    })?;
+    let after = std::fs::symlink_metadata(path).map_err(|error| {
+        contextual_io_error(format!("restat directory {}", path.display()), error)
+    })?;
     verify_path_metadata_io(path, &after, expected_identity, false)?;
     Ok(entries)
 }
@@ -254,7 +272,9 @@ pub(crate) fn verify_directory_blocking(
     path: &Path,
     expected_identity: Option<LocalSourceIdentity>,
 ) -> std::io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| {
+        contextual_io_error(format!("verify directory {}", path.display()), error)
+    })?;
     verify_path_metadata_io(path, &metadata, expected_identity, false)
 }
 
@@ -263,16 +283,25 @@ pub(crate) async fn read_verified_directory(
     path: &Path,
     expected_identity: Option<LocalSourceIdentity>,
 ) -> Result<tokio::fs::ReadDir, TransferRunError> {
-    let before = tokio::fs::symlink_metadata(path)
-        .await
-        .map_err(|error| message(format!("stat directory {}: {error}", path.display())))?;
+    let before = tokio::fs::symlink_metadata(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("stat directory {}", path.display()),
+            &error,
+        ))
+    })?;
     verify_path_metadata(path, &before, expected_identity, false)?;
-    let entries = tokio::fs::read_dir(path)
-        .await
-        .map_err(|error| message(format!("read directory {}: {error}", path.display())))?;
-    let after = tokio::fs::symlink_metadata(path)
-        .await
-        .map_err(|error| message(format!("restat directory {}: {error}", path.display())))?;
+    let entries = tokio::fs::read_dir(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("read directory {}", path.display()),
+            &error,
+        ))
+    })?;
+    let after = tokio::fs::symlink_metadata(path).await.map_err(|error| {
+        TransferRunError::Failed(io_failure(
+            format!("restat directory {}", path.display()),
+            &error,
+        ))
+    })?;
     verify_path_metadata(path, &after, expected_identity, false)?;
     if let Some(expected) = expected_identity {
         if LocalSourceIdentity::capture(path, &after).await != Some(expected) {
@@ -396,14 +425,10 @@ fn changed(path: &Path) -> TransferRunError {
 }
 
 fn changed_io(path: &Path) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        format!("source changed after transfer planning: {}", path.display()),
-    )
-}
-
-fn message(value: String) -> TransferRunError {
-    TransferRunError::failed(TransferErrorCode::IoFailed, value)
+    source_changed_io(format!(
+        "source changed after transfer planning: {}",
+        path.display()
+    ))
 }
 
 #[cfg(test)]

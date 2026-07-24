@@ -20,7 +20,7 @@ use super::commit::{
     ensure_local_target_available, ensure_remote_target_available, local_stage_path,
     remote_stage_path, LocalRoot, RemoteRoot,
 };
-use super::errors::TransferErrorCode;
+use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
 use super::metadata::EntryMetadata;
 use super::models::{EnqueueTransferRequest, TransferDirection, TransferStrategy};
@@ -291,10 +291,10 @@ async fn plan_local(
     let destination_metadata = tokio::fs::metadata(&destination_parent)
         .await
         .map_err(|error| {
-            message(format!(
-                "stat destination {}: {error}",
-                destination_parent.display()
-            ))
+            local_io(
+                format!("stat destination {}", destination_parent.display()),
+                error,
+            )
         })?;
     if !destination_metadata.is_dir() {
         return Err(message(format!(
@@ -302,9 +302,15 @@ async fn plan_local(
             destination_parent.display()
         )));
     }
-    let destination_parent = tokio::fs::canonicalize(&destination_parent)
-        .await
-        .map_err(|error| message(format!("canonicalize destination: {error}")))?;
+    let destination_parent =
+        tokio::fs::canonicalize(&destination_parent)
+            .await
+            .map_err(|error| {
+                local_io(
+                    format!("canonicalize destination {}", destination_parent.display()),
+                    error,
+                )
+            })?;
     let mut plan = LocalPlan {
         wsl,
         destination_parent: destination_parent.clone(),
@@ -319,14 +325,14 @@ async fn plan_local(
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(&source)
             .await
-            .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
+            .map_err(|error| local_io(format!("stat source {}", source.display()), error))?;
         reject_local_symlink_or_special(&source, &metadata)?;
         let source = tokio::fs::canonicalize(&source).await.map_err(|error| {
-            message(format!("canonicalize source {}: {error}", source.display()))
+            local_io(format!("canonicalize source {}", source.display()), error)
         })?;
         let metadata = tokio::fs::symlink_metadata(&source)
             .await
-            .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
+            .map_err(|error| local_io(format!("stat source {}", source.display()), error))?;
         reject_local_symlink_or_special(&source, &metadata)?;
         if !scan_contents
             && source_roots
@@ -388,7 +394,7 @@ async fn plan_local(
                 super::source::read_verified_directory(&source_dir, source_identity).await?;
             let mut destination_names = HashSet::new();
             while let Some(entry) = entries.next_entry().await.map_err(|error| {
-                message(format!("read directory {}: {error}", source_dir.display()))
+                local_io(format!("read directory {}", source_dir.display()), error)
             })? {
                 context.checkpoint().await?;
                 let source_path = entry.path();
@@ -396,7 +402,7 @@ async fn plan_local(
                     tokio::fs::symlink_metadata(&source_path)
                         .await
                         .map_err(|error| {
-                            message(format!("stat source {}: {error}", source_path.display()))
+                            local_io(format!("stat source {}", source_path.display()), error)
                         })?;
                 reject_local_symlink_or_special(&source_path, &metadata)?;
                 let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
@@ -457,14 +463,14 @@ async fn plan_remote_upload(
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(source)
             .await
-            .map_err(|error| message(format!("stat source {source}: {error}")))?;
+            .map_err(|error| local_io(format!("stat source {source}"), error))?;
         reject_local_symlink_or_special(Path::new(source), &metadata)?;
         let source = tokio::fs::canonicalize(source)
             .await
-            .map_err(|error| message(format!("canonicalize source {source}: {error}")))?;
+            .map_err(|error| local_io(format!("canonicalize source {source}"), error))?;
         let metadata = tokio::fs::symlink_metadata(&source)
             .await
-            .map_err(|error| message(format!("stat source {}: {error}", source.display())))?;
+            .map_err(|error| local_io(format!("stat source {}", source.display()), error))?;
         reject_local_symlink_or_special(&source, &metadata)?;
         if !scan_contents
             && source_roots
@@ -522,7 +528,7 @@ async fn plan_remote_upload(
             let mut entries =
                 super::source::read_verified_directory(&source_dir, source_identity).await?;
             while let Some(entry) = entries.next_entry().await.map_err(|error| {
-                message(format!("read directory {}: {error}", source_dir.display()))
+                local_io(format!("read directory {}", source_dir.display()), error)
             })? {
                 context.checkpoint().await?;
                 let source_path = entry.path();
@@ -530,7 +536,7 @@ async fn plan_remote_upload(
                     tokio::fs::symlink_metadata(&source_path)
                         .await
                         .map_err(|error| {
-                            message(format!("stat source {}: {error}", source_path.display()))
+                            local_io(format!("stat source {}", source_path.display()), error)
                         })?;
                 reject_local_symlink_or_special(&source_path, &metadata)?;
                 let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
@@ -577,10 +583,10 @@ async fn plan_remote_download(
     let destination_metadata = tokio::fs::metadata(destination_parent)
         .await
         .map_err(|error| {
-            message(format!(
-                "stat destination {}: {error}",
-                destination_parent.display()
-            ))
+            local_io(
+                format!("stat destination {}", destination_parent.display()),
+                error,
+            )
         })?;
     if !destination_metadata.is_dir() {
         return Err(message(format!(
@@ -588,9 +594,15 @@ async fn plan_remote_download(
             destination_parent.display()
         )));
     }
-    let destination_parent = tokio::fs::canonicalize(destination_parent)
-        .await
-        .map_err(|error| message(format!("canonicalize destination: {error}")))?;
+    let destination_parent =
+        tokio::fs::canonicalize(destination_parent)
+            .await
+            .map_err(|error| {
+                local_io(
+                    format!("canonicalize destination {}", destination_parent.display()),
+                    error,
+                )
+            })?;
     let home = workspace.home().await;
     let home = super::ssh::io::run("canonicalize remote root", session.canonicalize(home)).await?;
     let mut plan = RemoteDownloadPlan {
@@ -883,6 +895,11 @@ fn totals(sizes: impl Iterator<Item = u64>) -> (u64, u64) {
 /// 打包或接收端安全解压时处理，避免跨 WSL/SSH 的重复逐文件访问。
 fn scans_subtree(strategy: TransferStrategy) -> bool {
     strategy == TransferStrategy::Direct
+}
+
+/// 将规划阶段的本地 I/O 失败映射为稳定错误码，并保留操作路径。
+fn local_io(context: String, error: std::io::Error) -> TransferRunError {
+    TransferRunError::Failed(io_failure(context, &error))
 }
 
 fn message(value: String) -> TransferRunError {

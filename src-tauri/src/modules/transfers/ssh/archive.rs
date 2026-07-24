@@ -88,9 +88,9 @@ pub(crate) async fn execute_upload(
             )
             .await?;
         }
-        if !super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await {
-            pending_cleanup.push(work_dir.clone());
-        }
+        pending_cleanup.extend(
+            super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await,
+        );
         remote_work = None;
 
         context.complete_files(archive.file_count).await;
@@ -106,6 +106,9 @@ pub(crate) async fn execute_upload(
     if result.is_err() {
         pending_cleanup.extend(remote_work);
         pending_cleanup.extend(plan.roots.iter().map(|root| root.stage.clone()));
+    }
+    if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
+        pending_cleanup = super::cleanup::remove_now(&plan.workspace, &pending_cleanup).await;
     }
     super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
     close_sftp(&plan.session).await;
@@ -135,9 +138,9 @@ pub(crate) async fn execute_download(
             command.push(' ');
             command.push_str(&shell_quote(&format!("./{relative}")));
         }
-        context.set_stage(TransferStage::Verifying).await;
         let (archive_size, archive_sha256) =
             create_remote_archive(&plan.workspace, &command, &archive_path, context).await?;
+        context.set_stage(TransferStage::Verifying).await;
         verify_remote_download_sources(&plan, context).await?;
         context.set_archive_size(archive_size).await;
         context.set_stage(TransferStage::Transferring).await;
@@ -168,9 +171,9 @@ pub(crate) async fn execute_download(
         if local_sha256 != archive_sha256 {
             return Err(integrity("downloaded archive checksum mismatch"));
         }
-        if !super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await {
-            pending_cleanup.push(work_dir.clone());
-        }
+        pending_cleanup.extend(
+            super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await,
+        );
         remote_work = None;
 
         let roots = download_extract_roots(&plan)?;
@@ -193,6 +196,9 @@ pub(crate) async fn execute_download(
     }
     if result.is_err() {
         cleanup_local_staging(&plan.roots).await;
+    }
+    if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
+        pending_cleanup = super::cleanup::remove_now(&plan.workspace, &pending_cleanup).await;
     }
     super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
     close_sftp(&plan.session).await;

@@ -4,8 +4,6 @@
 //! 随后以单个 tar.gz 传输，并通过 SHA-256 和受控解包保证完整性与路径安全。归档
 //! 条目提供的路径永远不会直接交给文件系统。
 
-#[cfg(test)]
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -19,7 +17,10 @@ use flate2::Compression;
 use sha2::{Digest, Sha256};
 use tar::{Archive, Builder, EntryType, Header};
 
-use super::errors::{io_failure, TransferErrorCode};
+use super::errors::{
+    contextual_io_error, io_failure, is_source_changed_io,
+    source_changed_io as source_changed_error, TransferErrorCode,
+};
 use super::manager::{TaskControl, TransferRunError};
 use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
@@ -165,11 +166,14 @@ async fn build_archive(
         .tempfile()
         .map_err(|error| TransferRunError::Failed(io_failure("create local archive", &error)))?;
     let path = temporary.into_temp_path();
+    let excluded_path = std::fs::canonicalize(&path).map_err(|error| {
+        TransferRunError::Failed(io_failure("canonicalize local archive", &error))
+    })?;
     let build_path = path.to_path_buf();
     let control = context.control();
     let build_control = control.clone();
     let build = tokio::task::spawn_blocking(move || {
-        build_archive_blocking(&build_path, entries, &build_control)
+        build_archive_blocking(&build_path, entries, &excluded_path, &build_control)
     })
     .await
     .map_err(|error| message(format!("join archive task: {error}")))?;
@@ -211,9 +215,16 @@ pub(crate) async fn extract_download_archive_roots(
 fn build_archive_blocking(
     path: &Path,
     entries: Vec<PackEntry>,
+    excluded_path: &Path,
     control: &Arc<TaskControl>,
 ) -> io::Result<ArchiveBuild> {
-    let file = OpenOptions::new().write(true).truncate(true).open(path)?;
+    let file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|error| {
+            contextual_io_error(format!("open local archive {}", path.display()), error)
+        })?;
     let encoder = GzEncoder::new(HashingWriter::new(file), Compression::default());
     let mut archive = Builder::new(encoder);
     let mut seen = HashSet::new();
@@ -238,9 +249,26 @@ fn build_archive_blocking(
             } => match entries.next() {
                 Some(child) => {
                     control_io(control)?;
-                    let child = child?;
+                    let child = child.map_err(|error| {
+                        contextual_io_error(format!("read directory {}", source.display()), error)
+                    })?;
                     let child_source = child.path();
-                    let child_metadata = std::fs::symlink_metadata(&child_source)?;
+                    if child_source == excluded_path {
+                        pending.push(PackAction::DirectoryEntries {
+                            source,
+                            archive_path,
+                            source_identity,
+                            entries,
+                        });
+                        continue;
+                    }
+                    let child_metadata =
+                        std::fs::symlink_metadata(&child_source).map_err(|error| {
+                            contextual_io_error(
+                                format!("stat source {}", child_source.display()),
+                                error,
+                            )
+                        })?;
                     let child_name = child.file_name().into_string().map_err(|_| {
                         io::Error::new(
                             io::ErrorKind::InvalidData,
@@ -269,11 +297,19 @@ fn build_archive_blocking(
             },
         }
     }
-    archive.finish()?;
-    let encoder = archive.into_inner()?;
-    let hashing = encoder.finish()?;
+    archive.finish().map_err(|error| {
+        contextual_io_error(format!("finish local archive {}", path.display()), error)
+    })?;
+    let encoder = archive.into_inner().map_err(|error| {
+        contextual_io_error(format!("flush local archive {}", path.display()), error)
+    })?;
+    let hashing = encoder.finish().map_err(|error| {
+        contextual_io_error(format!("compress local archive {}", path.display()), error)
+    })?;
     let (file, sha256) = hashing.finish();
-    file.sync_all()?;
+    file.sync_all().map_err(|error| {
+        contextual_io_error(format!("sync local archive {}", path.display()), error)
+    })?;
     Ok(ArchiveBuild { sha256, file_count })
 }
 
@@ -305,7 +341,9 @@ fn append_pack_entry(
     control: &Arc<TaskControl>,
 ) -> io::Result<()> {
     control_io(control)?;
-    let metadata = std::fs::symlink_metadata(&entry.source)?;
+    let metadata = std::fs::symlink_metadata(&entry.source).map_err(|error| {
+        contextual_io_error(format!("stat source {}", entry.source.display()), error)
+    })?;
     let actual_kind = metadata_kind(&entry.source, &metadata)?;
     if actual_kind != entry.kind
         || entry
@@ -338,7 +376,14 @@ fn append_pack_entry(
     header.set_cksum();
     match entry.kind {
         ArchiveEntryKind::Directory => {
-            archive.append_data(&mut header, &entry.path, io::empty())?;
+            archive
+                .append_data(&mut header, &entry.path, io::empty())
+                .map_err(|error| {
+                    contextual_io_error(
+                        format!("append directory {} to archive", entry.source.display()),
+                        error,
+                    )
+                })?;
             let entries = super::source::read_verified_directory_blocking(
                 &entry.source,
                 entry.source_identity,
@@ -358,8 +403,20 @@ fn append_pack_entry(
                 entry.modified,
             )?;
             let reader = ControlledReader::new(&mut file, control.clone());
-            archive.append_data(&mut header, &entry.path, reader)?;
-            let opened = file.metadata()?;
+            archive
+                .append_data(&mut header, &entry.path, reader)
+                .map_err(|error| {
+                    contextual_io_error(
+                        format!("append file {} to archive", entry.source.display()),
+                        error,
+                    )
+                })?;
+            let opened = file.metadata().map_err(|error| {
+                contextual_io_error(
+                    format!("verify archived source {}", entry.source.display()),
+                    error,
+                )
+            })?;
             if opened.len() != entry.size
                 || entry
                     .modified
@@ -443,61 +500,10 @@ fn archive_mtime(metadata: &std::fs::Metadata) -> u64 {
 }
 
 fn source_changed_io(path: &Path) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("source changed while archiving: {}", path.display()),
-    )
-}
-
-#[cfg(test)]
-fn validate_archive(
-    path: &Path,
-    expected: &HashMap<String, (ArchiveEntryKind, u64)>,
-    control: &Arc<TaskControl>,
-) -> io::Result<String> {
-    let decoder = GzDecoder::new(HashingReader::new(File::open(path)?));
-    let mut archive = Archive::new(decoder);
-    let mut seen = HashSet::new();
-    for entry in archive.entries()? {
-        control_io(control)?;
-        let mut entry = entry?;
-        let path = normalize_archive_path(&entry.path()?)?;
-        let kind = entry_kind(entry.header().entry_type())?;
-        let (expected_kind, expected_size) = expected.get(&path).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unexpected archive entry: {path}"),
-            )
-        })?;
-        if !seen.insert(path.clone())
-            || kind != *expected_kind
-            || (kind == ArchiveEntryKind::File && entry.size() != *expected_size)
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid archive entry: {path}"),
-            ));
-        }
-        let copied = io::copy(
-            &mut ControlledReader::new(&mut entry, control.clone()),
-            &mut io::sink(),
-        )?;
-        if kind == ArchiveEntryKind::File && copied != *expected_size {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid archive entry length: {path}"),
-            ));
-        }
-    }
-    let decoder = archive.into_inner();
-    let decoder = consume_archive_tail(decoder, control)?;
-    if seen.len() != expected.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "archive is missing manifest entries",
-        ));
-    }
-    Ok(decoder.into_inner().finish())
+    source_changed_error(format!(
+        "source changed while archiving: {}",
+        path.display()
+    ))
 }
 
 /// 解压以顶层根映射约束的归档，并从 tar 头恢复可移植的 mode 与 mtime。
@@ -871,36 +877,6 @@ impl<W: Write> Write for HashingWriter<W> {
     }
 }
 
-/// 在校验 gzip 流时同步累计压缩包原始字节的 SHA-256。
-#[cfg(test)]
-struct HashingReader<R> {
-    inner: R,
-    digest: Sha256,
-}
-
-#[cfg(test)]
-impl<R> HashingReader<R> {
-    fn new(inner: R) -> Self {
-        Self {
-            inner,
-            digest: Sha256::new(),
-        }
-    }
-
-    fn finish(self) -> String {
-        format!("{:x}", self.digest.finalize())
-    }
-}
-
-#[cfg(test)]
-impl<R: Read> Read for HashingReader<R> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let read = self.inner.read(buffer)?;
-        self.digest.update(&buffer[..read]);
-        Ok(read)
-    }
-}
-
 impl<R> ControlledReader<R> {
     fn new(inner: R, control: Arc<TaskControl>) -> Self {
         Self { inner, control }
@@ -929,13 +905,12 @@ fn control_io(control: &TaskControl) -> io::Result<()> {
 fn blocking_error(error: io::Error, control: &TaskControl) -> TransferRunError {
     if control.is_cancelled() {
         TransferRunError::Canceled
-    } else if matches!(
-        error.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::StorageFull
-    ) {
-        TransferRunError::Failed(io_failure("archive operation", &error))
+    } else if is_source_changed_io(&error) {
+        TransferRunError::failed(TransferErrorCode::SourceChanged, error.to_string())
+    } else if error.kind() == io::ErrorKind::InvalidData {
+        TransferRunError::failed(TransferErrorCode::IntegrityCheckFailed, error.to_string())
     } else {
-        message(format!("archive operation failed: {error}"))
+        TransferRunError::Failed(io_failure("archive operation", &error))
     }
 }
 
@@ -988,20 +963,38 @@ mod tests {
     }
 
     #[test]
-    fn archive_validation_rejects_parent_paths_and_links() {
+    fn archive_extraction_rejects_parent_paths_and_links() {
         let directory = tempfile::tempdir().unwrap();
         let control = Arc::new(TaskControl::new());
         let parent = directory.path().join("parent.tar.gz");
         write_test_archive(&parent, b"../escape", EntryType::Regular);
-        assert!(validate_archive(&parent, &HashMap::new(), &control).is_err());
+        assert!(extract_archive_roots(
+            &parent,
+            vec![ExtractRoot {
+                archive_path: "escape".into(),
+                destination: directory.path().join("escape"),
+                kind: ArchiveEntryKind::File,
+            }],
+            &control,
+        )
+        .is_err());
 
         let link = directory.path().join("link.tar.gz");
         write_test_archive(&link, b"link", EntryType::Symlink);
-        assert!(validate_archive(&link, &HashMap::new(), &control).is_err());
+        assert!(extract_archive_roots(
+            &link,
+            vec![ExtractRoot {
+                archive_path: "link".into(),
+                destination: directory.path().join("link"),
+                kind: ArchiveEntryKind::File,
+            }],
+            &control,
+        )
+        .is_err());
     }
 
     #[test]
-    fn archive_validation_consumes_the_stream_and_checks_gzip_integrity() {
+    fn archive_extraction_consumes_the_stream_and_checks_gzip_integrity() {
         let directory = tempfile::tempdir().unwrap();
         let archive_path = directory.path().join("corrupt.tar.gz");
         write_test_archive(&archive_path, b"file.txt", EntryType::Regular);
@@ -1010,24 +1003,16 @@ mod tests {
         *last ^= 0xff;
         std::fs::write(&archive_path, bytes).unwrap();
 
-        let expected = HashMap::from([("file.txt".to_string(), (ArchiveEntryKind::File, 0))]);
-        assert!(validate_archive(&archive_path, &expected, &Arc::new(TaskControl::new())).is_err());
-    }
-
-    #[test]
-    fn archive_validation_returns_the_compressed_archive_sha256() {
-        let directory = tempfile::tempdir().unwrap();
-        let archive_path = directory.path().join("checksum.tar.gz");
-        write_test_archive(&archive_path, b"file.txt", EntryType::Regular);
-        let expected = HashMap::from([("file.txt".to_string(), (ArchiveEntryKind::File, 0))]);
-
-        let actual =
-            validate_archive(&archive_path, &expected, &Arc::new(TaskControl::new())).unwrap();
-        let expected = format!(
-            "{:x}",
-            Sha256::digest(std::fs::read(&archive_path).unwrap())
-        );
-        assert_eq!(actual, expected);
+        assert!(extract_archive_roots(
+            &archive_path,
+            vec![ExtractRoot {
+                archive_path: "file.txt".into(),
+                destination: directory.path().join("file.txt"),
+                kind: ArchiveEntryKind::File,
+            }],
+            &Arc::new(TaskControl::new()),
+        )
+        .is_err());
     }
 
     #[test]
@@ -1037,6 +1022,48 @@ mod tests {
         let (bytes, actual) = writer.finish();
         assert_eq!(bytes, b"archive-bytes");
         assert_eq!(actual, format!("{:x}", Sha256::digest(&bytes)));
+    }
+
+    #[test]
+    fn local_archive_excludes_its_own_output_from_a_source_ancestor() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("payload.txt"), b"payload").unwrap();
+        let archive_path = source.join("payload.tar.gz");
+        File::create(&archive_path).unwrap();
+        let metadata = std::fs::symlink_metadata(&source).unwrap();
+        let entry = PackEntry {
+            source: source.clone(),
+            path: "root".into(),
+            kind: ArchiveEntryKind::Directory,
+            size: 0,
+            mode: archive_mode(&metadata),
+            mtime: archive_mtime(&metadata),
+            modified: metadata.modified().ok(),
+            source_identity: LocalSourceIdentity::from_metadata(&metadata),
+        };
+        let control = Arc::new(TaskControl::new());
+
+        build_archive_blocking(&archive_path, vec![entry], &archive_path, &control).unwrap();
+        let destination = directory.path().join("destination");
+        let files = extract_archive_roots(
+            &archive_path,
+            vec![ExtractRoot {
+                archive_path: "root".into(),
+                destination: destination.clone(),
+                kind: ArchiveEntryKind::Directory,
+            }],
+            &control,
+        )
+        .unwrap();
+
+        assert_eq!(files, 1);
+        assert_eq!(
+            std::fs::read(destination.join("payload.txt")).unwrap(),
+            b"payload"
+        );
+        assert!(!destination.join("payload.tar.gz").exists());
     }
 
     #[test]

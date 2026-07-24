@@ -17,6 +17,8 @@ use crate::modules::transfers::archive::{
     build_wsl_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{cleanup_local_staging, commit_local_root, LocalRoot};
+#[cfg(windows)]
+use crate::modules::transfers::errors::io_failure;
 use crate::modules::transfers::errors::TransferErrorCode;
 use crate::modules::transfers::local::verify_apply_commit;
 use crate::modules::transfers::manager::TransferRunError;
@@ -124,8 +126,8 @@ async fn execute_download(
         let directory = create_work_dir(distro).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
-        context.set_stage(TransferStage::Verifying).await;
         let remote_sha256 = create_wsl_archive(distro, &remote_archive, sources, context).await?;
+        context.set_stage(TransferStage::Verifying).await;
         verify_sources(plan, context).await?;
 
         let host_archive = resolve_path(
@@ -611,7 +613,12 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(&file.source)
             .await
-            .map_err(|error| message(format!("verify WSL source: {error}")))?;
+            .map_err(|error| {
+                TransferRunError::Failed(io_failure(
+                    format!("verify WSL source {}", file.source.display()),
+                    &error,
+                ))
+            })?;
         if !metadata.is_file()
             || file
                 .source_identity
@@ -622,7 +629,7 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
                 .modified()
                 .is_some_and(|expected| metadata.modified().ok() != Some(expected))
         {
-            return Err(message(format!(
+            return Err(source_changed(format!(
                 "WSL source changed while archiving: {}",
                 file.source.display()
             )));
@@ -632,14 +639,19 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(&directory.source)
             .await
-            .map_err(|error| message(format!("verify WSL directory: {error}")))?;
+            .map_err(|error| {
+                TransferRunError::Failed(io_failure(
+                    format!("verify WSL directory {}", directory.source.display()),
+                    &error,
+                ))
+            })?;
         if !metadata.is_dir()
             || metadata.file_type().is_symlink()
             || directory
                 .source_identity
                 .is_some_and(|expected| !expected.matches_metadata(&metadata))
         {
-            return Err(message(format!(
+            return Err(source_changed(format!(
                 "WSL source changed while archiving: {}",
                 directory.source.display()
             )));
@@ -698,6 +710,11 @@ fn parse_sha256(output: &[u8]) -> RunResult<String> {
 
 fn message(value: impl Into<String>) -> TransferRunError {
     TransferRunError::failed(TransferErrorCode::IoFailed, value)
+}
+
+#[cfg(windows)]
+fn source_changed(value: impl Into<String>) -> TransferRunError {
+    TransferRunError::failed(TransferErrorCode::SourceChanged, value)
 }
 
 #[cfg(test)]
