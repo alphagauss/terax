@@ -38,6 +38,7 @@ export type TrashPathResult =
 
 export type DeletePathResult =
   | { kind: "deleted" }
+  | { kind: "already-deleting" }
   | { kind: "error"; reason: string };
 
 export function joinPath(parent: string, name: string): string {
@@ -90,6 +91,25 @@ function isUnder(key: string, root: string): boolean {
   return key === root || key.startsWith(`${root}/`);
 }
 
+/** 判断路径是否位于任一正在删除的根路径中。 */
+export function isPathDeleting(path: string, deleting: ReadonlySet<string>) {
+  for (const root of deleting) {
+    if (isUnder(path, root)) return true;
+  }
+  return false;
+}
+
+/** 判断新删除目标是否与现有删除任务的父子范围重叠。 */
+export function overlapsDeletingPath(
+  path: string,
+  deleting: ReadonlySet<string>,
+) {
+  for (const root of deleting) {
+    if (isUnder(path, root) || isUnder(root, path)) return true;
+  }
+  return false;
+}
+
 // mtime/size are ignored on purpose: the tree never renders them, so a watcher
 // refetch that only bumps mtime (saving a file) must not count as a change.
 function sameDirListing(a: DirEntry[], b: DirEntry[]): boolean {
@@ -128,9 +148,12 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     null,
   );
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [deletingPaths, setDeletingPaths] = useState<Set<string>>(new Set());
 
   const expandedRef = useRef(expanded);
   const nodesRef = useRef(nodes);
+  const deletingPathsRef = useRef(deletingPaths);
+  const deletionTokensRef = useRef(new Map<string, symbol>());
   const watchedRef = useRef<Set<string>>(new Set());
   const requestGenerationRef = useRef(0);
   const requestIdRef = useRef(0);
@@ -154,6 +177,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     nodesRef.current = nodes;
   }, [nodes]);
 
+  useEffect(() => {
+    deletingPathsRef.current = deletingPaths;
+  }, [deletingPaths]);
+
   const addWatch = useCallback((path: string) => {
     if (watchedRef.current.has(path)) return;
     watchedRef.current.add(path);
@@ -168,6 +195,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   const fetchChildren = useCallback(
     async (path: string) => {
       if (treeScope !== activeTreeScopeRef.current) return;
+      if (isPathDeleting(path, deletingPathsRef.current)) return;
       if (inFlightRef.current.has(path)) return;
       const generation = requestGenerationRef.current;
       const requestId = ++requestIdRef.current;
@@ -184,6 +212,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           workspace,
         });
         if (
+          isPathDeleting(path, deletingPathsRef.current) ||
           !isCurrentTreeRequest(
             request,
             activeTreeScopeRef.current,
@@ -277,10 +306,16 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       setExpanded(new Set());
       setPendingCreate(null);
       setRenaming(null);
+      deletingPathsRef.current = new Set();
+      deletionTokensRef.current.clear();
+      setDeletingPaths(new Set());
       return;
     }
     setPendingCreate(null);
     setRenaming(null);
+    deletingPathsRef.current = new Set();
+    deletionTokensRef.current.clear();
+    setDeletingPaths(new Set());
 
     const restored = recallExpansion(treeScope);
     setExpanded(new Set(restored));
@@ -345,7 +380,12 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     if (workspace.kind !== "ssh" || !rootPath) return;
     const timer = window.setInterval(() => {
       for (const [path, state] of Object.entries(nodesRef.current)) {
-        if (state.status === "loaded") void fetchChildren(path);
+        if (
+          state.status === "loaded" &&
+          !isPathDeleting(path, deletingPathsRef.current)
+        ) {
+          void fetchChildren(path);
+        }
       }
     }, 1000);
     return () => window.clearInterval(timer);
@@ -353,6 +393,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const toggle = useCallback(
     (path: string) => {
+      if (isPathDeleting(path, deletingPathsRef.current)) return;
       if (expandedRef.current.has(path)) {
         setExpanded((curr) => {
           const next = new Set(curr);
@@ -375,6 +416,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const expand = useCallback(
     (path: string) => {
+      if (isPathDeleting(path, deletingPathsRef.current)) return;
       if (expandedRef.current.has(path)) return;
       setExpanded((curr) => {
         const next = new Set(curr);
@@ -408,6 +450,32 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   }, [rootPath]);
 
   // --- mutations ---
+
+  const beginDelete = useCallback((path: string) => {
+    if (overlapsDeletingPath(path, deletingPathsRef.current)) return null;
+    const token = Symbol(path);
+    const next = new Set(deletingPathsRef.current);
+    next.add(path);
+    deletionTokensRef.current.set(path, token);
+    deletingPathsRef.current = next;
+    setDeletingPaths(next);
+    setRenaming((current) =>
+      current && isUnder(current, path) ? null : current,
+    );
+    setPendingCreate((current) =>
+      current && isUnder(current.parentPath, path) ? null : current,
+    );
+    return token;
+  }, []);
+
+  const endDelete = useCallback((path: string, token: symbol) => {
+    if (deletionTokensRef.current.get(path) !== token) return;
+    deletionTokensRef.current.delete(path);
+    const next = new Set(deletingPathsRef.current);
+    next.delete(path);
+    deletingPathsRef.current = next;
+    setDeletingPaths(next);
+  }, []);
 
   const beginCreate = useCallback(
     (parentPath: string, kind: "file" | "dir") => {
@@ -493,6 +561,8 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const deletePath = useCallback(
     async (path: string): Promise<DeletePathResult> => {
+      const token = beginDelete(path);
+      if (!token) return { kind: "already-deleting" };
       try {
         await invoke("fs_delete", { path, workspace });
         options?.onPathDeleted?.(path);
@@ -503,13 +573,19 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         // 远端递归删除可能在权限错误前已删除部分内容，失败后也刷新父目录。
         await fetchChildren(dirname(path));
         return { kind: "error", reason: String(e) };
+      } finally {
+        endDelete(path, token);
       }
     },
-    [fetchChildren, options, workspace],
+    [beginDelete, endDelete, fetchChildren, options, workspace],
   );
 
   const trashPath = useCallback(
     async (path: string): Promise<TrashPathResult> => {
+      const token = beginDelete(path);
+      if (!token) {
+        return { kind: "error", reason: "path is already being deleted" };
+      }
       try {
         const result = await invoke<TrashPathResult>("fs_trash", {
           path,
@@ -520,10 +596,13 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         await fetchChildren(dirname(path));
         return result;
       } catch (e) {
+        await fetchChildren(dirname(path));
         return { kind: "error", reason: String(e) };
+      } finally {
+        endDelete(path, token);
       }
     },
-    [fetchChildren, options, workspace],
+    [beginDelete, endDelete, fetchChildren, options, workspace],
   );
 
   const movePath = useCallback(
@@ -557,6 +636,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   return {
     nodes,
     expanded,
+    deletingPaths,
     pendingCreate,
     renaming,
     toggle,

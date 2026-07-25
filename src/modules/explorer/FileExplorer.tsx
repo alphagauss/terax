@@ -142,6 +142,7 @@ type Row =
       name: string;
       isDir: boolean;
       isExpanded: boolean;
+      isDeleting: boolean;
       depth: number;
       gitignored: boolean;
       gitStatusCode: GitStatusCode | null;
@@ -152,6 +153,7 @@ type Row =
       path: string;
       name: string;
       isDir: boolean;
+      isDeleting: boolean;
       depth: number;
       gitignored: boolean;
       gitStatusCode: GitStatusCode | null;
@@ -199,7 +201,8 @@ function buildRows(
     for (const entry of node.entries) {
       const path = tree.joinPath(parent, entry.name);
       const isDir = entry.kind === "dir";
-      const expanded = isDir && tree.expanded.has(path);
+      const isDeleting = tree.deletingPaths.has(path);
+      const expanded = isDir && !isDeleting && tree.expanded.has(path);
       const isRenaming = tree.renaming === path;
       const gitignored = parentIgnored || entry.gitignored;
       const gitStatusCode = gitignored ? null : lookup(path);
@@ -210,6 +213,7 @@ function buildRows(
           path,
           name: entry.name,
           isDir,
+          isDeleting,
           depth,
           gitignored,
           gitStatusCode,
@@ -223,6 +227,7 @@ function buildRows(
           name: entry.name,
           isDir,
           isExpanded: expanded,
+          isDeleting,
           depth,
           gitignored,
           gitStatusCode,
@@ -417,7 +422,7 @@ export const FileExplorer = memo(
       (path: string): boolean | undefined => {
         const idx = entryIndexByPath.get(path);
         const row = idx !== undefined ? rows[idx] : undefined;
-        return row?.kind === "entry" ? row.isDir : undefined;
+        return row?.kind === "entry" && !row.isDeleting ? row.isDir : undefined;
       },
       [entryIndexByPath, rows],
     );
@@ -622,8 +627,12 @@ export const FileExplorer = memo(
       switch (e.key) {
         case "F2": {
           if (currentIdx < 0) return;
+          const path = entryPaths[currentIdx];
+          const idx = entryIndexByPath.get(path);
+          const row = idx === undefined ? undefined : rows[idx];
+          if (row?.kind !== "entry" || row.isDeleting) return;
           e.preventDefault();
-          tree.beginRename(entryPaths[currentIdx]);
+          tree.beginRename(row.path);
           break;
         }
         case "Delete": {
@@ -632,7 +641,7 @@ export const FileExplorer = memo(
           const path = entryPaths[currentIdx];
           const idx = entryIndexByPath.get(path);
           const row = idx === undefined ? undefined : rows[idx];
-          if (row?.kind === "entry") {
+          if (row?.kind === "entry" && !row.isDeleting) {
             requestTrashDelete({
               path: row.path,
               name: row.name,
@@ -656,7 +665,7 @@ export const FileExplorer = memo(
           const idx = entryIndexByPath.get(path);
           if (idx === undefined) break;
           const row = rows[idx];
-          if (row.kind !== "entry") break;
+          if (row.kind !== "entry" || row.isDeleting) break;
           if (row.isDir) {
             if (!row.isExpanded) tree.toggle(row.path);
             else move(currentIdx + 1);
@@ -670,7 +679,7 @@ export const FileExplorer = memo(
           const idx = entryIndexByPath.get(path);
           if (idx === undefined) break;
           const row = rows[idx];
-          if (row.kind !== "entry") break;
+          if (row.kind !== "entry" || row.isDeleting) break;
           if (row.isDir && row.isExpanded) {
             tree.toggle(row.path);
           } else {
@@ -686,7 +695,7 @@ export const FileExplorer = memo(
           const idx = entryIndexByPath.get(path);
           if (idx === undefined) break;
           const row = rows[idx];
-          if (row.kind !== "entry") break;
+          if (row.kind !== "entry" || row.isDeleting) break;
           if (row.isDir) tree.toggle(row.path);
           else onOpenFile(row.path);
           break;
@@ -705,6 +714,7 @@ export const FileExplorer = memo(
               name={row.name}
               isDir={row.isDir}
               isExpanded={row.kind === "entry" ? row.isExpanded : false}
+              isDeleting={row.isDeleting}
               depth={row.depth}
               actions={rowActions}
               renameInProgress={renameInProgress}
@@ -716,6 +726,7 @@ export const FileExplorer = memo(
               onSelectPath={setSelectedPath}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
+              deletingLabel={t("deleting")}
             />
           );
         }
@@ -876,10 +887,12 @@ export const FileExplorer = memo(
                     path != null ? entryIndexByPath.get(path) : undefined;
                   const row = idx !== undefined ? rows[idx] : undefined;
                   setContextMenuPath(
-                    row && row.kind === "entry" ? row.path : null,
+                    row && row.kind === "entry" && !row.isDeleting
+                      ? row.path
+                      : null,
                   );
                   setMenuTarget(
-                    row && row.kind === "entry"
+                    row && row.kind === "entry" && !row.isDeleting
                       ? { path: row.path, name: row.name, isDir: row.isDir }
                       : null,
                   );

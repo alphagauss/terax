@@ -3,14 +3,14 @@
  * Local 工作区继续直接复制，WSL 与 SSH 拖放固定创建 Direct 后台上传任务。
  */
 
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 type Options = {
   rootPath: string | null;
@@ -23,8 +23,12 @@ function parentDir(path: string): string {
   return i > 0 ? path.slice(0, i) : path;
 }
 
-// Tauri reports the drop point in physical pixels on some platforms; scale down
-// only when it overflows the logical viewport (mirrors the terminal drop).
+/**
+ * 解析外部拖放位置对应的目标目录。
+ *
+ * Tauri 在部分平台返回物理像素；只有坐标超出逻辑视口时才按 DPR 缩放。
+ * `isDir` 返回 `undefined` 的删除中条目不可接收拖放。
+ */
 function dirAt(
   x: number,
   y: number,
@@ -43,7 +47,9 @@ function dirAt(
   const row = el.closest<HTMLElement>("[data-fs-path]");
   if (row) {
     const p = row.getAttribute("data-fs-path") as string;
-    return isDir(p) ? p : parentDir(p);
+    const kind = isDir(p);
+    if (kind === undefined) return null;
+    return kind ? p : parentDir(p);
   }
   if (el.closest("[data-explorer-drop]")) return rootPath;
   return null;

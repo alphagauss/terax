@@ -1,3 +1,8 @@
+/**
+ * 本文件实现资源管理器内部及到 Workbench 的指针拖放。
+ * 通过容器事件委托和直接更新拖动指示器，避免拖动期间逐帧触发 React 渲染。
+ */
+
 import {
   beginWorkbenchDrag,
   finishWorkbenchDrag,
@@ -21,10 +26,11 @@ function parentDir(path: string): string {
   return i > 0 ? path.slice(0, i) : path;
 }
 
-// Pointer-based, delegated on the container (no per-row handlers); sidesteps
-// native HTML5 DnD which Tauri intercepts when dragDropEnabled is on. The ghost
-// follows the cursor via direct DOM writes, so dragging re-renders only when the
-// drop target changes, not on every move.
+/**
+ * 管理资源管理器的指针拖放会话。
+ *
+ * `isDir` 返回 `undefined` 的条目不可作为拖动来源或目标，用于锁定删除中的路径。
+ */
 export function useExplorerDnd({
   rootPath,
   isDir,
@@ -68,10 +74,12 @@ export function useExplorerDnd({
       );
       const source = el?.getAttribute("data-fs-path");
       if (!source) return;
+      const sourceKind = optsRef.current.isDir(source);
+      if (sourceKind === undefined) return;
       const name = source.slice(source.lastIndexOf("/") + 1);
       const sx = e.clientX;
       const sy = e.clientY;
-      const sourceIsFile = optsRef.current.isDir(source) === false;
+      const sourceIsFile = sourceKind === false;
       let active = false;
 
       const move = (ev: PointerEvent) => {
@@ -101,13 +109,18 @@ export function useExplorerDnd({
           .elementFromPoint(ev.clientX, ev.clientY)
           ?.closest<HTMLElement>("[data-fs-path]");
         const p = hit?.getAttribute("data-fs-path");
-        const t = p ? (isDir(p) ? p : parentDir(p)) : rootPath;
+        const kind = p ? isDir(p) : undefined;
+        let target: string | null = rootPath;
+        if (p && kind === true) target = p;
+        else if (p && kind === false) target = parentDir(p);
+        else if (p) target = null;
         const valid =
           !workbenchTarget &&
-          t !== source &&
-          !t.startsWith(`${source}/`) &&
-          parentDir(source) !== t
-            ? t
+          target !== null &&
+          target !== source &&
+          !target.startsWith(`${source}/`) &&
+          parentDir(source) !== target
+            ? target
             : null;
         if (dropTargetRef.current !== valid) {
           dropTargetRef.current = valid;

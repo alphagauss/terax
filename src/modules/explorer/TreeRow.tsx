@@ -1,12 +1,20 @@
+/**
+ * 本文件渲染资源管理器的普通条目、创建输入和加载状态行。
+ * 条目行负责展示选择、重命名、Git 装饰和删除中的不可交互状态。
+ */
+
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+
+const DELETE_STATUS_DELAY_MS = 160;
 
 export type RowActions = {
   toggle: (path: string) => void;
@@ -21,6 +29,7 @@ export type EntryRowProps = {
   name: string;
   isDir: boolean;
   isExpanded: boolean;
+  isDeleting: boolean;
   depth: number;
   actions: RowActions;
   renameInProgress: boolean;
@@ -32,6 +41,7 @@ export type EntryRowProps = {
   onSelectPath: (path: string) => void;
   gitStatusCode?: GitStatusCode | null;
   gitignored?: boolean;
+  deletingLabel: string;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -41,6 +51,7 @@ function EntryRowImpl(props: EntryRowProps) {
     name,
     isDir,
     isExpanded,
+    isDeleting,
     depth,
     actions,
     renameInProgress,
@@ -52,10 +63,24 @@ function EntryRowImpl(props: EntryRowProps) {
     onSelectPath,
     gitStatusCode,
     gitignored = false,
+    deletingLabel,
   } = props;
 
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const paddingLeft = 6 + depth * 12;
+  const [showDeletingStatus, setShowDeletingStatus] = useState(false);
+
+  useEffect(() => {
+    if (!isDeleting) {
+      setShowDeletingStatus(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setShowDeletingStatus(true),
+      DELETE_STATUS_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [isDeleting]);
 
   if (isRenaming) {
     return (
@@ -84,7 +109,7 @@ function EntryRowImpl(props: EntryRowProps) {
   }
 
   const handleClick = () => {
-    if (renameInProgress) return;
+    if (renameInProgress || isDeleting) return;
     onSelectPath(path);
     if (isDir) actions.toggle(path);
     else onOpenFile(path);
@@ -98,12 +123,18 @@ function EntryRowImpl(props: EntryRowProps) {
       aria-level={depth + 1}
       aria-expanded={isDir ? isExpanded : undefined}
       aria-selected={isSelected}
+      aria-busy={isDeleting || undefined}
+      aria-disabled={isDeleting || undefined}
       tabIndex={-1}
       data-fs-path={path}
+      data-fs-deleting={isDeleting ? "" : undefined}
+      disabled={isDeleting}
       onClick={handleClick}
       onDoubleClick={() => !isDir && onOpenFile(path, true)}
       className={cn(
         "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
+        isDeleting &&
+          "cursor-wait text-muted-foreground hover:bg-transparent disabled:opacity-80",
         isContextTarget
           ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
           : isSelected
@@ -141,10 +172,24 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
+      {showDeletingStatus ? (
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-destructive">
+          <Spinner
+            className="size-3 motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span>{deletingLabel}</span>
+        </span>
+      ) : null}
     </button>
   );
 }
 
+/**
+ * 资源管理器普通条目行。
+ *
+ * 删除中的条目保持可见但完全禁用，并在右侧展示不确定进度反馈。
+ */
 export const EntryRow = memo(EntryRowImpl);
 
 export type PendingRowProps = {

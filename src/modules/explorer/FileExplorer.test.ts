@@ -141,6 +141,7 @@ vi.mock("./lib/useFileTree", () => ({
     commitCreate: vi.fn(),
     commitRename: vi.fn(),
     deletePath: vi.fn(),
+    deletingPaths: new Set<string>(),
     expand: vi.fn(),
     expanded: new Set<string>(),
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
