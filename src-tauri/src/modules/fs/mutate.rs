@@ -6,6 +6,13 @@
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use serde::Serialize;
+#[cfg(windows)]
+use std::process::Stdio;
+#[cfg(windows)]
+use std::time::Duration;
+
+#[cfg(windows)]
+const WSL_DELETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -88,8 +95,9 @@ pub async fn fs_rename(
     })
 }
 
-/// Deletes a file or directory (recursively for dirs). Callers are
-/// responsible for confirming destructive operations with the user.
+/// 删除文件或目录，目录会在所属 Workspace 环境内递归删除。
+///
+/// 调用方必须先完成破坏性操作确认；本命令负责环境分流和底层错误报告。
 #[tauri::command]
 pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
@@ -99,7 +107,20 @@ pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<
         let workspace = manager.workspace(&profile_id).await?;
         return remote::sftp::delete(&workspace, &path).await;
     }
-    let p = resolve_path(&path, &workspace);
+    if let WorkspaceEnv::Wsl { distro } = &workspace {
+        // Windows 盘挂载已经由 resolve_path 映射为本机盘符，继续走原生文件系统更快，
+        // 也保留回收站能力；只有 WSL 自有文件系统需要绕过 UNC 桥。
+        if is_wsl_drvfs_path(&path) {
+            return delete_local_path(&path, &workspace);
+        }
+        return delete_wsl_path(distro, &path).await;
+    }
+    delete_local_path(&path, &workspace)
+}
+
+/// 通过宿主机文件系统删除本地或映射到 Windows 盘符的路径。
+fn delete_local_path(path: &str, workspace: &WorkspaceEnv) -> Result<(), String> {
+    let p = resolve_path(path, workspace);
     let meta = std::fs::symlink_metadata(&p).map_err(|e| {
         log::debug!("fs_delete stat({}) failed: {e}", p.display());
         e.to_string()
@@ -117,8 +138,83 @@ pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<
     })
 }
 
-/// Moves a local path to the operating system trash. Remote workspaces return
-/// an explicit unavailable result so the frontend can ask before permanent deletion.
+/// 判断 WSL 路径是否位于 `/mnt/<drive>` Windows 盘挂载中。
+fn is_wsl_drvfs_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let Some(rest) = normalized.strip_prefix("/mnt/") else {
+        return false;
+    };
+    let mut parts = rest.split('/');
+    let drive = parts.next().unwrap_or_default();
+    drive.len() == 1 && drive.bytes().all(|byte| byte.is_ascii_alphabetic())
+}
+
+/// 在 WSL 发行版内部递归删除路径，避免逐项操作穿过 `\\wsl.localhost` 文件系统桥。
+///
+/// 参数直接交给 `wsl.exe --exec rm`，不经过 shell 解析。根路径及带有父级跳转的路径
+/// 会在启动进程前被拒绝，符号链接由 `rm` 按链接本身处理。
+#[cfg(windows)]
+async fn delete_wsl_path(distro: &str, path: &str) -> Result<(), String> {
+    validate_posix_destructive_path(path)?;
+    crate::modules::workspace::validate_wsl_distro_name(distro)?;
+
+    let mut command = tokio::process::Command::new("wsl.exe");
+    command
+        .arg("-d")
+        .arg(distro)
+        .arg("--exec")
+        .arg("rm")
+        .arg("-rf")
+        .arg("--")
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    crate::modules::proc::hide_console(command.as_std_mut());
+
+    let output = tokio::time::timeout(WSL_DELETE_TIMEOUT, command.output())
+        .await
+        .map_err(|_| format!("WSL delete timed out: {path}"))?
+        .map_err(|error| format!("start WSL delete: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = crate::modules::workspace::decode_command_output(&output.stderr);
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        Err(format!(
+            "WSL delete failed with status {}: {path}",
+            output.status
+        ))
+    } else {
+        Err(format!("WSL delete failed: {detail}"))
+    }
+}
+
+#[cfg(not(windows))]
+async fn delete_wsl_path(_distro: &str, _path: &str) -> Result<(), String> {
+    Err("WSL file deletion is only available on Windows".into())
+}
+
+/// 验证交给 WSL 原生命令的破坏性路径，禁止根目录和父级跳转。
+fn validate_posix_destructive_path(path: &str) -> Result<(), String> {
+    if !path.starts_with('/')
+        || path.contains(['\0', '\r', '\n'])
+        || path.trim_end_matches('/').is_empty()
+        || path
+            .split('/')
+            .any(|component| matches!(component, "." | ".."))
+    {
+        return Err("refusing to delete WSL root or unsafe path".into());
+    }
+    Ok(())
+}
+
+/// 将可由宿主机处理的路径移动到操作系统回收站。
+///
+/// SSH 和 WSL 自有文件系统没有兼容的宿主机回收站，返回明确的不可用结果，
+/// 由前端继续请求永久删除确认。WSL 的 Windows 盘挂载仍保留本机回收站能力。
 #[tauri::command]
 pub async fn fs_trash(
     path: String,
@@ -128,6 +224,11 @@ pub async fn fs_trash(
     if workspace.ssh_profile_id().is_some() {
         return Ok(TrashResult::Unavailable {
             reason: "remote workspace has no local trash service".to_string(),
+        });
+    }
+    if workspace.is_wsl() && !is_wsl_drvfs_path(&path) {
+        return Ok(TrashResult::Unavailable {
+            reason: "WSL workspace has no compatible Windows trash service".to_string(),
         });
     }
 
@@ -317,6 +418,28 @@ mod tests {
             .await
             .unwrap_err();
         assert!(!err.is_empty());
+    }
+
+    #[test]
+    fn wsl_delete_path_rejects_root_and_parent_traversal() {
+        assert!(validate_posix_destructive_path("/home/user/project").is_ok());
+        assert!(validate_posix_destructive_path("/home/user/a b").is_ok());
+        assert!(validate_posix_destructive_path("/").is_err());
+        assert!(validate_posix_destructive_path("////").is_err());
+        assert!(validate_posix_destructive_path("relative/path").is_err());
+        assert!(validate_posix_destructive_path("/home/user/../other").is_err());
+        assert!(validate_posix_destructive_path("/home/user/./project").is_err());
+        assert!(validate_posix_destructive_path("/home/user/\nproject").is_err());
+    }
+
+    #[test]
+    fn wsl_drvfs_detection_keeps_windows_mounts_on_the_host_backend() {
+        assert!(is_wsl_drvfs_path("/mnt/c/project"));
+        assert!(is_wsl_drvfs_path(r"\mnt\D\work"));
+        assert!(is_wsl_drvfs_path("/mnt/z"));
+        assert!(!is_wsl_drvfs_path("/mnt"));
+        assert!(!is_wsl_drvfs_path("/mnt/data/project"));
+        assert!(!is_wsl_drvfs_path("/home/user/project"));
     }
 
     // Deleting a symlink that points at a directory must remove only the link,

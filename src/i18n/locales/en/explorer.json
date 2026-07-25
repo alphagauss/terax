@@ -23,6 +23,7 @@
     "transferQueued": "Transfer added to the background queue",
     "transferFailed": "Could not start transfer: {{error}}",
     "copyFailed": "Could not copy item: {{error}}",
+    "deleteFailed": "Could not delete item: {{error}}",
     "newFile": "New File",
     "newFolder": "New Folder",
     "copyPath": "Copy Path",

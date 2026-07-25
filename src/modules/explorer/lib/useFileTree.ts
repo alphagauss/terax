@@ -1,9 +1,14 @@
+/**
+ * 本文件管理资源管理器文件树的加载、展开、监听和文件变更操作。
+ * 所有系统访问都通过 Tauri IPC，SSH 目录只轮询已展示的节点以限制远端开销。
+ */
+
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 import { isCurrentTreeRequest } from "./requestGuard";
+import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 
 export type DirEntry = {
   name: string;
@@ -29,6 +34,10 @@ export type PendingCreate = {
 export type TrashPathResult =
   | { kind: "trashed" }
   | { kind: "unavailable"; reason: string }
+  | { kind: "error"; reason: string };
+
+export type DeletePathResult =
+  | { kind: "deleted" }
   | { kind: "error"; reason: string };
 
 export function joinPath(parent: string, name: string): string {
@@ -101,6 +110,11 @@ type Options = {
   onPathDeleted?: (path: string) => void;
 };
 
+/**
+ * 管理指定 Workspace 根目录的文件树状态和变更操作。
+ *
+ * 仅缓存已加载目录；SSH 环境按秒刷新可见节点，所有变更完成后重新读取受影响父目录。
+ */
 export function useFileTree(rootPath: string | null, options?: Options) {
   const workspace = useWorkspaceEnvStore((state) => state.env);
   const treeScope = `${workspaceScopeKey(workspace)}\0${rootPath ?? ""}`;
@@ -478,13 +492,17 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   );
 
   const deletePath = useCallback(
-    async (path: string) => {
+    async (path: string): Promise<DeletePathResult> => {
       try {
         await invoke("fs_delete", { path, workspace });
         options?.onPathDeleted?.(path);
         await fetchChildren(dirname(path));
+        return { kind: "deleted" };
       } catch (e) {
         console.error("fs_delete failed:", e);
+        // 远端递归删除可能在权限错误前已删除部分内容，失败后也刷新父目录。
+        await fetchChildren(dirname(path));
+        return { kind: "error", reason: String(e) };
       }
     },
     [fetchChildren, options, workspace],

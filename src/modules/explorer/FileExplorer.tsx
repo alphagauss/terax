@@ -4,8 +4,6 @@
  * Workspace 根目录选择仍由上层仅在 Local 环境传入。
  */
 
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -26,6 +25,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -534,6 +534,17 @@ export const FileExplorer = memo(
         });
       },
       [tree.trashPath],
+    );
+
+    const requestPermanentDelete = useCallback(
+      (path: string) => {
+        void tree.deletePath(path).then((result) => {
+          if (result.kind === "error") {
+            toast.error(t("menu.deleteFailed", { error: result.reason }));
+          }
+        });
+      },
+      [t, tree.deletePath],
     );
 
     useGlobalShortcuts({
@@ -1089,7 +1100,7 @@ export const FileExplorer = memo(
                     variant="destructive"
                     onSelect={(e) => {
                       if (deleteConfirm) {
-                        void tree.deletePath(menuTarget.path);
+                        requestPermanentDelete(menuTarget.path);
                       } else {
                         // Keep the menu open on the first click so the user
                         // can confirm; let it close normally on the second.
@@ -1194,7 +1205,7 @@ export const FileExplorer = memo(
                 variant="destructive"
                 onClick={() => {
                   if (!permanentDeleteTarget) return;
-                  void tree.deletePath(permanentDeleteTarget.path);
+                  requestPermanentDelete(permanentDeleteTarget.path);
                   setPermanentDeleteTarget(null);
                 }}
               >

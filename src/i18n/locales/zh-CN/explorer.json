@@ -23,6 +23,7 @@
     "transferQueued": "已加入后台传输队列",
     "transferFailed": "无法启动传输：{{error}}",
     "copyFailed": "无法复制项目：{{error}}",
+    "deleteFailed": "无法删除项目：{{error}}",
     "newFile": "新建文件",
     "newFolder": "新建文件夹",
     "copyPath": "复制路径",

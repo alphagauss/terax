@@ -6,12 +6,14 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::session::{join_remote, validate_remote_path, RemoteWorkspace};
+
+const RECURSIVE_DELETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone, Debug)]
 pub struct RemoteDirEntry {
@@ -562,11 +564,15 @@ pub async fn rename(workspace: &Arc<RemoteWorkspace>, from: &str, to: &str) -> R
     .await
 }
 
+/// 删除远端文件或目录。
+///
+/// 文件仍使用单次 SFTP 删除；目录改由远端 `rm` 在服务器本地递归，避免文件数量
+/// 放大为逐项网络往返。命令参数经过 POSIX shell 转义，且危险根路径会被提前拒绝。
 pub async fn delete(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), String> {
     validate_destructive_path(path)?;
     let metadata = stat(workspace, path).await?;
-    let sftp = session(workspace).await?;
     if metadata.kind != RemoteEntryKind::Dir {
+        let sftp = session(workspace).await?;
         return sftp_result(
             workspace,
             &sftp,
@@ -575,36 +581,35 @@ pub async fn delete(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), 
         )
         .await;
     }
-    let mut directories = vec![path.trim_end_matches('/').to_string()];
-    let mut index = 0;
-    while index < directories.len() {
-        let directory = directories[index].clone();
-        index += 1;
-        for entry in read_dir(workspace, &directory, true).await? {
-            let child = join_remote(&directory, &entry.name);
-            if entry.kind == RemoteEntryKind::Dir {
-                directories.push(child);
-            } else {
-                sftp_result(
-                    workspace,
-                    &sftp,
-                    format!("remove remote file {child}"),
-                    sftp.remove_file(&child).await,
-                )
-                .await?;
-            }
-        }
-    }
-    for directory in directories.into_iter().rev() {
-        sftp_result(
-            workspace,
-            &sftp,
-            format!("remove remote directory {directory}"),
-            sftp.remove_dir(&directory).await,
-        )
+
+    let command = recursive_delete_command(path);
+    let output = workspace
+        .exec(&command, None, RECURSIVE_DELETE_TIMEOUT)
         .await?;
+    if output.timed_out {
+        return Err(format!("remote recursive delete timed out: {path}"));
     }
-    Ok(())
+    if output.exit_code == Some(0) {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        Err(format!(
+            "remote recursive delete failed with exit {:?}: {path}",
+            output.exit_code
+        ))
+    } else {
+        Err(format!("remote recursive delete failed: {detail}"))
+    }
+}
+
+/// 构造只包含一个已转义路径参数的远端递归删除命令。
+fn recursive_delete_command(path: &str) -> String {
+    format!(
+        "rm -rf -- {}",
+        super::session::shell_quote(path.trim_end_matches('/'))
+    )
 }
 
 async fn canonical_target_for_new_file(
@@ -703,8 +708,8 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        permission_attributes, remote_parent_name, sanitize_local_name, should_invalidate_session,
-        validate_destructive_path,
+        permission_attributes, recursive_delete_command, remote_parent_name, sanitize_local_name,
+        should_invalidate_session, validate_destructive_path,
     };
 
     #[test]
@@ -714,6 +719,20 @@ mod tests {
         }
         assert!(validate_destructive_path("/home/me/project/file.txt").is_ok());
         assert!(validate_destructive_path("relative/file.txt").is_ok());
+    }
+
+    #[test]
+    fn recursive_delete_command_quotes_one_exact_path() {
+        assert_eq!(
+            recursive_delete_command("/home/me/a b/it's"),
+            "rm -rf -- '/home/me/a b/it'\\''s'"
+        );
+        assert_eq!(
+            recursive_delete_command("/home/me/project///"),
+            "rm -rf -- '/home/me/project'"
+        );
+        let injected = recursive_delete_command("/tmp/a'; touch /tmp/pwned; '");
+        assert_eq!(injected, "rm -rf -- '/tmp/a'\\''; touch /tmp/pwned; '\\'''");
     }
 
     #[test]
