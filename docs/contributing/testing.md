@@ -76,7 +76,7 @@ When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
 
 File transfer changes must preserve these invariants:
 
-1. Paths cannot leave the immutable WSL or SSH Workspace root.
+1. Transfer paths are normalized absolute paths, while remote cleanup cannot leave the exact task-owned destination parents.
 2. A failed or canceled task removes only its task-owned staging paths.
 3. Final publication cannot replace a destination created by another task or process.
 4. Source identity and expected size are rechecked after planning.

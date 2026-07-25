@@ -37,12 +37,12 @@ Archive rejects absolute paths, parent traversal, links, special files, duplicat
 
 ## Safety and integrity
 
-- WSL and SSH paths must be normalized absolute paths inside the current Workspace root.
+- WSL and SSH transfer paths must be normalized absolute paths without parent traversal or control characters. Explicit Explorer selections may be outside the profile's startup root.
 - Symbolic links, hard links, sockets, devices, and other special files are not transferred.
 - Final destinations are reserved before execution and checked again at commit time.
 - Final publication never overwrites an existing path.
 - A multi-root task can expose roots one at a time. If a later root fails, already committed roots remain and the Workspace receives a filesystem-change event.
-- Cancel and failure cleanup only target paths derived from the task ID. They never recursively remove a final destination.
+- Cancel and failure cleanup only target paths derived from the task ID. Remote cleanup also requires an exact canonical destination parent captured by the task, and never recursively removes a final destination.
 - Direct rechecks planned source identity and file size. SSH transport provides packet integrity. Archive also validates gzip and the complete manifest. A second content-hash protocol is not included because the current threat model does not require it; adding one needs an explicit algorithm, performance budget, and user-visible contract.
 
 ## Failure and retry model
@@ -88,7 +88,7 @@ The implementation was exercised in real Tauri Workspace processes against local
 - missing-source retry after the source appears
 - WSL destination-full failure without publishing partial output
 - SSH connection loss, bounded failure convergence, reconnect cleanup, retry, and final hash verification
-- SSH Workspace-root escape rejection before server access
+- SSH malformed-path rejection and task-owned cleanup escape rejection
 
 Automated tests lock request limits, path boundaries, source identity, archive validation, no-replace commit, staging ownership, scheduler reservations, history bounds, structured errors, and frontend event convergence.
 

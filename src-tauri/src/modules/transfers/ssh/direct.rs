@@ -286,6 +286,11 @@ pub(crate) async fn execute_upload(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context.set_stage(TransferStage::Transferring).await;
+    let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
+        plan.workspace.profile.id.clone(),
+        plan.task_id.clone(),
+        &plan.roots,
+    );
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
@@ -322,9 +327,9 @@ pub(crate) async fn execute_upload(
     if result.is_err() {
         let mut pending: Vec<_> = plan.roots.iter().map(|root| root.stage.clone()).collect();
         if !super::cleanup::should_defer(&result) {
-            pending = super::cleanup::remove_now(&plan.workspace, &pending).await;
+            pending = super::cleanup::remove_now(&plan.workspace, &cleanup_scope, &pending).await;
         }
-        super::cleanup::schedule(plan.workspace.profile.id.clone(), pending);
+        super::cleanup::schedule(cleanup_scope, pending);
     }
     close_sftp(&plan.session).await;
     result

@@ -8,12 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use russh::{ChannelMsg, Sig};
-use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::OpenFlags;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use uuid::Uuid;
-
 use crate::modules::remote::session::{join_remote, shell_quote, ExecOutput, RemoteWorkspace};
 use crate::modules::transfers::archive::{
     build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
@@ -26,6 +20,10 @@ use crate::modules::transfers::manager::{TaskControl, TransferRunError};
 use crate::modules::transfers::models::TransferStage;
 use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadPlan};
 use crate::modules::transfers::progress::ExecutionContext;
+use russh::{ChannelMsg, Sig};
+use russh_sftp::client::SftpSession;
+use russh_sftp::protocol::OpenFlags;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
@@ -45,6 +43,11 @@ pub(crate) async fn execute_upload(
             .collect::<Vec<_>>()
             .as_slice(),
     )?;
+    let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
+        plan.workspace.profile.id.clone(),
+        plan.task_id.clone(),
+        &plan.roots,
+    );
     let mut remote_work: Option<String> = None;
     let mut pending_cleanup = Vec::new();
     let result = async {
@@ -53,10 +56,7 @@ pub(crate) async fn execute_upload(
         context.set_archive_size(archive.size).await;
         context.set_archive_file_count(archive.file_count).await;
 
-        let work_dir = join_remote(
-            &remote_parent,
-            &format!(".terax-archive-{}", Uuid::new_v4()),
-        );
+        let work_dir = join_remote(&remote_parent, &format!(".terax-archive-{}", plan.task_id));
         ensure_remote_target_available(&plan.session, &work_dir).await?;
         let command = format!("umask 077; mkdir -- {}", shell_quote(&work_dir));
         run_checked(&plan.workspace, &command, context).await?;
@@ -89,7 +89,12 @@ pub(crate) async fn execute_upload(
             .await?;
         }
         pending_cleanup.extend(
-            super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await,
+            super::cleanup::remove_now(
+                &plan.workspace,
+                &cleanup_scope,
+                std::slice::from_ref(&work_dir),
+            )
+            .await,
         );
         remote_work = None;
 
@@ -108,9 +113,10 @@ pub(crate) async fn execute_upload(
         pending_cleanup.extend(plan.roots.iter().map(|root| root.stage.clone()));
     }
     if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
-        pending_cleanup = super::cleanup::remove_now(&plan.workspace, &pending_cleanup).await;
+        pending_cleanup =
+            super::cleanup::remove_now(&plan.workspace, &cleanup_scope, &pending_cleanup).await;
     }
-    super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
+    super::cleanup::schedule(cleanup_scope, pending_cleanup);
     close_sftp(&plan.session).await;
     result
 }
@@ -120,12 +126,16 @@ pub(crate) async fn execute_download(
     plan: RemoteDownloadPlan,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
+    let cleanup_scope = super::cleanup::RemoteCleanupScope::for_download(
+        plan.workspace.profile.id.clone(),
+        plan.task_id.clone(),
+    );
     let mut remote_work: Option<String> = None;
     let mut pending_cleanup = Vec::new();
     let result = async {
         ensure_archive_capability(&plan.workspace, context, true).await?;
         context.set_stage(TransferStage::Archiving).await;
-        let work_dir = create_remote_work_dir(&plan.workspace, context).await?;
+        let work_dir = create_remote_work_dir(&plan.workspace, &plan.task_id, context).await?;
         remote_work = Some(work_dir.clone());
         let archive_path = join_remote(&work_dir, "payload.tar.gz");
         let sources = download_root_sources(&plan)?;
@@ -172,7 +182,12 @@ pub(crate) async fn execute_download(
             return Err(integrity("downloaded archive checksum mismatch"));
         }
         pending_cleanup.extend(
-            super::cleanup::remove_now(&plan.workspace, std::slice::from_ref(&work_dir)).await,
+            super::cleanup::remove_now(
+                &plan.workspace,
+                &cleanup_scope,
+                std::slice::from_ref(&work_dir),
+            )
+            .await,
         );
         remote_work = None;
 
@@ -198,9 +213,10 @@ pub(crate) async fn execute_download(
         cleanup_local_staging(&plan.roots).await;
     }
     if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
-        pending_cleanup = super::cleanup::remove_now(&plan.workspace, &pending_cleanup).await;
+        pending_cleanup =
+            super::cleanup::remove_now(&plan.workspace, &cleanup_scope, &pending_cleanup).await;
     }
-    super::cleanup::schedule(plan.workspace.profile.id.clone(), pending_cleanup);
+    super::cleanup::schedule(cleanup_scope, pending_cleanup);
     close_sftp(&plan.session).await;
     result
 }
@@ -276,11 +292,14 @@ async fn ensure_archive_capability(
 
 async fn create_remote_work_dir(
     workspace: &Arc<RemoteWorkspace>,
+    task_id: &str,
     context: &ExecutionContext,
 ) -> RunResult<String> {
+    let template = format!("/tmp/terax-archive.{task_id}.XXXXXXXX");
+    let command = format!("umask 077; mktemp -d {}", shell_quote(&template));
     let output = run_remote(
         workspace,
-        "umask 077; mktemp -d \"/tmp/terax-archive.XXXXXXXX\"",
+        &command,
         context.control(),
         Duration::from_secs(30),
     )
@@ -295,19 +314,22 @@ async fn create_remote_work_dir(
         .map_err(|_| integrity("remote temporary path is not valid UTF-8"))?
         .trim()
         .to_string();
-    let name = path.rsplit('/').next().unwrap_or_default();
-    let suffix = name.strip_prefix("terax-archive.").unwrap_or_default();
-    if path.strip_suffix(name) != Some("/tmp/")
-        || path == "/"
-        || path.contains('\n')
-        || path.contains('\0')
-        || path.split('/').any(|part| matches!(part, "." | ".."))
-        || suffix.len() != 8
-        || !suffix.bytes().all(|value| value.is_ascii_alphanumeric())
-    {
+    if !is_task_remote_work_dir(&path, task_id) {
         return Err(integrity("remote mktemp returned an invalid path"));
     }
     Ok(path)
+}
+
+/// 验证下载归档临时目录严格绑定当前任务，避免清理授权扩展到任意 `/tmp` 路径。
+fn is_task_remote_work_dir(path: &str, task_id: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or_default();
+    let prefix = format!("terax-archive.{task_id}.");
+    let suffix = name.strip_prefix(&prefix).unwrap_or_default();
+    path.strip_suffix(name) == Some("/tmp/")
+        && !path.contains(['\0', '\r', '\n'])
+        && !path.split('/').any(|part| matches!(part, "." | ".."))
+        && suffix.len() == 8
+        && suffix.bytes().all(|value| value.is_ascii_alphanumeric())
 }
 
 /// 确认命令通道创建的上传临时目录没有被替换或放宽访问权限。
@@ -705,5 +727,26 @@ mod tests {
             .unwrap(),
             (7, digest)
         );
+    }
+
+    #[test]
+    fn remote_work_directory_is_bound_to_the_exact_task() {
+        let task = uuid::Uuid::new_v4();
+        assert!(is_task_remote_work_dir(
+            &format!("/tmp/terax-archive.{task}.a1B2c3D4"),
+            &task.to_string()
+        ));
+        assert!(!is_task_remote_work_dir(
+            &format!("/tmp/terax-archive.{}.a1B2c3D4", uuid::Uuid::new_v4()),
+            &task.to_string()
+        ));
+        assert!(!is_task_remote_work_dir(
+            &format!("/var/tmp/terax-archive.{task}.a1B2c3D4"),
+            &task.to_string()
+        ));
+        assert!(!is_task_remote_work_dir(
+            &format!("/tmp/terax-archive.{task}.too-short"),
+            &task.to_string()
+        ));
     }
 }

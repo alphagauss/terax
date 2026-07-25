@@ -80,6 +80,7 @@ pub(crate) struct RemoteUploadFile {
 pub(crate) struct RemoteUploadPlan {
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
+    pub(crate) task_id: String,
     pub(crate) directories: Vec<PlannedDirectory<PathBuf, String>>,
     pub(crate) files: Vec<RemoteUploadFile>,
     pub(crate) roots: Vec<RemoteRoot>,
@@ -97,6 +98,7 @@ pub(crate) struct RemoteDownloadFile {
 pub(crate) struct RemoteDownloadPlan {
     pub(crate) workspace: Arc<RemoteWorkspace>,
     pub(crate) session: Arc<SftpSession>,
+    pub(crate) task_id: String,
     pub(crate) directories: Vec<PlannedDirectory<String, PathBuf>>,
     pub(crate) files: Vec<RemoteDownloadFile>,
     pub(crate) roots: Vec<LocalRoot>,
@@ -437,7 +439,7 @@ async fn plan_local(
     Ok(plan)
 }
 
-/// 扫描宿主机来源并生成 SSH 上传计划，远端目标必须位于 Workspace 根内。
+/// 扫描宿主机来源并生成 SSH 上传计划。
 async fn plan_remote_upload(
     workspace: Arc<RemoteWorkspace>,
     session: Arc<SftpSession>,
@@ -447,11 +449,11 @@ async fn plan_remote_upload(
     scan_contents: bool,
     context: &ExecutionContext,
 ) -> RunResult<RemoteUploadPlan> {
-    let destination_parent =
-        canonical_remote_directory(&workspace, &session, destination_parent).await?;
+    let destination_parent = canonical_remote_directory(&session, destination_parent).await?;
     let mut plan = RemoteUploadPlan {
         workspace,
         session,
+        task_id: task_id.to_string(),
         directories: Vec::new(),
         files: Vec::new(),
         roots: Vec::new(),
@@ -603,11 +605,10 @@ async fn plan_remote_download(
                     error,
                 )
             })?;
-    let home = workspace.home().await;
-    let home = super::ssh::io::run("canonicalize remote root", session.canonicalize(home)).await?;
     let mut plan = RemoteDownloadPlan {
         workspace,
         session,
+        task_id: task_id.to_string(),
         directories: Vec::new(),
         files: Vec::new(),
         roots: Vec::new(),
@@ -617,7 +618,7 @@ async fn plan_remote_download(
 
     for source in sources {
         context.checkpoint().await?;
-        validate_remote_workspace_path(source, &home)?;
+        validate_remote_transfer_path(source)?;
         let source_metadata = super::ssh::io::run(
             format!("stat remote source {source}"),
             plan.session.symlink_metadata(source.clone()),
@@ -629,15 +630,11 @@ async fn plan_remote_download(
             plan.session.canonicalize(source.clone()),
         )
         .await?;
-        if !remote_path_within(&source, &home) {
-            return Err(invalid(format!(
-                "remote source is outside workspace root: {source}"
-            )));
-        }
+        validate_remote_transfer_path(&source)?;
         if !scan_contents
             && source_roots
                 .iter()
-                .any(|root| remote_path_within(root, &source) || remote_path_within(&source, root))
+                .any(|root| remote_paths_overlap(root, &source))
         {
             return Err(invalid(format!(
                 "archive source roots cannot overlap: {source}"
@@ -724,23 +721,15 @@ async fn plan_remote_download(
     Ok(plan)
 }
 
-/// 规范化远端目录并确保其没有逃逸当前 SSH Workspace 根。
-async fn canonical_remote_directory(
-    workspace: &Arc<RemoteWorkspace>,
-    session: &Arc<SftpSession>,
-    path: &str,
-) -> RunResult<String> {
-    let home = super::ssh::io::run(
-        "canonicalize remote root",
-        session.canonicalize(workspace.home().await),
-    )
-    .await?;
-    validate_remote_workspace_path(path, &home)?;
+/// 规范化用户选择的远端目标目录。
+async fn canonical_remote_directory(session: &Arc<SftpSession>, path: &str) -> RunResult<String> {
+    validate_remote_transfer_path(path)?;
     let canonical = super::ssh::io::run(
         format!("canonicalize remote destination {path}"),
         session.canonicalize(path.to_string()),
     )
     .await?;
+    validate_remote_transfer_path(&canonical)?;
     let metadata = super::ssh::io::run(
         format!("stat remote destination {canonical}"),
         session.metadata(canonical.clone()),
@@ -751,16 +740,16 @@ async fn canonical_remote_directory(
             "remote destination is not a directory: {canonical}"
         )));
     }
-    if !remote_path_within(&canonical, &home) {
-        return Err(invalid(format!(
-            "remote destination is outside workspace root: {canonical}"
-        )));
-    }
     Ok(canonical)
 }
 
-/// 按远端 POSIX 组件边界判断路径是否位于 Workspace 根内。
-fn remote_path_within(path: &str, root: &str) -> bool {
+/// 按远端 POSIX 组件边界判断两个规范路径是否相同或互为祖先。
+fn remote_paths_overlap(left: &str, right: &str) -> bool {
+    remote_path_contains(left, right) || remote_path_contains(right, left)
+}
+
+/// 判断规范远端路径是否包含另一个路径。
+fn remote_path_contains(root: &str, path: &str) -> bool {
     let root = root.trim_end_matches('/');
     root.is_empty() && path.starts_with('/')
         || path == root
@@ -769,18 +758,18 @@ fn remote_path_within(path: &str, root: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
-/// 在接触远端文件系统前校验路径，避免通过遍历组件探测 Workspace 外部对象。
-fn validate_remote_workspace_path(path: &str, root: &str) -> RunResult<()> {
+/// 校验用户明确选择的 SSH 传输路径。
+///
+/// 传输范围由 SSH 账号权限和用户选择决定；此处只拒绝非绝对路径、控制字符及父级
+/// 遍历，删除权限由任务私有 staging 的独立清理授权约束。
+fn validate_remote_transfer_path(path: &str) -> RunResult<()> {
     if !path.starts_with('/')
         || path.contains(['\0', '\r', '\n'])
         || path
             .split('/')
             .any(|component| matches!(component, "." | ".."))
-        || !remote_path_within(path, root)
     {
-        return Err(invalid(format!(
-            "remote path is outside workspace root: {path}"
-        )));
+        return Err(invalid(format!("invalid remote transfer path: {path}")));
     }
     Ok(())
 }
@@ -915,26 +904,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remote_scope_requires_a_component_boundary() {
-        assert!(remote_path_within("/home/me/project", "/home/me"));
-        assert!(remote_path_within("/home/me", "/home/me"));
-        assert!(!remote_path_within("/home/other", "/home/me"));
-        assert!(!remote_path_within("/home/mean", "/home/me"));
-        assert!(remote_path_within("/etc", "/"));
+    fn remote_archive_overlap_requires_a_component_boundary() {
+        assert!(remote_paths_overlap("/home/me", "/home/me/project"));
+        assert!(remote_paths_overlap("/home/me", "/home/me"));
+        assert!(!remote_paths_overlap("/home/me", "/home/other"));
+        assert!(!remote_paths_overlap("/home/me", "/home/mean"));
+        assert!(remote_paths_overlap("/", "/etc"));
     }
 
     #[test]
-    fn remote_workspace_paths_are_rejected_before_server_access() {
-        assert!(validate_remote_workspace_path("/home/me/project", "/home/me").is_ok());
+    fn remote_transfer_paths_allow_user_selected_absolute_locations() {
+        assert!(validate_remote_transfer_path("/home/me/project").is_ok());
+        assert!(validate_remote_transfer_path("/srv/releases").is_ok());
         for path in [
             "home/me/project",
             "/home/me/../other",
-            "/home/other",
-            "/home/mean",
             "/home/me/file\0name",
         ] {
             let TransferRunError::Failed(failure) =
-                validate_remote_workspace_path(path, "/home/me").unwrap_err()
+                validate_remote_transfer_path(path).unwrap_err()
             else {
                 panic!("expected a structured failure");
             };
