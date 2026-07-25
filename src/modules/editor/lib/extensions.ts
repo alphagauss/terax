@@ -28,11 +28,6 @@ export const lspCompartment = new Compartment();
 export const indentCompartment = new Compartment();
 const editorFontMetricsCompartment = new Compartment();
 
-type EditorFontMetrics = {
-  editorFontSize: number;
-  zoomLevel: number;
-};
-
 const editorFontSizeExtensions = new Map<number, Extension>();
 
 /** 计算 CodeMirror 在抵消应用 CSS zoom 后应使用的字号。 */
@@ -55,83 +50,88 @@ function editorFontSizeExtension(fontSize: number): Extension {
   return extension;
 }
 
-/** 读取当前视口顶部对应的文档位置，供字号重测后恢复滚动锚点。 */
-function editorViewportAnchor(view: EditorView): number {
-  const scrollRect = view.scrollDOM.getBoundingClientRect();
-  const viewportTop = Math.max(
-    0,
-    (scrollRect.top - view.documentTop) / view.scaleY,
-  );
-  return view.lineBlockAtHeight(viewportTop).from;
-}
-
 /**
  * 通过 CodeMirror 配置事务更新字号并请求重新测量。
  *
- * 外部 CSS 变量不会使 CodeMirror 的行高与虚拟视口缓存失效，因此不能直接修改样式代替该流程。
+ * 字号主题变化会由 CodeMirror 自己维护滚动锚点。这里不能预读布局或主动滚动，
+ * 因为视图首次挂载时可能仍位于隐藏容器，错误的零尺寸测量会污染虚拟视口。
  */
 export function reconfigureEditorFontMetrics(
   view: EditorView,
   editorFontSize: number,
   zoomLevel: number,
 ): void {
-  const viewportAnchor = editorViewportAnchor(view);
+  reconfigureEditorFontSize(
+    view,
+    effectiveEditorFontSize(editorFontSize, zoomLevel),
+  );
+}
+
+/** 仅重配已经合成应用缩放的字号，避免同步器重复读取偏好。 */
+function reconfigureEditorFontSize(view: EditorView, fontSize: number): void {
   view.dispatch({
-    effects: [
-      editorFontMetricsCompartment.reconfigure(
-        editorFontSizeExtension(
-          effectiveEditorFontSize(editorFontSize, zoomLevel),
-        ),
-      ),
-      EditorView.scrollIntoView(viewportAnchor, { y: "start" }),
-    ],
+    effects: editorFontMetricsCompartment.reconfigure(
+      editorFontSizeExtension(fontSize),
+    ),
   });
   view.requestMeasure();
 }
 
-const editorFontMetricsSync = ViewPlugin.fromClass(
-  class EditorFontMetricsSync {
-    private frame: number | null = null;
-    private pending: EditorFontMetrics = usePreferencesStore.getState();
-    private readonly ownerWindow: Window;
-    private readonly unsubscribe: () => void;
+/**
+ * 创建与初始字号绑定的偏好同步扩展。
+ *
+ * 初始值用于消除视图创建后的无效重配，同时仍能覆盖扩展构建与插件挂载之间发生的偏好水合。
+ */
+function editorFontMetricsSync(initialFontSize: number): Extension {
+  return ViewPlugin.fromClass(
+    class EditorFontMetricsSync {
+      private frame: number | null = null;
+      private pendingFontSize = initialFontSize;
+      private appliedFontSize = initialFontSize;
+      private readonly ownerWindow: Window;
+      private readonly unsubscribe: () => void;
 
-    constructor(private readonly view: EditorView) {
-      this.ownerWindow = view.dom.ownerDocument.defaultView ?? window;
-      this.unsubscribe = usePreferencesStore.subscribe((state, previous) => {
-        if (
-          effectiveEditorFontSize(state.editorFontSize, state.zoomLevel) ===
-          effectiveEditorFontSize(previous.editorFontSize, previous.zoomLevel)
-        ) {
-          return;
-        }
-        this.pending = state;
-        this.schedule();
-      });
-      // 共享扩展可能早于偏好水合完成，视图创建后必须用最新值校准一次。
-      this.schedule();
-    }
-
-    private schedule(): void {
-      if (this.frame !== null) return;
-      this.frame = this.ownerWindow.requestAnimationFrame(() => {
-        this.frame = null;
-        reconfigureEditorFontMetrics(
-          this.view,
-          this.pending.editorFontSize,
-          this.pending.zoomLevel,
+      constructor(private readonly view: EditorView) {
+        this.ownerWindow = view.dom.ownerDocument.defaultView ?? window;
+        const current = usePreferencesStore.getState();
+        this.pendingFontSize = effectiveEditorFontSize(
+          current.editorFontSize,
+          current.zoomLevel,
         );
-      });
-    }
-
-    destroy(): void {
-      if (this.frame !== null) {
-        this.ownerWindow.cancelAnimationFrame(this.frame);
+        this.unsubscribe = usePreferencesStore.subscribe((state) => {
+          const nextFontSize = effectiveEditorFontSize(
+            state.editorFontSize,
+            state.zoomLevel,
+          );
+          this.pendingFontSize = nextFontSize;
+          if (nextFontSize === this.appliedFontSize) return;
+          this.schedule();
+        });
+        if (this.pendingFontSize !== this.appliedFontSize) {
+          this.schedule();
+        }
       }
-      this.unsubscribe();
-    }
-  },
-);
+
+      private schedule(): void {
+        if (this.frame !== null) return;
+        this.frame = this.ownerWindow.requestAnimationFrame(() => {
+          this.frame = null;
+          const nextFontSize = this.pendingFontSize;
+          if (nextFontSize === this.appliedFontSize) return;
+          reconfigureEditorFontSize(this.view, nextFontSize);
+          this.appliedFontSize = nextFontSize;
+        });
+      }
+
+      destroy(): void {
+        if (this.frame !== null) {
+          this.ownerWindow.cancelAnimationFrame(this.frame);
+        }
+        this.unsubscribe();
+      }
+    },
+  );
+}
 
 export function indentExtension(unit: string): Extension {
   return [
@@ -248,13 +248,10 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
 
 export function buildSharedExtensions(): readonly Extension[] {
   const { editorFontSize, zoomLevel } = usePreferencesStore.getState();
+  const initialFontSize = effectiveEditorFontSize(editorFontSize, zoomLevel);
   return [
     ...SHARED_EXTENSIONS,
-    editorFontMetricsCompartment.of(
-      editorFontSizeExtension(
-        effectiveEditorFontSize(editorFontSize, zoomLevel),
-      ),
-    ),
-    editorFontMetricsSync,
+    editorFontMetricsCompartment.of(editorFontSizeExtension(initialFontSize)),
+    editorFontMetricsSync(initialFontSize),
   ];
 }
