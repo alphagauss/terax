@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="/src/styles/workspace-bootstrap.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Terax</title>
     <script>
@@ -21,42 +22,6 @@
         } catch (e) {}
       })();
     </script>
-    <style>
-      #workspace-bootstrap {
-        position: fixed;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        color: #737373;
-      }
-
-      html.dark #workspace-bootstrap {
-        color: #a3a3a3;
-      }
-
-      #workspace-bootstrap::before {
-        width: 16px;
-        height: 16px;
-        box-sizing: border-box;
-        border: 2px solid currentColor;
-        border-right-color: transparent;
-        border-radius: 9999px;
-        content: "";
-        animation: workspace-bootstrap-spin 800ms linear infinite;
-      }
-
-      @keyframes workspace-bootstrap-spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        #workspace-bootstrap::before {
-          animation: none;
-        }
-      }
-    </style>
   </head>
 
   <body>

@@ -1,6 +1,6 @@
 /**
  * 本文件验证 Workspace 进程环境选择和冷启动显示顺序。
- * HTML 只提供轻量冷启动占位，不得绕过原生环境判断主动显示窗口。
+ * HTML 只提供轻量冷启动占位，不得绕过原生环境判断或以内联样式改变 CSP。
  */
 
 import { readFileSync } from "node:fs";
@@ -11,11 +11,20 @@ import { policyForEnvironmentSelection, sameWorkspaceEnv } from "./index";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(path.join(here, "../../../index.html"), "utf8");
+const bootstrapCss = readFileSync(
+  path.join(here, "../../styles/workspace-bootstrap.css"),
+  "utf8",
+);
 
 describe("Workspace process model", () => {
   it("keeps the bootstrap placeholder without forcing the window visible", () => {
     expect(indexHtml).toContain('id="workspace-bootstrap"');
+    expect(indexHtml).toContain(
+      'href="/src/styles/workspace-bootstrap.css"',
+    );
+    expect(indexHtml).not.toContain("<style");
     expect(indexHtml).not.toContain("plugin:window|show");
+    expect(bootstrapCss).toContain("#workspace-bootstrap");
   });
 
   it("uses fresh when the current environment is selected again", () => {

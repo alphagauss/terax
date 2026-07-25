@@ -1,0 +1,40 @@
+/*
+ * 本文件定义 Workspace 冷启动占位样式。
+ *
+ * 样式必须保持为外部资源，避免 Tauri 为 style-src 注入 nonce 后阻止运行时组件样式。
+ */
+
+#workspace-bootstrap {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #737373;
+}
+
+html.dark #workspace-bootstrap {
+  color: #a3a3a3;
+}
+
+#workspace-bootstrap::before {
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  content: "";
+  animation: workspace-bootstrap-spin 800ms linear infinite;
+}
+
+@keyframes workspace-bootstrap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #workspace-bootstrap::before {
+    animation: none;
+  }
+}
