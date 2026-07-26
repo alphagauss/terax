@@ -180,4 +180,54 @@ describe("AI session message conversion", () => {
       ),
     ).toEqual(["第一答", "第二答"]);
   });
+
+  it("restores each persisted message timestamp into UI metadata", () => {
+    const records: SessionMessage[] = [
+      {
+        role: "user",
+        content: "问题",
+        timestamp: "2026-07-26T09:00:00.000Z",
+      },
+      {
+        role: "assistant",
+        content: "回答",
+        timestamp: "2026-07-26T09:00:01.000Z",
+        turn_id: "turn-1",
+      },
+    ];
+
+    expect(
+      projectSessionMessages("session-1", records).map(
+        (message) => message.metadata,
+      ),
+    ).toEqual([
+      { createdAt: Date.parse("2026-07-26T09:00:00.000Z") },
+      { createdAt: Date.parse("2026-07-26T09:00:01.000Z") },
+    ]);
+  });
+
+  it("uses UI creation metadata when persisting message timestamps", () => {
+    const records = serializeSessionMessages(
+      [
+        {
+          id: "user-1",
+          role: "user",
+          metadata: { createdAt: Date.parse("2026-07-26T09:00:00.000Z") },
+          parts: [{ type: "text", text: "问题" }],
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          metadata: { createdAt: Date.parse("2026-07-26T09:00:01.000Z") },
+          parts: [{ type: "text", text: "回答", state: "done" }],
+        },
+      ],
+      { timestamp, turnId: "turn-1" },
+    );
+
+    expect(records.map((record) => record.timestamp)).toEqual([
+      "2026-07-26T09:00:00.000Z",
+      "2026-07-26T09:00:01.000Z",
+    ]);
+  });
 });

@@ -386,7 +386,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     void (async () => {
       const { sendChatMessage } = await import("../store/chatRuntime");
-      const sent = await sendChatMessage(sessionId, { role: "user", parts });
+      const sent = await sendChatMessage(sessionId, {
+        role: "user",
+        parts,
+        metadata: { createdAt: Date.now() },
+      });
       if (!sent) {
         toast.info("This session is running in another window");
         return;

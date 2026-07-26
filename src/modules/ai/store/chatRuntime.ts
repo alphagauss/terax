@@ -145,12 +145,21 @@ export async function sendMessage(text: string): Promise<boolean> {
     return false;
   if (!(await state.ensureSessionRunLock(sessionId))) return false;
   const c = getOrCreateChat(sessionId);
-  const sending = c.sendMessage({ text });
+  const sending = c.sendMessage({
+    text,
+    metadata: { createdAt: Date.now() },
+  });
   state.promoteSession(
     sessionId,
     c.messages.length > 0
       ? c.messages
-      : [{ id: "pending-user-message", role: "user", parts: [{ type: "text", text }] }],
+      : [
+          {
+            id: "pending-user-message",
+            role: "user",
+            parts: [{ type: "text", text }],
+          },
+        ],
   );
   await sending;
   return true;

@@ -79,6 +79,7 @@ export function projectSessionMessages(
   let assistantParts: UIMessage["parts"] | null = null;
   let assistantStart = -1;
   let assistantTurnId: string | undefined;
+  let assistantTimestamp: number | undefined;
 
   const flushAssistant = () => {
     if (!assistantParts) return;
@@ -86,15 +87,20 @@ export function projectSessionMessages(
       id: `${sessionId}:assistant:${assistantStart}`,
       role: "assistant",
       parts: assistantParts,
+      ...(assistantTimestamp === undefined
+        ? {}
+        : { metadata: { createdAt: assistantTimestamp } }),
     });
     assistantParts = null;
     assistantStart = -1;
     assistantTurnId = undefined;
+    assistantTimestamp = undefined;
   };
 
   const ensureAssistant = (
     index: number,
     turnId: string | undefined,
+    timestamp: number | undefined,
   ): UIMessage["parts"] => {
     if (
       assistantParts &&
@@ -108,11 +114,13 @@ export function projectSessionMessages(
       assistantParts = [];
       assistantStart = index;
       assistantTurnId = turnId;
+      assistantTimestamp = timestamp;
     }
     return assistantParts;
   };
 
   records.forEach((record, index) => {
+    const timestamp = parseRecordedTimestamp(record.timestamp);
     if (record.role === "user" || record.role === "system") {
       flushAssistant();
       const content =
@@ -134,13 +142,18 @@ export function projectSessionMessages(
         id: `${sessionId}:${record.role}:${index}`,
         role: record.role,
         parts,
+        ...(timestamp === undefined
+          ? {}
+          : { metadata: { createdAt: timestamp } }),
       });
       return;
     }
 
     if (record.role !== "assistant" && record.role !== "tool") return;
-    const parts = ensureAssistant(index, record.turn_id);
+    const parts = ensureAssistant(index, record.turn_id, timestamp);
     if (record.role === "assistant") {
+      // 一轮中可能先请求工具再给出最终答复，消息底部应显示最后一段答复的时间。
+      if (timestamp !== undefined) assistantTimestamp = timestamp;
       parts.push({ type: "step-start" });
       if (record.reasoning_content) {
         parts.push({
@@ -215,6 +228,10 @@ function serializeUiMessage(
   message: UIMessage,
   options: AppendOptions,
 ): SessionMessage[] {
+  const messageOptions = {
+    ...options,
+    timestamp: timestampFromMessage(message, options.timestamp),
+  };
   if (message.role === "user" || message.role === "system") {
     const content = message.parts
       .filter(
@@ -237,8 +254,8 @@ function serializeUiMessage(
       {
         role: message.role,
         content,
-        timestamp: options.timestamp,
-        turn_id: options.turnId,
+        timestamp: messageOptions.timestamp,
+        turn_id: messageOptions.turnId,
         ...(media.length > 0 ? { media } : {}),
       },
     ];
@@ -246,7 +263,7 @@ function serializeUiMessage(
 
   const blocks = splitAssistantBlocks(message);
   const records = blocks.flatMap((block) =>
-    serializeAssistantBlock(block, options),
+    serializeAssistantBlock(block, messageOptions),
   );
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index];
@@ -255,6 +272,22 @@ function serializeUiMessage(
     break;
   }
   return records;
+}
+
+/** 从 UI 消息元数据读取创建时间，缺失或非法时使用本次提交时间。 */
+function timestampFromMessage(message: UIMessage, fallback: string): string {
+  const createdAt = (message.metadata as { createdAt?: unknown } | undefined)
+    ?.createdAt;
+  if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) {
+    return fallback;
+  }
+  return new Date(createdAt).toISOString();
+}
+
+/** 容忍旧会话中异常时间戳，避免单条坏记录阻断整段会话恢复。 */
+function parseRecordedTimestamp(value: string): number | undefined {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
 }
 
 /** 按 step-start 切分 assistant 内容，保持模型步骤与工具结果的先后关系。 */

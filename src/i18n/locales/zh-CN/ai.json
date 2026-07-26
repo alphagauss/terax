@@ -38,8 +38,10 @@
       "footerApprox": "Token 数量为近似值（字符数 / 4）。"
     },
     "switchSession": "切换会话",
+    "aiSettings": "AI 设置",
     "newChat": "新对话",
     "newSession": "新建会话",
+    "closeAiSidebar": "关闭 AI 侧栏",
     "deleteSession": "删除会话",
     "empty": {
       "title": "向 Terax 提问",
@@ -120,6 +122,8 @@
     "contextCompacted_other": "上下文已压缩，省略了 {{count}} 条较早的工具结果以节省 token。",
     "hitStepLimit": "已达到步数上限。继续以接着运行。",
     "continue": "继续",
+    "copy": "复制消息",
+    "copied": "已复制",
     "read": "读取",
     "readFiles_one": "{{count}} 个文件",
     "readFiles_other": "{{count}} 个文件",

@@ -16,7 +16,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -25,17 +24,18 @@ import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
-  Add01Icon,
   AlertCircleIcon,
   ArrowDown01Icon,
   Cancel01Icon,
   Delete02Icon,
   FilterIcon,
+  PencilEdit02Icon,
   TerminalIcon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   estimateCost,
   getModel,
@@ -46,6 +46,7 @@ import {
   estimateUiMessageTokens,
   STREAM_RENDER_INTERVAL_MS,
 } from "../lib/chatRendering";
+import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
@@ -209,6 +210,12 @@ function Header({
   onClose: () => void;
   messages?: UIMessage[];
 }) {
+  const { t } = useTranslation("ai");
+  const newSession = useChatStore((s) => s.newSession);
+  const newSessionDisabled = useChatStore((s) =>
+    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
+  );
+
   return (
     <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
@@ -230,8 +237,8 @@ function Header({
           variant="ghost"
           onClick={() => void openSettingsWindow("models")}
           className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="AI settings"
-          title="AI settings"
+          aria-label={t("miniWindow.aiSettings")}
+          title={t("miniWindow.aiSettings")}
         >
           <HugeiconsIcon icon={Wrench01Icon} size={15} strokeWidth={1.75} />
         </Button>
@@ -239,10 +246,22 @@ function Header({
           type="button"
           size="icon"
           variant="ghost"
+          onClick={() => newSession()}
+          disabled={newSessionDisabled}
+          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          aria-label={t("miniWindow.newSession")}
+          title={t("miniWindow.newSession")}
+        >
+          <HugeiconsIcon icon={PencilEdit02Icon} size={15} strokeWidth={1.75} />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
           onClick={onClose}
           className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Close AI sidebar"
-          title="Close AI sidebar"
+          aria-label={t("miniWindow.closeAiSidebar")}
+          title={t("miniWindow.closeAiSidebar")}
         >
           <HugeiconsIcon icon={Cancel01Icon} size={15} strokeWidth={1.75} />
         </Button>
@@ -379,7 +398,6 @@ function SessionPicker() {
     s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
   );
   const switchSession = useChatStore((s) => s.switchSession);
-  const newSession = useChatStore((s) => s.newSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
@@ -411,15 +429,6 @@ function SessionPicker() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
-        <DropdownMenuItem
-          onSelect={() => newSession()}
-          disabled={runLocked}
-          className="gap-2 text-xs"
-        >
-          <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={1.75} />
-          New session
-        </DropdownMenuItem>
-        {sorted.length > 0 ? <DropdownMenuSeparator /> : null}
         {sorted.map((s) => (
           <SessionRow
             key={s.id}
@@ -448,6 +457,9 @@ function SessionRow({
   onSelect: () => void;
   onDelete: () => void;
 }) {
+  const { i18n } = useTranslation("ai");
+  const updatedAt = formatMessageTimestamp(session.updatedAt, i18n.language);
+
   return (
     <DropdownMenuItem
       disabled={disabled}
@@ -468,6 +480,14 @@ function SessionRow({
       <span className="min-w-0 flex-1 truncate">
         {session.title || "New chat"}
       </span>
+      {updatedAt ? (
+        <time
+          dateTime={new Date(session.updatedAt).toISOString()}
+          className="shrink-0 text-[10px] text-muted-foreground"
+        >
+          {updatedAt}
+        </time>
+      ) : null}
       <button
         type="button"
         disabled={disabled}

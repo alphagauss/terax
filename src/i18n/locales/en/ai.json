@@ -38,8 +38,10 @@
       "footerApprox": "Token count is approximate (chars / 4)."
     },
     "switchSession": "Switch session",
+    "aiSettings": "AI settings",
     "newChat": "New chat",
     "newSession": "New session",
+    "closeAiSidebar": "Close AI sidebar",
     "deleteSession": "Delete session",
     "empty": {
       "title": "Ask Terax anything",
@@ -120,6 +122,8 @@
     "contextCompacted_other": "Context compacted - {{count}} older tool results elided to save tokens.",
     "hitStepLimit": "Hit the step limit. Continue to keep going.",
     "continue": "Continue",
+    "copy": "Copy message",
+    "copied": "Copied",
     "read": "Read",
     "readFiles_one": "{{count}} file",
     "readFiles_other": "{{count}} files",

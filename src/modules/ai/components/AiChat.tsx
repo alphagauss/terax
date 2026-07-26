@@ -10,6 +10,8 @@ import {
 } from "@/components/ai-elements/conversation";
 import {
   Message,
+  MessageAction,
+  MessageActions,
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
@@ -30,9 +32,11 @@ import { cn } from "@/lib/utils";
 import {
   ArrowRight01Icon,
   CodeIcon,
+  Copy01Icon,
   File01Icon,
   HashtagIcon,
   TerminalIcon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type {
@@ -42,9 +46,19 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
+import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
@@ -497,6 +511,8 @@ const RenderedMessage = memo(function RenderedMessage({
         : buildPartGroups(message.parts as AnyPart[]),
     [message.parts, message.role],
   );
+  const timestamp = useMessageTimestamp(message);
+  const copyText = useMemo(() => messageTextForCopy(message), [message]);
 
   if (message.role === "user") {
     const rawText = message.parts
@@ -510,7 +526,11 @@ const RenderedMessage = memo(function RenderedMessage({
     const stripped = stripUserContextBlocks(withoutCmd);
 
     return (
-      <Message from="user" data-conversation-message-id={message.id}>
+      <Message
+        from="user"
+        data-conversation-message-id={message.id}
+        className="group/message"
+      >
         <MessageContent>
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
@@ -522,12 +542,17 @@ const RenderedMessage = memo(function RenderedMessage({
             </p>
           ) : null}
         </MessageContent>
+        <MessageMeta timestamp={timestamp} copyText={copyText} />
       </Message>
     );
   }
 
   return (
-    <Message from={message.role} data-conversation-message-id={message.id}>
+    <Message
+      from={message.role}
+      data-conversation-message-id={message.id}
+      className="group/message"
+    >
       <MessageContent>
         <div className="flex flex-col gap-3">
           {groups.map((g) => {
@@ -561,7 +586,96 @@ const RenderedMessage = memo(function RenderedMessage({
           })}
         </div>
       </MessageContent>
+      <MessageMeta timestamp={timestamp} copyText={copyText} />
     </Message>
+  );
+});
+
+/** 读取消息持久化元数据中的创建时间，流式消息首次渲染时使用当前时间作为临时值。 */
+function useMessageTimestamp(message: UIMessage): number {
+  const [renderedAt] = useState(() => Date.now());
+  const createdAt = (message.metadata as { createdAt?: unknown } | undefined)
+    ?.createdAt;
+  return typeof createdAt === "number" && Number.isFinite(createdAt)
+    ? createdAt
+    : renderedAt;
+}
+
+/** 提取用户或助手可见的正文，复制时不包含注入的终端、选区和文件上下文。 */
+function messageTextForCopy(message: UIMessage): string {
+  const text = message.parts
+    .filter(
+      (part): part is { type: "text"; text: string } => part.type === "text",
+    )
+    .map((part) => part.text)
+    .join("\n");
+  if (message.role !== "user") return text;
+  const withoutCommand = text.replace(TERAX_CMD_RE, "");
+  return stripUserContextBlocks(withoutCommand).text;
+}
+
+/** 消息底部的时间与复制操作，仅在消息悬停或键盘聚焦时显示。 */
+const MessageMeta = memo(function MessageMeta({
+  timestamp,
+  copyText,
+}: {
+  timestamp: number;
+  copyText: string;
+}) {
+  const { t, i18n } = useTranslation("ai");
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+  const label = formatMessageTimestamp(timestamp, i18n.language);
+
+  useEffect(
+    () => () => {
+      if (resetTimer.current !== null) {
+        window.clearTimeout(resetTimer.current);
+      }
+    },
+    [],
+  );
+
+  const copy = useCallback(async () => {
+    if (!copyText || typeof navigator === "undefined") return;
+    try {
+      await navigator.clipboard.writeText(copyText);
+    } catch {
+      return;
+    }
+    setCopied(true);
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => {
+      resetTimer.current = null;
+      setCopied(false);
+    }, 3000);
+  }, [copyText]);
+
+  return (
+    <MessageActions
+      className={cn(
+        "h-5 gap-0.5 text-[10px] text-muted-foreground opacity-0 transition-opacity duration-control",
+        "pointer-events-none group-hover/message:pointer-events-auto group-hover/message:opacity-100",
+        "group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100",
+      )}
+    >
+      {label ? (
+        <time dateTime={new Date(timestamp).toISOString()}>{label}</time>
+      ) : null}
+      <MessageAction
+        tooltip={copied ? t("chat.copied") : t("chat.copy")}
+        label={copied ? t("chat.copied") : t("chat.copy")}
+        onClick={() => void copy()}
+        disabled={!copyText}
+        className="size-5 text-muted-foreground hover:text-foreground"
+      >
+        <HugeiconsIcon
+          icon={copied ? Tick02Icon : Copy01Icon}
+          size={12}
+          strokeWidth={1.75}
+        />
+      </MessageAction>
+    </MessageActions>
   );
 });
 
