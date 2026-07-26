@@ -30,6 +30,12 @@
     "search.focus": "Find in current tab",
     "explorer.search": "Search files by name",
     "sidebar.toggle": "Toggle file explorer",
+    "activityBar.position.default": "Activity Bar Position: Default",
+    "activityBar.position.top": "Activity Bar Position: Top",
+    "activityBar.position.bottom": "Activity Bar Position: Bottom",
+    "activityBar.position.hidden": "Activity Bar Position: Hidden",
+    "activityBar.size.default": "Activity Bar Size: Default",
+    "activityBar.size.compact": "Activity Bar Size: Compact",
     "ai.toggle": "Toggle AI agent",
     "ai.askSelection": "Ask AI about selection"
   },

@@ -1,3 +1,8 @@
+/**
+ * 本文件测试命令面板动作的可用性、排序和回调连接。
+ * 运行时上下文使用完整假动作，避免新增视图命令破坏既有命令构建。
+ */
+
 import { describe, expect, it, vi } from "vitest";
 import {
   type CommandPaletteActionContext,
@@ -27,6 +32,8 @@ function context(): CommandPaletteActionContext {
     focusSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,
+    setActivityBarPosition: noop,
+    setActivityBarSize: noop,
     toggleAi: noop,
     askAiSelection: noop,
     openSettings: noop,

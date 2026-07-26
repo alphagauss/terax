@@ -8,6 +8,7 @@ import "./styles/globals.css";
 import "./i18n";
 import { preloadEn, preloadZhCN } from "./i18n";
 
+import { initializeSidebarLayout } from "@/modules/sidebar";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
@@ -27,7 +28,7 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
   scan({ enabled: true });
 }
 
-await initializeWorkspaceProcess();
+await Promise.all([initializeWorkspaceProcess(), initializeSidebarLayout()]);
 
 // Reap PTY sessions orphaned by a prior webview load before any tab spawns.
 await invoke("pty_close_all").catch(() => {});

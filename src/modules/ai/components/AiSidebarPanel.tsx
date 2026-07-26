@@ -26,7 +26,6 @@ import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   AlertCircleIcon,
   ArrowDown01Icon,
-  Cancel01Icon,
   Delete02Icon,
   FilterIcon,
   PencilEdit02Icon,
@@ -83,21 +82,11 @@ const SUGGESTIONS = [
  *
  * 负责连接当前会话、聊天区域和输入区，关闭侧边栏不会主动终止正在运行的会话。
  */
-export function AiSidebarPanel({
-  hasComposer,
-  onClose,
-}: {
-  hasComposer: boolean;
-  onClose: () => void;
-}) {
+export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-[12px]">
-      {sessionId ? (
-        <Body sessionId={sessionId} onClose={onClose} />
-      ) : (
-        <EmptyShell onClose={onClose} />
-      )}
+      {sessionId ? <Body sessionId={sessionId} /> : <EmptyShell />}
       <PlanDiffReview />
       {hasComposer ? (
         <AiSidebarComposer />
@@ -108,13 +97,7 @@ export function AiSidebarPanel({
   );
 }
 
-function Body({
-  sessionId,
-  onClose,
-}: {
-  sessionId: string;
-  onClose: () => void;
-}) {
+function Body({ sessionId }: { sessionId: string }) {
   const focusInput = useChatStore((s) => s.focusInput);
   const step = useChatStore((s) => s.agentMeta.step);
 
@@ -132,12 +115,7 @@ function Body({
 
   return (
     <>
-      <Header
-        step={step}
-        isBusy={isBusy}
-        onClose={onClose}
-        messages={helpers.messages}
-      />
+      <Header step={step} isBusy={isBusy} messages={helpers.messages} />
 
       <PlanModeStrip />
 
@@ -188,10 +166,10 @@ function PlanModeStrip() {
   );
 }
 
-function EmptyShell({ onClose }: { onClose: () => void }) {
+function EmptyShell() {
   return (
     <>
-      <Header step={null} isBusy={false} onClose={onClose} />
+      <Header step={null} isBusy={false} />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
         Loading sessions…
       </div>
@@ -202,12 +180,10 @@ function EmptyShell({ onClose }: { onClose: () => void }) {
 function Header({
   step,
   isBusy,
-  onClose,
   messages,
 }: {
   step: string | null;
   isBusy: boolean;
-  onClose: () => void;
   messages?: UIMessage[];
 }) {
   const { t } = useTranslation("ai");
@@ -253,17 +229,6 @@ function Header({
           title={t("miniWindow.newSession")}
         >
           <HugeiconsIcon icon={PencilEdit02Icon} size={15} strokeWidth={1.75} />
-        </Button>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          onClick={onClose}
-          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={t("miniWindow.closeAiSidebar")}
-          title={t("miniWindow.closeAiSidebar")}
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={15} strokeWidth={1.75} />
         </Button>
       </div>
     </div>
@@ -464,7 +429,7 @@ function SessionRow({
     <DropdownMenuItem
       disabled={disabled}
       onSelect={(e) => {
-        // Don't dismiss if user clicked the trash icon — handle below.
+        // 删除按钮由下方逻辑单独处理，此处不能提前关闭菜单。
         const target = e.target as HTMLElement | null;
         if (target?.closest("[data-session-delete]")) {
           e.preventDefault();
@@ -514,7 +479,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
           Ask Terax anything
         </p>
         <p className="max-w-[18rem] text-[11.5px] leading-relaxed text-muted-foreground">
-          Terax sees the active terminal — cwd, recent commands, and output.
+          Terax sees the active terminal: cwd, recent commands, and output.
         </p>
       </div>
       <div className="flex w-full flex-col gap-2.5">

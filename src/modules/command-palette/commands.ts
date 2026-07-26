@@ -1,4 +1,10 @@
+/**
+ * 本文件构建命令面板中的静态命令和运行时动作。
+ * 视图命令通过统一侧边栏控制器执行，不依赖容器当前所在位置。
+ */
+
 import i18n from "@/i18n";
+import type { ActivityBarPosition, ActivityBarSize } from "@/modules/sidebar";
 import type { Tab } from "@/modules/workbench";
 import {
   Cancel01Icon,
@@ -55,6 +61,8 @@ export type CommandPaletteActionContext = {
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
+  setActivityBarPosition: (position: ActivityBarPosition) => void;
+  setActivityBarSize: (size: ActivityBarSize) => void;
   toggleAi: () => void;
   askAiSelection: () => void;
   openSettings: () => void;
@@ -298,6 +306,22 @@ export function createCommandItems(
       shortcutId: "sidebar.toggle",
       run: ctx.toggleSidebar,
     },
+    ...(["default", "top", "bottom", "hidden"] as const).map((position) => ({
+      id: `activityBar.position.${position}`,
+      title: t(`cmd.activityBar.position.${position}`),
+      group: "View" as const,
+      keywords: ["activity bar", "sidebar", "position", position],
+      icon: SidebarLeftIcon,
+      run: () => ctx.setActivityBarPosition(position),
+    })),
+    ...(["default", "compact"] as const).map((size) => ({
+      id: `activityBar.size.${size}`,
+      title: t(`cmd.activityBar.size.${size}`),
+      group: "View" as const,
+      keywords: ["activity bar", "sidebar", "size", size],
+      icon: SidebarLeftIcon,
+      run: () => ctx.setActivityBarSize(size),
+    })),
     {
       id: "ai.toggle",
       title: t("cmd.ai.toggle"),

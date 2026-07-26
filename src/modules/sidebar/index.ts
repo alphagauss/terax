@@ -1,19 +1,19 @@
+/**
+ * 本文件导出统一侧边栏布局、导航、视图池和可复用区块组件。
+ * 业务模块只通过容器 ID 调用布局动作，不直接依赖主副侧边栏实现。
+ */
+
 export {
-  SidebarRail,
-  SidebarViewRail,
-  SIDEBAR_RAIL_HEIGHT,
-  type SidebarRailItem,
-} from "./SidebarRail";
+  SidebarActivityBar,
+  SecondarySidebarTabs,
+  SIDEBAR_COMPOSITE_BAR_HEIGHT,
+} from "./SidebarNavigation";
 export {
-  SecondarySidebar,
-  type SecondarySidebarView,
-} from "./SecondarySidebar";
-export type { SidebarViewId } from "./types";
-export {
-  useSidebarPanel,
-  SIDEBAR_MIN_WIDTH,
-} from "./useSidebarPanel";
-export { useSecondarySidebarPanel } from "./useSecondarySidebarPanel";
+  SidebarViewPool,
+  type SidebarPooledView,
+} from "./SidebarViewPool";
+export { initializeSidebarLayout } from "./persistence";
+export { useSidebarLayout } from "./useSidebarLayout";
 export {
   SidebarSectionAction,
   SidebarSectionGroup,
@@ -22,7 +22,18 @@ export {
 } from "./SidebarSectionGroup";
 export { SIDEBAR_SECTION_HEADER_HEIGHT } from "./sectionLayout";
 export {
+  PRIMARY_SIDEBAR_MIN_WIDTH,
   SECONDARY_SIDEBAR_DEFAULT_WIDTH,
   SECONDARY_SIDEBAR_MIN_WIDTH,
   WORKSPACE_MIN_WIDTH,
 } from "./layout";
+export type {
+  ActivityBarPosition,
+  ActivityBarSettings,
+  ActivityBarSize,
+  SidebarContainerDefinition,
+  SidebarContainerId,
+  SidebarLocation,
+  SidebarPlacements,
+  SidebarRuntimeState,
+} from "./types";

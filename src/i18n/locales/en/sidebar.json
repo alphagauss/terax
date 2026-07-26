@@ -1,4 +1,22 @@
 {
   "files": "Files",
-  "sourceControl": "Source Control"
+  "sourceControl": "Source Control",
+  "ai": "AI",
+  "moveToPrimary": "Move to Primary Sidebar",
+  "moveToSecondary": "Move to Secondary Sidebar",
+  "resetLocation": "Reset Location",
+  "closeSecondary": "Close Secondary Sidebar",
+  "hideContainer": "Hide {{name}}",
+  "activityBarPosition": "Activity Bar Position",
+  "activityBarSize": "Activity Bar Size",
+  "position": {
+    "default": "Default",
+    "top": "Top",
+    "bottom": "Bottom",
+    "hidden": "Hidden"
+  },
+  "size": {
+    "default": "Default",
+    "compact": "Compact"
+  }
 }

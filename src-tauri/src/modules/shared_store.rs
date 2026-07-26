@@ -21,6 +21,7 @@ const STORES: &[(&str, &str)] = &[
     ("custom-themes", "terax-custom-themes.json"),
     ("ai-agents", "terax-ai-agents.json"),
     ("ai-snippets", "terax-ai-snippets.json"),
+    ("ui-layout", "terax-ui-layout.json"),
     ("keys-epoch", "terax-keys-epoch.json"),
 ];
 const WORKSPACE_FILE_OPEN_REQUESTS: &str = "workspaceFileOpenRequests";

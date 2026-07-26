@@ -9,6 +9,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+html[data-sidebar-dragging="true"],
+html[data-sidebar-dragging="true"] * {
+  cursor: default !important;
+}
+
 @theme inline {
     --default-transition-duration: var(--dur-feedback);
     --default-transition-timing-function: var(--ease-standard);

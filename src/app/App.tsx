@@ -61,13 +61,11 @@ import {
   useGlobalShortcuts,
 } from "@/modules/shortcuts";
 import {
-  SECONDARY_SIDEBAR_MIN_WIDTH,
-  SecondarySidebar,
-  type SecondarySidebarView,
-  SIDEBAR_MIN_WIDTH,
-  SidebarRail,
-  useSecondarySidebarPanel,
-  useSidebarPanel,
+  SecondarySidebarTabs,
+  SidebarActivityBar,
+  SidebarViewPool,
+  type SidebarPooledView,
+  useSidebarLayout,
   WORKSPACE_MIN_WIDTH,
 } from "@/modules/sidebar";
 import {
@@ -117,7 +115,6 @@ import {
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
-import { AiChat01Icon } from "@hugeicons/core-free-icons";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -136,8 +133,6 @@ type WorkspaceActivation = {
   environment: string;
   workspaceId: string;
 };
-
-const SECONDARY_SIDEBAR_VIEW_IDS = ["ai"] as const;
 
 function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
   if (!value || typeof value !== "object") return null;
@@ -240,6 +235,7 @@ export default function App() {
   );
   const pendingGotoLine = useRef<Map<number, number>>(new Map());
   const webPreviewRefs = useRef<Map<number, WebPreviewPaneHandle>>(new Map());
+  const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
   const gitHistoryRefs = useRef(new Map<number, FindHandle>());
@@ -313,27 +309,16 @@ export default function App() {
     [activeSpaceId, tabs],
   );
 
-  const {
-    sidebarRef,
-    sidebarWidthRef,
-    sidebarView,
-    sidebarCollapsed,
-    initialSidebarCollapsed,
-    persistSidebarView,
-    toggleSidebar,
-    cycleSidebarView,
-    commitSidebarLayout,
-    toggleExplorerFocus,
-  } = useSidebarPanel(explorerRef);
-
-  const secondarySidebar = useSecondarySidebarPanel(SECONDARY_SIDEBAR_VIEW_IDS);
+  const sidebar = useSidebarLayout();
+  const toggleSidebar = useCallback(() => {
+    sidebar.toggleLocation("primary");
+  }, [sidebar.toggleLocation]);
   const commitWorkbenchLayout = useCallback(
     (_layout: Layout, meta: LayoutChangedMeta) => {
       if (!meta.isUserInteraction) return;
-      commitSidebarLayout();
-      secondarySidebar.commitLayout();
+      sidebar.commitLayout();
     },
-    [commitSidebarLayout, secondarySidebar.commitLayout],
+    [sidebar.commitLayout],
   );
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -352,23 +337,6 @@ export default function App() {
   const respondToApproval = useChatStore((s) => s.respondToApproval);
 
   const { hasComposer } = useAiBootstrap();
-
-  const secondarySidebarViews = useMemo<readonly SecondarySidebarView[]>(
-    () => [
-      {
-        id: "ai",
-        label: "AI",
-        icon: AiChat01Icon,
-        content: (
-          <AiSidebarPanel
-            hasComposer={hasComposer}
-            onClose={secondarySidebar.close}
-          />
-        ),
-      },
-    ],
-    [hasComposer, secondarySidebar.close],
-  );
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -532,10 +500,35 @@ export default function App() {
     return null;
   }, [tabs, activeId]);
 
+  const toggleExplorerFocus = useCallback(() => {
+    const explorer = explorerRef.current;
+    if (!sidebar.isVisible("explorer")) {
+      const active = document.activeElement;
+      explorerReturnFocusRef.current =
+        active instanceof HTMLElement && active !== document.body
+          ? active
+          : null;
+      sidebar.openContainer("explorer");
+      requestAnimationFrame(() => explorerRef.current?.focus());
+      return;
+    }
+    if (!explorer) return;
+    if (explorer.isFocused()) {
+      const target = explorerReturnFocusRef.current;
+      explorerReturnFocusRef.current = null;
+      if (target && document.body.contains(target)) target.focus();
+      else (document.activeElement as HTMLElement | null)?.blur?.();
+      return;
+    }
+    const active = document.activeElement;
+    explorerReturnFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
+    explorer.focus();
+  }, [sidebar.isVisible, sidebar.openContainer]);
+
   const openAiPanel = useCallback(() => {
-    secondarySidebar.persistView("ai");
-    secondarySidebar.open();
-  }, [secondarySidebar.open, secondarySidebar.persistView]);
+    sidebar.openContainer("ai");
+  }, [sidebar.openContainer]);
 
   const openAiPanelAndFocus = useCallback(
     (prefill: string | null = null) => {
@@ -546,12 +539,12 @@ export default function App() {
   );
 
   const toggleAiPanel = useCallback(() => {
-    if (secondarySidebar.collapsed) {
+    if (!sidebar.isVisible("ai")) {
       openAiPanelAndFocus();
     } else {
-      secondarySidebar.close();
+      sidebar.toggleContainer("ai");
     }
-  }, [openAiPanelAndFocus, secondarySidebar.close, secondarySidebar.collapsed]);
+  }, [openAiPanelAndFocus, sidebar.isVisible, sidebar.toggleContainer]);
 
   const attachSelection = useChatStore((s) => s.attachSelection);
   const attachFile = useChatStore((s) => s.attachFile);
@@ -796,20 +789,21 @@ export default function App() {
     activeTab?.kind === "editor" || activeTab?.kind === "markdown"
       ? activeTab.path
       : null;
-  const { sourceControl, toggleSourceControl, openGitGraphFromContext } =
-    useSourceControlContext({
-      activeTab,
-      tabs,
-      activeTerminalCwd,
-      explorerRoot,
-      launchCwd,
-      launchCwdResolved,
-      home,
-      sidebarView,
-      cycleSidebarView,
-      openCommitHistoryTab,
-      closeTab,
-    });
+  const toggleSourceControl = useCallback(() => {
+    sidebar.toggleContainer("source-control");
+  }, [sidebar.toggleContainer]);
+  const { sourceControl, openGitGraphFromContext } = useSourceControlContext({
+    activeTab,
+    tabs,
+    activeTerminalCwd,
+    explorerRoot,
+    launchCwd,
+    launchCwdResolved,
+    home,
+    sourceControlVisible: sidebar.isVisible("source-control"),
+    openCommitHistoryTab,
+    closeTab,
+  });
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
@@ -1252,6 +1246,8 @@ export default function App() {
             focusSearch: focusFind,
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
+            setActivityBarPosition: sidebar.setActivityBarPosition,
+            setActivityBarSize: sidebar.setActivityBarSize,
             toggleAi: toggleAiPanel,
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
@@ -1284,6 +1280,8 @@ export default function App() {
       splitActiveTab,
       focusFind,
       toggleSidebar,
+      sidebar.setActivityBarPosition,
+      sidebar.setActivityBarSize,
       toggleAiPanel,
       askFromSelection,
       activeSpaceId,
@@ -1453,6 +1451,77 @@ export default function App() {
     ],
   );
 
+  const visibleSidebarContainerIds = new Set(
+    sidebar.containers
+      .filter(
+        (container) =>
+          !sidebar.activityBar.hiddenContainerIds.includes(container.id),
+      )
+      .map((container) => container.id),
+  );
+  const primarySidebarContainers = sidebar.placements.primary
+    .map((id) => sidebar.containers.find((container) => container.id === id))
+    .filter(
+      (container): container is (typeof sidebar.containers)[number] =>
+        container !== undefined && visibleSidebarContainerIds.has(container.id),
+    );
+  const secondarySidebarContainers = sidebar.placements.secondary
+    .map((id) => sidebar.containers.find((container) => container.id === id))
+    .filter(
+      (container): container is (typeof sidebar.containers)[number] =>
+        container !== undefined && visibleSidebarContainerIds.has(container.id),
+    );
+  const sidebarBadges = {
+    "source-control": sourceControl.changedCount,
+  };
+  const sidebarConfigurationProps = {
+    allContainers: sidebar.containers,
+    activityBar: sidebar.activityBar,
+    onToggleVisibility: sidebar.toggleContainerVisibility,
+    onPositionChange: sidebar.setActivityBarPosition,
+    onSizeChange: sidebar.setActivityBarSize,
+  };
+  const sidebarViews: readonly SidebarPooledView[] = [
+    {
+      id: "explorer",
+      content: (
+        <FileExplorer
+          ref={explorerRef}
+          rootPath={explorerStartupReady ? explorerRoot : null}
+          loadingRoot={!explorerStartupReady && !environmentError}
+          onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
+          gitStatus={explorerGitDecorations ? sourceControl.status : null}
+          activeFilePath={explorerActiveFilePath}
+          onOpenFile={handleOpenFile}
+          onPathRenamed={handlePathRenamed}
+          onPathDeleted={handlePathDeleted}
+          onRevealInTerminal={cdInNewTab}
+          onAttachToAgent={handleAttachFileToAgent}
+          onDropToWorkbench={handleDropFileToWorkbench}
+        />
+      ),
+    },
+    {
+      id: "source-control",
+      content: (
+        <SourceControlViewContainer
+          open={sidebar.isVisible("source-control")}
+          sourceControl={sourceControl}
+          onOpenDiff={openGitDiffTab}
+          onOpenGitGraph={openGitGraphFromContext}
+          fullGraphOpen={activeTab?.kind === "git-history"}
+          onOpenCommitFile={openCommitFileDiffTab}
+          onOpenFile={handleOpenFile}
+          onNavigateToPath={cdInNewTab}
+        />
+      ),
+    },
+    {
+      id: "ai",
+      content: <AiSidebarPanel hasComposer={hasComposer} />,
+    },
+  ];
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
@@ -1464,80 +1533,85 @@ export default function App() {
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
-              onToggleSecondarySidebar={secondarySidebar.toggle}
-              secondarySidebarOpen={!secondarySidebar.collapsed}
+              onToggleSecondarySidebar={() =>
+                sidebar.toggleLocation("secondary")
+              }
+              secondarySidebarOpen={!sidebar.runtime.secondary.collapsed}
               spaceSwitcher={spaceSwitcher}
             />
           )}
 
-          <main className="zoom-content flex min-h-0 flex-1 flex-col">
+          <main className="zoom-content flex min-h-0 flex-1">
+            {sidebar.activityBar.position === "default" ? (
+              <SidebarActivityBar
+                {...sidebarConfigurationProps}
+                containers={primarySidebarContainers}
+                activeId={sidebar.runtime.primary.activeId}
+                badges={sidebarBadges}
+                onActivate={sidebar.toggleContainer}
+                onMove={sidebar.moveContainer}
+                onReset={sidebar.resetContainerLocation}
+              />
+            ) : null}
             <ResizablePanelGroup
               orientation="horizontal"
-              className="min-h-0 flex-1"
+              className="min-h-0 min-w-0 flex-1"
               onLayoutChanged={commitWorkbenchLayout}
             >
               <ResizablePanel
                 id="primary-sidebar"
-                panelRef={sidebarRef}
+                panelRef={sidebar.panelRefs.primary}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
-                  initialSidebarCollapsed
+                  sidebar.initialRuntime.primary.collapsed
                     ? "0px"
-                    : `${sidebarWidthRef.current}px`
+                    : `${sidebar.initialRuntime.primary.width}px`
                 }
-                minSize={`${SIDEBAR_MIN_WIDTH}px`}
+                minSize={`${sidebar.minimumWidth("primary")}px`}
                 collapsible
                 collapsedSize={0}
               >
                 <div
+                  data-sidebar-drop-zone="primary"
                   className={cn(
-                    "sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
-                    sidebarCollapsed
+                    "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
+                    sidebar.runtime.primary.collapsed
                       ? "pointer-events-none -translate-x-1.5 opacity-0"
                       : "translate-x-0 opacity-100",
                   )}
                 >
-                  <SidebarRail
-                    activeView={sidebarView}
-                    onSelectView={persistSidebarView}
-                    changedCount={sourceControl.changedCount}
+                  {sidebar.activityBar.position === "top" ? (
+                    <SidebarActivityBar
+                      {...sidebarConfigurationProps}
+                      containers={primarySidebarContainers}
+                      activeId={sidebar.runtime.primary.activeId}
+                      badges={sidebarBadges}
+                      onActivate={sidebar.openContainer}
+                      onMove={sidebar.moveContainer}
+                      onReset={sidebar.resetContainerLocation}
+                    />
+                  ) : null}
+                  <div
+                    data-sidebar-view-host="primary"
+                    className="relative min-h-0 flex-1"
                   />
-                  <div key={sidebarView} className="min-h-0 flex-1">
-                    {sidebarView === "explorer" ? (
-                      <FileExplorer
-                        ref={explorerRef}
-                        rootPath={explorerStartupReady ? explorerRoot : null}
-                        loadingRoot={!explorerStartupReady && !environmentError}
-                        onOpenFolder={
-                          workspaceEnv.kind === "local" ? openFolder : undefined
-                        }
-                        gitStatus={
-                          explorerGitDecorations ? sourceControl.status : null
-                        }
-                        activeFilePath={explorerActiveFilePath}
-                        onOpenFile={handleOpenFile}
-                        onPathRenamed={handlePathRenamed}
-                        onPathDeleted={handlePathDeleted}
-                        onRevealInTerminal={cdInNewTab}
-                        onAttachToAgent={handleAttachFileToAgent}
-                        onDropToWorkbench={handleDropFileToWorkbench}
-                      />
-                    ) : (
-                      <SourceControlViewContainer
-                        open
-                        sourceControl={sourceControl}
-                        onOpenDiff={openGitDiffTab}
-                        onOpenGitGraph={openGitGraphFromContext}
-                        fullGraphOpen={activeTab?.kind === "git-history"}
-                        onOpenCommitFile={openCommitFileDiffTab}
-                        onOpenFile={handleOpenFile}
-                        onNavigateToPath={cdInNewTab}
-                      />
-                    )}
-                  </div>
+                  {sidebar.activityBar.position === "bottom" ? (
+                    <SidebarActivityBar
+                      {...sidebarConfigurationProps}
+                      containers={primarySidebarContainers}
+                      activeId={sidebar.runtime.primary.activeId}
+                      badges={sidebarBadges}
+                      onActivate={sidebar.openContainer}
+                      onMove={sidebar.moveContainer}
+                      onReset={sidebar.resetContainerLocation}
+                    />
+                  ) : null}
                 </div>
               </ResizablePanel>
-              <ResizableHandle withHandle />
+              <ResizableHandle
+                withHandle
+                disabled={sidebar.runtime.primary.collapsed}
+              />
               <ResizablePanel
                 id="workspace"
                 defaultSize="78%"
@@ -1564,39 +1638,70 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle
                 withHandle
-                disabled={secondarySidebar.collapsed}
+                disabled={sidebar.runtime.secondary.collapsed}
               />
               <ResizablePanel
                 id="secondary-sidebar"
-                panelRef={secondarySidebar.panelRef}
+                panelRef={sidebar.panelRefs.secondary}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
-                  secondarySidebar.initialCollapsed
+                  sidebar.initialRuntime.secondary.collapsed
                     ? "0px"
-                    : `${secondarySidebar.widthRef.current}px`
+                    : `${sidebar.initialRuntime.secondary.width}px`
                 }
-                minSize={`${SECONDARY_SIDEBAR_MIN_WIDTH}px`}
+                minSize={`${sidebar.minimumWidth("secondary")}px`}
                 collapsible
                 collapsedSize={0}
               >
                 <div
                   className={cn(
                     "h-full min-h-0 transition-[opacity,translate] duration-pane ease-standard",
-                    secondarySidebar.collapsed
+                    sidebar.runtime.secondary.collapsed
                       ? "pointer-events-none translate-x-1.5 opacity-0"
                       : "translate-x-0 opacity-100",
                   )}
                 >
-                  <SecondarySidebar
-                    views={
-                      secondarySidebar.collapsed ? [] : secondarySidebarViews
-                    }
-                    activeView={secondarySidebar.activeView}
-                    onSelectView={secondarySidebar.persistView}
-                  />
+                  <aside
+                    data-sidebar-drop-zone="secondary"
+                    className="sidebar-scrollbar-scope flex h-full min-h-0 flex-col border-l border-border/60 bg-sidebar"
+                  >
+                    {sidebar.activityBar.position !== "bottom" ? (
+                      <SecondarySidebarTabs
+                        {...sidebarConfigurationProps}
+                        containers={secondarySidebarContainers}
+                        activeId={sidebar.runtime.secondary.activeId}
+                        badges={sidebarBadges}
+                        onActivate={sidebar.openContainer}
+                        onMove={sidebar.moveContainer}
+                        onReset={sidebar.resetContainerLocation}
+                        onClose={() => sidebar.closeLocation("secondary")}
+                      />
+                    ) : null}
+                    <div
+                      data-sidebar-view-host="secondary"
+                      className="relative min-h-0 flex-1"
+                    />
+                    {sidebar.activityBar.position === "bottom" ? (
+                      <SecondarySidebarTabs
+                        {...sidebarConfigurationProps}
+                        containers={secondarySidebarContainers}
+                        activeId={sidebar.runtime.secondary.activeId}
+                        badges={sidebarBadges}
+                        onActivate={sidebar.openContainer}
+                        onMove={sidebar.moveContainer}
+                        onReset={sidebar.resetContainerLocation}
+                        onClose={() => sidebar.closeLocation("secondary")}
+                      />
+                    ) : null}
+                  </aside>
                 </div>
               </ResizablePanel>
             </ResizablePanelGroup>
+            <SidebarViewPool
+              views={sidebarViews}
+              placements={sidebar.placements}
+              runtime={sidebar.runtime}
+            />
           </main>
 
           {!zenMode && (
@@ -1609,7 +1714,7 @@ export default function App() {
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onToggleAi={toggleAiPanel}
-              aiOpen={!secondarySidebar.collapsed}
+              aiOpen={sidebar.isVisible("ai")}
               privateActive={
                 activeTab?.kind === "terminal" && activeTab.private === true
               }
@@ -1637,7 +1742,7 @@ export default function App() {
                 closeAiDiffTab={closeAiDiffTab}
               />
               <LocalAgentNotificationsBridge
-                visible={!secondarySidebar.collapsed}
+                visible={sidebar.isVisible("ai")}
                 onActivate={openAiPanel}
               />
             </>

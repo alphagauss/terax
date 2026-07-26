@@ -1,5 +1,9 @@
+/**
+ * 本文件根据当前 Workbench 页面解析源代码管理仓库上下文。
+ * 面板是否活跃由统一侧边栏模型传入，不依赖具体主副位置。
+ */
+
 import { native } from "@/modules/ai/lib/native";
-import type { SidebarViewId } from "@/modules/sidebar";
 import type { Tab } from "@/modules/workbench";
 import { useCallback, useMemo } from "react";
 import { useSourceControl } from "./useSourceControl";
@@ -20,8 +24,7 @@ type Params = {
   launchCwd: string | null;
   launchCwdResolved: boolean;
   home: string | null;
-  sidebarView: SidebarViewId;
-  cycleSidebarView: (view: SidebarViewId) => void;
+  sourceControlVisible: boolean;
   openCommitHistoryTab: (args: {
     repoRoot: string;
     branch: string | null;
@@ -30,9 +33,9 @@ type Params = {
 };
 
 /**
- * Resolves the source-control context path off the active tab and feeds the
- * source-control summary. When git is not active the badge tracks a stable
- * per-session path so tab switches / cd don't re-fire git IPC.
+ * 解析当前页面对应的 Git 上下文，并向侧边栏和徽标提供源代码管理摘要。
+ *
+ * 面板未显示时徽标使用稳定的 Explorer 根目录，避免标签切换或终端目录变化重复触发 Git IPC。
  */
 export function useSourceControlContext({
   activeTab,
@@ -42,8 +45,7 @@ export function useSourceControlContext({
   launchCwd,
   launchCwdResolved,
   home,
-  sidebarView,
-  cycleSidebarView,
+  sourceControlVisible,
   openCommitHistoryTab,
   closeTab,
 }: Params) {
@@ -70,7 +72,7 @@ export function useSourceControlContext({
       ),
     [tabs],
   );
-  const sourceControlActive = hasOpenGitTab || sidebarView === "source-control";
+  const sourceControlActive = hasOpenGitTab || sourceControlVisible;
   // Ambient path tracks the explorer root so the rail badge and explorer git
   // decorations reflect the repo you are actually looking at. cd-within-repo
   // churn is absorbed by the status TTL + reusable-root path in useSourceControl.
@@ -79,10 +81,6 @@ export function useSourceControlContext({
     ? sourceControlContextPath
     : badgeContextPath;
   const sourceControl = useSourceControl(sourceControlPath, true);
-
-  const toggleSourceControl = useCallback(() => {
-    cycleSidebarView("source-control");
-  }, [cycleSidebarView]);
 
   const openGitGraphFromContext = useCallback(async () => {
     const known = sourceControl.hasRepo ? sourceControl.repo : null;
@@ -125,5 +123,5 @@ export function useSourceControlContext({
     sourceControlContextPath,
   ]);
 
-  return { sourceControl, toggleSourceControl, openGitGraphFromContext };
+  return { sourceControl, openGitGraphFromContext };
 }

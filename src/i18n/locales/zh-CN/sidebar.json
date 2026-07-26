@@ -1,4 +1,22 @@
 {
   "files": "文件",
-  "sourceControl": "源代码管理"
+  "sourceControl": "源代码管理",
+  "ai": "AI",
+  "moveToPrimary": "移到主侧边栏",
+  "moveToSecondary": "移到副侧边栏",
+  "resetLocation": "重置位置",
+  "closeSecondary": "关闭副侧边栏",
+  "hideContainer": "隐藏{{name}}",
+  "activityBarPosition": "活动栏位置",
+  "activityBarSize": "活动栏大小",
+  "position": {
+    "default": "默认",
+    "top": "顶部",
+    "bottom": "底部",
+    "hidden": "隐藏"
+  },
+  "size": {
+    "default": "默认",
+    "compact": "压缩"
+  }
 }

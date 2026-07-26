@@ -12,6 +12,7 @@ export type SharedStoreName =
   | "custom-themes"
   | "ai-agents"
   | "ai-snippets"
+  | "ui-layout"
   | "keys-epoch";
 
 export function readSharedStore(
