@@ -454,6 +454,39 @@ mod tests {
     }
 
     #[test]
+    fn preserves_readable_message_field_order_when_writing_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut value = session(id, "ordered");
+        value.messages = vec![
+            serde_json::from_str(
+                r#"{"role":"assistant","content":"answer","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{}"}}],"reasoning_content":"thoughts","timestamp":"2026-07-26T10:00:01.000Z","turn_id":"turn-1"}"#,
+            )
+            .unwrap(),
+            serde_json::from_str(
+                r#"{"role":"tool","tool_call_id":"call-1","name":"read_file","content":"{}","status":"completed","timestamp":"2026-07-26T10:00:01.000Z","turn_id":"turn-1"}"#,
+            )
+            .unwrap(),
+        ];
+
+        write_session(dir.path(), &value).unwrap();
+
+        let lines = fs::read_to_string(session_path(dir.path(), id))
+            .unwrap()
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            lines[1],
+            r#"{"role":"assistant","content":"answer","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read_file","arguments":"{}"}}],"reasoning_content":"thoughts","timestamp":"2026-07-26T10:00:01.000Z","turn_id":"turn-1"}"#
+        );
+        assert_eq!(
+            lines[2],
+            r#"{"role":"tool","tool_call_id":"call-1","name":"read_file","content":"{}","status":"completed","timestamp":"2026-07-26T10:00:01.000Z","turn_id":"turn-1"}"#
+        );
+    }
+
+    #[test]
     fn list_reads_only_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();

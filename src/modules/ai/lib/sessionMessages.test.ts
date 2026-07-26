@@ -28,12 +28,12 @@ describe("AI session message conversion", () => {
       },
     ];
 
-    expect(
-      serializeSessionMessages(messages, {
-        timestamp,
-        turnId: "turn-1",
-      }),
-    ).toEqual([
+    const records = serializeSessionMessages(messages, {
+      timestamp,
+      turnId: "turn-1",
+    });
+
+    expect(records).toEqual([
       {
         role: "user",
         content: "你好",
@@ -48,6 +48,14 @@ describe("AI session message conversion", () => {
         turn_id: "turn-1",
         turn_status: "completed",
       },
+    ]);
+    expect(Object.keys(records[1])).toEqual([
+      "role",
+      "content",
+      "reasoning_content",
+      "timestamp",
+      "turn_id",
+      "turn_status",
     ]);
   });
 
@@ -92,7 +100,6 @@ describe("AI session message conversion", () => {
       {
         role: "assistant",
         content: "",
-        reasoning_content: "需要读取文件。",
         tool_calls: [
           {
             id: "call-1",
@@ -103,6 +110,7 @@ describe("AI session message conversion", () => {
             },
           },
         ],
+        reasoning_content: "需要读取文件。",
         timestamp,
         turn_id: "turn-1",
       },
@@ -121,6 +129,22 @@ describe("AI session message conversion", () => {
         turn_id: "turn-1",
         turn_status: "completed",
       },
+    ]);
+    expect(Object.keys(records[1])).toEqual([
+      "role",
+      "content",
+      "tool_calls",
+      "reasoning_content",
+      "timestamp",
+      "turn_id",
+    ]);
+    expect(Object.keys(records[2])).toEqual([
+      "role",
+      "tool_call_id",
+      "name",
+      "content",
+      "timestamp",
+      "turn_id",
     ]);
 
     expect(

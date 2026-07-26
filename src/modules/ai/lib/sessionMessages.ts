@@ -310,10 +310,10 @@ function serializeAssistantBlock(
   const assistant: SessionMessage = {
     role: "assistant",
     content: block.content.join(""),
+    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     ...(block.reasoning.length > 0
       ? { reasoning_content: block.reasoning.join("") }
       : {}),
-    ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     timestamp: options.timestamp,
     turn_id: options.turnId,
   };
