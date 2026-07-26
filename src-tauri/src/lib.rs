@@ -328,7 +328,7 @@ pub fn run() {
             workspace_process::spawn_workspace_process,
             ai_sessions::ai_sessions_list,
             ai_sessions::ai_session_read,
-            ai_sessions::ai_session_publish,
+            ai_sessions::ai_session_commit,
             ai_sessions::ai_session_delete,
             ai_sessions::ai_session_run_acquire,
             ai_sessions::ai_session_run_release,

@@ -1,30 +1,32 @@
+/**
+ * 本文件验证 AI 会话提交与切换的状态机边界。
+ * 测试锁定流式生成、审批等待和运行锁期间不得提前提交。
+ */
+
 import { describe, expect, it } from "vitest";
-import {
-  canChangeSession,
-  shouldPublishSnapshot,
-} from "./sessionLifecycle";
+import { canChangeSession, shouldCommitSession } from "./sessionLifecycle";
 
-describe("AI session snapshot lifecycle", () => {
-  it.each(["submitted", "streaming"] as const)(
-    "does not publish while %s",
-    (status) => {
-      expect(shouldPublishSnapshot(status, 0, true)).toBe(false);
-    },
-  );
-
-  it("keeps the run lock while an approval is pending", () => {
-    expect(shouldPublishSnapshot("ready", 1, true)).toBe(false);
+describe("AI session commit lifecycle", () => {
+  it.each([
+    "submitted",
+    "streaming",
+  ] as const)("does not commit while %s", (status) => {
+    expect(shouldCommitSession(status, 0, true)).toBe(false);
   });
 
-  it.each(["ready", "error"] as const)(
-    "publishes a completed dirty run in %s",
-    (status) => {
-      expect(shouldPublishSnapshot(status, 0, true)).toBe(true);
-    },
-  );
+  it("keeps the run lock while an approval is pending", () => {
+    expect(shouldCommitSession("ready", 1, true)).toBe(false);
+  });
 
-  it("does not publish an untouched hydrated session", () => {
-    expect(shouldPublishSnapshot("ready", 0, false)).toBe(false);
+  it.each([
+    "ready",
+    "error",
+  ] as const)("commits a completed dirty run in %s", (status) => {
+    expect(shouldCommitSession(status, 0, true)).toBe(true);
+  });
+
+  it("does not commit an untouched hydrated session", () => {
+    expect(shouldCommitSession("ready", 0, false)).toBe(false);
   });
 
   it("blocks session changes while the active run lock is held", () => {

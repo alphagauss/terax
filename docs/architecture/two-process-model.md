@@ -127,9 +127,9 @@ Each process holds its Workspace OS lock for its lifetime.
 
 The writing process receives an immediate change event and other processes receive file-watcher events. Frontend listeners perform a trailing revision check, so event coalescing cannot permanently hide the final write.
 
-### AI session snapshots (`src-tauri/src/modules/ai_sessions.rs`)
+### AI sessions (`src-tauri/src/modules/ai_sessions.rs`)
 
-- `ai_sessions_list` / `ai_session_read` / `ai_session_publish` / `ai_session_delete`
+- `ai_sessions_list` / `ai_session_read` / `ai_session_commit` / `ai_session_delete`
 - `ai_session_run_acquire` / `ai_session_run_release` - cross-process exclusive run ownership
 
 ### Network (`src-tauri/src/modules/net.rs`)

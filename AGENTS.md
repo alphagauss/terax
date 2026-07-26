@@ -198,8 +198,8 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 - 云端 provider 通过 `@ai-sdk/*` 接入；本地 provider 包括 LM Studio、MLX、Ollama。
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
 - `lib/agent.ts` 保持 `Agent` 和 `DirectChatTransport` 结构，其他模块依赖 AI SDK v6 chat 语义。
-- 会话以 `sessions/<uuid>.json` 原子快照保存；单会话 OS 锁禁止两个进程同时继续同一会话。
-- `AgentRunBridge` 在 idle、error 或 stop 后发布完整快照；流式消息、审批和工具状态保留在所属进程。
+- 会话以 `sessions/<uuid>.jsonl` 原子保存；首行固定为 metadata，后续每行是一条角色消息记录。单会话 OS 锁禁止两个进程同时继续同一会话。
+- `AgentRunBridge` 在 idle、error 或 stop 后只提交新增的完整 turn；流式消息、审批和工具状态保留在所属进程。
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - live context 按需读取当前终端 cwd 和最后 300 行，禁止提前快照。

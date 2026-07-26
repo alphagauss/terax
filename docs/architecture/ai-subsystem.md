@@ -49,15 +49,28 @@ The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, 
 
 ## Sessions
 
-Conversations are organized into sessions. Completed history is stored as one atomic snapshot per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs` and `src/modules/ai/lib/sessions.ts`):
+Conversations are organized into sessions. Completed history is stored as one atomic JSONL file per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs`, `src/modules/ai/lib/sessions.ts`, and `src/modules/ai/lib/sessionMessages.ts`):
 
-- `<uuid>.json`: title, timestamps, complete messages, and todos
+- `<uuid>.jsonl`: the first line is a fixed metadata record; each remaining line is one role message
 - `<uuid>.lock`: OS lock used while one process is running the session
-- no shared session index; list operations scan and validate snapshot metadata
+- no shared session index; list operations read only the first metadata line
 
-Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. `AgentRunBridge` publishes a complete snapshot only after the run becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both atomic publish and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs, while a crash preserves the previous complete snapshot instead of a partial stream.
+```json
+{"_type":"metadata","key":"<uuid>","created_at":"2026-07-26T10:00:00.000Z","updated_at":"2026-07-26T10:00:01.000Z","metadata":{"title":"Session title","todos":[]}}
+```
 
-Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent snapshot, then a fresh session.
+The JSONL message schema belongs to Terax rather than Vercel AI SDK. User and assistant text use direct `role` and `content` fields, reasoning uses `reasoning_content`, and tool results use `role: "tool"`. Tool calls deliberately follow the OpenAI-compatible envelope:
+
+```json
+{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}],"timestamp":"2026-07-26T10:00:00.000Z"}
+{"role":"tool","tool_call_id":"call_1","name":"read_file","content":{"content":"..."},"timestamp":"2026-07-26T10:00:00.000Z"}
+```
+
+`function.arguments` is always a JSON string. Explicit adapters project these records into AI SDK `UIMessage` values when a chat is hydrated. A terminal run sends only its newly completed records to Rust; Rust reads the existing JSONL under the session lock, appends those records, and atomically replaces the complete file. This keeps the disk format readable and makes a future SDK switch local to the adapter.
+
+Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. `AgentRunBridge` commits only newly completed turn records after the run becomes idle, errors, or is stopped and no approval is pending. Rust merges them into the existing JSONL and atomically replaces the file. The observable frontend lock is cleared only after both commit and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs, while a crash preserves the previous complete file instead of a partial stream.
+
+Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent session file, then a fresh session.
 
 ## Composer
 
@@ -90,7 +103,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval; read-only tools still pass the deny-list.
-- A session run lock owns its in-memory runtime until publish and release both succeed; session navigation must not bypass that lifecycle.
+- A session run lock owns its in-memory runtime until commit and release both succeed; session navigation must not bypass that lifecycle.
 
 ## See also
 

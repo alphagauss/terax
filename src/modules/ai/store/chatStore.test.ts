@@ -1,10 +1,15 @@
+/**
+ * 本文件验证 AI 会话在多进程场景下的运行锁、缓存失效和终态发布。
+ * 测试确保 JSONL 记录缓存不会跨用例泄漏，并锁定发布失败时的锁语义。
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
   acquire: vi.fn(),
   release: vi.fn(),
   list: vi.fn(),
-  publish: vi.fn(),
+  commit: vi.fn(),
   read: vi.fn(),
   remove: vi.fn(),
   workspaceGet: vi.fn(),
@@ -16,7 +21,7 @@ vi.mock("../lib/sessions", async (importOriginal) => ({
   acquireSessionRun: io.acquire,
   releaseSessionRun: io.release,
   listSessions: io.list,
-  publishSession: io.publish,
+  commitSession: io.commit,
   readSession: io.read,
   deleteSessionFile: io.remove,
 }));
@@ -28,9 +33,9 @@ vi.mock("@/modules/workspace-process", () => ({
 
 vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
-import type { UIMessage } from "@ai-sdk/react";
 import {
   chats,
+  persistedMessageCounts,
   seedMessages,
   useChatStore,
 } from "./chatStore";
@@ -53,13 +58,12 @@ const second: SessionMeta = {
   fingerprint: "disk:2",
 };
 
-const snapshot = (meta: SessionMeta) => ({
-  schemaVersion: 1 as const,
+const sessionFile = (meta: SessionMeta) => ({
   id: meta.id,
   title: meta.title,
   createdAt: meta.createdAt,
   updatedAt: meta.updatedAt,
-  messages: [] as UIMessage[],
+  messages: [],
   todos: [],
 });
 
@@ -68,12 +72,13 @@ describe("chat store multi-process lifecycle", () => {
     vi.clearAllMocks();
     chats.clear();
     seedMessages.clear();
+    persistedMessageCounts.clear();
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
-    io.publish.mockResolvedValue(undefined);
+    io.commit.mockResolvedValue(undefined);
     io.read.mockImplementation(async (id: string) =>
-      snapshot(id === first.id ? first : second),
+      sessionFile(id === first.id ? first : second),
     );
     io.remove.mockResolvedValue(undefined);
     io.workspaceGet.mockReturnValue(undefined);
@@ -89,7 +94,7 @@ describe("chat store multi-process lifecycle", () => {
     });
   });
 
-  it("restores the most recent snapshot and persists it when no active id exists", async () => {
+  it("restores the most recent session and persists it when no active id exists", async () => {
     io.list.mockResolvedValue([first, second]);
 
     await useChatStore.getState().hydrateSessions();
@@ -129,16 +134,34 @@ describe("chat store multi-process lifecycle", () => {
     io.release.mockRejectedValueOnce(new Error("release failed"));
 
     await expect(
-      useChatStore.getState().publishMessages(first.id, [
-        { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
-      ]),
+      useChatStore
+        .getState()
+        .commitMessages(first.id, [
+          { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+        ]),
     ).rejects.toThrow("release failed");
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
     expect(refresh).not.toHaveBeenCalled();
+    expect(io.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            role: "user",
+            content: "hi",
+            turn_id: expect.stringMatching(/^turn_[0-9a-f]{12}$/),
+          }),
+        ],
+      }),
+    );
 
-    await useChatStore.getState().publishMessages(first.id, [
-      { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
-    ]);
+    await useChatStore
+      .getState()
+      .commitMessages(first.id, [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      ]);
+    expect(io.commit).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messages: [] }),
+    );
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
     expect(refresh).toHaveBeenCalledOnce();
   });
@@ -146,17 +169,18 @@ describe("chat store multi-process lifecycle", () => {
   it("allows a later send attempt after another process releases the lock", async () => {
     io.acquire.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(false);
+    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(
+      false,
+    );
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
-    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(true);
+    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(
+      true,
+    );
   });
 
   it("evicts an inactive cached Chat when its disk fingerprint changes", async () => {
     const stop = vi.fn().mockResolvedValue(undefined);
-    chats.set(
-      second.id,
-      { stop, status: "ready", messages: [] } as never,
-    );
+    chats.set(second.id, { stop, status: "ready", messages: [] } as never);
     useChatStore.setState({
       sessions: [first, second],
       activeSessionId: first.id,
@@ -173,7 +197,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(chats.has(second.id)).toBe(false);
   });
 
-  it("seeds the fallback snapshot before deleting the active session", async () => {
+  it("seeds the fallback session before deleting the active session", async () => {
     useChatStore.setState({
       sessions: [first, second],
       activeSessionId: first.id,

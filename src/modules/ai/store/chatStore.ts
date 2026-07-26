@@ -1,3 +1,8 @@
+/**
+ * 本文件管理 AI 聊天运行时、会话切换和终态发布。
+ * 会话在 UI 中使用 AI SDK 消息，磁盘侧通过独立记录模型只追加新 turn。
+ */
+
 import {
   getWorkspaceValue,
   setWorkspaceValue,
@@ -21,13 +26,17 @@ import {
 } from "../lib/keyring";
 import { pushRecentModel } from "../lib/modelPrefs";
 import {
+  projectSessionMessages,
+  serializeSessionMessages,
+} from "../lib/sessionMessages";
+import {
   acquireSessionRun,
+  commitSession,
   deleteSessionFile,
   deriveTitle,
   listSessions,
   mergeSessionMetadata,
   newSessionId,
-  publishSession,
   readSession,
   releaseSessionRun,
   type SessionMeta,
@@ -150,7 +159,7 @@ type StoreState = {
   newSession: () => string;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
-  publishMessages: (id: string, messages: UIMessage[]) => Promise<void>;
+  commitMessages: (id: string, messages: UIMessage[]) => Promise<void>;
 };
 
 const NOOP_LIVE: Live = {
@@ -167,7 +176,9 @@ const NOOP_LIVE: Live = {
 
 const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
+const cancelledRuns = new Set<string>();
 
+/** 更新聊天实例的 LRU 位置，并停止超出容量的非活动实例。 */
 export function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
@@ -182,12 +193,17 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
 export const seedMessages = new Map<string, UIMessage[]>();
+/** 记录磁盘已提交的 UI 消息数量，用于只转换本次新增 turn。 */
+export const persistedMessageCounts = new Map<string, number>();
 
-async function seedSnapshot(id: string): Promise<void> {
-  const snapshot = await readSession(id);
-  seedMessages.set(id, snapshot.messages);
+/** 读取磁盘记录，同时准备 UI 消息和待办事项的运行时种子。 */
+async function seedSession(id: string): Promise<void> {
+  const session = await readSession(id);
+  const messages = projectSessionMessages(id, session.messages);
+  persistedMessageCounts.set(id, messages.length);
+  seedMessages.set(id, messages);
   const { seedTodos } = await import("./todoStore");
-  seedTodos(id, snapshot.todos);
+  seedTodos(id, session.todos);
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -292,7 +308,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
             updatedAt: Date.now(),
           };
       const activeId = restored?.id ?? fresh?.id ?? null;
-      if (restored) await seedSnapshot(restored.id);
+      if (restored) await seedSession(restored.id);
       if (activeId) await setWorkspaceValue("ai:activeSessionId", activeId);
       set({
         sessions: fresh ? [fresh, ...sessions] : sessions,
@@ -322,6 +338,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         await chats.get(session.id)?.stop();
         chats.delete(session.id);
         seedMessages.delete(session.id);
+        persistedMessageCounts.delete(session.id);
         await useTodosStore.getState().clearSession(session.id);
       }
 
@@ -333,7 +350,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const before = local.find((session) => session.id === activeId);
         const after = diskById.get(activeId);
         if (after && before?.fingerprint !== after.fingerprint) {
-          await seedSnapshot(activeId);
+          await seedSession(activeId);
           activeChanged = true;
         }
       }
@@ -360,7 +377,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
       if (nextActive && nextActive !== activeId) {
         const nextMeta = next.find((session) => session.id === nextActive);
-        if (nextMeta?.fingerprint) await seedSnapshot(nextActive);
+        if (nextMeta?.fingerprint) await seedSession(nextActive);
         await setWorkspaceValue("ai:activeSessionId", nextActive);
         activeChanged = true;
       }
@@ -422,7 +439,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       flip();
       return;
     }
-    void seedSnapshot(id)
+    void seedSession(id)
       .catch((error) => set({ sessionSyncError: String(error) }))
       .finally(flip);
   },
@@ -437,6 +454,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         await chats.get(id)?.stop();
         chats.delete(id);
         seedMessages.delete(id);
+        persistedMessageCounts.delete(id);
         if (remaining.length === 0) {
           const fresh: SessionMeta = {
             id: newSessionId(),
@@ -458,7 +476,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
           !seedMessages.has(nextMeta.id)
         ) {
           try {
-            await seedSnapshot(nextMeta.id);
+            await seedSession(nextMeta.id);
           } catch (error) {
             set({ sessionSyncError: String(error) });
           }
@@ -472,7 +490,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     })();
   },
 
-  publishMessages: async (id, messages) => {
+  commitMessages: async (id, messages) => {
     const sessions = get().sessions;
     const meta = sessions.find((s) => s.id === id);
     if (!meta) return;
@@ -488,22 +506,38 @@ export const useChatStore = create<StoreState>((set, get) => ({
       !meta.title || meta.title === "New chat"
         ? deriveTitle(messages)
         : meta.title;
-    await publishSession({
-      schemaVersion: 1,
+    const persistedCount = persistedMessageCounts.get(id) ?? 0;
+    if (messages.length < persistedCount) {
+      throw new Error(
+        "The UI message history is shorter than the session file",
+      );
+    }
+    const records = serializeSessionMessages(messages.slice(persistedCount), {
+      timestamp: new Date(updatedAt).toISOString(),
+      turnId: `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      turnStatus: cancelledRuns.has(id)
+        ? "cancelled"
+        : get().agentMeta.status === "error"
+          ? "error"
+          : "completed",
+    });
+    await commitSession({
       id,
       title,
       createdAt: meta.createdAt,
       updatedAt,
-      messages,
+      messages: records,
       todos: useTodosStore.getState().bySession[id] ?? [],
     });
+    persistedMessageCounts.set(id, messages.length);
+    cancelledRuns.delete(id);
     await releaseSessionRun(id);
     const runLockSessionIds = { ...get().runLockSessionIds };
     delete runLockSessionIds[id];
     set({
       sessions: get().sessions.map((session) =>
         session.id === id
-          ? { ...session, title, updatedAt, fingerprint: "published" }
+          ? { ...session, title, updatedAt, fingerprint: "committed" }
           : session,
       ),
       runLockSessionIds,
@@ -530,7 +564,7 @@ export async function flushCompletedSessionRuns(): Promise<void> {
     if (chat.status === "submitted" || chat.status === "streaming") continue;
     if (hasPendingApproval(chat.messages)) continue;
     try {
-      await useChatStore.getState().publishMessages(id, chat.messages);
+      await useChatStore.getState().commitMessages(id, chat.messages);
     } catch (error) {
       useChatStore.setState({ sessionSyncError: String(error) });
     }
@@ -569,5 +603,8 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
 export function stop(): void {
   const id = useChatStore.getState().activeSessionId;
   if (!id) return;
-  void chats.get(id)?.stop();
+  const chat = chats.get(id);
+  if (!chat) return;
+  cancelledRuns.add(id);
+  void chat.stop().catch(() => cancelledRuns.delete(id));
 }

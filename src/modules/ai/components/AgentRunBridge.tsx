@@ -1,10 +1,15 @@
+/**
+ * 本文件将无界面的 AI Chat 运行状态桥接到全局 store。
+ * 负责审批响应、AI diff 生命周期和完整 turn 的终态提交。
+ */
+
 import { useChat, type UIMessage } from "@ai-sdk/react";
 import type { ToolUIPart, UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { native } from "../lib/native";
 import { checkReadable } from "../lib/security";
 import { resolvePath } from "../tools/tools";
-import { shouldPublishSnapshot } from "../lib/sessionLifecycle";
+import { shouldCommitSession } from "../lib/sessionLifecycle";
 import { useChatStore, type AgentRunStatus } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 
@@ -18,7 +23,7 @@ import { getOrCreateChat } from "../store/chatRuntime";
  *    to act on it; hiding it would be hostile.
  *  - For pending `write_file` calls, opens an AI diff tab in the editor area
  *    so the user can review the proposed change before approving.
- *  - Publishes one complete snapshot when a run reaches a terminal state.
+ *  - Commits one complete turn when a run reaches a terminal state.
  */
 
 export type DiffOpenInput = {
@@ -60,7 +65,7 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
     chat,
   });
   const patch = useChatStore((s) => s.patchAgentMeta);
-  const publishMessages = useChatStore((s) => s.publishMessages);
+  const commitMessages = useChatStore((s) => s.commitMessages);
   const runLocked = useChatStore((s) =>
     Boolean(s.runLockSessionIds[sessionId]),
   );
@@ -88,7 +93,7 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
 
   const latestMessages = useRef(messages);
   latestMessages.current = messages;
-  const publishing = useRef(false);
+  const committing = useRef(false);
   const statusRef = useRef(status);
   statusRef.current = status;
   const approvalsRef = useRef(approvalsPending);
@@ -96,45 +101,45 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
   const runLockedRef = useRef(runLocked);
   runLockedRef.current = runLocked;
   useEffect(() => {
-    if (!shouldPublishSnapshot(status, approvalsPending, runLocked)) return;
+    if (!shouldCommitSession(status, approvalsPending, runLocked)) return;
     const timer = window.setTimeout(() => {
       if (
-        !shouldPublishSnapshot(
+        !shouldCommitSession(
           statusRef.current,
           approvalsRef.current,
           runLockedRef.current,
         )
       )
         return;
-      if (publishing.current) return;
-      publishing.current = true;
-      void publishMessages(sessionId, latestMessages.current)
+      if (committing.current) return;
+      committing.current = true;
+      void commitMessages(sessionId, latestMessages.current)
         .catch((error) => {
           useChatStore.setState({ sessionSyncError: String(error) });
         })
         .finally(() => {
-          publishing.current = false;
+          committing.current = false;
         });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [sessionId, status, approvalsPending, runLocked, publishMessages]);
+  }, [sessionId, status, approvalsPending, runLocked, commitMessages]);
   useEffect(
     () => () => {
       if (
-        !shouldPublishSnapshot(
+        !shouldCommitSession(
           statusRef.current,
           approvalsRef.current,
           runLockedRef.current,
         )
       )
         return;
-      if (publishing.current) return;
-      publishing.current = true;
-      void publishMessages(sessionId, latestMessages.current).catch((error) => {
+      if (committing.current) return;
+      committing.current = true;
+      void commitMessages(sessionId, latestMessages.current).catch((error) => {
         console.error("Failed to save AI session during switch:", error);
       });
     },
-    [sessionId, publishMessages],
+    [sessionId, commitMessages],
   );
 
   useEffect(() => {
