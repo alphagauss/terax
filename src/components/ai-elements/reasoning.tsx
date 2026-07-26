@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
@@ -224,19 +225,25 @@ export type ReasoningContentProps = ComponentProps<
  * 因此稳定关闭后不会保留正文 DOM。
  */
 export const ReasoningContent = memo(
-  ({ className, children, ...props }: ReasoningContentProps) => (
-    <CollapsibleContent
-      className={cn(
-        "terax-collapsible-content outline-none",
-        className,
-      )}
-      {...props}
-    >
-      <div className="mt-2 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
-        {children}
-      </div>
-    </CollapsibleContent>
-  ),
+  function ReasoningContent({
+    className,
+    children,
+    ...props
+  }: ReasoningContentProps) {
+    const { isStreaming } = useReasoning();
+    const visibleText = useProgressiveText(children, isStreaming);
+
+    return (
+      <CollapsibleContent
+        className={cn("terax-collapsible-content outline-none", className)}
+        {...props}
+      >
+        <div className="mt-2 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
+          {visibleText}
+        </div>
+      </CollapsibleContent>
+    );
+  },
 );
 
 Reasoning.displayName = "Reasoning";

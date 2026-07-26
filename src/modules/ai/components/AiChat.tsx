@@ -19,7 +19,6 @@ import {
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
 import { Tool } from "@/components/ai-elements/tool";
-import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -29,7 +28,6 @@ import { Spinner } from "@/components/ui/spinner";
 import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
-  ArrowDown01Icon,
   ArrowRight01Icon,
   CodeIcon,
   File01Icon,
@@ -45,13 +43,12 @@ import type {
   UIMessagePart,
 } from "ai";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
-import {
-  type StickToBottomContext,
-  useStickToBottomContext,
-} from "use-stick-to-bottom";
+import type { StickToBottomContext } from "use-stick-to-bottom";
+import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { useChatStore } from "../store/chatStore";
+import { AiChatScrollControls } from "./AiChatScrollControls";
 import { AiToolApproval } from "./AiToolApproval";
 
 type ConversationScrollPosition = {
@@ -67,12 +64,6 @@ const conversationScrollPositions = new Map<
   string,
   ConversationScrollPosition
 >();
-
-const FAST_SCROLL_SPRING = {
-  damping: 0.78,
-  stiffness: 0.09,
-  mass: 0.95,
-} as const;
 
 function useConversationScrollMemory(sessionId: string) {
   const contextRef = useRef<StickToBottomContext | null>(null);
@@ -383,8 +374,8 @@ export function AiChatView({
     <Conversation
       contextRef={scrollMemory.contextRef}
       initial={scrollMemory.initial}
-      resize="instant"
-      {...FAST_SCROLL_SPRING}
+      resize={CHAT_SCROLL_SPRING}
+      {...CHAT_SCROLL_SPRING}
     >
       <ConversationContent
         className="gap-5 p-3"
@@ -436,32 +427,8 @@ export function AiChatView({
           </div>
         )}
       </ConversationContent>
-      <FastConversationScrollButton />
+      <AiChatScrollControls messages={messages} running={isBusy} />
     </Conversation>
-  );
-}
-
-function FastConversationScrollButton() {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
-  if (isAtBottom) return null;
-
-  return (
-    <Button
-      type="button"
-      size="icon"
-      variant="outline"
-      aria-label="Scroll to bottom"
-      title="Scroll to bottom"
-      onClick={() => {
-        void scrollToBottom({
-          animation: FAST_SCROLL_SPRING,
-          ignoreEscapes: true,
-        });
-      }}
-      className="absolute bottom-3 left-1/2 size-7 -translate-x-1/2 rounded-full border-border/50 bg-background/90 shadow-md backdrop-blur dark:bg-background/80 dark:hover:bg-muted"
-    >
-      <HugeiconsIcon icon={ArrowDown01Icon} size={13} strokeWidth={2} />
-    </Button>
   );
 }
 

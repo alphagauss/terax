@@ -122,7 +122,11 @@
     "continue": "继续",
     "read": "读取",
     "readFiles_one": "{{count}} 个文件",
-    "readFiles_other": "{{count}} 个文件"
+    "readFiles_other": "{{count}} 个文件",
+    "recentUserMessages": "最近的用户消息",
+    "scrollNavigation": "会话导航",
+    "scrollToLatest": "前往最新输出并恢复跟随",
+    "userMessageFallback": "[附件或上下文]"
   },
   "statusPill": {
     "openAiLog": "打开 AI 日志",

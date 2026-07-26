@@ -122,7 +122,11 @@
     "continue": "Continue",
     "read": "Read",
     "readFiles_one": "{{count}} file",
-    "readFiles_other": "{{count}} files"
+    "readFiles_other": "{{count}} files",
+    "recentUserMessages": "Recent user messages",
+    "scrollNavigation": "Conversation navigation",
+    "scrollToLatest": "Go to the latest response and follow",
+    "userMessageFallback": "[Attachment or context]"
   },
   "statusPill": {
     "openAiLog": "Open AI log",

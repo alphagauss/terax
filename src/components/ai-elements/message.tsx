@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 消息外壳、Markdown 正文、分支切换和消息操作区。
+ * 流式正文通过渐进可见文本控制突发输出，稳定 Markdown 块仍由 Streamdown 管理。
+ */
+
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +15,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
@@ -333,27 +339,43 @@ const ChatMarkdownCode = (props: ComponentProps<typeof MarkdownCode>) => (
 
 const streamdownComponents = { code: ChatMarkdownCode };
 
+/**
+ * Markdown 消息正文。
+ *
+ * 流式时只把渐进追赶后的可见文本交给 Streamdown，避免网络突发内容一次性
+ * 推高布局；完成态直接渲染最终文本并释放临时副本。
+ */
 export const MessageResponse = memo(
-  ({
+  function MessageResponse({
     className,
     children,
     streaming = false,
     ...props
-  }: MessageResponseProps) => (
-    <ChatStreamingProvider value={streaming}>
-      <Streamdown
-        className={cn(
-          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-          className,
-        )}
-        components={streamdownComponents}
-        plugins={streamdownPlugins}
-        {...props}
-      >
-        {normalizeMathDelimiters(children)}
-      </Streamdown>
-    </ChatStreamingProvider>
-  ),
+  }: MessageResponseProps) {
+    const rawText = typeof children === "string" ? children : "";
+    const visibleText = useProgressiveText(rawText, streaming);
+    const normalizedText = useMemo(
+      () => normalizeMathDelimiters(visibleText),
+      [visibleText],
+    );
+
+    return (
+      <ChatStreamingProvider value={streaming}>
+        <Streamdown
+          className={cn(
+            "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+            className,
+          )}
+          components={streamdownComponents}
+          isAnimating={streaming}
+          plugins={streamdownPlugins}
+          {...props}
+        >
+          {normalizedText}
+        </Streamdown>
+      </ChatStreamingProvider>
+    );
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     prevProps.streaming === nextProps.streaming &&
