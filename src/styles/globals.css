@@ -499,10 +499,10 @@ html *::-webkit-scrollbar {
   overflow: hidden;
 }
 .terax-collapsible-content[data-state="open"] {
-  animation: terax-collapsible-down var(--dur-control) var(--ease-standard);
+  animation: terax-collapsible-down var(--dur-control) var(--ease-emphasized);
 }
 .terax-collapsible-content[data-state="closed"] {
-  animation: terax-collapsible-up var(--dur-control) var(--ease-standard);
+  animation: terax-collapsible-up var(--dur-control) var(--ease-emphasized);
 }
 
 /* 生成的菜单组件保留现有 tw-animate 效果，只统一到控制级动效契约。 */

@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 侧边栏的会话外壳、上下文指标和空状态入口。
+ * 流式消息更新在此合并提交，避免头部统计和聊天正文按每个 delta 重渲染。
+ */
+
 import {
   Context,
   ContextContent,
@@ -17,7 +22,8 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { useChat, type UIMessage } from "@ai-sdk/react";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   Add01Icon,
   AlertCircleIcon,
@@ -29,17 +35,20 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   estimateCost,
   getModel,
   getModelContextLimit,
   type ModelId,
 } from "../config";
+import {
+  estimateUiMessageTokens,
+  STREAM_RENDER_INTERVAL_MS,
+} from "../lib/chatRendering";
 import type { SessionMeta } from "../lib/sessions";
-import { useChatStore } from "../store/chatStore";
 import { getOrCreateChat } from "../store/chatRuntime";
-import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useChatStore } from "../store/chatStore";
 import { usePlanStore } from "../store/planStore";
 import { AiChatView } from "./AiChat";
 import { AiInputBarConnect } from "./AiInputBar";
@@ -68,6 +77,11 @@ const SUGGESTIONS = [
   },
 ];
 
+/**
+ * AI 侧边栏主面板。
+ *
+ * 负责连接当前会话、聊天区域和输入区，关闭侧边栏不会主动终止正在运行的会话。
+ */
 export function AiSidebarPanel({
   hasComposer,
   onClose,
@@ -108,7 +122,10 @@ function Body({
     void revision;
     return getOrCreateChat(sessionId);
   }, [sessionId, revision]);
-  const helpers = useChat<UIMessage>({ chat });
+  const helpers = useChat<UIMessage>({
+    chat,
+    experimental_throttle: STREAM_RENDER_INTERVAL_MS,
+  });
   const isBusy =
     helpers.status === "submitted" || helpers.status === "streaming";
 
@@ -197,7 +214,7 @@ function Header({
       <div className="flex min-w-0 items-center gap-1.5">
         <SessionPicker />
         {messages !== undefined ? (
-          <ContextIndicator messages={messages} />
+          <ContextIndicator isBusy={isBusy} messages={messages} />
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -234,36 +251,33 @@ function Header({
   );
 }
 
-function estimateTokens(messages: UIMessage[]): number {
-  let chars = 0;
-  for (const m of messages) {
-    for (const p of m.parts) {
-      if (p.type === "text") {
-        chars += (p as { text?: string }).text?.length ?? 0;
-      } else if (p.type === "reasoning") {
-        chars += (p as { text?: string }).text?.length ?? 0;
-      } else if (typeof p.type === "string" && p.type.startsWith("tool-")) {
-        const tp = p as unknown as { input?: unknown; output?: unknown };
-        if (tp.input) chars += JSON.stringify(tp.input).length;
-        if (tp.output) chars += JSON.stringify(tp.output).length;
-      }
-    }
-  }
-  return Math.ceil(chars / 4);
-}
-
 function formatTokens(n: number): string {
   if (n < 1000) return String(n);
   if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
-function ContextIndicator({ messages }: { messages: UIMessage[] }) {
+function ContextIndicator({
+  isBusy,
+  messages,
+}: {
+  isBusy: boolean;
+  messages: UIMessage[];
+}) {
   const modelId = useChatStore((s) => s.selectedModelId);
   const tokens = useChatStore((s) => s.agentMeta.tokens);
   const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
   const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
-  const estimated = useMemo(() => estimateTokens(messages), [messages]);
+  const settledEstimateRef = useRef(0);
+  const shouldEstimate = !isBusy && lastInput <= 0;
+  const estimated = useMemo(() => {
+    if (!shouldEstimate) {
+      return settledEstimateRef.current;
+    }
+    const nextEstimate = estimateUiMessageTokens(messages);
+    settledEstimateRef.current = nextEstimate;
+    return nextEstimate;
+  }, [messages, shouldEstimate]);
   const used = lastInput > 0 ? lastInput : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
   const openaiCompatibleContextLimit = usePreferencesStore(

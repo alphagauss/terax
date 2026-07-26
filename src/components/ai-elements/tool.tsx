@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 工具调用的紧凑状态行和按需详情渲染。
+ * 工具详情默认折叠，稳定关闭后卸载输入输出子树以避免长会话持续占用渲染资源。
+ */
+
 "use client";
 
 import {
@@ -149,7 +154,7 @@ const ToolImpl = ({
   const label = meta?.label ?? toolName;
   const summary = deriveSummary(toolName, input);
   const isError = state === "output-error";
-  const open = defaultOpen ?? isError;
+  const open = defaultOpen ?? false;
   const isHeavy = HEAVY_CONTENT_TOOLS.has(toolName);
   // For heavy tools, only show details on error — never the streamed input
   // body, which is huge and re-renders per token.
@@ -223,6 +228,12 @@ const ToolImpl = ({
 // For heavy tools, the only thing that should trigger a re-render is a
 // state transition or the path summary changing — NOT every input-content
 // token. We compare the cheap derived summary instead of the input ref.
+/**
+ * 工具调用展示组件。
+ *
+ * 默认只渲染轻量标题；用户展开时才挂载输入输出，重型工具的流式正文
+ * 始终不进入详情树，避免大参数随 token 重渲染。
+ */
 export const Tool = memo(ToolImpl, (a, b) => {
   if (a.toolName !== b.toolName || a.state !== b.state) return false;
   if (a.errorText !== b.errorText) return false;

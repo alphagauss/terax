@@ -1,9 +1,13 @@
+/**
+ * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
+ * 流式阶段只更新末尾活动分段，历史消息和已完成工具保持稳定且默认折叠。
+ */
+
 import {
   Conversation,
   ConversationContent,
   ConversationEmptyState,
 } from "@/components/ai-elements/conversation";
-import { Button } from "@/components/ui/button";
 import {
   Message,
   MessageContent,
@@ -15,14 +19,15 @@ import {
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
 import { Tool } from "@/components/ai-elements/tool";
+import { Button } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 import i18n from "@/i18n";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -31,10 +36,7 @@ import {
   HashtagIcon,
   TerminalIcon,
 } from "@hugeicons/core-free-icons";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
-import { Spinner } from "@/components/ui/spinner";
-import { useChatStore } from "../store/chatStore";
-import { sendMessage } from "../store/chatRuntime";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type {
   ChatStatus,
   DynamicToolUIPart,
@@ -42,17 +44,14 @@ import type {
   UIMessage,
   UIMessagePart,
 } from "ai";
-import {
-  memo,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-} from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import {
   type StickToBottomContext,
   useStickToBottomContext,
 } from "use-stick-to-bottom";
+import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
+import { sendMessage } from "../store/chatRuntime";
+import { useChatStore } from "../store/chatStore";
 import { AiToolApproval } from "./AiToolApproval";
 
 type ConversationScrollPosition = {
@@ -329,6 +328,11 @@ type Props = {
   stop: () => void | PromiseLike<void>;
 };
 
+/**
+ * AI 会话消息视图。
+ *
+ * 负责恢复每个会话的滚动位置、渲染流式末尾消息，并保留用户主动脱离底部后的阅读位置。
+ */
 export function AiChatView({
   sessionId,
   messages,
@@ -516,15 +520,9 @@ const RenderedMessage = memo(function RenderedMessage({
   onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
 }) {
-  // Index of the trailing text part — only that one is "live" mid-stream.
-  // Earlier text parts (separated by tool calls) are already finalized.
-  let lastTextIdx = -1;
-  for (let i = message.parts.length - 1; i >= 0; i -= 1) {
-    if (message.parts[i]?.type === "text") {
-      lastTextIdx = i;
-      break;
-    }
-  }
+  // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
+  // 不应因后续工具调用继续显示流式状态。
+  const streamingPartIdx = streaming ? message.parts.length - 1 : -1;
   const groups = useMemo(
     () =>
       message.role === "user"
@@ -562,10 +560,7 @@ const RenderedMessage = memo(function RenderedMessage({
   }
 
   return (
-    <Message
-      from={message.role}
-      data-conversation-message-id={message.id}
-    >
+    <Message from={message.role} data-conversation-message-id={message.id}>
       <MessageContent>
         <div className="flex flex-col gap-3">
           {groups.map((g) => {
@@ -592,7 +587,7 @@ const RenderedMessage = memo(function RenderedMessage({
                 <RenderedPart
                   part={g.part}
                   onApproval={onApproval}
-                  streaming={streaming && g.idx === lastTextIdx}
+                  streaming={g.idx === streamingPartIdx}
                 />
               </PartAppear>
             );
@@ -748,7 +743,7 @@ const PartAppear = memo(function PartAppear({
   children: React.ReactNode;
 }) {
   return (
-    <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-surface ease-emphasized">
+    <div className="animate-in fade-in-0 slide-in-from-bottom-1 duration-control ease-emphasized">
       {children}
     </div>
   );
@@ -801,7 +796,7 @@ const RenderedPart = memo(function RenderedPart({
 
   if (part.type === "reasoning") {
     return (
-      <Reasoning>
+      <Reasoning isStreaming={streaming}>
         <ReasoningTrigger />
         <ReasoningContent>
           {(part as unknown as { text: string }).text}
@@ -854,7 +849,6 @@ const RenderedTool = memo(function RenderedTool({
       input={part.input}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
-      defaultOpen={toolName === "list_directory"}
     />
   );
 });

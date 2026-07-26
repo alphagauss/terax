@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 推理过程的流式状态、耗时标题和可卸载折叠区域。
+ * 完成态默认关闭，内容仅在展开及退出动画期间挂载以控制长会话资源占用。
+ */
+
 "use client";
 
 import {
@@ -50,6 +55,12 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
 const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
+/**
+ * 推理折叠容器。
+ *
+ * 流式开始时自动展开，结束后自动收起；关闭动画由 Radix Presence
+ * 托管，动画完成后内容子树会被卸载。
+ */
 export const Reasoning = memo(
   ({
     className,
@@ -159,6 +170,11 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   return <span>Reasoned for {duration}s</span>;
 };
 
+/**
+ * 推理折叠按钮。
+ *
+ * 根据流式状态展示 Thinking 或耗时，并仅通过颜色与箭头旋转提供反馈。
+ */
 export const ReasoningTrigger = memo(
   ({
     className,
@@ -171,7 +187,7 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex items-center gap-1.5 italic text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+          "flex items-center gap-1.5 italic text-[11px] text-muted-foreground transition-colors duration-control hover:text-foreground",
           className,
         )}
         {...props}
@@ -184,7 +200,7 @@ export const ReasoningTrigger = memo(
               size={11}
               strokeWidth={1.75}
               className={cn(
-                "transition-transform",
+                "transition-transform duration-control ease-emphasized",
                 isOpen ? "rotate-180" : "rotate-0",
               )}
             />
@@ -201,17 +217,24 @@ export type ReasoningContentProps = ComponentProps<
   children: string;
 };
 
+/**
+ * 推理内容区域。
+ *
+ * 使用 Radix 提供的真实内容高度执行展开和收起动画，不使用 forceMount，
+ * 因此稳定关闭后不会保留正文 DOM。
+ */
 export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "mt-2 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        "terax-collapsible-content outline-none",
         className,
       )}
       {...props}
     >
-      <div className="whitespace-pre-wrap wrap-break-word">{children}</div>
+      <div className="mt-2 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
+        {children}
+      </div>
     </CollapsibleContent>
   ),
 );
