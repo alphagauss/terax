@@ -7,6 +7,7 @@
   "resetLocation": "重置位置",
   "closeSecondary": "关闭副侧边栏",
   "hideContainer": "隐藏{{name}}",
+  "showContainer": "显示{{name}}",
   "activityBarPosition": "活动栏位置",
   "activityBarSize": "活动栏大小",
   "position": {

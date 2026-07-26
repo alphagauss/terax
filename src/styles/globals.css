@@ -14,6 +14,10 @@ html[data-sidebar-dragging="true"] * {
   cursor: default !important;
 }
 
+html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
+  overflow: hidden;
+}
+
 @theme inline {
     --default-transition-duration: var(--dur-feedback);
     --default-transition-timing-function: var(--ease-standard);

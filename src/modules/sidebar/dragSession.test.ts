@@ -4,7 +4,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { sidebarDropLocationForPoint, sidebarGapForPoint } from "./dragSession";
+import {
+  sidebarDropLocationForPoint,
+  sidebarGapForPoint,
+  sidebarInsertionIndexForDrop,
+} from "./dragSession";
 
 const rects = [
   { left: 0, top: 0, width: 40, height: 40 },
@@ -55,5 +59,24 @@ describe("sidebarDropLocationForPoint", () => {
     expect(
       sidebarDropLocationForPoint(regions, "secondary", 960, 104),
     ).toBeNull();
+  });
+});
+
+describe("sidebarInsertionIndexForDrop", () => {
+  it("keeps the DOM gap for rendering and adjusts only the committed index", () => {
+    expect(
+      sidebarInsertionIndexForDrop(
+        { location: "primary", index: 2 },
+        "primary",
+        0,
+      ),
+    ).toBe(1);
+    expect(
+      sidebarInsertionIndexForDrop(
+        { location: "secondary", index: 2 },
+        "primary",
+        0,
+      ),
+    ).toBe(2);
   });
 });

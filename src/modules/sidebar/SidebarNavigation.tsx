@@ -1,6 +1,6 @@
 /**
  * 本文件渲染主侧边栏 Activity Bar 和副侧边栏容器导航。
- * 两侧共享位置、显隐、拖放和菜单配置，并使用项目 Tooltip 统一悬停反馈。
+ * 两侧共享位置、显隐、拖放、溢出滚动和菜单配置，并使用项目 Tooltip 统一悬停反馈。
  */
 
 import {
@@ -25,7 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type PointerEvent, type ReactNode, useRef } from "react";
+import { type PointerEvent, type ReactNode, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   beginSidebarDrag,
@@ -79,6 +79,79 @@ type DragPointerState = {
 };
 
 type NavigationAppearance = "vertical" | "tabs" | "icons";
+
+/** 为不同方向的导航提供隐藏滚动条、滚轮转换和活动项自动可见。 */
+function NavigationViewport({
+  orientation,
+  activeId,
+  itemIds,
+  children,
+}: {
+  orientation: "horizontal" | "vertical";
+  activeId: SidebarContainerId | null;
+  itemIds: readonly SidebarContainerId[];
+  children: ReactNode;
+}) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const itemOrder = itemIds.join("\0");
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !activeId || !itemOrder) return;
+    const active = Array.from(
+      viewport.querySelectorAll<HTMLElement>("[data-sidebar-container-id]"),
+    ).find((element) => element.dataset.sidebarContainerId === activeId);
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId, itemOrder]);
+
+  useEffect(() => {
+    if (orientation !== "horizontal") return;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const onWheel = (event: WheelEvent) => {
+      if (
+        document.documentElement.dataset.sidebarDragging === "true" ||
+        Math.abs(event.deltaY) <= Math.abs(event.deltaX) ||
+        viewport.scrollWidth <= viewport.clientWidth
+      ) {
+        return;
+      }
+      event.preventDefault();
+      viewport.scrollBy({
+        left: event.deltaY,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, [orientation]);
+
+  return (
+    <div
+      ref={viewportRef}
+      data-sidebar-navigation-viewport
+      className={cn(
+        "overscroll-none scroll-smooth motion-reduce:scroll-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        orientation === "vertical"
+          ? "min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto"
+          : "min-w-0 flex-1 overflow-x-auto overflow-y-hidden",
+      )}
+    >
+      <div
+        className={cn(
+          "flex",
+          orientation === "vertical"
+            ? "min-h-full w-full flex-col items-center"
+            : "w-max items-center gap-1",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function isActivityBarPosition(value: string): value is ActivityBarPosition {
   return ACTIVITY_BAR_POSITIONS.some((position) => position === value);
@@ -211,6 +284,7 @@ function ActivityBarMenu({
 function ContainerMenu({
   container,
   location,
+  hidden,
   onMove,
   onReset,
   onToggleVisibility,
@@ -218,6 +292,7 @@ function ContainerMenu({
 }: {
   container: SidebarContainerDefinition;
   location: SidebarLocation;
+  hidden: boolean;
   onMove: SharedNavigationProps["onMove"];
   onReset: SharedNavigationProps["onReset"];
   onToggleVisibility: SharedNavigationProps["onToggleVisibility"];
@@ -232,12 +307,17 @@ function ContainerMenu({
           className={COMPACT_MENU_ITEM}
           onSelect={() => onToggleVisibility(container.id)}
         >
-          {t("hideContainer", { name: t(container.titleKey) })}
+          {t(hidden ? "showContainer" : "hideContainer", {
+            name: t(container.titleKey),
+          })}
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
           className={COMPACT_MENU_ITEM}
-          disabled={location === "primary"}
+          disabled={
+            location === "primary" ||
+            !container.allowedLocations.includes("primary")
+          }
           onSelect={() =>
             onMove(container.id, "primary", Number.MAX_SAFE_INTEGER)
           }
@@ -246,7 +326,10 @@ function ContainerMenu({
         </ContextMenuItem>
         <ContextMenuItem
           className={COMPACT_MENU_ITEM}
-          disabled={location === "secondary"}
+          disabled={
+            location === "secondary" ||
+            !container.allowedLocations.includes("secondary")
+          }
           onSelect={() =>
             onMove(container.id, "secondary", Number.MAX_SAFE_INTEGER)
           }
@@ -312,7 +395,13 @@ function DraggableContainerButton({
       ) >= 5
     ) {
       pointer.dragging = true;
-      beginSidebarDrag(container.id, location, onMove, event.currentTarget);
+      beginSidebarDrag(
+        container.id,
+        location,
+        container.allowedLocations,
+        onMove,
+        event.currentTarget,
+      );
     }
     if (pointer.dragging) {
       event.preventDefault();
@@ -418,6 +507,7 @@ function NavigationItems({
             <ContainerMenu
               container={container}
               location={location}
+              hidden={activityBar.hiddenContainerIds.includes(container.id)}
               onMove={onMove}
               onReset={onReset}
               onToggleVisibility={onToggleVisibility}
@@ -517,17 +607,23 @@ export function SidebarActivityBar({
       data-sidebar-drop-location="primary"
       data-sidebar-orientation="vertical"
       className={cn(
-        "flex shrink-0 flex-col items-center border-r border-border/60 bg-sidebar",
+        "flex min-h-0 shrink-0 flex-col items-center border-r border-border/60 bg-sidebar",
         compact ? "w-9" : "w-12",
       )}
     >
-      <NavigationItems
-        {...props}
-        activityBar={activityBar}
-        location="primary"
-        appearance="vertical"
-        barPosition="default"
-      />
+      <NavigationViewport
+        orientation="vertical"
+        activeId={props.activeId}
+        itemIds={props.containers.map((container) => container.id)}
+      >
+        <NavigationItems
+          {...props}
+          activityBar={activityBar}
+          location="primary"
+          appearance="vertical"
+          barPosition="default"
+        />
+      </NavigationViewport>
     </aside>
   ) : (
     <div
@@ -541,13 +637,19 @@ export function SidebarActivityBar({
           : "border-b border-border/60",
       )}
     >
-      <NavigationItems
-        {...props}
-        activityBar={activityBar}
-        location="primary"
-        appearance="icons"
-        barPosition={activityBar.position}
-      />
+      <NavigationViewport
+        orientation="horizontal"
+        activeId={props.activeId}
+        itemIds={props.containers.map((container) => container.id)}
+      >
+        <NavigationItems
+          {...props}
+          activityBar={activityBar}
+          location="primary"
+          appearance="icons"
+          barPosition={activityBar.position}
+        />
+      </NavigationViewport>
     </div>
   );
 
@@ -580,7 +682,11 @@ export function SecondarySidebarTabs({
         bottom ? "border-t border-border/60" : "border-b border-border/60",
       )}
     >
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+      <NavigationViewport
+        orientation="horizontal"
+        activeId={props.activeId}
+        itemIds={props.containers.map((container) => container.id)}
+      >
         <NavigationItems
           {...props}
           activityBar={activityBar}
@@ -588,7 +694,7 @@ export function SecondarySidebarTabs({
           appearance={appearance}
           barPosition={activityBar.position}
         />
-      </div>
+      </NavigationViewport>
       <Tooltip>
         <TooltipTrigger asChild>
           <button

@@ -27,6 +27,7 @@ type SidebarDragSnapshot = {
 type ActiveDrag = {
   id: SidebarContainerId;
   sourceLocation: SidebarLocation;
+  allowedLocations: readonly SidebarLocation[];
   bars: SidebarDragBar[];
   commit: (
     id: SidebarContainerId,
@@ -180,6 +181,19 @@ export function sidebarDropLocationForPoint(
   );
 }
 
+/** 将原始 DOM 间隙转换为移除源图标后的模型插入索引。 */
+export function sidebarInsertionIndexForDrop(
+  target: SidebarDropTarget,
+  sourceLocation: SidebarLocation,
+  sourceIndex: number,
+): number {
+  return target.location === sourceLocation &&
+    sourceIndex >= 0 &&
+    target.index > sourceIndex
+    ? target.index - 1
+    : target.index;
+}
+
 function collectDragGeometry(): SidebarDragBar[] {
   const bars: SidebarDragBar[] = [];
   for (const element of document.querySelectorAll<HTMLElement>(
@@ -214,27 +228,27 @@ function resolveTarget(
   clientX: number,
   clientY: number,
 ): SidebarDropTarget | null {
-  if (!active) return null;
+  const session = active;
+  if (!session) return null;
+  const allowedBars = session.bars.filter((bar) =>
+    session.allowedLocations.includes(bar.location),
+  );
   const location = sidebarDropLocationForPoint(
-    active.bars,
-    active.sourceLocation,
+    allowedBars,
+    session.sourceLocation,
     clientX,
     clientY,
   );
   if (!location) return null;
-  const bar = active.bars.find((candidate) => candidate.location === location);
+  const bar = allowedBars.find((candidate) => candidate.location === location);
   if (!bar) return null;
-  let index = sidebarGapForPoint(
+  const index = sidebarGapForPoint(
     bar.items.map((item) => item.rect),
     bar.orientation,
     clientX,
     clientY,
   );
 
-  if (location === active.sourceLocation) {
-    const sourceIndex = bar.items.findIndex((item) => item.id === active?.id);
-    if (sourceIndex >= 0 && index > sourceIndex) index -= 1;
-  }
   return { location, index };
 }
 
@@ -242,11 +256,18 @@ function resolveTarget(
 export function beginSidebarDrag(
   id: SidebarContainerId,
   sourceLocation: SidebarLocation,
+  allowedLocations: readonly SidebarLocation[],
   commit: ActiveDrag["commit"],
   previewSource: HTMLElement,
 ): void {
   removeDragPreview();
-  active = { id, sourceLocation, commit, bars: collectDragGeometry() };
+  active = {
+    id,
+    sourceLocation,
+    allowedLocations,
+    commit,
+    bars: collectDragGeometry(),
+  };
   createDragPreview(previewSource);
   emit({ draggedId: id, target: null });
 }
@@ -270,7 +291,17 @@ export function finishSidebarDrag(commit: boolean): boolean {
   removeDragPreview();
   emit(EMPTY);
   if (!commit || !session || !target) return false;
-  session.commit(session.id, target.location, target.index);
+  const sourceBar = session.bars.find(
+    (bar) => bar.location === session.sourceLocation,
+  );
+  const sourceIndex =
+    sourceBar?.items.findIndex((item) => item.id === session.id) ?? -1;
+  const insertionIndex = sidebarInsertionIndexForDrop(
+    target,
+    session.sourceLocation,
+    sourceIndex,
+  );
+  session.commit(session.id, target.location, insertionIndex);
   return true;
 }
 

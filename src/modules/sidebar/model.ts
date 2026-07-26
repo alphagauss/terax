@@ -71,6 +71,16 @@ function isActivityBarSize(value: unknown): value is ActivityBarSize {
   return value === "default" || value === "compact";
 }
 
+function sameContainerIds(
+  left: readonly SidebarContainerId[],
+  right: readonly SidebarContainerId[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((candidate, index) => candidate === right[index])
+  );
+}
+
 function validIdsAtLocation(
   value: unknown,
   location: SidebarLocation,
@@ -142,14 +152,17 @@ function readRuntimeLocation(
   value: unknown,
   location: SidebarLocation,
   placements: SidebarPlacements,
+  hiddenContainerIds: ReadonlySet<SidebarContainerId>,
 ) {
   const fallback = DEFAULT_SIDEBAR_RUNTIME_STATE[location];
   const record = isRecord(value) ? value : {};
   const activeId =
     isContainerId(record.activeId) &&
-    placements[location].includes(record.activeId)
+    placements[location].includes(record.activeId) &&
+    !hiddenContainerIds.has(record.activeId)
       ? record.activeId
-      : (placements[location][0] ?? null);
+      : (placements[location].find((id) => !hiddenContainerIds.has(id)) ??
+        null);
   const minWidth =
     location === "primary"
       ? PRIMARY_SIDEBAR_MIN_WIDTH
@@ -171,12 +184,19 @@ function readRuntimeLocation(
 export function normalizeSidebarRuntimeState(
   value: unknown,
   placements: SidebarPlacements,
+  hiddenContainerIds: readonly SidebarContainerId[] = [],
 ): SidebarRuntimeState {
   const record = isRecord(value) && value.version === 1 ? value : {};
+  const hidden = new Set(hiddenContainerIds);
   return {
     version: 1,
-    primary: readRuntimeLocation(record.primary, "primary", placements),
-    secondary: readRuntimeLocation(record.secondary, "secondary", placements),
+    primary: readRuntimeLocation(record.primary, "primary", placements, hidden),
+    secondary: readRuntimeLocation(
+      record.secondary,
+      "secondary",
+      placements,
+      hidden,
+    ),
   };
 }
 
@@ -186,6 +206,37 @@ export function findSidebarContainerLocation(
   id: SidebarContainerId,
 ): SidebarLocation {
   return placements.primary.includes(id) ? "primary" : "secondary";
+}
+
+/** 计算容器移动后的窗口状态，同栏排序保持当前活动项和折叠状态。 */
+export function runtimeAfterSidebarContainerMove(
+  runtime: SidebarRuntimeState,
+  previousPlacements: SidebarPlacements,
+  nextPlacements: SidebarPlacements,
+  id: SidebarContainerId,
+  targetLocation: SidebarLocation,
+  hiddenContainerIds: readonly SidebarContainerId[] = [],
+): SidebarRuntimeState {
+  const sourceLocation = findSidebarContainerLocation(previousPlacements, id);
+  if (sourceLocation === targetLocation) return runtime;
+
+  const hidden = new Set(hiddenContainerIds);
+  const next: SidebarRuntimeState = {
+    ...runtime,
+    primary: { ...runtime.primary },
+    secondary: { ...runtime.secondary },
+  };
+  if (next[sourceLocation].activeId === id) {
+    const fallback =
+      nextPlacements[sourceLocation].find((candidate) => {
+        return !hidden.has(candidate);
+      }) ?? null;
+    next[sourceLocation].activeId = fallback;
+    if (fallback === null) next[sourceLocation].collapsed = true;
+  }
+  next[targetLocation].activeId = id;
+  next[targetLocation].collapsed = false;
+  return next;
 }
 
 /** 原子移动或重排一个容器，目标索引表示删除源容器后的插入间隙。 */
@@ -205,5 +256,11 @@ export function moveSidebarContainer(
   const target = next[targetLocation];
   const index = Math.max(0, Math.min(Math.round(targetIndex), target.length));
   target.splice(index, 0, id);
+  if (
+    sameContainerIds(next.primary, placements.primary) &&
+    sameContainerIds(next.secondary, placements.secondary)
+  ) {
+    return placements;
+  }
   return next;
 }

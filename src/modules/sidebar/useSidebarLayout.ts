@@ -14,6 +14,7 @@ import {
   findSidebarContainerLocation,
   moveSidebarContainer,
   normalizeSidebarRuntimeState,
+  runtimeAfterSidebarContainerMove,
 } from "./model";
 import {
   getInitialSidebarPlacementState,
@@ -46,6 +47,7 @@ export function useSidebarLayout() {
     normalizeSidebarRuntimeState(
       getWorkspaceValue<unknown>(RUNTIME_STORAGE_KEY),
       initialPlacementState.placements,
+      initialPlacementState.activityBar.hiddenContainerIds,
     ),
   );
   const [runtime, setRuntime] = useState(initialRuntime);
@@ -68,7 +70,9 @@ export function useSidebarLayout() {
   );
 
   const replaceRuntime = useCallback((updater: RuntimeUpdater) => {
-    const next = updater(runtimeRef.current);
+    const current = runtimeRef.current;
+    const next = updater(current);
+    if (next === current) return;
     runtimeRef.current = next;
     setRuntime(next);
     void setWorkspaceValue(RUNTIME_STORAGE_KEY, next);
@@ -172,35 +176,24 @@ export function useSidebarLayout() {
         targetLocation,
         targetIndex,
       );
+      if (nextPlacements === currentPlacements) return;
       commitPlacementState({
         ...placementStateRef.current,
         placements: nextPlacements,
       });
 
-      replaceRuntime((current) => {
-        const next: SidebarRuntimeState = {
-          ...current,
-          primary: { ...current.primary },
-          secondary: { ...current.secondary },
-        };
-        if (
-          sourceLocation !== targetLocation &&
-          next[sourceLocation].activeId === id
-        ) {
-          const fallback = nextPlacements[sourceLocation][0] ?? null;
-          next[sourceLocation].activeId = fallback;
-          next[sourceLocation].collapsed =
-            fallback === null ? true : next[sourceLocation].collapsed;
-        }
-        next[targetLocation].activeId = id;
-        next[targetLocation].collapsed = false;
-        return next;
-      });
+      if (sourceLocation === targetLocation) return;
+      const nextRuntime = runtimeAfterSidebarContainerMove(
+        runtimeRef.current,
+        currentPlacements,
+        nextPlacements,
+        id,
+        targetLocation,
+        placementStateRef.current.activityBar.hiddenContainerIds,
+      );
+      replaceRuntime(() => nextRuntime);
 
-      if (
-        sourceLocation !== targetLocation &&
-        nextPlacements[sourceLocation].length === 0
-      ) {
+      if (nextRuntime[sourceLocation].collapsed) {
         panelRefs[sourceLocation].current?.collapse();
       }
       revealLocation(targetLocation, id);
@@ -241,8 +234,23 @@ export function useSidebarLayout() {
           hiddenContainerIds,
         },
       });
+      if (hidden.includes(id)) return;
+
+      const location = findSidebarContainerLocation(current.placements, id);
+      if (runtimeRef.current[location].activeId !== id) return;
+      const nextRuntime = normalizeSidebarRuntimeState(
+        runtimeRef.current,
+        current.placements,
+        hiddenContainerIds,
+      );
+      replaceRuntime(() => nextRuntime);
+      if (nextRuntime[location].collapsed) {
+        panelRefs[location].current?.collapse();
+      } else {
+        revealLocation(location, nextRuntime[location].activeId ?? undefined);
+      }
     },
-    [commitPlacementState],
+    [commitPlacementState, panelRefs, replaceRuntime, revealLocation],
   );
 
   const setActivityBarPosition = useCallback(
@@ -325,6 +333,7 @@ export function useSidebarLayout() {
       const nextRuntime = normalizeSidebarRuntimeState(
         runtimeRef.current,
         next.placements,
+        next.activityBar.hiddenContainerIds,
       );
       replaceRuntime(() => nextRuntime);
       requestAnimationFrame(() => {

@@ -7,6 +7,7 @@
   "resetLocation": "Reset Location",
   "closeSecondary": "Close Secondary Sidebar",
   "hideContainer": "Hide {{name}}",
+  "showContainer": "Show {{name}}",
   "activityBarPosition": "Activity Bar Position",
   "activityBarSize": "Activity Bar Size",
   "position": {

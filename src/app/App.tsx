@@ -1459,6 +1459,12 @@ export default function App() {
       )
       .map((container) => container.id),
   );
+  for (const location of ["primary", "secondary"] as const) {
+    const current = sidebar.runtime[location];
+    if (!current.collapsed && current.activeId) {
+      visibleSidebarContainerIds.add(current.activeId);
+    }
+  }
   const primarySidebarContainers = sidebar.placements.primary
     .map((id) => sidebar.containers.find((container) => container.id === id))
     .filter(
