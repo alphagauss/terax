@@ -1,3 +1,8 @@
+/**
+ * 本文件创建 AI SDK Chat 实例并衔接会话运行时。
+ * 用户消息成功进入 Chat 后才将内存草稿提升为历史会话，空草稿不会出现在会话列表或磁盘中。
+ */
+
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
@@ -128,6 +133,7 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
   return c;
 }
 
+/** 发送纯文本用户消息，并在消息进入运行时后提升空白草稿。 */
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
@@ -139,16 +145,61 @@ export async function sendMessage(text: string): Promise<boolean> {
     return false;
   if (!(await state.ensureSessionRunLock(sessionId))) return false;
   const c = getOrCreateChat(sessionId);
-  await c.sendMessage({ text });
+  const sending = c.sendMessage({ text });
+  state.promoteSession(
+    sessionId,
+    c.messages.length > 0
+      ? c.messages
+      : [{ id: "pending-user-message", role: "user", parts: [{ type: "text", text }] }],
+  );
+  await sending;
   return true;
 }
 
+/** 发送完整用户消息，供包含附件或上下文块的输入区调用。 */
 export async function sendChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): Promise<boolean> {
   const state = useChatStore.getState();
   if (!(await state.ensureSessionRunLock(sessionId))) return false;
-  await getOrCreateChat(sessionId).sendMessage(message);
+  const chat = getOrCreateChat(sessionId);
+  const sending = chat.sendMessage(message);
+  if (isUserSubmission(message)) {
+    state.promoteSession(
+      sessionId,
+      chat.messages.length > 0 ? chat.messages : messagesForPromotion(message),
+    );
+  }
+  await sending;
   return true;
+}
+
+/** 判断待发送内容是否代表一条用户输入，兼容 AI SDK 的 text 简写形式。 */
+function isUserSubmission(
+  message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+): boolean {
+  if (!message) return false;
+  if ("text" in message) return true;
+  return "role" in message && message.role === "user";
+}
+
+/** 为尚未同步进 Chat 状态的用户输入构造标题所需的最小消息结构。 */
+function messagesForPromotion(
+  message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+): UIMessage[] {
+  if (!message || !("parts" in message) || !Array.isArray(message.parts)) {
+    return [];
+  }
+  const messageWithParts = message as {
+    id?: string;
+    parts: UIMessage["parts"];
+  };
+  return [
+    {
+      id: messageWithParts.id ?? "pending-user-message",
+      role: "user",
+      parts: messageWithParts.parts,
+    } as UIMessage,
+  ];
 }

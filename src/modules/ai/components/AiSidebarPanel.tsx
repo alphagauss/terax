@@ -383,7 +383,8 @@ function SessionPicker() {
   const deleteSession = useChatStore((s) => s.deleteSession);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
-  if (!active) return null;
+  const isDraft = activeId != null && !active;
+  if (!active && !isDraft) return null;
 
   const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -394,12 +395,13 @@ function SessionPicker() {
           type="button"
           className={cn(
             "flex min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 py-1",
-            "text-[11px] text-muted-foreground transition-colors",
+            "text-[11px] text-foreground outline-none transition-colors",
             "hover:bg-accent hover:text-foreground",
+            "focus-visible:outline-none",
           )}
           title="Switch session"
         >
-          <span className="truncate">{active.title || "New chat"}</span>
+          <span className="truncate">{active?.title || "New chat"}</span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={10}

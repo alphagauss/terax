@@ -148,6 +148,12 @@ type StoreState = {
 
   // Sessions
   sessionsHydrated: boolean;
+  /**
+   * 当前尚未发送用户消息的临时会话。
+   *
+   * 草稿只用于承载输入和 Chat 实例，绝不能进入历史列表或写入会话文件。
+   */
+  draftSessionId: string | null;
   sessions: SessionMeta[];
   activeSessionId: string | null;
   activeSessionRevision: number;
@@ -157,6 +163,7 @@ type StoreState = {
   refreshSessions: () => Promise<void>;
   ensureSessionRunLock: (id: string) => Promise<boolean>;
   newSession: () => string;
+  promoteSession: (id: string, messages: UIMessage[]) => void;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   commitMessages: (id: string, messages: UIMessage[]) => Promise<void>;
@@ -284,12 +291,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
   resetAgentMeta: () => set({ agentMeta: IDLE_META }),
 
   sessionsHydrated: false,
+  draftSessionId: null,
   sessions: [],
   activeSessionId: null,
   activeSessionRevision: 0,
   runLockSessionIds: {},
   sessionSyncError: null,
 
+  /** 加载已持久化会话；没有历史记录时只创建内存草稿。 */
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
     try {
@@ -299,19 +308,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
         sessions.find((session) => session.id === savedActive) ??
         sessions[0] ??
         null;
-      const fresh: SessionMeta | null = restored
-        ? null
-        : {
-            id: newSessionId(),
-            title: "New chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-      const activeId = restored?.id ?? fresh?.id ?? null;
+      const draftId = restored ? null : newSessionId();
+      const activeId = restored?.id ?? draftId;
       if (restored) await seedSession(restored.id);
-      if (activeId) await setWorkspaceValue("ai:activeSessionId", activeId);
+      if (restored) await setWorkspaceValue("ai:activeSessionId", restored.id);
       set({
-        sessions: fresh ? [fresh, ...sessions] : sessions,
+        sessions,
+        draftSessionId: draftId,
         activeSessionId: activeId,
         sessionsHydrated: true,
         sessionSyncError: null,
@@ -324,6 +327,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
   },
 
+  /** 合并其他进程写入的会话，同时保持当前未发送草稿的焦点。 */
   refreshSessions: async () => {
     try {
       const disk = await listSessions();
@@ -355,19 +359,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
         }
       }
 
-      let next = merged;
+      const next = merged;
       let nextActive = activeId;
+      let nextDraftId = get().draftSessionId;
       if (next.length === 0) {
-        const id = newSessionId();
-        next = [
-          {
-            id,
-            title: "New chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          },
-        ];
-        nextActive = id;
+        if (!nextDraftId) nextDraftId = newSessionId();
+        nextActive = nextDraftId;
+      } else if (nextDraftId && activeId === nextDraftId) {
+        // 用户正在编辑未发送的草稿时，其他窗口的会话刷新不能抢走焦点。
+        nextActive = nextDraftId;
       } else if (
         !activeId ||
         !next.some((session) => session.id === activeId)
@@ -378,11 +378,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       if (nextActive && nextActive !== activeId) {
         const nextMeta = next.find((session) => session.id === nextActive);
         if (nextMeta?.fingerprint) await seedSession(nextActive);
-        await setWorkspaceValue("ai:activeSessionId", nextActive);
+        if (nextMeta) await setWorkspaceValue("ai:activeSessionId", nextActive);
         activeChanged = true;
       }
       set({
         sessions: next,
+        draftSessionId: nextDraftId,
         activeSessionId: nextActive,
         activeSessionRevision: activeChanged
           ? get().activeSessionRevision + 1
@@ -407,22 +408,41 @@ export const useChatStore = create<StoreState>((set, get) => ({
     return false;
   },
 
+  /** 切换到唯一的空白草稿，不为尚未发送的输入创建历史记录。 */
   newSession: () => {
     const activeId = get().activeSessionId;
     if (activeId && get().runLockSessionIds[activeId]) return activeId;
+    const draftId = get().draftSessionId;
+    if (draftId) return draftId;
     const id = newSessionId();
-    const meta: SessionMeta = {
-      id,
-      title: "New chat",
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    const next = [meta, ...get().sessions];
-    set({ sessions: next, activeSessionId: id, agentMeta: IDLE_META });
-    void setWorkspaceValue("ai:activeSessionId", id);
+    set({
+      draftSessionId: id,
+      activeSessionId: id,
+      agentMeta: IDLE_META,
+    });
     return id;
   },
 
+  /** 用户消息进入 Chat 后，将对应草稿提升为可见的历史会话。 */
+  promoteSession: (id, messages) => {
+    if (get().sessions.some((session) => session.id === id)) return;
+    const now = Date.now();
+    const meta: SessionMeta = {
+      id,
+      title: deriveTitle(messages),
+      createdAt: now,
+      updatedAt: now,
+    };
+    set({
+      sessions: [meta, ...get().sessions],
+      draftSessionId: get().draftSessionId === id ? null : get().draftSessionId,
+    });
+    if (get().activeSessionId === id) {
+      void setWorkspaceValue("ai:activeSessionId", id);
+    }
+  },
+
+  /** 切换到已持久化会话，并放弃当前未发送草稿的会话身份。 */
   switchSession: (id) => {
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
@@ -432,7 +452,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
-      set({ activeSessionId: id, agentMeta: IDLE_META });
+      set({ activeSessionId: id, draftSessionId: null, agentMeta: IDLE_META });
       void setWorkspaceValue("ai:activeSessionId", id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
@@ -444,6 +464,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       .finally(flip);
   },
 
+  /** 删除一条历史会话，并在需要时回退到另一条历史或空白草稿。 */
   deleteSession: (id) => {
     if (Object.keys(get().runLockSessionIds).length > 0) return;
     void (async () => {
@@ -455,18 +476,26 @@ export const useChatStore = create<StoreState>((set, get) => ({
         chats.delete(id);
         seedMessages.delete(id);
         persistedMessageCounts.delete(id);
-        if (remaining.length === 0) {
-          const fresh: SessionMeta = {
-            id: newSessionId(),
-            title: "New chat",
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
-          set({ sessions: [fresh], activeSessionId: fresh.id });
-          await setWorkspaceValue("ai:activeSessionId", fresh.id);
+        const wasActive = get().activeSessionId === id;
+        const activeDraftId = get().draftSessionId;
+        if (remaining.length === 0 && !wasActive && activeDraftId) {
+          // 删除最后一条历史记录不能丢弃用户正在编辑的空白草稿。
+          set({
+            sessions: [],
+            draftSessionId: activeDraftId,
+            activeSessionId: activeDraftId,
+          });
           return;
         }
-        const wasActive = get().activeSessionId === id;
+        if (remaining.length === 0) {
+          const draftId = newSessionId();
+          set({
+            sessions: [],
+            draftSessionId: draftId,
+            activeSessionId: draftId,
+          });
+          return;
+        }
         const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
         const nextMeta = remaining.find((session) => session.id === nextActive);
         if (
@@ -481,7 +510,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
             set({ sessionSyncError: String(error) });
           }
         }
-        set({ sessions: remaining, activeSessionId: nextActive });
+        set({
+          sessions: remaining,
+          draftSessionId:
+            activeDraftId === nextActive ? activeDraftId : null,
+          activeSessionId: nextActive,
+        });
         if (wasActive)
           await setWorkspaceValue("ai:activeSessionId", nextActive);
       } catch (error) {

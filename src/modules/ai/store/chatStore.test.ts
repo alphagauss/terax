@@ -85,6 +85,7 @@ describe("chat store multi-process lifecycle", () => {
     io.workspaceSet.mockResolvedValue(undefined);
     useChatStore.setState({
       sessionsHydrated: false,
+      draftSessionId: null,
       sessions: [],
       activeSessionId: null,
       activeSessionRevision: 0,
@@ -107,6 +108,17 @@ describe("chat store multi-process lifecycle", () => {
     );
   });
 
+  it("opens an unlisted draft when no persisted session exists", async () => {
+    await useChatStore.getState().hydrateSessions();
+
+    expect(useChatStore.getState().sessions).toEqual([]);
+    expect(useChatStore.getState().activeSessionId).toBeTruthy();
+    expect(useChatStore.getState().draftSessionId).toBe(
+      useChatStore.getState().activeSessionId,
+    );
+    expect(io.workspaceSet).not.toHaveBeenCalled();
+  });
+
   it("blocks new, switch, and delete while the active run lock is held", async () => {
     useChatStore.setState({
       sessions: [first, second],
@@ -121,6 +133,45 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().activeSessionId).toBe(first.id);
     expect(useChatStore.getState().sessions).toHaveLength(2);
     expect(io.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps a new session as one unlisted draft until a user message is sent", () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+
+    const draftId = useChatStore.getState().newSession();
+
+    expect(useChatStore.getState().activeSessionId).toBe(draftId);
+    expect(useChatStore.getState().draftSessionId).toBe(draftId);
+    expect(useChatStore.getState().sessions).toEqual([first]);
+    expect(useChatStore.getState().newSession()).toBe(draftId);
+    expect(useChatStore.getState().sessions).toEqual([first]);
+
+    useChatStore.getState().promoteSession(draftId, [
+      { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
+    ]);
+
+    expect(useChatStore.getState().draftSessionId).toBeNull();
+    expect(useChatStore.getState().sessions[0]).toMatchObject({
+      id: draftId,
+      title: "hello",
+    });
+  });
+
+  it("preserves the active draft when deleting the final history item", async () => {
+    const draftId = "draft-11111111-1111-4111-8111-111111111111";
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: draftId,
+      draftSessionId: draftId,
+    });
+
+    useChatStore.getState().deleteSession(first.id);
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().sessions).toEqual([]);
+    });
+
+    expect(useChatStore.getState().activeSessionId).toBe(draftId);
+    expect(useChatStore.getState().draftSessionId).toBe(draftId);
   });
 
   it("keeps the observable run lock when Rust release fails", async () => {
