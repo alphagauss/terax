@@ -49,7 +49,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--port",
         type=_parse_port,
-        default=8701,
+        default=11123,
         help="FastAPI 监听端口",
     )
     parser.add_argument(
@@ -58,6 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("critical", "error", "warning", "info", "debug", "trace"),
         default="info",
         help="Uvicorn 日志级别",
+    )
+    parser.add_argument(
+        "-t",
+        "--token",
+        help="Alpha 服务凭据；未提供时读取 TERAX_ALPHA_TOKEN",
     )
     return parser
 
@@ -77,6 +82,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         host=args.host,
         port=args.port,
         log_level=args.log_level,
+        token=args.token,
     )
 
 

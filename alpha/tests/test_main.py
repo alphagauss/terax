@@ -12,8 +12,14 @@ def test_main_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     captured: dict[str, object] = {}
 
-    def fake_run_server(*, host: str, port: int, log_level: str) -> None:
-        captured.update(host=host, port=port, log_level=log_level)
+    def fake_run_server(
+        *,
+        host: str,
+        port: int,
+        log_level: str,
+        token: str | None,
+    ) -> None:
+        captured.update(host=host, port=port, log_level=log_level, token=token)
 
     monkeypatch.setattr(main_module, "run_server", fake_run_server)
 
@@ -23,6 +29,7 @@ def test_main_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "host": "127.0.0.1",
         "port": 8701,
         "log_level": "info",
+        "token": None,
     }
 
 
@@ -31,8 +38,14 @@ def test_main_forwards_explicit_options(monkeypatch: pytest.MonkeyPatch) -> None
 
     captured: dict[str, object] = {}
 
-    def fake_run_server(*, host: str, port: int, log_level: str) -> None:
-        captured.update(host=host, port=port, log_level=log_level)
+    def fake_run_server(
+        *,
+        host: str,
+        port: int,
+        log_level: str,
+        token: str | None,
+    ) -> None:
+        captured.update(host=host, port=port, log_level=log_level, token=token)
 
     monkeypatch.setattr(main_module, "run_server", fake_run_server)
 
@@ -44,6 +57,8 @@ def test_main_forwards_explicit_options(monkeypatch: pytest.MonkeyPatch) -> None
             "9988",
             "--log-level",
             "DEBUG",
+            "--token",
+            "development-token",
         ]
     )
 
@@ -51,4 +66,26 @@ def test_main_forwards_explicit_options(monkeypatch: pytest.MonkeyPatch) -> None
         "host": "127.0.0.2",
         "port": 9988,
         "log_level": "debug",
+        "token": "development-token",
     }
+
+
+def test_main_accepts_short_token_option(monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证开发调试可以通过短参数传入服务凭据。"""
+
+    captured: dict[str, object] = {}
+
+    def fake_run_server(
+        *,
+        host: str,
+        port: int,
+        log_level: str,
+        token: str | None,
+    ) -> None:
+        captured.update(token=token)
+
+    monkeypatch.setattr(main_module, "run_server", fake_run_server)
+
+    main_module.main(["-t", "dev"])
+
+    assert captured["token"] == "dev"

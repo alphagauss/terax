@@ -10,7 +10,7 @@
 
 ## 应用入口
 
-- `alpha/__main__.py`: `python -m alpha` 模块入口；只解析监听地址、端口和日志级别，并把前台服务启动交给 `alpha.server`。
+- `alpha/__main__.py`: `python -m alpha` 模块入口；解析监听地址、端口、日志级别和开发调试用的 `-t/--token`，并把前台服务启动交给 `alpha.server`。未显式传入凭据时继续读取 `TERAX_ALPHA_TOKEN`。
 - `alpha/server.py`: 单 Uvicorn 协调进程运行器；创建 FastAPI 应用并以前台模式运行，不管理 daemon、PID 或日志文件。
 - `alpha/live/runner.py`、`alpha/paper/runner.py`: 实盘和模拟盘运行入口占位文件，当前只保留模块边界和导出。
 

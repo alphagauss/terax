@@ -15,7 +15,13 @@ def test_run_server_starts_single_uvicorn_process(
     fake_app = object()
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(server_module, "create_app", lambda: fake_app)
+    captured_token: dict[str, str | None] = {}
+
+    def fake_create_app(*, token: str | None = None) -> object:
+        captured_token["value"] = token
+        return fake_app
+
+    monkeypatch.setattr(server_module, "create_app", fake_create_app)
 
     def fake_uvicorn_run(app: object, **options: object) -> None:
         captured.update(app=app, **options)
@@ -26,8 +32,10 @@ def test_run_server_starts_single_uvicorn_process(
         host="127.0.0.1",
         port=8701,
         log_level="debug",
+        token="development-token",
     )
 
+    assert captured_token == {"value": "development-token"}
     assert captured == {
         "app": fake_app,
         "host": "127.0.0.1",
