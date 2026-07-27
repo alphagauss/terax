@@ -1,0 +1,16 @@
+pytest
+black
+pytest-cov
+loguru
+pydantic
+httpx
+pandas
+numpy
+python-dotenv
+# polars[all]
+# polars[numpy,pandas,pyarrow]
+tqdm
+deap
+fastapi
+uvicorn[standard]
+ta-lib

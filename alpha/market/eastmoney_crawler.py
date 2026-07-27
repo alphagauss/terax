@@ -1,3 +1,8 @@
+"""东方财富公开行情接口的异步请求与数据归一化。
+
+本模块只通过 HTTP 接口获取数据，不管理浏览器会话、Cookie 或人工验证流程。
+"""
+
 import asyncio
 import random
 from datetime import datetime
@@ -8,10 +13,7 @@ import httpx
 import pandas as pd
 from loguru import logger
 
-from alpha.market.eastmoney_session import EastmoneyCookieManager
-
-
-# 东方财富网基础请求头，Cookie 会在请求前按目标域名动态附加。
+# 东方财富网基础请求头。
 BASE_REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
     'Accept': '*/*',
@@ -20,7 +22,6 @@ BASE_REQUEST_HEADERS = {
 
 _REQUEST_TIMEOUT = 15.0
 _REQUEST_SEMAPHORE = asyncio.Semaphore(8)
-_COOKIE_MANAGER = EastmoneyCookieManager()
 
 code_id_dict = {
     '上证综指': '1.000001', 'sh': '1.000001', '上证指数': '1.000001', '1.000001': '1.000001',
@@ -85,13 +86,11 @@ async def _fetch_json(
     max_retries = 3
     base_delay = 1.0
     random_delay_range = (0.1, 0.4)
-    refreshed_cookies = False
-
     async with _REQUEST_SEMAPHORE:
         await asyncio.sleep(random.uniform(0.25, 0.8))
         for attempt in range(max_retries):
             try:
-                headers = _build_request_headers(url)
+                headers = dict(BASE_REQUEST_HEADERS)
                 if client is None:
                     async with httpx.AsyncClient(timeout=timeout) as local_client:
                         response = await _send_request(
@@ -113,22 +112,11 @@ async def _fetch_json(
                 if _looks_like_antibot_response(url, response, data):
                     raise EastmoneyAntiBotError(f"东方财富接口触发风控：{urlparse(url).netloc}")
 
-                _COOKIE_MANAGER.mark_success()
                 return data if isinstance(data, dict) else {}
 
             except EastmoneyAntiBotError as exc:
                 logger.warning(str(exc))
-                _COOKIE_MANAGER.mark_blocked()
-                if refreshed_cookies:
-                    logger.error("刷新 Cookie 后仍命中风控，放弃本次请求。")
-                    return {}
-
-                cookies = await _COOKIE_MANAGER.refresh_cookies()
-                refreshed_cookies = True
-                if not cookies:
-                    logger.error("Cookie 刷新失败，无法继续请求东方财富接口。")
-                    return {}
-                await asyncio.sleep(1.0)
+                return {}
 
             except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as exc:
                 if attempt == max_retries - 1:
@@ -143,30 +131,6 @@ async def _fetch_json(
 
 class EastmoneyAntiBotError(RuntimeError):
     """东方财富触发风控时抛出的异常。"""
-
-
-async def warmup_eastmoney_session(force_refresh: bool = False) -> bool:
-    """预热东方财富浏览器会话，默认仅在 Cookie 缺失或过旧时才刷新。"""
-    cookies = await _COOKIE_MANAGER.warmup(force_refresh=force_refresh)
-    return bool(cookies)
-
-
-def get_eastmoney_session_status() -> dict[str, Any]:
-    """返回当前东财会话状态，便于脚本在预热前判断。"""
-    return {
-        "has_cookies": _COOKIE_MANAGER.has_cookies(),
-        "cookie_age_seconds": _COOKIE_MANAGER.cookie_age_seconds(),
-        "should_refresh_before_request": _COOKIE_MANAGER.should_refresh_before_request(),
-    }
-
-
-def _build_request_headers(url: str) -> dict[str, str]:
-    """构造请求头，并按目标域名附带对应的 Cookie。"""
-    headers = dict(BASE_REQUEST_HEADERS)
-    cookie_header = _COOKIE_MANAGER.get_cookie_header(url)
-    if cookie_header:
-        headers["Cookie"] = cookie_header
-    return headers
 
 
 async def _send_request(
@@ -440,10 +404,6 @@ async def get_data(
 class EastmoneyMarket:
     """东方财富行情实现类（qstock 风格异步实现）。"""
 
-    async def warmup_session(self, force_refresh: bool = False) -> bool:
-        """在正式抓数前预热浏览器会话。默认仅在 Cookie 过旧时刷新。"""
-        return await warmup_eastmoney_session(force_refresh=force_refresh)
-
     async def get_history(
         self,
         symbol: str,
@@ -497,8 +457,6 @@ if __name__ == "__main__":
 
     async def main():
         market = EastmoneyMarket()
-        print(get_eastmoney_session_status())
-        await market.warmup_session()
         df_history = await market.get_history('平安银行', period='daily', adjust='hfq', start_date='20260320')
         print(df_history)
 

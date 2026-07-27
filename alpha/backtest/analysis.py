@@ -1,12 +1,15 @@
+"""回测结果的日度指标与统计分析。
+
+本模块只计算并返回可序列化的回测数据，不负责图表渲染，绘图由 Web 端完成。
+"""
+
 from datetime import date
 from typing import Callable
 
 import numpy as np
-import plotly.graph_objects as go
 from loguru import logger
 from pandas import DataFrame, Series
 from pandas.core.window import ExponentialMovingWindow
-from plotly.subplots import make_subplots
 
 
 class Analysis:
@@ -220,50 +223,4 @@ class Analysis:
         self.output("策略统计指标计算完成")
 
         return idx
-
-    def show_chart(self, df: DataFrame | None = None) -> None:
-        """展示回测分析图表。
-
-        优先使用已计算完成的分析结果，避免回测引擎同时承担展示职责。
-
-        Args:
-            df: 可选的分析结果数据
-        """
-        chart_df: DataFrame | None = df if df is not None else self.df
-        if chart_df.empty:
-            return
-
-        fig = make_subplots(
-            rows=4,
-            cols=1,
-            subplot_titles=["Balance", "Drawdown", "Daily PnL", "PnL Distribution"],
-            vertical_spacing=0.06,
-        )
-
-        fig.add_trace(
-            go.Scatter(x=chart_df.index, y=chart_df["balance"], mode="lines", name="Balance"),
-            row=1,
-            col=1,
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=chart_df.index,
-                y=chart_df["drawdown"],
-                fillcolor="red",
-                fill="tozeroy",
-                mode="lines",
-                name="Drawdown",
-            ),
-            row=2,
-            col=1,
-        )
-        fig.add_trace(go.Bar(x=chart_df.index, y=chart_df["net_pnl"], name="Daily PnL"), row=3, col=1)
-        fig.add_trace(
-            go.Histogram(x=chart_df["net_pnl"], nbinsx=100, name="Days"),
-            row=4,
-            col=1,
-        )
-
-        fig.update_layout(height=1000, width=1000)
-        fig.show()
 

@@ -62,9 +62,8 @@ alpha.api
 
 ## 市场接入
 
-- `alpha/market/eastmoney_crawler.py`: 东方财富抓取层，包含会话预热、反爬识别、JSON 解码、代码映射和实时/历史数据读取；核心类是 `EastmoneyMarket`，异常类是 `EastmoneyAntiBotError`。
+- `alpha/market/eastmoney_crawler.py`: 东方财富 HTTP 抓取层，包含固定请求头、限流重试、风控识别、JSON 解码、代码映射和实时/历史数据读取；不管理浏览器会话或 Cookie。核心类是 `EastmoneyMarket`，异常类是 `EastmoneyAntiBotError`。
 - `alpha/market/eastmoney_gm.py`: GM 接口适配层，封装当前/历史行情、交易日、交易时段、合约到期、指数成分和基本面查询等函数；`GMTimeoutError` 用于超时错误。
-- `alpha/market/eastmoney_session.py`: Cookie 和 Playwright 会话管理；`EastmoneyCookieManager` 负责持久化、刷新和失效判断，`EastmoneyPlaywrightSession` 负责浏览器会话。
 
 ## 存储层
 
@@ -88,7 +87,7 @@ alpha.api
 ## 回测层
 
 - `alpha/backtest/array.py`: `ArrayManager` 管理 OHLCV、成交额和持仓量窗口，并暴露最近值访问接口。
-- `alpha/backtest/analysis.py`: `Analysis` 计算回测统计指标、日度指标并生成图表；包含 `calculate_dalily()`、`calculate_statistics()`、`show_chart()`。
+- `alpha/backtest/analysis.py`: `Analysis` 计算回测统计指标与日度指标，向 Web 端返回绘图所需数据；包含 `calculate_dalily()`、`calculate_statistics()`。
 - `alpha/backtest/backtesting.py`: `BackTesting` 是回测主引擎，负责参数设置、数据加载、K 线推进、撮合、持仓/账户更新、结果统计和日志输出。
 - `alpha/backtest/data.py`: `BacktestDataScope` 和 `BacktestInput` 是回测输入/范围模型；其余函数负责 trade date、history data、profile/state/universe/contract 的构建与转换。
 - `alpha/backtest/indicator.py`: 指标封装层，提供 `compare_speed()` 和大量 TALib 风格方法。

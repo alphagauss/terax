@@ -1,3 +1,5 @@
+"""测试回测分析指标计算及其返回给 Web 端的日度数据不变量。"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -146,24 +148,3 @@ def test_analysis_margin_call_branch_should_clip_balance_to_zero() -> None:
 
     assert result is None
     assert analysis.df["balance"].min() == 0
-
-
-def test_analysis_show_chart_should_render_plotly_figure(monkeypatch: pytest.MonkeyPatch) -> None:
-    data = _sample_data()
-    analysis = Analysis(data, output=lambda _: None, capital=1_000_000)
-    analysis.calculate_dalily()
-
-    captured: dict[str, object] = {}
-
-    def fake_show(self: object) -> None:
-        captured["figure"] = self
-
-    monkeypatch.setattr("plotly.graph_objs._figure.Figure.show", fake_show)
-
-    analysis.show_chart()
-
-    figure = captured["figure"]
-    assert figure is not None
-    assert len(figure.data) == 4
-    assert figure.layout.height == 1000
-    assert figure.layout.width == 1000
