@@ -28,3 +28,8 @@ stats.html
 *.tsbuildinfo
 .pnpm-store
 .cargo-test-target
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/

@@ -8,16 +8,19 @@
 - `alpha/live/runner.py` 和 `alpha/paper/runner.py` 目前只是运行入口占位文件。
 - 各子包里的 `__init__.py` 大多只承担命名空间或轻量导出，不再逐个展开。
 
-## 入口与 CLI
+## 应用入口
 
-- `alpha/cli.py`: Typer 业务命令行入口；只保留 `sync-security`、`sync-bars`、`list-strategies`、`run-backtest`、`check-db`。不再管理应用生命周期，不再包含 daemon、start、stop、restart、status、logs。
+- `alpha/__main__.py`: `python -m alpha` 模块入口；只解析监听地址、端口和日志级别，并把前台服务启动交给 `alpha.server`。
+- `alpha/server.py`: 单 Uvicorn 协调进程运行器；创建 FastAPI 应用并以前台模式运行，不管理 daemon、PID 或日志文件。
 - `alpha/live/runner.py`、`alpha/paper/runner.py`: 实盘和模拟盘运行入口占位文件，当前只保留模块边界和导出。
 
-备注：当前迁入代码只保留业务路由和运行对象，独立 FastAPI 应用入口将在后续集成阶段建立。CLI 仅用于开发和离线维护，不是 Terax 的正式调用路径。
+备注：Alpha 的正式调用边界是 `/api/alpha`。离线数据库维护继续使用 `alpha/scripts/` 中的显式脚本，不再维护绕过 FastAPI 的业务 CLI。
 
 ## API 层
 
-- `alpha/api/router.py`: Alpha 业务 API 总路由；聚合 `health`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 九组业务路由。自身不带前缀，后续由独立 FastAPI 应用统一挂载到 `/api/alpha`。
+- `alpha/api/app.py`: 独立 FastAPI 应用工厂；从运行环境读取服务凭据，管理 `AlphaServiceContainer` 生命周期，并把业务路由挂载到 `/api/alpha`。
+- `alpha/api/auth.py`: HTTP Bearer 服务凭据验证；负责保护 Alpha 业务路由，不承接领域权限判断。
+- `alpha/api/router.py`: Alpha 业务 API 总路由；聚合 `health`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 九组业务路由。自身不带前缀，由独立 FastAPI 应用统一挂载到 `/api/alpha`。
 - `alpha/api/container.py`: `AlphaServiceContainer` 持有数据库、懒加载策略管理器、事件引擎和进程任务管理器；`create_alpha_service_container()` 延迟创建核心对象，供 FastAPI 应用组装；容器只负责运行对象组装与关闭，不承接具体 API 响应编排。`_LazyStrategyManager` 额外暴露回测结果概要与单结果读取，供工作台结果页复用现有 `StrategyResult`。
 - `alpha/api/deps.py`: FastAPI 依赖注入入口；只负责从 `app.state.alpha_services` 读取 `AlphaServiceContainer`。
 - `alpha/api/models.py`: Alpha 业务 API 响应模型，包括 `HealthResponse`、带 `bars/security_profile/index_constituents` 聚合字段的 `DataOverviewResponse`、`StrategyInfo`、以及包含 `backtest_id/status` 的 `BacktestStartResponse`。
@@ -118,6 +121,9 @@ alpha.api
 
 ## 测试索引
 
+- `alpha/tests/test_app.py`: 验证独立 FastAPI 应用的路由挂载、Bearer 鉴权及容器关闭。
+- `alpha/tests/test_main.py`: 验证 `python -m alpha` 参数默认值和服务运行器转发。
+- `alpha/tests/test_server.py`: 验证 Uvicorn 保持单进程前台启动。
 - `alpha/tests/test_router.py`: 验证 Alpha 最小业务 API 在路由层完成响应编排并调用容器中的核心对象。
 - `alpha/tests/test_api_container.py`: 验证 API 容器初始化、懒加载策略管理器和关闭运行对象。
 - `alpha/tests/unit_tests/test_api_events.py`: 事件广播工具测试。
