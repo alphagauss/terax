@@ -6,8 +6,8 @@ pub mod menu;
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, app_data, fs, git, history, lsp, net, open_with, pty, remote, secrets,
-    shared_store, shell, transfers, workspace, workspace_process,
+    agent, ai_sessions, alpha, app_data, fs, git, history, lsp, net, open_with, pty, remote,
+    secrets, shared_store, shell, transfers, workspace, workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -45,7 +45,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
         let _ = window.show();
         let _ = window.set_focus();
         if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
-            // emit() serializes via JSON — no string-escape footgun, unlike
+            // emit() serializes via JSON, no string-escape footgun, unlike
             // eval() with format!(). Frontend listens via Tauri event API.
             let _ = window.emit("terax:settings-tab", t);
         }
@@ -81,7 +81,7 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     let window = builder.build().map_err(|e| e.to_string())?;
 
     // Some Linux compositors (GNOME/Mutter with CSD-by-default) ignore the
-    // builder-time decorations flag — re-assert it after realize.
+    // builder-time decorations flag, re-assert it after realize.
     #[cfg(target_os = "linux")]
     {
         let _ = window.set_decorations(false);
@@ -356,11 +356,19 @@ pub fn run() {
             history::history_record,
             history::history_list,
             menu::apply_menu_language,
+            alpha::commands::alpha_status,
+            alpha::commands::alpha_set_python_path,
+            alpha::commands::alpha_check_python,
+            alpha::commands::alpha_set_auto_start,
+            alpha::commands::alpha_start,
+            alpha::commands::alpha_stop,
+            alpha::commands::alpha_restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app, event| {
             if let tauri::RunEvent::Ready = event {
+                alpha::schedule_delayed_start();
                 if let Some(main) = app.get_webview_window("main") {
                     if let Some(geometry) = window_geometry {
                         let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));

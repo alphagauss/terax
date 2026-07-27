@@ -1,0 +1,11 @@
+loguru
+pydantic
+httpx
+pandas
+numpy
+python-dotenv
+tqdm
+deap
+fastapi
+uvicorn[standard]
+ta-lib

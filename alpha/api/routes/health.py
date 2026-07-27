@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -26,4 +27,8 @@ async def health(
         健康检查响应。
     """
 
-    return HealthResponse(status="ok", services_ready=True)
+    return HealthResponse(
+        status="ok",
+        services_ready=True,
+        archive_hash=os.environ.get("TERAX_ALPHA_ARCHIVE_HASH", "development"),
+    )

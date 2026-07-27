@@ -17,29 +17,52 @@ def test_run_server_starts_single_uvicorn_process(
 
     captured_token: dict[str, str | None] = {}
 
-    def fake_create_app(*, token: str | None = None) -> object:
+    def fake_create_app(
+        *,
+        token: str | None = None,
+        shutdown_callback: object = None,
+    ) -> object:
         captured_token["value"] = token
+        captured["shutdown_callback"] = shutdown_callback
         return fake_app
 
     monkeypatch.setattr(server_module, "create_app", fake_create_app)
 
-    def fake_uvicorn_run(app: object, **options: object) -> None:
-        captured.update(app=app, **options)
+    class FakeConfig:
+        """记录 Uvicorn 配置参数。"""
 
-    monkeypatch.setattr(server_module.uvicorn, "run", fake_uvicorn_run)
+        def __init__(self, app: object, **options: object) -> None:
+            captured.update(app=app, **options)
+
+    class FakeServer:
+        """记录单进程服务已经运行。"""
+
+        should_exit = False
+
+        def __init__(self, _config: object) -> None:
+            captured["server"] = self
+
+        def run(self) -> None:
+            captured["ran"] = True
+
+    monkeypatch.setattr(server_module.uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(server_module.uvicorn, "Server", FakeServer)
 
     server_module.run_server(
         host="127.0.0.1",
-        port=8701,
+        port=11123,
         log_level="debug",
         token="development-token",
     )
 
     assert captured_token == {"value": "development-token"}
-    assert captured == {
-        "app": fake_app,
-        "host": "127.0.0.1",
-        "port": 8701,
-        "log_level": "debug",
-        "workers": 1,
-    }
+    assert captured["app"] is fake_app
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 11123
+    assert captured["log_level"] == "debug"
+    assert captured["workers"] == 1
+    assert captured["ran"] is True
+    callback = captured["shutdown_callback"]
+    assert callable(callback)
+    callback()
+    assert captured["server"].should_exit is True

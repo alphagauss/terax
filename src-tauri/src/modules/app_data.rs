@@ -1,3 +1,7 @@
+//! Terax 自有数据目录。
+//!
+//! 所有可写的跨模块数据都从 `~/.terax` 派生，不读取进程环境中的 HOME 路径。
+
 use std::path::PathBuf;
 
 /// Application-owned directories below `~/.terax`.
@@ -12,6 +16,7 @@ pub enum Directory {
     Ssh,
     ShellIntegration,
     Logs,
+    Alpha,
 }
 
 pub fn root() -> Result<PathBuf, String> {
@@ -31,6 +36,7 @@ pub fn directory(directory: Directory) -> Result<PathBuf, String> {
         Directory::Ssh => "ssh",
         Directory::ShellIntegration => "shell-integration",
         Directory::Logs => "logs",
+        Directory::Alpha => "alpha",
     };
     Ok(root()?.join(name))
 }
@@ -46,5 +52,7 @@ mod tests {
         assert_eq!(shared.parent().unwrap().file_name().unwrap(), ".terax");
         let window_state = directory(Directory::WindowState).unwrap();
         assert_eq!(window_state.file_name().unwrap(), "window-state");
+        let alpha = directory(Directory::Alpha).unwrap();
+        assert_eq!(alpha.file_name().unwrap(), "alpha");
     }
 }

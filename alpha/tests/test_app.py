@@ -59,7 +59,13 @@ def test_app_mounts_router_and_closes_container(
     assert missing.status_code == 401
     assert invalid.status_code == 401
     assert valid.status_code == 200
-    assert valid.json() == {"status": "ok", "services_ready": True}
+    assert valid.json() == {
+        "status": "ok",
+        "services_ready": True,
+        "service": "terax-alpha",
+        "protocol_version": 1,
+        "archive_hash": "development",
+    }
     assert container.closed is True
 
 
@@ -84,3 +90,34 @@ def test_create_app_reads_token_from_environment(
         )
 
     assert response.status_code == 200
+
+
+def test_shutdown_route_calls_managed_server_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证任意受认证客户端都能请求当前共享服务优雅退出。"""
+
+    container = FakeContainer()
+    shutdown_requested: list[bool] = []
+    monkeypatch.setattr(
+        app_module,
+        "create_alpha_service_container",
+        lambda: container,
+    )
+    app = app_module.create_app(
+        token="test-token",
+        shutdown_callback=lambda: shutdown_requested.append(True),
+    )
+
+    with TestClient(app) as client:
+        unauthorized = client.post("/api/alpha/system/shutdown")
+        assert shutdown_requested == []
+        response = client.post(
+            "/api/alpha/system/shutdown",
+            headers={"Authorization": "Bearer test-token"},
+        )
+
+    assert unauthorized.status_code == 401
+    assert response.status_code == 202
+    assert response.json() == {"status": "stopping"}
+    assert shutdown_requested == [True]

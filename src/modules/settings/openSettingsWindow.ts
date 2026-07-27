@@ -1,3 +1,8 @@
+/**
+ * 本文件封装独立设置窗口的打开入口和有效分区标识。
+ * 调用方只传递目标分区，窗口创建与复用由 Tauri 后端负责。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 
 export type SettingsTab =
@@ -7,6 +12,7 @@ export type SettingsTab =
   | "shortcuts"
   | "models"
   | "agents"
+  | "alpha"
   | "remote"
   | "about";
 

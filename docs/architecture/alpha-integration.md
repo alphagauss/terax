@@ -33,9 +33,29 @@ alpha-native Rust 计算模块
 | --- | --- | --- |
 | `alpha/` | FastAPI 接口、领域模型、行情、存储、策略、回测、同步、任务和事件 | 不维护 Terax 前端、AI Agent、工作区或第二套用户界面 |
 | `alpha-native/` | 适合 Rust 实现的量化计算和性能热点，通过 PyO3 供 Alpha 调用 | 不承载 FastAPI、进程生命周期或 Terax UI |
+| `src-tauri/build_support/alpha.rs` | 构建时筛选 Alpha 运行源码、生成确定性压缩归档和内容哈希 | 不包含 Python 解释器、第三方依赖、数据、测试或开发工具 |
 | `src-tauri/src/modules/alpha/` | Alpha 启停、探活、凭据注入及通用 GET、POST、WebSocket 转发 | 不复制 Alpha 领域模型，不解释或重组业务响应 |
 | `src/modules/alpha/` | Alpha 页面、图表、交互状态和 API 调用封装 | 不直接管理 Python 进程，不绕过 Rust 访问受管 Alpha 后端 |
 | `src/modules/ai/` | Alpha 相关 Agent 工具、审批和对话集成 | 通过与页面相同的 Alpha API 调用链访问业务能力 |
+
+## 打包与运行目录
+
+- `pnpm tauri dev` 不释放源码。Rust 以仓库根目录为工作目录，通过用户配置的解释器执行 `python -E -m alpha`。
+- Release 构建由 `src-tauri/build_support/alpha.rs` 把必要的 `.py` 文件和 `requirements-runtime.txt` 压缩进 Terax 可执行文件，不使用 Tauri resources，也不使用 PyInstaller。
+- Release 首次启动 Alpha 时，Rust 在跨进程文件锁内把归档释放到 `~/.terax/alpha/runtime/<archive-hash>/`。先写临时目录并校验入口和哈希标记，再通过同目录重命名发布，因此其他进程不会看到半成品。
+- 内容哈希发生变化时使用新的运行目录。旧目录不在启动路径上自动删除，避免影响仍在运行的旧版本服务。
+- Alpha 数据位于 `~/.terax/alpha/data/`，日志位于 `~/.terax/logs/alpha/`。Python 默认把 `__pycache__` 写入对应的内容哈希运行目录，使缓存跟随源码版本且无需额外缓存状态。
+- 发行物仍是一个裸 Terax 可执行文件。源码只有在运行 Alpha 时才以普通文件形式出现在本机运行目录中，Python 无法直接从 Tauri resource 或压缩字节中导入整套包。
+
+## 共享服务生命周期
+
+- 本机所有 Terax 进程共享一个监听 `127.0.0.1:11123` 的 Alpha 服务。每个窗口都是等价客户端，不维护窗口私有的服务状态。
+- Python 解释器绝对路径和自动启动开关通过 Terax 共享设置保存。首次未配置解释器时不自动启动，由用户在 Alpha 设置中选择解释器。
+- 应用 Ready 后延迟协调。健康检查成功且归档哈希一致时不做额外操作；服务未运行、端口空闲且已配置自动启动时才启动服务。
+- 健康服务的归档哈希与当前 Terax 不一致时，持有操作锁的新构建先请求旧服务正常退出，再以当前内嵌源码启动替代服务。
+- 启动、停止和重启共用 `~/.terax/alpha/service.lock`。该锁只串行化操作，服务是否运行始终以带凭据的健康检查为准。
+- Alpha 凭据保存在 `~/.terax/alpha/service.token`，只由 Rust 注入请求。停止通过受认证的 `/api/alpha/system/shutdown` 完成，不根据陈旧 PID 终止未知进程。
+- 若固定端口被无法认证的进程占用，Terax 报告冲突并拒绝启动或停止该进程。
 
 ## 核心原则
 
@@ -71,6 +91,7 @@ alpha-native Rust 计算模块
 
 | 变更类型 | 放置位置 |
 | --- | --- |
+| Alpha 源码筛选、压缩、内嵌归档与构建哈希 | `src-tauri/build_support/alpha.rs` |
 | 行情、策略、回测、同步、存储和任务行为 | `alpha/` 对应领域模块 |
 | HTTP 路由、请求模型、业务校验和事件协议 | `alpha/api/` |
 | 量化计算热点和 PyO3 接口 | `alpha-native/` |

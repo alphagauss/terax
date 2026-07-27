@@ -27,7 +27,7 @@ def test_main_uses_safe_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert captured == {
         "host": "127.0.0.1",
-        "port": 8701,
+        "port": 11123,
         "log_level": "info",
         "token": None,
     }

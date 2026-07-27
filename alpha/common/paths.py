@@ -1,39 +1,61 @@
-"""运行时路径辅助函数。"""
+"""Alpha 运行时路径辅助函数。
+
+所有持久数据和日志目录由 Terax 启动环境注入；独立开发运行时回退到用户目录，
+不依赖源码位置、当前工作目录或机器特定的绝对路径。
+"""
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-import sys
 
-if sys.platform == "win32":
-    WORKSPACE_DIR: Path = Path("D:/OneDrive/project/alphagogo/.data")
-else:
-    WORKSPACE_DIR: Path = Path.home() / "OneDrive/project/alphagogo/.data"
+DATA_DIR_ENV = "TERAX_ALPHA_DATA_DIR"
+LOG_DIR_ENV = "TERAX_ALPHA_LOG_DIR"
 
 
-def _ensure_path(path: Path) -> Path:
-    """确保路径所属目录存在。
+def _ensure_directory(path: Path) -> Path:
+    """确保目录存在。
 
     Args:
-        path: 目录或文件路径。
+        path: 需要创建的目录路径。
 
     Returns:
-        原始路径。
+        已创建的目录路径。
     """
 
-    if path.suffix:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _ensure_file_parent(path: Path) -> Path:
+    """确保文件的父目录存在。
+
+    Args:
+        path: 目标文件路径。
+
+    Returns:
+        原始文件路径。
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def get_data_dir() -> Path:
-    """返回运行数据目录。
+    """返回并创建 Alpha 持久数据目录。
+
+    Returns:
+        Terax 注入或用户目录下的 Alpha 数据目录。
     """
 
-    return WORKSPACE_DIR
+    configured = os.environ.get(DATA_DIR_ENV)
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".terax" / "alpha" / "data"
+    )
+    return _ensure_directory(path)
 
 
 def get_config_path() -> Path:
@@ -46,7 +68,7 @@ def get_config_path() -> Path:
         运行数据目录下的配置文件路径。
     """
 
-    return _ensure_path(get_data_dir() / "config.json")
+    return _ensure_file_parent(get_data_dir() / "config.json")
 
 
 def get_runtime_subdir(name: str) -> Path:
@@ -59,20 +81,23 @@ def get_runtime_subdir(name: str) -> Path:
         已确保存在的运行时子目录。
     """
 
-    return _ensure_path(get_data_dir() / name)
+    return _ensure_directory(get_data_dir() / name)
 
 
 def get_logs_dir() -> Path:
-    """返回日志目录。
-
-    Args:
-        无。
+    """返回并创建 Alpha 日志目录。
 
     Returns:
-        已确保存在的日志目录。
+        Terax 注入或默认的 Alpha 日志目录。
     """
 
-    return get_runtime_subdir("logs")
+    configured = os.environ.get(LOG_DIR_ENV)
+    path = (
+        Path(configured).expanduser()
+        if configured
+        else Path.home() / ".terax" / "logs" / "alpha"
+    )
+    return _ensure_directory(path)
 
 
 def get_file_path(filename: str) -> Path:

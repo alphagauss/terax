@@ -15,6 +15,7 @@
     "shortcuts": "快捷键",
     "models": "模型",
     "agents": "智能体",
+    "alpha": "Alpha",
     "remote": "远程",
     "about": "关于"
   },
@@ -407,6 +408,58 @@
       "errRequired": "必填。",
       "errFormat": "只能包含小写字母、数字和短横线。",
       "errInUse": "已被占用。"
+    }
+  },
+  "alpha": {
+    "header": {
+      "title": "Alpha",
+      "description": "配置所有 Terax 窗口共用的本地量化服务。"
+    },
+    "python": {
+      "label": "Python",
+      "title": "Python 解释器",
+      "description": "选择已有的 Python 环境。Terax 不会自动安装或修改其中的依赖。",
+      "unconfigured": "尚未配置",
+      "select": "选择",
+      "selectTitle": "选择 Alpha 使用的 Python 解释器"
+    },
+    "dependencies": {
+      "title": "运行依赖",
+      "description": "检查所选解释器是否包含 Alpha 运行依赖。",
+      "check": "检查",
+      "checking": "检查中...",
+      "ready": "Python {{version}} 已就绪。",
+      "missing": "缺少依赖：{{packages}}"
+    },
+    "service": {
+      "label": "服务",
+      "title": "共享 Alpha 服务",
+      "running": "正在监听 127.0.0.1:{{port}}，所有 Terax 窗口使用同一实例。",
+      "stopped": "共享服务尚未运行。",
+      "loading": "正在检查共享服务状态...",
+      "portConflict": "端口 {{port}} 已被 Terax 无法识别为 Alpha 的服务占用。",
+      "statusRunning": "运行中",
+      "statusStopped": "已停止"
+    },
+    "autoStart": {
+      "title": "Terax 启动后运行",
+      "description": "短暂延迟后，任意 Terax 进程都可以确保唯一共享服务已运行。"
+    },
+    "actions": {
+      "start": "启动",
+      "starting": "启动中...",
+      "startFailed": "无法启动 Alpha",
+      "stop": "停止",
+      "stopping": "停止中...",
+      "stopFailed": "无法停止 Alpha",
+      "restart": "重启",
+      "restarting": "重启中...",
+      "restartFailed": "无法重启 Alpha"
+    },
+    "errors": {
+      "status": "无法查询 Alpha 状态",
+      "python": "无法使用此 Python 解释器",
+      "setting": "无法更新 Alpha 设置"
     }
   },
   "remote": {

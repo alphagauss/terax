@@ -12,6 +12,15 @@ class HealthResponse(BaseModel):
 
     status: Literal["ok"]
     services_ready: bool
+    service: Literal["terax-alpha"] = "terax-alpha"
+    protocol_version: Literal[1] = 1
+    archive_hash: str = "development"
+
+
+class ShutdownResponse(BaseModel):
+    """Alpha 服务停止请求响应。"""
+
+    status: Literal["stopping"] = "stopping"
 
 
 class DataOverviewResponse(BaseModel):

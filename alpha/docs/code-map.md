@@ -11,7 +11,7 @@
 ## 应用入口
 
 - `alpha/__main__.py`: `python -m alpha` 模块入口；解析监听地址、端口、日志级别和开发调试用的 `-t/--token`，并把前台服务启动交给 `alpha.server`。未显式传入凭据时继续读取 `TERAX_ALPHA_TOKEN`。
-- `alpha/server.py`: 单 Uvicorn 协调进程运行器；创建 FastAPI 应用并以前台模式运行，不管理 daemon、PID 或日志文件。
+- `alpha/server.py`: 单 Uvicorn 协调进程运行器；创建 FastAPI 应用并以前台模式运行，把应用内关闭回调绑定到当前 Server，不管理 daemon、PID 或日志文件。
 - `alpha/live/runner.py`、`alpha/paper/runner.py`: 实盘和模拟盘运行入口占位文件，当前只保留模块边界和导出。
 
 备注：Alpha 的正式调用边界是 `/api/alpha`。离线数据库维护继续使用 `alpha/scripts/` 中的显式脚本，不再维护绕过 FastAPI 的业务 CLI。
@@ -20,13 +20,14 @@
 
 - `alpha/api/app.py`: 独立 FastAPI 应用工厂；从运行环境读取服务凭据，管理 `AlphaServiceContainer` 生命周期，并把业务路由挂载到 `/api/alpha`。
 - `alpha/api/auth.py`: HTTP Bearer 服务凭据验证；负责保护 Alpha 业务路由，不承接领域权限判断。
-- `alpha/api/router.py`: Alpha 业务 API 总路由；聚合 `health`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 九组业务路由。自身不带前缀，由独立 FastAPI 应用统一挂载到 `/api/alpha`。
+- `alpha/api/router.py`: Alpha API 总路由；聚合 `health`、`system`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 十组路由。自身不带前缀，由独立 FastAPI 应用统一挂载到 `/api/alpha`。
 - `alpha/api/container.py`: `AlphaServiceContainer` 持有数据库、懒加载策略管理器、事件引擎和进程任务管理器；`create_alpha_service_container()` 延迟创建核心对象，供 FastAPI 应用组装；容器只负责运行对象组装与关闭，不承接具体 API 响应编排。`_LazyStrategyManager` 额外暴露回测结果概要与单结果读取，供工作台结果页复用现有 `StrategyResult`。
 - `alpha/api/deps.py`: FastAPI 依赖注入入口；只负责从 `app.state.alpha_services` 读取 `AlphaServiceContainer`。
-- `alpha/api/models.py`: Alpha 业务 API 响应模型，包括 `HealthResponse`、带 `bars/security_profile/index_constituents` 聚合字段的 `DataOverviewResponse`、`StrategyInfo`、以及包含 `backtest_id/status` 的 `BacktestStartResponse`。
+- `alpha/api/models.py`: Alpha 业务 API 响应模型，包括带服务协议和归档哈希的 `HealthResponse`、`ShutdownResponse`、带 `bars/security_profile/index_constituents` 聚合字段的 `DataOverviewResponse`、`StrategyInfo`、以及包含 `backtest_id/status` 的 `BacktestStartResponse`。
 - `alpha/api/events.py`: `EventWebSocket` 协议和 `EventBroadcaster`；保留事件广播工具，但本次不新增实时推送路由。
 - `alpha/api/routes/_utils.py`: Alpha 工作台路由辅助函数；集中处理分页上限、日期解析、周期/复权/产品归一、任务状态映射以及轻量字段提取，避免各 route 重复拼装。
-- `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 业务服务容器状态。
+- `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 服务身份、协议版本和当前源码归档哈希，供 Terax 识别共享服务。
+- `alpha/api/routes/system.py`: `POST /system/shutdown`，在 Bearer 鉴权后请求当前 Uvicorn Server 正常退出，供任意 Terax 窗口停止共享服务。
 - `alpha/api/routes/status.py`: `GET /status`，返回 Alpha 是否启用、数据库是否就绪、数据目录、最新交易日、证券数量与运行中任务数；数据库异常会转换为 `database_ready=false` 的轻量状态响应。
 - `alpha/api/routes/data.py`: `GET /data/overview`，读取容器中的数据库并在路由层汇总行情数据概览；除保留旧的 `total_bar_count/bar_overview` 外，还新增按周期聚合的 `bars` 结构。
 - `alpha/api/routes/securities.py`: `GET /securities`、`GET /securities/{vt_symbol}`，复用 `DataBase.load_security_profiles()`、状态游标和股本变更接口，向前端返回证券搜索摘要、覆盖范围和受限详情。
@@ -46,7 +47,7 @@ alpha.api
 ## 共享基础
 
 - `alpha/common/enums.py`: 枚举定义，覆盖 `Interval`、`Exchange`、`Direction`、`Offset`、`Status`、`Product`、`OrderType`、`OptionType` 等；`ACTIVE_STATUSES` 定义活跃委托集合。
-- `alpha/common/paths.py`: 运行时路径推导，负责 `.data`、配置、日志目录和 UTF-8 JSON 读写。
+- `alpha/common/paths.py`: 运行时路径推导，优先读取 `TERAX_ALPHA_DATA_DIR` 和 `TERAX_ALPHA_LOG_DIR`，否则回退到 `~/.terax` 下的统一目录，并负责配置、日志目录和 UTF-8 JSON 读写。
 - `alpha/common/schema_core.py`: 事件常量（`EVENT_TIMER`、`EVENT_TICK` 等）、`STOPORDER_PREFIX`、`INTERVAL_DELTA_MAP`，以及 `vt_symbol` 和时间戳转换工具。
 - `alpha/common/schema_backtest.py`: 回测请求和结果辅助模型，如 `BacktestReq`、`HoldData`、`AccountData`。
 - `alpha/common/schema_market.py`: 市场数据 payload/query 模型，如 `BarDataPayload`、`SecurityProfilePayload`、`SecurityDailyInfoRecord`、`BarOverview`、`TickData`。

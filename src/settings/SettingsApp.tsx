@@ -3,12 +3,13 @@
  * 设置窗口只协调各设置分区，不直接持有分区业务状态。
  */
 
-import { Toaster } from "@/components/ui/sonner";
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
+import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { AlphaSettingsSection } from "@/modules/alpha/components/AlphaSettingsSection";
 import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -45,6 +46,7 @@ const TABS: {
   { id: "shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
   { id: "models", icon: AiScanIcon, component: ModelsSection },
   { id: "agents", icon: UserMultiple02Icon, component: AgentsSection },
+  { id: "alpha", icon: ServerStack03Icon, component: AlphaSettingsSection },
   { id: "remote", icon: ServerStack03Icon, component: RemoteSection },
   { id: "about", icon: InformationCircleIcon, component: AboutSection },
 ];
@@ -56,6 +58,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "alpha",
   "remote",
   "about",
 ];

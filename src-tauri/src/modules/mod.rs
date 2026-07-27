@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod ai_sessions;
+pub mod alpha;
 pub mod app_data;
 pub mod fs;
 pub mod git;

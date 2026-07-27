@@ -29,10 +29,20 @@ def run_server(
         服务停止后返回。
     """
 
-    uvicorn.run(
-        create_app(token=token),
+    server: uvicorn.Server | None = None
+
+    def request_shutdown() -> None:
+        """通知当前单进程 Uvicorn 协调器在响应完成后退出。"""
+
+        if server is not None:
+            server.should_exit = True
+
+    config = uvicorn.Config(
+        create_app(token=token, shutdown_callback=request_shutdown),
         host=host,
         port=port,
         log_level=log_level,
         workers=1,
     )
+    server = uvicorn.Server(config)
+    server.run()

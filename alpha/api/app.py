@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -56,11 +56,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         await container.close()
 
 
-def create_app(*, token: str | None = None) -> FastAPI:
+def create_app(
+    *,
+    token: str | None = None,
+    shutdown_callback: Callable[[], None] | None = None,
+) -> FastAPI:
     """创建受 Bearer 凭据保护的 Alpha FastAPI 应用。
 
     Args:
         token: 测试或受管调用方显式注入的凭据；默认读取运行环境。
+        shutdown_callback: Uvicorn 运行器提供的优雅停止回调。
 
     Returns:
         已挂载 `/api/alpha` 业务路由的 FastAPI 应用。
@@ -71,6 +76,7 @@ def create_app(*, token: str | None = None) -> FastAPI:
         lifespan=_lifespan,
     )
     app.state.alpha_token = _resolve_token(token)
+    app.state.alpha_shutdown = shutdown_callback
     app.include_router(
         router,
         prefix="/api/alpha",
