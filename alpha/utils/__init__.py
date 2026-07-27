@@ -9,7 +9,6 @@ from typing import Callable, TypeVar, Optional, Iterator
 import os
 from pathlib import Path
 from loguru import logger
-import yaml 
 
 from alpha.common.schema import Product
 from alpha.common.paths import  load_json, save_json, get_runtime_subdir
