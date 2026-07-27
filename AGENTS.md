@@ -134,6 +134,15 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
 - `open_settings_window`：独立设置窗口。
 
+### Alpha 量化服务边界
+
+- `alpha/` 是通过 FastAPI 接入 Terax 的独立量化后端，负责量化 API、领域逻辑、数据、任务和事件。
+- Alpha 对 Terax 的接口统一位于 `/api/alpha`。React 页面和 AI Agent 通过 Rust 通用代理访问，不直接管理 Python 进程或服务凭据。
+- Rust 只负责 Alpha 生命周期、探活、凭据注入及通用 GET、POST、WebSocket 转发，不复制或解释 Alpha 领域模型。
+- Alpha 页面属于 `src/modules/alpha/`，复用 Terax 的 Workbench、组件、国际化、通知和设置。Agent 工具复用同一套 Alpha API 调用链。
+- `alpha-native/` 用于可选的 PyO3 原生计算模块。原生实现不得改变 FastAPI 协议和上层调用方式。
+- 详细职责和代码归属见 `docs/architecture/alpha-integration.md`。
+
 ### PTY 与 Shell 集成
 
 - Shell 初始化脚本位于 `src-tauri/src/modules/pty/scripts/`，负责 OSC 7 和 OSC 133 标记。
@@ -235,6 +244,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 
 - `docs/README.md`：贡献者文档索引
 - `docs/architecture/two-process-model.md`：IPC 边界和命令参考
+- `docs/architecture/alpha-integration.md`：Alpha FastAPI、Rust 代理、前端和 PyO3 边界
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider

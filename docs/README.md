@@ -17,6 +17,7 @@ If a guide conflicts with `AGENTS.md`, `AGENTS.md` wins.
 - [AI subsystem](architecture/ai-subsystem.md) - providers, agent, sub-agents, sessions, composer, tools, edit diffs, live context bridge. Includes a walkthrough for adding a new provider.
 - [Terminal renderer pool](architecture/terminal-renderer-pool.md) - slot pooling, the DormantRing, and the never-serialize-mid-command invariant.
 - [File transfers](architecture/file-transfers.md) - Direct and Archive task lifecycle, staging, no-replace commit, retry, resource bounds, and real-environment verification.
+- [Alpha integration](architecture/alpha-integration.md) - FastAPI quant backend, thin Rust proxy, Terax UI integration, and optional PyO3 compute boundary.
 
 ## Contributing guides
 
