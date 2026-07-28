@@ -1,3 +1,8 @@
+"""测试 Alpha WebSocket 事件广播工具。
+
+锁定 JSON 编码、失败连接清理和慢客户端超时，广播器不直接订阅内部事件总线。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +36,21 @@ class FailingWebSocket:
 
         self.send_count += 1
         raise RuntimeError("连接已断开")
+
+
+class SlowWebSocket:
+    """永不完成发送的慢客户端替身。"""
+
+    def __init__(self) -> None:
+        """初始化发送次数。"""
+
+        self.send_count = 0
+
+    async def send_json(self, _data: object) -> None:
+        """模拟被网络背压永久阻塞的发送。"""
+
+        self.send_count += 1
+        await asyncio.Event().wait()
 
 
 def test_event_broadcaster_should_send_jsonable_event() -> None:
@@ -79,5 +99,29 @@ def test_event_broadcaster_should_remove_failed_clients() -> None:
 
         assert len(healthy_websocket.messages) == 2
         assert failing_websocket.send_count == 1
+
+    asyncio.run(scenario())
+
+
+def test_event_broadcaster_should_remove_slow_clients() -> None:
+    """验证单个慢客户端不会永久阻塞后续广播。"""
+
+    async def scenario() -> None:
+        broadcaster = EventBroadcaster(send_timeout=0.01)
+        healthy_websocket = FakeWebSocket()
+        slow_websocket = SlowWebSocket()
+        event = Event(
+            type=EVENT_LOG,
+            data=LogData(msg="测试日志", gateway_name="策略引擎"),
+        )
+
+        await broadcaster.connect(healthy_websocket)
+        await broadcaster.connect(slow_websocket)
+
+        await broadcaster.publish(event)
+        await broadcaster.publish(event)
+
+        assert len(healthy_websocket.messages) == 2
+        assert slow_websocket.send_count == 1
 
     asyncio.run(scenario())

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 import alpha.api.app as app_module
 
@@ -20,8 +21,6 @@ class FakeContainer:
         """记录应用生命周期已经关闭容器。"""
 
         self.closed = True
-
-
 def test_create_app_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证未配置服务凭据时拒绝创建应用。"""
 
@@ -121,3 +120,29 @@ def test_shutdown_route_calls_managed_server_callback(
     assert response.status_code == 202
     assert response.json() == {"status": "stopping"}
     assert shutdown_requested == [True]
+
+
+def test_websocket_requires_token_and_supports_bidirectional_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证事件 WebSocket 独立鉴权并支持客户端发送 JSON。"""
+
+    container = FakeContainer()
+    monkeypatch.setattr(
+        app_module,
+        "create_alpha_service_container",
+        lambda: container,
+    )
+    app = app_module.create_app(token="test-token")
+
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/api/alpha/events"):
+                pass
+
+        with client.websocket_connect(
+            "/api/alpha/events",
+            headers={"Authorization": "Bearer test-token"},
+        ) as websocket:
+            websocket.send_json({"type": "ping"})
+            assert websocket.receive_json() == {"type": "pong"}

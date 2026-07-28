@@ -4,8 +4,10 @@ httpx
 pandas
 numpy
 python-dotenv
+typing-extensions
 tqdm
 deap
 fastapi
-uvicorn[standard]
+uvicorn
+websockets
 ta-lib

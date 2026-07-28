@@ -214,6 +214,7 @@ pub fn run() {
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
+        .manage(alpha::AlphaProxyState::default())
         .manage(lsp::LspState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage({
@@ -363,6 +364,10 @@ pub fn run() {
             alpha::commands::alpha_start,
             alpha::commands::alpha_stop,
             alpha::commands::alpha_restart,
+            alpha::commands::alpha_http_request,
+            alpha::commands::alpha_ws_open,
+            alpha::commands::alpha_ws_send,
+            alpha::commands::alpha_ws_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -382,6 +387,9 @@ pub fn run() {
             // Servers exit on stdin EOF, but destructors are not guaranteed
             // on process exit; kill explicitly.
             if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<alpha::AlphaProxyState>() {
+                    state.close_all();
+                }
                 if let Some(state) = app.try_state::<lsp::LspState>() {
                     state.kill_all();
                 }

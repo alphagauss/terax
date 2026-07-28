@@ -5,6 +5,11 @@
 mod build_support;
 
 fn main() {
-    build_support::alpha::build_archive().expect("failed to build embedded Alpha archive");
+    println!("cargo:rerun-if-env-changed=PROFILE");
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        build_support::alpha::build_archive().expect("failed to build embedded Alpha archive");
+    } else {
+        println!("cargo:rustc-env=TERAX_ALPHA_ARCHIVE_SHA256=development");
+    }
     tauri_build::build()
 }

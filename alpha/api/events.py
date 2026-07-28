@@ -8,7 +8,7 @@ from typing import Protocol
 from fastapi.encoders import jsonable_encoder
 from loguru import logger
 
-from alpha.runtime.event import Event, EventEngine
+from alpha.runtime.event import Event
 
 
 class EventWebSocket(Protocol):
@@ -25,20 +25,17 @@ class EventWebSocket(Protocol):
 class EventBroadcaster:
     """把运行时事件广播给已连接的 WebSocket 客户端。"""
 
-    def __init__(self, event_engine: EventEngine | None = None) -> None:
+    def __init__(self, *, send_timeout: float = 2.0) -> None:
         """初始化广播器。
 
         Args:
-            event_engine: 可选事件引擎；传入后会自动订阅全部事件。
+            send_timeout: 单客户端发送超时，超时连接会被移除。
         """
 
-        self._event_engine = event_engine
+        self._send_timeout = send_timeout
         self._clients: set[EventWebSocket] = set()
         self._clients_lock = asyncio.Lock()
         self._broadcast_lock = asyncio.Lock()
-
-        if self._event_engine is not None:
-            self._event_engine.sub_general(self.publish)
 
     async def connect(self, websocket: EventWebSocket) -> None:
         """登记一个 WebSocket 客户端。
@@ -80,7 +77,10 @@ class EventBroadcaster:
             failed_clients: list[EventWebSocket] = []
             for websocket in clients:
                 try:
-                    await websocket.send_json(payload)
+                    await asyncio.wait_for(
+                        websocket.send_json(payload),
+                        timeout=self._send_timeout,
+                    )
                 except Exception as exc:
                     failed_clients.append(websocket)
                     logger.warning("WebSocket 事件广播失败: {}", exc)
@@ -89,14 +89,3 @@ class EventBroadcaster:
                 async with self._clients_lock:
                     for websocket in failed_clients:
                         self._clients.discard(websocket)
-
-    def close(self) -> None:
-        """取消事件订阅。
-
-        Returns:
-            无返回值。
-        """
-
-        if self._event_engine is not None:
-            self._event_engine.unsub_general(self.publish)
-            self._event_engine = None

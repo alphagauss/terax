@@ -11,6 +11,7 @@
 ## 应用入口
 
 - `alpha/__main__.py`: `python -m alpha` 模块入口；解析监听地址、端口、日志级别和开发调试用的 `-t/--token`，并把前台服务启动交给 `alpha.server`。未显式传入凭据时继续读取 `TERAX_ALPHA_TOKEN`。
+- `alpha/runtime_check.py`: Python 3.11 最低版本及运行依赖自检入口；读取 `requirements-runtime.txt`，通过稳定 JSON 向 Rust 报告缺失或损坏依赖。
 - `alpha/server.py`: 单 Uvicorn 协调进程运行器；创建 FastAPI 应用并以前台模式运行，把应用内关闭回调绑定到当前 Server，不管理 daemon、PID 或日志文件。
 - `alpha/live/runner.py`、`alpha/paper/runner.py`: 实盘和模拟盘运行入口占位文件，当前只保留模块边界和导出。
 
@@ -20,11 +21,12 @@
 
 - `alpha/api/app.py`: 独立 FastAPI 应用工厂；从运行环境读取服务凭据，管理 `AlphaServiceContainer` 生命周期，并把业务路由挂载到 `/api/alpha`。
 - `alpha/api/auth.py`: HTTP Bearer 服务凭据验证；负责保护 Alpha 业务路由，不承接领域权限判断。
+- `alpha/api/routes/events.py`: 受认证的双向 JSON WebSocket 端点；当前只提供 ping/pong 基础协议，后续在 FastAPI 内增加公共事件的显式按需订阅，不直接暴露内部事件总线。
 - `alpha/api/router.py`: Alpha API 总路由；聚合 `health`、`system`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 十组路由。自身不带前缀，由独立 FastAPI 应用统一挂载到 `/api/alpha`。
 - `alpha/api/container.py`: `AlphaServiceContainer` 持有数据库、懒加载策略管理器、事件引擎和进程任务管理器；`create_alpha_service_container()` 延迟创建核心对象，供 FastAPI 应用组装；容器只负责运行对象组装与关闭，不承接具体 API 响应编排。`_LazyStrategyManager` 额外暴露回测结果概要与单结果读取，供工作台结果页复用现有 `StrategyResult`。
 - `alpha/api/deps.py`: FastAPI 依赖注入入口；只负责从 `app.state.alpha_services` 读取 `AlphaServiceContainer`。
 - `alpha/api/models.py`: Alpha 业务 API 响应模型，包括带服务协议和归档哈希的 `HealthResponse`、`ShutdownResponse`、带 `bars/security_profile/index_constituents` 聚合字段的 `DataOverviewResponse`、`StrategyInfo`、以及包含 `backtest_id/status` 的 `BacktestStartResponse`。
-- `alpha/api/events.py`: `EventWebSocket` 协议和 `EventBroadcaster`；保留事件广播工具，但本次不新增实时推送路由。
+- `alpha/api/events.py`: `EventWebSocket` 协议和带单客户端发送超时的 `EventBroadcaster`；当前 WebSocket 路由不连接该工具，后续只用于显式订阅的公共事件。
 - `alpha/api/routes/_utils.py`: Alpha 工作台路由辅助函数；集中处理分页上限、日期解析、周期/复权/产品归一、任务状态映射以及轻量字段提取，避免各 route 重复拼装。
 - `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 服务身份、协议版本和当前源码归档哈希，供 Terax 识别共享服务。
 - `alpha/api/routes/system.py`: `POST /system/shutdown`，在 Bearer 鉴权后请求当前 Uvicorn Server 正常退出，供任意 Terax 窗口停止共享服务。
@@ -124,9 +126,10 @@ alpha.api
 - `alpha/tests/test_app.py`: 验证独立 FastAPI 应用的路由挂载、Bearer 鉴权及容器关闭。
 - `alpha/tests/test_main.py`: 验证 `python -m alpha` 参数默认值和服务运行器转发。
 - `alpha/tests/test_server.py`: 验证 Uvicorn 保持单进程前台启动。
+- `alpha/tests/test_runtime_check.py`: 验证 Python 最低版本、WebSocket 运行依赖、缺失依赖和损坏依赖的结构化检查结果。
 - `alpha/tests/test_router.py`: 验证 Alpha 最小业务 API 在路由层完成响应编排并调用容器中的核心对象。
 - `alpha/tests/test_api_container.py`: 验证 API 容器初始化、懒加载策略管理器和关闭运行对象。
-- `alpha/tests/unit_tests/test_api_events.py`: 事件广播工具测试。
+- `alpha/tests/unit_tests/test_api_events.py`: 事件广播工具的 JSON 编码、失败连接清理和慢客户端超时测试。
 - `alpha/tests/unit_tests/conftest.py`: 单元测试共用 fixtures、假数据库和假 provider。
 - `alpha/tests/integration_tests/test_eastmoney.py`: 东方财富实时分页和空页行为。
 - `alpha/tests/integration_tests/test_exec_es_gm_live.py`: GM live smoke 与证券同步 smoke。

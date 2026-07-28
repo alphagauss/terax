@@ -9,11 +9,18 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+  Channel: class {
+    onmessage = (_event: unknown) => {};
+  },
+}));
 
 import {
   checkAlphaPython,
   getAlphaStatus,
+  openAlphaWebSocket,
+  requestAlpha,
   restartAlpha,
   setAlphaAutoStart,
   setAlphaPythonPath,
@@ -51,6 +58,48 @@ describe("Alpha Tauri 命令封装", () => {
       ["alpha_check_python", { path: null }],
       ["alpha_check_python", { path: "C:/Python/python.exe" }],
       ["alpha_set_auto_start", { enabled: false }],
+    ]);
+  });
+
+  it("通过固定请求对象转发通用 JSON API", async () => {
+    await requestAlpha({
+      method: "POST",
+      path: "/api/alpha/backtests",
+      query: [{ name: "mode", value: "quick" }],
+      body: { strategyId: "demo" },
+    });
+
+    expect(mocks.invoke).toHaveBeenCalledWith("alpha_http_request", {
+      request: {
+        method: "POST",
+        path: "/api/alpha/backtests",
+        query: [{ name: "mode", value: "quick" }],
+        body: { strategyId: "demo" },
+      },
+    });
+  });
+
+  it("建立并控制完整双向 WebSocket", async () => {
+    mocks.invoke.mockResolvedValueOnce(7);
+    const connection = await openAlphaWebSocket(
+      "/api/alpha/events",
+      vi.fn(),
+    );
+    await connection.send({ type: "ping" });
+    await connection.close();
+    await connection.close();
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      [
+        "alpha_ws_open",
+        {
+          path: "/api/alpha/events",
+          query: [],
+          onEvent: expect.anything(),
+        },
+      ],
+      ["alpha_ws_send", { id: 7, message: { type: "ping" } }],
+      ["alpha_ws_close", { id: 7 }],
     ]);
   });
 });

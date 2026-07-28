@@ -322,7 +322,13 @@ def test_alpha_router_exposes_business_health() -> None:
     response = _client().get("/api/alpha/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "services_ready": True}
+    assert response.json() == {
+        "status": "ok",
+        "services_ready": True,
+        "service": "terax-alpha",
+        "protocol_version": 1,
+        "archive_hash": "development",
+    }
 
 
 def test_alpha_router_builds_data_overview() -> None:

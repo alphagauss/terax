@@ -8,10 +8,39 @@ from __future__ import annotations
 import secrets
 from typing import Annotated
 
-from fastapi import HTTPException, Request, Security, status
+from fastapi import (
+    HTTPException,
+    Request,
+    Security,
+    WebSocket,
+    WebSocketException,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 _BEARER = HTTPBearer(auto_error=False)
+
+
+def _valid_bearer(value: str | None, expected: str) -> bool:
+    """验证原始 Authorization 请求头。
+
+    Args:
+        value: Authorization 请求头。
+        expected: 应用持有的服务凭据。
+
+    Returns:
+        请求头包含匹配的 Bearer 凭据时返回 True。
+    """
+
+    if value is None:
+        return False
+    scheme, separator, credentials = value.partition(" ")
+    return (
+        separator == " "
+        and scheme.lower() == "bearer"
+        and bool(credentials)
+        and secrets.compare_digest(credentials, expected)
+    )
 
 
 async def require_alpha_token(
@@ -45,4 +74,22 @@ async def require_alpha_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Alpha 服务凭据无效",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+async def require_alpha_websocket_token(websocket: WebSocket) -> None:
+    """验证 WebSocket 握手携带的 Alpha Bearer 凭据。
+
+    Args:
+        websocket: 尚未接受的 WebSocket 连接。
+
+    Raises:
+        WebSocketException: 缺少凭据或凭据不匹配。
+    """
+
+    expected = websocket.app.state.alpha_token
+    if not _valid_bearer(websocket.headers.get("authorization"), expected):
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Alpha 服务凭据无效",
         )

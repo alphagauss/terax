@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI
 from alpha.api.auth import require_alpha_token
 from alpha.api.container import create_alpha_service_container
 from alpha.api.router import router
+from alpha.api.routes import events
 
 ALPHA_TOKEN_ENV = "TERAX_ALPHA_TOKEN"
 
@@ -82,4 +83,5 @@ def create_app(
         prefix="/api/alpha",
         dependencies=[Depends(require_alpha_token)],
     )
+    app.include_router(events.router, prefix="/api/alpha")
     return app

@@ -91,8 +91,8 @@ export function AlphaSettingsSection() {
         title: t("alpha.python.selectTitle"),
       });
       if (!selected || Array.isArray(selected)) return;
-      const result = await setAlphaPythonPath(selected);
-      setCheck(result);
+      await setAlphaPythonPath(selected);
+      setCheck(null);
       await refresh();
     } catch (error) {
       toast.error(t("alpha.errors.python"), {

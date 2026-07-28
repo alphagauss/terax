@@ -4,7 +4,9 @@
 //! Alpha 是否运行始终由受认证健康检查判定，不在各窗口复制生命周期状态。
 
 pub mod commands;
+mod proxy;
 mod runtime_files;
 mod service;
 
+pub use proxy::AlphaProxyState;
 pub use service::schedule_delayed_start;

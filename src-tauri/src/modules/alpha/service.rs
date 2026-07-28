@@ -11,8 +11,10 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::{self, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -62,6 +64,15 @@ pub struct PythonCheck {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct RuntimeCheck {
+    version: String,
+    minimum_version: String,
+    supported: bool,
+    missing_packages: Vec<String>,
+    import_errors: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct ServiceHealth {
     status: String,
@@ -97,19 +108,17 @@ fn read_config() -> Result<AlphaConfig, String> {
     })
 }
 
-/// 保存并验证用户选择的 Python 可执行文件。
+/// 保存用户选择的 Python 可执行文件。
 ///
-/// 解释器路径必须是明确的绝对文件路径，依赖缺失不会阻止保存，便于用户随后修复环境。
-pub async fn set_python_path(app: AppHandle, path: String) -> Result<PythonCheck, String> {
+/// 保存阶段只校验路径是明确存在的绝对文件，版本和依赖由用户主动检查。
+pub fn set_python_path(app: AppHandle, path: String) -> Result<(), String> {
     let validated = validate_python_path(&path)?;
-    let check = check_python(&validated).await;
     shared_store::shared_store_set(
         app,
         SETTINGS_STORE.to_string(),
         PYTHON_PATH_KEY.to_string(),
         Value::String(validated.to_string_lossy().into_owned()),
-    )?;
-    Ok(check)
+    )
 }
 
 /// 保存所有窗口共享的 Alpha 自动启动开关。
@@ -133,7 +142,10 @@ pub async fn check_configured_python(path: Option<String>) -> Result<PythonCheck
             validate_python_path(&configured)?
         }
     };
-    Ok(check_python(&path).await)
+    let code_root = tokio::task::spawn_blocking(runtime_files::code_root)
+        .await
+        .map_err(|error| error.to_string())??;
+    Ok(check_python(&path, &code_root).await)
 }
 
 /// 查询共享 Alpha 服务的当前真实状态。
@@ -235,19 +247,33 @@ async fn start_locked() -> Result<(), String> {
         // 先完成新服务前置检查，避免解释器或源码无效时停止仍可用的旧实例。
         stop_locked().await?;
     }
-    spawn_service(&python, &code_root, &data_dir, &logs_dir, &token)?;
+    let process_exit = spawn_service(&python, &code_root, &data_dir, &logs_dir, &token)?;
+    let log_path = logs_dir.join("service.log");
 
     let deadline = Instant::now() + OPERATION_TIMEOUT;
     while Instant::now() < deadline {
         if health(&token).await.is_some() {
             return Ok(());
         }
+        match process_exit.try_recv() {
+            Ok(Ok(status)) => return Err(startup_exit_message(status, &log_path)),
+            Ok(Err(error)) => {
+                return Err(format!(
+                    "等待 Alpha 进程退出状态失败: {error}，请检查 {}",
+                    log_path.display()
+                ));
+            }
+            Err(TryRecvError::Disconnected) => {
+                return Err(format!(
+                    "无法监控 Alpha 启动进程，请检查 {}",
+                    log_path.display()
+                ));
+            }
+            Err(TryRecvError::Empty) => {}
+        }
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
-    Err(format!(
-        "Alpha 启动超时，请检查 {}",
-        logs_dir.join("service.log").display()
-    ))
+    Err(format!("Alpha 启动超时，请检查 {}", log_path.display()))
 }
 
 /// 根据探活与端口状态决定幂等启动行为。
@@ -304,7 +330,7 @@ fn spawn_service(
     data_dir: &Path,
     logs_dir: &Path,
     token: &str,
-) -> Result<(), String> {
+) -> Result<Receiver<io::Result<ExitStatus>>, String> {
     let log_path = logs_dir.join("service.log");
     let stdout = OpenOptions::new()
         .create(true)
@@ -338,10 +364,19 @@ fn spawn_service(
             python.to_string_lossy()
         )
     })?;
+    let (exit_sender, exit_receiver) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let _ = exit_sender.send(child.wait());
     });
-    Ok(())
+    Ok(exit_receiver)
+}
+
+/// 构造 Python 子进程提前退出时的可操作错误。
+fn startup_exit_message(status: impl std::fmt::Display, log_path: &Path) -> String {
+    format!(
+        "Alpha 进程启动后退出，状态为 {status}，请检查 {}",
+        log_path.display()
+    )
 }
 
 #[cfg(windows)]
@@ -430,7 +465,7 @@ fn ensure_token() -> Result<String, String> {
     Ok(token)
 }
 
-fn read_token() -> Result<String, String> {
+pub(super) fn read_token() -> Result<String, String> {
     let path = runtime_files::token_path()?;
     let token = fs::read_to_string(&path)
         .map_err(|error| format!("无法读取 Alpha 服务凭据 {}: {error}", path.display()))?;
@@ -455,13 +490,12 @@ fn validate_python_path(value: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-async fn check_python(path: &Path) -> PythonCheck {
-    const SCRIPT: &str = r#"import importlib.util,json,sys
-items={"fastapi":"fastapi","uvicorn":"uvicorn","pydantic":"pydantic","httpx":"httpx","loguru":"loguru","numpy":"numpy","pandas":"pandas","ta-lib":"talib","tqdm":"tqdm","deap":"deap","python-dotenv":"dotenv"}
-missing=[name for name,module in items.items() if importlib.util.find_spec(module) is None]
-print(json.dumps({"version":sys.version.split()[0],"missing":missing}))"#;
+async fn check_python(path: &Path, code_root: &Path) -> PythonCheck {
     let mut command = tokio::process::Command::new(path);
-    command.args(["-E", "-c", SCRIPT]).kill_on_drop(true);
+    command
+        .current_dir(code_root)
+        .args(["-E", "-m", "alpha.runtime_check"])
+        .kill_on_drop(true);
     proc::hide_console(command.as_std_mut());
     let result = tokio::time::timeout(Duration::from_secs(10), command.output()).await;
     let path_text = path.to_string_lossy().into_owned();
@@ -492,7 +526,7 @@ print(json.dumps({"version":sys.version.split()[0],"missing":missing}))"#;
             error: Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
         };
     }
-    let value: Value = match serde_json::from_slice(&output.stdout) {
+    let result: RuntimeCheck = match serde_json::from_slice(&output.stdout) {
         Ok(value) => value,
         Err(error) => {
             return PythonCheck {
@@ -503,21 +537,29 @@ print(json.dumps({"version":sys.version.split()[0],"missing":missing}))"#;
             };
         }
     };
+    python_check_from_runtime(path_text, result)
+}
+
+/// 把 Python 侧的环境报告转换成前端稳定模型。
+fn python_check_from_runtime(path: String, result: RuntimeCheck) -> PythonCheck {
+    let error = if !result.supported {
+        Some(format!(
+            "Alpha 需要 Python {} 或更高版本，当前为 {}",
+            result.minimum_version, result.version
+        ))
+    } else if result.import_errors.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "Alpha Python 依赖无法加载: {}",
+            result.import_errors.join("; ")
+        ))
+    };
     PythonCheck {
-        path: path_text,
-        version: value
-            .get("version")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        missing_packages: value
-            .get("missing")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect(),
-        error: None,
+        path,
+        version: Some(result.version),
+        missing_packages: result.missing_packages,
+        error,
     }
 }
 
@@ -526,7 +568,7 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-fn base_url() -> String {
+pub(super) fn base_url() -> String {
     format!("http://{ALPHA_HOST}:{ALPHA_PORT}")
 }
 
@@ -588,5 +630,46 @@ mod tests {
         let mut unavailable = current;
         unavailable.services_ready = false;
         assert!(!is_compatible_health(&unavailable));
+    }
+
+    #[test]
+    fn runtime_check_rejects_old_python_and_preserves_missing_packages() {
+        let check = python_check_from_runtime(
+            "C:/Python/python.exe".to_string(),
+            RuntimeCheck {
+                version: "3.10.14".to_string(),
+                minimum_version: "3.11".to_string(),
+                supported: false,
+                missing_packages: vec!["fastapi".to_string()],
+                import_errors: Vec::new(),
+            },
+        );
+
+        assert!(check.error.unwrap().contains("Python 3.11"));
+        assert_eq!(check.missing_packages, ["fastapi"]);
+    }
+
+    #[test]
+    fn runtime_check_reports_broken_native_dependency() {
+        let check = python_check_from_runtime(
+            "C:/Python/python.exe".to_string(),
+            RuntimeCheck {
+                version: "3.11.9".to_string(),
+                minimum_version: "3.11".to_string(),
+                supported: true,
+                missing_packages: Vec::new(),
+                import_errors: vec!["ta-lib: OSError: missing DLL".to_string()],
+            },
+        );
+
+        assert!(check.error.unwrap().contains("ta-lib"));
+    }
+
+    #[test]
+    fn startup_exit_message_points_to_service_log() {
+        let message = startup_exit_message(7, Path::new("logs/alpha/service.log"));
+
+        assert!(message.contains("状态为 7"));
+        assert!(message.contains("logs/alpha/service.log"));
     }
 }

@@ -40,7 +40,7 @@ alpha-native Rust 计算模块
 
 ## 打包与运行目录
 
-- `pnpm tauri dev` 不释放源码。Rust 以仓库根目录为工作目录，通过用户配置的解释器执行 `python -E -m alpha`。
+- Dev 和 Test 构建不扫描或压缩 Alpha，也不把 Alpha 文件注册为 Cargo 构建输入。Rust 直接以仓库根目录为工作目录，通过用户配置的解释器执行 `python -E -m alpha`，使用固定的 `development` 版本标识。
 - Release 构建由 `src-tauri/build_support/alpha.rs` 把必要的 `.py` 文件和 `requirements-runtime.txt` 压缩进 Terax 可执行文件，不使用 Tauri resources，也不使用 PyInstaller。
 - Release 首次启动 Alpha 时，Rust 在跨进程文件锁内把归档释放到 `~/.terax/alpha/runtime/<archive-hash>/`。先写临时目录并校验入口和哈希标记，再通过同目录重命名发布，因此其他进程不会看到半成品。
 - 内容哈希发生变化时使用新的运行目录。旧目录不在启动路径上自动删除，避免影响仍在运行的旧版本服务。
@@ -51,6 +51,8 @@ alpha-native Rust 计算模块
 
 - 本机所有 Terax 进程共享一个监听 `127.0.0.1:11123` 的 Alpha 服务。每个窗口都是等价客户端，不维护窗口私有的服务状态。
 - Python 解释器绝对路径和自动启动开关通过 Terax 共享设置保存。首次未配置解释器时不自动启动，由用户在 Alpha 设置中选择解释器。
+- Python 运行环境以 `requirements-runtime.txt` 作为唯一依赖清单，通过 `python -E -m alpha.runtime_check` 逐项真实导入。最低版本为 Python 3.11；保存解释器时只校验绝对文件路径，只有用户主动检查才执行版本和依赖自检，为后续前端依赖管理保留清晰边界。
+- 服务启动不重复执行 Python 自检。解释器或环境后来发生变化时，由子进程提前退出和 `~/.terax/logs/alpha/service.log` 暴露真实错误，Rust 不等待完整启动超时。
 - 应用 Ready 后延迟协调。健康检查成功且归档哈希一致时不做额外操作；服务未运行、端口空闲且已配置自动启动时才启动服务。
 - 健康服务的归档哈希与当前 Terax 不一致时，持有操作锁的新构建先请求旧服务正常退出，再以当前内嵌源码启动替代服务。
 - 启动、停止和重启共用 `~/.terax/alpha/service.lock`。该锁只串行化操作，服务是否运行始终以带凭据的健康检查为准。
@@ -64,12 +66,16 @@ alpha-native Rust 计算模块
 - Alpha 对 Terax 暴露的接口统一位于 `/api/alpha`。
 - FastAPI 负责参数校验、业务错误、任务状态、数据访问和权限判断。
 - 重型回测、同步和优化不得阻塞 API 事件循环，应由 Alpha 任务运行时执行。
-- HTTP 查询结果是权威状态，WebSocket 用于进度、日志和状态变化通知。连接恢复后由客户端重新查询权威状态。
+- HTTP 查询结果是权威状态。当前 WebSocket 只提供受认证的双向 JSON 通路和 ping/pong，不订阅内部 EventEngine；后续由 FastAPI 定义公共事件类型，并由客户端按需订阅进度、日志和状态变化。
+- Rust 不自动重连 WebSocket。前端按页面生命周期决定是否重连，并在连接恢复后重新查询 HTTP 权威状态。
 
 ### Rust 代理保持通用
 
 - Rust 负责可信目标限制、连接管理、传输错误、凭据注入和必要的资源边界。
 - Rust 使用稳定的通用请求与事件通道，不为每个 Alpha 接口建立一组领域 command 和结构体。
+- 通用 HTTP 代理只接受 `/api/alpha` 下的 GET、POST 和 JSON，通用 WebSocket 代理支持双向 JSON 消息。两者都固定访问本机共享服务并由 Rust 注入凭据。
+- `/api/alpha/system/*` 只能由专用生命周期命令访问，不能通过通用代理转发。
+- 通用代理不会隐式启动 Alpha。传输失败由 Rust 报告，FastAPI 的 HTTP 业务状态码和 JSON 响应原样返回前端。
 - FastAPI 新增普通业务接口时，原则上只修改 Alpha 和前端 API 封装。
 - Alpha 服务凭据不暴露给 WebView，FastAPI 仍需独立验证 Rust 注入的凭据。
 
