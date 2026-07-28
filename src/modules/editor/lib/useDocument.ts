@@ -1,3 +1,9 @@
+/**
+ * 本文件将共享文档模型连接到 React。
+ *
+ * 同一路径的多个视图共享读取、缓冲区和保存状态，调用方不得另建独立副本。
+ */
+
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { getSharedDocumentModel } from "./documentModel";
@@ -9,6 +15,7 @@ type Options = {
   onDirtyChange?: (dirty: boolean) => void;
 };
 
+/** 订阅指定路径的共享文档，并暴露稳定的编辑、保存和重载动作。 */
 export function useDocument({ path, onDirtyChange }: Options) {
   const workspace = useWorkspaceEnvStore((state) => state.env);
   const model = useMemo(
@@ -40,3 +47,5 @@ export function useDocument({ path, onDirtyChange }: Options) {
     openAnyway: model.openAnyway,
   };
 }
+
+export type EditorDocument = ReturnType<typeof useDocument>;

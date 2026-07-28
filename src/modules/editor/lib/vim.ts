@@ -1,32 +1,18 @@
+/**
+ * 本文件初始化并创建 CodeMirror Vim 扩展。
+ *
+ * 模块仅在用户启用 Vim 时动态加载，Ex 命令通过轻量注册表调用所属视图。
+ */
+
 import type { Extension } from "@codemirror/state";
-import { type EditorView, ViewPlugin } from "@codemirror/view";
-import { Vim } from "@replit/codemirror-vim";
-
-export type VimHandlers = { save: () => void; close: () => void };
-
-const handlers = new WeakMap<EditorView, VimHandlers>();
-
-/** A CodeMirror extension that binds :w / :q handlers to this view. */
-export function vimHandlersExtension(
-  getHandlers: () => VimHandlers,
-): Extension {
-  return ViewPlugin.define((view) => {
-    handlers.set(view, getHandlers());
-    return {
-      update() {
-        // Keep handlers fresh in case the closure captured stale refs.
-        handlers.set(view, getHandlers());
-      },
-      destroy() {
-        handlers.delete(view);
-      },
-    };
-  });
-}
+import type { EditorView } from "@codemirror/view";
+import { Vim, vim } from "@replit/codemirror-vim";
+import { getVimHandlers } from "./vimHandlers";
 
 let initialized = false;
 
-export function initVimGlobals(): void {
+/** 注册一次全局 Ex 命令和方向键映射。 */
+function initVimGlobals(): void {
   if (initialized) return;
   initialized = true;
 
@@ -35,18 +21,18 @@ export function initVimGlobals(): void {
 
   Vim.defineEx("write", "w", (cm: CmAdapter) => {
     const view = getView(cm);
-    if (view) handlers.get(view)?.save();
+    if (view) getVimHandlers(view)?.save();
   });
 
   Vim.defineEx("quit", "q", (cm: CmAdapter) => {
     const view = getView(cm);
-    if (view) handlers.get(view)?.close();
+    if (view) getVimHandlers(view)?.close();
   });
 
   Vim.defineEx("wq", "wq", (cm: CmAdapter) => {
     const view = getView(cm);
     if (!view) return;
-    const h = handlers.get(view);
+    const h = getVimHandlers(view);
     h?.save();
     h?.close();
   });
@@ -54,7 +40,7 @@ export function initVimGlobals(): void {
   Vim.defineEx("xit", "x", (cm: CmAdapter) => {
     const view = getView(cm);
     if (!view) return;
-    const h = handlers.get(view);
+    const h = getVimHandlers(view);
     h?.save();
     h?.close();
   });
@@ -70,4 +56,10 @@ export function initVimGlobals(): void {
   Vim.map("<Down>", "j", "visual");
   Vim.map("<Left>", "h", "visual");
   Vim.map("<Right>", "l", "visual");
+}
+
+/** 初始化全局 Vim 命令并创建一个视图扩展。 */
+export function createVimExtension(): Extension {
+  initVimGlobals();
+  return vim();
 }

@@ -19,7 +19,6 @@ import { redo, undo } from "@codemirror/commands";
 import { gotoLine } from "@codemirror/search";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { vim } from "@replit/codemirror-vim";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import {
   forwardRef,
@@ -56,6 +55,7 @@ import {
   resolveFormatter,
   runExternalFormatter,
 } from "./lib/externalFormat";
+import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import {
   emptyGitChanges,
   gitChangeGutter,
@@ -64,13 +64,15 @@ import {
 } from "./lib/gitGutter";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
-import { openEditorFindPanel } from "./lib/find/editorFindPanel";
-import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
+import {
+  type EditorDocument,
+  FORCE_READ_LIMIT,
+  useDocument,
+} from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { previewMediaKind, usePreviewAssetUrl } from "./lib/usePreviewAssetUrl";
-import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
-
-initVimGlobals();
+import { useVimExtension } from "./lib/useVimExtension";
+import { vimHandlersExtension } from "./lib/vimHandlers";
 
 export type EditorPaneHandle = FindHandle & {
   focus: () => void;
@@ -93,7 +95,7 @@ export type EditorPaneHandle = FindHandle & {
   getViewportSourceLine: () => number | null;
 };
 
-type Props = {
+export type EditorPaneProps = {
   path: string;
   overrideLanguage?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
@@ -104,7 +106,11 @@ type Props = {
   onViewportSourceLineChange?: (line: number) => void;
 };
 
-export type EditorPaneProps = Props;
+type Props = EditorPaneProps;
+
+type CoreProps = Omit<Props, "onDirtyChange"> & {
+  document: EditorDocument;
+};
 
 // Above this, syntax highlighting and LSP are disabled: a multi-MB lezer
 // parse tree and a didOpen of that size cost far more than they give.
@@ -157,21 +163,37 @@ function formatBytes(n: number): string {
 /**
  * 代码编辑器面板。
  *
- * 负责渲染共享文档、处理保存和格式化，并在后台标签页中保持编辑器状态不被重建。
+ * 为独立调用方订阅共享文档，再交给已加载的 CodeMirror 面板渲染。
  */
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
+    const { onDirtyChange, ...coreProps } = props;
+    const document = useDocument({
+      path: props.path,
+      onDirtyChange,
+    });
+    return <EditorCore {...coreProps} ref={ref} document={document} />;
+  }),
+);
+
+/**
+ * 已取得共享文档的 CodeMirror 面板。
+ *
+ * 负责编辑、保存、格式化和渐进启用语言服务，不再触发文件首次读取。
+ */
+export const EditorCore = memo(
+  forwardRef<EditorPaneHandle, CoreProps>(function EditorCore(props, ref) {
     const { t } = useTranslation("editor");
     const diagnosticsOwnerId = useId();
     const {
       path,
       overrideLanguage,
-      onDirtyChange,
       onSaved,
       onClose,
       lspEnabled = true,
       initialSourceLine,
       onViewportSourceLineChange,
+      document,
     } = props;
 
     const {
@@ -182,10 +204,7 @@ export const EditorPane = memo(
       reload,
       adoptDiskText,
       openAnyway,
-    } = useDocument({
-      path,
-      onDirtyChange,
-    });
+    } = document;
     const reloadRef = useRef(reload);
     reloadRef.current = reload;
     const adoptDiskTextRef = useRef(adoptDiskText);
@@ -196,11 +215,12 @@ export const EditorPane = memo(
     viewportLineChangeRef.current = onViewportSourceLineChange;
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
+    const vimExtension = useVimExtension(vimMode);
     const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
     // 覆盖值只存在于当前编辑器视图，关闭后不影响全局偏好或其他文件。
-    const [temporaryWordWrap, setTemporaryWordWrap] = useState<
-      boolean | null
-    >(null);
+    const [temporaryWordWrap, setTemporaryWordWrap] = useState<boolean | null>(
+      null,
+    );
     const workspace = useWorkspaceEnvStore((s) => s.env);
     const workspaceScope = workspaceScopeKey(workspace);
     const languageRef = useRef<string | null>(null);
@@ -210,7 +230,8 @@ export const EditorPane = memo(
     /** 切换当前编辑器视图的自动换行，不持久化到偏好设置。 */
     const toggleTemporaryWordWrap = useCallback(() => {
       setTemporaryWordWrap(
-        (current) => !(current ?? usePreferencesStore.getState().editorWordWrap),
+        (current) =>
+          !(current ?? usePreferencesStore.getState().editorWordWrap),
       );
     }, []);
     const toggleTemporaryWordWrapRef = useRef(toggleTemporaryWordWrap);
@@ -466,9 +487,7 @@ export const EditorPane = memo(
       () => [
         // basicSetup is added before user extensions by @uiw/react-codemirror,
         // so we must elevate vim's precedence to win the keymap.
-        vimCompartment.of(
-          usePreferencesStore.getState().vimMode ? Prec.highest(vim()) : [],
-        ),
+        vimCompartment.of([]),
         wrapCompartment.of(
           usePreferencesStore.getState().editorWordWrap
             ? EditorView.lineWrapping
@@ -565,18 +584,18 @@ export const EditorPane = memo(
       const view = cmRef.current?.view;
       if (!view) return;
       view.dispatch({
-        effects: vimCompartment.reconfigure(vimMode ? Prec.highest(vim()) : []),
+        effects: vimCompartment.reconfigure(
+          vimExtension ? Prec.highest(vimExtension) : [],
+        ),
       });
-    }, [vimMode]);
+    }, [vimExtension]);
 
     useEffect(() => {
       const view = cmRef.current?.view;
       if (!view) return;
       view.dispatch({
         effects: wrapCompartment.reconfigure(
-          (temporaryWordWrap ?? editorWordWrap)
-            ? EditorView.lineWrapping
-            : [],
+          (temporaryWordWrap ?? editorWordWrap) ? EditorView.lineWrapping : [],
         ),
       });
     }, [editorWordWrap, temporaryWordWrap]);
@@ -618,13 +637,6 @@ export const EditorPane = memo(
       [diagnosticsOwnerId, path],
     );
 
-    // Warm the language chunk while the file is still being read; the
-    // ready-gated effect below then resolves from cache.
-    useEffect(() => {
-      const resolvePath = overrideLanguage ? `dummy.${overrideLanguage}` : path;
-      void resolveLanguage(resolvePath).catch(() => {});
-    }, [path, overrideLanguage]);
-
     const documentSize = doc.status === "ready" ? doc.size : null;
 
     useEffect(() => {
@@ -651,18 +663,28 @@ export const EditorPane = memo(
           }
         );
       };
-      void resolve().then((result) => {
-        if (cancelled) return;
-        if (result.id) languageRef.current = result.id;
-        setLangId(result.id || ext);
-        const view = cmRef.current?.view;
-        if (!view) return;
-        view.dispatch({
-          effects: languageCompartment.reconfigure(result.ext),
-        });
+      // 先让无高亮的 CodeMirror 完成首帧，再下载并接入对应语言扩展。
+      const frame = requestAnimationFrame(() => {
+        void resolve()
+          .then((result) => {
+            if (cancelled) return;
+            if (result.id) languageRef.current = result.id;
+            setLangId(result.id || ext);
+            const view = cmRef.current?.view;
+            if (!view) return;
+            view.dispatch({
+              effects: languageCompartment.reconfigure(result.ext),
+            });
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              console.warn("[editor] language extension load failed", error);
+            }
+          });
       });
       return () => {
         cancelled = true;
+        cancelAnimationFrame(frame);
       };
     }, [path, doc.status, overrideLanguage, documentSize]);
 
