@@ -1,3 +1,9 @@
+/**
+ * 本文件初始化 AI 偏好、密钥、会话和跨窗口刷新监听。
+ *
+ * 后台同步失败交由会话状态提示，避免未处理的 Promise 拒绝中断刷新周期。
+ */
+
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { firePendingReviewForSession } from "@/modules/agents/lib/review";
@@ -111,6 +117,7 @@ export function useAiBootstrap(): {
       if (refreshing) return;
       refreshing = true;
       void flushCompletedSessionRuns()
+        .catch(() => undefined)
         .then(refreshSessions)
         .finally(() => {
           refreshing = false;

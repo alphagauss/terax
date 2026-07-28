@@ -592,6 +592,7 @@ function hasPendingApproval(messages: UIMessage[]): boolean {
 
 export async function flushCompletedSessionRuns(): Promise<void> {
   const state = useChatStore.getState();
+  let firstFailure: unknown;
   for (const id of Object.keys(state.runLockSessionIds)) {
     const chat = chats.get(id);
     if (!chat) continue;
@@ -601,8 +602,10 @@ export async function flushCompletedSessionRuns(): Promise<void> {
       await useChatStore.getState().commitMessages(id, chat.messages);
     } catch (error) {
       useChatStore.setState({ sessionSyncError: String(error) });
+      firstFailure ??= error;
     }
   }
+  if (firstFailure !== undefined) throw firstFailure;
 }
 
 export function getAgentMeta(): AgentMeta {

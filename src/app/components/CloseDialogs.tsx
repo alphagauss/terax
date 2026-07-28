@@ -1,4 +1,11 @@
-import type { AppCloseBlocker } from "@/app/hooks/useAppCloseGuard";
+/**
+ * 本文件集中渲染标签页、Space 与应用关闭时的确认对话框。
+ *
+ * 应用关闭对话框同时承载未保存内容、保存超时和保存失败状态。
+ */
+
+import type { AppCloseDialogState } from "@/app/hooks/useAppCloseGuard";
+import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,7 +30,7 @@ type Props = {
   pendingDeleteTabs: number[] | null;
   onCancelDeleteClose: () => void;
   onConfirmDeleteClose: () => void;
-  pendingAppClose: AppCloseBlocker | null;
+  pendingAppClose: AppCloseDialogState | null;
   onCancelAppClose: () => void;
   onConfirmAppClose: () => void;
   pendingSpaceDelete: {
@@ -34,7 +41,7 @@ type Props = {
   onConfirmSpaceDelete: () => void;
 };
 
-/** Confirmation dialogs for closing dirty editors and terminals with live processes. */
+/** 渲染关闭脏编辑器、活动终端、Space 和应用时的确认对话框。 */
 export function CloseDialogs({
   tabs,
   pendingCloseTab,
@@ -174,27 +181,48 @@ export function CloseDialogs({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("close.quitTitle")}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingAppClose?.kind === "saving"
+                ? t("close.quitSavingTitle")
+                : pendingAppClose?.kind === "failed"
+                  ? t("close.quitFailedTitle")
+                  : t("close.quitTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingAppClose
-                ? t(
-                    pendingAppClose.busyTerminal
-                      ? pendingAppClose.dirtyEditors > 0
-                        ? "close.quitBusyDirty"
-                        : "close.quitBusy"
-                      : "close.quitDirty",
-                    { count: pendingAppClose.dirtyEditors },
-                  )
+                ? pendingAppClose.kind === "blocker"
+                  ? t(
+                      pendingAppClose.busyTerminal
+                        ? pendingAppClose.dirtyEditors > 0
+                          ? "close.quitBusyDirty"
+                          : "close.quitBusy"
+                        : "close.quitDirty",
+                      { count: pendingAppClose.dirtyEditors },
+                    )
+                  : pendingAppClose.kind === "saving"
+                    ? t("close.quitSaving")
+                    : t("close.quitFailed", {
+                        reason: pendingAppClose.reason,
+                      })
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={onCancelAppClose}>
+            <AlertDialogCancel>
               {t("common:cancel")}
             </AlertDialogCancel>
-            <AlertDialogAction onClick={onConfirmAppClose}>
-              {t("close.quitAnyway")}
-            </AlertDialogAction>
+            <Button
+              variant={
+                pendingAppClose?.kind === "blocker"
+                  ? "default"
+                  : "destructive"
+              }
+              onClick={onConfirmAppClose}
+            >
+              {pendingAppClose?.kind === "blocker"
+                ? t("close.quitAnyway")
+                : t("close.forceQuit")}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

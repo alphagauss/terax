@@ -35,6 +35,7 @@ vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
 import {
   chats,
+  flushCompletedSessionRuns,
   persistedMessageCounts,
   seedMessages,
   useChatStore,
@@ -42,6 +43,7 @@ import {
 import type { SessionMeta } from "../lib/sessions";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
+const realCommitMessages = useChatStore.getState().commitMessages;
 
 const first: SessionMeta = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -92,7 +94,25 @@ describe("chat store multi-process lifecycle", () => {
       runLockSessionIds: {},
       sessionSyncError: null,
       refreshSessions: realRefreshSessions,
+      commitMessages: realCommitMessages,
     });
+  });
+
+  it("关闭前提交失败时向调用方返回错误", async () => {
+    const failure = new Error("session write failed");
+    chats.set(first.id, {
+      status: "ready",
+      messages: [],
+    } as never);
+    useChatStore.setState({
+      runLockSessionIds: { [first.id]: true },
+      commitMessages: vi.fn().mockRejectedValue(failure),
+    });
+
+    await expect(flushCompletedSessionRuns()).rejects.toBe(failure);
+    expect(useChatStore.getState().sessionSyncError).toBe(
+      "Error: session write failed",
+    );
   });
 
   it("restores the most recent session and persists it when no active id exists", async () => {

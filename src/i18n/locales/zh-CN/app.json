@@ -23,6 +23,11 @@
     "quitDirty_other": "有 {{count}} 个文件存在未保存的更改。退出将丢弃这些更改。",
     "quitBusyDirty_one": "仍有进程正在运行,且有 1 个文件存在未保存的更改。退出将终止进程并丢弃更改。",
     "quitBusyDirty_other": "仍有进程正在运行,且有 {{count}} 个文件存在未保存的更改。退出将终止进程并丢弃更改。",
+    "quitSavingTitle": "仍在保存",
+    "quitSaving": "保存文件和应用状态的时间超过预期。取消可返回 Terax，强制退出可能丢失最近的更改。",
+    "quitFailedTitle": "无法安全退出",
+    "quitFailed": "Terax 无法完成退出前的准备：{{reason}}。取消可返回并手动保存，强制退出可能丢失最近的更改。",
+    "forceQuit": "强制退出",
     "quitAnyway": "仍然退出"
   },
   "windowControls": {

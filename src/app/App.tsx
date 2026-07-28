@@ -16,7 +16,11 @@ import {
   consumeWorkspaceOpenFiles,
   getLaunchDir,
 } from "@/lib/launchDir";
-import { onSharedStoreChange, readSharedStore } from "@/lib/sharedStore";
+import {
+  flushSharedStoreWrites,
+  onSharedStoreChange,
+  readSharedStore,
+} from "@/lib/sharedStore";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
@@ -46,6 +50,7 @@ import {
   hasOtherDocumentView,
   isDocumentTab,
   NewEditorDialog,
+  saveAutoSaveDocumentsBeforeClose,
   useEditorFileSync,
 } from "@/modules/editor";
 import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
@@ -114,6 +119,7 @@ import {
 } from "@/modules/workspace";
 import {
   currentWorkspaceBootstrap,
+  flushWorkspaceStore,
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
@@ -295,7 +301,7 @@ export default function App() {
     environmentHome: home,
   });
 
-  useSpacePersistence({
+  const flushSpacePersistence = useSpacePersistence({
     state: workbenchState,
     enabled: spacesHydrated,
   });
@@ -434,9 +440,26 @@ export default function App() {
     void handleCloseRef.current(id);
   }, []);
 
+  const flushBeforeAppClose = useCallback(
+    async () => {
+      const stateResults = await Promise.allSettled([
+        flushSpacePersistence(),
+        flushCompletedSessionRuns(),
+      ]);
+      const storeResults = await Promise.allSettled([
+        flushSharedStoreWrites(),
+        flushWorkspaceStore(),
+      ]);
+      for (const result of [...stateResults, ...storeResults]) {
+        if (result.status === "rejected") throw result.reason;
+      }
+    },
+    [flushSpacePersistence],
+  );
   const { pendingAppClose, confirmAppClose, cancelAppClose } = useAppCloseGuard(
     tabsRef,
-    flushCompletedSessionRuns,
+    flushBeforeAppClose,
+    saveAutoSaveDocumentsBeforeClose,
   );
   const [pendingSpaceDelete, setPendingSpaceDelete] = useState<{
     spaceId: string;

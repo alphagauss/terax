@@ -1,3 +1,9 @@
+/**
+ * 本文件负责工作台 Space 布局的延迟持久化。
+ *
+ * 常规状态变化经过防抖合并，应用主动关闭时可立即刷新并等待所有在途写入完成。
+ */
+
 import { serializeSpaceWorkbench } from "@/modules/spaces/lib/serialize";
 import { deleteSpaceData, saveState } from "@/modules/spaces/lib/store";
 import type { WorkbenchState } from "@/modules/workbench";
@@ -11,50 +17,70 @@ type Params = {
   enabled: boolean;
 };
 
+type PendingWrite = {
+  fingerprint: string;
+  operation: Promise<void>;
+};
+
+/**
+ * 持久化所有 Space 的工作台布局，并提供绕过防抖的关闭前刷新函数。
+ */
 export function useSpacePersistence({ state, enabled }: Params) {
   const last = useRef(new Map<string, string>());
-  const pending = useRef(new Map<string, string>());
+  const pending = useRef(new Map<string, PendingWrite>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef(state);
   latest.current = state;
 
-  const flush = useCallback((snapshot: WorkbenchState) => {
+  const flush = useCallback(async (snapshot: WorkbenchState) => {
+    const operations: Promise<void>[] = [];
     for (const spaceId of Object.keys(snapshot.spaces)) {
       const workbench = serializeSpaceWorkbench(snapshot, spaceId);
       const persist = (fingerprint: string, operation: Promise<void>) => {
-        pending.current.set(spaceId, fingerprint);
-        void operation
+        const tracked = operation
           .then(() => {
             last.current.set(spaceId, fingerprint);
           })
           .catch((error) => {
             console.error(`[spaces] failed to persist ${spaceId}`, error);
+            throw error;
           })
           .finally(() => {
-            if (pending.current.get(spaceId) === fingerprint) {
+            if (pending.current.get(spaceId)?.operation === tracked) {
               pending.current.delete(spaceId);
             }
           });
+        pending.current.set(spaceId, { fingerprint, operation: tracked });
+        operations.push(tracked);
       };
       if (!workbench) {
+        const pendingWrite = pending.current.get(spaceId);
         if (
           last.current.get(spaceId) === EMPTY_STATE ||
-          pending.current.get(spaceId) === EMPTY_STATE
+          pendingWrite?.fingerprint === EMPTY_STATE
         ) {
+          if (pendingWrite?.fingerprint === EMPTY_STATE) {
+            operations.push(pendingWrite.operation);
+          }
           continue;
         }
         persist(EMPTY_STATE, deleteSpaceData(spaceId));
         continue;
       }
       const json = JSON.stringify(workbench);
+      const pendingWrite = pending.current.get(spaceId);
       if (
         last.current.get(spaceId) === json ||
-        pending.current.get(spaceId) === json
+        pendingWrite?.fingerprint === json
       ) {
+        if (pendingWrite?.fingerprint === json) {
+          operations.push(pendingWrite.operation);
+        }
         continue;
       }
       persist(json, saveState(spaceId, { version: 2, workbench }));
     }
+    await Promise.all(operations);
   }, []);
 
   useEffect(() => {
@@ -62,7 +88,7 @@ export function useSpacePersistence({ state, enabled }: Params) {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       timer.current = null;
-      flush(state);
+      void flush(state).catch(() => undefined);
     }, DEBOUNCE_MS);
     return () => {
       if (timer.current) clearTimeout(timer.current);
@@ -72,9 +98,11 @@ export function useSpacePersistence({ state, enabled }: Params) {
   useEffect(() => {
     if (!enabled) return;
     const onHidden = () => {
-      if (document.visibilityState === "hidden") flush(latest.current);
+      if (document.visibilityState === "hidden") {
+        void flush(latest.current).catch(() => undefined);
+      }
     };
-    const onLeave = () => flush(latest.current);
+    const onLeave = () => void flush(latest.current).catch(() => undefined);
     document.addEventListener("visibilitychange", onHidden);
     window.addEventListener("blur", onLeave);
     window.addEventListener("beforeunload", onLeave);
@@ -82,7 +110,16 @@ export function useSpacePersistence({ state, enabled }: Params) {
       document.removeEventListener("visibilitychange", onHidden);
       window.removeEventListener("blur", onLeave);
       window.removeEventListener("beforeunload", onLeave);
-      flush(latest.current);
+      void flush(latest.current).catch(() => undefined);
     };
+  }, [enabled, flush]);
+
+  return useCallback(async () => {
+    if (!enabled) return;
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    await flush(latest.current);
   }, [enabled, flush]);
 }

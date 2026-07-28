@@ -1,3 +1,9 @@
+/**
+ * 本文件管理跨编辑器视图共享的文档缓冲区、磁盘同步和自动保存。
+ *
+ * 同一路径的视图共享保存队列；应用关闭时仅为已启用自动保存的脏文档立即落盘。
+ */
+
 import { documentResourceKey } from "@/lib/pathIdentity";
 import i18n from "@/i18n";
 import { notifyDocumentSaved } from "@/modules/lsp";
@@ -57,6 +63,22 @@ export function discardSharedDocumentModel(
   path: string,
 ): void {
   models.get(documentResourceKey(workspace, path))?.discard();
+}
+
+/**
+ * 应用主动关闭前立即保存所有已启用自动保存的脏文档。
+ *
+ * 文件冲突会作为失败返回关闭流程，避免未经用户确认覆盖磁盘内容。
+ */
+export async function saveAutoSaveDocumentsBeforeClose(): Promise<boolean> {
+  if (!usePreferencesStore.getState().editorAutoSave) return false;
+  while (true) {
+    const dirtyModels = [...models.values()].filter(
+      (model) => model.getSnapshot().dirty,
+    );
+    if (dirtyModels.length === 0) return true;
+    await Promise.all(dirtyModels.map((model) => model.saveBeforeClose()));
+  }
 }
 
 class SharedDocumentModel {
@@ -136,6 +158,16 @@ class SharedDocumentModel {
     }
     return this.saveNow();
   };
+
+  /** 保存关闭时仍为脏状态的最新缓冲区，并将冲突转换为可展示的失败原因。 */
+  async saveBeforeClose(): Promise<void> {
+    while (this.snapshot.dirty) {
+      const saved = await this.save();
+      if (saved) continue;
+      const name = this.path.split(/[\\/]/).pop() ?? this.path;
+      throw new Error(i18n.t("editor:closeAutoSaveConflict", { name }));
+    }
+  }
 
   reload = (): boolean => {
     if (this.snapshot.dirty) return false;

@@ -15,5 +15,6 @@ export {
   hasOtherDocumentView,
   isDocumentTab,
 } from "./lib/documentTabs";
+export { saveAutoSaveDocumentsBeforeClose } from "./lib/documentModel";
 export { NewEditorDialog } from "./NewEditorDialog";
 export { useEditorFileSync } from "./useEditorFileSync";
