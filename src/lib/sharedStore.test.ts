@@ -1,3 +1,9 @@
+/**
+ * 本文件测试跨进程共享存储的订阅与关闭前写入屏障。
+ *
+ * 订阅必须避免基线竞态，关闭刷新必须等待已经发出的原子写入完成。
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +25,11 @@ vi.mock("@tauri-apps/api/event", () => ({
   ),
 }));
 
-import { onSharedStoreChange } from "./sharedStore";
+import {
+  flushSharedStoreWrites,
+  onSharedStoreChange,
+  setSharedStoreKey,
+} from "./sharedStore";
 
 describe("shared store revision subscription", () => {
   beforeEach(() => {
@@ -91,5 +101,28 @@ describe("shared store revision subscription", () => {
     dispose();
     expect(mocks.unlisten).toHaveBeenCalledOnce();
     consoleError.mockRestore();
+  });
+
+  it("关闭刷新会等待所有在途共享存储写入", async () => {
+    let releaseWrite: (() => void) | undefined;
+    mocks.invoke.mockReturnValue(
+      new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      }),
+    );
+    const writing = setSharedStoreKey("ui-layout", "sidebar", {
+      primary: [],
+    });
+    let flushed = false;
+    const flushing = flushSharedStoreWrites().then(() => {
+      flushed = true;
+    });
+    await Promise.resolve();
+    expect(flushed).toBe(false);
+
+    releaseWrite?.();
+    await writing;
+    await flushing;
+    expect(flushed).toBe(true);
   });
 });

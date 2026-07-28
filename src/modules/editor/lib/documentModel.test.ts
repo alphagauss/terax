@@ -1,3 +1,9 @@
+/**
+ * 本文件测试共享文档模型的缓冲区、并发保存、自动保存与生命周期。
+ *
+ * 关闭前保存必须绕过自动保存延迟，同时不得保存未启用自动保存的脏文档。
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -19,6 +25,7 @@ import {
   documentResourceKey,
   getSharedDocumentModel,
   resetSharedDocumentModelsForTests,
+  saveAutoSaveDocumentsBeforeClose,
 } from "./documentModel";
 
 const local = { kind: "local" } satisfies WorkspaceEnv;
@@ -149,6 +156,97 @@ describe("shared document model", () => {
 
     unsubscribeFirst();
     unsubscribeSecond();
+  });
+
+  it("关闭前立即保存已启用自动保存的脏文档", async () => {
+    usePreferencesStore.setState({
+      editorAutoSave: true,
+      editorAutoSaveDelay: 60_000,
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("save before close\n");
+
+    await saveAutoSaveDocumentsBeforeClose();
+
+    expect(model.getSnapshot().dirty).toBe(false);
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_write_file",
+      ),
+    ).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("关闭保存期间继续编辑时会再次保存最新缓冲区", async () => {
+    usePreferencesStore.setState({
+      editorAutoSave: true,
+      editorAutoSaveDelay: 60_000,
+    });
+    let releaseFirstWrite: (() => void) | undefined;
+    let writeCount = 0;
+    let diskMtime = 1;
+    let diskSize = 4;
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { content?: string }) => {
+        if (command === "fs_read_file") {
+          return { kind: "text", content: "one\n", size: 4, mtime: 1 };
+        }
+        if (command === "fs_stat") {
+          return { kind: "file", size: diskSize, mtime: diskMtime };
+        }
+        if (command === "fs_write_file") {
+          writeCount += 1;
+          if (writeCount === 1) {
+            await new Promise<void>((resolve) => {
+              releaseFirstWrite = resolve;
+            });
+          }
+          diskMtime += 1;
+          diskSize = new TextEncoder().encode(args?.content ?? "").byteLength;
+          return diskMtime;
+        }
+        throw new Error(`unexpected command: ${command} ${args?.content}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("first edit\n");
+
+    const closingSave = saveAutoSaveDocumentsBeforeClose();
+    await vi.waitFor(() => expect(releaseFirstWrite).toBeDefined());
+    model.onChange("latest edit\n");
+    releaseFirstWrite?.();
+
+    await expect(closingSave).resolves.toBe(true);
+    expect(writeCount).toBe(2);
+    expect(model.getSnapshot().dirty).toBe(false);
+    unsubscribe();
+  });
+
+  it("关闭前不保存未启用自动保存的脏文档", async () => {
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("keep dirty\n");
+
+    await saveAutoSaveDocumentsBeforeClose();
+
+    expect(model.getSnapshot().dirty).toBe(true);
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_write_file",
+      ),
+    ).toHaveLength(0);
+    unsubscribe();
   });
 
   it("queues the latest buffer when editing continues during a save", async () => {

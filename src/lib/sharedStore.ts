@@ -15,6 +15,16 @@ export type SharedStoreName =
   | "ui-layout"
   | "keys-epoch";
 
+const pendingWrites = new Set<Promise<void>>();
+
+/** 跟踪跨进程共享存储写入，供应用关闭前等待所有原子替换完成。 */
+function trackSharedStoreWrite(operation: Promise<void>): Promise<void> {
+  pendingWrites.add(operation);
+  const remove = () => pendingWrites.delete(operation);
+  void operation.then(remove, remove);
+  return operation;
+}
+
 export function readSharedStore(
   store: SharedStoreName,
 ): Promise<Record<string, unknown>> {
@@ -26,14 +36,16 @@ export function setSharedStoreKey(
   key: string,
   value: unknown,
 ): Promise<void> {
-  return invoke("shared_store_set", { store, key, value });
+  return trackSharedStoreWrite(
+    invoke("shared_store_set", { store, key, value }),
+  );
 }
 
 export function deleteSharedStoreKey(
   store: SharedStoreName,
   key: string,
 ): Promise<void> {
-  return invoke("shared_store_delete", { store, key });
+  return trackSharedStoreWrite(invoke("shared_store_delete", { store, key }));
 }
 
 export type SharedStoreMutation =
@@ -45,7 +57,16 @@ export function mutateSharedStore(
   store: SharedStoreName,
   mutations: SharedStoreMutation[],
 ): Promise<void> {
-  return invoke("shared_store_mutate", { store, mutations });
+  return trackSharedStoreWrite(
+    invoke("shared_store_mutate", { store, mutations }),
+  );
+}
+
+/** 等待当前所有共享存储写入完成。 */
+export async function flushSharedStoreWrites(): Promise<void> {
+  while (pendingWrites.size > 0) {
+    await Promise.all(pendingWrites);
+  }
 }
 
 function sharedStoreRevision(store: SharedStoreName): Promise<string> {

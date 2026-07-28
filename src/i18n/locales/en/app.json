@@ -23,6 +23,11 @@
     "quitDirty_other": "{{count}} files have unsaved changes. Quitting will discard them.",
     "quitBusyDirty_one": "A process is still running and 1 file has unsaved changes. Quitting will terminate the process and discard the change.",
     "quitBusyDirty_other": "A process is still running and {{count}} files have unsaved changes. Quitting will terminate the process and discard the changes.",
+    "quitSavingTitle": "Still Saving",
+    "quitSaving": "Saving files and application state is taking longer than expected. Cancel to return to Terax, or force quit and risk losing recent changes.",
+    "quitFailedTitle": "Could Not Quit Safely",
+    "quitFailed": "Terax could not finish preparing to quit: {{reason}} Cancel to return and save manually, or force quit and risk losing recent changes.",
+    "forceQuit": "Force Quit",
     "quitAnyway": "Quit Anyway"
   },
   "windowControls": {

@@ -1,3 +1,9 @@
+/**
+ * 本文件管理当前 Workspace 进程的启动上下文与本地状态存储。
+ *
+ * 所有窗口级持久化都经过同一个 Tauri Store，关闭前可显式刷新到磁盘。
+ */
+
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
@@ -29,6 +35,15 @@ export type WorkspacePolicy = "fresh" | "recent";
 let bootstrap: WorkspaceBootstrap | null = null;
 let store: LazyStore | null = null;
 const cache = new Map<string, unknown>();
+const pendingWrites = new Set<Promise<unknown>>();
+
+/** 跟踪尚未完成的 Store 修改，供关闭前刷新建立严格的写入顺序。 */
+function trackWorkspaceWrite<T>(operation: Promise<T>): Promise<T> {
+  pendingWrites.add(operation);
+  const remove = () => pendingWrites.delete(operation);
+  void operation.then(remove, remove);
+  return operation;
+}
 
 export async function initializeWorkspaceProcess(): Promise<void> {
   bootstrap = await invoke<WorkspaceBootstrap>("get_workspace_bootstrap");
@@ -59,13 +74,22 @@ export async function setWorkspaceValue(
 ): Promise<void> {
   if (!store) throw new Error("Workspace store has not initialized");
   cache.set(key, value);
-  await store.set(key, value);
+  await trackWorkspaceWrite(store.set(key, value));
 }
 
 export async function deleteWorkspaceValue(key: string): Promise<void> {
   if (!store) throw new Error("Workspace store has not initialized");
   cache.delete(key);
-  await store.delete(key);
+  await trackWorkspaceWrite(store.delete(key));
+}
+
+/** 立即将当前 Workspace Store 的内存状态写入磁盘。 */
+export async function flushWorkspaceStore(): Promise<void> {
+  if (!store) throw new Error("Workspace store has not initialized");
+  while (pendingWrites.size > 0) {
+    await Promise.all(pendingWrites);
+  }
+  await store.save();
 }
 
 export async function spawnWorkspaceProcess(
