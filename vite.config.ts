@@ -1,3 +1,9 @@
+/**
+ * 本文件配置 Terax 前端的开发服务器、编译插件和生产分块。
+ *
+ * 按需功能必须保持独立入口，避免未启用的编辑器语言、Vim 或 AI provider 进入基础加载链路。
+ */
+
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -103,24 +109,6 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
           if (id.includes("@ai-sdk/")) return "ai-sdk-shared";
 
           if (id.includes("/xterm/") || id.includes("@xterm/")) return "xterm";
-          // Lang packs and legacy modes are dynamically imported by
-          // languageResolver; give each its own named chunk so they load on
-          // demand instead of being glued into the codemirror core chunk.
-          // (bundle audit, issue #551)
-          {
-            const m = id.match(/@codemirror\/lang-([\w-]+)/);
-            if (m) return `cm-lang-${m[1]}`;
-          }
-          {
-            const m = id.match(/@codemirror\/legacy-modes\/mode\/([\w-]+)/);
-            if (m) return `cm-legacy-${m[1]}`;
-          }
-          if (
-            id.includes("@codemirror/") ||
-            id.includes("@uiw/codemirror") ||
-            id.includes("@replit/codemirror")
-          )
-            return "codemirror";
           if (id.includes("/streamdown/") || id.includes("@streamdown/"))
             return "streamdown";
           if (
