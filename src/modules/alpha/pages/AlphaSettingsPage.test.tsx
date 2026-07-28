@@ -28,6 +28,11 @@ vi.mock("@/modules/alpha/native", () => ({
   stopAlpha: vi.fn(),
 }));
 
+vi.mock("@/modules/alpha/preferences", () => ({
+  setAlphaShowInRemote: vi.fn(),
+  useAlphaShowInRemote: () => false,
+}));
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));

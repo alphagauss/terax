@@ -234,6 +234,7 @@ export function hydrateSpaceWorkbench(
   serialized: SerializedWorkbenchNode,
   spaceId: string,
   allocId: () => number,
+  options: { allowAlphaSettings?: boolean } = {},
 ): { space: SpaceWorkbench; tabs: Tab[] } | null {
   const groups: SpaceWorkbench["groups"] = {};
   const tabs: Tab[] = [];
@@ -242,12 +243,19 @@ export function hydrateSpaceWorkbench(
   const visit = (node: SerializedWorkbenchNode): WorkbenchLayoutNode | null => {
     if (node.kind === "group") {
       if (!Array.isArray(node.tabs) || node.tabs.length === 0) return null;
-      const hydrated = node.tabs.map((tab) =>
+      const acceptedTabs = node.tabs.filter(
+        (tab) =>
+          tab.kind !== "alpha-settings" || options.allowAlphaSettings !== false,
+      );
+      if (acceptedTabs.length === 0) return null;
+      const activeSerialized = node.tabs[node.activeTabIndex];
+      const hydrated = acceptedTabs.map((tab) =>
         hydrateTab(tab, spaceId, allocId),
       );
       const groupId = allocId();
       const nodeId = allocId();
-      const activeTab = hydrated[node.activeTabIndex] ?? hydrated[0];
+      const activeIndex = acceptedTabs.indexOf(activeSerialized);
+      const activeTab = hydrated[activeIndex] ?? hydrated[0];
       groups[groupId] = {
         id: groupId,
         tabIds: hydrated.map((tab) => tab.id),

@@ -23,6 +23,11 @@
     "ready": "Python {{version}} is ready.",
     "missing": "Missing packages: {{packages}}"
   },
+  "availability": {
+    "label": "Availability",
+    "title": "Show in remote environments",
+    "description": "Also show Alpha in WSL and SSH workspaces. By default, Alpha is available only in Local workspaces."
+  },
   "service": {
     "label": "Service",
     "title": "Shared Alpha service",

@@ -6,6 +6,7 @@
 import {
   hydrateSpaceWorkbench,
   isSerializedWorkbenchNode,
+  type SerializedWorkbenchNode,
   serializeSpaceWorkbench,
 } from "@/modules/spaces/lib/serialize";
 import type { Tab, WorkbenchState } from "@/modules/workbench";
@@ -141,6 +142,25 @@ describe("Workbench Space serialization", () => {
         cold: true,
       }),
     ]);
+  });
+
+  it("drops persisted Alpha settings when the current environment hides Alpha", () => {
+    const serialized: SerializedWorkbenchNode = {
+      kind: "group",
+      tabs: [{ kind: "alpha-settings" }, { kind: "terminal", cwd: "/work" }],
+      activeTabIndex: 0,
+      active: true,
+    };
+
+    const restored = hydrateSpaceWorkbench(serialized, "default", counter(), {
+      allowAlphaSettings: false,
+    });
+
+    expect(restored?.tabs).toEqual([
+      expect.objectContaining({ kind: "terminal", cwd: "/work" }),
+    ]);
+    const activeGroup = restored?.space.groups[restored.space.activeGroupId];
+    expect(activeGroup?.activeTabId).toBe(restored?.tabs[0]?.id);
   });
 
   it("round-trips layout, active group, tabs, and terminal cwd", () => {

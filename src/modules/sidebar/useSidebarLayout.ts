@@ -11,6 +11,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { getSidebarContainer, SIDEBAR_CONTAINERS } from "./containers";
 import {
+  clampPanelWidth,
+  PRIMARY_SIDEBAR_MIN_WIDTH,
+  SECONDARY_SIDEBAR_MIN_WIDTH,
+} from "./layout";
+import {
   findSidebarContainerLocation,
   moveSidebarContainer,
   normalizeSidebarRuntimeState,
@@ -21,11 +26,6 @@ import {
   persistSidebarPlacementState,
   subscribeSidebarPlacementState,
 } from "./persistence";
-import {
-  PRIMARY_SIDEBAR_MIN_WIDTH,
-  SECONDARY_SIDEBAR_MIN_WIDTH,
-  clampPanelWidth,
-} from "./layout";
 import type {
   ActivityBarPosition,
   ActivityBarSize,
@@ -40,14 +40,26 @@ const RUNTIME_STORAGE_KEY = "sidebar-layout:runtime";
 type RuntimeUpdater = (current: SidebarRuntimeState) => SidebarRuntimeState;
 
 /** 控制容器激活、位置移动、区域折叠和最终尺寸持久化。 */
-export function useSidebarLayout() {
+export function useSidebarLayout(
+  unavailableContainerIds: readonly SidebarContainerId[] = [],
+) {
+  const unavailable = useMemo(
+    () => new Set(unavailableContainerIds),
+    [unavailableContainerIds],
+  );
+  const effectiveHiddenIds = useCallback(
+    (hidden: readonly SidebarContainerId[]) => [
+      ...new Set([...hidden, ...unavailable]),
+    ],
+    [unavailable],
+  );
   const [initialPlacementState] = useState(getInitialSidebarPlacementState);
   const [placementState, setPlacementState] = useState(initialPlacementState);
   const [initialRuntime] = useState(() =>
     normalizeSidebarRuntimeState(
       getWorkspaceValue<unknown>(RUNTIME_STORAGE_KEY),
       initialPlacementState.placements,
-      initialPlacementState.activityBar.hiddenContainerIds,
+      effectiveHiddenIds(initialPlacementState.activityBar.hiddenContainerIds),
     ),
   );
   const [runtime, setRuntime] = useState(initialRuntime);
@@ -241,7 +253,7 @@ export function useSidebarLayout() {
       const nextRuntime = normalizeSidebarRuntimeState(
         runtimeRef.current,
         current.placements,
-        hiddenContainerIds,
+        effectiveHiddenIds(hiddenContainerIds),
       );
       replaceRuntime(() => nextRuntime);
       if (nextRuntime[location].collapsed) {
@@ -250,7 +262,13 @@ export function useSidebarLayout() {
         revealLocation(location, nextRuntime[location].activeId ?? undefined);
       }
     },
-    [commitPlacementState, panelRefs, replaceRuntime, revealLocation],
+    [
+      commitPlacementState,
+      effectiveHiddenIds,
+      panelRefs,
+      replaceRuntime,
+      revealLocation,
+    ],
   );
 
   const setActivityBarPosition = useCallback(
@@ -333,7 +351,7 @@ export function useSidebarLayout() {
       const nextRuntime = normalizeSidebarRuntimeState(
         runtimeRef.current,
         next.placements,
-        next.activityBar.hiddenContainerIds,
+        effectiveHiddenIds(next.activityBar.hiddenContainerIds),
       );
       replaceRuntime(() => nextRuntime);
       requestAnimationFrame(() => {
@@ -356,11 +374,39 @@ export function useSidebarLayout() {
       cancelled = true;
       dispose?.();
     };
-  }, [panelRefs, replaceRuntime, revealLocation]);
+  }, [effectiveHiddenIds, panelRefs, replaceRuntime, revealLocation]);
+
+  useEffect(() => {
+    const nextRuntime = normalizeSidebarRuntimeState(
+      runtimeRef.current,
+      placementStateRef.current.placements,
+      effectiveHiddenIds(
+        placementStateRef.current.activityBar.hiddenContainerIds,
+      ),
+    );
+    replaceRuntime(() => nextRuntime);
+  }, [effectiveHiddenIds, replaceRuntime]);
+
+  const availableContainers = useMemo(
+    () =>
+      SIDEBAR_CONTAINERS.filter((container) => !unavailable.has(container.id)),
+    [unavailable],
+  );
+  const availablePlacements = useMemo(
+    () => ({
+      primary: placementState.placements.primary.filter(
+        (id) => !unavailable.has(id),
+      ),
+      secondary: placementState.placements.secondary.filter(
+        (id) => !unavailable.has(id),
+      ),
+    }),
+    [placementState.placements, unavailable],
+  );
 
   return {
-    containers: SIDEBAR_CONTAINERS,
-    placements: placementState.placements,
+    containers: availableContainers,
+    placements: availablePlacements,
     activityBar: placementState.activityBar,
     runtime,
     initialRuntime,

@@ -3,12 +3,12 @@
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
 
+import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -36,9 +36,10 @@ import {
   useChatStore,
   useSelectionAskAi,
 } from "@/modules/ai";
-import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
+import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
+import { useAlphaShowInRemote } from "@/modules/alpha/preferences";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
@@ -64,8 +65,8 @@ import {
 import {
   SecondarySidebarTabs,
   SidebarActivityBar,
-  SidebarViewPool,
   type SidebarPooledView,
+  SidebarViewPool,
   useSidebarLayout,
   WORKSPACE_MIN_WIDTH,
 } from "@/modules/sidebar";
@@ -100,9 +101,9 @@ import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import {
   DEFAULT_SPACE_ID,
   findGroupForTab,
+  type TerminalTab,
   useWorkbench,
   type WorkbenchChromeActions,
-  type TerminalTab,
   WorkbenchSurface,
   type WorkbenchViewServices,
 } from "@/modules/workbench";
@@ -116,18 +117,18 @@ import {
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
-import { useTranslation } from "react-i18next";
 import { CloseDialogs } from "./components/CloseDialogs";
-import { spaceDeleteDocuments } from "./lib/spaceDelete";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
+import { spaceDeleteDocuments } from "./lib/spaceDelete";
 
 type WorkspaceActivation = {
   requestId: string;
@@ -311,7 +312,13 @@ export default function App() {
     [activeSpaceId, tabs],
   );
 
-  const sidebar = useSidebarLayout();
+  const showAlphaInRemote = useAlphaShowInRemote();
+  const alphaAvailable = workspaceEnv.kind === "local" || showAlphaInRemote;
+  const unavailableSidebarContainerIds = useMemo(
+    () => (alphaAvailable ? [] : (["alpha"] as const)),
+    [alphaAvailable],
+  );
+  const sidebar = useSidebarLayout(unavailableSidebarContainerIds);
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
@@ -449,6 +456,13 @@ export default function App() {
     for (const k of [...terminalRefs.current.keys()])
       if (!live.has(k)) terminalRefs.current.delete(k);
   }, [tabs]);
+
+  useEffect(() => {
+    if (alphaAvailable) return;
+    for (const tab of tabsRef.current) {
+      if (tab.kind === "alpha-settings") disposeTab(tab.id);
+    }
+  }, [alphaAvailable, disposeTab]);
 
   // Most-recently-used tab ids, most recent first, pruned to live tabs. Drives
   // the Ctrl+Tab quick switcher so it cycles by recency, not strip order.
@@ -1524,10 +1538,16 @@ export default function App() {
         />
       ),
     },
-    {
-      id: "alpha",
-      content: <AlphaSidebar onOpenSettings={() => openAlphaSettingsTab()} />,
-    },
+    ...(alphaAvailable
+      ? [
+          {
+            id: "alpha" as const,
+            content: (
+              <AlphaSidebar onOpenSettings={() => openAlphaSettingsTab()} />
+            ),
+          },
+        ]
+      : []),
     {
       id: "ai",
       content: <AiSidebarPanel hasComposer={hasComposer} />,

@@ -16,6 +16,10 @@ import {
   startAlpha,
   stopAlpha,
 } from "@/modules/alpha/native";
+import {
+  setAlphaShowInRemote,
+  useAlphaShowInRemote,
+} from "@/modules/alpha/preferences";
 import { SectionHeader } from "@/settings/components/SectionHeader";
 import { SettingRow } from "@/settings/components/SettingRow";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -25,6 +29,7 @@ import { toast } from "sonner";
 
 type Action =
   | "autoStart"
+  | "remoteVisibility"
   | "check"
   | "start"
   | "stop"
@@ -46,6 +51,7 @@ export function AlphaSettingsPage({ visible }: Props) {
   const [status, setStatus] = useState<AlphaStatus | null>(null);
   const [check, setCheck] = useState<PythonCheck | null>(null);
   const [action, setAction] = useState<Action>(null);
+  const showInRemote = useAlphaShowInRemote();
 
   const refresh = useCallback(
     async (notifyOnError = false) => {
@@ -139,6 +145,19 @@ export function AlphaSettingsPage({ visible }: Props) {
     }
   };
 
+  const toggleRemoteVisibility = async (enabled: boolean) => {
+    setAction("remoteVisibility");
+    try {
+      await setAlphaShowInRemote(enabled);
+    } catch (error) {
+      toast.error(t("errors.setting"), {
+        description: String(error),
+      });
+    } finally {
+      setAction(null);
+    }
+  };
+
   const stateText = status?.running
     ? t("service.running", { port: status.port })
     : status?.issue === "portConflict"
@@ -205,6 +224,22 @@ export function AlphaSettingsPage({ visible }: Props) {
               </Button>
             </SettingRow>
           ) : null}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label>{t("availability.label")}</Label>
+          <SettingRow
+            title={t("availability.title")}
+            description={t("availability.description")}
+          >
+            <Switch
+              checked={showInRemote}
+              disabled={action !== null}
+              onCheckedChange={(enabled) =>
+                void toggleRemoteVisibility(enabled)
+              }
+            />
+          </SettingRow>
         </div>
 
         <div className="flex flex-col gap-2">

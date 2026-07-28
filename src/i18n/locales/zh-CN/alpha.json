@@ -23,6 +23,11 @@
     "ready": "Python {{version}} 已就绪。",
     "missing": "缺少依赖：{{packages}}"
   },
+  "availability": {
+    "label": "可用范围",
+    "title": "在远端环境中显示",
+    "description": "同时在 WSL 和 SSH 工作区中显示 Alpha。默认仅在 Local 工作区中可用。"
+  },
   "service": {
     "label": "服务",
     "title": "共享 Alpha 服务",

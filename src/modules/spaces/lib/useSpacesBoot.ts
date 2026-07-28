@@ -1,4 +1,5 @@
 import { native } from "@/modules/ai/lib/native";
+import { getInitialAlphaShowInRemote } from "@/modules/alpha/preferences";
 import {
   canBootWorkspaceEnvironment,
   initialWorkspaceRoot,
@@ -116,7 +117,15 @@ export function useSpacesBoot({
         for (const spaceMeta of spaces) {
           const persisted = loaded.states.get(spaceMeta.id);
           const restored = persisted
-            ? hydrateSpaceWorkbench(persisted.workbench, spaceMeta.id, allocId)
+            ? hydrateSpaceWorkbench(
+                persisted.workbench,
+                spaceMeta.id,
+                allocId,
+                {
+                  allowAlphaSettings:
+                    env.kind === "local" || getInitialAlphaShowInRemote(),
+                },
+              )
             : null;
           const workbench =
             restored ??

@@ -6,13 +6,13 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
 import "./i18n";
-import { preloadEn, preloadZhCN } from "./i18n";
-
+import { initializeAlphaPreferences } from "@/modules/alpha/preferences";
 import { initializeSidebarLayout } from "@/modules/sidebar";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ReactDOM from "react-dom/client";
 import App from "./app/App";
+import { preloadEn, preloadZhCN } from "./i18n";
 import { initLaunchDir } from "./lib/launchDir";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "./lib/platform";
 import { initializeWorkspaceProcess } from "./modules/workspace-process";
@@ -28,7 +28,11 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_SCAN === "true") {
   scan({ enabled: true });
 }
 
-await Promise.all([initializeWorkspaceProcess(), initializeSidebarLayout()]);
+await Promise.all([
+  initializeWorkspaceProcess(),
+  initializeSidebarLayout(),
+  initializeAlphaPreferences(),
+]);
 
 // Reap PTY sessions orphaned by a prior webview load before any tab spawns.
 await invoke("pty_close_all").catch(() => {});
