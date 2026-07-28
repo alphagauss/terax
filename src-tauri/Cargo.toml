@@ -125,9 +125,15 @@ tauri-plugin-window-state = "2"
 incremental = true
 debug = "line-tables-only"
 
+[profile.dev.package."*"]
+debug = false
+
+[profile.test.package."*"]
+debug = false
+
 [profile.release]
-codegen-units = 1
-lto = "fat"
+codegen-units = 16
+lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true

@@ -1,0 +1,3 @@
+# Windows 默认的 MSVC 链接器难以并行处理大型 Rust 二进制，使用工具链内置的 LLD 缩短 dev 和 build 的链接阶段。
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"
