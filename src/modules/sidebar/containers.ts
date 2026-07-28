@@ -5,6 +5,7 @@
 
 import {
   AiChat01Icon,
+  ChartCandlestickIcon,
   FolderGitTwoIcon,
   FolderTreeIcon,
 } from "@hugeicons/core-free-icons";
@@ -28,6 +29,15 @@ export const SIDEBAR_CONTAINERS = [
     defaultOrder: 1,
     allowedLocations: ["primary", "secondary"],
     minimumWidth: 220,
+  },
+  {
+    id: "alpha",
+    titleKey: "alpha",
+    icon: ChartCandlestickIcon,
+    defaultLocation: "primary",
+    defaultOrder: 2,
+    allowedLocations: ["primary", "secondary"],
+    minimumWidth: 180,
   },
   {
     id: "ai",

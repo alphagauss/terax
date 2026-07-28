@@ -1,6 +1,7 @@
 {
   "files": "Files",
   "sourceControl": "Source Control",
+  "alpha": "Alpha",
   "ai": "AI",
   "moveToPrimary": "Move to Primary Sidebar",
   "moveToSecondary": "Move to Secondary Sidebar",

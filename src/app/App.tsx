@@ -36,6 +36,7 @@ import {
   useChatStore,
   useSelectionAskAi,
 } from "@/modules/ai";
+import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
@@ -202,6 +203,7 @@ export default function App() {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAlphaSettingsTab,
     closeTab,
     updateTab,
     setDocumentDirty,
@@ -1521,6 +1523,10 @@ export default function App() {
           onNavigateToPath={cdInNewTab}
         />
       ),
+    },
+    {
+      id: "alpha",
+      content: <AlphaSidebar onOpenSettings={() => openAlphaSettingsTab()} />,
     },
     {
       id: "ai",

@@ -15,7 +15,6 @@
     "shortcuts": "Shortcuts",
     "models": "Models",
     "agents": "Agents",
-    "alpha": "Alpha",
     "remote": "Remote",
     "about": "About"
   },
@@ -408,58 +407,6 @@
       "errRequired": "Required.",
       "errFormat": "Lowercase letters, digits, and dashes only.",
       "errInUse": "Already in use."
-    }
-  },
-  "alpha": {
-    "header": {
-      "title": "Alpha",
-      "description": "Configure the shared local quant service used by every Terax window."
-    },
-    "python": {
-      "label": "Python",
-      "title": "Python interpreter",
-      "description": "Choose an existing Python environment. Terax does not install or modify its packages automatically.",
-      "unconfigured": "Not configured",
-      "select": "Choose",
-      "selectTitle": "Choose the Python interpreter for Alpha"
-    },
-    "dependencies": {
-      "title": "Runtime dependencies",
-      "description": "Check whether the selected interpreter contains the Alpha runtime packages.",
-      "check": "Check",
-      "checking": "Checking...",
-      "ready": "Python {{version}} is ready.",
-      "missing": "Missing packages: {{packages}}"
-    },
-    "service": {
-      "label": "Service",
-      "title": "Shared Alpha service",
-      "running": "Listening on 127.0.0.1:{{port}}. All Terax windows use this instance.",
-      "stopped": "The shared service is not running.",
-      "loading": "Checking the shared service status...",
-      "portConflict": "Port {{port}} is occupied by a service that Terax cannot identify as Alpha.",
-      "statusRunning": "Running",
-      "statusStopped": "Stopped"
-    },
-    "autoStart": {
-      "title": "Start after Terax launches",
-      "description": "After a short delay, any Terax process can ensure the single shared service is running."
-    },
-    "actions": {
-      "start": "Start",
-      "starting": "Starting...",
-      "startFailed": "Could not start Alpha",
-      "stop": "Stop",
-      "stopping": "Stopping...",
-      "stopFailed": "Could not stop Alpha",
-      "restart": "Restart",
-      "restarting": "Restarting...",
-      "restartFailed": "Could not restart Alpha"
-    },
-    "errors": {
-      "status": "Could not query Alpha status",
-      "python": "Could not use this Python interpreter",
-      "setting": "Could not update Alpha settings"
     }
   },
   "remote": {

@@ -1,6 +1,7 @@
 {
   "files": "文件",
   "sourceControl": "源代码管理",
+  "alpha": "Alpha",
   "ai": "AI",
   "moveToPrimary": "移到主侧边栏",
   "moveToSecondary": "移到副侧边栏",

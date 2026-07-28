@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 Workbench 空间布局的序列化和恢复。
+ * 重点锁定可恢复页面只保存定位信息，临时页面和运行时状态不会持久化。
+ */
+
 import {
   hydrateSpaceWorkbench,
   isSerializedWorkbenchNode,
@@ -97,6 +102,47 @@ function state(): WorkbenchState {
 }
 
 describe("Workbench Space serialization", () => {
+  it("persists Alpha settings as a locator and reloads its runtime page", () => {
+    const alphaSettings: Tab = {
+      id: 1,
+      kind: "alpha-settings",
+      spaceId: "default",
+      title: "Alpha Settings",
+    };
+    const current: WorkbenchState = {
+      tabs: { 1: alphaSettings },
+      spaces: {
+        default: {
+          root: { kind: "group", id: 2, groupId: 3 },
+          groups: {
+            3: { id: 3, tabIds: [1], activeTabId: 1 },
+          },
+          activeGroupId: 3,
+        },
+      },
+    };
+
+    const serialized = serializeSpaceWorkbench(current, "default");
+    expect(serialized).toEqual({
+      kind: "group",
+      tabs: [{ kind: "alpha-settings" }],
+      activeTabIndex: 0,
+      active: true,
+    });
+    expect(isSerializedWorkbenchNode(serialized)).toBe(true);
+
+    const restored = serialized
+      ? hydrateSpaceWorkbench(serialized, "default", counter())
+      : null;
+    expect(restored?.tabs).toEqual([
+      expect.objectContaining({
+        kind: "alpha-settings",
+        spaceId: "default",
+        cold: true,
+      }),
+    ]);
+  });
+
   it("round-trips layout, active group, tabs, and terminal cwd", () => {
     const serialized = serializeSpaceWorkbench(state(), "default");
     expect(serialized).toMatchObject({

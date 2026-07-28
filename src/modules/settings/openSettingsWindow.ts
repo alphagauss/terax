@@ -12,7 +12,6 @@ export type SettingsTab =
   | "shortcuts"
   | "models"
   | "agents"
-  | "alpha"
   | "remote"
   | "about";
 

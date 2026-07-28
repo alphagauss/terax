@@ -44,6 +44,7 @@ import type {
 } from "@/modules/workbench/types";
 import {
   Cancel01Icon,
+  ChartCandlestickIcon,
   Clock01Icon,
   ComputerTerminal02Icon,
   GitBranchIcon,
@@ -803,6 +804,16 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={Clock01Icon}
+        size={14}
+        strokeWidth={2}
+        className="shrink-0"
+      />
+    );
+  }
+  if (tab.kind === "alpha-settings") {
+    return (
+      <HugeiconsIcon
+        icon={ChartCandlestickIcon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

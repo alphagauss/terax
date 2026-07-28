@@ -27,7 +27,7 @@ describe("normalizeSidebarPlacementState", () => {
     ).toEqual({
       version: 1,
       placements: {
-        primary: ["ai", "source-control"],
+        primary: ["ai", "source-control", "alpha"],
         secondary: ["explorer"],
       },
       activityBar: {
@@ -76,7 +76,7 @@ describe("moveSidebarContainer", () => {
     );
 
     expect(placements).toEqual({
-      primary: ["explorer"],
+      primary: ["explorer", "alpha"],
       secondary: ["source-control", "ai"],
     });
     expect(findSidebarContainerLocation(placements, "source-control")).toBe(
@@ -92,7 +92,7 @@ describe("moveSidebarContainer", () => {
       1,
     );
 
-    expect(placements.primary).toEqual(["source-control", "explorer"]);
+    expect(placements.primary).toEqual(["source-control", "explorer", "alpha"]);
   });
 
   it("returns the original placements when the requested order is unchanged", () => {
@@ -190,8 +190,8 @@ describe("runtimeAfterSidebarContainerMove", () => {
     ).toEqual({
       version: 1,
       primary: {
-        activeId: null,
-        collapsed: true,
+        activeId: "alpha",
+        collapsed: false,
         width: 260,
       },
       secondary: {

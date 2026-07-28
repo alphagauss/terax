@@ -13,6 +13,7 @@
   "editor": "Editor",
   "webPreview": "Web Preview",
   "gitGraph": "Git Graph",
+  "alphaSettings": "Alpha Settings",
   "splitRight": "Split Right",
   "splitAndMove": "Split and Move",
   "splitMove": {

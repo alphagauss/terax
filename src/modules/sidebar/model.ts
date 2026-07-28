@@ -26,7 +26,7 @@ export const SIDEBAR_LOCATIONS = ["primary", "secondary"] as const;
 export const DEFAULT_SIDEBAR_PLACEMENT_STATE: SidebarPlacementState = {
   version: 1,
   placements: {
-    primary: ["explorer", "source-control"],
+    primary: ["explorer", "source-control", "alpha"],
     secondary: ["ai"],
   },
   activityBar: {

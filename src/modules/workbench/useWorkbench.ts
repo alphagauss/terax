@@ -1,3 +1,8 @@
+/**
+ * 本文件管理 Workbench 页面、分组和空间的运行时状态。
+ * 页面打开函数负责复用既有标签，具体页面内容由视图注册表渲染。
+ */
+
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import i18n from "@/i18n";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
@@ -21,6 +26,7 @@ import {
   updateSplitSizes,
 } from "@/modules/workbench/model";
 import {
+  type AlphaSettingsTab,
   type AiDiffStatus,
   DEFAULT_SPACE_ID,
   type EditorTab,
@@ -644,6 +650,34 @@ export function useWorkbench(
     [addPage, allocId, revealTab],
   );
 
+  /** 在目标工作组中打开或复用唯一的 Alpha 设置页。 */
+  const openAlphaSettingsTab = useCallback(
+    (groupId?: number) => {
+      const spaceId = activeSpaceIdRef.current;
+      const target = groupId ?? targetGroup(spaceId);
+      if (target === null) return null;
+      const group = stateRef.current.spaces[spaceId]?.groups[target];
+      if (!group) return null;
+      const existing = group.tabIds
+        .map((id) => stateRef.current.tabs[id])
+        .find((tab) => tab?.kind === "alpha-settings");
+      if (existing) {
+        revealTab(existing.id);
+        return existing.id;
+      }
+      const id = allocId();
+      const tab: AlphaSettingsTab = {
+        id,
+        kind: "alpha-settings",
+        spaceId,
+        title: i18n.t("tabs:alphaSettings"),
+      };
+      addPage(tab, target);
+      return id;
+    },
+    [addPage, allocId, revealTab, targetGroup],
+  );
+
   const updateTab = useCallback(
     (id: number, patch: TabPatch) =>
       commit((current) => patchTab(current, id, patch)),
@@ -935,6 +969,7 @@ export function useWorkbench(
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAlphaSettingsTab,
     closeAiDiffTab,
     closeTab,
     updateTab,

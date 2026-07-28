@@ -1,3 +1,8 @@
+/**
+ * 本文件定义 Workbench 标签页、分组和递归布局的公共类型。
+ * 页面类型只描述可渲染状态，不承载页面组件或运行时资源。
+ */
+
 export const DEFAULT_SPACE_ID = "default";
 
 export type WorkbenchDirection = "up" | "down" | "left" | "right";
@@ -75,6 +80,10 @@ export type GitCommitFileDiffTab = TabBase & {
   originalPath: string | null;
 };
 
+export type AlphaSettingsTab = TabBase & {
+  kind: "alpha-settings";
+};
+
 export type Tab =
   | TerminalTab
   | EditorTab
@@ -83,7 +92,8 @@ export type Tab =
   | AiDiffTab
   | GitDiffTab
   | GitHistoryTab
-  | GitCommitFileDiffTab;
+  | GitCommitFileDiffTab
+  | AlphaSettingsTab;
 
 export type TabPatch = Partial<{
   title: string;

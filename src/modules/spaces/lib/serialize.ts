@@ -1,3 +1,8 @@
+/**
+ * 本文件负责 Workbench 空间布局和可恢复页面的持久化转换。
+ * 只保存页面定位信息，运行时状态、连接和临时页面不会写入持久化数据。
+ */
+
 import i18n from "@/i18n";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
 import type {
@@ -20,7 +25,8 @@ export type SerializedTab =
     }
   | { kind: "editor"; path: string; explorerRoot?: string }
   | { kind: "web-preview"; url: string }
-  | { kind: "markdown"; path: string; explorerRoot?: string };
+  | { kind: "markdown"; path: string; explorerRoot?: string }
+  | { kind: "alpha-settings" };
 
 export type SerializedWorkbenchNode =
   | {
@@ -41,7 +47,8 @@ function isSerializableTab(tab: Tab): boolean {
     (tab.kind === "terminal" && !tab.private) ||
     tab.kind === "editor" ||
     tab.kind === "web-preview" ||
-    tab.kind === "markdown"
+    tab.kind === "markdown" ||
+    tab.kind === "alpha-settings"
   );
 }
 
@@ -81,11 +88,14 @@ function serializeTab(tab: Tab): SerializedTab | null {
           explorerRoot: tab.explorerRoot,
         }),
       };
+    case "alpha-settings":
+      return { kind: "alpha-settings" };
     default:
       return null;
   }
 }
 
+/** 将指定空间转换为只包含可恢复页面定位信息的持久化布局。 */
 export function serializeSpaceWorkbench(
   state: WorkbenchState,
   spaceId: string,
@@ -208,9 +218,18 @@ function hydrateTab(
           explorerRoot: serialized.explorerRoot,
         }),
       } satisfies MarkdownTab;
+    case "alpha-settings":
+      return {
+        id: allocId(),
+        kind: "alpha-settings",
+        spaceId,
+        cold: true,
+        title: i18n.t("tabs:alphaSettings"),
+      } satisfies Tab;
   }
 }
 
+/** 从持久化布局重建页面 ID，并让各页面在挂载后重新加载运行数据。 */
 export function hydrateSpaceWorkbench(
   serialized: SerializedWorkbenchNode,
   spaceId: string,
@@ -270,6 +289,7 @@ export function hydrateSpaceWorkbench(
   }
 }
 
+/** 为没有有效持久化布局的空间创建默认终端页面。 */
 export function freshSpaceWorkbench(
   spaceId: string,
   cwd: string | null | undefined,
@@ -300,6 +320,7 @@ export function freshSpaceWorkbench(
   };
 }
 
+/** 校验未知数据是否为当前版本支持的 Workbench 持久化布局。 */
 export function isSerializedWorkbenchNode(
   value: unknown,
 ): value is SerializedWorkbenchNode {
@@ -339,6 +360,7 @@ function isSerializedTab(value: unknown): value is SerializedTab {
     );
   }
   if (tab.kind === "web-preview") return typeof tab.url === "string";
+  if (tab.kind === "alpha-settings") return true;
   if (tab.kind === "editor" || tab.kind === "markdown") {
     return (
       typeof tab.path === "string" &&
