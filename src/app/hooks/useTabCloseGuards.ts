@@ -1,3 +1,8 @@
+/**
+ * 本文件管理标签关闭前的脏文档和前台终端确认流程。
+ * 普通标签包括 Space 的最后一个标签都直接交给 Workbench 关闭。
+ */
+
 import { hasOtherDocumentView, isDocumentTab } from "@/modules/editor";
 import { leafHasForegroundProcess } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
@@ -8,11 +13,7 @@ type Params = {
   disposeTab: (id: number) => void;
 };
 
-/**
- * Guards tab closing: dirty editors and terminals with a live foreground
- * process route through a confirmation dialog instead of closing immediately.
- * Owns the three pending-close states the dialogs render from.
- */
+/** 管理关闭确认状态，并在无需确认时释放目标标签。 */
 export function useTabCloseGuards({ tabs, disposeTab }: Params) {
   const [pendingCloseTab, setPendingCloseTab] = useState<number | null>(null);
   const [pendingTerminalCloseTab, setPendingTerminalCloseTab] = useState<
@@ -24,15 +25,8 @@ export function useTabCloseGuards({ tabs, disposeTab }: Params) {
 
   const handleClose = useCallback(
     async (id: number) => {
-      // Last tab in its space can't be closed (closeTab refuses). Skip the
-      // dialog entirely so confirming it doesn't appear to silently fail.
       const t = tabs.find((x) => x.id === id);
-      if (
-        !t ||
-        tabs.filter((candidate) => candidate.spaceId === t.spaceId).length < 2
-      ) {
-        return;
-      }
+      if (!t) return;
       if (isDocumentTab(t) && t.dirty) {
         if (!hasOtherDocumentView(tabs, t)) {
           setPendingCloseTab(id);

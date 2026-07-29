@@ -103,7 +103,7 @@ export type TabPatch = Partial<{
 export type WorkbenchGroup = {
   id: number;
   tabIds: number[];
-  activeTabId: number;
+  activeTabId: number | null;
 };
 
 export type WorkbenchLayoutNode =

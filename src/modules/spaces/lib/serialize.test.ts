@@ -1,4 +1,5 @@
 import {
+  freshSpaceWorkbench,
   hydrateSpaceWorkbench,
   isSerializedWorkbenchNode,
   serializeSpaceWorkbench,
@@ -97,6 +98,14 @@ function state(): WorkbenchState {
 }
 
 describe("Workbench Space serialization", () => {
+  it("creates a base page instead of a terminal without an explicit cwd", () => {
+    const fresh = freshSpaceWorkbench("default", null, counter());
+    expect(fresh.tabs).toEqual([]);
+    expect(
+      fresh.space.groups[fresh.space.activeGroupId].activeTabId,
+    ).toBeNull();
+  });
+
   it("round-trips layout, active group, tabs, and terminal cwd", () => {
     const serialized = serializeSpaceWorkbench(state(), "default");
     expect(serialized).toMatchObject({

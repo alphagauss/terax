@@ -1,9 +1,15 @@
+/**
+ * 本文件渲染 Workbench 的递归分组布局和标签栏外壳。
+ * Space 没有标签时直接展示基础启动页，不创建或伪装成标签页。
+ */
+
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { TabBar } from "@/modules/tabs";
+import { EmptyWorkbench } from "@/modules/workbench/EmptyWorkbench";
 import {
   useWorkbenchDragSnapshot,
   type WorkbenchDropTarget,
@@ -111,29 +117,31 @@ function WorkbenchGroup({
       onMouseDownCapture={() => actions.activateGroup(group.id)}
       onFocusCapture={() => actions.activateGroup(group.id)}
     >
-      <div className="flex h-9 shrink-0 items-center border-b border-border/60 bg-card px-1.5">
-        <TabBar
-          groupId={group.id}
-          tabs={groupTabs}
-          activeId={group.activeTabId}
-          activeGroup={active}
-          onSelect={actions.selectTab}
-          onNew={() => actions.newTerminal(group.id)}
-          onNewBlock={() => actions.newBlock(group.id)}
-          onNewPrivate={() => actions.newPrivate(group.id)}
-          onNewWebPreview={() => actions.newWebPreview(group.id)}
-          onNewEditor={() => actions.newEditor(group.id)}
-          onNewGitGraph={() => actions.newGitGraph(group.id)}
-          onClose={actions.closeTab}
-          onPin={actions.pinTab}
-          onRename={actions.renameTab}
-          onDropTab={actions.dropTab}
-          onSplitTab={actions.splitTab}
-          canClose={tabCount > 1}
-          onOverrideLanguage={actions.overrideLanguage}
-          compact
-        />
-      </div>
+      {groupTabs.length > 0 ? (
+        <div className="flex h-9 shrink-0 items-center border-b border-border/60 bg-card px-1.5">
+          <TabBar
+            groupId={group.id}
+            tabs={groupTabs}
+            activeId={group.activeTabId ?? 0}
+            activeGroup={active}
+            onSelect={actions.selectTab}
+            onNew={() => actions.newTerminal(group.id)}
+            onNewBlock={() => actions.newBlock(group.id)}
+            onNewPrivate={() => actions.newPrivate(group.id)}
+            onNewWebPreview={() => actions.newWebPreview(group.id)}
+            onNewEditor={() => actions.newEditor(group.id)}
+            onNewGitGraph={() => actions.newGitGraph(group.id)}
+            onClose={actions.closeTab}
+            onPin={actions.pinTab}
+            onRename={actions.renameTab}
+            onDropTab={actions.dropTab}
+            onSplitTab={actions.splitTab}
+            canClose={tabCount > 0}
+            onOverrideLanguage={actions.overrideLanguage}
+            compact
+          />
+        </div>
+      ) : null}
       <div
         data-workbench-drop-surface={group.id}
         className="relative min-h-0 flex-1 overflow-hidden"
@@ -142,6 +150,16 @@ function WorkbenchGroup({
           data-workbench-view-host={group.id}
           className="absolute inset-0 overflow-hidden"
         />
+        {groupTabs.length === 0 ? (
+          <EmptyWorkbench
+            onNewTerminal={() => actions.newTerminal(group.id)}
+            onNewBlock={() => actions.newBlock(group.id)}
+            onNewPrivate={() => actions.newPrivate(group.id)}
+            onNewEditor={() => actions.newEditor(group.id)}
+            onNewWebPreview={() => actions.newWebPreview(group.id)}
+            onNewGitGraph={() => actions.newGitGraph(group.id)}
+          />
+        ) : null}
         <WorkbenchDropOverlay groupId={group.id} />
       </div>
     </section>

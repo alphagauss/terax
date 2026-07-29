@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Workbench 标签、分组和递归布局的纯状态变换。
+ * 仅整个 Space 的唯一分组可以为空，用于承载不属于标签页的基础启动页。
+ */
+
 import i18n from "@/i18n";
 import { normalizePathForIdentity, titleFromUrl } from "@/lib/utils";
 import type {
@@ -353,7 +358,8 @@ export function activateGroup(
   const space = state.spaces[spaceId];
   const group = space?.groups[groupId];
   if (!space || !group) return state;
-  const active = state.tabs[group.activeTabId];
+  const active =
+    group.activeTabId === null ? undefined : state.tabs[group.activeTabId];
   if (space.activeGroupId === groupId && !active?.cold) return state;
   return {
     ...state,
@@ -401,7 +407,7 @@ export function addTabToGroup(
           [groupId]: {
             ...group,
             tabIds,
-            activeTabId: activate ? tab.id : group.activeTabId,
+            activeTabId: activate ? tab.id : (group.activeTabId ?? tab.id),
           },
         },
       },
@@ -457,7 +463,22 @@ function removeTabFromOwner(
   const orderedGroups = groupIds(space.root);
   const removedGroupIndex = orderedGroups.indexOf(group.id);
   const remainingGroups = orderedGroups.filter((id) => id !== group.id);
-  if (remainingGroups.length === 0) return state;
+  if (remainingGroups.length === 0) {
+    return {
+      ...state,
+      tabs,
+      spaces: {
+        ...state.spaces,
+        [owner.spaceId]: {
+          ...space,
+          groups: {
+            ...space.groups,
+            [group.id]: { ...group, tabIds: [], activeTabId: null },
+          },
+        },
+      },
+    };
+  }
   const groups = { ...space.groups };
   delete groups[group.id];
   const root = removeGroupNode(space.root, group.id);
@@ -494,13 +515,6 @@ export function moveTabToGroup(
   );
   if (!targetSpaceEntry) return state;
   const [targetSpaceId] = targetSpaceEntry;
-  if (
-    source.spaceId !== targetSpaceId &&
-    tabsForSpace(state, source.spaceId).length === 1
-  ) {
-    return state;
-  }
-
   if (source.group.id === targetGroupId) {
     if (index === undefined) return state;
     const ids = source.group.tabIds.filter((id) => id !== tabId);
@@ -556,14 +570,6 @@ export function splitWithTab(
   );
   if (!targetEntry) return state;
   const [spaceId, space] = targetEntry;
-  const sourceOwner = moveExisting ? findGroupForTab(state, tab.id) : null;
-  if (
-    sourceOwner &&
-    sourceOwner.spaceId !== spaceId &&
-    tabsForSpace(state, sourceOwner.spaceId).length === 1
-  ) {
-    return state;
-  }
   if (
     moveExisting &&
     space.groups[targetGroupId].tabIds.length === 1 &&
@@ -622,6 +628,20 @@ export function createSpaceWorkbench(
   };
 }
 
+/** 创建一个只包含基础启动页、尚无标签的 Space 布局。 */
+export function createEmptySpaceWorkbench(
+  groupId: number,
+  nodeId: number,
+): SpaceWorkbench {
+  return {
+    root: { kind: "group", id: nodeId, groupId },
+    groups: {
+      [groupId]: { id: groupId, tabIds: [], activeTabId: null },
+    },
+    activeGroupId: groupId,
+  };
+}
+
 export function assertWorkbenchState(state: WorkbenchState): void {
   const owned = new Set<number>();
   for (const [spaceId, space] of Object.entries(state.spaces)) {
@@ -638,9 +658,15 @@ export function assertWorkbenchState(state: WorkbenchState): void {
     }
     for (const group of Object.values(space.groups)) {
       if (group.tabIds.length === 0) {
-        throw new Error(`Group ${group.id} is empty`);
+        if (layoutGroups.length !== 1 || group.activeTabId !== null) {
+          throw new Error(`Group ${group.id} is invalidly empty`);
+        }
+        continue;
       }
-      if (!group.tabIds.includes(group.activeTabId)) {
+      if (
+        group.activeTabId === null ||
+        !group.tabIds.includes(group.activeTabId)
+      ) {
         throw new Error(`Group ${group.id} has an invalid active tab`);
       }
       for (const tabId of group.tabIds) {

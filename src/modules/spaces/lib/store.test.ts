@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 Space 状态的 Workspace Store 边界。
+ * 重点锁定布局、显式空态和删除操作的串行持久化。
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const workspaceStore = vi.hoisted(() => ({
@@ -57,7 +62,7 @@ describe("Workbench v2 storage boundary", () => {
     expect(persisted).toEqual({ version: 2, workbench });
 
     let id = 1;
-    const restored = persisted
+    const restored = persisted?.workbench
       ? hydrateSpaceWorkbench(persisted.workbench, "space-a", () => id++)
       : null;
     expect(restored?.space.root).toMatchObject({
@@ -76,6 +81,15 @@ describe("Workbench v2 storage boundary", () => {
     ).toMatchObject({
       kind: "web-preview",
       url: "http://localhost:5173",
+    });
+  });
+
+  it("loads an explicit empty Workbench state", async () => {
+    await saveState("space-a", { version: 2, workbench: null });
+    const loaded = await loadAll();
+    expect(loaded.states.get("space-a")).toEqual({
+      version: 2,
+      workbench: null,
     });
   });
 

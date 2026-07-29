@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 Space 激活选择和新 Workspace 初始根目录。
+ * 重点锁定只有显式 Local 启动目录会绕过基础空态。
+ */
+
 import { describe, expect, it } from "vitest";
 import {
   canBootWorkspaceEnvironment,
@@ -37,11 +42,7 @@ describe("findActiveSpace", () => {
 describe("initialWorkspaceRoot", () => {
   it("uses an explicit launch directory only for Local", () => {
     expect(
-      initialWorkspaceRoot(
-        { kind: "local" },
-        "C:/work",
-        "C:/Users/me",
-      ),
+      initialWorkspaceRoot({ kind: "local" }, "C:/work", "C:/Users/me"),
     ).toBe("C:/work");
     expect(
       initialWorkspaceRoot(
@@ -49,36 +50,28 @@ describe("initialWorkspaceRoot", () => {
         "C:/work",
         "/home/aj",
       ),
-    ).toBe("/home/aj");
+    ).toBeNull();
   });
 
-  it("uses the resolved environment home for fresh Local, WSL, and SSH", () => {
+  it("keeps fresh Local, WSL, and SSH Workspaces empty", () => {
     expect(
       initialWorkspaceRoot({ kind: "local" }, null, "C:/Users/me"),
-    ).toBe("C:/Users/me");
+    ).toBeNull();
     expect(
-      initialWorkspaceRoot(
-        { kind: "wsl", distro: "Ubuntu" },
-        null,
-        "/home/aj",
-      ),
-    ).toBe("/home/aj");
+      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, null, "/home/aj"),
+    ).toBeNull();
     expect(
       initialWorkspaceRoot(
         { kind: "ssh", profileId: "server" },
         null,
         "/home/remote",
       ),
-    ).toBe("/home/remote");
+    ).toBeNull();
   });
 
   it("does not leak a host path when a remote home is unavailable", () => {
     expect(
-      initialWorkspaceRoot(
-        { kind: "wsl", distro: "Ubuntu" },
-        "C:/work",
-        null,
-      ),
+      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, "C:/work", null),
     ).toBeNull();
   });
 });
@@ -89,10 +82,7 @@ describe("canBootWorkspaceEnvironment", () => {
       canBootWorkspaceEnvironment({ kind: "wsl", distro: "Ubuntu" }, null),
     ).toBe(false);
     expect(
-      canBootWorkspaceEnvironment(
-        { kind: "ssh", profileId: "server" },
-        null,
-      ),
+      canBootWorkspaceEnvironment({ kind: "ssh", profileId: "server" }, null),
     ).toBe(false);
     expect(
       canBootWorkspaceEnvironment(

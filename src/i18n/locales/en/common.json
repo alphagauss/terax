@@ -16,5 +16,6 @@
   "edit": "Edit",
   "home": "Home",
   "openFolder": "Open Folder",
-  "openFolderFailed": "Could not open folder picker"
+  "openFolderFailed": "Could not open folder picker",
+  "folderPathInvalid": "The folder path is unavailable"
 }

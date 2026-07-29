@@ -1,17 +1,9 @@
+/**
+ * 本文件读取原生 Workspace 进程定向到当前窗口的待打开文件。
+ * 目录启动上下文由 Workspace bootstrap 持有，不在前端重复缓存。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
-
-let cached: string | undefined;
-
-export async function initLaunchDir(): Promise<void> {
-  const dir =
-    (await invoke<string | null>("get_launch_dir").catch(() => null)) ??
-    (await invoke<string>("workspace_current_dir").catch(() => null));
-  cached = dir ? dir.replace(/\\/g, "/") : undefined;
-}
-
-export function getLaunchDir(): string | undefined {
-  return cached;
-}
 
 export async function consumeLaunchFiles(): Promise<string[]> {
   const files = await invoke<string[]>("get_launch_files").catch(() => []);

@@ -1,8 +1,14 @@
+/**
+ * 本文件测试 Workbench 的纯状态变换。
+ * 重点锁定分组布局、跨 Space 移动和唯一空分组的合法边界。
+ */
+
 import { describe, expect, it } from "vitest";
 import {
   activateTab,
   assertWorkbenchState,
   closeTab,
+  createEmptySpaceWorkbench,
   createSpaceWorkbench,
   groupIds,
   minimumPanelPercent,
@@ -79,12 +85,19 @@ describe("workbench model", () => {
     expect(moved.tabs[2].cold).toBe(false);
   });
 
-  it("refuses to remove the last tab from the last group", () => {
+  it("closes the last tab into the Space base page", () => {
     const state = initial();
-    expect(closeTab(state, 2)).toBe(state);
+    const closed = closeTab(state, 2);
+    expect(closed.tabs).toEqual({});
+    expect(closed.spaces.default.groups[1]).toEqual({
+      id: 1,
+      tabIds: [],
+      activeTabId: null,
+    });
+    expect(() => assertWorkbenchState(closed)).not.toThrow();
   });
 
-  it("refuses a bare cross-Space move that would orphan the source Space", () => {
+  it("allows a cross-Space move to leave the source Space empty", () => {
     const state = initial();
     const target = terminal(6);
     target.spaceId = "other";
@@ -96,8 +109,34 @@ describe("workbench model", () => {
       },
     } satisfies WorkbenchState;
 
-    expect(moveTabToGroup(withOther, 2, 4)).toBe(withOther);
-    expect(() => assertWorkbenchState(withOther)).not.toThrow();
+    const moved = moveTabToGroup(withOther, 2, 4);
+    expect(moved.spaces.default.groups[1].activeTabId).toBeNull();
+    expect(moved.spaces.default.groups[1].tabIds).toEqual([]);
+    expect(moved.spaces.other.groups[4].tabIds).toEqual([6, 2]);
+    expect(() => assertWorkbenchState(moved)).not.toThrow();
+  });
+
+  it("activates the first tab added to an empty Space", () => {
+    const state = {
+      tabs: {},
+      spaces: { default: createEmptySpaceWorkbench(1, 2) },
+    } satisfies WorkbenchState;
+    const tab = terminal(3);
+    const moved = {
+      ...state,
+      tabs: { [tab.id]: tab },
+      spaces: {
+        ...state.spaces,
+        other: createSpaceWorkbench(4, 5, tab.id),
+      },
+    } satisfies WorkbenchState;
+
+    const next = moveTabToGroup(moved, tab.id, 1);
+    expect(next.spaces.default.groups[1]).toMatchObject({
+      tabIds: [tab.id],
+      activeTabId: tab.id,
+    });
+    expect(() => assertWorkbenchState(next)).not.toThrow();
   });
 
   it("does not reorder a tab dropped into its own group center", () => {

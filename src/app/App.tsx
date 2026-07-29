@@ -11,11 +11,7 @@ import {
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  consumeLaunchFiles,
-  consumeWorkspaceOpenFiles,
-  getLaunchDir,
-} from "@/lib/launchDir";
+import { consumeLaunchFiles, consumeWorkspaceOpenFiles } from "@/lib/launchDir";
 import {
   flushSharedStoreWrites,
   onSharedStoreChange,
@@ -121,6 +117,7 @@ import {
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
+import { invoke } from "@tauri-apps/api/core";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -167,12 +164,10 @@ function parentDirectory(path: string): string | null {
 /**
  * Terax 主窗口组件。
  *
- * 负责组合工作区、终端和侧栏。目录选择仅在 Local 进程中创建当前窗口内的新终端标签页，避免将宿主机路径传给 WSL 或 SSH。
+ * 负责组合工作区、终端和侧栏。空 Space 不启动终端，目录入口只把当前环境内用户明确选择的路径传给新终端。
  */
 export default function App() {
   const { t } = useTranslation("common");
-  const initialLaunchCwd =
-    currentWorkspaceEnv().kind === "local" ? getLaunchDir() : null;
   const revealWorkbenchSpace = useCallback((spaceId: string) => {
     useSpaces.getState().setActive(spaceId);
   }, []);
@@ -216,10 +211,7 @@ export default function App() {
     focusGroup,
     splitTab,
     resizeSplit,
-  } = useWorkbench(
-    initialLaunchCwd ? { cwd: initialLaunchCwd } : undefined,
-    revealWorkbenchSpace,
-  );
+  } = useWorkbench(revealWorkbenchSpace);
 
   // Mirror `tabs` into a ref so callbacks scheduled with `setTimeout`
   // (e.g. cdInNewTab) read the latest Workbench state instead of a stale closure.
@@ -355,11 +347,9 @@ export default function App() {
   useEditorFileSync({ tabs, tabsRef, editorRefs });
   useThemeFileEditing({ tabsRef, openFileTab });
 
-  const { explorerRoot, inheritedCwdForNewTab } = useWorkspaceCwd(
-    activeTab,
-    tabs,
-    home,
-  );
+  const { explorerRoot: resolvedExplorerRoot, inheritedCwdForNewTab } =
+    useWorkspaceCwd(activeTab, tabs, home);
+  const explorerRoot = spaceTabs.length === 0 ? null : resolvedExplorerRoot;
   const [explorerStartupReady, setExplorerStartupReady] = useState(
     () => currentWorkspaceEnv().kind === "local",
   );
@@ -648,6 +638,33 @@ export default function App() {
     }
   }, [newTab, t, workspaceEnv.kind]);
 
+  const openEnvironmentHome = useCallback(() => {
+    if (home) newTab(home);
+  }, [home, newTab]);
+
+  /**
+   * 校验当前 WSL 或 SSH 环境中的目录并在该目录创建普通终端。
+   *
+   * 路径只在用户显式提交时访问，空 Workbench 本身不会触发远端文件请求。
+   */
+  const openEnvironmentPath = useCallback(
+    async (path: string) => {
+      if (workspaceEnv.kind === "local") return;
+      try {
+        const canonical = await native.canonicalize(path);
+        const stat = await invoke<{ kind: string }>("fs_stat", {
+          path: canonical,
+          workspace: workspaceEnv,
+        });
+        if (stat.kind !== "dir") throw new Error(t("folderPathInvalid"));
+        newTab(canonical);
+      } catch {
+        toast.error(t("folderPathInvalid"));
+      }
+    },
+    [newTab, t, workspaceEnv],
+  );
+
   const openNewPrivateTab = useCallback(() => {
     newPrivateTab(inheritedCwdForNewTab());
   }, [newPrivateTab, inheritedCwdForNewTab]);
@@ -821,7 +838,7 @@ export default function App() {
     activeTerminalCwd,
     explorerRoot,
     launchCwd,
-    launchCwdResolved,
+    launchCwdResolved: spaceTabs.length > 0 && launchCwdResolved,
     home,
     sourceControlVisible: sidebar.isVisible("source-control"),
     openCommitHistoryTab,
@@ -1093,12 +1110,8 @@ export default function App() {
         (candidate) =>
           candidate.kind === "terminal" && candidate.terminalId === terminalId,
       );
-      if (!tab || tab.kind !== "terminal") return;
-      if (all.length === 1) {
-        void getCurrentWindow().close();
-      } else {
-        closeExitedTerminal(tab.id);
-      }
+      if (tab?.kind !== "terminal") return;
+      closeExitedTerminal(tab.id);
     },
     [closeExitedTerminal],
   );
@@ -1119,12 +1132,12 @@ export default function App() {
     const { spaces, create, setActive } = useSpaces.getState();
     const meta = create({
       name: `Space ${spaces.length + 1}`,
-      root: activeCwd ?? home ?? null,
+      root: null,
     });
-    createSpace(meta.id, activeCwd ?? undefined);
+    createSpace(meta.id);
     setActive(meta.id);
     return meta.id;
-  }, [activeCwd, createSpace, home]);
+  }, [createSpace]);
 
   const deleteSpace = useCallback(
     (id: string) => {
@@ -1136,10 +1149,7 @@ export default function App() {
       );
       const nextSpaceId = useSpaces.getState().remove(id);
       if (!nextSpaceId) return;
-      const root = useSpaces
-        .getState()
-        .spaces.find((s) => s.id === nextSpaceId)?.root;
-      removeSpace(id, nextSpaceId, root ?? undefined);
+      removeSpace(id, nextSpaceId);
       if (discardPaths.length > 0) {
         void import("@/modules/editor/lib/documentModel").then(
           ({ discardSharedDocumentModel }) => {
@@ -1380,9 +1390,11 @@ export default function App() {
   const groupCwd = useCallback(
     (groupId: number) => {
       const space = workbenchState.spaces[activeSpaceId ?? DEFAULT_SPACE_ID];
-      const tab = space
-        ? workbenchState.tabs[space.groups[groupId]?.activeTabId]
-        : undefined;
+      const activeGroupTabId = space?.groups[groupId]?.activeTabId;
+      const tab =
+        activeGroupTabId === null || activeGroupTabId === undefined
+          ? undefined
+          : workbenchState.tabs[activeGroupTabId];
       return tab?.kind === "terminal" ? tab.cwd : inheritedCwdForNewTab();
     },
     [activeSpaceId, inheritedCwdForNewTab, workbenchState],
@@ -1519,6 +1531,12 @@ export default function App() {
           rootPath={explorerStartupReady ? explorerRoot : null}
           loadingRoot={!explorerStartupReady && !environmentError}
           onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
+          onOpenHome={
+            workspaceEnv.kind === "local" ? undefined : openEnvironmentHome
+          }
+          onOpenPath={
+            workspaceEnv.kind === "local" ? undefined : openEnvironmentPath
+          }
           gitStatus={explorerGitDecorations ? sourceControl.status : null}
           activeFilePath={explorerActiveFilePath}
           onOpenFile={handleOpenFile}
