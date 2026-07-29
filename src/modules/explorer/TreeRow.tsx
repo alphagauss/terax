@@ -136,9 +136,9 @@ function EntryRowImpl(props: EntryRowProps) {
         isDeleting &&
           "cursor-wait text-muted-foreground hover:bg-transparent disabled:opacity-80",
         isContextTarget
-          ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
+          ? "bg-accent text-foreground"
           : isSelected
-            ? "bg-accent text-foreground"
+            ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
             : gitignored
               ? "text-muted-foreground"
               : "text-foreground",
