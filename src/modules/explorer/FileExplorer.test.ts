@@ -1,6 +1,6 @@
 /**
  * 本文件验证文件资源管理器在目录根异步变化时保持 Hook 顺序，
- * 并锁定 Local 目录选择入口与非本地 Workspace 的后台传输入口。
+ * 并锁定顶部创建目标、Local 目录选择入口与非本地 Workspace 的后台传输入口。
  */
 
 // @vitest-environment happy-dom
@@ -157,7 +157,11 @@ vi.mock("./lib/useFileTree", () => ({
   }),
 }));
 
-import { FileExplorer } from "./FileExplorer";
+import {
+  FileExplorer,
+  resolvePendingCreateIndex,
+  resolveToolbarCreateParent,
+} from "./FileExplorer";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.join(here, "FileExplorer.tsx"), "utf8");
@@ -176,6 +180,56 @@ function expectNoHooksAfter(sourceText: string, marker: string) {
   expect(earlyReturn).toBeGreaterThan(-1);
   expect(sourceText.slice(earlyReturn)).not.toMatch(/\buse[A-Z]\w*\s*\(/);
 }
+
+describe("toolbar create parent", () => {
+  it("uses the selected folder", () => {
+    expect(
+      resolveToolbarCreateParent("/workspace", "/workspace/src", true),
+    ).toBe("/workspace/src");
+  });
+
+  it("uses the selected file's direct parent", () => {
+    expect(
+      resolveToolbarCreateParent("/workspace", "/workspace/src/app.tsx", false),
+    ).toBe("/workspace/src");
+    expect(
+      resolveToolbarCreateParent(
+        "C:\\workspace",
+        "C:\\workspace\\src\\app.tsx",
+        false,
+      ),
+    ).toBe("C:\\workspace\\src");
+  });
+
+  it("falls back to the workspace root without a valid selection", () => {
+    expect(resolveToolbarCreateParent("/workspace", null, undefined)).toBe(
+      "/workspace",
+    );
+    expect(
+      resolveToolbarCreateParent("/workspace", "/workspace/missing", undefined),
+    ).toBe("/workspace");
+  });
+});
+
+describe("pending create position", () => {
+  const entries = [
+    { kind: "dir" as const },
+    { kind: "dir" as const },
+    { kind: "symlink" as const },
+    { kind: "file" as const },
+  ];
+
+  it("places a folder draft before every entry", () => {
+    expect(resolvePendingCreateIndex(entries, "dir")).toBe(0);
+  });
+
+  it("places a file draft after folders and before files", () => {
+    expect(resolvePendingCreateIndex(entries, "file")).toBe(2);
+    expect(
+      resolvePendingCreateIndex([{ kind: "dir" }, { kind: "dir" }], "file"),
+    ).toBe(2);
+  });
+});
 
 describe("file opening render path", () => {
   it("keeps hooks before nullable render exits", () => {
