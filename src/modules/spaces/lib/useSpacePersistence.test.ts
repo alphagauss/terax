@@ -14,7 +14,6 @@ import { useSpacePersistence } from "./useSpacePersistence";
 
 const persistence = vi.hoisted(() => ({
   saveState: vi.fn(),
-  deleteSpaceData: vi.fn(),
 }));
 
 vi.mock("@/modules/spaces/lib/serialize", () => ({
@@ -23,7 +22,6 @@ vi.mock("@/modules/spaces/lib/serialize", () => ({
 
 vi.mock("@/modules/spaces/lib/store", () => ({
   saveState: persistence.saveState,
-  deleteSpaceData: persistence.deleteSpaceData,
 }));
 
 type HarnessProps = {
@@ -102,5 +100,31 @@ describe("useSpacePersistence", () => {
       vi.advanceTimersByTime(3000);
     });
     expect(persistence.saveState).toHaveBeenCalledTimes(1);
+  });
+
+  it("零标签 Space 会保存显式空态", async () => {
+    persistence.saveState.mockResolvedValue(undefined);
+    const state = {
+      spaces: { "space-a": {} },
+      serialized: null,
+    } as unknown as WorkbenchState;
+    let flushImmediately: (() => Promise<void>) | undefined;
+
+    await act(async () => {
+      root.render(
+        createElement(Harness, {
+          state,
+          onFlushReady: (flush) => {
+            flushImmediately = flush;
+          },
+        }),
+      );
+    });
+
+    await flushImmediately?.();
+    expect(persistence.saveState).toHaveBeenCalledWith("space-a", {
+      version: 2,
+      workbench: null,
+    });
   });
 });

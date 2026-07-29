@@ -258,6 +258,28 @@ describe("file opening render path", () => {
     act(() => root.unmount());
   });
 
+  it("renders lightweight remote Home and path entries when supplied", () => {
+    mocks.environmentKind = "ssh";
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: null,
+          onOpenFile: vi.fn(),
+          onOpenHome: vi.fn(),
+          onOpenPath: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("openHome");
+    expect(container.textContent).toContain("openPath");
+    expect(container.textContent).not.toContain("openFolder");
+    act(() => root.unmount());
+  });
+
   it("routes editable and Markdown files through isolated views", () => {
     expect(viewRegistrySource).toContain('tab.kind === "editor"');
     expect(viewRegistrySource).toContain("<EditorView");

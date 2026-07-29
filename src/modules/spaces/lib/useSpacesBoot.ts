@@ -1,3 +1,8 @@
+/**
+ * 本文件负责等待环境就绪并恢复当前 Workspace 的 Space 状态。
+ * 新 Workspace 默认进入空态，显式 Local 启动目录仍创建对应终端。
+ */
+
 import { native } from "@/modules/ai/lib/native";
 import { getInitialAlphaShowInRemote } from "@/modules/alpha/preferences";
 import {
@@ -88,6 +93,7 @@ export function useSpacesBoot({
         const { resolvedHome, loaded } = prepared;
         let spaces = loaded.spaces;
         let activeSpaceId = loaded.activeId;
+        let createdSpaceId: string | null = null;
 
         if (spaces.length === 0) {
           const root = initialWorkspaceRoot(
@@ -103,6 +109,7 @@ export function useSpacesBoot({
             updatedAt: Date.now(),
           };
           spaces = [meta];
+          createdSpaceId = meta.id;
           activeSpaceId = meta.id;
           await saveSpacesList(spaces);
           await saveActiveId(meta.id);
@@ -117,19 +124,25 @@ export function useSpacesBoot({
         for (const spaceMeta of spaces) {
           const persisted = loaded.states.get(spaceMeta.id);
           const restored = persisted
-            ? hydrateSpaceWorkbench(
-                persisted.workbench,
-                spaceMeta.id,
-                allocId,
-                {
-                  allowAlphaSettings:
-                    env.kind === "local" || getInitialAlphaShowInRemote(),
-                },
-              )
+            ? persisted.workbench === null
+              ? null
+              : hydrateSpaceWorkbench(
+                  persisted.workbench,
+                  spaceMeta.id,
+                  allocId,
+                  {
+                    allowAlphaSettings:
+                      env.kind === "local" || getInitialAlphaShowInRemote(),
+                  },
+                )
             : null;
           const workbench =
             restored ??
-            freshSpaceWorkbench(spaceMeta.id, spaceMeta.root, allocId);
+            freshSpaceWorkbench(
+              spaceMeta.id,
+              createdSpaceId === spaceMeta.id ? spaceMeta.root : null,
+              allocId,
+            );
           state.spaces[spaceMeta.id] = workbench.space;
           for (const tab of workbench.tabs) state.tabs[tab.id] = tab;
         }

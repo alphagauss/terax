@@ -1,7 +1,7 @@
 /**
  * 本文件实现工作区文件资源管理器。
  * 负责文件树、搜索、常规文件操作和非本地 Workspace 的后台传输入口。
- * Workspace 根目录选择仍由上层仅在 Local 环境传入。
+ * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
 import {
@@ -124,6 +124,8 @@ type Props = {
   rootPath: string | null;
   loadingRoot?: boolean;
   onOpenFolder?: () => void;
+  onOpenHome?: () => void;
+  onOpenPath?: (path: string) => void;
   activeFilePath?: string | null;
   onOpenFile: (path: string, pin?: boolean) => void;
   onPathRenamed?: (from: string, to: string) => void;
@@ -281,6 +283,8 @@ export const FileExplorer = memo(
       rootPath,
       loadingRoot = false,
       onOpenFolder,
+      onOpenHome,
+      onOpenPath,
       activeFilePath,
       onOpenFile,
       onPathRenamed,
@@ -295,6 +299,7 @@ export const FileExplorer = memo(
     const { t } = useTranslation(["explorer", "statusbar"]);
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
+    const [emptyPath, setEmptyPath] = useState("");
 
     /** 通过原生选择器创建文件或文件夹后台上传任务。 */
     const enqueueUpload = useCallback(
@@ -596,6 +601,38 @@ export const FileExplorer = memo(
               <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
               {t("openFolder")}
             </Button>
+          ) : null}
+          {onOpenHome ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-1 h-7 gap-1.5 text-xs"
+              onClick={onOpenHome}
+            >
+              <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
+              {t("openHome")}
+            </Button>
+          ) : null}
+          {onOpenPath ? (
+            <form
+              className="mt-1 flex w-full max-w-64 gap-1.5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const path = emptyPath.trim();
+                if (path) onOpenPath(path);
+              }}
+            >
+              <input
+                value={emptyPath}
+                onChange={(event) => setEmptyPath(event.target.value)}
+                placeholder={t("pathPlaceholder")}
+                aria-label={t("pathPlaceholder")}
+                className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
+              />
+              <Button type="submit" variant="outline" size="sm" className="h-7">
+                {t("openPath")}
+              </Button>
+            </form>
           ) : null}
         </div>
       );

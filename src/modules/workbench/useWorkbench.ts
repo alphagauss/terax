@@ -13,7 +13,7 @@ import {
   addTabToGroup,
   allTabs,
   closeTab as closeTabInState,
-  createSpaceWorkbench,
+  createEmptySpaceWorkbench,
   findGroupForTab,
   groupIds,
   moveTabToGroup as moveTabInState,
@@ -44,20 +44,11 @@ import {
 } from "@/modules/workbench/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-function createInitialState(initial?: Partial<TerminalTab>): WorkbenchState {
-  const tab: TerminalTab = {
-    id: 3,
-    kind: "terminal",
-    terminalId: 4,
-    spaceId: DEFAULT_SPACE_ID,
-    cold: true,
-    title: initial?.title ?? "shell",
-    cwd: initial?.cwd,
-  };
+function createInitialState(): WorkbenchState {
   return {
-    tabs: { [tab.id]: tab },
+    tabs: {},
     spaces: {
-      [DEFAULT_SPACE_ID]: createSpaceWorkbench(1, 2, tab.id),
+      [DEFAULT_SPACE_ID]: createEmptySpaceWorkbench(1, 2),
     },
   };
 }
@@ -129,15 +120,12 @@ function maxRuntimeId(state: WorkbenchState): number {
   return max;
 }
 
-export function useWorkbench(
-  initial?: Partial<TerminalTab>,
-  onRevealSpace?: (spaceId: string) => void,
-) {
-  const [state, setState] = useState(() => createInitialState(initial));
+export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
+  const [state, setState] = useState(createInitialState);
   const stateRef = useRef(state);
   const onRevealSpaceRef = useRef(onRevealSpace);
   onRevealSpaceRef.current = onRevealSpace;
-  const nextIdRef = useRef(5);
+  const nextIdRef = useRef(3);
   const [booted, setBooted] = useState(false);
   const [activeSpaceId, setActiveSpaceId] = useState(DEFAULT_SPACE_ID);
   const activeSpaceIdRef = useRef(activeSpaceId);
@@ -182,7 +170,9 @@ export function useWorkbench(
       if (!space) return current;
       const coldIds = Object.values(space.groups)
         .map((group) => group.activeTabId)
-        .filter((id) => current.tabs[id]?.cold);
+        .filter(
+          (id): id is number => id !== null && Boolean(current.tabs[id]?.cold),
+        );
       if (coldIds.length === 0) return current;
       const tabs = { ...current.tabs };
       for (const id of coldIds) tabs[id] = { ...tabs[id], cold: false };
@@ -233,35 +223,21 @@ export function useWorkbench(
   );
 
   const createSpace = useCallback(
-    (spaceId: string, cwd?: string, activate = true) => {
+    (spaceId: string, activate = true) => {
       if (stateRef.current.spaces[spaceId]) {
         if (activate) setActiveSpace(spaceId);
-        return stateRef.current.spaces[spaceId].groups[
-          stateRef.current.spaces[spaceId].activeGroupId
-        ].activeTabId;
+        return;
       }
       const groupId = allocId();
       const nodeId = allocId();
-      const tabId = allocId();
-      const terminalId = allocId();
-      const tab: TerminalTab = {
-        id: tabId,
-        terminalId,
-        kind: "terminal",
-        spaceId,
-        cold: true,
-        title: cwd ? pathBasename(cwd) : "shell",
-        cwd,
-      };
       commit((current) => ({
-        tabs: { ...current.tabs, [tabId]: tab },
+        tabs: current.tabs,
         spaces: {
           ...current.spaces,
-          [spaceId]: createSpaceWorkbench(groupId, nodeId, tabId),
+          [spaceId]: createEmptySpaceWorkbench(groupId, nodeId),
         },
       }));
       if (activate) setActiveSpace(spaceId);
-      return tabId;
     },
     [allocId, commit, setActiveSpace],
   );
@@ -275,7 +251,7 @@ export function useWorkbench(
       activate = true,
     ) => {
       if (!stateRef.current.spaces[spaceId]) {
-        return createSpace(spaceId, cwd, activate);
+        createSpace(spaceId, false);
       }
       const tabId = allocId();
       const terminalId = allocId();
@@ -718,30 +694,9 @@ export function useWorkbench(
 
   const moveTabToGroup = useCallback(
     (tabId: number, groupId: number, index?: number) => {
-      const current = stateRef.current;
-      const source = findGroupForTab(current, tabId);
-      const targetSpaceId = Object.entries(current.spaces).find(([, space]) =>
-        Boolean(space.groups[groupId]),
-      )?.[0];
-      const sourceTab = current.tabs[tabId];
-      if (
-        source &&
-        sourceTab &&
-        targetSpaceId &&
-        source.spaceId !== targetSpaceId &&
-        tabsForSpace(current, source.spaceId).length === 1
-      ) {
-        newTerminalTab(
-          sourceTab.kind === "terminal" ? sourceTab.cwd : undefined,
-          { title: "shell" },
-          source.spaceId,
-          source.group.id,
-          false,
-        );
-      }
       return commit((latest) => moveTabInState(latest, tabId, groupId, index));
     },
-    [commit, newTerminalTab],
+    [commit],
   );
 
   const reorderTabByGap = useCallback(
@@ -762,24 +717,6 @@ export function useWorkbench(
       const owner = findGroupForTab(current, tabId);
       const target = targetGroupId ?? owner?.group.id;
       if (!source || target === undefined) return null;
-      const targetSpaceId = Object.entries(current.spaces).find(([, space]) =>
-        Boolean(space.groups[target]),
-      )?.[0];
-      if (
-        move &&
-        owner &&
-        targetSpaceId &&
-        owner.spaceId !== targetSpaceId &&
-        tabsForSpace(current, owner.spaceId).length === 1
-      ) {
-        newTerminalTab(
-          source.kind === "terminal" ? source.cwd : undefined,
-          { title: "shell" },
-          owner.spaceId,
-          owner.group.id,
-          false,
-        );
-      }
       const nextTab = move
         ? source
         : cloneForSplit(
@@ -805,7 +742,7 @@ export function useWorkbench(
       );
       return next === current ? null : nextTab.id;
     },
-    [allocId, commit, newTerminalTab],
+    [allocId, commit],
   );
 
   const focusGroup = useCallback(
@@ -849,10 +786,10 @@ export function useWorkbench(
   );
 
   const removeSpace = useCallback(
-    (spaceId: string, fallbackSpaceId: string, fallbackCwd?: string) => {
+    (spaceId: string, fallbackSpaceId: string) => {
       if (!stateRef.current.spaces[spaceId]) return;
       if (!stateRef.current.spaces[fallbackSpaceId]) {
-        createSpace(fallbackSpaceId, fallbackCwd, false);
+        createSpace(fallbackSpaceId, false);
       }
       commit((current) => {
         const tabs = { ...current.tabs };
@@ -874,17 +811,9 @@ export function useWorkbench(
       const tab = current.tabs[tabId];
       const owner = findGroupForTab(current, tabId);
       if (tab?.kind !== "terminal" || !owner) return;
-      if (tabsForSpace(current, owner.spaceId).length === 1) {
-        newTerminalTab(
-          tab.cwd,
-          { title: "shell" },
-          owner.spaceId,
-          owner.group.id,
-        );
-      }
       closeTab(tabId);
     },
-    [closeTab, newTerminalTab],
+    [closeTab],
   );
 
   const moveTabToSpace = useCallback(
@@ -893,24 +822,14 @@ export function useWorkbench(
       const tab = current.tabs[tabId];
       const owner = findGroupForTab(current, tabId);
       if (!tab || !owner || owner.spaceId === targetSpaceId) return false;
-      if (!current.spaces[targetSpaceId])
-        createSpace(targetSpaceId, undefined, false);
+      if (!current.spaces[targetSpaceId]) createSpace(targetSpaceId, false);
       const sourceWasLast =
         tabsForSpace(stateRef.current, owner.spaceId).length === 1;
-      if (sourceWasLast) {
-        newTerminalTab(
-          tab.kind === "terminal" ? tab.cwd : undefined,
-          { title: "shell" },
-          owner.spaceId,
-          owner.group.id,
-          false,
-        );
-      }
       const target = stateRef.current.spaces[targetSpaceId].activeGroupId;
       moveTabToGroup(tabId, target);
       return activeSpaceIdRef.current === owner.spaceId && sourceWasLast;
     },
-    [createSpace, moveTabToGroup, newTerminalTab],
+    [createSpace, moveTabToGroup],
   );
 
   const reorderTab = useCallback(

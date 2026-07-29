@@ -4,6 +4,7 @@
  */
 
 import {
+  freshSpaceWorkbench,
   hydrateSpaceWorkbench,
   isSerializedWorkbenchNode,
   type SerializedWorkbenchNode,
@@ -103,6 +104,14 @@ function state(): WorkbenchState {
 }
 
 describe("Workbench Space serialization", () => {
+  it("creates a base page instead of a terminal without an explicit cwd", () => {
+    const fresh = freshSpaceWorkbench("default", null, counter());
+    expect(fresh.tabs).toEqual([]);
+    expect(
+      fresh.space.groups[fresh.space.activeGroupId].activeTabId,
+    ).toBeNull();
+  });
+
   it("persists Alpha settings as a locator and reloads its runtime page", () => {
     const alphaSettings: Tab = {
       id: 1,

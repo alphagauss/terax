@@ -15,6 +15,7 @@ import type {
   WorkbenchLayoutNode,
   WorkbenchState,
 } from "@/modules/workbench";
+import { createEmptySpaceWorkbench } from "@/modules/workbench/model";
 
 export type SerializedTab =
   | {
@@ -297,12 +298,20 @@ export function hydrateSpaceWorkbench(
   }
 }
 
-/** 为没有有效持久化布局的空间创建默认终端页面。 */
+/** 为没有有效持久化布局的 Space 创建空态，显式 cwd 则创建对应终端。 */
 export function freshSpaceWorkbench(
   spaceId: string,
   cwd: string | null | undefined,
   allocId: () => number,
 ): { space: SpaceWorkbench; tabs: Tab[] } {
+  if (!cwd) {
+    const groupId = allocId();
+    const nodeId = allocId();
+    return {
+      tabs: [],
+      space: createEmptySpaceWorkbench(groupId, nodeId),
+    };
+  }
   const tabId = allocId();
   const terminalId = allocId();
   const groupId = allocId();
@@ -314,7 +323,7 @@ export function freshSpaceWorkbench(
     spaceId,
     cold: true,
     title: cwd ? pathBasename(cwd) : "shell",
-    cwd: cwd ?? undefined,
+    cwd,
   };
   return {
     tabs: [tab],

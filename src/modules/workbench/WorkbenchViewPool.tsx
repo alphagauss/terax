@@ -1,3 +1,8 @@
+/**
+ * 本文件维护 Workbench 页面实例池并将页面挂接到所属 Group。
+ * 零标签 Space 不创建页面实例，已有隐藏页面仍保持挂载。
+ */
+
 import type {
   Tab,
   WorkbenchLayoutNode,
@@ -34,7 +39,7 @@ export function WorkbenchViewPool({
   const owners = useMemo(() => {
     const result = new Map<
       number,
-      { spaceId: string; groupId: number; activeTabId: number }
+      { spaceId: string; groupId: number; activeTabId: number | null }
     >();
     for (const [spaceId, space] of Object.entries(state.spaces)) {
       for (const group of Object.values(space.groups)) {

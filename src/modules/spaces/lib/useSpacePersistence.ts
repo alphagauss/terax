@@ -5,7 +5,7 @@
  */
 
 import { serializeSpaceWorkbench } from "@/modules/spaces/lib/serialize";
-import { deleteSpaceData, saveState } from "@/modules/spaces/lib/store";
+import { saveState } from "@/modules/spaces/lib/store";
 import type { WorkbenchState } from "@/modules/workbench";
 import { useCallback, useEffect, useRef } from "react";
 
@@ -64,7 +64,10 @@ export function useSpacePersistence({ state, enabled }: Params) {
           }
           continue;
         }
-        persist(EMPTY_STATE, deleteSpaceData(spaceId));
+        persist(
+          EMPTY_STATE,
+          saveState(spaceId, { version: 2, workbench: null }),
+        );
         continue;
       }
       const json = JSON.stringify(workbench);

@@ -403,12 +403,12 @@ export function TabBar({
                       : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
                     draggingId === t.id && "opacity-50",
                     compact
-                      ? tabs.length === 1
-                        ? "px-1.5!"
-                        : "ps-1.5! pe-6!"
-                      : tabs.length === 1
-                        ? "px-2!"
-                        : "ps-2! pe-6!",
+                      ? canClose
+                        ? "ps-1.5! pe-6!"
+                        : "px-1.5!"
+                      : canClose
+                        ? "ps-2! pe-6!"
+                        : "px-2!",
                   )}
                 >
                   <span
@@ -546,7 +546,15 @@ export function TabBar({
                       type="button"
                       aria-label={tr("closeTab")}
                       data-no-drag
-                      onClick={() => onClose(t.id)}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                      }}
+                      onPointerUp={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onClose(t.id);
+                      }}
                       className="absolute right-1 top-1/2 z-[2] -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity hover:bg-accent hover:opacity-100 group-hover:opacity-60 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       <HugeiconsIcon

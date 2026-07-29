@@ -1,3 +1,8 @@
+/**
+ * 本文件管理当前 Workspace 进程内的 Space 元数据和布局状态。
+ * 显式 null 布局表示用户关闭了该 Space 的全部标签。
+ */
+
 import {
   deleteWorkspaceValue,
   getWorkspaceEntries,
@@ -19,7 +24,7 @@ export type SpaceMeta = {
 
 export type SpaceState = {
   version: 2;
-  workbench: SerializedWorkbenchNode;
+  workbench: SerializedWorkbenchNode | null;
 };
 
 const KEY_SPACES = "spaces";
@@ -62,7 +67,8 @@ export async function loadAll(): Promise<LoadedSpaces> {
       const candidate = value as Partial<SpaceState>;
       if (
         candidate.version === 2 &&
-        isSerializedWorkbenchNode(candidate.workbench)
+        (candidate.workbench === null ||
+          isSerializedWorkbenchNode(candidate.workbench))
       ) {
         states.set(key.slice(STATE_PREFIX.length), candidate as SpaceState);
       }

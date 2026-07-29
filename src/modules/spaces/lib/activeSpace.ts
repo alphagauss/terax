@@ -1,3 +1,8 @@
+/**
+ * 本文件解析当前 Space 及新 Workspace 的初始目录。
+ * 只有 Local 显式启动目录会直接打开，普通新环境保持零标签空态。
+ */
+
 import type { WorkspaceEnv } from "@/modules/workspace";
 import type { SpaceMeta } from "./store";
 
@@ -15,10 +20,10 @@ export function findActiveSpace(
 export function initialWorkspaceRoot(
   env: WorkspaceEnv,
   explicitLaunchDir: string | null,
-  resolvedHome: string | null,
+  _resolvedHome: string | null,
 ): string | null {
   if (env.kind === "local" && explicitLaunchDir) return explicitLaunchDir;
-  return resolvedHome;
+  return null;
 }
 
 export function canBootWorkspaceEnvironment(
