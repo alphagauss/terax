@@ -1,4 +1,10 @@
+/**
+ * 本文件管理可复用的 xterm 渲染器池及其终端输入输出桥接。
+ * 负责渲染器生命周期、剪贴板动作和 TUI 鼠标路由，不拥有 PTY 会话状态。
+ */
+
 import { resolveFontFamily } from "@/lib/fonts";
+import { IS_MAC } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -10,10 +16,16 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { type FontWeight, Terminal } from "@xterm/xterm";
 import { shouldCursorBlink } from "./cursorBlink";
 import {
+  terminalClipboardIntent,
   terminalDeleteSequence,
   terminalLineNavigationSequence,
   terminalWordNavigationSequence,
 } from "./keymap";
+import {
+  shouldUseLocalTerminalMouse,
+  terminalMouseOverrideHeld,
+  terminalWheelDeltaRows,
+} from "./mouseRouting";
 import {
   readTerminalClipboard,
   writeTerminalClipboard,
@@ -70,6 +82,7 @@ export type Slot = {
   lastW: number;
   lastH: number;
   lastUsedAt: number;
+  wheelRemainder: number;
 };
 
 const slots: Slot[] = [];
@@ -150,6 +163,47 @@ export function pasteIntoLeaf(leafId: number, text: string): boolean {
   return true;
 }
 
+/**
+ * 将指定终端的当前选区写入系统剪贴板。
+ *
+ * 调用方可要求复制后清除选区，使智能 Ctrl+C 和对应菜单动作保持一致。
+ */
+export function copyLeafSelection(
+  leafId: number,
+  clearSelection = false,
+): boolean {
+  const slot = slots.find((s) => s.currentLeafId === leafId);
+  const selection = slot?.term.getSelection() ?? "";
+  if (!slot || !selection) return false;
+  void writeTerminalClipboard(selection);
+  if (clearSelection) slot.term.clearSelection();
+  return true;
+}
+
+/**
+ * 从系统剪贴板粘贴到指定终端。
+ *
+ * 剪贴板读取完成后重新按 leaf ID 解析 slot，避免渲染器复用期间粘贴到其他终端。
+ */
+export function pasteClipboardIntoLeaf(leafId: number): void {
+  void readTerminalClipboard().then((text) => {
+    if (text) pasteIntoLeaf(leafId, text);
+  });
+}
+
+/**
+ * 判断指定终端的鼠标事件是否应使用 Terax 本地行为。
+ */
+export function shouldUseLocalMouseForLeaf(
+  leafId: number,
+  event: Pick<MouseEvent, "altKey" | "shiftKey">,
+): boolean {
+  const mode =
+    slots.find((s) => s.currentLeafId === leafId)?.term.modes
+      .mouseTrackingMode ?? "none";
+  return shouldUseLocalTerminalMouse(mode, event, IS_MAC);
+}
+
 function getRecycler(): HTMLDivElement {
   if (recyclerEl?.isConnected) return recyclerEl;
   const el = document.createElement("div");
@@ -183,6 +237,7 @@ function termOptions() {
     cursorInactiveStyle: "outline" as const,
     scrollback: prefs.terminalScrollback,
     smoothScrollDuration: 120,
+    macOptionClickForcesSelection: IS_MAC,
     allowProposedApi: true,
     minimumContrastRatio: bgActive(prefs) ? MCR_BG_ACTIVE : MCR_BG_INACTIVE,
   };
@@ -238,7 +293,35 @@ function createSlot(): Slot {
     lastW: 0,
     lastH: 0,
     lastUsedAt: 0,
+    wheelRemainder: 0,
   };
+
+  term.attachCustomWheelEventHandler((event) => {
+    const mode = term.modes.mouseTrackingMode;
+    if (mode === "none" || !terminalMouseOverrideHeld(event, IS_MAC)) {
+      slot.wheelRemainder = 0;
+      return true;
+    }
+
+    // TUI 已接管滚轮时，旁路键必须显式滚动本地缓冲并阻止 VT 鼠标上报。
+    const cellHeight =
+      host.clientHeight > 0 && term.rows > 0
+        ? host.clientHeight / term.rows
+        : (term.options.fontSize ?? 14);
+    slot.wheelRemainder += terminalWheelDeltaRows(
+      event.deltaY,
+      event.deltaMode,
+      cellHeight,
+      term.rows,
+    );
+    const lines = Math.trunc(slot.wheelRemainder);
+    if (lines !== 0) {
+      slot.wheelRemainder -= lines;
+      term.scrollLines(lines);
+    }
+    event.preventDefault();
+    return false;
+  });
 
   term.attachCustomKeyEventHandler((event) => {
     // During IME composition the browser is assembling a multi-keystroke
@@ -279,21 +362,21 @@ function createSlot(): Slot {
       if (event.type === "keydown") bridge.writeToPty("\x1b\r");
       return false;
     }
-    if (isTerminalCopy(event)) {
-      if (event.type === "keydown" && slot.term.hasSelection()) {
-        const sel = slot.term.getSelection();
-        if (sel) void writeTerminalClipboard(sel);
+    const clipboardIntent = terminalClipboardIntent(event, {
+      isMac: IS_MAC,
+      smartCopyPaste: usePreferencesStore.getState().terminalSmartCopyPaste,
+      hasSelection: slot.term.hasSelection(),
+    });
+    if (clipboardIntent === "copy") {
+      if (event.type === "keydown") {
+        copyLeafSelection(leafId, !event.shiftKey);
       }
       event.preventDefault();
       return false;
     }
-    if (isTerminalPaste(event)) {
+    if (clipboardIntent === "paste") {
       if (event.type === "keydown") {
-        const targetLeafId = slot.currentLeafId;
-        void readTerminalClipboard().then((text) => {
-          if (text && slot.currentLeafId === targetLeafId)
-            slot.term.paste(text);
-        });
+        pasteClipboardIntoLeaf(leafId);
       }
       event.preventDefault();
       return false;
@@ -1054,32 +1137,6 @@ export function getLiveSlotForLeaf(leafId: number): Slot | null {
     slots.find(
       (s) => s.currentLeafId === leafId || s.retainedLeafId === leafId,
     ) ?? null
-  );
-}
-
-const IS_MAC =
-  typeof navigator !== "undefined" &&
-  /Mac|iPhone|iPad/.test(navigator.userAgent);
-
-function isTerminalCopy(e: KeyboardEvent): boolean {
-  return (
-    !IS_MAC &&
-    e.ctrlKey &&
-    e.shiftKey &&
-    !e.altKey &&
-    !e.metaKey &&
-    (e.code === "KeyC" || e.key === "c" || e.key === "C")
-  );
-}
-
-function isTerminalPaste(e: KeyboardEvent): boolean {
-  return (
-    !IS_MAC &&
-    e.ctrlKey &&
-    e.shiftKey &&
-    !e.altKey &&
-    !e.metaKey &&
-    (e.code === "KeyV" || e.key === "v" || e.key === "V")
   );
 }
 

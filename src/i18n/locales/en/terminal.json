@@ -21,5 +21,9 @@
     "switchShellAi": "Switch between Shell and AI",
     "openAiAssistant": "Open the AI assistant"
   },
+  "contextMenu": {
+    "copy": "Copy",
+    "paste": "Paste"
+  },
   "dropFilePathHere": "Drop file path here"
 }

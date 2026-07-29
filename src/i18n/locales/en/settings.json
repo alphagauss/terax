@@ -68,6 +68,10 @@
         "title": "Cursor blinking",
         "description": "Blink the terminal cursor. Off by default for lower idle CPU, matching VS Code and the macOS terminal."
       },
+      "smartCopyPaste": {
+        "title": "Smart copy and paste",
+        "description": "When enabled, Ctrl+C copies selected text and otherwise interrupts; Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V always remain available."
+      },
       "fontFamily": {
         "title": "Font family",
         "description": "Nerd Font name for icons (e.g. \"CaskaydiaCove Nerd Font Mono\"). Leave blank to auto-detect.",

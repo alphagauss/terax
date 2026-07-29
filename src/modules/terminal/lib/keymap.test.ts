@@ -1,6 +1,12 @@
+/**
+ * 本文件测试终端键盘映射的纯逻辑。
+ * 重点锁定平台差异、Shell 保留按键和智能剪贴板的选择感知行为。
+ */
+
 import { describe, expect, it } from "vitest";
 
 import {
+  terminalClipboardIntent,
   terminalDeleteSequence,
   terminalLineNavigationSequence,
   terminalWordNavigationSequence,
@@ -11,6 +17,7 @@ const evt = (partial: Partial<TerminalKeyEvent>): TerminalKeyEvent => ({
   altKey: false,
   ctrlKey: false,
   metaKey: false,
+  shiftKey: false,
   key: "",
   code: "",
   ...partial,
@@ -73,7 +80,12 @@ describe("terminalLineNavigationSequence", () => {
   it("does not remap Cmd+Option+Arrow (selection-style combos pass through)", () => {
     expect(
       terminalLineNavigationSequence(
-        evt({ metaKey: true, altKey: true, key: "ArrowLeft", code: "ArrowLeft" }),
+        evt({
+          metaKey: true,
+          altKey: true,
+          key: "ArrowLeft",
+          code: "ArrowLeft",
+        }),
         { isMac: true },
       ),
     ).toBeNull();
@@ -128,9 +140,103 @@ describe("terminalDeleteSequence", () => {
 
   it("does not remap plain Backspace", () => {
     expect(
-      terminalDeleteSequence(
-        evt({ key: "Backspace", code: "Backspace" }),
-        { isMac: true },
+      terminalDeleteSequence(evt({ key: "Backspace", code: "Backspace" }), {
+        isMac: true,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("terminalClipboardIntent", () => {
+  const options = (
+    overrides: Partial<Parameters<typeof terminalClipboardIntent>[1]> = {},
+  ) => ({
+    isMac: false,
+    smartCopyPaste: true,
+    hasSelection: false,
+    ...overrides,
+  });
+
+  it("always supports Ctrl+Shift+C/V off macOS", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, shiftKey: true, code: "KeyC", key: "c" }),
+        options({ smartCopyPaste: false }),
+      ),
+    ).toBe("copy");
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, shiftKey: true, code: "KeyV", key: "v" }),
+        options({ smartCopyPaste: false }),
+      ),
+    ).toBe("paste");
+  });
+
+  it("copies with Ctrl+C only when smart mode has a selection", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyC", key: "c" }),
+        options({ hasSelection: true }),
+      ),
+    ).toBe("copy");
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyC", key: "c" }),
+        options(),
+      ),
+    ).toBeNull();
+  });
+
+  it("pastes with Ctrl+V only when smart mode is enabled", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyV", key: "v" }),
+        options(),
+      ),
+    ).toBe("paste");
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyV", key: "v" }),
+        options({ smartCopyPaste: false }),
+      ),
+    ).toBeNull();
+  });
+
+  it("does not intercept clipboard keys on macOS", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, shiftKey: true, code: "KeyC", key: "c" }),
+        options({ isMac: true, hasSelection: true }),
+      ),
+    ).toBeNull();
+  });
+
+  it("supports uppercase and non-Latin keyboard layouts", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, key: "C" }),
+        options({ hasSelection: true }),
+      ),
+    ).toBe("copy");
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyV", key: "м" }),
+        options(),
+      ),
+    ).toBe("paste");
+  });
+
+  it("ignores AltGr and unrelated keys", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, altKey: true, code: "KeyC", key: "c" }),
+        options({ hasSelection: true }),
+      ),
+    ).toBeNull();
+    expect(
+      terminalClipboardIntent(
+        evt({ ctrlKey: true, code: "KeyX", key: "x" }),
+        options({ hasSelection: true }),
       ),
     ).toBeNull();
   });

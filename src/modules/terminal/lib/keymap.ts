@@ -1,11 +1,18 @@
+/**
+ * 本文件定义终端键盘事件的纯映射规则。
+ * 负责 readline 导航、删除和剪贴板意图分类，不直接访问 PTY 或系统剪贴板。
+ */
+
 export type TerminalKeyEvent = Pick<
   KeyboardEvent,
-  "altKey" | "ctrlKey" | "metaKey" | "key" | "code"
+  "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "key" | "code"
 >;
 
 export type PlatformOpts = { isMac: boolean };
 
-export function terminalWordNavigationSequence(event: TerminalKeyEvent): string | null {
+export function terminalWordNavigationSequence(
+  event: TerminalKeyEvent,
+): string | null {
   if (!event.altKey || event.ctrlKey || event.metaKey) return null;
   if (event.key === "ArrowLeft" || event.code === "ArrowLeft") return "\x1bb";
   if (event.key === "ArrowRight" || event.code === "ArrowRight") return "\x1bf";
@@ -42,4 +49,37 @@ export function terminalDeleteSequence(
   }
   if (event.ctrlKey && !event.altKey && !event.metaKey) return "\x17";
   return null;
+}
+
+export type TerminalClipboardIntent = "copy" | "paste";
+
+export type TerminalClipboardOptions = {
+  isMac: boolean;
+  smartCopyPaste: boolean;
+  hasSelection: boolean;
+};
+
+/**
+ * 判断按键是否应由终端剪贴板处理。
+ *
+ * macOS 保留原生 Cmd+C/V 和 Ctrl+C 中断语义。其他平台始终支持
+ * Ctrl+Shift+C/V；智能模式还会让有选区的 Ctrl+C 复制，并让 Ctrl+V 粘贴。
+ */
+export function terminalClipboardIntent(
+  event: TerminalKeyEvent,
+  opts: TerminalClipboardOptions,
+): TerminalClipboardIntent | null {
+  if (opts.isMac) return null;
+  if (!event.ctrlKey || event.altKey || event.metaKey) return null;
+
+  // 同时匹配物理键位和字符，保证非拉丁键盘布局仍可使用通用组合键。
+  const key = event.key.toLowerCase();
+  const isCopy = event.code === "KeyC" || key === "c";
+  const isPaste = event.code === "KeyV" || key === "v";
+  if (!isCopy && !isPaste) return null;
+
+  if (event.shiftKey) return isCopy ? "copy" : "paste";
+  if (!opts.smartCopyPaste) return null;
+  if (isPaste) return "paste";
+  return opts.hasSelection ? "copy" : null;
 }

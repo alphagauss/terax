@@ -21,5 +21,9 @@
     "switchShellAi": "在 Shell 和 AI 之间切换",
     "openAiAssistant": "打开 AI 助手"
   },
+  "contextMenu": {
+    "copy": "复制",
+    "paste": "粘贴"
+  },
   "dropFilePathHere": "将文件路径拖放到这里"
 }
