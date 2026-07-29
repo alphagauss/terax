@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
-import { IS_WINDOWS } from "@/lib/platform";
+import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -42,6 +42,7 @@ import {
   setTerminalLetterSpacing,
   setTerminalScrollback,
   setTerminalShell,
+  setTerminalSmartCopyPaste,
   setTerminalWebglEnabled,
   setWorkspaceWindowMode,
   setZoomLevel,
@@ -106,6 +107,9 @@ export function GeneralSection() {
     (s) => s.terminalWebglEnabled,
   );
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
+  const terminalSmartCopyPaste = usePreferencesStore(
+    (s) => s.terminalSmartCopyPaste,
+  );
   const terminalFontFamily = usePreferencesStore((s) => s.terminalFontFamily);
   const terminalFontWeight = usePreferencesStore((s) => s.terminalFontWeight);
   const terminalShell = usePreferencesStore((s) => s.terminalShell);
@@ -346,6 +350,17 @@ export function GeneralSection() {
             onCheckedChange={(v) => void setTerminalCursorBlink(v)}
           />
         </SettingRow>
+        {!IS_MAC && (
+          <SettingRow
+            title={t("general.terminal.smartCopyPaste.title")}
+            description={t("general.terminal.smartCopyPaste.description")}
+          >
+            <Switch
+              checked={terminalSmartCopyPaste}
+              onCheckedChange={(value) => void setTerminalSmartCopyPaste(value)}
+            />
+          </SettingRow>
+        )}
         <FontFamilyInput
           value={terminalFontFamily}
           onCommit={(v) => void setTerminalFontFamily(v)}

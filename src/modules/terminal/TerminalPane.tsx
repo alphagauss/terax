@@ -3,7 +3,21 @@
  * 终端会话由模块级池持有，视图隐藏时不会销毁 PTY。
  */
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  CTRL_KEY,
+  fmtShortcut,
+  IS_MAC,
+  MOD_KEY,
+  SHIFT_KEY,
+} from "@/lib/platform";
 import { usePresence } from "@/lib/usePresence";
 import {
   FIND_PRESENCE_MS,
@@ -13,12 +27,18 @@ import {
   FindWidget,
   type FindWidgetHandle,
 } from "@/modules/find";
+import {
+  COMPACT_CONTENT,
+  COMPACT_ITEM,
+} from "@/modules/explorer/lib/menuItemClass";
 import { useTheme } from "@/modules/theme";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { SearchAddon } from "@xterm/addon-search";
 import {
   forwardRef,
   memo,
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -29,6 +49,11 @@ import {
 import { useTranslation } from "react-i18next";
 import { BlockOverlay } from "./block/BlockOverlay";
 import { BlockWatermark } from "./block/BlockWatermark";
+import {
+  copyLeafSelection,
+  pasteClipboardIntoLeaf,
+  shouldUseLocalMouseForLeaf,
+} from "./lib/rendererPool";
 import {
   focusLeafInput,
   submitToLeaf,
@@ -107,11 +132,17 @@ export const TerminalPane = memo(
       useState<FindOptions>(DEFAULT_FIND_OPTIONS);
     const [searchAddon, setSearchAddon] = useState<SearchAddon | null>(null);
     const [findResult, setFindResult] = useState<FindResult>();
+    const [contextMenuHasSelection, setContextMenuHasSelection] =
+      useState(false);
     const remoteWorkspace = currentWorkspaceEnv().kind !== "local";
     const [shellReady, setShellReady] = useState(!remoteWorkspace);
     const findPresence = usePresence(findOpen, FIND_PRESENCE_MS);
     const { resolvedMode, themeId, customThemes } = useTheme();
     const { t } = useTranslation("common");
+    const { t: terminalT } = useTranslation("terminal");
+    const terminalSmartCopyPaste = usePreferencesStore(
+      (state) => state.terminalSmartCopyPaste,
+    );
 
     const session = useTerminalSession({
       leafId,
@@ -180,6 +211,19 @@ export const TerminalPane = memo(
       if (blocks && session.blockMode === "prompt") focusLeafInput(leafId);
       else session.focus();
     }, [blocks, leafId, session]);
+
+    const prepareContextMenu = useCallback(
+      (event: ReactMouseEvent<HTMLDivElement>) => {
+        const allowed = shouldUseLocalMouseForLeaf(leafId, event.nativeEvent);
+        if (!allowed) {
+          // Radix 随后会检查 defaultPrevented，因此不会与 TUI 同时打开本地菜单。
+          event.preventDefault();
+          return;
+        }
+        setContextMenuHasSelection(Boolean(session.getSelection()));
+      },
+      [leafId, session],
+    );
 
     const closeFind = useCallback(() => {
       searchAddon?.clearDecorations();
@@ -266,59 +310,97 @@ export const TerminalPane = memo(
         </div>
       ) : null;
 
-    if (blocks) {
-      return (
-        <div
-          className="zoom-exempt flex h-full w-full flex-col"
-          style={hideStyle}
-        >
-          <div className="relative min-h-0 flex-1">
-            {loadingIndicator}
-            {findWidget}
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: terminal surface; pointer selects command blocks */}
-            <div
-              ref={containerRef}
-              className="absolute inset-0 z-0"
-              onMouseDown={(e) => {
-                downYRef.current = e.clientY;
-              }}
-              onMouseUp={(e) => {
-                const moved =
-                  downYRef.current != null &&
-                  Math.abs(e.clientY - downYRef.current) > 4;
-                downYRef.current = null;
-                if (!moved) session.selectBlockAt(e.clientY);
-                if (session.blockMode === "prompt") focusLeafInput(leafId);
-              }}
-            />
-            <BlockWatermark
-              leafId={leafId}
-              subscribe={session.subscribeBlocks}
-            />
-            <BlockOverlay
-              subscribe={session.subscribeBlocks}
-              getVisible={session.visibleBlocks}
-              readOutput={(id) => session.readBlockId(id)?.output ?? null}
-              searchBlock={session.searchBlock}
-              revealMatch={session.revealMatch}
-              clearSearch={session.clearSearch}
-              promptReady={promptReady}
-              onRunAgain={(cmd) => submitToLeaf(leafId, cmd)}
-              onRestoreFocus={() => {
-                if (session.blockMode === "prompt") focusLeafInput(leafId);
-              }}
-            />
-          </div>
+    const terminalBody = blocks ? (
+      /* biome-ignore lint/a11y/noStaticElementInteractions: 终端表面通过右键打开本地菜单 */
+      <div
+        className="zoom-exempt flex h-full w-full flex-col"
+        style={hideStyle}
+        onContextMenu={prepareContextMenu}
+      >
+        <div className="relative min-h-0 flex-1">
+          {loadingIndicator}
+          {findWidget}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: terminal surface; pointer selects command blocks */}
+          <div
+            ref={containerRef}
+            className="absolute inset-0 z-0"
+            onMouseDown={(e) => {
+              downYRef.current = e.clientY;
+            }}
+            onMouseUp={(e) => {
+              const moved =
+                downYRef.current != null &&
+                Math.abs(e.clientY - downYRef.current) > 4;
+              downYRef.current = null;
+              if (!moved) session.selectBlockAt(e.clientY);
+              if (session.blockMode === "prompt") focusLeafInput(leafId);
+            }}
+          />
+          <BlockWatermark leafId={leafId} subscribe={session.subscribeBlocks} />
+          <BlockOverlay
+            subscribe={session.subscribeBlocks}
+            getVisible={session.visibleBlocks}
+            readOutput={(id) => session.readBlockId(id)?.output ?? null}
+            searchBlock={session.searchBlock}
+            revealMatch={session.revealMatch}
+            clearSearch={session.clearSearch}
+            promptReady={promptReady}
+            onRunAgain={(cmd) => submitToLeaf(leafId, cmd)}
+            onRestoreFocus={() => {
+              if (session.blockMode === "prompt") focusLeafInput(leafId);
+            }}
+          />
         </div>
-      );
-    }
-
-    return (
-      <div className="zoom-exempt relative h-full w-full" style={hideStyle}>
+      </div>
+    ) : (
+      /* biome-ignore lint/a11y/noStaticElementInteractions: 终端表面通过右键打开本地菜单 */
+      <div
+        className="zoom-exempt relative h-full w-full"
+        style={hideStyle}
+        onContextMenu={prepareContextMenu}
+      >
         {loadingIndicator}
         {findWidget}
         <div ref={containerRef} className="absolute inset-0" />
       </div>
+    );
+
+    const smartCopyEnabled = !IS_MAC && terminalSmartCopyPaste;
+    const usePrimaryShortcut = IS_MAC || smartCopyEnabled;
+    const copyShortcut = usePrimaryShortcut
+      ? fmtShortcut(MOD_KEY, "C")
+      : fmtShortcut(CTRL_KEY, SHIFT_KEY, "C");
+    const pasteShortcut = usePrimaryShortcut
+      ? fmtShortcut(MOD_KEY, "V")
+      : fmtShortcut(CTRL_KEY, SHIFT_KEY, "V");
+
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{terminalBody}</ContextMenuTrigger>
+        <ContextMenuContent
+          className={COMPACT_CONTENT}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            restoreFocus();
+          }}
+        >
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            disabled={!contextMenuHasSelection}
+            onSelect={() => copyLeafSelection(leafId, smartCopyEnabled)}
+          >
+            {terminalT("contextMenu.copy")}
+            <ContextMenuShortcut>{copyShortcut}</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            className={COMPACT_ITEM}
+            onSelect={() => pasteClipboardIntoLeaf(leafId)}
+          >
+            {terminalT("contextMenu.paste")}
+            <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   }),
 );

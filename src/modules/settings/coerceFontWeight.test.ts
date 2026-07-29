@@ -1,6 +1,6 @@
 /**
  * 本文件验证设置存储的归一化与默认值不变量。
- * 锁定字体字重兼容逻辑，并确保首次启动时默认使用简体中文。
+ * 锁定字体字重兼容逻辑，以及首次启动时的语言和终端交互默认值。
  */
 
 import { describe, expect, it } from "vitest";
@@ -27,5 +27,9 @@ describe("coerceFontWeight", () => {
 describe("DEFAULT_PREFERENCES", () => {
   it("defaults new installations to Simplified Chinese", () => {
     expect(DEFAULT_PREFERENCES.language).toBe("zh-CN");
+  });
+
+  it("enables smart terminal copy and paste by default", () => {
+    expect(DEFAULT_PREFERENCES.terminalSmartCopyPaste).toBe(true);
   });
 });

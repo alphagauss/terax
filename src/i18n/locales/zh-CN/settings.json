@@ -68,6 +68,10 @@
         "title": "光标闪烁",
         "description": "让终端光标闪烁。默认关闭以降低空闲 CPU 占用，与 VS Code 和 macOS 终端一致。"
       },
+      "smartCopyPaste": {
+        "title": "智能复制与粘贴",
+        "description": "开启后，Ctrl+C 在有选区时复制，否则发送中断；Ctrl+V 执行粘贴。Ctrl+Shift+C 和 Ctrl+Shift+V 始终可用。"
+      },
       "fontFamily": {
         "title": "字体",
         "description": "用于图标的 Nerd Font 名称（例如 \"CaskaydiaCove Nerd Font Mono\"）。留空则自动检测。",
