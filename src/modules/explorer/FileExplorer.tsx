@@ -65,14 +65,13 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
-import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+import { folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
@@ -183,9 +182,50 @@ function basename(path: string): string {
   return parts.length ? parts[parts.length - 1] : path;
 }
 
+/**
+ * 返回路径的直接父目录，同时兼容前端规范路径和系统反斜杠路径。
+ */
 function parentOf(path: string, fallback: string): string {
-  const i = path.lastIndexOf("/");
-  return i > 0 ? path.slice(0, i) : fallback;
+  const separatorIndex = Math.max(
+    path.lastIndexOf("/"),
+    path.lastIndexOf("\\"),
+  );
+  if (separatorIndex < 0) return fallback;
+  if (separatorIndex === 0) return path.slice(0, 1);
+
+  const parent = path.slice(0, separatorIndex);
+  return /^[A-Za-z]:$/.test(parent)
+    ? `${parent}${path[separatorIndex]}`
+    : parent;
+}
+
+/**
+ * 解析资源管理器顶部创建按钮的目标目录。
+ *
+ * 选中文件夹时使用文件夹自身，选中文件时使用其直接父目录；
+ * 没有有效选择时回退到工作区根目录。
+ */
+export function resolveToolbarCreateParent(
+  rootPath: string,
+  selectedPath: string | null,
+  selectedIsDir: boolean | undefined,
+): string {
+  if (!selectedPath || selectedIsDir === undefined) return rootPath;
+  return selectedIsDir ? selectedPath : parentOf(selectedPath, rootPath);
+}
+
+/**
+ * 计算创建草稿在已排序目录条目中的插入位置。
+ *
+ * 文件夹草稿保持在最前；文件草稿放在所有文件夹之后、第一个文件或符号链接之前。
+ */
+export function resolvePendingCreateIndex(
+  entries: readonly { kind: "file" | "dir" | "symlink" }[],
+  kind: "file" | "dir",
+): number {
+  if (kind === "dir") return 0;
+  const firstFileIndex = entries.findIndex((entry) => entry.kind !== "dir");
+  return firstFileIndex < 0 ? entries.length : firstFileIndex;
 }
 
 function buildRows(
@@ -197,10 +237,28 @@ function buildRows(
   const rows: Row[] = [];
   const entryIndexByPath = new Map<string, number>();
 
+  const appendPending = (parentPath: string, depth: number) => {
+    const pending = tree.pendingCreate;
+    if (!pending || pending.parentPath !== parentPath) return;
+    rows.push({
+      kind: "pending",
+      key: `pending:${parentPath}`,
+      depth,
+      pendingKind: pending.kind,
+    });
+  };
+
   const walk = (parent: string, depth: number, parentIgnored: boolean) => {
     const node = tree.nodes[parent];
     if (!node || node.status !== "loaded") return;
-    for (const entry of node.entries) {
+    const pending = tree.pendingCreate;
+    const pendingIndex =
+      pending?.parentPath === parent
+        ? resolvePendingCreateIndex(node.entries, pending.kind)
+        : -1;
+
+    for (const [entryIndex, entry] of node.entries.entries()) {
+      if (entryIndex === pendingIndex) appendPending(parent, depth);
       const path = tree.joinPath(parent, entry.name);
       const isDir = entry.kind === "dir";
       const isDeleting = tree.deletingPaths.has(path);
@@ -237,14 +295,7 @@ function buildRows(
       }
       if (isDir && expanded) {
         const child = tree.nodes[path];
-        if (tree.pendingCreate?.parentPath === path) {
-          rows.push({
-            kind: "pending",
-            key: `pending:${path}`,
-            depth: depth + 1,
-            pendingKind: tree.pendingCreate.kind,
-          });
-        }
+        if (child?.status !== "loaded") appendPending(path, depth + 1);
         if (child?.status === "loading") {
           rows.push({
             kind: "status",
@@ -266,6 +317,7 @@ function buildRows(
         }
       }
     }
+    if (pendingIndex === node.entries.length) appendPending(parent, depth);
   };
 
   walk(rootPath, 0, false);
@@ -639,8 +691,11 @@ export const FileExplorer = memo(
     }
 
     const root = tree.nodes[rootPath];
-    const pendingAtRoot =
-      tree.pendingCreate?.parentPath === rootPath ? tree.pendingCreate : null;
+    const toolbarCreateParent = resolveToolbarCreateParent(
+      rootPath,
+      selectedPath,
+      selectedPath ? isDirAt(selectedPath) : undefined,
+    );
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (tree.renaming || tree.pendingCreate || isSearchOpen) return;
@@ -837,7 +892,7 @@ export const FileExplorer = memo(
               variant="ghost"
               size="icon"
               className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => tree.beginCreate(rootPath, "file")}
+              onClick={() => tree.beginCreate(toolbarCreateParent, "file")}
               title={t("newFile")}
             >
               <HugeiconsIcon icon={FileAddIcon} size={13} strokeWidth={2} />
@@ -846,7 +901,7 @@ export const FileExplorer = memo(
               variant="ghost"
               size="icon"
               className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => tree.beginCreate(rootPath, "dir")}
+              onClick={() => tree.beginCreate(toolbarCreateParent, "dir")}
               title={t("newFolder")}
             >
               <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
@@ -943,36 +998,6 @@ export const FileExplorer = memo(
                   setMenuNonce((n) => n + 1);
                 }}
               >
-                {pendingAtRoot ? (
-                  <div
-                    role="treeitem"
-                    aria-level={1}
-                    tabIndex={-1}
-                    className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
-                    style={{ paddingLeft: 6 }}
-                  >
-                    <span className="size-3.5 shrink-0" />
-                    <img
-                      src={
-                        pendingAtRoot.kind === "dir"
-                          ? folderIconUrl("", false)
-                          : fileIconUrl("untitled")
-                      }
-                      alt=""
-                      className="size-4 shrink-0 opacity-70"
-                    />
-                    <InlineInput
-                      initial=""
-                      placeholder={
-                        pendingAtRoot.kind === "dir"
-                          ? t("newFolder")
-                          : t("newFile")
-                      }
-                      onCommit={tree.commitCreate}
-                      onCancel={tree.cancelCreate}
-                    />
-                  </div>
-                ) : null}
                 {root?.status === "loading" && (
                   <div
                     role="treeitem"
