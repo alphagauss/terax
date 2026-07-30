@@ -4,6 +4,14 @@
   "saveToPreview": "保存后预览",
   "loading": "加载中…",
   "readFailed": "读取文件失败:{{message}}",
+  "renderFailed": "无法渲染此文件，请使用源码视图检查内容。",
   "binaryUnsupported": "二进制文件无法渲染为 Markdown。",
-  "tooLarge": "文件大小为 {{size}} 字节,限制为 {{limit}} 字节。"
+  "tooLarge": "文件大小为 {{size}} 字节,限制为 {{limit}} 字节。",
+  "copyImage": "复制图片",
+  "saveImage": "图片另存为…",
+  "imageFile": "图片",
+  "imageCopied": "图片已复制",
+  "imageSaved": "图片已保存",
+  "imageCopyFailed": "无法复制图片:{{message}}",
+  "imageSaveFailed": "无法保存图片:{{message}}"
 }

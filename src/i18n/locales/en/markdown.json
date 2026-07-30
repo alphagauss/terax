@@ -4,6 +4,14 @@
   "saveToPreview": "Save to preview",
   "loading": "Loading…",
   "readFailed": "Failed to read file: {{message}}",
+  "renderFailed": "Failed to render this file. Use the Raw view to inspect it.",
   "binaryUnsupported": "Binary file: cannot render as markdown.",
-  "tooLarge": "File is {{size}} bytes; limit {{limit}}."
+  "tooLarge": "File is {{size}} bytes; limit {{limit}}.",
+  "copyImage": "Copy image",
+  "saveImage": "Save image as…",
+  "imageFile": "Image",
+  "imageCopied": "Image copied",
+  "imageSaved": "Image saved",
+  "imageCopyFailed": "Could not copy image: {{message}}",
+  "imageSaveFailed": "Could not save image: {{message}}"
 }

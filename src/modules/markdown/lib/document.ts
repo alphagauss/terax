@@ -1,3 +1,9 @@
+/**
+ * 本文件将 Markdown 源码整理为可渲染文档模型。
+ *
+ * 负责标题目录、GitHub 风格锚点、源码行范围和超大文档分块，不执行实际 DOM 渲染。
+ */
+
 import { Lexer, type Token, type Tokens } from "marked";
 import { parseMarkdownIntoBlocks } from "streamdown";
 
@@ -17,6 +23,7 @@ export type MarkdownDocumentBlock = {
 
 export type MarkdownDocumentHeading = {
   id: string;
+  slug: string;
   level: 1 | 2 | 3 | 4 | 5 | 6;
   title: string;
   sourceLine: number;
@@ -30,7 +37,7 @@ export type MarkdownDocument = {
   progressive: boolean;
 };
 
-type OutlineHeading = Omit<MarkdownDocumentHeading, "blockIndex">;
+type OutlineHeading = Omit<MarkdownDocumentHeading, "blockIndex" | "slug">;
 
 const HTML_ENTITIES: Readonly<Record<string, string>> = {
   amp: "&",
@@ -148,6 +155,18 @@ function buildOutline(source: string): OutlineHeading[] {
   return outline.sort((left, right) => left.sourceLine - right.sourceLine);
 }
 
+/**
+ * 生成与常见 GitHub 标题链接一致的基础 slug。
+ *
+ * 保留 Unicode 字母和数字，移除标点并将空白替换为连字符；重复标题的后缀由文档级调用方统一分配。
+ */
+export function githubHeadingSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_\-\s]/gu, "")
+    .replace(/\s/g, "-");
+}
+
 function estimatedBlockHeight(content: string): number {
   if (!content.trim()) return 0;
   const sourceLines = countLineBreaks(content) + 1;
@@ -206,16 +225,24 @@ function progressiveBlockContents(source: string): string[] | null {
   return contents.length > 1 ? contents : null;
 }
 
+/** 解析 Markdown，并生成渲染分块、全局唯一标题锚点和源码导航信息。 */
 export function prepareMarkdownDocument(source: string): MarkdownDocument {
   const normalizedSource = source.replace(/\r\n?/g, "\n");
   const progressiveContents = progressiveBlockContents(normalizedSource);
   const blocks = makeBlocks(
     progressiveContents ?? (normalizedSource ? [normalizedSource] : []),
   );
-  const outline = buildOutline(normalizedSource).map((heading) => ({
-    ...heading,
-    blockIndex: findBlockIndexForSourceLine(blocks, heading.sourceLine),
-  }));
+  const slugCounts = new Map<string, number>();
+  const outline = buildOutline(normalizedSource).map((heading) => {
+    const baseSlug = githubHeadingSlug(heading.title);
+    const duplicateIndex = slugCounts.get(baseSlug) ?? 0;
+    slugCounts.set(baseSlug, duplicateIndex + 1);
+    return {
+      ...heading,
+      slug: duplicateIndex === 0 ? baseSlug : `${baseSlug}-${duplicateIndex}`,
+      blockIndex: findBlockIndexForSourceLine(blocks, heading.sourceLine),
+    };
+  });
 
   return {
     source: normalizedSource,

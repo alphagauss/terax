@@ -1,3 +1,9 @@
+/**
+ * 本文件测试 Markdown DOM 与源码导航映射。
+ *
+ * 重点锁定标题公开 slug、渐进块行号和 CSS zoom 下的容器内片段滚动。
+ */
+
 import type { MarkdownDocumentBlock } from "@/modules/markdown/lib/document";
 import {
   markdownBlockRenderContent,
@@ -16,6 +22,7 @@ import {
   readRenderedViewportSourceLine,
   rehypeMarkdownSourcePositions,
   restoreRenderedSourceLine,
+  scrollRenderedFragment,
 } from "./anchor";
 
 function sourceElement(
@@ -116,6 +123,28 @@ describe("rehypeMarkdownSourcePositions", () => {
     });
   });
 
+  it("uses the document-wide slug as the public heading id", () => {
+    const heading = {
+      type: "element",
+      tagName: "h2",
+      position: { start: { line: 3 }, end: { line: 3 } },
+    };
+
+    rehypeMarkdownSourcePositions({
+      headingSlugById: { "markdown-heading-3": "hello-world-1" },
+    })({
+      type: "root",
+      children: [heading],
+    });
+
+    expect(heading).toMatchObject({
+      properties: {
+        id: "user-content-hello-world-1",
+        "data-markdown-heading-id": "markdown-heading-3",
+      },
+    });
+  });
+
   it("preserves source ranges through Streamdown static rendering", () => {
     const html = renderToStaticMarkup(
       createElement(
@@ -188,5 +217,54 @@ describe("rehypeMarkdownSourcePositions", () => {
     expect(html).not.toContain("terax-markdown-block");
     expect(html).toContain('data-markdown-heading-id="markdown-heading-25"');
     expect(html).toContain('data-markdown-block-index="4"');
+  });
+});
+
+describe("rendered fragment navigation", () => {
+  it("scrolls an empty fragment to the document start", () => {
+    const scroller = { scrollTop: 240 } as HTMLElement;
+    const root = {} as ParentNode;
+
+    expect(scrollRenderedFragment(scroller, root, "")).toBe(true);
+    expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("scrolls only the supplied container and corrects CSS zoom geometry", () => {
+    const target = {
+      id: "user-content-install",
+      closest: () => target,
+      getBoundingClientRect: () => ({ top: 200 }),
+    } as unknown as HTMLElement;
+    const root = {
+      querySelectorAll: () => [target],
+    } as unknown as ParentNode;
+    const scroller = {
+      offsetHeight: 500,
+      scrollTop: 200,
+      getBoundingClientRect: () => ({ top: 100, height: 250 }),
+    } as unknown as HTMLElement;
+
+    expect(scrollRenderedFragment(scroller, root, "install")).toBe(true);
+    expect(scroller.scrollTop).toBe(392);
+  });
+
+  it("resolves sanitizer-prefixed footnote targets", () => {
+    const target = {
+      id: "user-content-user-content-fn-note",
+      closest: () => target,
+      getBoundingClientRect: () => ({ top: 120 }),
+    } as unknown as HTMLElement;
+    const root = {
+      querySelectorAll: () => [target],
+    } as unknown as ParentNode;
+    const scroller = {
+      offsetHeight: 400,
+      scrollTop: 0,
+      getBoundingClientRect: () => ({ top: 20, height: 400 }),
+    } as unknown as HTMLElement;
+
+    expect(scrollRenderedFragment(scroller, root, "user-content-fn-note")).toBe(
+      true,
+    );
   });
 });

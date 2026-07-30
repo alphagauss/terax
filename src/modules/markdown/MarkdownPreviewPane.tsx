@@ -1,12 +1,20 @@
+/**
+ * 本文件实现 Markdown 标签页的预览、源码、目录与导航协调。
+ *
+ * 文件内容由共享文档模型提供，标签页隐藏时保持挂载，避免丢失滚动和编辑状态。
+ */
+
 import { cn } from "@/lib/utils";
 import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
 import { useDocument } from "@/modules/editor/lib/useDocument";
 import {
   MARKDOWN_ACTIVATION_OFFSET,
   MARKDOWN_CONTENT_CHANGE_EVENT,
+  normalizeMarkdownFragment,
   readActiveRenderedHeadingId,
   readRenderedViewportSourceLine,
   restoreRenderedSourceLine,
+  scrollRenderedFragment,
 } from "@/modules/markdown/lib/anchor";
 import {
   findBlockIndexForSourceLine,
@@ -22,6 +30,7 @@ import {
 import { MarkdownOutlinePanel } from "@/modules/markdown/MarkdownOutlinePanel";
 import { MarkdownOutlineToggle } from "@/modules/markdown/MarkdownOutlineToggle";
 import { MarkdownRawPane } from "@/modules/markdown/MarkdownRawPane";
+import { MarkdownRenderErrorBoundary } from "@/modules/markdown/MarkdownRenderErrorBoundary";
 import { MarkdownSplitLayout } from "@/modules/markdown/MarkdownSplitLayout";
 import { MarkdownViewToggle } from "@/modules/markdown/MarkdownViewToggle";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -49,6 +58,11 @@ type Props = {
 
 const NAVIGATION_FRAME_LIMIT = 30;
 
+/**
+ * Markdown 预览标签页。
+ *
+ * 在渲染视图与可编辑源码间保持源码行位置，并为长文档按需挂载目标块。
+ */
 export function MarkdownPreviewPane({
   id,
   path,
@@ -278,6 +292,37 @@ export function MarkdownPreviewPane({
     [cancelPendingNavigation, viewMode],
   );
 
+  const handleFragmentNavigate = useCallback(
+    (fragment: string) => {
+      const container = scrollRef.current;
+      const content = contentRef.current;
+      if (!container || !content || !document) return;
+
+      cancelPendingNavigation();
+      const normalized = normalizeMarkdownFragment(fragment);
+      const heading = document.outline.find((item) => item.slug === normalized);
+      if (heading) {
+        setActiveOutlineId(heading.id);
+        rendererRef.current?.ensureBlock(heading.blockIndex);
+      }
+
+      let attempts = 0;
+      const reveal = () => {
+        if (
+          scrollRenderedFragment(container, content, fragment) ||
+          attempts >= NAVIGATION_FRAME_LIMIT
+        ) {
+          navigationFrameRef.current = 0;
+          return;
+        }
+        attempts += 1;
+        navigationFrameRef.current = requestAnimationFrame(reveal);
+      };
+      navigationFrameRef.current = requestAnimationFrame(reveal);
+    },
+    [cancelPendingNavigation, document],
+  );
+
   const handleViewChange = useCallback(
     (mode: ViewMode) => {
       if (mode === viewMode || (mode === "rendered" && dirty)) return;
@@ -434,12 +479,23 @@ export function MarkdownPreviewPane({
                   </p>
                 )}
                 {document && scrollContainer && (
-                  <MarkdownDocumentRenderer
-                    ref={rendererRef}
-                    document={document}
-                    visible={visible}
-                    scrollContainer={scrollContainer}
-                  />
+                  <MarkdownRenderErrorBoundary
+                    content={document.source}
+                    fallback={
+                      <p className="text-[12px] text-destructive">
+                        {t("renderFailed")}
+                      </p>
+                    }
+                  >
+                    <MarkdownDocumentRenderer
+                      ref={rendererRef}
+                      document={document}
+                      documentPath={path}
+                      visible={visible}
+                      scrollContainer={scrollContainer}
+                      onFragmentNavigate={handleFragmentNavigate}
+                    />
+                  </MarkdownRenderErrorBoundary>
                 )}
               </div>
             </div>

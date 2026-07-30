@@ -1,9 +1,16 @@
+/**
+ * 本文件测试 Markdown 目录的活动标题选择。
+ *
+ * 目录项包含公开 slug，但活动状态仍以稳定内部 id 和源码行号为准。
+ */
+
 import { describe, expect, it } from "vitest";
 import { findActiveOutlineId, type MarkdownOutlineItem } from "./outline";
 
 const items: MarkdownOutlineItem[] = [
   {
     id: "first",
+    slug: "first",
     level: 1,
     title: "First",
     sourceLine: 2,
@@ -11,6 +18,7 @@ const items: MarkdownOutlineItem[] = [
   },
   {
     id: "second",
+    slug: "second",
     level: 2,
     title: "Second",
     sourceLine: 8,
@@ -18,6 +26,7 @@ const items: MarkdownOutlineItem[] = [
   },
   {
     id: "third",
+    slug: "third",
     level: 2,
     title: "Third",
     sourceLine: 16,

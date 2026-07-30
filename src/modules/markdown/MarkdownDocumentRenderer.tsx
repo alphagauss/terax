@@ -1,22 +1,35 @@
+/**
+ * 本文件实现 Markdown 文档的静态与渐进渲染。
+ *
+ * 负责延迟挂载长文档块、代码高亮、受控链接和源码位置，不负责文件读取与持久化。
+ */
+
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
 import { cn } from "@/lib/utils";
-import {
-  MARKDOWN_CONTENT_CHANGE_EVENT,
-  rehypeMarkdownSourcePositions,
-} from "@/modules/markdown/lib/anchor";
+import { MARKDOWN_CONTENT_CHANGE_EVENT } from "@/modules/markdown/lib/anchor";
 import type {
   MarkdownDocument,
   MarkdownDocumentBlock,
 } from "@/modules/markdown/lib/document";
 import {
+  classifyMarkdownLink,
+  isMarkdownExternalOpenGesture,
+} from "@/modules/markdown/lib/links";
+import {
   ProgressiveMountStore,
   startProgressiveMounting,
 } from "@/modules/markdown/lib/progressiveMount";
+import { buildMarkdownRehypePlugins } from "@/modules/markdown/lib/rehype";
 import {
   markdownBlockRenderContent,
   remarkMarkdownBlockSourcePosition,
 } from "@/modules/markdown/lib/sourcePosition";
+import {
+  MarkdownImageProvider,
+  MarkdownPreviewImage,
+} from "@/modules/markdown/MarkdownPreviewImage";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ComponentPropsWithoutRef, CSSProperties } from "react";
 import {
   createContext,
@@ -35,7 +48,6 @@ import {
 import {
   Block,
   type BlockProps,
-  defaultRehypePlugins,
   defaultRemarkPlugins,
   Streamdown,
 } from "streamdown";
@@ -49,17 +61,9 @@ const BLOCK_PREFETCH_RADIUS = 2;
 const IDLE_BATCH_SIZE = 2;
 const IDLE_TIMEOUT = 500;
 
-const staticRehypePlugins = [
-  ...Object.values(defaultRehypePlugins),
-  rehypeMarkdownSourcePositions,
-];
 const progressiveRemarkPlugins = [
   remarkMarkdownBlockSourcePosition,
   ...Object.values(defaultRemarkPlugins),
-];
-const progressiveRehypePlugins = [
-  ...Object.values(defaultRehypePlugins),
-  rehypeMarkdownSourcePositions,
 ];
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & {
@@ -75,7 +79,14 @@ type ProgressiveBlockContextValue = {
   notifyContentChange: () => void;
 };
 
+type MarkdownLinkProps = ComponentPropsWithoutRef<"a"> & {
+  node?: unknown;
+};
+
 const MarkdownVisibilityContext = createContext(true);
+const MarkdownFragmentNavigationContext = createContext<
+  (fragment: string) => void
+>(() => {});
 const ProgressiveBlockContext =
   createContext<ProgressiveBlockContextValue | null>(null);
 
@@ -161,7 +172,48 @@ function MarkdownPreviewCode({
   );
 }
 
-const markdownComponents = { code: MarkdownPreviewCode };
+/** 渲染受控预览链接，片段留在当前文档，允许的外链交给系统浏览器。 */
+function MarkdownPreviewLink({
+  href,
+  children,
+  node: _node,
+  ...props
+}: MarkdownLinkProps) {
+  const navigateToFragment = useContext(MarkdownFragmentNavigationContext);
+  const target = classifyMarkdownLink(href);
+  if (target.kind === "blocked") {
+    return <span title={href}>{children}</span>;
+  }
+
+  return (
+    <a
+      {...props}
+      href={href}
+      title={props.title ?? href}
+      data-streamdown="link"
+      rel="noreferrer"
+      onAuxClick={(event) => event.preventDefault()}
+      onClick={(event) => {
+        event.preventDefault();
+        if (target.kind === "fragment") {
+          navigateToFragment(target.fragment);
+        } else if (isMarkdownExternalOpenGesture(event)) {
+          void openUrl(target.url).catch((error) =>
+            console.error("[markdown-preview] open link failed", error),
+          );
+        }
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+const markdownComponents = {
+  a: MarkdownPreviewLink,
+  code: MarkdownPreviewCode,
+  img: MarkdownPreviewImage,
+};
 
 export function initialMarkdownBlockCount(
   blocks: readonly MarkdownDocumentBlock[],
@@ -274,18 +326,36 @@ export type MarkdownDocumentRendererHandle = {
 
 type Props = {
   document: MarkdownDocument;
+  documentPath: string;
   visible: boolean;
   scrollContainer: HTMLElement;
+  onFragmentNavigate: (fragment: string) => void;
 };
 
+/**
+ * Markdown 文档渲染器。
+ *
+ * 普通文档单次静态解析，超大文档按视口渐进挂载，同时保持全局标题 slug 和源码行映射。
+ */
 export const MarkdownDocumentRenderer = forwardRef<
   MarkdownDocumentRendererHandle,
   Props
 >(function MarkdownDocumentRenderer(
-  { document, visible, scrollContainer },
+  { document, documentPath, visible, scrollContainer, onFragmentNavigate },
   ref,
 ) {
   const progressive = document.progressive;
+  const headingSlugById = useMemo(
+    () =>
+      Object.fromEntries(
+        document.outline.map((heading) => [heading.id, heading.slug]),
+      ),
+    [document.outline],
+  );
+  const rehypePlugins = useMemo(
+    () => buildMarkdownRehypePlugins(headingSlugById),
+    [headingSlugById],
+  );
   const store = useMemo(
     () =>
       new ProgressiveMountStore(
@@ -423,37 +493,45 @@ export const MarkdownDocumentRenderer = forwardRef<
   );
 
   return (
-    <MarkdownVisibilityContext.Provider value={visible}>
-      {progressive ? (
-        <ProgressiveBlockContext.Provider value={progressiveContext}>
-          <Streamdown
-            className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-            components={markdownComponents}
-            plugins={streamdownPlugins}
-            rehypePlugins={progressiveRehypePlugins}
-            remarkPlugins={progressiveRemarkPlugins}
-            mode="streaming"
-            parseIncompleteMarkdown={false}
-            isAnimating={false}
-            BlockComponent={MemoizedProgressiveMarkdownBlock}
-            parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocks}
-          >
-            {document.source}
-          </Streamdown>
-        </ProgressiveBlockContext.Provider>
-      ) : (
-        <Streamdown
-          className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-          components={markdownComponents}
-          plugins={streamdownPlugins}
-          rehypePlugins={staticRehypePlugins}
-          mode="static"
-          parseIncompleteMarkdown={false}
-          isAnimating={false}
+    <MarkdownFragmentNavigationContext.Provider value={onFragmentNavigate}>
+      <MarkdownVisibilityContext.Provider value={visible}>
+        <MarkdownImageProvider
+          documentPath={documentPath}
+          scrollRoot={scrollContainer}
+          visible={visible}
         >
-          {document.source}
-        </Streamdown>
-      )}
-    </MarkdownVisibilityContext.Provider>
+          {progressive ? (
+            <ProgressiveBlockContext.Provider value={progressiveContext}>
+              <Streamdown
+                className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                components={markdownComponents}
+                plugins={streamdownPlugins}
+                rehypePlugins={rehypePlugins}
+                remarkPlugins={progressiveRemarkPlugins}
+                mode="streaming"
+                parseIncompleteMarkdown={false}
+                isAnimating={false}
+                BlockComponent={MemoizedProgressiveMarkdownBlock}
+                parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocks}
+              >
+                {document.source}
+              </Streamdown>
+            </ProgressiveBlockContext.Provider>
+          ) : (
+            <Streamdown
+              className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              components={markdownComponents}
+              plugins={streamdownPlugins}
+              rehypePlugins={rehypePlugins}
+              mode="static"
+              parseIncompleteMarkdown={false}
+              isAnimating={false}
+            >
+              {document.source}
+            </Streamdown>
+          )}
+        </MarkdownImageProvider>
+      </MarkdownVisibilityContext.Provider>
+    </MarkdownFragmentNavigationContext.Provider>
   );
 });

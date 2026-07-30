@@ -97,6 +97,39 @@ describe("workbench model", () => {
     expect(() => assertWorkbenchState(closed)).not.toThrow();
   });
 
+  it("warms the cold fallback tab when closing the active tab", () => {
+    const state = initial();
+    const active = terminal(4);
+    state.tabs[2] = { ...state.tabs[2], cold: true };
+    state.tabs[4] = active;
+    state.spaces.default.groups[1] = {
+      id: 1,
+      tabIds: [2, 4],
+      activeTabId: 4,
+    };
+
+    const closed = closeTab(state, 4);
+
+    expect(closed.spaces.default.groups[1].activeTabId).toBe(2);
+    expect(closed.tabs[2].cold).toBe(false);
+  });
+
+  it("warms the fallback even when the removed active tab was cold", () => {
+    const state = initial();
+    state.tabs[2] = { ...state.tabs[2], cold: true };
+    state.tabs[4] = { ...terminal(4), cold: true };
+    state.spaces.default.groups[1] = {
+      id: 1,
+      tabIds: [2, 4],
+      activeTabId: 4,
+    };
+
+    const closed = closeTab(state, 4);
+
+    expect(closed.spaces.default.groups[1].activeTabId).toBe(2);
+    expect(closed.tabs[2].cold).toBe(false);
+  });
+
   it("allows a cross-Space move to leave the source Space empty", () => {
     const state = initial();
     const target = terminal(6);

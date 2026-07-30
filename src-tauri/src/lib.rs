@@ -6,8 +6,8 @@ pub mod menu;
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, app_data, fs, git, history, lsp, net, open_with, pty, remote, secrets,
-    shared_store, shell, transfers, workspace, workspace_process,
+    agent, ai_sessions, app_data, fs, git, history, lsp, markdown_images, net, open_with, pty,
+    remote, secrets, shared_store, shell, transfers, workspace, workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -215,6 +215,7 @@ pub fn run() {
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(lsp::LspState::default())
+        .manage(markdown_images::MarkdownImageState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
@@ -269,6 +270,9 @@ pub fn run() {
             fs::file::fs_write_file,
             fs::file::fs_stat,
             fs::file::fs_canonicalize,
+            markdown_images::markdown_image_prepare,
+            markdown_images::markdown_image_release,
+            markdown_images::markdown_image_save_as,
             fs::mutate::fs_create_file,
             fs::mutate::fs_create_dir,
             fs::mutate::fs_rename,
