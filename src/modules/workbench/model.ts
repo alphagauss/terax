@@ -430,11 +430,25 @@ function removeTabFromOwner(
   const group = owner.group;
   const index = group.tabIds.indexOf(tabId);
   const tabIds = group.tabIds.filter((id) => id !== tabId);
-  const tabs = keepTab
+  const nextActiveTabId =
+    group.activeTabId === tabId
+      ? tabIds.length > 0
+        ? fallbackTabId(tabIds, index)
+        : null
+      : group.activeTabId;
+  let tabs = keepTab
     ? state.tabs
     : Object.fromEntries(
         Object.entries(state.tabs).filter(([id]) => Number(id) !== tabId),
       );
+  const nextActiveTab =
+    nextActiveTabId === null ? undefined : tabs[nextActiveTabId];
+  if (group.activeTabId === tabId && nextActiveTab?.cold) {
+    tabs = {
+      ...tabs,
+      [nextActiveTab.id]: { ...nextActiveTab, cold: false },
+    };
+  }
 
   if (tabIds.length > 0) {
     return {
@@ -449,10 +463,7 @@ function removeTabFromOwner(
             [group.id]: {
               ...group,
               tabIds,
-              activeTabId:
-                group.activeTabId === tabId
-                  ? fallbackTabId(tabIds, index)
-                  : group.activeTabId,
+              activeTabId: nextActiveTabId,
             },
           },
         },

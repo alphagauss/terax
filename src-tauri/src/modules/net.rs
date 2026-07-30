@@ -1,10 +1,14 @@
+//! 受控 HTTP 客户端与网络安全边界。
+//!
+//! 本模块统一执行协议、地址、重定向和请求头校验，防止 AI 请求与图片下载绕过 SSRF 限制。
+
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -21,6 +25,16 @@ const HEADER_BLOCKLIST: &[&str] = &[
     "trailer",
     "expect",
 ];
+const IMAGE_REDIRECT_LIMIT: usize = 5;
+const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 已通过公开地址校验和体积限制的网络图片。
+pub(crate) struct DownloadedImage {
+    /// 未解码的原始响应字节。
+    pub bytes: Vec<u8>,
+    /// 完成所有受控重定向后的 URL，用于推导保存文件名。
+    pub final_url: reqwest::Url,
+}
 
 fn is_blocked_host_name(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
@@ -30,6 +44,7 @@ fn is_blocked_host_name(host: &str) -> bool {
     )
 }
 
+/// 将 IP 归类为公开、私有、回环或必须无条件拒绝的元数据地址。
 fn ip_kind(ip: IpAddr) -> IpKind {
     match ip {
         IpAddr::V4(v) => {
@@ -53,6 +68,9 @@ fn ip_kind(ip: IpAddr) -> IpKind {
             IpKind::Public
         }
         IpAddr::V6(v) => {
+            if let Some(mapped) = v.to_ipv4_mapped() {
+                return ip_kind(IpAddr::V4(mapped));
+            }
             if v.is_loopback() || v.is_unspecified() || v.is_multicast() {
                 return IpKind::Loopback;
             }
@@ -82,26 +100,31 @@ enum IpKind {
     BlockedMetadata,
 }
 
-/// Resolve `host` once and return both its safety classification and the
-/// concrete IPs we resolved. Callers can pin reqwest to these IPs to defeat
-/// DNS rebinding (where a second lookup returns a different address).
+/// 识别 URL host 中可能带方括号的 IP 字面量。
+fn parse_ip_literal(host: &str) -> Option<IpAddr> {
+    host.strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(host)
+        .parse()
+        .ok()
+}
+
+/// 只解析一次 host，并返回安全分类和可固定到 HTTP 客户端的具体地址。
 async fn resolve_and_classify(host: &str) -> Result<(IpKind, Vec<IpAddr>), String> {
-    // Direct literal? Skip DNS.
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    // IP 字面量无需 DNS，方括号已在解析函数内兼容。
+    if let Some(ip) = parse_ip_literal(host) {
         return Ok((ip_kind(ip), vec![ip]));
     }
-    let host_owned = host.to_string();
-    let lookup = tokio::task::spawn_blocking(move || {
-        (host_owned.as_str(), 0u16)
-            .to_socket_addrs()
-            .map(|it| it.map(|a| a.ip()).collect::<Vec<_>>())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("dns: {e}"))?;
+    let mut lookup = tokio::net::lookup_host((host, 0u16))
+        .await
+        .map_err(|error| format!("dns: {error}"))?
+        .map(|address| address.ip())
+        .collect::<Vec<_>>();
     if lookup.is_empty() {
         return Err("dns: no addresses".into());
     }
+    lookup.sort_unstable();
+    lookup.dedup();
     let mut worst = IpKind::Public;
     for ip in &lookup {
         let k = ip_kind(*ip);
@@ -116,9 +139,8 @@ async fn resolve_and_classify(host: &str) -> Result<(IpKind, Vec<IpAddr>), Strin
     Ok((worst, lookup))
 }
 
-use std::net::ToSocketAddrs;
-
-fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> {
+/// 校验 URL 语法级边界；解析后的 IP 安全分类由异步调用方完成。
+fn validate_url(url: &str) -> Result<reqwest::Url, String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
     match parsed.scheme() {
         "http" | "https" => {}
@@ -133,14 +155,10 @@ fn validate_url(url: &str, allow_private: bool) -> Result<reqwest::Url, String> 
     if is_blocked_host_name(host) {
         return Err(format!("host not allowed: {host}"));
     }
-    // The actual IP classification has to be async — caller does it.
-    let _ = allow_private;
     Ok(parsed)
 }
 
-/// Classify the host AND return safe IPs to pin reqwest's resolver to.
-/// Defeats DNS rebinding (second-lookup-returns-different-IP) by reusing
-/// exactly the addresses that passed `ip_kind`.
+/// 分类 host 并只返回通过校验的地址，供 reqwest 固定解析结果以阻止 DNS 重绑定。
 async fn classify_and_collect_safe_ips(
     host: &str,
     allow_private: bool,
@@ -195,7 +213,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         return Err("empty base url".into());
     }
     let probe = format!("{trimmed}/models");
-    let parsed = validate_url(&probe, true)?;
+    let parsed = validate_url(&probe)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
@@ -215,7 +233,7 @@ pub async fn lm_ping(base_url: String) -> Result<u16, String> {
         .map(|r| r.status().as_u16())
         .map_err(|e| e.to_string())
 }
-// AI HTTP proxy — bypasses webview CORS / Mixed-Content / PNA so local-network
+// AI HTTP proxy: bypasses webview CORS / Mixed-Content / PNA so local-network
 // model servers (LM Studio, Ollama, vLLM) work in the production bundle.
 
 #[derive(Debug, Serialize)]
@@ -242,6 +260,7 @@ fn build_request(
     Ok(req)
 }
 
+/// 为 AI HTTP 代理构造固定已验证 DNS 结果的客户端。
 fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
@@ -249,7 +268,7 @@ fn build_safe_client(
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
-    // for the same hostname between classify and connect — classic DNS
+    // for the same hostname between classify and connect; classic DNS
     // rebinding attack. We pin port 0 because reqwest fills in the actual
     // port from the URL when wiring up the override map.
     for (host, ips) in pinned {
@@ -277,7 +296,7 @@ fn build_safe_client(
             if is_blocked_host_name(host) {
                 return attempt.stop();
             }
-            if let Ok(ip) = host.parse::<IpAddr>() {
+            if let Some(ip) = parse_ip_literal(host) {
                 let k = ip_kind(ip);
                 if k == IpKind::BlockedMetadata {
                     return attempt.stop();
@@ -285,17 +304,118 @@ fn build_safe_client(
                 if !allow_private && matches!(k, IpKind::Loopback | IpKind::Private) {
                     return attempt.stop();
                 }
-            } else if !allow_private {
-                if let Some(prev) = attempt.previous().last() {
-                    if prev.host_str() != Some(host) {
-                        return attempt.stop();
-                    }
+            } else if let Some(previous) = attempt.previous().last() {
+                // 新 host 无法在同步重定向策略中重新执行 DNS 分类，因此一律停止跨 host 跳转。
+                if previous.host_str() != Some(host) {
+                    return attempt.stop();
                 }
             }
             attempt.follow()
         }))
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// 为单次图片请求创建固定 DNS 结果且禁用自动重定向的客户端。
+fn build_pinned_client(
+    host: &str,
+    safe_ips: &[IpAddr],
+    timeout: Duration,
+) -> Result<reqwest::Client, String> {
+    let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10).min(timeout))
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &addrs)
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+/// 返回网络图片请求的剩余总时限，避免 DNS 和重定向分别获得完整超时。
+fn remaining_image_request_time(started: Instant) -> Result<Duration, String> {
+    IMAGE_REQUEST_TIMEOUT
+        .checked_sub(started.elapsed())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| "image request timed out".to_string())
+}
+
+/// 下载公开网络图片，并对每次重定向重新执行地址校验和体积限制。
+pub(crate) async fn download_public_image(
+    url: &str,
+    max_bytes: usize,
+    user_agent: &str,
+) -> Result<DownloadedImage, String> {
+    let started = Instant::now();
+    let mut current = validate_url(url)?;
+
+    for redirect_count in 0..=IMAGE_REDIRECT_LIMIT {
+        let remaining = remaining_image_request_time(started)?;
+        let host = current
+            .host_str()
+            .ok_or_else(|| "missing host".to_string())?
+            .to_string();
+        let safe_ips = tokio::time::timeout(remaining, classify_and_collect_safe_ips(&host, false))
+            .await
+            .map_err(|_| "image request timed out".to_string())??;
+        let remaining = remaining_image_request_time(started)?;
+        let client = build_pinned_client(&host, &safe_ips, remaining)?;
+        let mut request = client.get(current.clone()).header(
+            ACCEPT,
+            "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,image/*;q=0.9,*/*;q=0.5",
+        );
+        if !user_agent.is_empty()
+            && user_agent.len() <= 512
+            && !user_agent.chars().any(char::is_control)
+        {
+            request = request.header(USER_AGENT, user_agent);
+        }
+        let response = request.send().await.map_err(|error| error.to_string())?;
+
+        if response.status().is_redirection() {
+            if redirect_count == IMAGE_REDIRECT_LIMIT {
+                return Err("too many image redirects".into());
+            }
+            let location = response
+                .headers()
+                .get(LOCATION)
+                .ok_or_else(|| "image redirect has no location".to_string())?
+                .to_str()
+                .map_err(|_| "image redirect location is invalid".to_string())?;
+            current = validate_url(
+                current
+                    .join(location)
+                    .map_err(|error| format!("invalid image redirect: {error}"))?
+                    .as_str(),
+            )?;
+            continue;
+        }
+
+        if !response.status().is_success() {
+            return Err(format!("image request failed: {}", response.status()));
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > max_bytes as u64)
+        {
+            return Err(format!("image is larger than {max_bytes} bytes"));
+        }
+        let mut bytes = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| error.to_string())?;
+            if bytes.len().saturating_add(chunk.len()) > max_bytes {
+                return Err(format!("image is larger than {max_bytes} bytes"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        return Ok(DownloadedImage {
+            bytes,
+            final_url: current,
+        });
+    }
+
+    Err("too many image redirects".into())
 }
 
 fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
@@ -317,7 +437,7 @@ pub async fn ai_http_request(
     allow_private_network: Option<bool>,
 ) -> Result<HttpResponse, String> {
     let allow_private = allow_private_network.unwrap_or(false);
-    let parsed = validate_url(&url, allow_private)?;
+    let parsed = validate_url(&url)?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "missing host".to_string())?
@@ -365,7 +485,7 @@ pub async fn ai_http_stream(
     on_event: Channel<AiStreamEvent>,
 ) -> Result<(), String> {
     let allow_private = allow_private_network.unwrap_or(false);
-    let parsed = match validate_url(&url, allow_private) {
+    let parsed = match validate_url(&url) {
         Ok(p) => p,
         Err(e) => {
             let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
@@ -416,7 +536,7 @@ pub async fn ai_http_stream(
                     })
                     .is_err()
                 {
-                    // Channel dropped (frontend aborted) — stop streaming.
+                    // Channel dropped (frontend aborted), stop streaming.
                     return Ok(());
                 }
             }
@@ -450,7 +570,7 @@ mod tests {
             ip_kind("fd00:ec2::254".parse().unwrap()),
             IpKind::BlockedMetadata
         );
-        // Any link-local IPv4 (169.254/16) — same network range, still blocked.
+        // Any link-local IPv4 (169.254/16); same network range, still blocked.
         assert_eq!(
             ip_kind(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1))),
             IpKind::BlockedMetadata
@@ -487,6 +607,22 @@ mod tests {
             IpKind::Loopback
         );
         assert_eq!(ip_kind("::1".parse().unwrap()), IpKind::Loopback);
+        assert_eq!(
+            ip_kind("::ffff:127.0.0.1".parse().unwrap()),
+            IpKind::Loopback
+        );
+    }
+
+    #[test]
+    fn parses_bracketed_ipv6_literals_before_dns_resolution() {
+        assert_eq!(
+            parse_ip_literal("[2606:4700:4700::1111]"),
+            Some("2606:4700:4700::1111".parse().unwrap())
+        );
+        assert_eq!(
+            parse_ip_literal("[::ffff:127.0.0.1]"),
+            Some("::ffff:127.0.0.1".parse().unwrap())
+        );
     }
 
     #[test]
@@ -504,18 +640,18 @@ mod tests {
     #[test]
     fn validate_url_blocks_userinfo_and_metadata_hostnames() {
         // URLs with userinfo can confuse browsers / leak creds in redirects.
-        assert!(validate_url("http://user:pass@example.com/", true).is_err());
+        assert!(validate_url("http://user:pass@example.com/").is_err());
         // Cloud metadata-by-name.
-        assert!(validate_url("http://metadata.google.internal/", true).is_err());
-        assert!(validate_url("http://metadata/", true).is_err());
-        assert!(validate_url("http://metadata.azure.com/", true).is_err());
+        assert!(validate_url("http://metadata.google.internal/").is_err());
+        assert!(validate_url("http://metadata/").is_err());
+        assert!(validate_url("http://metadata.azure.com/").is_err());
     }
 
     #[test]
     fn validate_url_rejects_non_http_schemes() {
-        assert!(validate_url("ftp://example.com/", true).is_err());
-        assert!(validate_url("file:///etc/passwd", true).is_err());
-        assert!(validate_url("javascript:alert(1)", true).is_err());
+        assert!(validate_url("ftp://example.com/").is_err());
+        assert!(validate_url("file:///etc/passwd").is_err());
+        assert!(validate_url("javascript:alert(1)").is_err());
     }
 
     #[test]

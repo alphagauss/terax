@@ -3,6 +3,7 @@
  * 草稿、附件、语音与命令状态在侧边栏关闭时仍需保留，因此由根级 Provider 持有。
  */
 
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import {
   createContext,
@@ -12,14 +13,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
-import { tryRunSlashCommand, type SlashCommandMeta } from "./slashCommands";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
 
 export type FileAttachment = {
   id: string;
@@ -59,14 +59,15 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
 };
 
 type Voice = ReturnType<typeof useWhisperRecording>;
+type ComposerFiles = FileList | readonly File[];
 
 type ComposerCtx = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   value: string;
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
-  addFiles: (list: FileList | null) => Promise<void>;
-  /** Attach a file by absolute path — used by the file explorer's "Attach to Agent". */
+  addFiles: (list: ComposerFiles | null) => Promise<void>;
+  /** 按绝对路径附加文件，供文件管理器的“附加到 Agent”操作使用。 */
   attachFileByPath: (path: string) => Promise<void>;
   removeFile: (id: string) => void;
   pickedSnippets: Snippet[];
@@ -265,7 +266,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     },
   });
 
-  const addFiles = async (list: FileList | null) => {
+  /** 将文件选择或剪贴板中的文件转换为 Composer 附件。 */
+  const addFiles = async (list: ComposerFiles | null) => {
     if (!list) return;
     const next: FileAttachment[] = [];
     for (const f of Array.from(list)) {

@@ -10,6 +10,7 @@ pub mod fs;
 pub mod git;
 pub mod history;
 pub mod lsp;
+pub mod markdown_images;
 pub mod net;
 pub mod open_with;
 pub mod proc;

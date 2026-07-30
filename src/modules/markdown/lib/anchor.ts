@@ -1,3 +1,9 @@
+/**
+ * 本文件维护 Markdown 渲染结果与源码位置之间的映射。
+ *
+ * 同时提供目录定位和文档内片段滚动，所有滚动只作用于当前预览容器。
+ */
+
 import {
   MARKDOWN_BLOCK_INDEX_DATA_KEY,
   MARKDOWN_LINE_OFFSET_DATA_KEY,
@@ -19,6 +25,7 @@ type PositionedNode = {
 type SourcePositionOptions = {
   lineOffset?: number;
   blockIndex?: number;
+  headingSlugById?: Record<string, string>;
 };
 
 const SOURCE_BLOCK_TAGS = new Set([
@@ -40,6 +47,7 @@ const SOURCE_SELECTOR =
 export const MARKDOWN_ACTIVATION_OFFSET = 32;
 export const MARKDOWN_CONTENT_CHANGE_EVENT = "markdown-content-change";
 
+/** 为可导航 Markdown 元素附加全局源码位置和稳定标题标识。 */
 export function rehypeMarkdownSourcePositions(
   options: SourcePositionOptions = {},
 ) {
@@ -74,6 +82,9 @@ export function rehypeMarkdownSourcePositions(
         const headingId = heading
           ? `markdown-heading-${sourceStart}${occurrence > 1 ? `-${occurrence}` : ""}`
           : undefined;
+        const headingSlug = headingId
+          ? options.headingSlugById?.[headingId]
+          : undefined;
         const existingId = node.properties?.id;
         node.properties = {
           ...node.properties,
@@ -83,7 +94,12 @@ export function rehypeMarkdownSourcePositions(
             "data-markdown-block-index": String(blockIndex),
           }),
           ...(headingId && {
-            id: typeof existingId === "string" ? existingId : headingId,
+            id:
+              typeof existingId === "string"
+                ? existingId
+                : headingSlug !== undefined
+                  ? `user-content-${headingSlug}`
+                  : headingId,
             "data-markdown-heading-id": headingId,
           }),
         };
@@ -232,5 +248,58 @@ export function restoreRenderedSourceLine(
     rect.height * progress -
     viewportTop -
     MARKDOWN_ACTIVATION_OFFSET;
+  return true;
+}
+
+/** 解码并规范化 sanitizer 可能添加 `user-content-` 前缀的片段。 */
+export function normalizeMarkdownFragment(fragment: string): string {
+  const raw = fragment.startsWith("#") ? fragment.slice(1) : fragment;
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // 非法百分号转义按字面值处理，避免一次坏链接中断整个预览。
+  }
+  return decoded.startsWith("user-content-")
+    ? decoded.slice("user-content-".length)
+    : decoded;
+}
+
+/**
+ * 将片段目标滚动到当前 Markdown 容器顶部附近。
+ *
+ * 几何差值会换算为布局像素，避免应用 CSS zoom 时产生距离倍增。
+ */
+export function scrollRenderedFragment(
+  container: HTMLElement,
+  root: ParentNode,
+  fragment: string,
+): boolean {
+  const normalized = normalizeMarkdownFragment(fragment);
+  if (!normalized) {
+    container.scrollTop = 0;
+    return true;
+  }
+  const ids = new Set([
+    normalized,
+    `user-content-${normalized}`,
+    `user-content-user-content-${normalized}`,
+  ]);
+  const target = Array.from(root.querySelectorAll<HTMLElement>("[id]")).find(
+    (element) => ids.has(element.id),
+  );
+  if (!target) return false;
+
+  const anchor =
+    target.closest<HTMLElement>(
+      "p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, pre",
+    ) ?? target;
+  const containerRect = container.getBoundingClientRect();
+  const layoutHeight = container.offsetHeight;
+  const scale = layoutHeight > 0 ? containerRect.height / layoutHeight : 1;
+  container.scrollTop +=
+    (anchor.getBoundingClientRect().top - containerRect.top) /
+      Math.max(scale, Number.EPSILON) -
+    8;
   return true;
 }

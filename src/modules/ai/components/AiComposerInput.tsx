@@ -1,3 +1,9 @@
+/**
+ * 本文件实现 Agent Composer 的文本输入和触发器选择。
+ *
+ * 负责命令、片段、文件提示与剪贴板图片附件，不持久化 Composer 状态。
+ */
+
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -5,6 +11,7 @@ import { usePresence } from "@/lib/usePresence";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
+import { clipboardImageFiles } from "../lib/clipboardImages";
 import { useComposer } from "../lib/composer";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { useChatStore } from "../store/chatStore";
@@ -59,6 +66,11 @@ function detectFileTrigger(value: string, caret: number): FileTrigger | null {
   return null;
 }
 
+/**
+ * Agent 主输入框。
+ *
+ * 除键盘触发器外，粘贴图片会复用 Composer 的标准附件读取流程。
+ */
 export function AiComposerInput() {
   const { t } = useTranslation("ai");
   const c = useComposer();
@@ -225,6 +237,12 @@ export function AiComposerInput() {
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
               onSelect={updateTrigger}
+              onPaste={(event) => {
+                const images = clipboardImageFiles(event.clipboardData);
+                if (images.length === 0) return;
+                event.preventDefault();
+                void c.addFiles(images);
+              }}
               onKeyDown={(e) => {
                 if (pickerOpen) {
                   const items = fileTrigger ? filteredFiles : filteredItems;

@@ -1,5 +1,12 @@
+/**
+ * 本文件测试 Markdown 文档模型。
+ *
+ * 重点锁定源码行号、全局唯一标题 slug 和超大文档渐进分块不变量。
+ */
+
 import {
   findBlockIndexForSourceLine,
+  githubHeadingSlug,
   MARKDOWN_PROGRESSIVE_CHARACTER_THRESHOLD,
   prepareMarkdownDocument,
 } from "@/modules/markdown/lib/document";
@@ -26,11 +33,25 @@ describe("prepareMarkdownDocument", () => {
     expect(document.outline).toEqual([
       {
         id: "markdown-heading-1",
+        slug: "title",
         level: 1,
         title: "Title",
         sourceLine: 1,
         blockIndex: 0,
       },
+    ]);
+  });
+
+  it("creates GitHub-style slugs with document-wide duplicate suffixes", () => {
+    const document = prepareMarkdownDocument(
+      "# Hello, 世界!\n\n## Hello 世界\n\n### Hello 世界\n",
+    );
+
+    expect(githubHeadingSlug("Hello, 世界!")).toBe("hello-世界");
+    expect(document.outline.map(({ slug }) => slug)).toEqual([
+      "hello-世界",
+      "hello-世界-1",
+      "hello-世界-2",
     ]);
   });
 
@@ -89,6 +110,9 @@ describe("prepareMarkdownDocument", () => {
     expect(document.blocks.length).toBeGreaterThan(1);
     expect(document.blocks.map((block) => block.content).join("")).toBe(source);
     expect(document.blocks.length).toBeLessThan(100);
+    expect(new Set(document.outline.map((heading) => heading.slug)).size).toBe(
+      document.outline.length,
+    );
     for (const heading of document.outline) {
       const block = document.blocks[heading.blockIndex];
       expect(block.startLine).toBeLessThanOrEqual(heading.sourceLine);
