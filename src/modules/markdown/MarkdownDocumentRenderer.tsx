@@ -152,7 +152,7 @@ function MarkdownPreviewCode({
 
   if (!block || nearViewport) {
     return (
-      <MarkdownCode className={className} variant="preview" {...props}>
+      <MarkdownCode className={className} variant="document" {...props}>
         {children}
       </MarkdownCode>
     );
@@ -503,7 +503,7 @@ export const MarkdownDocumentRenderer = forwardRef<
           {progressive ? (
             <ProgressiveBlockContext.Provider value={progressiveContext}>
               <Streamdown
-                className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                 components={markdownComponents}
                 plugins={streamdownPlugins}
                 rehypePlugins={rehypePlugins}
@@ -519,7 +519,7 @@ export const MarkdownDocumentRenderer = forwardRef<
             </ProgressiveBlockContext.Provider>
           ) : (
             <Streamdown
-              className="markdown-preview select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+              className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
               components={markdownComponents}
               plugins={streamdownPlugins}
               rehypePlugins={rehypePlugins}

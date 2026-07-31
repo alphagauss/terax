@@ -1,3 +1,9 @@
+/**
+ * 本文件实现聊天与文档共用的 Markdown 代码块。
+ *
+ * 负责延迟高亮、Shell 命令卡片和 Mermaid 渲染，流式阶段避免解析未完成代码。
+ */
+
 "use client";
 
 import { Button } from "@/components/ui/button";
@@ -68,8 +74,11 @@ function loadMermaid(): Promise<MermaidInstance> {
   return mermaidInstance;
 }
 
-function mermaidConfig(mode: "light" | "dark", preview: boolean): MermaidConfig {
-  if (!preview) {
+function mermaidConfig(
+  mode: "light" | "dark",
+  documentContext: boolean,
+): MermaidConfig {
+  if (!documentContext) {
     return {
       startOnLoad: false,
       securityLevel: "strict",
@@ -135,9 +144,14 @@ export type ChatCodeBlockProps = {
   code: string;
   lang: string | null;
   onRun?: (command: string) => boolean;
-  variant?: "chat" | "preview";
+  variant?: "chat" | "document";
 };
 
+/**
+ * Markdown 围栏代码块。
+ *
+ * 聊天上下文允许执行 Shell 命令，文档上下文提供完整 Mermaid 浏览能力。
+ */
 export function ChatCodeBlock({
   code,
   lang,
@@ -152,7 +166,12 @@ export function ChatCodeBlock({
   }
 
   if (isDiagramLanguage(lang)) {
-    return <MermaidCode code={code} preview={variant === "preview"} />;
+    return (
+      <MermaidCode
+        code={code}
+        documentContext={variant === "document"}
+      />
+    );
   }
 
   if (variant === "chat" && onRun && SHELL_LANGS.has(label)) {
@@ -173,7 +192,13 @@ function GeneratingPlaceholder({ label }: { label: string }) {
   );
 }
 
-function MermaidCode({ code, preview }: { code: string; preview: boolean }) {
+function MermaidCode({
+  code,
+  documentContext,
+}: {
+  code: string;
+  documentContext: boolean;
+}) {
   const isIncomplete = useIsCodeFenceIncomplete();
   const { resolvedMode } = useTheme();
   const [state, setState] = useState<
@@ -196,7 +221,7 @@ function MermaidCode({ code, preview }: { code: string; preview: boolean }) {
     const id = `terax-mermaid-${++mermaidRenderId}`;
     void loadMermaid()
       .then((mermaid) => {
-        mermaid.initialize(mermaidConfig(resolvedMode, preview));
+        mermaid.initialize(mermaidConfig(resolvedMode, documentContext));
         return mermaid.render(id, code);
       })
       .then(({ svg }) => {
@@ -212,9 +237,9 @@ function MermaidCode({ code, preview }: { code: string; preview: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [code, isIncomplete, preview, resolvedMode]);
+  }, [code, documentContext, isIncomplete, resolvedMode]);
 
-  if (preview && state.kind === "ready") {
+  if (documentContext && state.kind === "ready") {
     return <MermaidViewport key={state.svg} svg={state.svg} />;
   }
 
@@ -508,7 +533,10 @@ function CommandCard({
   const isMultiline = code.includes("\n");
   const prompt = shellPrompt(lang);
   return (
-    <div className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/40">
+    <div
+      data-markdown-code-block
+      className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/40"
+    >
       <div className="flex items-center justify-between gap-2 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
           {normalizeLangLabel(lang)}

@@ -1,9 +1,16 @@
+/**
+ * 本文件连接 Streamdown 代码节点与 Terax 的代码块渲染器。
+ *
+ * 行内代码直接展示，围栏代码按聊天或文档上下文选择交互行为。
+ */
+
 "use client";
 
 import { isValidElement, type ReactNode } from "react";
 
 import { ChatCodeBlock } from "./chat-code";
 
+/** 将 Streamdown 代码节点递归还原为纯文本。 */
 export function markdownCodeText(children?: ReactNode): string {
   if (children == null || typeof children === "boolean") return "";
   if (typeof children === "string" || typeof children === "number") {
@@ -19,8 +26,9 @@ export function markdownCodeText(children?: ReactNode): string {
 }
 
 /**
- * Streamdown `components.code` override. `data-block` distinguishes fenced
- * blocks even when they do not declare a language.
+ * Markdown 代码节点渲染器。
+ *
+ * `data-block` 用于区分无语言标识的围栏代码，variant 只控制场景交互。
  */
 export function MarkdownCode({
   className,
@@ -34,7 +42,7 @@ export function MarkdownCode({
   children?: ReactNode;
   node?: unknown;
   onRun?: (command: string) => boolean;
-  variant?: "chat" | "preview";
+  variant?: "chat" | "document";
   "data-block"?: string;
 }) {
   const match = className?.match(/language-([^\s]+)/);

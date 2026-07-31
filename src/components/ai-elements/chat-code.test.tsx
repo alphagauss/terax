@@ -1,3 +1,9 @@
+/**
+ * 本文件测试 Markdown 代码块的语言识别和上下文行为。
+ *
+ * 锁定无标签围栏代码内容，以及 Shell 执行仅属于聊天上下文的不变量。
+ */
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { Streamdown } from "streamdown";
 import { describe, expect, it } from "vitest";
@@ -30,8 +36,12 @@ describe("MarkdownCode", () => {
   });
 
   it("keeps shell execution exclusive to chat code blocks", () => {
-    const preview = renderToStaticMarkup(
-      <MarkdownCode className="language-bash" data-block="true" variant="preview">
+    const document = renderToStaticMarkup(
+      <MarkdownCode
+        className="language-bash"
+        data-block="true"
+        variant="document"
+      >
         echo hello
       </MarkdownCode>,
     );
@@ -41,7 +51,9 @@ describe("MarkdownCode", () => {
       </MarkdownCode>,
     );
 
-    expect(preview).not.toContain("Run in active terminal");
+    expect(document).not.toContain("Run in active terminal");
     expect(chat).toContain("Run in active terminal");
+    expect(document).toContain("data-markdown-code-block");
+    expect(chat).toContain("data-markdown-code-block");
   });
 });
