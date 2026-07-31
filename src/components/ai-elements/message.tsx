@@ -363,7 +363,7 @@ export const MessageResponse = memo(
       <ChatStreamingProvider value={streaming}>
         <Streamdown
           className={cn(
-            "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+            "markdown-content size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
             className,
           )}
           components={streamdownComponents}
