@@ -1,5 +1,8 @@
 minimumReleaseAge: 4320
 minimumReleaseAgeStrict: true
+overrides:
+  react-doctor: 0.8.0
+  react-grab: 0.1.48
 allowBuilds:
   esbuild: true
   msgpackr-extract: false

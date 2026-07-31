@@ -14,6 +14,8 @@
   "editor": "编辑器",
   "webPreview": "网页预览",
   "gitGraph": "Git 图",
+  "alphaData": "Alpha 数据管理",
+  "alphaBacktests": "Alpha 回测",
   "alphaSettings": "Alpha 设置",
   "splitRight": "向右拆分",
   "splitAndMove": "拆分和移动",

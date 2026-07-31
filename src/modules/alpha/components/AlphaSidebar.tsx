@@ -1,22 +1,32 @@
 /**
- * 本文件实现 Alpha 活动栏对应的侧边栏入口。
- * 侧边栏只负责导航，服务配置和状态管理由 Workbench 设置页持有。
+ * 本文件实现 Alpha 活动栏对应的侧边栏导航。
+ * 侧边栏只打开数据、回测和设置标签，不持有业务查询或服务状态。
  */
 
-import { Settings01Icon } from "@hugeicons/core-free-icons";
+import {
+  ChartAnalysisIcon,
+  Database01Icon,
+  Settings01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
+  onOpenData: () => void;
+  onOpenBacktests: () => void;
   onOpenSettings: () => void;
 };
 
 /**
  * 渲染 Alpha 侧边栏。
  *
- * 当前仅提供设置入口，点击活动栏本身不会自动打开 Workbench 页面。
+ * 点击导航项时在当前工作组打开或复用对应的业务页面。
  */
-export function AlphaSidebar({ onOpenSettings }: Props) {
+export function AlphaSidebar({
+  onOpenData,
+  onOpenBacktests,
+  onOpenSettings,
+}: Props) {
   const { t } = useTranslation("alpha");
 
   return (
@@ -26,17 +36,50 @@ export function AlphaSidebar({ onOpenSettings }: Props) {
           {t("sidebar.title")}
         </span>
       </div>
-      <div className="min-h-0 flex-1" />
+      <nav className="flex min-h-0 flex-1 flex-col gap-1 p-2">
+        <NavItem
+          icon={Database01Icon}
+          label={t("sidebar.data")}
+          onClick={onOpenData}
+        />
+        <NavItem
+          icon={ChartAnalysisIcon}
+          label={t("sidebar.backtests")}
+          onClick={onOpenBacktests}
+        />
+      </nav>
       <div className="border-t border-border/60 p-2">
-        <button
-          type="button"
+        <NavItem
+          icon={Settings01Icon}
+          label={t("sidebar.settings")}
           onClick={onOpenSettings}
-          className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors duration-control hover:bg-foreground/[0.045] hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
-        >
-          <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.8} />
-          <span>{t("sidebar.settings")}</span>
-        </button>
+        />
       </div>
     </aside>
+  );
+}
+
+/** 渲染一个无状态的 Alpha 侧边栏导航项。 */
+function NavItem({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        // Workbench 打开函数可接收 groupId，不能把 React 点击事件透传过去。
+        onClick();
+      }}
+      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors duration-control hover:bg-foreground/[0.045] hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+    >
+      <HugeiconsIcon icon={icon} size={15} strokeWidth={1.8} />
+      <span>{label}</span>
+    </button>
   );
 }

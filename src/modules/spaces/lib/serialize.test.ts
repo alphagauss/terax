@@ -153,16 +153,65 @@ describe("Workbench Space serialization", () => {
     ]);
   });
 
-  it("drops persisted Alpha settings when the current environment hides Alpha", () => {
+  it("persists Alpha data and backtest pages as runtime locators", () => {
+    const current: WorkbenchState = {
+      tabs: {
+        1: {
+          id: 1,
+          kind: "alpha-data",
+          spaceId: "default",
+          title: "Alpha Data",
+        },
+        2: {
+          id: 2,
+          kind: "alpha-backtests",
+          spaceId: "default",
+          title: "Alpha Backtests",
+        },
+      },
+      spaces: {
+        default: {
+          root: { kind: "group", id: 3, groupId: 4 },
+          groups: {
+            4: { id: 4, tabIds: [1, 2], activeTabId: 2 },
+          },
+          activeGroupId: 4,
+        },
+      },
+    };
+
+    const serialized = serializeSpaceWorkbench(current, "default");
+    expect(serialized).toEqual({
+      kind: "group",
+      tabs: [{ kind: "alpha-data" }, { kind: "alpha-backtests" }],
+      activeTabIndex: 1,
+      active: true,
+    });
+
+    const restored = serialized
+      ? hydrateSpaceWorkbench(serialized, "default", counter())
+      : null;
+    expect(restored?.tabs.map((tab) => tab.kind)).toEqual([
+      "alpha-data",
+      "alpha-backtests",
+    ]);
+  });
+
+  it("drops persisted Alpha pages when the current environment hides Alpha", () => {
     const serialized: SerializedWorkbenchNode = {
       kind: "group",
-      tabs: [{ kind: "alpha-settings" }, { kind: "terminal", cwd: "/work" }],
+      tabs: [
+        { kind: "alpha-data" },
+        { kind: "alpha-backtests" },
+        { kind: "alpha-settings" },
+        { kind: "terminal", cwd: "/work" },
+      ],
       activeTabIndex: 0,
       active: true,
     };
 
     const restored = hydrateSpaceWorkbench(serialized, "default", counter(), {
-      allowAlphaSettings: false,
+      allowAlphaPages: false,
     });
 
     expect(restored?.tabs).toEqual([

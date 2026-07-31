@@ -7,6 +7,8 @@
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
+import { AlphaDataPage } from "@/modules/alpha/pages/AlphaDataPageLazy";
 import { AlphaSettingsPage } from "@/modules/alpha/pages/AlphaSettingsPage";
 import {
   AiDiffView,
@@ -108,6 +110,8 @@ export function WorkbenchRegisteredView({
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
         tab.kind !== "terminal" &&
           tab.kind !== "git-history" &&
+          tab.kind !== "alpha-data" &&
+          tab.kind !== "alpha-backtests" &&
           tab.kind !== "alpha-settings" &&
           "pt-2 pr-0 pb-2 pl-3",
       )}
@@ -167,6 +171,10 @@ export function WorkbenchRegisteredView({
           onOpenCommitFile={services.onOpenCommitFile}
           onFindHandle={services.onGitHistoryFindHandle}
         />
+      )}
+      {tab.kind === "alpha-data" && <AlphaDataPage visible={visible} />}
+      {tab.kind === "alpha-backtests" && (
+        <AlphaBacktestsPage visible={visible} />
       )}
       {tab.kind === "alpha-settings" && <AlphaSettingsPage visible={visible} />}
     </div>

@@ -26,7 +26,6 @@ import {
   updateSplitSizes,
 } from "@/modules/workbench/model";
 import {
-  type AlphaSettingsTab,
   type AiDiffStatus,
   DEFAULT_SPACE_ID,
   type EditorTab,
@@ -43,6 +42,8 @@ import {
   type WorkbenchState,
 } from "@/modules/workbench/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type AlphaPageKind = "alpha-data" | "alpha-backtests" | "alpha-settings";
 
 function createInitialState(): WorkbenchState {
   return {
@@ -626,9 +627,13 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [addPage, allocId, revealTab],
   );
 
-  /** 在目标工作组中打开或复用唯一的 Alpha 设置页。 */
-  const openAlphaSettingsTab = useCallback(
-    (groupId?: number) => {
+  /**
+   * 在目标工作组中打开或复用指定 Alpha 业务页。
+   *
+   * 每类页面在单个工作组内保持唯一，跨工作组仍可独立布局。
+   */
+  const openAlphaPageTab = useCallback(
+    (kind: AlphaPageKind, title: string, groupId?: number) => {
       const spaceId = activeSpaceIdRef.current;
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
@@ -636,22 +641,47 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (!group) return null;
       const existing = group.tabIds
         .map((id) => stateRef.current.tabs[id])
-        .find((tab) => tab?.kind === "alpha-settings");
+        .find((tab) => tab?.kind === kind);
       if (existing) {
         revealTab(existing.id);
         return existing.id;
       }
       const id = allocId();
-      const tab: AlphaSettingsTab = {
+      const tab: Tab = {
         id,
-        kind: "alpha-settings",
+        kind,
         spaceId,
-        title: i18n.t("tabs:alphaSettings"),
+        title,
       };
       addPage(tab, target);
       return id;
     },
     [addPage, allocId, revealTab, targetGroup],
+  );
+
+  /** 打开或复用 Alpha 数据管理页。 */
+  const openAlphaDataTab = useCallback(
+    (groupId?: number) =>
+      openAlphaPageTab("alpha-data", i18n.t("tabs:alphaData"), groupId),
+    [openAlphaPageTab],
+  );
+
+  /** 打开或复用 Alpha 回测页。 */
+  const openAlphaBacktestsTab = useCallback(
+    (groupId?: number) =>
+      openAlphaPageTab(
+        "alpha-backtests",
+        i18n.t("tabs:alphaBacktests"),
+        groupId,
+      ),
+    [openAlphaPageTab],
+  );
+
+  /** 打开或复用 Alpha 设置页。 */
+  const openAlphaSettingsTab = useCallback(
+    (groupId?: number) =>
+      openAlphaPageTab("alpha-settings", i18n.t("tabs:alphaSettings"), groupId),
+    [openAlphaPageTab],
   );
 
   const updateTab = useCallback(
@@ -888,6 +918,8 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAlphaDataTab,
+    openAlphaBacktestsTab,
     openAlphaSettingsTab,
     closeAiDiffTab,
     closeTab,

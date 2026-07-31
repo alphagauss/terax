@@ -131,7 +131,7 @@ export function useSpacesBoot({
                   spaceMeta.id,
                   allocId,
                   {
-                    allowAlphaSettings:
+                    allowAlphaPages:
                       env.kind === "local" || getInitialAlphaShowInRemote(),
                   },
                 )

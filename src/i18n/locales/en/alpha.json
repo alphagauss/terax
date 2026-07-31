@@ -1,7 +1,89 @@
 {
   "sidebar": {
     "title": "Alpha",
+    "data": "Data",
+    "backtests": "Backtests",
     "settings": "Settings"
+  },
+  "common": {
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "unavailable": "Unavailable"
+  },
+  "data": {
+    "title": "Data",
+    "description": "Inspect local market data coverage and preview daily bars.",
+    "metrics": {
+      "database": "Database",
+      "ready": "Ready",
+      "unavailable": "Unavailable",
+      "securities": "Securities",
+      "rows": "Bar rows",
+      "latest": "Latest trade date"
+    },
+    "coverage": {
+      "title": "Bar coverage",
+      "description": "Rows stored for each available interval.",
+      "rows": "Rows",
+      "aria": "Market data rows by interval",
+      "empty": "No bar coverage is available."
+    },
+    "securities": {
+      "title": "Securities",
+      "description": "{{count}} securities available. The first 50 are shown.",
+      "empty": "No securities are available."
+    },
+    "columns": {
+      "symbol": "Symbol",
+      "name": "Name",
+      "product": "Product",
+      "latest": "Latest bar"
+    },
+    "chart": {
+      "title": "Daily bars",
+      "description": "Forward-adjusted daily candles and volume, up to 500 bars.",
+      "aria": "Daily candlestick chart for {{symbol}}",
+      "empty": "Select a security with available daily bars."
+    }
+  },
+  "backtests": {
+    "title": "Backtests",
+    "description": "Review recent tasks and saved results from the Alpha service.",
+    "list": {
+      "title": "Recent backtests",
+      "description": "{{count}} backtests and running tasks.",
+      "empty": "No backtests are available."
+    },
+    "columns": {
+      "name": "Name",
+      "strategy": "Strategy",
+      "status": "Status",
+      "return": "Return",
+      "created": "Created"
+    },
+    "status": {
+      "completed": "Completed",
+      "running": "Running",
+      "pending": "Pending",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "stopped": "Stopped"
+    },
+    "metrics": {
+      "return": "Total return",
+      "drawdown": "Max drawdown",
+      "sharpe": "Sharpe ratio",
+      "trades": "Trades"
+    },
+    "chart": {
+      "title": "Result curve",
+      "description": "Daily equity and drawdown returned by the backtest service.",
+      "equity": "Equity",
+      "drawdown": "Drawdown",
+      "aria": "Equity and drawdown chart for {{name}}",
+      "pending": "Select a completed backtest to view its result curve.",
+      "empty": "This backtest does not contain a daily result curve."
+    }
   },
   "header": {
     "title": "Alpha",

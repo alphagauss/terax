@@ -1,7 +1,89 @@
 {
   "sidebar": {
     "title": "Alpha",
+    "data": "数据管理",
+    "backtests": "回测",
     "settings": "设置"
+  },
+  "common": {
+    "refresh": "刷新",
+    "loading": "加载中...",
+    "unavailable": "暂无"
+  },
+  "data": {
+    "title": "数据管理",
+    "description": "查看本地行情数据覆盖，并预览证券日 K 线。",
+    "metrics": {
+      "database": "数据库",
+      "ready": "已就绪",
+      "unavailable": "不可用",
+      "securities": "证券数量",
+      "rows": "K 线行数",
+      "latest": "最新交易日"
+    },
+    "coverage": {
+      "title": "K 线覆盖",
+      "description": "按现有周期统计本地已存储的行情行数。",
+      "rows": "行数",
+      "aria": "各周期行情数据行数",
+      "empty": "暂无 K 线覆盖数据。"
+    },
+    "securities": {
+      "title": "证券列表",
+      "description": "共有 {{count}} 个证券，当前显示前 50 个。",
+      "empty": "暂无证券数据。"
+    },
+    "columns": {
+      "symbol": "证券代码",
+      "name": "名称",
+      "product": "产品",
+      "latest": "最新 K 线"
+    },
+    "chart": {
+      "title": "日 K 线",
+      "description": "前复权日 K 线与成交量，最多显示 500 根。",
+      "aria": "{{symbol}} 的日 K 线图",
+      "empty": "请选择具有日线数据的证券。"
+    }
+  },
+  "backtests": {
+    "title": "回测",
+    "description": "查看 Alpha 服务中的近期任务和已保存结果。",
+    "list": {
+      "title": "近期回测",
+      "description": "共有 {{count}} 个回测结果或运行中任务。",
+      "empty": "暂无回测记录。"
+    },
+    "columns": {
+      "name": "名称",
+      "strategy": "策略",
+      "status": "状态",
+      "return": "收益率",
+      "created": "创建时间"
+    },
+    "status": {
+      "completed": "已完成",
+      "running": "运行中",
+      "pending": "等待中",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "stopped": "已停止"
+    },
+    "metrics": {
+      "return": "总收益率",
+      "drawdown": "最大回撤",
+      "sharpe": "夏普比率",
+      "trades": "成交次数"
+    },
+    "chart": {
+      "title": "结果曲线",
+      "description": "由回测服务返回的逐日净值和回撤。",
+      "equity": "净值",
+      "drawdown": "回撤",
+      "aria": "{{name}} 的净值和回撤曲线",
+      "pending": "请选择已完成的回测查看结果曲线。",
+      "empty": "该回测没有逐日结果曲线。"
+    }
   },
   "header": {
     "title": "Alpha",

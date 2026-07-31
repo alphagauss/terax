@@ -205,6 +205,8 @@ export default function App() {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAlphaDataTab,
+    openAlphaBacktestsTab,
     openAlphaSettingsTab,
     closeTab,
     updateTab,
@@ -473,7 +475,13 @@ export default function App() {
   useEffect(() => {
     if (alphaAvailable) return;
     for (const tab of tabsRef.current) {
-      if (tab.kind === "alpha-settings") disposeTab(tab.id);
+      if (
+        tab.kind === "alpha-data" ||
+        tab.kind === "alpha-backtests" ||
+        tab.kind === "alpha-settings"
+      ) {
+        disposeTab(tab.id);
+      }
     }
   }, [alphaAvailable, disposeTab]);
 
@@ -1584,7 +1592,11 @@ export default function App() {
           {
             id: "alpha" as const,
             content: (
-              <AlphaSidebar onOpenSettings={() => openAlphaSettingsTab()} />
+              <AlphaSidebar
+                onOpenData={openAlphaDataTab}
+                onOpenBacktests={openAlphaBacktestsTab}
+                onOpenSettings={openAlphaSettingsTab}
+              />
             ),
           },
         ]

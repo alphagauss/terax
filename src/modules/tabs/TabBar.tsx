@@ -44,9 +44,11 @@ import type {
 } from "@/modules/workbench/types";
 import {
   Cancel01Icon,
+  ChartAnalysisIcon,
   ChartCandlestickIcon,
   Clock01Icon,
   ComputerTerminal02Icon,
+  Database01Icon,
   GitBranchIcon,
   GitCompareIcon,
   Globe02Icon,
@@ -812,6 +814,26 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={Clock01Icon}
+        size={14}
+        strokeWidth={2}
+        className="shrink-0"
+      />
+    );
+  }
+  if (tab.kind === "alpha-data") {
+    return (
+      <HugeiconsIcon
+        icon={Database01Icon}
+        size={14}
+        strokeWidth={2}
+        className="shrink-0"
+      />
+    );
+  }
+  if (tab.kind === "alpha-backtests") {
+    return (
+      <HugeiconsIcon
+        icon={ChartAnalysisIcon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

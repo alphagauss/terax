@@ -27,6 +27,8 @@ export type SerializedTab =
   | { kind: "editor"; path: string; explorerRoot?: string }
   | { kind: "web-preview"; url: string }
   | { kind: "markdown"; path: string; explorerRoot?: string }
+  | { kind: "alpha-data" }
+  | { kind: "alpha-backtests" }
   | { kind: "alpha-settings" };
 
 export type SerializedWorkbenchNode =
@@ -49,6 +51,8 @@ function isSerializableTab(tab: Tab): boolean {
     tab.kind === "editor" ||
     tab.kind === "web-preview" ||
     tab.kind === "markdown" ||
+    tab.kind === "alpha-data" ||
+    tab.kind === "alpha-backtests" ||
     tab.kind === "alpha-settings"
   );
 }
@@ -91,6 +95,10 @@ function serializeTab(tab: Tab): SerializedTab | null {
       };
     case "alpha-settings":
       return { kind: "alpha-settings" };
+    case "alpha-data":
+      return { kind: "alpha-data" };
+    case "alpha-backtests":
+      return { kind: "alpha-backtests" };
     default:
       return null;
   }
@@ -227,6 +235,22 @@ function hydrateTab(
         cold: true,
         title: i18n.t("tabs:alphaSettings"),
       } satisfies Tab;
+    case "alpha-data":
+      return {
+        id: allocId(),
+        kind: "alpha-data",
+        spaceId,
+        cold: true,
+        title: i18n.t("tabs:alphaData"),
+      } satisfies Tab;
+    case "alpha-backtests":
+      return {
+        id: allocId(),
+        kind: "alpha-backtests",
+        spaceId,
+        cold: true,
+        title: i18n.t("tabs:alphaBacktests"),
+      } satisfies Tab;
   }
 }
 
@@ -235,7 +259,7 @@ export function hydrateSpaceWorkbench(
   serialized: SerializedWorkbenchNode,
   spaceId: string,
   allocId: () => number,
-  options: { allowAlphaSettings?: boolean } = {},
+  options: { allowAlphaPages?: boolean } = {},
 ): { space: SpaceWorkbench; tabs: Tab[] } | null {
   const groups: SpaceWorkbench["groups"] = {};
   const tabs: Tab[] = [];
@@ -246,7 +270,7 @@ export function hydrateSpaceWorkbench(
       if (!Array.isArray(node.tabs) || node.tabs.length === 0) return null;
       const acceptedTabs = node.tabs.filter(
         (tab) =>
-          tab.kind !== "alpha-settings" || options.allowAlphaSettings !== false,
+          !tab.kind.startsWith("alpha-") || options.allowAlphaPages !== false,
       );
       if (acceptedTabs.length === 0) return null;
       const activeSerialized = node.tabs[node.activeTabIndex];
@@ -377,7 +401,13 @@ function isSerializedTab(value: unknown): value is SerializedTab {
     );
   }
   if (tab.kind === "web-preview") return typeof tab.url === "string";
-  if (tab.kind === "alpha-settings") return true;
+  if (
+    tab.kind === "alpha-data" ||
+    tab.kind === "alpha-backtests" ||
+    tab.kind === "alpha-settings"
+  ) {
+    return true;
+  }
   if (tab.kind === "editor" || tab.kind === "markdown") {
     return (
       typeof tab.path === "string" &&
