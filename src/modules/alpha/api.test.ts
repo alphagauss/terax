@@ -7,6 +7,8 @@ import {
   getAlphaBacktestSeries,
   getAlphaBars,
   getAlphaSecurities,
+  getAlphaSettings,
+  updateAlphaSettings,
 } from "@/modules/alpha/api";
 import { requestAlpha } from "@/modules/alpha/native";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -152,5 +154,36 @@ describe("Alpha API client", () => {
     await expect(getAlphaSecurities()).rejects.toThrow(
       "Alpha 503: database unavailable",
     );
+  });
+
+  it("loads and saves the Alpha data directory", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: { data_dir: "D:/Alpha Data" },
+    });
+
+    await expect(getAlphaSettings()).resolves.toEqual({
+      dataDir: "D:/Alpha Data",
+    });
+    await expect(
+      updateAlphaSettings({ dataDir: "D:/Alpha Data" }),
+    ).resolves.toEqual({ dataDir: "D:/Alpha Data" });
+    expect(requestMock.mock.calls).toEqual([
+      [
+        {
+          method: "GET",
+          path: "/api/alpha/settings",
+          query: [],
+        },
+      ],
+      [
+        {
+          method: "POST",
+          path: "/api/alpha/settings",
+          body: { data_dir: "D:/Alpha Data" },
+        },
+      ],
+    ]);
   });
 });

@@ -1,3 +1,5 @@
+"""Alpha 数据库人工检查脚本。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,6 +18,7 @@ from alpha.common.schema_market import (
     SecurityDailyInfoQuery,
     SecurityProfileQuery,
 )
+from alpha.config import load_config
 from alpha.storage import DataBase, csvdb
 from alpha.storage.transforms import normalize_trade_date
 
@@ -119,7 +122,7 @@ async def check_load_security_daily_info(db: DataBase) -> None:
 
 async def main() -> None:
     """执行数据库手动检查入口。"""
-    db = DataBase()
+    db = DataBase(load_config().database_dir)
     try:
         await check_bar_overview(db)
         await check_load_security_profiles(db)

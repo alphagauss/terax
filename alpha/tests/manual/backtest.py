@@ -1,3 +1,5 @@
+"""Alpha 手动回测脚本。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,6 +10,7 @@ import pandas as pd
 from alpha.backtest.data import BacktestDataScope
 from alpha.backtest.runner import BacktestJobSpec, run_backtest_job
 from alpha.common.schema import Interval, Product
+from alpha.config import load_config
 from tests.manual.sma_strategy import DoubleMaStrategy
 
 
@@ -45,6 +48,7 @@ def main() -> None:
         strategy_class=DoubleMaStrategy,
         data_scope=scope,
         capital=1_000_000,
+        database_dir=load_config().database_dir,
     )
     result = run_backtest_job(
         spec,

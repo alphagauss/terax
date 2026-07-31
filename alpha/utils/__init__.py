@@ -1,3 +1,5 @@
+"""Alpha 通用计算辅助函数及轻量本机状态访问。"""
+
 import inspect
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -11,7 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from alpha.common.schema import Product
-from alpha.common.paths import  load_json, save_json, get_runtime_subdir
+from alpha.config import get_state_subdir, load_json, save_json
 
 class SingletonMeta(type):
     _instances = {}
@@ -169,7 +171,7 @@ class StrategyResult:
     @staticmethod
     def delete_strategy_result(key: str) -> None:
         """删除回测结果"""
-        paraent_path: Path = get_runtime_subdir(strategy_result_folder)
+        paraent_path: Path = get_state_subdir(strategy_result_folder)
         filepath: Path = paraent_path.joinpath(key)
         if filepath.exists():
             filepath.unlink()
@@ -180,7 +182,6 @@ class StrategyResult:
             del result[key]
         save_json("info.json", result, strategy_result_folder)
         return True
-
 
 
 

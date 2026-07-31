@@ -1,13 +1,18 @@
+"""Alpha API 容器组装和资源关闭不变量测试。"""
+
 from __future__ import annotations
 
+from pathlib import Path
+
 from alpha.api.container import create_alpha_service_container
+from alpha.config import AlphaConfig
 from alpha.runtime.event import EventEngine
 
 
 class FakeDatabase:
     """测试用数据库门面。"""
 
-    def __init__(self) -> None:
+    def __init__(self, _data_dir: Path | None = None) -> None:
         self.closed = False
 
     async def close(self) -> None:
@@ -67,12 +72,14 @@ def test_api_container_initializes_runtime_objects_lazily() -> None:
     def create_strategy_manager(
         event_engine: EventEngine,
         process_manager: FakeTaskManager,
+        _database_dir: Path,
     ) -> FakeStrategyManager:
         """创建测试策略管理器。
 
         Args:
             event_engine: Alpha 事件引擎。
             process_manager: 测试任务管理器。
+            _database_dir: 测试不使用的数据库目录。
 
         Returns:
             测试策略管理器。
@@ -83,6 +90,7 @@ def test_api_container_initializes_runtime_objects_lazily() -> None:
         return manager
 
     container = create_alpha_service_container(
+        AlphaConfig(data_dir=Path.cwd()),
         database_factory=FakeDatabase,
         event_engine_factory=EventEngine,
         task_manager_factory=FakeTaskManager,
@@ -106,10 +114,11 @@ async def test_api_container_closes_runtime_objects() -> None:
     task_manager = FakeTaskManager()
 
     container = create_alpha_service_container(
-        database_factory=lambda: database,
+        AlphaConfig(data_dir=Path.cwd()),
+        database_factory=lambda _data_dir: database,
         event_engine_factory=EventEngine,
         task_manager_factory=lambda: task_manager,
-        strategy_manager_factory=lambda event_engine, process_manager: FakeStrategyManager(),
+        strategy_manager_factory=lambda _event_engine, _process_manager, _database_dir: FakeStrategyManager(),
     )
 
     await container.close()

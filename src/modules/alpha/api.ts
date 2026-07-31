@@ -12,6 +12,10 @@ const statusSchema = z.object({
   security_count: z.number(),
 });
 
+const settingsSchema = z.object({
+  data_dir: z.string().min(1),
+});
+
 const barCoverageSchema = z.object({
   rows: z.number(),
 });
@@ -91,6 +95,18 @@ type AlphaBacktestSeries = {
   drawdown: z.infer<typeof drawdownSchema>["items"];
 };
 
+export type AlphaSettings = {
+  dataDir: string;
+};
+
+function alphaError(status: number, body: unknown): Error {
+  const detail =
+    body && typeof body === "object" && "detail" in body
+      ? String(body.detail)
+      : JSON.stringify(body);
+  return new Error(`Alpha ${status}: ${detail}`);
+}
+
 /**
  * 发送 Alpha GET 请求并校验响应。
  *
@@ -107,15 +123,34 @@ async function alphaGet<T>(
     query,
   });
   if (response.status < 200 || response.status >= 300) {
-    const detail =
-      response.body &&
-      typeof response.body === "object" &&
-      "detail" in response.body
-        ? String(response.body.detail)
-        : JSON.stringify(response.body);
-    throw new Error(`Alpha ${response.status}: ${detail}`);
+    throw alphaError(response.status, response.body);
   }
   return schema.parse(response.body);
+}
+
+/** 查询 Alpha 持久配置。 */
+export async function getAlphaSettings(): Promise<AlphaSettings> {
+  const settings = await alphaGet(
+    "/api/alpha/settings",
+    settingsSchema,
+  );
+  return { dataDir: settings.data_dir };
+}
+
+/** 保存 Alpha 持久配置，资源重建由设置页随后触发。 */
+export async function updateAlphaSettings(
+  settings: AlphaSettings,
+): Promise<AlphaSettings> {
+  const response = await requestAlpha({
+    method: "POST",
+    path: "/api/alpha/settings",
+    body: { data_dir: settings.dataDir },
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw alphaError(response.status, response.body);
+  }
+  const saved = settingsSchema.parse(response.body);
+  return { dataDir: saved.data_dir };
 }
 
 /** 查询 Alpha 服务和数据库摘要。 */

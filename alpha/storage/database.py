@@ -1,3 +1,5 @@
+"""Alpha SQLite 数据库门面及领域仓储聚合。"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -16,21 +18,19 @@ from alpha.common.schema_market import (
     SecurityStatusMetaPayload,
     ShareCapitalPayload,
 )
-from alpha.storage.base import DATABASE_NAME, SQLiteStorageBase
+from alpha.storage.base import SQLiteStorageBase
 from alpha.storage.repositories.equity import EquityRepository
 from alpha.storage.repositories.index_constituent import IndexConstituentRepository
 from alpha.storage.repositories.market_data import MarketDataRepository
 from alpha.storage.repositories.security import SecurityRepository
 from alpha.storage.transforms import normalize_trade_date
 from alpha.utils import log_execution_time
-from alpha.common.paths import get_runtime_subdir
-
-
 class DataBase:
     """SQLite 数据库对外门面。"""
 
-    def __init__(self) -> None:
-        data_dir = get_runtime_subdir(DATABASE_NAME)
+    def __init__(self, data_dir: Path) -> None:
+        """使用调用方明确提供的目录初始化数据库。"""
+
         self._storage = SQLiteStorageBase(data_dir)
         self._equity = EquityRepository(self._storage)
         self._security = SecurityRepository(self._storage)

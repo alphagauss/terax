@@ -1,3 +1,5 @@
+"""Alpha 指数成分同步任务及其本机缓存管理。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +20,7 @@ from alpha.sync_tasks.planners import build_index_constituent_sync_plans
 from alpha.sync_tasks.reporting import format_stage_timings
 from alpha.sync_tasks.universe import load_symbol_universe_from_csv, load_trade_dates_from_csv
 from alpha.sync_tasks.writers import load_index_constituent_meta_map
-from alpha.common.paths import load_json, save_json
+from alpha.config import load_json, save_json
 
 INDEX_CONSTITUENT_CACHE_FILE = "index_constituent_probe_cache.json"
 INDEX_CONSTITUENT_CACHE_FOLDER = "sync_tasks"

@@ -45,9 +45,9 @@ pub fn code_root() -> Result<PathBuf, String> {
     }
 }
 
-/// 返回 Alpha 持久数据目录并确保它存在。
-pub fn data_dir() -> Result<PathBuf, String> {
-    let path = app_data::directory(Directory::Alpha)?.join("data");
+/// 返回 Alpha 配置和本机状态根目录并确保它存在。
+pub fn alpha_home() -> Result<PathBuf, String> {
+    let path = app_data::directory(Directory::Alpha)?;
     fs::create_dir_all(&path).map_err(|error| error.to_string())?;
     Ok(path)
 }

@@ -1,7 +1,10 @@
+"""Alpha 回测引擎、任务输入和结果统计回归测试。"""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -349,6 +352,7 @@ def _make_spec(start: datetime, end: datetime) -> BacktestJobSpec:
         strategy_class=SimpleTradeStrategy,
         data_scope=scope,
         capital=1_000_000,
+        database_dir=Path.cwd() / ".test-alpha-database",
     )
 
 

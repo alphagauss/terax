@@ -15,6 +15,7 @@ from alpha.api.auth import require_alpha_token
 from alpha.api.container import create_alpha_service_container
 from alpha.api.router import router
 from alpha.api.routes import events
+from alpha.config import load_config
 
 ALPHA_TOKEN_ENV = "TERAX_ALPHA_TOKEN"
 
@@ -49,7 +50,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         应用运行阶段的控制权。
     """
 
-    container = create_alpha_service_container()
+    container = create_alpha_service_container(load_config())
     app.state.alpha_services = container
     try:
         yield

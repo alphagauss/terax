@@ -1,3 +1,5 @@
+"""Alpha 业务路由响应、任务保护和设置接口测试。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -5,8 +7,10 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from alpha.api.router import router
+from alpha.config import AlphaConfig
 
 
 class FakeDatabase:
@@ -308,9 +312,11 @@ def _client() -> TestClient:
 
     app = FastAPI()
     app.state.alpha_services = SimpleNamespace(
+        config=AlphaConfig(data_dir=Path.cwd()),
         database=FakeDatabase(),
         strategy_manager=FakeStrategyManager(),
         process_manager=FakeProcessManager(),
+        has_running_tasks=lambda: False,
     )
     app.include_router(router, prefix="/api/alpha")
     return TestClient(app)
@@ -459,3 +465,41 @@ def test_alpha_router_filters_sync_tasks() -> None:
     assert response.json() == [
         {"task_id": "sync-1", "status": "succeeded", "task_type": "sync-bars"}
     ]
+
+
+def test_alpha_router_reads_and_updates_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """验证设置接口保存显式数据目录并更新容器配置。"""
+
+    monkeypatch.setenv("TERAX_ALPHA_HOME", str(tmp_path / "alpha-home"))
+    client = _client()
+    data_dir = tmp_path / "synced-data"
+
+    initial = client.get("/api/alpha/settings")
+    updated = client.post(
+        "/api/alpha/settings",
+        json={"data_dir": str(data_dir)},
+    )
+
+    assert initial.status_code == 200
+    assert updated.status_code == 200
+    assert Path(updated.json()["data_dir"]) == data_dir.resolve()
+    assert client.app.state.alpha_services.config.data_dir == data_dir.resolve()
+
+
+def test_alpha_router_rejects_settings_update_while_task_is_running(
+    tmp_path: Path,
+) -> None:
+    """验证运行任务存在时不会切换数据目录。"""
+
+    client = _client()
+    client.app.state.alpha_services.has_running_tasks = lambda: True
+
+    response = client.post(
+        "/api/alpha/settings",
+        json={"data_dir": str(tmp_path / "synced-data")},
+    )
+
+    assert response.status_code == 409

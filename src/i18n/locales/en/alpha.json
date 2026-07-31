@@ -110,6 +110,17 @@
     "title": "Show in remote environments",
     "description": "Also show Alpha in WSL and SSH workspaces. By default, Alpha is available only in Local workspaces."
   },
+  "storage": {
+    "label": "Data storage",
+    "title": "Alpha data directory",
+    "description": "Database files are stored here. Saving a change restarts the shared Alpha service.",
+    "unavailable": "Start the Alpha service before changing its data directory.",
+    "loading": "Unavailable",
+    "select": "Choose",
+    "selectTitle": "Choose the Alpha data directory",
+    "save": "Save",
+    "saving": "Saving..."
+  },
   "service": {
     "label": "Service",
     "title": "Shared Alpha service",

@@ -1,10 +1,11 @@
-from pathlib import Path
-import pandas as pd
+"""Alpha 旧版 CSV 数据读写入口。"""
+
 from functools import lru_cache
+from pathlib import Path
 
-from alpha.common.paths import get_runtime_subdir
+import pandas as pd
 
-FOLDER_NAME = "csv_db"
+from alpha.config import load_config
 
 trade_date_name = "trade_date.csv"
 
@@ -29,7 +30,9 @@ symbol_info_map = [
 
 @lru_cache()
 def get_csvdb_folder() -> Path:
-    return get_runtime_subdir(FOLDER_NAME)
+    folder = load_config().csv_dir
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
 def save_csv(df: pd.DataFrame, name: str) -> None:
@@ -76,7 +79,4 @@ def get_a_share_infos():
     
     return results
         
-
-
-
 

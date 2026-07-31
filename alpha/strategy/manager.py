@@ -1,5 +1,8 @@
+"""Alpha 策略发现、回测调度和任务结果管理。"""
+
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from threading import RLock, Thread
 from typing import Callable, Literal
 
@@ -84,15 +87,18 @@ class StrategyManager:
     def __init__(
         self,
         event_engine: EventEngine,
+        database_dir: Path,
         task_manager: ProcessTaskManager | None = None,
     ) -> None:
         """初始化策略管理器。
 
         Args:
             event_engine: 事件引擎
+            database_dir: 回测任务读取的数据库目录。
             task_manager: 全局进程任务管理器
         """
         self.event_engine = event_engine
+        self.database_dir = database_dir
         self.loader = StrategyLoader()
         self.task_manager = task_manager or ProcessTaskManager()
         self._local_tasks: dict[str, LocalStrategyTask] = {}
@@ -185,6 +191,7 @@ class StrategyManager:
             strategy_class=strategy_class,
             data_scope=data_scope,
             capital=bt_req.capital,
+            database_dir=self.database_dir,
         )
 
     def _build_backtesting_metadata(

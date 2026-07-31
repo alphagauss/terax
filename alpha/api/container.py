@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alpha.common.schema_backtest import BacktestReq
+from alpha.config import AlphaConfig
 from alpha.runtime.event import EventEngine
 from alpha.runtime.processes import ProcessTaskManager
 
@@ -22,18 +24,24 @@ class _LazyStrategyManager:
         self,
         event_engine: EventEngine,
         process_manager: ProcessTaskManager,
-        factory: Callable[[EventEngine, ProcessTaskManager], "StrategyManager"] | None,
+        database_dir: Path,
+        factory: Callable[
+            [EventEngine, ProcessTaskManager, Path], "StrategyManager"
+        ]
+        | None,
     ) -> None:
         """初始化懒加载代理。
 
         Args:
             event_engine: Alpha 事件引擎。
             process_manager: Alpha 进程任务管理器。
+            database_dir: 回测任务读取的数据库目录。
             factory: 可选策略管理器工厂。
         """
 
         self._event_engine = event_engine
         self._process_manager = process_manager
+        self._database_dir = database_dir
         self._factory = factory
         self._manager: StrategyManager | None = None
 
@@ -53,12 +61,14 @@ class _LazyStrategyManager:
 
                 self._manager = StrategyManager(
                     self._event_engine,
+                    self._database_dir,
                     task_manager=self._process_manager,
                 )
             else:
                 self._manager = self._factory(
                     self._event_engine,
                     self._process_manager,
+                    self._database_dir,
                 )
         return self._manager
 
@@ -134,11 +144,22 @@ class _LazyStrategyManager:
 
         return self._get_manager().get_strategy_result(hash_name)
 
+    def has_running_tasks(self) -> bool:
+        """返回已初始化策略管理器中是否存在运行任务。"""
+
+        if self._manager is None:
+            return False
+        return any(
+            snapshot.get("status") == "running"
+            for snapshot in self._manager.get_status_dict().values()
+        )
+
 
 @dataclass
 class AlphaServiceContainer:
     """Alpha API 共享的运行对象容器。"""
 
+    config: AlphaConfig
     database: "DataBase"
     strategy_manager: _LazyStrategyManager
     event_engine: EventEngine
@@ -158,14 +179,24 @@ class AlphaServiceContainer:
         self.event_engine.stop()
         self.process_manager.close(stop_running=True)
 
+    def has_running_tasks(self) -> bool:
+        """返回当前容器是否仍有运行中的任务。"""
+
+        process_running = any(
+            snapshot.get("status") == "running"
+            for snapshot in self.process_manager.list_snapshots()
+        )
+        return process_running or self.strategy_manager.has_running_tasks()
+
 
 def create_alpha_service_container(
+    config: AlphaConfig,
     *,
-    database_factory: Callable[[], "DataBase"] | None = None,
+    database_factory: Callable[[Path], "DataBase"] | None = None,
     event_engine_factory: Callable[[], EventEngine] = EventEngine,
     task_manager_factory: Callable[[], ProcessTaskManager] = ProcessTaskManager,
     strategy_manager_factory: Callable[
-        [EventEngine, ProcessTaskManager],
+        [EventEngine, ProcessTaskManager, Path],
         "StrategyManager",
     ]
     | None = None,
@@ -173,6 +204,7 @@ def create_alpha_service_container(
     """创建 Alpha API 运行对象容器。
 
     Args:
+        config: 当前进程使用的 Alpha 配置。
         database_factory: 数据库门面工厂，测试可注入替身。
         event_engine_factory: 事件引擎工厂，测试可注入替身。
         task_manager_factory: 进程任务管理器工厂，测试可注入替身。
@@ -185,9 +217,9 @@ def create_alpha_service_container(
     if database_factory is None:
         from alpha.storage.database import DataBase
 
-        database = DataBase()
+        database = DataBase(config.database_dir)
     else:
-        database = database_factory()
+        database = database_factory(config.database_dir)
 
     event_engine = event_engine_factory()
     process_manager = task_manager_factory()
@@ -196,10 +228,12 @@ def create_alpha_service_container(
     strategy_manager = _LazyStrategyManager(
         event_engine,
         process_manager,
+        config.database_dir,
         strategy_manager_factory,
     )
 
     return AlphaServiceContainer(
+        config=config,
         database=database,
         strategy_manager=strategy_manager,
         event_engine=event_engine,

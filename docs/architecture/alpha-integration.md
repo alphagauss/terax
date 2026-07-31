@@ -44,7 +44,7 @@ alpha-native Rust 计算模块
 - Release 构建由 `src-tauri/build_support/alpha.rs` 把必要的 `.py` 文件和 `requirements-runtime.txt` 压缩进 Terax 可执行文件，不使用 Tauri resources，也不使用 PyInstaller。
 - Release 首次启动 Alpha 时，Rust 在跨进程文件锁内把归档释放到 `~/.terax/alpha/runtime/<archive-hash>/`。先写临时目录并校验入口和哈希标记，再通过同目录重命名发布，因此其他进程不会看到半成品。
 - 内容哈希发生变化时使用新的运行目录。旧目录不在启动路径上自动删除，避免影响仍在运行的旧版本服务。
-- Alpha 数据位于 `~/.terax/alpha/data/`，日志位于 `~/.terax/logs/alpha/`。Python 默认把 `__pycache__` 写入对应的内容哈希运行目录，使缓存跟随源码版本且无需额外缓存状态。
+- Alpha 配置固定保存在 `~/.terax/alpha/config.json`，默认数据目录为 `~/.terax/alpha/data/`，用户可在 Alpha 设置页把数据目录改到独立的同步位置。日志位于 `~/.terax/logs/alpha/`。Python 默认把 `__pycache__` 写入对应的内容哈希运行目录，使缓存跟随源码版本且无需额外缓存状态。
 - 发行物仍是一个裸 Terax 可执行文件。源码只有在运行 Alpha 时才以普通文件形式出现在本机运行目录中，Python 无法直接从 Tauri resource 或压缩字节中导入整套包。
 
 ## 共享服务生命周期

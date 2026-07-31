@@ -49,7 +49,7 @@ alpha.api
 ## 共享基础
 
 - `alpha/common/enums.py`: 枚举定义，覆盖 `Interval`、`Exchange`、`Direction`、`Offset`、`Status`、`Product`、`OrderType`、`OptionType` 等；`ACTIVE_STATUSES` 定义活跃委托集合。
-- `alpha/common/paths.py`: 运行时路径推导，优先读取 `TERAX_ALPHA_DATA_DIR` 和 `TERAX_ALPHA_LOG_DIR`，否则回退到 `~/.terax` 下的统一目录，并负责配置、日志目录和 UTF-8 JSON 读写。
+- `alpha/config.py`: Alpha 配置模型、`~/.terax/alpha/config.json` 原子读写和固定本机状态目录入口；可同步业务数据由配置中的 `data_dir` 指向。
 - `alpha/common/schema_core.py`: 事件常量（`EVENT_TIMER`、`EVENT_TICK` 等）、`STOPORDER_PREFIX`、`INTERVAL_DELTA_MAP`，以及 `vt_symbol` 和时间戳转换工具。
 - `alpha/common/schema_backtest.py`: 回测请求和结果辅助模型，如 `BacktestReq`、`HoldData`、`AccountData`。
 - `alpha/common/schema_market.py`: 市场数据 payload/query 模型，如 `BarDataPayload`、`SecurityProfilePayload`、`SecurityDailyInfoRecord`、`BarOverview`、`TickData`。

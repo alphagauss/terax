@@ -1,7 +1,10 @@
+"""Alpha 策略管理器任务调度和结果状态测试。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from time import monotonic, sleep
 from typing import Callable
 
@@ -222,6 +225,7 @@ def _make_manager(task_manager: FakeTaskManager | None = None) -> StrategyManage
 
     manager = StrategyManager(
         EventEngine(),
+        Path.cwd() / ".test-alpha-database",
         task_manager=task_manager or FakeTaskManager(),
     )
     manager.classes[ManagerTestStrategy.class_name] = ManagerTestStrategy

@@ -110,6 +110,17 @@
     "title": "在远端环境中显示",
     "description": "同时在 WSL 和 SSH 工作区中显示 Alpha。默认仅在 Local 工作区中可用。"
   },
+  "storage": {
+    "label": "数据存储",
+    "title": "Alpha 数据目录",
+    "description": "数据库文件保存在此目录。保存修改后会自动重启共享 Alpha 服务。",
+    "unavailable": "请先启动 Alpha 服务，再修改数据目录。",
+    "loading": "不可用",
+    "select": "选择",
+    "selectTitle": "选择 Alpha 数据目录",
+    "save": "保存",
+    "saving": "保存中..."
+  },
   "service": {
     "label": "服务",
     "title": "共享 Alpha 服务",

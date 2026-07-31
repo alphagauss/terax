@@ -1,8 +1,11 @@
+"""Alpha 回测与参数优化任务的可序列化执行入口。"""
+
 from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict, dataclass
 from functools import partial
+from pathlib import Path
 from typing import Callable, Literal
 
 from pandas import DataFrame
@@ -33,6 +36,7 @@ class BacktestJobSpec:
         strategy_class: 策略类，必须是可被 multiprocessing spawn 序列化的顶层类。
         data_scope: 本次任务需要的数据范围。
         capital: 初始资金。
+        database_dir: 子进程读取的数据库目录。
         risk_free: 年化无风险利率。
         annual_days: 年化交易日数量。
     """
@@ -41,6 +45,7 @@ class BacktestJobSpec:
     strategy_class: type[StrategyTemplate]
     data_scope: BacktestDataScope
     capital: int
+    database_dir: Path
     risk_free: float = 0
     annual_days: int = 240
 
@@ -55,7 +60,7 @@ async def load_backtest_input_for_job(spec: BacktestJobSpec) -> BacktestInput:
         已归一化的回测输入。
     """
 
-    db = DataBase()
+    db = DataBase(spec.database_dir)
     try:
         return await load_backtest_input(db, spec.data_scope)
     finally:

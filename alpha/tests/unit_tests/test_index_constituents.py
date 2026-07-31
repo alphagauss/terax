@@ -1,3 +1,5 @@
+"""Alpha 指数成分数据库读写和区间语义测试。"""
+
 import asyncio
 import inspect
 import sqlite3
@@ -24,11 +26,7 @@ class _SyncDatabaseHarness:
 
 def _make_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _SyncDatabaseHarness:
     data_dir = tmp_path / ".data" / "sqlite_db"
-    monkeypatch.setattr(
-        "alpha.storage.database.get_runtime_subdir",
-        lambda _: data_dir,
-    )
-    return _SyncDatabaseHarness(DataBase())
+    return _SyncDatabaseHarness(DataBase(data_dir))
 
 
 def _load_index_constituents(

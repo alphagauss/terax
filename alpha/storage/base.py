@@ -1,3 +1,5 @@
+"""Alpha SQLite 表结构、分片规则和异步连接管理。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +12,6 @@ from pathlib import Path
 from typing import Callable, TypeVar
 
 from loguru import logger
-
-DATABASE_NAME = "sqlite_db"
 
 ADJUST_FACTOR_CREATE = """
 CREATE TABLE IF NOT EXISTS adjust_factor (

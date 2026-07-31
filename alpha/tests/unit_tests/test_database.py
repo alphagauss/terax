@@ -1,3 +1,5 @@
+"""Alpha SQLite 门面的数据正确性、并发和清理不变量测试。"""
+
 import asyncio
 import inspect
 import sqlite3
@@ -34,8 +36,7 @@ class _SyncDatabaseHarness:
 
 def _make_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _SyncDatabaseHarness:
     data_dir = tmp_path / ".data" / "sqlite_db"
-    monkeypatch.setattr("alpha.storage.database.get_runtime_subdir", lambda _: data_dir)
-    return _SyncDatabaseHarness(DataBase())
+    return _SyncDatabaseHarness(DataBase(data_dir))
 
 
 def _mock_trade_date_csv(
@@ -714,8 +715,7 @@ def test_async_database_supports_concurrent_cross_partition_reads_and_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     data_dir = tmp_path / ".data" / "sqlite_db"
-    monkeypatch.setattr("alpha.storage.database.get_runtime_subdir", lambda _: data_dir)
-    db = DataBase()
+    db = DataBase(data_dir)
 
     async def scenario() -> tuple[list[dict], list[dict]]:
         start_2024 = datetime(2024, 12, 31)

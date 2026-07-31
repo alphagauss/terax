@@ -241,13 +241,13 @@ async fn start_locked() -> Result<(), String> {
     let code_root = tokio::task::spawn_blocking(runtime_files::code_root)
         .await
         .map_err(|error| error.to_string())??;
-    let data_dir = runtime_files::data_dir()?;
+    let alpha_home = runtime_files::alpha_home()?;
     let logs_dir = runtime_files::logs_dir()?;
     if replace_running {
         // 先完成新服务前置检查，避免解释器或源码无效时停止仍可用的旧实例。
         stop_locked().await?;
     }
-    let process_exit = spawn_service(&python, &code_root, &data_dir, &logs_dir, &token)?;
+    let process_exit = spawn_service(&python, &code_root, &alpha_home, &logs_dir, &token)?;
     let log_path = logs_dir.join("service.log");
 
     let deadline = Instant::now() + OPERATION_TIMEOUT;
@@ -327,7 +327,7 @@ async fn stop_locked() -> Result<(), String> {
 fn spawn_service(
     python: &Path,
     code_root: &Path,
-    data_dir: &Path,
+    alpha_home: &Path,
     logs_dir: &Path,
     token: &str,
 ) -> Result<Receiver<io::Result<ExitStatus>>, String> {
@@ -351,8 +351,7 @@ fn spawn_service(
             &ALPHA_PORT.to_string(),
         ])
         .env("TERAX_ALPHA_TOKEN", token)
-        .env("TERAX_ALPHA_DATA_DIR", data_dir)
-        .env("TERAX_ALPHA_LOG_DIR", logs_dir)
+        .env("TERAX_ALPHA_HOME", alpha_home)
         .env("TERAX_ALPHA_ARCHIVE_HASH", runtime_files::ARCHIVE_HASH)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))

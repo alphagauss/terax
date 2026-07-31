@@ -1,3 +1,5 @@
+"""Alpha 同步任务报告的本机持久化。"""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +10,7 @@ import pandas as pd
 
 from alpha.sync_tasks.constants import LOG_FOLDER_NAME
 from alpha.sync_tasks.models import BatchResult, ValidationIssue
-from alpha.common.paths import get_runtime_subdir
+from alpha.config import get_state_subdir
 
 
 def format_stage_timings(timings: dict[str, float]) -> str:
@@ -25,7 +27,7 @@ def write_update_report(
     validation_issues: list[ValidationIssue],
 ) -> tuple[Path, Path]:
     """将本次同步结果落盘。"""
-    log_dir = get_runtime_subdir(LOG_FOLDER_NAME)
+    log_dir = get_state_subdir(LOG_FOLDER_NAME)
     json_path = log_dir.joinpath(f"{report_name}.json")
     csv_path = log_dir.joinpath(f"{report_name}_validation_issues.csv")
 

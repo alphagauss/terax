@@ -10,6 +10,7 @@ from alpha.api.routes import (
     data,
     health,
     securities,
+    settings,
     status,
     strategies,
     sync,
@@ -23,6 +24,7 @@ router.include_router(system.router)
 router.include_router(status.router)
 router.include_router(data.router)
 router.include_router(securities.router)
+router.include_router(settings.router)
 router.include_router(bars.router)
 router.include_router(strategies.router)
 router.include_router(backtests.router)

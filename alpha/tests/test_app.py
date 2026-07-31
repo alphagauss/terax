@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import alpha.api.app as app_module
+from alpha.config import AlphaConfig
 
 
 @dataclass
@@ -21,6 +23,26 @@ class FakeContainer:
         """记录应用生命周期已经关闭容器。"""
 
         self.closed = True
+
+
+def _stub_container(
+    monkeypatch: pytest.MonkeyPatch,
+    container: FakeContainer,
+) -> None:
+    """让应用生命周期使用固定配置和测试容器。"""
+
+    monkeypatch.setattr(
+        app_module,
+        "create_alpha_service_container",
+        lambda _config: container,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "load_config",
+        lambda: AlphaConfig(data_dir=Path.cwd()),
+    )
+
+
 def test_create_app_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     """验证未配置服务凭据时拒绝创建应用。"""
 
@@ -36,11 +58,7 @@ def test_app_mounts_router_and_closes_container(
     """验证应用挂载受保护路由并在退出时关闭同一容器。"""
 
     container = FakeContainer()
-    monkeypatch.setattr(
-        app_module,
-        "create_alpha_service_container",
-        lambda: container,
-    )
+    _stub_container(monkeypatch, container)
     app = app_module.create_app(token="test-token")
 
     with TestClient(app) as client:
@@ -75,11 +93,7 @@ def test_create_app_reads_token_from_environment(
 
     container = FakeContainer()
     monkeypatch.setenv("TERAX_ALPHA_TOKEN", "environment-token")
-    monkeypatch.setattr(
-        app_module,
-        "create_alpha_service_container",
-        lambda: container,
-    )
+    _stub_container(monkeypatch, container)
     app = app_module.create_app()
 
     with TestClient(app) as client:
@@ -98,11 +112,7 @@ def test_shutdown_route_calls_managed_server_callback(
 
     container = FakeContainer()
     shutdown_requested: list[bool] = []
-    monkeypatch.setattr(
-        app_module,
-        "create_alpha_service_container",
-        lambda: container,
-    )
+    _stub_container(monkeypatch, container)
     app = app_module.create_app(
         token="test-token",
         shutdown_callback=lambda: shutdown_requested.append(True),
@@ -128,11 +138,7 @@ def test_websocket_requires_token_and_supports_bidirectional_json(
     """验证事件 WebSocket 独立鉴权并支持客户端发送 JSON。"""
 
     container = FakeContainer()
-    monkeypatch.setattr(
-        app_module,
-        "create_alpha_service_container",
-        lambda: container,
-    )
+    _stub_container(monkeypatch, container)
     app = app_module.create_app(token="test-token")
 
     with TestClient(app) as client:

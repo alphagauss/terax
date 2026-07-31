@@ -1,10 +1,14 @@
 /**
  * 本文件实现 Alpha 的 Workbench 设置页。
- * 页面仅在可见时刷新共享服务状态，服务控制仍通过 Rust 的幂等命令完成。
+ * 页面管理服务状态、数据目录和解释器设置，服务控制仍通过 Rust 的幂等命令完成。
  */
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import {
+  getAlphaSettings,
+  updateAlphaSettings,
+} from "@/modules/alpha/api";
 import {
   type AlphaStatus,
   checkAlphaPython,
@@ -31,6 +35,7 @@ type Action =
   | "autoStart"
   | "remoteVisibility"
   | "check"
+  | "dataDir"
   | "start"
   | "stop"
   | "restart"
@@ -50,6 +55,8 @@ export function AlphaSettingsPage({ visible }: Props) {
   const { t } = useTranslation("alpha");
   const [status, setStatus] = useState<AlphaStatus | null>(null);
   const [check, setCheck] = useState<PythonCheck | null>(null);
+  const [dataDir, setDataDir] = useState<string | null>(null);
+  const [savedDataDir, setSavedDataDir] = useState<string | null>(null);
   const [action, setAction] = useState<Action>(null);
   const showInRemote = useAlphaShowInRemote();
 
@@ -68,9 +75,21 @@ export function AlphaSettingsPage({ visible }: Props) {
     [t],
   );
 
+  const refreshSettings = useCallback(async () => {
+    try {
+      const settings = await getAlphaSettings();
+      setDataDir(settings.dataDir);
+      setSavedDataDir(settings.dataDir);
+    } catch {
+      setDataDir(null);
+      setSavedDataDir(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!visible) return;
     void refresh(true);
+    void refreshSettings();
     const timer = window.setInterval(() => void refresh(), 2500);
     const refreshOnFocus = () => void refresh();
     window.addEventListener("focus", refreshOnFocus);
@@ -78,7 +97,7 @@ export function AlphaSettingsPage({ visible }: Props) {
       window.clearInterval(timer);
       window.removeEventListener("focus", refreshOnFocus);
     };
-  }, [refresh, visible]);
+  }, [refresh, refreshSettings, visible]);
 
   const run = async (
     next: "start" | "stop" | "restart",
@@ -86,9 +105,47 @@ export function AlphaSettingsPage({ visible }: Props) {
   ) => {
     setAction(next);
     try {
-      setStatus(await operation());
+      const nextStatus = await operation();
+      setStatus(nextStatus);
+      if (nextStatus.running) {
+        await refreshSettings();
+      }
     } catch (error) {
       toast.error(t(`actions.${next}Failed`), {
+        description: String(error),
+      });
+      await refresh();
+    } finally {
+      setAction(null);
+    }
+  };
+
+  const selectDataDir = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t("storage.selectTitle"),
+      });
+      if (!selected || Array.isArray(selected)) return;
+      setDataDir(selected);
+    } catch (error) {
+      toast.error(t("errors.setting"), {
+        description: String(error),
+      });
+    }
+  };
+
+  const saveDataDir = async () => {
+    if (!dataDir) return;
+    setAction("dataDir");
+    try {
+      const saved = await updateAlphaSettings({ dataDir });
+      setDataDir(saved.dataDir);
+      setSavedDataDir(saved.dataDir);
+      setStatus(await restartAlpha());
+    } catch (error) {
+      toast.error(t("errors.setting"), {
         description: String(error),
       });
       await refresh();
@@ -239,6 +296,47 @@ export function AlphaSettingsPage({ visible }: Props) {
                 void toggleRemoteVisibility(enabled)
               }
             />
+          </SettingRow>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label>{t("storage.label")}</Label>
+          <SettingRow
+            title={t("storage.title")}
+            description={
+              dataDir === null
+                ? t("storage.unavailable")
+                : t("storage.description")
+            }
+            className="items-center"
+          >
+            <div className="flex max-w-90 items-center gap-2">
+              <span
+                className="max-w-54 truncate text-[11px] text-muted-foreground"
+                title={dataDir ?? undefined}
+              >
+                {dataDir ?? t("storage.loading")}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={dataDir === null || action !== null}
+                onClick={() => void selectDataDir()}
+              >
+                {t("storage.select")}
+              </Button>
+              <Button
+                size="sm"
+                disabled={
+                  dataDir === null || dataDir === savedDataDir || action !== null
+                }
+                onClick={() => void saveDataDir()}
+              >
+                {action === "dataDir"
+                  ? t("storage.saving")
+                  : t("storage.save")}
+              </Button>
+            </div>
           </SettingRow>
         </div>
 
