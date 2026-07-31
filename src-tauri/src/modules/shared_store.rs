@@ -17,6 +17,7 @@ use tauri::{AppHandle, Emitter};
 
 const STORES: &[(&str, &str)] = &[
     ("settings", "terax-settings.json"),
+    ("alpha", "terax-alpha.json"),
     ("ssh-profiles", "terax-ssh-profiles.json"),
     ("custom-themes", "terax-custom-themes.json"),
     ("ai-agents", "terax-ai-agents.json"),
@@ -364,6 +365,10 @@ mod tests {
     fn rejects_unknown_store_and_corrupt_json() {
         let dir = tempfile::tempdir().unwrap();
         assert!(store_path(dir.path(), "../../outside").is_err());
+        assert_eq!(
+            store_path(dir.path(), "alpha").unwrap(),
+            dir.path().join("terax-alpha.json")
+        );
         let path = dir.path().join("terax-settings.json");
         fs::write(&path, "not json").unwrap();
         assert!(mutate(dir.path(), "settings", |_| {}).is_err());

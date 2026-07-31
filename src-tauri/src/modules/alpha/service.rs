@@ -21,9 +21,9 @@ use tauri::AppHandle;
 
 const ALPHA_HOST: &str = "127.0.0.1";
 const ALPHA_PORT: u16 = 11123;
-const SETTINGS_STORE: &str = "settings";
-const PYTHON_PATH_KEY: &str = "alphaPythonPath";
-const AUTO_START_KEY: &str = "alphaAutoStart";
+const SETTINGS_STORE: &str = "alpha";
+const PYTHON_PATH_KEY: &str = "pythonPath";
+const AUTO_START_KEY: &str = "autoStart";
 const SERVICE_PROTOCOL_VERSION: u32 = 1;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(20);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(40);
