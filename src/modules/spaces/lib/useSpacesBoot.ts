@@ -5,16 +5,14 @@
 
 import { native } from "@/modules/ai/lib/native";
 import { getInitialAlphaShowInRemote } from "@/modules/alpha/preferences";
-import {
-  canBootWorkspaceEnvironment,
-  initialWorkspaceRoot,
-} from "@/modules/spaces/lib/activeSpace";
+import { initialWorkspaceRoot } from "@/modules/spaces/lib/activeSpace";
 import {
   freshSpaceWorkbench,
   hydrateSpaceWorkbench,
 } from "@/modules/spaces/lib/serialize";
 import {
   loadAll,
+  type LoadedSpaces,
   type SpaceMeta,
   saveActiveId,
   saveSpacesList,
@@ -34,19 +32,43 @@ type Params = {
   allocId: () => number;
   replaceWorkbench: (state: WorkbenchState, activeSpaceId: string) => void;
   markBooted: () => void;
-  initializeWorkspaceEnv: () => Promise<string | null>;
+  ensureWorkspaceReady: () => Promise<string | null>;
   environmentHome: string | null;
 };
 
-export async function prepareWorkspaceBoot<T>(
+/** 剔除未被 Space 元数据引用的状态，避免默认 ID 碰撞时复活已删除页面。 */
+function discardOrphanedStates(loaded: LoadedSpaces): LoadedSpaces {
+  const referencedIds = new Set(loaded.spaces.map((space) => space.id));
+  const states = new Map(
+    [...loaded.states].filter(([spaceId]) => referencedIds.has(spaceId)),
+  );
+  return states.size === loaded.states.size ? loaded : { ...loaded, states };
+}
+
+/** 判断有效持久化状态中是否存在需要恢复的页面。 */
+function restoredPagesNeedEnvironment(loaded: LoadedSpaces): boolean {
+  return [...loaded.states.values()].some((state) => state.workbench !== null);
+}
+
+/**
+ * 先读取本地 Space 布局，仅在存在待恢复页面时初始化远端环境。
+ *
+ * Local 始终解析 Home；空的 WSL 或 SSH Workspace 保持未连接，直到用户执行远端操作。
+ */
+export async function prepareWorkspaceBoot(
   env: ReturnType<typeof currentWorkspaceEnv>,
   environmentHome: string | null,
-  initializeWorkspaceEnv: () => Promise<string | null>,
-  loadWorkspaceState: () => Promise<T>,
-): Promise<{ resolvedHome: string | null; loaded: T } | null> {
-  const resolvedHome = environmentHome ?? (await initializeWorkspaceEnv());
-  if (!canBootWorkspaceEnvironment(env, resolvedHome)) return null;
-  return { resolvedHome, loaded: await loadWorkspaceState() };
+  ensureWorkspaceReady: () => Promise<string | null>,
+  loadWorkspaceState: () => Promise<LoadedSpaces>,
+): Promise<LoadedSpaces | null> {
+  const loaded = discardOrphanedStates(await loadWorkspaceState());
+  const needsEnvironment =
+    env.kind === "local" || restoredPagesNeedEnvironment(loaded);
+  if (!needsEnvironment) return loaded;
+
+  const resolvedHome = environmentHome ?? (await ensureWorkspaceReady());
+  if (env.kind !== "local" && !resolvedHome) return null;
+  return loaded;
 }
 
 function uniqueCwds(tabs: Tab[]): string[] {
@@ -68,7 +90,7 @@ export function useSpacesBoot({
   allocId,
   replaceWorkbench,
   markBooted,
-  initializeWorkspaceEnv,
+  ensureWorkspaceReady,
   environmentHome,
 }: Params) {
   const done = useRef(false);
@@ -80,17 +102,16 @@ export function useSpacesBoot({
     void (async () => {
       try {
         const env = currentWorkspaceEnv();
-        const prepared = await prepareWorkspaceBoot(
+        const loaded = await prepareWorkspaceBoot(
           env,
           environmentHome,
-          initializeWorkspaceEnv,
+          ensureWorkspaceReady,
           loadAll,
         );
-        if (!prepared) {
+        if (!loaded) {
           done.current = false;
           return;
         }
-        const { resolvedHome, loaded } = prepared;
         let spaces = loaded.spaces;
         let activeSpaceId = loaded.activeId;
         let createdSpaceId: string | null = null;
@@ -99,7 +120,6 @@ export function useSpacesBoot({
           const root = initialWorkspaceRoot(
             env,
             currentWorkspaceBootstrap().launchDir,
-            resolvedHome,
           );
           const meta: SpaceMeta = {
             id: DEFAULT_SPACE_ID,
@@ -166,7 +186,7 @@ export function useSpacesBoot({
     allocId,
     replaceWorkbench,
     markBooted,
-    initializeWorkspaceEnv,
+    ensureWorkspaceReady,
     environmentHome,
   ]);
 }

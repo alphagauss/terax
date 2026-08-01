@@ -7,6 +7,7 @@ import { native } from "@/modules/ai/lib/native";
 import {
   remoteNative,
   useRemoteStore,
+  type ConnectionStatus,
   type HostKeyPrompt,
 } from "@/modules/remote";
 import {
@@ -16,10 +17,10 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import { homeDir } from "@tauri-apps/api/path";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * 解析当前环境的初始 root。
+ * 解析当前环境的 Home，并在 SSH 未连接时建立连接。
  *
  * SSH 分支复用配置 store 已获取的状态，并仅按认证和代理方式读取必要密钥。
  */
@@ -58,9 +59,9 @@ async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
 }
 
 /**
- * 解析并授权当前应用进程绑定的工作区环境。
+ * 管理当前应用进程绑定环境的按需就绪状态。
  *
- * SSH 认证所需事件监听会先行建立，初始化成功后返回终端与 Explorer 共用的 root。
+ * SSH 事件监听先于页面恢复建立；并发请求复用同一次连接，原生重连期间不替换 transport。
  */
 export function useWorkspaceEnvironment() {
   const [home, setHome] = useState<string | null>(null);
@@ -71,6 +72,8 @@ export function useWorkspaceEnvironment() {
     () => currentWorkspaceEnv().kind !== "ssh",
   );
   const [hostPrompt, setHostPrompt] = useState<HostKeyPrompt | null>(null);
+  const resolvedHomeRef = useRef<string | null>(null);
+  const initializationRef = useRef<Promise<string | null> | null>(null);
 
   useEffect(() => {
     if (currentWorkspaceEnv().kind !== "ssh") return;
@@ -79,9 +82,18 @@ export function useWorkspaceEnvironment() {
     let unlistenHostKey: (() => void) | undefined;
     void (async () => {
       try {
-        const status = await remoteNative.onStatus((info) =>
-          useRemoteStore.getState().setStatus(info),
-        );
+        const status = await remoteNative.onStatus((info) => {
+          useRemoteStore.getState().setStatus(info);
+          const env = currentWorkspaceEnv();
+          if (
+            env.kind !== "ssh" ||
+            info.profileId !== env.profileId ||
+            info.status !== "connected"
+          ) {
+            return;
+          }
+          setEnvironmentError(null);
+        });
         if (!active) {
           status();
           return;
@@ -122,24 +134,46 @@ export function useWorkspaceEnvironment() {
       .finally(() => setLaunchCwdResolved(true));
   }, []);
 
-  const initializeWorkspaceEnv = useCallback(async (): Promise<
-    string | null
-  > => {
+  const ensureWorkspaceReady = useCallback(async (): Promise<string | null> => {
     const env = currentWorkspaceEnv();
-    try {
-      const nextHome = await resolveEnvHome(env);
-      setHome(nextHome);
-      if (env.kind !== "local") setLaunchCwd(nextHome);
+    const reusableHome = resolvedHomeRef.current;
+    const sshStatus =
+      env.kind === "ssh"
+        ? useRemoteStore.getState().statuses[env.profileId]?.status
+        : undefined;
+    if (canReuseWorkspaceHome(env, reusableHome, sshStatus)) {
       setEnvironmentError(null);
-      try {
-        await native.workspaceAuthorize(nextHome);
-      } catch {
-        // Remote paths and unavailable roots surface their own panel errors.
-      }
-      return nextHome;
-    } catch (error) {
-      setEnvironmentError(String(error));
+      return reusableHome;
+    }
+    if (initializationRef.current) return initializationRef.current;
+    if (sshStatus === "connecting" || sshStatus === "reconnecting") {
+      // 原生自动重连拥有自己的串行与退避流程，此时不并发发起替换连接。
       return null;
+    }
+
+    const task = (async () => {
+      try {
+        const nextHome = await resolveEnvHome(env);
+        resolvedHomeRef.current = nextHome;
+        setHome(nextHome);
+        if (env.kind !== "local") setLaunchCwd(nextHome);
+        setEnvironmentError(null);
+        try {
+          await native.workspaceAuthorize(nextHome);
+        } catch {
+          // Remote paths and unavailable roots surface their own panel errors.
+        }
+        return nextHome;
+      } catch (error) {
+        setEnvironmentError(String(error));
+        return null;
+      }
+    })();
+    initializationRef.current = task;
+    try {
+      return await task;
+    } finally {
+      if (initializationRef.current === task) initializationRef.current = null;
     }
   }, []);
 
@@ -151,6 +185,19 @@ export function useWorkspaceEnvironment() {
     remoteEventsReady,
     hostPrompt,
     clearHostPrompt: () => setHostPrompt(null),
-    initializeWorkspaceEnv,
+    ensureWorkspaceReady,
   };
+}
+
+/**
+ * 判断已解析的 Home 能否作为当前环境的就绪凭据复用。
+ *
+ * SSH 的路径缓存不代表连接仍存活，只有运行时状态为 connected 时才能复用。
+ */
+export function canReuseWorkspaceHome(
+  env: WorkspaceEnv,
+  home: string | null,
+  sshStatus?: ConnectionStatus,
+): home is string {
+  return Boolean(home) && (env.kind !== "ssh" || sshStatus === "connected");
 }

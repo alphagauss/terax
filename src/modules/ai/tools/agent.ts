@@ -1,3 +1,8 @@
+/**
+ * 本文件定义受审批的编码 Agent 创建、交互和输出读取工具。
+ * Agent 启动会等待 Workspace 环境就绪，终端输入遵守 TUI 的提交时序。
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
@@ -22,6 +27,7 @@ function tailLines(text: string, n: number): string {
   return parts.length <= n ? text : parts.slice(parts.length - n).join("\n");
 }
 
+/** 创建受审批的编码 Agent 工具，并通过异步上下文等待终端环境就绪。 */
 export function buildManagedAgentTools(ctx: ToolContext) {
   return {
     spawn_coding_agent: tool({
@@ -46,7 +52,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
               "a Claude Code agent is already active in this session; use send_to_agent to give it more work",
           };
         }
-        const spawned = ctx.spawnAgent(prompt);
+        const spawned = await ctx.spawnAgent(prompt);
         if (!spawned) return { error: "could not spawn the agent" };
         return {
           ok: true,

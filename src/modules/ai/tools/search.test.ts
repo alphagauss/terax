@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 AI 文件搜索工具的路径解析与原生调用边界。
+ * 测试上下文使用异步 Agent 启动契约，避免绕过 Workspace 就绪流程。
+ */
+
 import type { ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
@@ -27,7 +32,7 @@ function makeContext(): ToolContext {
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
     openWebPreview: () => false,
-    spawnAgent: () => null,
+    spawnAgent: async () => null,
     readAgentOutput: () => null,
     readCache: new Map(),
     getSessionId: () => "session",

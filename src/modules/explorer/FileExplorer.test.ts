@@ -254,20 +254,18 @@ describe("file opening render path", () => {
     act(() => root.unmount());
   });
 
-  it("shows the Explorer loading state instead of the missing-directory state", () => {
+  it("only shows root loading when the parent marks a real page as pending", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
+    const props = { rootPath: null, onOpenFile: vi.fn() };
+
+    act(() => root.render(createElement(FileExplorer, props)));
+    expect(container.textContent).toContain("noCurrentDirectory");
+    expect(container.textContent).not.toContain("spinner");
 
     act(() =>
-      root.render(
-        createElement(FileExplorer, {
-          rootPath: null,
-          loadingRoot: true,
-          onOpenFile: vi.fn(),
-        }),
-      ),
+      root.render(createElement(FileExplorer, { ...props, rootPending: true })),
     );
-
     expect(container.textContent).toContain("spinner");
     expect(container.textContent).toContain("loading");
     expect(container.textContent).not.toContain("noCurrentDirectory");
