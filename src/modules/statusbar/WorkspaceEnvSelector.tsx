@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IS_WINDOWS } from "@/lib/platform";
+import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
   remoteNative,
@@ -82,6 +83,13 @@ export function WorkspaceEnvSelector({
   );
   const activeStatus =
     env.kind === "ssh" ? statuses[env.profileId]?.status : undefined;
+  // 重试开始后优先展示实时进度，避免旧初始化错误把黄灯继续覆盖成红灯。
+  const connectionStatus =
+    activeStatus === "connecting" || activeStatus === "reconnecting"
+      ? activeStatus
+      : connectionError
+        ? "error"
+        : (activeStatus ?? "disconnected");
   const groupedProfiles = useMemo(
     () => groupSshProfiles(groups, profiles),
     [groups, profiles],
@@ -118,6 +126,10 @@ export function WorkspaceEnvSelector({
         : IS_WINDOWS
           ? t("workspace.windows")
           : t("workspace.local");
+  const triggerTitle =
+    env.kind === "ssh"
+      ? `${label}: ${t(`workspace.connectionStatus.${connectionStatus}`)}`
+      : t("workspace.environment");
 
   const reconnectCurrent = () => {
     if (env.kind !== "ssh") return;
@@ -136,7 +148,7 @@ export function WorkspaceEnvSelector({
           <button
             type="button"
             className="flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
-            title={t("workspace.environment")}
+            title={triggerTitle}
           >
             <HugeiconsIcon
               icon={ServerStack03Icon}
@@ -144,18 +156,23 @@ export function WorkspaceEnvSelector({
               strokeWidth={1.75}
             />
             {env.kind === "ssh" ? (
-              <span
-                className={`size-1.5 rounded-full ${
-                  activeStatus === "connected"
-                    ? "bg-emerald-500"
-                    : activeStatus === "error"
-                      ? "bg-destructive"
-                      : activeStatus === "connecting" ||
-                          activeStatus === "reconnecting"
-                        ? "bg-amber-500"
-                        : "bg-muted-foreground/50"
-                }`}
-              />
+              <>
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    connectionStatus === "connected" && "bg-emerald-500",
+                    connectionStatus === "error" && "bg-destructive",
+                    (connectionStatus === "connecting" ||
+                      connectionStatus === "reconnecting") &&
+                      "animate-pulse bg-amber-500 motion-reduce:animate-none",
+                    connectionStatus === "disconnected" &&
+                      "bg-muted-foreground/50",
+                  )}
+                />
+                <span className="sr-only">
+                  {t(`workspace.connectionStatus.${connectionStatus}`)}
+                </span>
+              </>
             ) : null}
             <span className="max-w-36 truncate">{label}</span>
           </button>

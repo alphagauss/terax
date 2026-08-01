@@ -255,7 +255,7 @@ export default function App() {
     remoteEventsReady,
     hostPrompt,
     clearHostPrompt,
-    initializeWorkspaceEnv,
+    ensureWorkspaceReady,
   } = useWorkspaceEnvironment();
 
   const activeSpaceId = useSpaces((s) => s.activeId);
@@ -286,7 +286,7 @@ export default function App() {
     allocId,
     replaceWorkbench,
     markBooted,
-    initializeWorkspaceEnv,
+    ensureWorkspaceReady,
     environmentHome: home,
   });
 
@@ -612,9 +612,33 @@ export default function App() {
     activeFindHandle()?.open();
   }, [activeFindHandle, setAskPopup]);
 
-  const openNewTab = useCallback(() => {
-    newTab(inheritedCwdForNewTab());
-  }, [newTab, inheritedCwdForNewTab]);
+  /** 环境就绪后创建指定类型的终端页面，Home 只作为缺省 cwd。 */
+  const openTerminalPage = useCallback(
+    async (
+      kind: "terminal" | "block" | "private",
+      cwd?: string,
+      groupId?: number,
+    ) => {
+      const readyHome = await ensureWorkspaceReady();
+      if (!readyHome) return;
+      const targetCwd = cwd ?? readyHome;
+      if (kind === "block") newBlockTab(targetCwd, groupId);
+      else if (kind === "private") newPrivateTab(targetCwd, groupId);
+      else newTab(targetCwd, groupId);
+    },
+    [ensureWorkspaceReady, newBlockTab, newPrivateTab, newTab],
+  );
+
+  const openNewTab = useCallback(
+    () => openTerminalPage("terminal", inheritedCwdForNewTab()),
+    [inheritedCwdForNewTab, openTerminalPage],
+  );
+
+  /** 在环境就绪后打开新建文件对话框，避免空远端 Workspace 被动连接。 */
+  const openNewEditor = useCallback(async () => {
+    if (!(await ensureWorkspaceReady())) return;
+    setNewEditorOpen(true);
+  }, [ensureWorkspaceReady]);
 
   /**
    * 通过原生目录选择器在当前 Local 工作区打开一个终端标签页。
@@ -638,9 +662,10 @@ export default function App() {
     }
   }, [newTab, t, workspaceEnv.kind]);
 
-  const openEnvironmentHome = useCallback(() => {
-    if (home) newTab(home);
-  }, [home, newTab]);
+  const openEnvironmentHome = useCallback(async () => {
+    const readyHome = await ensureWorkspaceReady();
+    if (readyHome) newTab(readyHome);
+  }, [ensureWorkspaceReady, newTab]);
 
   /**
    * 校验当前 WSL 或 SSH 环境中的目录并在该目录创建普通终端。
@@ -651,6 +676,7 @@ export default function App() {
     async (path: string) => {
       if (workspaceEnv.kind === "local") return;
       try {
+        if (!(await ensureWorkspaceReady())) return;
         const canonical = await native.canonicalize(path);
         const stat = await invoke<{ kind: string }>("fs_stat", {
           path: canonical,
@@ -662,16 +688,18 @@ export default function App() {
         toast.error(t("folderPathInvalid"));
       }
     },
-    [newTab, t, workspaceEnv],
+    [ensureWorkspaceReady, newTab, t, workspaceEnv],
   );
 
-  const openNewPrivateTab = useCallback(() => {
-    newPrivateTab(inheritedCwdForNewTab());
-  }, [newPrivateTab, inheritedCwdForNewTab]);
+  const openNewPrivateTab = useCallback(
+    () => openTerminalPage("private", inheritedCwdForNewTab()),
+    [inheritedCwdForNewTab, openTerminalPage],
+  );
 
-  const openNewBlockTab = useCallback(() => {
-    newBlockTab(inheritedCwdForNewTab());
-  }, [newBlockTab, inheritedCwdForNewTab]);
+  const openNewBlockTab = useCallback(
+    () => openTerminalPage("block", inheritedCwdForNewTab()),
+    [inheritedCwdForNewTab, openTerminalPage],
+  );
 
   const sendCd = useCallback(
     (path: string) => {
@@ -894,7 +922,7 @@ export default function App() {
       "tab.newBlock": openNewBlockTab,
       "tab.newPrivate": openNewPrivateTab,
       "tab.newWebPreview": () => openWebPreviewTab(""),
-      "tab.newEditor": () => setNewEditorOpen(true),
+      "tab.newEditor": () => void openNewEditor(),
       "tab.close": handleCloseActiveTab,
       "tab.next": () => stepSwitcher(1),
       "tab.prev": () => stepSwitcher(-1),
@@ -947,6 +975,7 @@ export default function App() {
       handleCloseActiveTab,
       openNewTab,
       openNewBlockTab,
+      openNewEditor,
       openNewPrivateTab,
       openWebPreviewTab,
       activeSpaceId,
@@ -1219,13 +1248,15 @@ export default function App() {
   );
 
   const handleNewTabInSpace = useCallback(
-    (spaceId: string) => {
+    async (spaceId: string) => {
+      const readyHome = await ensureWorkspaceReady();
+      if (!readyHome) return;
       const root = useSpaces
         .getState()
         .spaces.find((s) => s.id === spaceId)?.root;
-      newTabInSpace(spaceId, root ?? undefined);
+      newTabInSpace(spaceId, root ?? readyHome);
     },
-    [newTabInSpace],
+    [ensureWorkspaceReady, newTabInSpace],
   );
 
   const jumpToTab = useCallback(
@@ -1269,7 +1300,7 @@ export default function App() {
             openNewTab,
             openNewBlock: openNewBlockTab,
             openNewPrivate: openNewPrivateTab,
-            openNewEditor: () => setNewEditorOpen(true),
+            openNewEditor: () => void openNewEditor(),
             openNewWebPreview: () => openWebPreviewTab(""),
             openGitGraph: openGitGraphFromContext,
             toggleSourceControl,
@@ -1305,6 +1336,7 @@ export default function App() {
       workspaceWindowMode,
       openNewTab,
       openNewBlockTab,
+      openNewEditor,
       openNewPrivateTab,
       openWebPreviewTab,
       openGitGraphFromContext,
@@ -1361,6 +1393,7 @@ export default function App() {
     home,
     openWebPreviewTab,
     newAgentTab,
+    ensureWorkspaceReady,
     terminalRefs,
   });
 
@@ -1404,13 +1437,16 @@ export default function App() {
     () => ({
       selectTab: setActiveId,
       activateGroup: setActiveGroup,
-      newTerminal: (groupId) => newTab(groupCwd(groupId), groupId),
-      newBlock: (groupId) => newBlockTab(groupCwd(groupId), groupId),
-      newPrivate: (groupId) => newPrivateTab(groupCwd(groupId), groupId),
+      newTerminal: (groupId) =>
+        void openTerminalPage("terminal", groupCwd(groupId), groupId),
+      newBlock: (groupId) =>
+        void openTerminalPage("block", groupCwd(groupId), groupId),
+      newPrivate: (groupId) =>
+        void openTerminalPage("private", groupCwd(groupId), groupId),
       newWebPreview: (groupId) => openWebPreviewTab("", groupId),
       newEditor: (groupId) => {
         setActiveGroup(groupId);
-        setNewEditorOpen(true);
+        void openNewEditor();
       },
       newGitGraph: (groupId) => {
         setActiveGroup(groupId);
@@ -1426,13 +1462,12 @@ export default function App() {
       resizeSplit,
     }),
     [
-      groupCwd,
       handleClose,
       handleDropTab,
       handleRenameTab,
-      newBlockTab,
-      newPrivateTab,
-      newTab,
+      groupCwd,
+      openNewEditor,
+      openTerminalPage,
       openGitGraphFromContext,
       openWebPreviewTab,
       pinTab,
@@ -1529,7 +1564,11 @@ export default function App() {
         <FileExplorer
           ref={explorerRef}
           rootPath={explorerStartupReady ? explorerRoot : null}
-          loadingRoot={!explorerStartupReady && !environmentError}
+          rootPending={
+            spaceTabs.length > 0 &&
+            !explorerStartupReady &&
+            !environmentError
+          }
           onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
           onOpenHome={
             workspaceEnv.kind === "local" ? undefined : openEnvironmentHome
@@ -1757,7 +1796,7 @@ export default function App() {
               filePath={activeFilePath}
               home={home}
               workspaceError={environmentError}
-              onWorkspaceRetry={initializeWorkspaceEnv}
+              onWorkspaceRetry={ensureWorkspaceReady}
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onToggleAi={toggleAiPanel}

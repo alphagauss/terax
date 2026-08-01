@@ -4,11 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-  canBootWorkspaceEnvironment,
-  findActiveSpace,
-  initialWorkspaceRoot,
-} from "./activeSpace";
+import { findActiveSpace, initialWorkspaceRoot } from "./activeSpace";
 import type { SpaceMeta } from "./store";
 
 function space(over: Partial<SpaceMeta>): SpaceMeta {
@@ -41,58 +37,25 @@ describe("findActiveSpace", () => {
 
 describe("initialWorkspaceRoot", () => {
   it("uses an explicit launch directory only for Local", () => {
+    expect(initialWorkspaceRoot({ kind: "local" }, "C:/work")).toBe("C:/work");
     expect(
-      initialWorkspaceRoot({ kind: "local" }, "C:/work", "C:/Users/me"),
-    ).toBe("C:/work");
-    expect(
-      initialWorkspaceRoot(
-        { kind: "wsl", distro: "Ubuntu" },
-        "C:/work",
-        "/home/aj",
-      ),
+      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, "C:/work"),
     ).toBeNull();
   });
 
   it("keeps fresh Local, WSL, and SSH Workspaces empty", () => {
+    expect(initialWorkspaceRoot({ kind: "local" }, null)).toBeNull();
     expect(
-      initialWorkspaceRoot({ kind: "local" }, null, "C:/Users/me"),
+      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, null),
     ).toBeNull();
     expect(
-      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, null, "/home/aj"),
-    ).toBeNull();
-    expect(
-      initialWorkspaceRoot(
-        { kind: "ssh", profileId: "server" },
-        null,
-        "/home/remote",
-      ),
+      initialWorkspaceRoot({ kind: "ssh", profileId: "server" }, null),
     ).toBeNull();
   });
 
   it("does not leak a host path when a remote home is unavailable", () => {
     expect(
-      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, "C:/work", null),
+      initialWorkspaceRoot({ kind: "wsl", distro: "Ubuntu" }, "C:/work"),
     ).toBeNull();
-  });
-});
-
-describe("canBootWorkspaceEnvironment", () => {
-  it("keeps WSL and SSH terminals cold until their remote home resolves", () => {
-    expect(
-      canBootWorkspaceEnvironment({ kind: "wsl", distro: "Ubuntu" }, null),
-    ).toBe(false);
-    expect(
-      canBootWorkspaceEnvironment({ kind: "ssh", profileId: "server" }, null),
-    ).toBe(false);
-    expect(
-      canBootWorkspaceEnvironment(
-        { kind: "ssh", profileId: "server" },
-        "/home/remote",
-      ),
-    ).toBe(true);
-  });
-
-  it("allows Local to use the process default when home lookup fails", () => {
-    expect(canBootWorkspaceEnvironment({ kind: "local" }, null)).toBe(true);
   });
 });

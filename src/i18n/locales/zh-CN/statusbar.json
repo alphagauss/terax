@@ -23,7 +23,14 @@
     "manageSshProfiles": "管理 SSH 配置",
     "reconnectCurrentSsh": "重连当前 SSH",
     "retryCurrentEnvironment": "重试当前环境",
-    "refreshWsl": "刷新 WSL"
+    "refreshWsl": "刷新 WSL",
+    "connectionStatus": {
+      "connecting": "连接中",
+      "connected": "已连接",
+      "reconnecting": "正在重连",
+      "disconnected": "未连接",
+      "error": "连接失败"
+    }
   },
   "sshConnection": {
     "title": "连接 SSH 工作区",

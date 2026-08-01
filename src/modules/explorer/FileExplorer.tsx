@@ -121,7 +121,7 @@ function TransferStrategyMenu({
 
 type Props = {
   rootPath: string | null;
-  loadingRoot?: boolean;
+  rootPending?: boolean;
   onOpenFolder?: () => void;
   onOpenHome?: () => void;
   onOpenPath?: (path: string) => void;
@@ -333,7 +333,7 @@ export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
     {
       rootPath,
-      loadingRoot = false,
+      rootPending = false,
       onOpenFolder,
       onOpenHome,
       onOpenPath,
@@ -621,7 +621,7 @@ export const FileExplorer = memo(
     });
 
     if (!rootPath) {
-      if (loadingRoot) {
+      if (rootPending) {
         return (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
             <Spinner

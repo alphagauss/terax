@@ -23,7 +23,14 @@
     "manageSshProfiles": "Manage SSH profiles",
     "reconnectCurrentSsh": "Reconnect current SSH",
     "retryCurrentEnvironment": "Retry current environment",
-    "refreshWsl": "Refresh WSL"
+    "refreshWsl": "Refresh WSL",
+    "connectionStatus": {
+      "connecting": "Connecting",
+      "connected": "Connected",
+      "reconnecting": "Reconnecting",
+      "disconnected": "Disconnected",
+      "error": "Connection failed"
+    }
   },
   "sshConnection": {
     "title": "Connect SSH workspace",
