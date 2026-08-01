@@ -16,6 +16,7 @@ import {
   AlphaMetric,
   AlphaSectionTitle,
 } from "@/modules/alpha/components/AlphaPagePrimitives";
+import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
 import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
@@ -30,7 +31,9 @@ type Props = {
 export function AlphaBacktestsPage(props: Props) {
   return (
     <AlphaQueryProvider>
-      <AlphaBacktestsPageContent {...props} />
+      <AlphaServiceBoundary visible={props.visible}>
+        <AlphaBacktestsPageContent {...props} />
+      </AlphaServiceBoundary>
     </AlphaQueryProvider>
   );
 }

@@ -7,6 +7,7 @@
   },
   "common": {
     "refresh": "刷新",
+    "retry": "重试",
     "loading": "加载中...",
     "unavailable": "暂无"
   },
@@ -128,7 +129,11 @@
     "stopped": "共享服务尚未运行。",
     "loading": "正在检查共享服务状态...",
     "portConflict": "端口 {{port}} 已被 Terax 无法识别为 Alpha 的服务占用。",
+    "unavailableTitle": "Alpha 服务不可用",
+    "startRequired": "共享 Alpha 服务尚未运行，请在 Alpha 设置中启动服务。",
+    "configureRequired": "请先在 Alpha 设置中选择 Python 解释器并启动服务。",
     "statusRunning": "运行中",
+    "statusUnknown": "状态未知",
     "statusStopped": "已停止"
   },
   "autoStart": {

@@ -9,7 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
 import { AlphaDataPage } from "@/modules/alpha/pages/AlphaDataPageLazy";
-import { AlphaSettingsPage } from "@/modules/alpha/pages/AlphaSettingsPage";
+import { AlphaSettingsPage } from "@/modules/alpha/pages/AlphaSettingsPageLazy";
 import {
   AiDiffView,
   type EditorPaneHandle,

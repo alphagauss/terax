@@ -5,14 +5,10 @@
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import {
-  getAlphaSettings,
-  updateAlphaSettings,
-} from "@/modules/alpha/api";
+import { getAlphaSettings, updateAlphaSettings } from "@/modules/alpha/api";
 import {
   type AlphaStatus,
   checkAlphaPython,
-  getAlphaStatus,
   type PythonCheck,
   restartAlpha,
   setAlphaAutoStart,
@@ -21,13 +17,19 @@ import {
   stopAlpha,
 } from "@/modules/alpha/native";
 import {
+  alphaQueryKeys,
+  AlphaQueryProvider,
+  useAlphaServiceStatus,
+} from "@/modules/alpha/query";
+import {
   setAlphaShowInRemote,
   useAlphaShowInRemote,
 } from "@/modules/alpha/preferences";
 import { SectionHeader } from "@/settings/components/SectionHeader";
 import { SettingRow } from "@/settings/components/SettingRow";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -51,53 +53,51 @@ type Props = {
  *
  * Workbench 隐藏页面时停止探测，重新显示后立即刷新并恢复定时轮询。
  */
-export function AlphaSettingsPage({ visible }: Props) {
+export function AlphaSettingsPage(props: Props) {
+  return (
+    <AlphaQueryProvider>
+      <AlphaSettingsPageContent {...props} />
+    </AlphaQueryProvider>
+  );
+}
+
+/** 连接共享状态并渲染 Alpha 服务设置。 */
+function AlphaSettingsPageContent({ visible }: Props) {
   const { t } = useTranslation("alpha");
-  const [status, setStatus] = useState<AlphaStatus | null>(null);
+  const queryClient = useQueryClient();
+  const service = useAlphaServiceStatus(visible);
+  const status = service.data ?? null;
+  const settings = useQuery({
+    queryKey: alphaQueryKeys.settings,
+    queryFn: getAlphaSettings,
+    enabled: visible && status?.running === true,
+  });
   const [check, setCheck] = useState<PythonCheck | null>(null);
   const [dataDir, setDataDir] = useState<string | null>(null);
-  const [savedDataDir, setSavedDataDir] = useState<string | null>(null);
   const [action, setAction] = useState<Action>(null);
   const showInRemote = useAlphaShowInRemote();
-
-  const refresh = useCallback(
-    async (notifyOnError = false) => {
-      try {
-        setStatus(await getAlphaStatus());
-      } catch (error) {
-        if (notifyOnError) {
-          toast.error(t("errors.status"), {
-            description: String(error),
-          });
-        }
-      }
-    },
-    [t],
-  );
-
-  const refreshSettings = useCallback(async () => {
-    try {
-      const settings = await getAlphaSettings();
-      setDataDir(settings.dataDir);
-      setSavedDataDir(settings.dataDir);
-    } catch {
-      setDataDir(null);
-      setSavedDataDir(null);
-    }
-  }, []);
+  const savedDataDir = settings.data?.dataDir ?? null;
 
   useEffect(() => {
-    if (!visible) return;
-    void refresh(true);
-    void refreshSettings();
-    const timer = window.setInterval(() => void refresh(), 2500);
-    const refreshOnFocus = () => void refresh();
-    window.addEventListener("focus", refreshOnFocus);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshOnFocus);
-    };
-  }, [refresh, refreshSettings, visible]);
+    if (!settings.data) return;
+    setDataDir(settings.data.dataDir);
+  }, [settings.data]);
+
+  /** 发布生命周期命令结果，并同步暂停或刷新 Alpha 业务查询。 */
+  const publishStatus = async (nextStatus: AlphaStatus) => {
+    queryClient.setQueryData(alphaQueryKeys.service, nextStatus);
+    if (nextStatus.running) {
+      await queryClient.invalidateQueries({
+        queryKey: alphaQueryKeys.all,
+        predicate: (query) => query.queryKey[1] !== alphaQueryKeys.service[1],
+      });
+    } else {
+      await queryClient.cancelQueries({
+        queryKey: alphaQueryKeys.all,
+        predicate: (query) => query.queryKey[1] !== alphaQueryKeys.service[1],
+      });
+    }
+  };
 
   const run = async (
     next: "start" | "stop" | "restart",
@@ -106,15 +106,12 @@ export function AlphaSettingsPage({ visible }: Props) {
     setAction(next);
     try {
       const nextStatus = await operation();
-      setStatus(nextStatus);
-      if (nextStatus.running) {
-        await refreshSettings();
-      }
+      await publishStatus(nextStatus);
     } catch (error) {
       toast.error(t(`actions.${next}Failed`), {
         description: String(error),
       });
-      await refresh();
+      await service.refetch();
     } finally {
       setAction(null);
     }
@@ -142,13 +139,13 @@ export function AlphaSettingsPage({ visible }: Props) {
     try {
       const saved = await updateAlphaSettings({ dataDir });
       setDataDir(saved.dataDir);
-      setSavedDataDir(saved.dataDir);
-      setStatus(await restartAlpha());
+      queryClient.setQueryData(alphaQueryKeys.settings, saved);
+      await publishStatus(await restartAlpha());
     } catch (error) {
       toast.error(t("errors.setting"), {
         description: String(error),
       });
-      await refresh();
+      await service.refetch();
     } finally {
       setAction(null);
     }
@@ -165,7 +162,7 @@ export function AlphaSettingsPage({ visible }: Props) {
       if (!selected || Array.isArray(selected)) return;
       await setAlphaPythonPath(selected);
       setCheck(null);
-      await refresh();
+      await service.refetch();
     } catch (error) {
       toast.error(t("errors.python"), {
         description: String(error),
@@ -192,7 +189,7 @@ export function AlphaSettingsPage({ visible }: Props) {
     setAction("autoStart");
     try {
       await setAlphaAutoStart(enabled);
-      await refresh();
+      await service.refetch();
     } catch (error) {
       toast.error(t("errors.setting"), {
         description: String(error),
@@ -215,13 +212,16 @@ export function AlphaSettingsPage({ visible }: Props) {
     }
   };
 
-  const stateText = status?.running
-    ? t("service.running", { port: status.port })
-    : status?.issue === "portConflict"
-      ? t("service.portConflict", { port: status.port })
-      : status
-        ? t("service.stopped")
-        : t("service.loading");
+  const statusError = service.error && !service.data;
+  const stateText = statusError
+    ? t("errors.status")
+    : status?.running
+      ? t("service.running", { port: status.port })
+      : status?.issue === "portConflict"
+        ? t("service.portConflict", { port: status.port })
+        : status
+          ? t("service.stopped")
+          : t("service.loading");
 
   return (
     <div className="h-full overflow-y-auto">
@@ -304,37 +304,62 @@ export function AlphaSettingsPage({ visible }: Props) {
           <SettingRow
             title={t("storage.title")}
             description={
-              dataDir === null
-                ? t("storage.unavailable")
-                : t("storage.description")
+              !service.data && service.isPending
+                ? t("common.loading")
+                : !status?.running
+                  ? t("storage.unavailable")
+                  : settings.error
+                    ? `${t("errors.setting")}: ${String(settings.error)}`
+                    : dataDir === null
+                      ? t("storage.loading")
+                      : t("storage.description")
             }
             className="items-center"
           >
             <div className="flex max-w-90 items-center gap-2">
               <span
                 className="max-w-54 truncate text-[11px] text-muted-foreground"
-                title={dataDir ?? undefined}
+                title={status?.running ? (dataDir ?? undefined) : undefined}
               >
-                {dataDir ?? t("storage.loading")}
+                {!service.data && service.isPending
+                  ? t("common.loading")
+                  : status?.running
+                    ? settings.error
+                      ? t("errors.setting")
+                      : (dataDir ?? t("storage.loading"))
+                    : t("storage.unavailable")}
               </span>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={dataDir === null || action !== null}
-                onClick={() => void selectDataDir()}
+                disabled={
+                  !status?.running ||
+                  (!settings.error && dataDir === null) ||
+                  settings.isFetching ||
+                  action !== null
+                }
+                onClick={() => {
+                  if (settings.error) {
+                    void settings.refetch();
+                  } else {
+                    void selectDataDir();
+                  }
+                }}
               >
-                {t("storage.select")}
+                {settings.error ? t("common.retry") : t("storage.select")}
               </Button>
               <Button
                 size="sm"
                 disabled={
-                  dataDir === null || dataDir === savedDataDir || action !== null
+                  !status?.running ||
+                  dataDir === null ||
+                  dataDir === savedDataDir ||
+                  settings.isFetching ||
+                  action !== null
                 }
                 onClick={() => void saveDataDir()}
               >
-                {action === "dataDir"
-                  ? t("storage.saving")
-                  : t("storage.save")}
+                {action === "dataDir" ? t("storage.saving") : t("storage.save")}
               </Button>
             </div>
           </SettingRow>
@@ -347,12 +372,16 @@ export function AlphaSettingsPage({ visible }: Props) {
               className={
                 status?.running
                   ? "text-[11px] font-medium text-emerald-500"
-                  : "text-[11px] font-medium text-muted-foreground"
+                  : status
+                    ? "text-[11px] font-medium text-destructive"
+                    : "text-[11px] font-medium text-muted-foreground"
               }
             >
               {status?.running
                 ? t("service.statusRunning")
-                : t("service.statusStopped")}
+                : status === null
+                  ? t("service.statusUnknown")
+                  : t("service.statusStopped")}
             </span>
           </SettingRow>
           <SettingRow

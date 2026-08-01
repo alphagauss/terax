@@ -7,6 +7,7 @@
   },
   "common": {
     "refresh": "Refresh",
+    "retry": "Retry",
     "loading": "Loading...",
     "unavailable": "Unavailable"
   },
@@ -128,7 +129,11 @@
     "stopped": "The shared service is not running.",
     "loading": "Checking the shared service status...",
     "portConflict": "Port {{port}} is occupied by a service that Terax cannot identify as Alpha.",
+    "unavailableTitle": "Alpha service unavailable",
+    "startRequired": "The shared Alpha service is not running. Start it in Alpha settings.",
+    "configureRequired": "Choose a Python interpreter and start the service in Alpha settings.",
     "statusRunning": "Running",
+    "statusUnknown": "Status unknown",
     "statusStopped": "Stopped"
   },
   "autoStart": {

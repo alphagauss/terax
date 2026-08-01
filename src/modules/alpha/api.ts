@@ -130,10 +130,7 @@ async function alphaGet<T>(
 
 /** 查询 Alpha 持久配置。 */
 export async function getAlphaSettings(): Promise<AlphaSettings> {
-  const settings = await alphaGet(
-    "/api/alpha/settings",
-    settingsSchema,
-  );
+  const settings = await alphaGet("/api/alpha/settings", settingsSchema);
   return { dataDir: settings.data_dir };
 }
 
@@ -153,8 +150,8 @@ export async function updateAlphaSettings(
   return { dataDir: saved.data_dir };
 }
 
-/** 查询 Alpha 服务和数据库摘要。 */
-export function getAlphaStatusOverview(): Promise<AlphaStatusOverview> {
+/** 查询 Alpha 数据库和业务摘要。 */
+export function getAlphaOverview(): Promise<AlphaStatusOverview> {
   return alphaGet("/api/alpha/status", statusSchema);
 }
 

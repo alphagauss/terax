@@ -59,11 +59,13 @@ vi.mock("sonner", () => ({
 }));
 
 import { AlphaSettingsPage } from "@/modules/alpha/pages/AlphaSettingsPage";
+import { clearAlphaQueryCache } from "@/modules/alpha/query";
 
 describe("AlphaSettingsPage", () => {
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     vi.useFakeTimers();
+    clearAlphaQueryCache();
     mocks.getAlphaStatus.mockReset();
     mocks.getAlphaSettings.mockReset();
     mocks.getAlphaSettings.mockResolvedValue({ dataDir: "D:/alpha-data" });
@@ -87,7 +89,7 @@ describe("AlphaSettingsPage", () => {
     vi.useRealTimers();
   });
 
-  it("仅在页面可见时刷新和轮询状态", async () => {
+  it("仅在页面可见时轮询状态，停服时不请求业务设置", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -95,7 +97,7 @@ describe("AlphaSettingsPage", () => {
       root.render(createElement(AlphaSettingsPage, { visible: true }));
     });
     expect(mocks.getAlphaStatus).toHaveBeenCalledTimes(1);
-    expect(mocks.getAlphaSettings).toHaveBeenCalledTimes(1);
+    expect(mocks.getAlphaSettings).not.toHaveBeenCalled();
 
     await act(async () => {
       vi.advanceTimersByTime(2500);
@@ -114,12 +116,22 @@ describe("AlphaSettingsPage", () => {
       root.render(createElement(AlphaSettingsPage, { visible: true }));
     });
     expect(mocks.getAlphaStatus).toHaveBeenCalledTimes(3);
-    expect(mocks.getAlphaSettings).toHaveBeenCalledTimes(2);
+    expect(mocks.getAlphaSettings).not.toHaveBeenCalled();
 
     act(() => root.unmount());
   });
 
   it("保存数据目录后不依赖陈旧状态直接重启共享服务", async () => {
+    mocks.getAlphaStatus.mockResolvedValue({
+      running: true,
+      configured: true,
+      pythonPath: "C:/Python/python.exe",
+      autoStart: true,
+      port: 8765,
+      archiveHash: "archive",
+      serviceArchiveHash: "archive",
+      issue: null,
+    });
     mocks.open.mockResolvedValue("D:/synced-alpha");
     mocks.updateAlphaSettings.mockResolvedValue({
       dataDir: "D:/synced-alpha",
@@ -140,6 +152,11 @@ describe("AlphaSettingsPage", () => {
     await act(async () => {
       root.render(createElement(AlphaSettingsPage, { visible: true }));
     });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.resolve();
+    });
+    expect(mocks.getAlphaSettings).toHaveBeenCalledTimes(1);
     const choose = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent === "storage.select",
     );
@@ -153,6 +170,37 @@ describe("AlphaSettingsPage", () => {
       dataDir: "D:/synced-alpha",
     });
     expect(mocks.restartAlpha).toHaveBeenCalledTimes(1);
+    act(() => root.unmount());
+  });
+
+  it("设置接口失败时展示错误并允许重试", async () => {
+    mocks.getAlphaStatus.mockResolvedValue({
+      running: true,
+      configured: true,
+      pythonPath: "C:/Python/python.exe",
+      autoStart: true,
+      port: 8765,
+      archiveHash: "archive",
+      serviceArchiveHash: "archive",
+      issue: null,
+    });
+    mocks.getAlphaSettings.mockRejectedValue(new Error("settings failed"));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(AlphaSettingsPage, { visible: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+
+    expect(container.textContent).toContain("errors.setting");
+    const retry = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "common.retry",
+    );
+    await act(async () => retry?.click());
+    expect(mocks.getAlphaSettings).toHaveBeenCalledTimes(3);
     act(() => root.unmount());
   });
 });

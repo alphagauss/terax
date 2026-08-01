@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   getAlphaBars,
   getAlphaDataOverview,
+  getAlphaOverview,
   getAlphaSecurities,
-  getAlphaStatusOverview,
 } from "@/modules/alpha/api";
 import {
   AlphaEChart,
@@ -22,7 +22,8 @@ import {
   AlphaSectionTitle,
 } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { AlphaSecurityTable } from "@/modules/alpha/components/AlphaSecurityTable";
-import { AlphaQueryProvider } from "@/modules/alpha/query";
+import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
+import { alphaQueryKeys, AlphaQueryProvider } from "@/modules/alpha/query";
 import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -36,7 +37,9 @@ type Props = {
 export function AlphaDataPage(props: Props) {
   return (
     <AlphaQueryProvider>
-      <AlphaDataPageContent {...props} />
+      <AlphaServiceBoundary visible={props.visible}>
+        <AlphaDataPageContent {...props} />
+      </AlphaServiceBoundary>
     </AlphaQueryProvider>
   );
 }
@@ -46,8 +49,8 @@ function AlphaDataPageContent({ visible }: Props) {
   const { t, i18n } = useTranslation("alpha");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const status = useQuery({
-    queryKey: ["alpha", "status"],
-    queryFn: getAlphaStatusOverview,
+    queryKey: alphaQueryKeys.overview,
+    queryFn: getAlphaOverview,
     enabled: visible,
     refetchInterval: visible ? 10_000 : false,
   });
