@@ -53,6 +53,11 @@ import { Header } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import type { WebPreviewPaneHandle } from "@/modules/preview";
+import {
+  isPythonFile,
+  PythonInterpreterDialog,
+  usePythonFileRunner,
+} from "@/modules/python";
 import { HostKeyDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -192,6 +197,7 @@ export default function App() {
     newTab,
     newBlockTab,
     newAgentTab,
+    newRunTab,
     newPrivateTab,
     openFileTab,
     pinTab,
@@ -350,6 +356,14 @@ export default function App() {
   const { explorerRoot: resolvedExplorerRoot, inheritedCwdForNewTab } =
     useWorkspaceCwd(activeTab, tabs, home);
   const explorerRoot = spaceTabs.length === 0 ? null : resolvedExplorerRoot;
+  const pythonRunner = usePythonFileRunner({
+    workspace: workspaceEnv,
+    explorerRoot,
+    tabsRef,
+    editorRefs,
+    ensureWorkspaceReady,
+    newRunTab,
+  });
   const [explorerStartupReady, setExplorerStartupReady] = useState(
     () => currentWorkspaceEnv().kind === "local",
   );
@@ -1453,6 +1467,7 @@ export default function App() {
         openGitGraphFromContext();
       },
       closeTab: (tabId) => void handleClose(tabId),
+      runPythonFile: pythonRunner.runTab,
       pinTab,
       renameTab: handleRenameTab,
       dropTab: handleDropTab,
@@ -1472,6 +1487,7 @@ export default function App() {
       openWebPreviewTab,
       pinTab,
       resizeSplit,
+      pythonRunner.runTab,
       setActiveGroup,
       setActiveId,
       setOverrideLanguage,
@@ -1582,6 +1598,9 @@ export default function App() {
           onPathRenamed={handlePathRenamed}
           onPathDeleted={handlePathDeleted}
           onRevealInTerminal={cdInNewTab}
+          onRunPythonFile={(path, root) =>
+            void pythonRunner.runFile(path, root)
+          }
           onAttachToAgent={handleAttachFileToAgent}
           onDropToWorkbench={handleDropFileToWorkbench}
         />
@@ -1804,6 +1823,13 @@ export default function App() {
               privateActive={
                 activeTab?.kind === "terminal" && activeTab.private === true
               }
+              pythonFileActive={
+                activeTab?.kind === "editor" &&
+                isPythonFile(activeTab.path) &&
+                explorerRoot !== null
+              }
+              pythonInterpreter={pythonRunner.interpreter}
+              onSelectPython={pythonRunner.openSelector}
             />
           )}
 
@@ -1813,6 +1839,16 @@ export default function App() {
             onActivate={onActivateAgent}
           />
           <HostKeyDialog prompt={hostPrompt} onResolved={clearHostPrompt} />
+          <PythonInterpreterDialog
+            open={pythonRunner.pickerRequest !== null}
+            onOpenChange={(open) => {
+              if (!open) pythonRunner.closeSelector();
+            }}
+            root={pythonRunner.pickerRequest?.root ?? null}
+            workspace={workspaceEnv}
+            selectedPath={pythonRunner.selectedPath}
+            onSelect={pythonRunner.selectInterpreter}
+          />
           <ToastDismissOnClick />
           <Toaster
             position="bottom-right"

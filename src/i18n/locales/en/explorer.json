@@ -17,6 +17,7 @@
   "partialResults": "Showing partial results - refine your query.",
   "menu": {
     "open": "Open",
+    "runPythonFile": "Run Python File",
     "openInTerminal": "Open in Terminal",
     "revealInFinder": "Reveal in Finder",
     "downloadToLocal": "Download to Local…",

@@ -9,11 +9,11 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { TabBar } from "@/modules/tabs";
-import { EmptyWorkbench } from "@/modules/workbench/EmptyWorkbench";
 import {
   useWorkbenchDragSnapshot,
   type WorkbenchDropTarget,
 } from "@/modules/workbench/dragSession";
+import { EmptyWorkbench } from "@/modules/workbench/EmptyWorkbench";
 import { minimumPanelPercent } from "@/modules/workbench/model";
 import type {
   Tab,
@@ -34,6 +34,7 @@ export type WorkbenchChromeActions = {
   newEditor: (groupId: number) => void;
   newGitGraph: (groupId: number) => void;
   closeTab: (tabId: number) => void;
+  runPythonFile: (tabId: number, groupId: number) => void;
   pinTab: (tabId: number) => void;
   renameTab: (tabId: number, title: string) => void;
   dropTab: (tabId: number, target: WorkbenchDropTarget) => void;
@@ -132,6 +133,7 @@ function WorkbenchGroup({
             onNewEditor={() => actions.newEditor(group.id)}
             onNewGitGraph={() => actions.newGitGraph(group.id)}
             onClose={actions.closeTab}
+            onRunPythonFile={actions.runPythonFile}
             onPin={actions.pinTab}
             onRename={actions.renameTab}
             onDropTab={actions.dropTab}

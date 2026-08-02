@@ -1,7 +1,11 @@
-import { documentPathIdentity } from "@/lib/pathIdentity";
+/**
+ * 本文件管理 Workbench 页面、分组和空间的运行时状态。
+ * 页面打开函数负责复用既有标签，具体页面内容由视图注册表渲染。
+ */
+
 import i18n from "@/i18n";
+import { documentPathIdentity } from "@/lib/pathIdentity";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
-import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   activateGroup,
   activeTabId,
@@ -36,6 +40,7 @@ import {
   type WorkbenchDirection,
   type WorkbenchState,
 } from "@/modules/workbench/types";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 function createInitialState(): WorkbenchState {
@@ -294,9 +299,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [newTerminalTab],
   );
 
-  const newAgentTab = useCallback(
-    (cwd: string | undefined, title: string) => {
-      const tabId = newTerminalTab(cwd, { title });
+  /** 创建终端标签并返回页面与 PTY 使用的两个稳定标识。 */
+  const newTerminalHandle = useCallback(
+    (cwd: string | undefined, title: string, groupId?: number) => {
+      const tabId = newTerminalTab(cwd, { title }, undefined, groupId);
       const tab = stateRef.current.tabs[tabId];
       return {
         tabId,
@@ -304,6 +310,18 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       };
     },
     [newTerminalTab],
+  );
+
+  const newAgentTab = useCallback(
+    (cwd: string | undefined, title: string) => newTerminalHandle(cwd, title),
+    [newTerminalHandle],
+  );
+
+  /** 创建用于一次性运行文件的终端标签，并返回稳定的终端会话标识。 */
+  const newRunTab = useCallback(
+    (cwd: string | undefined, title: string, groupId?: number) =>
+      newTerminalHandle(cwd, title, groupId),
+    [newTerminalHandle],
   );
 
   useEffect(() => {
@@ -845,6 +863,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     newTab,
     newBlockTab,
     newAgentTab,
+    newRunTab,
     newPrivateTab,
     openFileTab,
     pinTab,

@@ -14,6 +14,7 @@ pub mod net;
 pub mod open_with;
 pub mod proc;
 pub mod pty;
+pub mod python;
 pub mod remote;
 pub mod secrets;
 pub mod shared_store;

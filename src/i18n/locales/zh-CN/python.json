@@ -1,0 +1,22 @@
+{
+  "title": "选择 Python 解释器",
+  "description": "选择已有的 Python 环境。Terax 不会创建或修改环境。",
+  "searchPlaceholder": "搜索环境、版本或路径...",
+  "loading": "正在发现 Python 解释器...",
+  "empty": "未发现 Python 解释器。",
+  "discoveryFailed": "无法发现 Python 解释器。",
+  "selectionFailed": "无法保存 Python 解释器选择。",
+  "probeFailed": "所选文件不是可用的 Python 解释器。",
+  "browseFailed": "无法打开 Python 解释器文件选择器。",
+  "refresh": "刷新",
+  "browse": "浏览...",
+  "browseTitle": "选择 Python 解释器",
+  "version": "Python {{version}}",
+  "groups": {
+    "workspace": "工作区",
+    "environments": "虚拟环境和 Conda 环境",
+    "system": "系统"
+  },
+  "runFailed": "无法运行 Python 文件",
+  "saveRequired": "请先保存文件再运行。"
+}
