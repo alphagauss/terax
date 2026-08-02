@@ -6,50 +6,36 @@ use crate::modules::workspace_process::WorkspaceProcessState;
 
 use super::manager::RemoteState;
 use super::models::{
-    ConnectRequest, ConnectionInfo, ImportedHost, TunnelConfig, TunnelEventKind, TunnelInfo,
+    ConnectRequest, ImportedHost, RemoteRuntimeSnapshot, TunnelConfig, TunnelEventKind, TunnelInfo,
 };
 
 #[tauri::command]
-pub async fn ssh_connect(
+/// 建立当前 SSH Workspace 唯一 Runtime，并返回权威快照。
+pub async fn ssh_runtime_connect(
     state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
     app: tauri::AppHandle,
     request: ConnectRequest,
-) -> Result<ConnectionInfo, String> {
+) -> Result<RemoteRuntimeSnapshot, String> {
+    workspace.assert_ssh_runtime_owner(&request.profile.id)?;
     state.manager.connect(request, app).await
 }
 
 #[tauri::command]
-pub async fn ssh_disconnect(
+/// 取消连接或恢复流程并释放当前 Runtime。
+pub async fn ssh_runtime_disconnect(
     state: tauri::State<'_, RemoteState>,
     app: tauri::AppHandle,
-    profile_id: String,
 ) -> Result<(), String> {
-    state.manager.disconnect(&profile_id, &app).await
+    state.manager.disconnect(&app).await
 }
 
 #[tauri::command]
-pub async fn ssh_reconnect(
+/// 返回当前 Runtime 的权威状态快照。
+pub async fn ssh_runtime_snapshot(
     state: tauri::State<'_, RemoteState>,
-    app: tauri::AppHandle,
-    profile_id: String,
-) -> Result<ConnectionInfo, String> {
-    state.manager.reconnect(&profile_id, app).await
-}
-
-#[tauri::command]
-pub async fn ssh_connection_status(
-    state: tauri::State<'_, RemoteState>,
-    profile_id: String,
-) -> Result<ConnectionInfo, String> {
-    Ok(state.manager.status(&profile_id).await)
-}
-
-#[tauri::command]
-pub async fn ssh_home(
-    state: tauri::State<'_, RemoteState>,
-    profile_id: String,
-) -> Result<String, String> {
-    state.manager.home(&profile_id).await
+) -> Result<RemoteRuntimeSnapshot, String> {
+    Ok(state.manager.snapshot().await)
 }
 
 #[tauri::command]

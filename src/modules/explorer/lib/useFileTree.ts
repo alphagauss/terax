@@ -4,7 +4,12 @@
  */
 
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import { useRemoteRuntimeStore } from "@/modules/remote";
+import {
+  useWorkspaceEnvStore,
+  workspaceScopeKey,
+  type WorkspaceEnv,
+} from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isCurrentTreeRequest } from "./requestGuard";
@@ -25,6 +30,7 @@ type ChildrenState =
   | { status: "error"; message: string };
 
 type TreeState = Record<string, ChildrenState>;
+const EMPTY_TREE_STATE: TreeState = {};
 
 export type PendingCreate = {
   parentPath: string;
@@ -130,6 +136,21 @@ type Options = {
   onPathDeleted?: (path: string) => void;
 };
 
+/** 为文件树生成稳定展开域和随 Runtime epoch 变化的请求域。 */
+export function fileTreeScopes(
+  workspace: WorkspaceEnv,
+  rootPath: string | null,
+  remoteEpoch: number | null,
+): { expansionScope: string; treeScope: string } {
+  const expansionScope = `${workspaceScopeKey(workspace)}\0${rootPath ?? ""}`;
+  return {
+    expansionScope,
+    treeScope: `${expansionScope}\0${
+      workspace.kind === "ssh" ? (remoteEpoch ?? "offline") : "native"
+    }`,
+  };
+}
+
 /**
  * 管理指定 Workspace 根目录的文件树状态和变更操作。
  *
@@ -137,7 +158,19 @@ type Options = {
  */
 export function useFileTree(rootPath: string | null, options?: Options) {
   const workspace = useWorkspaceEnvStore((state) => state.env);
-  const treeScope = `${workspaceScopeKey(workspace)}\0${rootPath ?? ""}`;
+  const runtime = useRemoteRuntimeStore((state) => state.snapshot);
+  const remoteEpoch =
+    workspace.kind === "ssh" &&
+    runtime.phase === "connected" &&
+    runtime.profileId === workspace.profileId
+      ? runtime.epoch
+      : null;
+  const remoteReady = workspace.kind !== "ssh" || remoteEpoch !== null;
+  const { expansionScope, treeScope } = fileTreeScopes(
+    workspace,
+    rootPath,
+    remoteEpoch,
+  );
   const showHidden = usePreferencesStore((s) => s.showHidden);
   const showHiddenRef = useRef(showHidden);
   const gitDecorations = usePreferencesStore((s) => s.explorerGitDecorations);
@@ -159,6 +192,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   const requestIdRef = useRef(0);
   const inFlightRef = useRef(new Map<string, number>());
   const activeTreeScopeRef = useRef(treeScope);
+  const nodesScopeRef = useRef(treeScope);
   activeTreeScopeRef.current = treeScope;
 
   useEffect(() => {
@@ -181,19 +215,26 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     deletingPathsRef.current = deletingPaths;
   }, [deletingPaths]);
 
-  const addWatch = useCallback((path: string) => {
-    if (watchedRef.current.has(path)) return;
-    watchedRef.current.add(path);
-    watchAdd([path]);
-  }, []);
+  const addWatch = useCallback(
+    (path: string) => {
+      if (workspace.kind === "ssh" || watchedRef.current.has(path)) return;
+      watchedRef.current.add(path);
+      watchAdd([path]);
+    },
+    [workspace.kind],
+  );
 
-  const removeWatch = useCallback((path: string) => {
-    if (!watchedRef.current.delete(path)) return;
-    watchRemove([path]);
-  }, []);
+  const removeWatch = useCallback(
+    (path: string) => {
+      if (workspace.kind === "ssh" || !watchedRef.current.delete(path)) return;
+      watchRemove([path]);
+    },
+    [workspace.kind],
+  );
 
   const fetchChildren = useCallback(
     async (path: string) => {
+      if (!remoteReady) return;
       if (treeScope !== activeTreeScopeRef.current) return;
       if (isPathDeleting(path, deletingPathsRef.current)) return;
       if (inFlightRef.current.has(path)) return;
@@ -293,7 +334,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         }
       }
     },
-    [treeScope, workspace],
+    [remoteReady, treeScope, workspace],
   );
 
   // Root change → restore the cached expansion for this root, re-scope watches,
@@ -301,6 +342,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   useEffect(() => {
     requestGenerationRef.current += 1;
     inFlightRef.current.clear();
+    nodesScopeRef.current = treeScope;
     if (!rootPath) {
       setNodes({});
       setExpanded(new Set());
@@ -317,32 +359,48 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     deletionTokensRef.current.clear();
     setDeletingPaths(new Set());
 
-    const restored = recallExpansion(treeScope);
+    const restored = recallExpansion(expansionScope);
     setExpanded(new Set(restored));
     setNodes({});
     // Sync the ref synchronously: nodesRef only updates after the next render,
     // so without this a fast (cached) fetchChildren below would read the stale
     // pre-clear "loaded" node, hit the sameDirListing early-return, and skip
-    // re-populating — leaving a valid root with an empty tree when rootPath
+    // re-populating, leaving a valid root with an empty tree when rootPath
     // changes rapidly (e.g. switching folders in quick succession).
     nodesRef.current = {};
 
-    const toWatch = [rootPath, ...restored];
+    if (!remoteReady) {
+      return () => {
+        rememberExpansion(expansionScope, expandedRef.current);
+      };
+    }
+
     void fetchChildren(rootPath);
     for (const d of restored) void fetchChildren(d);
-    for (const p of toWatch) watchedRef.current.add(p);
-    watchAdd(toWatch);
+    if (workspace.kind !== "ssh") {
+      const toWatch = [rootPath, ...restored];
+      for (const p of toWatch) watchedRef.current.add(p);
+      watchAdd(toWatch);
+    }
 
     return () => {
-      rememberExpansion(treeScope, expandedRef.current);
+      rememberExpansion(expansionScope, expandedRef.current);
       if (watchedRef.current.size > 0) {
         watchRemove([...watchedRef.current]);
         watchedRef.current.clear();
       }
     };
-  }, [rootPath, treeScope, fetchChildren]);
+  }, [
+    expansionScope,
+    fetchChildren,
+    remoteReady,
+    rootPath,
+    treeScope,
+    workspace.kind,
+  ]);
 
   useEffect(() => {
+    if (workspace.kind === "ssh") return;
     let alive = true;
     let unlisten: (() => void) | undefined;
     void listenFsChanged((paths) => {
@@ -362,7 +420,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       alive = false;
       unlisten?.();
     };
-  }, [fetchChildren]);
+  }, [fetchChildren, workspace.kind]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is intentionally omitted so ordinary tree edits do not refetch every expanded directory.
   useEffect(() => {
@@ -377,7 +435,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   // SFTP has no portable server-push file watcher. Poll only directories that
   // are already visible so remote changes appear without walking the project.
   useEffect(() => {
-    if (workspace.kind !== "ssh" || !rootPath) return;
+    if (workspace.kind !== "ssh" || !rootPath || !remoteReady) return;
     const timer = window.setInterval(() => {
       for (const [path, state] of Object.entries(nodesRef.current)) {
         if (
@@ -389,7 +447,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [workspace.kind, rootPath, fetchChildren]);
+  }, [workspace.kind, rootPath, remoteReady, fetchChildren]);
 
   const toggle = useCallback(
     (path: string) => {
@@ -634,7 +692,8 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   );
 
   return {
-    nodes,
+    remoteReady,
+    nodes: nodesScopeRef.current === treeScope ? nodes : EMPTY_TREE_STATE,
     expanded,
     deletingPaths,
     pendingCreate,

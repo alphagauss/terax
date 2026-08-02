@@ -130,6 +130,7 @@ import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { WorkspaceConnectionPlaceholder } from "./components/WorkspaceConnectionPlaceholder";
 import { spaceDeleteDocuments } from "./lib/spaceDelete";
 import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
@@ -192,6 +193,7 @@ export default function App() {
     createSpace,
     removeSpace,
     closeExitedTerminal,
+    booted: workbenchBooted,
     markBooted,
     setActiveSpace,
     newTab,
@@ -262,7 +264,12 @@ export default function App() {
     hostPrompt,
     clearHostPrompt,
     ensureWorkspaceReady,
+    reconnectWorkspace,
   } = useWorkspaceEnvironment();
+  const workspaceBootPending =
+    workspaceEnv.kind === "ssh" &&
+    !workbenchBooted &&
+    environmentError === null;
 
   const activeSpaceId = useSpaces((s) => s.activeId);
   const spacesHydrated = useSpaces((s) => s.hydrated);
@@ -435,22 +442,19 @@ export default function App() {
     void handleCloseRef.current(id);
   }, []);
 
-  const flushBeforeAppClose = useCallback(
-    async () => {
-      const stateResults = await Promise.allSettled([
-        flushSpacePersistence(),
-        flushCompletedSessionRuns(),
-      ]);
-      const storeResults = await Promise.allSettled([
-        flushSharedStoreWrites(),
-        flushWorkspaceStore(),
-      ]);
-      for (const result of [...stateResults, ...storeResults]) {
-        if (result.status === "rejected") throw result.reason;
-      }
-    },
-    [flushSpacePersistence],
-  );
+  const flushBeforeAppClose = useCallback(async () => {
+    const stateResults = await Promise.allSettled([
+      flushSpacePersistence(),
+      flushCompletedSessionRuns(),
+    ]);
+    const storeResults = await Promise.allSettled([
+      flushSharedStoreWrites(),
+      flushWorkspaceStore(),
+    ]);
+    for (const result of [...stateResults, ...storeResults]) {
+      if (result.status === "rejected") throw result.reason;
+    }
+  }, [flushSpacePersistence]);
   const { pendingAppClose, confirmAppClose, cancelAppClose } = useAppCloseGuard(
     tabsRef,
     flushBeforeAppClose,
@@ -1581,9 +1585,13 @@ export default function App() {
           ref={explorerRef}
           rootPath={explorerStartupReady ? explorerRoot : null}
           rootPending={
-            spaceTabs.length > 0 &&
-            !explorerStartupReady &&
-            !environmentError
+            workspaceBootPending
+              ? "connection"
+              : spaceTabs.length > 0 &&
+                  !explorerStartupReady &&
+                  !environmentError
+                ? "loading"
+                : undefined
           }
           onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
           onOpenHome={
@@ -1723,22 +1731,28 @@ export default function App() {
                 minSize={`${WORKSPACE_MIN_WIDTH}px`}
               >
                 <div className="flex h-full min-h-0 flex-col">
-                  <div className="relative min-h-0 flex-1">
-                    <WorkbenchSurface
-                      state={workbenchState}
-                      activeSpaceId={activeSpaceId ?? DEFAULT_SPACE_ID}
-                      actions={workbenchActions}
-                      services={workbenchServices}
-                    />
-                  </div>
+                  {workspaceBootPending ? (
+                    <WorkspaceConnectionPlaceholder />
+                  ) : (
+                    <>
+                      <div className="relative min-h-0 flex-1">
+                        <WorkbenchSurface
+                          state={workbenchState}
+                          activeSpaceId={activeSpaceId ?? DEFAULT_SPACE_ID}
+                          actions={workbenchActions}
+                          services={workbenchServices}
+                        />
+                      </div>
 
-                  <WorkspaceInputBar
-                    isBlockTab={isBlockTab}
-                    isTerminalTab={isTerminalTab}
-                    terminalId={activeTerminalId}
-                    cwd={activeCwd}
-                    home={home}
-                  />
+                      <WorkspaceInputBar
+                        isBlockTab={isBlockTab}
+                        isTerminalTab={isTerminalTab}
+                        terminalId={activeTerminalId}
+                        cwd={activeCwd}
+                        home={home}
+                      />
+                    </>
+                  )}
                 </div>
               </ResizablePanel>
               <ResizableHandle
@@ -1816,6 +1830,7 @@ export default function App() {
               home={home}
               workspaceError={environmentError}
               onWorkspaceRetry={ensureWorkspaceReady}
+              onWorkspaceReconnect={reconnectWorkspace}
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onToggleAi={toggleAiPanel}

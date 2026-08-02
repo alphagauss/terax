@@ -368,13 +368,11 @@ async fn run_remote(
     control: Arc<TaskControl>,
     timeout: Duration,
 ) -> RunResult<ExecOutput> {
-    let mut channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|error| message(format!("open archive command channel: {error}")))?
-    };
+    let mut channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|error| message(format!("open archive command channel: {error}")))?;
     channel
         .exec(true, command.as_bytes())
         .await

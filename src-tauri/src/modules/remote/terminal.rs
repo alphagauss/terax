@@ -1,8 +1,7 @@
-//! Remote PTY channel bridge.
+//! 远端 PTY channel 桥接与生命周期管理。
 //!
-//! Adapted from Eussh's terminal bridge, but uses Tauri raw IPC channels so it
-//! plugs directly into Terax's existing xterm/PTY frontend without a parallel
-//! renderer implementation.
+//! 本模块使用 Tauri raw IPC channel 接入既有 xterm 和 PTY 前端。只有底层 SSH handle
+//! 已关闭时才返回 transport 退出码，Runtime 是否断线仍由统一 ping 探活决定。
 
 use std::time::Duration;
 
@@ -13,8 +12,10 @@ use tokio::sync::{mpsc, oneshot, watch};
 use super::session::{shell_quote, signal_exit_code, validate_remote_path, RemoteWorkspace};
 use crate::modules::pty::shell_init::{bashrc_script, normalize_script};
 
+/// 底层 SSH transport 已关闭时向前端返回的专用退出码。
 pub const TRANSPORT_CLOSED_EXIT_CODE: i32 = -255;
 
+/// 一条远端交互式 PTY channel 的输入、尺寸和关闭控制句柄。
 pub struct RemoteTerminalHandle {
     input: mpsc::Sender<Vec<u8>>,
     resize: watch::Sender<(u16, u16)>,
@@ -45,6 +46,7 @@ impl RemoteTerminalHandle {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// 在已连接 workspace 上创建远端交互式 bash，并将数据桥接到前端。
 pub async fn open(
     workspace: std::sync::Arc<RemoteWorkspace>,
     cols: u16,
@@ -54,13 +56,11 @@ pub async fn open(
     on_data: Channel<Response>,
     on_exit: Channel<i32>,
 ) -> Result<RemoteTerminalHandle, String> {
-    let channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("open remote terminal channel: {e}"))?
-    };
+    let channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("open remote terminal channel: {e}"))?;
     channel
         .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
         .await
@@ -80,6 +80,7 @@ pub async fn open(
     let (input_tx, mut input_rx) = mpsc::channel::<Vec<u8>>(32);
     let (resize_tx, mut resize_rx) = watch::channel((cols, rows));
     let (close_tx, mut close_rx) = oneshot::channel();
+    let terminal_workspace = workspace.clone();
     tauri::async_runtime::spawn(async move {
         let mut exit_code = None;
         let mut closed_by_client = false;
@@ -128,13 +129,8 @@ pub async fn open(
             }
         }
         let _ = tokio::time::timeout(Duration::from_secs(1), write.close()).await;
-        let exit_code = exit_code.unwrap_or({
-            if closed_by_client {
-                0
-            } else {
-                TRANSPORT_CLOSED_EXIT_CODE
-            }
-        });
+        let transport_closed = terminal_workspace.is_closed();
+        let exit_code = classify_exit(exit_code, closed_by_client, transport_closed);
         let _ = on_exit.send(exit_code);
     });
 
@@ -142,6 +138,17 @@ pub async fn open(
         input: input_tx,
         resize: resize_tx,
         close: std::sync::Mutex::new(Some(close_tx)),
+    })
+}
+
+/// 将 terminal channel 结束分类为普通 shell 退出或 transport 断开。
+fn classify_exit(exit_code: Option<i32>, closed_by_client: bool, transport_closed: bool) -> i32 {
+    exit_code.unwrap_or({
+        if closed_by_client || !transport_closed {
+            0
+        } else {
+            TRANSPORT_CLOSED_EXIT_CODE
+        }
     })
 }
 
@@ -157,7 +164,9 @@ fn integrated_bash_command(cwd: &str, blocks: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{integrated_bash_command, signal_exit_code, TRANSPORT_CLOSED_EXIT_CODE};
+    use super::{
+        classify_exit, integrated_bash_command, signal_exit_code, TRANSPORT_CLOSED_EXIT_CODE,
+    };
     use russh::Sig;
 
     #[test]
@@ -185,5 +194,8 @@ mod tests {
     fn keeps_transport_loss_distinct_from_shell_exit() {
         assert_eq!(signal_exit_code(&Sig::TERM), 143);
         assert_ne!(signal_exit_code(&Sig::TERM), TRANSPORT_CLOSED_EXIT_CODE);
+        assert_eq!(classify_exit(None, false, false), 0);
+        assert_eq!(classify_exit(None, false, true), TRANSPORT_CLOSED_EXIT_CODE);
+        assert_eq!(classify_exit(None, true, true), 0);
     }
 }

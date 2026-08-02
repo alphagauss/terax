@@ -447,7 +447,6 @@
       "password": "密码",
       "passphrase": "私钥口令",
       "rootPath": "工作区根目录",
-      "keepalive": "保活间隔（秒）",
       "proxyUrl": "代理 URL（SOCKS5、HTTP、HTTPS）",
       "proxyPassword": "代理密码",
       "reconnect": "自动重连",
@@ -505,7 +504,6 @@
       "username": "必须填写用户名。",
       "identityFile": "私钥认证必须填写私钥文件。",
       "proxyPassword": "请将代理密码移到安全密码字段中。",
-      "keepalive": "保活间隔必须是大于或等于 0 的整数秒。",
       "reconnectAttempts": "重试次数必须是 1 到 20 之间的整数。"
     },
     "launch": {

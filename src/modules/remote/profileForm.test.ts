@@ -42,9 +42,6 @@ describe("SSH profile form", () => {
     form.authMethod = "private_key";
     expect(profileValidationIssue(form)).toBe("identityFile");
     form.identityFile = "~/.ssh/id_ed25519";
-    form.keepaliveSeconds = "0.5";
-    expect(profileValidationIssue(form)).toBe("keepalive");
-    form.keepaliveSeconds = "30";
     form.reconnectMaxAttempts = "21";
     expect(profileValidationIssue(form)).toBe("reconnectAttempts");
   });

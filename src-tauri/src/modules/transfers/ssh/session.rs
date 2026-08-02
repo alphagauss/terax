@@ -12,13 +12,11 @@ use crate::modules::remote::session::RemoteWorkspace;
 ///
 /// 上传文件使用有界的并发 WRITE 确认队列，不缓存完整文件，也不阻塞 Explorer 会话。
 pub(crate) async fn open(workspace: &Arc<RemoteWorkspace>) -> Result<Arc<SftpSession>, String> {
-    let channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|error| format!("open transfer SFTP channel: {error}"))?
-    };
+    let channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("open transfer SFTP channel: {error}"))?;
     channel
         .request_subsystem(true, "sftp")
         .await
@@ -38,13 +36,11 @@ pub(crate) async fn open(workspace: &Arc<RemoteWorkspace>) -> Result<Arc<SftpSes
 pub(crate) async fn open_raw(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<RawSftpSession>, String> {
-    let channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|error| format!("open transfer SFTP channel: {error}"))?
-    };
+    let channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("open transfer SFTP channel: {error}"))?;
     channel
         .request_subsystem(true, "sftp")
         .await

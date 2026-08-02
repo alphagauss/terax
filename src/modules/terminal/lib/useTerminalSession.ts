@@ -1,5 +1,13 @@
+/**
+ * 本文件管理终端叶子的 PTY 生命周期、渲染器池绑定和块模式状态。
+ * SSH PTY 绑定 Remote Runtime epoch，连接代际变化时统一丢弃并重建会话。
+ */
+
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
+import i18n from "@/i18n";
+import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchAddon } from "@xterm/addon-search";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +25,7 @@ import {
   registerPromptTracker,
 } from "./osc-handlers";
 import { openPty, type PtySession } from "./pty-bridge";
-import { isRecoverableRemoteExit } from "./exit";
+import { isRecoverableRemoteExit, shouldReplaceRemotePty } from "./exit";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import {
@@ -94,9 +102,28 @@ type Session = {
   commandRunning: boolean;
   hiddenReleaseTimer: ReturnType<typeof setTimeout> | null;
   spawnFailed: boolean;
+  spawnGeneration: number;
+  remoteEpoch: number | null;
+  remoteSuspended: boolean;
 };
 
 const sessions = new Map<number, Session>();
+
+/** 返回当前 SSH Workspace 已连接的 Runtime epoch。 */
+function currentRemoteEpoch(): number | null {
+  const workspace = currentWorkspaceEnv();
+  const runtime = useRemoteRuntimeStore.getState().snapshot;
+  return workspace.kind === "ssh" &&
+    runtime.phase === "connected" &&
+    runtime.profileId === workspace.profileId
+    ? runtime.epoch
+    : null;
+}
+
+/** 返回当前进程的终端是否依赖尚未连接的 SSH Runtime。 */
+function remoteRuntimeUnavailable(): boolean {
+  return currentWorkspaceEnv().kind === "ssh" && currentRemoteEpoch() === null;
+}
 
 // Block-overlay viewport listeners, keyed by leafId at module scope so the
 // overlay (a child) can subscribe before the parent effect creates the session.
@@ -267,7 +294,7 @@ export function blockWatermarkState(leafId: number): WatermarkState {
 
 /**
  * Clear the scrollback and screen of the currently focused terminal, keeping
- * the active prompt line — macOS Terminal's ⌘K behaviour. Returns false when no
+ * the active prompt line. Matches macOS Terminal's ⌘K behaviour. Returns false when no
  * focused terminal slot is bound (e.g. focus is in the editor or AI panel).
  */
 export function clearFocusedTerminal(): boolean {
@@ -430,6 +457,8 @@ function ensureSession(
 ): Session {
   const existing = sessions.get(leafId);
   if (existing) return existing;
+  const remoteEpoch = currentRemoteEpoch();
+  const remoteSuspended = remoteRuntimeUnavailable();
 
   const session: Session = {
     pty: null,
@@ -437,7 +466,7 @@ function ensureSession(
     initialCwd,
     lastCwd: null,
     pendingExit: null,
-    shellExited: false,
+    shellExited: remoteSuspended,
     callbacks: {},
     visibleNow: false,
     focusedNow: false,
@@ -462,6 +491,9 @@ function ensureSession(
     commandRunning: false,
     hiddenReleaseTimer: null,
     spawnFailed: false,
+    spawnGeneration: 0,
+    remoteEpoch,
+    remoteSuspended,
   };
   sessions.set(leafId, session);
 
@@ -489,14 +521,15 @@ async function openPtyWithRetry(
   leafId: number,
   s: Session,
   cwd: string | undefined,
+  generation: number,
 ): Promise<PtySession> {
   try {
-    return await openPtyForSession(leafId, s, cwd);
+    return await openPtyForSession(leafId, s, cwd, generation);
   } catch (e) {
     console.error("[terax] openPty failed, retrying once:", e);
     await new Promise((r) => setTimeout(r, SPAWN_RETRY_DELAY_MS));
-    if (s.disposed) throw e;
-    return openPtyForSession(leafId, s, cwd);
+    if (s.disposed || s.spawnGeneration !== generation) throw e;
+    return openPtyForSession(leafId, s, cwd, generation);
   }
 }
 
@@ -513,15 +546,46 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
   deliverPtyBytes(
     leafId,
     new TextEncoder().encode(
-      `\r\n\x1b[31m[terax] failed to start shell: ${detail}\x1b[0m\r\n\x1b[2mpress Enter to retry\x1b[0m\r\n`,
+      `\r\n\x1b[31m[terax] ${i18n.t("terminal:runtime.shellStartFailed", { detail })}\x1b[0m\r\n\x1b[2m${i18n.t("terminal:runtime.pressEnterToRetry")}\x1b[0m\r\n`,
     ),
   );
+}
+
+/** 在终端中呈现统一的 SSH Runtime 等待状态。 */
+function showRemoteSuspendedMessage(leafId: number, s: Session): void {
+  const slot = getSlotForLeaf(leafId);
+  if (slot) slot.term.options.disableStdin = true;
+  deliverPtyBytes(
+    leafId,
+    new TextEncoder().encode(
+      `\r\n\x1b[31m[terax] ${i18n.t("terminal:runtime.connectionClosed")}\x1b[0m\r\n\x1b[2m${i18n.t("terminal:runtime.waitingForReconnect")}\x1b[0m\r\n`,
+    ),
+  );
+  scheduleHiddenRelease(leafId, s);
+}
+
+/** 立即冻结失效 epoch 的 PTY，并等待统一 Runtime 发布下一代连接。 */
+function suspendRemoteSession(leafId: number, s: Session): void {
+  if (s.remoteSuspended) return;
+  s.spawnGeneration += 1;
+  void s.pty?.close();
+  s.pty = null;
+  s.ptyOpening = false;
+  s.shellExited = true;
+  s.pendingExit = null;
+  s.pendingInput = "";
+  s.commandRunning = false;
+  s.spawnFailed = false;
+  s.remoteEpoch = null;
+  s.remoteSuspended = true;
+  showRemoteSuspendedMessage(leafId, s);
 }
 
 async function openPtyForSession(
   leafId: number,
   s: Session,
   cwd: string | undefined,
+  generation: number,
 ): Promise<PtySession> {
   const startCols = s.cols > 0 ? s.cols : 80;
   const startRows = s.rows > 0 ? s.rows : 24;
@@ -529,23 +593,20 @@ async function openPtyForSession(
     startCols,
     startRows,
     {
-      onData: (bytes) => deliverPtyBytes(leafId, bytes),
+      onData: (bytes) => {
+        if (s.spawnGeneration === generation) deliverPtyBytes(leafId, bytes);
+      },
       onExit: (code) => {
+        if (s.spawnGeneration !== generation) return;
         s.shellExited = true;
         s.pty = null;
         s.pendingInput = "";
         s.commandRunning = false;
         if (isRecoverableRemoteExit(code)) {
-          s.spawnFailed = true;
-          const slot = getSlotForLeaf(leafId);
-          if (slot) slot.term.options.disableStdin = false;
-          deliverPtyBytes(
-            leafId,
-            new TextEncoder().encode(
-              "\r\n\x1b[31m[terax] SSH connection closed\x1b[0m\r\n\x1b[2mreconnect the workspace, then press Enter to restart bash\x1b[0m\r\n",
-            ),
-          );
-          scheduleHiddenRelease(leafId, s);
+          s.spawnFailed = false;
+          s.remoteEpoch = null;
+          s.remoteSuspended = true;
+          showRemoteSuspendedMessage(leafId, s);
           return;
         }
         const slot = getSlotForLeaf(leafId);
@@ -638,7 +699,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
           },
         ];
       }
-      // Shared in-command flag — see osc-handlers.ts. The prompt tracker
+      // Shared in-command flag; see osc-handlers.ts. The prompt tracker
       // flips it on OSC 133 B/C/D/A; the cwd handler reads it to ignore OSC
       // 7 emitted by untrusted command output (remote SSH, `cat` of an
       // attacker file, etc.).
@@ -697,11 +758,16 @@ function attachSession(
 
   if (!s.pty && !s.ptyOpening && !s.shellExited) {
     s.ptyOpening = true;
-    openPtyWithRetry(leafId, s, s.initialCwd)
+    const generation = ++s.spawnGeneration;
+    openPtyWithRetry(leafId, s, s.initialCwd, generation)
       .then((pty) => {
+        if (s.spawnGeneration !== generation) {
+          void pty.close();
+          return;
+        }
         s.ptyOpening = false;
         if (s.disposed || s.shellExited) {
-          pty.close();
+          void pty.close();
           return;
         }
         s.pty = pty;
@@ -712,6 +778,7 @@ function attachSession(
         if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
       })
       .catch((e) => {
+        if (s.spawnGeneration !== generation) return;
         s.ptyOpening = false;
         if (!s.disposed) surfaceSpawnFailure(leafId, s, e);
       });
@@ -726,13 +793,15 @@ function detachSession(leafId: number): void {
   s.container = null;
 }
 
+/** 丢弃当前 PTY，并以新的生成代际重新创建该终端会话。 */
 export async function respawnSession(
   leafId: number,
   cwd?: string,
 ): Promise<void> {
   const s = sessions.get(leafId);
   if (!s || s.disposed) return;
-  s.pty?.close();
+  const generation = ++s.spawnGeneration;
+  void s.pty?.close();
   s.pty = null;
   s.snapshot = null;
   s.dormantRing = new DormantRing();
@@ -742,6 +811,8 @@ export async function respawnSession(
   s.altScreenAtRelease = false;
   s.commandRunning = false;
   s.spawnFailed = false;
+  s.remoteEpoch = currentRemoteEpoch();
+  s.remoteSuspended = false;
   cancelHiddenRelease(s);
 
   const slot = getSlotForLeaf(leafId);
@@ -756,17 +827,18 @@ export async function respawnSession(
   s.ptyOpening = true;
   let pty: PtySession;
   try {
-    pty = await openPtyWithRetry(leafId, s, cwd ?? s.initialCwd);
+    pty = await openPtyWithRetry(leafId, s, cwd ?? s.initialCwd, generation);
   } catch (e) {
+    if (s.spawnGeneration !== generation) return;
     s.ptyOpening = false;
     if (!s.disposed) surfaceSpawnFailure(leafId, s, e);
     return;
   }
-  s.ptyOpening = false;
-  if (s.disposed) {
-    pty.close();
+  if (s.disposed || s.spawnGeneration !== generation) {
+    void pty.close();
     return;
   }
+  s.ptyOpening = false;
   s.pty = pty;
   if (s.pendingInput) {
     void pty.write(s.pendingInput);
@@ -799,6 +871,8 @@ export function disposeSession(leafId: number): void {
   const s = sessions.get(leafId);
   if (!s) return;
   s.disposed = true;
+  s.spawnGeneration += 1;
+  s.callbacks = {};
   cancelHiddenRelease(s);
   disposeLeafSlot(leafId);
   s.hasSlot = false;
@@ -831,6 +905,9 @@ type Options = {
   onCwd?: (cwd: string) => void;
 };
 
+/**
+ * 将终端叶子绑定到 renderer pool，并按 SSH Runtime epoch 管理 PTY 生命周期。
+ */
 export function useTerminalSession({
   leafId,
   container,
@@ -842,6 +919,15 @@ export function useTerminalSession({
   onExit,
   onCwd,
 }: Options) {
+  const remoteBinding = useRemoteRuntimeStore((state) => {
+    const workspace = currentWorkspaceEnv();
+    const runtime = state.snapshot;
+    if (workspace.kind !== "ssh") return "local" as const;
+    return runtime.phase === "connected" &&
+      runtime.profileId === workspace.profileId
+      ? runtime.epoch
+      : ("offline" as const);
+  });
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
 
@@ -870,6 +956,17 @@ export function useTerminalSession({
       detachSession(leafId);
     };
   }, [leafId, container, blocks]);
+
+  useEffect(() => {
+    if (remoteBinding === "local") return;
+    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    if (remoteBinding === "offline") {
+      suspendRemoteSession(leafId, s);
+      return;
+    }
+    if (!shouldReplaceRemotePty(s.remoteEpoch, remoteBinding)) return;
+    void respawnSession(leafId, s.lastCwd ?? initialCwdRef.current);
+  }, [blocks, leafId, remoteBinding]);
 
   const [blockMode, setBlockMode] = useState<BlockMode>("prompt");
   useEffect(() => {

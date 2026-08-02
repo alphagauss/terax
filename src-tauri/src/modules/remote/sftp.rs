@@ -119,13 +119,11 @@ pub async fn session(
 async fn open_cached_session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
-    let channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|error| format!("open SFTP channel: {error}"))?
-    };
+    let channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("open SFTP channel: {error}"))?;
     channel
         .request_subsystem(true, "sftp")
         .await

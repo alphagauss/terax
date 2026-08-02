@@ -25,5 +25,11 @@
     "copy": "复制",
     "paste": "粘贴"
   },
+  "runtime": {
+    "shellStartFailed": "Shell 启动失败：{{detail}}",
+    "pressEnterToRetry": "按回车键重试",
+    "connectionClosed": "SSH 连接已断开",
+    "waitingForReconnect": "正在等待工作区重新连接"
+  },
   "dropFilePathHere": "将文件路径拖放到这里"
 }

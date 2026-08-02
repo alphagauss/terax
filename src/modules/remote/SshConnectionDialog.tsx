@@ -1,3 +1,8 @@
+/**
+ * 本文件实现当前 SSH Workspace 的凭据输入与重连对话框。
+ * 对话框只收集和持久化凭据，连接生命周期由统一 Remote Runtime 管理。
+ */
+
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -15,24 +20,25 @@ import { useTranslation } from "react-i18next";
 import { remoteNative } from "./native";
 import { applyCredentialMutation, credentialMutation } from "./profileForm";
 import { useRemoteStore } from "./store";
+import type { SshCredentialInput } from "./types";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   profileId: string | null;
-  onConnected: () => Promise<string | null>;
+  onConnect: (credentials: SshCredentialInput) => Promise<string | null>;
 };
 
+/** 收集当前 profile 的凭据，并触发一次破坏式 Runtime 重连。 */
 export function SshConnectionDialog({
   open,
   onOpenChange,
   profileId,
-  onConnected,
+  onConnect,
 }: Props) {
   const { t } = useTranslation("statusbar");
   const profiles = useRemoteStore((state) => state.profiles);
   const load = useRemoteStore((state) => state.load);
-  const setStatus = useRemoteStore((state) => state.setStatus);
   const profile = useMemo(
     () => profiles.find((item) => item.id === profileId) ?? null,
     [profileId, profiles],
@@ -122,13 +128,12 @@ export function SshConnectionDialog({
     setError(null);
     try {
       await persistSecrets();
-      const info = await remoteNative.connect(
-        profile,
-        secret || null,
-        proxySecret || null,
-      );
-      setStatus(info);
-      if (!(await onConnected())) {
+      if (
+        !(await onConnect({
+          secret: secret || null,
+          proxySecret: proxySecret || null,
+        }))
+      ) {
         throw new Error(t("sshConnection.homeError"));
       }
       onOpenChange(false);

@@ -6,9 +6,24 @@
 import { describe, expect, it } from "vitest";
 import {
   ancestorDirs,
+  fileTreeScopes,
   isPathDeleting,
   overlapsDeletingPath,
 } from "./useFileTree";
+
+describe("file tree runtime scopes", () => {
+  it("keeps expansion while invalidating requests on every SSH epoch", () => {
+    const workspace = { kind: "ssh", profileId: "server" } as const;
+    const first = fileTreeScopes(workspace, "/workspace", 4);
+    const offline = fileTreeScopes(workspace, "/workspace", null);
+    const second = fileTreeScopes(workspace, "/workspace", 5);
+
+    expect(first.expansionScope).toBe(second.expansionScope);
+    expect(
+      new Set([first.treeScope, offline.treeScope, second.treeScope]).size,
+    ).toBe(3);
+  });
+});
 
 describe("ancestorDirs", () => {
   it("returns the directories that must be expanded to reveal a file", () => {

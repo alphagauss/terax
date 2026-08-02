@@ -122,7 +122,7 @@ function TransferStrategyMenu({
 
 type Props = {
   rootPath: string | null;
-  rootPending?: boolean;
+  rootPending?: "connection" | "loading";
   onOpenFolder?: () => void;
   onOpenHome?: () => void;
   onOpenPath?: (path: string) => void;
@@ -335,7 +335,7 @@ export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
     {
       rootPath,
-      rootPending = false,
+      rootPending,
       onOpenFolder,
       onOpenHome,
       onOpenPath,
@@ -631,7 +631,13 @@ export const FileExplorer = memo(
               className="size-4 motion-reduce:animate-none"
               aria-hidden="true"
             />
-            <span>{t("loading")}</span>
+            <span>
+              {t(
+                rootPending === "connection"
+                  ? "waitingForConnection"
+                  : "loading",
+              )}
+            </span>
           </div>
         );
       }
@@ -689,6 +695,18 @@ export const FileExplorer = memo(
               </Button>
             </form>
           ) : null}
+        </div>
+      );
+    }
+
+    if (!tree.remoteReady) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
+          <Spinner
+            className="size-4 motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span>{t("waitingForConnection")}</span>
         </div>
       );
     }

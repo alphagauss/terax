@@ -843,6 +843,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     state,
     tabs,
     activeId,
+    booted,
     allocId,
     markBooted,
     replaceWorkbench,
