@@ -323,56 +323,23 @@ describe("file opening render path", () => {
     expect(container.textContent).toContain("remoteWorkspace.connecting");
     expect(container.textContent).toContain("spinner");
     expect(container.textContent).not.toContain("noCurrentDirectory");
-    act(() => root.unmount());
-  });
 
-  it("replaces a stale remote tree with a manual reconnect state", () => {
-    mocks.environmentKind = "ssh";
-    mocks.remoteReady = false;
-    mocks.runtimePhase = "disconnected";
-    const container = document.createElement("div");
-    const root = createRoot(container);
-
-    act(() =>
-      root.render(
-        createElement(FileExplorer, {
-          rootPath: "/home/remote",
-          onOpenFile: vi.fn(),
-        }),
-      ),
-    );
-
-    expect(container.textContent).toContain("remoteWorkspace.manualReconnect");
-    expect(container.textContent).not.toContain("spinner");
-    act(() => root.unmount());
-  });
-
-  it("shows automatic recovery without exposing retries or a manual action", () => {
     mocks.environmentKind = "ssh";
     mocks.remoteReady = false;
     mocks.runtimePhase = "reconnecting";
-    const container = document.createElement("div");
-    const root = createRoot(container);
-
     act(() =>
       root.render(
         createElement(FileExplorer, {
           rootPath: "/home/remote",
           onOpenFile: vi.fn(),
-          onReconnect: vi.fn(),
         }),
       ),
     );
-
     expect(container.textContent).toContain("remoteWorkspace.reconnecting");
-    expect(container.textContent).toContain("spinner");
-    expect(container.textContent).not.toContain(
-      "remoteWorkspace.reconnectAction",
-    );
     act(() => root.unmount());
   });
 
-  it("offers the shared reconnect action after automatic recovery stops", () => {
+  it("offers manual reconnect after automatic recovery stops", () => {
     mocks.environmentKind = "ssh";
     mocks.remoteReady = false;
     mocks.runtimePhase = "disconnected";
@@ -389,10 +356,11 @@ describe("file opening render path", () => {
         }),
       ),
     );
-    act(() => container.querySelector("button")?.click());
 
+    expect(container.textContent).toContain("remoteWorkspace.manualReconnect");
+    expect(container.textContent).not.toContain("spinner");
+    act(() => container.querySelector("button")?.click());
     expect(onReconnect).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("remoteWorkspace.reconnectAction");
     act(() => root.unmount());
   });
 
