@@ -1,8 +1,7 @@
-//! TOFU host-key verification and confirmation bridge.
+//! SSH 主机密钥的 TOFU 校验、持久化与确认事件桥接。
 //!
-//! The on-disk format and changed-key behavior are adapted from meatshell's
-//! `known_hosts.rs`; the pending Tauri request bridge follows Eussh's
-//! `ssh/host_key.rs`. Both sources are modified for Terax's app data path.
+//! 每个未知或变化的密钥只在当前连接生命周期内等待确认。连接被新意图取消时同步
+//! 移除 pending 请求，避免迟到对话框影响下一次 transport。
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,6 +12,7 @@ use russh::keys::ssh_key::{HashAlg, PublicKey};
 use serde::Serialize;
 use tauri::Emitter;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HostKeyStatus {
@@ -40,6 +40,7 @@ struct HostKeyPrompt {
     changed: bool,
 }
 
+/// 管理 known_hosts 校验和当前进程内待确认请求。
 pub struct HostKeyVerifier {
     path: PathBuf,
     pending: tokio::sync::Mutex<HashMap<String, PendingVerification>>,
@@ -48,6 +49,7 @@ pub struct HostKeyVerifier {
 }
 
 impl HostKeyVerifier {
+    /// 使用指定 known_hosts 文件创建校验器。
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
@@ -125,6 +127,7 @@ impl HostKeyVerifier {
         std::fs::write(&self.path, output).map_err(|e| e.to_string())
     }
 
+    /// 校验服务端主机密钥，必要时等待前端确认或当前连接取消。
     pub async fn check(
         &self,
         app: &tauri::AppHandle,
@@ -132,6 +135,7 @@ impl HostKeyVerifier {
         host: &str,
         port: u16,
         key: &PublicKey,
+        cancellation: &CancellationToken,
     ) -> bool {
         let status = self.verify(host, port, key);
         if status == HostKeyStatus::Match {
@@ -176,8 +180,12 @@ impl HostKeyVerifier {
             self.pending.lock().await.remove(&request_id);
             return false;
         }
-        match tokio::time::timeout(Duration::from_secs(90), receiver).await {
-            Ok(Ok(accepted)) => accepted,
+        let confirmation = tokio::select! {
+            _ = cancellation.cancelled() => None,
+            result = tokio::time::timeout(Duration::from_secs(90), receiver) => Some(result),
+        };
+        match confirmation {
+            Some(Ok(Ok(accepted))) => accepted,
             _ => {
                 self.pending.lock().await.remove(&request_id);
                 false
@@ -185,6 +193,7 @@ impl HostKeyVerifier {
         }
     }
 
+    /// 完成一次仍在等待的主机密钥确认，并按用户选择写入 known_hosts。
     pub async fn confirm(
         &self,
         request_id: &str,

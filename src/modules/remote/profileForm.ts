@@ -22,7 +22,6 @@ export type SshProfileForm = {
   proxySecret: string;
   proxySecretDirty: boolean;
   rememberProxySecret: boolean;
-  keepaliveSeconds: string;
   reconnectEnabled: boolean;
   reconnectMaxAttempts: string;
   rootPath: string;
@@ -34,7 +33,6 @@ export type ProfileValidationIssue =
   | "username"
   | "identityFile"
   | "proxyPassword"
-  | "keepalive"
   | "reconnectAttempts";
 
 export type LaunchSecretIssue = "secret" | "proxy";
@@ -56,7 +54,6 @@ export function emptySshProfileForm(id: string): SshProfileForm {
     proxySecret: "",
     proxySecretDirty: false,
     rememberProxySecret: true,
-    keepaliveSeconds: "30",
     reconnectEnabled: true,
     reconnectMaxAttempts: "2",
     rootPath: "~",
@@ -80,7 +77,6 @@ export function sshProfileFormFrom(profile: SshProfile): SshProfileForm {
     proxySecret: "",
     proxySecretDirty: false,
     rememberProxySecret: true,
-    keepaliveSeconds: String(profile.keepaliveSeconds),
     reconnectEnabled: profile.reconnectEnabled,
     reconnectMaxAttempts: String(profile.reconnectMaxAttempts),
     rootPath: profile.rootPath ?? "~",
@@ -100,7 +96,6 @@ export function sshProfileFromForm(form: SshProfileForm): SshProfile {
     authMethod: form.authMethod,
     identityFile: form.identityFile.trim() || null,
     proxyUrl: form.proxyUrl.trim() || null,
-    keepaliveSeconds: Number(form.keepaliveSeconds),
     reconnectEnabled: form.reconnectEnabled,
     reconnectMaxAttempts: Number(form.reconnectMaxAttempts),
     rootPath: form.rootPath.trim() || "~",
@@ -121,14 +116,6 @@ export function profileValidationIssue(
     return "identityFile";
   }
   if (proxyUrlContainsPassword(form.proxyUrl)) return "proxyPassword";
-  const keepalive = Number(form.keepaliveSeconds);
-  if (
-    !form.keepaliveSeconds.trim() ||
-    !Number.isSafeInteger(keepalive) ||
-    keepalive < 0
-  ) {
-    return "keepalive";
-  }
   const reconnectAttempts = Number(form.reconnectMaxAttempts);
   if (
     !Number.isInteger(reconnectAttempts) ||

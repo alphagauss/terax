@@ -32,9 +32,7 @@
     "connectionStatus": {
       "connecting": "Connecting",
       "connected": "Connected",
-      "reconnecting": "Reconnecting",
-      "disconnected": "Disconnected",
-      "error": "Connection failed"
+      "disconnected": "Disconnected"
     }
   },
   "sshConnection": {

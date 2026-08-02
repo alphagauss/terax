@@ -17,5 +17,9 @@
   "home": "主目录",
   "openFolder": "打开文件夹",
   "openFolderFailed": "无法打开文件夹选择器",
-  "folderPathInvalid": "文件夹路径不可用"
+  "folderPathInvalid": "文件夹路径不可用",
+  "remoteWorkspace": {
+    "connecting": "正在连接远程工作区…",
+    "restoreAfterConnection": "连接就绪后将恢复已保存的文件和终端。"
+  }
 }

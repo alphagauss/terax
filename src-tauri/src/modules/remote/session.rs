@@ -1,10 +1,11 @@
 //! SSH transport、认证、远端环境探测与命令执行。
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
-//! channel。连接关键路径只确认 shell 与 Workspace root，SFTP 保持按需初始化。
+//! channel。本模块确认 shell 与 Workspace root，上层 Runtime 还会在发布连接前验证 SFTP。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use russh::keys::ssh_key::{HashAlg, PublicKey};
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::{ChannelMsg, Disconnect, Sig};
 use tokio::sync::{Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use super::host_key::HostKeyVerifier;
@@ -21,6 +23,7 @@ use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
 
+/// 处理 SSH 客户端事件、主机密钥确认和远端转发请求。
 pub struct ClientHandler {
     pub app: tauri::AppHandle,
     pub profile_id: String,
@@ -28,6 +31,7 @@ pub struct ClientHandler {
     pub port: u16,
     pub host_keys: Arc<HostKeyVerifier>,
     pub(super) remote_forwards: RemoteForwardRegistry,
+    pub cancellation: CancellationToken,
 }
 
 impl Handler for ClientHandler {
@@ -43,7 +47,12 @@ impl Handler for ClientHandler {
         let host = self.host.clone();
         let port = self.port;
         let key = key.clone();
-        async move { Ok(host_keys.check(&app, &profile_id, &host, port, &key).await) }
+        let cancellation = self.cancellation.clone();
+        async move {
+            Ok(host_keys
+                .check(&app, &profile_id, &host, port, &key, &cancellation)
+                .await)
+        }
     }
 
     fn server_channel_open_forwarded_tcpip(
@@ -88,25 +97,28 @@ impl Handler for ClientHandler {
     }
 }
 
+/// 一条已认证 SSH transport 及其可复用凭据和派生 channel 状态。
 pub struct RemoteWorkspace {
     pub profile: SshProfile,
-    pub handle: Arc<Mutex<Handle<ClientHandler>>>,
+    pub handle: Arc<Handle<ClientHandler>>,
     pub(super) remote_forwards: RemoteForwardRegistry,
     pub(crate) sftp: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     home: RwLock<String>,
     login_home: RwLock<String>,
     secret: Zeroizing<String>,
     proxy_secret: Zeroizing<String>,
+    transport_failed: AtomicBool,
 }
 
 impl RemoteWorkspace {
     /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
     ///
-    /// SFTP 在 Explorer 首次读取时按需创建，不属于认证后的连接关键路径。
+    /// SFTP 会话由调用方按需创建，Runtime 建立流程会在发布连接前主动完成首次探测。
     pub async fn connect(
         request: ConnectRequest,
         app: tauri::AppHandle,
         host_keys: Arc<HostKeyVerifier>,
+        cancellation: CancellationToken,
     ) -> Result<Arc<Self>, String> {
         request.profile.validate()?;
         let profile = request.profile;
@@ -120,7 +132,7 @@ impl RemoteWorkspace {
         // Keep russh's real client identifier. Advertising OpenSSH makes an
         // OpenSSH server enable private channel extensions such as
         // eow@openssh.com that russh does not implement.
-        let config = Arc::new(client_config(profile.keepalive_seconds));
+        let config = Arc::new(client_config());
 
         let remote_forwards = RemoteForwardRegistry::default();
         let mut handle = connect_transport(
@@ -130,6 +142,7 @@ impl RemoteWorkspace {
             app.clone(),
             host_keys.clone(),
             remote_forwards.clone(),
+            cancellation.clone(),
         )
         .await?;
 
@@ -153,6 +166,7 @@ impl RemoteWorkspace {
                 app,
                 host_keys,
                 remote_forwards.clone(),
+                cancellation,
             )
             .await?;
             if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
@@ -163,13 +177,14 @@ impl RemoteWorkspace {
         }
         let workspace = Arc::new(Self {
             profile,
-            handle: Arc::new(Mutex::new(handle)),
+            handle: Arc::new(handle),
             remote_forwards,
             sftp: Mutex::new(None),
             home: RwLock::new("/".into()),
             login_home: RwLock::new("/".into()),
             secret,
             proxy_secret,
+            transport_failed: AtomicBool::new(false),
         });
         let detected_home = match detect_linux_bash_home(&workspace).await {
             Ok(home) => home,
@@ -198,6 +213,7 @@ impl RemoteWorkspace {
         Ok(workspace)
     }
 
+    /// 复制保存在内存中的连接参数，供当前生命周期自动重连使用。
     pub fn reconnect_request(&self) -> ConnectRequest {
         ConnectRequest {
             profile: self.profile.clone(),
@@ -206,31 +222,64 @@ impl RemoteWorkspace {
         }
     }
 
+    /// 返回已校验的 Workspace root。
     pub async fn home(&self) -> String {
         self.home.read().await.clone()
     }
 
+    /// 返回远端账户登录 Home。
     pub async fn login_home(&self) -> String {
         self.login_home.read().await.clone()
     }
 
-    pub async fn is_closed(&self) -> bool {
-        self.handle.lock().await.is_closed()
+    /// 判断 transport 是否已被探活永久失效或底层 session 已关闭。
+    pub fn is_closed(&self) -> bool {
+        self.transport_failed.load(Ordering::Acquire) || self.handle.is_closed()
     }
 
-    pub async fn disconnect(&self) {
-        let sftp = self.sftp.lock().await.take();
-        if let Some(sftp) = sftp {
-            let _ = tokio::time::timeout(Duration::from_secs(1), sftp.close()).await;
+    /// 主动验证 SSH transport 能否在截止时间内完成一次往返。
+    ///
+    /// TCP 在本机断网后可能仍保持 established，不能用 socket 或 sender 是否关闭代替
+    /// 可用性判断。ping 超时或 session 关闭会永久使当前 workspace 失效。
+    pub async fn probe_transport(&self, timeout: Duration) -> bool {
+        if self.transport_failed.load(Ordering::Acquire) {
+            return false;
         }
-        let _ = self
-            .handle
-            .lock()
-            .await
-            .disconnect(Disconnect::ByApplication, "Terax workspace closed", "en")
-            .await;
+        let healthy = tokio::time::timeout(timeout, async {
+            !self.handle.is_closed()
+                && self.handle.send_ping().await.is_ok()
+                && !self.handle.is_closed()
+        })
+        .await
+        .unwrap_or(false);
+        if !healthy {
+            self.mark_transport_failed();
+        }
+        healthy
     }
 
+    /// 将探活已确认失效或正在显式关闭的 transport 标记为不可继续复用。
+    fn mark_transport_failed(&self) {
+        self.transport_failed.store(true, Ordering::Release);
+    }
+
+    /// 在固定截止时间内尽力关闭旧 transport，不允许失效连接阻塞新 epoch。
+    pub async fn disconnect(&self) {
+        self.mark_transport_failed();
+        let _ = tokio::time::timeout(Duration::from_secs(1), async {
+            let sftp = self.sftp.lock().await.take();
+            if let Some(sftp) = sftp {
+                let _ = sftp.close().await;
+            }
+            let _ = self
+                .handle
+                .disconnect(Disconnect::ByApplication, "Terax workspace closed", "en")
+                .await;
+        })
+        .await;
+    }
+
+    /// 打开独立 channel 执行命令，并限制运行时间和输出大小。
     pub async fn exec(
         &self,
         command: &str,
@@ -244,17 +293,15 @@ impl RemoteWorkspace {
             Some(cwd) => format!("cd -- {} && {command}", shell_quote(cwd)),
             None => command.to_string(),
         };
-        let mut channel = {
-            let handle = self.handle.lock().await;
-            handle
-                .channel_open_session()
-                .await
-                .map_err(|e| format!("open SSH exec channel: {e}"))?
-        };
+        let mut channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|error| format!("open SSH exec channel: {error}"))?;
         channel
             .exec(true, command.into_bytes())
             .await
-            .map_err(|e| format!("start remote command: {e}"))?;
+            .map_err(|error| format!("start remote command: {error}"))?;
 
         let run = async {
             let mut output = ExecOutput::default();
@@ -292,10 +339,8 @@ impl RemoteWorkspace {
     }
 }
 
-fn client_config(keepalive_seconds: u64) -> client::Config {
+fn client_config() -> client::Config {
     client::Config {
-        keepalive_interval: (keepalive_seconds > 0).then(|| Duration::from_secs(keepalive_seconds)),
-        keepalive_max: 3,
         nodelay: true,
         ..Default::default()
     }
@@ -308,6 +353,7 @@ async fn connect_transport(
     app: tauri::AppHandle,
     host_keys: Arc<HostKeyVerifier>,
     remote_forwards: RemoteForwardRegistry,
+    cancellation: CancellationToken,
 ) -> Result<Handle<ClientHandler>, String> {
     let handler = ClientHandler {
         app,
@@ -316,6 +362,7 @@ async fn connect_transport(
         port: profile.port,
         host_keys,
         remote_forwards,
+        cancellation,
     };
     let stream = tokio::time::timeout(
         Duration::from_secs(15),
@@ -416,6 +463,7 @@ fn parse_workspace_root(output: ExecOutput) -> Result<String, String> {
 }
 
 #[derive(Default, Debug)]
+/// 一次远端命令执行的有界输出。
 pub struct ExecOutput {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
@@ -683,9 +731,11 @@ mod path_tests {
 
     #[test]
     fn client_banner_does_not_impersonate_openssh() {
-        let banner = format!("{:?}", client_config(30).client_id);
+        let config = client_config();
+        let banner = format!("{:?}", config.client_id);
         assert!(!banner.contains("OpenSSH"), "unexpected banner: {banner}");
         assert!(banner.contains("russh"), "unexpected banner: {banner}");
+        assert_eq!(config.keepalive_interval, None);
     }
 
     #[test]

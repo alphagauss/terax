@@ -2,6 +2,7 @@
   "noCurrentDirectory": "No current directory",
   "files": "Files",
   "loading": "Loading…",
+  "waitingForConnection": "Waiting for remote connection…",
   "searchFiles": "Search files",
   "newFile": "New file",
   "newFolder": "New folder",

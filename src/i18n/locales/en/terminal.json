@@ -25,5 +25,11 @@
     "copy": "Copy",
     "paste": "Paste"
   },
+  "runtime": {
+    "shellStartFailed": "failed to start shell: {{detail}}",
+    "pressEnterToRetry": "press Enter to retry",
+    "connectionClosed": "SSH connection closed",
+    "waitingForReconnect": "waiting for workspace reconnect"
+  },
   "dropFilePathHere": "Drop file path here"
 }

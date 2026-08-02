@@ -17,9 +17,10 @@ import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
-  remoteNative,
   SshConnectionDialog,
+  useRemoteRuntimeStore,
   useRemoteStore,
+  type SshCredentialInput,
 } from "@/modules/remote";
 import { groupSshProfiles } from "@/modules/remote/groups";
 import {
@@ -34,13 +35,16 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   onSelect: (env: WorkspaceEnv) => void;
   connectionError?: string | null;
-  onCurrentConnected?: () => Promise<string | null>;
+  onCurrentConnected: () => Promise<string | null>;
+  onCurrentReconnect: (
+    credentials?: SshCredentialInput,
+  ) => Promise<string | null>;
 };
 
 const COMPACT_MENU_CONTENT = "min-w-52 rounded-xl p-1";
@@ -56,6 +60,7 @@ export function WorkspaceEnvSelector({
   onSelect,
   connectionError = null,
   onCurrentConnected,
+  onCurrentReconnect,
 }: Props) {
   const { t } = useTranslation("statusbar");
   const env = useWorkspaceEnvStore((state) => state.env);
@@ -65,10 +70,9 @@ export function WorkspaceEnvSelector({
   const refreshDistros = useWorkspaceEnvStore((state) => state.refreshDistros);
   const profiles = useRemoteStore((state) => state.profiles);
   const groups = useRemoteStore((state) => state.groups);
-  const statuses = useRemoteStore((state) => state.statuses);
   const loadProfiles = useRemoteStore((state) => state.load);
+  const runtime = useRemoteRuntimeStore((state) => state.snapshot);
   const [connectionOpen, setConnectionOpen] = useState(false);
-  const promptedError = useRef<string | null>(null);
 
   useEffect(() => {
     void loadProfiles();
@@ -81,30 +85,16 @@ export function WorkspaceEnvSelector({
         : undefined,
     [env, profiles],
   );
-  const activeStatus =
-    env.kind === "ssh" ? statuses[env.profileId]?.status : undefined;
-  // 重试开始后优先展示实时进度，避免旧初始化错误把黄灯继续覆盖成红灯。
   const connectionStatus =
-    activeStatus === "connecting" || activeStatus === "reconnecting"
-      ? activeStatus
-      : connectionError
-        ? "error"
-        : (activeStatus ?? "disconnected");
+    env.kind === "ssh" &&
+    runtime.phase !== "idle" &&
+    runtime.profileId === env.profileId
+      ? runtime.phase
+      : "disconnected";
   const groupedProfiles = useMemo(
     () => groupSshProfiles(groups, profiles),
     [groups, profiles],
   );
-
-  useEffect(() => {
-    if (env.kind !== "ssh" || !activeProfile || !connectionError) {
-      if (!connectionError) promptedError.current = null;
-      return;
-    }
-    const fingerprint = `${env.profileId}:${connectionError}`;
-    if (promptedError.current === fingerprint) return;
-    promptedError.current = fingerprint;
-    setConnectionOpen(true);
-  }, [activeProfile, connectionError, env]);
 
   useEffect(() => {
     if (env.kind !== "ssh") setConnectionOpen(false);
@@ -128,15 +118,19 @@ export function WorkspaceEnvSelector({
           : t("workspace.local");
   const triggerTitle =
     env.kind === "ssh"
-      ? `${label}: ${t(`workspace.connectionStatus.${connectionStatus}`)}`
+      ? [
+          `${label}: ${t(`workspace.connectionStatus.${connectionStatus}`)}`,
+          connectionError,
+        ]
+          .filter(Boolean)
+          .join("\n")
       : t("workspace.environment");
 
   const reconnectCurrent = () => {
     if (env.kind !== "ssh") return;
-    void remoteNative
-      .reconnect(env.profileId)
-      .then(async () => {
-        if (!(await onCurrentConnected?.())) setConnectionOpen(true);
+    void onCurrentReconnect()
+      .then((home) => {
+        if (!home) setConnectionOpen(true);
       })
       .catch(() => setConnectionOpen(true));
   };
@@ -161,9 +155,7 @@ export function WorkspaceEnvSelector({
                   className={cn(
                     "size-1.5 rounded-full",
                     connectionStatus === "connected" && "bg-emerald-500",
-                    connectionStatus === "error" && "bg-destructive",
-                    (connectionStatus === "connecting" ||
-                      connectionStatus === "reconnecting") &&
+                    connectionStatus === "connecting" &&
                       "animate-pulse bg-amber-500 motion-reduce:animate-none",
                     connectionStatus === "disconnected" &&
                       "bg-muted-foreground/50",
@@ -283,14 +275,10 @@ export function WorkspaceEnvSelector({
               {t("workspace.reconnectCurrentSsh")}
             </DropdownMenuItem>
           ) : null}
-          {connectionError ? (
+          {connectionError && env.kind !== "ssh" ? (
             <DropdownMenuItem
               onSelect={() => {
-                if (env.kind === "ssh") {
-                  setConnectionOpen(true);
-                  return;
-                }
-                void onCurrentConnected?.();
+                void onCurrentConnected();
               }}
               className={COMPACT_MENU_ITEM}
             >
@@ -320,7 +308,7 @@ export function WorkspaceEnvSelector({
         open={connectionOpen}
         onOpenChange={setConnectionOpen}
         profileId={env.kind === "ssh" ? env.profileId : null}
-        onConnected={async () => (await onCurrentConnected?.()) ?? null}
+        onConnect={onCurrentReconnect}
       />
     </>
   );

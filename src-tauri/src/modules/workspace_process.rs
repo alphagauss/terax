@@ -584,8 +584,23 @@ impl WorkspaceProcessState {
         &self.bootstrap
     }
 
+    /// 确认 SSH Runtime 请求属于当前进程启动时绑定的不可变环境。
+    pub fn assert_ssh_runtime_owner(&self, profile_id: &str) -> Result<(), String> {
+        assert_ssh_runtime_owner(&self.bootstrap.env, profile_id)
+    }
+
     pub fn assert_ssh_tunnel_owner(&self, profile_id: &str) -> Result<(), String> {
         assert_ssh_tunnel_owner(self.bootstrap.is_primary, &self.bootstrap.env, profile_id)
+    }
+}
+
+fn assert_ssh_runtime_owner(environment: &WorkspaceEnv, profile_id: &str) -> Result<(), String> {
+    match environment {
+        WorkspaceEnv::Ssh {
+            profile_id: active_profile,
+        } if active_profile == profile_id => Ok(()),
+        WorkspaceEnv::Ssh { .. } => Err("SSH profile does not match this Workspace".into()),
+        _ => Err("SSH connection requires an SSH Workspace".into()),
     }
 }
 
@@ -841,6 +856,16 @@ mod tests {
         assert!(assert_ssh_tunnel_owner(false, &ssh, "prod").is_err());
         assert!(assert_ssh_tunnel_owner(true, &ssh, "staging").is_err());
         assert!(assert_ssh_tunnel_owner(true, &WorkspaceEnv::Local, "prod").is_err());
+    }
+
+    #[test]
+    fn only_the_matching_ssh_workspace_owns_its_runtime() {
+        let ssh = WorkspaceEnv::Ssh {
+            profile_id: "prod".to_string(),
+        };
+        assert!(assert_ssh_runtime_owner(&ssh, "prod").is_ok());
+        assert!(assert_ssh_runtime_owner(&ssh, "staging").is_err());
+        assert!(assert_ssh_runtime_owner(&WorkspaceEnv::Local, "prod").is_err());
     }
 
     #[test]

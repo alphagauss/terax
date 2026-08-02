@@ -20,7 +20,6 @@ function profile(id: string, name: string, groupId: string): SshProfile {
     port: 22,
     username: "deploy",
     authMethod: "agent",
-    keepaliveSeconds: 30,
     reconnectEnabled: true,
     reconnectMaxAttempts: 5,
     tunnels: [],

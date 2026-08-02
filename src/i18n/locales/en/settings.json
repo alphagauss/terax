@@ -447,7 +447,6 @@
       "password": "Password",
       "passphrase": "Passphrase",
       "rootPath": "Workspace root",
-      "keepalive": "Keepalive (seconds)",
       "proxyUrl": "Proxy URL (SOCKS5, HTTP, HTTPS)",
       "proxyPassword": "Proxy password",
       "reconnect": "Reconnect automatically",
@@ -505,7 +504,6 @@
       "username": "Username is required.",
       "identityFile": "An identity file is required for private-key authentication.",
       "proxyPassword": "Move the proxy password to the secure password field.",
-      "keepalive": "Keepalive must be a whole number of seconds greater than or equal to 0.",
       "reconnectAttempts": "Reconnect attempts must be a whole number from 1 to 20."
     },
     "launch": {

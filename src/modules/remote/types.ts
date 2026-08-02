@@ -20,11 +20,15 @@ export type SshProfile = {
   authMethod: SshAuthMethod;
   identityFile?: string | null;
   proxyUrl?: string | null;
-  keepaliveSeconds: number;
   reconnectEnabled: boolean;
   reconnectMaxAttempts: number;
   rootPath?: string | null;
   tunnels: SshTunnel[];
+};
+
+export type SshCredentialInput = {
+  secret: string | null;
+  proxySecret: string | null;
 };
 
 export type SshTunnel = {
@@ -38,19 +42,27 @@ export type SshTunnel = {
   targetPort: number;
 };
 
-export type ConnectionStatus =
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "disconnected"
-  | "error";
-
-export type ConnectionInfo = {
-  profileId: string;
-  status: ConnectionStatus;
-  home?: string | null;
-  message?: string | null;
-};
+export type RemoteRuntimeSnapshot =
+  | { phase: "idle"; version: number }
+  | {
+      phase: "connecting";
+      version: number;
+      profileId: string;
+      attempt: number;
+    }
+  | {
+      phase: "connected";
+      version: number;
+      epoch: number;
+      profileId: string;
+      home: string;
+    }
+  | {
+      phase: "disconnected";
+      version: number;
+      profileId: string;
+      reason: string;
+    };
 
 export type HostKeyPrompt = {
   requestId: string;

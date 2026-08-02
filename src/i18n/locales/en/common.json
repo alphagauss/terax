@@ -17,5 +17,9 @@
   "home": "Home",
   "openFolder": "Open Folder",
   "openFolderFailed": "Could not open folder picker",
-  "folderPathInvalid": "The folder path is unavailable"
+  "folderPathInvalid": "The folder path is unavailable",
+  "remoteWorkspace": {
+    "connecting": "Connecting to remote workspace…",
+    "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready."
+  }
 }

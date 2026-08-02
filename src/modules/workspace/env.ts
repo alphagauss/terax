@@ -1,3 +1,8 @@
+/**
+ * 本文件定义应用进程绑定的 Workspace 环境及其前端状态。
+ * 环境在进程启动后不可切换，系统能力统一通过 Tauri command 访问。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 
@@ -68,8 +73,4 @@ export function currentWorkspaceScopeKey(): string {
 
 export async function getWslHome(distro: string): Promise<string> {
   return invoke<string>("wsl_home", { distro });
-}
-
-export async function getSshHome(profileId: string): Promise<string> {
-  return invoke<string>("ssh_home", { profileId });
 }

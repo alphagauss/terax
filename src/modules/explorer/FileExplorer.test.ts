@@ -15,11 +15,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   environmentKind: "local",
   rootStatus: "loaded",
+  remoteReady: true,
 }));
 
 afterEach(() => {
   mocks.environmentKind = "local";
   mocks.rootStatus = "loaded";
+  mocks.remoteReady = true;
 });
 
 vi.mock("@/components/ui/button", () => ({
@@ -150,6 +152,7 @@ vi.mock("./lib/useFileTree", () => ({
       "/home/remote": { status: mocks.rootStatus, entries: [] },
     },
     pendingCreate: null,
+    remoteReady: mocks.remoteReady,
     refresh: vi.fn(),
     renaming: null,
     toggle: vi.fn(),
@@ -264,11 +267,52 @@ describe("file opening render path", () => {
     expect(container.textContent).not.toContain("spinner");
 
     act(() =>
-      root.render(createElement(FileExplorer, { ...props, rootPending: true })),
+      root.render(
+        createElement(FileExplorer, { ...props, rootPending: "loading" }),
+      ),
     );
     expect(container.textContent).toContain("spinner");
     expect(container.textContent).toContain("loading");
     expect(container.textContent).not.toContain("noCurrentDirectory");
+    act(() => root.unmount());
+  });
+
+  it("explains that a saved remote tree is waiting for its connection", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: null,
+          rootPending: "connection",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("waitingForConnection");
+    expect(container.textContent).not.toContain("noCurrentDirectory");
+    act(() => root.unmount());
+  });
+
+  it("replaces a stale remote tree with a connection wait state", () => {
+    mocks.environmentKind = "ssh";
+    mocks.remoteReady = false;
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("waitingForConnection");
+    expect(container.textContent).not.toContain("remote");
     act(() => root.unmount());
   });
 

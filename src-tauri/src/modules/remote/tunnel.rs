@@ -191,6 +191,7 @@ impl TunnelFailure {
 }
 
 struct TunnelRuntime {
+    epoch: u64,
     info: TunnelInfo,
     config: TunnelConfig,
     bytes: Arc<AtomicU64>,
@@ -198,13 +199,16 @@ struct TunnelRuntime {
     task: Option<JoinHandle<()>>,
 }
 
+/// 按 Runtime epoch 管理当前进程内的所有隧道资源。
 pub(super) struct TunnelManager {
     next_id: AtomicU64,
     tunnels: RwLock<HashMap<u64, TunnelRuntime>>,
     operation_lock: AsyncMutex<()>,
+    active_epochs: Mutex<HashMap<String, u64>>,
 }
 
-pub(super) struct ProfileTunnelRestart {
+/// 一次 profile 隧道恢复产生的停止项和逐项启动结果。
+pub(super) struct ProfileTunnelStart {
     pub(super) stopped: Vec<TunnelInfo>,
     pub(super) started: Vec<Result<TunnelInfo, TunnelFailure>>,
 }
@@ -215,20 +219,30 @@ impl Default for TunnelManager {
             next_id: AtomicU64::new(1),
             tunnels: RwLock::new(HashMap::new()),
             operation_lock: AsyncMutex::new(()),
+            active_epochs: Mutex::new(HashMap::new()),
         }
     }
 }
 
 impl TunnelManager {
+    /// 在当前活动 epoch 上启动一条手动隧道。
     pub(super) async fn start(
         &self,
         workspace: Arc<RemoteWorkspace>,
         config: TunnelConfig,
+        epoch: u64,
     ) -> Result<TunnelInfo, TunnelFailure> {
         validate(&config).map_err(|message| TunnelFailure::new(None, message))?;
         let _operation = self.operation_lock.lock().await;
+        if !self.epoch_is_active(&config.profile_id, epoch) {
+            return Err(TunnelFailure::new(
+                None,
+                "SSH Runtime epoch is no longer active",
+            ));
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.start_with_id_unlocked(id, workspace, config).await
+        self.start_with_id_unlocked(id, workspace, config, epoch)
+            .await
     }
 
     async fn start_with_id_unlocked(
@@ -236,6 +250,7 @@ impl TunnelManager {
         id: u64,
         workspace: Arc<RemoteWorkspace>,
         config: TunnelConfig,
+        epoch: u64,
     ) -> Result<TunnelInfo, TunnelFailure> {
         let bytes = Arc::new(AtomicU64::new(0));
         let connections = TunnelConnections::default();
@@ -278,17 +293,15 @@ impl TunnelManager {
                             let target_host = target_host.clone();
                             let bytes = bytes.clone();
                             connections.spawn(async move {
-                                let channel = {
-                                    let handle = workspace.handle.lock().await;
-                                    handle
-                                        .channel_open_direct_tcpip(
-                                            target_host,
-                                            target_port as u32,
-                                            peer.ip().to_string(),
-                                            peer.port() as u32,
-                                        )
-                                        .await
-                                };
+                                let channel = workspace
+                                    .handle
+                                    .channel_open_direct_tcpip(
+                                        target_host,
+                                        target_port as u32,
+                                        peer.ip().to_string(),
+                                        peer.port() as u32,
+                                    )
+                                    .await;
                                 if let Ok(channel) = channel {
                                     let mut remote = channel.into_stream();
                                     let _ = copy_bidirectional_counted(
@@ -327,8 +340,8 @@ impl TunnelManager {
                 }
                 TunnelKind::Remote => {
                     let actual = {
-                        let handle = workspace.handle.lock().await;
-                        let port = handle
+                        let port = workspace
+                            .handle
                             .tcpip_forward(info.bind_host.clone(), info.bind_port as u32)
                             .await
                             .map_err(|e| format!("start remote forward: {e}"))?;
@@ -339,7 +352,8 @@ impl TunnelManager {
                                     let message = format!(
                                         "server returned invalid remote-forward port {port}"
                                     );
-                                    if let Err(error) = handle
+                                    if let Err(error) = workspace
+                                        .handle
                                         .cancel_tcpip_forward(info.bind_host.clone(), port)
                                         .await
                                     {
@@ -374,35 +388,38 @@ impl TunnelManager {
             Err(message) => {
                 info.status = TunnelStatus::Failed;
                 info.error = Some(message.clone());
-                self.insert_runtime(id, info.clone(), config, bytes, connections, None)
-                    .await;
+                self.insert_runtime(
+                    id,
+                    TunnelRuntime {
+                        epoch,
+                        info: info.clone(),
+                        config,
+                        bytes,
+                        connections,
+                        task: None,
+                    },
+                )
+                .await;
                 return Err(TunnelFailure::new(Some(info), message));
             }
         };
-        self.insert_runtime(id, info.clone(), config, bytes, connections, task)
-            .await;
-        Ok(info)
-    }
-
-    async fn insert_runtime(
-        &self,
-        id: u64,
-        info: TunnelInfo,
-        config: TunnelConfig,
-        bytes: Arc<AtomicU64>,
-        connections: TunnelConnections,
-        task: Option<JoinHandle<()>>,
-    ) {
-        self.tunnels.write().await.insert(
+        self.insert_runtime(
             id,
             TunnelRuntime {
-                info,
+                epoch,
+                info: info.clone(),
                 config,
                 bytes,
                 connections,
                 task,
             },
-        );
+        )
+        .await;
+        Ok(info)
+    }
+
+    async fn insert_runtime(&self, id: u64, runtime: TunnelRuntime) {
+        self.tunnels.write().await.insert(id, runtime);
     }
 
     pub(super) async fn stop(
@@ -426,16 +443,11 @@ impl TunnelManager {
 
         if current.kind == TunnelKind::Remote && current.status == TunnelStatus::Active {
             if let Some(workspace) = workspace.as_ref() {
-                if !workspace.is_closed().await {
-                    let result = {
-                        let handle = workspace.handle.lock().await;
-                        handle
-                            .cancel_tcpip_forward(
-                                current.bind_host.clone(),
-                                current.bind_port as u32,
-                            )
-                            .await
-                    };
+                if !workspace.is_closed() {
+                    let result = workspace
+                        .handle
+                        .cancel_tcpip_forward(current.bind_host.clone(), current.bind_port as u32)
+                        .await;
                     if let Err(error) = result {
                         let message = format!("stop remote forward: {error}");
                         if require_remote_cancel {
@@ -492,25 +504,6 @@ impl TunnelManager {
         result
     }
 
-    #[cfg(test)]
-    async fn active_configs(&self, profile_id: &str) -> Vec<TunnelConfig> {
-        let _operation = self.operation_lock.lock().await;
-        self.active_configs_unlocked(profile_id).await
-    }
-
-    #[cfg(test)]
-    async fn active_configs_unlocked(&self, profile_id: &str) -> Vec<TunnelConfig> {
-        self.tunnels
-            .read()
-            .await
-            .values()
-            .filter(|runtime| {
-                runtime.info.profile_id == profile_id && runtime.info.status == TunnelStatus::Active
-            })
-            .map(|runtime| runtime.config.clone())
-            .collect()
-    }
-
     pub(super) async fn info(&self, id: u64) -> Option<TunnelInfo> {
         let _operation = self.operation_lock.lock().await;
         self.info_unlocked(id).await
@@ -525,6 +518,7 @@ impl TunnelManager {
         id: u64,
         workspace: Arc<RemoteWorkspace>,
         config: TunnelConfig,
+        epoch: u64,
     ) -> Result<TunnelInfo, TunnelFailure> {
         let _operation = self.operation_lock.lock().await;
         let (previous, current) = {
@@ -535,6 +529,12 @@ impl TunnelManager {
             (runtime.config.clone(), runtime_info(runtime))
         };
         validate(&config).map_err(|message| TunnelFailure::new(Some(current.clone()), message))?;
+        if !self.epoch_is_active(&config.profile_id, epoch) {
+            return Err(TunnelFailure::new(
+                Some(current),
+                "SSH Runtime epoch is no longer active",
+            ));
+        }
         if previous.profile_id != config.profile_id {
             return Err(TunnelFailure::new(
                 Some(current),
@@ -545,6 +545,7 @@ impl TunnelManager {
             manager: self,
             workspace,
             id,
+            epoch,
         };
         replace_with_rollback(&mut operations, previous, config).await
     }
@@ -585,7 +586,7 @@ impl TunnelManager {
     ///
     /// 本地和动态隧道必须停止监听，避免继续占用端口并接受无法转发的连接。
     /// 运行时记录会保留为失败状态，供前端在重连成功前准确显示；已有失败项保持
-    /// 原因不变，后续重连会通过 `restart_profile` 统一清理并重建。
+    /// 原因不变，新 Runtime 会先清理旧资源，再从持久化配置重新建立隧道。
     pub(super) async fn fail_profile(
         &self,
         profile_id: &str,
@@ -641,41 +642,72 @@ impl TunnelManager {
         &self,
         workspace: Arc<RemoteWorkspace>,
         configs: Vec<TunnelConfig>,
-    ) -> ProfileTunnelRestart {
+        epoch: u64,
+    ) -> ProfileTunnelStart {
         let _operation = self.operation_lock.lock().await;
+        let profile_id = workspace.profile.id.clone();
+        if !self.epoch_is_active(&profile_id, epoch) {
+            return ProfileTunnelStart {
+                stopped: Vec::new(),
+                started: Vec::new(),
+            };
+        }
+        let stopped = self
+            .stop_profile_unlocked(&profile_id, workspace.clone())
+            .await;
         let mut started = Vec::with_capacity(configs.len());
         for config in configs {
             let id = self.next_id.fetch_add(1, Ordering::Relaxed);
             started.push(
-                self.start_with_id_unlocked(id, workspace.clone(), config)
+                self.start_with_id_unlocked(id, workspace.clone(), config, epoch)
                     .await,
             );
         }
-        ProfileTunnelRestart {
-            stopped: Vec::new(),
-            started,
+        ProfileTunnelStart { stopped, started }
+    }
+
+    /// 将持久化隧道的启动权限切换到最新连接代际。
+    pub(super) fn activate_profile_epoch(&self, profile_id: &str, epoch: u64) {
+        self.active_epochs
+            .lock()
+            .expect("SSH tunnel epoch lock poisoned")
+            .insert(profile_id.to_string(), epoch);
+    }
+
+    /// 在 transport 离线时撤销对应代际的隧道启动权限。
+    pub(super) fn deactivate_profile_epoch(&self, profile_id: &str, epoch: Option<u64>) {
+        let mut active = self
+            .active_epochs
+            .lock()
+            .expect("SSH tunnel epoch lock poisoned");
+        if epoch.is_none() || active.get(profile_id).copied() == epoch {
+            active.remove(profile_id);
         }
     }
 
-    /// 用最新持久化配置替换某个 profile 的全部运行时隧道。
-    pub(super) async fn restart_profile(
-        &self,
-        profile_id: &str,
-        previous: Arc<RemoteWorkspace>,
-        replacement: Arc<RemoteWorkspace>,
-        configs: Vec<TunnelConfig>,
-    ) -> ProfileTunnelRestart {
+    fn epoch_is_active(&self, profile_id: &str, epoch: u64) -> bool {
+        self.active_epochs
+            .lock()
+            .expect("SSH tunnel epoch lock poisoned")
+            .get(profile_id)
+            .is_some_and(|active| *active == epoch)
+    }
+
+    /// 清理迟到启动任务写入的指定连接代际资源，不影响更新 epoch 的隧道。
+    pub(super) async fn stop_epoch(&self, epoch: u64, workspace: Arc<RemoteWorkspace>) {
         let _operation = self.operation_lock.lock().await;
-        let stopped = self.stop_profile_unlocked(profile_id, previous).await;
-        let mut started = Vec::with_capacity(configs.len());
-        for config in configs {
-            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-            started.push(
-                self.start_with_id_unlocked(id, replacement.clone(), config)
-                    .await,
-            );
+        let ids: Vec<u64> = self
+            .tunnels
+            .read()
+            .await
+            .iter()
+            .filter_map(|(id, runtime)| (runtime.epoch == epoch).then_some(*id))
+            .collect();
+        for id in ids {
+            if let Err(error) = self.stop_unlocked(id, Some(workspace.clone()), false).await {
+                log::warn!("failed to clean up stale SSH tunnel: {}", error.message);
+            }
         }
-        ProfileTunnelRestart { stopped, started }
     }
 }
 
@@ -697,6 +729,7 @@ struct ManagerReplaceOperations<'a> {
     manager: &'a TunnelManager,
     workspace: Arc<RemoteWorkspace>,
     id: u64,
+    epoch: u64,
 }
 
 impl ReplaceOperations for ManagerReplaceOperations<'_> {
@@ -711,7 +744,7 @@ impl ReplaceOperations for ManagerReplaceOperations<'_> {
 
     async fn start(&mut self, config: TunnelConfig) -> Result<TunnelInfo, TunnelFailure> {
         self.manager
-            .start_with_id_unlocked(self.id, self.workspace.clone(), config)
+            .start_with_id_unlocked(self.id, self.workspace.clone(), config, self.epoch)
             .await
     }
 }
@@ -858,13 +891,11 @@ async fn socks5_serve(
         .await
         .map_err(|e| e.to_string())?;
     let port = u16::from_be_bytes(port);
-    let channel = {
-        let handle = workspace.handle.lock().await;
-        handle
-            .channel_open_direct_tcpip(host, port as u32, peer.ip().to_string(), peer.port() as u32)
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    let channel = workspace
+        .handle
+        .channel_open_direct_tcpip(host, port as u32, peer.ip().to_string(), peer.port() as u32)
+        .await
+        .map_err(|e| e.to_string())?;
     inbound
         .write_all(&socks_reply(0))
         .await
@@ -919,6 +950,19 @@ mod tests {
         assert!(validate(&tunnel).is_ok());
     }
 
+    #[test]
+    fn only_the_active_runtime_epoch_may_start_profile_tunnels() {
+        let manager = TunnelManager::default();
+        manager.activate_profile_epoch("ssh-prod", 8);
+
+        assert!(manager.epoch_is_active("ssh-prod", 8));
+        assert!(!manager.epoch_is_active("ssh-prod", 7));
+        manager.deactivate_profile_epoch("ssh-prod", Some(7));
+        assert!(manager.epoch_is_active("ssh-prod", 8));
+        manager.deactivate_profile_epoch("ssh-prod", Some(8));
+        assert!(!manager.epoch_is_active("ssh-prod", 8));
+    }
+
     fn info(id: u64, config: &TunnelConfig, status: TunnelStatus) -> TunnelInfo {
         TunnelInfo {
             id,
@@ -934,6 +978,17 @@ mod tests {
             target_port: config.target_port,
             bytes: 0,
             error: None,
+        }
+    }
+
+    fn runtime(epoch: u64, info: TunnelInfo, config: TunnelConfig) -> TunnelRuntime {
+        TunnelRuntime {
+            epoch,
+            info,
+            config,
+            bytes: Arc::new(AtomicU64::new(0)),
+            connections: TunnelConnections::default(),
+            task: None,
         }
     }
 
@@ -1080,38 +1135,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_tunnels_remain_visible_but_are_not_restored_on_reconnect() {
-        let manager = TunnelManager::default();
-        let active = config(TunnelKind::Local);
-        let mut failed = active.clone();
-        failed.name = "failed".into();
-        failed.bind_port = 3001;
-        manager
-            .insert_runtime(
-                1,
-                info(1, &active, TunnelStatus::Active),
-                active.clone(),
-                Arc::new(AtomicU64::new(0)),
-                TunnelConnections::default(),
-                None,
-            )
-            .await;
-        manager
-            .insert_runtime(
-                2,
-                info(2, &failed, TunnelStatus::Failed),
-                failed,
-                Arc::new(AtomicU64::new(0)),
-                TunnelConnections::default(),
-                None,
-            )
-            .await;
-
-        assert_eq!(manager.list("ssh-prod").await.len(), 2);
-        assert_eq!(manager.active_configs("ssh-prod").await, vec![active]);
-    }
-
-    #[tokio::test]
     async fn closed_ssh_transport_marks_active_tunnels_failed_and_preserves_existing_failures() {
         let manager = TunnelManager::default();
         let active = config(TunnelKind::Local);
@@ -1121,24 +1144,13 @@ mod tests {
         manager
             .insert_runtime(
                 1,
-                info(1, &active, TunnelStatus::Active),
-                active,
-                Arc::new(AtomicU64::new(0)),
-                TunnelConnections::default(),
-                None,
+                runtime(4, info(1, &active, TunnelStatus::Active), active),
             )
             .await;
         let mut failed_info = info(2, &already_failed, TunnelStatus::Failed);
         failed_info.error = Some("port is already in use".into());
         manager
-            .insert_runtime(
-                2,
-                failed_info,
-                already_failed,
-                Arc::new(AtomicU64::new(0)),
-                TunnelConnections::default(),
-                None,
-            )
+            .insert_runtime(2, runtime(4, failed_info, already_failed))
             .await;
 
         let failed = manager
@@ -1195,11 +1207,7 @@ mod tests {
         manager
             .insert_runtime(
                 1,
-                info(1, &active, TunnelStatus::Active),
-                active,
-                Arc::new(AtomicU64::new(0)),
-                TunnelConnections::default(),
-                None,
+                runtime(4, info(1, &active, TunnelStatus::Active), active),
             )
             .await;
         let operation = manager.operation_lock.lock().await;

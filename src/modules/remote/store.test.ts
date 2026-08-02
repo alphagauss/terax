@@ -1,18 +1,15 @@
 /**
  * 本文件测试 SSH 配置 store 的跨键持久化与冷启动读取规则。
- * 锁定原子分组变更、并发加载复用，以及状态查询完成前不得提前返回。
+ * 锁定原子分组变更、并发加载复用，以及配置与 Runtime 状态的职责分离。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConnectionInfo, SshProfile } from "./types";
+import type { SshProfile } from "./types";
 
 const mocks = vi.hoisted(() => ({
   mutateSharedStore: vi.fn(async () => {}),
   readSharedStore: vi.fn(async () => ({})),
-  status: vi.fn(async (profileId: string) => ({
-    profileId,
-    status: "disconnected",
-  })),
+  runtimeSnapshot: vi.fn(async () => ({ phase: "idle", version: 0 })),
 }));
 
 vi.mock("@/lib/sharedStore", () => ({
@@ -26,8 +23,8 @@ vi.mock("@/lib/sharedStore", () => ({
 vi.mock("./native", () => ({
   remoteNative: {
     deleteSecrets: vi.fn(async () => {}),
-    disconnect: vi.fn(async () => {}),
-    status: mocks.status,
+    disconnectRuntime: vi.fn(async () => {}),
+    runtimeSnapshot: mocks.runtimeSnapshot,
   },
 }));
 
@@ -43,7 +40,6 @@ function profile(id: string, groupId: string): SshProfile {
     port: 22,
     username: "deploy",
     authMethod: "agent",
-    keepaliveSeconds: 30,
     reconnectEnabled: true,
     reconnectMaxAttempts: 5,
     tunnels: [],
@@ -56,7 +52,6 @@ describe("SSH remote store", () => {
     useRemoteStore.setState({
       groups: [{ id: "prod", name: "Production" }],
       profiles: [profile("web", "prod"), profile("home", DEFAULT_SSH_GROUP_ID)],
-      statuses: {},
       loaded: true,
     });
   });
@@ -85,7 +80,6 @@ describe("SSH remote store", () => {
     useRemoteStore.setState({
       groups: [],
       profiles: [],
-      statuses: {},
       loaded: false,
     });
 
@@ -108,56 +102,18 @@ describe("SSH remote store", () => {
     useRemoteStore.setState({
       groups: [],
       profiles: [],
-      statuses: {},
       loaded: false,
     });
 
     await useRemoteStore.getState().load();
 
-    expect(useRemoteStore.getState().profiles[0]?.reconnectMaxAttempts).toBe(
-      2,
-    );
-  });
-
-  it("waits for the in-flight status snapshot even after profiles are loaded", async () => {
-    let resolveStatus: ((status: ConnectionInfo) => void) | undefined;
-    mocks.readSharedStore.mockResolvedValueOnce({
-      "profile:web": profile("web", DEFAULT_SSH_GROUP_ID),
-    });
-    mocks.status.mockImplementationOnce(
-      (profileId: string) =>
-        new Promise((resolve) => {
-          expect(profileId).toBe("web");
-          resolveStatus = resolve;
-        }),
-    );
-    useRemoteStore.setState({
-      groups: [],
-      profiles: [],
-      statuses: {},
-      loaded: false,
-    });
-
-    const first = useRemoteStore.getState().load();
-    await vi.waitFor(() => expect(resolveStatus).toBeTypeOf("function"));
-    const second = useRemoteStore.getState().load();
-    let secondResolved = false;
-    void second.then(() => {
-      secondResolved = true;
-    });
-    await Promise.resolve();
-
-    expect(secondResolved).toBe(false);
-    resolveStatus?.({ profileId: "web", status: "disconnected" });
-    await Promise.all([first, second]);
-    expect(mocks.readSharedStore).toHaveBeenCalledOnce();
+    expect(useRemoteStore.getState().profiles[0]?.reconnectMaxAttempts).toBe(2);
   });
 
   it("does not treat a mutation before the first read as a loaded snapshot", async () => {
     useRemoteStore.setState({
       groups: [],
       profiles: [],
-      statuses: {},
       loaded: false,
     });
 

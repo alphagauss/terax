@@ -10,10 +10,6 @@ fn default_port() -> u16 {
     22
 }
 
-fn default_keepalive() -> u64 {
-    30
-}
-
 fn default_reconnect_attempts() -> u32 {
     2
 }
@@ -24,6 +20,7 @@ fn default_tunnel_enabled() -> bool {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+/// SSH profile 支持的认证方式。
 pub enum SshAuthMethod {
     Password,
     PrivateKey,
@@ -47,8 +44,6 @@ pub struct SshProfile {
     pub identity_file: Option<String>,
     #[serde(default)]
     pub proxy_url: Option<String>,
-    #[serde(default = "default_keepalive")]
-    pub keepalive_seconds: u64,
     #[serde(default)]
     pub reconnect_enabled: bool,
     #[serde(default = "default_reconnect_attempts")]
@@ -60,6 +55,7 @@ pub struct SshProfile {
 }
 
 impl SshProfile {
+    /// 校验进入原生 SSH 边界的持久化连接参数。
     pub fn validate(&self) -> Result<(), String> {
         if self.id.trim().is_empty() {
             return Err("SSH profile id is required".into());
@@ -140,6 +136,7 @@ impl SshTunnel {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// 建立 Runtime 所需的 profile 与仅驻留内存的凭据。
 pub struct ConnectRequest {
     pub profile: SshProfile,
     #[serde(default)]
@@ -148,27 +145,53 @@ pub struct ConnectRequest {
     pub proxy_secret: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectionInfo {
-    pub profile_id: String,
-    pub status: ConnectionStatus,
-    pub home: Option<String>,
-    pub message: Option<String>,
+/// 当前进程唯一 SSH Runtime 的权威状态快照。
+///
+/// `version` 在每次状态迁移时递增，前端据此拒绝迟到事件；`epoch` 只在新 transport
+/// 完整通过 shell、Workspace root 与 SFTP 探测后递增，用于失效旧的终端和文件请求。
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(
+    tag = "phase",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum RemoteRuntimeSnapshot {
+    Idle {
+        version: u64,
+    },
+    Connecting {
+        version: u64,
+        profile_id: String,
+        attempt: u32,
+    },
+    Connected {
+        version: u64,
+        epoch: u64,
+        profile_id: String,
+        home: String,
+    },
+    Disconnected {
+        version: u64,
+        profile_id: String,
+        reason: String,
+    },
 }
 
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ConnectionStatus {
-    Connecting,
-    Connected,
-    Reconnecting,
-    Disconnected,
-    Error,
+impl RemoteRuntimeSnapshot {
+    /// 返回快照的单调版本号。
+    pub fn version(&self) -> u64 {
+        match self {
+            Self::Idle { version }
+            | Self::Connecting { version, .. }
+            | Self::Connected { version, .. }
+            | Self::Disconnected { version, .. } => *version,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// 从 OpenSSH 配置中读取的一条可导入主机记录。
 pub struct ImportedHost {
     pub alias: String,
     pub hostname: String,
@@ -358,6 +381,28 @@ mod tests {
     }
 
     #[test]
+    fn runtime_snapshot_serializes_one_monotonic_state_contract() {
+        let snapshot = RemoteRuntimeSnapshot::Connected {
+            version: 7,
+            epoch: 3,
+            profile_id: "server".into(),
+            home: "/home/alice".into(),
+        };
+
+        assert_eq!(snapshot.version(), 7);
+        assert_eq!(
+            serde_json::to_value(snapshot).unwrap(),
+            serde_json::json!({
+                "phase": "connected",
+                "version": 7,
+                "epoch": 3,
+                "profileId": "server",
+                "home": "/home/alice"
+            })
+        );
+    }
+
+    #[test]
     fn rejects_profile_values_outside_the_supported_contract() {
         let mut profile = SshProfile {
             id: "profile-1".into(),
@@ -368,7 +413,6 @@ mod tests {
             auth_method: SshAuthMethod::Password,
             identity_file: None,
             proxy_url: None,
-            keepalive_seconds: 30,
             reconnect_enabled: false,
             reconnect_max_attempts: 2,
             root_path: None,

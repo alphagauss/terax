@@ -1,203 +1,265 @@
 /**
  * 本文件初始化当前应用进程绑定的 Local、WSL 或 SSH 环境。
- * SSH 事件监听先于自动连接建立，远端密钥不会跨进程或写入普通配置。
+ * SSH 只投影 Rust Runtime 的权威快照；连接、重连和 epoch 均不在前端推断。
  */
 
 import { native } from "@/modules/ai/lib/native";
 import {
+  connectedRuntimeHome,
   remoteNative,
+  useRemoteRuntimeStore,
   useRemoteStore,
-  type ConnectionStatus,
+  waitForRuntimeSettlement,
   type HostKeyPrompt,
+  type RemoteRuntimeSnapshot,
+  type SshCredentialInput,
+  type SshProfile,
 } from "@/modules/remote";
-import {
-  currentWorkspaceEnv,
-  getSshHome,
-  getWslHome,
-  type WorkspaceEnv,
-} from "@/modules/workspace";
+import { currentWorkspaceEnv, getWslHome } from "@/modules/workspace";
 import { homeDir } from "@tauri-apps/api/path";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * 解析当前环境的 Home，并在 SSH 未连接时建立连接。
- *
- * SSH 分支复用配置 store 已获取的状态，并仅按认证和代理方式读取必要密钥。
- */
-async function resolveEnvHome(env: WorkspaceEnv): Promise<string> {
-  if (env.kind === "wsl") return getWslHome(env.distro);
-  if (env.kind === "ssh") {
-    const remoteStore = useRemoteStore.getState();
-    const profiles = await remoteStore.load();
-    const profile = profiles.find((item) => item.id === env.profileId);
-    if (!profile) throw new Error(`SSH profile not found: ${env.profileId}`);
-    const status = useRemoteStore.getState().statuses[env.profileId];
-    if (status?.status === "connected" && status.home) return status.home;
-    if (status?.status !== "connected") {
-      const [secret, proxySecret] = await Promise.all([
+/** 从当前 profile 和系统密钥链构造一次完整 SSH 连接。 */
+async function connectSshProfile(
+  profile: SshProfile,
+  credentials?: SshCredentialInput,
+): Promise<RemoteRuntimeSnapshot> {
+  const [storedSecret, storedProxySecret] = credentials
+    ? [credentials.secret, credentials.proxySecret]
+    : await Promise.all([
         profile.authMethod === "agent"
           ? null
-          : remoteNative.getSecret(env.profileId),
+          : remoteNative.getSecret(profile.id),
         profile.proxyUrl?.trim()
-          ? remoteNative.getProxySecret(env.profileId)
+          ? remoteNative.getProxySecret(profile.id)
           : null,
       ]);
-      const connected = await remoteNative.connect(
-        profile,
-        secret ?? "",
-        proxySecret ?? "",
-      );
-      useRemoteStore.getState().setStatus(connected);
-      if (!connected.home) {
-        throw new Error("SSH connected without a resolved workspace home");
-      }
-      return connected.home;
-    }
-    return getSshHome(env.profileId);
-  }
-  return (await homeDir()).replace(/\\/g, "/");
+  return remoteNative.connectRuntime(
+    profile,
+    storedSecret ?? "",
+    storedProxySecret ?? "",
+  );
 }
 
 /**
- * 管理当前应用进程绑定环境的按需就绪状态。
+ * 管理当前进程绑定环境的就绪入口。
  *
- * SSH 事件监听先于页面恢复建立；并发请求复用同一次连接，原生重连期间不替换 transport。
+ * SSH 连接中的调用等待同一 Runtime 状态收敛；显式重连始终执行破坏式 reset。
  */
 export function useWorkspaceEnvironment() {
-  const [home, setHome] = useState<string | null>(null);
-  const [launchCwd, setLaunchCwd] = useState<string | null>(null);
+  const env = currentWorkspaceEnv();
+  const runtimeSnapshot = useRemoteRuntimeStore((state) => state.snapshot);
+  const applyRuntimeSnapshot = useRemoteRuntimeStore(
+    (state) => state.applySnapshot,
+  );
+  const [nonSshHome, setNonSshHome] = useState<string | null>(null);
+  const nonSshHomeRef = useRef<string | null>(null);
+  const [localLaunchCwd, setLocalLaunchCwd] = useState<string | null>(null);
   const [launchCwdResolved, setLaunchCwdResolved] = useState(false);
-  const [environmentError, setEnvironmentError] = useState<string | null>(null);
+  const [remoteBridgeError, setRemoteBridgeError] = useState<string | null>(
+    null,
+  );
+  const [environmentActionError, setEnvironmentActionError] = useState<
+    string | null
+  >(null);
   const [remoteEventsReady, setRemoteEventsReady] = useState(
-    () => currentWorkspaceEnv().kind !== "ssh",
+    () => env.kind !== "ssh",
   );
   const [hostPrompt, setHostPrompt] = useState<HostKeyPrompt | null>(null);
-  const resolvedHomeRef = useRef<string | null>(null);
-  const initializationRef = useRef<Promise<string | null> | null>(null);
+  const connectionTaskRef = useRef<Promise<string | null> | null>(null);
+  const connectionRequestRef = useRef(0);
 
   useEffect(() => {
-    if (currentWorkspaceEnv().kind !== "ssh") return;
+    if (env.kind !== "ssh") return;
     let active = true;
-    let unlistenStatus: (() => void) | undefined;
+    let unlistenRuntime: (() => void) | undefined;
     let unlistenHostKey: (() => void) | undefined;
+    setRemoteEventsReady(false);
+    setRemoteBridgeError(null);
     void (async () => {
       try {
-        const status = await remoteNative.onStatus((info) => {
-          useRemoteStore.getState().setStatus(info);
-          const env = currentWorkspaceEnv();
-          if (
-            env.kind !== "ssh" ||
-            info.profileId !== env.profileId ||
-            info.status !== "connected"
-          ) {
-            return;
-          }
-          setEnvironmentError(null);
-        });
+        unlistenRuntime = await remoteNative.onRuntime(applyRuntimeSnapshot);
         if (!active) {
-          status();
+          unlistenRuntime();
           return;
         }
-        unlistenStatus = status;
-        const hostKey = await remoteNative.onHostKey(setHostPrompt);
+        unlistenHostKey = await remoteNative.onHostKey(setHostPrompt);
         if (!active) {
-          hostKey();
+          unlistenHostKey();
           return;
         }
-        unlistenHostKey = hostKey;
+        const snapshot = await remoteNative.runtimeSnapshot();
+        if (!active) return;
+        applyRuntimeSnapshot(snapshot);
         setRemoteEventsReady(true);
       } catch (error) {
-        unlistenStatus?.();
-        unlistenStatus = undefined;
+        unlistenRuntime?.();
+        unlistenHostKey?.();
+        unlistenRuntime = undefined;
+        unlistenHostKey = undefined;
         if (active) {
-          setEnvironmentError(`SSH event bridge failed: ${String(error)}`);
+          setRemoteBridgeError(`SSH event bridge failed: ${String(error)}`);
+          setRemoteEventsReady(false);
         }
       }
     })();
     return () => {
       active = false;
-      unlistenStatus?.();
+      unlistenRuntime?.();
       unlistenHostKey?.();
     };
-  }, []);
+  }, [applyRuntimeSnapshot, env.kind]);
 
   useEffect(() => {
-    if (currentWorkspaceEnv().kind !== "local") {
-      setLaunchCwd(null);
+    if (
+      env.kind === "ssh" &&
+      runtimeSnapshot.phase === "connected" &&
+      runtimeSnapshot.profileId === env.profileId
+    ) {
+      setEnvironmentActionError(null);
+    }
+  }, [env, runtimeSnapshot]);
+
+  useEffect(() => {
+    if (env.kind === "ssh" && runtimeSnapshot.phase !== "connecting") {
+      setHostPrompt(null);
+    }
+  }, [env.kind, runtimeSnapshot.phase]);
+
+  useEffect(() => {
+    if (env.kind !== "local") {
+      setLocalLaunchCwd(null);
       setLaunchCwdResolved(true);
       return;
     }
     native
       .workspaceCurrentDir()
-      .then(setLaunchCwd)
-      .catch(() => setLaunchCwd(null))
+      .then(setLocalLaunchCwd)
+      .catch(() => setLocalLaunchCwd(null))
       .finally(() => setLaunchCwdResolved(true));
-  }, []);
+  }, [env.kind]);
+
+  const connectWorkspace = useCallback(
+    async (
+      credentials?: SshCredentialInput,
+      force = false,
+    ): Promise<string | null> => {
+      if (env.kind !== "ssh") return null;
+      // 没有 Runtime 事件就无法保证断线状态收敛，禁止建立不可观测的连接。
+      if (!remoteEventsReady) return null;
+      const current = useRemoteRuntimeStore.getState().snapshot;
+      if (!force) {
+        const connectedHome = connectedRuntimeHome(current);
+        if (connectedHome) return connectedHome;
+        if (current.phase === "connecting") {
+          return waitForRuntimeSettlement();
+        }
+      }
+      if (connectionTaskRef.current && !force) return connectionTaskRef.current;
+
+      const requestId = ++connectionRequestRef.current;
+      setEnvironmentActionError(null);
+      setHostPrompt(null);
+      const task = (async () => {
+        try {
+          const profiles = await useRemoteStore.getState().load();
+          const profile = profiles.find((item) => item.id === env.profileId);
+          if (!profile) {
+            throw new Error(`SSH profile not found: ${env.profileId}`);
+          }
+          const snapshot = await connectSshProfile(profile, credentials);
+          applyRuntimeSnapshot(snapshot);
+          if (connectionRequestRef.current !== requestId) return null;
+          setEnvironmentActionError(null);
+          const readyHome = connectedRuntimeHome(snapshot);
+          if (readyHome) {
+            try {
+              await native.workspaceAuthorize(readyHome);
+            } catch {
+              // 远端授权仅记录 Workspace root，具体失败由对应面板呈现。
+            }
+          }
+          return readyHome;
+        } catch (error) {
+          const snapshot = await remoteNative
+            .runtimeSnapshot()
+            .catch(() => null);
+          if (snapshot) applyRuntimeSnapshot(snapshot);
+          if (connectionRequestRef.current === requestId) {
+            setEnvironmentActionError(
+              snapshot?.phase === "disconnected" ? null : String(error),
+            );
+          }
+          return null;
+        }
+      })();
+      connectionTaskRef.current = task;
+      try {
+        return await task;
+      } finally {
+        if (connectionTaskRef.current === task) {
+          connectionTaskRef.current = null;
+        }
+      }
+    },
+    [applyRuntimeSnapshot, env, remoteEventsReady],
+  );
 
   const ensureWorkspaceReady = useCallback(async (): Promise<string | null> => {
-    const env = currentWorkspaceEnv();
-    const reusableHome = resolvedHomeRef.current;
-    const sshStatus =
-      env.kind === "ssh"
-        ? useRemoteStore.getState().statuses[env.profileId]?.status
-        : undefined;
-    if (canReuseWorkspaceHome(env, reusableHome, sshStatus)) {
-      setEnvironmentError(null);
-      return reusableHome;
-    }
-    if (initializationRef.current) return initializationRef.current;
-    if (sshStatus === "connecting" || sshStatus === "reconnecting") {
-      // 原生自动重连拥有自己的串行与退避流程，此时不并发发起替换连接。
+    if (env.kind === "ssh") return connectWorkspace();
+    if (nonSshHomeRef.current) return nonSshHomeRef.current;
+    try {
+      const nextHome =
+        env.kind === "wsl"
+          ? await getWslHome(env.distro)
+          : (await homeDir()).replace(/\\/g, "/");
+      nonSshHomeRef.current = nextHome;
+      setNonSshHome(nextHome);
+      setEnvironmentActionError(null);
+      try {
+        await native.workspaceAuthorize(nextHome);
+      } catch {
+        // 不可用 root 的具体错误由对应面板呈现。
+      }
+      return nextHome;
+    } catch (error) {
+      setEnvironmentActionError(String(error));
       return null;
     }
+  }, [connectWorkspace, env]);
 
-    const task = (async () => {
-      try {
-        const nextHome = await resolveEnvHome(env);
-        resolvedHomeRef.current = nextHome;
-        setHome(nextHome);
-        if (env.kind !== "local") setLaunchCwd(nextHome);
-        setEnvironmentError(null);
-        try {
-          await native.workspaceAuthorize(nextHome);
-        } catch {
-          // Remote paths and unavailable roots surface their own panel errors.
-        }
-        return nextHome;
-      } catch (error) {
-        setEnvironmentError(String(error));
-        return null;
-      }
-    })();
-    initializationRef.current = task;
-    try {
-      return await task;
-    } finally {
-      if (initializationRef.current === task) initializationRef.current = null;
-    }
-  }, []);
+  const reconnectWorkspace = useCallback(
+    (credentials?: SshCredentialInput) =>
+      env.kind === "ssh"
+        ? connectWorkspace(credentials, true)
+        : ensureWorkspaceReady(),
+    [connectWorkspace, ensureWorkspaceReady, env.kind],
+  );
+
+  // 只有 connected 快照中的 Home 可以作为文件、PTY 或启动恢复的就绪凭据。
+  const remoteHome = connectedRuntimeHome(runtimeSnapshot);
+  const home = env.kind === "ssh" ? remoteHome : nonSshHome;
+  const launchCwd =
+    env.kind === "local"
+      ? localLaunchCwd
+      : env.kind === "ssh"
+        ? remoteHome
+        : nonSshHome;
+  const runtimeError =
+    env.kind === "ssh" && runtimeSnapshot.phase === "disconnected"
+      ? runtimeSnapshot.reason
+      : null;
 
   return {
     home,
     launchCwd,
     launchCwdResolved,
-    environmentError,
+    environmentError:
+      remoteBridgeError ?? environmentActionError ?? runtimeError,
     remoteEventsReady,
     hostPrompt,
     clearHostPrompt: () => setHostPrompt(null),
     ensureWorkspaceReady,
+    reconnectWorkspace,
   };
-}
-
-/**
- * 判断已解析的 Home 能否作为当前环境的就绪凭据复用。
- *
- * SSH 的路径缓存不代表连接仍存活，只有运行时状态为 connected 时才能复用。
- */
-export function canReuseWorkspaceHome(
-  env: WorkspaceEnv,
-  home: string | null,
-  sshStatus?: ConnectionStatus,
-): home is string {
-  return Boolean(home) && (env.kind !== "ssh" || sshStatus === "connected");
 }

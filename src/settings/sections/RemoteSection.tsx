@@ -316,7 +316,6 @@ export function RemoteSection() {
             authMethod: host.identityFile ? "private_key" : "agent",
             identityFile: host.identityFile || null,
             proxyUrl: null,
-            keepaliveSeconds: 30,
             reconnectEnabled: true,
             reconnectMaxAttempts: 2,
             rootPath: null,
@@ -804,18 +803,6 @@ export function RemoteSection() {
                     onChange={(event) => update("rootPath", event.target.value)}
                     placeholder="~"
                     spellCheck={false}
-                  />
-                </Field>
-                <Field label={t("remote.fields.keepalive")}>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={form.keepaliveSeconds}
-                    onChange={(event) =>
-                      update("keepaliveSeconds", event.target.value)
-                    }
-                    className={NUMBER_INPUT_CLASS}
-                    onWheel={blurNumberInputOnWheel}
                   />
                 </Field>
                 <Field

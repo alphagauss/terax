@@ -1,6 +1,6 @@
 /**
- * 本文件维护跨 Workspace 进程共享的 SSH 配置、分组和连接状态。
- * 分组只影响配置管理与导航，运行时连接仍由稳定的 profile ID 标识。
+ * 本文件维护跨 Workspace 进程共享的 SSH 配置与分组。
+ * 连接状态只属于当前进程的 Remote Runtime，不进入共享配置 store。
  */
 
 import {
@@ -13,7 +13,7 @@ import {
 import { create } from "zustand";
 import { remoteNative } from "./native";
 import { DEFAULT_SSH_GROUP_ID } from "./groups";
-import type { ConnectionInfo, SshGroup, SshProfile, SshTunnel } from "./types";
+import type { SshGroup, SshProfile, SshTunnel } from "./types";
 
 const profileKey = (id: string) => `profile:${id}`;
 const groupKey = (id: string) => `group:${id}`;
@@ -23,7 +23,6 @@ let loadInFlight: Promise<SshProfile[]> | null = null;
 type RemoteState = {
   groups: SshGroup[];
   profiles: SshProfile[];
-  statuses: Record<string, ConnectionInfo>;
   loaded: boolean;
   /** 读取并归一化 SSH 配置；常规调用复用已完成或正在进行的加载。 */
   load: (force?: boolean) => Promise<SshProfile[]>;
@@ -32,7 +31,6 @@ type RemoteState = {
   saveProfile: (profile: SshProfile) => Promise<void>;
   saveProfiles: (profiles: SshProfile[]) => Promise<void>;
   deleteProfile: (profileId: string) => Promise<void>;
-  setStatus: (info: ConnectionInfo) => void;
 };
 
 function removeInlineProxyPassword(value?: string | null): string | null {
@@ -52,12 +50,6 @@ function normalizeProfile(
     name: profile.name?.trim() || `${profile.username}@${profile.host}`,
     proxyUrl: removeInlineProxyPassword(profile.proxyUrl),
     port: normalizeInteger(profile.port, 1, 65535, 22),
-    keepaliveSeconds: normalizeInteger(
-      profile.keepaliveSeconds,
-      0,
-      Number.MAX_SAFE_INTEGER,
-      30,
-    ),
     reconnectMaxAttempts: normalizeInteger(
       profile.reconnectMaxAttempts,
       1,
@@ -98,7 +90,6 @@ function normalizeInteger(
 export const useRemoteStore = create<RemoteState>((set, get) => ({
   groups: [],
   profiles: [],
-  statuses: {},
   loaded: false,
   load: async (force = false) => {
     if (loadInFlight) {
@@ -135,22 +126,6 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
           void useRemoteStore.getState().load(true);
         });
       }
-      const statuses = await Promise.all(
-        profiles.map((profile) =>
-          remoteNative.status(profile.id).catch(
-            () =>
-              ({
-                profileId: profile.id,
-                status: "disconnected",
-              }) satisfies ConnectionInfo,
-          ),
-        ),
-      );
-      set({
-        statuses: Object.fromEntries(
-          statuses.map((status) => [status.profileId, status]),
-        ),
-      });
       return profiles;
     })();
     loadInFlight = task;
@@ -261,20 +236,21 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
     );
   },
   deleteProfile: async (profileId) => {
-    await remoteNative.disconnect(profileId).catch(() => {});
+    const runtime = await remoteNative.runtimeSnapshot().catch(() => null);
+    if (
+      runtime &&
+      runtime.phase !== "idle" &&
+      runtime.profileId === profileId
+    ) {
+      await remoteNative.disconnectRuntime().catch(() => {});
+    }
     await remoteNative.deleteSecrets(profileId).catch(() => {});
     const profiles = get().profiles.filter(
       (profile) => profile.id !== profileId,
     );
-    const statuses = { ...get().statuses };
-    delete statuses[profileId];
-    set({ profiles, statuses });
+    set({ profiles });
     await deleteSharedStoreKey("ssh-profiles", profileKey(profileId));
   },
-  setStatus: (info) =>
-    set((state) => ({
-      statuses: { ...state.statuses, [info.profileId]: info },
-    })),
 }));
 
 export function newProfileId(): string {

@@ -6,9 +6,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
-  ConnectionInfo,
   HostKeyPrompt,
   ImportedHost,
+  RemoteRuntimeSnapshot,
   SshProfile,
   TunnelConfig,
   TunnelEvent,
@@ -18,26 +18,22 @@ import type {
 export const SSH_SECRET_SERVICE = "terax-ssh";
 const proxySecretAccount = (profileId: string) => `${profileId}:proxy`;
 
+/** SSH Runtime、隧道、主机密钥与凭据的原生调用边界。 */
 export const remoteNative = {
-  connect: (
+  connectRuntime: (
     profile: SshProfile,
     secret?: string | null,
     proxySecret?: string | null,
   ) =>
-    invoke<ConnectionInfo>("ssh_connect", {
+    invoke<RemoteRuntimeSnapshot>("ssh_runtime_connect", {
       request: {
         profile,
         secret: secret || null,
         proxySecret: proxySecret || null,
       },
     }),
-  disconnect: (profileId: string) =>
-    invoke<void>("ssh_disconnect", { profileId }),
-  reconnect: (profileId: string) =>
-    invoke<ConnectionInfo>("ssh_reconnect", { profileId }),
-  status: (profileId: string) =>
-    invoke<ConnectionInfo>("ssh_connection_status", { profileId }),
-  home: (profileId: string) => invoke<string>("ssh_home", { profileId }),
+  disconnectRuntime: () => invoke<void>("ssh_runtime_disconnect"),
+  runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
   confirmHostKey: (requestId: string, accepted: boolean, remember: boolean) =>
     invoke<void>("ssh_confirm_host_key", {
       requestId,
@@ -92,8 +88,10 @@ export const remoteNative = {
       remoteNative.deleteProxySecret(profileId),
     ]);
   },
-  onStatus: (handler: (info: ConnectionInfo) => void): Promise<UnlistenFn> =>
-    listen<ConnectionInfo>("terax://ssh-status", (event) =>
+  onRuntime: (
+    handler: (info: RemoteRuntimeSnapshot) => void,
+  ): Promise<UnlistenFn> =>
+    listen<RemoteRuntimeSnapshot>("terax://ssh-runtime", (event) =>
       handler(event.payload),
     ),
   onTunnel: (handler: (event: TunnelEvent) => void): Promise<UnlistenFn> =>

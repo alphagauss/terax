@@ -32,9 +32,7 @@
     "connectionStatus": {
       "connecting": "连接中",
       "connected": "已连接",
-      "reconnecting": "正在重连",
-      "disconnected": "未连接",
-      "error": "连接失败"
+      "disconnected": "未连接"
     }
   },
   "sshConnection": {
