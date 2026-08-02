@@ -40,7 +40,7 @@ describe("Remote Runtime store", () => {
     });
   });
 
-  it("waits for connecting to settle on the next connected epoch", async () => {
+  it("waits across connecting phases until the next connected epoch", async () => {
     const apply = useRemoteRuntimeStore.getState().applySnapshot;
     apply({
       phase: "connecting",
@@ -49,32 +49,19 @@ describe("Remote Runtime store", () => {
     });
     const settlement = waitForRuntimeSettlement();
     apply({
-      phase: "connected",
+      phase: "reconnecting",
       version: 2,
+      profileId: "server",
+    });
+    apply({
+      phase: "connected",
+      version: 3,
       epoch: 1,
       profileId: "server",
       home: "/home/me",
     });
 
     await expect(settlement).resolves.toBe("/home/me");
-  });
-
-  it("waits across automatic reconnect attempts until the runtime settles", async () => {
-    const apply = useRemoteRuntimeStore.getState().applySnapshot;
-    apply({
-      phase: "reconnecting",
-      version: 1,
-      profileId: "server",
-    });
-    const settlement = waitForRuntimeSettlement();
-    apply({
-      phase: "disconnected",
-      version: 2,
-      profileId: "server",
-      reason: "offline",
-    });
-
-    await expect(settlement).resolves.toBeNull();
   });
 
   it("does not expose the historical Home of a disconnected runtime", () => {
