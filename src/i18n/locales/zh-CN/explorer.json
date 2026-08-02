@@ -2,7 +2,6 @@
   "noCurrentDirectory": "当前无目录",
   "files": "文件",
   "loading": "加载中…",
-  "waitingForConnection": "正在等待远程连接…",
   "searchFiles": "搜索文件",
   "newFile": "新建文件",
   "newFolder": "新建文件夹",

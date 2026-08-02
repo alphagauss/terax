@@ -26,11 +26,11 @@
     "defaultSshGroup": "Default",
     "noSshProfiles": "No SSH profiles",
     "manageSshProfiles": "Manage SSH profiles",
-    "reconnectCurrentSsh": "Reconnect current SSH",
     "retryCurrentEnvironment": "Retry current environment",
     "refreshWsl": "Refresh WSL",
     "connectionStatus": {
       "connecting": "Connecting",
+      "reconnecting": "Reconnecting automatically",
       "connected": "Connected",
       "disconnected": "Disconnected"
     }

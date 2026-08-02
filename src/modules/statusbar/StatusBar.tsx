@@ -11,7 +11,7 @@ import {
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
 import type { PythonInterpreter } from "@/modules/python/native";
-import { TunnelStatusControl, type SshCredentialInput } from "@/modules/remote";
+import { TunnelStatusControl } from "@/modules/remote";
 import { TransferStatusControl } from "@/modules/transfers";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon, SourceCodeIcon } from "@hugeicons/core-free-icons";
@@ -27,9 +27,7 @@ type Props = {
   home: string | null;
   workspaceError: string | null;
   onWorkspaceRetry: () => Promise<string | null>;
-  onWorkspaceReconnect: (
-    credentials?: SshCredentialInput,
-  ) => Promise<string | null>;
+  onWorkspaceReconnect: () => void;
   onCd: (path: string) => void;
   onWorkspaceChange: (env: WorkspaceEnv) => void;
   onToggleAi: () => void;

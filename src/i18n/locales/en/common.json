@@ -19,7 +19,11 @@
   "openFolderFailed": "Could not open folder picker",
   "folderPathInvalid": "The folder path is unavailable",
   "remoteWorkspace": {
-    "connecting": "Connecting to remote workspace…",
-    "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready."
+    "connecting": "Connecting to SSH…",
+    "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready.",
+    "connectionClosed": "SSH connection closed",
+    "reconnecting": "Reconnecting automatically…",
+    "manualReconnect": "Manual reconnection is required.",
+    "reconnectAction": "Reconnect current SSH"
   }
 }

@@ -82,7 +82,7 @@ impl RemoteManager {
     ) -> Result<RemoteRuntimeSnapshot, String> {
         let lifecycle = self.begin_lifecycle().await;
         if !self
-            .publish_connecting(&app, &lifecycle, &request.profile.id, 0)
+            .publish_connecting(&app, &lifecycle, &request.profile.id)
             .await
         {
             return Err(CONNECT_SUPERSEDED.into());
@@ -92,7 +92,15 @@ impl RemoteManager {
             return Err(CONNECT_SUPERSEDED.into());
         }
         self.stop_current(&app).await;
-        self.connect_locked(request, &lifecycle, &app).await
+        let profile_id = request.profile.id.clone();
+        let result = self.connect_locked(request, &lifecycle, &app).await;
+        if let Err(error) = &result {
+            if error != CONNECT_SUPERSEDED && self.is_lifecycle_current(lifecycle.id).await {
+                self.publish_disconnected(&app, &lifecycle, &profile_id, error.clone())
+                    .await;
+            }
+        }
+        result
     }
 
     /// 在调用方已持有连接锁时建立一个新 epoch。
@@ -119,13 +127,7 @@ impl RemoteManager {
             result = connect => result,
         } {
             Ok(workspace) => workspace,
-            Err(error) => {
-                if self.is_lifecycle_current(lifecycle.id).await {
-                    self.publish_disconnected(app, lifecycle, &profile_id, error.clone())
-                        .await;
-                }
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
 
         if !self.is_lifecycle_current(lifecycle.id).await {
@@ -148,8 +150,6 @@ impl RemoteManager {
                 return Err(CONNECT_SUPERSEDED.into());
             }
             let error = format!("initialize SSH filesystem at {home}: {error}");
-            self.publish_disconnected(app, lifecycle, &profile_id, error.clone())
-                .await;
             return Err(error);
         }
 
@@ -293,11 +293,14 @@ impl RemoteManager {
         let profile = workspace.profile.clone();
         let profile_id = profile.id.clone();
         let request = workspace.reconnect_request();
-        if self
-            .publish_disconnected(app, &lifecycle, &profile_id, "SSH connection closed".into())
-            .await
-            .is_none()
-        {
+        let published = if profile.reconnect_enabled {
+            self.publish_reconnecting(app, &lifecycle, &profile_id)
+                .await
+        } else {
+            self.publish_disconnected(app, &lifecycle, &profile_id, "SSH connection closed".into())
+                .await
+        };
+        if !published {
             return;
         }
         self.tunnels
@@ -336,12 +339,6 @@ impl RemoteManager {
                 _ = lifecycle.cancellation.cancelled() => return,
                 guard = self.connect_lock.lock() => guard,
             };
-            if !self
-                .publish_connecting(app, &lifecycle, &profile_id, attempt)
-                .await
-            {
-                return;
-            }
             let result = self.connect_locked(request.clone(), &lifecycle, app).await;
             drop(guard);
             if lifecycle.cancellation.is_cancelled() {
@@ -349,7 +346,14 @@ impl RemoteManager {
             }
             match result {
                 Ok(_) => return,
-                Err(error) => log::warn!("SSH reconnect attempt {attempt} failed: {error}"),
+                Err(error) if error == CONNECT_SUPERSEDED => return,
+                Err(error) => {
+                    log::warn!("SSH reconnect attempt {attempt} failed: {error}");
+                    if attempt == profile.reconnect_max_attempts {
+                        self.publish_disconnected(app, &lifecycle, &profile_id, error)
+                            .await;
+                    }
+                }
             }
         }
     }
@@ -401,12 +405,10 @@ impl RemoteManager {
         app: &tauri::AppHandle,
         lifecycle: &RuntimeLifecycle,
         profile_id: &str,
-        attempt: u32,
     ) -> bool {
         let snapshot = RemoteRuntimeSnapshot::Connecting {
             version: self.version(),
             profile_id: profile_id.to_string(),
-            attempt,
         };
         let published = {
             let mut runtime = self.runtime.write().await;
@@ -423,13 +425,41 @@ impl RemoteManager {
         published
     }
 
+    /// 发布自动重连进度，并移除已经失效的旧 workspace。
+    async fn publish_reconnecting(
+        &self,
+        app: &tauri::AppHandle,
+        lifecycle: &RuntimeLifecycle,
+        profile_id: &str,
+    ) -> bool {
+        let snapshot = RemoteRuntimeSnapshot::Reconnecting {
+            version: self.version(),
+            profile_id: profile_id.to_string(),
+        };
+        let published = {
+            let mut runtime = self.runtime.write().await;
+            if runtime.lifecycle.id != lifecycle.id {
+                false
+            } else {
+                runtime.workspace = None;
+                runtime.snapshot = snapshot.clone();
+                true
+            }
+        };
+        if published {
+            let _ = app.emit("terax://ssh-runtime", snapshot);
+        }
+        published
+    }
+
+    /// 发布最终断开状态，并移除已失效的 workspace。
     async fn publish_disconnected(
         &self,
         app: &tauri::AppHandle,
         lifecycle: &RuntimeLifecycle,
         profile_id: &str,
         reason: String,
-    ) -> Option<RemoteRuntimeSnapshot> {
+    ) -> bool {
         let snapshot = RemoteRuntimeSnapshot::Disconnected {
             version: self.version(),
             profile_id: profile_id.to_string(),
@@ -446,10 +476,10 @@ impl RemoteManager {
             }
         };
         if !published {
-            return None;
+            return false;
         }
-        let _ = app.emit("terax://ssh-runtime", snapshot.clone());
-        Some(snapshot)
+        let _ = app.emit("terax://ssh-runtime", snapshot);
+        true
     }
 
     /// 关闭当前 Runtime 并回到无连接的初始状态。

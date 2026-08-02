@@ -26,11 +26,11 @@
     "defaultSshGroup": "默认",
     "noSshProfiles": "尚无 SSH 配置",
     "manageSshProfiles": "管理 SSH 配置",
-    "reconnectCurrentSsh": "重连当前 SSH",
     "retryCurrentEnvironment": "重试当前环境",
     "refreshWsl": "刷新 WSL",
     "connectionStatus": {
       "connecting": "连接中",
+      "reconnecting": "正在自动重新连接",
       "connected": "已连接",
       "disconnected": "未连接"
     }

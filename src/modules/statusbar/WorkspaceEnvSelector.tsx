@@ -16,12 +16,7 @@ import {
 import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import {
-  SshConnectionDialog,
-  useRemoteRuntimeStore,
-  useRemoteStore,
-  type SshCredentialInput,
-} from "@/modules/remote";
+import { useRemoteRuntimeStore, useRemoteStore } from "@/modules/remote";
 import { groupSshProfiles } from "@/modules/remote/groups";
 import {
   LOCAL_WORKSPACE,
@@ -35,16 +30,14 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
   onSelect: (env: WorkspaceEnv) => void;
   connectionError?: string | null;
   onCurrentConnected: () => Promise<string | null>;
-  onCurrentReconnect: (
-    credentials?: SshCredentialInput,
-  ) => Promise<string | null>;
+  onCurrentReconnect: () => void;
 };
 
 const COMPACT_MENU_CONTENT = "min-w-52 rounded-xl p-1";
@@ -55,7 +48,7 @@ const COMPACT_MENU_SUB_TRIGGER =
 const COMPACT_SSH_MENU_ITEM =
   "min-h-10 gap-1.5 rounded-lg px-2 py-1 text-[12px] font-semibold";
 
-/** 在状态栏展示当前环境，并提供本地、WSL 与分组 SSH Workspace 入口。 */
+/** 在状态栏展示当前环境与 SSH Runtime 状态，并提供环境选择和共享重连入口。 */
 export function WorkspaceEnvSelector({
   onSelect,
   connectionError = null,
@@ -72,7 +65,6 @@ export function WorkspaceEnvSelector({
   const groups = useRemoteStore((state) => state.groups);
   const loadProfiles = useRemoteStore((state) => state.load);
   const runtime = useRemoteRuntimeStore((state) => state.snapshot);
-  const [connectionOpen, setConnectionOpen] = useState(false);
 
   useEffect(() => {
     void loadProfiles();
@@ -95,10 +87,6 @@ export function WorkspaceEnvSelector({
     () => groupSshProfiles(groups, profiles),
     [groups, profiles],
   );
-
-  useEffect(() => {
-    if (env.kind !== "ssh") setConnectionOpen(false);
-  }, [env]);
 
   const handleOpenChange = (open: boolean) => {
     if (IS_WINDOWS && open && distros.length === 0 && !loading) {
@@ -126,15 +114,6 @@ export function WorkspaceEnvSelector({
           .join("\n")
       : t("workspace.environment");
 
-  const reconnectCurrent = () => {
-    if (env.kind !== "ssh") return;
-    void onCurrentReconnect()
-      .then((home) => {
-        if (!home) setConnectionOpen(true);
-      })
-      .catch(() => setConnectionOpen(true));
-  };
-
   return (
     <>
       <DropdownMenu onOpenChange={handleOpenChange}>
@@ -155,7 +134,8 @@ export function WorkspaceEnvSelector({
                   className={cn(
                     "size-1.5 rounded-full",
                     connectionStatus === "connected" && "bg-emerald-500",
-                    connectionStatus === "connecting" &&
+                    (connectionStatus === "connecting" ||
+                      connectionStatus === "reconnecting") &&
                       "animate-pulse bg-amber-500 motion-reduce:animate-none",
                     connectionStatus === "disconnected" &&
                       "bg-muted-foreground/50",
@@ -269,10 +249,10 @@ export function WorkspaceEnvSelector({
           </DropdownMenuItem>
           {env.kind === "ssh" ? (
             <DropdownMenuItem
-              onSelect={reconnectCurrent}
+              onSelect={onCurrentReconnect}
               className={COMPACT_MENU_ITEM}
             >
-              {t("workspace.reconnectCurrentSsh")}
+              {t("common:remoteWorkspace.reconnectAction")}
             </DropdownMenuItem>
           ) : null}
           {connectionError && env.kind !== "ssh" ? (
@@ -303,13 +283,6 @@ export function WorkspaceEnvSelector({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
-
-      <SshConnectionDialog
-        open={connectionOpen}
-        onOpenChange={setConnectionOpen}
-        profileId={env.kind === "ssh" ? env.profileId : null}
-        onConnect={onCurrentReconnect}
-      />
     </>
   );
 }
