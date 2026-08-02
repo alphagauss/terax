@@ -30,7 +30,9 @@ import {
 import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { isPythonFile } from "@/modules/python/path";
+import { useRemoteRuntimeStore } from "@/modules/remote";
 import { useShortcutLabel } from "@/modules/shortcuts";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   beginWorkbenchDrag,
   finishWorkbenchDrag,
@@ -104,7 +106,8 @@ type Props = {
 /**
  * Workbench 标签栏组件。
  *
- * 负责标签展示和交互入口。新建 Tab 菜单为名称与快捷键预留稳定宽度，并禁止单项内容折行。
+ * 负责标签展示和交互入口，并在活动标签上呈现最终 SSH 断开状态。
+ * 新建 Tab 菜单为名称与快捷键预留稳定宽度，并禁止单项内容折行。
  */
 export function TabBar({
   groupId,
@@ -129,6 +132,15 @@ export function TabBar({
   compact,
 }: Props) {
   const { t: tr } = useTranslation("tabs");
+  const sshDisconnected = useRemoteRuntimeStore((state) => {
+    const workspace = currentWorkspaceEnv();
+    const runtime = state.snapshot;
+    return (
+      workspace.kind === "ssh" &&
+      runtime.phase === "disconnected" &&
+      runtime.profileId === workspace.profileId
+    );
+  });
   const newTerminalShortcut = useShortcutLabel("tab.new");
   const newBlockShortcut = useShortcutLabel("tab.newBlock");
   const newPrivateShortcut = useShortcutLabel("tab.newPrivate");
@@ -291,6 +303,10 @@ export function TabBar({
               const isPreview = t.kind === "editor" && (t as EditorTab).preview;
               const isActive = t.id === activeId;
               const isNew = !firstRender && !seen.has(t.id);
+              const dirty =
+                (t.kind === "editor" || t.kind === "markdown") && t.dirty;
+              const connectionAlert =
+                sshDisconnected && activeGroup && isActive;
 
               // While renaming, render a non-button cell so the <input> is not
               // nested inside the trigger <button> (invalid HTML, and WebKit
@@ -527,12 +543,25 @@ export function TabBar({
                     <span className={cn("truncate", isPreview && "italic")}>
                       {labelFor(t)}
                     </span>
-                    {(t.kind === "editor" || t.kind === "markdown") &&
-                    t.dirty ? (
+                    {dirty || connectionAlert ? (
                       <span
                         role="img"
-                        aria-label={tr("unsavedChanges")}
-                        className="size-1.5 shrink-0 rounded-full bg-foreground/70"
+                        aria-label={tr(
+                          dirty && connectionAlert
+                            ? "unsavedAndSshDisconnected"
+                            : connectionAlert
+                              ? "sshDisconnected"
+                              : "unsavedChanges",
+                        )}
+                        title={
+                          connectionAlert ? tr("sshDisconnected") : undefined
+                        }
+                        className={cn(
+                          "size-1.5 shrink-0 rounded-full",
+                          connectionAlert
+                            ? "bg-destructive"
+                            : "bg-foreground/70",
+                        )}
                       />
                     ) : null}
                   </span>

@@ -29,6 +29,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import { isPythonFile } from "@/modules/python/path";
+import {
+  useRemoteRuntimeStore,
+  type RemoteRuntimeSnapshot,
+} from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import {
@@ -126,6 +130,7 @@ type Props = {
   onOpenFolder?: () => void;
   onOpenHome?: () => void;
   onOpenPath?: (path: string) => void;
+  onReconnect?: () => void;
   activeFilePath?: string | null;
   onOpenFile: (path: string, pin?: boolean) => void;
   onPathRenamed?: (from: string, to: string) => void;
@@ -175,6 +180,64 @@ type EntryTarget = {
   name: string;
   isDir: boolean;
 };
+
+type RemoteNoticePhase = Extract<
+  RemoteRuntimeSnapshot["phase"],
+  "connecting" | "reconnecting" | "disconnected"
+>;
+
+/** 展示 SSH 连接过程或需要用户处理的最终断开状态。 */
+function RemoteConnectionNotice({
+  phase,
+  onReconnect,
+}: {
+  phase: RemoteNoticePhase;
+  onReconnect?: () => void;
+}) {
+  const { t } = useTranslation("common");
+  const pending = phase !== "disconnected";
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
+      {pending ? (
+        <Spinner
+          className="size-4 motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+      ) : (
+        <span
+          className="size-2 rounded-full bg-destructive"
+          aria-hidden="true"
+        />
+      )}
+      {phase === "connecting" ? (
+        <span>{t("remoteWorkspace.connecting")}</span>
+      ) : (
+        <>
+          <span className="text-foreground">
+            {t("remoteWorkspace.connectionClosed")}
+          </span>
+          <span>
+            {t(
+              phase === "reconnecting"
+                ? "remoteWorkspace.reconnecting"
+                : "remoteWorkspace.manualReconnect",
+            )}
+          </span>
+        </>
+      )}
+      {!pending && onReconnect ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-1 h-7 text-xs"
+          onClick={onReconnect}
+        >
+          {t("remoteWorkspace.reconnectAction")}
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
@@ -329,7 +392,8 @@ function buildRows(
 /**
  * 文件资源管理器组件。
  *
- * 展示当前终端驱动的目录树，并按运行环境提供本地根目录选择或后台传输操作。
+ * 展示当前终端驱动的目录树，并呈现 SSH 恢复进度和统一的手动重连入口。
+ * 按运行环境提供本地根目录选择或后台传输操作。
  */
 export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
@@ -339,6 +403,7 @@ export const FileExplorer = memo(
       onOpenFolder,
       onOpenHome,
       onOpenPath,
+      onReconnect,
       activeFilePath,
       onOpenFile,
       onPathRenamed,
@@ -354,6 +419,15 @@ export const FileExplorer = memo(
     const { t } = useTranslation(["explorer", "statusbar"]);
     const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
+    const runtime = useRemoteRuntimeStore((state) => state.snapshot);
+    const remotePhase =
+      workspaceEnv.kind === "ssh" &&
+      (runtime.phase === "connecting" ||
+        runtime.phase === "reconnecting" ||
+        runtime.phase === "disconnected") &&
+      runtime.profileId === workspaceEnv.profileId
+        ? runtime.phase
+        : null;
     const [emptyPath, setEmptyPath] = useState("");
 
     /** 通过原生选择器创建文件或文件夹后台上传任务。 */
@@ -624,20 +698,24 @@ export const FileExplorer = memo(
     });
 
     if (!rootPath) {
-      if (rootPending) {
+      const connectionPhase =
+        remotePhase ?? (rootPending === "connection" ? "connecting" : null);
+      if (connectionPhase) {
+        return (
+          <RemoteConnectionNotice
+            phase={connectionPhase}
+            onReconnect={onReconnect}
+          />
+        );
+      }
+      if (rootPending === "loading") {
         return (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
             <Spinner
               className="size-4 motion-reduce:animate-none"
               aria-hidden="true"
             />
-            <span>
-              {t(
-                rootPending === "connection"
-                  ? "waitingForConnection"
-                  : "loading",
-              )}
-            </span>
+            <span>{t("loading")}</span>
           </div>
         );
       }
@@ -701,13 +779,14 @@ export const FileExplorer = memo(
 
     if (!tree.remoteReady) {
       return (
-        <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-xs text-muted-foreground">
-          <Spinner
-            className="size-4 motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-          <span>{t("waitingForConnection")}</span>
-        </div>
+        <RemoteConnectionNotice
+          phase={
+            remotePhase === "connecting" || remotePhase === "reconnecting"
+              ? remotePhase
+              : "disconnected"
+          }
+          onReconnect={onReconnect}
+        />
       );
     }
 

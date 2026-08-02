@@ -4,6 +4,8 @@
   "fewerLanguages": "↑ 收起语言",
   "allLanguages": "↓ 全部语言",
   "unsavedChanges": "未保存的更改",
+  "sshDisconnected": "SSH 连接已断开",
+  "unsavedAndSshDisconnected": "未保存的更改；SSH 连接已断开",
   "closeTab": "关闭标签页",
   "renameTab": "重命名标签页",
   "newTab": "新建标签页",

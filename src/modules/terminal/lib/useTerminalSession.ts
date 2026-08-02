@@ -105,7 +105,10 @@ type Session = {
   spawnGeneration: number;
   remoteEpoch: number | null;
   remoteSuspended: boolean;
+  remoteNotice: RemoteNotice | null;
 };
+
+type RemoteNotice = "closed" | "connecting" | "reconnecting" | "disconnected";
 
 const sessions = new Map<number, Session>();
 
@@ -494,6 +497,7 @@ function ensureSession(
     spawnGeneration: 0,
     remoteEpoch,
     remoteSuspended,
+    remoteNotice: null,
   };
   sessions.set(leafId, session);
 
@@ -551,34 +555,57 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
   );
 }
 
-/** 在终端中呈现统一的 SSH Runtime 等待状态。 */
-function showRemoteSuspendedMessage(leafId: number, s: Session): void {
+/** 在终端中追加 SSH Runtime 状态，重复状态不反复刷屏。 */
+function showRemoteNotice(
+  leafId: number,
+  s: Session,
+  notice: RemoteNotice,
+): void {
+  const previous = s.remoteNotice;
+  if (previous === notice) return;
+  s.remoteNotice = notice;
   const slot = getSlotForLeaf(leafId);
   if (slot) slot.term.options.disableStdin = true;
-  deliverPtyBytes(
-    leafId,
-    new TextEncoder().encode(
-      `\r\n\x1b[31m[terax] ${i18n.t("terminal:runtime.connectionClosed")}\x1b[0m\r\n\x1b[2m${i18n.t("terminal:runtime.waitingForReconnect")}\x1b[0m\r\n`,
-    ),
-  );
+  const title =
+    previous === null || notice === "connecting"
+      ? `\r\n\x1b[31m[terax] ${i18n.t(
+          notice === "connecting"
+            ? "common:remoteWorkspace.connecting"
+            : "common:remoteWorkspace.connectionClosed",
+        )}\x1b[0m`
+      : "";
+  const detail =
+    notice === "closed" || notice === "connecting"
+      ? ""
+      : `${title ? "\r\n" : ""}\x1b[2m${i18n.t(
+          notice === "reconnecting"
+            ? "common:remoteWorkspace.reconnecting"
+            : "common:remoteWorkspace.manualReconnect",
+        )}\x1b[0m`;
+  deliverPtyBytes(leafId, new TextEncoder().encode(`${title}${detail}\r\n`));
   scheduleHiddenRelease(leafId, s);
 }
 
 /** 立即冻结失效 epoch 的 PTY，并等待统一 Runtime 发布下一代连接。 */
-function suspendRemoteSession(leafId: number, s: Session): void {
-  if (s.remoteSuspended) return;
-  s.spawnGeneration += 1;
-  void s.pty?.close();
-  s.pty = null;
-  s.ptyOpening = false;
-  s.shellExited = true;
-  s.pendingExit = null;
-  s.pendingInput = "";
-  s.commandRunning = false;
-  s.spawnFailed = false;
-  s.remoteEpoch = null;
-  s.remoteSuspended = true;
-  showRemoteSuspendedMessage(leafId, s);
+function suspendRemoteSession(
+  leafId: number,
+  s: Session,
+  notice: RemoteNotice,
+): void {
+  if (!s.remoteSuspended) {
+    s.spawnGeneration += 1;
+    void s.pty?.close();
+    s.pty = null;
+    s.ptyOpening = false;
+    s.shellExited = true;
+    s.pendingExit = null;
+    s.pendingInput = "";
+    s.commandRunning = false;
+    s.spawnFailed = false;
+    s.remoteEpoch = null;
+    s.remoteSuspended = true;
+  }
+  showRemoteNotice(leafId, s, notice);
 }
 
 async function openPtyForSession(
@@ -604,9 +631,7 @@ async function openPtyForSession(
         s.commandRunning = false;
         if (isRecoverableRemoteExit(code)) {
           s.spawnFailed = false;
-          s.remoteEpoch = null;
-          s.remoteSuspended = true;
-          showRemoteSuspendedMessage(leafId, s);
+          suspendRemoteSession(leafId, s, "closed");
           return;
         }
         const slot = getSlotForLeaf(leafId);
@@ -813,6 +838,7 @@ export async function respawnSession(
   s.spawnFailed = false;
   s.remoteEpoch = currentRemoteEpoch();
   s.remoteSuspended = false;
+  s.remoteNotice = null;
   cancelHiddenRelease(s);
 
   const slot = getSlotForLeaf(leafId);
@@ -923,10 +949,10 @@ export function useTerminalSession({
     const workspace = currentWorkspaceEnv();
     const runtime = state.snapshot;
     if (workspace.kind !== "ssh") return "local" as const;
-    return runtime.phase === "connected" &&
-      runtime.profileId === workspace.profileId
-      ? runtime.epoch
-      : ("offline" as const);
+    if (runtime.phase === "idle" || runtime.profileId !== workspace.profileId) {
+      return "disconnected" as const;
+    }
+    return runtime.phase === "connected" ? runtime.epoch : runtime.phase;
   });
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
@@ -960,8 +986,8 @@ export function useTerminalSession({
   useEffect(() => {
     if (remoteBinding === "local") return;
     const s = ensureSession(leafId, initialCwdRef.current, blocks);
-    if (remoteBinding === "offline") {
-      suspendRemoteSession(leafId, s);
+    if (typeof remoteBinding !== "number") {
+      suspendRemoteSession(leafId, s, remoteBinding);
       return;
     }
     if (!shouldReplaceRemotePty(s.remoteEpoch, remoteBinding)) return;

@@ -30,14 +30,19 @@ export function connectedRuntimeHome(
 /** 等待当前连接操作结束，并返回其最终可用 Home。 */
 export function waitForRuntimeSettlement(): Promise<string | null> {
   const current = useRemoteRuntimeStore.getState().snapshot;
-  if (current.phase !== "connecting") {
+  if (current.phase !== "connecting" && current.phase !== "reconnecting") {
     return Promise.resolve(connectedRuntimeHome(current));
   }
   return new Promise((resolve) => {
     let settled = false;
     let unsubscribe = () => {};
     const settle = (snapshot: RemoteRuntimeSnapshot) => {
-      if (settled || snapshot.phase === "connecting") return;
+      if (
+        settled ||
+        snapshot.phase === "connecting" ||
+        snapshot.phase === "reconnecting"
+      )
+        return;
       settled = true;
       unsubscribe();
       resolve(connectedRuntimeHome(snapshot));

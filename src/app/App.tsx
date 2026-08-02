@@ -60,7 +60,7 @@ import {
   PythonInterpreterDialog,
   usePythonFileRunner,
 } from "@/modules/python";
-import { HostKeyDialog } from "@/modules/remote";
+import { HostKeyDialog, SshConnectionDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -271,6 +271,14 @@ export default function App() {
     ensureWorkspaceReady,
     reconnectWorkspace,
   } = useWorkspaceEnvironment();
+  const [sshConnectionOpen, setSshConnectionOpen] = useState(false);
+  // 文件管理器、状态栏和凭据对话框共享 Hook 内的连接任务，避免并发替换 SSH Runtime。
+  const requestSshReconnect = useCallback(() => {
+    if (workspaceEnv.kind !== "ssh") return;
+    void reconnectWorkspace().then((connectedHome) => {
+      if (!connectedHome) setSshConnectionOpen(true);
+    });
+  }, [reconnectWorkspace, workspaceEnv.kind]);
   const workspaceBootPending =
     workspaceEnv.kind === "ssh" &&
     !workbenchBooted &&
@@ -1624,6 +1632,7 @@ export default function App() {
           onOpenPath={
             workspaceEnv.kind === "local" ? undefined : openEnvironmentPath
           }
+          onReconnect={requestSshReconnect}
           gitStatus={explorerGitDecorations ? sourceControl.status : null}
           activeFilePath={explorerActiveFilePath}
           onOpenFile={handleOpenFile}
@@ -1868,7 +1877,7 @@ export default function App() {
               home={home}
               workspaceError={environmentError}
               onWorkspaceRetry={ensureWorkspaceReady}
-              onWorkspaceReconnect={reconnectWorkspace}
+              onWorkspaceReconnect={requestSshReconnect}
               onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onToggleAi={toggleAiPanel}
@@ -1892,6 +1901,14 @@ export default function App() {
             onActivate={onActivateAgent}
           />
           <HostKeyDialog prompt={hostPrompt} onResolved={clearHostPrompt} />
+          <SshConnectionDialog
+            open={sshConnectionOpen}
+            onOpenChange={setSshConnectionOpen}
+            profileId={
+              workspaceEnv.kind === "ssh" ? workspaceEnv.profileId : null
+            }
+            onConnect={reconnectWorkspace}
+          />
           <PythonInterpreterDialog
             open={pythonRunner.pickerRequest !== null}
             onOpenChange={(open) => {

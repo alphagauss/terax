@@ -1,6 +1,6 @@
 /**
  * 本文件测试标签栏关闭控件的结构约束。
- * 重点锁定单标签仍为关闭按钮预留空间，并阻止关闭点击落到标签拖拽层。
+ * 重点锁定关闭控件交互，并确认最终 SSH 断开只标记当前活动标签。
  */
 
 import { readFileSync } from "node:fs";
@@ -23,5 +23,11 @@ describe("TabBar close control", () => {
       "onPointerUp={(event) => event.stopPropagation()}",
     );
     expect(source).toContain("onClose(t.id);");
+  });
+
+  it("shows a final SSH disconnect alert only on the active tab", () => {
+    expect(source).toContain("sshDisconnected && activeGroup && isActive");
+    expect(source).toMatch(/connectionAlert\s*\?\s*"bg-destructive"/);
+    expect(source).toContain('"unsavedAndSshDisconnected"');
   });
 });

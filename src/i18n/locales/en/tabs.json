@@ -4,6 +4,8 @@
   "fewerLanguages": "↑ Fewer languages",
   "allLanguages": "↓ All languages",
   "unsavedChanges": "Unsaved changes",
+  "sshDisconnected": "SSH connection closed",
+  "unsavedAndSshDisconnected": "Unsaved changes; SSH connection closed",
   "closeTab": "Close tab",
   "renameTab": "Rename tab",
   "newTab": "New tab",

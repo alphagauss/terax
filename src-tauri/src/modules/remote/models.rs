@@ -149,6 +149,7 @@ pub struct ConnectRequest {
 ///
 /// `version` 在每次状态迁移时递增，前端据此拒绝迟到事件；`epoch` 只在新 transport
 /// 完整通过 shell、Workspace root 与 SFTP 探测后递增，用于失效旧的终端和文件请求。
+/// `reconnecting` 表示自动恢复仍在进行，`disconnected` 表示流程已停止并需要用户处理。
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(
     tag = "phase",
@@ -162,7 +163,10 @@ pub enum RemoteRuntimeSnapshot {
     Connecting {
         version: u64,
         profile_id: String,
-        attempt: u32,
+    },
+    Reconnecting {
+        version: u64,
+        profile_id: String,
     },
     Connected {
         version: u64,
@@ -183,6 +187,7 @@ impl RemoteRuntimeSnapshot {
         match self {
             Self::Idle { version }
             | Self::Connecting { version, .. }
+            | Self::Reconnecting { version, .. }
             | Self::Connected { version, .. }
             | Self::Disconnected { version, .. } => *version,
         }
@@ -398,6 +403,19 @@ mod tests {
                 "epoch": 3,
                 "profileId": "server",
                 "home": "/home/alice"
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(RemoteRuntimeSnapshot::Reconnecting {
+                version: 8,
+                profile_id: "server".into(),
+            })
+            .unwrap(),
+            serde_json::json!({
+                "phase": "reconnecting",
+                "version": 8,
+                "profileId": "server"
             })
         );
     }

@@ -1,6 +1,6 @@
 /**
  * 本文件验证文件资源管理器在目录根异步变化时保持 Hook 顺序，
- * 并锁定顶部创建目标、Local 目录选择入口与非本地 Workspace 的后台传输入口。
+ * 并锁定顶部创建目标、SSH 恢复状态、Local 目录选择入口与非本地 Workspace 的后台传输入口。
  */
 
 // @vitest-environment happy-dom
@@ -16,16 +16,26 @@ const mocks = vi.hoisted(() => ({
   environmentKind: "local",
   rootStatus: "loaded",
   remoteReady: true,
+  runtimePhase: "idle",
 }));
 
 afterEach(() => {
   mocks.environmentKind = "local";
   mocks.rootStatus = "loaded";
   mocks.remoteReady = true;
+  mocks.runtimePhase = "idle";
 });
 
 vi.mock("@/components/ui/button", () => ({
-  Button: ({ children }: { children?: React.ReactNode }) => children,
+  Button: ({
+    children,
+    variant: _variant,
+    size: _size,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+    variant?: string;
+    size?: string;
+  }) => createElement("button", { type: "button", ...props }, children),
 }));
 vi.mock("@/components/ui/spinner", () => ({
   Spinner: () => createElement("span", null, "spinner"),
@@ -72,11 +82,30 @@ vi.mock("@/modules/settings/preferences", () => ({
     select: (state: { explorerGitDecorations: boolean }) => unknown,
   ) => select({ explorerGitDecorations: false }),
 }));
+vi.mock("@/modules/remote", () => ({
+  useRemoteRuntimeStore: (
+    select: (state: { snapshot: Record<string, unknown> }) => unknown,
+  ) =>
+    select({
+      snapshot:
+        mocks.runtimePhase === "idle"
+          ? { phase: "idle", version: 0 }
+          : {
+              phase: mocks.runtimePhase,
+              version: 1,
+              profileId: "server",
+              reason: "offline",
+            },
+    }),
+}));
 vi.mock("@/modules/shortcuts", () => ({ useGlobalShortcuts: vi.fn() }));
 vi.mock("@/modules/workspace", () => ({
   useWorkspaceEnvStore: (
-    select: (state: { env: { kind: string } }) => unknown,
-  ) => select({ env: { kind: mocks.environmentKind } }),
+    select: (state: { env: { kind: string; profileId?: string } }) => unknown,
+  ) =>
+    select({
+      env: { kind: mocks.environmentKind, profileId: "server" },
+    }),
 }));
 vi.mock("@hugeicons/core-free-icons", () => ({
   FileAddIcon: {},
@@ -277,7 +306,7 @@ describe("file opening render path", () => {
     act(() => root.unmount());
   });
 
-  it("explains that a saved remote tree is waiting for its connection", () => {
+  it("shows SSH connection progress while a remote workspace boots", () => {
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -291,14 +320,16 @@ describe("file opening render path", () => {
       ),
     );
 
-    expect(container.textContent).toContain("waitingForConnection");
+    expect(container.textContent).toContain("remoteWorkspace.connecting");
+    expect(container.textContent).toContain("spinner");
     expect(container.textContent).not.toContain("noCurrentDirectory");
     act(() => root.unmount());
   });
 
-  it("replaces a stale remote tree with a connection wait state", () => {
+  it("replaces a stale remote tree with a manual reconnect state", () => {
     mocks.environmentKind = "ssh";
     mocks.remoteReady = false;
+    mocks.runtimePhase = "disconnected";
     const container = document.createElement("div");
     const root = createRoot(container);
 
@@ -311,8 +342,57 @@ describe("file opening render path", () => {
       ),
     );
 
-    expect(container.textContent).toContain("waitingForConnection");
-    expect(container.textContent).not.toContain("remote");
+    expect(container.textContent).toContain("remoteWorkspace.manualReconnect");
+    expect(container.textContent).not.toContain("spinner");
+    act(() => root.unmount());
+  });
+
+  it("shows automatic recovery without exposing retries or a manual action", () => {
+    mocks.environmentKind = "ssh";
+    mocks.remoteReady = false;
+    mocks.runtimePhase = "reconnecting";
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+          onReconnect: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(container.textContent).toContain("remoteWorkspace.reconnecting");
+    expect(container.textContent).toContain("spinner");
+    expect(container.textContent).not.toContain(
+      "remoteWorkspace.reconnectAction",
+    );
+    act(() => root.unmount());
+  });
+
+  it("offers the shared reconnect action after automatic recovery stops", () => {
+    mocks.environmentKind = "ssh";
+    mocks.remoteReady = false;
+    mocks.runtimePhase = "disconnected";
+    const onReconnect = vi.fn();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+          onReconnect,
+        }),
+      ),
+    );
+    act(() => container.querySelector("button")?.click());
+
+    expect(onReconnect).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("remoteWorkspace.reconnectAction");
     act(() => root.unmount());
   });
 

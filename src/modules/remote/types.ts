@@ -48,7 +48,11 @@ export type RemoteRuntimeSnapshot =
       phase: "connecting";
       version: number;
       profileId: string;
-      attempt: number;
+    }
+  | {
+      phase: "reconnecting";
+      version: number;
+      profileId: string;
     }
   | {
       phase: "connected";

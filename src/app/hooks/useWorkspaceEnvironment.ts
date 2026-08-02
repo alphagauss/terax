@@ -44,7 +44,8 @@ async function connectSshProfile(
 /**
  * 管理当前进程绑定环境的就绪入口。
  *
- * SSH 连接中的调用等待同一 Runtime 状态收敛；显式重连始终执行破坏式 reset。
+ * SSH 连接中的调用等待同一 Runtime 状态收敛；同一前端连接任务只执行一次，
+ * 显式重连在没有在途任务时执行破坏式 reset。
  */
 export function useWorkspaceEnvironment() {
   const env = currentWorkspaceEnv();
@@ -67,7 +68,6 @@ export function useWorkspaceEnvironment() {
   );
   const [hostPrompt, setHostPrompt] = useState<HostKeyPrompt | null>(null);
   const connectionTaskRef = useRef<Promise<string | null> | null>(null);
-  const connectionRequestRef = useRef(0);
 
   useEffect(() => {
     if (env.kind !== "ssh") return;
@@ -121,7 +121,11 @@ export function useWorkspaceEnvironment() {
   }, [env, runtimeSnapshot]);
 
   useEffect(() => {
-    if (env.kind === "ssh" && runtimeSnapshot.phase !== "connecting") {
+    if (
+      env.kind === "ssh" &&
+      runtimeSnapshot.phase !== "connecting" &&
+      runtimeSnapshot.phase !== "reconnecting"
+    ) {
       setHostPrompt(null);
     }
   }, [env.kind, runtimeSnapshot.phase]);
@@ -151,13 +155,15 @@ export function useWorkspaceEnvironment() {
       if (!force) {
         const connectedHome = connectedRuntimeHome(current);
         if (connectedHome) return connectedHome;
-        if (current.phase === "connecting") {
+        if (
+          current.phase === "connecting" ||
+          current.phase === "reconnecting"
+        ) {
           return waitForRuntimeSettlement();
         }
       }
-      if (connectionTaskRef.current && !force) return connectionTaskRef.current;
+      if (connectionTaskRef.current) return connectionTaskRef.current;
 
-      const requestId = ++connectionRequestRef.current;
       setEnvironmentActionError(null);
       setHostPrompt(null);
       const task = (async () => {
@@ -169,7 +175,6 @@ export function useWorkspaceEnvironment() {
           }
           const snapshot = await connectSshProfile(profile, credentials);
           applyRuntimeSnapshot(snapshot);
-          if (connectionRequestRef.current !== requestId) return null;
           setEnvironmentActionError(null);
           const readyHome = connectedRuntimeHome(snapshot);
           if (readyHome) {
@@ -185,11 +190,9 @@ export function useWorkspaceEnvironment() {
             .runtimeSnapshot()
             .catch(() => null);
           if (snapshot) applyRuntimeSnapshot(snapshot);
-          if (connectionRequestRef.current === requestId) {
-            setEnvironmentActionError(
-              snapshot?.phase === "disconnected" ? null : String(error),
-            );
-          }
+          setEnvironmentActionError(
+            snapshot?.phase === "disconnected" ? null : String(error),
+          );
           return null;
         }
       })();
