@@ -17,18 +17,23 @@ import {
   stopAlpha,
 } from "@/modules/alpha/native";
 import {
-  alphaQueryKeys,
-  AlphaQueryProvider,
-  useAlphaServiceStatus,
-} from "@/modules/alpha/query";
-import {
   setAlphaShowInRemote,
   useAlphaShowInRemote,
 } from "@/modules/alpha/preferences";
+import {
+  AlphaQueryProvider,
+  alphaQueryKeys,
+  useAlphaServiceStatus,
+} from "@/modules/alpha/query";
+import {
+  type PythonInterpreter,
+  PythonInterpreterDialog,
+} from "@/modules/python";
+import { LOCAL_WORKSPACE } from "@/modules/workspace";
 import { SectionHeader } from "@/settings/components/SectionHeader";
 import { SettingRow } from "@/settings/components/SettingRow";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -75,6 +80,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
   const [check, setCheck] = useState<PythonCheck | null>(null);
   const [dataDir, setDataDir] = useState<string | null>(null);
   const [action, setAction] = useState<Action>(null);
+  const [pythonPickerOpen, setPythonPickerOpen] = useState(false);
   const showInRemote = useAlphaShowInRemote();
   const savedDataDir = settings.data?.dataDir ?? null;
 
@@ -151,22 +157,13 @@ function AlphaSettingsPageContent({ visible }: Props) {
     }
   };
 
-  const selectPython = async () => {
+  /** 保存发现列表或手动浏览得到的本机解释器。 */
+  const selectPython = async (interpreter: PythonInterpreter) => {
     setAction("select");
     try {
-      const selected = await open({
-        directory: false,
-        multiple: false,
-        title: t("python.selectTitle"),
-      });
-      if (!selected || Array.isArray(selected)) return;
-      await setAlphaPythonPath(selected);
+      await setAlphaPythonPath(interpreter.path);
       setCheck(null);
       await service.refetch();
-    } catch (error) {
-      toast.error(t("errors.python"), {
-        description: String(error),
-      });
     } finally {
       setAction(null);
     }
@@ -249,7 +246,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
                 size="sm"
                 variant="outline"
                 disabled={action !== null}
-                onClick={() => void selectPython()}
+                onClick={() => setPythonPickerOpen(true)}
               >
                 {t("python.select")}
               </Button>
@@ -432,6 +429,15 @@ function AlphaSettingsPageContent({ visible }: Props) {
           </div>
         </div>
       </div>
+      <PythonInterpreterDialog
+        open={pythonPickerOpen}
+        onOpenChange={setPythonPickerOpen}
+        root={null}
+        workspace={LOCAL_WORKSPACE}
+        selectedPath={status?.pythonPath}
+        title={t("python.selectTitle")}
+        onSelect={selectPython}
+      />
     </div>
   );
 }

@@ -1,0 +1,22 @@
+{
+  "title": "Select Python interpreter",
+  "description": "Choose an existing Python environment. Terax does not create or modify environments.",
+  "searchPlaceholder": "Search by environment, version, or path...",
+  "loading": "Discovering Python interpreters...",
+  "empty": "No Python interpreters found.",
+  "discoveryFailed": "Could not discover Python interpreters.",
+  "selectionFailed": "Could not save the Python interpreter selection.",
+  "probeFailed": "The selected file is not a usable Python interpreter.",
+  "browseFailed": "Could not open the Python interpreter browser.",
+  "refresh": "Refresh",
+  "browse": "Browse...",
+  "browseTitle": "Choose a Python interpreter",
+  "version": "Python {{version}}",
+  "groups": {
+    "workspace": "Workspace",
+    "environments": "Virtual and Conda environments",
+    "system": "System"
+  },
+  "runFailed": "Could not run Python file",
+  "saveRequired": "Save the file before running it."
+}

@@ -29,6 +29,7 @@ import {
 } from "@/modules/editor/lib/languageDefinitions";
 import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
+import { isPythonFile } from "@/modules/python/path";
 import { useShortcutLabel } from "@/modules/shortcuts";
 import {
   beginWorkbenchDrag,
@@ -84,6 +85,7 @@ type Props = {
   onNewEditor: () => void;
   onNewGitGraph: () => void;
   onClose: (id: number) => void;
+  onRunPythonFile: (id: number, groupId: number) => void;
   /** Pin (promote) a preview tab to persistent on double-click. */
   onPin: (id: number) => void;
   /** Set a terminal tab's custom label; empty string resets to default. */
@@ -117,6 +119,7 @@ export function TabBar({
   onNewEditor,
   onNewGitGraph,
   onClose,
+  onRunPythonFile,
   onPin,
   onRename,
   onDropTab,
@@ -577,6 +580,17 @@ export function TabBar({
                     className="min-w-48 p-1"
                     onCloseAutoFocus={(e) => e.preventDefault()}
                   >
+                    {t.kind === "editor" && isPythonFile(t.path) && (
+                      <>
+                        <ContextMenuItem
+                          className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => onRunPythonFile(t.id, groupId)}
+                        >
+                          {tr("runPythonFile")}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
                     {t.kind === "terminal" && (
                       <ContextMenuItem
                         className="gap-2 rounded-xl px-2.5 py-1.5 text-[13px]"

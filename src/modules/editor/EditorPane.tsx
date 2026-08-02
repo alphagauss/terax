@@ -78,6 +78,8 @@ export type EditorPaneHandle = FindHandle & {
   focus: () => void;
   getSelection: () => string | null;
   getPath: () => string;
+  /** 保存当前缓冲区，发生保存冲突或写入失败时返回 false。 */
+  save: () => Promise<boolean>;
   /** Re-read the file from disk. Skips silently if the buffer is dirty. */
   reload: () => boolean;
   /** Move the cursor to a 1-based line and center it, once content is ready. */
@@ -299,7 +301,7 @@ export const EditorCore = memo(
       };
     }, []);
     // Stabilize save + onSaved via refs so the extensions array never changes
-    // identity — a new identity makes @uiw/react-codemirror reconfigure the
+    // identity; a new identity makes @uiw/react-codemirror reconfigure the
     // whole state, wiping the language compartment.
     const saveRef = useRef(save);
     saveRef.current = save;
@@ -312,7 +314,8 @@ export const EditorCore = memo(
     const warnedNoFormatRef = useRef(false);
     const refreshGitGutterRef = useRef<() => void>(() => {});
 
-    const performSave = useCallback(async () => {
+    /** 保存当前编辑器缓冲区，并在成功落盘后执行配置的外部格式化。 */
+    const performSave = useCallback(async (): Promise<boolean> => {
       const view = cmRef.current?.view;
       const prefs = usePreferencesStore.getState();
       const formatter = resolveFormatter(languageRef.current, prefs);
@@ -350,9 +353,9 @@ export const EditorCore = memo(
         toast.error(i18n.t("editor:saveFailed"), {
           description: String(error),
         });
-        return;
+        return false;
       }
-      if (!saved) return;
+      if (!saved) return false;
       if (prefs.editorFormatOnSave && formatter !== "lsp") {
         const error = await runExternalFormatter(
           formatter,
@@ -375,6 +378,7 @@ export const EditorCore = memo(
       }
       onSavedRef.current?.();
       refreshGitGutterRef.current();
+      return true;
     }, []);
     const performSaveRef = useRef(performSave);
     performSaveRef.current = performSave;
@@ -707,6 +711,7 @@ export const EditorCore = memo(
           return view.state.sliceDoc(from, to);
         },
         getPath: () => path,
+        save: () => performSaveRef.current(),
         getViewportSourceLine: () => {
           const view = cmRef.current?.view;
           return view ? editorViewportSourceLine(view) : null;

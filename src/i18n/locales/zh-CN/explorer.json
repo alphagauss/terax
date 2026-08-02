@@ -17,6 +17,7 @@
   "partialResults": "仅显示部分结果，请细化搜索条件。",
   "menu": {
     "open": "打开",
+    "runPythonFile": "运行 Python 文件",
     "openInTerminal": "在终端中打开",
     "revealInFinder": "在访达中显示",
     "downloadToLocal": "下载到本地…",

@@ -1,4 +1,9 @@
 {
+  "python": {
+    "select": "选择 Python",
+    "selected": "Python 解释器：{{path}}。点击可更改。",
+    "unselected": "为当前项目选择 Python 解释器。"
+  },
   "private": {
     "label": "私密：对 AI 隐藏",
     "tooltip": "AI 无法看到此终端的输出。可用于密钥、SSH，或任何你不想发送给模型的内容。"

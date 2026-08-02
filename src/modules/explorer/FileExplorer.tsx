@@ -28,6 +28,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { isPythonFile } from "@/modules/python/path";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import {
@@ -130,6 +131,7 @@ type Props = {
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;
+  onRunPythonFile?: (path: string, root: string) => void;
   onAttachToAgent?: (path: string) => void;
   onDropToWorkbench?: (path: string, target: WorkbenchDropTarget) => void;
   gitStatus?: GitStatusSnapshot | null;
@@ -342,6 +344,7 @@ export const FileExplorer = memo(
       onPathRenamed,
       onPathDeleted,
       onRevealInTerminal,
+      onRunPythonFile,
       onAttachToAgent,
       onDropToWorkbench,
       gitStatus,
@@ -1073,6 +1076,18 @@ export const FileExplorer = memo(
                       {t("menu.open")}
                     </ContextMenuItem>
                   )}
+                  {!menuTarget.isDir &&
+                    isPythonFile(menuTarget.path) &&
+                    onRunPythonFile && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          onRunPythonFile(menuTarget.path, rootPath)
+                        }
+                      >
+                        {t("menu.runPythonFile")}
+                      </ContextMenuItem>
+                    )}
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.beginRename(menuTarget.path)}

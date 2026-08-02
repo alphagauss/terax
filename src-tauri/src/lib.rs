@@ -7,7 +7,7 @@ pub mod modules;
 
 use modules::{
     agent, ai_sessions, alpha, app_data, fs, git, history, lsp, markdown_images, net, open_with,
-    pty, remote, secrets, shared_store, shell, transfers, workspace, workspace_process,
+    pty, python, remote, secrets, shared_store, shell, transfers, workspace, workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -360,6 +360,8 @@ pub fn run() {
             history::history_commands,
             history::history_record,
             history::history_list,
+            python::python_list_interpreters,
+            python::python_probe_interpreter,
             menu::apply_menu_language,
             alpha::commands::alpha_status,
             alpha::commands::alpha_set_python_path,

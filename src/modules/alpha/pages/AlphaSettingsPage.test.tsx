@@ -1,6 +1,6 @@
 /**
- * 本文件测试 Alpha Workbench 设置页的状态探测和数据目录保存流程。
- * 重点锁定可见性轮询以及保存配置后自动重启共享服务。
+ * 本文件测试 Alpha Workbench 设置页的状态探测、数据目录和 Python 选择流程。
+ * 重点锁定可见性轮询、保存配置后自动重启共享服务以及解释器路径持久化。
  */
 
 // @vitest-environment happy-dom
@@ -17,7 +17,9 @@ const mocks = vi.hoisted(() => ({
   getAlphaSettings: vi.fn(),
   getAlphaStatus: vi.fn(),
   open: vi.fn(),
+  pythonDialogProps: null as unknown,
   restartAlpha: vi.fn(),
+  setAlphaPythonPath: vi.fn(),
   translate: (key: string) => key,
   updateAlphaSettings: vi.fn(),
 }));
@@ -32,7 +34,7 @@ vi.mock("@/modules/alpha/native", () => ({
   getAlphaStatus: mocks.getAlphaStatus,
   restartAlpha: mocks.restartAlpha,
   setAlphaAutoStart: vi.fn(),
-  setAlphaPythonPath: vi.fn(),
+  setAlphaPythonPath: mocks.setAlphaPythonPath,
   startAlpha: vi.fn(),
   stopAlpha: vi.fn(),
 }));
@@ -40,6 +42,13 @@ vi.mock("@/modules/alpha/native", () => ({
 vi.mock("@/modules/alpha/preferences", () => ({
   setAlphaShowInRemote: vi.fn(),
   useAlphaShowInRemote: () => false,
+}));
+
+vi.mock("@/modules/python", () => ({
+  PythonInterpreterDialog: (props: unknown) => {
+    mocks.pythonDialogProps = props;
+    return null;
+  },
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -70,7 +79,9 @@ describe("AlphaSettingsPage", () => {
     mocks.getAlphaSettings.mockReset();
     mocks.getAlphaSettings.mockResolvedValue({ dataDir: "D:/alpha-data" });
     mocks.open.mockReset();
+    mocks.pythonDialogProps = null;
     mocks.restartAlpha.mockReset();
+    mocks.setAlphaPythonPath.mockReset().mockResolvedValue(undefined);
     mocks.updateAlphaSettings.mockReset();
     mocks.getAlphaStatus.mockResolvedValue({
       running: false,
@@ -201,6 +212,32 @@ describe("AlphaSettingsPage", () => {
     );
     await act(async () => retry?.click());
     expect(mocks.getAlphaSettings).toHaveBeenCalledTimes(3);
+    act(() => root.unmount());
+  });
+
+  it("从解释器对话框选择后保存 Alpha Python 路径", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(AlphaSettingsPage, { visible: true }));
+    });
+    const select = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "python.select",
+    );
+
+    await act(async () => select?.click());
+    const dialog = mocks.pythonDialogProps as {
+      open: boolean;
+      onSelect: (interpreter: { path: string }) => Promise<void>;
+    };
+    expect(dialog.open).toBe(true);
+    await act(async () => {
+      await dialog.onSelect({ path: "C:/Python/python.exe" });
+    });
+
+    expect(mocks.setAlphaPythonPath).toHaveBeenCalledWith(
+      "C:/Python/python.exe",
+    );
     act(() => root.unmount());
   });
 });
