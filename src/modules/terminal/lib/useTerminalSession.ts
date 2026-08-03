@@ -1,6 +1,6 @@
 /**
  * 本文件管理终端的 PTY 生命周期、渲染器池绑定和块模式状态。
- * SSH PTY 绑定 Remote Runtime epoch，连接代际变化时统一丢弃并重建会话。
+ * SSH PTY 随 Runtime epoch 重建，但自动重连保留当前进程内的终端滚动历史。
  */
 
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
@@ -25,7 +25,13 @@ import {
   registerPromptTracker,
 } from "./osc-handlers";
 import { openPty, type PtySession } from "./pty-bridge";
-import { isRecoverableRemoteExit, shouldReplaceRemotePty } from "./exit";
+import {
+  EXIT_ALTERNATE_SCREEN_SEQUENCE,
+  isRecoverableRemoteExit,
+  REMOTE_RECONNECT_RESET_SEQUENCE,
+  remotePtyRespawnMode,
+  type TerminalRespawnMode,
+} from "./exit";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import {
@@ -565,8 +571,20 @@ function showRemoteNotice(
   const previous = s.remoteNotice;
   if (previous === notice) return;
   s.remoteNotice = notice;
-  const slot = getSlotForTerminal(terminalId);
-  if (slot) slot.term.options.disableStdin = true;
+  const slot = getLiveSlotForTerminal(terminalId);
+  if (slot) {
+    // 断线时退出 TUI 的 alternate screen，让状态提示和后续新 Shell 回到可滚动历史。
+    if (slot.term.buffer.active.type === "alternate") {
+      slot.term.write(EXIT_ALTERNATE_SCREEN_SEQUENCE);
+    }
+    slot.term.options.disableStdin = true;
+  } else if (s.altScreenAtRelease) {
+    // 快照会先恢复 alternate screen，退出序列必须排在状态提示和新 Shell 输出之前。
+    s.dormantRing.push(
+      new TextEncoder().encode(EXIT_ALTERNATE_SCREEN_SEQUENCE),
+    );
+    s.altScreenAtRelease = false;
+  }
   const title =
     previous === null || notice === "connecting"
       ? `\r\n\x1b[31m[terax] ${i18n.t(
@@ -823,18 +841,24 @@ function detachSession(terminalId: number): void {
   s.container = null;
 }
 
-/** 丢弃当前 PTY，并以新的生成代际重新创建该终端会话。 */
+/** 丢弃当前 PTY，并按指定模式重新创建终端会话。 */
 export async function respawnSession(
   terminalId: number,
   cwd?: string,
+  mode: TerminalRespawnMode = "clear",
 ): Promise<void> {
   const s = sessions.get(terminalId);
   if (!s || s.disposed) return;
+  const preserveHistory = mode === "preserve-history";
+  const wasRemoteSuspended = s.remoteSuspended;
+  const releasedFromAltScreen = s.altScreenAtRelease;
   const generation = ++s.spawnGeneration;
   void s.pty?.close();
   s.pty = null;
-  s.snapshot = null;
-  s.dormantRing = new DormantRing();
+  if (!preserveHistory) {
+    s.snapshot = null;
+    s.dormantRing = new DormantRing();
+  }
   s.shellExited = false;
   s.pendingExit = null;
   s.pendingInput = "";
@@ -846,13 +870,38 @@ export async function respawnSession(
   s.remoteNotice = null;
   cancelHiddenRelease(s);
 
-  const slot = getSlotForTerminal(terminalId);
-  if (slot) {
-    slot.term.options.disableStdin = false;
-    slot.term.clear();
-    slot.term.reset();
+  const liveSlot = getLiveSlotForTerminal(terminalId);
+  if (preserveHistory) {
+    if (liveSlot) {
+      liveSlot.term.options.disableStdin = false;
+      // 状态若直接跳到新 epoch，断线提示可能尚未来得及退出 alternate screen。
+      if (
+        !wasRemoteSuspended &&
+        liveSlot.term.buffer.active.type === "alternate"
+      ) {
+        liveSlot.term.write(EXIT_ALTERNATE_SCREEN_SEQUENCE);
+      }
+      // DECSTR 只复位终端模式，不擦除普通缓冲区和 scrollback。
+      liveSlot.term.write(REMOTE_RECONNECT_RESET_SEQUENCE);
+    } else {
+      if (releasedFromAltScreen) {
+        s.dormantRing.push(
+          new TextEncoder().encode(EXIT_ALTERNATE_SCREEN_SEQUENCE),
+        );
+      }
+      s.dormantRing.push(
+        new TextEncoder().encode(REMOTE_RECONNECT_RESET_SEQUENCE),
+      );
+    }
   } else {
-    discardRetainedSlot(terminalId);
+    const slot = getSlotForTerminal(terminalId);
+    if (slot) {
+      slot.term.options.disableStdin = false;
+      slot.term.clear();
+      slot.term.reset();
+    } else {
+      discardRetainedSlot(terminalId);
+    }
   }
 
   s.ptyOpening = true;
@@ -1000,8 +1049,9 @@ export function useTerminalSession({
       suspendRemoteSession(terminalId, s, remoteBinding);
       return;
     }
-    if (!shouldReplaceRemotePty(s.remoteEpoch, remoteBinding)) return;
-    void respawnSession(terminalId, s.lastCwd ?? initialCwdRef.current);
+    const mode = remotePtyRespawnMode(s.remoteEpoch, remoteBinding);
+    if (!mode) return;
+    void respawnSession(terminalId, s.lastCwd ?? initialCwdRef.current, mode);
   }, [blocks, terminalId, remoteBinding]);
 
   const [blockMode, setBlockMode] = useState<BlockMode>("prompt");
