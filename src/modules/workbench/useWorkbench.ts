@@ -1,6 +1,6 @@
 /**
  * 本文件管理 Workbench 页面、分组和空间的运行时状态。
- * 页面打开函数负责复用既有标签，具体页面内容由视图注册表渲染。
+ * 页面打开函数负责复用既有标签，后台预热只解除冷状态而不改变页面所有权。
  */
 
 import i18n from "@/i18n";
@@ -196,6 +196,20 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [commit, setActiveSpace],
   );
   const setActiveId = useCallback((id: number) => revealTab(id), [revealTab]);
+
+  /** 允许冷页面在后台挂载，不改变所属 Space、Group 或活动标签。 */
+  const warmTabInBackground = useCallback(
+    (id: number) =>
+      commit((current) => {
+        const tab = current.tabs[id];
+        if (!tab?.cold) return current;
+        return {
+          ...current,
+          tabs: { ...current.tabs, [id]: { ...tab, cold: false } },
+        };
+      }),
+    [commit],
+  );
 
   const setActiveGroup = useCallback(
     (groupId: number) =>
@@ -883,6 +897,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     replaceWorkbench,
     setActiveSpace,
     setActiveId,
+    warmTabInBackground,
     setActiveGroup,
     createSpace,
     removeSpace,
