@@ -39,10 +39,7 @@ type Params = {
   launchCwd: string | null;
   home: string | null;
   openWebPreviewTab: (url: string) => void;
-  newAgentTab: (
-    cwd: string | undefined,
-    title: string,
-  ) => { tabId: number; leafId: number };
+  newAgentTab: (cwd: string | undefined, title: string) => number;
   ensureWorkspaceReady: () => Promise<string | null>;
   terminalRefs: RefObject<Map<number, TerminalPaneHandle>>;
 };
@@ -78,7 +75,7 @@ export function useAiLiveBridge(params: Params) {
         const t = tabs.find((x) => x.id === activeId);
         if (t?.kind !== "terminal") return null;
         if (t.private) return null;
-        const buf = terminalRefs.current.get(t.terminalId)?.getBuffer(300);
+        const buf = terminalRefs.current.get(t.id)?.getBuffer(300);
         return buf ? redactSensitive(buf) : null;
       },
       isActiveTerminalPrivate: () => {
@@ -90,7 +87,7 @@ export function useAiLiveBridge(params: Params) {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
         if (t?.kind !== "terminal") return false;
-        const term = terminalRefs.current.get(t.terminalId);
+        const term = terminalRefs.current.get(t.id);
         if (!term) return false;
         term.write(text);
         term.focus();
@@ -118,24 +115,21 @@ export function useAiLiveBridge(params: Params) {
         const cwd = findCwd() ?? readyHome;
         const short =
           oneLine.length > 32 ? `${oneLine.slice(0, 32)}…` : oneLine;
-        const { tabId, leafId } = ref.current.newAgentTab(
-          cwd,
-          `claude · ${short}`,
-        );
+        const tabId = ref.current.newAgentTab(cwd, `claude · ${short}`);
         useManagedAgentsStore
           .getState()
-          .register({ leafId, tabId, sessionId, task: oneLine, cwd });
+          .register({ tabId, sessionId, task: oneLine, cwd });
         const hooksReady = invoke("agent_enable_hooks", {
           agent: "claude",
         }).catch(() => {});
         void (async () => {
-          await Promise.all([whenSessionReady(leafId), hooksReady]);
-          if (!writeToSession(leafId, "claude\r")) {
-            useManagedAgentsStore.getState().remove(leafId);
+          await Promise.all([whenSessionReady(tabId), hooksReady]);
+          if (!writeToSession(tabId, "claude\r")) {
+            useManagedAgentsStore.getState().remove(tabId);
             return;
           }
           const readBuf = () => {
-            const term = terminalRefs.current.get(leafId);
+            const term = terminalRefs.current.get(tabId);
             return term ? term.getBuffer(120) : null;
           };
           const result = await waitForClaudeTuiReady(readBuf);
@@ -145,20 +139,20 @@ export function useAiLiveBridge(params: Params) {
                 "[terax] Claude TUI did not appear in time; aborting prompt send",
               );
             }
-            useManagedAgentsStore.getState().remove(leafId);
+            useManagedAgentsStore.getState().remove(tabId);
             return;
           }
-          if (!writeToSession(leafId, `\x1b[200~${trimmed}\x1b[201~`)) {
-            useManagedAgentsStore.getState().remove(leafId);
+          if (!writeToSession(tabId, `\x1b[200~${trimmed}\x1b[201~`)) {
+            useManagedAgentsStore.getState().remove(tabId);
             return;
           }
-          setTimeout(() => writeToSession(leafId, "\r"), 120);
-          useManagedAgentsStore.getState().setPhase(leafId, "working");
+          setTimeout(() => writeToSession(tabId, "\r"), 120);
+          useManagedAgentsStore.getState().setPhase(tabId, "working");
         })();
-        return { tabId, leafId };
+        return tabId;
       },
-      readLeafBuffer: (leafId: number) => {
-        const buf = terminalRefs.current.get(leafId)?.getBuffer(300);
+      readTerminalBuffer: (tabId: number) => {
+        const buf = terminalRefs.current.get(tabId)?.getBuffer(300);
         return buf ? redactSensitive(buf) : null;
       },
     });

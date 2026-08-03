@@ -196,6 +196,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 
 - `workbench/`：归一化页面所有权、递归分割树和稳定 ViewPool。移动或分割标签页不能重挂载页面。
 - `terminal/`：PTY 会话、OSC 解析和 renderer pool。运行命令的隐藏终端不能被序列化；不要重放增量 TUI 输出覆盖快照。
+- 终端标签的 `tab.id` 同时作为前端终端会话、renderer pool 和 Agent 路由的唯一身份，不得重新引入 `terminalId` 或 `leafId`。原生 PTY ID 是独立资源 ID，只能通过终端会话层映射。
 - `editor/`：CodeMirror 页面、换行与缩进检测、冲突保存、格式化、diff、AI 补全和 LSP。大文件限制和主题解析必须保持现有不变量。
 - `explorer/`：文件树、搜索、重命名和上下文操作；路径 basename 必须兼容反斜杠。
 - `preview/`：开发服务器预览。

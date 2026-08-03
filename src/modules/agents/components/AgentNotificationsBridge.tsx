@@ -1,5 +1,10 @@
+/**
+ * 本文件把原生 PTY Agent 信号桥接到标签状态和通知系统。
+ * PTY ID 先映射到终端标签 ID，后续状态只使用标签的唯一身份。
+ */
+
 import i18n from "@/i18n";
-import { leafIdForPty } from "@/modules/terminal";
+import { terminalIdForPty } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
@@ -11,7 +16,7 @@ import { useWindowFocus } from "../lib/useWindowFocus";
 import { useAgentStore } from "../store/agentStore";
 import { useManagedAgentsStore } from "../store/managedAgentsStore";
 
-type Activate = (tabId: number, leafId: number) => void;
+type Activate = (tabId: number) => void;
 type Ctx = {
   tabs: Tab[];
   activeId: number;
@@ -19,16 +24,9 @@ type Ctx = {
   onActivate: Activate;
 };
 
-function tabInfo(
-  tabs: Tab[],
-  leafId: number,
-): { tabId: number; title: string } | null {
-  for (const t of tabs) {
-    if (t.kind === "terminal" && t.terminalId === leafId) {
-      return { tabId: t.id, title: t.title };
-    }
-  }
-  return null;
+function findTerminalTab(tabs: Tab[], tabId: number) {
+  const tab = tabs.find((candidate) => candidate.id === tabId);
+  return tab?.kind === "terminal" ? tab : null;
 }
 
 function route(
@@ -36,7 +34,7 @@ function route(
   kind: "attention" | "finished",
   ctx: Ctx,
 ): void {
-  const info = tabInfo(ctx.tabs, session.leafId);
+  const tab = findTerminalTab(ctx.tabs, session.tabId);
   const name = displayAgent(session.agent);
   const heading =
     kind === "attention"
@@ -48,52 +46,51 @@ function route(
     agent: session.agent,
     kind,
     title: heading,
-    body: info?.title,
+    body: tab?.title,
     focused: ctx.focused,
     visible: ctx.activeId === session.tabId,
     // Stop fires every turn, so finished only updates the bell; attention toasts.
     allowToast: kind === "attention",
     tabId: session.tabId,
-    leafId: session.leafId,
-    onActivate: () => ctx.onActivate(session.tabId, session.leafId),
+    onActivate: () => ctx.onActivate(session.tabId),
   });
 }
 
 function handleSignal(sig: AgentSignal, ctx: Ctx): void {
-  const leafId = leafIdForPty(sig.id);
-  if (leafId === null) return;
+  const tabId = terminalIdForPty(sig.id);
+  if (tabId === null) return;
   const store = useAgentStore.getState();
 
   switch (sig.kind) {
     case "started": {
-      const info = tabInfo(ctx.tabs, leafId);
-      if (!info) return;
-      store.start(leafId, info.tabId, sig.agent ?? "agent");
+      if (!findTerminalTab(ctx.tabs, tabId)) return;
+      store.start(tabId, sig.agent ?? "agent");
       return;
     }
     case "working":
-      store.setStatus(leafId, "working");
+      store.setStatus(tabId, "working");
       return;
     case "attention": {
-      store.setStatus(leafId, "waiting");
-      const session = store.sessions[leafId];
+      store.setStatus(tabId, "waiting");
+      const session = store.sessions[tabId];
       if (session) route(session, "attention", ctx);
       return;
     }
     case "finished": {
-      store.setStatus(leafId, "waiting");
-      const session = store.sessions[leafId];
+      store.setStatus(tabId, "waiting");
+      const session = store.sessions[tabId];
       if (session) route(session, "finished", ctx);
-      maybeTriggerManagedReview(leafId);
+      maybeTriggerManagedReview(tabId);
       return;
     }
     case "exited":
-      store.finish(leafId);
-      useManagedAgentsStore.getState().remove(leafId);
+      store.finish(tabId);
+      useManagedAgentsStore.getState().remove(tabId);
       return;
   }
 }
 
+/** 监听 Agent 生命周期信号并更新对应标签的通知状态。 */
 export function AgentNotificationsBridge({
   tabs,
   activeId,

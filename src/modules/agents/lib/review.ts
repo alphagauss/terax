@@ -1,3 +1,8 @@
+/**
+ * 本文件管理托管 Agent 的自动审查触发与待处理状态。
+ * 每个 Agent 由其 Workbench 标签 ID 唯一定位。
+ */
+
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import {
   useManagedAgentsStore,
@@ -26,8 +31,8 @@ function canReview(m: ManagedAgent): boolean {
 
 function fireReview(m: ManagedAgent): void {
   const store = useManagedAgentsStore.getState();
-  store.markReviewed(m.leafId);
-  store.setPhase(m.leafId, "reviewing");
+  store.markReviewed(m.tabId);
+  store.setPhase(m.tabId, "reviewing");
   void (async () => {
     const { getOrCreateChat } = await import("@/modules/ai/store/chatRuntime");
     const chat = getOrCreateChat(m.sessionId);
@@ -38,23 +43,25 @@ function fireReview(m: ManagedAgent): void {
   })();
 }
 
-export function maybeTriggerManagedReview(leafId: number): void {
+/** 在托管 Agent 当前轮次满足条件时立即审查，否则记录待处理状态。 */
+export function maybeTriggerManagedReview(tabId: number): void {
   const store = useManagedAgentsStore.getState();
-  const m = store.get(leafId);
+  const m = store.get(tabId);
   if (!m || !canReview(m)) return;
   if (useChatStore.getState().activeSessionId !== m.sessionId) {
-    store.setPendingReview(leafId, true);
+    store.setPendingReview(tabId, true);
     return;
   }
   fireReview(m);
 }
 
+/** 激活会话后触发其此前延迟的托管 Agent 审查。 */
 export function firePendingReviewForSession(sessionId: string): void {
   const store = useManagedAgentsStore.getState();
   const m = store.getBySessionId(sessionId);
   if (!m?.pendingReview) return;
   if (!canReview(m)) {
-    store.setPendingReview(m.leafId, false);
+    store.setPendingReview(m.tabId, false);
     return;
   }
   fireReview(m);

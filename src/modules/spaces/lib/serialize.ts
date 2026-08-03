@@ -170,10 +170,8 @@ function hydrateTab(
   switch (serialized.kind) {
     case "terminal": {
       const id = allocId();
-      const terminalId = allocId();
       return {
         id,
-        terminalId,
         kind: "terminal",
         spaceId,
         cold: true,
@@ -337,12 +335,10 @@ export function freshSpaceWorkbench(
     };
   }
   const tabId = allocId();
-  const terminalId = allocId();
   const groupId = allocId();
   const nodeId = allocId();
   const tab: TerminalTab = {
     id: tabId,
-    terminalId,
     kind: "terminal",
     spaceId,
     cold: true,

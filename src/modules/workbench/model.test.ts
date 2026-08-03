@@ -22,10 +22,9 @@ import {
 } from "./model";
 import type { Tab, WorkbenchLayoutNode, WorkbenchState } from "./types";
 
-function terminal(id: number, terminalId = id + 100): Tab {
+function terminal(id: number): Tab {
   return {
     id,
-    terminalId,
     kind: "terminal",
     spaceId: "default",
     title: `term-${id}`,
@@ -62,7 +61,6 @@ describe("workbench model", () => {
     const moved = moveTabToGroup(split, 2, 4, 1);
     expect(groupIds(moved.spaces.default.root)).toEqual([4]);
     expect(moved.spaces.default.groups[4].tabIds).toEqual([4, 2]);
-    expect(moved.tabs[2]).toMatchObject({ terminalId: 102 });
     expect(() => assertWorkbenchState(moved)).not.toThrow();
   });
 

@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染当前目录或文件路径的状态栏面包屑。
+ * 路径分段兼容 Windows 与 Unix 分隔符，只有目录段支持导航。
+ */
+
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -45,9 +50,10 @@ function basename(path: string): string {
   return i === -1 ? path : path.slice(i + 1);
 }
 
+/** 渲染当前目录或文件路径，并将可导航目录回传给工作区。 */
 export function CwdBreadcrumb({ cwd, filePath, home, onCd }: Props) {
   const { t } = useTranslation("statusbar");
-  // File mode: dir segments navigate; filename is the terminal leaf.
+  // 文件模式下目录段可导航，文件名仅作为末级静态项。
   if (filePath) {
     const dir = dirname(filePath);
     const name = basename(filePath);

@@ -1,3 +1,8 @@
+/**
+ * 本文件保存由 AI 工具创建的托管 Agent 状态。
+ * 每个托管 Agent 以其终端标签 ID 为唯一运行时键。
+ */
+
 import { create } from "zustand";
 
 export const DEFAULT_MAX_ROUNDS = 3;
@@ -5,7 +10,6 @@ export const DEFAULT_MAX_ROUNDS = 3;
 export type ManagedPhase = "spawning" | "working" | "reviewing" | "done";
 
 export type ManagedAgent = {
-  leafId: number;
   tabId: number;
   sessionId: string;
   task: string;
@@ -20,31 +24,29 @@ export type ManagedAgent = {
 type ManagedAgentsState = {
   agents: Record<number, ManagedAgent>;
   register: (a: {
-    leafId: number;
     tabId: number;
     sessionId: string;
     task: string;
     cwd: string | null;
     maxRounds?: number;
   }) => void;
-  setPhase: (leafId: number, phase: ManagedPhase) => void;
-  markReviewed: (leafId: number) => void;
-  setPendingReview: (leafId: number, pending: boolean) => void;
-  bumpRound: (leafId: number) => void;
-  remove: (leafId: number) => void;
-  get: (leafId: number) => ManagedAgent | undefined;
+  setPhase: (tabId: number, phase: ManagedPhase) => void;
+  markReviewed: (tabId: number) => void;
+  setPendingReview: (tabId: number, pending: boolean) => void;
+  bumpRound: (tabId: number) => void;
+  remove: (tabId: number) => void;
+  get: (tabId: number) => ManagedAgent | undefined;
   getBySessionId: (sessionId: string) => ManagedAgent | undefined;
 };
 
 export const useManagedAgentsStore = create<ManagedAgentsState>((set, get) => ({
   agents: {},
 
-  register: ({ leafId, tabId, sessionId, task, cwd, maxRounds }) =>
+  register: ({ tabId, sessionId, task, cwd, maxRounds }) =>
     set((s) => ({
       agents: {
         ...s.agents,
-        [leafId]: {
-          leafId,
+        [tabId]: {
           tabId,
           sessionId,
           task,
@@ -58,55 +60,55 @@ export const useManagedAgentsStore = create<ManagedAgentsState>((set, get) => ({
       },
     })),
 
-  setPhase: (leafId, phase) =>
+  setPhase: (tabId, phase) =>
     set((s) => {
-      const a = s.agents[leafId];
+      const a = s.agents[tabId];
       if (!a || a.phase === phase) return s;
-      return { agents: { ...s.agents, [leafId]: { ...a, phase } } };
+      return { agents: { ...s.agents, [tabId]: { ...a, phase } } };
     }),
 
-  markReviewed: (leafId) =>
+  markReviewed: (tabId) =>
     set((s) => {
-      const a = s.agents[leafId];
+      const a = s.agents[tabId];
       if (!a) return s;
       return {
         agents: {
           ...s.agents,
-          [leafId]: { ...a, reviewedAtRound: a.rounds, pendingReview: false },
+          [tabId]: { ...a, reviewedAtRound: a.rounds, pendingReview: false },
         },
       };
     }),
 
-  setPendingReview: (leafId, pending) =>
+  setPendingReview: (tabId, pending) =>
     set((s) => {
-      const a = s.agents[leafId];
+      const a = s.agents[tabId];
       if (!a || a.pendingReview === pending) return s;
       return {
-        agents: { ...s.agents, [leafId]: { ...a, pendingReview: pending } },
+        agents: { ...s.agents, [tabId]: { ...a, pendingReview: pending } },
       };
     }),
 
-  bumpRound: (leafId) =>
+  bumpRound: (tabId) =>
     set((s) => {
-      const a = s.agents[leafId];
+      const a = s.agents[tabId];
       if (!a) return s;
       return {
         agents: {
           ...s.agents,
-          [leafId]: { ...a, rounds: a.rounds + 1, phase: "working" },
+          [tabId]: { ...a, rounds: a.rounds + 1, phase: "working" },
         },
       };
     }),
 
-  remove: (leafId) =>
+  remove: (tabId) =>
     set((s) => {
-      if (!s.agents[leafId]) return s;
+      if (!s.agents[tabId]) return s;
       const next = { ...s.agents };
-      delete next[leafId];
+      delete next[tabId];
       return { agents: next };
     }),
 
-  get: (leafId) => get().agents[leafId],
+  get: (tabId) => get().agents[tabId],
 
   getBySessionId: (sessionId) =>
     Object.values(get().agents).find((a) => a.sessionId === sessionId),

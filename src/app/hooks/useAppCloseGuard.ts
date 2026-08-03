@@ -5,7 +5,7 @@
  */
 
 import { countDirtyDocuments } from "@/modules/editor";
-import { leafHasForegroundProcess } from "@/modules/terminal";
+import { terminalHasForegroundProcess } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -18,10 +18,12 @@ import {
 
 async function anyTerminalBusy(tabs: Tab[]): Promise<boolean> {
   const terminalIds = tabs.flatMap((tab) =>
-    tab.kind === "terminal" ? [tab.terminalId] : [],
+    tab.kind === "terminal" ? [tab.id] : [],
   );
   if (terminalIds.length === 0) return false;
-  const checks = await Promise.all(terminalIds.map(leafHasForegroundProcess));
+  const checks = await Promise.all(
+    terminalIds.map(terminalHasForegroundProcess),
+  );
   return checks.some(Boolean);
 }
 

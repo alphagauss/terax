@@ -1,8 +1,13 @@
+/**
+ * 本文件把 Tauri 文件拖放事件路由到鼠标下方的终端。
+ * DOM 标记保存终端标签 ID，路径格式化后再写入对应输入流。
+ */
+
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect } from "react";
 import { useTerminalDropStore } from "./dropStore";
 import { formatDroppedPaths } from "./quoteShellPath";
-import { pasteIntoLeaf } from "./rendererPool";
+import { pasteIntoTerminal } from "./rendererPool";
 
 // Tauri reports the drop point in physical pixels on some platforms and logical
 // on others; only scale down when it overflows the logical viewport.
@@ -46,7 +51,7 @@ export function useTerminalFileDrop(): void {
           if (!p.paths.length) return;
           const terminalId = terminalIdAt(p.position.x, p.position.y);
           if (terminalId !== null) {
-            pasteIntoLeaf(terminalId, formatDroppedPaths(p.paths));
+            pasteIntoTerminal(terminalId, formatDroppedPaths(p.paths));
           }
         }
       })

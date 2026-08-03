@@ -89,10 +89,10 @@ function replaceEditorPreview(
   };
 }
 
-function cloneForSplit(tab: Tab, id: number, terminalId: number): Tab | null {
+function cloneForSplit(tab: Tab, id: number): Tab | null {
   switch (tab.kind) {
     case "terminal":
-      return { ...tab, id, terminalId, cold: false };
+      return { ...tab, id, cold: false };
     case "editor":
       return { ...tab, id, preview: false, cold: false };
     case "markdown":
@@ -112,7 +112,6 @@ function maxRuntimeId(state: WorkbenchState): number {
   };
   for (const tab of Object.values(state.tabs)) {
     max = Math.max(max, tab.id);
-    if (tab.kind === "terminal") max = Math.max(max, tab.terminalId);
   }
   for (const space of Object.values(state.spaces)) {
     visit(space.root);
@@ -255,10 +254,8 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         createSpace(spaceId, false);
       }
       const tabId = allocId();
-      const terminalId = allocId();
       const tab: TerminalTab = {
         id: tabId,
-        terminalId,
         kind: "terminal",
         spaceId,
         title: options.title,
@@ -301,29 +298,17 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [newTerminalTab],
   );
 
-  /** 创建终端标签并返回页面与 PTY 使用的两个稳定标识。 */
-  const newTerminalHandle = useCallback(
-    (cwd: string | undefined, title: string, groupId?: number) => {
-      const tabId = newTerminalTab(cwd, { title }, undefined, groupId);
-      const tab = stateRef.current.tabs[tabId];
-      return {
-        tabId,
-        leafId: tab.kind === "terminal" ? tab.terminalId : 0,
-      };
-    },
+  const newAgentTab = useCallback(
+    (cwd: string | undefined, title: string) =>
+      newTerminalTab(cwd, { title }, undefined),
     [newTerminalTab],
   );
 
-  const newAgentTab = useCallback(
-    (cwd: string | undefined, title: string) => newTerminalHandle(cwd, title),
-    [newTerminalHandle],
-  );
-
-  /** 创建用于一次性运行文件的终端标签，并返回稳定的终端会话标识。 */
+  /** 创建用于一次性运行文件的终端标签，并返回其稳定标识。 */
   const newRunTab = useCallback(
     (cwd: string | undefined, title: string, groupId?: number) =>
-      newTerminalHandle(cwd, title, groupId),
-    [newTerminalHandle],
+      newTerminalTab(cwd, { title }, undefined, groupId),
+    [newTerminalTab],
   );
 
   useEffect(() => {
@@ -721,15 +706,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   );
 
   const setTerminalCwd = useCallback(
-    (terminalId: number, cwd: string) =>
+    (tabId: number, cwd: string) =>
       commit((current) => {
-        const tab = Object.values(current.tabs).find(
-          (candidate) =>
-            candidate.kind === "terminal" &&
-            candidate.terminalId === terminalId,
-        );
+        const tab = current.tabs[tabId];
         return tab?.kind === "terminal" && tab.cwd !== cwd
-          ? patchTab(current, tab.id, { cwd })
+          ? patchTab(current, tabId, { cwd })
           : current;
       }),
     [commit],
@@ -760,13 +741,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const owner = findGroupForTab(current, tabId);
       const target = targetGroupId ?? owner?.group.id;
       if (!source || target === undefined) return null;
-      const nextTab = move
-        ? source
-        : cloneForSplit(
-            source,
-            allocId(),
-            source.kind === "terminal" ? allocId() : 0,
-          );
+      const nextTab = move ? source : cloneForSplit(source, allocId());
       if (!nextTab) return null;
       const groupId = allocId();
       const nodeId = allocId();

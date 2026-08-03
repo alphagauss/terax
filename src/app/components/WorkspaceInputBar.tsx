@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染工作区底部的块终端输入栏及上下文状态。
+ * 输入只绑定当前活动终端，标签切换时由终端运行时恢复各自草稿。
+ */
+
 import { Chip } from "@/modules/ai/components/Chip";
 import { useBlockController } from "@/modules/terminal/lib/blockController";
 import { useTheme } from "@/modules/theme";
@@ -21,6 +26,7 @@ type Props = {
   home: string | null;
 };
 
+/** 渲染当前活动块终端的命令输入与工作区上下文。 */
 export function WorkspaceInputBar({
   isBlockTab,
   isTerminalTab,
@@ -75,7 +81,7 @@ export function WorkspaceInputBar({
         </div>
         <Suspense fallback={null}>
           <ShellInput
-            leafId={terminalId}
+            terminalId={terminalId}
             mode={blockMode}
             focused
             themeKey={themeKey}

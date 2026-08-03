@@ -1,3 +1,8 @@
+/**
+ * 本文件测试标签标题的显示规则。
+ * 重点锁定终端自定义标题与路径派生标题的优先级。
+ */
+
 import type { TerminalTab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
 import { labelFor } from "./tabLabel";
@@ -5,7 +10,6 @@ import { labelFor } from "./tabLabel";
 function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
   return {
     id: 1,
-    terminalId: 2,
     kind: "terminal",
     spaceId: "default",
     title: "shell",
