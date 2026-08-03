@@ -48,7 +48,7 @@ class AlphaConfig(BaseModel):
     def database_dir(self) -> Path:
         """返回 SQLite 数据库目录。"""
 
-        return self.data_dir / "database"
+        return self.data_dir / "sqlite_db"
 
     @property
     def csv_dir(self) -> Path:
