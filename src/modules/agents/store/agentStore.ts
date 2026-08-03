@@ -1,3 +1,8 @@
+/**
+ * 本文件保存终端 Agent 的瞬时状态、通知和本地 Agent 状态。
+ * 终端会话表以标签 ID 为键，不持久化原生 PTY 资源身份。
+ */
+
 import { create } from "zustand";
 import type {
   AgentNotification,
@@ -14,9 +19,9 @@ type AgentStoreState = {
   sessions: Record<number, AgentSession>;
   localAgent: LocalAgentState;
   notifications: AgentNotification[];
-  start: (leafId: number, tabId: number, agent: string) => void;
-  setStatus: (leafId: number, status: AgentStatus) => void;
-  finish: (leafId: number) => void;
+  start: (tabId: number, agent: string) => void;
+  setStatus: (tabId: number, status: AgentStatus) => void;
+  finish: (tabId: number) => void;
   setLocalAgent: (state: LocalAgentState) => void;
   pushNotification: (
     n: Omit<AgentNotification, "id" | "at" | "read">,
@@ -30,14 +35,13 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   localAgent: null,
   notifications: [],
 
-  start: (leafId, tabId, agent) =>
+  start: (tabId, agent) =>
     set((s) => {
       const now = Date.now();
       return {
         sessions: {
           ...s.sessions,
-          [leafId]: {
-            leafId,
+          [tabId]: {
             tabId,
             agent,
             status: "working",
@@ -49,15 +53,15 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
       };
     }),
 
-  setStatus: (leafId, status) =>
+  setStatus: (tabId, status) =>
     set((s) => {
-      const prev = s.sessions[leafId];
+      const prev = s.sessions[tabId];
       if (!prev || prev.status === status) return s;
       const now = Date.now();
       return {
         sessions: {
           ...s.sessions,
-          [leafId]: {
+          [tabId]: {
             ...prev,
             status,
             lastActivityAt: now,
@@ -67,11 +71,11 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
       };
     }),
 
-  finish: (leafId) =>
+  finish: (tabId) =>
     set((s) => {
-      if (!s.sessions[leafId]) return s;
+      if (!s.sessions[tabId]) return s;
       const next = { ...s.sessions };
-      delete next[leafId];
+      delete next[tabId];
       return { sessions: next };
     }),
 
@@ -102,12 +106,11 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   clearNotifications: () => set({ notifications: [] }),
 }));
 
-/** The tab/leaf of the agent that most recently entered the waiting state, for
- *  the keyboard jump-to-attention shortcut. Null when none is waiting. */
-export function nextAttentionTarget(): { tabId: number; leafId: number } | null {
+/** 返回最近进入等待状态的 Agent 标签 ID，供快捷键直接跳转。 */
+export function nextAttentionTabId(): number | null {
   const waiting = Object.values(useAgentStore.getState().sessions)
     .filter((s) => s.status === "waiting")
     .sort((a, b) => (b.attentionSince ?? 0) - (a.attentionSince ?? 0));
   const t = waiting[0];
-  return t ? { tabId: t.tabId, leafId: t.leafId } : null;
+  return t?.tabId ?? null;
 }

@@ -32,7 +32,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
   return {
     spawn_coding_agent: tool({
       description:
-        "Spawn a Claude Code agent in a new terminal tab and give it the prompt. Use this when the user (via /claude-code) wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active — use send_to_agent instead.",
+        "Spawn a Claude Code agent in a new terminal tab and give it the prompt. Use this when the user (via /claude-code) wants work delegated and no agent is active yet in this session. Craft a complete, self-contained prompt first; the user approves it before the agent starts. Do not call this if an agent is already active; use send_to_agent instead.",
       inputSchema: z.object({
         prompt: z
           .string()
@@ -52,11 +52,11 @@ export function buildManagedAgentTools(ctx: ToolContext) {
               "a Claude Code agent is already active in this session; use send_to_agent to give it more work",
           };
         }
-        const spawned = await ctx.spawnAgent(prompt);
-        if (!spawned) return { error: "could not spawn the agent" };
+        const tabId = await ctx.spawnAgent(prompt);
+        if (tabId === null) return { error: "could not spawn the agent" };
         return {
           ok: true,
-          tab_id: spawned.tabId,
+          tab_id: tabId,
           message: "Claude Code agent spawned. It will start working shortly.",
         };
       },
@@ -89,13 +89,13 @@ export function buildManagedAgentTools(ctx: ToolContext) {
         if (hasControlChars(oneLine)) {
           return { error: "instruction contains control characters" };
         }
-        if (!writeToSession(managed.leafId, oneLine)) {
-          store.remove(managed.leafId);
+        if (!writeToSession(managed.tabId, oneLine)) {
+          store.remove(managed.tabId);
           return { error: "agent terminal is no longer available (closed?)" };
         }
-        setTimeout(() => writeToSession(managed.leafId, "\r"), SUBMIT_DELAY_MS);
-        store.bumpRound(managed.leafId);
-        return { ok: true, sent: oneLine, round: store.get(managed.leafId)?.rounds };
+        setTimeout(() => writeToSession(managed.tabId, "\r"), SUBMIT_DELAY_MS);
+        store.bumpRound(managed.tabId);
+        return { ok: true, sent: oneLine, round: store.get(managed.tabId)?.rounds };
       },
     }),
 
@@ -117,7 +117,7 @@ export function buildManagedAgentTools(ctx: ToolContext) {
           ? useManagedAgentsStore.getState().getBySessionId(sessionId)
           : undefined;
         if (!managed) return { active: false };
-        const raw = ctx.readAgentOutput(managed.leafId);
+        const raw = ctx.readAgentOutput(managed.tabId);
         return {
           active: true,
           phase: managed.phase,

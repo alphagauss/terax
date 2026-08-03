@@ -1,5 +1,5 @@
 /**
- * 本文件管理终端叶子的 PTY 生命周期、渲染器池绑定和块模式状态。
+ * 本文件管理终端的 PTY 生命周期、渲染器池绑定和块模式状态。
  * SSH PTY 绑定 Remote Runtime epoch，连接代际变化时统一丢弃并重建会话。
  */
 
@@ -41,15 +41,15 @@ import {
   applyWebglPreference,
   configureRendererPool,
   discardRetainedSlot,
-  disposeLeafSlot,
+  disposeTerminalSlot,
   focusSlot,
-  getLiveSlotForLeaf,
-  getSlotForLeaf,
-  isLeafAltScreen,
-  parkLeafSlot,
+  getLiveSlotForTerminal,
+  getSlotForTerminal,
+  isTerminalAltScreen,
+  parkTerminalSlot,
   poolSize,
   poolSlotStats,
-  refreshLeafSlot,
+  refreshTerminalSlot,
   releaseSlot,
   setSlotFocused,
 } from "./rendererPool";
@@ -83,22 +83,19 @@ type Session = {
   blockMode: BlockMode;
   blockListeners: Set<() => void>;
   blockDecorations: BlockDecorations | null;
-  // Set by the block shell-input; called to pull focus back when the xterm
-  // grid steals it at the prompt (e.g. on a click), so typing stays in the bar.
+  // 由块终端输入框注册，在 xterm 网格抢走焦点时将输入焦点拉回输入栏。
   inputFocus: (() => void) | null;
-  // Per-leaf unsent shell-input text; the single workspace bar swaps it on focus change.
+  // 每个终端独立保存未发送的输入，工作区单一输入栏在焦点变化时切换草稿。
   inputDraft: string;
   // Live "input has text" flag from the block shell-input (gates the watermark).
   inputActive: boolean;
-  // A command was submitted on this leaf; kills the watermark synchronously,
-  // before the shell's OSC 133 C round-trips through the PTY.
+  // 命令提交后立即隐藏水印，无需等待 shell 的 OSC 133 C 经 PTY 返回。
   everSubmitted: boolean;
   // True if the slot was in alt-screen mode (TUI like vim, htop, dofek)
   // at the most recent release. Read once on the next bind to trigger a
   // SIGWINCH-driven repaint instead of replaying dormant bytes.
   altScreenAtRelease: boolean;
-  // OSC 133 C..D window (or blocks running mode): a foreground process owns
-  // the terminal, so the leaf must keep its live grid while hidden.
+  // OSC 133 C..D 或块运行模式表示前台进程占用终端，隐藏时仍必须保留实时网格。
   commandRunning: boolean;
   hiddenReleaseTimer: ReturnType<typeof setTimeout> | null;
   spawnFailed: boolean;
@@ -128,22 +125,21 @@ function remoteRuntimeUnavailable(): boolean {
   return currentWorkspaceEnv().kind === "ssh" && currentRemoteEpoch() === null;
 }
 
-// Block-overlay viewport listeners, keyed by leafId at module scope so the
-// overlay (a child) can subscribe before the parent effect creates the session.
+// 视口监听器按 terminalId 存在模块作用域，使子级 overlay 可在父级 effect 创建会话前订阅。
 const blockViewportListeners = new Map<number, Set<() => void>>();
 
-const readyLeaves = new Set<number>();
+const readyTerminals = new Set<number>();
 const readyWaiters = new Map<
   number,
   { resolve: () => void; timer: ReturnType<typeof setTimeout> }[]
 >();
 
-function markSessionReady(leafId: number): void {
-  if (readyLeaves.has(leafId)) return;
-  readyLeaves.add(leafId);
-  const waiters = readyWaiters.get(leafId);
+function markSessionReady(terminalId: number): void {
+  if (readyTerminals.has(terminalId)) return;
+  readyTerminals.add(terminalId);
+  const waiters = readyWaiters.get(terminalId);
   if (!waiters) return;
-  readyWaiters.delete(leafId);
+  readyWaiters.delete(terminalId);
   for (const w of waiters) {
     clearTimeout(w.timer);
     w.resolve();
@@ -151,20 +147,20 @@ function markSessionReady(leafId: number): void {
 }
 
 export function whenSessionReady(
-  leafId: number,
+  terminalId: number,
   timeoutMs = 4000,
 ): Promise<void> {
-  if (readyLeaves.has(leafId)) return Promise.resolve();
+  if (readyTerminals.has(terminalId)) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      const arr = readyWaiters.get(leafId);
+      const arr = readyWaiters.get(terminalId);
       const i = arr?.findIndex((w) => w.timer === timer) ?? -1;
       if (arr && i >= 0) arr.splice(i, 1);
       resolve();
     }, timeoutMs);
-    const arr = readyWaiters.get(leafId) ?? [];
+    const arr = readyWaiters.get(terminalId) ?? [];
     arr.push({ resolve, timer });
-    readyWaiters.set(leafId, arr);
+    readyWaiters.set(terminalId, arr);
   });
 }
 
@@ -177,8 +173,8 @@ function queuePendingInput(s: Session, data: string): void {
   s.pendingInput += data;
 }
 
-export function writeToSession(leafId: number, data: string): boolean {
-  const s = sessions.get(leafId);
+export function writeToSession(terminalId: number, data: string): boolean {
+  const s = sessions.get(terminalId);
   if (!s || s.shellExited) return false;
   if (s.pty) {
     void s.pty.write(data);
@@ -188,8 +184,8 @@ export function writeToSession(leafId: number, data: string): boolean {
   return true;
 }
 
-export function submitToLeaf(leafId: number, text: string): void {
-  const s = sessions.get(leafId);
+export function submitToTerminal(terminalId: number, text: string): void {
+  const s = sessions.get(terminalId);
   if (!s || s.shellExited) return;
   s.everSubmitted = true;
   // Bracketed paste keeps a multiline command atomic; trailing CR runs it.
@@ -200,12 +196,12 @@ export function submitToLeaf(leafId: number, text: string): void {
   else queuePendingInput(s, data);
 }
 
-export function interruptLeaf(leafId: number): void {
-  sessions.get(leafId)?.pty?.write("\x03");
+export function interruptTerminal(terminalId: number): void {
+  sessions.get(terminalId)?.pty?.write("\x03");
 }
 
-export function leafCwd(leafId: number): string | null {
-  return sessions.get(leafId)?.lastCwd ?? null;
+export function terminalCwd(terminalId: number): string | null {
+  return sessions.get(terminalId)?.lastCwd ?? null;
 }
 
 export function navigateFocusedBlocks(dir: -1 | 1): boolean {
@@ -217,24 +213,26 @@ export function navigateFocusedBlocks(dir: -1 | 1): boolean {
   return false;
 }
 
-export function clearLeafBlockSelection(leafId: number): boolean {
-  return sessions.get(leafId)?.blockDecorations?.clearBlockSelection() ?? false;
+export function clearTerminalBlockSelection(terminalId: number): boolean {
+  return (
+    sessions.get(terminalId)?.blockDecorations?.clearBlockSelection() ?? false
+  );
 }
 
-export function leafGridSelection(leafId: number): string | null {
-  const sel = getSlotForLeaf(leafId)?.term.getSelection() ?? "";
+export function terminalGridSelection(terminalId: number): string | null {
+  const sel = getSlotForTerminal(terminalId)?.term.getSelection() ?? "";
   return sel.length > 0 ? sel : null;
 }
 
-export function getLeafBlockMode(leafId: number): BlockMode {
-  return sessions.get(leafId)?.blockMode ?? "prompt";
+export function getTerminalBlockMode(terminalId: number): BlockMode {
+  return sessions.get(terminalId)?.blockMode ?? "prompt";
 }
 
-export function subscribeLeafBlockMode(
-  leafId: number,
+export function subscribeTerminalBlockMode(
+  terminalId: number,
   cb: () => void,
 ): () => void {
-  const s = sessions.get(leafId);
+  const s = sessions.get(terminalId);
   if (!s) return () => {};
   s.blockListeners.add(cb);
   return () => {
@@ -242,32 +240,35 @@ export function subscribeLeafBlockMode(
   };
 }
 
-export function setLeafInputFocus(
-  leafId: number,
+export function setTerminalInputFocus(
+  terminalId: number,
   fn: (() => void) | null,
 ): void {
-  const s = sessions.get(leafId);
+  const s = sessions.get(terminalId);
   if (s) s.inputFocus = fn;
 }
 
-export function focusLeafInput(leafId: number): void {
-  sessions.get(leafId)?.inputFocus?.();
+export function focusTerminalInput(terminalId: number): void {
+  sessions.get(terminalId)?.inputFocus?.();
 }
 
-export function getLeafDraft(leafId: number): string {
-  return sessions.get(leafId)?.inputDraft ?? "";
+export function getTerminalDraft(terminalId: number): string {
+  return sessions.get(terminalId)?.inputDraft ?? "";
 }
 
-export function setLeafDraft(leafId: number, text: string): void {
-  const s = sessions.get(leafId);
+export function setTerminalDraft(terminalId: number, text: string): void {
+  const s = sessions.get(terminalId);
   if (s) s.inputDraft = text;
 }
 
-export function setLeafInputActivity(leafId: number, active: boolean): void {
-  const s = sessions.get(leafId);
+export function setTerminalInputActivity(
+  terminalId: number,
+  active: boolean,
+): void {
+  const s = sessions.get(terminalId);
   if (!s || s.inputActive === active) return;
   s.inputActive = active;
-  const set = blockViewportListeners.get(leafId);
+  const set = blockViewportListeners.get(terminalId);
   if (set) for (const l of set) l();
 }
 
@@ -279,12 +280,12 @@ export type WatermarkState = "visible" | "hidden" | "dead";
 // "dead" is permanent and lets the component unmount for good. The grid check
 // scans glyphs, not the cursor: the prompt integration prints a blank gap line
 // at spawn, so the cursor sits below row 0 even on a visually empty terminal.
-export function blockWatermarkState(leafId: number): WatermarkState {
-  const s = sessions.get(leafId);
+export function blockWatermarkState(terminalId: number): WatermarkState {
+  const s = sessions.get(terminalId);
   if (!s || s.disposed) return "dead";
   if (s.everSubmitted || s.blockDecorations?.hasAnyBlock()) return "dead";
   if (!s.blockDecorations || s.inputActive) return "hidden";
-  const slot = getSlotForLeaf(leafId);
+  const slot = getSlotForTerminal(terminalId);
   if (!slot) return "hidden";
   const buf = slot.term.buffer.active;
   if (buf.baseY > 0) return "dead";
@@ -301,9 +302,9 @@ export function blockWatermarkState(leafId: number): WatermarkState {
  * focused terminal slot is bound (e.g. focus is in the editor or AI panel).
  */
 export function clearFocusedTerminal(): boolean {
-  for (const [leafId, s] of sessions) {
+  for (const [terminalId, s] of sessions) {
     if (!s.visibleNow || !s.focusedNow) continue;
-    const slot = getSlotForLeaf(leafId);
+    const slot = getSlotForTerminal(terminalId);
     if (!slot) continue;
     slot.term.clear();
     return true;
@@ -311,29 +312,29 @@ export function clearFocusedTerminal(): boolean {
   return false;
 }
 
-export function leafIdForPty(ptyId: number): number | null {
-  for (const [leafId, s] of sessions) {
-    if (s.pty?.id === ptyId) return leafId;
+/** 根据原生 PTY ID 查找拥有它的前端终端 ID。 */
+export function terminalIdForPty(ptyId: number): number | null {
+  for (const [terminalId, s] of sessions) {
+    if (s.pty?.id === ptyId) return terminalId;
   }
   return null;
 }
 
-function leafBusy(s: Session): boolean {
+function terminalBusy(s: Session): boolean {
   return s.commandRunning || (s.pty !== null && isAgentActivePty(s.pty.id));
 }
 
 const HIDDEN_RELEASE_DELAY_MS = 300;
 
-// A parked hidden leaf went idle: give the post-command prompt a moment to
-// render into the live buffer, then hand the slot back to the pool.
-function scheduleHiddenRelease(leafId: number, s: Session): void {
+// 隐藏终端进入空闲后，先让命令提示符写入实时缓冲区，再把 slot 交还给池。
+function scheduleHiddenRelease(terminalId: number, s: Session): void {
   if (s.visibleNow || !s.hasSlot) return;
   cancelHiddenRelease(s);
   s.hiddenReleaseTimer = setTimeout(() => {
     s.hiddenReleaseTimer = null;
     if (s.disposed || s.visibleNow || !s.hasSlot) return;
-    if (s.blocks || isLeafAltScreen(leafId) || leafBusy(s)) return;
-    unbindLeafFromSlot(leafId, s);
+    if (s.blocks || isTerminalAltScreen(terminalId) || terminalBusy(s)) return;
+    unbindTerminalFromSlot(terminalId, s);
   }, HIDDEN_RELEASE_DELAY_MS);
 }
 
@@ -344,63 +345,65 @@ function cancelHiddenRelease(s: Session): void {
   }
 }
 
-async function releaseIfIdle(leafId: number, s: Session): Promise<void> {
-  const busy = await leafHasForegroundJob(leafId);
+async function releaseIfIdle(terminalId: number, s: Session): Promise<void> {
+  const busy = await terminalHasForegroundJob(terminalId);
   if (busy || s.disposed || s.visibleNow || !s.hasSlot) return;
-  if (s.blocks || isLeafAltScreen(leafId) || leafBusy(s)) return;
-  unbindLeafFromSlot(leafId, s);
+  if (s.blocks || isTerminalAltScreen(terminalId) || terminalBusy(s)) return;
+  unbindTerminalFromSlot(terminalId, s);
 }
 
-async function leafHasForegroundJob(leafId: number): Promise<boolean> {
-  const s = sessions.get(leafId);
+async function terminalHasForegroundJob(terminalId: number): Promise<boolean> {
+  const s = sessions.get(terminalId);
   if (!s?.pty || s.shellExited) return false;
   try {
     return await invoke<boolean>("pty_has_foreground_job", { id: s.pty.id });
   } catch (e) {
-    console.error("[terax] pty_has_foreground_job failed for leaf", leafId, e);
+    console.error(
+      "[terax] pty_has_foreground_job failed for terminal",
+      terminalId,
+      e,
+    );
     return false;
   }
 }
 
-function onLeafCommandState(leafId: number, running: boolean): void {
-  const s = sessions.get(leafId);
+function onTerminalCommandState(terminalId: number, running: boolean): void {
+  const s = sessions.get(terminalId);
   if (!s || s.commandRunning === running) return;
   s.commandRunning = running;
   if (!running) {
-    scheduleHiddenRelease(leafId, s);
+    scheduleHiddenRelease(terminalId, s);
     return;
   }
   cancelHiddenRelease(s);
-  // A command started in a hidden released leaf (e.g. submitted by the AI):
-  // rebind its retained slot so output parses live instead of filling the
-  // ring. Deferred: this callback fires inside xterm's parse loop and the
-  // rebind touches the same terminal (fit/resize).
+  // 隐藏且已释放的终端启动命令时重新绑定保留的 slot，使输出实时解析而不是填充 ring。
+  // 回调发生在 xterm 解析循环内，而重新绑定会触碰同一终端，因此延后执行。
   if (!s.visibleNow && !s.hasSlot && s.container && !s.disposed) {
     setTimeout(() => {
       if (s.disposed || s.visibleNow || s.hasSlot || !s.container) return;
-      if (!leafBusy(s)) return;
-      bindLeafToSlot(leafId, s);
-      parkLeafSlot(leafId);
+      if (!terminalBusy(s)) return;
+      bindTerminalToSlot(terminalId, s);
+      parkTerminalSlot(terminalId);
     }, 0);
   }
 }
 
 ensureAgentActivityListener((ptyId) => {
-  const leafId = leafIdForPty(ptyId);
-  if (leafId === null) return;
-  const s = sessions.get(leafId);
-  if (s) scheduleHiddenRelease(leafId, s);
+  const terminalId = terminalIdForPty(ptyId);
+  if (terminalId === null) return;
+  const s = sessions.get(terminalId);
+  if (s) scheduleHiddenRelease(terminalId, s);
 });
 
 configureRendererPool({
-  resolveLeaf(leafId) {
-    const s = sessions.get(leafId);
+  resolveTerminal(terminalId) {
+    const s = sessions.get(terminalId);
     if (!s) return null;
     return {
       writeToPty: (data) => {
         // Shell spawn failed (bad cwd, missing binary): Enter retries.
         if (s.spawnFailed) {
-          if (data.includes("\r")) void respawnSession(leafId);
+          if (data.includes("\r")) void respawnSession(terminalId);
           return;
         }
         if (s.pty) void s.pty.write(data);
@@ -424,27 +427,27 @@ configureRendererPool({
       },
     };
   },
-  evictLeaf(leafId) {
-    const s = sessions.get(leafId);
+  evictTerminal(terminalId) {
+    const s = sessions.get(terminalId);
     if (!s) return;
-    unbindLeafFromSlot(leafId, s);
+    unbindTerminalFromSlot(terminalId, s);
   },
-  isLeafFocused(leafId) {
-    const s = sessions.get(leafId);
+  isTerminalFocused(terminalId) {
+    const s = sessions.get(terminalId);
     return !!s && s.visibleNow && s.focusedNow;
   },
-  isLeafBlocks(leafId) {
-    return sessions.get(leafId)?.blocks ?? false;
+  isTerminalBlocks(terminalId) {
+    return sessions.get(terminalId)?.blocks ?? false;
   },
-  isLeafBusy(leafId) {
-    const s = sessions.get(leafId);
-    return !!s && leafBusy(s);
+  isTerminalBusy(terminalId) {
+    const s = sessions.get(terminalId);
+    return !!s && terminalBusy(s);
   },
-  isLeafVisible(leafId) {
-    return sessions.get(leafId)?.visibleNow ?? false;
+  isTerminalVisible(terminalId) {
+    return sessions.get(terminalId)?.visibleNow ?? false;
   },
-  storeSnapshot(leafId, out) {
-    const s = sessions.get(leafId);
+  storeSnapshot(terminalId, out) {
+    const s = sessions.get(terminalId);
     if (!s) return;
     s.snapshot = out.snapshot;
     if (out.cols > 0) s.cols = out.cols;
@@ -454,11 +457,11 @@ configureRendererPool({
 });
 
 function ensureSession(
-  leafId: number,
+  terminalId: number,
   initialCwd?: string,
   blocks = false,
 ): Session {
-  const existing = sessions.get(leafId);
+  const existing = sessions.get(terminalId);
   if (existing) return existing;
   const remoteEpoch = currentRemoteEpoch();
   const remoteSuspended = remoteRuntimeUnavailable();
@@ -499,7 +502,7 @@ function ensureSession(
     remoteSuspended,
     remoteNotice: null,
   };
-  sessions.set(leafId, session);
+  sessions.set(terminalId, session);
 
   session.ready = (async () => {
     await ensureMonoFontsLoaded();
@@ -509,12 +512,11 @@ function ensureSession(
   return session;
 }
 
-function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
-  const s = sessions.get(leafId);
+function deliverPtyBytes(terminalId: number, bytes: Uint8Array): void {
+  const s = sessions.get(terminalId);
   if (!s) return;
-  // Retained slots keep parsing live (render paused); the ring is only for
-  // leaves whose buffer was stolen or never bound.
-  const slot = getLiveSlotForLeaf(leafId);
+  // 保留的 slot 会继续实时解析，ring 只接收 slot 被占用或从未绑定的终端输出。
+  const slot = getLiveSlotForTerminal(terminalId);
   if (slot) slot.term.write(bytes);
   else s.dormantRing.push(bytes);
 }
@@ -522,25 +524,24 @@ function deliverPtyBytes(leafId: number, bytes: Uint8Array): void {
 const SPAWN_RETRY_DELAY_MS = 250;
 
 async function openPtyWithRetry(
-  leafId: number,
+  terminalId: number,
   s: Session,
   cwd: string | undefined,
   generation: number,
 ): Promise<PtySession> {
   try {
-    return await openPtyForSession(leafId, s, cwd, generation);
+    return await openPtyForSession(terminalId, s, cwd, generation);
   } catch (e) {
     console.error("[terax] openPty failed, retrying once:", e);
     await new Promise((r) => setTimeout(r, SPAWN_RETRY_DELAY_MS));
     if (s.disposed || s.spawnGeneration !== generation) throw e;
-    return openPtyForSession(leafId, s, cwd, generation);
+    return openPtyForSession(terminalId, s, cwd, generation);
   }
 }
 
-// Spawn failure must not flow through onExit: handleLeafExit closes the pane
-// (or respawns the last one, which would loop). Show the error in the pane
-// and let Enter retry instead of leaving a dead black grid.
-function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
+// 启动失败不能进入 onExit，否则会关闭面板，最后一个面板还可能循环重启。
+// 错误直接显示在终端内，并允许用户按 Enter 重试。
+function surfaceSpawnFailure(terminalId: number, s: Session, e: unknown): void {
   console.error("[terax] shell spawn failed:", e);
   s.shellExited = true;
   s.spawnFailed = true;
@@ -548,7 +549,7 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
     .replace(/[\x00-\x1f\x7f]/g, " ")
     .slice(0, 300);
   deliverPtyBytes(
-    leafId,
+    terminalId,
     new TextEncoder().encode(
       `\r\n\x1b[31m[terax] ${i18n.t("terminal:runtime.shellStartFailed", { detail })}\x1b[0m\r\n\x1b[2m${i18n.t("terminal:runtime.pressEnterToRetry")}\x1b[0m\r\n`,
     ),
@@ -557,14 +558,14 @@ function surfaceSpawnFailure(leafId: number, s: Session, e: unknown): void {
 
 /** 在终端中追加 SSH Runtime 状态，重复状态不反复刷屏。 */
 function showRemoteNotice(
-  leafId: number,
+  terminalId: number,
   s: Session,
   notice: RemoteNotice,
 ): void {
   const previous = s.remoteNotice;
   if (previous === notice) return;
   s.remoteNotice = notice;
-  const slot = getSlotForLeaf(leafId);
+  const slot = getSlotForTerminal(terminalId);
   if (slot) slot.term.options.disableStdin = true;
   const title =
     previous === null || notice === "connecting"
@@ -582,13 +583,16 @@ function showRemoteNotice(
             ? "common:remoteWorkspace.reconnecting"
             : "common:remoteWorkspace.manualReconnect",
         )}\x1b[0m`;
-  deliverPtyBytes(leafId, new TextEncoder().encode(`${title}${detail}\r\n`));
-  scheduleHiddenRelease(leafId, s);
+  deliverPtyBytes(
+    terminalId,
+    new TextEncoder().encode(`${title}${detail}\r\n`),
+  );
+  scheduleHiddenRelease(terminalId, s);
 }
 
 /** 立即冻结失效 epoch 的 PTY，并等待统一 Runtime 发布下一代连接。 */
 function suspendRemoteSession(
-  leafId: number,
+  terminalId: number,
   s: Session,
   notice: RemoteNotice,
 ): void {
@@ -605,11 +609,11 @@ function suspendRemoteSession(
     s.remoteEpoch = null;
     s.remoteSuspended = true;
   }
-  showRemoteNotice(leafId, s, notice);
+  showRemoteNotice(terminalId, s, notice);
 }
 
 async function openPtyForSession(
-  leafId: number,
+  terminalId: number,
   s: Session,
   cwd: string | undefined,
   generation: number,
@@ -621,7 +625,8 @@ async function openPtyForSession(
     startRows,
     {
       onData: (bytes) => {
-        if (s.spawnGeneration === generation) deliverPtyBytes(leafId, bytes);
+        if (s.spawnGeneration === generation)
+          deliverPtyBytes(terminalId, bytes);
       },
       onExit: (code) => {
         if (s.spawnGeneration !== generation) return;
@@ -631,12 +636,12 @@ async function openPtyForSession(
         s.commandRunning = false;
         if (isRecoverableRemoteExit(code)) {
           s.spawnFailed = false;
-          suspendRemoteSession(leafId, s, "closed");
+          suspendRemoteSession(terminalId, s, "closed");
           return;
         }
-        const slot = getSlotForLeaf(leafId);
+        const slot = getSlotForTerminal(terminalId);
         if (slot) slot.term.options.disableStdin = true;
-        scheduleHiddenRelease(leafId, s);
+        scheduleHiddenRelease(terminalId, s);
         if (s.callbacks.onExit) s.callbacks.onExit(code);
         else s.pendingExit = code;
       },
@@ -658,12 +663,12 @@ async function openPtyForSession(
   return pty;
 }
 
-function applyBlockMode(leafId: number, mode: BlockMode): void {
-  const s = sessions.get(leafId);
+function applyBlockMode(terminalId: number, mode: BlockMode): void {
+  const s = sessions.get(terminalId);
   if (!s) return;
   s.blockMode = mode;
   s.commandRunning = mode !== "prompt";
-  const slot = getSlotForLeaf(leafId);
+  const slot = getSlotForTerminal(terminalId);
   if (slot) {
     const prompt = mode === "prompt";
     slot.term.options.disableStdin = prompt;
@@ -680,12 +685,12 @@ function applyBlockMode(leafId: number, mode: BlockMode): void {
   for (const l of s.blockListeners) l();
 }
 
-function bindLeafToSlot(leafId: number, s: Session): void {
+function bindTerminalToSlot(terminalId: number, s: Session): void {
   if (!s.container) return;
   const altScreen = s.altScreenAtRelease;
   s.altScreenAtRelease = false;
   acquireSlot({
-    leafId,
+    terminalId,
     container: s.container,
     snapshot: s.snapshot,
     altScreen,
@@ -699,14 +704,14 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         const osc52 = registerOsc52ClipboardHandler(term);
         const deco = new BlockDecorations(term, {
           onCwd: (next) => {
-            markSessionReady(leafId);
+            markSessionReady(terminalId);
             if (s.lastCwd === next) return;
             s.lastCwd = next;
             s.callbacks.onCwd?.(next);
           },
-          onMode: (mode) => applyBlockMode(leafId, mode),
+          onMode: (mode) => applyBlockMode(terminalId, mode),
           onViewport: () => {
-            const set = blockViewportListeners.get(leafId);
+            const set = blockViewportListeners.get(terminalId);
             if (set) for (const l of set) l();
           },
         });
@@ -730,12 +735,12 @@ function bindLeafToSlot(leafId: number, s: Session): void {
       // attacker file, etc.).
       const shellState = createShellIntegrationState();
       const prompt = registerPromptTracker(term, shellState, (running) =>
-        onLeafCommandState(leafId, running),
+        onTerminalCommandState(terminalId, running),
       );
       const cwd = registerCwdHandler(
         term,
         (next) => {
-          markSessionReady(leafId);
+          markSessionReady(terminalId);
           if (s.lastCwd === next) return;
           s.lastCwd = next;
           s.callbacks.onCwd?.(next);
@@ -749,7 +754,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
   });
   s.snapshot = null;
   s.hasSlot = true;
-  if (s.blocks) applyBlockMode(leafId, s.blockMode);
+  if (s.blocks) applyBlockMode(terminalId, s.blockMode);
   if (s.lastCwd !== null) s.callbacks.onCwd?.(s.lastCwd);
   if (s.pendingExit !== null) {
     const code = s.pendingExit;
@@ -758,10 +763,10 @@ function bindLeafToSlot(leafId: number, s: Session): void {
   }
 }
 
-function unbindLeafFromSlot(leafId: number, s: Session): void {
+function unbindTerminalFromSlot(terminalId: number, s: Session): void {
   if (!s.hasSlot) return;
   s.callbacks.onSearchReady?.(null);
-  const out = releaseSlot(leafId);
+  const out = releaseSlot(terminalId);
   if (out) {
     if (out.cols > 0) s.cols = out.cols;
     if (out.rows > 0) s.rows = out.rows;
@@ -770,21 +775,21 @@ function unbindLeafFromSlot(leafId: number, s: Session): void {
 }
 
 function attachSession(
-  leafId: number,
+  terminalId: number,
   container: HTMLDivElement,
   callbacks: Callbacks,
 ): void {
-  const s = sessions.get(leafId);
+  const s = sessions.get(terminalId);
   if (!s || s.disposed) return;
   s.callbacks = callbacks;
   s.container = container;
 
-  if (s.visibleNow) bindLeafToSlot(leafId, s);
+  if (s.visibleNow) bindTerminalToSlot(terminalId, s);
 
   if (!s.pty && !s.ptyOpening && !s.shellExited) {
     s.ptyOpening = true;
     const generation = ++s.spawnGeneration;
-    openPtyWithRetry(leafId, s, s.initialCwd, generation)
+    openPtyWithRetry(terminalId, s, s.initialCwd, generation)
       .then((pty) => {
         if (s.spawnGeneration !== generation) {
           void pty.close();
@@ -805,25 +810,25 @@ function attachSession(
       .catch((e) => {
         if (s.spawnGeneration !== generation) return;
         s.ptyOpening = false;
-        if (!s.disposed) surfaceSpawnFailure(leafId, s, e);
+        if (!s.disposed) surfaceSpawnFailure(terminalId, s, e);
       });
   }
 }
 
-function detachSession(leafId: number): void {
-  const s = sessions.get(leafId);
+function detachSession(terminalId: number): void {
+  const s = sessions.get(terminalId);
   if (!s) return;
-  unbindLeafFromSlot(leafId, s);
+  unbindTerminalFromSlot(terminalId, s);
   s.callbacks = {};
   s.container = null;
 }
 
 /** 丢弃当前 PTY，并以新的生成代际重新创建该终端会话。 */
 export async function respawnSession(
-  leafId: number,
+  terminalId: number,
   cwd?: string,
 ): Promise<void> {
-  const s = sessions.get(leafId);
+  const s = sessions.get(terminalId);
   if (!s || s.disposed) return;
   const generation = ++s.spawnGeneration;
   void s.pty?.close();
@@ -841,23 +846,28 @@ export async function respawnSession(
   s.remoteNotice = null;
   cancelHiddenRelease(s);
 
-  const slot = getSlotForLeaf(leafId);
+  const slot = getSlotForTerminal(terminalId);
   if (slot) {
     slot.term.options.disableStdin = false;
     slot.term.clear();
     slot.term.reset();
   } else {
-    discardRetainedSlot(leafId);
+    discardRetainedSlot(terminalId);
   }
 
   s.ptyOpening = true;
   let pty: PtySession;
   try {
-    pty = await openPtyWithRetry(leafId, s, cwd ?? s.initialCwd, generation);
+    pty = await openPtyWithRetry(
+      terminalId,
+      s,
+      cwd ?? s.initialCwd,
+      generation,
+    );
   } catch (e) {
     if (s.spawnGeneration !== generation) return;
     s.ptyOpening = false;
-    if (!s.disposed) surfaceSpawnFailure(leafId, s, e);
+    if (!s.disposed) surfaceSpawnFailure(terminalId, s, e);
     return;
   }
   if (s.disposed || s.spawnGeneration !== generation) {
@@ -873,10 +883,11 @@ export async function respawnSession(
   if (s.cols > 0 && s.rows > 0) pty.resize(s.cols, s.rows);
 }
 
-export async function leafHasForegroundProcess(
-  leafId: number,
+/** 查询终端是否仍有前台任务，查询失败时按无前台任务处理。 */
+export async function terminalHasForegroundProcess(
+  terminalId: number,
 ): Promise<boolean> {
-  const s = sessions.get(leafId);
+  const s = sessions.get(terminalId);
   if (!s?.pty || s.shellExited) return false;
   try {
     const result = await invoke<boolean>("pty_has_foreground_process", {
@@ -885,33 +896,33 @@ export async function leafHasForegroundProcess(
     return result;
   } catch (e) {
     console.error(
-      "[terax] pty_has_foreground_process failed for leaf",
-      leafId,
+      "[terax] pty_has_foreground_process failed for terminal",
+      terminalId,
       e,
     );
     return false;
   }
 }
 
-export function disposeSession(leafId: number): void {
-  const s = sessions.get(leafId);
+export function disposeSession(terminalId: number): void {
+  const s = sessions.get(terminalId);
   if (!s) return;
   s.disposed = true;
   s.spawnGeneration += 1;
   s.callbacks = {};
   cancelHiddenRelease(s);
-  disposeLeafSlot(leafId);
+  disposeTerminalSlot(terminalId);
   s.hasSlot = false;
   s.snapshot = null;
   s.pty?.close();
   s.pty = null;
   s.pendingInput = "";
-  sessions.delete(leafId);
-  blockViewportListeners.delete(leafId);
-  readyLeaves.delete(leafId);
-  const waiters = readyWaiters.get(leafId);
+  sessions.delete(terminalId);
+  blockViewportListeners.delete(terminalId);
+  readyTerminals.delete(terminalId);
+  const waiters = readyWaiters.get(terminalId);
   if (waiters) {
-    readyWaiters.delete(leafId);
+    readyWaiters.delete(terminalId);
     for (const w of waiters) {
       clearTimeout(w.timer);
       w.resolve();
@@ -920,7 +931,7 @@ export function disposeSession(leafId: number): void {
 }
 
 type Options = {
-  leafId: number;
+  terminalId: number;
   container: React.RefObject<HTMLDivElement | null>;
   visible: boolean;
   focused?: boolean;
@@ -932,10 +943,10 @@ type Options = {
 };
 
 /**
- * 将终端叶子绑定到 renderer pool，并按 SSH Runtime epoch 管理 PTY 生命周期。
+ * 将终端绑定到 renderer pool，并按 SSH Runtime epoch 管理 PTY 生命周期。
  */
 export function useTerminalSession({
-  leafId,
+  terminalId,
   container,
   visible,
   focused = true,
@@ -957,54 +968,54 @@ export function useTerminalSession({
   const cbRef = useRef({ onSearchReady, onExit, onCwd });
   cbRef.current = { onSearchReady, onExit, onCwd };
 
-  // initialCwd seeds the first PTY spawn only. It must NOT be an effect dep:
-  // OSC 7 updates the leaf cwd on every `cd`, and re-running the bind effect
-  // would detach/rebind the renderer slot (disposing block markers) on each cd.
+  // initialCwd 仅用于首次创建 PTY，不能作为 effect 依赖。OSC 7 会在每次 cd 后更新
+  // cwd，若重新运行绑定 effect，就会反复解绑 renderer slot 并丢失块标记。
   const initialCwdRef = useRef(initialCwd);
   initialCwdRef.current = initialCwd;
 
   useEffect(() => {
     let cancelled = false;
-    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    const s = ensureSession(terminalId, initialCwdRef.current, blocks);
     s.ready.then(() => {
       if (cancelled || s.disposed) return;
       const node = container.current;
       if (!node) return;
-      attachSession(leafId, node, {
+      attachSession(terminalId, node, {
         onSearchReady: (a) => cbRef.current.onSearchReady?.(a),
         onExit: (c) => cbRef.current.onExit?.(c),
         onCwd: (c) => cbRef.current.onCwd?.(c),
       });
-      if (s.visibleNow && s.focusedNow && !s.blocks) focusSlot(leafId);
+      if (s.visibleNow && s.focusedNow && !s.blocks) focusSlot(terminalId);
     });
     return () => {
       cancelled = true;
-      detachSession(leafId);
+      detachSession(terminalId);
     };
-  }, [leafId, container, blocks]);
+  }, [terminalId, container, blocks]);
 
   useEffect(() => {
     if (remoteBinding === "local") return;
-    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    const s = ensureSession(terminalId, initialCwdRef.current, blocks);
     if (typeof remoteBinding !== "number") {
-      suspendRemoteSession(leafId, s, remoteBinding);
+      suspendRemoteSession(terminalId, s, remoteBinding);
       return;
     }
     if (!shouldReplaceRemotePty(s.remoteEpoch, remoteBinding)) return;
-    void respawnSession(leafId, s.lastCwd ?? initialCwdRef.current);
-  }, [blocks, leafId, remoteBinding]);
+    void respawnSession(terminalId, s.lastCwd ?? initialCwdRef.current);
+  }, [blocks, terminalId, remoteBinding]);
 
   const [blockMode, setBlockMode] = useState<BlockMode>("prompt");
   useEffect(() => {
     if (!blocks) return;
-    const s = ensureSession(leafId, initialCwdRef.current, blocks);
+    const s = ensureSession(terminalId, initialCwdRef.current, blocks);
     setBlockMode(s.blockMode);
-    const cb = () => setBlockMode(sessions.get(leafId)?.blockMode ?? "prompt");
+    const cb = () =>
+      setBlockMode(sessions.get(terminalId)?.blockMode ?? "prompt");
     s.blockListeners.add(cb);
     return () => {
       s.blockListeners.delete(cb);
     };
-  }, [leafId, blocks]);
+  }, [terminalId, blocks]);
 
   const fontSize = usePreferencesStore((p) => p.terminalFontSize);
   const zoomLevel = usePreferencesStore((p) => p.zoomLevel);
@@ -1050,45 +1061,45 @@ export function useTerminalSession({
   }, [bgActive]);
 
   useEffect(() => {
-    const s = sessions.get(leafId);
+    const s = sessions.get(terminalId);
     if (!s) return;
     s.visibleNow = visible;
     s.focusedNow = focused;
     if (visible) {
       cancelHiddenRelease(s);
-      if (s.container && !s.hasSlot) bindLeafToSlot(leafId, s);
-      else if (s.hasSlot) refreshLeafSlot(leafId);
-      setSlotFocused(leafId, focused);
-      if (focused && !blocks) focusSlot(leafId);
+      if (s.container && !s.hasSlot) bindTerminalToSlot(terminalId, s);
+      else if (s.hasSlot) refreshTerminalSlot(terminalId);
+      setSlotFocused(terminalId, focused);
+      if (focused && !blocks) focusSlot(terminalId);
     } else if (s.hasSlot) {
       // Always park first (keeps the grid live, pauses rendering); release
       // only after confirming nothing owns the terminal. Sync signals (OSC
       // 133, agent detect) short-circuit; the async foreground-process check
       // covers shells without integration.
-      parkLeafSlot(leafId);
-      if (!s.blocks && !isLeafAltScreen(leafId) && !leafBusy(s)) {
-        void releaseIfIdle(leafId, s);
+      parkTerminalSlot(terminalId);
+      if (!s.blocks && !isTerminalAltScreen(terminalId) && !terminalBusy(s)) {
+        void releaseIfIdle(terminalId, s);
       }
     }
-  }, [leafId, visible, focused, blocks]);
+  }, [terminalId, visible, focused, blocks]);
 
   const write = useCallback(
     (data: string) => {
-      const s = sessions.get(leafId);
+      const s = sessions.get(terminalId);
       if (!s || s.shellExited) return;
       if (s.pty) void s.pty.write(data);
       else queuePendingInput(s, data);
     },
-    [leafId],
+    [terminalId],
   );
 
-  const focus = useCallback(() => focusSlot(leafId), [leafId]);
+  const focus = useCallback(() => focusSlot(terminalId), [terminalId]);
 
   const getBuffer = useCallback(
     (maxLines = 200): string | null => {
-      const s = sessions.get(leafId);
+      const s = sessions.get(terminalId);
       if (!s) return null;
-      const slot = getLiveSlotForLeaf(leafId);
+      const slot = getLiveSlotForTerminal(terminalId);
       if (slot) {
         const buf = slot.term.buffer.active;
         const total = buf.length;
@@ -1107,14 +1118,14 @@ export function useTerminalSession({
       while (tail.length && tail[tail.length - 1] === "") tail.pop();
       return tail.join("\n");
     },
-    [leafId],
+    [terminalId],
   );
 
   const getSelection = useCallback((): string | null => {
-    const slot = getSlotForLeaf(leafId);
+    const slot = getSlotForTerminal(terminalId);
     const sel = slot?.term.getSelection() ?? "";
     return sel.length > 0 ? sel : null;
-  }, [leafId]);
+  }, [terminalId]);
 
   const applyTheme = useCallback(() => {
     applyPoolTheme();
@@ -1122,56 +1133,57 @@ export function useTerminalSession({
 
   const selectBlockAt = useCallback(
     (clientY: number) =>
-      sessions.get(leafId)?.blockDecorations?.selectBlockAt(clientY),
-    [leafId],
+      sessions.get(terminalId)?.blockDecorations?.selectBlockAt(clientY),
+    [terminalId],
   );
 
   const readBlockId = useCallback(
     (id: string) =>
-      sessions.get(leafId)?.blockDecorations?.readById(id) ?? null,
-    [leafId],
+      sessions.get(terminalId)?.blockDecorations?.readById(id) ?? null,
+    [terminalId],
   );
 
   const subscribeBlocks = useCallback(
     (cb: () => void) => {
-      let set = blockViewportListeners.get(leafId);
+      let set = blockViewportListeners.get(terminalId);
       if (!set) {
         set = new Set();
-        blockViewportListeners.set(leafId, set);
+        blockViewportListeners.set(terminalId, set);
       }
       set.add(cb);
       return () => {
-        const live = blockViewportListeners.get(leafId);
+        const live = blockViewportListeners.get(terminalId);
         live?.delete(cb);
-        if (live && live.size === 0) blockViewportListeners.delete(leafId);
+        if (live && live.size === 0) blockViewportListeners.delete(terminalId);
       };
     },
-    [leafId],
+    [terminalId],
   );
 
   const visibleBlocks = useCallback(
     (): VisibleBlocks =>
-      sessions.get(leafId)?.blockDecorations?.visibleBlocks() ?? {
+      sessions.get(terminalId)?.blockDecorations?.visibleBlocks() ?? {
         blocks: [],
         sticky: null,
       },
-    [leafId],
+    [terminalId],
   );
 
   const searchBlock = useCallback(
     (id: string, query: string) =>
-      sessions.get(leafId)?.blockDecorations?.searchBlock(id, query) ?? [],
-    [leafId],
+      sessions.get(terminalId)?.blockDecorations?.searchBlock(id, query) ?? [],
+    [terminalId],
   );
 
   const revealMatch = useCallback(
-    (m: BlockMatch) => sessions.get(leafId)?.blockDecorations?.revealMatch(m),
-    [leafId],
+    (m: BlockMatch) =>
+      sessions.get(terminalId)?.blockDecorations?.revealMatch(m),
+    [terminalId],
   );
 
   const clearSearch = useCallback(
-    () => sessions.get(leafId)?.blockDecorations?.clearSearch(),
-    [leafId],
+    () => sessions.get(terminalId)?.blockDecorations?.clearSearch(),
+    [terminalId],
   );
 
   return useMemo(
@@ -1216,8 +1228,8 @@ function stripAnsi(s: string): string {
 }
 
 export function terminalDebugStats() {
-  const liveSessions = [...sessions.entries()].map(([leafId, s]) => ({
-    leafId,
+  const liveSessions = [...sessions.entries()].map(([terminalId, s]) => ({
+    terminalId,
     pty: !!s.pty,
     visible: s.visibleNow,
     focused: s.focusedNow,
@@ -1232,7 +1244,7 @@ export function terminalDebugStats() {
   return {
     poolSize: poolSize(),
     webglContexts: slots.filter((s) => s.webgl).length,
-    idleSlots: slots.filter((s) => s.leafId === null).length,
+    idleSlots: slots.filter((s) => s.terminalId === null).length,
     slots,
     sessionCount: liveSessions.length,
     sessions: liveSessions,

@@ -79,7 +79,7 @@ describe("usePythonFileRunner", () => {
 
   it("runs an existing selection without rewriting it", async () => {
     const ensureWorkspaceReady = vi.fn().mockResolvedValue("C:/Users/test");
-    const newRunTab = vi.fn().mockReturnValue({ tabId: 7, leafId: 8 });
+    const newRunTab = vi.fn().mockReturnValue(7);
     const tabsRef = { current: [] } as MutableRefObject<Tab[]>;
     const editorRefs = {
       current: new Map<number, EditorPaneHandle>(),
@@ -109,7 +109,7 @@ describe("usePythonFileRunner", () => {
       undefined,
     );
     expect(mocks.writeToSession).toHaveBeenCalledWith(
-      8,
+      7,
       "& 'C:/Python/python.exe' 'C:/project/main.py'\r",
     );
     act(() => root.unmount());
@@ -132,7 +132,7 @@ describe("usePythonFileRunner", () => {
         tabsRef,
         editorRefs,
         ensureWorkspaceReady,
-        newRunTab: vi.fn().mockReturnValue({ tabId: 7, leafId: 8 }),
+        newRunTab: vi.fn().mockReturnValue(7),
       });
       return null;
     };

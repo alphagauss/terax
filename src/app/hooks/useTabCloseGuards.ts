@@ -4,7 +4,7 @@
  */
 
 import { hasOtherDocumentView, isDocumentTab } from "@/modules/editor";
-import { leafHasForegroundProcess } from "@/modules/terminal";
+import { terminalHasForegroundProcess } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { useCallback, useState } from "react";
 
@@ -34,7 +34,7 @@ export function useTabCloseGuards({ tabs, disposeTab }: Params) {
         }
       }
       if (t?.kind === "terminal") {
-        if (await leafHasForegroundProcess(t.terminalId)) {
+        if (await terminalHasForegroundProcess(t.id)) {
           setPendingTerminalCloseTab(id);
           return;
         }

@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染 Agent 通知入口、未读通知和活动会话列表。
+ * 终端 Agent 通过唯一标签 ID 激活，内置 Agent 使用独立入口。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -22,7 +27,7 @@ import type { AgentNotification, AgentStatus } from "../lib/types";
 import { useAgentStore } from "../store/agentStore";
 
 type Props = {
-  onActivate: (tabId: number, leafId: number) => void;
+  onActivate: (tabId: number) => void;
   onActivateLocal: () => void;
 };
 
@@ -169,6 +174,7 @@ function NotificationRow({
   );
 }
 
+/** 展示 Agent 通知并把用户导航到对应标签或本地 Agent。 */
 export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const { t } = useTranslation("agents");
   const [open, setOpen] = useState(false);
@@ -220,8 +226,8 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
     }
   };
 
-  const activate = (tabId: number, leafId: number) => {
-    onActivate(tabId, leafId);
+  const activate = (tabId: number) => {
+    onActivate(tabId);
     setOpen(false);
   };
 
@@ -232,7 +238,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
 
   const activateNotification = (n: AgentNotification) => {
     if (n.source === "local") activateLocal();
-    else activate(n.tabId, n.leafId);
+    else activate(n.tabId);
   };
 
   const empty = activeCount === 0 && notifications.length === 0;
@@ -302,10 +308,10 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
             ) : null}
             {active.map((s) => (
               <StatusRow
-                key={s.leafId}
+                key={s.tabId}
                 agent={s.agent}
                 status={s.status}
-                onClick={() => activate(s.tabId, s.leafId)}
+                onClick={() => activate(s.tabId)}
               />
             ))}
             {activeCount > 0 && notifications.length > 0 ? (

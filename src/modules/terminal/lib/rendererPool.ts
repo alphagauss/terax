@@ -37,16 +37,16 @@ const PTY_RESIZE_DEBOUNCE_MS = 256;
 const SNAPSHOT_SCROLLBACK_CAP = 5_000;
 
 export type SlotAdapter = {
-  resolveLeaf(leafId: number): LeafBridge | null;
-  evictLeaf(leafId: number): void;
-  isLeafFocused(leafId: number): boolean;
-  isLeafBlocks(leafId: number): boolean;
-  isLeafBusy(leafId: number): boolean;
-  isLeafVisible(leafId: number): boolean;
-  storeSnapshot(leafId: number, out: SerializeOutput): void;
+  resolveTerminal(terminalId: number): TerminalBridge | null;
+  evictTerminal(terminalId: number): void;
+  isTerminalFocused(terminalId: number): boolean;
+  isTerminalBlocks(terminalId: number): boolean;
+  isTerminalBusy(terminalId: number): boolean;
+  isTerminalVisible(terminalId: number): boolean;
+  storeSnapshot(terminalId: number, out: SerializeOutput): void;
 };
 
-export type LeafBridge = {
+export type TerminalBridge = {
   writeToPty(data: string): void;
   resizePty(cols: number, rows: number): void;
   // Force a SIGWINCH on the underlying PTY at the given dims. Implemented
@@ -65,10 +65,9 @@ export type Slot = {
   readonly host: HTMLDivElement;
   webglAddon: WebglAddon | null;
   webglCanvases: HTMLCanvasElement[];
-  currentLeafId: number | null;
-  // Leaf whose buffer this slot still holds intact after release; serialized
-  // only if another leaf steals the slot.
-  retainedLeafId: number | null;
+  currentTerminalId: number | null;
+  // 释放后仍完整保留缓冲区的终端，仅在其他终端占用该 slot 时序列化。
+  retainedTerminalId: number | null;
   parked: boolean;
   oscDisposers: (() => void)[];
   observer: ResizeObserver | null;
@@ -107,14 +106,15 @@ function setWindowActive(active: boolean): void {
   if (windowActive === active) return;
   windowActive = active;
   for (const slot of slots) {
-    if (slot.currentLeafId === null) continue;
+    if (slot.currentTerminalId === null) continue;
     applyCursorBlinkOnSlot(
       slot,
-      adapter?.isLeafFocused(slot.currentLeafId) ?? false,
+      adapter?.isTerminalFocused(slot.currentTerminalId) ?? false,
     );
   }
 }
 
+/** 配置 renderer pool 与终端会话之间的运行时桥接。 */
 export function configureRendererPool(a: SlotAdapter): void {
   adapter = a;
   bindWindowActivityListeners();
@@ -130,8 +130,8 @@ export function poolSize(): number {
 
 export type PoolSlotStat = {
   id: number;
-  leafId: number | null;
-  retainedLeafId: number | null;
+  terminalId: number | null;
+  retainedTerminalId: number | null;
   parked: boolean;
   cols: number;
   rows: number;
@@ -143,8 +143,8 @@ export type PoolSlotStat = {
 export function poolSlotStats(): PoolSlotStat[] {
   return slots.map((s) => ({
     id: s.id,
-    leafId: s.currentLeafId,
-    retainedLeafId: s.retainedLeafId,
+    terminalId: s.currentTerminalId,
+    retainedTerminalId: s.retainedTerminalId,
     parked: s.parked,
     cols: s.term.cols,
     rows: s.term.rows,
@@ -156,8 +156,8 @@ export function poolSlotStats(): PoolSlotStat[] {
 
 // Bracketed paste via xterm, so an app that enabled it (Claude Code) treats a
 // dropped path as a real paste while a plain shell gets the literal text.
-export function pasteIntoLeaf(leafId: number, text: string): boolean {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function pasteIntoTerminal(terminalId: number, text: string): boolean {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return false;
   slot.term.paste(text);
   return true;
@@ -168,11 +168,11 @@ export function pasteIntoLeaf(leafId: number, text: string): boolean {
  *
  * 调用方可要求复制后清除选区，使智能 Ctrl+C 和对应菜单动作保持一致。
  */
-export function copyLeafSelection(
-  leafId: number,
+export function copyTerminalSelection(
+  terminalId: number,
   clearSelection = false,
 ): boolean {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   const selection = slot?.term.getSelection() ?? "";
   if (!slot || !selection) return false;
   void writeTerminalClipboard(selection);
@@ -183,23 +183,23 @@ export function copyLeafSelection(
 /**
  * 从系统剪贴板粘贴到指定终端。
  *
- * 剪贴板读取完成后重新按 leaf ID 解析 slot，避免渲染器复用期间粘贴到其他终端。
+ * 剪贴板读取完成后重新按 terminal ID 解析 slot，避免渲染器复用期间粘贴到其他终端。
  */
-export function pasteClipboardIntoLeaf(leafId: number): void {
+export function pasteClipboardIntoTerminal(terminalId: number): void {
   void readTerminalClipboard().then((text) => {
-    if (text) pasteIntoLeaf(leafId, text);
+    if (text) pasteIntoTerminal(terminalId, text);
   });
 }
 
 /**
  * 判断指定终端的鼠标事件是否应使用 Terax 本地行为。
  */
-export function shouldUseLocalMouseForLeaf(
-  leafId: number,
+export function shouldUseLocalMouseForTerminal(
+  terminalId: number,
   event: Pick<MouseEvent, "altKey" | "shiftKey">,
 ): boolean {
   const mode =
-    slots.find((s) => s.currentLeafId === leafId)?.term.modes
+    slots.find((s) => s.currentTerminalId === terminalId)?.term.modes
       .mouseTrackingMode ?? "none";
   return shouldUseLocalTerminalMouse(mode, event, IS_MAC);
 }
@@ -278,8 +278,8 @@ function createSlot(): Slot {
     host,
     webglAddon: null,
     webglCanvases: [],
-    currentLeafId: null,
-    retainedLeafId: null,
+    currentTerminalId: null,
+    retainedTerminalId: null,
     parked: false,
     oscDisposers: [],
     observer: null,
@@ -324,18 +324,14 @@ function createSlot(): Slot {
   });
 
   term.attachCustomKeyEventHandler((event) => {
-    // During IME composition the browser is assembling a multi-keystroke
-    // character (Chinese pinyin → hanzi, Korean jamo → syllable, etc.).
-    // Raw keydown events — including the Enter that commits a candidate —
-    // must NOT be forwarded to the PTY; xterm will receive the final
-    // composed string through its own compositionend handler instead.
-    // keyCode 229 ("Process") is what Chromium reports for every key
-    // pressed inside an active IME session when isComposing is not yet set.
+    // IME 合成期间浏览器正在组合多次按键，原始 keydown 包括确认候选词的 Enter
+    // 都不能转发给 PTY。xterm 会通过 compositionend 接收最终文本。
+    // Chromium 在 isComposing 尚未设置时会为 IME 按键报告 keyCode 229。
     if (event.isComposing || event.keyCode === 229) return false;
 
-    const leafId = slot.currentLeafId;
-    if (leafId === null) return false;
-    const bridge = adapter?.resolveLeaf(leafId);
+    const terminalId = slot.currentTerminalId;
+    if (terminalId === null) return false;
+    const bridge = adapter?.resolveTerminal(terminalId);
     if (!bridge) return true;
     const lineNavigation = terminalLineNavigationSequence(event, {
       isMac: IS_MAC,
@@ -369,14 +365,14 @@ function createSlot(): Slot {
     });
     if (clipboardIntent === "copy") {
       if (event.type === "keydown") {
-        copyLeafSelection(leafId, !event.shiftKey);
+        copyTerminalSelection(terminalId, !event.shiftKey);
       }
       event.preventDefault();
       return false;
     }
     if (clipboardIntent === "paste") {
       if (event.type === "keydown") {
-        pasteClipboardIntoLeaf(leafId);
+        pasteClipboardIntoTerminal(terminalId);
       }
       event.preventDefault();
       return false;
@@ -385,16 +381,16 @@ function createSlot(): Slot {
   });
 
   term.onData((data) => {
-    const leafId = slot.currentLeafId;
-    if (leafId === null) return;
-    adapter?.resolveLeaf(leafId)?.writeToPty(data);
+    const terminalId = slot.currentTerminalId;
+    if (terminalId === null) return;
+    adapter?.resolveTerminal(terminalId)?.writeToPty(data);
   });
 
   slots.push(slot);
   return slot;
 }
 
-type PickResult = { slot: Slot; previousLeafId: number | null };
+type PickResult = { slot: Slot; previousTerminalId: number | null };
 
 function isAltScreen(s: Slot): boolean {
   try {
@@ -405,11 +401,15 @@ function isAltScreen(s: Slot): boolean {
 }
 
 function evictionScore(s: Slot): number {
-  const leafId = s.currentLeafId;
-  const visible = leafId !== null && (adapter?.isLeafVisible(leafId) ?? false);
-  const busy = leafId !== null && (adapter?.isLeafBusy(leafId) ?? false);
-  const blocks = leafId !== null && (adapter?.isLeafBlocks(leafId) ?? false);
-  const focused = leafId !== null && (adapter?.isLeafFocused(leafId) ?? false);
+  const terminalId = s.currentTerminalId;
+  const visible =
+    terminalId !== null && (adapter?.isTerminalVisible(terminalId) ?? false);
+  const busy =
+    terminalId !== null && (adapter?.isTerminalBusy(terminalId) ?? false);
+  const blocks =
+    terminalId !== null && (adapter?.isTerminalBlocks(terminalId) ?? false);
+  const focused =
+    terminalId !== null && (adapter?.isTerminalFocused(terminalId) ?? false);
   return (
     (visible ? 1000 : 0) +
     (isAltScreen(s) ? 100 : 0) +
@@ -429,43 +429,44 @@ export function visibleBindingsRequireAnotherSlot(
   );
 }
 
-function pickSlotFor(leafId: number): PickResult {
+function pickSlotFor(terminalId: number): PickResult {
   const retainedOwn = slots.find(
-    (s) => s.currentLeafId === null && s.retainedLeafId === leafId,
+    (s) => s.currentTerminalId === null && s.retainedTerminalId === terminalId,
   );
-  if (retainedOwn) return { slot: retainedOwn, previousLeafId: null };
+  if (retainedOwn) return { slot: retainedOwn, previousTerminalId: null };
 
   const clean = slots.find(
-    (s) => s.currentLeafId === null && s.retainedLeafId === null,
+    (s) => s.currentTerminalId === null && s.retainedTerminalId === null,
   );
-  if (clean) return { slot: clean, previousLeafId: null };
+  if (clean) return { slot: clean, previousTerminalId: null };
   if (slots.length < POOL_MAX_SIZE)
-    return { slot: createSlot(), previousLeafId: null };
+    return { slot: createSlot(), previousTerminalId: null };
 
   // Retained buffers are cheaper to lose than bound ones: serialize, no evict.
   let retained: Slot | null = null;
   for (const s of slots) {
-    if (s.currentLeafId !== null) continue;
+    if (s.currentTerminalId !== null) continue;
     if (!retained || s.lastUsedAt < retained.lastUsedAt) retained = s;
   }
-  if (retained) return { slot: retained, previousLeafId: null };
+  if (retained) return { slot: retained, previousTerminalId: null };
 
   const allBoundSlotsVisible = visibleBindingsRequireAnotherSlot(
     slots.map((slot) => ({
-      bound: slot.currentLeafId !== null,
+      bound: slot.currentTerminalId !== null,
       visible:
-        slot.currentLeafId !== null &&
-        (adapter?.isLeafVisible(slot.currentLeafId) ?? false),
+        slot.currentTerminalId !== null &&
+        (adapter?.isTerminalVisible(slot.currentTerminalId) ?? false),
     })),
   );
   if (allBoundSlotsVisible) {
-    return { slot: createSlot(), previousLeafId: null };
+    return { slot: createSlot(), previousTerminalId: null };
   }
 
   let best: Slot | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const s of slots) {
-    if (s.currentLeafId === leafId) return { slot: s, previousLeafId: null };
+    if (s.currentTerminalId === terminalId)
+      return { slot: s, previousTerminalId: null };
     const score = evictionScore(s);
     if (score < bestScore) {
       bestScore = score;
@@ -474,11 +475,11 @@ function pickSlotFor(leafId: number): PickResult {
   }
   if (!best) throw new Error("Renderer pool has no evictable slot");
   const chosen = best;
-  return { slot: chosen, previousLeafId: chosen.currentLeafId };
+  return { slot: chosen, previousTerminalId: chosen.currentTerminalId };
 }
 
 export type AcquireParams = {
-  leafId: number;
+  terminalId: number;
   container: HTMLDivElement;
   snapshot: string | null;
   // True if the slot was in alt-screen mode (TUI like vim, htop, dofek)
@@ -493,28 +494,32 @@ export type AcquireParams = {
   onSearchReady: (addon: SearchAddon) => void;
 };
 
+/** 为终端获取或复用 renderer slot，并在必要时保存被替换终端的快照。 */
 export function acquireSlot(params: AcquireParams): Slot {
-  const existing = slots.find((s) => s.currentLeafId === params.leafId);
+  const existing = slots.find((s) => s.currentTerminalId === params.terminalId);
   if (existing) {
     rewireSlot(existing, params);
     return existing;
   }
 
-  const pick = pickSlotFor(params.leafId);
-  if (pick.previousLeafId !== null) {
-    adapter?.evictLeaf(pick.previousLeafId);
+  const pick = pickSlotFor(params.terminalId);
+  if (pick.previousTerminalId !== null) {
+    adapter?.evictTerminal(pick.previousTerminalId);
   }
   if (
-    pick.slot.currentLeafId !== null &&
-    pick.slot.currentLeafId !== params.leafId
+    pick.slot.currentTerminalId !== null &&
+    pick.slot.currentTerminalId !== params.terminalId
   ) {
-    detachSlotFromLeaf(pick.slot, false);
+    detachSlotFromTerminal(pick.slot, false);
   }
   if (
-    pick.slot.retainedLeafId !== null &&
-    pick.slot.retainedLeafId !== params.leafId
+    pick.slot.retainedTerminalId !== null &&
+    pick.slot.retainedTerminalId !== params.terminalId
   ) {
-    adapter?.storeSnapshot(pick.slot.retainedLeafId, serializeSlot(pick.slot));
+    adapter?.storeSnapshot(
+      pick.slot.retainedTerminalId,
+      serializeSlot(pick.slot),
+    );
     discardRetention(pick.slot);
   }
   bindSlot(pick.slot, params);
@@ -522,7 +527,7 @@ export function acquireSlot(params: AcquireParams): Slot {
 }
 
 function discardRetention(slot: Slot): void {
-  slot.retainedLeafId = null;
+  slot.retainedTerminalId = null;
   for (const d of slot.oscDisposers) {
     try {
       d();
@@ -532,14 +537,14 @@ function discardRetention(slot: Slot): void {
 }
 
 function bindSlot(slot: Slot, p: AcquireParams): void {
-  const fast = slot.retainedLeafId === p.leafId;
+  const fast = slot.retainedTerminalId === p.terminalId;
   const stale =
     !slot.webglAddon ||
     slot.parked ||
     performance.now() - slot.lastUsedAt > SLOT_STALE_MS;
   const hadWebgl = !!slot.webglAddon;
-  slot.retainedLeafId = null;
-  slot.currentLeafId = p.leafId;
+  slot.retainedTerminalId = null;
+  slot.currentTerminalId = p.terminalId;
   slot.lastUsedAt = performance.now();
 
   cancelPendingUnhide(slot);
@@ -606,13 +611,20 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
   slot.lastH = p.container.clientHeight;
   if (slot.lastCols !== p.cols || slot.lastRows !== p.rows) {
     // resizePty updates session.cols/rows + pty backend; no separate scope call.
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
+    adapter
+      ?.resolveTerminal(p.terminalId)
+      ?.resizePty(slot.lastCols, slot.lastRows);
   }
 
-  applyCursorBlinkOnSlot(slot, adapter?.isLeafFocused(p.leafId) ?? false);
+  applyCursorBlinkOnSlot(
+    slot,
+    adapter?.isTerminalFocused(p.terminalId) ?? false,
+  );
 
   if (!fast && p.altScreen && !p.shellExited) {
-    adapter?.resolveLeaf(p.leafId)?.kickPty(slot.term.cols, slot.term.rows);
+    adapter
+      ?.resolveTerminal(p.terminalId)
+      ?.kickPty(slot.term.cols, slot.term.rows);
   }
 
   if (fast) {
@@ -622,7 +634,7 @@ function bindSlot(slot: Slot, p: AcquireParams): void {
         slot.term.refresh(0, slot.term.rows - 1);
       } catch {}
     }
-    if (adapter?.isLeafFocused(p.leafId)) slot.term.focus();
+    if (adapter?.isTerminalFocused(p.terminalId)) slot.term.focus();
   } else {
     scheduleUnhide(slot, stale || hadWebgl);
   }
@@ -641,8 +653,8 @@ function scheduleUnhide(slot: Slot, stale: boolean): void {
           slot.term.refresh(0, slot.term.rows - 1);
         } catch {}
       }
-      const leafId = slot.currentLeafId;
-      if (leafId !== null && adapter?.isLeafFocused(leafId)) {
+      const terminalId = slot.currentTerminalId;
+      if (terminalId !== null && adapter?.isTerminalFocused(terminalId)) {
         slot.term.focus();
       }
     });
@@ -667,7 +679,9 @@ function rewireSlot(slot: Slot, p: AcquireParams): void {
   slot.lastW = p.container.clientWidth;
   slot.lastH = p.container.clientHeight;
   if (slot.term.cols !== p.cols || slot.term.rows !== p.rows) {
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.term.cols, slot.term.rows);
+    adapter
+      ?.resolveTerminal(p.terminalId)
+      ?.resizePty(slot.term.cols, slot.term.rows);
   }
   slot.lastCols = slot.term.cols;
   slot.lastRows = slot.term.rows;
@@ -684,12 +698,14 @@ function setupResizeObserver(slot: Slot, p: AcquireParams): void {
   const container = p.container;
   const flushPty = () => {
     slot.ptyTimer = null;
-    if (slot.currentLeafId !== p.leafId) return;
+    if (slot.currentTerminalId !== p.terminalId) return;
     if (slot.term.cols === slot.lastCols && slot.term.rows === slot.lastRows)
       return;
     slot.lastCols = slot.term.cols;
     slot.lastRows = slot.term.rows;
-    adapter?.resolveLeaf(p.leafId)?.resizePty(slot.lastCols, slot.lastRows);
+    adapter
+      ?.resolveTerminal(p.terminalId)
+      ?.resizePty(slot.lastCols, slot.lastRows);
   };
 
   slot.observer = new ResizeObserver(() => {
@@ -697,7 +713,7 @@ function setupResizeObserver(slot: Slot, p: AcquireParams): void {
     if (slot.fitTimer) clearTimeout(slot.fitTimer);
     slot.fitTimer = setTimeout(() => {
       slot.fitTimer = null;
-      if (slot.currentLeafId !== p.leafId || slot.parked) return;
+      if (slot.currentTerminalId !== p.terminalId || slot.parked) return;
       const w = container.clientWidth;
       const h = container.clientHeight;
       if (w === slot.lastW && h === slot.lastH) return;
@@ -720,10 +736,11 @@ export type SerializeOutput = {
 
 export type ReleaseOutput = { cols: number; rows: number };
 
-export function releaseSlot(leafId: number): ReleaseOutput | null {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+/** 释放终端当前绑定的 renderer slot，同时保留可快速恢复的缓冲区。 */
+export function releaseSlot(terminalId: number): ReleaseOutput | null {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return null;
-  detachSlotFromLeaf(slot, true);
+  detachSlotFromTerminal(slot, true);
   return { cols: slot.term.cols, rows: slot.term.rows };
 }
 
@@ -746,9 +763,9 @@ function serializeSlot(slot: Slot): SerializeOutput {
   };
 }
 
-function detachSlotFromLeaf(slot: Slot, retain: boolean): void {
-  if (retain && slot.currentLeafId !== null) {
-    slot.retainedLeafId = slot.currentLeafId;
+function detachSlotFromTerminal(slot: Slot, retain: boolean): void {
+  if (retain && slot.currentTerminalId !== null) {
+    slot.retainedTerminalId = slot.currentTerminalId;
     parkSlotHost(slot);
   } else {
     discardRetention(slot);
@@ -768,7 +785,7 @@ function detachSlotFromLeaf(slot: Slot, retain: boolean): void {
   cancelPendingUnhide(slot);
   slot.host.style.visibility = "";
 
-  slot.currentLeafId = null;
+  slot.currentTerminalId = null;
   slot.lastUsedAt = performance.now();
   scheduleWebglReap(slot);
   scheduleSlotReap(slot);
@@ -793,7 +810,7 @@ function scheduleWebglReap(slot: Slot): void {
   if (!slot.webglAddon) return;
   slot.webglReapTimer = setTimeout(() => {
     slot.webglReapTimer = null;
-    if (slot.currentLeafId === null || slot.parked) disposeSlotWebgl(slot);
+    if (slot.currentTerminalId === null || slot.parked) disposeSlotWebgl(slot);
   }, WEBGL_REAP_GRACE_MS);
 }
 
@@ -820,14 +837,14 @@ function cancelSlotReap(slot: Slot): void {
 }
 
 function reapIdleSlot(slot: Slot): void {
-  if (slot.currentLeafId !== null) return;
-  const idle = slots.filter((s) => s.currentLeafId === null);
+  if (slot.currentTerminalId !== null) return;
+  const idle = slots.filter((s) => s.currentTerminalId === null);
   if (idle.length <= IDLE_SLOTS_KEEP_WARM) return;
   idle.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
   const surplus = idle.slice(0, idle.length - IDLE_SLOTS_KEEP_WARM);
   if (!surplus.includes(slot)) return;
-  if (slot.retainedLeafId !== null) {
-    adapter?.storeSnapshot(slot.retainedLeafId, serializeSlot(slot));
+  if (slot.retainedTerminalId !== null) {
+    adapter?.storeSnapshot(slot.retainedTerminalId, serializeSlot(slot));
   }
   disposeSlot(slot);
 }
@@ -889,7 +906,7 @@ function attachWebgl(slot: Slot): void {
       // reset; without re-attach the slot would silently fall back to DOM
       // forever. Defer past WebKit's reset window before retrying.
       setTimeout(() => {
-        if (slot.webglAddon || slot.currentLeafId === null || slot.parked)
+        if (slot.webglAddon || slot.currentTerminalId === null || slot.parked)
           return;
         if (!usePreferencesStore.getState().terminalWebglEnabled) return;
         attachWebgl(slot);
@@ -966,7 +983,7 @@ function releaseCanvasContext(canvas: HTMLCanvasElement): void {
 export function applyWebglPreference(enabled: boolean): void {
   for (const slot of slots) {
     if (enabled) {
-      if (slot.currentLeafId !== null && !slot.parked && !slot.webglAddon) {
+      if (slot.currentTerminalId !== null && !slot.parked && !slot.webglAddon) {
         attachWebgl(slot);
         if (slot.webglAddon) {
           try {
@@ -984,7 +1001,7 @@ export function applyWebglPreference(enabled: boolean): void {
 // Parked and retained slots can't be measured (display:none); poison lastW
 // so the refit happens on unpark/rebind instead.
 function refitSlot(slot: Slot): void {
-  if (slot.parked || slot.currentLeafId === null) {
+  if (slot.parked || slot.currentTerminalId === null) {
     slot.lastW = -1;
     return;
   }
@@ -992,7 +1009,7 @@ function refitSlot(slot: Slot): void {
   slot.lastCols = slot.term.cols;
   slot.lastRows = slot.term.rows;
   adapter
-    ?.resolveLeaf(slot.currentLeafId)
+    ?.resolveTerminal(slot.currentTerminalId)
     ?.resizePty(slot.term.cols, slot.term.rows);
 }
 
@@ -1042,13 +1059,13 @@ export function applyTheme(): void {
   }
 }
 
-export function focusSlot(leafId: number): void {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function focusSlot(terminalId: number): void {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   slot?.term.focus();
 }
 
-export function setSlotFocused(leafId: number, focused: boolean): void {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function setSlotFocused(terminalId: number, focused: boolean): void {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return;
   applyCursorBlinkOnSlot(slot, focused);
 }
@@ -1056,10 +1073,10 @@ export function setSlotFocused(leafId: number, focused: boolean): void {
 export function applyCursorBlink(enabled: boolean): void {
   cursorBlinkEnabled = enabled;
   for (const slot of slots) {
-    if (slot.currentLeafId === null) continue;
+    if (slot.currentTerminalId === null) continue;
     applyCursorBlinkOnSlot(
       slot,
-      adapter?.isLeafFocused(slot.currentLeafId) ?? false,
+      adapter?.isTerminalFocused(slot.currentTerminalId) ?? false,
     );
   }
 }
@@ -1070,24 +1087,24 @@ function applyCursorBlinkOnSlot(slot: Slot, focused: boolean): void {
   slot.term.options.cursorBlink = desired;
 }
 
-export function getSlotForLeaf(leafId: number): Slot | null {
-  return slots.find((s) => s.currentLeafId === leafId) ?? null;
+export function getSlotForTerminal(terminalId: number): Slot | null {
+  return slots.find((s) => s.currentTerminalId === terminalId) ?? null;
 }
 
-export function isLeafAltScreen(leafId: number): boolean {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function isTerminalAltScreen(terminalId: number): boolean {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   return slot ? isAltScreen(slot) : false;
 }
 
-export function parkLeafSlot(leafId: number): void {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function parkTerminalSlot(terminalId: number): void {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return;
   parkSlotHost(slot);
   scheduleWebglReap(slot);
 }
 
-export function refreshLeafSlot(leafId: number): void {
-  const slot = slots.find((s) => s.currentLeafId === leafId);
+export function refreshTerminalSlot(terminalId: number): void {
+  const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return;
   cancelWebglReap(slot);
   unparkSlotHost(slot);
@@ -1107,7 +1124,9 @@ export function refreshLeafSlot(leafId: number): void {
     if (slot.term.cols !== slot.lastCols || slot.term.rows !== slot.lastRows) {
       slot.lastCols = slot.term.cols;
       slot.lastRows = slot.term.rows;
-      adapter?.resolveLeaf(leafId)?.resizePty(slot.lastCols, slot.lastRows);
+      adapter
+        ?.resolveTerminal(terminalId)
+        ?.resizePty(slot.lastCols, slot.lastRows);
     }
   }
   try {
@@ -1115,16 +1134,17 @@ export function refreshLeafSlot(leafId: number): void {
   } catch {}
 }
 
-export function disposeLeafSlot(leafId: number): void {
+export function disposeTerminalSlot(terminalId: number): void {
   const slot = slots.find(
-    (s) => s.currentLeafId === leafId || s.retainedLeafId === leafId,
+    (s) =>
+      s.currentTerminalId === terminalId || s.retainedTerminalId === terminalId,
   );
   if (slot) disposeSlot(slot);
 }
 
-export function discardRetainedSlot(leafId: number): void {
+export function discardRetainedSlot(terminalId: number): void {
   const slot = slots.find(
-    (s) => s.currentLeafId === null && s.retainedLeafId === leafId,
+    (s) => s.currentTerminalId === null && s.retainedTerminalId === terminalId,
   );
   if (!slot) return;
   discardRetention(slot);
@@ -1132,10 +1152,12 @@ export function discardRetainedSlot(leafId: number): void {
   slot.term.reset();
 }
 
-export function getLiveSlotForLeaf(leafId: number): Slot | null {
+export function getLiveSlotForTerminal(terminalId: number): Slot | null {
   return (
     slots.find(
-      (s) => s.currentLeafId === leafId || s.retainedLeafId === leafId,
+      (s) =>
+        s.currentTerminalId === terminalId ||
+        s.retainedTerminalId === terminalId,
     ) ?? null
   );
 }

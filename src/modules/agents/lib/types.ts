@@ -1,3 +1,8 @@
+/**
+ * 本文件定义 Agent 信号、运行状态和通知的共享类型。
+ * 终端 Agent 使用 Workbench 标签 ID 作为唯一前端身份。
+ */
+
 export type AgentStatus = "working" | "waiting";
 
 export type AgentSource = "terminal" | "local";
@@ -16,7 +21,6 @@ export type AgentSignal = {
 };
 
 export type AgentSession = {
-  leafId: number;
   tabId: number;
   agent: string;
   status: AgentStatus;
@@ -28,7 +32,6 @@ export type AgentSession = {
 export type AgentNotification = {
   id: string;
   source: AgentSource;
-  leafId: number;
   tabId: number;
   agent: string;
   kind: NotificationKind;

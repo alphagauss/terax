@@ -36,8 +36,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     openWebPreview: (url) => useChatStore.getState().live.openWebPreview(url),
     spawnAgent: (prompt) =>
       useChatStore.getState().live.spawnManagedAgent(prompt, sessionId),
-    readAgentOutput: (leafId) =>
-      useChatStore.getState().live.readLeafBuffer(leafId),
+    readAgentOutput: (tabId) =>
+      useChatStore.getState().live.readTerminalBuffer(tabId),
     readCache,
     getSessionId: () => sessionId,
   };

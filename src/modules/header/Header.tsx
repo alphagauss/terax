@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染主窗口标题栏、全局入口和窗口控制区域。
+ * Agent 通知导航直接使用 Workbench 标签 ID。
+ */
+
 import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
@@ -18,7 +23,7 @@ import { useTranslation } from "react-i18next";
 type Props = {
   onToggleSidebar: () => void;
   onOpenCommandPalette: () => void;
-  onActivateAgent: (tabId: number, leafId: number) => void;
+  onActivateAgent: (tabId: number) => void;
   onActivateLocalAgent: () => void;
   onOpenSettings: () => void;
   onToggleSecondarySidebar?: () => void;
@@ -26,6 +31,7 @@ type Props = {
   spaceSwitcher: ReactNode;
 };
 
+/** 渲染应用标题栏并连接全局导航与窗口操作。 */
 export function Header({
   onToggleSidebar,
   onOpenCommandPalette,

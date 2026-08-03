@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染块终端首次使用时的快捷操作提示。
+ * 提示状态按终端 ID 订阅，执行过命令后永久隐藏。
+ */
+
 import { cn } from "@/lib/utils";
 import { useShortcutLabel } from "@/modules/shortcuts";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -8,21 +13,23 @@ import {
 } from "../lib/useTerminalSession";
 
 type Props = {
-  leafId: number;
+  terminalId: number;
   subscribe: (cb: () => void) => () => void;
 };
 
 const NOOP_SUBSCRIBE = () => () => {};
 const DEAD = (): WatermarkState => "dead";
 
-// First-run hints over an untouched block terminal. Once the leaf runs a
-// command the component unmounts for good and drops its subscription.
-export function BlockWatermark({ leafId, subscribe }: Props) {
+/**
+ * 渲染尚未执行命令的块终端水印。
+ * 执行命令后组件永久卸载并取消订阅。
+ */
+export function BlockWatermark({ terminalId, subscribe }: Props) {
   const { t } = useTranslation("terminal");
   const [gone, setGone] = useState(false);
   const state = useSyncExternalStore(
     gone ? NOOP_SUBSCRIBE : subscribe,
-    gone ? DEAD : () => blockWatermarkState(leafId),
+    gone ? DEAD : () => blockWatermarkState(terminalId),
   );
 
   useEffect(() => {

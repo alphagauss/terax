@@ -16,7 +16,7 @@ const terminal = vi.hoisted(() => ({
 }));
 
 vi.mock("@/modules/terminal", () => ({
-  leafHasForegroundProcess: terminal.hasForegroundProcess,
+  terminalHasForegroundProcess: terminal.hasForegroundProcess,
 }));
 
 type HarnessProps = {

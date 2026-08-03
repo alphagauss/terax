@@ -5,7 +5,7 @@ import {
   serializeSpaceWorkbench,
 } from "@/modules/spaces/lib/serialize";
 import type { Tab, WorkbenchState } from "@/modules/workbench";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 function counter(start = 100): () => number {
   let value = start;
@@ -15,7 +15,6 @@ function counter(start = 100): () => number {
 function state(): WorkbenchState {
   const terminal: Tab = {
     id: 1,
-    terminalId: 10,
     kind: "terminal",
     spaceId: "default",
     title: "api",
@@ -50,7 +49,6 @@ function state(): WorkbenchState {
   };
   const blocks: Tab = {
     id: 5,
-    terminalId: 11,
     kind: "terminal",
     spaceId: "default",
     title: "blocks",
@@ -104,6 +102,18 @@ describe("Workbench Space serialization", () => {
     expect(
       fresh.space.groups[fresh.space.activeGroupId].activeTabId,
     ).toBeNull();
+  });
+
+  it("allocates one frontend identity for a terminal tab", () => {
+    const allocId = vi.fn(counter());
+    const fresh = freshSpaceWorkbench("default", "/work", allocId);
+    const tab = fresh.tabs[0];
+
+    expect(tab).toMatchObject({ id: 100, kind: "terminal", cwd: "/work" });
+    expect(fresh.space.groups[fresh.space.activeGroupId].activeTabId).toBe(
+      tab.id,
+    );
+    expect(allocId).toHaveBeenCalledTimes(3);
   });
 
   it("round-trips layout, active group, tabs, and terminal cwd", () => {
@@ -171,7 +181,6 @@ describe("Workbench Space serialization", () => {
   it("preserves retained panel proportions when a transient branch is dropped", () => {
     const first: Tab = {
       id: 1,
-      terminalId: 10,
       kind: "terminal",
       spaceId: "default",
       title: "one",
@@ -185,7 +194,6 @@ describe("Workbench Space serialization", () => {
     };
     const last: Tab = {
       id: 3,
-      terminalId: 11,
       kind: "terminal",
       spaceId: "default",
       title: "three",

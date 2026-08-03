@@ -1,5 +1,5 @@
 /**
- * 本文件渲染单个终端叶子视图及其查找、命令块和启动反馈。
+ * 本文件渲染单个终端视图及其查找、命令块和启动反馈。
  * 终端会话由模块级池持有，视图隐藏时不会销毁 PTY。
  */
 
@@ -50,13 +50,13 @@ import { useTranslation } from "react-i18next";
 import { BlockOverlay } from "./block/BlockOverlay";
 import { BlockWatermark } from "./block/BlockWatermark";
 import {
-  copyLeafSelection,
-  pasteClipboardIntoLeaf,
-  shouldUseLocalMouseForLeaf,
+  copyTerminalSelection,
+  pasteClipboardIntoTerminal,
+  shouldUseLocalMouseForTerminal,
 } from "./lib/rendererPool";
 import {
-  focusLeafInput,
-  submitToLeaf,
+  focusTerminalInput,
+  submitToTerminal,
   useTerminalSession,
   whenSessionReady,
 } from "./lib/useTerminalSession";
@@ -92,28 +92,28 @@ export type TerminalPaneHandle = FindHandle & {
 };
 
 type Props = {
-  /** Stable identifier for this leaf (passed back through callbacks). */
-  leafId: number;
+  /** 当前终端的稳定标识，回调会原样返回。 */
+  terminalId: number;
   /** Tab containing this pane is on screen. */
   visible: boolean;
-  /** 当前叶子在标签页内激活时接收自动聚焦。 */
+  /** 当前终端在标签页内激活时接收自动聚焦。 */
   focused?: boolean;
   initialCwd?: string;
   /** Enable command-block decorations (OSC 133) for this terminal. */
   blocks?: boolean;
-  onExit?: (leafId: number, code: number) => void;
-  onCwd?: (leafId: number, cwd: string) => void;
+  onExit?: (terminalId: number, code: number) => void;
+  onCwd?: (terminalId: number, cwd: string) => void;
 };
 
 /**
- * 单个终端叶子组件。
+ * 单个终端组件。
  *
  * 复用模块级 PTY 会话，并在前台 shell 首次就绪前显示局部加载反馈。
  */
 export const TerminalPane = memo(
   forwardRef<TerminalPaneHandle, Props>(function TerminalPane(
     {
-      leafId,
+      terminalId,
       visible,
       focused = true,
       initialCwd,
@@ -145,15 +145,15 @@ export const TerminalPane = memo(
     );
 
     const session = useTerminalSession({
-      leafId,
+      terminalId,
       container: containerRef,
       visible,
       focused,
       initialCwd,
       blocks,
       onSearchReady: setSearchAddon,
-      onExit: (c) => onExit?.(leafId, c),
-      onCwd: (c) => onCwd?.(leafId, c),
+      onExit: (c) => onExit?.(terminalId, c),
+      onCwd: (c) => onCwd?.(terminalId, c),
     });
 
     useEffect(() => {
@@ -163,13 +163,13 @@ export const TerminalPane = memo(
       }
       let active = true;
       setShellReady(false);
-      void whenSessionReady(leafId).then(() => {
+      void whenSessionReady(terminalId).then(() => {
         if (active) setShellReady(true);
       });
       return () => {
         active = false;
       };
-    }, [leafId, remoteWorkspace]);
+    }, [terminalId, remoteWorkspace]);
 
     useEffect(() => {
       // Defer one frame so CSS-variable token resolution sees the new class.
@@ -208,13 +208,17 @@ export const TerminalPane = memo(
     }, [findOptions, invalidRegex, query, searchAddon]);
 
     const restoreFocus = useCallback(() => {
-      if (blocks && session.blockMode === "prompt") focusLeafInput(leafId);
+      if (blocks && session.blockMode === "prompt")
+        focusTerminalInput(terminalId);
       else session.focus();
-    }, [blocks, leafId, session]);
+    }, [blocks, terminalId, session]);
 
     const prepareContextMenu = useCallback(
       (event: ReactMouseEvent<HTMLDivElement>) => {
-        const allowed = shouldUseLocalMouseForLeaf(leafId, event.nativeEvent);
+        const allowed = shouldUseLocalMouseForTerminal(
+          terminalId,
+          event.nativeEvent,
+        );
         if (!allowed) {
           // Radix 随后会检查 defaultPrevented，因此不会与 TUI 同时打开本地菜单。
           event.preventDefault();
@@ -222,7 +226,7 @@ export const TerminalPane = memo(
         }
         setContextMenuHasSelection(Boolean(session.getSelection()));
       },
-      [leafId, session],
+      [terminalId, session],
     );
 
     const closeFind = useCallback(() => {
@@ -333,10 +337,14 @@ export const TerminalPane = memo(
                 Math.abs(e.clientY - downYRef.current) > 4;
               downYRef.current = null;
               if (!moved) session.selectBlockAt(e.clientY);
-              if (session.blockMode === "prompt") focusLeafInput(leafId);
+              if (session.blockMode === "prompt")
+                focusTerminalInput(terminalId);
             }}
           />
-          <BlockWatermark leafId={leafId} subscribe={session.subscribeBlocks} />
+          <BlockWatermark
+            terminalId={terminalId}
+            subscribe={session.subscribeBlocks}
+          />
           <BlockOverlay
             subscribe={session.subscribeBlocks}
             getVisible={session.visibleBlocks}
@@ -345,9 +353,10 @@ export const TerminalPane = memo(
             revealMatch={session.revealMatch}
             clearSearch={session.clearSearch}
             promptReady={promptReady}
-            onRunAgain={(cmd) => submitToLeaf(leafId, cmd)}
+            onRunAgain={(cmd) => submitToTerminal(terminalId, cmd)}
             onRestoreFocus={() => {
-              if (session.blockMode === "prompt") focusLeafInput(leafId);
+              if (session.blockMode === "prompt")
+                focusTerminalInput(terminalId);
             }}
           />
         </div>
@@ -387,14 +396,14 @@ export const TerminalPane = memo(
           <ContextMenuItem
             className={COMPACT_ITEM}
             disabled={!contextMenuHasSelection}
-            onSelect={() => copyLeafSelection(leafId, smartCopyEnabled)}
+            onSelect={() => copyTerminalSelection(terminalId, smartCopyEnabled)}
           >
             {terminalT("contextMenu.copy")}
             <ContextMenuShortcut>{copyShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem
             className={COMPACT_ITEM}
-            onSelect={() => pasteClipboardIntoLeaf(leafId)}
+            onSelect={() => pasteClipboardIntoTerminal(terminalId)}
           >
             {terminalT("contextMenu.paste")}
             <ContextMenuShortcut>{pasteShortcut}</ContextMenuShortcut>

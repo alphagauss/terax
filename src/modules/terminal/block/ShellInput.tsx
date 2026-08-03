@@ -1,15 +1,20 @@
+/**
+ * 本文件渲染块终端的独立 Shell 输入控件。
+ * 输入草稿与焦点状态按终端 ID 隔离，提交仍写入对应 PTY。
+ */
+
 import { resolveFontFamily } from "@/lib/fonts";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useEffect, useRef } from "react";
 import {
-  clearLeafBlockSelection,
-  getLeafDraft,
-  leafGridSelection,
-  setLeafDraft,
-  setLeafInputActivity,
-  setLeafInputFocus,
+  clearTerminalBlockSelection,
+  getTerminalDraft,
+  terminalGridSelection,
+  setTerminalDraft,
+  setTerminalInputActivity,
+  setTerminalInputFocus,
 } from "../lib/useTerminalSession";
 import {
   historyCommands,
@@ -21,8 +26,8 @@ import type { BlockMode } from "./lib/modeMachine";
 import { createShellEditor, type ShellEditorHandle } from "./lib/shellEditor";
 
 type Props = {
-  /** Active leaf the bar is driving; the editor retargets to it. */
-  leafId: number;
+  /** 输入栏当前控制的终端，编辑器会随之重新绑定。 */
+  terminalId: number;
   mode: BlockMode;
   focused: boolean;
   /** Changes when the active theme changes, so the editor re-themes. */
@@ -32,8 +37,9 @@ type Props = {
   getCwd: () => string | null;
 };
 
+/** 渲染块终端输入框并同步该终端的草稿和选择状态。 */
 export default function ShellInput({
-  leafId,
+  terminalId,
   mode,
   focused,
   themeKey,
@@ -46,8 +52,8 @@ export default function ShellInput({
   const commandsRef = useRef<string[]>([]);
   const cbRef = useRef({ onSubmit, onInterrupt, getCwd });
   cbRef.current = { onSubmit, onInterrupt, getCwd };
-  const leafIdRef = useRef(leafId);
-  leafIdRef.current = leafId;
+  const terminalIdRef = useRef(terminalId);
+  terminalIdRef.current = terminalId;
   const atPrompt = mode === "prompt";
   const focusableRef = useRef(false);
   focusableRef.current = focused && atPrompt;
@@ -79,7 +85,7 @@ export default function ShellInput({
       commandNames: () => commandsRef.current,
       getCwd: () => cbRef.current.getCwd(),
       onChange: (text) =>
-        setLeafInputActivity(leafIdRef.current, text.length > 0),
+        setTerminalInputActivity(terminalIdRef.current, text.length > 0),
       suggest: historySuggest,
       historyList,
       onSubmit: (text) => {
@@ -91,7 +97,7 @@ export default function ShellInput({
         cbRef.current.onSubmit(text);
       },
       onInterrupt: () => cbRef.current.onInterrupt(),
-      onEscape: () => clearLeafBlockSelection(leafIdRef.current),
+      onEscape: () => clearTerminalBlockSelection(terminalIdRef.current),
     });
     handleRef.current = handle;
     requestAnimationFrame(() => handleRef.current?.focus());
@@ -101,24 +107,23 @@ export default function ShellInput({
     };
   }, []);
 
-  // Retarget the single editor to the active leaf: register its focus callback
-  // and swap drafts so each leaf keeps its own unsent command. New or switched
-  // tabs land with the cursor already in the input.
+  // 单个编辑器随活动终端切换焦点回调和草稿，使每个终端保留各自未发送的命令。
+  // 新建或切换标签后，光标直接落入输入框。
   useEffect(() => {
-    setLeafInputFocus(leafId, () => handleRef.current?.focus());
-    handleRef.current?.setValue(getLeafDraft(leafId));
+    setTerminalInputFocus(terminalId, () => handleRef.current?.focus());
+    handleRef.current?.setValue(getTerminalDraft(terminalId));
     requestAnimationFrame(() => {
-      if (focusableRef.current && leafIdRef.current === leafId) {
+      if (focusableRef.current && terminalIdRef.current === terminalId) {
         handleRef.current?.focus();
       }
     });
     return () => {
       const value = handleRef.current?.getValue() ?? "";
-      setLeafDraft(leafId, value);
-      setLeafInputActivity(leafId, value.length > 0);
-      setLeafInputFocus(leafId, null);
+      setTerminalDraft(terminalId, value);
+      setTerminalInputActivity(terminalId, value.length > 0);
+      setTerminalInputFocus(terminalId, null);
     };
-  }, [leafId]);
+  }, [terminalId]);
 
   useEffect(() => {
     void themeKey;
@@ -141,7 +146,7 @@ export default function ShellInput({
   const onCopyCapture = (e: React.ClipboardEvent) => {
     const view = handleRef.current?.view;
     if (view && !view.state.selection.main.empty) return;
-    const sel = leafGridSelection(leafId);
+    const sel = terminalGridSelection(terminalId);
     if (!sel) return;
     e.preventDefault();
     e.clipboardData.setData("text/plain", sel);

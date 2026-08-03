@@ -18,7 +18,7 @@ import {
 const closeMocks = vi.hoisted(() => ({
   close: vi.fn(),
   countDirtyDocuments: vi.fn(),
-  leafHasForegroundProcess: vi.fn(),
+  terminalHasForegroundProcess: vi.fn(),
   listener: undefined as
     | ((event: { preventDefault: () => void }) => void)
     | undefined,
@@ -29,7 +29,7 @@ vi.mock("@/modules/editor", () => ({
 }));
 
 vi.mock("@/modules/terminal", () => ({
-  leafHasForegroundProcess: closeMocks.leafHasForegroundProcess,
+  terminalHasForegroundProcess: closeMocks.terminalHasForegroundProcess,
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -87,7 +87,7 @@ describe("useAppCloseGuard", () => {
     closeMocks.listener = undefined;
     closeMocks.close.mockResolvedValue(undefined);
     closeMocks.countDirtyDocuments.mockReturnValue(0);
-    closeMocks.leafHasForegroundProcess.mockResolvedValue(false);
+    closeMocks.terminalHasForegroundProcess.mockResolvedValue(false);
     root = createRoot(document.createElement("div"));
   });
 

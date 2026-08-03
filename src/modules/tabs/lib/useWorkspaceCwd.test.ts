@@ -1,3 +1,8 @@
+/**
+ * 本文件测试标签与 Explorer 根目录之间的工作区路径解析。
+ * 终端标签只通过自身标签 ID 和 cwd 参与解析。
+ */
+
 import type { Tab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
 import { resolveExplorerRoot } from "./useWorkspaceCwd";
@@ -5,7 +10,6 @@ import { resolveExplorerRoot } from "./useWorkspaceCwd";
 const terminal = (cwd: string): Tab =>
   ({
     id: 1,
-    terminalId: 2,
     kind: "terminal",
     spaceId: "default",
     title: "shell",

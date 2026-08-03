@@ -12,20 +12,18 @@ export type ToolContext = {
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   /**
-   * Type a string into the active terminal at the prompt — without executing.
-   * Returns false if there is no active terminal tab to inject into.
+   * 向活动终端输入文本但不执行。
+   * 没有可写入的活动终端标签时返回 false。
    */
   injectIntoActivePty: (text: string) => boolean;
   /** Open a new preview tab (in-app iframe) at the given URL. */
   openWebPreview: (url: string) => boolean;
-  /** Spawn a Claude Code agent in a new terminal tab, bound to this session. */
-  spawnAgent: (
-    prompt: string,
-  ) => Promise<{ tabId: number; leafId: number } | null>;
-  /** Read the terminal scrollback tail of a managed agent's leaf. */
-  readAgentOutput: (leafId: number) => string | null;
+  /** 在新终端标签中启动绑定到当前会话的 Claude Code Agent。 */
+  spawnAgent: (prompt: string) => Promise<number | null>;
+  /** 读取托管 Agent 所在终端的滚动缓冲区尾部。 */
+  readAgentOutput: (tabId: number) => string | null;
   readCache: Map<string, { size: number; hash: number }>;
-  /** Active chat session id — used by tools that persist per-session state (todos). */
+  /** 当前聊天会话 ID，供待办事项等按会话持久化的工具使用。 */
   getSessionId: () => string | null;
 };
 

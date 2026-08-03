@@ -39,7 +39,7 @@ type Options = {
     cwd: string | undefined,
     title: string,
     groupId?: number,
-  ) => { tabId: number; leafId: number };
+  ) => number;
 };
 
 /**
@@ -95,7 +95,7 @@ export function usePythonFileRunner({
           toast.error(t("runFailed"));
           return;
         }
-        const { leafId } = newRunTab(
+        const tabId = newRunTab(
           root,
           `python · ${pythonFileName(path)}`,
           groupId,
@@ -106,8 +106,8 @@ export function usePythonFileRunner({
           workspace,
           usePreferencesStore.getState().terminalShell,
         );
-        await whenSessionReady(leafId);
-        if (!writeToSession(leafId, `${command}\r`)) {
+        await whenSessionReady(tabId);
+        if (!writeToSession(tabId, `${command}\r`)) {
           toast.error(t("runFailed"));
         }
       } catch (error) {

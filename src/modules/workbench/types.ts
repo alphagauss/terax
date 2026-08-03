@@ -12,7 +12,6 @@ type TabBase = {
 
 export type TerminalTab = TabBase & {
   kind: "terminal";
-  terminalId: number;
   cwd?: string;
   blocks?: boolean;
   private?: boolean;

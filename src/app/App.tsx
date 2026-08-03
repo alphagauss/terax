@@ -23,7 +23,7 @@ import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
 import {
   AgentNotificationsBridge,
-  nextAttentionTarget,
+  nextAttentionTabId,
 } from "@/modules/agents";
 import {
   AgentRunBridge,
@@ -94,7 +94,7 @@ import {
 import {
   clearFocusedTerminal,
   disposeSession,
-  leafHasForegroundProcess,
+  terminalHasForegroundProcess,
   navigateFocusedBlocks,
   type TerminalPaneHandle,
   useTerminalFileDrop,
@@ -232,7 +232,7 @@ export default function App() {
     const t = tabs.find((x) => x.id === activeId);
     return t && t.kind === "terminal" ? t : null;
   }, [tabs, activeId]);
-  const activeTerminalId = activeTerminalTab?.terminalId ?? null;
+  const activeTerminalId = activeTerminalTab?.id ?? null;
 
   const terminalRefs = useRef<Map<number, TerminalPaneHandle>>(new Map());
   const editorRefs = useRef<Map<number, EditorPaneHandle>>(new Map());
@@ -392,7 +392,7 @@ export default function App() {
 
     let active = true;
     // 只在首次远端启动且前台页为终端时排序，后续切换标签不重复阻塞 Explorer。
-    void whenSessionReady(activeTab.terminalId).then(() => {
+    void whenSessionReady(activeTab.id).then(() => {
       if (active) setExplorerStartupReady(true);
     });
     return () => {
@@ -477,7 +477,7 @@ export default function App() {
   useEffect(() => {
     const live = new Set<number>();
     for (const t of tabs) {
-      if (t.kind === "terminal") live.add(t.terminalId);
+      if (t.kind === "terminal") live.add(t.id);
     }
     for (const id of liveTerminalIdsRef.current) {
       if (!live.has(id)) disposeSession(id);
@@ -531,7 +531,7 @@ export default function App() {
     const t = tabs.find((x) => x.id === activeId);
     if (!t) return null;
     if (t.kind === "terminal") {
-      return terminalRefs.current.get(t.terminalId)?.getSelection() ?? null;
+      return terminalRefs.current.get(t.id)?.getSelection() ?? null;
     }
     if (t.kind === "editor" || t.kind === "markdown") {
       return editorRefs.current.get(activeId)?.getSelection() ?? null;
@@ -625,7 +625,7 @@ export default function App() {
     if (editor) return editor;
     const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
     if (tab?.kind === "terminal") {
-      return terminalRefs.current.get(tab.terminalId) ?? null;
+      return terminalRefs.current.get(tab.id) ?? null;
     }
     if (tab?.kind === "git-history") {
       return gitHistoryRefs.current.get(tabId) ?? null;
@@ -744,7 +744,7 @@ export default function App() {
       setTimeout(() => {
         const tab = tabsRef.current.find((x) => x.id === tabId);
         if (!tab || tab.kind !== "terminal") return;
-        const t = terminalRefs.current.get(tab.terminalId);
+        const t = terminalRefs.current.get(tab.id);
         if (!t) return;
         t.write(`cd ${quoteShellArg(path)}\r`);
         t.focus();
@@ -929,7 +929,7 @@ export default function App() {
 
   // Focus an agent's tab, switching to its Space before activating its group.
   const activateAgentTarget = useCallback(
-    (tabId: number, _terminalId: number) => {
+    (tabId: number) => {
       const space = tabsRef.current.find((t) => t.id === tabId)?.spaceId;
       if (space && space !== useSpaces.getState().activeId) {
         useSpaces.getState().setActive(space);
@@ -974,8 +974,8 @@ export default function App() {
       "ai.toggle": toggleAiPanel,
       "ai.askSelection": askFromSelection,
       "agent.focusAttention": () => {
-        const t = nextAttentionTarget();
-        if (t) activateAgentTarget(t.tabId, t.leafId);
+        const tabId = nextAttentionTabId();
+        if (tabId !== null) activateAgentTarget(tabId);
       },
       "settings.open": () => void openSettingsWindow(),
       "folder.open": () => void openFolder(),
@@ -1140,8 +1140,8 @@ export default function App() {
 
   const authorizedCwds = useRef(new Set<string>());
   const handleTerminalCwd = useCallback(
-    (terminalId: number, cwd: string) => {
-      setTerminalCwd(terminalId, cwd);
+    (tabId: number, cwd: string) => {
+      setTerminalCwd(tabId, cwd);
       if (cwd && !authorizedCwds.current.has(cwd)) {
         authorizedCwds.current.add(cwd);
         native.workspaceAuthorize(cwd).catch(() => {
@@ -1159,12 +1159,8 @@ export default function App() {
   }, [openAiPanelAndFocus]);
 
   const handleTerminalExit = useCallback(
-    (terminalId: number, _code: number) => {
-      const all = tabsRef.current;
-      const tab = all.find(
-        (candidate) =>
-          candidate.kind === "terminal" && candidate.terminalId === terminalId,
-      );
+    (tabId: number, _code: number) => {
+      const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
       if (tab?.kind !== "terminal") return;
       closeExitedTerminal(tab.id);
     },
@@ -1227,7 +1223,7 @@ export default function App() {
       const busyTerminal = (
         await Promise.all(
           terminalTabs.map((tab) =>
-            leafHasForegroundProcess(tab.terminalId).catch(() => true),
+            terminalHasForegroundProcess(tab.id).catch(() => true),
           ),
         )
       ).some(Boolean);

@@ -1,3 +1,8 @@
+/**
+ * 本文件实现无渲染器终端的有界字节缓冲区。
+ * 缓冲区溢出时从安全行边界恢复，避免重放半段控制序列。
+ */
+
 const DEFAULT_BYTE_CAP = 1024 * 1024;
 const DEFAULT_BLOCK_SIZE = 16 * 1024;
 
@@ -10,10 +15,10 @@ const OVERFLOW_NOTICE = new TextEncoder().encode(
 const LF = 0x0a;
 
 /**
- * Byte buffer for PTY output while a leaf has no renderer slot. Chunks are
- * coalesced into fixed-size blocks (capacity bound by bytes, not chunk
- * count); on overflow the oldest blocks are dropped and drain() resumes from
- * the next line boundary instead of resetting the terminal.
+ * 缓存终端没有 renderer slot 时产生的 PTY 输出。
+ *
+ * 数据合并为固定大小的块并按字节限制容量。溢出时丢弃最旧块，读取从下一行边界
+ * 恢复，避免重置终端或从控制序列中间开始重放。
  */
 export class DormantRing {
   private blocks: Uint8Array[] = [];

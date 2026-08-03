@@ -54,8 +54,8 @@ export type Live = {
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
-  ) => Promise<{ tabId: number; leafId: number } | null>;
-  readLeafBuffer: (leafId: number) => string | null;
+  ) => Promise<number | null>;
+  readTerminalBuffer: (tabId: number) => string | null;
 };
 
 export type AgentRunStatus =
@@ -178,7 +178,7 @@ const NOOP_LIVE: Live = {
   getActiveFile: () => null,
   openWebPreview: () => false,
   spawnManagedAgent: async () => null,
-  readLeafBuffer: () => null,
+  readTerminalBuffer: () => null,
 };
 
 const CHATS_LRU_CAP = 8;
