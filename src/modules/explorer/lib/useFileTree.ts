@@ -1,8 +1,13 @@
 /**
- * 本文件管理资源管理器文件树的加载、展开、监听和文件变更操作。
- * 所有系统访问都通过 Tauri IPC，SSH 目录只轮询已展示的节点以限制远端开销。
+ * 本文件管理资源管理器文件树的缓存恢复、加载、展开、监听和文件变更操作。
+ * 所有系统访问都通过 Tauri IPC，切换根目录时先显示成功缓存并立即校验最新内容。
  */
 
+import {
+  type DirEntry,
+  readCachedDirectory,
+  writeCachedDirectory,
+} from "@/modules/explorer/lib/directoryCache";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import {
@@ -15,13 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isCurrentTreeRequest } from "./requestGuard";
 import { listenFsChanged, watchAdd, watchRemove } from "./watch";
 
-export type DirEntry = {
-  name: string;
-  kind: "file" | "dir" | "symlink";
-  size: number;
-  mtime: number;
-  gitignored: boolean;
-};
+export type { DirEntry } from "@/modules/explorer/lib/directoryCache";
 
 type ChildrenState =
   | { status: "idle" }
@@ -264,6 +263,16 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           return;
         }
 
+        writeCachedDirectory(
+          {
+            workspace,
+            path,
+            showHidden: showHiddenRef.current,
+            gitDecorations: gitDecorationsRef.current,
+          },
+          { entries },
+        );
+
         const prev = nodesRef.current[path];
         if (
           prev?.status === "loaded" &&
@@ -324,10 +333,11 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         ) {
           return;
         }
-        setNodes((s) => ({
-          ...s,
-          [path]: { status: "error", message: String(e) },
-        }));
+        setNodes((s) =>
+          s[path]?.status === "loaded"
+            ? s
+            : { ...s, [path]: { status: "error", message: String(e) } },
+        );
       } finally {
         if (inFlightRef.current.get(path) === requestId) {
           inFlightRef.current.delete(path);
@@ -361,13 +371,25 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
     const restored = recallExpansion(expansionScope);
     setExpanded(new Set(restored));
-    setNodes({});
+    const cachedNodes: TreeState = {};
+    for (const path of new Set([rootPath, ...restored])) {
+      const cached = readCachedDirectory({
+        workspace,
+        path,
+        showHidden: showHiddenRef.current,
+        gitDecorations: gitDecorationsRef.current,
+      });
+      if (cached) {
+        cachedNodes[path] = { status: "loaded", entries: cached.entries };
+      }
+    }
+    setNodes(cachedNodes);
     // Sync the ref synchronously: nodesRef only updates after the next render,
     // so without this a fast (cached) fetchChildren below would read the stale
     // pre-clear "loaded" node, hit the sameDirListing early-return, and skip
     // re-populating, leaving a valid root with an empty tree when rootPath
     // changes rapidly (e.g. switching folders in quick succession).
-    nodesRef.current = {};
+    nodesRef.current = cachedNodes;
 
     if (!remoteReady) {
       return () => {
@@ -396,7 +418,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     remoteReady,
     rootPath,
     treeScope,
-    workspace.kind,
+    workspace,
   ]);
 
   useEffect(() => {

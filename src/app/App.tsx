@@ -47,7 +47,11 @@ import {
   saveAutoSaveDocumentsBeforeClose,
   useEditorFileSync,
 } from "@/modules/editor";
-import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
+import {
+  FileExplorer,
+  type FileExplorerHandle,
+  useExplorerDirectoryPrefetch,
+} from "@/modules/explorer";
 import type { FindHandle } from "@/modules/find";
 import { Header } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
@@ -105,9 +109,10 @@ import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import {
   DEFAULT_SPACE_ID,
   findGroupForTab,
+  type TerminalTab,
+  useStartupWarmup,
   useWorkbench,
   type WorkbenchChromeActions,
-  type TerminalTab,
   WorkbenchSurface,
   type WorkbenchViewServices,
 } from "@/modules/workbench";
@@ -182,6 +187,7 @@ export default function App() {
     tabs,
     activeId,
     setActiveId,
+    warmTabInBackground,
     setActiveGroup,
     allocId,
     replaceWorkbench,
@@ -399,6 +405,20 @@ export default function App() {
       active = false;
     };
   }, [activeTab, explorerStartupReady, spacesHydrated, workspaceEnv.kind]);
+
+  useStartupWarmup({
+    enabled: workbenchBooted && spacesHydrated && explorerStartupReady,
+    state: workbenchState,
+    activeSpaceId: activeSpaceId ?? DEFAULT_SPACE_ID,
+    activeTab,
+    warmTabInBackground,
+  });
+
+  useExplorerDirectoryPrefetch({
+    enabled: workbenchBooted && spacesHydrated && explorerStartupReady,
+    tabs,
+    currentRoot: explorerRoot,
+  });
 
   useWindowTitle(activeTab, explorerRoot);
 

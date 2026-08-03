@@ -15,6 +15,7 @@ export {
   type WorkbenchLayoutNode,
   type WorkbenchState,
 } from "@/modules/workbench/types";
+export { useStartupWarmup } from "@/modules/workbench/useStartupWarmup";
 export { useWorkbench } from "@/modules/workbench/useWorkbench";
 export type { WorkbenchViewServices } from "@/modules/workbench/viewRegistry";
 export type { WorkbenchChromeActions } from "@/modules/workbench/WorkbenchGrid";
