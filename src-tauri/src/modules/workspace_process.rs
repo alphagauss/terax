@@ -322,6 +322,11 @@ fn environment_identity(env: &WorkspaceEnv) -> Result<EnvironmentIdentity, Strin
     Ok(EnvironmentIdentity { key, filename_key })
 }
 
+/// 返回可安全用于持久化文件名前缀的 Workspace 环境标识。
+pub(crate) fn environment_filename_key(env: &WorkspaceEnv) -> Result<String, String> {
+    Ok(environment_identity(env)?.filename_key)
+}
+
 fn filename_component(value: &str) -> String {
     let mut result = String::new();
     for byte in value.bytes() {
@@ -392,7 +397,21 @@ fn ensure_state(path: &Path) -> Result<(), String> {
     write_atomic(path, b"{}").map_err(|error| error.to_string())
 }
 
-fn remove_stale_state(state_path: &Path, lock_path: &Path, window_state_root: &Path, id: Uuid) {
+/// 清理已经确认没有进程持锁的额外 Workspace 状态。
+///
+/// 必须先删除以随机 Workspace ID 命名的传输 Journal。Journal 清理失败时保留状态文件，
+/// 让后续启动仍能识别并重试，避免生成无法再归属到任何窗口的持久化记录。
+fn remove_stale_state(
+    state_path: &Path,
+    lock_path: &Path,
+    window_state_root: &Path,
+    transfer_root: &Path,
+    id: Uuid,
+) {
+    if let Err(error) = crate::modules::transfers::remove_workspace_files(transfer_root, id) {
+        log::warn!("cannot remove stale transfer journals for Workspace {id}: {error}");
+        return;
+    }
     if let Err(error) = fs::remove_file(state_path) {
         if error.kind() != std::io::ErrorKind::NotFound {
             log::warn!(
@@ -430,7 +449,12 @@ fn remove_stale_state(state_path: &Path, lock_path: &Path, window_state_root: &P
     }
 }
 
-fn cleanup_extra_states(root: &Path, window_state_root: &Path) -> Result<(), String> {
+/// 扫描并清理没有活动进程持锁的额外 Workspace 状态及其传输 Journal。
+fn cleanup_extra_states(
+    root: &Path,
+    window_state_root: &Path,
+    transfer_root: &Path,
+) -> Result<(), String> {
     if !root.exists() {
         return Ok(());
     }
@@ -451,7 +475,7 @@ fn cleanup_extra_states(root: &Path, window_state_root: &Path) -> Result<(), Str
             continue;
         };
         drop(lock);
-        remove_stale_state(&path, &lock_path, window_state_root, id);
+        remove_stale_state(&path, &lock_path, window_state_root, transfer_root, id);
     }
     Ok(())
 }
@@ -512,10 +536,12 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     let launch_geometry = request.window_geometry;
     let window_state_root =
         crate::modules::app_data::directory(crate::modules::app_data::Directory::WindowState)?;
+    let transfer_root =
+        crate::modules::app_data::directory(crate::modules::app_data::Directory::Transfers)?;
     let _registry = FileLock::acquire(&root.join(REGISTRY_LOCK), Duration::from_secs(5))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "Workspace registry is busy".to_string())?;
-    cleanup_extra_states(root, &window_state_root)?;
+    cleanup_extra_states(root, &window_state_root, &transfer_root)?;
 
     let _policy = request.policy;
     let single_kind = StateKind::Single;
@@ -906,9 +932,17 @@ mod tests {
             FileLock::try_acquire(&root.path().join(lock_filename(&environment, &live_kind)))
                 .unwrap()
                 .unwrap();
-        cleanup_extra_states(root.path(), windows.path()).unwrap();
+        let transfers = tempfile::tempdir().unwrap();
+        let task = Uuid::new_v4();
+        let stale_journal = transfers.path().join(format!("local.{stale}.{task}.jsonl"));
+        let live_journal = transfers.path().join(format!("local.{live}.{task}.jsonl"));
+        fs::write(&stale_journal, b"stale").unwrap();
+        fs::write(&live_journal, b"live").unwrap();
+        cleanup_extra_states(root.path(), windows.path(), transfers.path()).unwrap();
         assert!(!stale_path.exists());
         assert!(live_path.exists());
+        assert!(!stale_journal.exists());
+        assert!(live_journal.exists());
         drop(live_lock);
     }
 }

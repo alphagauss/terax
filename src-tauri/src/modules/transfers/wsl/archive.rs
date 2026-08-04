@@ -11,6 +11,7 @@ use std::time::Duration;
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
+#[cfg(windows)]
 use uuid::Uuid;
 
 use crate::modules::transfers::archive::{
@@ -30,6 +31,8 @@ use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
 const COMMAND_OUTPUT_LIMIT: usize = 1024 * 1024;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 type RunResult<T> = Result<T, TransferRunError>;
 
@@ -65,10 +68,10 @@ async fn execute_upload(
     let result = async {
         ensure_capability(distro).await?;
         let archive = build_wsl_upload_archive(plan, context).await?;
-        context.set_archive_size(archive.size).await;
-        context.set_archive_file_count(archive.file_count).await;
+        context.set_archive_size(archive.size).await?;
+        context.set_archive_file_count(archive.file_count).await?;
 
-        let directory = create_upload_work_dir(distro, destination_parent).await?;
+        let directory = create_upload_work_dir(distro, destination_parent, &plan.task_id).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
         let host_archive = resolve_path(
@@ -93,21 +96,33 @@ async fn execute_upload(
         )
         .await?;
         publish_upload_staging(plan, distro, &directory, context).await?;
-        cleanup_work_dir(distro, &directory).await;
+        if !cleanup_work_dir(distro, &directory, &plan.task_id).await {
+            schedule_cleanup_work_dir(
+                distro.to_string(),
+                directory.clone(),
+                plan.task_id.clone(),
+                plan.owner_task_id.clone(),
+            );
+        }
         work_dir = None;
-        context.complete_files(archive.file_count).await;
-        verify_apply_commit(plan, context).await
+        verify_apply_commit(plan, archive.file_count, context).await?;
+        Ok(())
     }
     .await;
     if let Some(directory) = work_dir {
-        if matches!(&result, Err(TransferRunError::Canceled)) {
-            schedule_cleanup_work_dir(distro.to_string(), directory);
-        } else {
-            cleanup_work_dir(distro, &directory).await;
+        if matches!(&result, Err(TransferRunError::Canceled))
+            || !cleanup_work_dir(distro, &directory, &plan.task_id).await
+        {
+            schedule_cleanup_work_dir(
+                distro.to_string(),
+                directory,
+                plan.task_id.clone(),
+                plan.owner_task_id.clone(),
+            );
         }
     }
     if result.is_err() {
-        cleanup_local_staging(&plan.roots).await;
+        cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     result
 }
@@ -123,7 +138,7 @@ async fn execute_download(
     let result = async {
         ensure_capability(distro).await?;
         context.set_stage(TransferStage::Archiving).await;
-        let directory = create_work_dir(distro).await?;
+        let directory = create_work_dir(distro, &plan.task_id).await?;
         work_dir = Some(directory.clone());
         let remote_archive = format!("{directory}/payload.tar.gz");
         let remote_sha256 = create_wsl_archive(distro, &remote_archive, sources, context).await?;
@@ -140,7 +155,7 @@ async fn execute_download(
             .await
             .map_err(|error| message(format!("stat WSL archive: {error}")))?
             .len();
-        context.set_archive_size(archive_size).await;
+        context.set_archive_size(archive_size).await?;
         let temporary = tempfile::Builder::new()
             .prefix("terax-archive-")
             .suffix(".tar.gz")
@@ -155,25 +170,37 @@ async fn execute_download(
         if local_sha256 != remote_sha256 {
             return Err(message("downloaded WSL archive checksum mismatch"));
         }
-        cleanup_work_dir(distro, &directory).await;
+        if !cleanup_work_dir(distro, &directory, &plan.task_id).await {
+            schedule_cleanup_work_dir(
+                distro.to_string(),
+                directory.clone(),
+                plan.task_id.clone(),
+                plan.owner_task_id.clone(),
+            );
+        }
         work_dir = None;
 
         let roots = download_extract_roots(plan, sources)?;
         let file_count = extract_download_archive_roots(&local_archive, roots, context).await?;
-        context.set_archive_file_count(file_count).await;
-        context.complete_files(file_count).await;
-        verify_apply_commit(plan, context).await
+        context.set_archive_file_count(file_count).await?;
+        verify_apply_commit(plan, file_count, context).await?;
+        Ok(())
     }
     .await;
     if let Some(directory) = work_dir {
-        if matches!(&result, Err(TransferRunError::Canceled)) {
-            schedule_cleanup_work_dir(distro.to_string(), directory);
-        } else {
-            cleanup_work_dir(distro, &directory).await;
+        if matches!(&result, Err(TransferRunError::Canceled))
+            || !cleanup_work_dir(distro, &directory, &plan.task_id).await
+        {
+            schedule_cleanup_work_dir(
+                distro.to_string(),
+                directory,
+                plan.task_id.clone(),
+                plan.owner_task_id.clone(),
+            );
         }
     }
     if result.is_err() {
-        cleanup_local_staging(&plan.roots).await;
+        cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     result
 }
@@ -349,56 +376,82 @@ fi
 }
 
 #[cfg(windows)]
-async fn create_work_dir(distro: &str) -> RunResult<String> {
-    let output = capture_wsl(
-        distro,
-        "sh",
-        &[
-            "-c",
-            "umask 077; mktemp -d \"${TMPDIR:-/tmp}/terax-archive.XXXXXXXX\"",
-        ],
-    )
-    .await?;
+/// 在 WSL 临时目录创建绑定任务 ID 的下载归档工作目录。
+async fn create_work_dir(distro: &str, task_id: &str) -> RunResult<String> {
+    validate_task_id(task_id)?;
+    let command =
+        format!("umask 077; mktemp -d \"${{TMPDIR:-/tmp}}/terax-archive.{task_id}.XXXXXXXX\"");
+    let output = capture_wsl(distro, "sh", &["-c", &command]).await?;
     let directory = output.trim();
-    validate_work_dir(directory)?;
+    validate_work_dir(directory, task_id)?;
     Ok(directory.to_string())
 }
 
 #[cfg(windows)]
-async fn create_upload_work_dir(distro: &str, destination_parent: &str) -> RunResult<String> {
+/// 在最终目标父目录创建绑定任务 ID 的上传归档工作目录。
+async fn create_upload_work_dir(
+    distro: &str,
+    destination_parent: &str,
+    task_id: &str,
+) -> RunResult<String> {
+    validate_task_id(task_id)?;
     let parent = destination_parent.trim_end_matches('/');
-    let name = format!(".terax-archive-{}", Uuid::new_v4());
+    let name = format!(".terax-archive-{task_id}");
     let directory = if parent.is_empty() {
         format!("/{name}")
     } else {
         format!("{parent}/{name}")
     };
-    validate_work_dir(&directory)?;
+    validate_work_dir(&directory, task_id)?;
     capture_wsl(distro, "mkdir", &["-m", "700", "--", &directory]).await?;
     Ok(directory)
 }
 
 #[cfg(windows)]
-async fn cleanup_work_dir(distro: &str, directory: &str) {
-    if validate_work_dir(directory).is_err() {
+/// 尝试删除通过任务所有权校验的 WSL 归档工作目录。
+async fn cleanup_work_dir(distro: &str, directory: &str, task_id: &str) -> bool {
+    if validate_work_dir(directory, task_id).is_err() {
         log::warn!("refused to clean invalid WSL archive directory: {directory}");
-        return;
+        return false;
     }
-    if let Err(error) = capture_wsl(distro, "rm", &["-rf", "--", directory]).await {
-        log::warn!("failed to clean WSL archive directory {directory}: {error:?}");
-    }
+    capture_wsl(distro, "rm", &["-rf", "--", directory])
+        .await
+        .is_ok()
 }
 
 #[cfg(windows)]
-/// 取消后在后台执行单个 WSL 本地递归删除，避免清理阻塞任务进入 Canceled。
-fn schedule_cleanup_work_dir(distro: String, directory: String) {
+/// 后台等待 WSL 清理成功，期间保留任务历史的临时数据所有权。
+fn schedule_cleanup_work_dir(
+    distro: String,
+    directory: String,
+    staging_task_id: String,
+    owner_task_id: String,
+) {
+    crate::modules::transfers::manager::begin_deferred_cleanup(&owner_task_id);
     tauri::async_runtime::spawn(async move {
-        cleanup_work_dir(&distro, &directory).await;
+        let cleanup = async {
+            loop {
+                if cleanup_work_dir(&distro, &directory, &staging_task_id).await {
+                    return;
+                }
+                tokio::time::sleep(CLEANUP_RETRY_INTERVAL).await;
+            }
+        };
+        if tokio::time::timeout(CLEANUP_RETRY_WINDOW, cleanup)
+            .await
+            .is_ok()
+        {
+            crate::modules::transfers::manager::finish_deferred_cleanup(&owner_task_id);
+        } else {
+            log::warn!("WSL archive cleanup expired for task {owner_task_id}: {directory}");
+        }
     });
 }
 
 #[cfg(windows)]
-fn validate_work_dir(path: &str) -> RunResult<()> {
+/// 校验工作目录的绝对路径、固定命名与任务所有权。
+fn validate_work_dir(path: &str, task_id: &str) -> RunResult<()> {
+    validate_task_id(task_id)?;
     if !path.starts_with('/')
         || path.contains(['\0', '\r', '\n'])
         || path
@@ -408,19 +461,26 @@ fn validate_work_dir(path: &str) -> RunResult<()> {
         return Err(message("invalid WSL archive directory"));
     }
     let name = path.rsplit('/').next().unwrap_or_default();
-    let mktemp = name.strip_prefix("terax-archive.").is_some_and(|suffix| {
+    let mktemp_prefix = format!("terax-archive.{task_id}.");
+    let mktemp = name.strip_prefix(&mktemp_prefix).is_some_and(|suffix| {
         suffix.len() == 8
             && suffix
                 .chars()
                 .all(|character| character.is_ascii_alphanumeric())
     });
-    let adjacent = name
-        .strip_prefix(".terax-archive-")
-        .is_some_and(|suffix| Uuid::parse_str(suffix).is_ok());
+    let adjacent = name == format!(".terax-archive-{task_id}");
     if !mktemp && !adjacent {
         return Err(message("invalid WSL archive directory"));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+/// 拒绝不能安全嵌入固定工作目录名称的任务 ID。
+fn validate_task_id(task_id: &str) -> RunResult<()> {
+    Uuid::parse_str(task_id)
+        .map(|_| ())
+        .map_err(|_| message("invalid WSL archive task id"))
 }
 
 #[cfg(windows)]
@@ -599,8 +659,13 @@ async fn publish_upload_staging(
             .file_name()
             .ok_or_else(|| message("WSL staging root has no filename"))?;
         commit_local_root(&LocalRoot {
+            source_path: root.source_path.clone(),
             stage: host_work_dir.join(name),
             final_path: root.stage.clone(),
+            kind: root.kind,
+            destination_kind: None,
+            mode: crate::modules::transfers::commit::RootCommitMode::Create,
+            merge_preconditions: Vec::new(),
         })
         .await?;
     }
@@ -741,18 +806,24 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn cleanup_is_limited_to_mktemp_shape() {
-        assert!(validate_work_dir("/tmp/terax-archive.Ab12Cd34").is_ok());
+        let task = "550e8400-e29b-41d4-a716-446655440000";
         assert!(validate_work_dir(
-            "/home/user/.terax-archive-550e8400-e29b-41d4-a716-446655440000"
+            "/tmp/terax-archive.550e8400-e29b-41d4-a716-446655440000.Ab12Cd34",
+            task,
+        )
+        .is_ok());
+        assert!(validate_work_dir(
+            "/home/user/.terax-archive-550e8400-e29b-41d4-a716-446655440000",
+            task,
         )
         .is_ok());
         for path in [
-            "/tmp/terax-archive.short",
-            "/tmp/other.Ab12Cd34",
-            "/tmp/../terax-archive.Ab12Cd34",
-            "tmp/terax-archive.Ab12Cd34",
+            "/tmp/terax-archive.550e8400-e29b-41d4-a716-446655440000.short",
+            "/tmp/terax-archive.00000000-0000-0000-0000-000000000000.Ab12Cd34",
+            "/tmp/../terax-archive.550e8400-e29b-41d4-a716-446655440000.Ab12Cd34",
+            "tmp/terax-archive.550e8400-e29b-41d4-a716-446655440000.Ab12Cd34",
         ] {
-            assert!(validate_work_dir(path).is_err(), "accepted {path:?}");
+            assert!(validate_work_dir(path, task).is_err(), "accepted {path:?}");
         }
     }
 

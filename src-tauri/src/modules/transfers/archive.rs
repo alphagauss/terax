@@ -71,7 +71,7 @@ pub(crate) async fn execute(
     prepared: PreparedTransfer,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
-    let result = match prepared.manifest {
+    match prepared.manifest {
         TransferManifest::RemoteUpload(plan) => {
             super::ssh::archive::execute_upload(plan, context).await
         }
@@ -79,8 +79,7 @@ pub(crate) async fn execute(
             super::ssh::archive::execute_download(plan, context).await
         }
         TransferManifest::Local(plan) => super::wsl::archive::execute(plan, context).await,
-    };
-    result
+    }
 }
 
 /// 按远端 staging 相对路径创建本地 tar.gz，并在打包过程中递归枚举来源。

@@ -13,7 +13,8 @@ use crate::modules::transfers::archive::{
     build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, commit_local_root, commit_remote_root, ensure_remote_target_available,
+    cleanup_local_committed_backups, cleanup_local_staging, commit_local_roots,
+    commit_remote_roots, ensure_remote_target_available,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
@@ -44,8 +45,9 @@ pub(crate) async fn execute_upload(
             .as_slice(),
     )?;
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
-        plan.workspace.profile.id.clone(),
+        &plan.workspace,
         plan.task_id.clone(),
+        plan.owner_task_id.clone(),
         &plan.roots,
     );
     let mut remote_work: Option<String> = None;
@@ -53,8 +55,8 @@ pub(crate) async fn execute_upload(
     let result = async {
         ensure_archive_capability(&plan.workspace, context, false).await?;
         let archive = build_upload_archive(&plan, &remote_parent, context).await?;
-        context.set_archive_size(archive.size).await;
-        context.set_archive_file_count(archive.file_count).await;
+        context.set_archive_size(archive.size).await?;
+        context.set_archive_file_count(archive.file_count).await?;
 
         let work_dir = join_remote(&remote_parent, &format!(".terax-archive-{}", plan.task_id));
         ensure_remote_target_available(&plan.session, &work_dir).await?;
@@ -98,13 +100,17 @@ pub(crate) async fn execute_upload(
         );
         remote_work = None;
 
-        context.complete_files(archive.file_count).await;
-        context.set_stage(TransferStage::Finalizing).await;
-        for root in &plan.roots {
-            context.checkpoint().await?;
-            commit_remote_root(&plan.session, root).await?;
-            context.root_committed().await;
-        }
+        context.begin_finalizing().await?;
+        context.checkpoint().await?;
+        commit_remote_roots(&plan.workspace, &plan.roots).await?;
+        pending_cleanup.extend(
+            plan.roots
+                .iter()
+                .map(|root| format!("{}.backup", root.stage)),
+        );
+        context
+            .roots_committed(plan.roots.len() as u64, archive.file_count)
+            .await?;
         Ok(())
     }
     .await;
@@ -127,8 +133,9 @@ pub(crate) async fn execute_download(
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_download(
-        plan.workspace.profile.id.clone(),
+        &plan.workspace,
         plan.task_id.clone(),
+        plan.owner_task_id.clone(),
     );
     let mut remote_work: Option<String> = None;
     let mut pending_cleanup = Vec::new();
@@ -152,7 +159,7 @@ pub(crate) async fn execute_download(
             create_remote_archive(&plan.workspace, &command, &archive_path, context).await?;
         context.set_stage(TransferStage::Verifying).await;
         verify_remote_download_sources(&plan, context).await?;
-        context.set_archive_size(archive_size).await;
+        context.set_archive_size(archive_size).await?;
         context.set_stage(TransferStage::Transferring).await;
 
         let temporary = tempfile::Builder::new()
@@ -194,15 +201,15 @@ pub(crate) async fn execute_download(
         let roots = download_extract_roots(&plan)?;
         let file_count =
             extract_download_archive_roots(&archive_local_path, roots, context).await?;
-        context.set_archive_file_count(file_count).await;
-        context.complete_files(file_count).await;
-
-        context.set_stage(TransferStage::Finalizing).await;
-        for root in &plan.roots {
-            context.checkpoint().await?;
-            commit_local_root(root).await?;
-            context.root_committed().await;
-        }
+        context.set_archive_file_count(file_count).await?;
+        context.begin_finalizing().await?;
+        context.checkpoint().await?;
+        commit_local_roots(&plan.roots).await?;
+        let progress = context
+            .roots_committed(plan.roots.len() as u64, file_count)
+            .await;
+        cleanup_local_committed_backups(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
+        progress?;
         Ok(())
     }
     .await;
@@ -210,7 +217,7 @@ pub(crate) async fn execute_download(
         pending_cleanup.extend(remote_work);
     }
     if result.is_err() {
-        cleanup_local_staging(&plan.roots).await;
+        cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     if !pending_cleanup.is_empty() && !super::cleanup::should_defer(&result) {
         pending_cleanup =

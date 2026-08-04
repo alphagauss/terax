@@ -443,12 +443,9 @@ export const FileExplorer = memo(
               ? await pickUploadFiles(t("menu.uploadFiles"))
               : await pickUploadFolders(t("menu.uploadFolder"));
           if (sources.length === 0) return;
-          const enqueue =
-            strategy === "archive"
-              ? transferNative.enqueueArchive
-              : transferNative.enqueueDirect;
-          await enqueue({
+          await transferNative.enqueue({
             direction: "upload",
+            strategy,
             sources,
             destination,
           });
@@ -472,12 +469,9 @@ export const FileExplorer = memo(
             t("menu.downloadToLocal"),
           );
           if (!destination) return;
-          const enqueue =
-            strategy === "archive"
-              ? transferNative.enqueueArchive
-              : transferNative.enqueueDirect;
-          await enqueue({
+          await transferNative.enqueue({
             direction: "download",
+            strategy,
             sources: [source],
             destination,
           });

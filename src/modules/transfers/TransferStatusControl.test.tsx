@@ -1,0 +1,242 @@
+/**
+ * 本文件测试文件传输冲突决策和 Direct 失败项操作。
+ * 锁定对话框只能提交后端声明的动作，并确保文件级重试复用原聚合任务 ID。
+ */
+
+// @vitest-environment happy-dom
+
+import {
+  act,
+  createElement,
+  type ButtonHTMLAttributes,
+  type ChangeEvent,
+  type InputHTMLAttributes,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TransferConflict, TransferTask } from "@/modules/transfers/types";
+
+const mocks = vi.hoisted(() => ({
+  resolveConflict: vi.fn(() => Promise.resolve()),
+  retryFailure: vi.fn(() => Promise.resolve()),
+  ignoreFailure: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
+    createElement("button", { type: "button", ...props }, children),
+}));
+vi.mock("@/components/ui/checkbox", () => ({
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: InputHTMLAttributes<HTMLInputElement> & {
+    onCheckedChange?: (checked: boolean) => void;
+  }) =>
+    createElement("input", {
+      ...props,
+      type: "checkbox",
+      checked: Boolean(checked),
+      onChange: (event: ChangeEvent<HTMLInputElement>) =>
+        onCheckedChange?.(event.currentTarget.checked),
+    }),
+}));
+vi.mock("@/components/ui/alert-dialog", () => {
+  const Wrapper = ({ children }: { children?: ReactNode }) => children;
+  const Action = ({
+    children,
+    variant: _variant,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) =>
+    createElement("button", { type: "button", ...props }, children);
+  return {
+    AlertDialog: Wrapper,
+    AlertDialogAction: Action,
+    AlertDialogCancel: Action,
+    AlertDialogContent: Wrapper,
+    AlertDialogDescription: Wrapper,
+    AlertDialogFooter: Wrapper,
+    AlertDialogHeader: Wrapper,
+    AlertDialogTitle: Wrapper,
+  };
+});
+vi.mock("@/components/ui/popover", () => ({
+  Popover: ({ children }: { children?: ReactNode }) => children,
+  PopoverContent: ({ children }: { children?: ReactNode }) => children,
+  PopoverTrigger: ({ children }: { children?: ReactNode }) => children,
+}));
+vi.mock("@/components/ui/progress", () => ({
+  Progress: () => createElement("div"),
+}));
+vi.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children }: { children?: ReactNode }) => children,
+}));
+vi.mock("@/modules/transfers/native", () => ({
+  transferNative: {
+    resolveConflict: mocks.resolveConflict,
+    retryFailure: mocks.retryFailure,
+    ignoreFailure: mocks.ignoreFailure,
+  },
+}));
+vi.mock("@/modules/transfers/store", () => ({
+  useTransferBridge: vi.fn(),
+  useTransferStore: (select: (state: Record<string, unknown>) => unknown) =>
+    select({
+      tasks: {},
+      panelOpen: false,
+      setPanelOpen: vi.fn(),
+      removeLocal: vi.fn(),
+      removeLocalMany: vi.fn(),
+    }),
+}));
+vi.mock("@/modules/workspace", () => ({
+  useWorkspaceEnvStore: (select: (state: { env: { kind: string } }) => unknown) =>
+    select({ env: { kind: "wsl" } }),
+}));
+vi.mock("@hugeicons/core-free-icons", () => ({
+  ArrowDataTransferVerticalIcon: {},
+  ArrowDown01Icon: {},
+  ArrowRight01Icon: {},
+  Cancel01Icon: {},
+  CleanIcon: {},
+  Delete02Icon: {},
+  Download01Icon: {},
+  PauseIcon: {},
+  PlayIcon: {},
+  Refresh01Icon: {},
+  Upload01Icon: {},
+}));
+vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+
+import {
+  TransferConflictDialog,
+  TransferTaskRow,
+} from "@/modules/transfers/TransferStatusControl";
+
+afterEach(() => {
+  mocks.resolveConflict.mockClear();
+  mocks.retryFailure.mockClear();
+  mocks.ignoreFailure.mockClear();
+  document.body.innerHTML = "";
+});
+
+function render(element: ReactElement) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  act(() => root.render(element));
+  return { container, root };
+}
+
+describe("transfer conflict dialog", () => {
+  it("renders only declared decisions and submits replace-all authorization", () => {
+    const conflict: TransferConflict = {
+      id: "conflict",
+      kind: "file",
+      sourceKind: "file",
+      destinationKind: "file",
+      sourcePath: "/source/file",
+      destinationPath: "/target/file",
+      decisions: ["cancel", "replace"],
+      allowApplyToRemaining: true,
+    };
+    const { container, root } = render(
+      createElement(TransferConflictDialog, { taskId: "task", conflict }),
+    );
+    const checkbox = container.querySelector<HTMLInputElement>(
+      "#transfer-conflict-apply",
+    );
+    const buttons = Array.from(container.querySelectorAll("button"));
+
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "transfers.conflict.actions.cancel",
+      "transfers.conflict.actions.replace",
+    ]);
+    act(() => checkbox?.click());
+    act(() => buttons[1]?.click());
+
+    expect(mocks.resolveConflict).toHaveBeenCalledWith({
+      taskId: "task",
+      conflictId: "conflict",
+      decision: "replace",
+      applyToRemaining: true,
+    });
+    act(() => root.unmount());
+  });
+});
+
+describe("Direct failure actions", () => {
+  it("routes retry and ignore through the original aggregate task", () => {
+    const task: TransferTask = {
+      id: "task",
+      direction: "upload",
+      strategy: "direct",
+      status: "completed_with_errors",
+      stage: "finished",
+      sourceCount: 1,
+      destination: "/target",
+      name: "folder",
+      totalBytes: 10,
+      transferredBytes: 0,
+      totalFiles: 1,
+      completedFiles: 0,
+      failedFiles: 1,
+      unprocessedFiles: 0,
+      totalRoots: 1,
+      committedRoots: 1,
+      speedBytesPerSecond: 0,
+      currentFile: null,
+      failure: null,
+      fileFailures: [
+        {
+          id: "failure",
+          sourcePath: "/source/file",
+          destinationPath: "/target/file",
+          failure: {
+            code: "source_changed",
+            detail: "changed",
+            retryable: true,
+          },
+          attempts: 1,
+          ignored: false,
+        },
+      ],
+      conflict: null,
+      isDirectory: true,
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const { container, root } = render(createElement(TransferTaskRow, { task }));
+    const expand = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "transfers.failedFiles",
+    );
+    act(() => expand?.click());
+    const retry = container.querySelector<HTMLButtonElement>(
+      'button[title="transfers.retryFile"]',
+    );
+    act(() => retry?.click());
+
+    expect(mocks.retryFailure).toHaveBeenCalledWith("task", "failure");
+    act(() => root.unmount());
+
+    const ignored = render(createElement(TransferTaskRow, { task }));
+    const ignoredExpand = Array.from(
+      ignored.container.querySelectorAll("button"),
+    ).find((button) => button.textContent === "transfers.failedFiles");
+    act(() => ignoredExpand?.click());
+    const remove = ignored.container.querySelector<HTMLButtonElement>(
+      'button[title="transfers.removeFailure"]',
+    );
+    act(() => remove?.click());
+
+    expect(mocks.ignoreFailure).toHaveBeenCalledWith("task", "failure");
+    act(() => ignored.root.unmount());
+  });
+});

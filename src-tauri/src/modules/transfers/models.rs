@@ -1,7 +1,7 @@
 //! 文件传输命令与前端共享的数据模型。
 //!
-//! 模型只描述当前 Workspace 进程内的传输任务，不持久化凭据，也不暴露可由
-//! 前端任意切换的 SSH profile。Direct 与 Archive 由不同命令显式选择。
+//! 模型描述当前 Workspace 的传输任务及其 Journal 快照，不包含凭据，也不暴露可由
+//! 前端任意切换的 SSH profile。Direct 与 Archive 由请求中的策略显式选择。
 
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +19,7 @@ pub enum TransferDirection {
 }
 
 /// 用户显式选择的传输策略。
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferStrategy {
     Direct,
@@ -27,14 +27,16 @@ pub enum TransferStrategy {
 }
 
 /// 传输任务的外部生命周期状态。
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferStatus {
     Queued,
     Running,
     Paused,
+    AwaitingDecision,
     Canceling,
     Completed,
+    CompletedWithErrors,
     Failed,
     Canceled,
 }
@@ -42,16 +44,20 @@ pub enum TransferStatus {
 impl TransferStatus {
     /// 返回任务是否已经进入不可继续执行的终态。
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Canceled)
+        matches!(
+            self,
+            Self::Completed | Self::CompletedWithErrors | Self::Failed | Self::Canceled
+        )
     }
 }
 
 /// 任务当前所在的执行阶段。
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferStage {
     Queued,
     Scanning,
+    CheckingConflicts,
     Archiving,
     Transferring,
     Extracting,
@@ -61,10 +67,11 @@ pub enum TransferStage {
 }
 
 /// 创建后台传输任务的请求。
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnqueueTransferRequest {
     pub direction: TransferDirection,
+    pub strategy: TransferStrategy,
     pub sources: Vec<String>,
     pub destination: String,
 }
@@ -106,8 +113,72 @@ impl EnqueueTransferRequest {
     }
 }
 
+/// 冲突目标和来源的条目类型。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferEntryKind {
+    File,
+    Directory,
+    Other,
+}
+
+/// 前端可展示的冲突交互类型。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConflictKind {
+    File,
+    ArchiveDirectory,
+    TypeMismatch,
+}
+
+/// 单个冲突允许提交的稳定动作。
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransferConflictDecision {
+    Cancel,
+    Replace,
+    ReplaceDirectory,
+    Merge,
+}
+
+/// 当前正在等待用户处理的目标冲突。
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferConflict {
+    pub id: String,
+    pub kind: TransferConflictKind,
+    pub source_kind: TransferEntryKind,
+    pub destination_kind: TransferEntryKind,
+    pub source_path: String,
+    pub destination_path: String,
+    pub decisions: Vec<TransferConflictDecision>,
+    pub allow_apply_to_remaining: bool,
+}
+
+/// 用户对当前冲突提交的一次性决策。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveTransferConflictRequest {
+    pub task_id: String,
+    pub conflict_id: String,
+    pub decision: TransferConflictDecision,
+    pub apply_to_remaining: bool,
+}
+
+/// Direct 任务中可独立重试或忽略的文件失败。
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferFileFailure {
+    pub id: String,
+    pub source_path: String,
+    pub destination_path: String,
+    pub failure: TransferFailure,
+    pub attempts: u32,
+    pub ignored: bool,
+}
+
 /// 可供前端展示的完整任务快照。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferTaskSnapshot {
     pub id: String,
@@ -122,11 +193,16 @@ pub struct TransferTaskSnapshot {
     pub transferred_bytes: u64,
     pub total_files: u64,
     pub completed_files: u64,
+    pub failed_files: u64,
+    pub unprocessed_files: u64,
     pub total_roots: u64,
     pub committed_roots: u64,
     pub speed_bytes_per_second: u64,
     pub current_file: Option<String>,
     pub failure: Option<TransferFailure>,
+    pub file_failures: Vec<TransferFileFailure>,
+    pub conflict: Option<TransferConflict>,
+    pub is_directory: bool,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -139,6 +215,7 @@ mod tests {
     fn normalize_rejects_empty_requests_without_rewriting_paths() {
         let normalized = EnqueueTransferRequest {
             direction: TransferDirection::Upload,
+            strategy: TransferStrategy::Direct,
             sources: vec!["  ".into(), " C:/a.txt ".into()],
             destination: " /tmp ".into(),
         }
@@ -149,6 +226,7 @@ mod tests {
 
         assert!(EnqueueTransferRequest {
             direction: TransferDirection::Download,
+            strategy: TransferStrategy::Archive,
             sources: vec![],
             destination: "/tmp".into(),
         }
@@ -159,9 +237,11 @@ mod tests {
     #[test]
     fn only_finished_states_are_terminal() {
         assert!(TransferStatus::Completed.is_terminal());
+        assert!(TransferStatus::CompletedWithErrors.is_terminal());
         assert!(TransferStatus::Failed.is_terminal());
         assert!(TransferStatus::Canceled.is_terminal());
         assert!(!TransferStatus::Paused.is_terminal());
+        assert!(!TransferStatus::AwaitingDecision.is_terminal());
         assert!(!TransferStatus::Canceling.is_terminal());
     }
 
@@ -169,6 +249,7 @@ mod tests {
     fn normalize_caps_untrusted_request_size() {
         let error = EnqueueTransferRequest {
             direction: TransferDirection::Upload,
+            strategy: TransferStrategy::Direct,
             sources: (0..=MAX_TRANSFER_SOURCES)
                 .map(|index| format!("/{index}"))
                 .collect(),

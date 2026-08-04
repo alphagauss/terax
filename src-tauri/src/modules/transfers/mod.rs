@@ -6,8 +6,10 @@
 mod archive;
 pub mod commands;
 mod commit;
+mod conflicts;
 mod direct;
 mod errors;
+mod journal;
 mod local;
 mod manager;
 mod metadata;
@@ -19,4 +21,5 @@ mod source;
 mod ssh;
 mod wsl;
 
+pub(crate) use journal::remove_workspace_files;
 pub use manager::TransferState;

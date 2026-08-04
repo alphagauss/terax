@@ -76,10 +76,12 @@ Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
 
 ### File transfers (`src-tauri/src/modules/transfers/`)
 
-Background transfer tasks are process-local and bound to the immutable Workspace environment. Direct and Archive are explicit strategies and share the same planner, scheduler, staging, and no-replace commit protocol.
+Background transfer execution is process-local and bound to the immutable Workspace environment. Low-frequency task history is persisted by Rust Journals. Direct and Archive are explicit strategies and share the same planner, scheduler, staging, conflict, and commit protocol.
 
-- `transfer_enqueue_direct` / `transfer_enqueue_archive` - create a task with the selected strategy
-- `transfer_list` - list current process-local task snapshots
+- `transfer_enqueue` - create a task with the request's explicit strategy
+- `transfer_list` - list current Workspace task snapshots, loading Journal history on first access
+- `transfer_resolve_conflict` - resolve the current conflict with a task-bound decision
+- `transfer_retry_failure` / `transfer_ignore_failure` - update one Direct file failure
 - `transfer_pause` / `transfer_resume` / `transfer_cancel` - control queued or running tasks
 - `transfer_retry` - create a new task from a failed or canceled request
 - `transfer_remove` - remove a terminal history entry

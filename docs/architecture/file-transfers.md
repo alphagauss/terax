@@ -6,7 +6,7 @@ This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md
 
 Terax supports background file and directory transfer between the Host and the immutable WSL or SSH environment selected when the Workspace process starts. The Rust backend owns task state, filesystem access, scheduling, and final publication. The webview only creates and controls tasks through typed Tauri commands.
 
-The current implementation is intentionally process-local. Tasks survive panel unmounts but not application process termination. Durable restart recovery, resumable journals, directory synchronization, and a two-pane file manager require separate product and persistence designs and are not part of this transfer foundation.
+Task execution is process-local, while low-frequency task history is persisted in `~/.terax/transfers` as one JSONL Journal per task. A process restart does not resume transferred bytes. Instead, an interrupted active task is recovered as failed with stable aggregate counts.
 
 ## Execution flow
 
@@ -15,19 +15,22 @@ Every task follows the same flow:
 1. Normalize the request and bind it to the current Workspace environment.
 2. Scan sources, reject unsupported entries, and build a strategy-independent manifest.
 3. Reserve all final top-level destinations in the process.
-4. Wait for one of two execution permits in the current Workspace process.
-5. Write each root to a task-owned sibling path named `.terax-part-<task-id>-<index>`.
-6. Recheck source identity and transferred size.
-7. Publish each root with an operating-system no-replace rename.
-8. Remove only staging paths owned by the task and release reservations.
+4. Check destination conflicts and wait for explicit user decisions while retaining the destination reservation but not a data-transfer permit.
+5. Wait for one of two execution permits in the current Workspace process.
+6. Write each root to a task-owned sibling path named `.terax-part-<task-id>-<index>`.
+7. Recheck source identity, transferred size, and the destination state covered by each conflict decision.
+8. Publish new, replaced, or merged roots with the commit mode authorized for that task.
+9. Remove only temporary paths owned by the task and release reservations.
 
-Direct and Archive are separate user choices and separate enqueue commands. They share the same lifecycle, manifest, reservation, progress, and commit protocol. Terax never selects a strategy automatically and never silently falls back from Archive to Direct.
+Direct and Archive are explicit choices carried by the unified enqueue request. They share the same lifecycle, manifest, reservation, progress, and commit protocol. Terax never selects a strategy automatically and never silently falls back from Archive to Direct.
 
 ## Strategies
 
 ### Direct
 
-Direct copies files individually. SSH transfers use a task-exclusive SFTP session, bounded in-flight requests, offset-based writes, and close-result verification. WSL Direct uses the Host filesystem bridge. Empty directories and portable permission and modification-time metadata are preserved.
+Direct copies files individually. A directory is one aggregate task: recoverable file failures are recorded and other files continue, while connection loss, exhausted storage, an unreliable Journal, and commit failures stop the task. Failed files can be retried or ignored in the original aggregate row. Each retry rechecks the source and conflicts without reusing a previous replace-all decision.
+
+SSH transfers use a task-exclusive SFTP session, bounded in-flight requests, offset-based writes, and close-result verification. WSL Direct uses the Host filesystem bridge. Empty directories and portable permission and modification-time metadata are preserved.
 
 ### Archive
 
@@ -39,24 +42,26 @@ Archive rejects absolute paths, parent traversal, links, special files, duplicat
 
 - WSL and SSH transfer paths must be normalized absolute paths without parent traversal or control characters. Explicit Explorer selections may be outside the profile's startup root.
 - Symbolic links, hard links, sockets, devices, and other special files are not transferred.
-- Final destinations are reserved before execution and checked again at commit time.
-- Final publication never overwrites an existing path.
-- A multi-root task can expose roots one at a time. If a later root fails, already committed roots remain and the Workspace receives a filesystem-change event.
-- Cancel and failure cleanup only target paths derived from the task ID. Remote cleanup also requires an exact canonical destination parent captured by the task, and never recursively removes a final destination.
+- Final destinations are reserved with ancestor and descendant overlap checks before execution and checked again at commit time.
+- A new destination uses no-replace publication. Existing targets are changed only by an explicit conflict decision. Direct directory merges also revalidate every reachable source path observed during conflict checking, including paths that were absent.
+- Direct can expose roots one at a time. If a later root fails, already committed roots remain and the Workspace receives a filesystem-change event. Archive publishes all roots as one transaction and rolls them back together on failure.
+- Cancel and failure cleanup only target paths derived from the task ID. After a root is successfully published, the same restricted cleanup path also removes its derived backup. A backup retained by a failed commit or rollback is recovery data and is never scheduled for generic cleanup. Remote cleanup additionally requires an exact canonical destination parent captured by the task, and never recursively removes a final destination.
 - Direct rechecks planned source identity and file size. SSH transport provides packet integrity. Archive also validates gzip and the complete manifest. A second content-hash protocol is not included because the current threat model does not require it; adding one needs an explicit algorithm, performance budget, and user-visible contract.
 
 ## Failure and retry model
 
-Task snapshots expose a stable error code, diagnostic detail, and whether retry is meaningful. The frontend localizes the stable code and does not parse backend English text. Retry creates a new task from the original request and never reuses incomplete staging.
+Task snapshots expose a stable error code, diagnostic detail, aggregate file counts, unresolved Direct file failures, and whether whole-task retry is meaningful. The frontend localizes the stable code and does not parse backend English text. Whole-task retry creates a new task from the original request. Direct file retry reuses the original aggregate task but creates a fresh execution identity and staging path.
 
-Each SSH filesystem operation has a 15-second upper bound so a broken transport cannot hold an execution permit indefinitely. If disconnect prevents immediate cleanup, the current Workspace process waits up to ten minutes for the same profile to reconnect, opens a new task-exclusive SFTP session, and retries removal.
+Each SSH filesystem operation has a 15-second upper bound so a broken transport cannot hold an execution permit indefinitely. If disconnect prevents immediate cleanup, the current Workspace process waits up to ten minutes for the same stable host, port, and username endpoint to reconnect, then retries removal. Rebinding the same profile ID to another endpoint never transfers the cleanup authorization.
 
-An abrupt process exit can still leave uniquely named staging paths because the task model is not durable. These paths are never treated as completed destinations and are not reused. Durable crash cleanup belongs with a future journal and restart-recovery design.
+Deferred local, WSL, and SSH cleanup retains process-local task ownership until removal is confirmed. Manual history deletion, bulk clearing, and automatic pruning skip a task while any of its cleanup operations remain pending.
+
+An abrupt process exit can still leave uniquely named target-side staging paths. They are never treated as completed destinations or reused. The Journal preserves the interrupted task as failed, but the first version does not provide byte-level resume.
 
 ## Resource bounds
 
 - At most 2 tasks execute concurrently.
-- At most 64 non-terminal tasks are retained.
+- At most 64 tasks may be non-terminal or retain pending cleanup ownership.
 - At most 100 terminal history entries are retained.
 - A request contains at most 1,024 sources.
 - Each source or destination path contains at most 32 KiB.
@@ -66,8 +71,10 @@ These limits keep malformed IPC requests and an unattended task producer from cr
 
 ## IPC and events
 
-- `transfer_enqueue_direct` and `transfer_enqueue_archive` create tasks.
-- `transfer_list` restores the current process-local task list.
+- `transfer_enqueue` creates a Direct or Archive task according to `request.strategy`.
+- `transfer_list` restores the current Workspace task history from Journals on first access.
+- `transfer_resolve_conflict` submits a decision bound to the current task and conflict ID.
+- `transfer_retry_failure` / `transfer_ignore_failure` update one Direct file failure in its aggregate task.
 - `transfer_pause`, `transfer_resume`, and `transfer_cancel` control active tasks.
 - `transfer_retry` creates a new task from a failed or canceled task.
 - `transfer_remove` removes a terminal history entry.
@@ -90,7 +97,7 @@ The implementation was exercised in real Tauri Workspace processes against local
 - SSH connection loss, bounded failure convergence, reconnect cleanup, retry, and final hash verification
 - SSH malformed-path rejection and task-owned cleanup escape rejection
 
-Automated tests lock request limits, path boundaries, source identity, archive validation, no-replace commit, staging ownership, scheduler reservations, history bounds, structured errors, and frontend event convergence.
+Automated tests lock request limits, path boundaries, source identity, archive validation, no-replace and transactional commit, conflict preconditions, staging ownership, scheduler reservations, Journal replay, history bounds, structured errors, and frontend event convergence.
 
 ## See also
 

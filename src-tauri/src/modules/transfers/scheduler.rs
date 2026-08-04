@@ -64,7 +64,11 @@ impl TransferScheduler {
             .reserved_targets
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(target) = targets.iter().find(|target| reserved.contains(*target)) {
+        if let Some(target) = targets.iter().find(|target| {
+            reserved
+                .iter()
+                .any(|current| reservation_targets_overlap(current, target))
+        }) {
             return Err(TransferRunError::failed(
                 TransferErrorCode::DestinationBusy,
                 format!("another transfer is already writing to {target}"),
@@ -76,6 +80,29 @@ impl TransferScheduler {
             reserved: self.reserved_targets.clone(),
         })
     }
+}
+
+/// 按规范路径组件边界判断两个本地或 SSH reservation 是否重叠。
+fn reservation_targets_overlap(left: &str, right: &str) -> bool {
+    let Some((left_kind, left_path)) = left.split_once(':') else {
+        return left == right;
+    };
+    let Some((right_kind, right_path)) = right.split_once(':') else {
+        return left == right;
+    };
+    if left_kind != right_kind {
+        return false;
+    }
+    reservation_path_contains(left_path, right_path)
+        || reservation_path_contains(right_path, left_path)
+}
+
+fn reservation_path_contains(root: &str, path: &str) -> bool {
+    let root = root.trim_end_matches(['/', '\\']);
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/') || suffix.starts_with('\\'))
 }
 
 /// 在任务结束或失败时自动释放进程内目标 reservation。
@@ -143,5 +170,21 @@ mod tests {
         assert!(scheduler.reserve(vec!["local:/c".into()]).is_ok());
         drop(first);
         assert!(scheduler.reserve(vec!["local:/a".into()]).is_ok());
+    }
+
+    #[test]
+    fn reservations_reject_ancestor_and_descendant_targets() {
+        let scheduler = TransferScheduler::new(2);
+        let _root = scheduler.reserve(vec!["ssh:/srv/project".into()]).unwrap();
+
+        assert!(scheduler
+            .reserve(vec!["ssh:/srv/project/build".into()])
+            .is_err());
+        assert!(scheduler
+            .reserve(vec!["ssh:/srv/project-old".into()])
+            .is_ok());
+        assert!(scheduler
+            .reserve(vec!["local:/srv/project/build".into()])
+            .is_ok());
     }
 }

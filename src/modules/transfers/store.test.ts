@@ -4,7 +4,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import type { TransferTask } from "./types";
+import {
+  hasExpandableTransferFailures,
+  isActiveTransfer,
+  type TransferTask,
+} from "./types";
 
 vi.mock("./native", () => ({ transferNative: {} }));
 
@@ -28,11 +32,16 @@ function task(id: string, updatedAt: number): TransferTask {
     transferredBytes: updatedAt,
     totalFiles: 1,
     completedFiles: 0,
+    failedFiles: 0,
+    unprocessedFiles: 0,
     totalRoots: 1,
     committedRoots: 0,
     speedBytesPerSecond: 0,
     currentFile: null,
     failure: null,
+    fileFailures: [],
+    conflict: null,
+    isDirectory: false,
     createdAt: 1,
     updatedAt,
   };
@@ -94,5 +103,41 @@ describe("transfer panel state", () => {
       second: task("second", 2),
     });
     useTransferStore.setState({ tasks: {} });
+  });
+});
+
+describe("transfer task presentation rules", () => {
+  it("keeps conflict decisions active but terminal partial tasks inactive", () => {
+    const waiting = task("waiting", 1);
+    waiting.status = "awaiting_decision";
+    expect(isActiveTransfer(waiting)).toBe(true);
+
+    waiting.status = "completed_with_errors";
+    expect(isActiveTransfer(waiting)).toBe(false);
+  });
+
+  it("expands only Direct directory failures and never Archive failures", () => {
+    const partial = task("partial", 1);
+    partial.status = "completed_with_errors";
+    partial.isDirectory = true;
+    partial.failedFiles = 1;
+    partial.fileFailures = [
+      {
+        id: "failure",
+        sourcePath: "/source/file.txt",
+        destinationPath: "/target/file.txt",
+        failure: {
+          code: "source_changed",
+          detail: "changed",
+          retryable: true,
+        },
+        attempts: 1,
+        ignored: false,
+      },
+    ];
+
+    expect(hasExpandableTransferFailures(partial)).toBe(true);
+    partial.strategy = "archive";
+    expect(hasExpandableTransferFailures(partial)).toBe(false);
   });
 });

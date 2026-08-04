@@ -1,9 +1,10 @@
 /**
- * 本文件实现状态栏文件传输概览和非模态任务面板。
- * 面板关闭不会影响 Rust 后台任务，进度只订阅独立 Zustand slice，不触发 Workbench 重渲染。
+ * 本文件实现状态栏文件传输概览、冲突决策和 Direct 失败项操作。
+ * 面板关闭不会影响 Rust 后台任务，全局冲突对话框仍保持挂载；任务状态只订阅独立 Zustand slice。
  */
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,6 +26,8 @@ import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import {
   ArrowDataTransferVerticalIcon,
+  ArrowDown01Icon,
+  ArrowRight01Icon,
   Cancel01Icon,
   CleanIcon,
   Delete02Icon,
@@ -39,10 +42,19 @@ import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { formatTransferError, formatTransferFailure } from "./errors";
-import { transferNative } from "./native";
-import { useTransferBridge, useTransferStore } from "./store";
-import { isActiveTransfer, type TransferTask } from "./types";
+import {
+  formatTransferError,
+  formatTransferFailure,
+} from "@/modules/transfers/errors";
+import { transferNative } from "@/modules/transfers/native";
+import { useTransferBridge, useTransferStore } from "@/modules/transfers/store";
+import {
+  hasExpandableTransferFailures,
+  isActiveTransfer,
+  type TransferConflict,
+  type TransferConflictDecision,
+  type TransferTask,
+} from "@/modules/transfers/types";
 
 /** 展示当前进程传输任务的聚合状态和行内控制。 */
 export function TransferStatusControl() {
@@ -51,7 +63,7 @@ export function TransferStatusControl() {
   return <TransferStatusPanel />;
 }
 
-/** 仅在非本地 Workspace 挂载任务订阅和面板状态。 */
+/** 挂载传输事件桥、任务列表与全局冲突对话框。 */
 function TransferStatusPanel() {
   const { t } = useTranslation("statusbar");
   const taskMap = useTransferStore((state) => state.tasks);
@@ -71,7 +83,10 @@ function TransferStatusPanel() {
     [taskMap],
   );
   const active = tasks.filter(isActiveTransfer);
-  const failed = tasks.filter((task) => task.status === "failed").length;
+  const failed = tasks.filter(
+    (task) =>
+      task.status === "failed" || task.status === "completed_with_errors",
+  ).length;
   const totalBytes = active.reduce((sum, task) => sum + task.totalBytes, 0);
   const transferredBytes = active.reduce(
     (sum, task) => sum + Math.min(task.transferredBytes, task.totalBytes),
@@ -81,12 +96,22 @@ function TransferStatusPanel() {
   const showAggregateProgress =
     totalBytes > 0 &&
     active.every(
-      (task) => task.stage !== "queued" && task.stage !== "scanning",
+      (task) =>
+        task.stage !== "queued" &&
+        task.stage !== "scanning" &&
+        task.stage !== "checking_conflicts",
     );
   const completedCount = tasks.filter(
-    (task) => task.status === "completed",
+    (task) =>
+      task.status === "completed" || task.status === "completed_with_errors",
   ).length;
   const clearableCount = tasks.filter((task) => !isActiveTransfer(task)).length;
+  const conflictTask = tasks
+    .filter(
+      (task) => task.status === "awaiting_decision" && task.conflict !== null,
+    )
+    .sort((left, right) => left.createdAt - right.createdAt)[0];
+  const pendingConflict = conflictTask?.conflict;
 
   /** 清理指定范围的终态任务，并在成功后即时同步本地快照。 */
   const clearTasks = async (kind: "completed" | "all") => {
@@ -230,13 +255,23 @@ function TransferStatusPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {conflictTask && pendingConflict ? (
+        <TransferConflictDialog
+          key={pendingConflict.id}
+          taskId={conflictTask.id}
+          conflict={pendingConflict}
+        />
+      ) : null}
     </Popover>
   );
 }
 
-function TransferTaskRow({ task }: { task: TransferTask }) {
+/** 展示一条聚合任务，并仅为 Direct 文件夹展开失败文件。 */
+export function TransferTaskRow({ task }: { task: TransferTask }) {
   const { t } = useTranslation("statusbar");
   const removeLocal = useTransferStore((state) => state.removeLocal);
+  const [failuresOpen, setFailuresOpen] = useState(false);
+  const [failureActionPending, setFailureActionPending] = useState(false);
   const active = isActiveTransfer(task);
   const progress = transferProgress(task);
   const detail = task.currentFile
@@ -252,6 +287,9 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
   const failureMessage = task.failure
     ? formatTransferFailure(task.failure, t)
     : null;
+  const fileFailures = task.fileFailures.filter((failure) => !failure.ignored);
+  const canExpandFailures =
+    hasExpandableTransferFailures(task) && fileFailures.length > 0;
 
   const run = (operation: Promise<void>) => {
     void operation.catch((error) =>
@@ -274,6 +312,19 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
         ),
       );
   };
+  const runFailureAction = (operation: () => Promise<void>) => {
+    if (failureActionPending) return;
+    setFailureActionPending(true);
+    void operation()
+      .catch((error) =>
+        toast.error(
+          t("transfers.operationFailed", {
+            error: formatTransferError(error, t),
+          }),
+        ),
+      )
+      .finally(() => setFailureActionPending(false));
+  };
 
   return (
     <div className="px-3 py-2.5">
@@ -281,7 +332,9 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
         <span
           className={cn(
             "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-            task.status === "failed" && "bg-destructive/10 text-destructive",
+            (task.status === "failed" ||
+              task.status === "completed_with_errors") &&
+              "bg-destructive/10 text-destructive",
           )}
         >
           <HugeiconsIcon
@@ -301,7 +354,9 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
             <span
               className={cn(
                 "shrink-0 text-[10px] text-muted-foreground",
-                task.status === "failed" && "text-destructive",
+                (task.status === "failed" ||
+                  task.status === "completed_with_errors") &&
+                  "text-destructive",
               )}
             >
               {taskStateLabel(task, t)}
@@ -327,7 +382,82 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
               {task.failure.detail}
             </div>
           ) : null}
-          {active || task.status === "completed" ? (
+          {!active && task.strategy === "direct" && task.isDirectory ? (
+            <div
+              className={cn(
+                "mt-1 text-[10px] text-muted-foreground",
+                (task.failedFiles > 0 || task.unprocessedFiles > 0) &&
+                  "text-destructive",
+              )}
+            >
+              {t("transfers.resultSummary", {
+                completed: task.completedFiles,
+                failed: task.failedFiles,
+                unprocessed: task.unprocessedFiles,
+              })}
+            </div>
+          ) : null}
+          {canExpandFailures ? (
+            <button
+              type="button"
+              className="mt-1 flex items-center gap-1 text-[10px] text-destructive hover:underline"
+              onClick={() => setFailuresOpen((open) => !open)}
+            >
+              <HugeiconsIcon
+                icon={failuresOpen ? ArrowDown01Icon : ArrowRight01Icon}
+                size={10}
+                strokeWidth={1.8}
+              />
+              {t("transfers.failedFiles", { count: fileFailures.length })}
+            </button>
+          ) : null}
+          {canExpandFailures && failuresOpen ? (
+            <div className="mt-1.5 space-y-1.5 border-l border-destructive/30 pl-2">
+              {fileFailures.map((failure) => (
+                <div key={failure.id} className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="truncate text-[10px] text-foreground"
+                      title={failure.destinationPath}
+                    >
+                      {basename(failure.destinationPath)}
+                    </div>
+                    <div
+                      className="line-clamp-2 text-[9.5px] leading-3.5 text-muted-foreground"
+                      title={failure.failure.detail}
+                    >
+                      {formatTransferFailure(failure.failure, t)}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-0.5">
+                    <TaskButton
+                      label={t("transfers.retryFile")}
+                      icon={Refresh01Icon}
+                      disabled={failureActionPending}
+                      onClick={() =>
+                        runFailureAction(() =>
+                          transferNative.retryFailure(task.id, failure.id),
+                        )
+                      }
+                    />
+                    <TaskButton
+                      label={t("transfers.removeFailure")}
+                      icon={Delete02Icon}
+                      disabled={failureActionPending}
+                      onClick={() =>
+                        runFailureAction(() =>
+                          transferNative.ignoreFailure(task.id, failure.id),
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {active ||
+          task.status === "completed" ||
+          task.status === "completed_with_errors" ? (
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}
           <div className="mt-1.5 flex min-h-5 items-center justify-between gap-2">
@@ -395,14 +525,124 @@ function TransferTaskRow({ task }: { task: TransferTask }) {
   );
 }
 
+/** 要求用户对当前唯一冲突做出显式决定，关闭动作不会绕过决策。 */
+export function TransferConflictDialog({
+  taskId,
+  conflict,
+}: {
+  taskId: string;
+  conflict: TransferConflict;
+}) {
+  const { t } = useTranslation("statusbar");
+  const [applyToRemaining, setApplyToRemaining] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = (decision: TransferConflictDecision) => {
+    setSubmitting(true);
+    void transferNative
+      .resolveConflict({
+        taskId,
+        conflictId: conflict.id,
+        decision,
+        applyToRemaining:
+          decision !== "cancel" &&
+          conflict.allowApplyToRemaining &&
+          applyToRemaining,
+      })
+      .catch((error) => {
+        setSubmitting(false);
+        toast.error(
+          t("transfers.operationFailed", {
+            error: formatTransferError(error, t),
+          }),
+        );
+      });
+  };
+
+  return (
+    <AlertDialog open>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t(`transfers.conflict.${conflict.kind}.title`)}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {t(`transfers.conflict.${conflict.kind}.description`)}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-2 rounded-md bg-muted/50 p-2.5 text-xs">
+          <div>
+            <div className="text-muted-foreground">
+              {t("transfers.conflict.source")}
+            </div>
+            <div className="break-all" title={conflict.sourcePath}>
+              {conflict.sourcePath}
+            </div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">
+              {t("transfers.conflict.destination")}
+            </div>
+            <div className="break-all" title={conflict.destinationPath}>
+              {conflict.destinationPath}
+            </div>
+          </div>
+        </div>
+        {conflict.allowApplyToRemaining ? (
+          <label
+            htmlFor="transfer-conflict-apply"
+            className="flex items-center gap-2 text-sm"
+          >
+            <Checkbox
+              id="transfer-conflict-apply"
+              checked={applyToRemaining}
+              onCheckedChange={(checked) =>
+                setApplyToRemaining(checked === true)
+              }
+              disabled={submitting}
+            />
+            {t("transfers.conflict.applyToRemaining")}
+          </label>
+        ) : null}
+        <AlertDialogFooter>
+          {conflict.decisions.map((decision) =>
+            decision === "cancel" ? (
+              <AlertDialogCancel
+                key={decision}
+                disabled={submitting}
+                onClick={() => submit(decision)}
+              >
+                {t(`transfers.conflict.actions.${decision}`)}
+              </AlertDialogCancel>
+            ) : (
+              <AlertDialogAction
+                key={decision}
+                variant={
+                  decision === "replace_directory" ? "destructive" : "default"
+                }
+                disabled={submitting}
+                onClick={() => submit(decision)}
+              >
+                {t(`transfers.conflict.actions.${decision}`)}
+              </AlertDialogAction>
+            ),
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function TaskButton({
   label,
   icon,
   onClick,
+  disabled = false,
 }: {
   label: string;
   icon: typeof PauseIcon;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <Button
@@ -412,6 +652,7 @@ function TaskButton({
       title={label}
       aria-label={label}
       onClick={onClick}
+      disabled={disabled}
       className="text-muted-foreground"
     >
       <HugeiconsIcon icon={icon} size={11} strokeWidth={1.9} />
@@ -421,7 +662,8 @@ function TaskButton({
 
 /** 将字节进度限制为进度条可接受的百分比。 */
 export function transferProgress(task: TransferTask): number {
-  if (task.status === "completed") return 100;
+  if (task.status === "completed" || task.status === "completed_with_errors")
+    return 100;
   if (task.totalBytes <= 0) return 0;
   return Math.max(
     0,
@@ -450,6 +692,8 @@ function taskStateLabel(task: TransferTask, t: TFunction<"statusbar">): string {
   if (task.status === "failed") return t("transfers.status.failed");
   if (task.status === "canceled") return t("transfers.status.canceled");
   if (task.status === "completed") return t("transfers.status.completed");
+  if (task.status === "completed_with_errors")
+    return t("transfers.status.completedWithErrors");
   if (task.status === "paused") return t("transfers.status.paused");
   if (task.status === "canceling") return t("transfers.status.canceling");
   return t(`transfers.stage.${task.stage}`);
