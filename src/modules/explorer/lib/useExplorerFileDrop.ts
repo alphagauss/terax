@@ -88,8 +88,9 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
           const workspace = currentWorkspaceEnv();
           if (workspace.kind !== "local") {
             void transferNative
-              .enqueueDirect({
+              .enqueue({
                 direction: "upload",
+                strategy: "direct",
                 sources: p.paths,
                 destination: dir,
               })

@@ -15,13 +15,16 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, commit_local_root, commit_remote_root,
+    cleanup_local_committed_backups, cleanup_local_staging, commit_local_root, commit_remote_root,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::TransferRunError;
-use crate::modules::transfers::models::TransferStage;
-use crate::modules::transfers::planner::{RemoteDownloadPlan, RemoteUploadFile, RemoteUploadPlan};
+use crate::modules::transfers::models::{TransferEntryKind, TransferFileFailure, TransferStage};
+use crate::modules::transfers::planner::{
+    RemoteDownloadFile, RemoteDownloadPlan, RemoteUploadFile, RemoteUploadPlan,
+};
 use crate::modules::transfers::progress::ExecutionContext;
+use uuid::Uuid;
 
 const DOWNLOAD_CHUNK_BYTES: usize = 32 * 1024;
 const MAX_INFLIGHT_READS: usize = 32;
@@ -242,9 +245,7 @@ async fn download_file_into_inner(
         }
     }
 
-    if let Some(error) = failure {
-        return Err(error);
-    }
+    // 取消后由外层立即关闭任务独占的 raw session，不能为了单个句柄再等待 I/O 超时。
     if canceled {
         return Err(TransferRunError::Canceled);
     }
@@ -253,6 +254,9 @@ async fn download_file_into_inner(
         session.close(handle),
     )
     .await;
+    if let Some(error) = failure {
+        return Err(error);
+    }
     close_result?;
     if completed != expected_size {
         return Err(source_changed(format!(
@@ -287,10 +291,12 @@ pub(crate) async fn execute_upload(
 ) -> RunResult<()> {
     context.set_stage(TransferStage::Transferring).await;
     let cleanup_scope = super::cleanup::RemoteCleanupScope::for_upload(
-        plan.workspace.profile.id.clone(),
+        &plan.workspace,
         plan.task_id.clone(),
+        plan.owner_task_id.clone(),
         &plan.roots,
     );
+    let mut committed_backups = Vec::new();
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
@@ -300,13 +306,28 @@ pub(crate) async fn execute_upload(
             )
             .await?;
         }
-        for file in &plan.files {
-            copy_remote_upload_file(&plan.session, file, context).await?;
+        let mut successful = vec![true; plan.files.len()];
+        for (index, file) in plan.files.iter().enumerate() {
+            if let Err(error) = copy_remote_upload_file(&plan.session, file, context).await {
+                record_remote_upload_failure(&plan, file, error, context).await?;
+                successful[index] = false;
+                remove_remote_partial_file(&plan.session, &file.destination).await?;
+            }
         }
         context.set_stage(TransferStage::Verifying).await;
-        for file in &plan.files {
+        for (index, file) in plan.files.iter().enumerate() {
+            if !successful[index] {
+                continue;
+            }
             context.checkpoint().await?;
-            verify_remote_file(&plan.session, &file.destination, file.size).await?;
+            match verify_remote_file(&plan.session, &file.destination, file.size).await {
+                Ok(()) => {}
+                Err(error) => {
+                    record_remote_upload_failure(&plan, file, error, context).await?;
+                    successful[index] = false;
+                    remove_remote_partial_file(&plan.session, &file.destination).await?;
+                }
+            }
         }
         for directory in plan.directories.iter().rev() {
             context.checkpoint().await?;
@@ -315,22 +336,32 @@ pub(crate) async fn execute_upload(
                 .apply_remote(&plan.session, &directory.destination)
                 .await?;
         }
-        context.set_stage(TransferStage::Finalizing).await;
+        context.begin_finalizing().await?;
         for root in &plan.roots {
             context.checkpoint().await?;
-            commit_remote_root(&plan.session, root).await?;
-            context.root_committed().await;
+            commit_remote_root(&plan.workspace, &plan.session, root).await?;
+            committed_backups.push(format!("{}.backup", root.stage));
+            let completed = plan
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(index, file)| {
+                    successful[*index] && remote_path_is_within(&root.stage, &file.destination)
+                })
+                .count() as u64;
+            context.roots_committed(1, completed).await?;
         }
         Ok(())
     }
     .await;
+    let mut pending = committed_backups;
     if result.is_err() {
-        let mut pending: Vec<_> = plan.roots.iter().map(|root| root.stage.clone()).collect();
-        if !super::cleanup::should_defer(&result) {
-            pending = super::cleanup::remove_now(&plan.workspace, &cleanup_scope, &pending).await;
-        }
-        super::cleanup::schedule(cleanup_scope, pending);
+        pending.extend(plan.roots.iter().map(|root| root.stage.clone()));
     }
+    if !pending.is_empty() && !super::cleanup::should_defer(&result) {
+        pending = super::cleanup::remove_now(&plan.workspace, &cleanup_scope, &pending).await;
+    }
+    super::cleanup::schedule(cleanup_scope, pending);
     close_sftp(&plan.session).await;
     result
 }
@@ -354,37 +385,55 @@ pub(crate) async fn execute_download(
                     ))
                 })?;
         }
-        for file in &plan.files {
-            context.set_current_file(file.source.clone()).await;
-            verify_remote_source(
-                &plan.session,
-                &file.source,
-                file.size,
-                file.metadata.modified(),
-            )
-            .await?;
-            download_file(
-                &raw_session,
-                &file.source,
-                &file.destination,
-                file.size,
-                context,
-            )
-            .await?;
-            verify_remote_source(
-                &plan.session,
-                &file.source,
-                file.size,
-                file.metadata.modified(),
-            )
-            .await?;
-            file.metadata.apply_local(&file.destination).await?;
-            context.complete_file().await;
+        let mut successful = vec![true; plan.files.len()];
+        for (index, file) in plan.files.iter().enumerate() {
+            let result = async {
+                context.set_current_file(file.source.clone()).await;
+                verify_remote_source(
+                    &plan.session,
+                    &file.source,
+                    file.size,
+                    file.metadata.modified(),
+                )
+                .await?;
+                download_file(
+                    &raw_session,
+                    &file.source,
+                    &file.destination,
+                    file.size,
+                    context,
+                )
+                .await?;
+                verify_remote_source(
+                    &plan.session,
+                    &file.source,
+                    file.size,
+                    file.metadata.modified(),
+                )
+                .await?;
+                file.metadata.apply_local(&file.destination).await
+            }
+            .await;
+            match result {
+                Ok(()) => {}
+                Err(error) => {
+                    record_remote_download_failure(&plan, file, error, context).await?;
+                    successful[index] = false;
+                    remove_local_partial_file(&file.destination).await?;
+                }
+            }
         }
         context.set_stage(TransferStage::Verifying).await;
-        for file in &plan.files {
+        for (index, file) in plan.files.iter().enumerate() {
+            if !successful[index] {
+                continue;
+            }
             context.checkpoint().await?;
-            verify_local_file(&file.destination, file.size).await?;
+            if let Err(error) = verify_local_file(&file.destination, file.size).await {
+                record_remote_download_failure(&plan, file, error, context).await?;
+                successful[index] = false;
+                remove_local_partial_file(&file.destination).await?;
+            }
         }
         for directory in plan.directories.iter().rev() {
             context.checkpoint().await?;
@@ -393,17 +442,32 @@ pub(crate) async fn execute_download(
                 .apply_local(&directory.destination)
                 .await?;
         }
-        context.set_stage(TransferStage::Finalizing).await;
+        context.begin_finalizing().await?;
         for root in &plan.roots {
             context.checkpoint().await?;
             commit_local_root(root).await?;
-            context.root_committed().await;
+            let completed = plan
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(index, file)| {
+                    successful[*index] && file.destination.starts_with(&root.stage)
+                })
+                .count() as u64;
+            let progress = context.roots_committed(1, completed).await;
+            cleanup_local_committed_backups(
+                &plan.task_id,
+                &plan.owner_task_id,
+                std::slice::from_ref(root),
+            )
+            .await;
+            progress?;
         }
         Ok(())
     }
     .await;
     if result.is_err() {
-        cleanup_local_staging(&plan.roots).await;
+        cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     let _ = raw_session.close_session();
     close_sftp(&plan.session).await;
@@ -461,8 +525,127 @@ async fn copy_remote_upload_file(
     file.metadata
         .apply_remote(session, &file.destination)
         .await?;
-    context.complete_file().await;
     Ok(())
+}
+
+/// 将 SSH 上传目录内的文件错误隔离到失败列表，连接和容量故障仍终止任务。
+async fn record_remote_upload_failure(
+    plan: &RemoteUploadPlan,
+    file: &RemoteUploadFile,
+    error: TransferRunError,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    let Some(destination) = remote_directory_child_final_path(plan, &file.destination) else {
+        return Err(error);
+    };
+    if !error.is_file_scoped() {
+        return Err(error);
+    }
+    context
+        .record_file_failure(TransferFileFailure {
+            id: Uuid::new_v4().to_string(),
+            source_path: file.source.to_string_lossy().into_owned(),
+            destination_path: destination,
+            failure: error
+                .failure()
+                .expect("file-scoped errors contain a failure"),
+            attempts: 1,
+            ignored: false,
+        })
+        .await
+}
+
+/// 将 SSH 下载目录内的文件错误隔离到失败列表，顶层单文件保持任务级失败。
+async fn record_remote_download_failure(
+    plan: &RemoteDownloadPlan,
+    file: &RemoteDownloadFile,
+    error: TransferRunError,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    let Some(destination) = local_directory_child_final_path(plan, &file.destination) else {
+        return Err(error);
+    };
+    if !error.is_file_scoped() {
+        return Err(error);
+    }
+    context
+        .record_file_failure(TransferFileFailure {
+            id: Uuid::new_v4().to_string(),
+            source_path: file.source.clone(),
+            destination_path: destination.to_string_lossy().into_owned(),
+            failure: error
+                .failure()
+                .expect("file-scoped errors contain a failure"),
+            attempts: 1,
+            ignored: false,
+        })
+        .await
+}
+
+fn remote_directory_child_final_path(plan: &RemoteUploadPlan, stage: &str) -> Option<String> {
+    plan.roots.iter().find_map(|root| {
+        if root.kind != TransferEntryKind::Directory || stage == root.stage {
+            return None;
+        }
+        let relative = stage
+            .strip_prefix(&root.stage)
+            .and_then(|suffix| suffix.strip_prefix('/'))?;
+        Some(crate::modules::remote::session::join_remote(
+            &root.final_path,
+            relative,
+        ))
+    })
+}
+
+fn remote_path_is_within(root: &str, path: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn local_directory_child_final_path(
+    plan: &RemoteDownloadPlan,
+    stage: &Path,
+) -> Option<std::path::PathBuf> {
+    plan.roots.iter().find_map(|root| {
+        if root.kind != TransferEntryKind::Directory || stage == root.stage {
+            return None;
+        }
+        Some(root.final_path.join(stage.strip_prefix(&root.stage).ok()?))
+    })
+}
+
+async fn remove_remote_partial_file(session: &Arc<SftpSession>, path: &str) -> RunResult<()> {
+    let removal = super::io::run(
+        format!("remove partial remote transfer file {path}"),
+        session.remove_file(path.to_string()),
+    )
+    .await;
+    if removal.is_ok() {
+        return Ok(());
+    }
+    let exists = super::io::run(
+        format!("check partial remote transfer file {path}"),
+        session.try_exists(path.to_string()),
+    )
+    .await?;
+    if exists {
+        removal
+    } else {
+        Ok(())
+    }
+}
+
+async fn remove_local_partial_file(path: &Path) -> RunResult<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(TransferRunError::Failed(io_failure(
+            format!("remove partial transfer file {}", path.display()),
+            &error,
+        ))),
+    }
 }
 
 /// 以固定大小块复制异步流，每个块之间响应暂停和取消并汇总进度。

@@ -1,8 +1,8 @@
 //! SSH 任务私有 staging 的受限清理与断线重试。
 //!
 //! 传输连接中断时，原会话无法立即删除任务私有路径。本模块在当前 Workspace 进程
-//! 内保留任务 ID 与精确目标父目录，等待同一 profile 重连后只清理匹配该授权的
-//! staging。用户选择的传输范围与删除授权相互独立。
+//! 内保留 staging ID、聚合历史任务 ID、稳定 SSH 端点与精确目标父目录，等待同一
+//! 端点重连后只清理匹配该授权的 staging。用户选择的传输范围与删除授权相互独立。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,14 +26,23 @@ const MAX_CLEANUP_COMMAND_BYTES: usize = 64 * 1024;
 #[derive(Clone)]
 pub(crate) struct RemoteCleanupScope {
     profile_id: String,
+    endpoint_host: String,
+    endpoint_port: u16,
+    endpoint_username: String,
     task_id: String,
+    owner_task_id: String,
     staging_parents: Vec<String>,
     allow_download_tmp: bool,
 }
 
 impl RemoteCleanupScope {
     /// 从 SSH 上传计划的最终目标生成精确清理范围。
-    pub(crate) fn for_upload(profile_id: String, task_id: String, roots: &[RemoteRoot]) -> Self {
+    pub(crate) fn for_upload(
+        workspace: &RemoteWorkspace,
+        task_id: String,
+        owner_task_id: String,
+        roots: &[RemoteRoot],
+    ) -> Self {
         let mut staging_parents: Vec<_> = roots
             .iter()
             .filter_map(|root| remote_parent(&root.final_path).map(str::to_string))
@@ -41,25 +50,37 @@ impl RemoteCleanupScope {
         staging_parents.sort();
         staging_parents.dedup();
         Self {
-            profile_id,
+            profile_id: workspace.profile.id.clone(),
+            endpoint_host: workspace.profile.host.to_ascii_lowercase(),
+            endpoint_port: workspace.profile.port,
+            endpoint_username: workspace.profile.username.clone(),
             task_id,
+            owner_task_id,
             staging_parents,
             allow_download_tmp: false,
         }
     }
 
     /// 创建只允许清理 SSH Archive 下载临时目录的范围。
-    pub(crate) fn for_download(profile_id: String, task_id: String) -> Self {
+    pub(crate) fn for_download(
+        workspace: &RemoteWorkspace,
+        task_id: String,
+        owner_task_id: String,
+    ) -> Self {
         Self {
-            profile_id,
+            profile_id: workspace.profile.id.clone(),
+            endpoint_host: workspace.profile.host.to_ascii_lowercase(),
+            endpoint_port: workspace.profile.port,
+            endpoint_username: workspace.profile.username.clone(),
             task_id,
+            owner_task_id,
             staging_parents: Vec::new(),
             allow_download_tmp: true,
         }
     }
 }
 
-/// 在后台等待同一 SSH profile 恢复，并清理当前任务明确拥有的路径。
+/// 在后台等待同一 SSH 端点恢复，并清理当前任务明确拥有的路径。
 pub(crate) fn schedule(scope: RemoteCleanupScope, mut paths: Vec<String>) {
     paths.sort();
     paths.dedup();
@@ -67,6 +88,8 @@ pub(crate) fn schedule(scope: RemoteCleanupScope, mut paths: Vec<String>) {
         return;
     }
     let profile_id = scope.profile_id.clone();
+    let owner_task_id = scope.owner_task_id.clone();
+    super::super::manager::begin_deferred_cleanup(&owner_task_id);
     tauri::async_runtime::spawn(async move {
         if tokio::time::timeout(
             CLEANUP_RETRY_WINDOW,
@@ -79,6 +102,8 @@ pub(crate) fn schedule(scope: RemoteCleanupScope, mut paths: Vec<String>) {
                 "remote transfer cleanup expired for profile {profile_id}: {} path(s)",
                 paths.len()
             );
+        } else {
+            super::super::manager::finish_deferred_cleanup(&owner_task_id);
         }
     });
 }
@@ -95,10 +120,10 @@ pub(crate) async fn remove_now(
     if paths.is_empty() {
         return Vec::new();
     }
-    if workspace.profile.id != scope.profile_id {
+    if !scope.matches_workspace(workspace) {
         log::warn!(
-            "refused remote transfer cleanup for mismatched profile {}",
-            workspace.profile.id
+            "refused remote transfer cleanup for mismatched SSH endpoint on profile {}",
+            scope.profile_id
         );
         return paths.to_vec();
     }
@@ -190,6 +215,24 @@ fn cleanup_command(paths: &[&String]) -> String {
 }
 
 impl RemoteCleanupScope {
+    /// 同时绑定 profile 与稳定端点，避免 profile 改绑后清理到另一台服务器。
+    fn matches_workspace(&self, workspace: &RemoteWorkspace) -> bool {
+        self.matches_endpoint(
+            &workspace.profile.id,
+            &workspace.profile.host,
+            workspace.profile.port,
+            &workspace.profile.username,
+        )
+    }
+
+    /// 比较重连后的稳定端点字段，主机名不区分 ASCII 大小写。
+    fn matches_endpoint(&self, profile_id: &str, host: &str, port: u16, username: &str) -> bool {
+        profile_id == self.profile_id
+            && host.eq_ignore_ascii_case(&self.endpoint_host)
+            && port == self.endpoint_port
+            && username == self.endpoint_username
+    }
+
     /// 判断路径是否由当前任务生成且位于获准父目录。
     fn owns(&self, path: &str) -> bool {
         if uuid::Uuid::parse_str(&self.task_id).is_err()
@@ -219,6 +262,8 @@ impl RemoteCleanupScope {
         let Some(value) = name.strip_prefix(".terax-part-") else {
             return false;
         };
+        // `.backup` 只会在对应根已经成功公开后由执行器加入清理集合。
+        let value = value.strip_suffix(".backup").unwrap_or(value);
         let Some((task_id, index)) = value.rsplit_once('-') else {
             return false;
         };
@@ -249,12 +294,18 @@ mod tests {
     fn cleanup_accepts_only_paths_owned_by_the_exact_task_and_parent() {
         let task = uuid::Uuid::new_v4();
         let stage = format!("/srv/releases/.terax-part-{task}-3");
-        let roots = [RemoteRoot {
-            stage: stage.clone(),
-            final_path: "/srv/releases/package".into(),
-        }];
-        let scope = RemoteCleanupScope::for_upload("profile".into(), task.to_string(), &roots);
+        let scope = RemoteCleanupScope {
+            profile_id: "profile".into(),
+            endpoint_host: "server.example".into(),
+            endpoint_port: 22,
+            endpoint_username: "user".into(),
+            task_id: task.to_string(),
+            owner_task_id: task.to_string(),
+            staging_parents: vec!["/srv/releases".into()],
+            allow_download_tmp: false,
+        };
         assert!(scope.owns(&stage));
+        assert!(scope.owns(&format!("{stage}.backup")));
         assert!(scope.owns(&format!("/srv/releases/.terax-archive-{task}")));
         assert!(!scope.owns(&format!("/tmp/terax-archive.{task}.a1B2c3D4")));
         assert!(!scope.owns("/"));
@@ -267,9 +318,32 @@ mod tests {
             uuid::Uuid::new_v4()
         )));
 
-        let download_scope = RemoteCleanupScope::for_download("profile".into(), task.to_string());
+        let download_scope = RemoteCleanupScope {
+            allow_download_tmp: true,
+            staging_parents: Vec::new(),
+            ..scope.clone()
+        };
         assert!(download_scope.owns(&format!("/tmp/terax-archive.{task}.a1B2c3D4")));
         assert!(!download_scope.owns("/tmp/terax-archive.a1B2c3D4"));
+    }
+
+    #[test]
+    fn cleanup_scope_rejects_a_rebound_profile_endpoint() {
+        let scope = RemoteCleanupScope {
+            profile_id: "profile".into(),
+            endpoint_host: "server.example".into(),
+            endpoint_port: 22,
+            endpoint_username: "user".into(),
+            task_id: uuid::Uuid::new_v4().to_string(),
+            owner_task_id: uuid::Uuid::new_v4().to_string(),
+            staging_parents: Vec::new(),
+            allow_download_tmp: true,
+        };
+
+        assert!(scope.matches_endpoint("profile", "SERVER.EXAMPLE", 22, "user"));
+        assert!(!scope.matches_endpoint("profile", "other.example", 22, "user"));
+        assert!(!scope.matches_endpoint("profile", "server.example", 2222, "user"));
+        assert!(!scope.matches_endpoint("profile", "server.example", 22, "other"));
     }
 
     #[test]

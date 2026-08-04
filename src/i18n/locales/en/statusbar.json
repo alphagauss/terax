@@ -74,7 +74,12 @@
     "clearAllTitle": "Clear all transfer history?",
     "clearAllDescription": "Completed, failed, and canceled tasks will be removed. Active transfers will keep running.",
     "retry": "Retry",
+    "retryFile": "Retry file",
     "remove": "Remove",
+    "removeFailure": "Remove failure record",
+    "resultSummary": "{{completed}} succeeded / {{failed}} failed / {{unprocessed}} not processed",
+    "failedFiles_one": "{{count}} failed file",
+    "failedFiles_other": "{{count}} failed files",
     "operationFailed": "Transfer action failed: {{error}}",
     "failureDetail": "Error: {{error}}",
     "partialResult_one": "{{committed}} of {{total}} top-level items was saved before the task stopped.",
@@ -102,16 +107,41 @@
       "direct": "Direct",
       "archive": "Archive"
     },
+    "conflict": {
+      "source": "Source",
+      "destination": "Destination",
+      "applyToRemaining": "Use this choice for all remaining conflicts in this task",
+      "file": {
+        "title": "Replace the existing file?",
+        "description": "A file already exists at the destination. Replace it to continue the transfer."
+      },
+      "archive_directory": {
+        "title": "The destination folder already exists",
+        "description": "Choose whether to replace the whole folder or merge it with the archive."
+      },
+      "type_mismatch": {
+        "title": "Replace the conflicting item?",
+        "description": "The source and destination item types differ. Replace the destination to continue."
+      },
+      "actions": {
+        "cancel": "Cancel transfer",
+        "replace": "Replace",
+        "replace_directory": "Remove folder and replace",
+        "merge": "Merge and replace duplicate files"
+      }
+    },
     "status": {
       "failed": "Failed",
       "canceled": "Canceled",
       "completed": "Completed",
+      "completedWithErrors": "Completed with errors",
       "paused": "Paused",
       "canceling": "Canceling…"
     },
     "stage": {
       "queued": "Queued",
       "scanning": "Scanning…",
+      "checking_conflicts": "Checking conflicts…",
       "archiving": "Creating archive…",
       "transferring": "Transferring…",
       "extracting": "Extracting archive…",

@@ -5,12 +5,16 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::commit::{cleanup_local_staging, commit_local_root};
+use super::commit::{
+    cleanup_local_committed_backups, cleanup_local_staging, commit_local_root, commit_local_roots,
+};
 use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
 use super::models::TransferStage;
+use super::models::{TransferEntryKind, TransferFileFailure};
 use super::planner::{LocalFile, LocalPlan};
 use super::progress::ExecutionContext;
+use uuid::Uuid;
 
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
 
@@ -31,15 +35,20 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
                     ))
                 })?;
         }
-        for file in &plan.files {
-            copy_local_file(file, context).await?;
+        let mut successful = vec![true; plan.files.len()];
+        for (index, file) in plan.files.iter().enumerate() {
+            if let Err(error) = copy_local_file(file, context).await {
+                record_local_file_failure(&plan, file, error, context).await?;
+                successful[index] = false;
+                remove_partial_file(&file.destination).await?;
+            }
         }
-        verify_apply_commit(&plan, context).await?;
+        verify_apply_commit_direct(&plan, &mut successful, context).await?;
         Ok(())
     }
     .await;
     if result.is_err() {
-        cleanup_local_staging(&plan.roots).await;
+        cleanup_local_staging(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
     }
     result
 }
@@ -47,14 +56,59 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
 /// 复验 staging、恢复 Manifest 元数据并以 no-replace 方式提交全部顶层目标。
 pub(crate) async fn verify_apply_commit(
     plan: &LocalPlan,
+    committed_files: u64,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    let mut successful = vec![true; plan.files.len()];
+    verify_apply_commit_inner(
+        plan,
+        &mut successful,
+        false,
+        false,
+        committed_files,
+        context,
+    )
+    .await
+}
+
+async fn verify_apply_commit_direct(
+    plan: &LocalPlan,
+    successful: &mut [bool],
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    verify_apply_commit_inner(plan, successful, true, true, 0, context).await
+}
+
+async fn verify_apply_commit_inner(
+    plan: &LocalPlan,
+    successful: &mut [bool],
+    allow_file_failures: bool,
+    count_after_commit: bool,
+    transaction_files: u64,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
     context.set_stage(TransferStage::Verifying).await;
-    for file in &plan.files {
+    for (index, file) in plan.files.iter().enumerate() {
+        if !successful[index] {
+            continue;
+        }
         context.checkpoint().await?;
-        verify_local_file(&file.destination, file.size).await?;
-        file.metadata.apply_local(&file.destination).await?;
-        context.complete_file().await;
+        let result = async {
+            verify_local_file(&file.destination, file.size).await?;
+            file.metadata.apply_local(&file.destination).await
+        }
+        .await;
+        match result {
+            Ok(()) => {}
+            Err(error) => {
+                if !allow_file_failures {
+                    return Err(error);
+                }
+                record_local_file_failure(plan, file, error, context).await?;
+                successful[index] = false;
+                remove_partial_file(&file.destination).await?;
+            }
+        }
     }
     for directory in plan.directories.iter().rev() {
         context.checkpoint().await?;
@@ -77,13 +131,87 @@ pub(crate) async fn verify_apply_commit(
             .apply_local(&directory.destination)
             .await?;
     }
-    context.set_stage(TransferStage::Finalizing).await;
-    for root in &plan.roots {
+    context.begin_finalizing().await?;
+    if count_after_commit {
+        for root in &plan.roots {
+            context.checkpoint().await?;
+            commit_local_root(root).await?;
+            let completed = plan
+                .files
+                .iter()
+                .enumerate()
+                .filter(|(index, file)| {
+                    successful[*index] && file.destination.starts_with(&root.stage)
+                })
+                .count() as u64;
+            let progress = context.roots_committed(1, completed).await;
+            cleanup_local_committed_backups(
+                &plan.task_id,
+                &plan.owner_task_id,
+                std::slice::from_ref(root),
+            )
+            .await;
+            progress?;
+        }
+    } else {
         context.checkpoint().await?;
-        commit_local_root(root).await?;
-        context.root_committed().await;
+        commit_local_roots(&plan.roots).await?;
+        let progress = context
+            .roots_committed(plan.roots.len() as u64, transaction_files)
+            .await;
+        cleanup_local_committed_backups(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
+        progress?;
     }
     Ok(())
+}
+
+/// 将目录根内的可恢复文件错误记录为局部失败，任务级错误仍交给上层终止。
+async fn record_local_file_failure(
+    plan: &LocalPlan,
+    file: &LocalFile,
+    error: TransferRunError,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    if !is_directory_child(plan, &file.destination) {
+        return Err(error);
+    }
+    if !error.is_file_scoped() {
+        return Err(error);
+    }
+    let failure = error
+        .failure()
+        .expect("file-scoped errors contain a failure");
+    context
+        .record_file_failure(TransferFileFailure {
+            id: Uuid::new_v4().to_string(),
+            source_path: file.retry_source_path.clone(),
+            destination_path: file.final_destination_path.clone(),
+            failure,
+            attempts: 1,
+            ignored: false,
+        })
+        .await?;
+    Ok(())
+}
+
+/// 判断文件是否属于目录聚合根，顶层单文件错误仍保持任务级失败。
+fn is_directory_child(plan: &LocalPlan, stage: &std::path::Path) -> bool {
+    plan.roots.iter().any(|root| {
+        root.kind == TransferEntryKind::Directory
+            && stage != root.stage
+            && stage.strip_prefix(&root.stage).is_ok()
+    })
+}
+
+async fn remove_partial_file(path: &std::path::Path) -> RunResult<()> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(TransferRunError::Failed(io_failure(
+            format!("remove partial transfer file {}", path.display()),
+            &error,
+        ))),
+    }
 }
 
 /// 复制一个同宿主文件并在关闭前同步目标数据。

@@ -34,14 +34,17 @@ export type TransferStatus =
   | "queued"
   | "running"
   | "paused"
+  | "awaiting_decision"
   | "canceling"
   | "completed"
+  | "completed_with_errors"
   | "failed"
   | "canceled";
 
 export type TransferStage =
   | "queued"
   | "scanning"
+  | "checking_conflicts"
   | "archiving"
   | "transferring"
   | "extracting"
@@ -51,8 +54,47 @@ export type TransferStage =
 
 export type EnqueueTransferRequest = {
   direction: TransferDirection;
+  strategy: TransferStrategy;
   sources: string[];
   destination: string;
+};
+
+export type TransferEntryKind = "file" | "directory" | "other";
+export type TransferConflictKind =
+  | "file"
+  | "archive_directory"
+  | "type_mismatch";
+export type TransferConflictDecision =
+  | "cancel"
+  | "replace"
+  | "replace_directory"
+  | "merge";
+
+export type TransferConflict = {
+  id: string;
+  kind: TransferConflictKind;
+  sourceKind: TransferEntryKind;
+  destinationKind: TransferEntryKind;
+  sourcePath: string;
+  destinationPath: string;
+  decisions: TransferConflictDecision[];
+  allowApplyToRemaining: boolean;
+};
+
+export type ResolveTransferConflictRequest = {
+  taskId: string;
+  conflictId: string;
+  decision: TransferConflictDecision;
+  applyToRemaining: boolean;
+};
+
+export type TransferFileFailure = {
+  id: string;
+  sourcePath: string;
+  destinationPath: string;
+  failure: TransferFailure;
+  attempts: number;
+  ignored: boolean;
 };
 
 export type TransferTask = {
@@ -68,11 +110,16 @@ export type TransferTask = {
   transferredBytes: number;
   totalFiles: number;
   completedFiles: number;
+  failedFiles: number;
+  unprocessedFiles: number;
   totalRoots: number;
   committedRoots: number;
   speedBytesPerSecond: number;
   currentFile: string | null;
   failure: TransferFailure | null;
+  fileFailures: TransferFileFailure[];
+  conflict: TransferConflict | null;
+  isDirectory: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -83,6 +130,17 @@ export function isActiveTransfer(task: TransferTask): boolean {
     task.status === "queued" ||
     task.status === "running" ||
     task.status === "paused" ||
+    task.status === "awaiting_decision" ||
     task.status === "canceling"
+  );
+}
+
+/** 仅允许已完成但有错误的 Direct 文件夹展开未忽略失败项。 */
+export function hasExpandableTransferFailures(task: TransferTask): boolean {
+  return (
+    task.strategy === "direct" &&
+    task.isDirectory &&
+    task.status === "completed_with_errors" &&
+    task.fileFailures.some((failure) => !failure.ignored)
   );
 }

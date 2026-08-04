@@ -8,12 +8,12 @@ use tauri::{AppHandle, State};
 use crate::modules::workspace_process::WorkspaceProcessState;
 
 use super::errors::TransferFailure;
-use super::models::{EnqueueTransferRequest, TransferStrategy, TransferTaskSnapshot};
+use super::models::{EnqueueTransferRequest, ResolveTransferConflictRequest, TransferTaskSnapshot};
 use super::TransferState;
 
-/// 将文件、文件夹或批量来源作为 Direct 任务加入后台队列。
+/// 将文件、文件夹或批量来源按请求中的策略加入后台队列。
 #[tauri::command]
-pub async fn transfer_enqueue_direct(
+pub async fn transfer_enqueue(
     app: AppHandle,
     state: State<'_, TransferState>,
     workspace: State<'_, WorkspaceProcessState>,
@@ -24,28 +24,44 @@ pub async fn transfer_enqueue_direct(
         .enqueue(
             app,
             workspace.bootstrap().env.clone(),
+            workspace.bootstrap().id.clone(),
             request,
-            TransferStrategy::Direct,
         )
         .await
 }
 
-/// 将 WSL 或 SSH 文件、文件夹或批量来源作为 Archive 任务加入后台队列。
+/// 提交当前待处理冲突的一次性决策。
 #[tauri::command]
-pub async fn transfer_enqueue_archive(
+pub async fn transfer_resolve_conflict(
+    state: State<'_, TransferState>,
+    request: ResolveTransferConflictRequest,
+) -> Result<(), TransferFailure> {
+    state.manager().resolve_conflict(request).await
+}
+
+/// 忽略一个 Direct 文件失败，使其不再出现在默认失败列表中。
+#[tauri::command]
+pub async fn transfer_ignore_failure(
+    app: AppHandle,
+    state: State<'_, TransferState>,
+    id: String,
+    failure_id: String,
+) -> Result<(), TransferFailure> {
+    state.manager().ignore_failure(&app, &id, &failure_id).await
+}
+
+/// 在原聚合任务中重新执行一个 Direct 文件失败。
+#[tauri::command]
+pub async fn transfer_retry_failure(
     app: AppHandle,
     state: State<'_, TransferState>,
     workspace: State<'_, WorkspaceProcessState>,
-    request: EnqueueTransferRequest,
-) -> Result<TransferTaskSnapshot, TransferFailure> {
+    id: String,
+    failure_id: String,
+) -> Result<(), TransferFailure> {
     state
         .manager()
-        .enqueue(
-            app,
-            workspace.bootstrap().env.clone(),
-            request,
-            TransferStrategy::Archive,
-        )
+        .retry_failure(app, workspace.bootstrap().env.clone(), &id, &failure_id)
         .await
 }
 
@@ -53,8 +69,12 @@ pub async fn transfer_enqueue_archive(
 #[tauri::command]
 pub async fn transfer_list(
     state: State<'_, TransferState>,
-) -> Result<Vec<TransferTaskSnapshot>, String> {
-    Ok(state.manager().list().await)
+    workspace: State<'_, WorkspaceProcessState>,
+) -> Result<Vec<TransferTaskSnapshot>, TransferFailure> {
+    state
+        .manager()
+        .list(&workspace.bootstrap().env, &workspace.bootstrap().id)
+        .await
 }
 
 /// 暂停后台传输任务。
@@ -97,7 +117,7 @@ pub async fn transfer_remove(
     state.manager().remove(&app, &id).await
 }
 
-/// 清理已完成的传输任务记录，不影响失败、取消或仍在运行的任务。
+/// 清理成功及完成但含文件失败的任务，不影响任务级失败、取消或运行中任务。
 #[tauri::command]
 pub async fn transfer_clear_completed(
     app: AppHandle,
@@ -125,6 +145,11 @@ pub async fn transfer_retry(
 ) -> Result<TransferTaskSnapshot, TransferFailure> {
     state
         .manager()
-        .retry(app, workspace.bootstrap().env.clone(), &id)
+        .retry(
+            app,
+            workspace.bootstrap().env.clone(),
+            workspace.bootstrap().id.clone(),
+            &id,
+        )
         .await
 }

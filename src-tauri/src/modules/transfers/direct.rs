@@ -14,7 +14,7 @@ pub(crate) async fn execute(
     prepared: PreparedTransfer,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
-    let result = match prepared.manifest {
+    match prepared.manifest {
         TransferManifest::Local(plan) => super::local::execute(plan, context).await,
         TransferManifest::RemoteUpload(plan) => {
             super::ssh::direct::execute_upload(plan, context).await
@@ -22,6 +22,5 @@ pub(crate) async fn execute(
         TransferManifest::RemoteDownload(plan) => {
             super::ssh::direct::execute_download(plan, context).await
         }
-    };
-    result
+    }
 }

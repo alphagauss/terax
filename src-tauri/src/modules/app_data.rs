@@ -1,19 +1,20 @@
 use std::path::PathBuf;
 
-/// Application-owned directories below `~/.terax`.
+/// `~/.terax` 下由应用统一管理的持久化目录。
 ///
-/// New persistent Terax data must use this module rather than an OS app-data
-/// directory or a module-local path convention.
+/// 新增持久化数据必须从这里取路径，不能自行约定模块目录。
 pub enum Directory {
     Shared,
     Sessions,
     Workspaces,
     WindowState,
+    Transfers,
     Ssh,
     ShellIntegration,
     Logs,
 }
 
+/// 返回 Terax 自有数据根目录。
 pub fn root() -> Result<PathBuf, String> {
     dirs::home_dir()
         .map(|home| home.join(".terax"))
@@ -22,12 +23,14 @@ pub fn root() -> Result<PathBuf, String> {
         })
 }
 
+/// 返回指定类别的稳定数据目录路径，不主动创建目录。
 pub fn directory(directory: Directory) -> Result<PathBuf, String> {
     let name = match directory {
         Directory::Shared => "shared",
         Directory::Sessions => "sessions",
         Directory::Workspaces => "workspaces",
         Directory::WindowState => "window-state",
+        Directory::Transfers => "transfers",
         Directory::Ssh => "ssh",
         Directory::ShellIntegration => "shell-integration",
         Directory::Logs => "logs",
@@ -46,5 +49,7 @@ mod tests {
         assert_eq!(shared.parent().unwrap().file_name().unwrap(), ".terax");
         let window_state = directory(Directory::WindowState).unwrap();
         assert_eq!(window_state.file_name().unwrap(), "window-state");
+        let transfers = directory(Directory::Transfers).unwrap();
+        assert_eq!(transfers.file_name().unwrap(), "transfers");
     }
 }

@@ -3,13 +3,13 @@
 //! 后端以稳定错误码向前端描述失败类别，动态路径、操作系统错误和远端输出只作为
 //! 诊断细节。前端据此本地化用户提示，不依赖英文错误文本做控制流判断。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 use std::io;
 
 /// 前端可稳定识别和翻译的传输错误码。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransferErrorCode {
     InvalidRequest,
@@ -31,7 +31,7 @@ pub enum TransferErrorCode {
 }
 
 /// 通过 IPC 和任务快照暴露的结构化失败信息。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferFailure {
     pub code: TransferErrorCode,

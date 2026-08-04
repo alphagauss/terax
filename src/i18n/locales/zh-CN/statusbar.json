@@ -74,7 +74,12 @@
     "clearAllTitle": "清空全部传输记录？",
     "clearAllDescription": "将移除已完成、失败和已取消的任务，进行中的传输不会受到影响。",
     "retry": "重试",
+    "retryFile": "重试文件",
     "remove": "移除",
+    "removeFailure": "删除失败记录",
+    "resultSummary": "{{completed}} 个成功 / {{failed}} 个失败 / {{unprocessed}} 个未处理",
+    "failedFiles_one": "{{count}} 个失败文件",
+    "failedFiles_other": "{{count}} 个失败文件",
     "operationFailed": "传输操作失败：{{error}}",
     "failureDetail": "错误：{{error}}",
     "partialResult_one": "任务停止前已保存 {{committed}} / {{total}} 个顶层项目。",
@@ -102,16 +107,41 @@
       "direct": "直接传输",
       "archive": "打包传输"
     },
+    "conflict": {
+      "source": "来源",
+      "destination": "目标",
+      "applyToRemaining": "本次任务剩余冲突都使用此选择",
+      "file": {
+        "title": "替换已存在的文件？",
+        "description": "目标位置已有同名文件。替换后将继续传输。"
+      },
+      "archive_directory": {
+        "title": "目标文件夹已存在",
+        "description": "请选择移除整个目标文件夹后覆盖，或与归档合并并替换重名文件。"
+      },
+      "type_mismatch": {
+        "title": "替换类型冲突的项目？",
+        "description": "来源与目标的项目类型不同。替换目标后将继续传输。"
+      },
+      "actions": {
+        "cancel": "取消传输",
+        "replace": "替换目标",
+        "replace_directory": "移除文件夹并覆盖",
+        "merge": "合并并替换全部重名文件"
+      }
+    },
     "status": {
       "failed": "失败",
       "canceled": "已取消",
       "completed": "已完成",
+      "completedWithErrors": "完成但有失败",
       "paused": "已暂停",
       "canceling": "正在取消…"
     },
     "stage": {
       "queued": "排队中",
       "scanning": "正在扫描…",
+      "checking_conflicts": "正在检查冲突…",
       "archiving": "正在创建归档…",
       "transferring": "正在传输…",
       "extracting": "正在解包…",
