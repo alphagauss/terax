@@ -1,3 +1,9 @@
+/**
+ * 本文件实现只读的左右分栏 Git diff 视图。
+ *
+ * 负责同步两侧编辑器、独立横向滚动条和基于外层 MergeView 滚动区域的变更概览。
+ */
+
 import { defaultKeymap } from "@codemirror/commands";
 import { foldGutter } from "@codemirror/language";
 import { MergeView } from "@codemirror/merge";
@@ -82,6 +88,9 @@ function bindHorizontalScrollbar(
   };
 }
 
+/**
+ * 左右分栏展示原始内容和修改后内容，并在可纵向滚动时显示 Git 变更概览。
+ */
 export function SplitDiffView({
   original,
   modified,
@@ -116,7 +125,7 @@ export function SplitDiffView({
       const view = viewRef.current;
       const rail = railRef.current;
       if (view && rail) {
-        renderGitChangeOverview(view.b, rail, changesRef.current);
+        renderGitChangeOverview(view.b, rail, changesRef.current, view.dom);
       }
     };
     const scheduleRail = () => {
@@ -210,7 +219,9 @@ export function SplitDiffView({
   useEffect(() => {
     const view = viewRef.current;
     const rail = railRef.current;
-    if (view && rail) renderGitChangeOverview(view.b, rail, changes);
+    if (view && rail) {
+      renderGitChangeOverview(view.b, rail, changes, view.dom);
+    }
   }, [changes]);
 
   useEffect(() => {
