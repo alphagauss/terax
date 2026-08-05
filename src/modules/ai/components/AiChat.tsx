@@ -80,21 +80,24 @@ const conversationScrollPositions = new Map<
   ConversationScrollPosition
 >();
 
+/** 记忆并恢复会话滚动位置，滚动事件按动画帧合并，底部状态不采集消息锚点。 */
 function useConversationScrollMemory(sessionId: string) {
   const contextRef = useRef<StickToBottomContext | null>(null);
   const remembered = conversationScrollPositions.get(sessionId);
 
   useLayoutEffect(() => {
-    let frame = 0;
+    let bindFrame = 0;
+    let saveFrame = 0;
     let disposed = false;
     let element: HTMLElement | null = null;
-    let save: (() => void) | null = null;
+    let saveNow: (() => void) | null = null;
+    let handleScroll: (() => void) | null = null;
 
     const bind = () => {
       const context = contextRef.current;
       element = context?.scrollRef.current ?? null;
       if (!context || !element) {
-        frame = window.requestAnimationFrame(bind);
+        bindFrame = window.requestAnimationFrame(bind);
         return;
       }
 
@@ -102,13 +105,22 @@ function useConversationScrollMemory(sessionId: string) {
         if (!element) return;
         const remaining =
           element.scrollHeight - element.clientHeight - element.scrollTop;
+        const atBottom = remaining <= 4;
         conversationScrollPositions.set(sessionId, {
           top: element.scrollTop,
-          atBottom: remaining <= 4,
-          anchor: findConversationAnchor(element),
+          atBottom,
+          anchor: atBottom ? null : findConversationAnchor(element),
         });
       };
-      save = savePosition;
+      const scheduleSave = () => {
+        if (saveFrame !== 0) return;
+        saveFrame = window.requestAnimationFrame(() => {
+          saveFrame = 0;
+          savePosition();
+        });
+      };
+      saveNow = savePosition;
+      handleScroll = scheduleSave;
 
       const saved = conversationScrollPositions.get(sessionId);
       if (saved && !saved.atBottom) {
@@ -142,19 +154,23 @@ function useConversationScrollMemory(sessionId: string) {
         queueMicrotask(() => {
           if (disposed) return;
           restore();
-          element?.addEventListener("scroll", savePosition, { passive: true });
+          element?.addEventListener("scroll", scheduleSave, { passive: true });
         });
         return;
       }
 
-      element.addEventListener("scroll", savePosition, { passive: true });
+      element.addEventListener("scroll", scheduleSave, { passive: true });
     };
 
     bind();
     return () => {
       disposed = true;
-      window.cancelAnimationFrame(frame);
-      if (element && save) element.removeEventListener("scroll", save);
+      window.cancelAnimationFrame(bindFrame);
+      window.cancelAnimationFrame(saveFrame);
+      if (element && handleScroll) {
+        element.removeEventListener("scroll", handleScroll);
+      }
+      saveNow?.();
     };
   }, [sessionId]);
 
