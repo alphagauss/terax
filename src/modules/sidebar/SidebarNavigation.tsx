@@ -525,7 +525,7 @@ function NavigationItems({
                   appearance === "vertical" &&
                     (compact
                       ? "h-7 w-9 justify-center"
-                      : "size-12 justify-center"),
+                      : "h-12 w-11 justify-center"),
                   appearance === "icons" && "size-7 justify-center",
                   appearance === "tabs" &&
                     "h-7 max-w-44 justify-center gap-1.5 px-2.5 text-[11px] font-medium",
@@ -608,7 +608,7 @@ export function SidebarActivityBar({
       data-sidebar-orientation="vertical"
       className={cn(
         "flex min-h-0 shrink-0 flex-col items-center border-r border-border/60 bg-sidebar",
-        compact ? "w-9" : "w-12",
+        compact ? "w-9" : "w-11",
       )}
     >
       <NavigationViewport
