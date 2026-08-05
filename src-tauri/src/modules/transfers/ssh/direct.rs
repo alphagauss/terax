@@ -337,7 +337,7 @@ pub(crate) async fn execute_upload(
                 .await?;
         }
         context.begin_finalizing().await?;
-        for root in &plan.roots {
+        for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
             commit_remote_root(&plan.workspace, &plan.session, root).await?;
             committed_backups.push(format!("{}.backup", root.stage));
@@ -345,9 +345,7 @@ pub(crate) async fn execute_upload(
                 .files
                 .iter()
                 .enumerate()
-                .filter(|(index, file)| {
-                    successful[*index] && remote_path_is_within(&root.stage, &file.destination)
-                })
+                .filter(|(index, file)| successful[*index] && file.root_index == root_index)
                 .count() as u64;
             context.roots_committed(1, completed).await?;
         }
@@ -443,16 +441,14 @@ pub(crate) async fn execute_download(
                 .await?;
         }
         context.begin_finalizing().await?;
-        for root in &plan.roots {
+        for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
             commit_local_root(root).await?;
             let completed = plan
                 .files
                 .iter()
                 .enumerate()
-                .filter(|(index, file)| {
-                    successful[*index] && file.destination.starts_with(&root.stage)
-                })
+                .filter(|(index, file)| successful[*index] && file.root_index == root_index)
                 .count() as u64;
             let progress = context.roots_committed(1, completed).await;
             cleanup_local_committed_backups(
@@ -535,9 +531,15 @@ async fn record_remote_upload_failure(
     error: TransferRunError,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
-    let Some(destination) = remote_directory_child_final_path(plan, &file.destination) else {
-        return Err(error);
+    let Some(root) = plan.roots.get(file.root_index) else {
+        return Err(TransferRunError::failed(
+            TransferErrorCode::Internal,
+            "transfer file references a missing root",
+        ));
     };
+    if root.kind != TransferEntryKind::Directory || file.destination == root.stage {
+        return Err(error);
+    }
     if !error.is_file_scoped() {
         return Err(error);
     }
@@ -545,7 +547,7 @@ async fn record_remote_upload_failure(
         .record_file_failure(TransferFileFailure {
             id: Uuid::new_v4().to_string(),
             source_path: file.source.to_string_lossy().into_owned(),
-            destination_path: destination,
+            destination_path: file.final_destination.clone(),
             failure: error
                 .failure()
                 .expect("file-scoped errors contain a failure"),
@@ -562,9 +564,15 @@ async fn record_remote_download_failure(
     error: TransferRunError,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
-    let Some(destination) = local_directory_child_final_path(plan, &file.destination) else {
-        return Err(error);
+    let Some(root) = plan.roots.get(file.root_index) else {
+        return Err(TransferRunError::failed(
+            TransferErrorCode::Internal,
+            "transfer file references a missing root",
+        ));
     };
+    if root.kind != TransferEntryKind::Directory || file.destination == root.stage {
+        return Err(error);
+    }
     if !error.is_file_scoped() {
         return Err(error);
     }
@@ -572,7 +580,7 @@ async fn record_remote_download_failure(
         .record_file_failure(TransferFileFailure {
             id: Uuid::new_v4().to_string(),
             source_path: file.source.clone(),
-            destination_path: destination.to_string_lossy().into_owned(),
+            destination_path: file.final_destination.to_string_lossy().into_owned(),
             failure: error
                 .failure()
                 .expect("file-scoped errors contain a failure"),
@@ -580,40 +588,6 @@ async fn record_remote_download_failure(
             ignored: false,
         })
         .await
-}
-
-fn remote_directory_child_final_path(plan: &RemoteUploadPlan, stage: &str) -> Option<String> {
-    plan.roots.iter().find_map(|root| {
-        if root.kind != TransferEntryKind::Directory || stage == root.stage {
-            return None;
-        }
-        let relative = stage
-            .strip_prefix(&root.stage)
-            .and_then(|suffix| suffix.strip_prefix('/'))?;
-        Some(crate::modules::remote::session::join_remote(
-            &root.final_path,
-            relative,
-        ))
-    })
-}
-
-fn remote_path_is_within(root: &str, path: &str) -> bool {
-    path == root
-        || path
-            .strip_prefix(root)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
-fn local_directory_child_final_path(
-    plan: &RemoteDownloadPlan,
-    stage: &Path,
-) -> Option<std::path::PathBuf> {
-    plan.roots.iter().find_map(|root| {
-        if root.kind != TransferEntryKind::Directory || stage == root.stage {
-            return None;
-        }
-        Some(root.final_path.join(stage.strip_prefix(&root.stage).ok()?))
-    })
 }
 
 async fn remove_remote_partial_file(session: &Arc<SftpSession>, path: &str) -> RunResult<()> {

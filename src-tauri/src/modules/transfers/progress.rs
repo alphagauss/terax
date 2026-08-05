@@ -14,6 +14,7 @@ use super::models::{
 };
 
 const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(200);
+const FILE_FAILURE_BATCH_SIZE: usize = 64;
 
 /// 执行器共享的任务控制和节流进度上下文。
 pub(crate) struct ExecutionContext {
@@ -23,9 +24,11 @@ pub(crate) struct ExecutionContext {
     control: Arc<TaskControl>,
     pending_bytes: u64,
     pending_current_file: Option<String>,
+    pending_file_failures: Vec<TransferFileFailure>,
     committed_roots: u64,
     file_retry: bool,
     sample_started: Instant,
+    failure_batch_started: Instant,
 }
 
 impl ExecutionContext {
@@ -43,9 +46,11 @@ impl ExecutionContext {
             control,
             pending_bytes: 0,
             pending_current_file: None,
+            pending_file_failures: Vec::new(),
             committed_roots: 0,
             file_retry: false,
             sample_started: Instant::now(),
+            failure_batch_started: Instant::now(),
         }
     }
 
@@ -84,6 +89,7 @@ impl ExecutionContext {
         conflict: TransferConflict,
     ) -> Result<super::manager::ConflictResolution, TransferRunError> {
         self.flush_progress().await;
+        self.flush_file_failures().await?;
         let conflict_id = conflict.id.clone();
         self.control.begin_conflict(conflict_id.clone()).await?;
         if let Err(error) = self
@@ -111,19 +117,15 @@ impl ExecutionContext {
         failure: TransferFileFailure,
     ) -> Result<(), TransferRunError> {
         self.flush_progress().await;
-        self.manager
-            .record_file_failure(&self.app, &self.task_id, failure)
-            .await
+        self.queue_file_failure(failure).await
     }
 
     /// 在规划期记录已确认是文件的来源元数据失败，此时还没有待刷新的复制进度。
     pub(crate) async fn record_scan_failure(
-        &self,
+        &mut self,
         failure: TransferFileFailure,
     ) -> Result<(), TransferRunError> {
-        self.manager
-            .record_file_failure(&self.app, &self.task_id, failure)
-            .await
+        self.queue_file_failure(failure).await
     }
 
     /// 设置任务阶段并保留暂停状态。
@@ -137,6 +139,7 @@ impl ExecutionContext {
     /// 在公开 staging 前同步写入提交意图，持久化失败会阻止破坏性操作。
     pub(crate) async fn begin_finalizing(&mut self) -> Result<(), TransferRunError> {
         self.flush_progress().await;
+        self.flush_file_failures().await?;
         self.manager
             .begin_finalizing(&self.app, &self.task_id)
             .await
@@ -144,7 +147,7 @@ impl ExecutionContext {
 
     /// 在扫描完成后发布稳定的文件数和总字节数。
     pub(crate) async fn set_totals(
-        &self,
+        &mut self,
         total_files: u64,
         total_bytes: u64,
         total_roots: u64,
@@ -153,6 +156,7 @@ impl ExecutionContext {
         if self.file_retry {
             return Ok(());
         }
+        self.flush_file_failures().await?;
         self.manager
             .set_totals(
                 &self.app,
@@ -230,8 +234,38 @@ impl ExecutionContext {
     }
 
     /// 在任务进入终态前提交尚未达到节流窗口的最后一批进度。
-    pub(crate) async fn flush_pending(&mut self) {
+    pub(crate) async fn flush_pending(&mut self) -> Result<(), TransferRunError> {
         self.flush_progress().await;
+        self.flush_file_failures().await
+    }
+
+    /// 缓冲一个文件失败，并按时间或数量阈值批量写入 Journal 和任务快照。
+    async fn queue_file_failure(
+        &mut self,
+        failure: TransferFileFailure,
+    ) -> Result<(), TransferRunError> {
+        if self.pending_file_failures.is_empty() {
+            self.failure_batch_started = Instant::now();
+        }
+        self.pending_file_failures.push(failure);
+        if self.pending_file_failures.len() >= FILE_FAILURE_BATCH_SIZE
+            || self.failure_batch_started.elapsed() >= PROGRESS_EVENT_INTERVAL
+        {
+            self.flush_file_failures().await?;
+        }
+        Ok(())
+    }
+
+    /// 一次同步一批失败，避免失败风暴产生逐文件全局锁、fsync 和前端事件。
+    async fn flush_file_failures(&mut self) -> Result<(), TransferRunError> {
+        if self.pending_file_failures.is_empty() {
+            return Ok(());
+        }
+        let failures = std::mem::take(&mut self.pending_file_failures);
+        self.failure_batch_started = Instant::now();
+        self.manager
+            .record_file_failures(&self.app, &self.task_id, failures)
+            .await
     }
 
     /// 一次性提交节流窗口内累计的字节、文件数与当前文件。

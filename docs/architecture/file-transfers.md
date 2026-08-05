@@ -28,13 +28,13 @@ Direct and Archive are explicit choices carried by the unified enqueue request. 
 
 ### Direct
 
-Direct copies files individually. A directory is one aggregate task: recoverable file failures are recorded and other files continue, while connection loss, exhausted storage, an unreliable Journal, and commit failures stop the task. Failed files can be retried or ignored in the original aggregate row. Each retry rechecks the source and conflicts without reusing a previous replace-all decision.
+Direct copies files individually. A directory is one aggregate task: recoverable file failures are recorded and other files continue, while connection loss, exhausted storage, an unreliable Journal, and commit failures stop the task. Child conflicts can be skipped or replaced, and either choice can be reused for the remaining conflicts in that execution. Skipped source entries never enter staging and preserve the existing destination. Failed files can be retried or ignored in the original aggregate row. Each retry rechecks the source and conflicts without reusing a previous bulk decision.
 
 SSH transfers use a task-exclusive SFTP session, bounded in-flight requests, offset-based writes, and close-result verification. WSL Direct uses the Host filesystem bridge. Empty directories and portable permission and modification-time metadata are preserved.
 
 ### Archive
 
-Archive builds a tar.gz stream and transfers it once across the environment boundary. Uploads are validated locally before transfer and safely extracted in a private remote work directory. Downloads are created remotely, then validated and extracted locally against the planner manifest.
+Archive builds a tar.gz stream and transfers it once across the environment boundary. Uploads are validated locally before transfer and safely extracted in a private remote work directory. Downloads are created remotely, then validated and extracted locally against the planner manifest. When the destination directory already exists, source-first merge preserves destination-only entries while replacing conflicts, and destination-first merge preserves source-only entries while keeping conflicts unchanged.
 
 Archive rejects absolute paths, parent traversal, links, special files, duplicate manifest entries, unexpected entries, size mismatches, invalid gzip data, and excessive trailing data. SSH Archive requires Linux, bash, tar, gzip, and a private temporary directory. Missing tools produce an explicit failure.
 

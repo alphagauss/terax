@@ -112,22 +112,24 @@
       "destination": "Destination",
       "applyToRemaining": "Use this choice for all remaining conflicts in this task",
       "file": {
-        "title": "Replace the existing file?",
-        "description": "A file already exists at the destination. Replace it to continue the transfer."
+        "title": "A file already exists at the destination",
+        "description": "Choose whether to skip this file or replace the destination."
       },
       "archive_directory": {
         "title": "The destination folder already exists",
-        "description": "Choose whether to replace the whole folder or merge it with the archive."
+        "description": "Replace the entire destination folder, or merge and choose whether conflicting items prefer the source or destination."
       },
       "type_mismatch": {
-        "title": "Replace the conflicting item?",
-        "description": "The source and destination item types differ. Replace the destination to continue."
+        "title": "The destination item has a different type",
+        "description": "Choose whether to skip this item or replace the destination."
       },
       "actions": {
         "cancel": "Cancel transfer",
+        "skip": "Skip destination",
         "replace": "Replace",
-        "replace_directory": "Remove folder and replace",
-        "merge": "Merge and replace duplicate files"
+        "replace_directory": "Replace entire destination folder",
+        "merge": "Merge, prefer source",
+        "merge_skip": "Merge, prefer destination"
       }
     },
     "status": {

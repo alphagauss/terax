@@ -66,9 +66,11 @@ export type TransferConflictKind =
   | "type_mismatch";
 export type TransferConflictDecision =
   | "cancel"
+  | "skip"
   | "replace"
   | "replace_directory"
-  | "merge";
+  | "merge"
+  | "merge_skip";
 
 export type TransferConflict = {
   id: string;

@@ -136,9 +136,11 @@ pub enum TransferConflictKind {
 #[serde(rename_all = "snake_case")]
 pub enum TransferConflictDecision {
     Cancel,
+    Skip,
     Replace,
     ReplaceDirectory,
     Merge,
+    MergeSkip,
 }
 
 /// 当前正在等待用户处理的目标冲突。

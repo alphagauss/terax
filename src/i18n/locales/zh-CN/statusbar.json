@@ -112,22 +112,24 @@
       "destination": "目标",
       "applyToRemaining": "本次任务剩余冲突都使用此选择",
       "file": {
-        "title": "替换已存在的文件？",
-        "description": "目标位置已有同名文件。替换后将继续传输。"
+        "title": "目标位置已有同名文件",
+        "description": "请选择跳过该文件，或替换目标后继续传输。"
       },
       "archive_directory": {
         "title": "目标文件夹已存在",
-        "description": "请选择移除整个目标文件夹后覆盖，或与归档合并并替换重名文件。"
+        "description": "请选择替换整个目标文件夹，或合并并指定重名项目优先保留来源还是目标。"
       },
       "type_mismatch": {
-        "title": "替换类型冲突的项目？",
-        "description": "来源与目标的项目类型不同。替换目标后将继续传输。"
+        "title": "来源与目标的项目类型不同",
+        "description": "请选择跳过该项目，或替换目标后继续传输。"
       },
       "actions": {
         "cancel": "取消传输",
+        "skip": "跳过目标",
         "replace": "替换目标",
-        "replace_directory": "移除文件夹并覆盖",
-        "merge": "合并并替换全部重名文件"
+        "replace_directory": "替换整个目标文件夹",
+        "merge": "合并，来源优先",
+        "merge_skip": "合并，目标优先"
       }
     },
     "status": {

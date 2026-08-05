@@ -27,45 +27,30 @@ pub(crate) enum RootCommitMode {
     Create,
     Replace,
     Merge,
+    MergeSkip,
 }
 
-/// 本地顶层来源的 staging 与最终目标。
+/// 顶层来源的 staging、最终目标和冲突授权。
 #[derive(Clone)]
-pub(crate) struct LocalRoot {
+pub(crate) struct TransferRoot<P> {
     pub(crate) source_path: String,
-    pub(crate) stage: PathBuf,
-    pub(crate) final_path: PathBuf,
+    pub(crate) stage: P,
+    pub(crate) final_path: P,
     pub(crate) kind: TransferEntryKind,
     pub(crate) destination_kind: Option<TransferEntryKind>,
     pub(crate) mode: RootCommitMode,
-    pub(crate) merge_preconditions: Vec<LocalMergePrecondition>,
+    pub(crate) merge_preconditions: Vec<MergePrecondition<P>>,
 }
 
-/// Direct 目录合并在冲突检查时观察到的本地子项状态。
+/// Direct 目录合并在冲突检查时观察到的子项状态。
 #[derive(Clone)]
-pub(crate) struct LocalMergePrecondition {
-    pub(crate) path: PathBuf,
+pub(crate) struct MergePrecondition<P> {
+    pub(crate) path: P,
     pub(crate) expected_kind: Option<TransferEntryKind>,
 }
 
-/// SSH 顶层来源的 staging 与最终目标。
-#[derive(Clone)]
-pub(crate) struct RemoteRoot {
-    pub(crate) source_path: String,
-    pub(crate) stage: String,
-    pub(crate) final_path: String,
-    pub(crate) kind: TransferEntryKind,
-    pub(crate) destination_kind: Option<TransferEntryKind>,
-    pub(crate) mode: RootCommitMode,
-    pub(crate) merge_preconditions: Vec<RemoteMergePrecondition>,
-}
-
-/// Direct 目录合并在冲突检查时观察到的 SSH 子项状态。
-#[derive(Clone)]
-pub(crate) struct RemoteMergePrecondition {
-    pub(crate) path: String,
-    pub(crate) expected_kind: Option<TransferEntryKind>,
-}
+pub(crate) type LocalRoot = TransferRoot<PathBuf>;
+pub(crate) type RemoteRoot = TransferRoot<String>;
 
 /// 确认本地目标尚不存在，未知元数据错误不得被当作空闲目标。
 pub(crate) async fn ensure_local_target_available(path: &Path) -> RunResult<()> {
@@ -140,22 +125,12 @@ pub(crate) fn remote_stage_path(
 /// 按冲突阶段确定的模式公开一个本地 staging 根。
 pub(crate) async fn commit_local_root(root: &LocalRoot) -> RunResult<()> {
     ensure_local_merge_preconditions(root).await?;
-    let stage = root.stage.clone();
     let final_path = root.final_path.clone();
-    let mode = root.mode;
-    let kind = root.kind;
-    let destination_kind = root.destination_kind;
-    tokio::task::spawn_blocking(move || {
-        commit_local_blocking(&stage, &final_path, kind, destination_kind, mode)
-    })
-    .await
-    .map_err(|error| message(format!("join local commit task: {error}")))?
-    .map_err(|error| {
-        message(format!(
-            "commit transfer {}: {error}",
-            root.final_path.display()
-        ))
-    })
+    let root = root.clone();
+    tokio::task::spawn_blocking(move || commit_local_roots_blocking(std::slice::from_ref(&root)))
+        .await
+        .map_err(|error| message(format!("join local commit task: {error}")))?
+        .map_err(|error| message(format!("commit transfer {}: {error}", final_path.display())))
 }
 
 /// 将 Archive 的全部本地根作为一个事务提交，任一发布失败都会恢复全部旧目标。
@@ -182,64 +157,24 @@ pub(crate) async fn commit_remote_root(
         .await;
     }
     ensure_remote_merge_preconditions(session, root).await?;
-
-    let backup = format!("{}.backup", root.stage);
-    let stage = shell_quote(&root.stage);
-    let final_path = shell_quote(&root.final_path);
-    let backup_path = shell_quote(&backup);
-    let merge = if root.mode == RootCommitMode::Merge {
-        remote_merge_command(&stage, &final_path)
-    } else {
-        String::new()
-    };
-    let precondition = remote_precondition(root);
-    let command = format!(
-        r#"set -e
-{precondition}
-if [ -e {backup_path} ] || [ -L {backup_path} ]; then
-  echo 'transfer backup already exists; refusing to discard recovery data' >&2
-  exit 1
-fi
-{merge}
-if [ -f {stage} ] && [ ! -L {stage} ] && [ -f {final_path} ] && [ ! -L {final_path} ]; then
-  mv -f -- {stage} {final_path}
-  exit 0
-fi
-mv -- {final_path} {backup_path}
-if [ -e {final_path} ] || [ -L {final_path} ]; then
-  echo 'transfer destination appeared during commit; original kept in backup' >&2
-  exit 125
-fi
-if mv -- {stage} {final_path}; then
-  rm -rf -- {backup_path} || true
-else
-  status=$?
-  if [ -e {final_path} ] || [ -L {final_path} ] || ! mv -- {backup_path} {final_path}; then
-    echo 'transfer rollback failed; original kept in backup' >&2
-    exit 125
-  fi
-  exit "$status"
-fi
-"#
-    );
-    let output = workspace
-        .exec(&command, None, Duration::from_secs(24 * 60 * 60))
-        .await
-        .map_err(|error| {
-            message(format!(
-                "commit remote transfer {}: {error}",
-                root.final_path
-            ))
-        })?;
-    if output.exit_code == Some(0) && !output.timed_out && !output.truncated {
-        Ok(())
-    } else {
-        Err(message(format!(
-            "commit remote transfer {} failed: {}",
-            root.final_path,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
+    if root.mode == RootCommitMode::Replace
+        && root.kind == TransferEntryKind::File
+        && root.destination_kind == Some(TransferEntryKind::File)
+    {
+        let command = format!(
+            "set -e\n{}mv -f -- {} {}\n",
+            remote_precondition(root),
+            shell_quote(&root.stage),
+            shell_quote(&root.final_path)
+        );
+        return execute_remote_commit(
+            workspace,
+            &command,
+            &format!("commit remote transfer {}", root.final_path),
+        )
+        .await;
     }
+    commit_remote_roots(workspace, std::slice::from_ref(root)).await
 }
 
 /// 在一次目标端 Shell 事务中提交全部 SSH Archive 根，并在失败时反向回滚。
@@ -250,6 +185,12 @@ pub(crate) async fn commit_remote_roots(
     if roots.is_empty() {
         return Ok(());
     }
+    let command = remote_transaction_command(roots);
+    execute_remote_commit(workspace, &command, "commit remote archive transaction").await
+}
+
+/// 生成可单元测试的 SSH 多根提交与反向回滚脚本。
+fn remote_transaction_command(roots: &[RemoteRoot]) -> String {
     let mut command = String::from("set -e\n");
     for root in roots {
         let stage = shell_quote(&root.stage);
@@ -261,8 +202,14 @@ pub(crate) async fn commit_remote_roots(
                 "if [ -e {backup} ] || [ -L {backup} ]; then echo 'archive backup already exists; refusing to discard recovery data' >&2; exit 1; fi\n"
             ));
         }
-        if root.mode == RootCommitMode::Merge {
-            command.push_str(&remote_merge_command(&stage, &final_path));
+        match root.mode {
+            RootCommitMode::Merge => {
+                command.push_str(&remote_source_wins_merge_command(&stage, &final_path));
+            }
+            RootCommitMode::MergeSkip => {
+                command.push_str(&remote_target_wins_merge_command(&stage, &final_path));
+            }
+            RootCommitMode::Create | RootCommitMode::Replace => {}
         }
     }
     command.push_str("rollback() {\n  status=$?\n  trap - EXIT\n  set +e\n  rollback_failed=0\n");
@@ -310,21 +257,29 @@ pub(crate) async fn commit_remote_roots(
             ));
         }
     }
+    command
+}
+
+async fn execute_remote_commit(
+    workspace: &Arc<RemoteWorkspace>,
+    command: &str,
+    operation: &str,
+) -> RunResult<()> {
     let output = workspace
-        .exec(&command, None, Duration::from_secs(24 * 60 * 60))
+        .exec(command, None, Duration::from_secs(24 * 60 * 60))
         .await
-        .map_err(|error| message(format!("commit remote archive transaction: {error}")))?;
+        .map_err(|error| message(format!("{operation}: {error}")))?;
     if output.exit_code == Some(0) && !output.timed_out && !output.truncated {
         Ok(())
     } else {
         Err(message(format!(
-            "commit remote archive transaction failed: {}",
+            "{operation} failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )))
     }
 }
 
-fn remote_merge_command(stage: &str, final_path: &str) -> String {
+fn remote_source_wins_merge_command(stage: &str, final_path: &str) -> String {
     format!(
         r#"
 find -P {final_path} -mindepth 1 -exec sh -c '
@@ -357,6 +312,69 @@ for item do
   [ "$status" = 0 ] || exit "$status"
 done
 ' terax-merge {final_path} {stage} {{}} +
+"#
+    )
+}
+
+/// 生成目标优先的远端合并脚本，重名项保留目标版本，来源独有项保留在 staging。
+fn remote_target_wins_merge_command(stage: &str, final_path: &str) -> String {
+    format!(
+        r#"
+find -P {final_path} -mindepth 1 -exec sh -c '
+root=$1
+stage=$2
+shift 2
+for item do
+  relative=${{item#"$root"/}}
+  destination=$stage/$relative
+  parent=${{destination%/*}}
+  restore_parent=0
+  permissions=$(LC_ALL=C ls -ld -- "$parent") || exit $?
+  case "$permissions" in
+    ??w*) ;;
+    *) chmod u+w -- "$parent" || exit $?; restore_parent=1 ;;
+  esac
+  status=0
+  if [ -d "$item" ] && [ ! -L "$item" ]; then
+    if [ -d "$destination" ] && [ ! -L "$destination" ]; then
+      :
+    else
+      if [ -e "$destination" ] || [ -L "$destination" ]; then
+        if [ -d "$destination" ] && [ ! -L "$destination" ]; then chmod -R u+w -- "$destination" || status=$?; fi
+        [ "$status" = 0 ] && rm -rf -- "$destination" || status=$?
+      fi
+      [ "$status" = 0 ] && mkdir -- "$destination" || status=$?
+    fi
+  else
+    if [ -e "$destination" ] || [ -L "$destination" ]; then
+      if [ -d "$destination" ] && [ ! -L "$destination" ]; then chmod -R u+w -- "$destination" || status=$?; fi
+      [ "$status" = 0 ] && rm -rf -- "$destination" || status=$?
+    fi
+    if [ "$status" = 0 ]; then
+      if [ -f "$item" ] && [ ! -L "$item" ]; then
+        ln -- "$item" "$destination" 2>/dev/null || cp -a -- "$item" "$destination" || status=$?
+      else
+        cp -a -- "$item" "$destination" || status=$?
+      fi
+    fi
+  fi
+  if [ "$restore_parent" = 1 ]; then chmod u-w -- "$parent" || exit $?; fi
+  [ "$status" = 0 ] || exit "$status"
+done
+' terax-merge-target {final_path} {stage} {{}} +
+find -P {final_path} -depth -type d -exec sh -c '
+root=$1
+stage=$2
+shift 2
+for item do
+  relative=${{item#"$root"/}}
+  destination=$stage/$relative
+  chmod --reference="$item" -- "$destination" || exit $?
+  touch -r "$item" -- "$destination" || exit $?
+done
+' terax-merge-target-metadata {final_path} {stage} {{}} +
+chmod --reference={final_path} -- {stage}
+touch -r {final_path} -- {stage}
 "#
     )
 }
@@ -396,8 +414,23 @@ fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
                 ),
             ));
         }
-        if root.mode == RootCommitMode::Merge {
-            merge_target_only_blocking(&root.final_path, &root.stage)?;
+        match root.mode {
+            RootCommitMode::Merge => {
+                merge_target_only_blocking(&root.final_path, &root.stage)?;
+            }
+            RootCommitMode::MergeSkip => {
+                merge_target_wins_blocking(&root.final_path, &root.stage)?;
+            }
+            RootCommitMode::Create | RootCommitMode::Replace => {}
+        }
+    }
+
+    if let [root] = roots {
+        if root.mode == RootCommitMode::Replace
+            && root.kind == TransferEntryKind::File
+            && root.destination_kind == Some(TransferEntryKind::File)
+        {
+            return replace_file(&root.stage, &root.final_path);
         }
     }
 
@@ -427,7 +460,7 @@ fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
         let backup = local_backup_path(&roots[index]);
         if let Err(error) = remove_local_path_blocking(&backup) {
             log::warn!(
-                "failed to clean committed archive backup {}: {error}",
+                "failed to clean committed transfer backup {}: {error}",
                 backup.display()
             );
         }
@@ -473,61 +506,6 @@ fn local_backup_path(root: &LocalRoot) -> PathBuf {
             .and_then(|name| name.to_str())
             .unwrap_or(".terax-transfer")
     ))
-}
-
-fn commit_local_blocking(
-    stage: &Path,
-    final_path: &Path,
-    kind: TransferEntryKind,
-    destination_kind: Option<TransferEntryKind>,
-    mode: RootCommitMode,
-) -> std::io::Result<()> {
-    ensure_local_commit_precondition(final_path, destination_kind)?;
-    if mode == RootCommitMode::Create {
-        return rename_no_replace(stage, final_path);
-    }
-    let backup = stage.with_file_name(format!(
-        "{}.backup",
-        stage
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(".terax-transfer")
-    ));
-    if local_entry_kind_blocking(&backup)?.is_some() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            format!(
-                "transfer backup already exists; refusing to discard recovery data: {}",
-                backup.display()
-            ),
-        ));
-    }
-    if mode == RootCommitMode::Replace
-        && kind == TransferEntryKind::File
-        && std::fs::symlink_metadata(final_path)
-            .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
-    {
-        return replace_file(stage, final_path);
-    }
-    if mode == RootCommitMode::Merge {
-        merge_target_only_blocking(final_path, stage)?;
-    }
-    rename_no_replace(final_path, &backup)?;
-    match rename_no_replace(stage, final_path) {
-        Ok(()) => {
-            if let Err(error) = remove_local_path_blocking(&backup) {
-                log::warn!(
-                    "failed to clean committed transfer backup {}: {error}",
-                    backup.display()
-                );
-            }
-            Ok(())
-        }
-        Err(error) => {
-            let rollback = rename_no_replace(&backup, final_path);
-            Err(transaction_error(error, rollback))
-        }
-    }
 }
 
 /// 确认 Direct 合并中的每个可达来源子项仍保持冲突检查时的目标类型。
@@ -579,17 +557,15 @@ async fn ensure_remote_merge_preconditions(
     if root.mode != RootCommitMode::Merge {
         return Ok(());
     }
-    let mut pending = stream::iter(root.merge_preconditions.iter().cloned())
-        .map(|precondition| {
-            let session = session.clone();
-            async move {
-                let actual = remote_entry_kind(&session, &precondition.path).await?;
-                Ok::<_, TransferRunError>((precondition, actual))
-            }
-        })
-        .buffer_unordered(MAX_REMOTE_PRECONDITION_PROBES);
-    while let Some(result) = pending.next().await {
-        let (precondition, actual) = result?;
+    let kinds = super::ssh::io::entry_kinds(
+        session,
+        root.merge_preconditions
+            .iter()
+            .map(|precondition| precondition.path.clone()),
+    )
+    .await?;
+    for precondition in &root.merge_preconditions {
+        let actual = kinds.get(&precondition.path).copied().flatten();
         if actual != precondition.expected_kind {
             return Err(message(format!(
                 "remote merge destination changed after conflict approval: {}",
@@ -598,28 +574,6 @@ async fn ensure_remote_merge_preconditions(
         }
     }
     Ok(())
-}
-
-async fn remote_entry_kind(
-    session: &Arc<SftpSession>,
-    path: &str,
-) -> RunResult<Option<TransferEntryKind>> {
-    match super::ssh::io::run(
-        format!("stat remote merge destination {path}"),
-        session.symlink_metadata(path.to_string()),
-    )
-    .await
-    {
-        Ok(metadata) if metadata.file_type().is_file() => Ok(Some(TransferEntryKind::File)),
-        Ok(metadata) if metadata.file_type().is_dir() => Ok(Some(TransferEntryKind::Directory)),
-        Ok(_) => Ok(Some(TransferEntryKind::Other)),
-        Err(TransferRunError::Failed(failure))
-            if failure.code == TransferErrorCode::SourceUnavailable =>
-        {
-            Ok(None)
-        }
-        Err(error) => Err(error),
-    }
 }
 
 /// 在本地破坏性提交边界重新核对用户授权时看到的目标类型。
@@ -733,6 +687,68 @@ fn merge_target_only_blocking(source: &Path, stage: &Path) -> std::io::Result<()
         })?;
     }
     Ok(())
+}
+
+/// 将目标树覆盖到来源 staging，重名项保留目标版本，来源独有项保持不变。
+fn merge_target_wins_blocking(target: &Path, stage: &Path) -> std::io::Result<()> {
+    let target_metadata = std::fs::symlink_metadata(target)?;
+    if !target_metadata.is_dir() || target_metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            format!(
+                "merge target changed to a non-directory: {}",
+                target.display()
+            ),
+        ));
+    }
+    with_writable_local_directory(stage, || {
+        for entry in std::fs::read_dir(target)? {
+            let entry = entry?;
+            let target_path = entry.path();
+            let stage_path = stage.join(entry.file_name());
+            let target_metadata = std::fs::symlink_metadata(&target_path)?;
+            match std::fs::symlink_metadata(&stage_path) {
+                Ok(stage_metadata)
+                    if target_metadata.is_dir()
+                        && !target_metadata.file_type().is_symlink()
+                        && stage_metadata.is_dir()
+                        && !stage_metadata.file_type().is_symlink() =>
+                {
+                    merge_target_wins_blocking(&target_path, &stage_path)?;
+                }
+                Ok(_) => {
+                    remove_merge_staging_path(&stage_path)?;
+                    copy_local_tree_blocking(&target_path, &stage_path)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    copy_local_tree_blocking(&target_path, &stage_path)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    })?;
+    copy_local_metadata(target, stage, &target_metadata)
+}
+
+/// 删除任务私有 staging 中被目标版本取代的只读条目，不接触最终目标路径。
+#[allow(clippy::permissions_set_readonly_false)]
+fn remove_merge_staging_path(path: &Path) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        make_local_directory_writable(path, &metadata.permissions())?;
+        for entry in std::fs::read_dir(path)? {
+            remove_merge_staging_path(&entry?.path())?;
+        }
+        return std::fs::remove_dir(path);
+    }
+    #[cfg(windows)]
+    if metadata.permissions().readonly() {
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions)?;
+    }
+    std::fs::remove_file(path)
 }
 
 fn copy_local_tree_blocking(source: &Path, destination: &Path) -> std::io::Result<()> {
@@ -1086,6 +1102,96 @@ mod tests {
         );
     }
 
+    #[test]
+    fn remote_transaction_command_keeps_preconditions_and_reverse_rollback() {
+        let roots = vec![
+            RemoteRoot {
+                source_path: "/source/new".into(),
+                stage: "/target/.terax-part-task-0".into(),
+                final_path: "/target/new".into(),
+                kind: TransferEntryKind::Directory,
+                destination_kind: None,
+                mode: RootCommitMode::Create,
+                merge_preconditions: Vec::new(),
+            },
+            RemoteRoot {
+                source_path: "/source/existing".into(),
+                stage: "/target/.terax-part-task-1".into(),
+                final_path: "/target/existing".into(),
+                kind: TransferEntryKind::Directory,
+                destination_kind: Some(TransferEntryKind::Directory),
+                mode: RootCommitMode::Merge,
+                merge_preconditions: Vec::new(),
+            },
+            RemoteRoot {
+                source_path: "/source/preserve".into(),
+                stage: "/target/.terax-part-task-2".into(),
+                final_path: "/target/preserve".into(),
+                kind: TransferEntryKind::Directory,
+                destination_kind: Some(TransferEntryKind::Directory),
+                mode: RootCommitMode::MergeSkip,
+                merge_preconditions: Vec::new(),
+            },
+        ];
+
+        let command = remote_transaction_command(&roots);
+
+        assert!(command.contains("transfer destination changed after conflict approval"));
+        assert!(command.contains("find -P '/target/existing'"));
+        assert!(command.contains("terax-merge-target '/target/preserve'"));
+        assert!(command.contains("chmod --reference='/target/preserve'"));
+        assert!(command.contains("backed_1=1"));
+        assert!(command.find("published_1").unwrap() < command.find("published_0").unwrap());
+        assert!(command.ends_with("rm -rf -- '/target/.terax-part-task-2.backup' || true\n"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn remote_target_first_transaction_preserves_both_sides_with_target_precedence() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("stage");
+        let final_path = directory.path().join("final");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::create_dir(&final_path).unwrap();
+        std::fs::write(stage.join("same.txt"), b"source").unwrap();
+        std::fs::write(stage.join("source-only.txt"), b"source-only").unwrap();
+        std::fs::write(final_path.join("same.txt"), b"target").unwrap();
+        std::fs::write(final_path.join("target-only.txt"), b"target-only").unwrap();
+        let root = RemoteRoot {
+            source_path: "/source".into(),
+            stage: stage.to_string_lossy().into_owned(),
+            final_path: final_path.to_string_lossy().into_owned(),
+            kind: TransferEntryKind::Directory,
+            destination_kind: Some(TransferEntryKind::Directory),
+            mode: RootCommitMode::MergeSkip,
+            merge_preconditions: Vec::new(),
+        };
+
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(remote_transaction_command(&[root]))
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read(final_path.join("same.txt")).unwrap(),
+            b"target"
+        );
+        assert_eq!(
+            std::fs::read(final_path.join("source-only.txt")).unwrap(),
+            b"source-only"
+        );
+        assert_eq!(
+            std::fs::read(final_path.join("target-only.txt")).unwrap(),
+            b"target-only"
+        );
+    }
+
     #[tokio::test]
     async fn local_commit_never_replaces_an_existing_target() {
         let directory = tempfile::tempdir().unwrap();
@@ -1329,6 +1435,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_directory_target_first_merge_preserves_conflicts_and_source_only_entries() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = directory.path().join("stage");
+        let final_path = directory.path().join("final");
+        tokio::fs::create_dir(&stage).await.unwrap();
+        tokio::fs::create_dir(&final_path).await.unwrap();
+        tokio::fs::write(stage.join("same.txt"), b"source")
+            .await
+            .unwrap();
+        tokio::fs::write(stage.join("source-only.txt"), b"source-only")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(stage.join("type-conflict"))
+            .await
+            .unwrap();
+        tokio::fs::write(stage.join("type-conflict/nested.txt"), b"source")
+            .await
+            .unwrap();
+        tokio::fs::write(final_path.join("same.txt"), b"target")
+            .await
+            .unwrap();
+        tokio::fs::write(final_path.join("target-only.txt"), b"target-only")
+            .await
+            .unwrap();
+        tokio::fs::write(final_path.join("type-conflict"), b"target-file")
+            .await
+            .unwrap();
+        let root = LocalRoot {
+            source_path: "source".into(),
+            stage,
+            final_path,
+            kind: TransferEntryKind::Directory,
+            destination_kind: Some(TransferEntryKind::Directory),
+            mode: RootCommitMode::MergeSkip,
+            merge_preconditions: Vec::new(),
+        };
+
+        commit_local_root(&root).await.unwrap();
+
+        assert_eq!(
+            tokio::fs::read(root.final_path.join("same.txt"))
+                .await
+                .unwrap(),
+            b"target"
+        );
+        assert_eq!(
+            tokio::fs::read(root.final_path.join("source-only.txt"))
+                .await
+                .unwrap(),
+            b"source-only"
+        );
+        assert_eq!(
+            tokio::fs::read(root.final_path.join("target-only.txt"))
+                .await
+                .unwrap(),
+            b"target-only"
+        );
+        assert_eq!(
+            tokio::fs::read(root.final_path.join("type-conflict"))
+                .await
+                .unwrap(),
+            b"target-file"
+        );
+    }
+
+    #[tokio::test]
     async fn local_directory_merge_rejects_a_new_unapproved_collision() {
         let directory = tempfile::tempdir().unwrap();
         let stage = directory.path().join("stage");
@@ -1347,7 +1519,7 @@ mod tests {
             kind: TransferEntryKind::Directory,
             destination_kind: Some(TransferEntryKind::Directory),
             mode: RootCommitMode::Merge,
-            merge_preconditions: vec![LocalMergePrecondition {
+            merge_preconditions: vec![MergePrecondition {
                 path: collision.clone(),
                 expected_kind: None,
             }],

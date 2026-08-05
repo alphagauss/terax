@@ -10,6 +10,7 @@ import {
   createElement,
   type ButtonHTMLAttributes,
   type ChangeEvent,
+  type HTMLAttributes,
   type InputHTMLAttributes,
   type ReactElement,
   type ReactNode,
@@ -48,17 +49,23 @@ vi.mock("@/components/ui/alert-dialog", () => {
   const Wrapper = ({ children }: { children?: ReactNode }) => children;
   const Action = ({
     children,
-    variant: _variant,
+    variant,
     ...props
   }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) =>
-    createElement("button", { type: "button", ...props }, children);
+    createElement(
+      "button",
+      { type: "button", "data-variant": variant, ...props },
+      children,
+    );
+  const Footer = ({ children, ...props }: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", props, children);
   return {
     AlertDialog: Wrapper,
     AlertDialogAction: Action,
     AlertDialogCancel: Action,
     AlertDialogContent: Wrapper,
     AlertDialogDescription: Wrapper,
-    AlertDialogFooter: Wrapper,
+    AlertDialogFooter: Footer,
     AlertDialogHeader: Wrapper,
     AlertDialogTitle: Wrapper,
   };
@@ -136,7 +143,7 @@ function render(element: ReactElement) {
 }
 
 describe("transfer conflict dialog", () => {
-  it("renders only declared decisions and submits replace-all authorization", () => {
+  it("renders only declared decisions and submits skip-all authorization", () => {
     const conflict: TransferConflict = {
       id: "conflict",
       kind: "file",
@@ -144,7 +151,7 @@ describe("transfer conflict dialog", () => {
       destinationKind: "file",
       sourcePath: "/source/file",
       destinationPath: "/target/file",
-      decisions: ["cancel", "replace"],
+      decisions: ["cancel", "skip", "replace"],
       allowApplyToRemaining: true,
     };
     const { container, root } = render(
@@ -157,7 +164,12 @@ describe("transfer conflict dialog", () => {
 
     expect(buttons.map((button) => button.textContent)).toEqual([
       "transfers.conflict.actions.cancel",
+      "transfers.conflict.actions.skip",
       "transfers.conflict.actions.replace",
+    ]);
+    expect(buttons.slice(1).map((button) => button.dataset.variant)).toEqual([
+      "default",
+      "destructive",
     ]);
     act(() => checkbox?.click());
     act(() => buttons[1]?.click());
@@ -165,8 +177,49 @@ describe("transfer conflict dialog", () => {
     expect(mocks.resolveConflict).toHaveBeenCalledWith({
       taskId: "task",
       conflictId: "conflict",
-      decision: "replace",
+      decision: "skip",
       applyToRemaining: true,
+    });
+    act(() => root.unmount());
+  });
+
+  it("offers both source-first and destination-first Archive merges", () => {
+    const conflict: TransferConflict = {
+      id: "archive-conflict",
+      kind: "archive_directory",
+      sourceKind: "directory",
+      destinationKind: "directory",
+      sourcePath: "/source/folder",
+      destinationPath: "/target/folder",
+      decisions: ["cancel", "replace_directory", "merge", "merge_skip"],
+      allowApplyToRemaining: false,
+    };
+    const { container, root } = render(
+      createElement(TransferConflictDialog, { taskId: "task", conflict }),
+    );
+    const buttons = Array.from(container.querySelectorAll("button"));
+
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "transfers.conflict.actions.cancel",
+      "transfers.conflict.actions.replace_directory",
+      "transfers.conflict.actions.merge",
+      "transfers.conflict.actions.merge_skip",
+    ]);
+    expect(container.querySelector(".grid-cols-2")).not.toBeNull();
+    expect(buttons.every((button) => button.className.includes("w-full"))).toBe(
+      true,
+    );
+    expect(buttons.slice(1).map((button) => button.dataset.variant)).toEqual([
+      "destructive",
+      "secondary",
+      "default",
+    ]);
+    act(() => buttons[3]?.click());
+    expect(mocks.resolveConflict).toHaveBeenCalledWith({
+      taskId: "task",
+      conflictId: "archive-conflict",
+      decision: "merge_skip",
+      applyToRemaining: false,
     });
     act(() => root.unmount());
   });
