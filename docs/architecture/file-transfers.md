@@ -30,7 +30,7 @@ Direct and Archive are explicit choices carried by the unified enqueue request. 
 
 Direct copies files individually. A directory is one aggregate task: recoverable file failures are recorded and other files continue, while connection loss, exhausted storage, an unreliable Journal, and commit failures stop the task. Child conflicts can be skipped or replaced, and either choice can be reused for the remaining conflicts in that execution. Skipped source entries never enter staging and preserve the existing destination. Failed files can be retried or ignored in the original aggregate row. Each retry rechecks the source and conflicts without reusing a previous bulk decision.
 
-SSH transfers use a task-exclusive SFTP session, bounded in-flight requests, offset-based writes, and close-result verification. WSL Direct uses the Host filesystem bridge. Empty directories and portable permission and modification-time metadata are preserved.
+SSH transfers use a task-exclusive SFTP session, bounded in-flight requests, offset-based writes, and close-result verification. WSL Direct uses the Host filesystem bridge. Empty directories and portable permission and modification-time metadata are preserved. Unix modes retain their permission semantics; Windows `ReadOnly` is preserved only for files because the directory attribute does not represent POSIX write access.
 
 ### Archive
 
@@ -46,6 +46,7 @@ Archive rejects absolute paths, parent traversal, links, special files, duplicat
 - A new destination uses no-replace publication. Existing targets are changed only by an explicit conflict decision. Direct directory merges also revalidate every reachable source path observed during conflict checking, including paths that were absent.
 - Direct can expose roots one at a time. If a later root fails, already committed roots remain and the Workspace receives a filesystem-change event. Archive publishes all roots as one transaction and rolls them back together on failure.
 - Cancel and failure cleanup only target paths derived from the task ID. After a root is successfully published, the same restricted cleanup path also removes its derived backup. A backup retained by a failed commit or rollback is recovery data and is never scheduled for generic cleanup. Remote cleanup additionally requires an exact canonical destination parent captured by the task, and never recursively removes a final destination.
+- Owned staging and committed-backup cleanup first uses one same-filesystem traversal. If directory permissions block removal, it restores only the owner permissions needed inside that temporary tree and retries. It does not follow symbolic links, cross a nested mount, modify the published destination, or elevate privileges; a temporary root that is itself a mount point is refused.
 - Direct rechecks planned source identity and file size. SSH transport provides packet integrity. Archive also validates gzip and the complete manifest. A second content-hash protocol is not included because the current threat model does not require it; adding one needs an explicit algorithm, performance budget, and user-visible contract.
 
 ## Failure and retry model

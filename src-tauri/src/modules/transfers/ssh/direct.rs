@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::modules::transfers::commit::{
-    cleanup_local_committed_backups, cleanup_local_staging, commit_local_root, commit_remote_root,
+    cleanup_local_staging, commit_local_root, commit_remote_root, schedule_local_cleanup,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::TransferRunError;
@@ -294,9 +294,9 @@ pub(crate) async fn execute_upload(
         &plan.workspace,
         plan.task_id.clone(),
         plan.owner_task_id.clone(),
-        &plan.roots,
+        plan.roots.iter().map(|root| root.final_path.as_str()),
     );
-    let mut committed_backups = Vec::new();
+    let mut pending_cleanup = Vec::new();
     let result = async {
         for directory in &plan.directories {
             context.checkpoint().await?;
@@ -339,8 +339,7 @@ pub(crate) async fn execute_upload(
         context.begin_finalizing().await?;
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            commit_remote_root(&plan.workspace, &plan.session, root).await?;
-            committed_backups.push(format!("{}.backup", root.stage));
+            pending_cleanup.extend(commit_remote_root(&plan.workspace, &plan.session, root).await?);
             let completed = plan
                 .files
                 .iter()
@@ -352,7 +351,7 @@ pub(crate) async fn execute_upload(
         Ok(())
     }
     .await;
-    let mut pending = committed_backups;
+    let mut pending = pending_cleanup;
     if result.is_err() {
         pending.extend(plan.roots.iter().map(|root| root.stage.clone()));
     }
@@ -443,7 +442,7 @@ pub(crate) async fn execute_download(
         context.begin_finalizing().await?;
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            commit_local_root(root).await?;
+            let pending_cleanup = commit_local_root(root).await?;
             let completed = plan
                 .files
                 .iter()
@@ -451,12 +450,7 @@ pub(crate) async fn execute_download(
                 .filter(|(index, file)| successful[*index] && file.root_index == root_index)
                 .count() as u64;
             let progress = context.roots_committed(1, completed).await;
-            cleanup_local_committed_backups(
-                &plan.task_id,
-                &plan.owner_task_id,
-                std::slice::from_ref(root),
-            )
-            .await;
+            schedule_local_cleanup(&plan.owner_task_id, pending_cleanup);
             progress?;
         }
         Ok(())

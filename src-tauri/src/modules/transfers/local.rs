@@ -6,7 +6,7 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::commit::{
-    cleanup_local_committed_backups, cleanup_local_staging, commit_local_root, commit_local_roots,
+    cleanup_local_staging, commit_local_root, commit_local_roots, schedule_local_cleanup,
 };
 use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
@@ -135,7 +135,7 @@ async fn verify_apply_commit_inner(
     if count_after_commit {
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            commit_local_root(root).await?;
+            let pending_cleanup = commit_local_root(root).await?;
             let completed = plan
                 .files
                 .iter()
@@ -143,21 +143,16 @@ async fn verify_apply_commit_inner(
                 .filter(|(index, file)| successful[*index] && file.root_index == root_index)
                 .count() as u64;
             let progress = context.roots_committed(1, completed).await;
-            cleanup_local_committed_backups(
-                &plan.task_id,
-                &plan.owner_task_id,
-                std::slice::from_ref(root),
-            )
-            .await;
+            schedule_local_cleanup(&plan.owner_task_id, pending_cleanup);
             progress?;
         }
     } else {
         context.checkpoint().await?;
-        commit_local_roots(&plan.roots).await?;
+        let pending_cleanup = commit_local_roots(&plan.roots).await?;
         let progress = context
             .roots_committed(plan.roots.len() as u64, transaction_files)
             .await;
-        cleanup_local_committed_backups(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
+        schedule_local_cleanup(&plan.owner_task_id, pending_cleanup);
         progress?;
     }
     Ok(())
