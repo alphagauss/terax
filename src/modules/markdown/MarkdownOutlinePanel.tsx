@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Markdown 文档目录及其虚拟化标题列表。
+ * 目录使用独立绘制边界，避免滚动时的高亮过渡使整张 WebView 重新栅格化。
+ */
+
 import { cn } from "@/lib/utils";
 import type { MarkdownOutlineItem } from "@/modules/markdown/lib/outline";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -11,6 +16,11 @@ type Props = {
   onSelect: (item: MarkdownOutlineItem) => void;
 };
 
+/**
+ * Markdown 文档目录。
+ *
+ * 负责虚拟化标题行、跟随当前阅读位置并处理标题跳转，不持有正文滚动状态。
+ */
 export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
   const navRef = useRef<HTMLElement>(null);
   const baseLevel = useMemo(
@@ -42,7 +52,7 @@ export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
   return (
     <div
       data-markdown-outline
-      className="flex h-full min-h-0 flex-col bg-sidebar"
+      className="flex h-full min-h-0 flex-col contain-paint bg-sidebar"
     >
       <div className="flex h-12 shrink-0 items-center border-b border-border/60 px-3">
         <span className="truncate text-xs font-medium text-foreground">
