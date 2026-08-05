@@ -536,6 +536,10 @@ export function TransferConflictDialog({
   const { t } = useTranslation("statusbar");
   const [applyToRemaining, setApplyToRemaining] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const archiveDirectory = conflict.kind === "archive_directory";
+  const archiveActionClassName = archiveDirectory
+    ? "h-auto min-h-9 w-full whitespace-normal py-2 text-center leading-tight"
+    : undefined;
 
   const submit = (decision: TransferConflictDecision) => {
     setSubmitting(true);
@@ -604,11 +608,18 @@ export function TransferConflictDialog({
             {t("transfers.conflict.applyToRemaining")}
           </label>
         ) : null}
-        <AlertDialogFooter>
+        <AlertDialogFooter
+          className={
+            archiveDirectory
+              ? "grid grid-cols-2 gap-2 sm:grid sm:grid-cols-2"
+              : undefined
+          }
+        >
           {conflict.decisions.map((decision) =>
             decision === "cancel" ? (
               <AlertDialogCancel
                 key={decision}
+                className={archiveActionClassName}
                 disabled={submitting}
                 onClick={() => submit(decision)}
               >
@@ -617,9 +628,8 @@ export function TransferConflictDialog({
             ) : (
               <AlertDialogAction
                 key={decision}
-                variant={
-                  decision === "replace_directory" ? "destructive" : "default"
-                }
+                variant={conflictActionVariant(decision)}
+                className={archiveActionClassName}
                 disabled={submitting}
                 onClick={() => submit(decision)}
               >
@@ -631,6 +641,23 @@ export function TransferConflictDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+/** 按冲突动作的风险和推荐程度选择稳定的按钮底色。 */
+function conflictActionVariant(
+  decision: TransferConflictDecision,
+): "default" | "outline" | "secondary" | "destructive" {
+  switch (decision) {
+    case "replace":
+    case "replace_directory":
+      return "destructive";
+    case "merge":
+      return "secondary";
+    case "skip":
+      return "default";
+    default:
+      return "default";
+  }
 }
 
 function TaskButton({

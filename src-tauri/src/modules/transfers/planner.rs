@@ -42,8 +42,10 @@ struct PlanningTaskIdentity<'a> {
 
 /// 同一宿主文件系统中的单文件复制项。
 pub(crate) struct LocalFile {
+    pub(crate) root_index: usize,
     pub(crate) source: PathBuf,
     pub(crate) destination: PathBuf,
+    pub(crate) final_destination: PathBuf,
     pub(crate) retry_source_path: String,
     pub(crate) final_destination_path: String,
     pub(crate) size: u64,
@@ -53,8 +55,10 @@ pub(crate) struct LocalFile {
 
 /// 创建后需要在子项完成时恢复元数据的目录。
 pub(crate) struct PlannedDirectory<S, D> {
+    pub(crate) root_index: usize,
     pub(crate) source: S,
     pub(crate) destination: D,
+    pub(crate) final_destination: D,
     pub(crate) metadata: EntryMetadata,
     pub(crate) source_identity: Option<LocalSourceIdentity>,
 }
@@ -85,8 +89,10 @@ pub(crate) enum WslArchiveContext {
 
 /// 从宿主机写入 SSH staging 的单文件复制项。
 pub(crate) struct RemoteUploadFile {
+    pub(crate) root_index: usize,
     pub(crate) source: PathBuf,
     pub(crate) destination: String,
+    pub(crate) final_destination: String,
     pub(crate) size: u64,
     pub(crate) metadata: EntryMetadata,
     pub(crate) source_identity: Option<LocalSourceIdentity>,
@@ -106,8 +112,10 @@ pub(crate) struct RemoteUploadPlan {
 
 /// 从 SSH 来源写入本地 staging 的单文件复制项。
 pub(crate) struct RemoteDownloadFile {
+    pub(crate) root_index: usize,
     pub(crate) source: String,
     pub(crate) destination: PathBuf,
+    pub(crate) final_destination: PathBuf,
     pub(crate) size: u64,
     pub(crate) metadata: EntryMetadata,
 }
@@ -209,6 +217,19 @@ impl PreparedTransfer {
     pub(crate) fn target_keys(&self) -> Vec<String> {
         self.manifest.target_keys()
     }
+
+    /// 发布当前 Manifest 的实际执行总量，冲突跳过条目后可再次调用以收敛进度。
+    pub(crate) async fn publish_totals(&self, context: &mut ExecutionContext) -> RunResult<()> {
+        let (total_files, total_bytes) = self.manifest.totals();
+        context
+            .set_totals(
+                total_files,
+                total_bytes,
+                self.manifest.root_count(),
+                self.manifest.has_directory(),
+            )
+            .await
+    }
 }
 
 /// 扫描传输来源并生成不产生写入副作用的执行计划。
@@ -220,13 +241,14 @@ pub(crate) async fn prepare(
     request: &EnqueueTransferRequest,
     task_id: &str,
     strategy: TransferStrategy,
-    context: &ExecutionContext,
+    context: &mut ExecutionContext,
 ) -> RunResult<PreparedTransfer> {
     context.checkpoint().await?;
     let scan_contents = scans_subtree(strategy);
+    let owner_id = context.task_id().to_string();
     let task = PlanningTaskIdentity {
         staging_id: task_id,
-        owner_id: context.task_id(),
+        owner_id: &owner_id,
     };
     let plan = match workspace {
         WorkspaceEnv::Local => {
@@ -321,16 +343,9 @@ pub(crate) async fn prepare(
         }
     };
 
-    let (total_files, total_bytes) = plan.totals();
-    context
-        .set_totals(
-            total_files,
-            total_bytes,
-            plan.root_count(),
-            plan.has_directory(),
-        )
-        .await?;
-    Ok(PreparedTransfer { manifest: plan })
+    let prepared = PreparedTransfer { manifest: plan };
+    prepared.publish_totals(context).await?;
+    Ok(prepared)
 }
 
 /// 扫描同一宿主文件系统中的来源，并为每个顶层项目生成同级 staging 目标。
@@ -341,7 +356,7 @@ async fn plan_local(
     wsl: WslArchiveContext,
     task: PlanningTaskIdentity<'_>,
     scan_contents: bool,
-    context: &ExecutionContext,
+    context: &mut ExecutionContext,
 ) -> RunResult<LocalPlan> {
     let destination_metadata = tokio::fs::metadata(&destination_parent)
         .await
@@ -456,8 +471,10 @@ async fn plan_local(
                 &final_path,
             )?;
             plan.files.push(LocalFile {
+                root_index,
                 source,
                 destination: stage,
+                final_destination: final_path,
                 retry_source_path,
                 final_destination_path,
                 size: metadata.len(),
@@ -468,8 +485,10 @@ async fn plan_local(
         }
 
         plan.directories.push(PlannedDirectory {
+            root_index,
             source: source.clone(),
             destination: stage.clone(),
+            final_destination: final_path.clone(),
             metadata: EntryMetadata::from_local(&metadata),
             source_identity,
         });
@@ -531,8 +550,10 @@ async fn plan_local(
                 let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
                 if metadata.is_dir() {
                     plan.directories.push(PlannedDirectory {
+                        root_index,
                         source: source_path.clone(),
                         destination: destination_path.clone(),
+                        final_destination: final_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
                         source_identity,
                     });
@@ -547,8 +568,10 @@ async fn plan_local(
                         &final_path,
                     )?;
                     plan.files.push(LocalFile {
+                        root_index,
                         source: source_path,
                         destination: destination_path,
+                        final_destination: final_path,
                         retry_source_path,
                         final_destination_path,
                         size: metadata.len(),
@@ -570,7 +593,7 @@ async fn plan_remote_upload(
     destination_parent: &str,
     task: PlanningTaskIdentity<'_>,
     scan_contents: bool,
-    context: &ExecutionContext,
+    context: &mut ExecutionContext,
 ) -> RunResult<RemoteUploadPlan> {
     let destination_parent = canonical_remote_directory(&session, destination_parent).await?;
     let mut plan = RemoteUploadPlan {
@@ -587,6 +610,7 @@ async fn plan_remote_upload(
     let mut source_roots: Vec<PathBuf> = Vec::new();
 
     for source in sources {
+        let root_index = plan.roots.len();
         context.checkpoint().await?;
         let metadata = tokio::fs::symlink_metadata(source)
             .await
@@ -621,7 +645,7 @@ async fn plan_remote_upload(
             return Err(invalid(format!("duplicate destination name: {name}")));
         }
         let final_path = join_remote(&destination_parent, &name);
-        let stage = remote_stage_path(&final_path, task.staging_id, plan.roots.len())?;
+        let stage = remote_stage_path(&final_path, task.staging_id, root_index)?;
         ensure_remote_target_available(&plan.session, &stage).await?;
         plan.roots.push(RemoteRoot {
             source_path: source.to_string_lossy().into_owned(),
@@ -639,8 +663,10 @@ async fn plan_remote_upload(
 
         if metadata.is_file() {
             plan.files.push(RemoteUploadFile {
+                root_index,
                 source,
                 destination: stage,
+                final_destination: final_path,
                 size: metadata.len(),
                 metadata: EntryMetadata::from_local(&metadata),
                 source_identity,
@@ -649,8 +675,10 @@ async fn plan_remote_upload(
         }
 
         plan.directories.push(PlannedDirectory {
+            root_index,
             source: source.clone(),
             destination: stage.clone(),
+            final_destination: final_path.clone(),
             metadata: EntryMetadata::from_local(&metadata),
             source_identity,
         });
@@ -702,16 +730,20 @@ async fn plan_remote_upload(
                 let source_identity = LocalSourceIdentity::capture(&source_path, &metadata).await;
                 if metadata.is_dir() {
                     plan.directories.push(PlannedDirectory {
+                        root_index,
                         source: source_path.clone(),
                         destination: destination_path.clone(),
+                        final_destination: final_path.clone(),
                         metadata: EntryMetadata::from_local(&metadata),
                         source_identity,
                     });
                     pending.push((source_path, destination_path, final_path, source_identity));
                 } else {
                     plan.files.push(RemoteUploadFile {
+                        root_index,
                         source: source_path,
                         destination: destination_path,
+                        final_destination: final_path,
                         size: metadata.len(),
                         metadata: EntryMetadata::from_local(&metadata),
                         source_identity,
@@ -731,7 +763,7 @@ async fn plan_remote_download(
     destination_parent: &Path,
     task: PlanningTaskIdentity<'_>,
     scan_contents: bool,
-    context: &ExecutionContext,
+    context: &mut ExecutionContext,
 ) -> RunResult<RemoteDownloadPlan> {
     let destination_metadata = tokio::fs::metadata(destination_parent)
         .await
@@ -770,6 +802,7 @@ async fn plan_remote_download(
     let mut source_roots: Vec<String> = Vec::new();
 
     for source in sources {
+        let root_index = plan.roots.len();
         context.checkpoint().await?;
         validate_remote_transfer_path(source)?;
         let source_metadata = super::ssh::io::run(
@@ -808,7 +841,7 @@ async fn plan_remote_download(
             )));
         }
         let final_path = destination_parent.join(destination_name);
-        let stage = local_stage_path(&final_path, task.staging_id, plan.roots.len())?;
+        let stage = local_stage_path(&final_path, task.staging_id, root_index)?;
         ensure_local_target_available(&stage).await?;
         plan.roots.push(LocalRoot {
             source_path: source.clone(),
@@ -826,8 +859,10 @@ async fn plan_remote_download(
 
         if source_metadata.file_type().is_file() {
             plan.files.push(RemoteDownloadFile {
+                root_index,
                 source,
                 destination: stage,
+                final_destination: final_path,
                 size: remote_size(&source_metadata, &source_name)?,
                 metadata: EntryMetadata::from_remote(&source_metadata),
             });
@@ -835,8 +870,10 @@ async fn plan_remote_download(
         }
 
         plan.directories.push(PlannedDirectory {
+            root_index,
             source: source.clone(),
             destination: stage.clone(),
+            final_destination: final_path.clone(),
             metadata: EntryMetadata::from_remote(&source_metadata),
             source_identity: None,
         });
@@ -868,8 +905,10 @@ async fn plan_remote_download(
                 if entry_type.is_dir() {
                     let metadata = entry.metadata();
                     plan.directories.push(PlannedDirectory {
+                        root_index,
                         source: source_path.clone(),
                         destination: destination_path.clone(),
+                        final_destination: final_path.clone(),
                         metadata: EntryMetadata::from_remote(&metadata),
                         source_identity: None,
                     });
@@ -892,8 +931,10 @@ async fn plan_remote_download(
                         Err(error) => return Err(error),
                     };
                     plan.files.push(RemoteDownloadFile {
+                        root_index,
                         source: source_path.clone(),
                         destination: destination_path,
+                        final_destination: final_path,
                         size,
                         metadata: EntryMetadata::from_remote(&metadata),
                     });
@@ -1136,7 +1177,7 @@ fn local_io(context: String, error: std::io::Error) -> TransferRunError {
 
 /// 将递归扫描中已经确认属于普通文件的元数据错误降级为可重试文件失败。
 async fn record_scan_failure(
-    context: &ExecutionContext,
+    context: &mut ExecutionContext,
     source_path: String,
     destination_path: String,
     failure: TransferFailure,

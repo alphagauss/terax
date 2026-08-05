@@ -34,8 +34,8 @@ enum JournalRecord {
     Snapshot {
         snapshot: TransferTaskSnapshot,
     },
-    FileFailure {
-        failure: TransferFileFailure,
+    FileFailures {
+        failures: Vec<TransferFileFailure>,
     },
     CommittedProgress {
         committed_roots: u64,
@@ -99,17 +99,20 @@ pub(crate) async fn append(
     .await
 }
 
-/// 以增量记录持久化一个 Direct 文件失败，避免反复写入不断增长的完整失败数组。
-pub(crate) async fn append_file_failure(
+/// 批量持久化 Direct 文件失败，避免逐文件取得全局锁并同步磁盘。
+pub(crate) async fn append_file_failures(
     path: &Path,
-    failure: &TransferFileFailure,
+    failures: &[TransferFileFailure],
 ) -> Result<(), TransferFailure> {
+    if failures.is_empty() {
+        return Ok(());
+    }
     append_record(
         path,
-        &JournalRecord::FileFailure {
-            failure: failure.clone(),
+        &JournalRecord::FileFailures {
+            failures: failures.to_vec(),
         },
-        "append transfer file failure",
+        "append transfer file failures",
     )
     .await
 }
@@ -295,18 +298,20 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
             JournalRecord::Snapshot {
                 snapshot: next_snapshot,
             } => snapshot = Some(next_snapshot),
-            JournalRecord::FileFailure { failure } => {
+            JournalRecord::FileFailures { failures } => {
                 let Some(current) = snapshot.as_mut() else {
                     return Err("file failure appears before the created record".into());
                 };
-                if !current
-                    .file_failures
-                    .iter()
-                    .any(|known| known.id == failure.id)
-                {
-                    current.failed_files = current.failed_files.saturating_add(1);
-                    current.is_directory = true;
-                    current.file_failures.push(failure);
+                for failure in failures {
+                    if !current
+                        .file_failures
+                        .iter()
+                        .any(|known| known.id == failure.id)
+                    {
+                        current.failed_files = current.failed_files.saturating_add(1);
+                        current.is_directory = true;
+                        current.file_failures.push(failure);
+                    }
                 }
             }
             JournalRecord::CommittedProgress {
@@ -516,26 +521,34 @@ mod tests {
             },
         )
         .unwrap();
+        let first_failure = TransferFileFailure {
+            id: "failure".into(),
+            source_path: "/source/file".into(),
+            destination_path: "/target/file".into(),
+            failure: TransferFailure::new(TransferErrorCode::SourceChanged, "changed"),
+            attempts: 1,
+            ignored: false,
+        };
         append_blocking(
             &path,
-            &JournalRecord::FileFailure {
-                failure: TransferFileFailure {
-                    id: "failure".into(),
-                    source_path: "/source/file".into(),
-                    destination_path: "/target/file".into(),
-                    failure: TransferFailure::new(TransferErrorCode::SourceChanged, "changed"),
-                    attempts: 1,
-                    ignored: false,
-                },
+            &JournalRecord::FileFailures {
+                failures: vec![
+                    first_failure.clone(),
+                    TransferFileFailure {
+                        id: "second-failure".into(),
+                        ..first_failure
+                    },
+                ],
             },
         )
         .unwrap();
 
         let loaded = read_task(&path).unwrap().unwrap();
 
-        assert_eq!(loaded.snapshot.failed_files, 1);
+        assert_eq!(loaded.snapshot.failed_files, 2);
         assert!(loaded.snapshot.is_directory);
         assert_eq!(loaded.snapshot.file_failures[0].id, "failure");
+        assert_eq!(loaded.snapshot.file_failures[1].id, "second-failure");
     }
 
     #[test]

@@ -325,7 +325,6 @@ impl TaskControl {
 /// 保存当前进程任务快照、控制句柄和全局并发许可。
 pub(crate) struct TransferManager {
     tasks: RwLock<HashMap<String, ManagedTask>>,
-    controls: RwLock<HashMap<String, Arc<TaskControl>>>,
     scheduler: TransferScheduler,
     journal_loaded: Mutex<bool>,
     enqueue_operations: Mutex<()>,
@@ -336,6 +335,7 @@ struct ManagedTask {
     snapshot: TransferTaskSnapshot,
     request: EnqueueTransferRequest,
     journal_path: PathBuf,
+    control: Option<Arc<TaskControl>>,
 }
 
 impl TransferManager {
@@ -343,7 +343,6 @@ impl TransferManager {
     fn new(concurrency: usize) -> Self {
         Self {
             tasks: RwLock::new(HashMap::new()),
-            controls: RwLock::new(HashMap::new()),
             scheduler: TransferScheduler::new(concurrency),
             journal_loaded: Mutex::new(false),
             enqueue_operations: Mutex::new(()),
@@ -412,13 +411,10 @@ impl TransferManager {
                     snapshot: snapshot.clone(),
                     request: request.clone(),
                     journal_path,
+                    control: Some(control.clone()),
                 },
             );
         }
-        self.controls
-            .write()
-            .await
-            .insert(id.clone(), control.clone());
         emit_snapshot(&app, &snapshot);
 
         let manager = self.clone();
@@ -675,10 +671,9 @@ impl TransferManager {
             return Err(error);
         }
         let control = Arc::new(TaskControl::new());
-        self.controls
-            .write()
-            .await
-            .insert(id.to_string(), control.clone());
+        if let Some(task) = self.tasks.write().await.get_mut(id) {
+            task.control = Some(control.clone());
+        }
         let manager = self.clone();
         let task_id = id.to_string();
         let failure_id = failure_id.to_string();
@@ -813,11 +808,13 @@ impl TransferManager {
         self.set_stage(&app, &id, TransferStage::Scanning).await;
         let mut context =
             ExecutionContext::new(self.clone(), app.clone(), id.clone(), control.clone());
-        let result = async {
+        let mut result = async {
             let mut prepared =
-                planner::prepare(&workspace, &request, &id, request.strategy, &context).await?;
+                planner::prepare(&workspace, &request, &id, request.strategy, &mut context).await?;
             let _reservation = self.scheduler.reserve(prepared.target_keys())?;
-            conflicts::resolve(&mut prepared, request.strategy, &mut context).await?;
+            if conflicts::resolve(&mut prepared, request.strategy, &mut context).await? {
+                prepared.publish_totals(&mut context).await?;
+            }
             let _permit = self.scheduler.acquire(&control).await?;
             match request.strategy {
                 TransferStrategy::Direct => direct::execute(prepared, &mut context).await,
@@ -825,7 +822,11 @@ impl TransferManager {
             }
         }
         .await;
-        context.flush_pending().await;
+        if let Err(error) = context.flush_pending().await {
+            if result.is_ok() {
+                result = Err(error);
+            }
+        }
         if should_emit_fs_changed(
             request.direction,
             result.is_ok(),
@@ -860,23 +861,29 @@ impl TransferManager {
         );
         // 每次重试使用独立 staging 身份，避免断线清理尚未完成时撞上前一次临时路径。
         let execution_id = Uuid::new_v4().to_string();
-        let result = async {
+        let mut result = async {
             control.checkpoint().await?;
             let mut prepared = planner::prepare(
                 &workspace,
                 &request,
                 &execution_id,
                 TransferStrategy::Direct,
-                &context,
+                &mut context,
             )
             .await?;
             let _reservation = self.scheduler.reserve(prepared.target_keys())?;
-            conflicts::resolve(&mut prepared, TransferStrategy::Direct, &mut context).await?;
+            if conflicts::resolve(&mut prepared, TransferStrategy::Direct, &mut context).await? {
+                prepared.publish_totals(&mut context).await?;
+            }
             let _permit = self.scheduler.acquire(&control).await?;
             direct::execute(prepared, &mut context).await
         }
         .await;
-        context.flush_pending().await;
+        if let Err(error) = context.flush_pending().await {
+            if result.is_ok() {
+                result = Err(error);
+            }
+        }
         if should_emit_fs_changed(
             request.direction,
             result.is_ok(),
@@ -920,7 +927,9 @@ impl TransferManager {
                     .await;
             }
         }
-        self.controls.write().await.remove(id);
+        if let Some(task) = self.tasks.write().await.get_mut(id) {
+            task.control = None;
+        }
     }
 
     /// 将执行结果转换为稳定终态，并移除暂停和取消控制句柄。
@@ -984,18 +993,20 @@ impl TransferManager {
                     .await;
             }
         }
-        self.controls.write().await.remove(id);
+        if let Some(task) = self.tasks.write().await.get_mut(id) {
+            task.control = None;
+        }
         drop(operation);
         self.prune_history(app).await;
     }
 
     /// 取得仍处于活动期的任务控制句柄。
     async fn control(&self, id: &str) -> Result<Arc<TaskControl>, TransferFailure> {
-        self.controls
+        self.tasks
             .read()
             .await
             .get(id)
-            .cloned()
+            .and_then(|task| task.control.clone())
             .ok_or_else(|| task_not_found(id))
     }
 
@@ -1017,13 +1028,8 @@ impl TransferManager {
         app: &AppHandle,
         id: &str,
     ) -> Result<(), TransferRunError> {
-        let snapshot = self
-            .mutate_task(app, id, |task| task.stage = TransferStage::Finalizing)
+        self.mutate_and_persist(app, id, |task| task.stage = TransferStage::Finalizing)
             .await
-            .map_err(TransferRunError::from)?;
-        self.persist_snapshot(id, &snapshot)
-            .await
-            .map_err(TransferRunError::from)
     }
 
     /// 发布冲突并把任务切换到等待用户状态。
@@ -1033,18 +1039,13 @@ impl TransferManager {
         id: &str,
         conflict: TransferConflict,
     ) -> Result<(), TransferRunError> {
-        let snapshot = self
-            .mutate_task(app, id, |task| {
-                task.status = TransferStatus::AwaitingDecision;
-                task.stage = TransferStage::CheckingConflicts;
-                task.conflict = Some(conflict);
-                task.speed_bytes_per_second = 0;
-            })
-            .await
-            .map_err(TransferRunError::from)?;
-        self.persist_snapshot(id, &snapshot)
-            .await
-            .map_err(TransferRunError::from)
+        self.mutate_and_persist(app, id, |task| {
+            task.status = TransferStatus::AwaitingDecision;
+            task.stage = TransferStage::CheckingConflicts;
+            task.conflict = Some(conflict);
+            task.speed_bytes_per_second = 0;
+        })
+        .await
     }
 
     /// 清除已经处理的冲突，并按决策恢复运行或进入取消中状态。
@@ -1074,21 +1075,24 @@ impl TransferManager {
         .map_err(TransferRunError::from)
     }
 
-    /// 记录 Direct 中一个已经隔离的文件失败。
-    pub(crate) async fn record_file_failure(
+    /// 批量记录 Direct 中已经隔离的文件失败。
+    pub(crate) async fn record_file_failures(
         &self,
         app: &AppHandle,
         id: &str,
-        failure: TransferFileFailure,
+        failures: Vec<TransferFileFailure>,
     ) -> Result<(), TransferRunError> {
+        if failures.is_empty() {
+            return Ok(());
+        }
         let path = self.journal_path(id).await?;
-        journal::append_file_failure(&path, &failure)
+        journal::append_file_failures(&path, &failures)
             .await
             .map_err(TransferRunError::from)?;
         self.mutate_task(app, id, |task| {
-            task.failed_files = task.failed_files.saturating_add(1);
+            task.failed_files = task.failed_files.saturating_add(failures.len() as u64);
             task.is_directory = true;
-            task.file_failures.push(failure);
+            task.file_failures.extend(failures);
         })
         .await
         .map(|_| ())
@@ -1105,18 +1109,13 @@ impl TransferManager {
         total_roots: u64,
         is_directory: bool,
     ) -> Result<(), TransferRunError> {
-        let snapshot = self
-            .mutate_task(app, id, |task| {
-                task.total_files = total_files;
-                task.total_bytes = total_bytes;
-                task.total_roots = total_roots;
-                task.is_directory = is_directory;
-            })
-            .await
-            .map_err(TransferRunError::from)?;
-        self.persist_snapshot(id, &snapshot)
-            .await
-            .map_err(TransferRunError::from)
+        self.mutate_and_persist(app, id, |task| {
+            task.total_files = total_files;
+            task.total_bytes = total_bytes;
+            task.total_roots = total_roots;
+            task.is_directory = is_directory;
+        })
+        .await
     }
 
     /// 记录 Archive 单流的实际字节总量，并同步低频恢复快照。
@@ -1126,17 +1125,12 @@ impl TransferManager {
         id: &str,
         total_bytes: u64,
     ) -> Result<(), TransferRunError> {
-        let snapshot = self
-            .mutate_task(app, id, |task| {
-                task.total_bytes = total_bytes;
-                task.transferred_bytes = 0;
-                task.speed_bytes_per_second = 0;
-            })
-            .await
-            .map_err(TransferRunError::from)?;
-        self.persist_snapshot(id, &snapshot)
-            .await
-            .map_err(TransferRunError::from)
+        self.mutate_and_persist(app, id, |task| {
+            task.total_bytes = total_bytes;
+            task.transferred_bytes = 0;
+            task.speed_bytes_per_second = 0;
+        })
+        .await
     }
 
     /// 记录 Archive 在打包或解包后确认的文件总数，并同步低频恢复快照。
@@ -1146,16 +1140,11 @@ impl TransferManager {
         id: &str,
         total_files: u64,
     ) -> Result<(), TransferRunError> {
-        let snapshot = self
-            .mutate_task(app, id, |task| {
-                task.total_files = total_files;
-                task.completed_files = task.completed_files.min(total_files);
-            })
-            .await
-            .map_err(TransferRunError::from)?;
-        self.persist_snapshot(id, &snapshot)
-            .await
-            .map_err(TransferRunError::from)
+        self.mutate_and_persist(app, id, |task| {
+            task.total_files = total_files;
+            task.completed_files = task.completed_files.min(total_files);
+        })
+        .await
     }
 
     /// 在不可回滚的发布之后同步保存已提交根和文件数量。
@@ -1200,6 +1189,22 @@ impl TransferManager {
         Ok(snapshot)
     }
 
+    /// 在发布低频快照后立即追加 Journal，供提交边界和稳定总量更新复用。
+    async fn mutate_and_persist(
+        &self,
+        app: &AppHandle,
+        id: &str,
+        mutate: impl FnOnce(&mut TransferTaskSnapshot),
+    ) -> Result<(), TransferRunError> {
+        let snapshot = self
+            .mutate_task(app, id, mutate)
+            .await
+            .map_err(TransferRunError::from)?;
+        self.persist_snapshot(id, &snapshot)
+            .await
+            .map_err(TransferRunError::from)
+    }
+
     /// 保留全部活动任务和最近终态记录，并通知前端同步淘汰结果。
     async fn prune_history(&self, app: &AppHandle) {
         let _operation = self.history_operations.lock().await;
@@ -1240,6 +1245,7 @@ impl TransferManager {
                     snapshot: task.snapshot,
                     request: task.request,
                     journal_path: task.path,
+                    control: None,
                 });
         }
         *loaded = true;
@@ -1359,7 +1365,10 @@ fn is_supported_conflict_resolution(
         && conflict.decisions.contains(&request.decision)
         && (!request.apply_to_remaining
             || conflict.allow_apply_to_remaining
-                && request.decision == TransferConflictDecision::Replace)
+                && matches!(
+                    request.decision,
+                    TransferConflictDecision::Replace | TransferConflictDecision::Skip
+                ))
 }
 
 fn retry_destination_parent(
@@ -1499,6 +1508,7 @@ mod tests {
                 destination: "/tmp".into(),
             },
             journal_path: PathBuf::from(format!("{id}.jsonl")),
+            control: None,
         }
     }
 
@@ -1703,7 +1713,7 @@ mod tests {
     }
 
     #[test]
-    fn conflict_resolution_rejects_stale_actions_and_unauthorized_replace_all() {
+    fn conflict_resolution_rejects_stale_actions_and_unauthorized_bulk_decisions() {
         let mut conflict = TransferConflict {
             id: "current".into(),
             kind: super::super::models::TransferConflictKind::File,
@@ -1713,6 +1723,7 @@ mod tests {
             destination_path: "/target".into(),
             decisions: vec![
                 TransferConflictDecision::Cancel,
+                TransferConflictDecision::Skip,
                 TransferConflictDecision::Replace,
             ],
             allow_apply_to_remaining: false,
@@ -1730,11 +1741,15 @@ mod tests {
         request.conflict_id = "current".into();
         request.decision = TransferConflictDecision::Merge;
         assert!(!is_supported_conflict_resolution(&conflict, &request));
+        request.decision = TransferConflictDecision::MergeSkip;
+        assert!(!is_supported_conflict_resolution(&conflict, &request));
         request.decision = TransferConflictDecision::Replace;
         request.apply_to_remaining = true;
         assert!(!is_supported_conflict_resolution(&conflict, &request));
 
         conflict.allow_apply_to_remaining = true;
+        assert!(is_supported_conflict_resolution(&conflict, &request));
+        request.decision = TransferConflictDecision::Skip;
         assert!(is_supported_conflict_resolution(&conflict, &request));
         request.decision = TransferConflictDecision::Cancel;
         assert!(!is_supported_conflict_resolution(&conflict, &request));

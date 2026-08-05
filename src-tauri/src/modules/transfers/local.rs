@@ -133,16 +133,14 @@ async fn verify_apply_commit_inner(
     }
     context.begin_finalizing().await?;
     if count_after_commit {
-        for root in &plan.roots {
+        for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
             commit_local_root(root).await?;
             let completed = plan
                 .files
                 .iter()
                 .enumerate()
-                .filter(|(index, file)| {
-                    successful[*index] && file.destination.starts_with(&root.stage)
-                })
+                .filter(|(index, file)| successful[*index] && file.root_index == root_index)
                 .count() as u64;
             let progress = context.roots_committed(1, completed).await;
             cleanup_local_committed_backups(
@@ -172,7 +170,13 @@ async fn record_local_file_failure(
     error: TransferRunError,
     context: &mut ExecutionContext,
 ) -> RunResult<()> {
-    if !is_directory_child(plan, &file.destination) {
+    let Some(root) = plan.roots.get(file.root_index) else {
+        return Err(TransferRunError::failed(
+            TransferErrorCode::Internal,
+            "transfer file references a missing root",
+        ));
+    };
+    if root.kind != TransferEntryKind::Directory || file.destination == root.stage {
         return Err(error);
     }
     if !error.is_file_scoped() {
@@ -192,15 +196,6 @@ async fn record_local_file_failure(
         })
         .await?;
     Ok(())
-}
-
-/// 判断文件是否属于目录聚合根，顶层单文件错误仍保持任务级失败。
-fn is_directory_child(plan: &LocalPlan, stage: &std::path::Path) -> bool {
-    plan.roots.iter().any(|root| {
-        root.kind == TransferEntryKind::Directory
-            && stage != root.stage
-            && stage.strip_prefix(&root.stage).is_ok()
-    })
 }
 
 async fn remove_partial_file(path: &std::path::Path) -> RunResult<()> {
