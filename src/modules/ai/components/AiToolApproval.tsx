@@ -47,7 +47,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
   const input = part.input as Record<string, unknown>;
 
   return (
-    <div className="rounded-lg border border-border bg-card shadow-sm">
+    <div className="rounded-lg border border-border bg-card shadow-sm [&_*]:text-[12px]!">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <span className="size-1.5 shrink-0 rounded-full bg-amber-500 animate-pulse" />
         <HugeiconsIcon
@@ -195,4 +195,3 @@ function PreviewBlock({
     </pre>
   );
 }
-
