@@ -1,5 +1,55 @@
+/**
+ * 本文件测试 Git diff 行分类与变更概览 rail 的显示条件。
+ *
+ * 锁定无纵向溢出时不得显示 rail，以及新增、修改和删除行的解析规则。
+ */
+
+import type { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
-import { gitChangesForDiff, parseUnifiedDiff } from "./gitGutter";
+import {
+  gitChangesForDiff,
+  hasVerticalScroll,
+  parseUnifiedDiff,
+  renderGitChangeOverview,
+} from "./gitGutter";
+
+describe("hasVerticalScroll", () => {
+  it("returns false when all content fits in the viewport", () => {
+    const element = { scrollHeight: 400, clientHeight: 400 } as HTMLElement;
+
+    expect(hasVerticalScroll(element)).toBe(false);
+  });
+
+  it("returns true when content exceeds the viewport", () => {
+    const element = { scrollHeight: 401, clientHeight: 400 } as HTMLElement;
+
+    expect(hasVerticalScroll(element)).toBe(true);
+  });
+
+  it("hides the Git overview rail when changed content does not scroll", () => {
+    const scrollDOM = {
+      scrollHeight: 400,
+      clientHeight: 400,
+    } as HTMLElement;
+    const view = { scrollDOM } as EditorView;
+    let replaceCount = 0;
+    const rail = {
+      hidden: false,
+      replaceChildren: () => {
+        replaceCount++;
+      },
+    } as unknown as HTMLDivElement;
+
+    renderGitChangeOverview(view, rail, {
+      added: new Set([1]),
+      modified: new Set(),
+      deleted: new Set(),
+    });
+
+    expect(rail.hidden).toBe(true);
+    expect(replaceCount).toBe(1);
+  });
+});
 
 describe("parseUnifiedDiff", () => {
   it("returns nothing for empty input", () => {

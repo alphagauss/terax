@@ -1,3 +1,9 @@
+/**
+ * 本文件实现编辑器中的 Git 行变更解析、行号槽标记和滚动概览 rail。
+ *
+ * 概览 rail 只在内容可纵向滚动时显示，普通编辑器与合并视图需传入各自实际的滚动容器。
+ */
+
 import { type Extension, StateEffect, StateField } from "@codemirror/state";
 import {
   EditorView,
@@ -149,15 +155,22 @@ function changeRanges(changes: GitChanges): ChangeRange[] {
   return ranges;
 }
 
+/** 判断元素是否存在需要滚动条承载的纵向溢出。 */
+export function hasVerticalScroll(element: HTMLElement): boolean {
+  return element.scrollHeight > element.clientHeight;
+}
+
+/** 绘制 Git 变更概览，并在编辑器无需纵向滚动时隐藏整个 rail。 */
 export function renderGitChangeOverview(
   view: EditorView,
   rail: HTMLDivElement,
   changes: GitChanges,
+  scrollElement: HTMLElement = view.scrollDOM,
 ) {
   const ranges = changeRanges(changes);
   rail.replaceChildren();
-  rail.hidden = ranges.length === 0;
-  if (ranges.length === 0) return;
+  rail.hidden = ranges.length === 0 || !hasVerticalScroll(scrollElement);
+  if (rail.hidden) return;
 
   const contentHeight = Math.max(view.contentHeight, 1);
   for (const range of ranges) {
