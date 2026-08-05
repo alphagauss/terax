@@ -13,8 +13,8 @@ use crate::modules::transfers::archive::{
     build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{
-    cleanup_local_committed_backups, cleanup_local_staging, commit_local_roots,
-    commit_remote_roots, ensure_remote_target_available,
+    cleanup_local_staging, commit_local_roots, commit_remote_roots, ensure_remote_target_available,
+    schedule_local_cleanup,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
@@ -48,7 +48,7 @@ pub(crate) async fn execute_upload(
         &plan.workspace,
         plan.task_id.clone(),
         plan.owner_task_id.clone(),
-        &plan.roots,
+        plan.roots.iter().map(|root| root.final_path.as_str()),
     );
     let mut remote_work: Option<String> = None;
     let mut pending_cleanup = Vec::new();
@@ -102,12 +102,7 @@ pub(crate) async fn execute_upload(
 
         context.begin_finalizing().await?;
         context.checkpoint().await?;
-        commit_remote_roots(&plan.workspace, &plan.roots).await?;
-        pending_cleanup.extend(
-            plan.roots
-                .iter()
-                .map(|root| format!("{}.backup", root.stage)),
-        );
+        pending_cleanup.extend(commit_remote_roots(&plan.workspace, &plan.roots).await?);
         context
             .roots_committed(plan.roots.len() as u64, archive.file_count)
             .await?;
@@ -204,11 +199,11 @@ pub(crate) async fn execute_download(
         context.set_archive_file_count(file_count).await?;
         context.begin_finalizing().await?;
         context.checkpoint().await?;
-        commit_local_roots(&plan.roots).await?;
+        let pending_local_cleanup = commit_local_roots(&plan.roots).await?;
         let progress = context
             .roots_committed(plan.roots.len() as u64, file_count)
             .await;
-        cleanup_local_committed_backups(&plan.task_id, &plan.owner_task_id, &plan.roots).await;
+        schedule_local_cleanup(&plan.owner_task_id, pending_local_cleanup);
         progress?;
         Ok(())
     }

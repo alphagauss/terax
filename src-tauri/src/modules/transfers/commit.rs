@@ -20,6 +20,7 @@ use super::models::TransferEntryKind;
 const MAX_REMOTE_PRECONDITION_PROBES: usize = 32;
 const LOCAL_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const LOCAL_CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
+const REMOTE_BACKUP_CLEANUP_PENDING_MARKER: &str = "TERAX_BACKUP_CLEANUP_PENDING_V1";
 
 /// 顶层来源在最终目标上的提交方式。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,8 +123,8 @@ pub(crate) fn remote_stage_path(
     ))
 }
 
-/// 按冲突阶段确定的模式公开一个本地 staging 根。
-pub(crate) async fn commit_local_root(root: &LocalRoot) -> RunResult<()> {
+/// 按冲突阶段确定的模式公开一个本地 staging 根，并返回未清理的 backup。
+pub(crate) async fn commit_local_root(root: &LocalRoot) -> RunResult<Vec<PathBuf>> {
     ensure_local_merge_preconditions(root).await?;
     let final_path = root.final_path.clone();
     let root = root.clone();
@@ -133,8 +134,10 @@ pub(crate) async fn commit_local_root(root: &LocalRoot) -> RunResult<()> {
         .map_err(|error| message(format!("commit transfer {}: {error}", final_path.display())))
 }
 
-/// 将 Archive 的全部本地根作为一个事务提交，任一发布失败都会恢复全部旧目标。
-pub(crate) async fn commit_local_roots(roots: &[LocalRoot]) -> RunResult<()> {
+/// 将 Archive 的全部本地根作为一个事务提交，并返回未清理的 backup。
+///
+/// 任一发布失败都会恢复全部旧目标；只有发布全部完成后才会返回可安全重试的残留路径。
+pub(crate) async fn commit_local_roots(roots: &[LocalRoot]) -> RunResult<Vec<PathBuf>> {
     let roots = roots.to_vec();
     tokio::task::spawn_blocking(move || commit_local_roots_blocking(&roots))
         .await
@@ -142,19 +145,20 @@ pub(crate) async fn commit_local_roots(roots: &[LocalRoot]) -> RunResult<()> {
         .map_err(|error| message(format!("commit local archive transaction: {error}")))
 }
 
-/// 按冲突阶段确定的模式公开一个 SSH staging 根。
+/// 按冲突阶段确定的模式公开一个 SSH staging 根，并返回未清理的 backup。
 pub(crate) async fn commit_remote_root(
     workspace: &Arc<RemoteWorkspace>,
     session: &Arc<SftpSession>,
     root: &RemoteRoot,
-) -> RunResult<()> {
+) -> RunResult<Vec<String>> {
     if root.mode == RootCommitMode::Create {
         ensure_remote_target_available(session, &root.final_path).await?;
-        return super::ssh::io::run(
+        super::ssh::io::run(
             format!("commit remote transfer {}", root.final_path),
             session.rename(root.stage.clone(), root.final_path.clone()),
         )
-        .await;
+        .await?;
+        return Ok(Vec::new());
     }
     ensure_remote_merge_preconditions(session, root).await?;
     if root.mode == RootCommitMode::Replace
@@ -167,30 +171,40 @@ pub(crate) async fn commit_remote_root(
             shell_quote(&root.stage),
             shell_quote(&root.final_path)
         );
-        return execute_remote_commit(
+        execute_remote_commit(
             workspace,
             &command,
             &format!("commit remote transfer {}", root.final_path),
         )
-        .await;
+        .await?;
+        return Ok(Vec::new());
     }
     commit_remote_roots(workspace, std::slice::from_ref(root)).await
 }
 
-/// 在一次目标端 Shell 事务中提交全部 SSH Archive 根，并在失败时反向回滚。
+/// 在一次目标端 Shell 事务中提交全部 SSH Archive 根。
+///
+/// 失败时反向回滚；发布成功时返回 Shell 未能删除的 backup，供后台受限重试。
 pub(crate) async fn commit_remote_roots(
     workspace: &Arc<RemoteWorkspace>,
     roots: &[RemoteRoot],
-) -> RunResult<()> {
+) -> RunResult<Vec<String>> {
     if roots.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let command = remote_transaction_command(roots);
-    execute_remote_commit(workspace, &command, "commit remote archive transaction").await
+    let backups: Vec<_> = roots
+        .iter()
+        .filter(|root| root.mode != RootCommitMode::Create)
+        .map(remote_backup_path)
+        .collect();
+    let command = remote_transaction_command(roots, &backups);
+    let cleanup_pending =
+        execute_remote_commit(workspace, &command, "commit remote archive transaction").await?;
+    Ok(if cleanup_pending { backups } else { Vec::new() })
 }
 
 /// 生成可单元测试的 SSH 多根提交与反向回滚脚本。
-fn remote_transaction_command(roots: &[RemoteRoot]) -> String {
+fn remote_transaction_command(roots: &[RemoteRoot], backups: &[String]) -> String {
     let mut command = String::from("set -e\n");
     for root in roots {
         let stage = shell_quote(&root.stage);
@@ -249,13 +263,15 @@ fn remote_transaction_command(roots: &[RemoteRoot]) -> String {
         ));
     }
     command.push_str("trap - EXIT\n");
-    for root in roots {
-        if root.mode != RootCommitMode::Create {
-            command.push_str(&format!(
-                "rm -rf -- {} || true\n",
-                shell_quote(&remote_backup_path(root))
-            ));
-        }
+    if !backups.is_empty() {
+        command.push_str("set +e\n");
+        command.push_str(&super::ssh::cleanup::cleanup_command(
+            backups.iter().map(String::as_str),
+        ));
+        command.push_str(&format!(
+            "\nterax_backup_cleanup_status=$?\nset -e\nif [ \"$terax_backup_cleanup_status\" != 0 ]; then printf '%s\\n' {}; fi\n",
+            shell_quote(REMOTE_BACKUP_CLEANUP_PENDING_MARKER)
+        ));
     }
     command
 }
@@ -264,13 +280,16 @@ async fn execute_remote_commit(
     workspace: &Arc<RemoteWorkspace>,
     command: &str,
     operation: &str,
-) -> RunResult<()> {
+) -> RunResult<bool> {
     let output = workspace
         .exec(command, None, Duration::from_secs(24 * 60 * 60))
         .await
         .map_err(|error| message(format!("{operation}: {error}")))?;
     if output.exit_code == Some(0) && !output.timed_out && !output.truncated {
-        Ok(())
+        Ok(output
+            .stdout
+            .windows(REMOTE_BACKUP_CLEANUP_PENDING_MARKER.len())
+            .any(|value| value == REMOTE_BACKUP_CLEANUP_PENDING_MARKER.as_bytes()))
     } else {
         Err(message(format!(
             "{operation} failed: {}",
@@ -401,7 +420,7 @@ fn remote_precondition(root: &RemoteRoot) -> String {
     )
 }
 
-fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
+fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<Vec<PathBuf>> {
     for root in roots {
         ensure_local_commit_precondition(&root.final_path, root.destination_kind)?;
         let backup = local_backup_path(root);
@@ -430,7 +449,8 @@ fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
             && root.kind == TransferEntryKind::File
             && root.destination_kind == Some(TransferEntryKind::File)
         {
-            return replace_file(&root.stage, &root.final_path);
+            replace_file(&root.stage, &root.final_path)?;
+            return Ok(Vec::new());
         }
     }
 
@@ -456,6 +476,7 @@ fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
         published.push(index);
     }
 
+    let mut pending_cleanup = Vec::new();
     for index in backed {
         let backup = local_backup_path(&roots[index]);
         if let Err(error) = remove_local_path_blocking(&backup) {
@@ -463,9 +484,10 @@ fn commit_local_roots_blocking(roots: &[LocalRoot]) -> std::io::Result<()> {
                 "failed to clean committed transfer backup {}: {error}",
                 backup.display()
             );
+            pending_cleanup.push(backup);
         }
     }
-    Ok(())
+    Ok(pending_cleanup)
 }
 
 fn rollback_local_archive(
@@ -717,7 +739,7 @@ fn merge_target_wins_blocking(target: &Path, stage: &Path) -> std::io::Result<()
                     merge_target_wins_blocking(&target_path, &stage_path)?;
                 }
                 Ok(_) => {
-                    remove_merge_staging_path(&stage_path)?;
+                    remove_local_path_blocking(&stage_path)?;
                     copy_local_tree_blocking(&target_path, &stage_path)?;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -731,24 +753,123 @@ fn merge_target_wins_blocking(target: &Path, stage: &Path) -> std::io::Result<()
     copy_local_metadata(target, stage, &target_metadata)
 }
 
-/// 删除任务私有 staging 中被目标版本取代的只读条目，不接触最终目标路径。
-#[allow(clippy::permissions_set_readonly_false)]
-fn remove_merge_staging_path(path: &Path) -> std::io::Result<()> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        make_local_directory_writable(path, &metadata.permissions())?;
-        for entry in std::fs::read_dir(path)? {
-            remove_merge_staging_path(&entry?.path())?;
+/// 删除经过任务所有权校验的本地临时树。
+///
+/// 遍历使用显式目录列表，避免超深目录耗尽线程栈；只修复任务私有
+/// 目录和普通文件的所需权限，符号链接始终作为链接本身删除。
+fn remove_local_path_blocking(path: &Path) -> std::io::Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return remove_local_symlink(path, &metadata.file_type());
+    }
+    if !metadata.is_dir() {
+        return remove_local_non_directory(path);
+    }
+
+    make_local_directory_writable(path, &metadata.permissions())?;
+    let mut directories = vec![path.to_path_buf()];
+    let mut index = 0;
+    while index < directories.len() {
+        let directory = directories[index].clone();
+        for entry in std::fs::read_dir(directory)? {
+            let entry = entry?;
+            let child = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                remove_local_symlink(&child, &file_type)?;
+            } else if file_type.is_dir() {
+                // chmod 前重新读取不跟随链接的元数据，避免使用过期的 DirEntry 类型。
+                let metadata = match std::fs::symlink_metadata(&child) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error),
+                };
+                if metadata.file_type().is_symlink() {
+                    remove_local_symlink(&child, &metadata.file_type())?;
+                } else if metadata.is_dir() {
+                    make_local_directory_writable(&child, &metadata.permissions())?;
+                    directories.push(child);
+                } else {
+                    remove_local_non_directory(&child)?;
+                }
+            } else {
+                remove_local_non_directory(&child)?;
+            }
         }
-        return std::fs::remove_dir(path);
+        index += 1;
     }
-    #[cfg(windows)]
-    if metadata.permissions().readonly() {
-        let mut permissions = metadata.permissions();
-        permissions.set_readonly(false);
-        std::fs::set_permissions(path, permissions)?;
+    for directory in directories.into_iter().rev() {
+        match std::fs::remove_dir(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
     }
-    std::fs::remove_file(path)
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn remove_local_symlink(path: &Path, _file_type: &std::fs::FileType) -> std::io::Result<()> {
+    remove_local_file(path)
+}
+
+#[cfg(windows)]
+fn remove_local_symlink(path: &Path, file_type: &std::fs::FileType) -> std::io::Result<()> {
+    use std::os::windows::fs::FileTypeExt;
+
+    let result = if file_type.is_symlink_dir() {
+        std::fs::remove_dir(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_local_file(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn remove_local_non_directory(path: &Path) -> std::io::Result<()> {
+    match remove_local_file(path) {
+        Ok(()) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return remove_local_symlink(path, &metadata.file_type());
+    }
+    if metadata.is_dir() {
+        return Err(std::io::Error::other(
+            "transfer cleanup entry changed to a directory",
+        ));
+    }
+    let mut permissions = metadata.permissions();
+    if !permissions.readonly() {
+        return remove_local_file(path);
+    }
+    permissions.set_readonly(false);
+    std::fs::set_permissions(path, permissions)?;
+    remove_local_file(path)
+}
+
+#[cfg(not(windows))]
+fn remove_local_non_directory(path: &Path) -> std::io::Result<()> {
+    remove_local_file(path)
 }
 
 fn copy_local_tree_blocking(source: &Path, destination: &Path) -> std::io::Result<()> {
@@ -816,10 +937,10 @@ fn make_local_directory_writable(
     use std::os::unix::fs::PermissionsExt;
 
     let mode = original.mode();
-    if mode & 0o200 != 0 {
+    if mode & 0o700 == 0o700 {
         return Ok(false);
     }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o200))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode | 0o700))?;
     Ok(true)
 }
 
@@ -873,56 +994,17 @@ fn copy_symlink(source: &Path, destination: &Path) -> std::io::Result<()> {
     }
 }
 
-fn remove_local_path_blocking(path: &Path) -> std::io::Result<()> {
-    let metadata = match std::fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        std::fs::remove_dir_all(path)
-    } else {
-        std::fs::remove_file(path)
-    }
-}
-
 /// 失败或取消后只清理任务私有 staging，不删除已经提交的最终目标。
 pub(crate) async fn cleanup_local_staging(
     staging_task_id: &str,
     owner_task_id: &str,
     roots: &[LocalRoot],
 ) {
-    cleanup_local_owned_paths(staging_task_id, owner_task_id, roots, false).await;
-}
-
-/// 提交成功后清理同一 staging 派生的 backup，删除失败时保留历史所有权并后台重试。
-///
-/// 调用方只能在对应根已经成功公开后使用此入口，提交或回滚失败时的 backup 仍是恢复数据，
-/// 不得交给通用清理流程。
-pub(crate) async fn cleanup_local_committed_backups(
-    staging_task_id: &str,
-    owner_task_id: &str,
-    roots: &[LocalRoot],
-) {
-    cleanup_local_owned_paths(staging_task_id, owner_task_id, roots, true).await;
-}
-
-/// 校验根路径的任务所有权，并删除 staging 或其已提交 backup。
-async fn cleanup_local_owned_paths(
-    staging_task_id: &str,
-    owner_task_id: &str,
-    roots: &[LocalRoot],
-    backups: bool,
-) {
     let mut paths = Vec::new();
     let mut invalid_ownership = false;
     for root in roots {
         if local_staging_is_owned(&root.stage, staging_task_id) {
-            paths.push(if backups {
-                local_backup_path(root)
-            } else {
-                root.stage.clone()
-            });
+            paths.push(root.stage.clone());
         } else {
             invalid_ownership = true;
             log::warn!(
@@ -939,7 +1021,7 @@ async fn cleanup_local_owned_paths(
     if remaining.is_empty() {
         return;
     }
-    schedule_local_cleanup(owner_task_id.to_string(), remaining);
+    schedule_local_cleanup(owner_task_id, remaining);
 }
 
 /// 校验本地 staging 的固定名称确实绑定当前任务。
@@ -954,40 +1036,40 @@ fn local_staging_is_owned(path: &Path, task_id: &str) -> bool {
 
 /// 删除一组已经验证的本地任务临时路径并返回仍需重试的项。
 async fn remove_local_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut remaining = Vec::new();
-    for path in paths {
-        if !remove_local_path(&path).await {
-            remaining.push(path);
-        }
+    if paths.is_empty() {
+        return Vec::new();
     }
-    remaining
-}
-
-async fn remove_local_path(path: &Path) -> bool {
-    let metadata = match tokio::fs::symlink_metadata(path).await {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+    let retry = paths.clone();
+    match tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .filter(|path| {
+                if let Err(error) = remove_local_path_blocking(path) {
+                    log::warn!("failed to clean transfer path {}: {error}", path.display());
+                    true
+                } else {
+                    false
+                }
+            })
+            .collect()
+    })
+    .await
+    {
+        Ok(remaining) => remaining,
         Err(error) => {
-            log::warn!("failed to stat transfer path {}: {error}", path.display());
-            return false;
+            log::warn!("failed to join local transfer cleanup: {error}");
+            retry
         }
-    };
-    let result = if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        tokio::fs::remove_dir_all(path).await
-    } else {
-        tokio::fs::remove_file(path).await
-    };
-    if let Err(error) = result {
-        log::warn!("failed to clean transfer path {}: {error}", path.display());
-        false
-    } else {
-        true
     }
 }
 
-/// 后台重试本地或 WSL UNC staging，并在确认清理后解除历史删除限制。
-fn schedule_local_cleanup(task_id: String, paths: Vec<PathBuf>) {
-    super::manager::begin_deferred_cleanup(&task_id);
+/// 后台重试已验证所有权的本地临时路径，并在清理后解除历史删除限制。
+pub(crate) fn schedule_local_cleanup(task_id: &str, paths: Vec<PathBuf>) {
+    if paths.is_empty() {
+        return;
+    }
+    super::manager::begin_deferred_cleanup(task_id);
+    let task_id = task_id.to_string();
     tauri::async_runtime::spawn(async move {
         let cleanup = async {
             let mut remaining = paths;
@@ -1134,7 +1216,12 @@ mod tests {
             },
         ];
 
-        let command = remote_transaction_command(&roots);
+        let backups: Vec<_> = roots
+            .iter()
+            .filter(|root| root.mode != RootCommitMode::Create)
+            .map(remote_backup_path)
+            .collect();
+        let command = remote_transaction_command(&roots, &backups);
 
         assert!(command.contains("transfer destination changed after conflict approval"));
         assert!(command.contains("find -P '/target/existing'"));
@@ -1142,7 +1229,12 @@ mod tests {
         assert!(command.contains("chmod --reference='/target/preserve'"));
         assert!(command.contains("backed_1=1"));
         assert!(command.find("published_1").unwrap() < command.find("published_0").unwrap());
-        assert!(command.ends_with("rm -rf -- '/target/.terax-part-task-2.backup' || true\n"));
+        assert!(command.contains("set -- '/target/.terax-part-task-1.backup'"));
+        assert!(command.contains("'/target/.terax-part-task-2.backup'"));
+        assert!(command.contains(REMOTE_BACKUP_CLEANUP_PENDING_MARKER));
+        assert!(command.ends_with("fi\n"));
+        assert!(!command.contains("rm -rf -- '/target/.terax-part-task-1.backup'"));
+        assert!(!command.contains("rm -rf -- '/target/.terax-part-task-2.backup'"));
     }
 
     #[cfg(target_os = "linux")]
@@ -1167,9 +1259,10 @@ mod tests {
             merge_preconditions: Vec::new(),
         };
 
+        let backups = vec![remote_backup_path(&root)];
         let output = std::process::Command::new("sh")
             .arg("-c")
-            .arg(remote_transaction_command(&[root]))
+            .arg(remote_transaction_command(&[root], &backups))
             .output()
             .unwrap();
 
@@ -1190,6 +1283,11 @@ mod tests {
             std::fs::read(final_path.join("target-only.txt")).unwrap(),
             b"target-only"
         );
+        assert!(!stage.with_extension("backup").exists());
+        assert!(!output
+            .stdout
+            .windows(REMOTE_BACKUP_CLEANUP_PENDING_MARKER.len())
+            .any(|value| value == REMOTE_BACKUP_CLEANUP_PENDING_MARKER.as_bytes()));
     }
 
     #[tokio::test]
@@ -1244,7 +1342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn committed_backup_cleanup_preserves_the_published_target() {
+    async fn local_commit_cleans_a_readonly_backup_without_a_followup_pass() {
         let directory = tempfile::tempdir().unwrap();
         let stage = directory.path().join(".terax-part-task-0");
         let final_path = directory.path().join("final");
@@ -1258,17 +1356,28 @@ mod tests {
             merge_preconditions: Vec::new(),
         };
         let backup = local_backup_path(&root);
-        tokio::fs::create_dir(&backup).await.unwrap();
-        tokio::fs::write(backup.join("old.txt"), b"old")
+        let readonly_directory = root.final_path.join("readonly");
+        tokio::fs::create_dir_all(&readonly_directory)
             .await
             .unwrap();
-        tokio::fs::create_dir(&root.final_path).await.unwrap();
-        tokio::fs::write(root.final_path.join("new.txt"), b"new")
+        let readonly_file = readonly_directory.join("old.txt");
+        tokio::fs::write(&readonly_file, b"old").await.unwrap();
+        let mut file_permissions = std::fs::metadata(&readonly_file).unwrap().permissions();
+        file_permissions.set_readonly(true);
+        std::fs::set_permissions(&readonly_file, file_permissions).unwrap();
+        let mut directory_permissions = std::fs::metadata(&readonly_directory)
+            .unwrap()
+            .permissions();
+        directory_permissions.set_readonly(true);
+        std::fs::set_permissions(&readonly_directory, directory_permissions).unwrap();
+        tokio::fs::create_dir(&root.stage).await.unwrap();
+        tokio::fs::write(root.stage.join("new.txt"), b"new")
             .await
             .unwrap();
 
-        cleanup_local_committed_backups("task", "task", std::slice::from_ref(&root)).await;
+        let pending_cleanup = commit_local_root(&root).await.unwrap();
 
+        assert!(pending_cleanup.is_empty());
         assert!(!backup.exists());
         assert_eq!(
             tokio::fs::read(root.final_path.join("new.txt"))
@@ -1276,6 +1385,39 @@ mod tests {
                 .unwrap(),
             b"new"
         );
+    }
+
+    #[test]
+    fn local_cleanup_handles_deep_directory_trees_iteratively() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("deep");
+        let mut child = root.clone();
+        for _ in 0..80 {
+            child.push("d");
+        }
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(child.join("file"), b"data").unwrap();
+
+        remove_local_path_blocking(&root).unwrap();
+
+        assert!(!root.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_cleanup_does_not_follow_symbolic_links() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("owned");
+        let external = directory.path().join("external");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&external).unwrap();
+        std::fs::write(external.join("keep"), b"data").unwrap();
+        std::os::unix::fs::symlink(&external, root.join("link")).unwrap();
+
+        remove_local_path_blocking(&root).unwrap();
+
+        assert!(!root.exists());
+        assert_eq!(std::fs::read(external.join("keep")).unwrap(), b"data");
     }
 
     #[test]
@@ -1311,7 +1453,7 @@ mod tests {
             merge_preconditions: Vec::new(),
         };
 
-        commit_local_root(&root).await.unwrap();
+        assert!(commit_local_root(&root).await.unwrap().is_empty());
 
         assert_eq!(tokio::fs::read(&root.final_path).await.unwrap(), b"new");
         assert!(!root.stage.exists());
@@ -1404,7 +1546,7 @@ mod tests {
             merge_preconditions: Vec::new(),
         };
 
-        commit_local_root(&root).await.unwrap();
+        assert!(commit_local_root(&root).await.unwrap().is_empty());
 
         assert_eq!(
             tokio::fs::read(root.final_path.join("same.txt"))
@@ -1472,7 +1614,7 @@ mod tests {
             merge_preconditions: Vec::new(),
         };
 
-        commit_local_root(&root).await.unwrap();
+        assert!(commit_local_root(&root).await.unwrap().is_empty());
 
         assert_eq!(
             tokio::fs::read(root.final_path.join("same.txt"))

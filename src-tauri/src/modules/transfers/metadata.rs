@@ -28,7 +28,7 @@ impl EntryMetadata {
     pub(crate) fn from_local(metadata: &std::fs::Metadata) -> Self {
         Self {
             mode: local_mode(metadata),
-            readonly: metadata.permissions().readonly(),
+            readonly: local_readonly(metadata),
             accessed: metadata.accessed().ok(),
             modified: metadata.modified().ok(),
             is_dir: metadata.is_dir(),
@@ -59,8 +59,7 @@ impl EntryMetadata {
     /// 返回归档头使用的可移植权限位。
     pub(crate) fn archive_mode(&self) -> u32 {
         self.mode.unwrap_or(match (self.is_dir, self.readonly) {
-            (true, true) => 0o555,
-            (true, false) => 0o755,
+            (true, _) => 0o755,
             (false, true) => 0o444,
             (false, false) => 0o644,
         })
@@ -169,6 +168,17 @@ fn local_mode(_metadata: &std::fs::Metadata) -> Option<u32> {
 }
 
 #[cfg(unix)]
+fn local_readonly(metadata: &std::fs::Metadata) -> bool {
+    metadata.permissions().readonly()
+}
+
+#[cfg(not(unix))]
+fn local_readonly(metadata: &std::fs::Metadata) -> bool {
+    // Windows 目录的 ReadOnly 是外壳属性，不表达 POSIX 目录写权限。
+    metadata.is_file() && metadata.permissions().readonly()
+}
+
+#[cfg(unix)]
 fn set_local_permissions(path: &Path, metadata: &EntryMetadata) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -181,7 +191,7 @@ fn set_local_permissions(path: &Path, metadata: &EntryMetadata) -> std::io::Resu
 #[cfg(not(unix))]
 fn set_local_permissions(path: &Path, metadata: &EntryMetadata) -> std::io::Result<()> {
     let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_readonly(metadata.readonly);
+    permissions.set_readonly(!metadata.is_dir && metadata.readonly);
     std::fs::set_permissions(path, permissions)
 }
 
@@ -220,6 +230,39 @@ mod tests {
         assert_eq!(attributes.gid, None);
     }
 
+    #[test]
+    fn portable_directory_mode_ignores_non_unix_readonly_flag() {
+        let metadata = EntryMetadata {
+            mode: None,
+            readonly: true,
+            accessed: None,
+            modified: None,
+            is_dir: true,
+        };
+
+        assert_eq!(metadata.archive_mode(), 0o755);
+        assert_eq!(metadata.remote_attributes().permissions, Some(0o755));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[allow(clippy::permissions_set_readonly_false)]
+    fn windows_readonly_directory_is_not_a_posix_readonly_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("readonly");
+        std::fs::create_dir(&path).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        let metadata = EntryMetadata::from_local(&std::fs::metadata(&path).unwrap());
+
+        assert_eq!(metadata.archive_mode(), 0o755);
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
     #[tokio::test]
     async fn applies_local_readonly_and_modified_time() {
         let directory = tempfile::tempdir().unwrap();
@@ -250,5 +293,24 @@ mod tests {
             ..metadata
         };
         writable.apply_local(&path).await.unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn remote_readonly_directory_does_not_set_windows_readonly() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("directory");
+        tokio::fs::create_dir(&path).await.unwrap();
+        let metadata = EntryMetadata {
+            mode: None,
+            readonly: true,
+            accessed: None,
+            modified: None,
+            is_dir: true,
+        };
+
+        metadata.apply_local(&path).await.unwrap();
+
+        assert!(!std::fs::metadata(path).unwrap().permissions().readonly());
     }
 }

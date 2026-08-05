@@ -10,14 +10,55 @@ use std::time::Duration;
 use crate::modules::remote::manager::global_manager;
 use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
 
-use super::super::commit::RemoteRoot;
 use super::super::errors::TransferErrorCode;
 use super::super::manager::TransferRunError;
 
 const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
 const CLEANUP_COMMAND_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-const MAX_CLEANUP_COMMAND_BYTES: usize = 64 * 1024;
+const MAX_CLEANUP_COMMAND_BYTES: usize = 160 * 1024;
+// 正常树只遍历一次；回退必须在 find 下沉前逐目录立即 chmod，`{} +` 会过晚执行。
+const CLEANUP_COMMAND_START: &str = r#"terax_remove_owned_path() {
+  path=$1
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+  if [ -d "$path" ] && [ ! -L "$path" ]; then
+    parent=${path%/*}
+    [ -n "$parent" ] || parent=/
+    path_device=$(stat -c %d -- "$path") || return 1
+    parent_device=$(stat -c %d -- "$parent") || return 1
+    [ "$path_device" = "$parent_device" ] || return 1
+  fi
+  if find -P "$path" -xdev -depth -delete 2>/dev/null; then
+    return 0
+  fi
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+  if [ ! -d "$path" ] || [ -L "$path" ]; then
+    find -P "$path" -xdev -depth -delete
+    return $?
+  fi
+  chmod u+rwx -- "$path" || return 1
+  find -P "$path" -xdev -type d -exec sh -c '
+    expected_device=$1
+    directory=$2
+    directory_device=$(stat -c %d -- "$directory") || exit 1
+    [ "$directory_device" = "$expected_device" ] || exit 0
+    chmod u+rwx -- "$directory"
+  ' terax-cleanup "$path_device" {} \; || return 1
+  find -P "$path" -xdev -depth -delete
+}
+set --"#;
+const CLEANUP_COMMAND_END: &str = r#"
+terax_cleanup_status=0
+for path do
+  if ! terax_remove_owned_path "$path"; then
+    terax_cleanup_status=1
+  fi
+done
+[ "$terax_cleanup_status" -eq 0 ]"#;
 
 /// 单个传输任务持有的远端删除授权。
 ///
@@ -37,15 +78,15 @@ pub(crate) struct RemoteCleanupScope {
 
 impl RemoteCleanupScope {
     /// 从 SSH 上传计划的最终目标生成精确清理范围。
-    pub(crate) fn for_upload(
+    pub(crate) fn for_upload<'a>(
         workspace: &RemoteWorkspace,
         task_id: String,
         owner_task_id: String,
-        roots: &[RemoteRoot],
+        final_paths: impl IntoIterator<Item = &'a str>,
     ) -> Self {
-        let mut staging_parents: Vec<_> = roots
-            .iter()
-            .filter_map(|root| remote_parent(&root.final_path).map(str::to_string))
+        let mut staging_parents: Vec<_> = final_paths
+            .into_iter()
+            .filter_map(|path| remote_parent(path).map(str::to_string))
             .collect();
         staging_parents.sort();
         staging_parents.dedup();
@@ -110,8 +151,8 @@ pub(crate) fn schedule(scope: RemoteCleanupScope, mut paths: Vec<String>) {
 
 /// 用少量服务器本地命令删除经过验证的任务私有路径，并返回仍需重试的路径。
 ///
-/// 此入口只接受 Terax 生成的固定命名，拒绝任意用户路径。`rm -rf` 在远端本地递归，
-/// 不会把目录中文件数量放大为逐项 SFTP 往返。
+/// 此入口只接受 Terax 生成的固定命名，拒绝任意用户路径。权限阻塞时只恢复
+/// 任务私有树的目录 owner 权限，不跟随符号链接，也不会把文件数量放大为逐项 SFTP 往返。
 pub(crate) async fn remove_now(
     workspace: &Arc<RemoteWorkspace>,
     scope: &RemoteCleanupScope,
@@ -134,7 +175,7 @@ pub(crate) async fn remove_now(
 
     let mut remaining = Vec::new();
     for batch in cleanup_batches(paths) {
-        let command = cleanup_command(&batch);
+        let command = cleanup_command(batch.iter().copied());
         match workspace
             .exec(&command, None, CLEANUP_COMMAND_TIMEOUT)
             .await
@@ -147,11 +188,11 @@ pub(crate) async fn remove_now(
                     output.exit_code,
                     String::from_utf8_lossy(&output.stderr).trim()
                 );
-                remaining.extend(batch.into_iter().cloned());
+                remaining.extend(batch.into_iter().map(str::to_string));
             }
             Err(error) => {
                 log::warn!("failed to start remote transfer cleanup: {error}");
-                remaining.extend(batch.into_iter().cloned());
+                remaining.extend(batch.into_iter().map(str::to_string));
             }
         }
     }
@@ -186,18 +227,18 @@ pub(crate) fn should_defer(result: &Result<(), TransferRunError>) -> bool {
         )
 }
 
-fn cleanup_batches(paths: &[String]) -> Vec<Vec<&String>> {
+fn cleanup_batches(paths: &[String]) -> Vec<Vec<&str>> {
     let mut batches = Vec::new();
     let mut batch = Vec::new();
-    let mut command_bytes = "rm -rf --".len();
+    let mut command_bytes = CLEANUP_COMMAND_START.len() + CLEANUP_COMMAND_END.len();
     for path in paths {
         let argument_bytes = 1 + shell_quote(path).len();
         if !batch.is_empty() && command_bytes + argument_bytes > MAX_CLEANUP_COMMAND_BYTES {
             batches.push(std::mem::take(&mut batch));
-            command_bytes = "rm -rf --".len();
+            command_bytes = CLEANUP_COMMAND_START.len() + CLEANUP_COMMAND_END.len();
         }
         command_bytes += argument_bytes;
-        batch.push(path);
+        batch.push(path.as_str());
     }
     if !batch.is_empty() {
         batches.push(batch);
@@ -205,12 +246,14 @@ fn cleanup_batches(paths: &[String]) -> Vec<Vec<&String>> {
     batches
 }
 
-fn cleanup_command(paths: &[&String]) -> String {
-    let mut command = String::from("rm -rf --");
+/// 为已校验所有权的路径生成同一份受限 Linux 删除脚本。
+pub(crate) fn cleanup_command<'a>(paths: impl IntoIterator<Item = &'a str>) -> String {
+    let mut command = String::from(CLEANUP_COMMAND_START);
     for path in paths {
         command.push(' ');
         command.push_str(&shell_quote(path));
     }
+    command.push_str(CLEANUP_COMMAND_END);
     command
 }
 
@@ -349,20 +392,43 @@ mod tests {
     #[test]
     fn cleanup_commands_are_split_before_the_byte_limit() {
         let paths = vec![
-            format!(
-                "/home/user/{}/.terax-part-{}-0",
-                "a".repeat(40_000),
-                uuid::Uuid::new_v4()
-            ),
-            format!(
-                "/home/user/{}/.terax-part-{}-1",
-                "b".repeat(40_000),
-                uuid::Uuid::new_v4()
-            ),
+            format!("/home/user/{}", "'".repeat(21_000)),
+            format!("/home/user/{}", "'".repeat(21_000)),
         ];
         let batches = cleanup_batches(&paths);
         assert_eq!(batches.len(), 2);
-        assert!(cleanup_command(&batches[0]).len() <= MAX_CLEANUP_COMMAND_BYTES);
-        assert!(cleanup_command(&batches[1]).len() <= MAX_CLEANUP_COMMAND_BYTES);
+        assert!(cleanup_command(batches[0].iter().copied()).len() <= MAX_CLEANUP_COMMAND_BYTES);
+        assert!(cleanup_command(batches[1].iter().copied()).len() <= MAX_CLEANUP_COMMAND_BYTES);
+    }
+
+    #[test]
+    fn maximally_quoted_transfer_path_fits_one_cleanup_command() {
+        let path = "'".repeat(32 * 1_024);
+        let paths = vec![path];
+        let batches = cleanup_batches(&paths);
+
+        assert_eq!(batches.len(), 1);
+        assert!(cleanup_command(batches[0].iter().copied()).len() <= MAX_CLEANUP_COMMAND_BYTES);
+    }
+
+    #[test]
+    fn cleanup_is_bounded_and_repairs_each_directory_before_descending() {
+        let path = String::from("/srv/releases/.terax-part-task-0.backup");
+        let command = cleanup_command([path.as_str()]);
+
+        let device_check = command.find("path_device=$(stat").unwrap();
+        let first_delete = command.find("find -P \"$path\"").unwrap();
+        assert!(device_check < first_delete);
+        assert!(command.contains("[ \"$path_device\" = \"$parent_device\" ] || return 1"));
+        assert!(command.contains("find -P \"$path\" -xdev -depth -delete"));
+        assert!(command.contains("find -P \"$path\" -xdev -type d"));
+        assert!(command.contains("chmod u+rwx -- \"$directory\""));
+        assert!(command.contains("{} \\;"));
+        assert!(!command.contains("{} +"));
+        assert!(!command.contains("rm -rf"));
+        assert!(!command.contains("chmod -R"));
+        assert!(command.contains("terax_cleanup_status=0"));
+        assert!(command.contains("if ! terax_remove_owned_path \"$path\""));
+        assert!(command.contains("set -- '/srv/releases/.terax-part-task-0.backup'"));
     }
 }

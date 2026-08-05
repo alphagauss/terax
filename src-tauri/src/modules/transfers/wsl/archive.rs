@@ -414,9 +414,8 @@ async fn cleanup_work_dir(distro: &str, directory: &str, task_id: &str) -> bool 
         log::warn!("refused to clean invalid WSL archive directory: {directory}");
         return false;
     }
-    capture_wsl(distro, "rm", &["-rf", "--", directory])
-        .await
-        .is_ok()
+    let command = crate::modules::transfers::ssh::cleanup::cleanup_command([directory]);
+    capture_wsl(distro, "bash", &["-c", &command]).await.is_ok()
 }
 
 #[cfg(windows)]
@@ -658,7 +657,7 @@ async fn publish_upload_staging(
             .stage
             .file_name()
             .ok_or_else(|| message("WSL staging root has no filename"))?;
-        commit_local_root(&LocalRoot {
+        let _ = commit_local_root(&LocalRoot {
             source_path: root.source_path.clone(),
             stage: host_work_dir.join(name),
             final_path: root.stage.clone(),

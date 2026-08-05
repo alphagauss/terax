@@ -22,6 +22,7 @@ use super::errors::{
     source_changed_io as source_changed_error, TransferErrorCode,
 };
 use super::manager::{TaskControl, TransferRunError};
+use super::metadata::EntryMetadata;
 use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
 use super::source::LocalSourceIdentity;
@@ -448,7 +449,7 @@ fn pack_entry_from_metadata(
         } else {
             0
         },
-        mode: archive_mode(metadata),
+        mode: EntryMetadata::from_local(metadata).archive_mode(),
         mtime: archive_mtime(metadata),
         modified: metadata.modified().ok(),
         source_identity: LocalSourceIdentity::from_metadata(metadata),
@@ -468,24 +469,6 @@ fn metadata_kind(path: &Path, metadata: &std::fs::Metadata) -> io::Result<Archiv
     } else {
         ArchiveEntryKind::Directory
     })
-}
-
-/// 归档使用可跨平台恢复的 Unix 权限位，Windows 仅区分只读与可写。
-fn archive_mode(metadata: &std::fs::Metadata) -> u32 {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o777
-    }
-    #[cfg(not(unix))]
-    {
-        match (metadata.is_dir(), metadata.permissions().readonly()) {
-            (true, true) => 0o555,
-            (true, false) => 0o755,
-            (false, true) => 0o444,
-            (false, false) => 0o644,
-        }
-    }
 }
 
 /// tar 头仅保存秒级修改时间，无法表示的值按 Unix epoch 处理。
@@ -697,8 +680,9 @@ fn apply_archive_metadata(path: &Path, metadata: ArchiveEntryMetadata) -> io::Re
     }
     #[cfg(not(unix))]
     {
-        let mut permissions = std::fs::metadata(path)?.permissions();
-        permissions.set_readonly(metadata.mode & 0o222 == 0);
+        let target = std::fs::metadata(path)?;
+        let mut permissions = target.permissions();
+        permissions.set_readonly(target.is_file() && metadata.mode & 0o222 == 0);
         std::fs::set_permissions(path, permissions)?;
     }
     Ok(())
@@ -1037,7 +1021,7 @@ mod tests {
             path: "root".into(),
             kind: ArchiveEntryKind::Directory,
             size: 0,
-            mode: archive_mode(&metadata),
+            mode: EntryMetadata::from_local(&metadata).archive_mode(),
             mtime: archive_mtime(&metadata),
             modified: metadata.modified().ok(),
             source_identity: LocalSourceIdentity::from_metadata(&metadata),
