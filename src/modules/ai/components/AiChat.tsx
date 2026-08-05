@@ -1,5 +1,6 @@
 /**
  * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
+ * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
  * 流式阶段只更新末尾活动分段，历史消息和已完成工具保持稳定且默认折叠。
  */
 
@@ -367,6 +368,18 @@ export function AiChatView({
     [addToolApprovalResponse],
   );
 
+  const setToolDetailsWheelScope = useCallback(
+    (scope: HTMLDivElement | null) => {
+      if (!scope) return;
+
+      scope.addEventListener("wheel", handleToolDetailsWheel, {
+        passive: false,
+      });
+      return () => scope.removeEventListener("wheel", handleToolDetailsWheel);
+    },
+    [],
+  );
+
   if (messages.length === 0) {
     return (
       <Conversation
@@ -395,14 +408,16 @@ export function AiChatView({
         className="gap-5 p-3"
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
       >
-        {messages.map((m) => (
-          <RenderedMessage
-            key={m.id}
-            message={m}
-            onApproval={onApproval}
-            streaming={m.id === streamingMessageId}
-          />
-        ))}
+        <div ref={setToolDetailsWheelScope} className="contents">
+          {messages.map((m) => (
+            <RenderedMessage
+              key={m.id}
+              message={m}
+              onApproval={onApproval}
+              streaming={m.id === streamingMessageId}
+            />
+          ))}
+        </div>
         {compactionNotice && (
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
@@ -554,7 +569,7 @@ const RenderedMessage = memo(function RenderedMessage({
       className="group/message"
     >
       <MessageContent>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
           {groups.map((g) => {
             if (g.kind === "reads") {
               return (
@@ -765,7 +780,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
     <Collapsible className="group/read overflow-hidden rounded-md border border-border/50 bg-card/50">
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px]",
+          "flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] leading-4",
           "transition-colors hover:bg-muted/50",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
@@ -786,11 +801,11 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           className="shrink-0 text-muted-foreground"
         />
         <span className="shrink-0 font-medium text-foreground">Read</span>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-[12px] text-muted-foreground">
           {count} file{count === 1 ? "" : "s"}
         </span>
         {paths.length > 0 ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/80 group-data-[state=open]/read:invisible">
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground/80 group-data-[state=open]/read:invisible">
             · {preview}
           </span>
         ) : null}
@@ -800,7 +815,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           {paths.map((path) => (
             <li
               key={path}
-              className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground"
+              className="flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground"
             >
               <HugeiconsIcon
                 icon={File01Icon}
@@ -835,7 +850,7 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
   const state = (part as { state?: string }).state ?? "";
   const isError = state === "output-error";
   return (
-    <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px]">
+    <div className="flex items-center gap-2 rounded-md px-2 py-1 text-[12px] leading-4">
       <span
         className={cn(
           "size-1.5 shrink-0 rounded-full",
@@ -851,7 +866,7 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
         className="shrink-0 text-muted-foreground"
       />
       <span className="shrink-0 font-medium text-foreground">Read</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
         {path ?? ""}
       </span>
     </div>
@@ -878,8 +893,8 @@ const RenderedPart = memo(function RenderedPart({
   if (part.type === "reasoning") {
     return (
       <Reasoning isStreaming={streaming}>
-        <ReasoningTrigger />
-        <ReasoningContent>
+        <ReasoningTrigger className="text-[12px] leading-4" />
+        <ReasoningContent className="[&_*]:text-[12px]!">
           {(part as unknown as { text: string }).text}
         </ReasoningContent>
       </Reasoning>
@@ -925,6 +940,7 @@ const RenderedTool = memo(function RenderedTool({
 
   return (
     <Tool
+      className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-1 [&>button]:leading-4"
       toolName={toolName}
       state={part.state}
       input={part.input}
@@ -933,3 +949,20 @@ const RenderedTool = memo(function RenderedTool({
     />
   );
 });
+
+/** 将工具详情中的 Shift 加滚轮转换为横向滚动，监听器必须以 non-passive 注册。 */
+function handleToolDetailsWheel(event: WheelEvent) {
+  const delta = event.deltaX || event.deltaY;
+  if (!event.shiftKey || delta === 0) return;
+
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+
+  const scrollArea = target.closest<HTMLElement>(
+    ".ai-tool-details .overflow-auto, .ai-tool-details [data-slot='collapsible-content'] > div",
+  );
+  if (!scrollArea || scrollArea.scrollWidth <= scrollArea.clientWidth) return;
+
+  event.preventDefault();
+  scrollArea.scrollLeft += delta;
+}
