@@ -47,9 +47,15 @@ const quickDiffField = StateField.define<QuickDiffSnapshot | null>({
 });
 
 class ChangeMarker extends GutterMarker {
-  constructor(kind: QuickDiffRange["kind"]) {
+  constructor(private readonly kind: QuickDiffRange["kind"]) {
     super();
-    this.elementClass = `cm-change-${kind}`;
+  }
+
+  /** 将 Git 标记绘制到独立子层，避免与活动行 gutter 样式争用背景和阴影。 */
+  toDOM(): HTMLElement {
+    const marker = document.createElement("span");
+    marker.className = `cm-changeMarker cm-change-${this.kind}`;
+    return marker;
   }
 }
 
@@ -160,7 +166,16 @@ const changeGutter = gutter({
 
 const changeGutterTheme = EditorView.baseTheme({
   ".cm-changeGutter": { width: "3px", padding: "0" },
-  ".cm-changeGutter .cm-gutterElement": { padding: "0" },
+  ".cm-changeGutter .cm-gutterElement": {
+    width: "3px",
+    padding: "0",
+    position: "relative",
+  },
+  ".cm-changeMarker": {
+    display: "block",
+    width: "100%",
+    height: "100%",
+  },
   ".cm-change-added": { backgroundColor: "var(--terminal-ansi-green)" },
   ".cm-change-modified": { backgroundColor: "var(--terminal-ansi-blue)" },
   ".cm-change-deleted": {
