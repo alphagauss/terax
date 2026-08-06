@@ -1,8 +1,14 @@
+/**
+ * 本文件定义 AI 的前台命令、后台进程及日志工具。
+ * 命令执行始终经过安全检查，完全访问模式只省略逐次批准。
+ */
+
 import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
+import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 
 /**
@@ -27,16 +33,17 @@ function workspaceSessionKey(sessionId: string): string {
   return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
 }
 
+/** 创建 Shell 工具，并在每次命令调用时读取最新权限模式。 */
 export function buildShellTools(ctx: ToolContext) {
   return {
     bash_run: tool({
       description:
-        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top) — they will hang. Asks for user approval.",
+        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top), which will hang. Follows the current approval mode.",
       inputSchema: z.object({
         command: z.string(),
         timeout_secs: z.number().int().min(1).max(300).optional(),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ command, timeout_secs }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
@@ -68,12 +75,12 @@ export function buildShellTools(ctx: ToolContext) {
 
     bash_background: tool({
       description:
-        "Spawn a long-running background process (e.g. `pnpm dev`, `cargo watch`, log tailers). Returns a handle; use `bash_logs` to read its output and `bash_kill` to stop it. Output is captured into a 4MB ring buffer. Asks for user approval.",
+        "Spawn a long-running background process (e.g. `pnpm dev`, `cargo watch`, log tailers). Returns a handle; use `bash_logs` to read its output and `bash_kill` to stop it. Output is captured into a 4MB ring buffer. Follows the current approval mode.",
       inputSchema: z.object({
         command: z.string(),
         cwd: z.string().nullable().optional(),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };

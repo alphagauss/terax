@@ -33,10 +33,12 @@ import {
   GlobeIcon,
   GoogleGeminiIcon,
   Grok02Icon,
+  HandIcon,
   Mic01Icon,
   MistralIcon,
   PlugIcon,
   Search01Icon,
+  SecurityWarningIcon,
   ServerStack01Icon,
   Settings01Icon,
   StarIcon,
@@ -82,6 +84,10 @@ const PROVIDER_ICON = {
   ollama: ServerStack01Icon,
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
+/**
+ * AI 侧栏输入组件。
+ * 负责输入附件、模型和进程内权限模式选择，以及发送和停止操作。
+ */
 export function AiSidebarComposer() {
   const { t } = useTranslation("ai");
   const c = useComposer();
@@ -197,6 +203,62 @@ export function AiSidebarComposer() {
         </div>
       </div>
     </div>
+  );
+}
+
+const PERMISSION_MODES = [
+  { id: "ask", icon: HandIcon },
+  { id: "full-access", icon: SecurityWarningIcon },
+] as const;
+
+/** 选择当前 Workspace 进程内的 AI 工具审批模式。 */
+function PermissionModeDropdown() {
+  const { t } = useTranslation("ai");
+  const mode = useChatStore((s) => s.permissionMode);
+  const setMode = useChatStore((s) => s.setPermissionMode);
+  const activeIcon = mode === "ask" ? HandIcon : SecurityWarningIcon;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "my-1 h-5.5 shrink-0 gap-1 rounded-md px-1.5 text-xs hover:bg-accent focus-visible:border-transparent focus-visible:ring-0",
+            mode === "full-access"
+              ? "text-amber-600! dark:text-amber-400!"
+              : "text-foreground!",
+          )}
+          title={t(`statusBar.permissionMode.${mode}`)}
+        >
+          <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
+          <span>{t(`statusBar.permissionMode.${mode}`)}</span>
+          <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        className="min-w-44 rounded-2xl p-1"
+      >
+        {PERMISSION_MODES.map((item) => (
+          <DropdownMenuItem
+            key={item.id}
+            onSelect={() => setMode(item.id)}
+            className={cn(
+              "gap-2 rounded-xl px-2.5 py-1.5 text-xs",
+              item.id === "full-access"
+                ? "text-amber-600! **:text-amber-600! dark:text-amber-400! dark:**:text-amber-400!"
+                : "text-foreground! **:text-foreground!",
+            )}
+          >
+            <HugeiconsIcon icon={item.icon} size={14} strokeWidth={1.75} />
+            {t(`statusBar.permissionMode.${item.id}`)}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -440,6 +502,7 @@ function ModelDropdown() {
           </div>
         </div>
       </DropdownMenuContent>
+      <PermissionModeDropdown />
     </DropdownMenu>
   );
 }

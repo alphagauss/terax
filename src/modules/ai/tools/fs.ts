@@ -1,3 +1,8 @@
+/**
+ * 本文件定义 AI 的受控文件读取、写入和目录创建工具。
+ * 所有路径都经过秘密路径和规范化检查，权限模式只控制逐次批准。
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -5,6 +10,7 @@ import {
   checkReadableCanonical,
   checkWritableCanonical,
 } from "../lib/security";
+import { useChatStore } from "../store/chatStore";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -17,6 +23,7 @@ function djb2(s: string): number {
   return h >>> 0;
 }
 
+/** 创建文件系统工具，并为写操作动态应用当前权限模式。 */
 export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
@@ -135,12 +142,12 @@ export function buildFsTools(ctx: ToolContext) {
 
     write_file: tool({
       description:
-        "Create or overwrite a file with the given content. Always asks the user before running. Prefer `edit` / `multi_edit` for in-place changes — only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
+        "Create or overwrite a file with the given content. Follows the current approval mode. Prefer `edit` / `multi_edit` for in-place changes; only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
       inputSchema: z.object({
         path: z.string(),
         content: z.string(),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ path, content }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
@@ -183,11 +190,11 @@ export function buildFsTools(ctx: ToolContext) {
 
     create_directory: tool({
       description:
-        "Create a directory (and any missing parents). Always asks the user before running.",
+        "Create a directory (and any missing parents). Follows the current approval mode.",
       inputSchema: z.object({
         path: z.string(),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);

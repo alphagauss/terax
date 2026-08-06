@@ -101,6 +101,10 @@
     "openaiCompatible": "OpenAI Compatible",
     "modelTitle": "Model: {{label}}",
     "modelNoKey": "{{label}} - no key configured",
+    "permissionMode": {
+      "ask": "Ask approval",
+      "full-access": "Full access"
+    },
     "noFavorites": "No favorites yet - star a model to pin it here.",
     "noRecent": "No recently-used models.",
     "noMatch": "No models match.",

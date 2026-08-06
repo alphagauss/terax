@@ -1,7 +1,13 @@
+/**
+ * 本文件定义 AI 的单处和批量文本编辑工具。
+ * 编辑始终遵守先读后写及路径安全约束，权限模式只控制逐次批准。
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
+import { useChatStore } from "../store/chatStore";
 import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
 
@@ -117,11 +123,12 @@ async function applyEdits(
   }
 }
 
+/** 创建文本编辑工具，并为写操作动态应用当前权限模式。 */
 export function buildEditTools(ctx: ToolContext) {
   return {
     edit: tool({
       description:
-        "Replace an exact string in a file. Requires read_file on this path first in the current session — this prevents blind edits. `old_string` must be unique in the file unless `replace_all: true`. Asks for user approval before writing.",
+        "Replace an exact string in a file. Requires read_file on this path first in the current session to prevent blind edits. `old_string` must be unique in the file unless `replace_all: true`. Follows the current approval mode.",
       inputSchema: z.object({
         path: z.string(),
         old_string: z
@@ -130,7 +137,7 @@ export function buildEditTools(ctx: ToolContext) {
         new_string: z.string().describe("Replacement substring."),
         replace_all: z.boolean().optional(),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ path, old_string, new_string, replace_all }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);
@@ -154,7 +161,7 @@ export function buildEditTools(ctx: ToolContext) {
 
     multi_edit: tool({
       description:
-        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Asks for user approval before writing.",
+        "Apply several exact-string replacements to a single file atomically. Each edit is applied in order to the running buffer; if any edit's old_string is missing or non-unique, the whole batch aborts before writing. Requires prior read_file on the path. Follows the current approval mode.",
       inputSchema: z.object({
         path: z.string(),
         edits: z
@@ -167,7 +174,7 @@ export function buildEditTools(ctx: ToolContext) {
           )
           .min(1),
       }),
-      needsApproval: true,
+      needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ path, edits }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
         const safety = await checkWritableCanonical(reqPath, native.canonicalize);

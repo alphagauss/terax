@@ -105,6 +105,8 @@ export type PendingFileAttachment = {
   path: string;
 };
 
+export type AiPermissionMode = "ask" | "full-access";
+
 export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
 
 type StoreState = {
@@ -129,6 +131,9 @@ type StoreState = {
 
   selectedModelId: string;
   setSelectedModelId: (id: string) => void;
+
+  permissionMode: AiPermissionMode;
+  setPermissionMode: (mode: AiPermissionMode) => void;
 
   focusSignal: number;
   pendingPrefill: string | null;
@@ -241,6 +246,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set({ selectedModelId: id });
     void pushRecentModel(id);
   },
+
+  permissionMode: "ask",
+  setPermissionMode: (permissionMode) => set({ permissionMode }),
 
   focusSignal: 0,
   pendingPrefill: null,

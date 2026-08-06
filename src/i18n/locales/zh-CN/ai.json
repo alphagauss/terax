@@ -101,6 +101,10 @@
     "openaiCompatible": "OpenAI Compatible",
     "modelTitle": "模型：{{label}}",
     "modelNoKey": "{{label}}：未配置密钥",
+    "permissionMode": {
+      "ask": "请求批准",
+      "full-access": "完全访问"
+    },
     "noFavorites": "还没有收藏，给模型加星即可固定到这里。",
     "noRecent": "没有最近使用的模型。",
     "noMatch": "没有匹配的模型。",
