@@ -201,8 +201,8 @@ fn write_session(root: &Path, session: &SessionFile) -> Result<(), String> {
     write_atomic(&session_path(root, id), &bytes).map_err(|error| error.to_string())
 }
 
-/// 在锁内读取现有记录，追加本次新增记录后整体原子替换。
-fn commit_session(root: &Path, update: &SessionFile) -> Result<(), String> {
+/// 在锁内读取现有记录，追加本次新增记录后整体原子替换，并返回真实文件指纹。
+fn commit_session(root: &Path, update: &SessionFile) -> Result<SessionMetadata, String> {
     let id = validate_session_file(update)?;
     let path = session_path(root, id);
     let mut messages = if path.exists() {
@@ -221,7 +221,8 @@ fn commit_session(root: &Path, update: &SessionFile) -> Result<(), String> {
             messages,
             ..update.clone()
         },
-    )
+    )?;
+    metadata(root, id)
 }
 
 /// 从首行 metadata 和文件系统属性构造会话列表项。
@@ -298,7 +299,7 @@ fn commit_with_run_lock(
     state: &AiSessionsState,
     id: Uuid,
     session: &SessionFile,
-) -> Result<(), String> {
+) -> Result<SessionMetadata, String> {
     let run_locks = state
         .run_locks
         .lock()
@@ -313,12 +314,12 @@ fn commit_with_run_lock(
     commit_session(root, session)
 }
 
-/// 将新增记录提交到 AI 会话，拒绝写入其他进程正在运行的会话。
+/// 将新增记录提交到 AI 会话并返回最新 metadata，拒绝写入其他进程正在运行的会话。
 #[tauri::command]
 pub fn ai_session_commit(
     state: State<'_, AiSessionsState>,
     session: SessionFile,
-) -> Result<(), String> {
+) -> Result<SessionMetadata, String> {
     let id = validate_session_file(&session)?;
     let root = sessions_dir()?;
     commit_with_run_lock(&root, state.inner(), id, &session)

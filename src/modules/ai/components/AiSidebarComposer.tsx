@@ -45,6 +45,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   compatModelIdForEndpoint,
   getCompatModelInfo,
@@ -82,6 +83,7 @@ const PROVIDER_ICON = {
 } as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 export function AiSidebarComposer() {
+  const { t } = useTranslation("ai");
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,7 +123,7 @@ export function AiSidebarComposer() {
 
         <div className="flex min-w-0 items-center gap-0.5">
           <IconBtn
-            title="Attach file or image"
+            title={t("statusBar.attachFileOrImage")}
             onClick={() => fileInputRef.current?.click()}
             disabled={c.isBusy}
           >
@@ -132,12 +134,14 @@ export function AiSidebarComposer() {
             <IconBtn
               title={
                 !c.voice.hasKey
-                  ? `Voice needs a ${STT_PROVIDER_LABELS[c.voice.sttProvider]} key`
+                  ? t("statusBar.voiceNeedsKey", {
+                      provider: STT_PROVIDER_LABELS[c.voice.sttProvider],
+                    })
                   : c.voice.recording
-                    ? "Stop & transcribe"
+                    ? t("statusBar.stopAndTranscribe")
                     : c.voice.transcribing
-                      ? "Transcribing…"
-                      : "Voice input"
+                      ? t("statusBar.transcribing")
+                      : t("statusBar.voiceInput")
               }
               onClick={() =>
                 c.voice.recording ? c.voice.stop() : void c.voice.start()
@@ -168,8 +172,8 @@ export function AiSidebarComposer() {
               variant="ghost"
               onClick={c.stop}
               className="size-7"
-              aria-label="Stop"
-              title="Stop"
+              aria-label={t("statusBar.stop")}
+              title={t("statusBar.stop")}
             >
               <HugeiconsIcon
                 icon={StopCircleIcon}
@@ -184,8 +188,8 @@ export function AiSidebarComposer() {
               onClick={c.submit}
               disabled={!c.canSend}
               className="size-7 rounded-full"
-              aria-label="Send"
-              title="Send (Enter)"
+              aria-label={t("statusBar.send")}
+              title={t("statusBar.send")}
             >
               <HugeiconsIcon icon={ArrowUpIcon} size={14} strokeWidth={1.75} />
             </Button>
@@ -199,6 +203,7 @@ export function AiSidebarComposer() {
 type Tab = "all" | "favorites" | "recent";
 
 function ModelDropdown() {
+  const { t } = useTranslation("ai");
   const selected = useChatStore((s) => s.selectedModelId);
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setSelected = useChatStore((s) => s.setSelectedModelId);
@@ -288,8 +293,8 @@ function ModelDropdown() {
           )}
           title={
             currentProviderHasKey
-              ? `Model: ${current.label}`
-              : `${current.label} — no key configured`
+              ? t("statusBar.modelTitle", { label: current.label })
+              : t("statusBar.modelNoKey", { label: current.label })
           }
         >
           {current.label}
@@ -322,7 +327,7 @@ function ModelDropdown() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
-            placeholder="Search models, providers, capabilities…"
+            placeholder={t("statusBar.searchPlaceholder")}
             className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
           />
         </div>
@@ -330,20 +335,20 @@ function ModelDropdown() {
         {/* Tabs */}
         <div className="flex items-center gap-0.5 border-b border-border/70 px-2 py-1.5">
           <TabButton
-            label="All"
+            label={t("statusBar.tabAll")}
             icon={AiBookIcon}
             active={tab === "all"}
             onClick={() => setTab("all")}
           />
           <TabButton
-            label="Favorites"
+            label={t("statusBar.tabFavorites")}
             icon={FavouriteIcon}
             active={tab === "favorites"}
             onClick={() => setTab("favorites")}
             count={favoriteIds.length || undefined}
           />
           <TabButton
-            label="Recent"
+            label={t("statusBar.tabRecent")}
             icon={Clock01Icon}
             active={tab === "recent"}
             onClick={() => setTab("recent")}
@@ -352,11 +357,11 @@ function ModelDropdown() {
         </div>
 
         <div className="flex max-h-104 min-h-0">
-          {/* Provider sidebar — configured first, unconfigured muted, no dividers. */}
+          {/* 已配置的提供方优先，未配置项弱化显示。 */}
           <div className="flex w-11 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/70 bg-muted/20 py-1.5">
             <ProviderPill
               icon={AiBookIcon}
-              title="All providers"
+              title={t("statusBar.allProviders")}
               active={activeProvider === null}
               onClick={() => setActiveProvider(null)}
             />
@@ -368,7 +373,9 @@ function ModelDropdown() {
                 key={p.id}
                 icon={PROVIDER_ICON[p.id]}
                 title={
-                  hasKeyFor(p.id) ? p.label : `${p.label} — not configured`
+                  hasKeyFor(p.id)
+                    ? p.label
+                    : t("statusBar.notConfigured", { label: p.label })
                 }
                 active={activeProvider === p.id}
                 muted={!hasKeyFor(p.id)}
@@ -378,7 +385,7 @@ function ModelDropdown() {
             {customEndpoints.length > 0 && (
               <ProviderPill
                 icon={PlugIcon}
-                title="OpenAI Compatible"
+                title={t("statusBar.openaiCompatible")}
                 active={activeProvider === COMPAT_PROVIDER_ID}
                 onClick={() => setActiveProvider(COMPAT_PROVIDER_ID)}
               />
@@ -390,7 +397,7 @@ function ModelDropdown() {
             {activeProvider === COMPAT_PROVIDER_ID && (
               <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
                 <HugeiconsIcon icon={PlugIcon} size={13} strokeWidth={1.75} />
-                <span>OpenAI Compatible</span>
+                <span>{t("statusBar.openaiCompatible")}</span>
               </div>
             )}
             {activeProvider !== null &&
@@ -405,10 +412,10 @@ function ModelDropdown() {
             {filtered.length === 0 ? (
               <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground">
                 {tab === "favorites"
-                  ? "No favorites yet — star a model to pin it here."
+                  ? t("statusBar.noFavorites")
                   : tab === "recent"
-                    ? "No recently-used models."
-                    : "No models match."}
+                    ? t("statusBar.noRecent")
+                    : t("statusBar.noMatch")}
               </div>
             ) : (
               filtered.map((m) => (
@@ -516,6 +523,7 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
 }
 
 function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
+  const { t } = useTranslation("ai");
   const p = PROVIDERS.find((x) => x.id === providerId);
   if (!p) return null;
   return (
@@ -526,10 +534,10 @@ function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
     >
       <HugeiconsIcon icon={Settings01Icon} size={13} strokeWidth={1.75} />
       <span className="flex-1 truncate">
-        Configure {p.label} to use these models.
+        {t("statusBar.configureCta", { label: p.label })}
       </span>
       <span className="shrink-0 text-[10px] underline-offset-2 group-hover:underline">
-        Open
+        {t("statusBar.open")}
       </span>
     </button>
   );
@@ -552,6 +560,7 @@ function ModelRow({
   onPick: () => void;
   onToggleFavorite: () => void;
 }) {
+  const { t } = useTranslation("ai");
   return (
     <DropdownMenuItem
       onSelect={(e) => {
@@ -571,7 +580,7 @@ function ModelRow({
           e.stopPropagation();
           onToggleFavorite();
         }}
-        title={favorite ? "Unfavorite" : "Favorite"}
+        title={favorite ? t("statusBar.unfavorite") : t("statusBar.favorite")}
         className={cn(
           "shrink-0 rounded p-0.5 transition-colors",
           favorite
@@ -620,11 +629,24 @@ function ModelRow({
 }
 
 function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
+  const { t } = useTranslation("ai");
   return (
     <div className="ml-auto flex items-center gap-1.5">
-      <CapBar icon={BrainIcon} value={caps.intelligence} label="Intelligence" />
-      <CapBar icon={FlashIcon} value={caps.speed} label="Speed" />
-      <CapBar icon={CoinsDollarIcon} value={caps.cost} label="Affordability" />
+      <CapBar
+        icon={BrainIcon}
+        value={caps.intelligence}
+        label={t("statusBar.intelligence")}
+      />
+      <CapBar
+        icon={FlashIcon}
+        value={caps.speed}
+        label={t("statusBar.speed")}
+      />
+      <CapBar
+        icon={CoinsDollarIcon}
+        value={caps.cost}
+        label={t("statusBar.affordability")}
+      />
     </div>
   );
 }
@@ -638,8 +660,12 @@ function CapBar({
   value: number;
   label: string;
 }) {
+  const { t } = useTranslation("ai");
   return (
-    <span className="flex items-center gap-0.5" title={`${label}: ${value}/5`}>
+    <span
+      className="flex items-center gap-0.5"
+      title={t("statusBar.capBarTitle", { label, value })}
+    >
       <HugeiconsIcon
         icon={icon}
         size={10}

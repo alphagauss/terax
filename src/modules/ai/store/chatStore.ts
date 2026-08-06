@@ -161,7 +161,7 @@ type StoreState = {
   sessionSyncError: string | null;
   hydrateSessions: () => Promise<void>;
   refreshSessions: () => Promise<void>;
-  ensureSessionRunLock: (id: string) => Promise<boolean>;
+  beginSessionRun: (id: string) => Promise<boolean>;
   newSession: () => string;
   promoteSession: (id: string, messages: UIMessage[]) => void;
   switchSession: (id: string) => void;
@@ -184,6 +184,9 @@ const NOOP_LIVE: Live = {
 const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
 const cancelledRuns = new Set<string>();
+const acquiringSessionRuns = new Set<string>();
+const sessionCommits = new Map<string, Promise<void>>();
+let sessionSwitchSequence = 0;
 
 /** 更新聊天实例的 LRU 位置，并停止超出容量的非活动实例。 */
 export function touchChat(id: string, c: Chat<UIMessage>) {
@@ -395,21 +398,28 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
   },
 
-  ensureSessionRunLock: async (id) => {
-    if (get().runLockSessionIds[id]) return true;
-    const acquired = await acquireSessionRun(id);
-    if (acquired) {
+  /** 为一次新运行取得独占权；本进程已有运行或正在取锁时同样拒绝。 */
+  beginSessionRun: async (id) => {
+    if (get().runLockSessionIds[id] || acquiringSessionRuns.has(id)) {
+      return false;
+    }
+    acquiringSessionRuns.add(id);
+    try {
+      const acquired = await acquireSessionRun(id);
+      if (!acquired) return false;
       set({
         runLockSessionIds: { ...get().runLockSessionIds, [id]: true },
         sessionSyncError: null,
       });
       return true;
+    } finally {
+      acquiringSessionRuns.delete(id);
     }
-    return false;
   },
 
   /** 切换到唯一的空白草稿，不为尚未发送的输入创建历史记录。 */
   newSession: () => {
+    sessionSwitchSequence++;
     const activeId = get().activeSessionId;
     if (activeId && get().runLockSessionIds[activeId]) return activeId;
     const draftId = get().draftSessionId;
@@ -444,6 +454,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   /** 切换到已持久化会话，并放弃当前未发送草稿的会话身份。 */
   switchSession: (id) => {
+    const requestSequence = ++sessionSwitchSequence;
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
     const activeId = get().activeSessionId;
@@ -452,6 +463,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
+      if (requestSequence !== sessionSwitchSequence) return;
       set({ activeSessionId: id, draftSessionId: null, agentMeta: IDLE_META });
       void setWorkspaceValue("ai:activeSessionId", id);
     };
@@ -460,13 +472,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return;
     }
     void seedSession(id)
-      .catch((error) => set({ sessionSyncError: String(error) }))
-      .finally(flip);
+      .then(flip)
+      .catch((error) => {
+        if (requestSequence === sessionSwitchSequence) {
+          set({ sessionSyncError: String(error) });
+        }
+      });
   },
 
   /** 删除一条历史会话，并在需要时回退到另一条历史或空白草稿。 */
   deleteSession: (id) => {
     if (Object.keys(get().runLockSessionIds).length > 0) return;
+    sessionSwitchSequence++;
     void (async () => {
       try {
         await deleteSessionFile(id);
@@ -512,8 +529,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         }
         set({
           sessions: remaining,
-          draftSessionId:
-            activeDraftId === nextActive ? activeDraftId : null,
+          draftSessionId: activeDraftId === nextActive ? activeDraftId : null,
           activeSessionId: nextActive,
         });
         if (wasActive)
@@ -525,58 +541,68 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   commitMessages: async (id, messages) => {
-    const sessions = get().sessions;
-    const meta = sessions.find((s) => s.id === id);
-    if (!meta) return;
-    if (messages.length === 0 && meta.title === "New chat") {
+    const pending = sessionCommits.get(id);
+    if (pending) return pending;
+
+    const commit = (async () => {
+      const sessions = get().sessions;
+      const meta = sessions.find((s) => s.id === id);
+      if (!meta) return;
+      if (messages.length === 0 && meta.title === "New chat") {
+        await releaseSessionRun(id);
+        const runLockSessionIds = { ...get().runLockSessionIds };
+        delete runLockSessionIds[id];
+        set({ runLockSessionIds });
+        return;
+      }
+      const updatedAt = Date.now();
+      const title =
+        !meta.title || meta.title === "New chat"
+          ? deriveTitle(messages)
+          : meta.title;
+      const persistedCount = persistedMessageCounts.get(id) ?? 0;
+      if (messages.length < persistedCount) {
+        throw new Error(
+          "The UI message history is shorter than the session file",
+        );
+      }
+      const records = serializeSessionMessages(messages.slice(persistedCount), {
+        timestamp: new Date(updatedAt).toISOString(),
+        turnId: `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+        turnStatus: cancelledRuns.has(id)
+          ? "cancelled"
+          : get().agentMeta.status === "error"
+            ? "error"
+            : "completed",
+      });
+      const committedMeta = await commitSession({
+        id,
+        title,
+        createdAt: meta.createdAt,
+        updatedAt,
+        messages: records,
+        todos: useTodosStore.getState().bySession[id] ?? [],
+      });
+      persistedMessageCounts.set(id, messages.length);
+      cancelledRuns.delete(id);
+      set({
+        sessions: get().sessions.map((session) =>
+          session.id === id ? committedMeta : session,
+        ),
+      });
+      await get().refreshSessions();
       await releaseSessionRun(id);
       const runLockSessionIds = { ...get().runLockSessionIds };
       delete runLockSessionIds[id];
       set({ runLockSessionIds });
-      return;
+    })();
+
+    sessionCommits.set(id, commit);
+    try {
+      await commit;
+    } finally {
+      if (sessionCommits.get(id) === commit) sessionCommits.delete(id);
     }
-    const updatedAt = Date.now();
-    const title =
-      !meta.title || meta.title === "New chat"
-        ? deriveTitle(messages)
-        : meta.title;
-    const persistedCount = persistedMessageCounts.get(id) ?? 0;
-    if (messages.length < persistedCount) {
-      throw new Error(
-        "The UI message history is shorter than the session file",
-      );
-    }
-    const records = serializeSessionMessages(messages.slice(persistedCount), {
-      timestamp: new Date(updatedAt).toISOString(),
-      turnId: `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      turnStatus: cancelledRuns.has(id)
-        ? "cancelled"
-        : get().agentMeta.status === "error"
-          ? "error"
-          : "completed",
-    });
-    await commitSession({
-      id,
-      title,
-      createdAt: meta.createdAt,
-      updatedAt,
-      messages: records,
-      todos: useTodosStore.getState().bySession[id] ?? [],
-    });
-    persistedMessageCounts.set(id, messages.length);
-    cancelledRuns.delete(id);
-    await releaseSessionRun(id);
-    const runLockSessionIds = { ...get().runLockSessionIds };
-    delete runLockSessionIds[id];
-    set({
-      sessions: get().sessions.map((session) =>
-        session.id === id
-          ? { ...session, title, updatedAt, fingerprint: "committed" }
-          : session,
-      ),
-      runLockSessionIds,
-    });
-    await get().refreshSessions();
   },
 }));
 

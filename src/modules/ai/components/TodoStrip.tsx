@@ -1,3 +1,8 @@
+/**
+ * 本文件展示当前 AI 会话的待办进度和任务状态。
+ * 待办数据按会话隔离，空列表不占用侧栏空间。
+ */
+
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { CheckmarkSquare02Icon, SquareIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { Todo } from "../lib/todos";
 import { useTodosStore } from "../store/todoStore";
 
@@ -18,7 +24,9 @@ type Props = { sessionId: string | null };
 
 const EMPTY_TODOS: Todo[] = [];
 
+/** 展示当前会话的待办进度与任务列表。 */
 export function TodoStrip({ sessionId }: Props) {
+  const { t } = useTranslation("ai");
   const hydrate = useTodosStore((s) => s.hydrate);
   const todos =
     useTodosStore((s) => (sessionId ? s.bySession[sessionId] : undefined)) ??
@@ -36,7 +44,9 @@ export function TodoStrip({ sessionId }: Props) {
   return (
     <div className="flex flex-col min-h-0 shrink-0 border-t-2 border-border/40 bg-muted/80 px-3 py-1.5 max-h-[35%] shadow-[0_-4px_12px_-8px_rgba(0,0,0,0.2)]">
       <div className="my-1.5 flex items-center gap-2 shrink-0">
-        <span className="text-[11px] font-medium text-foreground">Todos</span>
+        <span className="text-[11px] font-medium text-foreground">
+          {t("todos.title")}
+        </span>
         <Progress value={pct} className="h-1 flex-1" />
         <span className="text-[11px] tabular-nums font-mono text-muted-foreground">
           {completed}/{todos.length}

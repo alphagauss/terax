@@ -59,6 +59,13 @@ const second: SessionMeta = {
   updatedAt: 1,
   fingerprint: "disk:2",
 };
+const third: SessionMeta = {
+  id: "33333333-3333-4333-8333-333333333333",
+  title: "Third",
+  createdAt: 1,
+  updatedAt: 0,
+  fingerprint: "disk:3",
+};
 
 const sessionFile = (meta: SessionMeta) => ({
   id: meta.id,
@@ -78,7 +85,17 @@ describe("chat store multi-process lifecycle", () => {
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
-    io.commit.mockResolvedValue(undefined);
+    io.commit.mockImplementation(
+      async (session: { id: string; title: string; updatedAt: number }) => ({
+        id: session.id,
+        title: session.title,
+        createdAt: 1,
+        updatedAt: session.updatedAt,
+        modifiedAt: 10,
+        size: 20,
+        fingerprint: "disk:committed",
+      }),
+    );
     io.read.mockImplementation(async (id: string) =>
       sessionFile(id === first.id ? first : second),
     );
@@ -144,7 +161,7 @@ describe("chat store multi-process lifecycle", () => {
       sessions: [first, second],
       activeSessionId: first.id,
     });
-    await useChatStore.getState().ensureSessionRunLock(first.id);
+    await useChatStore.getState().beginSessionRun(first.id);
 
     expect(useChatStore.getState().newSession()).toBe(first.id);
     useChatStore.getState().switchSession(second.id);
@@ -166,9 +183,11 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().newSession()).toBe(draftId);
     expect(useChatStore.getState().sessions).toEqual([first]);
 
-    useChatStore.getState().promoteSession(draftId, [
-      { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
-    ]);
+    useChatStore
+      .getState()
+      .promoteSession(draftId, [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
+      ]);
 
     expect(useChatStore.getState().draftSessionId).toBeNull();
     expect(useChatStore.getState().sessions[0]).toMatchObject({
@@ -212,7 +231,7 @@ describe("chat store multi-process lifecycle", () => {
         ]),
     ).rejects.toThrow("release failed");
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
-    expect(refresh).not.toHaveBeenCalled();
+    expect(refresh).toHaveBeenCalledOnce();
     expect(io.commit).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: [
@@ -234,19 +253,87 @@ describe("chat store multi-process lifecycle", () => {
       expect.objectContaining({ messages: [] }),
     );
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
-    expect(refresh).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledTimes(2);
   });
 
-  it("allows a later send attempt after another process releases the lock", async () => {
+  it("allows a later run after another process releases the lock", async () => {
     io.acquire.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
 
-    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(
-      false,
-    );
+    expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
-    expect(await useChatStore.getState().ensureSessionRunLock(first.id)).toBe(
-      true,
+    expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(true);
+    expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
+    expect(io.acquire).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the active Chat after committing its own turn", async () => {
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const chat = { stop, status: "ready", messages: [] } as never;
+    const committed = { ...first, updatedAt: 3, fingerprint: "disk:committed" };
+    chats.set(first.id, chat);
+    io.commit.mockResolvedValue(committed);
+    io.list.mockResolvedValue([committed]);
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      activeSessionRevision: 0,
+      runLockSessionIds: { [first.id]: true },
+    });
+
+    await useChatStore
+      .getState()
+      .commitMessages(first.id, [
+        { id: "m1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      ]);
+
+    expect(chats.get(first.id)).toBe(chat);
+    expect(stop).not.toHaveBeenCalled();
+    expect(useChatStore.getState().activeSessionRevision).toBe(0);
+    expect(useChatStore.getState().sessions[0]).toEqual(committed);
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it("keeps the latest session choice when an older read finishes later", async () => {
+    let resolveSecond: (value: ReturnType<typeof sessionFile>) => void = () =>
+      undefined;
+    io.read.mockImplementation((id: string) =>
+      id === second.id
+        ? new Promise((resolve) => {
+            resolveSecond = resolve;
+          })
+        : Promise.resolve(sessionFile(id === first.id ? first : third)),
     );
+    useChatStore.setState({
+      sessions: [first, second, third],
+      activeSessionId: first.id,
+    });
+
+    useChatStore.getState().switchSession(second.id);
+    useChatStore.getState().switchSession(third.id);
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(third.id);
+    });
+    resolveSecond(sessionFile(second));
+    await Promise.resolve();
+
+    expect(useChatStore.getState().activeSessionId).toBe(third.id);
+  });
+
+  it("does not switch to a session whose history cannot be read", async () => {
+    io.read.mockRejectedValueOnce(new Error("read failed"));
+    useChatStore.setState({
+      sessions: [first, second],
+      activeSessionId: first.id,
+    });
+
+    useChatStore.getState().switchSession(second.id);
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().sessionSyncError).toBe(
+        "Error: read failed",
+      );
+    });
+
+    expect(useChatStore.getState().activeSessionId).toBe(first.id);
   });
 
   it("evicts an inactive cached Chat when its disk fingerprint changes", async () => {

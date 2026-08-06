@@ -133,46 +133,41 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
   return c;
 }
 
-/** 发送纯文本用户消息，并在消息进入运行时后提升空白草稿。 */
+/** 发送纯文本用户消息；消息被运行时接受后立即返回，不等待流式回复完成。 */
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
   if (!sessionId) return false;
-  if (
-    providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
-    !getActiveProviderKey()
-  )
-    return false;
-  if (!(await state.ensureSessionRunLock(sessionId))) return false;
-  const c = getOrCreateChat(sessionId);
-  const sending = c.sendMessage({
-    text,
+  return startChatMessage(sessionId, {
+    role: "user",
+    parts: [{ type: "text", text }],
     metadata: { createdAt: Date.now() },
   });
-  state.promoteSession(
-    sessionId,
-    c.messages.length > 0
-      ? c.messages
-      : [
-          {
-            id: "pending-user-message",
-            role: "user",
-            parts: [{ type: "text", text }],
-          },
-        ],
-  );
-  await sending;
-  return true;
 }
 
-/** 发送完整用户消息，供包含附件或上下文块的输入区调用。 */
+/** 发送完整用户消息；消息被运行时接受后立即返回，不等待流式回复完成。 */
 export async function sendChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): Promise<boolean> {
+  return startChatMessage(sessionId, message);
+}
+
+/** 统一校验模型、Chat 状态和运行锁后启动一轮消息。 */
+async function startChatMessage(
+  sessionId: string,
+  message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+): Promise<boolean> {
   const state = useChatStore.getState();
-  if (!(await state.ensureSessionRunLock(sessionId))) return false;
+  if (
+    providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
+    !getActiveProviderKey()
+  ) {
+    return false;
+  }
   const chat = getOrCreateChat(sessionId);
+  if (chat.status === "submitted" || chat.status === "streaming") return false;
+  if (!(await state.beginSessionRun(sessionId))) return false;
   const sending = chat.sendMessage(message);
   if (isUserSubmission(message)) {
     state.promoteSession(
@@ -180,7 +175,7 @@ export async function sendChatMessage(
       chat.messages.length > 0 ? chat.messages : messagesForPromotion(message),
     );
   }
-  await sending;
+  void sending;
   return true;
 }
 

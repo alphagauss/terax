@@ -363,6 +363,7 @@ export function AiChatView({
   clearError,
   addToolApprovalResponse,
 }: Props) {
+  const { t } = useTranslation("ai");
   const scrollMemory = useConversationScrollMemory(sessionId);
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
@@ -405,8 +406,8 @@ export function AiChatView({
       >
         <ConversationContent scrollClassName="app-scrollbar [scrollbar-gutter:stable]">
           <ConversationEmptyState
-            title="Ask Terax anything"
-            description="Explain command output, fix errors, generate snippets, or run a task."
+            title={t("chat.emptyTitle")}
+            description={t("chat.emptyDescription")}
           />
         </ConversationContent>
       </Conversation>
@@ -443,29 +444,27 @@ export function AiChatView({
         {showSpinner && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Spinner />
-            <span className="truncate">{step ?? "Thinking…"}</span>
+            <span className="truncate">{step ?? t("chat.thinking")}</span>
           </div>
         )}
         {showContinue && (
           <ContinueRow
             onContinue={() => {
               patchAgentMeta({ hitStepCap: false });
-              void sendMessage(
-                "Continue from where you stopped. Don't recap — just keep going.",
-              );
+              void sendMessage(t("chat.continuePrompt"));
             }}
           />
         )}
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            <div className="font-medium">Request failed.</div>
+            <div className="font-medium">{t("chat.somethingWentWrong")}</div>
             <div className="mt-0.5 leading-relaxed">{error.message}</div>
             <button
               type="button"
               onClick={clearError}
               className="mt-1 underline"
             >
-              Dismiss
+              {t("chat.dismiss")}
             </button>
           </div>
         )}
@@ -482,19 +481,19 @@ const CompactionNotice = memo(function CompactionNotice({
   droppedCount: number;
   onDismiss: () => void;
 }) {
+  const { t } = useTranslation("ai");
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
       <span className="size-1.5 shrink-0 rounded-full bg-amber-500/80" />
       <span className="flex-1 truncate">
-        Context compacted — {droppedCount} older tool result
-        {droppedCount === 1 ? "" : "s"} elided to save tokens.
+        {t("chat.contextCompacted", { count: droppedCount })}
       </span>
       <button
         type="button"
         onClick={onDismiss}
         className="text-[10.5px] underline"
       >
-        Dismiss
+        {t("chat.dismiss")}
       </button>
     </div>
   );
@@ -505,17 +504,18 @@ const ContinueRow = memo(function ContinueRow({
 }: {
   onContinue: () => void;
 }) {
+  const { t } = useTranslation("ai");
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card/60 px-2.5 py-1.5 text-[11px]">
       <span className="flex-1 text-muted-foreground">
-        Hit the step limit. Continue to keep going.
+        {t("chat.hitStepLimit")}
       </span>
       <button
         type="button"
         onClick={onContinue}
         className="rounded-md border border-border/60 bg-background px-2 py-0.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent"
       >
-        Continue
+        {t("chat.continue")}
       </button>
     </div>
   );
@@ -775,6 +775,7 @@ function basename(p: string): string {
 }
 
 const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
+  const { t } = useTranslation("ai");
   const paths = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -814,9 +815,11 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="shrink-0 font-medium text-foreground">Read</span>
+        <span className="shrink-0 font-medium text-foreground">
+          {t("chat.read")}
+        </span>
         <span className="shrink-0 text-[12px] text-muted-foreground">
-          {count} file{count === 1 ? "" : "s"}
+          {t("chat.readFiles", { count })}
         </span>
         {paths.length > 0 ? (
           <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground group-data-[state=open]/read:invisible">
@@ -860,6 +863,7 @@ const PartAppear = memo(function PartAppear({
 });
 
 const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
+  const { t } = useTranslation("ai");
   const path = readPathFromPart(part);
   const state = (part as { state?: string }).state ?? "";
   const isError = state === "output-error";
@@ -879,7 +883,9 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
         strokeWidth={1.75}
         className="shrink-0 text-muted-foreground"
       />
-      <span className="shrink-0 font-medium text-foreground">Read</span>
+      <span className="shrink-0 font-medium text-foreground">
+        {t("chat.read")}
+      </span>
       <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground">
         {path ?? ""}
       </span>
