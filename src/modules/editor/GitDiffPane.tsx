@@ -1,17 +1,17 @@
+/**
+ * 本文件实现工作区与历史提交的 Git diff 预览。
+ * working diff 在激活和仓库变化时读取真实内容，commit diff 在页面挂载期间只读取一次。
+ */
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import { native } from "@/modules/ai/lib/native";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useRepositoryGeneration } from "@/modules/source-control/repositoryChanges";
 import { unifiedMergeView } from "@codemirror/merge";
 import type { Extension } from "@codemirror/state";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import CodeMirror from "@uiw/react-codemirror";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  commitDiffKey,
-  fetchCommitDiff,
-  fetchWorkingDiff,
-  getCachedDiff,
-  workingDiffKey,
-} from "./lib/diffCache";
 import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
@@ -19,12 +19,8 @@ import {
   languageCompartment,
   READONLY_EXTENSIONS,
 } from "./lib/extensions";
-import {
-  gitChangeOverview,
-  gitChangesForDiff,
-  setGitChanges,
-} from "./lib/gitGutter";
-import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
+import { gitChangeOverview } from "./lib/gitGutter";
+import { resolveLanguage } from "./lib/languageResolver";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { SplitDiffView } from "./SplitDiffView";
 
@@ -68,61 +64,64 @@ type LoadState =
     }
   | { kind: "error"; message: string };
 
-function cacheKey(source: WorkingSource | CommitSource): string {
+function sourceKey(source: WorkingSource | CommitSource): string {
   return source.kind === "working"
-    ? workingDiffKey(source.repoRoot, source.path, source.mode)
-    : commitDiffKey(source.repoRoot, source.sha, source.path);
+    ? `working\0${source.repoRoot}\0${source.mode}\0${source.path}\0${source.originalPath ?? ""}`
+    : `commit\0${source.repoRoot}\0${source.sha}\0${source.path}\0${source.originalPath ?? ""}`;
 }
 
-function loadStateFromCache(source: WorkingSource | CommitSource): LoadState {
-  const hit = getCachedDiff(cacheKey(source));
-  if (!hit) return { kind: "idle" };
-  return {
-    kind: "loaded",
-    originalContent: hit.originalContent,
-    modifiedContent: hit.modifiedContent,
-    isBinary: hit.isBinary,
-    fallbackPatch: hit.fallbackPatch,
-    langExt: resolveLanguageSync(source.path)?.ext ?? null,
-  };
-}
-
+/**
+ * 展示工作区或历史提交的只读文件 diff。
+ *
+ * 隐藏的 working diff 只记录仓库 generation，重新可见后再读取；commit diff 在同一页面实例内复用已加载内容。
+ */
 export function GitDiffPane({ source, active }: Props) {
-  const cmRef = useRef<ReactCodeMirrorRef>(null);
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const loadedCommitKeyRef = useRef<string | null>(null);
   const themeExt = useEditorThemeExt();
   const diffViewMode = usePreferencesStore((s) => s.diffViewMode);
-  const [state, setState] = useState<LoadState>(() =>
-    active ? loadStateFromCache(source) : { kind: "idle" },
-  );
+  const generation = useRepositoryGeneration(source.repoRoot);
+  const workingGeneration = source.kind === "working" ? generation : 0;
+  const [state, setState] = useState<LoadState>({ kind: "idle" });
 
-  const key = cacheKey(source);
+  const key = sourceKey(source);
 
   useEffect(() => {
+    void workingGeneration;
+    void key;
     if (!active) return;
-    const cached = loadStateFromCache(source);
-    if (cached.kind === "loaded") {
-      setState(cached);
+    const requestedSource = sourceRef.current;
+    if (
+      requestedSource.kind === "commit" &&
+      loadedCommitKeyRef.current === key
+    ) {
       return;
     }
     let cancelled = false;
     setState({ kind: "loading" });
     const promise =
-      source.kind === "working"
-        ? fetchWorkingDiff(
-            source.repoRoot,
-            source.path,
-            source.mode,
-            source.originalPath,
+      requestedSource.kind === "working"
+        ? native.gitDiffContent(
+            requestedSource.repoRoot,
+            requestedSource.path,
+            requestedSource.mode === "+",
+            requestedSource.originalPath,
           )
-        : fetchCommitDiff(
-            source.repoRoot,
-            source.sha,
-            source.path,
-            source.originalPath,
+        : native.gitCommitFileDiff(
+            requestedSource.repoRoot,
+            requestedSource.sha,
+            requestedSource.path,
+            requestedSource.originalPath,
           );
-    Promise.all([promise, resolveLanguage(source.path).catch(() => null)])
+    Promise.all([
+      promise,
+      resolveLanguage(requestedSource.path).catch(() => null),
+    ])
       .then(([res, lang]) => {
         if (cancelled) return;
+        loadedCommitKeyRef.current =
+          requestedSource.kind === "commit" ? key : null;
         setState({
           kind: "loaded",
           originalContent: res.originalContent,
@@ -145,7 +144,7 @@ export function GitDiffPane({ source, active }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [active, key, source]);
+  }, [active, key, workingGeneration]);
 
   const path = source.path;
   const loaded = state.kind === "loaded" ? state : null;
@@ -160,10 +159,6 @@ export function GitDiffPane({ source, active }: Props) {
   const useFallback = isBinary || isTooLarge;
 
   const langExt = loaded?.langExt ?? null;
-  const overviewChanges = useMemo(
-    () => gitChangesForDiff(fallbackPatch, originalContent, modifiedContent),
-    [fallbackPatch, originalContent, modifiedContent],
-  );
   const extensions = useMemo(
     () =>
       diffViewMode === "split"
@@ -173,7 +168,6 @@ export function GitDiffPane({ source, active }: Props) {
             DEFAULT_INDENT,
             languageCompartment.of(langExt ?? []),
             ...READONLY_EXTENSIONS,
-            gitChangeOverview,
             unifiedMergeView({
               original: originalContent,
               mergeControls: false,
@@ -181,37 +175,11 @@ export function GitDiffPane({ source, active }: Props) {
               gutter: true,
               syntaxHighlightDeletions: true,
             }),
+            gitChangeOverview,
             UNIFIED_DIFF_THEME,
           ],
     [originalContent, langExt, diffViewMode],
   );
-
-  useEffect(() => {
-    if (diffViewMode !== "inline" || useFallback) return;
-    cmRef.current?.view?.dispatch({
-      effects: setGitChanges.of(overviewChanges),
-    });
-  }, [diffViewMode, overviewChanges, useFallback]);
-
-  // Cache-hit path only: the diff came from the cache before the language
-  // pack was imported. Resolve and reconfigure once the view exists.
-  useEffect(() => {
-    if (
-      diffViewMode === "split" ||
-      useFallback ||
-      state.kind !== "loaded" ||
-      state.langExt
-    )
-      return;
-    let cancelled = false;
-    resolveLanguage(path).then((res) => {
-      if (cancelled || !res) return;
-      setState((s) => (s.kind === "loaded" ? { ...s, langExt: res.ext } : s));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [useFallback, path, state, diffViewMode]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -236,11 +204,9 @@ export function GitDiffPane({ source, active }: Props) {
             original={originalContent}
             modified={modifiedContent}
             path={path}
-            changes={overviewChanges}
           />
         ) : (
           <CodeMirror
-            ref={cmRef}
             value={modifiedContent}
             theme={themeExt}
             extensions={extensions}

@@ -1,9 +1,14 @@
+//! Git Tauri command 的薄适配层。
+//!
+//! 本模块只负责把阻塞 Git 操作移出异步运行时，并传递当前工作区环境。
+
 use tauri::{AppHandle, Manager};
 
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitRepoInfo, GitStatusSnapshot,
+    GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo,
+    GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -74,16 +79,16 @@ pub async fn git_diff(
     .await
 }
 
+/// 读取指定工作区文件在当前 HEAD 中的有界文本基线。
 #[tauri::command]
-pub async fn git_diff_head(
-    repo_root: String,
-    path: Option<String>,
+pub async fn git_quick_diff_baseline(
+    path: String,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
-) -> Result<GitDiffResult, String> {
+) -> Result<Option<GitQuickDiffBaseline>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::diff_head(r, &repo_root, path.as_deref(), &workspace).map_err(Into::into)
+        operations::quick_diff_baseline(r, &path, &workspace).map_err(Into::into)
     })
     .await
 }

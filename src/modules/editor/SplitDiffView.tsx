@@ -24,8 +24,9 @@ import {
   languageCompartment,
   READONLY_EXTENSIONS,
 } from "./lib/extensions";
-import { type GitChanges, renderGitChangeOverview } from "./lib/gitGutter";
+import { renderGitChangeOverview } from "./lib/gitGutter";
 import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
+import { rangesFromChunks } from "./lib/quickDiff";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import "./SplitDiffView.css";
 
@@ -36,7 +37,6 @@ type SplitDiffViewProps = {
   original: string;
   modified: string;
   path: string;
-  changes: GitChanges;
 };
 
 function replaceDoc(view: EditorView, doc: string) {
@@ -95,7 +95,6 @@ export function SplitDiffView({
   original,
   modified,
   path,
-  changes,
 }: SplitDiffViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const leftScrollbarRef = useRef<HTMLDivElement>(null);
@@ -112,9 +111,6 @@ export function SplitDiffView({
   const themeExt = useEditorThemeExt();
   const themeRef = useRef(themeExt);
   themeRef.current = themeExt;
-  const changesRef = useRef(changes);
-  changesRef.current = changes;
-
   useEffect(() => {
     const parent = containerRef.current;
     if (!parent) return;
@@ -125,7 +121,12 @@ export function SplitDiffView({
       const view = viewRef.current;
       const rail = railRef.current;
       if (view && rail) {
-        renderGitChangeOverview(view.b, rail, changesRef.current, view.dom);
+        renderGitChangeOverview(
+          view.b,
+          rail,
+          rangesFromChunks(view.a.state.doc, view.b.state.doc, view.chunks),
+          view.dom,
+        );
       }
     };
     const scheduleRail = () => {
@@ -215,14 +216,6 @@ export function SplitDiffView({
     replaceDoc(view.b, modified);
     requestAnimationFrame(() => syncScrollbarsRef.current());
   }, [original, modified]);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    const rail = railRef.current;
-    if (view && rail) {
-      renderGitChangeOverview(view.b, rail, changes, view.dom);
-    }
-  }, [changes]);
 
   useEffect(() => {
     const view = viewRef.current;

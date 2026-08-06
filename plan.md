@@ -1,113 +1,78 @@
-# 文件传输冲突、失败聚合与 Journal 重构计划
+# Git 实时 Diff 与仓库状态重构计划
 
 ## 目标
 
-重构 WSL、SSH 与本地宿主之间的文件传输，使目标冲突由用户明确决策，Direct 支持文件级失败隔离和重试，Archive 保持归档级完整性，并以最小持久化结构支持任务历史与异常退出状态收敛。
+以单一 HEAD 基线重构编辑器 Quick Diff、仓库状态刷新和 Git diff 标签页，使未保存内容能够实时显示行变更，保存及 Git 操作能够统一刷新 Source Control、Explorer 和打开的 diff 页面。
 
-本次允许破坏式重构，不保留旧 IPC、旧序列化模型或“目标存在即失败”的兼容路径。
+本次允许破坏内部 TypeScript API 和 Tauri command，不保留旧 command、旧 working diff cache、旧 unified patch parser、旧乐观状态或兼容转发层。用户数据、持久化设置、工作区授权和 Git 路径安全边界保持不变。
 
-## 产品语义
+## 成功标准
 
-### 冲突处理
+- 编辑受 Git 跟踪的文件后，无需保存即可更新 added、modified、deleted gutter 和 overview。
+- 输入期间不启动 Git 进程、不执行文件读取或 IPC。
+- 文件顶部插入或删除内容后，既有标记仍映射到正确行。
+- 保存、stage、unstage、discard、commit 和仓库文件事件通过同一失效入口刷新受影响消费者。
+- 打开的 working diff 页面不会使用旧缓存，也不会被过期异步请求覆盖。
+- 同一文件和 HEAD revision 的基线请求合并并使用有界缓存。
+- 大文件或复杂 diff 有明确计算上限，不阻塞编辑器输入。
+- 删除旧链路后，搜索不到 `git_diff_head`、`gitDiffHead`、`diffCache`、`parseUnifiedDiff`、`applyStatus` 和旧乐观 reconcile 逻辑。
 
-- 顶层文件使用 Direct 或 Archive 传输时，目标存在同名项则等待用户选择取消或覆盖。
-- Archive 文件夹遇到同名文件夹时，提供取消、替换整个目标文件夹、合并且来源优先、合并且目标优先四个选项。
-- Direct 文件夹遇到同名文件夹时自动进入合并模式；遇到同路径文件或文件与目录类型不一致时逐项询问取消、跳过或替换。
-- Direct 冲突对话框允许把跳过或替换应用到本次任务的后续冲突。该授权只在当前任务本次执行期间有效。
-- 符号链接不得作为来源传输；目标中的符号链接按叶子冲突处理，任何提交逻辑都不得跟随符号链接越出目标树。
+## 设计
 
-### Direct 文件夹
+### Repository Model
 
-- 前端以一个聚合任务显示文件夹。
-- 单个文件发生可隔离错误时记录失败并继续处理其他文件。
-- 文件夹任务结束后显示成功、失败和未处理数量。
-- 展开任务时只显示未解决的失败文件。
-- 失败文件支持单独重试和忽略。单文件重试复用原聚合任务行，并重新走冲突检查。
-- 重试单文件时重新检查来源和目标冲突，不复用已经结束任务的覆盖授权。
-- 成功计数只在文件安全发布到最终目标后增加；写入 staging 不算成功。
-- 失败文件不会删除或覆盖目标中的旧文件。
+- `useSourceControl` 是当前仓库 `repo`、`status`、loading、error、busy action 和 generation 的唯一状态来源。
+- 新增统一的仓库变更通知入口，合并编辑器写入、文件监听和 Git mutation 产生的刷新请求。
+- 本地变更按短时间窗口防抖并合并 inflight refresh；窗口 focus 只作为漏事件兜底。
+- Source Control 面板直接派生展示状态，不复制 `repo`、`status` 或 `panelState`。
+- stage、unstage、discard 和 commit 执行完成后直接刷新真实状态，不维护乐观快照或 reconcile timer。
 
-以下错误属于任务级错误，不得继续制造大量文件失败记录：连接不可恢复、空间不足、目标根不可写、staging 或 Journal 不可靠、归档完整性失败、提交或回滚失败。
+### Quick Diff Model
 
-### Archive 文件夹
+- 新增精简 Tauri command，根据文件路径完成授权后的仓库解析，并返回 repo root、相对路径、HEAD revision 和 `HEAD:path` 文本基线。
+- 前端按 workspace 与文件路径合并 inflight 请求并维护小型 LRU；缓存项携带 repo、relative path 和 revision，HEAD 变化时按仓库精确失效。
+- CodeMirror StateField 保存基线和 `@codemirror/merge` chunks；文档 transaction 使用 `Chunk.updateB` 增量更新。
+- gutter、overview rail 和 Git diff 页面统一从 chunks 派生行类型，不再解析 unified patch。
+- 对超出编辑器 Quick Diff 限制的文件或超时计算返回空装饰，不能显示错误行号。
 
-- 始终以一个不可展开的聚合任务显示。
-- 归档的打包、传输、校验、解压和提交是一个完整单元，只显示成功或失败。
-- 任一归档级错误都不得发布部分结果。
-- Archive 失败只能整体重试；不提供文件级失败明细或文件级重试。
+### Git Diff 页面
 
-## 后端状态与 IPC
+- 删除全局 `diffCache.ts` 和所有手工 invalidation API。
+- commit diff 在已挂载页面内加载一次；working diff 根据 repository generation 在可见时重新读取。
+- 原生 `git_diff_content` 只为二进制或超大文本生成 fallback patch，普通文本依赖 CodeMirror diff。
+- 过期请求通过页面内 generation/request token 丢弃，不写入任何全局缓存。
 
-- 使用一个统一的 `transfer_enqueue` 命令，请求中包含 `strategy`。
-- 删除旧的 `transfer_enqueue_direct` 和 `transfer_enqueue_archive`。
-- 新增 `awaiting_decision` 状态和 `checking_conflicts` 阶段。
-- 任务快照包含当前待处理冲突、Direct 失败明细和聚合计数。
-- 新增 `transfer_resolve_conflict`，前端只能提交任务 ID、冲突 ID、枚举决策和是否应用到本次任务后续冲突。
-- 新增 Direct 失败项的单项重试和忽略命令。
-- 冲突等待期间不占用数据传输并发许可，但保留目标路径 reservation。
-- 取消必须同时唤醒暂停等待和冲突等待。
-- 目标 reservation 使用路径祖先与后代冲突判断，不只比较字符串是否相等。
+## 删除范围
 
-## 执行流程
+- 删除 Rust `git_diff_head` command、`operations::diff_head` 和只为它存在的 HEAD diff mode。
+- 删除前端 `native.gitDiffHead`。
+- 删除 EditorPane 中 repo resolve、保存后 Git 刷新、request ref 和路径字符串归属判断。
+- 删除 `parseUnifiedDiff`、`gitChangesForDiff` 和基于三个行号 Set 的旧 GitChanges 状态。
+- 删除 `src/modules/editor/lib/diffCache.ts` 及所有引用。
+- 删除 `SourceControlSummary.applyStatus`、乐观 stage/unstage/discard、affected-path invalidation 和 reconcile timer。
+- 删除 Source Control 面板复制的 repo、status、panelState 状态。
 
-1. 规范化请求并检查顶层来源。
-2. 生成稳定目标根和 reservation key。
-3. Direct 递归扫描来源；Archive 只保留顶层来源并在打包期间遍历。
-4. 批量检查目标冲突。SSH 和 WSL 目标不得逐文件串行 `stat`；优先使用一次目标端批处理，回退时使用有界并发。
-5. 逐项等待用户决策。取消使整个任务进入 canceled。
-6. 在目标父目录同级创建任务私有 staging。
-7. 执行 Direct 文件流或 Archive 单归档流。
-8. 校验 staging，并在提交边界重新确认顶层目标仍符合已授权模式。
-9. 按创建、文件覆盖、目录替换或目录合并语义提交。
-10. 清理 staging 和 backup 后进入终态并发布文件系统变更。
+## 执行与验证
 
-## 提交语义
+1. 重构 Quick Diff 纯函数和 CodeMirror StateField。
+   - 验证：单元测试覆盖新增、修改、删除、顶部插入、连续 transaction、基线替换和计算上限。
+2. 新增精简 Git baseline command，并删除 `git_diff_head`。
+   - 验证：Rust 测试覆盖普通文件、未跟踪文件、无 HEAD 仓库、路径越界和内容大小限制。
+3. 接入 EditorPane，删除保存后 Git patch 链路。
+   - 验证：前端测试证明编辑 transaction 不调用 native Git，基线只在 revision 变化时重新加载。
+4. 收敛 Repository Model 和 Source Control 面板状态。
+   - 验证：测试覆盖事件防抖、inflight 合并、mutation 后刷新和陈旧请求丢弃。
+5. 删除 working diff cache，并让页面跟随 repository generation。
+   - 验证：测试覆盖页面可见刷新、隐藏期间标脏和旧请求不能覆盖新结果。
+6. 删除所有旧符号和兼容代码，检查变更范围及代码文档。
+   - 验证：使用 `rg` 确认旧符号归零，并检查所有修改的 Rust、TypeScript 和 TSX 文件具有合格中文文件级注释。
+7. 运行最小且充分的完整验证。
+   - 前端：`pnpm lint`、`pnpm check-types`、相关 `pnpm test`，最后运行完整 `pnpm test`。
+   - Rust：`cargo clippy --all-targets --locked -- -D warnings` 和相关测试；可用时运行 `cargo nextest run --locked`，否则运行 `cargo test --locked`。
 
-- 新目标使用 no-replace rename。
-- 文件覆盖先完整写入并校验 staging，再使用平台原子替换。
-- 目录整体替换先将旧目标改名为 backup，再将 staging 改名为最终目标；第二步失败时恢复 backup。
-- 目录合并只覆盖已经授权的来源项，保留目标独有内容。
-- Direct 的可隔离文件失败不参与提交，目标旧文件保持不变。
-- 目录提交无法安全继续时回滚本次尚未公开的 staging；已经公开的成功文件必须在快照中准确计数。
+## 非目标
 
-## 极简 Journal
-
-新增 `~/.terax/transfers/`，采用扁平布局：
-
-```text
-~/.terax/transfers/
-  registry.lock
-  <environment>.<workspace-id>.<task-id>.jsonl
-```
-
-- 每个任务只有一个 JSONL 文件，不创建任务子目录、独立 Manifest、独立 failure 文件或每任务 lock 文件。
-- 文件名环境部分复用 Workspace 的安全环境文件名规则；SSH 使用稳定端点身份，不只使用可被改绑的 profile ID。Workspace ID 隔离同环境并行运行的多个窗口。
-- JSONL 保存任务创建、冲突等待、提交意图、失败记录变更和终态，不记录普通阶段的高频变化。
-- 不记录每个成功文件，不持久化高频字节进度。
-- 破坏性提交之前的 write-ahead 记录必须同步落盘。
-- 第一版不支持进程重启后的字节级断点续传。异常退出后的活动任务在下次启动时收敛为失败，运行期失败仍由任务所有权清理 staging。
-- 目标端沿用任务 ID 约束的 staging 和归档临时路径，不额外保存第二份 Journal。
-
-## 记录删除
-
-- Rust Journal 是前端任务历史的唯一持久化事实来源。
-- 删除单个任务时，后端必须先确认任务已终止且目标临时数据已清理，再删除 JSONL，最后从内存移除并发布事件。
-- Journal 删除失败时不得先从前端隐藏记录。
-- 清空已完成或清空全部返回实际删除的任务 ID；前端只移除后端确认的 ID。
-- 自动历史淘汰必须复用相同删除路径。
-
-## 前端
-
-- `TransferStatusControl` 展示聚合任务、冲突等待状态和终态摘要。
-- Direct 文件夹仅在存在失败项时可展开，失败列表支持单项重试和忽略。
-- Archive 文件夹不可展开，只显示当前阶段和最终成功或失败。
-- 冲突对话框属于 transfers 模块并在应用框架长期挂载，不依赖 Explorer 是否打开。
-- 同时存在多个冲突时按任务创建时间依次展示。
-- 所有新增文本同步更新英文和简体中文。
-
-## 验证
-
-- Rust 单元测试覆盖冲突决策合法性、等待与取消、目标 reservation、文件覆盖、目录替换、Direct 跳过、Archive 不发布部分结果、Journal 重放与删除。
-- 前端测试覆盖状态合并、冲突对话框选项、Direct 失败展开、重试与忽略、Archive 不展开。
-- 修改前端后运行 `pnpm lint`、`pnpm check-types` 和相关 `pnpm test`。
-- 修改 Rust 后运行 `cargo clippy --all-targets --locked -- -D warnings` 和相关测试；没有 nextest 时使用 `cargo test --locked`。
+- 本次不实现 index 与 HEAD 双 Quick Diff provider。
+- 本次不新增 gutter 点击后的 hunk stage/revert 菜单。
+- 本次不引入新的运行时依赖或后台 Git polling daemon。
+- 本次不修改 Git 会话、持久化设置格式或工作区授权模型。

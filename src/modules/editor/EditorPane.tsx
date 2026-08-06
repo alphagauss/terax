@@ -7,7 +7,6 @@
 import i18n from "@/i18n";
 import { endpointIdFromCompatModel } from "@/modules/ai/config";
 import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
-import { native } from "@/modules/ai/lib/native";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -56,14 +55,13 @@ import {
   runExternalFormatter,
 } from "./lib/externalFormat";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
-import {
-  emptyGitChanges,
-  gitChangeGutter,
-  parseUnifiedDiff,
-  setGitChanges,
-} from "./lib/gitGutter";
+import { gitChangeGutter, setQuickDiffBaseline } from "./lib/gitGutter";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
+import {
+  loadQuickDiffBaseline,
+  useQuickDiffBaselineGeneration,
+} from "./lib/quickDiffBaseline";
 import {
   type EditorDocument,
   FORCE_READ_LIMIT,
@@ -225,6 +223,10 @@ export const EditorCore = memo(
     );
     const workspace = useWorkspaceEnvStore((s) => s.env);
     const workspaceScope = workspaceScopeKey(workspace);
+    const quickDiffGeneration = useQuickDiffBaselineGeneration(
+      workspaceScope,
+      path,
+    );
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
@@ -312,7 +314,6 @@ export const EditorCore = memo(
     const lspActiveRef = useRef(false);
     const warnedNoLspRef = useRef(false);
     const warnedNoFormatRef = useRef(false);
-    const refreshGitGutterRef = useRef<() => void>(() => {});
 
     /** 保存当前编辑器缓冲区，并在成功落盘后执行配置的外部格式化。 */
     const performSave = useCallback(async (): Promise<boolean> => {
@@ -377,7 +378,6 @@ export const EditorCore = memo(
         }
       }
       onSavedRef.current?.();
-      refreshGitGutterRef.current();
       return true;
     }, []);
     const performSaveRef = useRef(performSave);
@@ -385,67 +385,36 @@ export const EditorCore = memo(
 
     const pathRef = useRef(path);
     pathRef.current = path;
-    const workspaceScopeRef = useRef(workspaceScope);
-    workspaceScopeRef.current = workspaceScope;
-    const gitGutterRequestRef = useRef(0);
-
-    const refreshGitGutter = useCallback(async () => {
-      const view = cmRef.current?.view;
-      if (!view) return;
-      const request = ++gitGutterRequestRef.current;
-      const requestedPath = pathRef.current;
-      const requestedScope = workspaceScopeRef.current;
-      const stale = () =>
-        request !== gitGutterRequestRef.current ||
-        !view.dom.isConnected ||
-        pathRef.current !== requestedPath ||
-        workspaceScopeRef.current !== requestedScope;
-
-      try {
-        const normalizedPath = requestedPath.replace(/\\/g, "/");
-        const slash = normalizedPath.lastIndexOf("/");
-        const directory =
-          slash > 0 ? normalizedPath.slice(0, slash) : normalizedPath;
-        const repo = await native.gitResolveRepo(directory);
-        if (stale()) return;
-        if (!repo) {
-          view.dispatch({ effects: setGitChanges.of(emptyGitChanges()) });
-          return;
-        }
-
-        const root = repo.repoRoot.replace(/\\/g, "/").replace(/\/+$/, "");
-        if (!normalizedPath.startsWith(`${root}/`)) {
-          view.dispatch({ effects: setGitChanges.of(emptyGitChanges()) });
-          return;
-        }
-        const relativePath = normalizedPath.slice(root.length + 1);
-        const diff = await native.gitDiffHead(repo.repoRoot, relativePath);
-        if (stale()) return;
-        view.dispatch({
-          effects: setGitChanges.of(
-            diff.truncated
-              ? emptyGitChanges()
-              : parseUnifiedDiff(diff.diffText),
-          ),
-        });
-      } catch {
-        if (!stale()) {
-          view.dispatch({ effects: setGitChanges.of(emptyGitChanges()) });
-        }
-      }
-    }, []);
-    refreshGitGutterRef.current = () => void refreshGitGutter();
-
     useEffect(() => {
+      void quickDiffGeneration;
       if (doc.status !== "ready") return;
+      let cancelled = false;
       let frame = 0;
-      const run = () => {
-        if (cmRef.current?.view) void refreshGitGutter();
-        else frame = requestAnimationFrame(run);
+      const run = async () => {
+        const view = cmRef.current?.view;
+        if (!view) {
+          frame = requestAnimationFrame(run);
+          return;
+        }
+        try {
+          const baseline = await loadQuickDiffBaseline(workspaceScope, path);
+          if (!cancelled && view.dom.isConnected) {
+            view.dispatch({
+              effects: setQuickDiffBaseline.of(baseline?.content ?? null),
+            });
+          }
+        } catch {
+          if (!cancelled && view.dom.isConnected) {
+            view.dispatch({ effects: setQuickDiffBaseline.of(null) });
+          }
+        }
       };
-      run();
-      return () => cancelAnimationFrame(frame);
-    }, [doc.status, refreshGitGutter]);
+      void run();
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(frame);
+      };
+    }, [doc.status, path, quickDiffGeneration, workspaceScope]);
 
     const pendingLineRef = useRef<number | null>(null);
     const restoredSourceLineRef = useRef<number | null>(null);

@@ -1,10 +1,24 @@
+/**
+ * 本文件维护当前仓库唯一的 Source Control 状态模型。
+ * 所有调用方共享原生快照，仓库修改和文件事件只触发合并后的真实状态刷新。
+ */
+
 import {
-  native,
   type GitRepoInfo,
   type GitStatusSnapshot,
+  native,
 } from "@/modules/ai/lib/native";
 import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  notifyRepositoryChanged,
+  notifyRepositoryHeadChanged,
+} from "./repositoryChanges";
+import {
+  createRepositoryRefreshQueue,
+  type RepositoryRefreshMode,
+} from "./repositoryRefresh";
 
 const AUTO_FETCH_THROTTLE_MS = 5 * 60_000;
 const AUTO_FETCH_LRU_LIMIT = 16;
@@ -13,7 +27,7 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 1500;
 // is still inside the loaded repo (cd-within-repo produces identical status).
 const SC_STATUS_TTL_MS = 2000;
 
-export type SourceControlRefreshMode = "auto" | "always" | "never";
+export type SourceControlRefreshMode = RepositoryRefreshMode;
 export type SourceControlRemoteAction = "fetch" | "pull" | "push";
 export type SourceControlRemoteActionMode =
   | "contextual"
@@ -38,12 +52,7 @@ export type SourceControlSummary = {
   localError: string | null;
   busyAction: SourceControlRemoteAction | null;
   lastRemoteError: string | null;
-  applyStatus: (
-    updater: (status: GitStatusSnapshot) => GitStatusSnapshot,
-  ) => void;
-  refresh: (options?: {
-    remote?: SourceControlRefreshMode;
-  }) => Promise<void>;
+  refresh: (options?: { remote?: SourceControlRefreshMode }) => Promise<void>;
   runRemoteAction: (
     mode?: SourceControlRemoteActionMode,
   ) => Promise<SourceControlRemoteActionResult>;
@@ -86,6 +95,23 @@ function getContextualAction(
   return "fetch";
 }
 
+function statusFingerprint(status: GitStatusSnapshot | null): string {
+  if (!status) return "";
+  return JSON.stringify([
+    status.headSha,
+    status.branch,
+    status.upstream,
+    status.ahead,
+    status.behind,
+    status.changedFiles.map((file) => [
+      file.path,
+      file.originalPath,
+      file.indexStatus,
+      file.worktreeStatus,
+    ]),
+  ]);
+}
+
 export function getSourceControlRemoteIndicator(
   summary: Pick<
     SourceControlSummary,
@@ -93,7 +119,13 @@ export function getSourceControlRemoteIndicator(
   >,
 ): SourceControlRemoteIndicator {
   if (!summary.hasRepo || !summary.upstream) {
-    return { visible: false, label: "", title: "", disabled: true, action: null };
+    return {
+      visible: false,
+      label: "",
+      title: "",
+      disabled: true,
+      action: null,
+    };
   }
   if (summary.ahead > 0 && summary.behind > 0) {
     return {
@@ -146,6 +178,11 @@ function touchAutoFetch(map: Map<string, number>, key: string): void {
   }
 }
 
+/**
+ * 维护当前工作区上下文对应的唯一 Git 仓库快照。
+ *
+ * 本地事件和 Git 操作共用串行刷新队列；刷新期间发生的新失效会在当前请求结束后再次读取真实状态。
+ */
 export function useSourceControl(
   contextPath: string | null,
   enabled: boolean = true,
@@ -163,8 +200,17 @@ export function useSourceControl(
   });
   const stateRef = useRef(state);
   const requestIdRef = useRef(0);
-  const inflightRef = useRef<Promise<void> | null>(null);
-  const inflightModeRef = useRef<SourceControlRefreshMode>("never");
+  const doRefreshRef = useRef<
+    ((mode: SourceControlRefreshMode) => Promise<void>) | null
+  >(null);
+  const refreshQueueRef = useRef<ReturnType<
+    typeof createRepositoryRefreshQueue
+  > | null>(null);
+  if (!refreshQueueRef.current) {
+    refreshQueueRef.current = createRepositoryRefreshQueue(async (mode) => {
+      await doRefreshRef.current?.(mode);
+    });
+  }
   const autoFetchByRepoRef = useRef(new Map<string, number>());
   const enabledRef = useRef(enabled);
   const lastRefreshAtRef = useRef(0);
@@ -178,9 +224,8 @@ export function useSourceControl(
   }, [enabled]);
 
   useEffect(() => {
+    void workspaceKey;
     requestIdRef.current++;
-    inflightRef.current = null;
-    inflightModeRef.current = "never";
     autoFetchByRepoRef.current.clear();
     setState({
       repo: null,
@@ -193,20 +238,9 @@ export function useSourceControl(
     });
   }, [workspaceKey]);
 
-  const applyStatus = useCallback(
-    (updater: (status: GitStatusSnapshot) => GitStatusSnapshot) => {
-      setState((current) => {
-        if (!current.status) return current;
-        const next = updater(current.status);
-        if (next === current.status) return current;
-        return { ...current, status: next };
-      });
-    },
-    [],
-  );
-
   const doRefresh = useCallback(
     async (remoteMode: SourceControlRefreshMode): Promise<void> => {
+      void workspaceKey;
       if (!enabledRef.current) return;
       const requestId = ++requestIdRef.current;
 
@@ -230,7 +264,11 @@ export function useSourceControl(
           ? activeRoot
           : undefined;
 
-      setState((current) => ({ ...current, isLoading: true, localError: null }));
+      setState((current) => ({
+        ...current,
+        isLoading: true,
+        localError: null,
+      }));
 
       try {
         let repo: GitRepoInfo | null;
@@ -301,8 +339,7 @@ export function useSourceControl(
           repo.upstream &&
           remoteMode !== "never" &&
           (remoteMode === "always" ||
-            Date.now() -
-              (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
+            Date.now() - (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
               AUTO_FETCH_THROTTLE_MS);
 
         if (shouldAutoFetch) {
@@ -318,6 +355,16 @@ export function useSourceControl(
           }
         }
 
+        const previousStatus =
+          stateRef.current.status?.repoRoot === repo.repoRoot
+            ? stateRef.current.status
+            : null;
+        if (statusFingerprint(previousStatus) !== statusFingerprint(status)) {
+          notifyRepositoryChanged(repo.repoRoot);
+        }
+        if (previousStatus?.headSha !== status?.headSha) {
+          notifyRepositoryHeadChanged(repo.repoRoot, status?.headSha ?? null);
+        }
         setState((current) => ({
           ...current,
           repo,
@@ -343,29 +390,14 @@ export function useSourceControl(
     },
     [contextPath, workspaceKey],
   );
+  doRefreshRef.current = doRefresh;
 
   const refresh = useCallback(
-    async (options?: { remote?: SourceControlRefreshMode }) => {
+    (options?: { remote?: SourceControlRefreshMode }) => {
       const remoteMode = options?.remote ?? "never";
-      const inflight = inflightRef.current;
-      if (inflight) {
-        const cur = inflightModeRef.current;
-        const upgrade =
-          (cur === "never" && remoteMode !== "never") ||
-          (cur === "auto" && remoteMode === "always");
-        if (!upgrade) return inflight;
-      }
-      inflightModeRef.current = remoteMode;
-      const run = doRefresh(remoteMode).finally(() => {
-        if (inflightRef.current === run) {
-          inflightRef.current = null;
-          inflightModeRef.current = "never";
-        }
-      });
-      inflightRef.current = run;
-      return run;
+      return refreshQueueRef.current?.request(remoteMode) ?? Promise.resolve();
     },
-    [doRefresh],
+    [],
   );
 
   const runRemoteAction = useCallback(
@@ -414,6 +446,7 @@ export function useSourceControl(
   );
 
   useEffect(() => {
+    void workspaceKey;
     if (!enabled) {
       requestIdRef.current++;
       setState({
@@ -474,6 +507,26 @@ export function useSourceControl(
     };
   }, [refresh, enabled]);
 
+  useEffect(() => {
+    if (!enabled) return;
+    let timer = 0;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = 0;
+        void refresh({ remote: "never" });
+      }, 120);
+    };
+    const windowHandle = getCurrentWebviewWindow();
+    const written = windowHandle.listen("fs:file-written", schedule);
+    const changed = windowHandle.listen("fs:changed", schedule);
+    return () => {
+      window.clearTimeout(timer);
+      void written.then((unlisten) => unlisten());
+      void changed.then((unlisten) => unlisten());
+    };
+  }, [enabled, refresh]);
+
   return useMemo<SourceControlSummary>(
     () => ({
       repo: state.repo,
@@ -487,10 +540,9 @@ export function useSourceControl(
       localError: state.localError,
       busyAction: state.busyAction,
       lastRemoteError: state.lastRemoteError,
-      applyStatus,
       refresh,
       runRemoteAction,
     }),
-    [state, applyStatus, refresh, runRemoteAction],
+    [state, refresh, runRemoteAction],
   );
 }
