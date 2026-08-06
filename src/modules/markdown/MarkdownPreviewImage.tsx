@@ -9,7 +9,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@/components/menu/context-menu";
 import {
   copyMarkdownImage,
   saveMarkdownImage,
