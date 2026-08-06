@@ -47,10 +47,6 @@ import {
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  COMPACT_CONTENT,
-  COMPACT_ITEM,
-} from "@/modules/explorer/lib/menuItemClass";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
@@ -1365,10 +1361,9 @@ const EntryRow = memo(function EntryRow({
         </div>
       </ContextMenuTrigger>
 
-      <ContextMenuContent className={COMPACT_CONTENT}>
+      <ContextMenuContent>
         {/* Open actions */}
         <ContextMenuItem
-          className={COMPACT_ITEM}
           onSelect={() => {
             onFocusRow(row.key);
             void onSelectFile(entry);
@@ -1378,7 +1373,6 @@ const EntryRow = memo(function EntryRow({
         </ContextMenuItem>
         {!isDeleted && onOpenFile && absolutePath ? (
           <ContextMenuItem
-            className={COMPACT_ITEM}
             onSelect={() => onOpenFile(absolutePath)}
           >
             {t("menu.openFile")}
@@ -1389,7 +1383,6 @@ const EntryRow = memo(function EntryRow({
 
         {/* Stage / Unstage */}
         <ContextMenuItem
-          className={COMPACT_ITEM}
           disabled={disabled}
           onSelect={() => void onToggleStageFile(entry)}
         >
@@ -1397,7 +1390,6 @@ const EntryRow = memo(function EntryRow({
         </ContextMenuItem>
         {entry.unstaged ? (
           <ContextMenuItem
-            className={COMPACT_ITEM}
             variant="destructive"
             disabled={disabled}
             onSelect={() => onDiscardFile(entry)}
@@ -1410,14 +1402,12 @@ const EntryRow = memo(function EntryRow({
 
         {/* Copy paths */}
         <ContextMenuItem
-          className={COMPACT_ITEM}
           onSelect={() => void copyToClipboard(entry.path.replace(/\\/g, "/"))}
         >
           {t("menu.copyRelativePath")}
         </ContextMenuItem>
         {absolutePath ? (
           <ContextMenuItem
-            className={COMPACT_ITEM}
             onSelect={() => void copyToClipboard(absolutePath)}
           >
             {t("menu.copyAbsolutePath")}
@@ -1429,7 +1419,6 @@ const EntryRow = memo(function EntryRow({
           <>
             <ContextMenuSeparator />
             <ContextMenuItem
-              className={COMPACT_ITEM}
               onSelect={() => void revealInFinder(absolutePath)}
             >
               {revealLabel}

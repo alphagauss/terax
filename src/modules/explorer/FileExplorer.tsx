@@ -77,7 +77,6 @@ import {
 } from "./lib/contextActions";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { folderIconUrl } from "./lib/iconResolver";
-import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { ancestorDirs, useFileTree } from "./lib/useFileTree";
@@ -102,14 +101,13 @@ function TransferStrategyMenu({
   const { t } = useTranslation("explorer");
   return (
     <ContextMenuSub>
-      <ContextMenuSubTrigger className={COMPACT_ITEM}>
+      <ContextMenuSubTrigger>
         {label}
       </ContextMenuSubTrigger>
-      <ContextMenuSubContent className={COMPACT_CONTENT}>
+      <ContextMenuSubContent>
         {(["direct", "archive"] as const).map((strategy) => (
           <ContextMenuItem
             key={strategy}
-            className={COMPACT_ITEM}
             onSelect={() => onSelect(strategy)}
           >
             {t(
@@ -1152,7 +1150,6 @@ export const FileExplorer = memo(
             </ContextMenuTrigger>
             <ContextMenuContent
               key={menuNonce}
-              className={COMPACT_CONTENT}
               onCloseAutoFocus={(e) => {
                 if (tree.renaming || tree.pendingCreate) e.preventDefault();
               }}
@@ -1161,7 +1158,6 @@ export const FileExplorer = memo(
                 <>
                   {!menuTarget.isDir && (
                     <ContextMenuItem
-                      className={COMPACT_ITEM}
                       onSelect={() => onOpenFile(menuTarget.path, true)}
                     >
                       {t("menu.open")}
@@ -1171,7 +1167,6 @@ export const FileExplorer = memo(
                     isPythonFile(menuTarget.path) &&
                     onRunPythonFile && (
                       <ContextMenuItem
-                        className={COMPACT_ITEM}
                         onSelect={() =>
                           onRunPythonFile(menuTarget.path, rootPath)
                         }
@@ -1180,14 +1175,12 @@ export const FileExplorer = memo(
                       </ContextMenuItem>
                     )}
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => tree.beginRename(menuTarget.path)}
                   >
                     {t("common:rename")}
                   </ContextMenuItem>
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
-                      className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(menuTarget.path)}
                     >
                       {t("menu.openInTerminal")}
@@ -1220,7 +1213,6 @@ export const FileExplorer = memo(
                     </>
                   ) : (
                     <ContextMenuItem
-                      className={COMPACT_ITEM}
                       onSelect={() => void revealInFinder(menuTarget.path)}
                     >
                       {t("menu.revealInFinder")}
@@ -1228,7 +1220,6 @@ export const FileExplorer = memo(
                   )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() =>
                       tree.beginCreate(
                         menuTarget.isDir
@@ -1241,7 +1232,6 @@ export const FileExplorer = memo(
                     {t("menu.newFile")}
                   </ContextMenuItem>
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() =>
                       tree.beginCreate(
                         menuTarget.isDir
@@ -1255,13 +1245,11 @@ export const FileExplorer = memo(
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => void copyToClipboard(menuTarget.path)}
                   >
                     {t("menu.copyPath")}
                   </ContextMenuItem>
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() =>
                       void copyToClipboard(
                         relativePath(rootPath, menuTarget.path),
@@ -1274,7 +1262,6 @@ export const FileExplorer = memo(
                     <>
                       <ContextMenuSeparator />
                       <ContextMenuItem
-                        className={COMPACT_ITEM}
                         onSelect={() => onAttachToAgent?.(menuTarget.path)}
                       >
                         {t("menu.attachToAgent")}
@@ -1283,7 +1270,6 @@ export const FileExplorer = memo(
                   )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     variant="destructive"
                     onSelect={(e) => {
                       if (deleteConfirm) {
@@ -1305,7 +1291,6 @@ export const FileExplorer = memo(
                 <>
                   {onRevealInTerminal && (
                     <ContextMenuItem
-                      className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(rootPath)}
                     >
                       {t("menu.openInTerminal")}
@@ -1329,7 +1314,6 @@ export const FileExplorer = memo(
                     </>
                   ) : (
                     <ContextMenuItem
-                      className={COMPACT_ITEM}
                       onSelect={() => void revealInFinder(rootPath)}
                     >
                       {t("menu.revealInFinder")}
@@ -1337,26 +1321,22 @@ export const FileExplorer = memo(
                   )}
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "file")}
                   >
                     {t("menu.newFile")}
                   </ContextMenuItem>
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "dir")}
                   >
                     {t("menu.newFolder")}
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => void copyToClipboard(rootPath)}
                   >
                     {t("menu.copyPath")}
                   </ContextMenuItem>
                   <ContextMenuItem
-                    className={COMPACT_ITEM}
                     onSelect={() => tree.refresh(rootPath)}
                   >
                     {t("menu.refresh")}

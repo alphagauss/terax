@@ -27,10 +27,6 @@ import {
   FindWidget,
   type FindWidgetHandle,
 } from "@/modules/find";
-import {
-  COMPACT_CONTENT,
-  COMPACT_ITEM,
-} from "@/modules/explorer/lib/menuItemClass";
 import { useTheme } from "@/modules/theme";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
@@ -387,14 +383,12 @@ export const TerminalPane = memo(
       <ContextMenu>
         <ContextMenuTrigger asChild>{terminalBody}</ContextMenuTrigger>
         <ContextMenuContent
-          className={COMPACT_CONTENT}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             restoreFocus();
           }}
         >
           <ContextMenuItem
-            className={COMPACT_ITEM}
             disabled={!contextMenuHasSelection}
             onSelect={() => copyTerminalSelection(terminalId, smartCopyEnabled)}
           >
@@ -402,7 +396,6 @@ export const TerminalPane = memo(
             <ContextMenuShortcut>{copyShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem
-            className={COMPACT_ITEM}
             onSelect={() => pasteClipboardIntoTerminal(terminalId)}
           >
             {terminalT("contextMenu.paste")}

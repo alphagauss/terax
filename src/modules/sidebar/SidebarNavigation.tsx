@@ -46,9 +46,6 @@ export const SIDEBAR_COMPOSITE_BAR_HEIGHT = 36;
 
 const ACTIVITY_BAR_POSITIONS = ["default", "top", "bottom", "hidden"] as const;
 const ACTIVITY_BAR_SIZES = ["default", "compact"] as const;
-const COMPACT_MENU_CONTENT = "min-w-44 rounded-2xl p-1";
-const COMPACT_MENU_ITEM = "gap-2 rounded-xl px-2.5 py-1.5 text-xs";
-const COMPACT_MENU_CHECK_ITEM = "gap-2 rounded-xl py-1.5 pr-7 pl-2.5 text-xs";
 
 type NavigationConfigurationProps = {
   allContainers: readonly SidebarContainerDefinition[];
@@ -207,7 +204,6 @@ function ActivityBarConfigurationMenu({
       {allContainers.map((container) => (
         <ContextMenuCheckboxItem
           key={container.id}
-          className={COMPACT_MENU_CHECK_ITEM}
           checked={!activityBar.hiddenContainerIds.includes(container.id)}
           onCheckedChange={() => onToggleVisibility(container.id)}
         >
@@ -216,10 +212,10 @@ function ActivityBarConfigurationMenu({
       ))}
       <ContextMenuSeparator />
       <ContextMenuSub>
-        <ContextMenuSubTrigger className={COMPACT_MENU_ITEM}>
+        <ContextMenuSubTrigger>
           {t("activityBarPosition")}
         </ContextMenuSubTrigger>
-        <ContextMenuSubContent className={COMPACT_MENU_CONTENT}>
+        <ContextMenuSubContent>
           <ContextMenuRadioGroup
             value={activityBar.position}
             onValueChange={(value) => {
@@ -230,7 +226,6 @@ function ActivityBarConfigurationMenu({
               <ContextMenuRadioItem
                 key={position}
                 value={position}
-                className={COMPACT_MENU_CHECK_ITEM}
               >
                 {t(`position.${position}`)}
               </ContextMenuRadioItem>
@@ -240,10 +235,10 @@ function ActivityBarConfigurationMenu({
       </ContextMenuSub>
       {activityBar.position === "default" ? (
         <ContextMenuSub>
-          <ContextMenuSubTrigger className={COMPACT_MENU_ITEM}>
+          <ContextMenuSubTrigger>
             {t("activityBarSize")}
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className={COMPACT_MENU_CONTENT}>
+          <ContextMenuSubContent>
             <ContextMenuRadioGroup
               value={activityBar.size}
               onValueChange={(value) => {
@@ -254,7 +249,6 @@ function ActivityBarConfigurationMenu({
                 <ContextMenuRadioItem
                   key={size}
                   value={size}
-                  className={COMPACT_MENU_CHECK_ITEM}
                 >
                   {t(`size.${size}`)}
                 </ContextMenuRadioItem>
@@ -274,7 +268,7 @@ function ActivityBarMenu({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent className={cn("w-52", COMPACT_MENU_CONTENT)}>
+      <ContextMenuContent className="w-52">
         <ActivityBarConfigurationMenu {...configuration} />
       </ContextMenuContent>
     </ContextMenu>
@@ -302,9 +296,8 @@ function ContainerMenu({
   return (
     <ContextMenu>
       <ContextMenuTrigger className="contents">{children}</ContextMenuTrigger>
-      <ContextMenuContent className={cn("w-48", COMPACT_MENU_CONTENT)}>
+      <ContextMenuContent className="w-48">
         <ContextMenuItem
-          className={COMPACT_MENU_ITEM}
           onSelect={() => onToggleVisibility(container.id)}
         >
           {t(hidden ? "showContainer" : "hideContainer", {
@@ -313,7 +306,6 @@ function ContainerMenu({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          className={COMPACT_MENU_ITEM}
           disabled={
             location === "primary" ||
             !container.allowedLocations.includes("primary")
@@ -325,7 +317,6 @@ function ContainerMenu({
           {t("moveToPrimary")}
         </ContextMenuItem>
         <ContextMenuItem
-          className={COMPACT_MENU_ITEM}
           disabled={
             location === "secondary" ||
             !container.allowedLocations.includes("secondary")
@@ -338,7 +329,6 @@ function ContainerMenu({
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem
-          className={COMPACT_MENU_ITEM}
           onSelect={() => onReset(container.id)}
         >
           {t("resetLocation")}
