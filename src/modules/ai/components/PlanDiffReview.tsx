@@ -1,3 +1,8 @@
+/**
+ * 本文件实现计划模式下的待应用变更审查面板。
+ * 用户可以查看轻量差异、逐项拒绝或一次性应用队列。
+ */
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -10,6 +15,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { usePlanStore, type QueuedEdit } from "../store/planStore";
 
 function basename(p: string): string {
@@ -32,7 +38,9 @@ function diffStats(
   return { added, removed };
 }
 
+/** 展示并处理计划模式积累的文件变更。 */
 export function PlanDiffReview() {
+  const { t } = useTranslation("ai");
   const queue = usePlanStore((s) => s.queue);
   const removeOne = usePlanStore((s) => s.removeOne);
   const clear = usePlanStore((s) => s.clear);
@@ -59,10 +67,10 @@ export function PlanDiffReview() {
       <div className="flex items-center justify-between border-b border-border/40 px-3 py-2">
         <div className="flex flex-col">
           <span className="text-[13px] font-semibold tracking-tight">
-            Plan review
+            {t("planReview.title")}
           </span>
           <span className="text-[10.5px] text-muted-foreground">
-            {queue.length} pending change{queue.length === 1 ? "" : "s"}
+            {t("planReview.pendingChanges", { count: queue.length })}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -75,7 +83,7 @@ export function PlanDiffReview() {
             disabled={busy}
           >
             <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
-            Discard all
+            {t("planReview.discardAll")}
           </Button>
           <Button
             type="button"
@@ -85,7 +93,7 @@ export function PlanDiffReview() {
             disabled={busy}
           >
             <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
-            Apply {queue.length}
+            {t("planReview.apply", { count: queue.length })}
           </Button>
         </div>
       </div>
@@ -105,17 +113,20 @@ function PlanRow({
   item: QueuedEdit;
   onReject: () => void;
 }) {
+  const { t } = useTranslation("ai");
   const [open, setOpen] = useState(false);
   const isDir = item.kind === "create_directory";
   const isNew = item.isNewFile && !isDir;
   const stats = isDir
     ? null
     : diffStats(item.originalContent, item.proposedContent);
-  const Icon = isDir
-    ? FolderAddIcon
-    : isNew
-      ? FilePlusIcon
-      : FileEditIcon;
+  const Icon = isDir ? FolderAddIcon : isNew ? FilePlusIcon : FileEditIcon;
+  const kindLabel =
+    item.kind === "multi_edit"
+      ? t("toolApproval.editFileBatch")
+      : item.kind === "write_file"
+        ? t("toolApproval.writeFile")
+        : t("toolApproval.editFile");
 
   return (
     <li className="group/row overflow-hidden rounded-md border border-border/50 bg-card">
@@ -129,7 +140,7 @@ function PlanRow({
             open && "rotate-180",
             isDir && "invisible",
           )}
-          aria-label="Toggle diff"
+          aria-label={t("planReview.toggleDiff")}
         >
           <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={1.75} />
         </button>
@@ -146,7 +157,7 @@ function PlanRow({
             </span>
             {isNew ? (
               <span className="text-[10px] text-emerald-600 dark:text-emerald-400">
-                new
+                {t("planReview.newFile")}
               </span>
             ) : null}
           </div>
@@ -159,13 +170,11 @@ function PlanRow({
                 +{stats.added}
               </span>
               <span className="text-destructive">−{stats.removed}</span>
-              <span className="text-muted-foreground">
-                {item.kind === "multi_edit" ? "multi-edit" : item.kind}
-              </span>
+              <span className="text-muted-foreground">{kindLabel}</span>
             </div>
           ) : (
             <div className="mt-0.5 text-[10px] text-muted-foreground">
-              {item.description ?? "create directory"}
+              {item.description ?? t("planReview.createDirectory")}
             </div>
           )}
         </div>
@@ -175,7 +184,7 @@ function PlanRow({
           variant="ghost"
           className="size-5 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100"
           onClick={onReject}
-          aria-label="Reject"
+          aria-label={t("planReview.reject")}
         >
           <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={1.75} />
         </Button>
@@ -199,23 +208,21 @@ function UnifiedDiffPreview({
   original: string;
   proposed: string;
 }) {
-  // Coarse line-level diff (LCS-lite via set membership). For real diffs
-  // we'd reach for a library; this is good enough for at-a-glance review.
+  const { t } = useTranslation("ai");
+  // 这里只需快速预览，不引入完整 diff 依赖。
   const a = original.split("\n");
   const b = proposed.split("\n");
   const setA = new Set(a);
   const setB = new Set(b);
 
   const lines: Array<{ kind: "add" | "del" | "ctx"; text: string }> = [];
-  // First pass: removed (in a, not in b).
   for (const l of a) if (!setB.has(l)) lines.push({ kind: "del", text: l });
-  // Then: added (in b, not in a).
   for (const l of b) if (!setA.has(l)) lines.push({ kind: "add", text: l });
 
   if (lines.length === 0) {
     return (
       <div className="text-[11px] italic text-muted-foreground">
-        no line-level changes
+        {t("planReview.noChanges")}
       </div>
     );
   }
@@ -247,7 +254,7 @@ function UnifiedDiffPreview({
         ))}
         {rest > 0 ? (
           <div className="px-2 py-1 text-[10px] italic text-muted-foreground">
-            … {rest} more changes
+            {t("planReview.moreChanges", { count: rest })}
           </div>
         ) : null}
       </div>

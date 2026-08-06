@@ -72,6 +72,9 @@
     "placeholder": "Ask Terax anything   -   # for snippets and commands, @ for files",
     "listening": "Listening…",
     "transcribing": "Transcribing…",
+    "sessionBusy": "This session is still finishing another run.",
+    "connectDescription": "Connect any AI provider or use a local model. Your key stays in the OS keychain.",
+    "connectProvider": "Connect provider",
     "fileTooLarge": "{{name}} is too large to attach ({{size}}).",
     "unsupportedFile": "{{name}} is not a supported text or image file.",
     "attachFailed": "Could not attach the file: {{error}}"
@@ -132,6 +135,30 @@
     "scrollNavigation": "Conversation navigation",
     "scrollToLatest": "Go to the latest response and follow",
     "userMessageFallback": "[Attachment or context]"
+  },
+  "todos": {
+    "title": "Todos"
+  },
+  "filePicker": {
+    "workspaceFiles": "Workspace files",
+    "noWorkspace": "No workspace open",
+    "indexing": "Indexing workspace…",
+    "noMatches": "No matching files",
+    "truncated": "The workspace is large. Refine your query to narrow the results."
+  },
+  "planReview": {
+    "title": "Plan review",
+    "pendingChanges_one": "{{count}} pending change",
+    "pendingChanges_other": "{{count}} pending changes",
+    "discardAll": "Discard all",
+    "apply": "Apply {{count}}",
+    "toggleDiff": "Toggle diff",
+    "newFile": "new",
+    "createDirectory": "create directory",
+    "reject": "Reject",
+    "noChanges": "No line-level changes",
+    "moreChanges_one": "… {{count}} more change",
+    "moreChanges_other": "… {{count}} more changes"
   },
   "statusPill": {
     "openAiLog": "Open AI log",

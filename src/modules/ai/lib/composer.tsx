@@ -105,7 +105,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const { t } = useTranslation("ai");
   const sessionId = useChatStore((s) => s.activeSessionId);
   const status = useChatStore((s) => s.agentMeta.status);
-  const isBusy = status === "thinking" || status === "streaming";
+  const runLocked = useChatStore((s) =>
+    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
+  );
+  const isBusy = runLocked || status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<FileAttachment[]>([]);
@@ -384,6 +387,14 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
 
     if (!sessionId) return;
+    const submittedValue = value;
+    const submittedFileIds = new Set(files.map((file) => file.id));
+    const submittedSnippetIds = new Set(
+      pickedSnippets.map((snippet) => snippet.id),
+    );
+    const submittedCommandNames = new Set(
+      pickedCommands.map((command) => command.name),
+    );
     const store = useChatStore.getState();
     store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
     void (async () => {
@@ -394,13 +405,19 @@ export function AiComposerProvider({ children }: ProviderProps) {
         metadata: { createdAt: Date.now() },
       });
       if (!sent) {
-        toast.info("This session is running in another window");
+        toast.info(t("composer.sessionBusy"));
         return;
       }
-      setValue("");
-      setFiles([]);
-      setPickedSnippets([]);
-      setPickedCommands([]);
+      setValue((current) => (current === submittedValue ? "" : current));
+      setFiles((current) =>
+        current.filter((file) => !submittedFileIds.has(file.id)),
+      );
+      setPickedSnippets((current) =>
+        current.filter((snippet) => !submittedSnippetIds.has(snippet.id)),
+      );
+      setPickedCommands((current) =>
+        current.filter((command) => !submittedCommandNames.has(command.name)),
+      );
       requestAnimationFrame(() => textareaRef.current?.focus());
     })();
   };

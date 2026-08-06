@@ -33,14 +33,19 @@ export function useAiBootstrap(): {
   const setCustomEndpointKeys = useChatStore((s) => s.setCustomEndpointKeys);
   const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const activeSessionRunLocked = useChatStore((s) =>
+    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
+  );
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
 
   useEffect(() => {
-    if (activeSessionId) firePendingReviewForSession(activeSessionId);
-  }, [activeSessionId]);
+    if (activeSessionId && !activeSessionRunLocked) {
+      firePendingReviewForSession(activeSessionId);
+    }
+  }, [activeSessionId, activeSessionRunLocked]);
 
   const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);

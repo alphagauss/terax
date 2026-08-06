@@ -55,14 +55,19 @@ export async function readSession(id: string): Promise<SessionFile> {
   };
 }
 
-/** 提交本次新增记录，Rust 侧负责读取旧记录并整体原子替换。 */
-export function commitSession(session: SessionFile): Promise<void> {
+/** 提交本次新增记录，并取得原子替换后文件的真实 metadata。 */
+export async function commitSession(
+  session: SessionFile,
+): Promise<SessionMeta> {
   const ipcSession: IpcSessionFile = {
     ...session,
     createdAt: new Date(session.createdAt).toISOString(),
     updatedAt: new Date(session.updatedAt).toISOString(),
   };
-  return invoke("ai_session_commit", { session: ipcSession });
+  const meta = await invoke<IpcSessionMeta>("ai_session_commit", {
+    session: ipcSession,
+  });
+  return fromIpcMeta(meta);
 }
 
 /** 删除指定会话文件。 */

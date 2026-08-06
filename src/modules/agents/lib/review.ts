@@ -9,6 +9,8 @@ import {
   type ManagedAgent,
 } from "../store/managedAgentsStore";
 
+const reviewDispatches = new Set<number>();
+
 function buildReviewDirective(m: ManagedAgent): string {
   const remaining = m.maxRounds - m.rounds;
   const lastRound =
@@ -29,18 +31,29 @@ function canReview(m: ManagedAgent): boolean {
   return true;
 }
 
-function fireReview(m: ManagedAgent): void {
-  const store = useManagedAgentsStore.getState();
-  store.markReviewed(m.tabId);
-  store.setPhase(m.tabId, "reviewing");
-  void (async () => {
-    const { getOrCreateChat } = await import("@/modules/ai/store/chatRuntime");
-    const chat = getOrCreateChat(m.sessionId);
-    void chat.sendMessage({
+/** 通过统一聊天入口发起自动审查，失败时保留待重试状态。 */
+async function fireReview(m: ManagedAgent): Promise<void> {
+  if (reviewDispatches.has(m.tabId)) return;
+  reviewDispatches.add(m.tabId);
+  try {
+    const { sendChatMessage } = await import("@/modules/ai/store/chatRuntime");
+    const sent = await sendChatMessage(m.sessionId, {
       role: "user",
       parts: [{ type: "text", text: buildReviewDirective(m) }],
-    } as Parameters<typeof chat.sendMessage>[0]);
-  })();
+      metadata: { createdAt: Date.now() },
+    });
+    const store = useManagedAgentsStore.getState();
+    if (!sent) {
+      store.setPendingReview(m.tabId, true);
+      return;
+    }
+    store.markReviewed(m.tabId);
+    store.setPhase(m.tabId, "reviewing");
+  } catch {
+    useManagedAgentsStore.getState().setPendingReview(m.tabId, true);
+  } finally {
+    reviewDispatches.delete(m.tabId);
+  }
 }
 
 /** 在托管 Agent 当前轮次满足条件时立即审查，否则记录待处理状态。 */
@@ -52,7 +65,7 @@ export function maybeTriggerManagedReview(tabId: number): void {
     store.setPendingReview(tabId, true);
     return;
   }
-  fireReview(m);
+  void fireReview(m);
 }
 
 /** 激活会话后触发其此前延迟的托管 Agent 审查。 */
@@ -64,5 +77,5 @@ export function firePendingReviewForSession(sessionId: string): void {
     store.setPendingReview(m.tabId, false);
     return;
   }
-  fireReview(m);
+  void fireReview(m);
 }

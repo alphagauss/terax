@@ -72,6 +72,9 @@
     "placeholder": "向 Terax 提问   -   输入 # 使用片段和命令，输入 @ 引用文件",
     "listening": "正在聆听…",
     "transcribing": "正在转写…",
+    "sessionBusy": "此会话仍在完成上一轮运行。",
+    "connectDescription": "连接任意 AI 提供方或使用本地模型。密钥只保存在系统钥匙串中。",
+    "connectProvider": "连接提供方",
     "fileTooLarge": "{{name}} 太大，无法附加（{{size}}）。",
     "unsupportedFile": "{{name}} 不是支持的文本或图片文件。",
     "attachFailed": "无法附加文件：{{error}}"
@@ -132,6 +135,30 @@
     "scrollNavigation": "会话导航",
     "scrollToLatest": "前往最新输出并恢复跟随",
     "userMessageFallback": "[附件或上下文]"
+  },
+  "todos": {
+    "title": "待办"
+  },
+  "filePicker": {
+    "workspaceFiles": "工作区文件",
+    "noWorkspace": "未打开工作区",
+    "indexing": "正在索引工作区…",
+    "noMatches": "没有匹配的文件",
+    "truncated": "工作区较大，请细化查询以缩小结果范围。"
+  },
+  "planReview": {
+    "title": "计划审查",
+    "pendingChanges_one": "{{count}} 项待处理变更",
+    "pendingChanges_other": "{{count}} 项待处理变更",
+    "discardAll": "全部丢弃",
+    "apply": "应用 {{count}} 项",
+    "toggleDiff": "展开或收起差异",
+    "newFile": "新增",
+    "createDirectory": "创建目录",
+    "reject": "拒绝",
+    "noChanges": "没有行级变更",
+    "moreChanges_one": "… 还有 {{count}} 项变更",
+    "moreChanges_other": "… 还有 {{count}} 项变更"
   },
   "statusPill": {
     "openAiLog": "打开 AI 日志",

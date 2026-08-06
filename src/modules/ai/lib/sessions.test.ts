@@ -79,15 +79,25 @@ describe("session IPC timestamp boundary", () => {
   });
 
   it("commits frontend timestamps as ISO strings", async () => {
-    ipc.mockResolvedValueOnce(undefined);
-    await commitSession({
+    ipc.mockResolvedValueOnce({
       id: "session",
       title: "Session",
-      createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
-      updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
-      messages: [],
-      todos: [],
+      createdAt: "2026-07-26T10:00:00.000Z",
+      updatedAt: "2026-07-26T10:00:01.000Z",
+      modifiedAt: 1,
+      size: 2,
+      fingerprint: "1:2",
     });
+    await expect(
+      commitSession({
+        id: "session",
+        title: "Session",
+        createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
+        updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
+        messages: [],
+        todos: [],
+      }),
+    ).resolves.toMatchObject({ fingerprint: "1:2" });
 
     expect(ipc).toHaveBeenCalledWith("ai_session_commit", {
       session: {
