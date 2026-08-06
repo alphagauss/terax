@@ -31,7 +31,6 @@ import { useTranslation } from "react-i18next";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { fileIconUrl } from "./lib/iconResolver";
 import { copyToClipboard, revealInFinder } from "./lib/contextActions";
-import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { cn } from "@/lib/utils";
 
 type SearchHit = {
@@ -276,10 +275,9 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         </span>
                       </button>
                     </ContextMenuTrigger>
-                    <ContextMenuContent className={COMPACT_CONTENT}>
+                    <ContextMenuContent>
                       {!hit.is_dir && (
                         <ContextMenuItem
-                          className={COMPACT_ITEM}
                           onSelect={() => onOpenFile(hit.path)}
                         >
                           {t("menu.open")}
@@ -287,28 +285,24 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                       )}
                       {hit.is_dir && onRevealInTerminal && (
                         <ContextMenuItem
-                          className={COMPACT_ITEM}
                           onSelect={() => onRevealInTerminal(hit.path)}
                         >
                           {t("menu.openInTerminal")}
                         </ContextMenuItem>
                       )}
                       <ContextMenuItem
-                        className={COMPACT_ITEM}
                         onSelect={() => void revealInFinder(hit.path)}
                       >
                         {t("menu.revealInFinder")}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
-                        className={COMPACT_ITEM}
                         onSelect={() => void copyToClipboard(hit.path)}
                       >
                         {t("menu.copyPath")}
                       </ContextMenuItem>
                       <ContextMenuSeparator />
                       <ContextMenuItem
-                        className={COMPACT_ITEM}
                         onSelect={() => onAttachToAgent?.(hit.path)}
                       >
                         {t("menu.attachToAgent")}

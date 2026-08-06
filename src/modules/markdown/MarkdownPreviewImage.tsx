@@ -216,9 +216,8 @@ export function MarkdownPreviewImage({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{image}</ContextMenuTrigger>
-      <ContextMenuContent className="min-w-40 rounded-2xl p-1">
+      <ContextMenuContent className="min-w-40">
         <ContextMenuItem
-          className="gap-2 rounded-xl px-2.5 py-1.5 text-xs"
           disabled={!asset.resource}
           onSelect={() => {
             const element = imageRef.current;
@@ -234,7 +233,6 @@ export function MarkdownPreviewImage({
           {t("copyImage")}
         </ContextMenuItem>
         <ContextMenuItem
-          className="gap-2 rounded-xl px-2.5 py-1.5 text-xs"
           disabled={!asset.resource}
           onSelect={() => {
             if (!asset.resource) return;
