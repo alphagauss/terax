@@ -312,6 +312,7 @@ class SharedDocumentModel {
         const name = this.path.split(/[\\/]/).pop() ?? this.path;
         toast.warning(i18n.t("editor:saveConflict.title"), {
           id: `save-conflict:${this.key}`,
+          duration: Infinity,
           description: i18n.t("editor:saveConflict.description", { name }),
           action: {
             label: i18n.t("editor:saveConflict.overwrite"),

@@ -1,5 +1,5 @@
 /**
- * 本文件测试共享文档模型的缓冲区、并发保存、自动保存与生命周期。
+ * 本文件测试共享文档模型的缓冲区、并发保存、保存冲突、自动保存与生命周期。
  *
  * 关闭前保存必须绕过自动保存延迟，同时不得保存未启用自动保存的脏文档。
  */
@@ -156,6 +156,43 @@ describe("shared document model", () => {
 
     unsubscribeFirst();
     unsubscribeSecond();
+  });
+
+  it("保存冲突通知保持显示直到用户处理", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") {
+        return { kind: "text", content: "one\n", size: 4, mtime: 1 };
+      }
+      if (command === "fs_stat") {
+        return { kind: "file", size: 4, mtime: 2 };
+      }
+      if (command === "fs_write_file") return 3;
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local edit\n");
+
+    await expect(model.save()).resolves.toBe(false);
+
+    expect(mocks.warning).toHaveBeenCalledOnce();
+    const options = mocks.warning.mock.calls[0]?.[1];
+    expect(options).toMatchObject({
+      duration: Infinity,
+      action: { label: "Overwrite" },
+    });
+
+    options.action.onClick();
+    await vi.waitFor(() => expect(model.getSnapshot().dirty).toBe(false));
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_write_file",
+      ),
+    ).toHaveLength(1);
+    unsubscribe();
   });
 
   it("关闭前立即保存已启用自动保存的脏文档", async () => {
