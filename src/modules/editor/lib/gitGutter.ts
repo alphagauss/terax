@@ -1,10 +1,22 @@
 /**
- * 本文件实现编辑器中的 Git 行变更解析、行号槽标记和滚动概览 rail。
- *
- * 概览 rail 只在内容可纵向滚动时显示，普通编辑器与合并视图需传入各自实际的滚动容器。
+ * 本文件实现编辑器中的 Git Quick Diff 行号槽与滚动概览。
+ * 编辑器键入时增量更新基线 chunks，Git diff 页面直接复用 MergeView 已计算的 chunks。
  */
 
-import { type Extension, StateEffect, StateField } from "@codemirror/state";
+import {
+  buildQuickDiff,
+  type QuickDiffRange,
+  type QuickDiffSnapshot,
+  rangesFromChunks,
+  updateQuickDiff,
+} from "@/modules/editor/lib/quickDiff";
+import { getChunks, getOriginalDoc } from "@codemirror/merge";
+import {
+  type Extension,
+  StateEffect,
+  StateField,
+  Text,
+} from "@codemirror/state";
 import {
   EditorView,
   GutterMarker,
@@ -13,147 +25,39 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 
-// 1-based new-file line numbers, grouped by change kind. `deleted` marks lines
-// that have a deletion immediately above/at them (shown as a boundary bar).
-export type GitChanges = {
-  added: Set<number>;
-  modified: Set<number>;
-  deleted: Set<number>;
-};
+export const setQuickDiffBaseline = StateEffect.define<string | null>();
 
-export const emptyGitChanges = (): GitChanges => ({
-  added: new Set(),
-  modified: new Set(),
-  deleted: new Set(),
-});
-
-/**
- * Parse a `git diff` unified patch into per-line change kinds against the NEW
- * (worktree) file, so a gutter can mark added / modified / deleted lines.
- * Note: diff is worktree-vs-HEAD (recomputed on save), so staged and unstaged
- * edits share one baseline.
- */
-export function parseUnifiedDiff(diffText: string): GitChanges {
-  const res = emptyGitChanges();
-  if (!diffText) return res;
-
-  let newLine = 0;
-  let pendingDel = 0; // deletions seen since the last addition/context line
-  for (const raw of diffText.split("\n")) {
-    if (raw === "") continue;
-    if (raw.startsWith("@@")) {
-      const m = /@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-      if (m) newLine = Number.parseInt(m[1], 10);
-      pendingDel = 0;
-      continue;
-    }
-    // File headers / metadata — never part of a hunk body.
-    if (
-      raw.startsWith("+++ ") ||
-      raw.startsWith("--- ") ||
-      raw.startsWith("diff ") ||
-      raw.startsWith("index ") ||
-      raw.startsWith("new file") ||
-      raw.startsWith("deleted file") ||
-      raw.startsWith("rename ") ||
-      raw.startsWith("similarity ") ||
-      raw.startsWith("\\")
-    ) {
-      continue;
-    }
-
-    const c = raw[0];
-    if (c === "+") {
-      if (pendingDel > 0) {
-        res.modified.add(newLine);
-        pendingDel--;
-      } else {
-        res.added.add(newLine);
+const quickDiffField = StateField.define<QuickDiffSnapshot | null>({
+  create: () => null,
+  update(value, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setQuickDiffBaseline)) {
+        return effect.value === null
+          ? null
+          : buildQuickDiff(
+              Text.of(effect.value.split(/\r\n?|\n/)),
+              transaction.newDoc,
+            );
       }
-      newLine++;
-    } else if (c === "-") {
-      pendingDel++;
-    } else {
-      // context line: flush any unmatched deletions as a boundary marker here
-      if (pendingDel > 0) {
-        res.deleted.add(newLine);
-        pendingDel = 0;
-      }
-      newLine++;
     }
-  }
-  if (pendingDel > 0) res.deleted.add(Math.max(1, newLine - 1));
-  return res;
-}
-
-export function gitChangesForDiff(
-  diffText: string,
-  originalContent: string,
-  modifiedContent: string,
-): GitChanges {
-  const changes = parseUnifiedDiff(diffText);
-  if (
-    changes.added.size > 0 ||
-    changes.modified.size > 0 ||
-    changes.deleted.size > 0
-  ) {
-    return changes;
-  }
-  if (originalContent.length === 0 && modifiedContent.length > 0) {
-    const lines = modifiedContent.split(/\r?\n/);
-    const count = Math.max(
-      1,
-      lines.length - (modifiedContent.endsWith("\n") ? 1 : 0),
-    );
-    for (let line = 1; line <= count; line++) changes.added.add(line);
-  } else if (originalContent.length > 0 && modifiedContent.length === 0) {
-    changes.deleted.add(1);
-  }
-  return changes;
-}
-
-export const setGitChanges = StateEffect.define<GitChanges>();
-
-const gitChangesField = StateField.define<GitChanges>({
-  create: emptyGitChanges,
-  update(value, tr) {
-    for (const e of tr.effects) if (e.is(setGitChanges)) return e.value;
-    return value;
+    return value && transaction.docChanged
+      ? updateQuickDiff(value, transaction.newDoc, transaction.changes)
+      : value;
   },
 });
 
 class ChangeMarker extends GutterMarker {
-  constructor(kind: "added" | "modified" | "deleted") {
+  constructor(kind: QuickDiffRange["kind"]) {
     super();
     this.elementClass = `cm-change-${kind}`;
   }
 }
 
-const addedMarker = new ChangeMarker("added");
-const modifiedMarker = new ChangeMarker("modified");
-const deletedMarker = new ChangeMarker("deleted");
-
-type ChangeKind = "added" | "modified" | "deleted";
-type ChangeRange = { kind: ChangeKind; from: number; to: number };
-
-function changeRanges(changes: GitChanges): ChangeRange[] {
-  const kinds = new Map<number, ChangeKind>();
-  for (const line of changes.deleted) kinds.set(line, "deleted");
-  for (const line of changes.added) kinds.set(line, "added");
-  for (const line of changes.modified) kinds.set(line, "modified");
-
-  const ranges: ChangeRange[] = [];
-  for (const line of [...kinds.keys()].sort((a, b) => a - b)) {
-    const kind = kinds.get(line);
-    const previous = ranges[ranges.length - 1];
-    if (kind && previous?.kind === kind && previous.to + 1 === line) {
-      previous.to = line;
-    } else if (kind) {
-      ranges.push({ kind, from: line, to: line });
-    }
-  }
-  return ranges;
-}
+const markers = {
+  added: new ChangeMarker("added"),
+  modified: new ChangeMarker("modified"),
+  deleted: new ChangeMarker("deleted"),
+};
 
 /** 判断元素是否存在需要滚动条承载的纵向溢出。 */
 export function hasVerticalScroll(element: HTMLElement): boolean {
@@ -164,10 +68,9 @@ export function hasVerticalScroll(element: HTMLElement): boolean {
 export function renderGitChangeOverview(
   view: EditorView,
   rail: HTMLDivElement,
-  changes: GitChanges,
+  ranges: readonly QuickDiffRange[],
   scrollElement: HTMLElement = view.scrollDOM,
 ) {
-  const ranges = changeRanges(changes);
   rail.replaceChildren();
   rail.hidden = ranges.length === 0 || !hasVerticalScroll(scrollElement);
   if (rail.hidden) return;
@@ -175,16 +78,15 @@ export function renderGitChangeOverview(
   const contentHeight = Math.max(view.contentHeight, 1);
   for (const range of ranges) {
     const firstLine = view.state.doc.line(
-      Math.max(1, Math.min(range.from, view.state.doc.lines)),
+      Math.max(1, Math.min(range.fromLine, view.state.doc.lines)),
     );
     const lastLine = view.state.doc.line(
-      Math.max(1, Math.min(range.to, view.state.doc.lines)),
+      Math.max(1, Math.min(range.toLine, view.state.doc.lines)),
     );
     const firstBlock = view.lineBlockAt(firstLine.from);
     const lastBlock = view.lineBlockAt(lastLine.to);
     const top = (firstBlock.top / contentHeight) * 100;
     const bottom = ((lastBlock.top + lastBlock.height) / contentHeight) * 100;
-
     const marker = document.createElement("span");
     marker.className = `cm-changeOverview-${range.kind}`;
     marker.style.top = `${top}%`;
@@ -201,54 +103,66 @@ class ChangeOverview {
     this.rail.className = "cm-changeOverview";
     this.rail.setAttribute("aria-hidden", "true");
     view.dom.append(this.rail);
-    renderGitChangeOverview(view, this.rail, view.state.field(gitChangesField));
+    this.render();
   }
 
   update(update: ViewUpdate) {
+    const currentField = update.state.field(quickDiffField, false);
+    const previousField = update.startState.field(quickDiffField, false);
+    const currentChunks = getChunks(update.state)?.chunks;
+    const previousChunks = getChunks(update.startState)?.chunks;
     if (
       update.docChanged ||
       update.geometryChanged ||
-      update.state.field(gitChangesField) !==
-        update.startState.field(gitChangesField)
+      currentField !== previousField ||
+      currentChunks !== previousChunks
     ) {
-      renderGitChangeOverview(
-        this.view,
-        this.rail,
-        update.state.field(gitChangesField),
-      );
+      this.render();
     }
   }
 
   destroy() {
     this.rail.remove();
   }
+
+  private render() {
+    const snapshot = this.view.state.field(quickDiffField, false);
+    const merge = snapshot ? null : getChunks(this.view.state);
+    const ranges = snapshot
+      ? snapshot.ranges
+      : merge?.side === null
+        ? rangesFromChunks(
+            getOriginalDoc(this.view.state),
+            this.view.state.doc,
+            merge.chunks,
+          )
+        : [];
+    renderGitChangeOverview(this.view, this.rail, ranges);
+  }
 }
 
 const changeGutter = gutter({
   class: "cm-changeGutter",
   lineMarker(view, line) {
-    const changes = view.state.field(gitChangesField, false);
-    if (!changes) return null;
-    const lineNo = view.state.doc.lineAt(line.from).number;
-    if (changes.modified.has(lineNo)) return modifiedMarker;
-    if (changes.added.has(lineNo)) return addedMarker;
-    if (changes.deleted.has(lineNo)) return deletedMarker;
-    return null;
+    const lineNumber = view.state.doc.lineAt(line.from).number;
+    const range = view.state
+      .field(quickDiffField, false)
+      ?.ranges.find(
+        (candidate) =>
+          lineNumber >= candidate.fromLine && lineNumber <= candidate.toLine,
+      );
+    return range ? markers[range.kind] : null;
   },
   lineMarkerChange: (update) =>
-    update.state.field(gitChangesField) !==
-    update.startState.field(gitChangesField),
+    update.state.field(quickDiffField) !==
+    update.startState.field(quickDiffField),
 });
 
 const changeGutterTheme = EditorView.baseTheme({
   ".cm-changeGutter": { width: "3px", padding: "0" },
   ".cm-changeGutter .cm-gutterElement": { padding: "0" },
-  ".cm-change-added": {
-    backgroundColor: "var(--terminal-ansi-green)",
-  },
-  ".cm-change-modified": {
-    backgroundColor: "var(--terminal-ansi-blue)",
-  },
+  ".cm-change-added": { backgroundColor: "var(--terminal-ansi-green)" },
+  ".cm-change-modified": { backgroundColor: "var(--terminal-ansi-blue)" },
   ".cm-change-deleted": {
     boxShadow: "inset 0 -2px 0 0 var(--terminal-ansi-red)",
   },
@@ -256,13 +170,10 @@ const changeGutterTheme = EditorView.baseTheme({
 
 const changeOverviewPlugin = ViewPlugin.fromClass(ChangeOverview);
 
-export const gitChangeOverview: Extension = [
-  gitChangesField,
-  changeOverviewPlugin,
-];
+export const gitChangeOverview: Extension = changeOverviewPlugin;
 
 export const gitChangeGutter: Extension = [
-  gitChangesField,
+  quickDiffField,
   changeGutter,
   changeGutterTheme,
   changeOverviewPlugin,

@@ -1,3 +1,7 @@
+//! Git 操作集成测试。
+//!
+//! 使用真实临时仓库锁定工作区授权、状态解析和 HEAD Quick Diff 基线不变量。
+
 mod common;
 
 use common::{git_available, GitRepoFixture};
@@ -61,6 +65,60 @@ fn resolve_repo_returns_branch_for_unborn_head() {
     assert_eq!(info.branch, "main");
     assert!(info.upstream.is_none());
     assert!(!info.is_detached);
+}
+
+#[test]
+fn quick_diff_baseline_reads_head_instead_of_worktree() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("src/main.ts", "const value = 1;\n");
+    fx.run_git(&["add", "src/main.ts"]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    fx.write_file("src/main.ts", "const value = 2;\n");
+
+    let path = to_canon(fx.repo_path.join("src/main.ts"));
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("quick diff baseline")
+        .expect("tracked text file");
+
+    assert_eq!(baseline.content, "const value = 1;\n");
+    assert_eq!(baseline.relative_path, "src/main.ts");
+    assert_eq!(baseline.repo_root, fx.repo_str());
+    assert!(!baseline.revision.is_empty());
+}
+
+#[test]
+fn quick_diff_baseline_ignores_untracked_and_unborn_files() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("new.txt", "new\n");
+    let path = to_canon(fx.repo_path.join("new.txt"));
+
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("quick diff baseline");
+
+    assert!(baseline.is_none());
+}
+
+#[test]
+fn quick_diff_baseline_ignores_oversized_head_content() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("large.txt", &"x".repeat(2 * 1024 * 1024 + 1));
+    fx.run_git(&["add", "large.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "large"]);
+    let path = to_canon(fx.repo_path.join("large.txt"));
+
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("quick diff baseline");
+
+    assert!(baseline.is_none());
 }
 
 #[test]

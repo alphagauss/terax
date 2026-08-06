@@ -1,3 +1,8 @@
+/**
+ * 本文件定义前端与 Tauri 原生命令之间的类型化调用边界。
+ * 负责注入当前工作区环境，不包含业务状态或缓存。
+ */
+
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -71,6 +76,13 @@ export type GitStatusSnapshot = {
 export type GitDiffResult = {
   diffText: string;
   truncated: boolean;
+};
+
+export type GitQuickDiffBaseline = {
+  repoRoot: string;
+  relativePath: string;
+  revision: string;
+  content: string;
 };
 
 export type GitDiffContentResult = {
@@ -278,9 +290,8 @@ export const native = {
       staged,
       workspace: currentWorkspaceEnv(),
     }),
-  gitDiffHead: (repoRoot: string, path: string | null) =>
-    invoke<GitDiffResult>("git_diff_head", {
-      repoRoot,
+  gitQuickDiffBaseline: (path: string) =>
+    invoke<GitQuickDiffBaseline | null>("git_quick_diff_baseline", {
       path,
       workspace: currentWorkspaceEnv(),
     }),

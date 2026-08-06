@@ -1,3 +1,7 @@
+//! Git 仓库操作与安全边界实现。
+//!
+//! 所有路径先经过工作区授权和仓库内校验，再交给本地、WSL 或 SSH Git 进程。
+
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
@@ -11,14 +15,16 @@ use crate::modules::git::process::{
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
     GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
-    GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES,
-    NETWORK_TIMEOUT_SECS,
+    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
+    MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
     ResolvedGitDirectory,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
+
+const DIFF_VIEW_TEXT_LIMIT: usize = 256 * 1024;
 
 pub fn resolve_repo(
     registry: &WorkspaceRegistry,
@@ -37,18 +43,9 @@ fn resolve_repo_in_authorized(
     registry: &WorkspaceRegistry,
     cwd: &ResolvedGitDirectory,
 ) -> Result<Option<GitRepoInfo>> {
-    let Some(root_line) = git_stdout_line_opt(
-        &cwd.workspace,
-        &cwd.git_path,
-        ["rev-parse", "--show-toplevel"],
-    )?
-    else {
+    let Some(canonical_root) = resolve_repo_root_in_authorized(registry, cwd)? else {
         return Ok(None);
     };
-    let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
-    if !canonical_root.remote {
-        let _ = registry.authorize(&canonical_root.local_path);
-    }
 
     let head = match git_stdout_lines(
         &canonical_root.workspace,
@@ -84,6 +81,26 @@ fn resolve_repo_in_authorized(
     }))
 }
 
+/// 解析并授权仓库根目录，不读取分支或 upstream。
+fn resolve_repo_root_in_authorized(
+    registry: &WorkspaceRegistry,
+    cwd: &ResolvedGitDirectory,
+) -> Result<Option<ResolvedGitDirectory>> {
+    let Some(root_line) = git_stdout_line_opt(
+        &cwd.workspace,
+        &cwd.git_path,
+        ["rev-parse", "--show-toplevel"],
+    )?
+    else {
+        return Ok(None);
+    };
+    let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
+    if !canonical_root.remote {
+        let _ = registry.authorize(&canonical_root.local_path);
+    }
+    Ok(Some(canonical_root))
+}
+
 pub fn panel_snapshot(
     registry: &WorkspaceRegistry,
     cwd: &str,
@@ -94,22 +111,12 @@ pub fn panel_snapshot(
         return Err(GitError::PathOutsideWorkspace(cwd.local_path));
     }
     ensure_git_available(&cwd.workspace)?;
-    let Some(root_line) = git_stdout_line_opt(
-        &cwd.workspace,
-        &cwd.git_path,
-        ["rev-parse", "--show-toplevel"],
-    )?
-    else {
+    let Some(canonical_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
         return Ok(GitPanelSnapshot {
             repo: None,
             status: None,
         });
     };
-    let canonical_root = canonical_dir(registry, &root_line, &cwd.workspace)?;
-    if !canonical_root.remote {
-        let _ = registry.authorize(&canonical_root.local_path);
-    }
-
     let status = status_inner(&canonical_root)?;
     let repo = GitRepoInfo {
         repo_root: canonical_root.git_path.clone(),
@@ -184,22 +191,69 @@ pub fn diff(
     )
 }
 
-pub fn diff_head(
+/// 读取文件在当前 HEAD 中的文本基线。
+///
+/// 未被 HEAD 跟踪、二进制文件以及尚无首个提交的仓库返回 `None`。
+pub fn quick_diff_baseline(
     registry: &WorkspaceRegistry,
-    repo_root: &str,
-    path: Option<&str>,
+    path: &str,
     workspace: &WorkspaceEnv,
-) -> Result<GitDiffResult> {
-    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
-    ensure_git_available(&repo_root.workspace)?;
-    diff_inner(&repo_root, path, DiffMode::Head)
+) -> Result<Option<GitQuickDiffBaseline>> {
+    let (parent, file_name) = split_file_path(path)?;
+    let cwd = canonical_dir(registry, parent, workspace)?;
+    if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
+        return Err(GitError::PathOutsideWorkspace(cwd.local_path));
+    }
+    ensure_git_available(&cwd.workspace)?;
+    let Some(repo_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
+        return Ok(None);
+    };
+    let Some(revision) = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--verify", "HEAD"],
+    )?
+    else {
+        return Ok(None);
+    };
+    let file_path = format!(
+        "{}/{}",
+        cwd.git_path.trim_end_matches(['/', '\\']),
+        file_name
+    );
+    let relative_path = relative_git_path(&repo_root.git_path, &file_path, repo_root.remote)?;
+    let relative_path =
+        pathspec_from_input(&repo_root.local_path, &relative_path, repo_root.remote)?;
+    // 后续始终读取已解析出的 revision，避免 HEAD 在多条 Git 命令之间移动后返回错配内容。
+    let object = format!("{revision}:{relative_path}");
+    let Some(size) = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["cat-file", "-s", &object],
+    )?
+    .and_then(|value| value.parse::<u64>().ok()) else {
+        return Ok(None);
+    };
+    if size > MAX_FILE_BYTES {
+        return Ok(None);
+    }
+    let TextSource::Text(content) =
+        git_show_text(&repo_root.workspace, &repo_root.git_path, &object)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(GitQuickDiffBaseline {
+        repo_root: repo_root.git_path,
+        relative_path,
+        revision,
+        content,
+    }))
 }
 
 #[derive(Clone, Copy)]
 enum DiffMode {
     Worktree,
     Index,
-    Head,
 }
 
 fn diff_inner(
@@ -211,10 +265,6 @@ fn diff_inner(
     match mode {
         DiffMode::Worktree => {}
         DiffMode::Index => args.push("--cached".into()),
-        DiffMode::Head => {
-            args.push("HEAD".into());
-            args.push("--diff-filter=CDMRTUXB".into());
-        }
     }
     let pathspec = match path.filter(|p| !p.is_empty()) {
         Some(p) => Some(pathspec_from_input(
@@ -291,24 +341,34 @@ pub fn diff_content(
     } else {
         read_worktree_text(&repo_root, &rel_path, &worktree_path)?
     };
-    let patch = diff_inner(
-        &repo_root,
-        Some(&rel_path),
-        if staged {
-            DiffMode::Index
-        } else {
-            DiffMode::Worktree
-        },
-    )?;
     let is_binary =
         matches!(original, TextSource::Binary) || matches!(modified, TextSource::Binary);
+    let needs_patch = is_binary
+        || text_source_len(&original) > DIFF_VIEW_TEXT_LIMIT
+        || text_source_len(&modified) > DIFF_VIEW_TEXT_LIMIT;
+    let patch = if needs_patch {
+        Some(diff_inner(
+            &repo_root,
+            Some(&rel_path),
+            if staged {
+                DiffMode::Index
+            } else {
+                DiffMode::Worktree
+            },
+        )?)
+    } else {
+        None
+    };
 
     Ok(GitDiffContentResult {
         original_content: original.into_text(),
         modified_content: modified.into_text(),
         is_binary,
-        fallback_patch: patch.diff_text,
-        truncated: patch.truncated,
+        fallback_patch: patch
+            .as_ref()
+            .map(|result| result.diff_text.clone())
+            .unwrap_or_default(),
+        truncated: patch.is_some_and(|result| result.truncated),
     })
 }
 
@@ -879,41 +939,48 @@ pub fn commit_file_diff(
         &format!("{sha}:{rel}"),
     )?;
 
-    let mut diff_args: Vec<OsString> = vec![
-        "show".into(),
-        "--no-color".into(),
-        "--no-ext-diff".into(),
-        "--format=".into(),
-        "-m".into(),
-        "--first-parent".into(),
-        sha.into(),
-        "--".into(),
-    ];
-    diff_args.push(rel.clone().into());
-    if original_rel != rel {
-        diff_args.push(original_rel.clone().into());
-    }
-    let patch_output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        diff_args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&patch_output, "git show <commit> -- <path> failed")?;
-    let patch_text = match String::from_utf8(patch_output.stdout) {
-        Ok(text) => text,
-        Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
-    };
-
     let is_binary =
         matches!(original, TextSource::Binary) || matches!(modified, TextSource::Binary);
+    let needs_patch = is_binary
+        || text_source_len(&original) > DIFF_VIEW_TEXT_LIMIT
+        || text_source_len(&modified) > DIFF_VIEW_TEXT_LIMIT;
+    let mut patch_text = String::new();
+    let mut truncated = false;
+    if needs_patch {
+        let mut diff_args: Vec<OsString> = vec![
+            "show".into(),
+            "--no-color".into(),
+            "--no-ext-diff".into(),
+            "--format=".into(),
+            "-m".into(),
+            "--first-parent".into(),
+            sha.into(),
+            "--".into(),
+        ];
+        diff_args.push(rel.clone().into());
+        if original_rel != rel {
+            diff_args.push(original_rel.clone().into());
+        }
+        let patch_output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            diff_args,
+            DEFAULT_TIMEOUT_SECS,
+        )?;
+        ensure_success(&patch_output, "git show <commit> -- <path> failed")?;
+        truncated = patch_output.truncated;
+        patch_text = match String::from_utf8(patch_output.stdout) {
+            Ok(text) => text,
+            Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+        };
+    }
 
     Ok(GitDiffContentResult {
         original_content: original.into_text(),
         modified_content: modified.into_text(),
         is_binary,
         fallback_patch: patch_text,
-        truncated: patch_output.truncated,
+        truncated,
     })
 }
 
@@ -1107,6 +1174,50 @@ fn pathspec_from_input(repo_root: &Path, rel: &str, remote: bool) -> Result<Stri
     }
     let resolved = resolve_within_repo(repo_root, rel)?;
     Ok(pathspec(repo_root, &resolved))
+}
+
+fn text_source_len(source: &TextSource) -> usize {
+    match source {
+        TextSource::Text(text) => text.len(),
+        TextSource::Missing | TextSource::Binary => 0,
+    }
+}
+
+/// 将文件路径拆为父目录与文件名，统一接受两种平台分隔符。
+fn split_file_path(path: &str) -> Result<(&str, &str)> {
+    let split = path
+        .rfind(['/', '\\'])
+        .ok_or_else(|| GitError::InvalidPath(path.into()))?;
+    let (parent, name) = path.split_at(split);
+    let name = &name[1..];
+    if parent.is_empty() || name.is_empty() || name == "." || name == ".." {
+        return Err(GitError::InvalidPath(path.into()));
+    }
+    Ok((parent, name))
+}
+
+/// 从规范仓库路径中提取安全的仓库相对路径。
+fn relative_git_path(repo_root: &str, file_path: &str, remote: bool) -> Result<String> {
+    let root = repo_root
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    let file = file_path.replace('\\', "/");
+    let prefix = format!("{root}/");
+    let matches = if remote || !cfg!(windows) {
+        file.starts_with(&prefix)
+    } else {
+        file.to_ascii_lowercase()
+            .starts_with(&prefix.to_ascii_lowercase())
+    };
+    if !matches {
+        return Err(GitError::InvalidPath(file_path.into()));
+    }
+    let relative = &file[prefix.len()..];
+    if !is_safe_pathspec(relative) {
+        return Err(GitError::InvalidPath(relative.into()));
+    }
+    Ok(relative.to_string())
 }
 
 fn read_worktree_text(
@@ -1318,6 +1429,29 @@ pub fn checkout_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quick_diff_path_helpers_accept_both_separators() {
+        assert_eq!(
+            split_file_path("C:\\repo\\src\\main.ts").unwrap(),
+            ("C:\\repo\\src", "main.ts")
+        );
+        assert_eq!(
+            split_file_path("/repo/src/main.ts").unwrap(),
+            ("/repo/src", "main.ts")
+        );
+        assert_eq!(
+            relative_git_path("/repo", "/repo/src/main.ts", true).unwrap(),
+            "src/main.ts"
+        );
+    }
+
+    #[test]
+    fn quick_diff_path_helpers_reject_outside_paths() {
+        assert!(relative_git_path("/repo", "/repository/main.ts", true).is_err());
+        assert!(relative_git_path("/repo", "/repo/../secret", true).is_err());
+        assert!(split_file_path("main.ts").is_err());
+    }
 
     #[test]
     fn sha_is_safe_accepts_hex() {

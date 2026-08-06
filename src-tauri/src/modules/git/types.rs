@@ -1,3 +1,7 @@
+//! Git 命令跨进程返回的数据结构与内部输出类型。
+//!
+//! 所有公开结构使用 camelCase 序列化，避免前端维护额外的协议转换层。
+
 use serde::Serialize;
 
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -62,6 +66,16 @@ pub struct DiscardEntry {
 pub struct GitDiffResult {
     pub diff_text: String,
     pub truncated: bool,
+}
+
+/// 编辑器 Quick Diff 使用的 HEAD 文本基线。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitQuickDiffBaseline {
+    pub repo_root: String,
+    pub relative_path: String,
+    pub revision: String,
+    pub content: String,
 }
 
 #[derive(Serialize)]
