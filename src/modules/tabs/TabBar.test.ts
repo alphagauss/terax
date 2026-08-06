@@ -1,6 +1,6 @@
 /**
- * 本文件测试标签栏关闭控件的结构约束。
- * 重点锁定单标签仍为关闭按钮预留空间，并阻止关闭点击落到标签拖拽层。
+ * 本文件测试标签栏关闭控件和新建入口的结构约束。
+ * 重点锁定关闭交互，以及标签溢出时新建入口仍固定可见。
  */
 
 import { readFileSync } from "node:fs";
@@ -23,5 +23,13 @@ describe("TabBar close control", () => {
       "onPointerUp={(event) => event.stopPropagation()}",
     );
     expect(source).toContain("onClose(t.id);");
+  });
+});
+
+describe("TabBar new-tab control", () => {
+  it("keeps the new-tab trigger visible at the scrolling edge", () => {
+    expect(source).toContain(
+      "sticky right-0 z-10 size-7 shrink-0 rounded-md bg-card",
+    );
   });
 });
