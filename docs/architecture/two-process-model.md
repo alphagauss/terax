@@ -50,7 +50,9 @@ Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
 #### File
 
 - `fs_read_file` - read file contents
+- `fs_file_version` - compute file metadata and digest at the data source without returning contents
 - `fs_write_file` - write file contents
+- `fs_write_file_checked` - explicitly match a file version or overwrite, then atomically replace the file
 - `fs_stat` - file metadata
 - `fs_canonicalize` - canonical path
 

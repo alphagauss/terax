@@ -1,10 +1,24 @@
+/**
+ * 本文件解析并执行编辑器外部格式化器。
+ *
+ * 格式化结果通过带内容版本的文件读取交回文档模型，避免绕过磁盘协调状态。
+ */
+
 import { quoteShellArg } from "@/lib/shellQuote";
 import type { EditorFormatter } from "@/modules/settings/store";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import type { EditorView } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 
-type ReadResult = { kind: string; content?: string; mtime?: number };
+type ReadResult =
+  | {
+      kind: "text";
+      content: string;
+      revision: string;
+      size: number;
+      mtime: number;
+    }
+  | { kind: "binary" | "toolarge" };
 
 type CommandOutput = {
   stdout: string;
@@ -141,15 +155,24 @@ export async function runExternalFormatter(
   }
 }
 
-export async function readFileText(
-  path: string,
-): Promise<{ text: string; mtime: number } | null> {
+/** 读取外部格式化后的文本及其磁盘版本。 */
+export async function readFileText(path: string): Promise<{
+  text: string;
+  revision: string;
+  size: number;
+  mtime: number;
+} | null> {
   const res = await invoke<ReadResult>("fs_read_file", {
     path,
     workspace: currentWorkspaceEnv(),
   }).catch(() => null);
-  if (res?.kind !== "text" || res.content == null) return null;
-  return { text: res.content, mtime: res.mtime ?? 0 };
+  if (res?.kind !== "text") return null;
+  return {
+    text: res.content,
+    revision: res.revision,
+    size: res.size,
+    mtime: res.mtime,
+  };
 }
 
 // Minimal change dispatch: trimming the common prefix/suffix keeps the

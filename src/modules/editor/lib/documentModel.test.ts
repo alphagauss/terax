@@ -1,7 +1,7 @@
 /**
- * 本文件测试共享文档模型的缓冲区、并发保存、保存冲突、自动保存与生命周期。
+ * 本文件测试共享文档模型的内容版本协调、保存冲突、自动保存与生命周期。
  *
- * 关闭前保存必须绕过自动保存延迟，同时不得保存未启用自动保存的脏文档。
+ * 磁盘元数据不得制造冲突，真实的双向内容变化不得被自动覆盖。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,13 +10,21 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   notifyDocumentSaved: vi.fn(),
   warning: vi.fn(),
+  error: vi.fn(),
+  dismiss: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@/modules/lsp", () => ({
   notifyDocumentSaved: mocks.notifyDocumentSaved,
 }));
-vi.mock("sonner", () => ({ toast: { warning: mocks.warning } }));
+vi.mock("sonner", () => ({
+  toast: {
+    warning: mocks.warning,
+    error: mocks.error,
+    dismiss: mocks.dismiss,
+  },
+}));
 
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { WorkspaceEnv } from "@/modules/workspace";
@@ -30,6 +38,32 @@ import {
 
 const local = { kind: "local" } satisfies WorkspaceEnv;
 
+function text(content: string, revision = `revision:${content}`, mtime = 1) {
+  return {
+    kind: "text",
+    content,
+    size: new TextEncoder().encode(content).byteLength,
+    mtime,
+    revision,
+  };
+}
+
+function written(content: string, mtime = 2) {
+  return {
+    status: "written",
+    revision: `revision:${content}`,
+    size: new TextEncoder().encode(content).byteLength,
+    mtime,
+  };
+}
+
+function observed(content: string, mtime = 2) {
+  return {
+    size: new TextEncoder().encode(content).byteLength,
+    mtime,
+  };
+}
+
 describe("shared document model", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,14 +71,18 @@ describe("shared document model", () => {
       editorAutoSave: false,
       editorAutoSaveDelay: 1000,
     });
-    mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
-        return { kind: "text", content: "one\n", size: 4, mtime: 1 };
-      }
-      if (command === "fs_stat") return { kind: "file", size: 4, mtime: 1 };
-      if (command === "fs_write_file") return 2;
-      throw new Error(`unexpected command: ${command}`);
-    });
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { content?: string }) => {
+        if (command === "fs_read_file") return text("one\n");
+        if (command === "fs_stat") {
+          return { kind: "file", size: 4, mtime: 1 };
+        }
+        if (command === "fs_write_file_checked") {
+          return written(args?.content ?? "");
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
   });
 
   afterEach(() => {
@@ -100,7 +138,37 @@ describe("shared document model", () => {
     unsubscribeSecond();
   });
 
-  it("coalesces reloads from multiple views and never reloads over dirty text", async () => {
+  it("updates the ready document size after external formatting", async () => {
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+
+    model.adoptFormattedDiskText("formatted\n", "formatted", 10, 2);
+
+    expect(model.getSnapshot().doc).toMatchObject({
+      status: "ready",
+      size: 10,
+    });
+    unsubscribe();
+  });
+
+  it("replays a reload requested while a disk read is in flight", async () => {
+    let releaseReload: (() => void) | undefined;
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command !== "fs_read_file") {
+        throw new Error(`unexpected command: ${command}`);
+      }
+      readCount += 1;
+      if (readCount === 2) {
+        await new Promise<void>((resolve) => {
+          releaseReload = resolve;
+        });
+      }
+      return text("one\n");
+    });
     const first = getSharedDocumentModel(local, "C:/work/file.ts");
     const second = getSharedDocumentModel(local, "C:/work/file.ts");
     const unsubscribeFirst = first.subscribe(() => {});
@@ -109,24 +177,300 @@ describe("shared document model", () => {
       expect(first.getSnapshot().doc.status).toBe("ready"),
     );
 
-    expect(first.reload()).toBe(true);
-    expect(second.reload()).toBe(true);
-    await vi.waitFor(() =>
-      expect(
-        mocks.invoke.mock.calls.filter(
-          ([command]) => command === "fs_read_file",
-        ),
-      ).toHaveLength(2),
-    );
-
-    first.onChange("dirty\n");
-    expect(second.reload()).toBe(false);
-    expect(
-      mocks.invoke.mock.calls.filter(([command]) => command === "fs_read_file"),
-    ).toHaveLength(2);
+    first.reload();
+    second.reload();
+    await vi.waitFor(() => expect(releaseReload).toBeDefined());
+    releaseReload?.();
+    await vi.waitFor(() => expect(readCount).toBe(3));
 
     unsubscribeFirst();
     unsubscribeSecond();
+  });
+
+  it("reads the file only after a watcher probe finds new content", async () => {
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") {
+        readCount += 1;
+        return readCount === 1
+          ? text("base\n", "base", 1)
+          : text("external\n", "external", 2);
+      }
+      if (command === "fs_file_version") {
+        return { revision: "external", size: 9, mtime: 2 };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+
+    model.checkForChanges();
+
+    await vi.waitFor(() => expect(readCount).toBe(2));
+    expect(model.getSnapshot()).toMatchObject({
+      dirty: false,
+      doc: { status: "ready", content: "external\n" },
+    });
+    unsubscribe();
+  });
+
+  it("ignores metadata-only external rewrites and saves without a warning", async () => {
+    let readCount = 0;
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { content?: string }) => {
+        if (command === "fs_read_file") {
+          readCount += 1;
+          return text("one\n", "same-content", readCount);
+        }
+        if (command === "fs_write_file_checked") {
+          return written(args?.content ?? "");
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    model.reload();
+    await vi.waitFor(() => expect(readCount).toBe(2));
+    await expect(model.save()).resolves.toBe(true);
+
+    expect(mocks.warning).not.toHaveBeenCalled();
+    expect(model.getSnapshot().dirty).toBe(false);
+    unsubscribe();
+  });
+
+  it("merges an external line-ending rewrite into the local save", async () => {
+    let readCount = 0;
+    let writeCount = 0;
+    mocks.invoke.mockImplementation(
+      async (
+        command: string,
+        args?: {
+          content?: string;
+          condition?: { type?: string; version?: { revision?: string } };
+        },
+      ) => {
+        if (command === "fs_read_file") {
+          readCount += 1;
+          return readCount === 1
+            ? text("base\n", "base", 1)
+            : text("base\r\n", "crlf-base", 2);
+        }
+        if (command === "fs_write_file_checked") {
+          writeCount += 1;
+          expect(args?.condition?.version?.revision).toBe("crlf-base");
+          expect(args?.content).toBe("local\r\n");
+          return written(args?.content ?? "", 3);
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    model.reload();
+    await vi.waitFor(() => expect(readCount).toBe(2));
+    expect(model.getSnapshot().doc).toMatchObject({ size: 6 });
+    await expect(model.save()).resolves.toBe(true);
+
+    expect(writeCount).toBe(1);
+    expect(model.getSnapshot().dirty).toBe(false);
+    expect(mocks.warning).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("retains local text and enters conflict when both sides changed", async () => {
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command !== "fs_read_file") {
+        throw new Error(`unexpected command: ${command}`);
+      }
+      readCount += 1;
+      return readCount === 1
+        ? text("base\n", "base")
+        : text("external\n", "external");
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    model.reload();
+    await vi.waitFor(() => expect(mocks.warning).toHaveBeenCalledOnce());
+
+    expect(model.getSnapshot()).toMatchObject({
+      dirty: true,
+      doc: { status: "ready", content: "local\n" },
+    });
+    expect(mocks.warning.mock.calls[0]?.[1]).toMatchObject({
+      duration: Infinity,
+      action: { label: "Overwrite" },
+    });
+    unsubscribe();
+  });
+
+  it("treats a matching external version as convergence instead of conflict", async () => {
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { content?: string }) => {
+        if (command === "fs_read_file") return text("base\n", "base");
+        if (command === "fs_write_file_checked") {
+          return written(args?.content ?? "");
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    await expect(model.save()).resolves.toBe(true);
+
+    expect(model.getSnapshot().dirty).toBe(false);
+    expect(mocks.warning).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("keeps a save conflict visible and force-writes only after confirmation", async () => {
+    let readCount = 0;
+    mocks.invoke.mockImplementation(
+      async (
+        command: string,
+        args?: { content?: string; condition?: { type?: string } },
+      ) => {
+        if (command === "fs_read_file") {
+          readCount += 1;
+          return readCount === 1
+            ? text("base\n", "base")
+            : text("external\n", "external", 2);
+        }
+        if (command === "fs_write_file_checked") {
+          if (args?.condition?.type === "overwrite") {
+            return written(args.content ?? "", 3);
+          }
+          return {
+            status: "conflict",
+            current: observed("external\n", 2),
+          };
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    await expect(model.save()).resolves.toBe(false);
+    expect(mocks.warning).toHaveBeenCalledOnce();
+
+    mocks.warning.mock.calls[0]?.[1].action.onClick();
+    await vi.waitFor(() => expect(model.getSnapshot().dirty).toBe(false));
+
+    const writes = mocks.invoke.mock.calls.filter(
+      ([command]) => command === "fs_write_file_checked",
+    );
+    expect(writes).toHaveLength(2);
+    expect(writes[0]?.[1]).toMatchObject({
+      condition: { type: "match", version: { revision: "base" } },
+    });
+    expect(writes[1]?.[1]).toMatchObject({
+      condition: { type: "overwrite" },
+    });
+    expect(mocks.dismiss).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("keeps conflict state and reports an explicit overwrite failure", async () => {
+    let writeCount = 0;
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") {
+        readCount += 1;
+        return readCount === 1
+          ? text("base\n", "base")
+          : text("external\n", "external", 2);
+      }
+      if (command === "fs_write_file_checked") {
+        writeCount += 1;
+        if (writeCount === 1) {
+          return {
+            status: "conflict",
+            current: observed("external\n", 2),
+          };
+        }
+        throw new Error("disk full");
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+    await expect(model.save()).resolves.toBe(false);
+
+    mocks.warning.mock.calls[0]?.[1].action.onClick();
+    await vi.waitFor(() => expect(mocks.error).toHaveBeenCalledOnce());
+
+    expect(model.getSnapshot().dirty).toBe(true);
+    expect(mocks.warning).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it("treats a remotely deleted file as an overwriteable conflict", async () => {
+    let readCount = 0;
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { condition?: { type?: string } }) => {
+        if (command === "fs_read_file") {
+          readCount += 1;
+          if (readCount === 1) return text("base\n", "base");
+          throw new Error("not found");
+        }
+        if (command === "fs_write_file_checked") {
+          return args?.condition?.type === "overwrite"
+            ? written("local\n", 3)
+            : { status: "conflict", current: null };
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(
+      { kind: "ssh", profileId: "dev" },
+      "/work/file.ts",
+    );
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+
+    await expect(model.save()).resolves.toBe(false);
+    expect(mocks.warning).toHaveBeenCalledOnce();
+
+    mocks.warning.mock.calls[0]?.[1].action.onClick();
+    await vi.waitFor(() => expect(model.getSnapshot().dirty).toBe(false));
+    expect(mocks.dismiss).toHaveBeenCalled();
+    unsubscribe();
   });
 
   it("coalesces concurrent saves and clears dirty for every view", async () => {
@@ -148,7 +492,7 @@ describe("shared document model", () => {
     expect(savedBySecond).toBe(true);
     expect(
       mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_write_file",
+        ([command]) => command === "fs_write_file_checked",
       ),
     ).toHaveLength(1);
     expect(second.getSnapshot().dirty).toBe(false);
@@ -158,39 +502,171 @@ describe("shared document model", () => {
     unsubscribeSecond();
   });
 
-  it("保存冲突通知保持显示直到用户处理", async () => {
-    mocks.invoke.mockImplementation(async (command: string) => {
-      if (command === "fs_read_file") {
-        return { kind: "text", content: "one\n", size: 4, mtime: 1 };
-      }
-      if (command === "fs_stat") {
-        return { kind: "file", size: 4, mtime: 2 };
-      }
-      if (command === "fs_write_file") return 3;
-      throw new Error(`unexpected command: ${command}`);
+  it("在最后一次编辑达到配置延迟后自动保存", async () => {
+    usePreferencesStore.setState({
+      editorAutoSave: true,
+      editorAutoSaveDelay: 500,
     });
     const model = getSharedDocumentModel(local, "C:/work/file.ts");
     const unsubscribe = model.subscribe(() => {});
     await vi.waitFor(() =>
       expect(model.getSnapshot().doc.status).toBe("ready"),
     );
-    model.onChange("local edit\n");
+    vi.useFakeTimers();
 
-    await expect(model.save()).resolves.toBe(false);
-
-    expect(mocks.warning).toHaveBeenCalledOnce();
-    const options = mocks.warning.mock.calls[0]?.[1];
-    expect(options).toMatchObject({
-      duration: Infinity,
-      action: { label: "Overwrite" },
-    });
-
-    options.action.onClick();
-    await vi.waitFor(() => expect(model.getSnapshot().dirty).toBe(false));
+    model.onChange("first\n");
+    await vi.advanceTimersByTimeAsync(400);
+    model.onChange("latest\n");
+    await vi.advanceTimersByTimeAsync(499);
     expect(
       mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_write_file",
+        ([command]) => command === "fs_write_file_checked",
       ),
+    ).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_write_file_checked",
+      ),
+    ).toHaveLength(1);
+    expect(model.getSnapshot().dirty).toBe(false);
+    unsubscribe();
+  });
+
+  it("进入冲突后暂停自动保存", async () => {
+    usePreferencesStore.setState({
+      editorAutoSave: true,
+      editorAutoSaveDelay: 500,
+    });
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command !== "fs_read_file") {
+        throw new Error(`unexpected command: ${command}`);
+      }
+      readCount += 1;
+      return readCount === 1
+        ? text("base\n", "base")
+        : text("external\n", "external", 2);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+    model.reload();
+    await vi.waitFor(() => expect(mocks.warning).toHaveBeenCalledOnce());
+    vi.useFakeTimers();
+
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_write_file_checked",
+      ),
+    ).toHaveLength(0);
+    expect(model.getSnapshot().dirty).toBe(true);
+    unsubscribe();
+  });
+
+  it("does not download an unchanged SSH conflict on every poll", async () => {
+    vi.useFakeTimers();
+    let readCount = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") {
+        readCount += 1;
+        return text("base\n", "base", 1);
+      }
+      if (command === "fs_write_file_checked") {
+        return {
+          status: "conflict",
+          current: observed("external\n", 2),
+        };
+      }
+      if (command === "fs_stat") {
+        return {
+          kind: "file",
+          size: new TextEncoder().encode("external\n").byteLength,
+          mtime: 2,
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(
+      { kind: "ssh", profileId: "dev" },
+      "/work/file.ts",
+    );
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("local\n");
+    await expect(model.save()).resolves.toBe(false);
+    expect(readCount).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(readCount).toBe(1);
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === "fs_stat"),
+    ).toHaveLength(10);
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_file_version",
+      ),
+    ).toHaveLength(0);
+    unsubscribe();
+  });
+
+  it("shares one polling timer across SSH documents", async () => {
+    vi.useFakeTimers();
+    const workspace = { kind: "ssh", profileId: "dev" } satisfies WorkspaceEnv;
+    const first = getSharedDocumentModel(workspace, "/work/first.ts");
+    const second = getSharedDocumentModel(workspace, "/work/second.ts");
+    const unsubscribeFirst = first.subscribe(() => {});
+    const unsubscribeSecond = second.subscribe(() => {});
+    await vi.waitFor(() => {
+      expect(first.getSnapshot().doc.status).toBe("ready");
+      expect(second.getSnapshot().doc.status).toBe("ready");
+    });
+
+    expect(vi.getTimerCount()).toBe(1);
+
+    unsubscribeFirst();
+    unsubscribeSecond();
+  });
+
+  it("periodically verifies unchanged SSH metadata with a digest", async () => {
+    vi.useFakeTimers();
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") return text("one\n");
+      if (command === "fs_stat") {
+        return { kind: "file", size: 4, mtime: 1 };
+      }
+      if (command === "fs_file_version") {
+        return { revision: "revision:one\n", size: 4, mtime: 1 };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(
+      { kind: "ssh", profileId: "dev" },
+      "/work/file.ts",
+    );
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "fs_file_version",
+      ),
+    ).toHaveLength(1);
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === "fs_read_file"),
     ).toHaveLength(1);
     unsubscribe();
   });
@@ -212,7 +688,7 @@ describe("shared document model", () => {
     expect(model.getSnapshot().dirty).toBe(false);
     expect(
       mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_write_file",
+        ([command]) => command === "fs_write_file_checked",
       ),
     ).toHaveLength(1);
     unsubscribe();
@@ -225,28 +701,19 @@ describe("shared document model", () => {
     });
     let releaseFirstWrite: (() => void) | undefined;
     let writeCount = 0;
-    let diskMtime = 1;
-    let diskSize = 4;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") {
-          return { kind: "text", content: "one\n", size: 4, mtime: 1 };
-        }
-        if (command === "fs_stat") {
-          return { kind: "file", size: diskSize, mtime: diskMtime };
-        }
-        if (command === "fs_write_file") {
+        if (command === "fs_read_file") return text("one\n");
+        if (command === "fs_write_file_checked") {
           writeCount += 1;
           if (writeCount === 1) {
             await new Promise<void>((resolve) => {
               releaseFirstWrite = resolve;
             });
           }
-          diskMtime += 1;
-          diskSize = new TextEncoder().encode(args?.content ?? "").byteLength;
-          return diskMtime;
+          return written(args?.content ?? "", writeCount + 1);
         }
-        throw new Error(`unexpected command: ${command} ${args?.content}`);
+        throw new Error(`unexpected command: ${command}`);
       },
     );
     const model = getSharedDocumentModel(local, "C:/work/file.ts");
@@ -280,38 +747,26 @@ describe("shared document model", () => {
     expect(model.getSnapshot().dirty).toBe(true);
     expect(
       mocks.invoke.mock.calls.filter(
-        ([command]) => command === "fs_write_file",
+        ([command]) => command === "fs_write_file_checked",
       ),
     ).toHaveLength(0);
     unsubscribe();
   });
 
   it("queues the latest buffer when editing continues during a save", async () => {
-    const firstWrite = {
-      release: null as ((mtime: number) => void) | null,
-    };
-    let diskMtime = 1;
-    let diskSize = 4;
+    let releaseFirstWrite: (() => void) | undefined;
     let writeCount = 0;
     mocks.invoke.mockImplementation(
       async (command: string, args?: { content?: string }) => {
-        if (command === "fs_read_file") {
-          return { kind: "text", content: "one\n", size: 4, mtime: 1 };
-        }
-        if (command === "fs_stat") {
-          return { kind: "file", size: diskSize, mtime: diskMtime };
-        }
-        if (command === "fs_write_file") {
+        if (command === "fs_read_file") return text("one\n");
+        if (command === "fs_write_file_checked") {
           writeCount += 1;
           if (writeCount === 1) {
-            diskMtime = await new Promise<number>((resolve) => {
-              firstWrite.release = resolve;
+            await new Promise<void>((resolve) => {
+              releaseFirstWrite = resolve;
             });
-          } else {
-            diskMtime += 1;
           }
-          diskSize = new TextEncoder().encode(args?.content ?? "").byteLength;
-          return diskMtime;
+          return written(args?.content ?? "", writeCount + 1);
         }
         throw new Error(`unexpected command: ${command}`);
       },
@@ -324,15 +779,70 @@ describe("shared document model", () => {
 
     model.onChange("first edit\n");
     const firstSave = model.save();
-    await vi.waitFor(() => expect(firstWrite.release).not.toBeNull());
+    await vi.waitFor(() => expect(releaseFirstWrite).toBeDefined());
     model.onChange("second edit\n");
     const secondSave = model.save();
-    firstWrite.release?.(2);
+    releaseFirstWrite?.();
 
     await expect(firstSave).resolves.toBe(true);
     await expect(secondSave).resolves.toBe(true);
     expect(writeCount).toBe(2);
     expect(model.getSnapshot().dirty).toBe(false);
+    unsubscribe();
+  });
+
+  it("probes a watcher event after saving without reading the file back", async () => {
+    let releaseWrite: (() => void) | undefined;
+    let readCount = 0;
+    mocks.invoke.mockImplementation(
+      async (command: string, args?: { content?: string }) => {
+        if (command === "fs_read_file") {
+          readCount += 1;
+          return text("base\n", "base", 1);
+        }
+        if (command === "fs_write_file_checked") {
+          await new Promise<void>((resolve) => {
+            releaseWrite = resolve;
+          });
+          return written(args?.content ?? "", 2);
+        }
+        if (command === "fs_file_version") {
+          return {
+            revision: "revision:first\n",
+            size: 6,
+            mtime: 2,
+          };
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    );
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(() => {});
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().doc.status).toBe("ready"),
+    );
+    model.onChange("first\n");
+
+    const saving = model.save();
+    await vi.waitFor(() => expect(releaseWrite).toBeDefined());
+    model.onChange("second\n");
+    model.checkForChanges();
+    releaseWrite?.();
+
+    await expect(saving).resolves.toBe(true);
+    await vi.waitFor(() =>
+      expect(
+        mocks.invoke.mock.calls.some(
+          ([command]) => command === "fs_file_version",
+        ),
+      ).toBe(true),
+    );
+    expect(readCount).toBe(1);
+    expect(model.getSnapshot()).toMatchObject({
+      dirty: true,
+      doc: { status: "ready", content: "second\n" },
+    });
+    expect(mocks.warning).not.toHaveBeenCalled();
     unsubscribe();
   });
 

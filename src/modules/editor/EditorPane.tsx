@@ -78,8 +78,10 @@ export type EditorPaneHandle = FindHandle & {
   getPath: () => string;
   /** 保存当前缓冲区，发生保存冲突或写入失败时返回 false。 */
   save: () => Promise<boolean>;
-  /** Re-read the file from disk. Skips silently if the buffer is dirty. */
-  reload: () => boolean;
+  /** 从磁盘重新读取并与当前缓冲区协调，不直接覆盖未保存内容。 */
+  reload: () => void;
+  /** 先核对数据源端版本，只有内容变化时才读取正文。 */
+  checkForChanges: () => void;
   /** Move the cursor to a 1-based line and center it, once content is ready. */
   gotoLine: (line: number) => void;
   /** Scroll a 1-based source line to the viewport activation line. */
@@ -202,13 +204,16 @@ export const EditorCore = memo(
       onChange,
       save,
       reload,
-      adoptDiskText,
+      checkForChanges,
+      adoptFormattedDiskText,
       openAnyway,
     } = document;
     const reloadRef = useRef(reload);
     reloadRef.current = reload;
-    const adoptDiskTextRef = useRef(adoptDiskText);
-    adoptDiskTextRef.current = adoptDiskText;
+    const checkForChangesRef = useRef(checkForChanges);
+    checkForChangesRef.current = checkForChanges;
+    const adoptFormattedDiskTextRef = useRef(adoptFormattedDiskText);
+    adoptFormattedDiskTextRef.current = adoptFormattedDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
     const editorContainerRef = useRef<HTMLDivElement>(null);
     const viewportLineChangeRef = useRef(onViewportSourceLineChange);
@@ -372,7 +377,12 @@ export const EditorCore = memo(
           if (readBack !== null && view && view.state.doc === docAtSave) {
             applyFormattedContent(
               view,
-              adoptDiskTextRef.current(readBack.text, readBack.mtime),
+              adoptFormattedDiskTextRef.current(
+                readBack.text,
+                readBack.revision,
+                readBack.size,
+                readBack.mtime,
+              ),
             );
           }
         }
@@ -686,6 +696,7 @@ export const EditorCore = memo(
           return view ? editorViewportSourceLine(view) : null;
         },
         reload: () => reloadRef.current(),
+        checkForChanges: () => checkForChangesRef.current(),
         gotoLine: (line: number) => {
           pendingLineRef.current = line;
           applyPendingGoto();
