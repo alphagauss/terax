@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI Composer 的文件选择浮层。
+ * 负责文件搜索、键盘选择和加载状态展示。
+ */
+
 import { PopoverContent } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -42,7 +47,7 @@ export function FilePickerContent({
       onMouseDown={(e) => e.preventDefault()}
       className="w-80 overflow-hidden rounded-lg border border-border/60 bg-popover/95 p-0 shadow-xl backdrop-blur-xl"
     >
-      <div className="border-b border-border/60 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+      <div className="border-b border-border/60 px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         Workspace files
       </div>
       {!hasWorkspace ? (

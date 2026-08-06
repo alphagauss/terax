@@ -1,3 +1,8 @@
+/**
+ * 本文件负责将主题配置写入根元素的 CSS 变量。
+ * 切换主题时会清理上一主题的内联变量，使缺失字段回退到全局默认值。
+ */
+
 import type { Theme, ThemeColors, ThemeMode, TerminalPalette } from "./types";
 
 const COLOR_VAR: Record<keyof ThemeColors, string> = {
@@ -19,6 +24,11 @@ const COLOR_VAR: Record<keyof ThemeColors, string> = {
   border: "--border",
   input: "--input",
   ring: "--ring",
+  gitModified: "--git-modified",
+  gitAdded: "--git-added",
+  gitUntracked: "--git-untracked",
+  gitRenamed: "--git-renamed",
+  gitDeleted: "--git-deleted",
   sidebar: "--sidebar",
   sidebarForeground: "--sidebar-foreground",
   sidebarPrimary: "--sidebar-primary",

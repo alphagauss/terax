@@ -299,7 +299,7 @@ const ContextChips = memo(function ContextChips({
           {chipIcon(c)}
           <span className="font-medium text-foreground">{chipLabel(c)}</span>
           {"lines" in c && c.lines > 0 ? (
-            <span className="opacity-70">· {c.lines}L</span>
+            <span className="text-muted-foreground">· {c.lines}L</span>
           ) : null}
         </span>
       ))}
@@ -459,13 +459,11 @@ export function AiChatView({
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">Request failed.</div>
-            <div className="mt-0.5 leading-relaxed opacity-90">
-              {error.message}
-            </div>
+            <div className="mt-0.5 leading-relaxed">{error.message}</div>
             <button
               type="button"
               onClick={clearError}
-              className="mt-1 underline opacity-80 hover:opacity-100"
+              className="mt-1 underline"
             >
               Dismiss
             </button>
@@ -494,7 +492,7 @@ const CompactionNotice = memo(function CompactionNotice({
       <button
         type="button"
         onClick={onDismiss}
-        className="text-[10.5px] underline opacity-70 hover:opacity-100"
+        className="text-[10.5px] underline"
       >
         Dismiss
       </button>
@@ -821,7 +819,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
           {count} file{count === 1 ? "" : "s"}
         </span>
         {paths.length > 0 ? (
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground/80 group-data-[state=open]/read:invisible">
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground group-data-[state=open]/read:invisible">
             · {preview}
           </span>
         ) : null}
@@ -840,7 +838,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
                 className="shrink-0 opacity-60"
               />
               <span className="truncate text-foreground">{basename(path)}</span>
-              <span className="truncate opacity-60">{path}</span>
+              <span className="truncate text-muted-foreground">{path}</span>
             </li>
           ))}
         </ul>

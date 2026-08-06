@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染 Git 提交详情和文件变更列表。
+ * 提交说明、作者信息和文件路径需在紧凑布局下保持可读。
+ */
+
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -98,7 +103,7 @@ export function CommitDetail({
           </div>
         </div>
         {body ? (
-          <div className="app-scrollbar mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-foreground/80">
+          <div className="app-scrollbar mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-foreground">
             {body}
           </div>
         ) : null}
@@ -107,7 +112,7 @@ export function CommitDetail({
           {commit.authorEmail ? (
             <>
               <span className="text-muted-foreground/45">·</span>
-              <span className="truncate text-muted-foreground/85">
+              <span className="truncate text-muted-foreground">
                 {commit.authorEmail}
               </span>
             </>
@@ -233,7 +238,7 @@ function CommitFileRow({
       <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
         <span className="truncate text-[11.5px] font-medium">{name}</span>
         {dir ? (
-          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground/80">
+          <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
             {dir}
           </span>
         ) : null}

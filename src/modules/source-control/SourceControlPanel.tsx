@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
+ * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
+ */
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +32,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
-import { useTranslation } from "react-i18next";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -78,6 +82,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { GraphSection } from "./GraphSection";
 import type { SourceControlSummary } from "./useSourceControl";
@@ -410,8 +415,7 @@ function SourceControlViewContainerComponent({
         : null;
   const commitHint = canCommit
     ? t("commit.hint", { shortcut: commitShortcut })
-    : (commitDisabledReason ??
-      t("commit.hint", { shortcut: commitShortcut }));
+    : (commitDisabledReason ?? t("commit.hint", { shortcut: commitShortcut }));
   const pushHint = scm.pushHint ?? t("push.unavailable");
   const pushDisabledReason = scm.actionBusy
     ? t("commit.waitForAction")
@@ -808,7 +812,7 @@ function SourceControlViewContainerComponent({
                               "min-h-[72px] border-border resize-none rounded-lg bg-transparent px-3 pb-7 pt-2.5 text-[12.5px] leading-snug shadow-none placeholder:text-muted-foreground/65 focus-visible:ring-0 focus:border-0",
                             )}
                           />
-                          <div className="pointer-events-none absolute inset-x-3 bottom-1.5 flex items-center justify-between p-1 gap-2 text-[10px] tabular-nums text-muted-foreground/55">
+                          <div className="pointer-events-none absolute inset-x-3 bottom-1.5 flex items-center justify-between p-1 gap-2 text-[10px] tabular-nums text-muted-foreground">
                             {scm.commitMessage.length > 0 ? (
                               <span>Ch: {scm.commitMessage.length}</span>
                             ) : (
@@ -868,12 +872,12 @@ function SourceControlViewContainerComponent({
                                   : "bg-muted-foreground/30",
                             )}
                           />
-                          <span className="truncate font-medium text-foreground/85">
+                          <span className="truncate font-medium text-foreground">
                             {stagedCount === 0
                               ? "Nothing staged"
                               : `${stagedCount} ${stagedCount === 1 ? "file" : "files"} staged`}
                           </span>
-                          <span className="ml-auto shrink-0 truncate text-muted-foreground/65">
+                          <span className="ml-auto shrink-0 truncate text-muted-foreground">
                             {pushStatusLabel}
                           </span>
                         </div>
@@ -1129,7 +1133,7 @@ function CleanTreeHint({ repoLabel }: { repoLabel: string }) {
       </div>
       <div className="text-[10.5px] leading-snug text-muted-foreground">
         {t("cleanTreeOn")}{" "}
-        <span className="font-mono text-foreground/80">{repoLabel}</span>
+        <span className="font-mono text-foreground">{repoLabel}</span>
       </div>
     </div>
   );
@@ -1173,10 +1177,10 @@ function DivergedBanner() {
         className="shrink-0"
       />
       <span className="min-w-0 flex-1 truncate">
-        <span className="font-medium text-foreground/85">
+        <span className="font-medium text-foreground">
           {t("divergedBanner.title")}
         </span>
-        <span className="ml-1 opacity-75">{t("divergedBanner.detail")}</span>
+        <span className="ml-1">{t("divergedBanner.detail")}</span>
       </span>
     </div>
   );
@@ -1309,14 +1313,14 @@ const EntryRow = memo(function EntryRow({
                   "truncate text-[13px] leading-none",
                   isSelected || focused
                     ? "font-semibold text-foreground"
-                    : "font-medium text-foreground/95",
+                    : "font-medium text-foreground",
                   pathLabel ? "max-w-[58%] shrink-0" : "min-w-0 flex-1",
                 )}
               >
                 {fileName}
               </span>
               {pathLabel ? (
-                <span className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground/75">
+                <span className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground">
                   {pathLabel}
                 </span>
               ) : null}

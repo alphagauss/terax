@@ -32,7 +32,6 @@ import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { isPythonFile } from "@/modules/python/path";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import { useShortcutLabel } from "@/modules/shortcuts";
-import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   beginWorkbenchDrag,
   finishWorkbenchDrag,
@@ -45,6 +44,7 @@ import type {
   Tab,
   WorkbenchDirection,
 } from "@/modules/workbench/types";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   Cancel01Icon,
   Clock01Icon,
@@ -494,7 +494,7 @@ export function TabBar({
                               e.preventDefault();
                               setShowAllLanguages((v) => !v);
                             }}
-                            className="w-full px-2.5 py-1.5 text-left text-xs text-primary/60 hover:text-primary rounded-lg transition-colors hover:bg-accent"
+                            className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
                           >
                             {showAllLanguages
                               ? tr("fewerLanguages")

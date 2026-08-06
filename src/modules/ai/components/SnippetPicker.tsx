@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI Composer 的片段和斜杠命令选择浮层。
+ * 负责筛选、键盘导航和选中回调。
+ */
+
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -132,7 +137,7 @@ export function SnippetPickerContent({
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+    <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
       {label}
     </div>
   );

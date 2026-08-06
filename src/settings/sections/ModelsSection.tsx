@@ -23,10 +23,6 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import {
-  getBindingTokens,
-  SHORTCUTS,
-} from "@/modules/shortcuts/shortcuts";
-import {
   type CustomEndpoint,
   compatModelIdForEndpoint,
   DEFAULT_MODEL_ID,
@@ -80,6 +76,7 @@ import {
   setSttProvider,
   setWhispercppBaseURL,
 } from "@/modules/settings/store";
+import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import {
   Add01Icon,
   ArrowDown01Icon,
@@ -406,7 +403,7 @@ export function ModelsSection() {
             <p className="text-[12px] text-muted-foreground">
               {t("models.providers.emptyTitle")}
             </p>
-            <p className="mt-0.5 text-[10.5px] text-muted-foreground/70">
+            <p className="mt-0.5 text-[10.5px] text-muted-foreground">
               {t("models.providers.emptyHint")}
             </p>
           </div>
@@ -784,7 +781,7 @@ function AutocompleteRow({
                       <ProviderIcon provider={p.id} size={11} />
                       <span>{p.label}</span>
                       {!pConfigured ? (
-                        <span className="ml-auto text-[9.5px] normal-case tracking-normal text-muted-foreground/70">
+                        <span className="ml-auto text-[9.5px] normal-case tracking-normal text-muted-foreground">
                           {t("models.providers.notConnected")}
                         </span>
                       ) : null}
@@ -831,7 +828,8 @@ function AutocompleteRow({
               </SelectItem>
               <SelectItem value="manual">
                 {t("models.defaults.trigger.manual", {
-                  shortcut: aiCompleteShortcut || t("models.defaults.trigger.shortcut"),
+                  shortcut:
+                    aiCompleteShortcut || t("models.defaults.trigger.shortcut"),
                 })}
               </SelectItem>
             </SelectContent>
@@ -1343,7 +1341,7 @@ function StatusLine({
     );
   }
   return (
-    <span className="text-[10.5px] text-destructive/80">
+    <span className="text-[10.5px] text-destructive">
       {t("models.card.unreachable")}
     </span>
   );

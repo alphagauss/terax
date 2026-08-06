@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Source Control 的提交图谱区域。
+ * 负责提交列表、分页加载和选中提交详情展示。
+ */
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -404,7 +409,7 @@ export const GraphSection = memo(function GraphSection({
                     maxLaneCount={maxLaneCount}
                     active={openAnchor?.sha === commit.sha}
                   />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/90">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
                     {commit.subject || "(no subject)"}
                   </span>
                   {refs.map((value) => (
@@ -415,7 +420,7 @@ export const GraphSection = memo(function GraphSection({
                       {value}
                     </span>
                   ))}
-                  <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground/70">
+                  <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
                     {relativeTime(commit.timestampSecs)}
                   </span>
                 </button>

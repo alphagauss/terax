@@ -3,6 +3,7 @@
  * 外观选项的状态切换使用项目控制级动效，其他设置行为保持不变。
  */
 
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -18,20 +19,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
-  setLanguage,
   type Language,
-  type ThemePref,
-} from "@/modules/settings/store";
-import {
   setAgentNotifications,
   setAutostart,
   setExplorerGitDecorations,
+  setLanguage,
   setRestoreWindowState,
   setShowHidden,
   setSourceControlShowUndoCommit,
@@ -48,6 +45,7 @@ import {
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
+  type ThemePref,
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
 import {
@@ -321,7 +319,7 @@ export function GeneralSection() {
                   <TooltipTrigger asChild>
                     <span
                       role="img"
-                      className="cursor-help text-[11px] text-muted-foreground/70 leading-none"
+                      className="cursor-help text-[11px] text-muted-foreground leading-none"
                       aria-label={t("general.terminal.webgl.moreInfo")}
                     >
                       ⓘ

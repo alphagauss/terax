@@ -9,15 +9,15 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { Route01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { TunnelManagerDialog } from "./TunnelManagerDialog";
 import { remoteNative } from "./native";
 import { useRemoteStore } from "./store";
+import { TunnelManagerDialog } from "./TunnelManagerDialog";
 import { applyTunnelEvent, tunnelEventError } from "./tunnelEvents";
 import type { SshTunnel, TunnelInfo } from "./types";
 
@@ -124,7 +124,7 @@ export function TunnelStatusControl() {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex h-6 items-center rounded-sm px-1.5 text-muted-foreground/55">
+          <span className="flex h-6 items-center rounded-sm px-1.5 text-muted-foreground">
             <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
             <span className="sr-only">{t("tunnels.label")}</span>
           </span>
@@ -145,9 +145,13 @@ export function TunnelStatusControl() {
         title={lifecycleError ?? t("tunnels.label")}
       >
         <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
-        <span>{t("tunnels.count", { count: profile?.tunnels.length ?? 0 })}</span>
+        <span>
+          {t("tunnels.count", { count: profile?.tunnels.length ?? 0 })}
+        </span>
         {failedCount ? (
-          <span className={cn("text-destructive", lifecycleError && "font-medium")}>
+          <span
+            className={cn("text-destructive", lifecycleError && "font-medium")}
+          >
             {t("tunnels.failedCount", { count: failedCount })}
           </span>
         ) : null}

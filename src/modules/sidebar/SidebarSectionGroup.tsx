@@ -1,3 +1,8 @@
+/**
+ * 本文件实现侧边栏可折叠、可调整尺寸的分区组。
+ * 分区标题和辅助说明在紧凑布局下保持可读。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   animateResizableLayout,
@@ -268,7 +273,7 @@ function SidebarSectionHeader({
           </span>
         ) : null}
         {description ? (
-          <span className="min-w-0 truncate text-[10px] font-normal normal-case tracking-normal text-muted-foreground/75">
+          <span className="min-w-0 truncate text-[10px] font-normal normal-case tracking-normal text-muted-foreground">
             {description}
           </span>
         ) : null}

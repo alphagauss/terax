@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   CheckmarkCircle02Icon,
@@ -17,7 +18,6 @@ import {
   Notification03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import i18n from "@/i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -97,7 +97,11 @@ function HookAgentRow({
   const { t } = useTranslation("agents");
   return (
     <div className="flex items-center gap-2 px-2 py-1">
-      <AgentIcon agent={id} size={14} className="shrink-0 text-muted-foreground" />
+      <AgentIcon
+        agent={id}
+        size={14}
+        className="shrink-0 text-muted-foreground"
+      />
       <span className="flex-1 truncate text-[12px] text-muted-foreground">
         {label}
       </span>
@@ -328,8 +332,12 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
         )}
 
         <div className="border-t border-border/60 p-1">
-          <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-            <HugeiconsIcon icon={Notification03Icon} size={11} strokeWidth={2} />
+          <div className="flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            <HugeiconsIcon
+              icon={Notification03Icon}
+              size={11}
+              strokeWidth={2}
+            />
             {t("bell.alerts")}
           </div>
           {HOOK_AGENTS.map((id) => (
