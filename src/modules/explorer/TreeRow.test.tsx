@@ -15,7 +15,9 @@ vi.mock("@/components/ui/spinner", () => ({
 vi.mock("@hugeicons/core-free-icons", () => ({ ArrowRight01Icon: {} }));
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("./InlineInput", () => ({ InlineInput: () => null }));
-vi.mock("./lib/gitStatusColor", () => ({ explorerGitTextClass: () => "" }));
+vi.mock("./lib/gitStatusColor", () => ({
+  explorerGitTextClass: (code: string) => `git-status-${code}`,
+}));
 vi.mock("./lib/iconResolver", () => ({
   fileIconUrl: () => "file-icon",
   folderIconUrl: () => "folder-icon",
@@ -25,6 +27,72 @@ import { EntryRow } from "./TreeRow";
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+function renderEntryRow(
+  overrides: Partial<Parameters<typeof EntryRow>[0]> = {},
+) {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  act(() =>
+    root.render(
+      createElement(EntryRow, {
+        domId: "row",
+        path: "/workspace/file.ts",
+        name: "file.ts",
+        isDir: false,
+        isExpanded: false,
+        isDeleting: false,
+        depth: 0,
+        actions: {
+          toggle: vi.fn(),
+          beginRename: vi.fn(),
+          commitRename: vi.fn(),
+          cancelRename: vi.fn(),
+        },
+        renameInProgress: false,
+        isSelected: false,
+        isRenaming: false,
+        onOpenFile: vi.fn(),
+        onSelectPath: vi.fn(),
+        deletingLabel: "删除中",
+        ...overrides,
+      }),
+    ),
+  );
+  return { container, root };
+}
+
+describe("EntryRow Git decorations", () => {
+  it.each([
+    "M",
+    "U",
+  ] as const)("keeps the %s color and trailing marker when selected", (gitStatusCode) => {
+    const { container, root } = renderEntryRow({
+      gitStatusCode,
+      isSelected: true,
+    });
+
+    const decorations = container.querySelectorAll(
+      `.git-status-${gitStatusCode}`,
+    );
+    expect(decorations).toHaveLength(2);
+    expect(decorations[0]?.textContent).toBe("file.ts");
+    expect(decorations[0]?.classList.contains("truncate")).toBe(true);
+    expect(decorations[1]?.textContent).toBe(gitStatusCode);
+    expect(decorations[1]?.classList.contains("shrink-0")).toBe(true);
+    act(() => root.unmount());
+  });
+
+  it("does not add a trailing marker to directories", () => {
+    const { container, root } = renderEntryRow({
+      isDir: true,
+      gitStatusCode: "M",
+    });
+
+    expect(container.querySelectorAll(".git-status-M")).toHaveLength(1);
+    act(() => root.unmount());
+  });
 });
 
 describe("EntryRow deleting state", () => {

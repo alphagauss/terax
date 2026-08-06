@@ -164,14 +164,22 @@ function EntryRowImpl(props: EntryRowProps) {
       <span
         className={cn(
           "min-w-0 flex-1 truncate",
-          !isSelected &&
-            !gitignored &&
-            gitStatusCode &&
-            explorerGitTextClass(gitStatusCode),
+          !gitignored && gitStatusCode && explorerGitTextClass(gitStatusCode),
         )}
       >
         {name}
       </span>
+      {!isDir && (gitStatusCode === "M" || gitStatusCode === "U") ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "w-3 shrink-0 text-right font-mono text-[10px]",
+            explorerGitTextClass(gitStatusCode),
+          )}
+        >
+          {gitStatusCode}
+        </span>
+      ) : null}
       {showDeletingStatus ? (
         <span className="flex shrink-0 items-center gap-1 text-[11px] text-destructive">
           <Spinner
