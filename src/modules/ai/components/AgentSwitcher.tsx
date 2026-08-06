@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI Agent 人设选择菜单。
+ * 负责切换内置或自定义 Agent，并提供进入 Agent 设置的入口。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -5,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/menu/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {

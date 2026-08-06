@@ -9,7 +9,7 @@ import {
   ContextMenuItem,
   ContextMenuShortcut,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@/components/menu/context-menu";
 import { Spinner } from "@/components/ui/spinner";
 import {
   CTRL_KEY,

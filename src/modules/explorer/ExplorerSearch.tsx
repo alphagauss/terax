@@ -1,3 +1,8 @@
+/**
+ * 本文件实现文件资源管理器的搜索结果视图。
+ * 负责结果分组、打开操作和与文件树一致的上下文菜单。
+ */
+
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -6,7 +11,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@/components/menu/context-menu";
 import {
   Cancel01Icon,
   Folder01Icon,

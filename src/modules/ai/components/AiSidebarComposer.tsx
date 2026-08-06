@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -238,20 +238,16 @@ function PermissionModeDropdown() {
           <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        className="min-w-44 rounded-2xl p-1"
-      >
+      <DropdownMenuContent align="start">
         {PERMISSION_MODES.map((item) => (
           <DropdownMenuItem
             key={item.id}
             onSelect={() => setMode(item.id)}
-            className={cn(
-              "gap-2 rounded-xl px-2.5 py-1.5 text-xs",
+            className={
               item.id === "full-access"
                 ? "text-amber-600! **:text-amber-600! dark:text-amber-400! dark:**:text-amber-400!"
-                : "text-foreground! **:text-foreground!",
-            )}
+                : "text-foreground! **:text-foreground!"
+            }
           >
             <HugeiconsIcon icon={item.icon} size={14} strokeWidth={1.75} />
             {t(`statusBar.permissionMode.${item.id}`)}

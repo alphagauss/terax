@@ -1,9 +1,14 @@
+/**
+ * 本文件实现终端命令块的悬浮操作层。
+ * 负责命令块操作、AI 入口及相关下拉菜单，不持有终端会话生命周期。
+ */
+
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/menu/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import {

@@ -232,6 +232,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 ### UI 与路径约定
 
 - `src/components/ui/` 由 shadcn/ui 管理，`src/components/ai-elements/` 由 AI Elements registry 管理，不要手工修改生成代码。
+- 业务代码中的 Dropdown Menu 和 Context Menu 统一从 `src/components/menu/` 导入，默认使用紧凑桌面密度；只有 registry 包装层可以直接导入对应的 `src/components/ui/` 生成组件。
 - Tailwind v4 配置位于 `src/styles/globals.css`，不存在 `tailwind.config.*`。
 - 从 `@/lib/utils` 导入并使用 `cn()`。
 - 前端规范路径使用正斜杠。来自 OSC 7、Explorer 或系统的路径必须同时兼容 `/` 和 `\`。

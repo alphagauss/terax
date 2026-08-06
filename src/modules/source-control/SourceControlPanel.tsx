@@ -21,7 +21,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@/components/menu/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,7 +30,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {

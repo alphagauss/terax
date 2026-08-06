@@ -17,7 +17,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";

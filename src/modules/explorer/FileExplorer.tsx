@@ -24,7 +24,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@/components/menu/context-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";

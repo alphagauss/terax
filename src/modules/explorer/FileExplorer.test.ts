@@ -55,7 +55,7 @@ vi.mock("@/components/ui/alert-dialog", () => {
   };
 });
 
-vi.mock("@/components/ui/context-menu", () => {
+vi.mock("@/components/menu/context-menu", () => {
   const Pass = ({ children }: { children?: React.ReactNode }) => children;
   return {
     ContextMenu: Pass,
