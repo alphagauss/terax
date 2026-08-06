@@ -1,3 +1,13 @@
+/**
+ * 本文件同步已打开编辑器与磁盘写入和文件监听事件。
+ *
+ * 同一路径的多个视图共享一个文档模型，因此每批事件只触发一次协调读取。
+ */
+
+import {
+  documentEventResourceKey,
+  documentResourceKey,
+} from "@/lib/pathIdentity";
 import {
   listenFsChanged,
   parentDir,
@@ -5,6 +15,7 @@ import {
   watchRemove,
 } from "@/modules/explorer/lib/watch";
 import type { Tab } from "@/modules/workbench";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type RefObject, useEffect, useRef } from "react";
 import type { EditorPaneHandle } from "./EditorPane";
@@ -15,10 +26,29 @@ type Params = {
   editorRefs: RefObject<Map<number, EditorPaneHandle>>;
 };
 
+/** 对每个共享文档模型至多触发一次重新协调。 */
+function reloadMatchingEditors(
+  tabs: Tab[],
+  editorRefs: RefObject<Map<number, EditorPaneHandle>>,
+  changed: Set<string>,
+  mode: "probe" | "reload",
+): void {
+  const workspace = currentWorkspaceEnv();
+  const reloaded = new Set<string>();
+  for (const tab of tabs) {
+    if (tab.kind !== "editor" && tab.kind !== "markdown") continue;
+    const key = documentResourceKey(workspace, tab.path);
+    if (!changed.has(key) || reloaded.has(key)) continue;
+    const editor = editorRefs.current.get(tab.id);
+    if (!editor) continue;
+    reloaded.add(key);
+    if (mode === "probe") editor.checkForChanges();
+    else editor.reload();
+  }
+}
+
 /**
- * Keeps open editor tabs in sync with on-disk changes: reloads on applied AI
- * diffs, external writes, and fs-watch events, and maintains the watch set for
- * the directories of open editor files.
+ * 维护编辑器文件监听，并在 AI 修改、外部写入或文件事件后协调磁盘内容。
  */
 export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
   // When an AI diff is approved (write_file applied to disk), reload any
@@ -27,16 +57,17 @@ export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
   // once per applied diff.
   const appliedDiffsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    const workspace = currentWorkspaceEnv();
+    const changed = new Set<string>();
     for (const t of tabs) {
       if (t.kind !== "ai-diff") continue;
       if (t.status !== "approved") continue;
       if (appliedDiffsRef.current.has(t.approvalId)) continue;
       appliedDiffsRef.current.add(t.approvalId);
-      for (const e of tabs) {
-        if (e.kind !== "editor" && e.kind !== "markdown") continue;
-        if (e.path !== t.path) continue;
-        editorRefs.current.get(e.id)?.reload();
-      }
+      changed.add(documentResourceKey(workspace, t.path));
+    }
+    if (changed.size > 0) {
+      reloadMatchingEditors(tabs, editorRefs, changed, "reload");
     }
   }, [tabs, editorRefs]);
 
@@ -47,14 +78,13 @@ export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
         "fs:file-written",
         (event) => {
           if (event.payload.source === "editor") return;
-          const normalizedPath = event.payload.path.replace(/\\/g, "/");
-          const currentTabs = tabsRef.current;
-          for (const t of currentTabs) {
-            if (t.kind !== "editor" && t.kind !== "markdown") continue;
-            if (t.path.replace(/\\/g, "/") === normalizedPath) {
-              editorRefs.current.get(t.id)?.reload();
-            }
-          }
+          const workspace = currentWorkspaceEnv();
+          reloadMatchingEditors(
+            tabsRef.current,
+            editorRefs,
+            new Set([documentEventResourceKey(workspace, event.payload.path)]),
+            "reload",
+          );
         },
       );
     return () => {
@@ -82,13 +112,11 @@ export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
     let alive = true;
     let unlisten: (() => void) | undefined;
     void listenFsChanged((paths) => {
-      const changed = new Set(paths.map((p) => p.replace(/\\/g, "/")));
-      for (const t of tabsRef.current) {
-        if (t.kind !== "editor" && t.kind !== "markdown") continue;
-        if (changed.has(t.path.replace(/\\/g, "/"))) {
-          editorRefs.current.get(t.id)?.reload();
-        }
-      }
+      const workspace = currentWorkspaceEnv();
+      const changed = new Set(
+        paths.map((path) => documentEventResourceKey(workspace, path)),
+      );
+      reloadMatchingEditors(tabsRef.current, editorRefs, changed, "probe");
     }).then((un) => {
       if (alive) unlisten = un;
       else un();

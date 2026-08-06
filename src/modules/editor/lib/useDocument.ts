@@ -43,7 +43,8 @@ export function useDocument({ path, onDirtyChange }: Options) {
     onChange: model.onChange,
     save: model.save,
     reload: model.reload,
-    adoptDiskText: model.adoptDiskText,
+    checkForChanges: model.checkForChanges,
+    adoptFormattedDiskText: model.adoptFormattedDiskText,
     openAnyway: model.openAnyway,
   };
 }
