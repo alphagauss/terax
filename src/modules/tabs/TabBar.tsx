@@ -689,12 +689,13 @@ export function TabBar({
             })}
           </TabsList>
         </Tabs>
+        {/* 正常宽度下跟随标签，横向溢出时吸附在滚动视口右侧。 */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
-              className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="sticky right-0 z-10 size-7 shrink-0 rounded-md bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
               title={tr("newTab")}
             >
               <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
