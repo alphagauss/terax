@@ -1,3 +1,8 @@
+/**
+ * 本文件测试自定义主题配置的结构校验。
+ * 锁定可用颜色字段、变体要求和终端调色板边界。
+ */
+
 import { describe, expect, it } from "vitest";
 import { validateTheme } from "./validateTheme";
 
@@ -63,6 +68,25 @@ describe("validateTheme", () => {
       baseTheme({ variants: { dark: { colors: { background: "" } } } }),
     );
     expect(result.ok).toBe(false);
+  });
+
+  it("accepts Git status semantic colors", () => {
+    const result = validateTheme(
+      baseTheme({
+        variants: {
+          dark: {
+            colors: {
+              gitModified: "#e2c08d",
+              gitAdded: "#81b88b",
+              gitUntracked: "#73c991",
+              gitRenamed: "#73c991",
+              gitDeleted: "#c74e39",
+            },
+          },
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
   });
 
   it("requires the terminal ansi palette to have exactly 16 entries", () => {

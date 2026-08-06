@@ -1,3 +1,8 @@
+/**
+ * 本文件实现工作区 Space 切换器及其标签列表。
+ * 负责 Space 的选择、重命名、拖拽和标签导航。
+ */
+
 import { Kbd } from "@/components/ui/kbd";
 import {
   Popover,
@@ -457,7 +462,7 @@ function SpaceRow({
         )}
         {!editing && (
           <>
-            <span className="shrink-0 px-1 text-[10px] tabular-nums text-muted-foreground/50 group-hover:hidden">
+            <span className="shrink-0 px-1 text-[10px] tabular-nums text-muted-foreground group-hover:hidden">
               {tabs.length}
             </span>
             <div
@@ -503,7 +508,7 @@ function SpaceRow({
             />
           ))}
           {tabs.length === 0 && (
-            <span className="px-2 py-1 text-[10.5px] text-muted-foreground/50">
+            <span className="px-2 py-1 text-[10.5px] text-muted-foreground">
               {draggingTabFromOther ? t("dropToMoveHere") : t("noTabs")}
             </span>
           )}
@@ -572,7 +577,7 @@ function TabRow({
             {labelFor(tab)}
           </span>
           {subtitle && (
-            <span className="truncate text-[9.5px] leading-tight text-muted-foreground/55">
+            <span className="truncate text-[9.5px] leading-tight text-muted-foreground">
               {subtitle}
             </span>
           )}

@@ -1,3 +1,8 @@
+/**
+ * 本文件定义对齐 VS Code Modern 的明暗主题。
+ * UI、终端和 Git 状态色分别使用对应模式的默认配色。
+ */
+
 import type { Theme, ThemeVariant } from "../types";
 
 export const darkModernVariant: ThemeVariant = {
@@ -20,6 +25,11 @@ export const darkModernVariant: ThemeVariant = {
     border: "#2b2b2b",
     input: "#313131",
     ring: "#0078d4",
+    gitModified: "#E2C08D",
+    gitAdded: "#81B88B",
+    gitUntracked: "#73C991",
+    gitRenamed: "#73C991",
+    gitDeleted: "#C74E39",
     sidebar: "#181818",
     sidebarForeground: "#cccccc",
     sidebarPrimary: "#0078d4",
@@ -65,6 +75,11 @@ export const lightModernVariant: ThemeVariant = {
     border: "#e5e5e5",
     input: "#e5e5e5",
     ring: "#005fb8",
+    gitModified: "#895503",
+    gitAdded: "#587C0C",
+    gitUntracked: "#007100",
+    gitRenamed: "#007100",
+    gitDeleted: "#AD0707",
     sidebar: "#f8f8f8",
     sidebarForeground: "#3b3b3b",
     sidebarPrimary: "#005fb8",

@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 Git 历史列表、提交图谱和详情面板。
+ * 密集的提交元信息使用清晰的语义文字颜色，不额外降低小字号透明度。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -617,7 +622,7 @@ export function GitHistoryPane({
         ) : (
           <>
             <div
-              className="grid shrink-0 items-center gap-3 border-b border-border/40 bg-card/55 pr-3 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70"
+              className="grid shrink-0 items-center gap-3 border-b border-border/40 bg-card/55 pr-3 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
               style={{
                 height: TABLE_HEADER_HEIGHT,
                 gridTemplateColumns: GRID_TEMPLATE,
@@ -679,7 +684,7 @@ export function GitHistoryPane({
                 </div>
               ) : null}
               {endReached && !activeSearch ? (
-                <div className="py-3 text-center text-[10.5px] text-muted-foreground/65">
+                <div className="py-3 text-center text-[10.5px] text-muted-foreground">
                   End of history
                 </div>
               ) : null}
@@ -824,7 +829,7 @@ const CommitRow = memo(function CommitRow({
           />
         ) : null}
       </div>
-      <span className="pl-px font-mono text-[10.5px] tabular-nums text-muted-foreground/80">
+      <span className="pl-px font-mono text-[10.5px] tabular-nums text-muted-foreground">
         {commit.shortSha}
       </span>
       <span
@@ -832,7 +837,7 @@ const CommitRow = memo(function CommitRow({
           "min-w-0 truncate text-[12px] leading-tight",
           active
             ? "font-semibold text-foreground"
-            : "font-medium text-foreground/95",
+            : "font-medium text-foreground",
         )}
       >
         {commit.subject ? (
@@ -843,7 +848,7 @@ const CommitRow = memo(function CommitRow({
       </span>
       <span aria-hidden />
       <span
-        className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground/85"
+        className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground"
         title={commit.authorEmail || commit.author}
       >
         <span
@@ -858,13 +863,13 @@ const CommitRow = memo(function CommitRow({
           {commit.author ? highlight(commit.author, query) : t("unknownAuthor")}
         </span>
       </span>
-      <span className="text-right font-mono text-[10.5px] tabular-nums text-muted-foreground/75">
+      <span className="text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
         {date}
       </span>
       <span className="flex min-w-0 items-center justify-end gap-1.5 font-mono text-[10px] tabular-nums">
         {commit.filesChanged > 0 ? (
           <span
-            className="inline-flex items-center gap-1 text-muted-foreground/75"
+            className="inline-flex items-center gap-1 text-muted-foreground"
             title={t("filesChanged", { count: commit.filesChanged })}
           >
             <HugeiconsIcon

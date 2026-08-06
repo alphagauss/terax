@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染键盘标签切换浮层。
+ * 标签名称和辅助信息必须在明暗主题下保持清晰可读。
+ */
+
 import { cn } from "@/lib/utils";
 import type { Tab } from "@/modules/workbench";
 import { useMemo } from "react";
@@ -49,7 +54,7 @@ export function TabSwitcherHud({
               <TabIcon tab={t} />
               <span className="min-w-0 flex-1 truncate">{labelFor(t)}</span>
               {subtitle && (
-                <span className="shrink-0 truncate text-[10px] text-muted-foreground/55">
+                <span className="shrink-0 truncate text-[10px] text-muted-foreground">
                   {subtitle}
                 </span>
               )}

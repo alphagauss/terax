@@ -92,7 +92,7 @@ export function CwdBreadcrumb({ cwd, filePath, home, onCd }: Props) {
 
   if (!cwd) {
     return (
-      <span className="text-xs text-muted-foreground/70">
+      <span className="text-xs text-muted-foreground">
         {t("cwd.noDirectory")}
       </span>
     );

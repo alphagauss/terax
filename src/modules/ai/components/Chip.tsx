@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI Composer 使用的紧凑上下文标签。
+ * 标签值和可选前缀使用语义文字颜色，避免多层透明度叠加。
+ */
+
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -16,7 +21,7 @@ export type ChipTone =
 // the tone prop stays so call sites keep their semantics.
 type Tone = { box: string; icon: string };
 
-const BOX = "border-border/40 bg-foreground/[0.03] text-foreground/75";
+const BOX = "border-border/40 bg-foreground/[0.03] text-foreground/85";
 const TONE: Tone = { box: BOX, icon: "text-foreground/60" };
 
 const TONES: Record<ChipTone, Tone> = {
@@ -71,7 +76,7 @@ export function Chip({
             className={cn("shrink-0", TONES[tone].icon)}
           />
         ))}
-      {label && <span className="opacity-55">{label}</span>}
+      {label && <span className="text-muted-foreground">{label}</span>}
       {children != null && (
         <span className="max-w-[12rem] truncate font-medium">{children}</span>
       )}

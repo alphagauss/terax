@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 AI 侧边栏 Composer 及其模型选择界面。
+ * 负责输入、上下文标签、模型筛选和发送控制。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -8,6 +13,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   Add01Icon,
   AiBookIcon,
@@ -27,11 +33,11 @@ import {
   GlobeIcon,
   GoogleGeminiIcon,
   Grok02Icon,
-  MistralIcon,
   Mic01Icon,
+  MistralIcon,
   PlugIcon,
-  ServerStack01Icon,
   Search01Icon,
+  ServerStack01Icon,
   Settings01Icon,
   StarIcon,
   StopCircleIcon,
@@ -45,18 +51,17 @@ import {
   getModel,
   isCompatModelId,
   MODELS,
-  providerNeedsKey,
-  PROVIDERS,
-  STT_PROVIDER_LABELS,
   type ModelCapabilities,
   type ModelId,
   type ModelInfo,
+  PROVIDERS,
   type ProviderId,
+  providerNeedsKey,
+  STT_PROVIDER_LABELS,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { AiComposerInput } from "./AiComposerInput";
 import { ChipsRow } from "./ChipsRow";
 
@@ -398,7 +403,7 @@ function ModelDropdown() {
               <ProviderConfigureCTA providerId={activeProvider as ProviderId} />
             ) : null}
             {filtered.length === 0 ? (
-              <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground/70">
+              <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground">
                 {tab === "favorites"
                   ? "No favorites yet — star a model to pin it here."
                   : tab === "recent"

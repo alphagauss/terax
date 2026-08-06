@@ -43,6 +43,11 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-git-modified: var(--git-modified);
+    --color-git-added: var(--git-added);
+    --color-git-untracked: var(--git-untracked);
+    --color-git-renamed: var(--git-renamed);
+    --color-git-deleted: var(--git-deleted);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -141,6 +146,11 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --border: oklch(0.925 0.005 214.3);
     --input: oklch(0.925 0.005 214.3);
     --ring: oklch(0.723 0.014 214.4);
+    --git-modified: #895503;
+    --git-added: #587c0c;
+    --git-untracked: #007100;
+    --git-renamed: #007100;
+    --git-deleted: #ad0707;
     --chart-1: oklch(0.872 0.007 219.6);
     --chart-2: oklch(0.56 0.021 213.5);
     --chart-3: oklch(0.45 0.017 213.2);
@@ -176,6 +186,11 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.56 0.021 213.5);
+    --git-modified: #e2c08d;
+    --git-added: #81b88b;
+    --git-untracked: #73c991;
+    --git-renamed: #73c991;
+    --git-deleted: #c74e39;
     --chart-1: oklch(0.872 0.007 219.6);
     --chart-2: oklch(0.56 0.021 213.5);
     --chart-3: oklch(0.45 0.017 213.2);

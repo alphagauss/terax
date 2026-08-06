@@ -1,4 +1,13 @@
-import { CodeIcon, HashtagIcon, TerminalIcon } from "@hugeicons/core-free-icons";
+/**
+ * 本文件渲染 AI Composer 已选择的文件、片段和终端上下文标签。
+ * 标签的计数与范围信息保持紧凑但清晰可读。
+ */
+
+import {
+  CodeIcon,
+  HashtagIcon,
+  TerminalIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import type { FileAttachment } from "../lib/composer";
@@ -64,7 +73,9 @@ export function ChipsRow({
         >
           {f.name}
           {f.kind === "selection" && f.text ? (
-            <span className="ml-1 opacity-60">· {selLineCount(f.text)}L</span>
+            <span className="ml-1 text-muted-foreground">
+              · {selLineCount(f.text)}L
+            </span>
           ) : null}
         </Chip>
       ))}
@@ -74,7 +85,13 @@ export function ChipsRow({
 
 function fileIcon(f: FileAttachment): ReactNode {
   if (f.kind === "image" && f.url) {
-    return <img src={f.url} alt="" className="size-4 shrink-0 rounded object-cover" />;
+    return (
+      <img
+        src={f.url}
+        alt=""
+        className="size-4 shrink-0 rounded object-cover"
+      />
+    );
   }
   if (f.kind === "selection") {
     return (
@@ -87,7 +104,7 @@ function fileIcon(f: FileAttachment): ReactNode {
     );
   }
   return (
-    <span className="shrink-0 font-mono text-[10px] opacity-70">
+    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
       {extOf(f.name)}
     </span>
   );

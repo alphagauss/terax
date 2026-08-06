@@ -1,16 +1,22 @@
+/**
+ * 本文件定义资源管理器 Git 状态的文件名颜色。
+ * 仅负责状态到主题语义色的映射，不绑定具体主题配色。
+ */
+
 import type { GitStatusCode } from "./gitStatusUtils";
 
-// Soft filename tint, new-VS-Code direction: color the name, no badges.
+/** 返回 Git 状态对应的主题语义文字颜色类。 */
 export function explorerGitTextClass(code: GitStatusCode): string {
   switch (code) {
     case "M":
-      return "text-amber-200/85";
+      return "text-git-modified";
     case "A":
+      return "text-git-added";
     case "U":
-      return "text-[#73C991]/90";
+      return "text-git-untracked";
     case "R":
-      return "text-sky-300/85";
+      return "text-git-renamed";
     case "D":
-      return "text-rose-200/80";
+      return "text-git-deleted";
   }
 }

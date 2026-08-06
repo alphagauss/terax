@@ -1,3 +1,8 @@
+/**
+ * 本文件实现网页预览的地址栏和状态提示。
+ * 负责地址输入、刷新、外部打开以及临时通知的交互。
+ */
+
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -206,7 +211,7 @@ export const WebPreviewAddressBar = forwardRef<
           <button
             type="button"
             onClick={() => setNotice(null)}
-            className="ml-auto rounded px-1 text-[10px] opacity-80 hover:bg-accent hover:opacity-100"
+            className="ml-auto rounded px-1 text-[10px] hover:bg-accent"
           >
             {t("addressBar.dismiss")}
           </button>

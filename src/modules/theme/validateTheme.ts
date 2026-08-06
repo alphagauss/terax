@@ -1,3 +1,8 @@
+/**
+ * 本文件校验并规范化从主题文件读取的配置。
+ * 只接受已登记的主题字段，避免未知键静默失效。
+ */
+
 import type { Theme, ThemeColors, ThemeVariant, TerminalPalette } from "./types";
 
 export type ValidationResult =
@@ -14,6 +19,7 @@ const COLOR_KEYS: readonly (keyof ThemeColors)[] = [
   "accent", "accentForeground",
   "destructive",
   "border", "input", "ring",
+  "gitModified", "gitAdded", "gitUntracked", "gitRenamed", "gitDeleted",
   "sidebar", "sidebarForeground",
   "sidebarPrimary", "sidebarPrimaryForeground",
   "sidebarAccent", "sidebarAccentForeground",

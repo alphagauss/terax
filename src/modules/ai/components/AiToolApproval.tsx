@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染 AI 工具执行前的审批卡片。
+ * 负责展示操作摘要、风险信息以及允许或拒绝操作。
+ */
+
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -56,9 +61,7 @@ function AiToolApprovalImpl({ part, toolName, onRespond }: Props) {
           strokeWidth={1.75}
           className="shrink-0 text-muted-foreground"
         />
-        <span className="text-[12px] font-medium text-foreground">
-          {label}
-        </span>
+        <span className="text-[12px] font-medium text-foreground">{label}</span>
         <span className="ml-auto text-[10px] text-muted-foreground">
           {t("toolApproval.needsApproval")}
         </span>
@@ -140,7 +143,7 @@ function PreviewBlock({
     return (
       <div className="space-y-0.5 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
-        <div className="text-[10.5px] text-muted-foreground/80">
+        <div className="text-[10.5px] text-muted-foreground">
           {t("toolApproval.lines", { count: lines })}
           {t("toolApproval.reviewInDiffTab")}
         </div>
@@ -158,7 +161,7 @@ function PreviewBlock({
           {String(input.path ?? "")}
           {input.replace_all ? t("toolApproval.replaceAll") : ""}
         </div>
-        <div className="text-[10.5px] text-muted-foreground/80">
+        <div className="text-[10.5px] text-muted-foreground">
           {t("toolApproval.diffLines", {
             removed,
             added,
@@ -176,7 +179,7 @@ function PreviewBlock({
     return (
       <div className="space-y-0.5 font-mono text-[11px]">
         <div className="text-muted-foreground">{String(input.path ?? "")}</div>
-        <div className="text-[10.5px] text-muted-foreground/80">
+        <div className="text-[10.5px] text-muted-foreground">
           {t("toolApproval.edits", { count: edits.length })}
         </div>
       </div>

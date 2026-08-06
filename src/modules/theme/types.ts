@@ -1,3 +1,8 @@
+/**
+ * 本文件定义应用主题、终端调色板及主题变体的数据结构。
+ * 颜色字段均为可选项，未声明的字段由全局主题变量提供回退值。
+ */
+
 export type ThemeMode = "light" | "dark";
 
 export type ThemeColors = Partial<{
@@ -19,6 +24,11 @@ export type ThemeColors = Partial<{
   border: string;
   input: string;
   ring: string;
+  gitModified: string;
+  gitAdded: string;
+  gitUntracked: string;
+  gitRenamed: string;
+  gitDeleted: string;
   sidebar: string;
   sidebarForeground: string;
   sidebarPrimary: string;
