@@ -4,11 +4,17 @@
  */
 
 import type { ToolExecutionOptions } from "ai";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
 import { buildManagedAgentTools } from "./agent";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
+
+const nativeMock = vi.hoisted(() => ({
+  shellBgSpawn: vi.fn(),
+}));
+
+vi.mock("../lib/native", () => ({ native: nativeMock }));
 
 const toolOptions: ToolExecutionOptions = {
   toolCallId: "tool-call",
@@ -16,8 +22,7 @@ const toolOptions: ToolExecutionOptions = {
 };
 
 const context: ToolContext = {
-  getCwd: () => null,
-  getWorkspaceRoot: () => null,
+  getCwd: () => "/workspace",
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
@@ -30,6 +35,7 @@ const context: ToolContext = {
 
 describe("AI tool approval mode", () => {
   beforeEach(() => {
+    nativeMock.shellBgSpawn.mockReset();
     useChatStore.setState({ permissionMode: "ask" });
   });
 
@@ -62,5 +68,18 @@ describe("AI tool approval mode", () => {
     expect(result).toMatchObject({
       error: expect.stringContaining("filesystem root"),
     });
+  });
+
+  it("resolves a background cwd against the fixed session directory", async () => {
+    nativeMock.shellBgSpawn.mockResolvedValue(7);
+    const execute = buildShellTools(context).bash_background.execute;
+    if (!execute) throw new Error("bash_background execute missing");
+
+    await execute({ command: "pnpm dev", cwd: "apps/web" }, toolOptions);
+
+    expect(nativeMock.shellBgSpawn).toHaveBeenCalledWith(
+      "pnpm dev",
+      "/workspace/apps/web",
+    );
   });
 });

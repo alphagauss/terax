@@ -1,3 +1,8 @@
+/**
+ * 本文件实现基于会话固定目录的 grep 与 glob 搜索工具。
+ * 搜索结果仍经过秘密路径拒绝规则过滤。
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
@@ -15,14 +20,7 @@ function resolveRoot(
       return { ok: false, error: String(e) };
     }
   }
-  const ws = ctx.getWorkspaceRoot();
-  if (ws) return { ok: true, path: ws };
-  const cwd = ctx.getCwd();
-  if (cwd) return { ok: true, path: cwd };
-  return {
-    ok: false,
-    error: "no workspace root or active cwd; pass `root` explicitly.",
-  };
+  return { ok: true, path: ctx.getCwd() };
 }
 
 const MAX_LINE_LEN = 160;
@@ -57,7 +55,7 @@ export function buildSearchTools(ctx: ToolContext) {
           .string()
           .optional()
           .describe(
-            "Root to search under. Defaults to workspace root, then active cwd.",
+            "Root to search under. Defaults to the session working directory.",
           ),
         glob: z
           .array(z.string())

@@ -20,6 +20,7 @@ import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
+import { resolveSessionCwd } from "./sessions";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
 
 export type FileAttachment = {
@@ -80,6 +81,7 @@ type ComposerCtx = {
   isBusy: boolean;
   readOnly: boolean;
   readOnlyEnvironmentKey: string | null;
+  workingDirectory: string | null;
   submit: () => void;
   stop: () => void;
   voice: Voice;
@@ -120,6 +122,16 @@ export function AiComposerProvider({ children }: ProviderProps) {
     sessionEnvironmentKey !== undefined &&
     sessionEnvironmentKey !== currentWorkspaceBootstrap().environmentKey;
   const readOnlyEnvironmentKey = readOnly ? sessionEnvironmentKey : null;
+  const workingDirectory = useChatStore((s) => {
+    const id = s.activeSessionId;
+    if (!id) return null;
+    return resolveSessionCwd(
+      id,
+      s.draftSessionId,
+      s.sessions,
+      s.live.explorerRoot,
+    );
+  });
   const isBusy = runLocked || status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
@@ -312,7 +324,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
   const submit = () => {
-    if (isBusy || readOnly) return;
+    if (isBusy || readOnly || !workingDirectory) return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -448,6 +460,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       files.length > 0 ||
       pickedSnippets.length > 0 ||
       pickedCommands.length > 0);
+  const canSubmit = canSend && Boolean(workingDirectory?.trim());
 
   const ctx: ComposerCtx = {
     textareaRef,
@@ -466,10 +479,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
     isBusy,
     readOnly,
     readOnlyEnvironmentKey,
+    workingDirectory,
     submit,
     stop,
     voice,
-    canSend,
+    canSend: canSubmit,
   };
 
   return <Ctx.Provider value={ctx}>{children}</Ctx.Provider>;

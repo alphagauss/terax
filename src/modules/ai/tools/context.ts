@@ -1,13 +1,11 @@
 /**
- * 本文件定义 AI 工具可访问的实时 Workbench 能力。
- * 工具只能通过受控回调操作终端和页面，不直接持有 React 或原生运行时状态。
+ * 本文件定义 AI 工具可访问的固定会话目录与实时 Workbench 能力。
+ * 路径基准来自会话，终端和页面操作通过受控回调执行。
  */
 
 export type ToolContext = {
-  /** Active terminal tab cwd, used to resolve relative paths. Null = home. */
-  getCwd: () => string | null;
-  /** Workspace root (explorer root). Used by tools that operate over the project. */
-  getWorkspaceRoot: () => string | null;
+  /** 当前会话固定 cwd，用于解析所有相对路径。 */
+  getCwd: () => string;
   /** Last N lines of the active terminal buffer (or null if not a terminal tab). */
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
@@ -27,13 +25,9 @@ export type ToolContext = {
   getSessionId: () => string | null;
 };
 
-export function resolvePath(rawPath: string, cwd: string | null): string {
+export function resolvePath(rawPath: string, cwd: string): string {
   if (rawPath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(rawPath))
     return rawPath;
-  if (!cwd)
-    throw new Error(
-      `cannot resolve relative path "${rawPath}": no active terminal cwd. Pass an absolute path.`,
-    );
   const sep = cwd.includes("\\") && !cwd.includes("/") ? "\\" : "/";
   return cwd.endsWith(sep) ? `${cwd}${rawPath}` : `${cwd}${sep}${rawPath}`;
 }

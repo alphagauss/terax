@@ -1,6 +1,6 @@
 /**
- * 本文件验证 AI 会话在多进程场景下的运行锁、缓存失效和终态发布。
- * 测试确保 JSONL 记录缓存不会跨用例泄漏，并锁定发布失败时的锁语义。
+ * 本文件验证 AI 会话在多进程场景下的运行锁、缓存失效和两阶段发布。
+ * 测试锁定用户消息先行落盘、终态追加、重试和发布失败时的锁语义。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,14 +37,17 @@ vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 import {
   chats,
   flushCompletedSessionRuns,
+  pendingTurnIds,
   persistedMessageCounts,
   seedMessages,
+  sessionMetadata,
   useChatStore,
 } from "./chatStore";
 import type { SessionMeta } from "../lib/sessions";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
 const realCommitMessages = useChatStore.getState().commitMessages;
+const realPersistSubmittedTurn = useChatStore.getState().persistSubmittedTurn;
 
 const first: SessionMeta = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -52,7 +55,7 @@ const first: SessionMeta = {
   createdAt: 1,
   updatedAt: 2,
   environmentKey: "local",
-  metadata: { title: "First", todos: [] },
+  cwd: "D:/workspace/first",
   fingerprint: "disk:1",
 };
 const second: SessionMeta = {
@@ -61,7 +64,7 @@ const second: SessionMeta = {
   createdAt: 1,
   updatedAt: 1,
   environmentKey: "local",
-  metadata: { title: "Second", todos: [] },
+  cwd: "D:/workspace/second",
   fingerprint: "disk:2",
 };
 const third: SessionMeta = {
@@ -70,7 +73,7 @@ const third: SessionMeta = {
   createdAt: 1,
   updatedAt: 0,
   environmentKey: "local",
-  metadata: { title: "Third", todos: [] },
+  cwd: "D:/workspace/third",
   fingerprint: "disk:3",
 };
 
@@ -79,7 +82,8 @@ const sessionFile = (meta: SessionMeta) => ({
   createdAt: meta.createdAt,
   updatedAt: meta.updatedAt,
   environmentKey: meta.environmentKey,
-  metadata: meta.metadata,
+  cwd: meta.cwd,
+  metadata: { title: meta.title, todos: [] },
   messages: [],
 });
 
@@ -89,12 +93,15 @@ describe("chat store multi-process lifecycle", () => {
     chats.clear();
     seedMessages.clear();
     persistedMessageCounts.clear();
+    sessionMetadata.clear();
+    pendingTurnIds.clear();
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
     io.commit.mockImplementation(
       async (session: {
         id: string;
+        cwd: string;
         metadata: { title: string };
         updatedAt: number;
       }) => ({
@@ -103,7 +110,7 @@ describe("chat store multi-process lifecycle", () => {
         createdAt: 1,
         updatedAt: session.updatedAt,
         environmentKey: "local",
-        metadata: session.metadata,
+        cwd: session.cwd,
         modifiedAt: 10,
         size: 20,
         fingerprint: "disk:committed",
@@ -125,6 +132,7 @@ describe("chat store multi-process lifecycle", () => {
       sessionSyncError: null,
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
+      persistSubmittedTurn: realPersistSubmittedTurn,
     });
   });
 
@@ -196,17 +204,86 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().newSession()).toBe(draftId);
     expect(useChatStore.getState().sessions).toEqual([first]);
 
-    useChatStore
-      .getState()
-      .promoteSession(draftId, [
-        { id: "m1", role: "user", parts: [{ type: "text", text: "hello" }] },
-      ]);
+    useChatStore.getState().promoteSession(
+      draftId,
+      [
+        {
+          id: "m1",
+          role: "user",
+          parts: [{ type: "text", text: "hello" }],
+        },
+      ],
+      "D:/workspace/draft",
+    );
 
     expect(useChatStore.getState().draftSessionId).toBeNull();
     expect(useChatStore.getState().sessions[0]).toMatchObject({
       id: draftId,
       title: "hello",
+      cwd: "D:/workspace/draft",
     });
+  });
+
+  it("persists the user message and system prompt before the assistant response", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      runLockSessionIds: { [first.id]: true },
+    });
+
+    const user = {
+      id: "m1",
+      role: "user" as const,
+      parts: [{ type: "text" as const, text: "hello" }],
+    };
+    await useChatStore
+      .getState()
+      .persistSubmittedTurn(first.id, [user], "prompt for this turn");
+
+    const firstCommit = io.commit.mock.calls[0][0];
+    expect(firstCommit).toEqual(
+      expect.objectContaining({
+        cwd: "D:/workspace/first",
+        metadata: expect.objectContaining({
+          systemPrompt: "prompt for this turn",
+        }),
+        messages: [
+          expect.objectContaining({
+            role: "user",
+            content: "hello",
+            turn_id: expect.stringMatching(/^turn_[0-9a-f]{12}$/),
+          }),
+        ],
+      }),
+    );
+    expect(persistedMessageCounts.get(first.id)).toBe(1);
+
+    const assistant = {
+      id: "a1",
+      role: "assistant" as const,
+      parts: [{ type: "text" as const, text: "answer" }],
+    };
+    await useChatStore
+      .getState()
+      .persistSubmittedTurn(first.id, [user, assistant], "updated prompt");
+    expect(io.commit.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ systemPrompt: "updated prompt" }),
+        messages: [],
+      }),
+    );
+    expect(persistedMessageCounts.get(first.id)).toBe(1);
+
+    await useChatStore.getState().commitMessages(first.id, [user, assistant]);
+    const finalCommit = io.commit.mock.calls[2][0];
+    expect(finalCommit.messages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: "answer",
+        turn_id: firstCommit.messages[0].turn_id,
+      }),
+    ]);
+    expect(finalCommit.metadata.systemPrompt).toBe("updated prompt");
   });
 
   it("preserves the active draft when deleting the final history item", async () => {

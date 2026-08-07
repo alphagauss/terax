@@ -236,17 +236,15 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
 
     let cancelled = false;
     void (async () => {
-      const cwd = useChatStore.getState().live.getCwd();
+      const cwd = useChatStore
+        .getState()
+        .sessions.find((session) => session.id === sessionId)?.cwd;
+      if (!cwd) return;
       for (const p of pending) {
         if (cancelled) return;
         // Mark as opened up-front so a re-render mid-await doesn't double-open.
         openedRef.current.add(p.approvalId);
-        let abs: string;
-        try {
-          abs = resolvePath(p.path, cwd);
-        } catch {
-          abs = p.path;
-        }
+        const abs = resolvePath(p.path, cwd);
         const original = await readOriginal(abs);
         if (cancelled) return;
         let proposed = "";
@@ -274,7 +272,13 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
     return () => {
       cancelled = true;
     };
-  }, [messages, fileMutationFingerprint, openAiDiffTab, closeAiDiffTab]);
+  }, [
+    messages,
+    fileMutationFingerprint,
+    openAiDiffTab,
+    closeAiDiffTab,
+    sessionId,
+  ]);
 
   return null;
 }

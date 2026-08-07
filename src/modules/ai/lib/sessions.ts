@@ -11,14 +11,14 @@ import type { Todo } from "./todos";
 /** Rust 不解释的会话业务 metadata，由前端按需扩展。 */
 export type SessionData = Record<string, unknown>;
 
-/** 前端列表使用的会话 metadata，时间统一为毫秒值。 */
+/** 前端高频轮询使用的会话摘要，时间统一为毫秒值。 */
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
   environmentKey: string;
-  metadata: SessionData;
+  cwd: string;
   modifiedAt?: number;
   size?: number;
   fingerprint?: string;
@@ -30,14 +30,12 @@ export type SessionFile = {
   createdAt: number;
   updatedAt: number;
   environmentKey: string;
+  cwd: string;
   metadata: SessionData;
   messages: SessionMessage[];
 };
 
-type IpcSessionMeta = Omit<
-  SessionMeta,
-  "title" | "createdAt" | "updatedAt"
-> & {
+type IpcSessionMeta = Omit<SessionMeta, "createdAt" | "updatedAt"> & {
   createdAt: string;
   updatedAt: string;
 };
@@ -68,7 +66,19 @@ export function sessionTodos(metadata: SessionData): Todo[] {
   return Array.isArray(metadata.todos) ? (metadata.todos as Todo[]) : [];
 }
 
-/** 提交本次新增记录，并取得原子替换后文件的真实 metadata。 */
+/** 解析会话实际使用的固定工作目录，草稿尚未发送时跟随 Explorer 根目录。 */
+export function resolveSessionCwd(
+  sessionId: string,
+  draftSessionId: string | null,
+  sessions: readonly SessionMeta[],
+  explorerRoot: string | null,
+): string | null {
+  const persisted = sessions.find((session) => session.id === sessionId);
+  if (persisted) return persisted.cwd;
+  return sessionId === draftSessionId ? explorerRoot : null;
+}
+
+/** 提交本次新增记录，并取得原子替换后文件的真实会话摘要。 */
 export async function commitSession(
   session: SessionFile,
 ): Promise<SessionMeta> {
@@ -110,7 +120,6 @@ export function deriveTitle(messages: UIMessage[]): string {
     for (const p of m.parts) {
       if (p.type !== "text") continue;
       const text = (p as { text: string }).text
-        .replace(/<terminal-context[\s\S]*?<\/terminal-context>\s*/g, "")
         .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
         .replace(/<file[\s\S]*?<\/file>\s*/g, "")
         .trim();
@@ -138,16 +147,18 @@ export function mergeSessionMetadata(
   ].sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-/** 将 IPC 元数据中的 ISO 时间转换为毫秒值。 */
+/** 显式投影 IPC 会话摘要，避免未来检查字段意外进入高频列表状态。 */
 function fromIpcMeta(meta: IpcSessionMeta): SessionMeta {
   return {
-    ...meta,
-    title:
-      typeof meta.metadata.title === "string"
-        ? meta.metadata.title
-        : "New chat",
+    id: meta.id,
+    title: meta.title,
     createdAt: parseTimestamp(meta.createdAt),
     updatedAt: parseTimestamp(meta.updatedAt),
+    environmentKey: meta.environmentKey,
+    cwd: meta.cwd,
+    modifiedAt: meta.modifiedAt,
+    size: meta.size,
+    fingerprint: meta.fingerprint,
   };
 }
 

@@ -46,7 +46,7 @@
     "deleteSession": "Delete session",
     "empty": {
       "title": "Ask Terax anything",
-      "description": "Terax sees the active terminal - cwd, recent commands, and output."
+      "description": "Terax works from the Explorer folder and reads terminal output only when needed."
     }
   },
   "toolApproval": {
@@ -74,6 +74,7 @@
     "listening": "Listening…",
     "transcribing": "Transcribing…",
     "sessionBusy": "This session is still finishing another run.",
+    "workingDirectory": "Working directory: {{path}}",
     "connectDescription": "Connect any AI provider or use a local model. Your key stays in the OS keychain.",
     "connectProvider": "Connect provider",
     "fileTooLarge": "{{name}} is too large to attach ({{size}}).",

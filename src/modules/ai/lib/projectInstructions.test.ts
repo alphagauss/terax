@@ -18,7 +18,7 @@ describe("readAgentsMd", () => {
     readFileMock.mockReset();
   });
 
-  it("reads AGENTS.md from the workspace root", async () => {
+  it("reads AGENTS.md from the session working directory", async () => {
     readFileMock.mockResolvedValue({
       kind: "text",
       content: "# Project instructions",
@@ -37,11 +37,6 @@ describe("readAgentsMd", () => {
     readFileMock.mockRejectedValue(new Error("not found"));
 
     await expect(readAgentsMd("C:/work/project-missing")).resolves.toBeNull();
-  });
-
-  it("does not read without a workspace root", async () => {
-    await expect(readAgentsMd(null)).resolves.toBeNull();
-    expect(readFileMock).not.toHaveBeenCalled();
   });
 
   it("returns instructions larger than 32 KiB without truncation", async () => {

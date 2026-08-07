@@ -30,6 +30,7 @@ import {
   DeepseekIcon,
   FavouriteIcon,
   FlashIcon,
+  Folder01Icon,
   GlobeIcon,
   GoogleGeminiIcon,
   Grok02Icon,
@@ -207,6 +208,23 @@ export function AiSidebarComposer() {
             </Button>
           )}
         </div>
+
+        {c.workingDirectory ? (
+          <div
+            className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
+            title={t("composer.workingDirectory", {
+              path: c.workingDirectory,
+            })}
+          >
+            <HugeiconsIcon
+              icon={Folder01Icon}
+              size={12}
+              strokeWidth={1.75}
+              className="shrink-0"
+            />
+            <span className="truncate font-mono">{c.workingDirectory}</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );

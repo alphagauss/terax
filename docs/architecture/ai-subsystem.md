@@ -36,7 +36,7 @@ Keys are never persisted outside the OS keychain / Linux secrets file.
 `runAgentStream` (`agent.ts:391`):
 
 1. Resolves the model via `buildConfiguredLanguageModel`.
-2. Builds a stable system prompt from `selectSystemPrompt(modelId)` plus optional persona, custom instructions, and `AGENTS.md` project instructions.
+2. Builds a stable system prompt from `selectSystemPrompt(modelId)`, the session working directory, optional persona, custom instructions, and `AGENTS.md` project instructions. Before contacting the model, the exact prompt and any new user message are committed to disk.
 3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
 4. Streams via `streamText` with the tool set from `buildTools(ctx)` and `stopWhen: stepCountIs(MAX_AGENT_STEPS)`.
 5. Emits step labels, usage deltas, and finish metadata.
@@ -49,14 +49,15 @@ The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, 
 
 ## Sessions
 
-Conversations are organized into sessions. Completed history is stored as one atomic JSONL file per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs`, `src/modules/ai/lib/sessions.ts`, and `src/modules/ai/lib/sessionMessages.ts`):
+Conversations are organized into sessions. Accepted user messages and completed response records are stored as one atomic JSONL file per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs`, `src/modules/ai/lib/sessions.ts`, and `src/modules/ai/lib/sessionMessages.ts`):
 
 - `<uuid>.jsonl`: the first line is a fixed metadata record; each remaining line is one role message
 - `<uuid>.lock`: OS lock used while one process is running the session
 - no shared session index; list operations read only the first metadata line
+- `ai_sessions_list` projects each header to an explicit lightweight summary and never returns inspection-only metadata such as `systemPrompt`
 
 ```json
-{"_type":"metadata","key":"<uuid>","created_at":"2026-07-26T10:00:00.000Z","updated_at":"2026-07-26T10:00:01.000Z","metadata":{"title":"Session title","todos":[]}}
+{"_type":"metadata","key":"<uuid>","createdAt":"2026-07-26T10:00:00.000Z","updatedAt":"2026-07-26T10:00:01.000Z","environmentKey":"local","cwd":"/workspace/project","metadata":{"title":"Session title","todos":[],"systemPrompt":"..."}}
 ```
 
 The JSONL message schema belongs to Terax rather than Vercel AI SDK. User and assistant text use direct `role` and `content` fields, reasoning uses `reasoning_content`, and tool results use `role: "tool"`. Tool calls deliberately follow the OpenAI-compatible envelope:
@@ -66,9 +67,9 @@ The JSONL message schema belongs to Terax rather than Vercel AI SDK. User and as
 {"role":"tool","tool_call_id":"call_1","name":"read_file","content":{"content":"..."},"timestamp":"2026-07-26T10:00:00.000Z"}
 ```
 
-`function.arguments` is always a JSON string. Explicit adapters project these records into AI SDK `UIMessage` values when a chat is hydrated. A terminal run sends only its newly completed records to Rust; Rust reads the existing JSONL under the session lock, appends those records, and atomically replaces the complete file. This keeps the disk format readable and makes a future SDK switch local to the adapter.
+`function.arguments` is always a JSON string. Explicit adapters project these records into AI SDK `UIMessage` values when a chat is hydrated. Each persistence phase sends only its new records to Rust; Rust reads the existing JSONL under the session lock, appends them, and atomically replaces the complete file. This keeps the disk format readable and makes a future SDK switch local to the adapter.
 
-Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. `AgentRunBridge` commits only newly completed turn records after the run becomes idle, errors, or is stopped and no approval is pending. Rust merges them into the existing JSONL and atomically replaces the file. The observable frontend lock is cleared only after both commit and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs, while a crash preserves the previous complete file instead of a partial stream.
+Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. The transport commits accepted user records and the current prompt before creating the model request. `AgentRunBridge` appends only complete Assistant and tool records after the run becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both the terminal commit and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs. A crash retains the latest accepted user message without writing a partial Assistant stream.
 
 Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent session file, then a fresh session.
 
@@ -77,6 +78,10 @@ Other Workspace processes poll metadata every three seconds (paused while hidden
 `AiComposerProvider` (`src/modules/ai/lib/composer.tsx`) is a React context that holds shared input state (text, attachments, voice) for the docked input bar and any other surface. Attachments can be images, text files, or `selection` chips from the terminal or editor. Selections are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit time and are not pasted into the textarea.
 
 The composer derives `isBusy` from `agentMeta.status` so it can mount safely before sessions hydrate.
+
+A draft displays and follows the current Explorer root. Its first accepted user message promotes it to a persisted session and freezes that root as `cwd`. Persisted sessions always display and use their stored `cwd`. Files and selections are sent only when explicitly attached, as visible user-message content.
+
+Each model request first commits its new user message and the exact current system prompt under the session run lock. Approval continuations overwrite only the prompt and do not duplicate the user record. Once the run reaches idle, error, or stop, the bridge appends the complete Assistant and tool records with the same turn ID. Streaming fragments are never written.
 
 ## Tools and approval
 
@@ -95,7 +100,7 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 
 ## Live context bridge
 
-`App.tsx` calls `setLive({ getCwd, getTerminalContext, … })` so tools can read the currently active terminal's cwd and the last 300 lines of buffer. It is lazy by design - tools call for it only when needed rather than pre-snapshotting every turn.
+`App.tsx` publishes the current Explorer root for unsent drafts and a lazy terminal-buffer reader. Once a draft is sent, the session's stored `cwd` becomes the sole base for relative tool paths. Terminal output remains live and is read only when the model explicitly calls the terminal tool.
 
 ## Invariants
 
@@ -103,6 +108,9 @@ AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per
 - Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
 - New providers must justify their bundle cost and unique value.
 - Mutating tools require approval; read-only tools still pass the deny-list.
+- The in-memory message list, persisted message records, and model input preserve the same message content. No active tab, cwd, or environment block is injected during send.
+- A persisted session's `cwd` is immutable and every relative tool path resolves against it.
+- Acquiring a persisted session run restores the saved cwd authorization from the validated JSONL header without changing the Explorer root.
 - A session run lock owns its in-memory runtime until commit and release both succeed; session navigation must not bypass that lifecycle.
 
 ## See also

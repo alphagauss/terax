@@ -11,7 +11,8 @@ import {
 } from "ai";
 import { getModel, type ModelId, providerNeedsKey } from "../config";
 import { BUILTIN_AGENTS } from "../lib/agents";
-import { createContextAwareTransport } from "../lib/transport";
+import { resolveSessionCwd } from "../lib/sessions";
+import { createSessionTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import {
@@ -25,9 +26,16 @@ import { usePlanStore } from "./planStore";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
+  /** 返回发送前已经冻结的会话 cwd，缺失表示运行时不变量被破坏。 */
+  const getSessionCwd = () => {
+    const cwd = useChatStore
+      .getState()
+      .sessions.find((session) => session.id === sessionId)?.cwd;
+    if (!cwd) throw new Error("AI session working directory is unavailable");
+    return cwd;
+  };
   const toolContext: ToolContext = {
-    getCwd: () => useChatStore.getState().live.getCwd(),
-    getWorkspaceRoot: () => useChatStore.getState().live.getWorkspaceRoot(),
+    getCwd: getSessionCwd,
     getTerminalContext: () => useChatStore.getState().live.getTerminalContext(),
     isActiveTerminalPrivate: () =>
       useChatStore.getState().live.isActiveTerminalPrivate(),
@@ -35,14 +43,16 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().live.injectIntoActivePty(text),
     openWebPreview: (url) => useChatStore.getState().live.openWebPreview(url),
     spawnAgent: (prompt) =>
-      useChatStore.getState().live.spawnManagedAgent(prompt, sessionId),
+      useChatStore
+        .getState()
+        .live.spawnManagedAgent(prompt, sessionId, getSessionCwd()),
     readAgentOutput: (tabId) =>
       useChatStore.getState().live.readTerminalBuffer(tabId),
     readCache,
     getSessionId: () => sessionId,
   };
 
-  const transport = createContextAwareTransport({
+  const transport = createSessionTransport({
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
     getModelId: () => useChatStore.getState().selectedModelId,
@@ -54,15 +64,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
       return { name: a.name, instructions: a.instructions };
     },
-    getLive: () => {
-      const live = useChatStore.getState().live;
-      return {
-        cwd: live.getCwd(),
-        terminalPrivate: live.isActiveTerminalPrivate(),
-        workspaceRoot: live.getWorkspaceRoot(),
-        activeFile: live.getActiveFile(),
-      };
-    },
+    getCwd: getSessionCwd,
     getPlanMode: () => usePlanStore.getState().active,
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
@@ -91,6 +93,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     onFinishMeta: (info) => {
       useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
     },
+    onSystemPrompt: (systemPrompt, messages) =>
+      useChatStore
+        .getState()
+        .persistSubmittedTurn(sessionId, messages, systemPrompt),
     onUsage: (delta) => {
       const cur = useChatStore.getState().agentMeta.tokens;
       useChatStore.getState().patchAgentMeta({
@@ -159,6 +165,13 @@ async function startChatMessage(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): Promise<boolean> {
   const state = useChatStore.getState();
+  const cwd = resolveSessionCwd(
+    sessionId,
+    state.draftSessionId,
+    state.sessions,
+    state.live.explorerRoot,
+  );
+  if (!cwd?.trim()) return false;
   if (
     providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
     !getActiveProviderKey()
@@ -168,13 +181,10 @@ async function startChatMessage(
   const chat = getOrCreateChat(sessionId);
   if (chat.status === "submitted" || chat.status === "streaming") return false;
   if (!(await state.beginSessionRun(sessionId))) return false;
-  const sending = chat.sendMessage(message);
   if (isUserSubmission(message)) {
-    state.promoteSession(
-      sessionId,
-      chat.messages.length > 0 ? chat.messages : messagesForPromotion(message),
-    );
+    state.promoteSession(sessionId, messagesForPromotion(message), cwd);
   }
+  const sending = chat.sendMessage(message);
   void sending;
   return true;
 }
