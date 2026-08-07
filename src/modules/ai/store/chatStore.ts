@@ -48,6 +48,7 @@ import { useTodosStore } from "./todoStore";
 
 export type Live = {
   explorerRoot: string | null;
+  revealWorkingDirectory: (cwd: string) => Promise<void>;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
@@ -183,6 +184,7 @@ type StoreState = {
 
 const NOOP_LIVE: Live = {
   explorerRoot: null,
+  revealWorkingDirectory: async () => {},
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,

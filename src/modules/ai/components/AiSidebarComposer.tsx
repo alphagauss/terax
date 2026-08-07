@@ -93,6 +93,17 @@ export function AiSidebarComposer() {
   const { t } = useTranslation("ai");
   const c = useComposer();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const workingDirectoryContent = c.workingDirectory ? (
+    <>
+      <HugeiconsIcon
+        icon={Folder01Icon}
+        size={12}
+        strokeWidth={1.75}
+        className="shrink-0"
+      />
+      <span className="truncate font-mono">{c.workingDirectory}</span>
+    </>
+  ) : null;
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
@@ -210,20 +221,28 @@ export function AiSidebarComposer() {
         </div>
 
         {c.workingDirectory ? (
-          <div
-            className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
-            title={t("composer.workingDirectory", {
-              path: c.workingDirectory,
-            })}
-          >
-            <HugeiconsIcon
-              icon={Folder01Icon}
-              size={12}
-              strokeWidth={1.75}
-              className="shrink-0"
-            />
-            <span className="truncate font-mono">{c.workingDirectory}</span>
-          </div>
+          c.canRevealWorkingDirectory ? (
+            <button
+              type="button"
+              disabled={c.revealingWorkingDirectory}
+              onClick={c.revealWorkingDirectory}
+              className="flex min-w-0 items-center gap-1.5 rounded px-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+              aria-label={t("composer.workingDirectory", {
+                path: c.workingDirectory,
+              })}
+            >
+              {workingDirectoryContent}
+            </button>
+          ) : (
+            <div
+              className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
+              title={t("composer.workingDirectory", {
+                path: c.workingDirectory,
+              })}
+            >
+              {workingDirectoryContent}
+            </div>
+          )
         ) : null}
       </div>
     </div>
