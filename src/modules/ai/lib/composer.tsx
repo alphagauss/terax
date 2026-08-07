@@ -20,7 +20,7 @@ import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
 import { getChat, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { resolveSessionCwd } from "./sessions";
+import { canRevealSessionCwd, resolveSessionCwd } from "./sessions";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
 
 export type FileAttachment = {
@@ -82,6 +82,9 @@ type ComposerCtx = {
   readOnly: boolean;
   readOnlyEnvironmentKey: string | null;
   workingDirectory: string | null;
+  canRevealWorkingDirectory: boolean;
+  revealingWorkingDirectory: boolean;
+  revealWorkingDirectory: () => void;
   submit: () => void;
   stop: () => void;
   voice: Voice;
@@ -132,6 +135,14 @@ export function AiComposerProvider({ children }: ProviderProps) {
       s.live.explorerRoot,
     );
   });
+  const canRevealWorkingDirectory = useChatStore((s) => {
+    return canRevealSessionCwd(
+      s.activeSessionId,
+      s.draftSessionId,
+      s.sessions,
+      currentWorkspaceBootstrap().environmentKey,
+    );
+  });
   const isBusy = runLocked || status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
@@ -139,6 +150,30 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const revealingWorkingDirectoryRef = useRef(false);
+  const [revealingWorkingDirectory, setRevealingWorkingDirectory] =
+    useState(false);
+
+  /** 导航到当前历史会话的固定工作目录，并合并连续点击。 */
+  const revealWorkingDirectory = useCallback(() => {
+    if (
+      !canRevealWorkingDirectory ||
+      !workingDirectory ||
+      revealingWorkingDirectoryRef.current
+    ) {
+      return;
+    }
+    revealingWorkingDirectoryRef.current = true;
+    setRevealingWorkingDirectory(true);
+    void useChatStore
+      .getState()
+      .live.revealWorkingDirectory(workingDirectory)
+      .catch(() => toast.error(t("composer.workingDirectoryUnavailable")))
+      .finally(() => {
+        revealingWorkingDirectoryRef.current = false;
+        setRevealingWorkingDirectory(false);
+      });
+  }, [canRevealWorkingDirectory, t, workingDirectory]);
 
   const attachFileByPath = useCallback(
     async (path: string) => {
@@ -480,6 +515,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     readOnly,
     readOnlyEnvironmentKey,
     workingDirectory,
+    canRevealWorkingDirectory,
+    revealingWorkingDirectory,
+    revealWorkingDirectory,
     submit,
     stop,
     voice,

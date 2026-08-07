@@ -75,6 +75,7 @@
     "transcribing": "正在转写…",
     "sessionBusy": "此会话仍在完成上一轮运行。",
     "workingDirectory": "工作目录：{{path}}",
+    "workingDirectoryUnavailable": "会话工作目录不可用。",
     "connectDescription": "连接任意 AI 提供方或使用本地模型。密钥只保存在系统钥匙串中。",
     "connectProvider": "连接提供方",
     "fileTooLarge": "{{name}} 太大，无法附加（{{size}}）。",

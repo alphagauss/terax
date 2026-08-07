@@ -1429,8 +1429,11 @@ export default function App() {
   useAiLiveBridge({
     setLive,
     activeId,
+    activeSpaceId,
     tabs,
     explorerRoot,
+    setActiveId,
+    newTab,
     openWebPreviewTab,
     newAgentTab,
     ensureWorkspaceReady,

@@ -78,6 +78,20 @@ export function resolveSessionCwd(
   return sessionId === draftSessionId ? explorerRoot : null;
 }
 
+/** 判断活动会话是否为当前环境中已持久化、可导航到固定 cwd 的会话。 */
+export function canRevealSessionCwd(
+  sessionId: string | null,
+  draftSessionId: string | null,
+  sessions: readonly SessionMeta[],
+  environmentKey: string,
+): boolean {
+  if (!sessionId || sessionId === draftSessionId) return false;
+  return sessions.some(
+    (session) =>
+      session.id === sessionId && session.environmentKey === environmentKey,
+  );
+}
+
 /** 提交本次新增记录，并取得原子替换后文件的真实会话摘要。 */
 export async function commitSession(
   session: SessionFile,

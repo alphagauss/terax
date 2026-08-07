@@ -10,6 +10,7 @@ const ipc = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke: ipc }));
 
 import {
+  canRevealSessionCwd,
   commitSession,
   listSessions,
   mergeSessionMetadata,
@@ -66,6 +67,20 @@ describe("session working directory", () => {
     expect(
       resolveSessionCwd("saved", "draft", [persisted], "/workspace/other"),
     ).toBe("/workspace/saved");
+  });
+
+  it("only enables navigation for persisted sessions in the current environment", () => {
+    const persisted = meta("saved", 1);
+    expect(canRevealSessionCwd("draft", "draft", [], "local")).toBe(false);
+    expect(
+      canRevealSessionCwd(
+        "saved",
+        null,
+        [{ ...persisted, environmentKey: "wsl:Ubuntu" }],
+        "local",
+      ),
+    ).toBe(false);
+    expect(canRevealSessionCwd("saved", null, [persisted], "local")).toBe(true);
   });
 });
 
