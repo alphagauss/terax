@@ -20,6 +20,7 @@
   "folderPathInvalid": "The folder path is unavailable",
   "remoteWorkspace": {
     "connecting": "Connecting to SSH…",
+    "startingWsl": "Starting WSL…",
     "restoreAfterConnection": "Your saved files and terminals will be restored after the connection is ready.",
     "connectionClosed": "SSH connection closed",
     "reconnecting": "Reconnecting automatically…",

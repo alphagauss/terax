@@ -286,7 +286,7 @@ export default function App() {
     });
   }, [reconnectWorkspace, workspaceEnv.kind]);
   const workspaceBootPending =
-    workspaceEnv.kind === "ssh" &&
+    workspaceEnv.kind !== "local" &&
     !workbenchBooted &&
     environmentError === null;
 
@@ -1634,7 +1634,9 @@ export default function App() {
           rootPath={explorerStartupReady ? explorerRoot : null}
           rootPending={
             workspaceBootPending
-              ? "connection"
+              ? workspaceEnv.kind === "ssh"
+                ? "connection"
+                : "loading"
               : spaceTabs.length > 0 &&
                   !explorerStartupReady &&
                   !environmentError
@@ -1795,7 +1797,9 @@ export default function App() {
               >
                 <div className="flex h-full min-h-0 flex-col">
                   {workspaceBootPending ? (
-                    <WorkspaceConnectionPlaceholder />
+                    <WorkspaceConnectionPlaceholder
+                      kind={workspaceEnv.kind === "wsl" ? "wsl" : "ssh"}
+                    />
                   ) : (
                     <>
                       <div className="relative min-h-0 flex-1">

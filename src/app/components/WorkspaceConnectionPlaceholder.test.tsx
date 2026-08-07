@@ -1,6 +1,6 @@
 /**
- * 本文件验证远程工作区连接占位界面。
- * 确保工作区恢复前明确展示连接等待状态，而不是暴露空白初始布局。
+ * 本文件验证远程工作区启动占位界面。
+ * 确保 SSH 与 WSL 恢复前明确展示等待状态，而不是暴露空白初始布局。
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -18,11 +18,23 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("WorkspaceConnectionPlaceholder", () => {
-  it("shows that saved workspace state will be restored after connection", () => {
-    const markup = renderToStaticMarkup(<WorkspaceConnectionPlaceholder />);
+  it("shows SSH connection progress before restoring saved state", () => {
+    const markup = renderToStaticMarkup(
+      <WorkspaceConnectionPlaceholder kind="ssh" />,
+    );
 
     expect(markup).toContain('data-testid="spinner"');
     expect(markup).toContain("remoteWorkspace.connecting");
+    expect(markup).toContain("remoteWorkspace.restoreAfterConnection");
+  });
+
+  it("shows WSL startup progress before restoring saved state", () => {
+    const markup = renderToStaticMarkup(
+      <WorkspaceConnectionPlaceholder kind="wsl" />,
+    );
+
+    expect(markup).toContain('data-testid="spinner"');
+    expect(markup).toContain("remoteWorkspace.startingWsl");
     expect(markup).toContain("remoteWorkspace.restoreAfterConnection");
   });
 });

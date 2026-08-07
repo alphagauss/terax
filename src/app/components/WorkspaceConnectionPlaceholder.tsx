@@ -6,8 +6,12 @@
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "react-i18next";
 
-/** 展示 SSH 连接和持久化页面恢复仍在进行的阻塞提示。 */
-export function WorkspaceConnectionPlaceholder() {
+/** 展示 SSH 连接或 WSL 启动期间的持久化页面恢复提示。 */
+export function WorkspaceConnectionPlaceholder({
+  kind,
+}: {
+  kind: "ssh" | "wsl";
+}) {
   const { t } = useTranslation("common");
   return (
     <div className="flex h-full min-h-0 items-center justify-center p-8 text-center">
@@ -17,7 +21,11 @@ export function WorkspaceConnectionPlaceholder() {
           aria-hidden="true"
         />
         <p className="text-sm font-medium text-foreground">
-          {t("remoteWorkspace.connecting")}
+          {t(
+            kind === "ssh"
+              ? "remoteWorkspace.connecting"
+              : "remoteWorkspace.startingWsl",
+          )}
         </p>
         <p className="text-xs leading-relaxed">
           {t("remoteWorkspace.restoreAfterConnection")}
