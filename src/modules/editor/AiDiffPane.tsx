@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染 AI 文件修改的只读 CodeMirror diff。
+ * 页面只响应整次工具审批，不直接执行或持久化文件修改。
+ */
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { AiDiffStatus } from "@/modules/workbench";
@@ -73,7 +78,7 @@ const DIFF_THEME = EditorView.theme({
 
 const STATUS_LABEL_KEY: Record<AiDiffStatus, string> = {
   pending: "statusPending",
-  approved: "statusApplied",
+  approved: "statusApproved",
   rejected: "statusRejected",
 };
 
@@ -86,6 +91,7 @@ const STATUS_BADGE: Record<
   rejected: "destructive",
 };
 
+/** 渲染一次文件工具调用的只读差异及整体审批操作。 */
 export function AiDiffPane({
   path,
   originalContent,
@@ -232,8 +238,7 @@ function computeLineStats(
 function countLines(doc: string, from: number, to: number): number {
   if (from === to) return 0;
   const slice = doc.slice(from, to);
-  // A change spanning N newlines touches N+1 lines, but a trailing newline
-  // means the final segment is empty — don't count that as a touched line.
+  // 末尾换行产生的空片段不属于实际修改行，不能计入统计。
   let n = 1;
   for (let i = 0; i < slice.length; i++) {
     if (slice.charCodeAt(i) === 10) n++;

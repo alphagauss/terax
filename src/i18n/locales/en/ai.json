@@ -18,10 +18,6 @@
         "text": "Summarize what just happened in the terminal."
       }
     },
-    "planMode": "Plan mode",
-    "queued": "· {{count}} queued",
-    "noEditsQueued": "· no edits queued",
-    "exit": "Exit",
     "loadingSessions": "Loading sessions…",
     "thinking": "Thinking…",
     "closeTitle": "Close (Esc)",
@@ -59,6 +55,9 @@
     "needsApproval": "needs approval",
     "deny": "Deny",
     "approve": "Approve",
+    "review": "Review diff",
+    "openDiffHint": "Open the diff to review this change",
+    "preparingPreview": "Preparing a safe diff preview…",
     "lines_one": "{{count}} line",
     "lines_other": "{{count}} lines",
     "reviewInDiffTab": " · review in the diff tab",
@@ -67,6 +66,13 @@
     "diffLines_other": "−{{removed}} / +{{added}} lines",
     "edits_one": "{{count}} edit · review in the diff tab",
     "edits_other": "{{count}} edits · review in the diff tab"
+  },
+  "notifications": {
+    "approvalTitle": "{{session}} needs your approval",
+    "approvalBody": "Approve a tool to continue",
+    "errorTitle": "{{session}} failed",
+    "finishedTitle": "{{session}} finished",
+    "finishedBody": "Your task is ready"
   },
   "composer": {
     "placeholder": "Ask Terax anything   -   # for snippets and commands, @ for files",
@@ -153,20 +159,6 @@
     "noMatches": "No matching files",
     "truncated": "The workspace is large. Refine your query to narrow the results."
   },
-  "planReview": {
-    "title": "Plan review",
-    "pendingChanges_one": "{{count}} pending change",
-    "pendingChanges_other": "{{count}} pending changes",
-    "discardAll": "Discard all",
-    "apply": "Apply {{count}}",
-    "toggleDiff": "Toggle diff",
-    "newFile": "new",
-    "createDirectory": "create directory",
-    "reject": "Reject",
-    "noChanges": "No line-level changes",
-    "moreChanges_one": "… {{count}} more change",
-    "moreChanges_other": "… {{count}} more changes"
-  },
   "statusPill": {
     "openAiLog": "Open AI log",
     "openAiSidebar": "Open AI sidebar",
@@ -177,11 +169,8 @@
     "thinking": "Thinking…"
   },
   "slashCommands": {
-    "planModeOff": "Plan mode off",
-    "planModeOn": "Plan mode on",
     "claudeCodeUsage": "Usage: /claude-code <request>",
     "initLabel": "Initialize workspace",
-    "planLabel": "Plan mode",
     "claudeCodeLabel": "Delegate to Claude Code"
   },
   "whisper": {

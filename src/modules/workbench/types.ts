@@ -48,10 +48,11 @@ export type AiDiffStatus = "pending" | "approved" | "rejected";
 
 export type AiDiffTab = TabBase & {
   kind: "ai-diff";
+  sessionId: string;
   path: string;
   originalContent: string;
   proposedContent: string;
-  approvalId: string;
+  requestKey: string;
   status: AiDiffStatus;
   isNewFile: boolean;
 };

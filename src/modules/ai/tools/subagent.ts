@@ -1,3 +1,8 @@
+/**
+ * 本文件定义只读子 Agent 工具及其会话状态反馈。
+ * 子 Agent 复用所属会话 ID，不访问活动会话的单例状态。
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 import { runSubagent } from "../agents/runSubagent";
@@ -15,13 +20,13 @@ export function buildSubagentTools(ctx: ToolContext) {
 Types:
 ${TYPE_KEYS.map((k) => `- ${k}: ${SUBAGENTS[k].description}`).join("\n")}
 
-Auto-executes (no approval) — subagents are read-only by design.`,
+Auto-executes (no approval). Subagents are read-only by design.`,
       inputSchema: z.object({
         type: z.enum(TYPE_KEYS),
         prompt: z
           .string()
           .describe(
-            "Self-contained instruction. The subagent has no memory of prior conversation — include all relevant context.",
+          "Self-contained instruction. The subagent has no memory of prior conversation, so include all relevant context.",
           ),
         description: z
           .string()
@@ -38,7 +43,8 @@ Auto-executes (no approval) — subagents are read-only by design.`,
             keys: apiKeys,
             modelId: selectedModelId,
             toolContext: ctx,
-            onStep: (label) => patchAgentMeta({ step: label }),
+            onStep: (label) =>
+              patchAgentMeta(ctx.getSessionId(), { step: label }),
           });
           return {
             type,

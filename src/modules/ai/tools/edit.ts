@@ -1,126 +1,62 @@
 /**
  * 本文件定义 AI 的单处和批量文本编辑工具。
- * 编辑始终遵守先读后写及路径安全约束，权限模式只控制逐次批准。
+ * 编辑遵守先读后写，并通过统一文件修改快照保证审批内容与最终写入一致。
  */
 
 import { tool } from "ai";
 import { z } from "zod";
-import { native } from "../lib/native";
-import { checkWritableCanonical } from "../lib/security";
 import { useChatStore } from "../store/chatStore";
-import { newQueuedEditId, usePlanStore } from "../store/planStore";
-import { resolvePath, type ToolContext } from "./context";
+import type { ToolContext } from "./context";
+import {
+  clearPreparedFileMutation,
+  commitPreparedFileMutation,
+  getPreparedFileMutation,
+  prepareFileMutation,
+  type PreparedFileMutation,
+} from "./fileMutation";
 
-type EditResult =
-  | { ok: true; replacements: number; bytesWritten: number; path: string }
-  | { error: string; path: string };
+type EditInput = {
+  path: string;
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+};
 
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
+type MultiEditInput = {
+  path: string;
+  edits: Array<{
+    old_string: string;
+    new_string: string;
+    replace_all?: boolean;
+  }>;
+};
 
-async function applyEdits(
-  abs: string,
-  edits: { old_string: string; new_string: string; replace_all?: boolean }[],
-  kind: "edit" | "multi_edit",
-  readCache: Map<string, { size: number; hash: number }>,
-): Promise<EditResult> {
-  const r = await native.readFile(abs);
-  if (r.kind === "binary")
-    return { error: "binary file refused", path: abs };
-  if (r.kind === "toolarge")
-    return { error: `file too large (${r.size} bytes)`, path: abs };
-
-  const original = r.content;
-  let content = original;
-  let totalReplacements = 0;
-
-  for (const e of edits) {
-    if (e.old_string === e.new_string) {
-      return {
-        error: "old_string and new_string are identical",
-        path: abs,
-      };
-    }
-    if (e.old_string.length === 0) {
-      return { error: "old_string cannot be empty", path: abs };
-    }
-    if (e.replace_all) {
-      const before = content;
-      content = content.split(e.old_string).join(e.new_string);
-      const occurrences =
-        (before.length - content.length) /
-          (e.old_string.length - e.new_string.length || 1) || 0;
-      // Recover count via direct search to avoid divide-by-zero edge cases.
-      let n = 0;
-      let i = 0;
-      while ((i = before.indexOf(e.old_string, i)) !== -1) {
-        n++;
-        i += e.old_string.length;
-      }
-      if (n === 0) {
-        return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}`,
-          path: abs,
-        };
-      }
-      totalReplacements += n;
-      void occurrences;
-    } else {
-      const first = content.indexOf(e.old_string);
-      if (first === -1) {
-        return {
-          error: `old_string not found: ${JSON.stringify(e.old_string.slice(0, 80))}`,
-          path: abs,
-        };
-      }
-      const second = content.indexOf(e.old_string, first + 1);
-      if (second !== -1) {
-        return {
-          error:
-            "old_string is not unique. Provide more surrounding context, or set replace_all=true.",
-          path: abs,
-        };
-      }
-      content =
-        content.slice(0, first) +
-        e.new_string +
-        content.slice(first + e.old_string.length);
-      totalReplacements += 1;
-    }
+/** 提交已规划的编辑，并更新当前会话的先读缓存。 */
+async function executePreparedEdit(
+  ctx: ToolContext,
+  prepared: PreparedFileMutation,
+): Promise<{
+  ok: true;
+  replacements: number;
+  bytesWritten: number;
+  path: string;
+}> {
+  if (!ctx.readCache.has(prepared.path)) {
+    throw new Error(
+      "must call read_file on this path first (read-before-edit invariant).",
+    );
   }
-
-  if (usePlanStore.getState().active) {
-    usePlanStore.getState().enqueue({
-      id: newQueuedEditId(),
-      kind,
-      path: abs,
-      originalContent: original,
-      proposedContent: content,
-      isNewFile: false,
-    });
-    return {
-      ok: true,
-      replacements: totalReplacements,
-      bytesWritten: content.length,
-      path: abs,
-    };
-  }
-
-  try {
-    await native.writeFile(abs, content);
-    readCache.set(abs, { size: content.length, hash: djb2(content) });
-    return {
-      ok: true,
-      replacements: totalReplacements,
-      bytesWritten: content.length,
-      path: abs,
-    };
-  } catch (err) {
-    return { error: String(err), path: abs };
-  }
+  await commitPreparedFileMutation(prepared);
+  ctx.readCache.set(prepared.path, {
+    size: prepared.after.length,
+    hash: hashText(prepared.after),
+  });
+  return {
+    ok: true,
+    replacements: prepared.replacements,
+    bytesWritten: prepared.after.length,
+    path: prepared.path,
+  };
 }
 
 /** 创建文本编辑工具，并为写操作动态应用当前权限模式。 */
@@ -133,30 +69,15 @@ export function buildEditTools(ctx: ToolContext) {
         path: z.string(),
         old_string: z
           .string()
-          .describe("Exact substring to replace. Must be unique unless replace_all."),
+          .describe(
+            "Exact substring to replace. Must be unique unless replace_all.",
+          ),
         new_string: z.string().describe("Replacement substring."),
         replace_all: z.boolean().optional(),
       }),
       needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ path, old_string, new_string, replace_all }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
-          return {
-            error:
-              "must call read_file on this path first (read-before-edit invariant).",
-            path: abs,
-          };
-        }
-        return applyEdits(
-          abs,
-          [{ old_string, new_string, replace_all }],
-          "edit",
-          ctx.readCache,
-        );
-      },
+      execute: async (input: EditInput, { toolCallId }) =>
+        executeEditTool(ctx, "edit", input, toolCallId),
     }),
 
     multi_edit: tool({
@@ -175,20 +96,40 @@ export function buildEditTools(ctx: ToolContext) {
           .min(1),
       }),
       needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ path, edits }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        if (!ctx.readCache.has(abs)) {
-          return {
-            error:
-              "must call read_file on this path first (read-before-edit invariant).",
-            path: abs,
-          };
-        }
-        return applyEdits(abs, edits, "multi_edit", ctx.readCache);
-      },
+      execute: async (input: MultiEditInput, { toolCallId }) =>
+        executeEditTool(ctx, "multi_edit", input, toolCallId),
     }),
   } as const;
+}
+
+async function executeEditTool(
+  ctx: ToolContext,
+  toolName: "edit" | "multi_edit",
+  input: EditInput | MultiEditInput,
+  toolCallId: string,
+) {
+  const sessionId = ctx.getSessionId();
+  try {
+    const prepared =
+      getPreparedFileMutation(sessionId, toolCallId) ??
+      (await prepareFileMutation({
+        sessionId,
+        toolCallId,
+        toolName,
+        input,
+        cwd: ctx.getCwd(),
+      }));
+    return await executePreparedEdit(ctx, prepared);
+  } catch (error) {
+    clearPreparedFileMutation(sessionId, toolCallId);
+    return { error: String(error), path: input.path };
+  }
+}
+
+function hashText(content: string): number {
+  let hash = 5381;
+  for (let index = 0; index < content.length; index += 1) {
+    hash = ((hash << 5) + hash + content.charCodeAt(index)) | 0;
+  }
+  return hash >>> 0;
 }

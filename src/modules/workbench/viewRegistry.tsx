@@ -57,8 +57,8 @@ export type WorkbenchViewServices = {
     handle: WebPreviewPaneHandle | null,
   ) => void;
   onWebPreviewUrlChange: (tabId: number, url: string) => void;
-  onAiDiffAccept: (approvalId: string) => void;
-  onAiDiffReject: (approvalId: string) => void;
+  onAiDiffAccept: (requestKey: string) => void;
+  onAiDiffReject: (requestKey: string) => void;
   onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
   onGitHistoryFindHandle: (tabId: number, handle: FindHandle | null) => void;
 };

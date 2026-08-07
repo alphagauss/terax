@@ -21,6 +21,7 @@
   "syntaxFeaturesDisabled": "syntax features disabled",
   "statusPending": "Pending review",
   "statusApplied": "Applied",
+  "statusApproved": "Approved",
   "statusRejected": "Rejected",
   "accept": "Accept",
   "reject": "Reject"

@@ -21,6 +21,7 @@ type RouteArgs = {
   /** Allow an in-app toast when focused but not looking at the agent. */
   allowToast: boolean;
   tabId?: number;
+  sessionId?: string;
   onActivate: () => void;
 };
 
@@ -35,12 +36,15 @@ export function routeAgentNotification({
   visible,
   allowToast,
   tabId = 0,
+  sessionId,
   onActivate,
 }: RouteArgs): void {
   if (!usePreferencesStore.getState().agentNotifications) return;
   if (focused && visible) return;
 
-  useAgentStore.getState().pushNotification({ source, agent, kind, tabId });
+  useAgentStore
+    .getState()
+    .pushNotification({ source, agent, kind, tabId, sessionId });
 
   if (!focused) {
     void osNotify(title, body ?? agent);

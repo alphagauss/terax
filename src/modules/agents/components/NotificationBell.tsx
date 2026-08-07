@@ -28,7 +28,7 @@ import { useAgentStore } from "../store/agentStore";
 
 type Props = {
   onActivate: (tabId: number) => void;
-  onActivateLocal: () => void;
+  onActivateLocal: (sessionId?: string) => void;
 };
 
 function relativeTime(ts: number): string {
@@ -235,13 +235,13 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
     setOpen(false);
   };
 
-  const activateLocal = () => {
-    onActivateLocal();
+  const activateLocal = (sessionId?: string) => {
+    onActivateLocal(sessionId);
     setOpen(false);
   };
 
   const activateNotification = (n: AgentNotification) => {
-    if (n.source === "local") activateLocal();
+    if (n.source === "local") activateLocal(n.sessionId);
     else activate(n.tabId);
   };
 

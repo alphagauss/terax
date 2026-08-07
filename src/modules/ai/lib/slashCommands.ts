@@ -3,12 +3,7 @@
  * 命令只负责本地状态切换或生成提示词，不直接绕过工具审批执行写操作。
  */
 
-import {
-  CheckListIcon,
-  ClaudeIcon,
-  SparklesIcon,
-} from "@hugeicons/core-free-icons";
-import { usePlanStore } from "../store/planStore";
+import { ClaudeIcon, SparklesIcon } from "@hugeicons/core-free-icons";
 
 /**
  * Outcome of intercepting a slash command from the composer.
@@ -62,12 +57,6 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Initialize workspace",
     icon: SparklesIcon,
   },
-  plan: {
-    name: "plan",
-    invocation: "/plan",
-    label: "Plan mode",
-    icon: CheckListIcon,
-  },
   "claude-code": {
     name: "claude-code",
     invocation: "/claude-code",
@@ -97,19 +86,6 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
   const tail = rest.join(" ").trim();
 
   switch (head) {
-    case "plan": {
-      const store = usePlanStore.getState();
-      if (tail === "off" || tail === "exit") {
-        store.disable();
-        return { kind: "handled", toast: "Plan mode off" };
-      }
-      store.toggle();
-      const nowActive = usePlanStore.getState().active;
-      return {
-        kind: "handled",
-        toast: nowActive ? "Plan mode on" : "Plan mode off",
-      };
-    }
     case "init": {
       return {
         kind: "send-prompt",

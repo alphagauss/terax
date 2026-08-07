@@ -303,9 +303,6 @@ export function buildConfiguredLanguageModel(
   });
 }
 
-const PLAN_MODE_PROMPT = `## PLAN MODE — ACTIVE
-Mutating tools (write_file, edit, multi_edit, create_directory) will queue their changes for the user to review as a single diff. Do NOT execute bash_run or bash_background while plan mode is active — restrict yourself to reads (read_file, grep, glob, list_directory) and the queued mutations. After queueing the full set of edits, stop and return a brief summary; do not continue acting until the user has accepted/rejected.`;
-
 /**
  * 组装一次会话中可复用的系统提示词。
  *
@@ -321,10 +318,10 @@ function buildStableSystem(
   const base = selectSystemPrompt(modelId);
   const environmentBlock = `\n\n## SESSION ENVIRONMENT\nWorking directory: ${cwd}\nResolve every relative tool path against this directory. The directory is fixed for the lifetime of this session.`;
   const personaBlock = persona?.instructions.trim()
-    ? `\n\n## ACTIVE AGENT — ${persona.name}\n${persona.instructions.trim()}`
+      ? `\n\n## ACTIVE AGENT: ${persona.name}\n${persona.instructions.trim()}`
     : "";
   const customBlock = customInstructions?.trim()
-    ? `\n\n## USER CUSTOM INSTRUCTIONS — follow unless they conflict with safety rules above\n${customInstructions.trim()}`
+      ? `\n\n## USER CUSTOM INSTRUCTIONS: follow unless they conflict with safety rules above\n${customInstructions.trim()}`
     : "";
   const instructionsBlock =
     projectInstructions && projectInstructions.trim().length > 0
@@ -377,7 +374,6 @@ export type RunAgentOptions = {
   openrouterModelId?: string;
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
-  planMode?: boolean;
   projectInstructions?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
@@ -402,9 +398,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
     opts.customInstructions,
     opts.projectInstructions ?? null,
   );
-  const planInstructions = opts.planMode ? PLAN_MODE_PROMPT : null;
   await opts.onSystemPrompt?.(
-    planInstructions ? `${stableSystem}\n\n${planInstructions}` : stableSystem,
+    stableSystem,
     opts.uiMessages,
   );
 
@@ -430,7 +425,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const prompt = prepareAgentPrompt(
     stableSystem,
-    planInstructions,
     compactedHistory,
     provider,
   );

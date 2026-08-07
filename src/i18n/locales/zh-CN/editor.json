@@ -21,6 +21,7 @@
   "syntaxFeaturesDisabled": "语法功能已禁用",
   "statusPending": "待审阅",
   "statusApplied": "已应用",
+  "statusApproved": "已批准",
   "statusRejected": "已拒绝",
   "accept": "接受",
   "reject": "拒绝"

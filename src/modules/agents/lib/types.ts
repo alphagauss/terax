@@ -33,6 +33,7 @@ export type AgentNotification = {
   id: string;
   source: AgentSource;
   tabId: number;
+  sessionId?: string;
   agent: string;
   kind: NotificationKind;
   at: number;

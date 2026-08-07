@@ -11,8 +11,13 @@ import {
   checkWritableCanonical,
 } from "../lib/security";
 import { useChatStore } from "../store/chatStore";
-import { newQueuedEditId, usePlanStore } from "../store/planStore";
 import { resolvePath, type ToolContext } from "./context";
+import {
+  clearPreparedFileMutation,
+  commitPreparedFileMutation,
+  getPreparedFileMutation,
+  prepareFileMutation,
+} from "./fileMutation";
 
 const READ_BYTE_CAP = 25 * 1024;
 const READ_LINE_CAP = 2000;
@@ -28,11 +33,13 @@ export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-        "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content — re-read the prior tool result.",
+          "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content. Re-read the prior tool result.",
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Absolute path, or relative to the session working directory."),
+          .describe(
+            "Absolute path, or relative to the session working directory.",
+          ),
         offset: z
           .number()
           .int()
@@ -49,7 +56,10 @@ export function buildFsTools(ctx: ToolContext) {
       }),
       execute: async ({ path, offset, limit }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         try {
@@ -65,7 +75,12 @@ export function buildFsTools(ctx: ToolContext) {
           const hash = djb2(r.content);
           const isFullRead = offset === undefined && limit === undefined;
           const prior = ctx.readCache.get(abs);
-          if (isFullRead && prior && prior.size === r.size && prior.hash === hash) {
+          if (
+            isFullRead &&
+            prior &&
+            prior.size === r.size &&
+            prior.hash === hash
+          ) {
             return { path: abs, unchanged: true, size: r.size };
           }
           ctx.readCache.set(abs, { size: r.size, hash });
@@ -85,7 +100,10 @@ export function buildFsTools(ctx: ToolContext) {
               size: r.size,
               total_lines: lines.length,
               ...(truncated
-                ? { truncated: true, hint: "call read_file with offset to continue" }
+                ? {
+                    truncated: true,
+                    hint: "call read_file with offset to continue",
+                  }
                 : {}),
             };
           }
@@ -121,11 +139,16 @@ export function buildFsTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Absolute path, or relative to the session working directory."),
+          .describe(
+            "Absolute path, or relative to the session working directory.",
+          ),
       }),
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(reqPath, native.canonicalize);
+        const safety = await checkReadableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
         try {
@@ -148,42 +171,31 @@ export function buildFsTools(ctx: ToolContext) {
         content: z.string(),
       }),
       needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ path, content }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-
-        if (usePlanStore.getState().active) {
-          let original = "";
-          let isNewFile = false;
-          try {
-            const r = await native.readFile(abs);
-            if (r.kind === "text") original = r.content;
-          } catch {
-            isNewFile = true;
-          }
-          usePlanStore.getState().enqueue({
-            id: newQueuedEditId(),
-            kind: "write_file",
-            path: abs,
-            originalContent: original,
-            proposedContent: content,
-            isNewFile,
+      execute: async ({ path, content }, { toolCallId }) => {
+        const sessionId = ctx.getSessionId();
+        try {
+          const prepared =
+            getPreparedFileMutation(sessionId, toolCallId) ??
+            (await prepareFileMutation({
+              sessionId,
+              toolCallId,
+              toolName: "write_file",
+              input: { path, content },
+              cwd: ctx.getCwd(),
+            }));
+          await commitPreparedFileMutation(prepared);
+          ctx.readCache.set(prepared.path, {
+            size: prepared.after.length,
+            hash: djb2(prepared.after),
           });
           return {
-            path: abs,
-            queued_for_plan_review: true,
+            path: prepared.path,
+            bytesWritten: prepared.after.length,
             ok: true,
           };
-        }
-
-        try {
-          await native.writeFile(abs, content);
-          ctx.readCache.set(abs, { size: content.length, hash: djb2(content) });
-          return { path: abs, bytesWritten: content.length, ok: true };
         } catch (e) {
-          return { error: String(e), path: abs };
+          clearPreparedFileMutation(sessionId, toolCallId);
+          return { error: String(e), path: resolvePath(path, ctx.getCwd()) };
         }
       },
     }),
@@ -197,21 +209,12 @@ export function buildFsTools(ctx: ToolContext) {
       needsApproval: () => useChatStore.getState().permissionMode === "ask",
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(reqPath, native.canonicalize);
+        const safety = await checkWritableCanonical(
+          reqPath,
+          native.canonicalize,
+        );
         if (!safety.ok) return { error: safety.reason, path: reqPath };
         const abs = safety.canonical;
-        if (usePlanStore.getState().active) {
-          usePlanStore.getState().enqueue({
-            id: newQueuedEditId(),
-            kind: "create_directory",
-            path: abs,
-            originalContent: "",
-            proposedContent: "",
-            isNewFile: true,
-            description: "Create directory",
-          });
-          return { path: abs, queued_for_plan_review: true, ok: true };
-        }
         try {
           await native.createDir(abs);
           return { path: abs, ok: true };

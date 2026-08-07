@@ -1,3 +1,8 @@
+/**
+ * 本文件构造发送给模型的系统提示和消息序列。
+ * 只处理模型上下文，不持有 UI 模式或审批状态。
+ */
+
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type { ProviderId } from "@/modules/ai/config";
 
@@ -8,16 +13,12 @@ export type PreparedAgentPrompt = {
 
 export function prepareAgentPrompt(
   stableSystem: string,
-  planInstructions: string | null,
   history: readonly ModelMessage[],
   provider: ProviderId,
 ): PreparedAgentPrompt {
   const system: SystemModelMessage[] = [
     { role: "system", content: stableSystem },
   ];
-  if (planInstructions) {
-    system.push({ role: "system", content: planInstructions });
-  }
   const messages = history.slice();
   if (provider !== "anthropic") return { system, messages };
 

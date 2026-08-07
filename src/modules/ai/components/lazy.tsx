@@ -5,7 +5,7 @@
 
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import type { AgentRunBridgeProps } from "./AgentRunBridge";
+import type { ApprovalToastHostProps } from "./ApprovalToastHost";
 import type { SelectionAskAiProps } from "./SelectionAskAi";
 
 const AgentRunBridgeInner = lazy(() =>
@@ -16,14 +16,30 @@ const AiSidebarPanelInner = lazy(() =>
   import("./AiSidebarPanel").then((m) => ({ default: m.AiSidebarPanel })),
 );
 
+const ApprovalToastHostInner = lazy(() =>
+  import("./ApprovalToastHost").then((m) => ({
+    default: m.ApprovalToastHost,
+  })),
+);
+
 const SelectionAskAiInner = lazy(() =>
   import("./SelectionAskAi").then((m) => ({ default: m.SelectionAskAi })),
 );
 
-export function AgentRunBridge(props: AgentRunBridgeProps) {
+/** 按需加载所有运行中会话的无界面桥接器。 */
+export function AgentRunBridge() {
   return (
     <Suspense fallback={null}>
-      <AgentRunBridgeInner {...props} />
+      <AgentRunBridgeInner />
+    </Suspense>
+  );
+}
+
+/** 按需加载持续工具审批通知。 */
+export function ApprovalToastHost(props: ApprovalToastHostProps) {
+  return (
+    <Suspense fallback={null}>
+      <ApprovalToastHostInner {...props} />
     </Suspense>
   );
 }
