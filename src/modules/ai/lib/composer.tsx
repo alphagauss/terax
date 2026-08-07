@@ -18,7 +18,11 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useWhisperRecording } from "../hooks/useWhisperRecording";
 import { expandSnippetTokens, type Snippet } from "../lib/snippets";
-import { getChat, useChatStore } from "../store/chatStore";
+import {
+  getAgentMetaForSession,
+  stopSession,
+  useChatStore,
+} from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { canRevealSessionCwd, resolveSessionCwd } from "./sessions";
 import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
@@ -112,7 +116,9 @@ type ProviderProps = {
 export function AiComposerProvider({ children }: ProviderProps) {
   const { t } = useTranslation("ai");
   const sessionId = useChatStore((s) => s.activeSessionId);
-  const status = useChatStore((s) => s.agentMeta.status);
+  const status = useChatStore(
+    (state) => getAgentMetaForSession(state, state.activeSessionId).status,
+  );
   const runLocked = useChatStore((s) =>
     s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
   );
@@ -369,7 +375,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     )
       return;
 
-    // `/plan` 在本地切换规划模式；`/init` 则改写为生成 AGENTS.md 的扫描提示词。
+    // `/init` 改写为生成 AGENTS.md 的扫描提示词，其余命令交给模型处理。
     let effectiveText = trimmed;
     let commandMarker: string | null = null;
     let commandSource = trimmed;
@@ -457,7 +463,10 @@ export function AiComposerProvider({ children }: ProviderProps) {
       pickedCommands.map((command) => command.name),
     );
     const store = useChatStore.getState();
-    store.patchAgentMeta({ hitStepCap: false, compactionNotice: null });
+    store.patchAgentMeta(sessionId, {
+      hitStepCap: false,
+      compactionNotice: null,
+    });
     void (async () => {
       const { sendChatMessage } = await import("../store/chatRuntime");
       const sent = await sendChatMessage(sessionId, {
@@ -485,7 +494,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const stop = () => {
     if (!sessionId) return;
-    void getChat(sessionId)?.stop();
+    void stopSession(sessionId);
   };
 
   const canSend =

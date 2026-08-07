@@ -1,5 +1,11 @@
+/**
+ * 本文件汇总 AI 模块的轻量公共入口。
+ * 重型聊天运行时保持独立导入，避免进入启动包。
+ */
+
 export {
   AgentRunBridge,
+  ApprovalToastHost,
   AiSidebarPanel,
   SelectionAskAi,
 } from "./components/lazy";
@@ -23,7 +29,7 @@ export {
   flushCompletedSessionRuns,
   getActiveProviderKey,
   hasKeyForModel,
-  stop,
+  selectActiveAgentMeta,
   useChatStore,
   type AgentMeta,
   type AgentRunStatus,

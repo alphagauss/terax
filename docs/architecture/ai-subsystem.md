@@ -69,7 +69,7 @@ The JSONL message schema belongs to Terax rather than Vercel AI SDK. User and as
 
 `function.arguments` is always a JSON string. Explicit adapters project these records into AI SDK `UIMessage` values when a chat is hydrated. Each persistence phase sends only its new records to Rust; Rust reads the existing JSONL under the session lock, appends them, and atomically replaces the complete file. This keeps the disk format readable and makes a future SDK switch local to the adapter.
 
-Streaming state remains in the owning process. Sending first acquires the session run lock; while the active session holds it, new/switch/delete actions are disabled so its runtime bridge cannot be unmounted. The transport commits accepted user records and the current prompt before creating the model request. `AgentRunBridge` appends only complete Assistant and tool records after the run becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both the terminal commit and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs. A crash retains the latest accepted user message without writing a partial Assistant stream.
+Streaming state remains in the owning process. Sending first acquires the session run lock. Each locked session keeps its own runtime bridge, so the active UI may switch sessions without stopping background streaming or approval. A running session cannot be deleted. The transport commits accepted user records and the current prompt before creating the model request. `AgentRunBridge` appends only complete Assistant and tool records after that session becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both the terminal commit and Rust lock release succeed. Focus/poll/normal-close paths also flush completed runs. A crash retains the latest accepted user message without writing a partial Assistant stream.
 
 Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent session file, then a fresh session.
 
@@ -77,7 +77,7 @@ Other Workspace processes poll metadata every three seconds (paused while hidden
 
 `AiComposerProvider` (`src/modules/ai/lib/composer.tsx`) is a React context that holds shared input state (text, attachments, voice) for the docked input bar and any other surface. Attachments can be images, text files, or `selection` chips from the terminal or editor. Selections are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit time and are not pasted into the textarea.
 
-The composer derives `isBusy` from `agentMeta.status` so it can mount safely before sessions hydrate.
+The composer derives `isBusy` from the active session's entry in `agentMetaBySession` so it can mount safely before sessions hydrate while other sessions continue in the background.
 
 A draft displays and follows the current Explorer root. Its first accepted user message promotes it to a persisted session and freezes that root as `cwd`. Persisted sessions always display and use their stored `cwd`. Files and selections are sent only when explicitly attached, as visible user-message content.
 
@@ -88,15 +88,14 @@ Each model request first commits its new user message and the exact current syst
 Tool definitions live under `src/modules/ai/tools/`:
 
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the security deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and the UI renders an approval card.
+- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and the UI renders one persistent approval toast per request, independent of the visible chat.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
-- In plan mode, mutating tools queue edits for batch review instead of applying them immediately.
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
 
 ## Edit diffs
 
-AI-proposed file edits open in an `ai-diff` tab. The user accepts or rejects per hunk. Only after acceptance does the `write_file` or `edit` tool actually run. This keeps the approval UI decoupled from the tool execution.
+File mutation approval prepares an immutable before/after snapshot and shows a summary toast. The user may open a read-only `ai-diff` tab and approve or reject the whole tool call from either surface. Execution writes the prepared content only if the canonical path, original content, and file existence state still match. The same flow works without a Git repository.
 
 ## Live context bridge
 

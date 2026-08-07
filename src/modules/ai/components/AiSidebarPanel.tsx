@@ -49,12 +49,10 @@ import {
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
 import { getOrCreateChat } from "../store/chatRuntime";
-import { useChatStore } from "../store/chatStore";
-import { usePlanStore } from "../store/planStore";
+import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import { AiChatView } from "./AiChat";
 import { AiInputBarConnect } from "./AiInputBar";
 import { AiSidebarComposer } from "./AiSidebarComposer";
-import { PlanDiffReview } from "./PlanDiffReview";
 import { TodoStrip } from "./TodoStrip";
 
 const SUGGESTIONS = [
@@ -98,7 +96,6 @@ export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
       ) : (
         <EmptyShell />
       )}
-      <PlanDiffReview />
       {hasComposer ? (
         <AiSidebarComposer />
       ) : (
@@ -116,7 +113,9 @@ function Body({
   readOnly: boolean;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
-  const step = useChatStore((s) => s.agentMeta.step);
+  const step = useChatStore(
+    (state) => getAgentMetaForSession(state, sessionId).step,
+  );
 
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const helpers = useChat<UIMessage>({
@@ -128,9 +127,12 @@ function Body({
 
   return (
     <>
-      <Header step={step} isBusy={isBusy} messages={helpers.messages} />
-
-      <PlanModeStrip />
+      <Header
+        sessionId={sessionId}
+        step={step}
+        isBusy={isBusy}
+        messages={helpers.messages}
+      />
 
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 ? (
@@ -143,8 +145,6 @@ function Body({
               status={helpers.status}
               error={helpers.error}
               clearError={helpers.clearError}
-              addToolApprovalResponse={helpers.addToolApprovalResponse}
-              stop={helpers.stop}
             />
           </div>
         )}
@@ -155,40 +155,11 @@ function Body({
   );
 }
 
-function PlanModeStrip() {
-  const { t } = useTranslation("ai");
-  const active = usePlanStore((s) => s.active);
-  const queueLen = usePlanStore((s) => s.queue.length);
-  const disable = usePlanStore((s) => s.disable);
-  if (!active) return null;
-  return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/40 bg-muted/40 px-3 py-1.5">
-      <span className="size-1.5 shrink-0 rounded-full bg-amber-500" />
-      <span className="text-[11px] font-medium text-foreground">
-        {t("miniWindow.planMode")}
-      </span>
-      <span className="text-[11px] text-muted-foreground">
-        {queueLen > 0
-          ? t("miniWindow.queued", { count: queueLen })
-          : t("miniWindow.noEditsQueued")}
-      </span>
-      <span className="flex-1" />
-      <button
-        type="button"
-        onClick={() => disable()}
-        className="rounded px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        {t("miniWindow.exit")}
-      </button>
-    </div>
-  );
-}
-
 function EmptyShell() {
   const { t } = useTranslation("ai");
   return (
     <>
-      <Header step={null} isBusy={false} />
+      <Header sessionId={null} step={null} isBusy={false} />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
         {t("miniWindow.loadingSessions")}
       </div>
@@ -197,26 +168,29 @@ function EmptyShell() {
 }
 
 function Header({
+  sessionId,
   step,
   isBusy,
   messages,
 }: {
+  sessionId: string | null;
   step: string | null;
   isBusy: boolean;
   messages?: UIMessage[];
 }) {
   const { t } = useTranslation("ai");
   const newSession = useChatStore((s) => s.newSession);
-  const newSessionDisabled = useChatStore((s) =>
-    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
-  );
 
   return (
     <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         <SessionPicker />
         {messages !== undefined ? (
-          <ContextIndicator isBusy={isBusy} messages={messages} />
+          <ContextIndicator
+            sessionId={sessionId}
+            isBusy={isBusy}
+            messages={messages}
+          />
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -244,7 +218,6 @@ function Header({
           size="icon"
           variant="ghost"
           onClick={() => newSession()}
-          disabled={newSessionDisabled}
           className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label={t("miniWindow.newSession")}
           title={t("miniWindow.newSession")}
@@ -263,17 +236,24 @@ function formatTokens(n: number): string {
 }
 
 function ContextIndicator({
+  sessionId,
   isBusy,
   messages,
 }: {
+  sessionId: string | null;
   isBusy: boolean;
   messages: UIMessage[];
 }) {
   const { t } = useTranslation("ai");
   const modelId = useChatStore((s) => s.selectedModelId);
-  const tokens = useChatStore((s) => s.agentMeta.tokens);
-  const lastInput = useChatStore((s) => s.agentMeta.lastInputTokens);
-  const lastCached = useChatStore((s) => s.agentMeta.lastCachedTokens);
+  const meta = useChatStore((state) =>
+    getAgentMetaForSession(state, sessionId),
+  );
+  const {
+    tokens,
+    lastInputTokens: lastInput,
+    lastCachedTokens: lastCached,
+  } = meta;
   const settledEstimateRef = useRef(0);
   const shouldEstimate = !isBusy && lastInput <= 0;
   const estimated = useMemo(() => {
@@ -386,9 +366,7 @@ function SessionPicker() {
   const { t } = useTranslation("ai");
   const sessions = useChatStore((s) => s.sessions);
   const activeId = useChatStore((s) => s.activeSessionId);
-  const runLocked = useChatStore((s) =>
-    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
-  );
+  const runLocks = useChatStore((s) => s.runLockSessionIds);
   const switchSession = useChatStore((s) => s.switchSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
 
@@ -428,7 +406,7 @@ function SessionPicker() {
             key={s.id}
             session={s}
             active={s.id === activeId}
-            disabled={runLocked}
+            deleteDisabled={Boolean(runLocks[s.id])}
             onSelect={() => switchSession(s.id)}
             onDelete={() => deleteSession(s.id)}
           />
@@ -441,13 +419,13 @@ function SessionPicker() {
 function SessionRow({
   session,
   active,
-  disabled,
+  deleteDisabled,
   onSelect,
   onDelete,
 }: {
   session: SessionMeta;
   active: boolean;
-  disabled: boolean;
+  deleteDisabled: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
@@ -456,7 +434,6 @@ function SessionRow({
 
   return (
     <DropdownMenuItem
-      disabled={disabled}
       onSelect={(e) => {
         // 删除按钮由下方逻辑单独处理，此处不能提前关闭菜单。
         const target = e.target as HTMLElement | null;
@@ -484,7 +461,7 @@ function SessionRow({
       ) : null}
       <button
         type="button"
-        disabled={disabled}
+        disabled={deleteDisabled}
         data-session-delete
         onClick={(e) => {
           e.stopPropagation();

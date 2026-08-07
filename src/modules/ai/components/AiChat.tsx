@@ -62,9 +62,8 @@ import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
-import { useChatStore } from "../store/chatStore";
+import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import { AiChatScrollControls } from "./AiChatScrollControls";
-import { AiToolApproval } from "./AiToolApproval";
 
 type ConversationScrollPosition = {
   top: number;
@@ -334,20 +333,12 @@ function chipLabel(c: ContextChip): string {
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
-type ApprovalArg = {
-  id: string;
-  approved: boolean;
-  reason?: string;
-};
-
 type Props = {
   sessionId: string;
   messages: UIMessage[];
   status: ChatStatus;
   error: Error | undefined;
   clearError: () => void;
-  addToolApprovalResponse: (arg: ApprovalArg) => void | PromiseLike<void>;
-  stop: () => void | PromiseLike<void>;
 };
 
 /**
@@ -361,7 +352,6 @@ export function AiChatView({
   status,
   error,
   clearError,
-  addToolApprovalResponse,
 }: Props) {
   const { t } = useTranslation("ai");
   const scrollMemory = useConversationScrollMemory(sessionId);
@@ -372,18 +362,13 @@ export function AiChatView({
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
-  const step = useChatStore((s) => s.agentMeta.step);
-  const hitStepCap = useChatStore((s) => s.agentMeta.hitStepCap);
-  const compactionNotice = useChatStore((s) => s.agentMeta.compactionNotice);
+  const meta = useChatStore((state) =>
+    getAgentMetaForSession(state, sessionId),
+  );
+  const { step, hitStepCap, compactionNotice } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
-
-  const onApproval = useCallback(
-    (id: string, approved: boolean) =>
-      addToolApprovalResponse({ id, approved }),
-    [addToolApprovalResponse],
-  );
 
   const setToolDetailsWheelScope = useCallback(
     (scope: HTMLDivElement | null) => {
@@ -430,7 +415,6 @@ export function AiChatView({
             <RenderedMessage
               key={m.id}
               message={m}
-              onApproval={onApproval}
               streaming={m.id === streamingMessageId}
             />
           ))}
@@ -438,7 +422,9 @@ export function AiChatView({
         {compactionNotice && (
           <CompactionNotice
             droppedCount={compactionNotice.droppedCount}
-            onDismiss={() => patchAgentMeta({ compactionNotice: null })}
+            onDismiss={() =>
+              patchAgentMeta(sessionId, { compactionNotice: null })
+            }
           />
         )}
         {showSpinner && (
@@ -450,7 +436,7 @@ export function AiChatView({
         {showContinue && (
           <ContinueRow
             onContinue={() => {
-              patchAgentMeta({ hitStepCap: false });
+              patchAgentMeta(sessionId, { hitStepCap: false });
               void sendMessage(t("chat.continuePrompt"));
             }}
           />
@@ -523,11 +509,9 @@ const ContinueRow = memo(function ContinueRow({
 
 const RenderedMessage = memo(function RenderedMessage({
   message,
-  onApproval,
   streaming,
 }: {
   message: UIMessage;
-  onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
 }) {
   // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
@@ -607,7 +591,6 @@ const RenderedMessage = memo(function RenderedMessage({
               <PartAppear key={`${message.id}-${g.key}`}>
                 <RenderedPart
                   part={g.part}
-                  onApproval={onApproval}
                   streaming={g.idx === streamingPartIdx}
                 />
               </PartAppear>
@@ -895,11 +878,9 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
 
 const RenderedPart = memo(function RenderedPart({
   part,
-  onApproval,
   streaming,
 }: {
   part: AnyPart;
-  onApproval: (id: string, approved: boolean) => void;
   streaming: boolean;
 }) {
   if (part.type === "text") {
@@ -925,12 +906,7 @@ const RenderedPart = memo(function RenderedPart({
     part.type === "dynamic-tool" ||
     (typeof part.type === "string" && part.type.startsWith("tool-"))
   ) {
-    return (
-      <RenderedTool
-        part={part as unknown as AnyToolPart}
-        onApproval={onApproval}
-      />
-    );
+    return <RenderedTool part={part as unknown as AnyToolPart} />;
   }
 
   return null;
@@ -938,25 +914,13 @@ const RenderedPart = memo(function RenderedPart({
 
 const RenderedTool = memo(function RenderedTool({
   part,
-  onApproval,
 }: {
   part: AnyToolPart;
-  onApproval: (id: string, approved: boolean) => void;
 }) {
   const toolName =
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
-
-  if (part.state === "approval-requested") {
-    return (
-      <AiToolApproval
-        part={part as Extract<ToolUIPart, { state: "approval-requested" }>}
-        toolName={toolName}
-        onRespond={(approved) => onApproval(part.approval.id, approved)}
-      />
-    );
-  }
 
   return (
     <Tool

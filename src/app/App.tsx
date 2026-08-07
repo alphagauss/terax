@@ -27,6 +27,7 @@ import {
 } from "@/modules/agents";
 import {
   AgentRunBridge,
+  ApprovalToastHost,
   AiSidebarPanel,
   flushCompletedSessionRuns,
   LocalAgentNotificationsBridge,
@@ -38,6 +39,7 @@ import {
 } from "@/modules/ai";
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
+import { useApprovalStore } from "@/modules/ai/store/approvalStore";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
@@ -213,7 +215,7 @@ export default function App() {
     newMarkdownTab,
     setOverrideLanguage,
     openAiDiffTab,
-    closeAiDiffTab,
+    setAiDiffStatus,
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
@@ -359,7 +361,7 @@ export default function App() {
   );
   const focusInput = useChatStore((s) => s.focusInput);
   const setLive = useChatStore((s) => s.setLive);
-  const respondToApproval = useChatStore((s) => s.respondToApproval);
+  const respondApproval = useApprovalStore((state) => state.respond);
 
   const { hasComposer } = useAiBootstrap();
 
@@ -1174,7 +1176,8 @@ export default function App() {
 
   const onActivateAgent = activateAgentTarget;
 
-  const onActivateLocalAgent = useCallback(() => {
+  const onActivateLocalAgent = useCallback((sessionId?: string) => {
+    if (sessionId) useChatStore.getState().switchSession(sessionId);
     openAiPanelAndFocus();
   }, [openAiPanelAndFocus]);
 
@@ -1544,8 +1547,12 @@ export default function App() {
       onEditorCloseTab: requestEditorClose,
       registerWebPreviewHandle,
       onWebPreviewUrlChange: handleWebPreviewUrl,
-      onAiDiffAccept: (id) => respondToApproval(id, true),
-      onAiDiffReject: (id) => respondToApproval(id, false),
+      onAiDiffAccept: (key) => {
+        if (respondApproval(key, true)) setAiDiffStatus(key, "approved");
+      },
+      onAiDiffReject: (key) => {
+        if (respondApproval(key, false)) setAiDiffStatus(key, "rejected");
+      },
       onOpenCommitFile: openCommitFileDiffTab,
       onGitHistoryFindHandle: registerGitHistoryHandle,
     }),
@@ -1561,7 +1568,8 @@ export default function App() {
       registerWebPreviewHandle,
       registerTerminalHandle,
       requestEditorClose,
-      respondToApproval,
+      respondApproval,
+      setAiDiffStatus,
       setActiveId,
     ],
   );
@@ -1912,13 +1920,14 @@ export default function App() {
 
           {hasComposer ? (
             <>
-              <AgentRunBridge
-                openAiDiffTab={openAiDiffTab}
-                closeAiDiffTab={closeAiDiffTab}
+              <AgentRunBridge />
+              <ApprovalToastHost
+                openDiff={openAiDiffTab}
+                onResolved={setAiDiffStatus}
               />
               <LocalAgentNotificationsBridge
                 visible={sidebar.isVisible("ai")}
-                onActivate={openAiPanel}
+                onActivate={onActivateLocalAgent}
               />
             </>
           ) : null}

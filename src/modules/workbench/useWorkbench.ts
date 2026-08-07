@@ -470,14 +470,15 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
 
   const openAiDiffTab = useCallback(
     (input: {
+      sessionId: string;
       path: string;
       originalContent: string;
       proposedContent: string;
-      approvalId: string;
+      requestKey: string;
       isNewFile: boolean;
     }) => {
       const existing = Object.values(stateRef.current.tabs).find(
-        (tab) => tab.kind === "ai-diff" && tab.approvalId === input.approvalId,
+        (tab) => tab.kind === "ai-diff" && tab.requestKey === input.requestKey,
       );
       if (existing) {
         revealTab(existing.id);
@@ -489,10 +490,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         kind: "ai-diff",
         spaceId: activeSpaceIdRef.current,
         title: `${pathBasename(input.path)} (AI diff)`,
+        sessionId: input.sessionId,
         path: input.path,
         originalContent: input.originalContent,
         proposedContent: input.proposedContent,
-        approvalId: input.approvalId,
+        requestKey: input.requestKey,
         status: "pending",
         isNewFile: input.isNewFile,
       });
@@ -502,11 +504,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   );
 
   const setAiDiffStatus = useCallback(
-    (approvalId: string, status: AiDiffStatus) =>
+    (requestKey: string, status: AiDiffStatus) =>
       commit((current) => {
         const tab = Object.values(current.tabs).find(
           (candidate) =>
-            candidate.kind === "ai-diff" && candidate.approvalId === approvalId,
+            candidate.kind === "ai-diff" && candidate.requestKey === requestKey,
         );
         if (tab?.kind !== "ai-diff") return current;
         return {
@@ -520,19 +522,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   const closeTab = useCallback(
     (id: number) => commit((current) => closeTabInState(current, id)),
     [commit],
-  );
-
-  const closeAiDiffTab = useCallback(
-    (approvalId: string) => {
-      const target = Object.values(stateRef.current.tabs).find(
-        (tab) => tab.kind === "ai-diff" && tab.approvalId === approvalId,
-      );
-      if (!target) return;
-      const before = stateRef.current;
-      const next = closeTab(target.id);
-      if (next === before) setAiDiffStatus(approvalId, "approved");
-    },
-    [closeTab, setAiDiffStatus],
   );
 
   const openGitDiffTab = useCallback(
@@ -864,7 +853,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
-    closeAiDiffTab,
+    setAiDiffStatus,
     closeTab,
     updateTab,
     setDocumentDirty,

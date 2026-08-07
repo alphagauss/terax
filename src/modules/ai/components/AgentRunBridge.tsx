@@ -1,98 +1,122 @@
 /**
- * 本文件将无界面的 AI Chat 运行状态桥接到全局 store。
- * 负责审批响应、AI diff 生命周期和完整 turn 的终态提交。
+ * 本文件将所有运行中 AI 会话的 Chat 状态桥接到按会话隔离的全局状态。
+ * 负责审批注册、文件预览准备和完整 turn 提交，不依赖当前活动会话或侧栏。
  */
 
-import { useChat, type UIMessage } from "@ai-sdk/react";
-import type { ToolUIPart, UIMessagePart } from "ai";
+import { type UIMessage, useChat } from "@ai-sdk/react";
+import type { UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
-import { native } from "../lib/native";
-import { checkReadable } from "../lib/security";
-import { resolvePath } from "../tools/tools";
 import { shouldCommitSession } from "../lib/sessionLifecycle";
-import { useChatStore, type AgentRunStatus } from "../store/chatStore";
+import { useApprovalStore } from "../store/approvalStore";
 import { getOrCreateChat } from "../store/chatRuntime";
-
-/**
- * Headless bridge that mirrors chat lifecycle into the store, so the status
- * pill / mini-window / panel can react without being inside the chat hook tree.
- *
- * Side effects:
- *  - Patches `agentMeta` on every status / approvals change.
- *  - Auto-opens the mini-window when an approval is pending — the user has
- *    to act on it; hiding it would be hostile.
- *  - For pending `write_file` calls, opens an AI diff tab in the editor area
- *    so the user can review the proposed change before approving.
- *  - Commits one complete turn when a run reaches a terminal state.
- */
-
-export type DiffOpenInput = {
-  path: string;
-  originalContent: string;
-  proposedContent: string;
-  approvalId: string;
-  isNewFile: boolean;
-};
-
-export type AgentRunBridgeProps = {
-  openAiDiffTab: (input: DiffOpenInput) => number | null;
-  closeAiDiffTab: (approvalId: string) => void;
-};
-
-export function AgentRunBridge(props: AgentRunBridgeProps) {
-  const sessionId = useChatStore((s) => s.activeSessionId);
-  const revision = useChatStore((s) => s.activeSessionRevision);
-  if (!sessionId) return null;
-  return (
-    <Bridge key={`${sessionId}:${revision}`} sessionId={sessionId} {...props} />
-  );
-}
-
-type BridgeProps = { sessionId: string } & AgentRunBridgeProps;
-
-type WriteFileInput = { path?: unknown; content?: unknown };
-
-type ToolPartLike = ToolUIPart & {
-  approval?: { id: string };
-  input?: WriteFileInput;
-};
+import { type AgentRunStatus, useChatStore } from "../store/chatStore";
+import {
+  clearPreparedFileMutation,
+  isTerminalFileMutationState,
+  prepareFileMutation,
+} from "../tools/fileMutation";
 
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
-function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
+type PendingApproval = {
+  sessionId: string;
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+};
+
+/** 为每个持有运行锁的会话保持独立桥接器。 */
+export function AgentRunBridge() {
+  const sessionIds = useChatStore((state) =>
+    Object.keys(state.runLockSessionIds),
+  );
+  return (
+    <>
+      {sessionIds.map((sessionId) => (
+        <SessionRunBridge key={sessionId} sessionId={sessionId} />
+      ))}
+    </>
+  );
+}
+
+function SessionRunBridge({ sessionId }: { sessionId: string }) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
     chat,
   });
-  const patch = useChatStore((s) => s.patchAgentMeta);
-  const commitMessages = useChatStore((s) => s.commitMessages);
-  const runLocked = useChatStore((s) =>
-    Boolean(s.runLockSessionIds[sessionId]),
+  const patch = useChatStore((state) => state.patchAgentMeta);
+  const commitMessages = useChatStore((state) => state.commitMessages);
+  const runLocked = useChatStore((state) =>
+    Boolean(state.runLockSessionIds[sessionId]),
   );
-  const setApprovalResponder = useChatStore((s) => s.setApprovalResponder);
+  const approvals = useMemo(
+    () => collectPendingApprovals(sessionId, messages),
+    [messages, sessionId],
+  );
+  const approvalsPending = approvals.length;
 
-  // Expose the approval responder so the diff tab can resolve approvals.
-  // We keep it in a ref-stable closure so identity is stable per render.
   useEffect(() => {
-    setApprovalResponder((id, approved) =>
-      addToolApprovalResponse({ id, approved }),
-    );
-    return () => setApprovalResponder(null);
-  }, [setApprovalResponder, addToolApprovalResponse]);
+    useApprovalStore
+      .getState()
+      .registerResponder(sessionId, (approvalId, approved) =>
+        addToolApprovalResponse({ id: approvalId, approved }),
+      );
+    return () => {
+      useApprovalStore.getState().registerResponder(sessionId, null);
+    };
+  }, [addToolApprovalResponse, sessionId]);
 
-  const approvalsPending = useMemo(() => {
-    let n = 0;
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts) {
-        if ((p as { state?: string }).state === "approval-requested") n++;
-      }
+  useEffect(() => {
+    useApprovalStore.getState().syncSessionRequests(sessionId, approvals);
+  }, [approvals, sessionId]);
+
+  useEffect(() => {
+    const cwd = useChatStore
+      .getState()
+      .sessions.find((session) => session.id === sessionId)?.cwd;
+    if (!cwd) return;
+    let cancelled = false;
+    for (const approval of approvals) {
+      if (!isFileMutation(approval.toolName)) continue;
+      const key = `${sessionId}:${approval.approvalId}`;
+      const request = useApprovalStore.getState().requests[key];
+      if (!request || request.preview || request.previewError) continue;
+      void prepareFileMutation({
+        sessionId,
+        toolCallId: approval.toolCallId,
+        toolName: approval.toolName,
+        input: approval.input,
+        cwd,
+      })
+        .then((preview) => {
+          if (!cancelled) {
+            useApprovalStore.getState().setPreview(key, preview);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            useApprovalStore.getState().setPreview(key, null, String(error));
+          }
+        });
     }
-    return n;
-  }, [messages]);
+    return () => {
+      cancelled = true;
+    };
+  }, [approvals, sessionId]);
+
+  useEffect(() => {
+    clearTerminalFileMutations(sessionId, messages);
+  }, [messages, sessionId]);
 
   const latestMessages = useRef(messages);
   latestMessages.current = messages;
+  useEffect(
+    () => () => {
+      clearSessionFileMutations(sessionId, latestMessages.current);
+    },
+    [sessionId],
+  );
   const committing = useRef(false);
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -100,6 +124,7 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
   approvalsRef.current = approvalsPending;
   const runLockedRef = useRef(runLocked);
   runLockedRef.current = runLocked;
+
   useEffect(() => {
     if (!shouldCommitSession(status, approvalsPending, runLocked)) return;
     const timer = window.setTimeout(() => {
@@ -108,10 +133,11 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
           statusRef.current,
           approvalsRef.current,
           runLockedRef.current,
-        )
-      )
+        ) ||
+        committing.current
+      ) {
         return;
-      if (committing.current) return;
+      }
       committing.current = true;
       void commitMessages(sessionId, latestMessages.current)
         .catch((error) => {
@@ -122,7 +148,8 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
         });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [sessionId, status, approvalsPending, runLocked, commitMessages]);
+  }, [approvalsPending, commitMessages, runLocked, sessionId, status]);
+
   useEffect(
     () => () => {
       if (
@@ -130,16 +157,20 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
           statusRef.current,
           approvalsRef.current,
           runLockedRef.current,
-        )
-      )
+        ) ||
+        committing.current
+      ) {
         return;
-      if (committing.current) return;
+      }
       committing.current = true;
       void commitMessages(sessionId, latestMessages.current).catch((error) => {
-        console.error("Failed to save AI session during switch:", error);
+        console.error(
+          "Failed to save AI session during bridge cleanup:",
+          error,
+        );
       });
     },
-    [sessionId, commitMessages],
+    [commitMessages, sessionId],
   );
 
   useEffect(() => {
@@ -149,257 +180,117 @@ function Bridge({ sessionId, openAiDiffTab, closeAiDiffTab }: BridgeProps) {
     else if (status === "streaming") runStatus = "streaming";
     else if (status === "error") runStatus = "error";
     else runStatus = "idle";
-    patch({
+    patch(sessionId, {
       status: runStatus,
       approvalsPending,
       ...(runStatus === "idle" || runStatus === "error" ? { step: null } : {}),
       ...(runStatus === "idle" ? { error: null } : {}),
     });
-  }, [status, approvalsPending, patch]);
-
-  // ---- AI diff tab management ----------------------------------------------
-  // We track which approvalIds have already opened a tab so re-renders don't
-  // open duplicates. Reset when the session changes.
-  const openedRef = useRef<Set<string>>(new Set());
-  const fileMutationFingerprintRef = useRef<string>("");
-
-  // Cheap fingerprint of file-mutation tool parts only. The diff-tab effect
-  // is the most expensive thing on the streaming path, so we skip it when
-  // only text/reasoning tokens have arrived (the common case).
-  const fileMutationFingerprint = useMemo(() => {
-    let fp = "";
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const p of m.parts as AnyPart[]) {
-        const t = (p as { type?: string }).type;
-        if (
-          t === "tool-write_file" ||
-          t === "tool-edit" ||
-          t === "tool-multi_edit"
-        ) {
-          const state = (p as { state?: string }).state ?? "";
-          const id = (p as { approval?: { id?: string } }).approval?.id ?? "";
-          fp += `${id}:${state}|`;
-        }
-      }
-    }
-    return fp;
-  }, [messages]);
-
-  useEffect(() => {
-    type Pending = {
-      approvalId: string;
-      path: string;
-      /**
-       * Either a literal proposed content (write_file), or a function that
-       * derives proposed content from the on-disk original (edit/multi_edit).
-       */
-      derive:
-        | { kind: "literal"; content: string }
-        | { kind: "edits"; edits: EditOp[] };
-    };
-    if (fileMutationFingerprint === fileMutationFingerprintRef.current) {
-      return;
-    }
-    fileMutationFingerprintRef.current = fileMutationFingerprint;
-
-    const pending: Pending[] = [];
-    const toClose = new Set<string>();
-
-    for (const m of messages) {
-      if (m.role !== "assistant") continue;
-      for (const part of m.parts as AnyPart[]) {
-        const info = extractFileMutation(part);
-        if (!info) continue;
-        const { state, approvalId, path, derive } = info;
-        if (!approvalId) continue;
-        if (state === "approval-requested") {
-          if (!openedRef.current.has(approvalId)) {
-            pending.push({ approvalId, path, derive });
-          }
-        } else if (
-          state === "approval-responded" ||
-          state === "output-available" ||
-          state === "output-error"
-        ) {
-          if (openedRef.current.has(approvalId)) toClose.add(approvalId);
-        }
-      }
-    }
-
-    for (const id of toClose) {
-      openedRef.current.delete(id);
-      closeAiDiffTab(id);
-    }
-
-    if (pending.length === 0) return;
-
-    let cancelled = false;
-    void (async () => {
-      const cwd = useChatStore
-        .getState()
-        .sessions.find((session) => session.id === sessionId)?.cwd;
-      if (!cwd) return;
-      for (const p of pending) {
-        if (cancelled) return;
-        // Mark as opened up-front so a re-render mid-await doesn't double-open.
-        openedRef.current.add(p.approvalId);
-        const abs = resolvePath(p.path, cwd);
-        const original = await readOriginal(abs);
-        if (cancelled) return;
-        let proposed = "";
-        if (p.derive.kind === "literal") {
-          proposed = p.derive.content;
-        } else {
-          const r = applyEditsLocally(original.content, p.derive.edits);
-          if (!r.ok) {
-            // Edit precondition failed (string not found / not unique).
-            // Skip opening the tab; the approval modal will surface the error.
-            continue;
-          }
-          proposed = r.content;
-        }
-        openAiDiffTab({
-          path: abs,
-          originalContent: original.content,
-          proposedContent: proposed,
-          approvalId: p.approvalId,
-          isNewFile: original.isNewFile,
-        });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    messages,
-    fileMutationFingerprint,
-    openAiDiffTab,
-    closeAiDiffTab,
-    sessionId,
-  ]);
+  }, [approvalsPending, patch, sessionId, status]);
 
   return null;
 }
 
-type EditOp = { old_string: string; new_string: string; replace_all?: boolean };
-
-type FileMutation =
-  | {
-      state: string;
-      approvalId: string | null;
-      path: string;
-      derive: { kind: "literal"; content: string };
-    }
-  | {
-      state: string;
-      approvalId: string | null;
-      path: string;
-      derive: { kind: "edits"; edits: EditOp[] };
-    };
-
-function extractFileMutation(part: AnyPart): FileMutation | null {
-  const type = (part as { type?: string }).type;
-  const p = part as ToolPartLike;
-  const state = (p as { state?: string }).state ?? "";
-  const approvalId = p.approval?.id ?? null;
-
-  if (type === "tool-write_file") {
-    const input = (p.input ?? {}) as WriteFileInput;
-    const path = typeof input.path === "string" ? input.path : "";
-    const content = typeof input.content === "string" ? input.content : "";
-    if (!path) return null;
-    return { state, approvalId, path, derive: { kind: "literal", content } };
-  }
-  if (type === "tool-edit") {
-    const input = (p.input ?? {}) as {
-      path?: unknown;
-      old_string?: unknown;
-      new_string?: unknown;
-      replace_all?: unknown;
-    };
-    const path = typeof input.path === "string" ? input.path : "";
-    const oldStr = typeof input.old_string === "string" ? input.old_string : "";
-    const newStr = typeof input.new_string === "string" ? input.new_string : "";
-    if (!path) return null;
-    return {
-      state,
-      approvalId,
-      path,
-      derive: {
-        kind: "edits",
-        edits: [
-          {
-            old_string: oldStr,
-            new_string: newStr,
-            replace_all: Boolean(input.replace_all),
-          },
-        ],
-      },
-    };
-  }
-  if (type === "tool-multi_edit") {
-    const input = (p.input ?? {}) as { path?: unknown; edits?: unknown };
-    const path = typeof input.path === "string" ? input.path : "";
-    if (!path || !Array.isArray(input.edits)) return null;
-    const edits: EditOp[] = (input.edits as Record<string, unknown>[])
-      .map((e) => ({
-        old_string: typeof e.old_string === "string" ? e.old_string : "",
-        new_string: typeof e.new_string === "string" ? e.new_string : "",
-        replace_all: Boolean(e.replace_all),
-      }))
-      .filter((e) => e.old_string.length > 0);
-    if (edits.length === 0) return null;
-    return { state, approvalId, path, derive: { kind: "edits", edits } };
-  }
-  return null;
-}
-
-function applyEditsLocally(
-  original: string,
-  edits: EditOp[],
-): { ok: true; content: string } | { ok: false } {
-  let content = original;
-  for (const e of edits) {
-    if (e.old_string === e.new_string || e.old_string.length === 0)
-      return { ok: false };
-    if (e.replace_all) {
-      if (!content.includes(e.old_string)) return { ok: false };
-      content = content.split(e.old_string).join(e.new_string);
-    } else {
-      const first = content.indexOf(e.old_string);
-      if (first === -1) return { ok: false };
-      const second = content.indexOf(e.old_string, first + 1);
-      if (second !== -1) return { ok: false };
-      content =
-        content.slice(0, first) +
-        e.new_string +
-        content.slice(first + e.old_string.length);
+function collectPendingApprovals(
+  sessionId: string,
+  messages: readonly UIMessage[],
+): PendingApproval[] {
+  const approvals: PendingApproval[] = [];
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts as AnyPart[]) {
+      const candidate = part as unknown as {
+        type?: string;
+        toolName?: string;
+        toolCallId?: string;
+        state?: string;
+        input?: unknown;
+        approval?: { id?: string };
+      };
+      if (candidate.state !== "approval-requested") continue;
+      const approvalId = candidate.approval?.id;
+      const toolCallId = candidate.toolCallId;
+      if (!approvalId || !toolCallId) continue;
+      const toolName =
+        candidate.type === "dynamic-tool"
+          ? (candidate.toolName ?? "unknown")
+          : (candidate.type?.replace(/^tool-/, "") ?? "unknown");
+      approvals.push({
+        sessionId,
+        approvalId,
+        toolCallId,
+        toolName,
+        input: asRecord(candidate.input),
+      });
     }
   }
-  return { ok: true, content };
+  return approvals;
 }
 
-async function readOriginal(
-  abs: string,
-): Promise<{ content: string; isNewFile: boolean }> {
-  // The fs guard rejects sensitive paths even on read; mirror that here so
-  // the user sees an empty "before" rather than an error tab.
-  const safety = checkReadable(abs);
-  if (!safety.ok) return { content: "", isNewFile: false };
-  try {
-    const r = await native.readFile(abs);
-    if (r.kind === "text") return { content: r.content, isNewFile: false };
-    // Binary or oversized — we can't render the original sensibly. Show the
-    // proposed content as a "new" view; the user can still cancel.
-    return { content: "", isNewFile: false };
-  } catch (e) {
-    const msg = String(e).toLowerCase();
-    const notFound =
-      msg.includes("no such file") ||
-      msg.includes("not found") ||
-      msg.includes("os error 2");
-    return { content: "", isNewFile: notFound };
+function clearTerminalFileMutations(
+  sessionId: string,
+  messages: readonly UIMessage[],
+): void {
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts as AnyPart[]) {
+      const candidate = part as unknown as {
+        type?: string;
+        toolName?: string;
+        toolCallId?: string;
+        state?: string;
+      };
+      const toolName =
+        candidate.type === "dynamic-tool"
+          ? candidate.toolName
+          : candidate.type?.replace(/^tool-/, "");
+      if (
+        candidate.toolCallId &&
+        toolName &&
+        isFileMutation(toolName) &&
+        isTerminalFileMutationState(candidate.state)
+      ) {
+        clearPreparedFileMutation(sessionId, candidate.toolCallId);
+      }
+    }
   }
+}
+
+function clearSessionFileMutations(
+  sessionId: string,
+  messages: readonly UIMessage[],
+): void {
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts as AnyPart[]) {
+      const candidate = part as unknown as {
+        type?: string;
+        toolName?: string;
+        toolCallId?: string;
+      };
+      const toolName =
+        candidate.type === "dynamic-tool"
+          ? candidate.toolName
+          : candidate.type?.replace(/^tool-/, "");
+      if (candidate.toolCallId && toolName && isFileMutation(toolName)) {
+        clearPreparedFileMutation(sessionId, candidate.toolCallId);
+      }
+    }
+  }
+}
+
+function isFileMutation(
+  toolName: string,
+): toolName is "write_file" | "edit" | "multi_edit" {
+  return (
+    toolName === "write_file" ||
+    toolName === "edit" ||
+    toolName === "multi_edit"
+  );
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
 }

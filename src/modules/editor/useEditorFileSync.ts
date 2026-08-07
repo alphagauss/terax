@@ -51,26 +51,6 @@ function reloadMatchingEditors(
  * 维护编辑器文件监听，并在 AI 修改、外部写入或文件事件后协调磁盘内容。
  */
 export function useEditorFileSync({ tabs, tabsRef, editorRefs }: Params) {
-  // When an AI diff is approved (write_file applied to disk), reload any
-  // open editor tabs for that path so the user sees the new content. We
-  // track which approvalIds we've already handled to fire the reload only
-  // once per applied diff.
-  const appliedDiffsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const workspace = currentWorkspaceEnv();
-    const changed = new Set<string>();
-    for (const t of tabs) {
-      if (t.kind !== "ai-diff") continue;
-      if (t.status !== "approved") continue;
-      if (appliedDiffsRef.current.has(t.approvalId)) continue;
-      appliedDiffsRef.current.add(t.approvalId);
-      changed.add(documentResourceKey(workspace, t.path));
-    }
-    if (changed.size > 0) {
-      reloadMatchingEditors(tabs, editorRefs, changed, "reload");
-    }
-  }, [tabs, editorRefs]);
-
   useEffect(() => {
     type FileWrittenPayload = { path: string; source?: string };
     const unlistenPromise =

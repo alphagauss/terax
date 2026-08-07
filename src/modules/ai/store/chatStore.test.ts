@@ -129,6 +129,7 @@ describe("chat store multi-process lifecycle", () => {
       activeSessionId: null,
       activeSessionRevision: 0,
       runLockSessionIds: {},
+      agentMetaBySession: {},
       sessionSyncError: null,
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
@@ -177,18 +178,22 @@ describe("chat store multi-process lifecycle", () => {
     expect(io.workspaceSet).not.toHaveBeenCalled();
   });
 
-  it("blocks new, switch, and delete while the active run lock is held", async () => {
+  it("allows leaving a running session but prevents deleting that session", async () => {
     useChatStore.setState({
       sessions: [first, second],
       activeSessionId: first.id,
     });
     await useChatStore.getState().beginSessionRun(first.id);
 
-    expect(useChatStore.getState().newSession()).toBe(first.id);
+    const draftId = useChatStore.getState().newSession();
+    expect(draftId).not.toBe(first.id);
+    expect(useChatStore.getState().activeSessionId).toBe(draftId);
     useChatStore.getState().switchSession(second.id);
-    useChatStore.getState().deleteSession(second.id);
+    await vi.waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
+    useChatStore.getState().deleteSession(first.id);
 
-    expect(useChatStore.getState().activeSessionId).toBe(first.id);
     expect(useChatStore.getState().sessions).toHaveLength(2);
     expect(io.remove).not.toHaveBeenCalled();
   });

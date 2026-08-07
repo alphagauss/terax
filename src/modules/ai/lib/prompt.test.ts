@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 AI 系统提示与模型消息准备逻辑。
+ * 测试确保提示构造不引入已删除的本地模式状态。
+ */
+
 import { streamText, type ModelMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -10,16 +15,10 @@ const history: ModelMessage[] = [
 
 describe("prepareAgentPrompt", () => {
   it("keeps trusted instructions outside conversation messages", () => {
-    const prompt = prepareAgentPrompt(
-      "Stable instructions",
-      "Plan instructions",
-      history,
-      "openai",
-    );
+    const prompt = prepareAgentPrompt("Stable instructions", history, "openai");
 
     expect(prompt.system).toEqual([
       { role: "system", content: "Stable instructions" },
-      { role: "system", content: "Plan instructions" },
     ]);
     expect(prompt.messages).toEqual(history);
     expect(prompt.messages.every((message) => message.role !== "system")).toBe(
@@ -30,7 +29,6 @@ describe("prepareAgentPrompt", () => {
   it("keeps Anthropic cache markers on the stable prefix and rotating tail", () => {
     const prompt = prepareAgentPrompt(
       "Stable instructions",
-      "Plan instructions",
       history,
       "anthropic",
     );
@@ -38,7 +36,6 @@ describe("prepareAgentPrompt", () => {
     expect(prompt.system[0].providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
     });
-    expect(prompt.system[1].providerOptions).toBeUndefined();
     expect(prompt.messages[0].providerOptions).toBeUndefined();
     expect(prompt.messages[1].providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
@@ -60,12 +57,7 @@ describe("prepareAgentPrompt", () => {
         }),
       },
     });
-    const prompt = prepareAgentPrompt(
-      "Stable instructions",
-      "Plan instructions",
-      history,
-      "openai",
-    );
+    const prompt = prepareAgentPrompt("Stable instructions", history, "openai");
 
     try {
       const result = streamText({
@@ -84,3 +76,7 @@ describe("prepareAgentPrompt", () => {
     }
   });
 });
+/**
+ * 本文件测试稳定系统提示与会话历史的模型输入边界。
+ * 重点锁定系统指令不混入对话消息，并保留 Anthropic 缓存标记。
+ */

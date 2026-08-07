@@ -38,7 +38,6 @@ type Deps = {
     systemPrompt: string,
     messages: UIMessage[],
   ) => void | Promise<void>;
-  getPlanMode?: () => boolean;
 };
 
 type SendOptions = {
@@ -79,7 +78,6 @@ export function createSessionTransport(deps: Deps) {
       openrouterModelId: deps.getOpenrouterModelId?.(),
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
-      planMode: deps.getPlanMode?.(),
       cwd,
       projectInstructions,
       uiMessages: options.messages,

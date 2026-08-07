@@ -24,7 +24,7 @@ type Props = {
   onToggleSidebar: () => void;
   onOpenCommandPalette: () => void;
   onActivateAgent: (tabId: number) => void;
-  onActivateLocalAgent: () => void;
+  onActivateLocalAgent: (sessionId?: string) => void;
   onOpenSettings: () => void;
   onToggleSecondarySidebar?: () => void;
   secondarySidebarOpen?: boolean;

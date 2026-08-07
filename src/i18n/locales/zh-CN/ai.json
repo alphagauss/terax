@@ -18,10 +18,6 @@
         "text": "总结一下终端里刚刚发生了什么。"
       }
     },
-    "planMode": "计划模式",
-    "queued": "· 已排队 {{count}} 项",
-    "noEditsQueued": "· 无待处理编辑",
-    "exit": "退出",
     "loadingSessions": "正在加载会话…",
     "thinking": "思考中…",
     "closeTitle": "关闭 (Esc)",
@@ -59,6 +55,9 @@
     "needsApproval": "需要批准",
     "deny": "拒绝",
     "approve": "批准",
+    "review": "查看 diff",
+    "openDiffHint": "打开 diff 查看此项修改",
+    "preparingPreview": "正在准备安全的 diff 预览…",
     "lines_one": "{{count}} 行",
     "lines_other": "{{count}} 行",
     "reviewInDiffTab": " · 在 diff 标签页中查看",
@@ -67,6 +66,13 @@
     "diffLines_other": "−{{removed}} / +{{added}} 行",
     "edits_one": "{{count}} 处编辑 · 在 diff 标签页中查看",
     "edits_other": "{{count}} 处编辑 · 在 diff 标签页中查看"
+  },
+  "notifications": {
+    "approvalTitle": "{{session}} 需要批准",
+    "approvalBody": "批准工具调用后继续",
+    "errorTitle": "{{session}} 运行失败",
+    "finishedTitle": "{{session}} 已完成",
+    "finishedBody": "任务结果已就绪"
   },
   "composer": {
     "placeholder": "向 Terax 提问   -   输入 # 使用片段和命令，输入 @ 引用文件",
@@ -153,20 +159,6 @@
     "noMatches": "没有匹配的文件",
     "truncated": "工作区较大，请细化查询以缩小结果范围。"
   },
-  "planReview": {
-    "title": "计划审查",
-    "pendingChanges_one": "{{count}} 项待处理变更",
-    "pendingChanges_other": "{{count}} 项待处理变更",
-    "discardAll": "全部丢弃",
-    "apply": "应用 {{count}} 项",
-    "toggleDiff": "展开或收起差异",
-    "newFile": "新增",
-    "createDirectory": "创建目录",
-    "reject": "拒绝",
-    "noChanges": "没有行级变更",
-    "moreChanges_one": "… 还有 {{count}} 项变更",
-    "moreChanges_other": "… 还有 {{count}} 项变更"
-  },
   "statusPill": {
     "openAiLog": "打开 AI 日志",
     "openAiSidebar": "打开 AI 侧栏",
@@ -177,11 +169,8 @@
     "thinking": "思考中…"
   },
   "slashCommands": {
-    "planModeOff": "计划模式已关闭",
-    "planModeOn": "计划模式已开启",
     "claudeCodeUsage": "用法：/claude-code <request>",
     "initLabel": "初始化工作区",
-    "planLabel": "计划模式",
     "claudeCodeLabel": "委派给 Claude Code"
   },
   "whisper": {

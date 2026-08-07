@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { canChangeSession, shouldCommitSession } from "./sessionLifecycle";
+import { shouldCommitSession } from "./sessionLifecycle";
 
 describe("AI session commit lifecycle", () => {
   it.each([
@@ -27,10 +27,5 @@ describe("AI session commit lifecycle", () => {
 
   it("does not commit an untouched hydrated session", () => {
     expect(shouldCommitSession("ready", 0, false)).toBe(false);
-  });
-
-  it("blocks session changes while the active run lock is held", () => {
-    expect(canChangeSession(true)).toBe(false);
-    expect(canChangeSession(false)).toBe(true);
   });
 });

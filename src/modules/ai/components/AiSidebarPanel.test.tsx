@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-
 /**
- * 本文件验证 AI 侧栏在同一会话 ID 更换 Chat 实例后会重新订阅消息。
- * 测试锁定外部会话刷新不能让正文继续监听已淘汰实例。
+ * 本文件测试 AI 侧栏的会话订阅和后台运行边界。
+ * 测试锁定 Chat 实例更换后重新订阅，且侧栏不拥有后台运行生命周期。
  */
 
 import { Chat, type UIMessage } from "@ai-sdk/react";
@@ -31,11 +30,10 @@ vi.mock("./AiChat", () => ({
 }));
 vi.mock("./AiSidebarComposer", () => ({ AiSidebarComposer: () => null }));
 vi.mock("./AiInputBar", () => ({ AiInputBarConnect: () => null }));
-vi.mock("./PlanDiffReview", () => ({ PlanDiffReview: () => null }));
 vi.mock("./TodoStrip", () => ({ TodoStrip: () => null }));
 
-import { AiSidebarPanel } from "./AiSidebarPanel";
 import { useChatStore } from "../store/chatStore";
+import { AiSidebarPanel } from "./AiSidebarPanel";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 const transport = {

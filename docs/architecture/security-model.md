@@ -44,7 +44,8 @@ This is the allow side of the file-system boundary. Any new feature that spawns 
 In `src/modules/ai/tools/tools.ts`:
 
 - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `run_command`, `shell_session_run`, `shell_bg_spawn`) set `needsApproval: true`. The AI SDK pauses and surfaces a `tool-approval-request` part rendered as a confirmation card.
+- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `run_command`, `shell_session_run`, `shell_bg_spawn`) set `needsApproval: true`. The AI SDK pauses and the frontend routes each request to a persistent toast keyed by session and approval ID.
+- File mutations prepare the reviewed content before approval and verify the canonical path, original content, and file existence state again before writing. The diff does not depend on Git.
 - `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
 
 Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.

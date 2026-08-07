@@ -17,12 +17,12 @@ import type { ToolContext } from "../tools/tools";
 import { useAgentsStore } from "./agentsStore";
 import {
   chats,
+  getAgentMetaForSession,
   getActiveProviderKey,
   seedMessages,
   touchChat,
   useChatStore,
 } from "./chatStore";
-import { usePlanStore } from "./planStore";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
   const readCache = new Map<string, { size: number; hash: number }>();
@@ -36,12 +36,32 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   };
   const toolContext: ToolContext = {
     getCwd: getSessionCwd,
-    getTerminalContext: () => useChatStore.getState().live.getTerminalContext(),
-    isActiveTerminalPrivate: () =>
-      useChatStore.getState().live.isActiveTerminalPrivate(),
-    injectIntoActivePty: (text) =>
-      useChatStore.getState().live.injectIntoActivePty(text),
-    openWebPreview: (url) => useChatStore.getState().live.openWebPreview(url),
+    getTerminalContext: () => {
+      const state = useChatStore.getState();
+      return state.activeSessionId === sessionId
+        ? state.live.getTerminalContext()
+        : null;
+    },
+    isActiveTerminalPrivate: () => {
+      const state = useChatStore.getState();
+      return (
+        state.activeSessionId === sessionId &&
+        state.live.isActiveTerminalPrivate()
+      );
+    },
+    injectIntoActivePty: (text) => {
+      const state = useChatStore.getState();
+      return (
+        state.activeSessionId === sessionId &&
+        state.live.injectIntoActivePty(text)
+      );
+    },
+    openWebPreview: (url) => {
+      const state = useChatStore.getState();
+      return (
+        state.activeSessionId === sessionId && state.live.openWebPreview(url)
+      );
+    },
     spawnAgent: (prompt) =>
       useChatStore
         .getState()
@@ -65,7 +85,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       return { name: a.name, instructions: a.instructions };
     },
     getCwd: getSessionCwd,
-    getPlanMode: () => usePlanStore.getState().active,
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,
@@ -83,23 +102,26 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
     getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
     onStep: (step) => {
-      useChatStore.getState().patchAgentMeta({ step });
+      useChatStore.getState().patchAgentMeta(sessionId, { step });
     },
     onCompact: (info) => {
-      useChatStore.getState().patchAgentMeta({
+      useChatStore.getState().patchAgentMeta(sessionId, {
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
       });
     },
     onFinishMeta: (info) => {
-      useChatStore.getState().patchAgentMeta({ hitStepCap: info.hitStepCap });
+      useChatStore
+        .getState()
+        .patchAgentMeta(sessionId, { hitStepCap: info.hitStepCap });
     },
     onSystemPrompt: (systemPrompt, messages) =>
       useChatStore
         .getState()
         .persistSubmittedTurn(sessionId, messages, systemPrompt),
     onUsage: (delta) => {
-      const cur = useChatStore.getState().agentMeta.tokens;
-      useChatStore.getState().patchAgentMeta({
+      const state = useChatStore.getState();
+      const cur = getAgentMetaForSession(state, sessionId).tokens;
+      state.patchAgentMeta(sessionId, {
         tokens: {
           inputTokens: cur.inputTokens + delta.inputTokens,
           outputTokens: cur.outputTokens + delta.outputTokens,
@@ -120,7 +142,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
-      useChatStore.getState().patchAgentMeta({
+      useChatStore.getState().patchAgentMeta(sessionId, {
         status: "error",
         error: e instanceof Error ? e.message : String(e),
       });

@@ -1,78 +1,83 @@
-# Git 实时 Diff 与仓库状态重构计划
+# AI 会话后台运行与工具审批重构计划
 
 ## 目标
 
-以单一 HEAD 基线重构编辑器 Quick Diff、仓库状态刷新和 Git diff 标签页，使未保存内容能够实时显示行变更，保存及 Git 操作能够统一刷新 Source Control、Explorer 和打开的 diff 页面。
+以按会话隔离的运行状态重构 AI 会话生命周期，将工具审批从聊天消息中的交互卡片迁移到持续 toast，并让文件审批通过用户主动打开的 `ai-diff` 页面审查。完成后允许用户切换离开仍在运行或等待审批的会话，运行、审批、通知和停止操作都必须准确路由到所属会话。
 
-本次允许破坏内部 TypeScript API 和 Tauri command，不保留旧 command、旧 working diff cache、旧 unified patch parser、旧乐观状态或兼容转发层。用户数据、持久化设置、工作区授权和 Git 路径安全边界保持不变。
+本次允许破坏内部 TypeScript API 和前端状态结构，不保留单例运行状态、旧审批转发器、计划模式队列或兼容转发层。会话 JSONL 格式、工作区授权、安全拒绝规则和 Vercel AI SDK v6 Chat 语义保持不变。
 
-## 成功标准
+## 已确认范围
 
-- 编辑受 Git 跟踪的文件后，无需保存即可更新 added、modified、deleted gutter 和 overview。
-- 输入期间不启动 Git 进程、不执行文件读取或 IPC。
-- 文件顶部插入或删除内容后，既有标记仍映射到正确行。
-- 保存、stage、unstage、discard、commit 和仓库文件事件通过同一失效入口刷新受影响消费者。
-- 打开的 working diff 页面不会使用旧缓存，也不会被过期异步请求覆盖。
-- 同一文件和 HEAD revision 的基线请求合并并使用有界缓存。
-- 大文件或复杂 diff 有明确计算上限，不阻塞编辑器输入。
-- 删除旧链路后，搜索不到 `git_diff_head`、`gitDiffHead`、`diffCache`、`parseUnifiedDiff`、`applyStatus` 和旧乐观 reconcile 逻辑。
+- 完整删除 `/plan` 计划模式及其批量审查功能。
+- 暂缓轮末文件修改列表和工作区级文件变更跟踪。
+- 不通过 Git、目录快照或文件监听追踪 Shell 命令造成的文件变化。
+- 保留 `ai-diff`，它只表示单次文件工具的审批前快照，不依赖 Git 仓库。
+- 文件审批 toast 提供拒绝和同意；用户点击文件摘要可主动打开 diff。
+- 用户手动打开的 diff 在审批结束后保留终态，由用户关闭。
 
 ## 设计
 
-### Repository Model
+### 会话运行状态
 
-- `useSourceControl` 是当前仓库 `repo`、`status`、loading、error、busy action 和 generation 的唯一状态来源。
-- 新增统一的仓库变更通知入口，合并编辑器写入、文件监听和 Git mutation 产生的刷新请求。
-- 本地变更按短时间窗口防抖并合并 inflight refresh；窗口 focus 只作为漏事件兜底。
-- Source Control 面板直接派生展示状态，不复制 `repo`、`status` 或 `panelState`。
-- stage、unstage、discard 和 commit 执行完成后直接刷新真实状态，不维护乐观快照或 reconcile timer。
+- 将单例 `agentMeta` 替换为按 `sessionId` 索引的运行状态。
+- 活动会话的状态栏、Composer 和用量展示通过选择器读取对应会话状态。
+- 运行桥接器按持有运行锁的会话挂载，不依赖 AI 侧栏是否可见，也不依赖活动会话。
+- 停止、提交、错误、用量和通知操作显式携带 `sessionId`。
+- Chat LRU 不得停止持有运行锁或等待审批的会话。
 
-### Quick Diff Model
+### 审批状态与通知
 
-- 新增精简 Tauri command，根据文件路径完成授权后的仓库解析，并返回 repo root、相对路径、HEAD revision 和 `HEAD:path` 文本基线。
-- 前端按 workspace 与文件路径合并 inflight 请求并维护小型 LRU；缓存项携带 repo、relative path 和 revision，HEAD 变化时按仓库精确失效。
-- CodeMirror StateField 保存基线和 `@codemirror/merge` chunks；文档 transaction 使用 `Chunk.updateB` 增量更新。
-- gutter、overview rail 和 Git diff 页面统一从 chunks 派生行类型，不再解析 unified patch。
-- 对超出编辑器 Quick Diff 限制的文件或超时计算返回空装饰，不能显示错误行号。
+- 审批请求以 `sessionId` 和 `approvalId` 的组合键标识。
+- 每个运行会话独立注册审批响应器，不再使用全局单例 callback。
+- 聊天消息只显示紧凑的等待审批状态，不包含同意或拒绝按钮。
+- 持续 toast 是审批的操作入口，但审批状态由按会话索引的独立审批 store 持有。
+- 窗口失焦时发送系统通知；系统通知只负责唤醒和导航，实际审批仍在应用内完成。
+- 多个会话或同一会话存在多个审批时，每个请求独立显示并准确路由。
 
-### Git Diff 页面
+### 文件修改预览
 
-- 删除全局 `diffCache.ts` 和所有手工 invalidation API。
-- commit diff 在已挂载页面内加载一次；working diff 根据 repository generation 在可见时重新读取。
-- 原生 `git_diff_content` 只为二进制或超大文本生成 fallback patch，普通文本依赖 CodeMirror diff。
-- 过期请求通过页面内 generation/request token 丢弃，不写入任何全局缓存。
+- 新增统一文件修改规划模块，负责路径规范化、安全检查、读取原文和应用编辑。
+- `write_file`、`edit` 和 `multi_edit` 的审批预览与实际执行使用同一个 prepared mutation。
+- 执行前验证文件仍匹配审批时基线；发生变化时拒绝写入并返回明确错误。
+- diff 标签使用会话级审批键，不再只依赖可能跨会话冲突的 `approvalId`。
+- diff 标签保持临时页面，不写入 Space 布局或会话历史。
 
 ## 删除范围
 
-- 删除 Rust `git_diff_head` command、`operations::diff_head` 和只为它存在的 HEAD diff mode。
-- 删除前端 `native.gitDiffHead`。
-- 删除 EditorPane 中 repo resolve、保存后 Git 刷新、request ref 和路径字符串归属判断。
-- 删除 `parseUnifiedDiff`、`gitChangesForDiff` 和基于三个行号 Set 的旧 GitChanges 状态。
-- 删除 `src/modules/editor/lib/diffCache.ts` 及所有引用。
-- 删除 `SourceControlSummary.applyStatus`、乐观 stage/unstage/discard、affected-path invalidation 和 reconcile timer。
-- 删除 Source Control 面板复制的 repo、status、panelState 状态。
+- 删除 `planStore.ts`、`PlanDiffReview.tsx` 和 `PlanModeStrip`。
+- 删除 `/plan` 命令、计划模式系统提示、翻译和文档。
+- 删除文件工具中的计划队列分支和 `queued_for_plan_review` 输出。
+- 删除聊天中的 `AiToolApproval` 交互卡片。
+- 删除单例 `approvalResponder` 和基于活动会话的审批转发。
+- 删除 `AgentRunBridge` 中重复的文件编辑推导与自动打开、自动关闭 diff 逻辑。
+- 删除运行期间禁止新建或切换会话的前台限制，保留删除运行中会话的安全限制。
 
-## 执行与验证
+## 执行顺序
 
-1. 重构 Quick Diff 纯函数和 CodeMirror StateField。
-   - 验证：单元测试覆盖新增、修改、删除、顶部插入、连续 transaction、基线替换和计算上限。
-2. 新增精简 Git baseline command，并删除 `git_diff_head`。
-   - 验证：Rust 测试覆盖普通文件、未跟踪文件、无 HEAD 仓库、路径越界和内容大小限制。
-3. 接入 EditorPane，删除保存后 Git patch 链路。
-   - 验证：前端测试证明编辑 transaction 不调用 native Git，基线只在 revision 变化时重新加载。
-4. 收敛 Repository Model 和 Source Control 面板状态。
-   - 验证：测试覆盖事件防抖、inflight 合并、mutation 后刷新和陈旧请求丢弃。
-5. 删除 working diff cache，并让页面跟随 repository generation。
-   - 验证：测试覆盖页面可见刷新、隐藏期间标脏和旧请求不能覆盖新结果。
-6. 删除所有旧符号和兼容代码，检查变更范围及代码文档。
-   - 验证：使用 `rg` 确认旧符号归零，并检查所有修改的 Rust、TypeScript 和 TSX 文件具有合格中文文件级注释。
-7. 运行最小且充分的完整验证。
-   - 前端：`pnpm lint`、`pnpm check-types`、相关 `pnpm test`，最后运行完整 `pnpm test`。
-   - Rust：`cargo clippy --all-targets --locked -- -D warnings` 和相关测试；可用时运行 `cargo nextest run --locked`，否则运行 `cargo test --locked`。
+1. 删除计划模式及批量审查功能。
+2. 将运行元数据、审批响应和运行桥接改为按会话管理，暂时保持界面行为稳定。
+3. 抽取统一文件修改规划逻辑，接入审批预览与实际写入。
+4. 将审批交互迁移到持续 toast，聊天中只保留紧凑状态，diff 改为用户主动打开。
+5. 解除运行期间的会话切换限制，补齐后台 Chat、通知、停止和提交路由。
+6. 删除旧 API、冗余逻辑、翻译和文档，确认不存在兼容残留。
+7. 运行前端静态检查、类型检查和相关测试，最后运行完整前端测试。
+
+## 关键验证
+
+- 两个会话可以分别运行、等待审批和完成，状态互不覆盖。
+- 切换会话不会停止后台流式响应，也不会提前释放运行锁。
+- 同一 `approvalId` 出现在不同会话时仍能准确响应。
+- 关闭 AI 侧栏不影响运行和审批。
+- 文件 toast 不自动打开 diff；点击文件摘要后只打开一个对应 diff 标签。
+- 从 toast 或 diff 页审批都会更新同一请求，且只能响应一次。
+- 审批后文件发生变化时写入失败，不覆盖未审查内容。
+- 无 Git 目录中的 `write_file`、`edit` 和 `multi_edit` 可以正常预览与审批。
+- Chat LRU 不会驱逐运行中或等待审批的会话。
+- 搜索不到计划模式、单例审批 responder 和旧文件预览推导逻辑。
 
 ## 非目标
 
-- 本次不实现 index 与 HEAD 双 Quick Diff provider。
-- 本次不新增 gutter 点击后的 hunk stage/revert 菜单。
-- 本次不引入新的运行时依赖或后台 Git polling daemon。
-- 本次不修改 Git 会话、持久化设置格式或工作区授权模型。
+- 不实现轮末文件修改列表、历史 diff artifact 或修改撤销。
+- 不追踪 Shell 命令、外部进程或用户操作造成的文件变化。
+- 不新增 Git 依赖、工作区快照或文件系统沙箱。
+- 不改变 AI 会话 JSONL 格式和 Rust 会话锁协议。

@@ -1,6 +1,6 @@
 /**
- * 本文件管理 AI 聊天运行时、会话切换和两阶段持久化。
- * 用户消息在模型请求前落盘，完整 Assistant 与工具记录在终态追加。
+ * 本文件管理按会话隔离的 AI 运行状态、会话切换和两阶段持久化。
+ * 用户消息在模型请求前落盘，后台运行的完整 Assistant 与工具记录在终态追加。
  */
 
 import {
@@ -80,23 +80,26 @@ export type AgentMeta = {
   compactionNotice: { droppedCount: number; at: number } | null;
 };
 
-const ZERO_USAGE: AgentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
-};
+/** 创建独立的空闲运行状态，避免不同会话共享可变嵌套对象。 */
+export function createIdleAgentMeta(): AgentMeta {
+  return {
+    status: "idle",
+    step: null,
+    approvalsPending: 0,
+    error: null,
+    tokens: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+    },
+    lastInputTokens: 0,
+    lastCachedTokens: 0,
+    hitStepCap: false,
+    compactionNotice: null,
+  };
+}
 
-const IDLE_META: AgentMeta = {
-  status: "idle",
-  step: null,
-  approvalsPending: 0,
-  error: null,
-  tokens: ZERO_USAGE,
-  lastInputTokens: 0,
-  lastCachedTokens: 0,
-  hitStepCap: false,
-  compactionNotice: null,
-};
+const IDLE_AGENT_META = createIdleAgentMeta();
 
 export type PendingSelection = {
   id: string;
@@ -110,20 +113,9 @@ export type PendingFileAttachment = {
 
 export type AiPermissionMode = "ask" | "full-access";
 
-export type ApprovalResponder = (approvalId: string, approved: boolean) => void;
-
 type StoreState = {
   live: Live;
   setLive: (live: Live) => void;
-
-  /**
-   * Set by AgentRunBridge each render. Lets surfaces outside the chat hook
-   * tree (e.g. the AI diff tab in the editor area) resolve a pending tool
-   * approval through the active session's `addToolApprovalResponse`.
-   */
-  approvalResponder: ApprovalResponder | null;
-  setApprovalResponder: (fn: ApprovalResponder | null) => void;
-  respondToApproval: (approvalId: string, approved: boolean) => void;
 
   apiKeys: ProviderKeys;
   setApiKeys: (keys: ProviderKeys) => void;
@@ -150,9 +142,9 @@ type StoreState = {
   attachFile: (path: string) => void;
   consumeFileAttachments: () => PendingFileAttachment[];
 
-  agentMeta: AgentMeta;
-  patchAgentMeta: (patch: Partial<AgentMeta>) => void;
-  resetAgentMeta: () => void;
+  agentMetaBySession: Record<string, AgentMeta>;
+  patchAgentMeta: (sessionId: string, patch: Partial<AgentMeta>) => void;
+  resetAgentMeta: (sessionId: string) => void;
 
   // Sessions
   sessionsHydrated: boolean;
@@ -200,17 +192,22 @@ const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
 
-/** 更新聊天实例的 LRU 位置，并停止超出容量的非活动实例。 */
+/** 更新聊天实例的 LRU 位置，并只驱逐没有运行锁的非活动实例。 */
 export function touchChat(id: string, c: Chat<UIMessage>) {
   if (chats.has(id)) chats.delete(id);
   chats.set(id, c);
   while (chats.size > CHATS_LRU_CAP) {
-    const oldest = chats.keys().next().value;
-    if (!oldest || oldest === id) break;
-    if (useChatStore.getState().activeSessionId === oldest) break;
-    void chats.get(oldest)?.stop();
-    chats.delete(oldest);
-    sessionMetadata.delete(oldest);
+    const state = useChatStore.getState();
+    const candidate = [...chats.keys()].find(
+      (sessionId) =>
+        sessionId !== id &&
+        sessionId !== state.activeSessionId &&
+        !state.runLockSessionIds[sessionId],
+    );
+    if (!candidate) break;
+    void chats.get(candidate)?.stop();
+    chats.delete(candidate);
+    sessionMetadata.delete(candidate);
   }
 }
 // Initial messages for a session, populated at hydration time and consumed
@@ -241,7 +238,9 @@ async function seedSession(id: string): Promise<void> {
 
 /** 判断持久化会话是否属于当前 Workspace 进程。 */
 export function isSessionWritable(id: string): boolean {
-  const session = useChatStore.getState().sessions.find((item) => item.id === id);
+  const session = useChatStore
+    .getState()
+    .sessions.find((item) => item.id === id);
   return (
     !session ||
     session.environmentKey === currentWorkspaceBootstrap().environmentKey
@@ -251,13 +250,6 @@ export function isSessionWritable(id: string): boolean {
 export const useChatStore = create<StoreState>((set, get) => ({
   live: NOOP_LIVE,
   setLive: (live) => set({ live }),
-
-  approvalResponder: null,
-  setApprovalResponder: (fn) => set({ approvalResponder: fn }),
-  respondToApproval: (approvalId, approved) => {
-    const fn = get().approvalResponder;
-    if (fn) fn(approvalId, approved);
-  },
 
   apiKeys: { ...EMPTY_PROVIDER_KEYS },
   setApiKeys: (keys) => set({ apiKeys: keys }),
@@ -330,10 +322,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
     return v;
   },
 
-  agentMeta: IDLE_META,
-  patchAgentMeta: (patch) =>
-    set((s) => ({ agentMeta: { ...s.agentMeta, ...patch } })),
-  resetAgentMeta: () => set({ agentMeta: IDLE_META }),
+  agentMetaBySession: {},
+  patchAgentMeta: (sessionId, patch) =>
+    set((state) => ({
+      agentMetaBySession: {
+        ...state.agentMetaBySession,
+        [sessionId]: {
+          ...(state.agentMetaBySession[sessionId] ?? createIdleAgentMeta()),
+          ...patch,
+        },
+      },
+    })),
+  resetAgentMeta: (sessionId) =>
+    set((state) => ({
+      agentMetaBySession: {
+        ...state.agentMetaBySession,
+        [sessionId]: createIdleAgentMeta(),
+      },
+    })),
 
   sessionsHydrated: false,
   draftSessionId: null,
@@ -465,15 +471,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
   /** 切换到唯一的空白草稿，不为尚未发送的输入创建历史记录。 */
   newSession: () => {
     sessionSwitchSequence++;
-    const activeId = get().activeSessionId;
-    if (activeId && get().runLockSessionIds[activeId]) return activeId;
     const draftId = get().draftSessionId;
-    if (draftId) return draftId;
+    if (draftId) {
+      set({ activeSessionId: draftId });
+      return draftId;
+    }
     const id = newSessionId();
     set({
       draftSessionId: id,
       activeSessionId: id,
-      agentMeta: IDLE_META,
     });
     return id;
   },
@@ -566,14 +572,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const requestSequence = ++sessionSwitchSequence;
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
-    const activeId = get().activeSessionId;
-    if (activeId && get().runLockSessionIds[activeId]) return;
-
     // Lazily seed the chat with persisted messages the first time we open
     // this session. Subsequent switches reuse the cached Chat instance.
     const flip = () => {
       if (requestSequence !== sessionSwitchSequence) return;
-      set({ activeSessionId: id, draftSessionId: null, agentMeta: IDLE_META });
+      set({ activeSessionId: id, draftSessionId: null });
       void setWorkspaceValue("ai:activeSessionId", id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
@@ -591,7 +594,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   /** 删除一条历史会话，并在需要时回退到另一条历史或空白草稿。 */
   deleteSession: (id) => {
-    if (Object.keys(get().runLockSessionIds).length > 0) return;
+    if (get().runLockSessionIds[id]) return;
     sessionSwitchSequence++;
     void (async () => {
       try {
@@ -604,6 +607,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         persistedMessageCounts.delete(id);
         sessionMetadata.delete(id);
         pendingTurnIds.delete(id);
+        const agentMetaBySession = { ...get().agentMetaBySession };
+        delete agentMetaBySession[id];
         const wasActive = get().activeSessionId === id;
         const activeDraftId = get().draftSessionId;
         if (remaining.length === 0 && !wasActive && activeDraftId) {
@@ -612,6 +617,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
             sessions: [],
             draftSessionId: activeDraftId,
             activeSessionId: activeDraftId,
+            agentMetaBySession,
           });
           return;
         }
@@ -621,6 +627,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
             sessions: [],
             draftSessionId: draftId,
             activeSessionId: draftId,
+            agentMetaBySession,
           });
           return;
         }
@@ -642,6 +649,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
           sessions: remaining,
           draftSessionId: activeDraftId === nextActive ? activeDraftId : null,
           activeSessionId: nextActive,
+          agentMetaBySession,
         });
         if (wasActive)
           await setWorkspaceValue("ai:activeSessionId", nextActive);
@@ -683,7 +691,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         turnId: pendingTurnIds.get(id) ?? newTurnId(),
         turnStatus: cancelledRuns.has(id)
           ? "cancelled"
-          : get().agentMeta.status === "error"
+          : getAgentMetaForSession(get(), id).status === "error"
             ? "error"
             : "completed",
       });
@@ -752,8 +760,19 @@ export async function flushCompletedSessionRuns(): Promise<void> {
   if (firstFailure !== undefined) throw firstFailure;
 }
 
-export function getAgentMeta(): AgentMeta {
-  return useChatStore.getState().agentMeta;
+/** 读取指定会话的运行状态，尚未运行的会话按空闲状态处理。 */
+export function getAgentMetaForSession(
+  state: Pick<StoreState, "agentMetaBySession">,
+  sessionId: string | null,
+): AgentMeta {
+  return sessionId
+    ? (state.agentMetaBySession[sessionId] ?? IDLE_AGENT_META)
+    : IDLE_AGENT_META;
+}
+
+/** Zustand 选择器：读取当前活动会话的运行状态。 */
+export function selectActiveAgentMeta(state: StoreState): AgentMeta {
+  return getAgentMetaForSession(state, state.activeSessionId);
 }
 
 export function getActiveProviderKey(): string | null {
@@ -781,11 +800,10 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
   return id ? chats.get(id) : undefined;
 }
 
-export function stop(): void {
-  const id = useChatStore.getState().activeSessionId;
-  if (!id) return;
-  const chat = chats.get(id);
-  if (!chat) return;
-  cancelledRuns.add(id);
-  void chat.stop().catch(() => cancelledRuns.delete(id));
+/** 停止指定会话并标记本轮为用户取消，后台会话不会误停当前活动会话。 */
+export async function stopSession(sessionId: string): Promise<void> {
+  const chat = chats.get(sessionId);
+  if (!chat || !useChatStore.getState().runLockSessionIds[sessionId]) return;
+  cancelledRuns.add(sessionId);
+  await chat.stop();
 }

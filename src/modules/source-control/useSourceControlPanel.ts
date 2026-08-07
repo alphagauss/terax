@@ -15,7 +15,10 @@ import {
   type GitStatusSnapshot,
   native,
 } from "@/modules/ai/lib/native";
-import { useChatStore } from "@/modules/ai/store/chatStore";
+import {
+  selectActiveAgentMeta,
+  useChatStore,
+} from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SourceControlSummary } from "./useSourceControl";
@@ -270,7 +273,7 @@ export function useSourceControlPanel(
     | null,
 ): SourceControlPanelState {
   const selectedModelId = useChatStore((state) => state.selectedModelId);
-  const agentStatus = useChatStore((state) => state.agentMeta.status);
+  const agentStatus = useChatStore(selectActiveAgentMeta).status;
   const hasApiKeyForSelected = useChatStore((state) => {
     const model = resolveModel(state.selectedModelId);
     return !providerNeedsKey(model.provider) || !!state.apiKeys[model.provider];

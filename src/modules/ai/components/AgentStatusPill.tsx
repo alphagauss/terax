@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染当前 AI 会话的紧凑运行状态。
+ * 状态严格来自活动会话，不聚合后台会话。
+ */
+
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import {
@@ -8,7 +13,11 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import { useChatStore, type AgentMeta } from "../store/chatStore";
+import {
+  selectActiveAgentMeta,
+  useChatStore,
+  type AgentMeta,
+} from "../store/chatStore";
 
 type Props = {
   onClick: () => void;
@@ -17,7 +26,7 @@ type Props = {
 
 export function AgentStatusPill({ onClick, active = false }: Props) {
   const { t } = useTranslation("ai");
-  const meta = useChatStore((s) => s.agentMeta);
+  const meta = useChatStore(selectActiveAgentMeta);
   const { tone, icon, label } = describe(meta, t);
 
   return (
@@ -31,8 +40,12 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
           meta.status === "idle" &&
           "border-border bg-accent text-foreground",
       )}
-      title={active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")}
-      aria-label={active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")}
+      title={
+        active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")
+      }
+      aria-label={
+        active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")
+      }
       aria-pressed={active}
     >
       {icon}
