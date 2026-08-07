@@ -22,6 +22,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { type UIMessage, useChat } from "@ai-sdk/react";
 import {
   AlertCircleIcon,
@@ -79,10 +80,21 @@ const SUGGESTIONS = [
 export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const revision = useChatStore((s) => s.activeSessionRevision);
+  const readOnly = useChatStore((s) => {
+    const session = s.sessions.find((item) => item.id === s.activeSessionId);
+    return (
+      session !== undefined &&
+      session.environmentKey !== currentWorkspaceBootstrap().environmentKey
+    );
+  });
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-[12px]">
       {sessionId ? (
-        <Body key={`${sessionId}:${revision}`} sessionId={sessionId} />
+        <Body
+          key={`${sessionId}:${revision}`}
+          sessionId={sessionId}
+          readOnly={readOnly}
+        />
       ) : (
         <EmptyShell />
       )}
@@ -96,7 +108,13 @@ export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
   );
 }
 
-function Body({ sessionId }: { sessionId: string }) {
+function Body({
+  sessionId,
+  readOnly,
+}: {
+  sessionId: string;
+  readOnly: boolean;
+}) {
   const focusInput = useChatStore((s) => s.focusInput);
   const step = useChatStore((s) => s.agentMeta.step);
 
@@ -116,7 +134,7 @@ function Body({ sessionId }: { sessionId: string }) {
 
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 ? (
-          <EmptyState onPick={focusInput} />
+          <EmptyState onPick={focusInput} disabled={readOnly} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
             <AiChatView
@@ -481,7 +499,13 @@ function SessionRow({
   );
 }
 
-function EmptyState({ onPick }: { onPick: (text: string) => void }) {
+function EmptyState({
+  onPick,
+  disabled,
+}: {
+  onPick: (text: string) => void;
+  disabled: boolean;
+}) {
   const { t } = useTranslation("ai");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 py-10 text-center">
@@ -499,12 +523,14 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
           <button
             key={s.translationKey}
             type="button"
+            disabled={disabled}
             onClick={() =>
               onPick(t(`miniWindow.suggestions.${s.translationKey}.text`))
             }
             className={cn(
               "group flex items-center gap-2.5 bg-card/70 rounded-lg px-2.5 py-2 border border-border text-left",
               "transition-colors hover:bg-muted/50 hover:text-foreground",
+              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-card/70 disabled:hover:text-inherit",
             )}
           >
             <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground transition-colors group-hover:bg-foreground/5 group-hover:text-foreground">

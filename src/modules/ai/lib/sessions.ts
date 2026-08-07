@@ -1,6 +1,6 @@
 /**
  * 本文件封装 AI 会话的 Tauri IPC，并隔离磁盘 JSONL 与前端运行时类型。
- * 时间戳在 IPC 边界转换为 ISO 字符串，消息记录不直接依赖 AI SDK。
+ * 外层环境归属由 Rust 校验，内层业务 metadata 由前端解释，消息记录不直接依赖 AI SDK。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -8,12 +8,17 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SessionMessage } from "./sessionMessages";
 import type { Todo } from "./todos";
 
+/** Rust 不解释的会话业务 metadata，由前端按需扩展。 */
+export type SessionData = Record<string, unknown>;
+
 /** 前端列表使用的会话 metadata，时间统一为毫秒值。 */
 export type SessionMeta = {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  environmentKey: string;
+  metadata: SessionData;
   modifiedAt?: number;
   size?: number;
   fingerprint?: string;
@@ -22,14 +27,17 @@ export type SessionMeta = {
 /** IPC 封装对外提供的 SDK 无关会话文件。 */
 export type SessionFile = {
   id: string;
-  title: string;
   createdAt: number;
   updatedAt: number;
+  environmentKey: string;
+  metadata: SessionData;
   messages: SessionMessage[];
-  todos: Todo[];
 };
 
-type IpcSessionMeta = Omit<SessionMeta, "createdAt" | "updatedAt"> & {
+type IpcSessionMeta = Omit<
+  SessionMeta,
+  "title" | "createdAt" | "updatedAt"
+> & {
   createdAt: string;
   updatedAt: string;
 };
@@ -53,6 +61,11 @@ export async function readSession(id: string): Promise<SessionFile> {
     createdAt: parseTimestamp(session.createdAt),
     updatedAt: parseTimestamp(session.updatedAt),
   };
+}
+
+/** 从不透明 metadata 中读取待办列表，异常值按空列表处理。 */
+export function sessionTodos(metadata: SessionData): Todo[] {
+  return Array.isArray(metadata.todos) ? (metadata.todos as Todo[]) : [];
 }
 
 /** 提交本次新增记录，并取得原子替换后文件的真实 metadata。 */
@@ -129,6 +142,10 @@ export function mergeSessionMetadata(
 function fromIpcMeta(meta: IpcSessionMeta): SessionMeta {
   return {
     ...meta,
+    title:
+      typeof meta.metadata.title === "string"
+        ? meta.metadata.title
+        : "New chat",
     createdAt: parseTimestamp(meta.createdAt),
     updatedAt: parseTimestamp(meta.updatedAt),
   };

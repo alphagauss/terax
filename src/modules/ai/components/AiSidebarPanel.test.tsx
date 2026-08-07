@@ -15,6 +15,9 @@ const runtime = vi.hoisted(() => ({ chat: null as Chat<UIMessage> | null }));
 vi.mock("../store/chatRuntime", () => ({
   getOrCreateChat: () => runtime.chat,
 }));
+vi.mock("@/modules/workspace-process", () => ({
+  currentWorkspaceBootstrap: () => ({ environmentKey: "local" }),
+}));
 vi.mock("./AiChat", () => ({
   AiChatView: ({ messages }: { messages: UIMessage[] }) => (
     <div data-testid="messages">

@@ -27,6 +27,7 @@ vi.mock("../lib/sessions", async (importOriginal) => ({
 }));
 
 vi.mock("@/modules/workspace-process", () => ({
+  currentWorkspaceBootstrap: () => ({ environmentKey: "local" }),
   getWorkspaceValue: io.workspaceGet,
   setWorkspaceValue: io.workspaceSet,
 }));
@@ -50,6 +51,8 @@ const first: SessionMeta = {
   title: "First",
   createdAt: 1,
   updatedAt: 2,
+  environmentKey: "local",
+  metadata: { title: "First", todos: [] },
   fingerprint: "disk:1",
 };
 const second: SessionMeta = {
@@ -57,6 +60,8 @@ const second: SessionMeta = {
   title: "Second",
   createdAt: 1,
   updatedAt: 1,
+  environmentKey: "local",
+  metadata: { title: "Second", todos: [] },
   fingerprint: "disk:2",
 };
 const third: SessionMeta = {
@@ -64,16 +69,18 @@ const third: SessionMeta = {
   title: "Third",
   createdAt: 1,
   updatedAt: 0,
+  environmentKey: "local",
+  metadata: { title: "Third", todos: [] },
   fingerprint: "disk:3",
 };
 
 const sessionFile = (meta: SessionMeta) => ({
   id: meta.id,
-  title: meta.title,
   createdAt: meta.createdAt,
   updatedAt: meta.updatedAt,
+  environmentKey: meta.environmentKey,
+  metadata: meta.metadata,
   messages: [],
-  todos: [],
 });
 
 describe("chat store multi-process lifecycle", () => {
@@ -86,11 +93,17 @@ describe("chat store multi-process lifecycle", () => {
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
     io.commit.mockImplementation(
-      async (session: { id: string; title: string; updatedAt: number }) => ({
+      async (session: {
+        id: string;
+        metadata: { title: string };
+        updatedAt: number;
+      }) => ({
         id: session.id,
-        title: session.title,
+        title: session.metadata.title,
         createdAt: 1,
         updatedAt: session.updatedAt,
+        environmentKey: "local",
+        metadata: session.metadata,
         modifiedAt: 10,
         size: 20,
         fingerprint: "disk:committed",
@@ -264,6 +277,18 @@ describe("chat store multi-process lifecycle", () => {
     expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(true);
     expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
     expect(io.acquire).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a run owned by another workspace environment", async () => {
+    useChatStore.setState({
+      sessions: [{ ...first, environmentKey: "wsl:Ubuntu" }],
+      activeSessionId: first.id,
+    });
+
+    await expect(
+      useChatStore.getState().beginSessionRun(first.id),
+    ).resolves.toBe(false);
+    expect(io.acquire).not.toHaveBeenCalled();
   });
 
   it("keeps the active Chat after committing its own turn", async () => {

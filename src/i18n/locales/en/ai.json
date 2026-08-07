@@ -70,6 +70,7 @@
   },
   "composer": {
     "placeholder": "Ask Terax anything   -   # for snippets and commands, @ for files",
+    "foreignEnvironmentPlaceholder": "This session belongs to {{environment}} and is read-only in the current environment",
     "listening": "Listening…",
     "transcribing": "Transcribing…",
     "sessionBusy": "This session is still finishing another run.",

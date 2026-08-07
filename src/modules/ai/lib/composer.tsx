@@ -4,6 +4,7 @@
  */
 
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { invoke } from "@tauri-apps/api/core";
 import {
   createContext,
@@ -77,6 +78,8 @@ type ComposerCtx = {
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
   isBusy: boolean;
+  readOnly: boolean;
+  readOnlyEnvironmentKey: string | null;
   submit: () => void;
   stop: () => void;
   voice: Voice;
@@ -108,6 +111,15 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const runLocked = useChatStore((s) =>
     s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
   );
+  const sessionEnvironmentKey = useChatStore(
+    (s) =>
+      s.sessions.find((session) => session.id === s.activeSessionId)
+        ?.environmentKey,
+  );
+  const readOnly =
+    sessionEnvironmentKey !== undefined &&
+    sessionEnvironmentKey !== currentWorkspaceBootstrap().environmentKey;
+  const readOnlyEnvironmentKey = readOnly ? sessionEnvironmentKey : null;
   const isBusy = runLocked || status === "thinking" || status === "streaming";
 
   const [value, setValue] = useState("");
@@ -118,6 +130,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const attachFileByPath = useCallback(
     async (path: string) => {
+      if (readOnly) return;
       try {
         const workspace = currentWorkspaceEnv();
         const name = basename(path);
@@ -201,7 +214,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         toast.error(t("composer.attachFailed", { error: String(e) }));
       }
     },
-    [t],
+    [readOnly, t],
   );
 
   const focusSignal = useChatStore((s) => s.focusSignal);
@@ -213,22 +226,22 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const consumeFileAttachments = useChatStore((s) => s.consumeFileAttachments);
 
   useEffect(() => {
-    if (focusSignal === 0) return;
+    if (focusSignal === 0 || readOnly) return;
     textareaRef.current?.focus();
     if (pendingPrefill != null) {
       const text = consumePrefill();
       if (text) setValue((v) => (v ? `${text}${v}` : text));
     }
-  }, [focusSignal, pendingPrefill, consumePrefill]);
+  }, [focusSignal, pendingPrefill, consumePrefill, readOnly]);
 
   // Re-focus the textarea whenever the agent finishes a response
   const prevIsBusyRef = useRef(false);
   useEffect(() => {
-    if (prevIsBusyRef.current && !isBusy) {
+    if (prevIsBusyRef.current && !isBusy && !readOnly) {
       requestAnimationFrame(() => textareaRef.current?.focus());
     }
     prevIsBusyRef.current = isBusy;
-  }, [isBusy]);
+  }, [isBusy, readOnly]);
 
   useEffect(() => {
     if (pendingFileAttachments.length === 0) return;
@@ -241,7 +254,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   useEffect(() => {
     if (pendingSelections.length === 0) return;
     const drained = consumeSelections();
-    if (drained.length === 0) return;
+    if (drained.length === 0 || readOnly) return;
     setFiles((prev) => {
       const existing = new Set(prev.map((f) => f.id));
       const next: FileAttachment[] = [];
@@ -260,10 +273,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
       }
       return next.length ? [...prev, ...next] : prev;
     });
-  }, [pendingSelections, consumeSelections]);
+  }, [pendingSelections, consumeSelections, readOnly]);
 
   const voice = useWhisperRecording({
     onResult: (transcript: string) => {
+      if (readOnly) return;
       setValue((v) => (v ? `${v} ${transcript}` : transcript));
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
@@ -271,7 +285,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   /** 将文件选择或剪贴板中的文件转换为 Composer 附件。 */
   const addFiles = async (list: ComposerFiles | null) => {
-    if (!list) return;
+    if (!list || readOnly) return;
     const next: FileAttachment[] = [];
     for (const f of Array.from(list)) {
       const att = await readAttachment(f);
@@ -298,7 +312,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
   const submit = () => {
-    if (isBusy) return;
+    if (isBusy || readOnly) return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -429,6 +443,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
 
   const canSend =
     !isBusy &&
+    !readOnly &&
     (value.trim().length > 0 ||
       files.length > 0 ||
       pickedSnippets.length > 0 ||
@@ -449,6 +464,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     addCommand,
     removeCommand,
     isBusy,
+    readOnly,
+    readOnlyEnvironmentKey,
     submit,
     stop,
     voice,

@@ -4,6 +4,7 @@
  */
 
 import {
+  currentWorkspaceBootstrap,
   getWorkspaceValue,
   setWorkspaceValue,
 } from "@/modules/workspace-process";
@@ -39,6 +40,7 @@ import {
   newSessionId,
   readSession,
   releaseSessionRun,
+  sessionTodos,
   type SessionMeta,
 } from "../lib/sessions";
 import { useTodosStore } from "./todoStore";
@@ -218,7 +220,16 @@ async function seedSession(id: string): Promise<void> {
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   const { seedTodos } = await import("./todoStore");
-  seedTodos(id, session.todos);
+  seedTodos(id, sessionTodos(session.metadata));
+}
+
+/** 判断持久化会话是否属于当前 Workspace 进程。 */
+export function isSessionWritable(id: string): boolean {
+  const session = useChatStore.getState().sessions.find((item) => item.id === id);
+  return (
+    !session ||
+    session.environmentKey === currentWorkspaceBootstrap().environmentKey
+  );
 }
 
 export const useChatStore = create<StoreState>((set, get) => ({
@@ -252,11 +263,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   focusSignal: 0,
   pendingPrefill: null,
-  focusInput: (prefill = null) =>
+  focusInput: (prefill = null) => {
+    const activeId = get().activeSessionId;
+    if (activeId && !isSessionWritable(activeId)) return;
     set((s) => ({
       focusSignal: s.focusSignal + 1,
       pendingPrefill: prefill ?? null,
-    })),
+    }));
+  },
   consumePrefill: () => {
     const v = get().pendingPrefill;
     if (v != null) set({ pendingPrefill: null });
@@ -265,6 +279,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   pendingSelections: [],
   attachSelection: (text, source) => {
+    const activeId = get().activeSessionId;
+    if (activeId && !isSessionWritable(activeId)) return;
     const trimmed = text.trim();
     if (!trimmed) return;
     const id = `sel-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -284,6 +300,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   pendingFileAttachments: [],
   attachFile: (path) => {
+    const activeId = get().activeSessionId;
+    if (activeId && !isSessionWritable(activeId)) return;
     const trimmed = path.trim();
     if (!trimmed) return;
     set((s) => ({
@@ -408,6 +426,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
   /** 为一次新运行取得独占权；本进程已有运行或正在取锁时同样拒绝。 */
   beginSessionRun: async (id) => {
+    if (!isSessionWritable(id)) return false;
     if (get().runLockSessionIds[id] || acquiringSessionRuns.has(id)) {
       return false;
     }
@@ -445,11 +464,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
   promoteSession: (id, messages) => {
     if (get().sessions.some((session) => session.id === id)) return;
     const now = Date.now();
+    const title = deriveTitle(messages);
     const meta: SessionMeta = {
       id,
-      title: deriveTitle(messages),
+      title,
       createdAt: now,
       updatedAt: now,
+      environmentKey: currentWorkspaceBootstrap().environmentKey,
+      metadata: { title, todos: [] },
     };
     set({
       sessions: [meta, ...get().sessions],
@@ -585,11 +607,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       const committedMeta = await commitSession({
         id,
-        title,
         createdAt: meta.createdAt,
         updatedAt,
+        environmentKey: currentWorkspaceBootstrap().environmentKey,
+        metadata: {
+          ...meta.metadata,
+          title,
+          todos: useTodosStore.getState().bySession[id] ?? [],
+        },
         messages: records,
-        todos: useTodosStore.getState().bySession[id] ?? [],
       });
       persistedMessageCounts.set(id, messages.length);
       cancelledRuns.delete(id);
