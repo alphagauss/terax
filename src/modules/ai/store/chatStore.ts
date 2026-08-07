@@ -1,6 +1,6 @@
 /**
- * 本文件管理 AI 聊天运行时、会话切换和终态发布。
- * 会话在 UI 中使用 AI SDK 消息，磁盘侧通过独立记录模型只追加新 turn。
+ * 本文件管理 AI 聊天运行时、会话切换和两阶段持久化。
+ * 用户消息在模型请求前落盘，完整 Assistant 与工具记录在终态追加。
  */
 
 import {
@@ -41,21 +41,21 @@ import {
   readSession,
   releaseSessionRun,
   sessionTodos,
+  type SessionData,
   type SessionMeta,
 } from "../lib/sessions";
 import { useTodosStore } from "./todoStore";
 
 export type Live = {
-  getCwd: () => string | null;
+  explorerRoot: string | null;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
-  getWorkspaceRoot: () => string | null;
-  getActiveFile: () => string | null;
   openWebPreview: (url: string) => boolean;
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
+    cwd: string,
   ) => Promise<number | null>;
   readTerminalBuffer: (tabId: number) => string | null;
 };
@@ -170,19 +170,22 @@ type StoreState = {
   refreshSessions: () => Promise<void>;
   beginSessionRun: (id: string) => Promise<boolean>;
   newSession: () => string;
-  promoteSession: (id: string, messages: UIMessage[]) => void;
+  promoteSession: (id: string, messages: UIMessage[], cwd: string) => void;
+  persistSubmittedTurn: (
+    id: string,
+    messages: UIMessage[],
+    systemPrompt: string,
+  ) => Promise<void>;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
   commitMessages: (id: string, messages: UIMessage[]) => Promise<void>;
 };
 
 const NOOP_LIVE: Live = {
-  getCwd: () => null,
+  explorerRoot: null,
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
-  getWorkspaceRoot: () => null,
-  getActiveFile: () => null,
   openWebPreview: () => false,
   spawnManagedAgent: async () => null,
   readTerminalBuffer: () => null,
@@ -205,6 +208,7 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
     if (useChatStore.getState().activeSessionId === oldest) break;
     void chats.get(oldest)?.stop();
     chats.delete(oldest);
+    sessionMetadata.delete(oldest);
   }
 }
 // Initial messages for a session, populated at hydration time and consumed
@@ -212,6 +216,15 @@ export function touchChat(id: string, c: Chat<UIMessage>) {
 export const seedMessages = new Map<string, UIMessage[]>();
 /** 记录磁盘已提交的 UI 消息数量，用于只转换本次新增 turn。 */
 export const persistedMessageCounts = new Map<string, number>();
+/** 缓存已实际读取会话的完整 metadata，列表轮询只维护轻量摘要。 */
+export const sessionMetadata = new Map<string, SessionData>();
+/** 保存当前未结束 turn 的稳定 ID，发送前的用户记录与结束后的响应共用它。 */
+export const pendingTurnIds = new Map<string, string>();
+
+/** 创建不暴露存储格式细节的 turn ID。 */
+function newTurnId(): string {
+  return `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
 
 /** 读取磁盘记录，同时准备 UI 消息和待办事项的运行时种子。 */
 async function seedSession(id: string): Promise<void> {
@@ -219,6 +232,7 @@ async function seedSession(id: string): Promise<void> {
   const messages = projectSessionMessages(id, session.messages);
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
+  sessionMetadata.set(id, session.metadata);
   const { seedTodos } = await import("./todoStore");
   seedTodos(id, sessionTodos(session.metadata));
 }
@@ -372,6 +386,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         chats.delete(session.id);
         seedMessages.delete(session.id);
         persistedMessageCounts.delete(session.id);
+        sessionMetadata.delete(session.id);
+        pendingTurnIds.delete(session.id);
         await useTodosStore.getState().clearSession(session.id);
       }
 
@@ -461,7 +477,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   /** 用户消息进入 Chat 后，将对应草稿提升为可见的历史会话。 */
-  promoteSession: (id, messages) => {
+  promoteSession: (id, messages, cwd) => {
     if (get().sessions.some((session) => session.id === id)) return;
     const now = Date.now();
     const title = deriveTitle(messages);
@@ -471,8 +487,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
       environmentKey: currentWorkspaceBootstrap().environmentKey,
-      metadata: { title, todos: [] },
+      cwd,
     };
+    sessionMetadata.set(id, { title, todos: [] });
     set({
       sessions: [meta, ...get().sessions],
       draftSessionId: get().draftSessionId === id ? null : get().draftSessionId,
@@ -480,6 +497,66 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (get().activeSessionId === id) {
       void setWorkspaceValue("ai:activeSessionId", id);
     }
+  },
+
+  /**
+   * 在模型请求开始前持久化本轮用户消息和准确系统提示词。
+   *
+   * `persistedMessageCounts` 只前移连续的新用户消息。等待工具审批触发的自动续传
+   * 不会重复写入用户记录，后续完整 Assistant 消息仍由终态提交统一追加。
+   */
+  persistSubmittedTurn: async (id, messages, systemPrompt) => {
+    const meta = get().sessions.find((session) => session.id === id);
+    if (!meta) throw new Error("AI session metadata is unavailable");
+    const persistedCount = persistedMessageCounts.get(id) ?? 0;
+    if (messages.length < persistedCount) {
+      throw new Error(
+        "The UI message history is shorter than the session file",
+      );
+    }
+
+    const submittedUsers: UIMessage[] = [];
+    for (const message of messages.slice(persistedCount)) {
+      if (message.role !== "user") break;
+      submittedUsers.push(message);
+    }
+
+    let turnId = pendingTurnIds.get(id);
+    if (!turnId) {
+      turnId = newTurnId();
+      pendingTurnIds.set(id, turnId);
+    }
+    const updatedAt = Date.now();
+    const title =
+      !meta.title || meta.title === "New chat"
+        ? deriveTitle(messages)
+        : meta.title;
+    const metadata: SessionData = {
+      ...(sessionMetadata.get(id) ?? {}),
+      title,
+      todos: useTodosStore.getState().bySession[id] ?? [],
+      systemPrompt,
+    };
+    sessionMetadata.set(id, metadata);
+    const committedMeta = await commitSession({
+      id,
+      createdAt: meta.createdAt,
+      updatedAt,
+      environmentKey: currentWorkspaceBootstrap().environmentKey,
+      cwd: meta.cwd,
+      metadata,
+      messages: serializeSessionMessages(submittedUsers, {
+        timestamp: new Date(updatedAt).toISOString(),
+        turnId,
+      }),
+    });
+    persistedMessageCounts.set(id, persistedCount + submittedUsers.length);
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === id ? committedMeta : session,
+      ),
+      sessionSyncError: null,
+    });
   },
 
   /** 切换到已持久化会话，并放弃当前未发送草稿的会话身份。 */
@@ -523,6 +600,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         chats.delete(id);
         seedMessages.delete(id);
         persistedMessageCounts.delete(id);
+        sessionMetadata.delete(id);
+        pendingTurnIds.delete(id);
         const wasActive = get().activeSessionId === id;
         const activeDraftId = get().draftSessionId;
         if (remaining.length === 0 && !wasActive && activeDraftId) {
@@ -580,6 +659,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       if (!meta) return;
       if (messages.length === 0 && meta.title === "New chat") {
         await releaseSessionRun(id);
+        pendingTurnIds.delete(id);
         const runLockSessionIds = { ...get().runLockSessionIds };
         delete runLockSessionIds[id];
         set({ runLockSessionIds });
@@ -598,7 +678,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       }
       const records = serializeSessionMessages(messages.slice(persistedCount), {
         timestamp: new Date(updatedAt).toISOString(),
-        turnId: `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+        turnId: pendingTurnIds.get(id) ?? newTurnId(),
         turnStatus: cancelledRuns.has(id)
           ? "cancelled"
           : get().agentMeta.status === "error"
@@ -610,8 +690,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
         createdAt: meta.createdAt,
         updatedAt,
         environmentKey: currentWorkspaceBootstrap().environmentKey,
+        cwd: meta.cwd,
         metadata: {
-          ...meta.metadata,
+          ...(sessionMetadata.get(id) ?? {}),
           title,
           todos: useTodosStore.getState().bySession[id] ?? [],
         },
@@ -619,6 +700,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       persistedMessageCounts.set(id, messages.length);
       cancelledRuns.delete(id);
+      pendingTurnIds.delete(id);
       set({
         sessions: get().sessions.map((session) =>
           session.id === id ? committedMeta : session,

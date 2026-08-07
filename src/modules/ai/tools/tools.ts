@@ -1,3 +1,8 @@
+/**
+ * 本文件组合 AI 可调用的工具集合。
+ * 所有文件与 Shell 相对路径由具体工具统一基于会话固定工作目录解析。
+ */
+
 import { buildManagedAgentTools } from "./agent";
 import { buildEditTools } from "./edit";
 import { buildFsTools } from "./fs";
@@ -10,23 +15,11 @@ import { buildTodoTools } from "./todo";
 export { resolvePath, type ToolContext } from "./context";
 
 /**
- * AI tool definitions.
+ * 构建当前会话的完整工具集合。
  *
- * Approval policy:
- *  - Read-only tools (`read_file`, `list_directory`, `grep`, `glob`)
- *    auto-execute, but go through the security guard which refuses obvious
- *    secret paths (.env*, .ssh/, credentials, etc.).
- *  - Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`,
- *    `run_command`) require explicit user approval — the AI SDK pauses on
- *    tool-call and surfaces a `tool-approval-request` part that the UI
- *    renders as a confirmation card.
- *  - `edit` / `multi_edit` additionally enforce a read-before-edit invariant
- *    (the model must have called read_file on the path earlier in the
- *    session).
- *
- * The model sees absolute paths only after they are resolved against the
- * active terminal's cwd (provided via `getCwd`); it should not invent paths
- * outside that.
+ * 只读工具经过秘密路径拦截后自动执行，写入与命令工具必须取得用户批准。
+ * 编辑工具额外要求模型先读取目标文件。各工具取得的 `getCwd` 始终指向
+ * 会话首次发送时冻结的目录，不受标签页或 Explorer 后续切换影响。
  */
 export function buildTools(ctx: import("./context").ToolContext) {
   return {

@@ -32,7 +32,7 @@ export function buildFsTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Absolute path, or relative to the active terminal cwd."),
+          .describe("Absolute path, or relative to the session working directory."),
         offset: z
           .number()
           .int()
@@ -121,7 +121,7 @@ export function buildFsTools(ctx: ToolContext) {
       inputSchema: z.object({
         path: z
           .string()
-          .describe("Absolute path, or relative to the active terminal cwd."),
+          .describe("Absolute path, or relative to the session working directory."),
       }),
       execute: async ({ path }) => {
         const reqPath = resolvePath(path, ctx.getCwd());

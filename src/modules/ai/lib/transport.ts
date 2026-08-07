@@ -1,6 +1,6 @@
 /**
  * 本文件连接聊天 UI 与 Agent 流式运行时。
- * 每次发送前注入实时终端环境和工作区项目指令，保持模型上下文与当前界面一致。
+ * 会话消息保持原样发送，项目指令和固定工作目录只进入系统提示词。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -11,20 +11,13 @@ import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { readAgentsMd } from "./projectInstructions";
 import type { ToolContext } from "../tools/tools";
 
-type LiveSnapshot = {
-  cwd: string | null;
-  terminalPrivate: boolean;
-  workspaceRoot: string | null;
-  activeFile: string | null;
-};
-
 type Deps = {
   getKeys: () => ProviderKeys;
   toolContext: ToolContext;
   getModelId: () => string;
   getCustomInstructions: () => string;
   getAgentPersona: () => { name: string; instructions: string } | null;
-  getLive: () => LiveSnapshot;
+  getCwd: () => string;
   getLmstudioBaseURL?: () => string | undefined;
   getLmstudioModelId?: () => string | undefined;
   getMlxBaseURL?: () => string | undefined;
@@ -41,6 +34,10 @@ type Deps = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onSystemPrompt?: (
+    systemPrompt: string,
+    messages: UIMessage[],
+  ) => void | Promise<void>;
   getPlanMode?: () => boolean;
 };
 
@@ -51,18 +48,14 @@ type SendOptions = {
 };
 
 /**
- * 创建能够注入实时环境和项目指令的聊天传输层。
+ * 创建只从真实会话消息和固定会话环境构造请求的聊天传输层。
  *
- * 每次发送前读取工作区根目录的 AGENTS.md，读取结果由底层短暂缓存。
+ * 每次发送前从会话 cwd 读取 AGENTS.md，读取结果由底层短暂缓存。
  */
-export function createContextAwareTransport(deps: Deps) {
+export function createSessionTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
-    const live = deps.getLive();
-    const projectInstructions = await readAgentsMd(live.workspaceRoot);
-    const envBlock = formatEnvBlock(live);
-    const messagesForRun = envBlock
-      ? injectEnvIntoLastUser(options.messages, envBlock)
-      : options.messages;
+    const cwd = deps.getCwd();
+    const projectInstructions = await readAgentsMd(cwd);
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
@@ -73,6 +66,7 @@ export function createContextAwareTransport(deps: Deps) {
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
+      onSystemPrompt: deps.onSystemPrompt,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
       lmstudioModelId: deps.getLmstudioModelId?.(),
       mlxBaseURL: deps.getMlxBaseURL?.(),
@@ -86,8 +80,9 @@ export function createContextAwareTransport(deps: Deps) {
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
       planMode: deps.getPlanMode?.(),
+      cwd,
       projectInstructions,
-      uiMessages: messagesForRun,
+      uiMessages: options.messages,
       abortSignal: options.abortSignal,
     });
     return result.toUIMessageStream({
@@ -102,51 +97,4 @@ export function createContextAwareTransport(deps: Deps) {
       return null;
     },
   };
-}
-
-function injectEnvIntoLastUser(
-  messages: UIMessage[],
-  envBlock: string,
-): UIMessage[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const parts = m.parts as ReadonlyArray<{ type: string; text?: string }>;
-    let textIdx = -1;
-    for (let j = 0; j < parts.length; j++) {
-      if (parts[j].type === "text") {
-        textIdx = j;
-        break;
-      }
-    }
-    const nextParts =
-      textIdx === -1
-        ? [{ type: "text", text: envBlock }, ...parts]
-        : parts.map((p, idx) =>
-            idx === textIdx
-              ? { ...p, text: `${envBlock}\n\n${p.text ?? ""}` }
-              : p,
-          );
-    const out = messages.slice();
-    out[i] = { ...m, parts: nextParts } as UIMessage;
-    return out;
-  }
-  return messages;
-}
-
-function formatEnvBlock(live: LiveSnapshot): string | null {
-  const lines: string[] = [];
-  if (live.workspaceRoot) lines.push(`workspace_root: ${live.workspaceRoot}`);
-  if (live.cwd) lines.push(`active_terminal_cwd: ${live.cwd}`);
-  if (live.activeFile) lines.push(`active_file: ${live.activeFile}`);
-  if (live.terminalPrivate) lines.push("active_terminal_mode: private");
-  if (lines.length === 0) return null;
-  return `<env>\n${lines.join("\n")}\n</env>`;
-}
-
-export const CONTEXT_BLOCK_RE =
-  /^<terminal-context[^>]*>[\s\S]*?<\/terminal-context>\n*/;
-
-export function stripContextBlock(text: string): string {
-  return text.replace(CONTEXT_BLOCK_RE, "");
 }

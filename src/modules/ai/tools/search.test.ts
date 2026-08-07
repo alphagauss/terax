@@ -27,7 +27,6 @@ const toolOptions: ToolExecutionOptions = {
 function makeContext(): ToolContext {
   return {
     getCwd: () => "/workspace",
-    getWorkspaceRoot: () => "/workspace",
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,

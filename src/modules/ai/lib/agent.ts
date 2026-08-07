@@ -313,11 +313,13 @@ Mutating tools (write_file, edit, multi_edit, create_directory) will queue their
  */
 function buildStableSystem(
   modelId: string,
+  cwd: string,
   persona: { name: string; instructions: string } | null,
   customInstructions: string | undefined,
   projectInstructions: string | null,
 ): string {
   const base = selectSystemPrompt(modelId);
+  const environmentBlock = `\n\n## SESSION ENVIRONMENT\nWorking directory: ${cwd}\nResolve every relative tool path against this directory. The directory is fixed for the lifetime of this session.`;
   const personaBlock = persona?.instructions.trim()
     ? `\n\n## ACTIVE AGENT — ${persona.name}\n${persona.instructions.trim()}`
     : "";
@@ -328,7 +330,7 @@ function buildStableSystem(
     projectInstructions && projectInstructions.trim().length > 0
       ? `\n\n## PROJECT INSTRUCTIONS: AGENTS.md\n${projectInstructions.trim()}`
       : "";
-  return `${base}${instructionsBlock}${personaBlock}${customBlock}`;
+  return `${base}${environmentBlock}${instructionsBlock}${personaBlock}${customBlock}`;
 }
 
 export type AgentUsage = {
@@ -351,6 +353,7 @@ const EMPTY_USAGE: AgentUsage = {
 export type RunAgentOptions = {
   keys: ProviderKeys;
   modelId?: string;
+  cwd: string;
   customInstructions?: string;
   agentPersona?: { name: string; instructions: string } | null;
   toolContext: ToolContext;
@@ -358,6 +361,10 @@ export type RunAgentOptions = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onSystemPrompt?: (
+    systemPrompt: string,
+    messages: UIMessage[],
+  ) => void | Promise<void>;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
   mlxBaseURL?: string;
@@ -379,32 +386,26 @@ export type RunAgentOptions = {
 /**
  * 使用当前模型配置启动一次 Agent 流式响应。
  *
- * 项目指令在消息转换前进入稳定系统提示词，不会作为用户消息参与历史裁剪。
+ * 项目指令在消息转换前进入稳定系统提示词。模型初始化前等待调用方持久化
+ * 用户消息和完整提示词，确保磁盘成功后才开始远端请求。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
-  const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
-    lmstudioBaseURL: opts.lmstudioBaseURL,
-    lmstudioModelId: opts.lmstudioModelId,
-    mlxBaseURL: opts.mlxBaseURL,
-    mlxModelId: opts.mlxModelId,
-    ollamaBaseURL: opts.ollamaBaseURL,
-    ollamaModelId: opts.ollamaModelId,
-    openaiCompatibleBaseURL: opts.openaiCompatibleBaseURL,
-    openaiCompatibleModelId: opts.openaiCompatibleModelId,
-    openrouterModelId: opts.openrouterModelId,
-    customEndpoints: opts.customEndpoints,
-    customEndpointKeys: opts.customEndpointKeys,
-  });
   const endpoints = opts.customEndpoints ?? [];
   const info = resolveModel(modelId, endpoints);
   const provider = info.provider;
 
   const stableSystem = buildStableSystem(
     modelId,
+    opts.cwd,
     opts.agentPersona ?? null,
     opts.customInstructions,
     opts.projectInstructions ?? null,
+  );
+  const planInstructions = opts.planMode ? PLAN_MODE_PROMPT : null;
+  await opts.onSystemPrompt?.(
+    planInstructions ? `${stableSystem}\n\n${planInstructions}` : stableSystem,
+    opts.uiMessages,
   );
 
   const history = await convertToModelMessages(opts.uiMessages);
@@ -429,10 +430,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   const prompt = prepareAgentPrompt(
     stableSystem,
-    opts.planMode ? PLAN_MODE_PROMPT : null,
+    planInstructions,
     compactedHistory,
     provider,
   );
+  const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
+    lmstudioBaseURL: opts.lmstudioBaseURL,
+    lmstudioModelId: opts.lmstudioModelId,
+    mlxBaseURL: opts.mlxBaseURL,
+    mlxModelId: opts.mlxModelId,
+    ollamaBaseURL: opts.ollamaBaseURL,
+    ollamaModelId: opts.ollamaModelId,
+    openaiCompatibleBaseURL: opts.openaiCompatibleBaseURL,
+    openaiCompatibleModelId: opts.openaiCompatibleModelId,
+    openrouterModelId: opts.openrouterModelId,
+    customEndpoints: opts.customEndpoints,
+    customEndpointKeys: opts.customEndpointKeys,
+  });
 
   let stepsSeen = 0;
   return streamText({

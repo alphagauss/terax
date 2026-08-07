@@ -46,7 +46,7 @@
     "deleteSession": "删除会话",
     "empty": {
       "title": "向 Terax 提问",
-      "description": "Terax 能看到当前活动的终端：cwd、最近的命令和输出。"
+      "description": "Terax 在文件管理器目录中工作，仅在需要时读取终端输出。"
     }
   },
   "toolApproval": {
@@ -74,6 +74,7 @@
     "listening": "正在聆听…",
     "transcribing": "正在转写…",
     "sessionBusy": "此会话仍在完成上一轮运行。",
+    "workingDirectory": "工作目录：{{path}}",
     "connectDescription": "连接任意 AI 提供方或使用本地模型。密钥只保存在系统钥匙串中。",
     "connectProvider": "连接提供方",
     "fileTooLarge": "{{name}} 太大，无法附加（{{size}}）。",

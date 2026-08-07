@@ -9,7 +9,7 @@ import { z } from "zod";
 import { native } from "../lib/native";
 import { checkShellCommand } from "../lib/security";
 import { useChatStore } from "../store/chatStore";
-import type { ToolContext } from "./context";
+import { resolvePath, type ToolContext } from "./context";
 
 /**
  * Per-session lazy shell-session id. The agent gets one persistent shell per
@@ -84,8 +84,10 @@ export function buildShellTools(ctx: ToolContext) {
       execute: async ({ command, cwd }) => {
         const safety = checkShellCommand(command);
         if (!safety.ok) return { error: safety.reason };
-        const effectiveCwd = cwd ?? ctx.getCwd();
         try {
+          const effectiveCwd = cwd
+            ? resolvePath(cwd, ctx.getCwd())
+            : ctx.getCwd();
           const handle = await native.shellBgSpawn(command, effectiveCwd);
           return { handle, command, cwd: effectiveCwd, ok: true };
         } catch (e) {

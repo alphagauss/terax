@@ -1,6 +1,6 @@
 /**
  * 本文件把当前 Workbench 的实时上下文桥接到 AI 会话。
- * Agent 终端按需初始化 Workspace 环境，敏感终端内容不会进入 AI 上下文。
+ * Explorer 根目录只供草稿展示，历史会话路径由会话自身固定保存。
  */
 
 import { useManagedAgentsStore } from "@/modules/agents/store/managedAgentsStore";
@@ -36,8 +36,6 @@ type Params = {
   activeId: number;
   tabs: Tab[];
   explorerRoot: string | null;
-  launchCwd: string | null;
-  home: string | null;
   openWebPreviewTab: (url: string) => void;
   newAgentTab: (cwd: string | undefined, title: string) => number;
   ensureWorkspaceReady: () => Promise<string | null>;
@@ -45,8 +43,8 @@ type Params = {
 };
 
 /**
- * 将 cwd、终端缓冲区、活动文件和 Agent 启动能力发布到聊天运行时。
- * live getter 通过 ref 读取最新状态，避免终端 OSC cwd 更新反复重建桥接对象。
+ * 将 Explorer 根目录、终端缓冲区和 Agent 启动能力发布到聊天运行时。
+ * 终端 getter 通过 ref 读取最新状态，避免终端更新反复重建桥接对象。
  */
 export function useAiLiveBridge(params: Params) {
   const { setLive, terminalRefs } = params;
@@ -54,22 +52,8 @@ export function useAiLiveBridge(params: Params) {
   ref.current = params;
 
   useEffect(() => {
-    const findCwd = () => {
-      const { activeId, tabs, explorerRoot, launchCwd, home } = ref.current;
-      const active = tabs.find((x) => x.id === activeId);
-      if (active?.kind === "terminal") {
-        return active.cwd ?? null;
-      }
-      for (let i = tabs.length - 1; i >= 0; i--) {
-        const t = tabs[i];
-        if (t.kind !== "terminal") continue;
-        if (t.cwd) return t.cwd;
-      }
-      return explorerRoot ?? launchCwd ?? home ?? null;
-    };
-
     setLive({
-      getCwd: findCwd,
+      explorerRoot: params.explorerRoot,
       getTerminalContext: () => {
         const { activeId, tabs } = ref.current;
         const t = tabs.find((x) => x.id === activeId);
@@ -93,26 +77,20 @@ export function useAiLiveBridge(params: Params) {
         term.focus();
         return true;
       },
-      getWorkspaceRoot: () => {
-        const { explorerRoot, launchCwd, home } = ref.current;
-        return explorerRoot ?? launchCwd ?? home ?? null;
-      },
-      getActiveFile: () => {
-        const { activeId, tabs } = ref.current;
-        const t = tabs.find((x) => x.id === activeId);
-        return t?.kind === "editor" ? t.path : null;
-      },
       openWebPreview: (url: string) => {
         ref.current.openWebPreviewTab(url);
         return true;
       },
-      spawnManagedAgent: async (prompt: string, sessionId: string) => {
+      spawnManagedAgent: async (
+        prompt: string,
+        sessionId: string,
+        cwd: string,
+      ) => {
         const trimmed = prompt.trim();
         if (!trimmed) return null;
         const readyHome = await ref.current.ensureWorkspaceReady();
         if (!readyHome) return null;
         const oneLine = trimmed.replace(/\s*\r?\n\s*/g, " ");
-        const cwd = findCwd() ?? readyHome;
         const short =
           oneLine.length > 32 ? `${oneLine.slice(0, 32)}…` : oneLine;
         const tabId = ref.current.newAgentTab(cwd, `claude · ${short}`);
@@ -156,5 +134,5 @@ export function useAiLiveBridge(params: Params) {
         return buf ? redactSensitive(buf) : null;
       },
     });
-  }, [setLive, terminalRefs]);
+  }, [params.explorerRoot, setLive, terminalRefs]);
 }

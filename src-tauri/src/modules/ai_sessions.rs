@@ -1,10 +1,11 @@
 //! AI 会话 JSONL 文件的读取、发布和跨进程运行锁管理。
 //!
 //! 每个会话使用一个文件，首行固定为 metadata，后续每行是一条 SDK 无关的消息记录。
-//! Rust 校验外层环境归属，内层业务 metadata 保持不透明。完整 turn 结束后原子替换文件，
-//! 运行锁确保两个进程不能同时续写同一会话。
+//! Rust 校验外层环境归属和不可变 cwd，列表只投影摘要，内层业务 metadata 保持不透明。
+//! 用户消息与终态记录分阶段原子追加，运行锁确保两个进程不能同时续写同一会话。
 
 use crate::modules::storage::{write_atomic, FileLock};
+use crate::modules::workspace::{authorize_user_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashMap;
@@ -28,19 +29,21 @@ pub struct SessionFile {
     pub created_at: String,
     pub updated_at: String,
     pub environment_key: String,
+    pub cwd: String,
     pub metadata: Map<String, Value>,
     pub messages: Vec<Value>,
 }
 
-/// 会话列表使用的轻量 metadata 和文件指纹。
+/// 会话列表轮询使用的显式摘要，不携带完整业务 metadata。
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMetadata {
     pub id: String,
+    pub title: String,
     pub created_at: String,
     pub updated_at: String,
     pub environment_key: String,
-    pub metadata: Map<String, Value>,
+    pub cwd: String,
     pub modified_at: u64,
     pub size: u64,
     pub fingerprint: String,
@@ -54,6 +57,7 @@ struct SessionFileHeader {
     created_at: String,
     updated_at: String,
     environment_key: String,
+    cwd: String,
     metadata: Map<String, Value>,
 }
 
@@ -94,6 +98,9 @@ fn validate_session_file(session: &SessionFile) -> Result<Uuid, String> {
     if session.environment_key.is_empty() {
         return Err("session environmentKey must not be empty".to_string());
     }
+    if session.cwd.trim().is_empty() {
+        return Err("session cwd must not be empty".to_string());
+    }
     for (index, message) in session.messages.iter().enumerate() {
         if !message.is_object() {
             return Err(format!("message line {} must be a JSON object", index + 2));
@@ -113,6 +120,9 @@ fn validate_header(header: &SessionFileHeader, expected_id: Uuid) -> Result<(), 
     }
     if header.environment_key.is_empty() {
         return Err("session environmentKey must not be empty".to_string());
+    }
+    if header.cwd.trim().is_empty() {
+        return Err("session cwd must not be empty".to_string());
     }
     validate_timestamps(&header.created_at, &header.updated_at)
 }
@@ -174,6 +184,7 @@ fn read_session(root: &Path, id: Uuid) -> Result<SessionFile, String> {
         created_at: header.created_at,
         updated_at: header.updated_at,
         environment_key: header.environment_key,
+        cwd: header.cwd,
         metadata: header.metadata,
         messages,
     })
@@ -189,6 +200,7 @@ fn write_session(root: &Path, session: &SessionFile) -> Result<(), String> {
         created_at: session.created_at.clone(),
         updated_at: session.updated_at.clone(),
         environment_key: session.environment_key.clone(),
+        cwd: session.cwd.clone(),
         metadata: session.metadata.clone(),
     };
     let mut bytes = Vec::new();
@@ -220,6 +232,9 @@ fn commit_session(
         if existing.created_at != update.created_at {
             return Err("session createdAt does not match existing file".to_string());
         }
+        if existing.cwd != update.cwd {
+            return Err("session cwd must not change".to_string());
+        }
         existing.messages
     } else {
         Vec::new()
@@ -247,12 +262,19 @@ fn metadata(root: &Path, id: Uuid) -> Result<SessionMetadata, String> {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default();
     let size = info.len();
+    let title = header
+        .metadata
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("New chat")
+        .to_string();
     Ok(SessionMetadata {
         id: header.key,
+        title,
         created_at: header.created_at,
         updated_at: header.updated_at,
         environment_key: header.environment_key,
-        metadata: header.metadata,
+        cwd: header.cwd,
         modified_at,
         size,
         fingerprint: format!("{modified_at}:{size}"),
@@ -326,7 +348,9 @@ fn commit_with_run_lock(
     commit_session(root, session, environment_key)
 }
 
-/// 将新增记录提交到 AI 会话并返回最新 metadata，拒绝写入其他进程正在运行的会话。
+/// 将新增记录提交到 AI 会话并返回最新摘要。
+///
+/// 新会话 cwd 来自已授权的 Explorer 根目录；历史会话仍由不可变校验防止换根。
 #[tauri::command]
 pub fn ai_session_commit(
     state: State<'_, AiSessionsState>,
@@ -337,6 +361,16 @@ pub fn ai_session_commit(
     session.environment_key = environment_key.clone();
     let id = validate_session_file(&session)?;
     let root = sessions_dir()?;
+    let path = session_path(&root, id);
+    if path.exists() {
+        let header = read_header(&path, id)?;
+        if header.environment_key != environment_key {
+            return Err("session belongs to another workspace environment".to_string());
+        }
+        if header.cwd != session.cwd {
+            return Err("session cwd must not change".to_string());
+        }
+    }
     commit_with_run_lock(&root, state.inner(), id, &session, &environment_key)
 }
 
@@ -364,14 +398,17 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
     }
 }
 
-/// 尝试为一次 AI 运行取得跨进程锁，重复取得同一锁视为成功。
-#[tauri::command]
-pub fn ai_session_run_acquire(
-    state: State<'_, AiSessionsState>,
-    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
-    id: String,
+/// 取得会话运行锁，并恢复历史会话固定 cwd 对应的 Workspace 授权。
+///
+/// 历史 cwd 只从已校验的会话首行读取并恢复授权，因此这里不接受前端额外传入路径。
+fn acquire_session_run(
+    root: &Path,
+    state: &AiSessionsState,
+    registry: &WorkspaceRegistry,
+    id: Uuid,
+    environment_key: &str,
+    workspace: &WorkspaceEnv,
 ) -> Result<bool, String> {
-    let id = strict_uuid(&id)?;
     let mut locks = state
         .run_locks
         .lock()
@@ -379,21 +416,42 @@ pub fn ai_session_run_acquire(
     if locks.contains_key(&id) {
         return Ok(true);
     }
-    let root = sessions_dir()?;
-    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let Some(lock) =
-        FileLock::try_acquire(&lock_path(&root, id)).map_err(|error| error.to_string())?
+        FileLock::try_acquire(&lock_path(root, id)).map_err(|error| error.to_string())?
     else {
         return Ok(false);
     };
-    let path = session_path(&root, id);
-    if path.exists()
-        && read_header(&path, id)?.environment_key != workspace_state.bootstrap().environment_key
-    {
-        return Ok(false);
+    let path = session_path(root, id);
+    if path.exists() {
+        let header = read_header(&path, id)?;
+        if header.environment_key != environment_key {
+            return Ok(false);
+        }
+        authorize_user_spawn_cwd(registry, Some(&header.cwd), workspace)?;
     }
     locks.insert(id, lock);
     Ok(true)
+}
+
+/// 尝试为一次 AI 运行取得跨进程锁，重复取得同一锁视为成功。
+#[tauri::command]
+pub fn ai_session_run_acquire(
+    state: State<'_, AiSessionsState>,
+    registry: State<'_, WorkspaceRegistry>,
+    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
+    id: String,
+) -> Result<bool, String> {
+    let id = strict_uuid(&id)?;
+    let bootstrap = workspace_state.bootstrap();
+    acquire_session_run(
+        &sessions_dir()?,
+        state.inner(),
+        registry.inner(),
+        id,
+        &bootstrap.environment_key,
+        &bootstrap.env,
+    )
 }
 
 /// 释放当前进程持有的 AI 会话运行锁。
@@ -435,6 +493,7 @@ mod tests {
             created_at: "2026-07-26T10:00:00.000Z".to_string(),
             updated_at: "2026-07-26T10:00:01.000Z".to_string(),
             environment_key: "local".to_string(),
+            cwd: "D:/workspace/project".to_string(),
             metadata: serde_json::from_value(json!({
                 "title": title,
                 "todos": [{"id": "todo", "title": "test", "status": "pending"}]
@@ -518,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn list_reads_only_metadata() {
+    fn list_returns_summary_without_reading_messages_or_inspection_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
         fs::write(
@@ -531,8 +590,10 @@ mod tests {
                     created_at: "2026-07-26T10:00:00.000Z".to_string(),
                     updated_at: "2026-07-26T10:00:01.000Z".to_string(),
                     environment_key: "local".to_string(),
+                    cwd: "D:/workspace/project".to_string(),
                     metadata: serde_json::from_value(json!({
-                        "title": "metadata only"
+                        "title": "metadata only",
+                        "systemPrompt": "large inspection-only value"
                     }))
                     .unwrap(),
                 })
@@ -543,7 +604,11 @@ mod tests {
 
         let sessions = list_sessions(dir.path()).unwrap();
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].metadata["title"], "metadata only");
+        assert_eq!(sessions[0].title, "metadata only");
+        assert!(serde_json::to_value(&sessions[0])
+            .unwrap()
+            .get("metadata")
+            .is_none());
         assert!(read_session(dir.path(), id).is_err());
     }
 
@@ -584,6 +649,47 @@ mod tests {
         assert_eq!(stored.environment_key, "local");
         assert_eq!(stored.metadata["title"], "local");
         assert_eq!(stored.messages.len(), 1);
+    }
+
+    #[test]
+    fn refuses_to_change_a_session_working_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        commit_session(dir.path(), &session(id, "local"), "local").unwrap();
+
+        let mut moved = session(id, "moved");
+        moved.cwd = "D:/workspace/other".to_string();
+        assert!(commit_session(dir.path(), &moved, "local").is_err());
+
+        let stored = read_session(dir.path(), id).unwrap();
+        assert_eq!(stored.cwd, "D:/workspace/project");
+        assert_eq!(stored.metadata["title"], "local");
+    }
+
+    #[test]
+    fn acquiring_a_saved_session_restores_its_cwd_authorization() {
+        let sessions = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut saved = session(id, "saved");
+        saved.cwd = workspace.path().to_string_lossy().into_owned();
+        commit_session(sessions.path(), &saved, "local").unwrap();
+
+        let state = AiSessionsState::default();
+        let registry = WorkspaceRegistry::default();
+        let canonical = fs::canonicalize(workspace.path()).unwrap();
+        assert!(!registry.is_authorized(&canonical));
+
+        assert!(acquire_session_run(
+            sessions.path(),
+            &state,
+            &registry,
+            id,
+            "local",
+            &WorkspaceEnv::Local,
+        )
+        .unwrap());
+        assert!(registry.is_authorized(&canonical));
     }
 
     #[test]

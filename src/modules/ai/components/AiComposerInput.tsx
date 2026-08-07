@@ -76,7 +76,7 @@ export function AiComposerInput() {
   const c = useComposer();
   const focusSignal = useChatStore((s) => s.focusSignal);
   const snippets = useSnippetsStore((s) => s.snippets);
-  const workspaceRoot = useChatStore((s) => s.live.getWorkspaceRoot());
+  const workspaceRoot = c.workingDirectory;
 
   useEffect(() => {
     if (focusSignal === 0) return;

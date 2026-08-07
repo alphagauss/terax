@@ -58,7 +58,7 @@ function userMessageText(message: UIMessage): string {
 /**
  * 从会话消息生成按发送顺序排列的用户消息导航项。
  *
- * 附件、选区和片段上下文不会进入菜单摘要，避免大段隐藏上下文挤占导航列表。
+ * 附件、选区和片段不会进入菜单摘要，避免大段显式附着内容挤占导航列表。
  */
 export function buildUserMessageAnchors(
   messages: readonly UIMessage[],

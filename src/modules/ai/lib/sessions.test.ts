@@ -1,6 +1,6 @@
 /**
- * 本文件验证 AI 会话 IPC 的时间转换与多进程 metadata 合并。
- * 测试锁定 JSONL 边界使用 ISO 时间，前端状态继续使用毫秒值。
+ * 本文件验证 AI 会话摘要 IPC、时间转换与多进程列表合并。
+ * 测试锁定列表不携带检查 metadata，JSONL 边界使用 ISO 时间。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import {
   commitSession,
   listSessions,
   mergeSessionMetadata,
+  resolveSessionCwd,
   type SessionMeta,
 } from "./sessions";
 
@@ -26,7 +27,7 @@ const meta = (
   createdAt: 1,
   updatedAt,
   environmentKey: "local",
-  metadata: { title: id, todos: [] },
+  cwd: `/workspace/${id}`,
   fingerprint,
 });
 
@@ -53,6 +54,21 @@ describe("session metadata merge", () => {
   });
 });
 
+describe("session working directory", () => {
+  it("follows Explorer for a draft and keeps persisted sessions fixed", () => {
+    const persisted = meta("saved", 1);
+    expect(resolveSessionCwd("draft", "draft", [], "/workspace/one")).toBe(
+      "/workspace/one",
+    );
+    expect(resolveSessionCwd("draft", "draft", [], "/workspace/two")).toBe(
+      "/workspace/two",
+    );
+    expect(
+      resolveSessionCwd("saved", "draft", [persisted], "/workspace/other"),
+    ).toBe("/workspace/saved");
+  });
+});
+
 describe("session IPC timestamp boundary", () => {
   it("converts ISO metadata timestamps to frontend milliseconds", async () => {
     ipc.mockResolvedValueOnce([
@@ -61,7 +77,9 @@ describe("session IPC timestamp boundary", () => {
         createdAt: "2026-07-26T10:00:00.000Z",
         updatedAt: "2026-07-26T10:00:01.000Z",
         environmentKey: "local",
-        metadata: { title: "Session", todos: [] },
+        cwd: "/workspace/session",
+        title: "Session",
+        metadata: { systemPrompt: "must not enter the summary" },
         modifiedAt: 1,
         size: 2,
         fingerprint: "1:2",
@@ -75,7 +93,7 @@ describe("session IPC timestamp boundary", () => {
         createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
         updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
         environmentKey: "local",
-        metadata: { title: "Session", todos: [] },
+        cwd: "/workspace/session",
         modifiedAt: 1,
         size: 2,
         fingerprint: "1:2",
@@ -89,7 +107,8 @@ describe("session IPC timestamp boundary", () => {
       createdAt: "2026-07-26T10:00:00.000Z",
       updatedAt: "2026-07-26T10:00:01.000Z",
       environmentKey: "local",
-      metadata: { title: "Session", todos: [] },
+      cwd: "/workspace/session",
+      title: "Session",
       modifiedAt: 1,
       size: 2,
       fingerprint: "1:2",
@@ -100,6 +119,7 @@ describe("session IPC timestamp boundary", () => {
         createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
         updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
         environmentKey: "local",
+        cwd: "/workspace/session",
         metadata: { title: "Session", todos: [] },
         messages: [],
       }),
@@ -111,6 +131,7 @@ describe("session IPC timestamp boundary", () => {
         createdAt: "2026-07-26T10:00:00.000Z",
         updatedAt: "2026-07-26T10:00:01.000Z",
         environmentKey: "local",
+        cwd: "/workspace/session",
         metadata: { title: "Session", todos: [] },
         messages: [],
       },
