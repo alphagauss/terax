@@ -99,6 +99,7 @@ export function AiSidebarComposer() {
         <input
           ref={fileInputRef}
           type="file"
+          disabled={c.readOnly}
           multiple
           accept={ACCEPTED_FILES}
           className="hidden"
@@ -131,7 +132,7 @@ export function AiSidebarComposer() {
           <IconBtn
             title={t("statusBar.attachFileOrImage")}
             onClick={() => fileInputRef.current?.click()}
-            disabled={c.isBusy}
+            disabled={c.isBusy || c.readOnly}
           >
             <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
           </IconBtn>
@@ -152,7 +153,12 @@ export function AiSidebarComposer() {
               onClick={() =>
                 c.voice.recording ? c.voice.stop() : void c.voice.start()
               }
-              disabled={c.isBusy || c.voice.transcribing || !c.voice.hasKey}
+              disabled={
+                c.isBusy ||
+                c.readOnly ||
+                c.voice.transcribing ||
+                !c.voice.hasKey
+              }
               className={cn(
                 c.voice.recording &&
                   "bg-destructive/10 text-destructive hover:bg-destructive/15",

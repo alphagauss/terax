@@ -232,7 +232,8 @@ export function AiComposerInput() {
           <div className="flex items-start gap-2">
             <textarea
               ref={c.textareaRef}
-              value={c.value}
+              disabled={c.readOnly}
+              value={c.readOnly ? "" : c.value}
               onChange={(e) => c.setValue(e.target.value)}
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
@@ -283,11 +284,18 @@ export function AiComposerInput() {
                   c.submit();
                 }
               }}
-              placeholder={t("composer.placeholder")}
+              placeholder={
+                c.readOnly
+                  ? t("composer.foreignEnvironmentPlaceholder", {
+                      environment: c.readOnlyEnvironmentKey,
+                    })
+                  : t("composer.placeholder")
+              }
               rows={1}
               className={cn(
                 "max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
                 "placeholder:text-muted-foreground/60",
+                "disabled:cursor-not-allowed",
               )}
             />
             <AgentSwitcher />

@@ -1,11 +1,12 @@
 //! AI 会话 JSONL 文件的读取、发布和跨进程运行锁管理。
 //!
 //! 每个会话使用一个文件，首行固定为 metadata，后续每行是一条 SDK 无关的消息记录。
-//! 完整 turn 结束后原子替换文件，运行锁确保两个进程不能同时续写同一会话。
+//! Rust 校验外层环境归属，内层业务 metadata 保持不透明。完整 turn 结束后原子替换文件，
+//! 运行锁确保两个进程不能同时续写同一会话。
 
 use crate::modules::storage::{write_atomic, FileLock};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Lines};
@@ -24,11 +25,11 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionFile {
     pub id: String,
-    pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    pub environment_key: String,
+    pub metadata: Map<String, Value>,
     pub messages: Vec<Value>,
-    pub todos: Vec<Value>,
 }
 
 /// 会话列表使用的轻量 metadata 和文件指纹。
@@ -36,9 +37,10 @@ pub struct SessionFile {
 #[serde(rename_all = "camelCase")]
 pub struct SessionMetadata {
     pub id: String,
-    pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    pub environment_key: String,
+    pub metadata: Map<String, Value>,
     pub modified_at: u64,
     pub size: u64,
     pub fingerprint: String,
@@ -51,14 +53,8 @@ struct SessionFileHeader {
     key: String,
     created_at: String,
     updated_at: String,
-    metadata: SessionFileMetadata,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-struct SessionFileMetadata {
-    title: String,
-    #[serde(default)]
-    todos: Vec<Value>,
+    environment_key: String,
+    metadata: Map<String, Value>,
 }
 
 /// 保存当前进程持有的会话运行锁。
@@ -95,6 +91,9 @@ fn lock_path(root: &Path, id: Uuid) -> PathBuf {
 fn validate_session_file(session: &SessionFile) -> Result<Uuid, String> {
     let id = strict_uuid(&session.id)?;
     validate_timestamps(&session.created_at, &session.updated_at)?;
+    if session.environment_key.is_empty() {
+        return Err("session environmentKey must not be empty".to_string());
+    }
     for (index, message) in session.messages.iter().enumerate() {
         if !message.is_object() {
             return Err(format!("message line {} must be a JSON object", index + 2));
@@ -111,6 +110,9 @@ fn validate_header(header: &SessionFileHeader, expected_id: Uuid) -> Result<(), 
     let inner_id = strict_uuid(&header.key)?;
     if inner_id != expected_id {
         return Err("session key does not match filename".to_string());
+    }
+    if header.environment_key.is_empty() {
+        return Err("session environmentKey must not be empty".to_string());
     }
     validate_timestamps(&header.created_at, &header.updated_at)
 }
@@ -169,11 +171,11 @@ fn read_session(root: &Path, id: Uuid) -> Result<SessionFile, String> {
 
     Ok(SessionFile {
         id: header.key,
-        title: header.metadata.title,
         created_at: header.created_at,
         updated_at: header.updated_at,
+        environment_key: header.environment_key,
+        metadata: header.metadata,
         messages,
-        todos: header.metadata.todos,
     })
 }
 
@@ -186,10 +188,8 @@ fn write_session(root: &Path, session: &SessionFile) -> Result<(), String> {
         key: session.id.clone(),
         created_at: session.created_at.clone(),
         updated_at: session.updated_at.clone(),
-        metadata: SessionFileMetadata {
-            title: session.title.clone(),
-            todos: session.todos.clone(),
-        },
+        environment_key: session.environment_key.clone(),
+        metadata: session.metadata.clone(),
     };
     let mut bytes = Vec::new();
     serde_json::to_writer(&mut bytes, &header).map_err(|error| error.to_string())?;
@@ -202,11 +202,21 @@ fn write_session(root: &Path, session: &SessionFile) -> Result<(), String> {
 }
 
 /// 在锁内读取现有记录，追加本次新增记录后整体原子替换，并返回真实文件指纹。
-fn commit_session(root: &Path, update: &SessionFile) -> Result<SessionMetadata, String> {
+fn commit_session(
+    root: &Path,
+    update: &SessionFile,
+    environment_key: &str,
+) -> Result<SessionMetadata, String> {
     let id = validate_session_file(update)?;
+    if update.environment_key != environment_key {
+        return Err("session belongs to another workspace environment".to_string());
+    }
     let path = session_path(root, id);
     let mut messages = if path.exists() {
         let existing = read_session(root, id)?;
+        if existing.environment_key != environment_key {
+            return Err("session belongs to another workspace environment".to_string());
+        }
         if existing.created_at != update.created_at {
             return Err("session createdAt does not match existing file".to_string());
         }
@@ -239,9 +249,10 @@ fn metadata(root: &Path, id: Uuid) -> Result<SessionMetadata, String> {
     let size = info.len();
     Ok(SessionMetadata {
         id: header.key,
-        title: header.metadata.title,
         created_at: header.created_at,
         updated_at: header.updated_at,
+        environment_key: header.environment_key,
+        metadata: header.metadata,
         modified_at,
         size,
         fingerprint: format!("{modified_at}:{size}"),
@@ -299,30 +310,34 @@ fn commit_with_run_lock(
     state: &AiSessionsState,
     id: Uuid,
     session: &SessionFile,
+    environment_key: &str,
 ) -> Result<SessionMetadata, String> {
     let run_locks = state
         .run_locks
         .lock()
         .map_err(|_| "AI session lock state is poisoned".to_string())?;
     if run_locks.contains_key(&id) {
-        return commit_session(root, session);
+        return commit_session(root, session, environment_key);
     }
     drop(run_locks);
     let _lock = FileLock::try_acquire(&lock_path(root, id))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "session is running in another window".to_string())?;
-    commit_session(root, session)
+    commit_session(root, session, environment_key)
 }
 
 /// 将新增记录提交到 AI 会话并返回最新 metadata，拒绝写入其他进程正在运行的会话。
 #[tauri::command]
 pub fn ai_session_commit(
     state: State<'_, AiSessionsState>,
-    session: SessionFile,
+    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
+    mut session: SessionFile,
 ) -> Result<SessionMetadata, String> {
+    let environment_key = workspace_state.bootstrap().environment_key.clone();
+    session.environment_key = environment_key.clone();
     let id = validate_session_file(&session)?;
     let root = sessions_dir()?;
-    commit_with_run_lock(&root, state.inner(), id, &session)
+    commit_with_run_lock(&root, state.inner(), id, &session, &environment_key)
 }
 
 /// 删除指定会话文件，运行中的会话不可删除。
@@ -353,6 +368,7 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
 #[tauri::command]
 pub fn ai_session_run_acquire(
     state: State<'_, AiSessionsState>,
+    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
     id: String,
 ) -> Result<bool, String> {
     let id = strict_uuid(&id)?;
@@ -370,6 +386,12 @@ pub fn ai_session_run_acquire(
     else {
         return Ok(false);
     };
+    let path = session_path(&root, id);
+    if path.exists()
+        && read_header(&path, id)?.environment_key != workspace_state.bootstrap().environment_key
+    {
+        return Ok(false);
+    }
     locks.insert(id, lock);
     Ok(true)
 }
@@ -410,15 +432,19 @@ mod tests {
     fn session(id: Uuid, title: &str) -> SessionFile {
         SessionFile {
             id: id.to_string(),
-            title: title.to_string(),
             created_at: "2026-07-26T10:00:00.000Z".to_string(),
             updated_at: "2026-07-26T10:00:01.000Z".to_string(),
+            environment_key: "local".to_string(),
+            metadata: serde_json::from_value(json!({
+                "title": title,
+                "todos": [{"id": "todo", "title": "test", "status": "pending"}]
+            }))
+            .unwrap(),
             messages: vec![json!({
                 "role": "user",
                 "content": "hello",
                 "timestamp": "2026-07-26T10:00:01.000Z"
             })],
-            todos: vec![json!({"id": "todo", "title": "test", "status": "pending"})],
         }
     }
 
@@ -432,10 +458,12 @@ mod tests {
     fn commit_appends_records_and_replaces_complete_jsonl_file() {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
-        commit_session(dir.path(), &session(id, "old")).unwrap();
+        commit_session(dir.path(), &session(id, "old"), "local").unwrap();
         let mut next = session(id, "new");
         next.messages[0]["content"] = json!("again");
-        commit_session(dir.path(), &next).unwrap();
+        next.metadata
+            .insert("runtimeConfig".to_string(), json!({"futureField": true}));
+        commit_session(dir.path(), &next, "local").unwrap();
 
         let content = fs::read_to_string(session_path(dir.path(), id)).unwrap();
         let lines = content.lines().collect::<Vec<_>>();
@@ -449,7 +477,9 @@ mod tests {
             "user"
         );
         let stored = read_session(dir.path(), id).unwrap();
-        assert_eq!(stored.title, "new");
+        assert_eq!(stored.metadata["title"], "new");
+        assert_eq!(stored.metadata["runtimeConfig"]["futureField"], true);
+        assert_eq!(stored.environment_key, "local");
         assert_eq!(stored.messages.len(), 2);
         assert_eq!(list_sessions(dir.path()).unwrap().len(), 1);
     }
@@ -500,10 +530,11 @@ mod tests {
                     key: id.to_string(),
                     created_at: "2026-07-26T10:00:00.000Z".to_string(),
                     updated_at: "2026-07-26T10:00:01.000Z".to_string(),
-                    metadata: SessionFileMetadata {
-                        title: "metadata only".to_string(),
-                        todos: Vec::new(),
-                    },
+                    environment_key: "local".to_string(),
+                    metadata: serde_json::from_value(json!({
+                        "title": "metadata only"
+                    }))
+                    .unwrap(),
                 })
                 .unwrap()
             ),
@@ -512,8 +543,47 @@ mod tests {
 
         let sessions = list_sessions(dir.path()).unwrap();
         assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].title, "metadata only");
+        assert_eq!(sessions[0].metadata["title"], "metadata only");
         assert!(read_session(dir.path(), id).is_err());
+    }
+
+    #[test]
+    fn rejects_headers_without_environment_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        fs::write(
+            session_path(dir.path(), id),
+            format!(
+                "{}\n",
+                json!({
+                    "_type": "metadata",
+                    "key": id,
+                    "createdAt": "2026-07-26T10:00:00.000Z",
+                    "updatedAt": "2026-07-26T10:00:01.000Z",
+                    "metadata": {"title": "legacy"}
+                })
+            ),
+        )
+        .unwrap();
+
+        assert!(read_session(dir.path(), id).is_err());
+        assert!(list_sessions(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn refuses_to_reassign_a_session_to_another_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        commit_session(dir.path(), &session(id, "local"), "local").unwrap();
+
+        let mut foreign = session(id, "foreign");
+        foreign.environment_key = "wsl:Ubuntu".to_string();
+        assert!(commit_session(dir.path(), &foreign, "wsl:Ubuntu").is_err());
+
+        let stored = read_session(dir.path(), id).unwrap();
+        assert_eq!(stored.environment_key, "local");
+        assert_eq!(stored.metadata["title"], "local");
+        assert_eq!(stored.messages.len(), 1);
     }
 
     #[test]
@@ -566,11 +636,14 @@ mod tests {
         wait_for(&ready);
         let state = AiSessionsState::default();
         let value = session(id, "locked");
-        assert!(commit_with_run_lock(dir.path(), &state, id, &value).is_err());
+        assert!(commit_with_run_lock(dir.path(), &state, id, &value, "local").is_err());
         fs::write(&release, b"release").unwrap();
         assert!(child.wait().unwrap().success());
 
-        commit_with_run_lock(dir.path(), &state, id, &value).unwrap();
-        assert_eq!(read_session(dir.path(), id).unwrap().title, "locked");
+        commit_with_run_lock(dir.path(), &state, id, &value, "local").unwrap();
+        assert_eq!(
+            read_session(dir.path(), id).unwrap().metadata["title"],
+            "locked"
+        );
     }
 }

@@ -25,6 +25,8 @@ const meta = (
   title: id,
   createdAt: 1,
   updatedAt,
+  environmentKey: "local",
+  metadata: { title: id, todos: [] },
   fingerprint,
 });
 
@@ -56,9 +58,10 @@ describe("session IPC timestamp boundary", () => {
     ipc.mockResolvedValueOnce([
       {
         id: "session",
-        title: "Session",
         createdAt: "2026-07-26T10:00:00.000Z",
         updatedAt: "2026-07-26T10:00:01.000Z",
+        environmentKey: "local",
+        metadata: { title: "Session", todos: [] },
         modifiedAt: 1,
         size: 2,
         fingerprint: "1:2",
@@ -71,6 +74,8 @@ describe("session IPC timestamp boundary", () => {
         title: "Session",
         createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
         updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
+        environmentKey: "local",
+        metadata: { title: "Session", todos: [] },
         modifiedAt: 1,
         size: 2,
         fingerprint: "1:2",
@@ -81,9 +86,10 @@ describe("session IPC timestamp boundary", () => {
   it("commits frontend timestamps as ISO strings", async () => {
     ipc.mockResolvedValueOnce({
       id: "session",
-      title: "Session",
       createdAt: "2026-07-26T10:00:00.000Z",
       updatedAt: "2026-07-26T10:00:01.000Z",
+      environmentKey: "local",
+      metadata: { title: "Session", todos: [] },
       modifiedAt: 1,
       size: 2,
       fingerprint: "1:2",
@@ -91,22 +97,22 @@ describe("session IPC timestamp boundary", () => {
     await expect(
       commitSession({
         id: "session",
-        title: "Session",
         createdAt: Date.parse("2026-07-26T10:00:00.000Z"),
         updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
+        environmentKey: "local",
+        metadata: { title: "Session", todos: [] },
         messages: [],
-        todos: [],
       }),
     ).resolves.toMatchObject({ fingerprint: "1:2" });
 
     expect(ipc).toHaveBeenCalledWith("ai_session_commit", {
       session: {
         id: "session",
-        title: "Session",
         createdAt: "2026-07-26T10:00:00.000Z",
         updatedAt: "2026-07-26T10:00:01.000Z",
+        environmentKey: "local",
+        metadata: { title: "Session", todos: [] },
         messages: [],
-        todos: [],
       },
     });
   });

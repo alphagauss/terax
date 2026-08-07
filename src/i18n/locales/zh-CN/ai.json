@@ -70,6 +70,7 @@
   },
   "composer": {
     "placeholder": "向 Terax 提问   -   输入 # 使用片段和命令，输入 @ 引用文件",
+    "foreignEnvironmentPlaceholder": "此会话属于 {{environment}}，在当前环境中为只读",
     "listening": "正在聆听…",
     "transcribing": "正在转写…",
     "sessionBusy": "此会话仍在完成上一轮运行。",
