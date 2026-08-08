@@ -32,12 +32,11 @@ const quickDiffField = StateField.define<QuickDiffSnapshot | null>({
   update(value, transaction) {
     for (const effect of transaction.effects) {
       if (effect.is(setQuickDiffBaseline)) {
-        return effect.value === null
-          ? null
-          : buildQuickDiff(
-              Text.of(effect.value.split(/\r\n?|\n/)),
-              transaction.newDoc,
-            );
+        if (effect.value === null) return null;
+        return buildQuickDiff(
+          Text.of(effect.value.split(/\r\n?|\n/)),
+          transaction.newDoc,
+        );
       }
     }
     return value && transaction.docChanged

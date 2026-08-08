@@ -4,6 +4,8 @@
  * 同一路径的多个视图共享读取、缓冲区和保存状态，调用方不得另建独立副本。
  */
 
+import { documentPathIdentity } from "@/lib/pathIdentity";
+import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContext";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { getSharedDocumentModel } from "./documentModel";
@@ -18,6 +20,7 @@ type Options = {
 /** 订阅指定路径的共享文档，并暴露稳定的编辑、保存和重载动作。 */
 export function useDocument({ path, onDirtyChange }: Options) {
   const workspace = useWorkspaceEnvStore((state) => state.env);
+  const repository = useRepositorySnapshot();
   const model = useMemo(
     () => getSharedDocumentModel(workspace, path),
     [path, workspace],
@@ -27,7 +30,6 @@ export function useDocument({ path, onDirtyChange }: Options) {
     model.getSnapshot,
     model.getSnapshot,
   );
-
   const onDirtyChangeRef = useRef(onDirtyChange);
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
@@ -36,10 +38,42 @@ export function useDocument({ path, onDirtyChange }: Options) {
     onDirtyChangeRef.current?.(snapshot.dirty);
   }, [snapshot.dirty]);
 
+  useEffect(() => {
+    if (
+      snapshot.doc.status !== "ready" ||
+      !repository.repo ||
+      !repository.status
+    ) {
+      return;
+    }
+    const fileIdentity = documentPathIdentity(workspace, path);
+    const rootIdentity = documentPathIdentity(
+      workspace,
+      repository.repo.repoRoot,
+    ).replace(/\/$/, "");
+    if (
+      fileIdentity === rootIdentity ||
+      fileIdentity.startsWith(`${rootIdentity}/`)
+    ) {
+      model.syncGitBaseline(
+        repository.repo.repoRoot,
+        repository.status.headSha,
+      );
+    }
+  }, [
+    model,
+    path,
+    repository.repo,
+    repository.status,
+    snapshot.doc.status,
+    workspace,
+  ]);
+
   return {
     doc: snapshot.doc,
     dirty: snapshot.dirty,
     baselineContent: snapshot.baselineContent,
+    gitBaseline: snapshot.gitBaseline,
     onChange: model.onChange,
     save: model.save,
     reload: model.reload,

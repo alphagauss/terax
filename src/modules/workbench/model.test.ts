@@ -189,20 +189,20 @@ describe("workbench model", () => {
       id: 2,
       kind: "git-diff",
       spaceId: "default",
-      title: "old.ts (-)",
+      title: "old.ts (W)",
       path: "new.ts",
       repoRoot: "/work",
-      mode: "-",
+      side: "worktree",
       originalPath: "old.ts",
     };
     const state = { ...current, tabs: { 2: diff } };
     const next = patchTab(state, 2, {
-      title: "renamed.ts (-)",
+      title: "renamed.ts (W)",
       originalPath: "renamed.ts",
     });
     expect(next.tabs[2]).toMatchObject({
       id: 2,
-      title: "renamed.ts (-)",
+      title: "renamed.ts (W)",
       originalPath: "renamed.ts",
     });
   });

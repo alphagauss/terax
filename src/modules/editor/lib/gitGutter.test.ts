@@ -23,6 +23,11 @@ describe("gitChangeGutter", () => {
   it.each([
     {
       kind: "added",
+      baseline: "",
+      current: "new",
+    },
+    {
+      kind: "added",
       baseline: "one\nthree",
       current: "one\ntwo\nthree",
     },

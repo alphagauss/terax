@@ -69,7 +69,23 @@ type DocumentSnapshot = {
   doc: DocumentState;
   dirty: boolean;
   baselineContent: string;
+  /** 当前文档在 HEAD 中的文本；null 表示无法提供 Quick Diff。 */
+  gitBaseline: string | null;
 };
+
+type DocumentUpdate = Omit<DocumentSnapshot, "gitBaseline"> & {
+  gitBaseline?: string | null;
+};
+
+type GitBaselineResult =
+  | {
+      kind: "text";
+      repoRoot: string;
+      relativePath: string;
+      headSha: string | null;
+      content: string;
+    }
+  | { kind: "unsupported" };
 
 type Listener = () => void;
 type ReloadMode = "none" | "probe" | "full";
@@ -78,6 +94,11 @@ const REMOTE_POLL_MS = 3000;
 const REMOTE_DIGEST_POLL_COUNT = 10;
 const MODEL_DISPOSE_DELAY_MS = 30_000;
 const REMOTE_POLL_CONCURRENCY = 8;
+
+/** 组合 Quick Diff 基线的仓库与提交身份，避免相同 SHA 的不同仓库共享缓存。 */
+function gitBaselineKey(repoRoot: string, headSha: string | null): string {
+  return `${repoRoot}\0${headSha ?? ""}`;
+}
 
 const models = new Map<string, SharedDocumentModel>();
 let remotePollTimer: ReturnType<typeof setInterval> | null = null;
@@ -176,6 +197,7 @@ class SharedDocumentModel {
     doc: { status: "loading" },
     dirty: false,
     baselineContent: "",
+    gitBaseline: null,
   };
   private readonly listeners = new Set<Listener>();
   private started = false;
@@ -194,6 +216,10 @@ class SharedDocumentModel {
   private savePromise: Promise<boolean> | null = null;
   private reloadPromise: Promise<void> | null = null;
   private unchangedRemotePolls = 0;
+  private gitBaselineGeneration = 0;
+  private gitBaselineLoadedKey: string | null = null;
+  private gitBaselinePromise: Promise<void> | null = null;
+  private gitBaselineRequestedKey: string | null = null;
 
   constructor(
     private readonly key: string,
@@ -301,6 +327,30 @@ class SharedDocumentModel {
     void this.loadInitial(true);
   };
 
+  /** 仓库或 HEAD 变化时刷新共享 Quick Diff 基线，相同资源版本不重复执行 IPC。 */
+  syncGitBaseline = (repoRoot: string, headSha: string | null): void => {
+    const requestedKey = gitBaselineKey(repoRoot, headSha);
+    if (this.gitBaselineLoadedKey === requestedKey) return;
+    if (
+      this.gitBaselinePromise &&
+      this.gitBaselineRequestedKey === requestedKey
+    ) {
+      return;
+    }
+    this.gitBaselineLoadedKey = null;
+    this.publish({
+      doc: this.snapshot.doc,
+      dirty: this.snapshot.dirty,
+      baselineContent: this.snapshot.baselineContent,
+      gitBaseline: null,
+    });
+    this.gitBaselineRequestedKey = requestedKey;
+    const pending = this.loadGitBaseline().finally(() => {
+      if (this.gitBaselinePromise === pending) this.gitBaselinePromise = null;
+    });
+    this.gitBaselinePromise = pending;
+  };
+
   /** 采用由 Terax 主动执行的外部格式化结果，并返回编辑器使用的 LF 内容。 */
   adoptFormattedDiskText = (
     diskText: string,
@@ -343,21 +393,61 @@ class SharedDocumentModel {
     if (this.disposeTimer) clearTimeout(this.disposeTimer);
     this.disposeTimer = null;
     this.readGeneration += 1;
+    this.gitBaselineGeneration += 1;
     this.reloadRequested = "none";
     if (this.conflictDisk !== undefined) toast.dismiss(this.conflictToastId());
     syncRemotePolling();
   }
 
-  private publish(next: DocumentSnapshot): void {
+  private publish(update: DocumentUpdate): void {
+    const next: DocumentSnapshot = {
+      ...update,
+      gitBaseline:
+        update.gitBaseline === undefined
+          ? this.snapshot.gitBaseline
+          : update.gitBaseline,
+    };
     if (
       next.doc === this.snapshot.doc &&
       next.dirty === this.snapshot.dirty &&
-      next.baselineContent === this.snapshot.baselineContent
+      next.baselineContent === this.snapshot.baselineContent &&
+      next.gitBaseline === this.snapshot.gitBaseline
     ) {
       return;
     }
     this.snapshot = next;
     for (const listener of this.listeners) listener();
+  }
+
+  /** 读取当前文档唯一的 HEAD 文本基线，并丢弃过期请求。 */
+  private async loadGitBaseline(): Promise<void> {
+    const generation = ++this.gitBaselineGeneration;
+    try {
+      const result = await invoke<GitBaselineResult>(
+        "git_quick_diff_baseline",
+        { path: this.path, workspace: this.workspace },
+      );
+      if (generation !== this.gitBaselineGeneration) return;
+      this.gitBaselineLoadedKey =
+        result.kind === "text"
+          ? gitBaselineKey(result.repoRoot, result.headSha)
+          : null;
+      this.publish({
+        doc: this.snapshot.doc,
+        dirty: this.snapshot.dirty,
+        baselineContent: this.snapshot.baselineContent,
+        gitBaseline: result.kind === "text" ? result.content : null,
+      });
+    } catch {
+      if (generation !== this.gitBaselineGeneration) return;
+      this.gitBaselineLoadedKey = null;
+      this.publish({
+        doc: this.snapshot.doc,
+        dirty: this.snapshot.dirty,
+        baselineContent: this.snapshot.baselineContent,
+        gitBaseline: null,
+      });
+    }
   }
 
   private async loadInitial(showLoading: boolean): Promise<void> {

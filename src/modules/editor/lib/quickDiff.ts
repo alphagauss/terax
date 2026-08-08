@@ -1,7 +1,7 @@
 /**
  * 本文件实现基于 HEAD 文本基线的增量 Quick Diff 计算。
  *
- * 只处理内存文本与行变更范围，不访问 Git、文件系统或 IPC。复杂 diff 超过计算上限时返回空装饰，避免阻塞编辑器输入。
+ * 只处理内存文本与行变更范围，不访问 Git、文件系统或 IPC。超大输入禁用计算，复杂 diff 则保留快速算法给出的保守范围。
  */
 
 import { Chunk, type DiffConfig } from "@codemirror/merge";
@@ -51,10 +51,9 @@ export function rangesFromChunks(
   modified: Text,
   chunks: readonly Chunk[],
 ): QuickDiffRange[] {
-  if (chunks.some((chunk) => !chunk.precise)) return [];
-
   const kinds = new Map<number, QuickDiffKind>();
   for (const chunk of chunks) {
+    // 非精确 chunk 仍具有可靠的整行边界。它只牺牲最小编辑粒度，不能因此隐藏整份文件的变更标识。
     // Chunk 已按整行扩展。只有一侧的整行范围为空时，才能判定为纯新增或纯删除；
     // 字符级插入和删除的两侧范围都非空，必须显示为修改。
     const hasOriginal = baseline.length > 0 && chunk.fromA !== chunk.toA;

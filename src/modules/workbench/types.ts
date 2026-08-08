@@ -3,6 +3,8 @@
  * 页面类型只描述可渲染状态，不承载页面组件或运行时资源。
  */
 
+import type { GitDiffSide } from "@/modules/source-control/gitTypes";
+
 export const DEFAULT_SPACE_ID = "default";
 
 export type WorkbenchDirection = "up" | "down" | "left" | "right";
@@ -61,7 +63,7 @@ export type GitDiffTab = TabBase & {
   kind: "git-diff";
   path: string;
   repoRoot: string;
-  mode: "-" | "+";
+  side: GitDiffSide;
   originalPath: string | null;
 };
 

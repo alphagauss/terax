@@ -4,18 +4,6 @@
  */
 
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -31,6 +19,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -81,7 +81,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { GraphSection } from "./GraphSection";
-import type { SourceControlSummary } from "./useSourceControl";
+import type { GitDiffSide } from "./gitTypes";
+import type { RepositoryController } from "./useRepositoryController";
 import {
   type CheckState,
   type SourceControlFileEntry,
@@ -90,7 +91,7 @@ import {
 
 type Props = {
   open: boolean;
-  sourceControl: SourceControlSummary;
+  sourceControl: RepositoryController;
   onOpenGitGraph?: () => void;
   fullGraphOpen?: boolean;
   onOpenCommitFile?: (input: {
@@ -104,7 +105,7 @@ type Props = {
   onOpenDiff: (input: {
     path: string;
     repoRoot: string;
-    mode: "+" | "-";
+    side: GitDiffSide;
     originalPath: string | null;
     title?: string;
   }) => void;
@@ -609,7 +610,7 @@ function SourceControlViewContainerComponent({
           const entry = focusedEntry();
           if (entry) {
             event.preventDefault();
-            void scm.selectFile(entry);
+            scm.openFileDiff(entry);
           }
           break;
         }
@@ -978,15 +979,12 @@ function SourceControlViewContainerComponent({
                                       <RowRenderer
                                         row={row}
                                         focused={focusedRowKey === row.key}
-                                        selectedPath={
-                                          scm.selected?.path ?? null
-                                        }
                                         actionBusy={scm.actionBusy}
                                         headerCheckState={scm.headerCheckState}
                                         repoRoot={scm.repo?.repoRoot ?? null}
                                         onFocusRow={setFocusedRowKey}
                                         onToggleAll={scm.toggleAll}
-                                        onSelectFile={scm.selectFile}
+                                        onOpenFileDiff={scm.openFileDiff}
                                         onToggleStageFile={scm.toggleStageFile}
                                         onDiscardFile={scm.requestDiscardFile}
                                         onOpenFile={onOpenFile}
@@ -1087,6 +1085,7 @@ function SourceControlViewContainerComponent({
   );
 }
 
+/** Source Control 侧边栏容器，渲染仓库状态、文件操作与提交入口。 */
 export const SourceControlViewContainer = memo(
   SourceControlViewContainerComponent,
 );
@@ -1138,13 +1137,12 @@ function CleanTreeHint({ repoLabel }: { repoLabel: string }) {
 type RowRendererProps = {
   row: RowDescriptor;
   focused: boolean;
-  selectedPath: string | null;
   actionBusy: string | null;
   headerCheckState: CheckState;
   repoRoot: string | null;
   onFocusRow: (key: string | null) => void;
   onToggleAll: () => Promise<void> | void;
-  onSelectFile: (entry: SourceControlFileEntry) => Promise<void>;
+  onOpenFileDiff: (entry: SourceControlFileEntry) => void;
   onToggleStageFile: (entry: SourceControlFileEntry) => Promise<void>;
   onDiscardFile: (entry: SourceControlFileEntry) => void;
   onOpenFile?: (absolutePath: string) => void;
@@ -1228,11 +1226,10 @@ function ListHeader({
 const EntryRow = memo(function EntryRow({
   row,
   focused,
-  selectedPath,
   actionBusy,
   repoRoot,
   onFocusRow,
-  onSelectFile,
+  onOpenFileDiff,
   onToggleStageFile,
   onDiscardFile,
   onOpenFile,
@@ -1241,7 +1238,6 @@ const EntryRow = memo(function EntryRow({
 }) {
   const { t } = useTranslation("sourceControl");
   const entry = row.entry;
-  const isSelected = selectedPath === entry.path;
   const fileName = basename(entry.path);
   const iconUrl = fileIconUrl(fileName);
   const pathLabel = entryPathLabel(entry);
@@ -1266,27 +1262,20 @@ const EntryRow = memo(function EntryRow({
         <div
           id={`scm-row-${row.key}`}
           data-focused={focused || undefined}
-          data-selected={isSelected || undefined}
           role="option"
-          aria-selected={isSelected}
+          aria-selected={focused}
           tabIndex={-1}
           onMouseDown={() => onFocusRow(row.key)}
           className={cn(
             "group relative flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
-            focused
-              ? "bg-accent/60"
-              : isSelected
-                ? "bg-accent/55 text-foreground"
-                : "hover:bg-accent/30",
+            focused ? "bg-accent/60" : "hover:bg-accent/30",
           )}
         >
           <span
             className={cn(
               "pointer-events-none absolute inset-y-1 left-0 w-[2px] rounded-full transition-opacity",
               statusAccent(entry.statusCode),
-              isSelected || focused
-                ? "opacity-100"
-                : "opacity-55 group-hover:opacity-95",
+              focused ? "opacity-100" : "opacity-55 group-hover:opacity-95",
             )}
             aria-hidden
           />
@@ -1294,7 +1283,7 @@ const EntryRow = memo(function EntryRow({
             type="button"
             onClick={() => {
               onFocusRow(row.key);
-              void onSelectFile(entry);
+              onOpenFileDiff(entry);
             }}
             className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
           >
@@ -1307,7 +1296,7 @@ const EntryRow = memo(function EntryRow({
               <span
                 className={cn(
                   "truncate text-[13px] leading-none",
-                  isSelected || focused
+                  focused
                     ? "font-semibold text-foreground"
                     : "font-medium text-foreground",
                   pathLabel ? "max-w-[58%] shrink-0" : "min-w-0 flex-1",
@@ -1324,7 +1313,7 @@ const EntryRow = memo(function EntryRow({
           </button>
 
           {showDiscard ? (
-            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 data-[focused=true]:opacity-100 data-[selected=true]:opacity-100">
+            <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100 group-data-[focused=true]:opacity-100">
               <IconActionButton
                 label={`Discard ${entry.path}`}
                 disabled={disabled}
@@ -1366,15 +1355,13 @@ const EntryRow = memo(function EntryRow({
         <ContextMenuItem
           onSelect={() => {
             onFocusRow(row.key);
-            void onSelectFile(entry);
+            onOpenFileDiff(entry);
           }}
         >
           {t("menu.openDiff")}
         </ContextMenuItem>
         {!isDeleted && onOpenFile && absolutePath ? (
-          <ContextMenuItem
-            onSelect={() => onOpenFile(absolutePath)}
-          >
+          <ContextMenuItem onSelect={() => onOpenFile(absolutePath)}>
             {t("menu.openFile")}
           </ContextMenuItem>
         ) : null}
@@ -1407,9 +1394,7 @@ const EntryRow = memo(function EntryRow({
           {t("menu.copyRelativePath")}
         </ContextMenuItem>
         {absolutePath ? (
-          <ContextMenuItem
-            onSelect={() => void copyToClipboard(absolutePath)}
-          >
+          <ContextMenuItem onSelect={() => void copyToClipboard(absolutePath)}>
             {t("menu.copyAbsolutePath")}
           </ContextMenuItem>
         ) : null}
@@ -1418,9 +1403,7 @@ const EntryRow = memo(function EntryRow({
         {!isDeleted && absolutePath ? (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem
-              onSelect={() => void revealInFinder(absolutePath)}
-            >
+            <ContextMenuItem onSelect={() => void revealInFinder(absolutePath)}>
               {revealLabel}
             </ContextMenuItem>
           </>

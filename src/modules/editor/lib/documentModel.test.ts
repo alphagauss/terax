@@ -1,5 +1,5 @@
 /**
- * 本文件测试共享文档模型的内容版本协调、保存冲突、自动保存与生命周期。
+ * 本文件测试共享文档模型的内容版本协调、Git 基线、保存冲突、自动保存与生命周期。
  *
  * 磁盘元数据不得制造冲突，真实的双向内容变化不得被自动覆盖。
  */
@@ -62,6 +62,14 @@ function observed(content: string, mtime = 2) {
     size: new TextEncoder().encode(content).byteLength,
     mtime,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 describe("shared document model", () => {
@@ -136,6 +144,157 @@ describe("shared document model", () => {
 
     unsubscribeFirst();
     unsubscribeSecond();
+  });
+
+  it("loads one shared HEAD baseline and preserves an empty new-file baseline", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") return text("new\n");
+      if (command === "git_quick_diff_baseline") {
+        return {
+          kind: "text",
+          repoRoot: "C:/work",
+          relativePath: "new.ts",
+          headSha: null,
+          content: "",
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/new.ts");
+    const unsubscribe = model.subscribe(vi.fn());
+
+    model.syncGitBaseline("C:/work", null);
+    model.syncGitBaseline("C:/work", null);
+
+    await vi.waitFor(() => expect(model.getSnapshot().gitBaseline).toBe(""));
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "git_quick_diff_baseline",
+      ),
+    ).toHaveLength(1);
+    unsubscribe();
+  });
+
+  it("reloads the baseline when the repository changes at the same HEAD", async () => {
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") return text("current\n");
+      if (command === "git_quick_diff_baseline") {
+        const callCount = mocks.invoke.mock.calls.filter(
+          ([name]) => name === "git_quick_diff_baseline",
+        ).length;
+        return {
+          kind: "text",
+          repoRoot: callCount === 1 ? "C:/outer" : "C:/outer/nested",
+          relativePath: "file.ts",
+          headSha: "same-sha",
+          content: callCount === 1 ? "outer\n" : "nested\n",
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/outer/nested/file.ts");
+    const unsubscribe = model.subscribe(vi.fn());
+
+    model.syncGitBaseline("C:/outer", "same-sha");
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().gitBaseline).toBe("outer\n"),
+    );
+    model.syncGitBaseline("C:/outer/nested", "same-sha");
+    expect(model.getSnapshot().gitBaseline).toBeNull();
+
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().gitBaseline).toBe("nested\n"),
+    );
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "git_quick_diff_baseline",
+      ),
+    ).toHaveLength(2);
+    unsubscribe();
+  });
+
+  it("retries an unsupported baseline because a new worktree file can become text", async () => {
+    let baselineReads = 0;
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") return text("current\n");
+      if (command === "git_quick_diff_baseline") {
+        baselineReads += 1;
+        return baselineReads === 1
+          ? { kind: "unsupported" }
+          : {
+              kind: "text",
+              repoRoot: "C:/work",
+              relativePath: "new.ts",
+              headSha: "head",
+              content: "",
+            };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/new.ts");
+    const unsubscribe = model.subscribe(vi.fn());
+
+    model.syncGitBaseline("C:/work", "head");
+    await vi.waitFor(() => expect(baselineReads).toBe(1));
+    await Promise.resolve();
+    model.syncGitBaseline("C:/work", "head");
+
+    await vi.waitFor(() => expect(model.getSnapshot().gitBaseline).toBe(""));
+    expect(baselineReads).toBe(2);
+    unsubscribe();
+  });
+
+  it("discards a baseline request completed after a newer repository identity", async () => {
+    const stale = deferred<{
+      kind: "text";
+      repoRoot: string;
+      relativePath: string;
+      headSha: string;
+      content: string;
+    }>();
+    const fresh = deferred<{
+      kind: "text";
+      repoRoot: string;
+      relativePath: string;
+      headSha: string;
+      content: string;
+    }>();
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === "fs_read_file") return text("current\n");
+      if (command === "git_quick_diff_baseline") {
+        const baselineReads = mocks.invoke.mock.calls.filter(
+          ([name]) => name === "git_quick_diff_baseline",
+        ).length;
+        return baselineReads === 1 ? stale.promise : fresh.promise;
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+    const model = getSharedDocumentModel(local, "C:/work/file.ts");
+    const unsubscribe = model.subscribe(vi.fn());
+
+    model.syncGitBaseline("C:/old", "old");
+    model.syncGitBaseline("C:/new", "new");
+    fresh.resolve({
+      kind: "text",
+      repoRoot: "C:/new",
+      relativePath: "file.ts",
+      headSha: "new",
+      content: "fresh\n",
+    });
+    await vi.waitFor(() =>
+      expect(model.getSnapshot().gitBaseline).toBe("fresh\n"),
+    );
+
+    stale.resolve({
+      kind: "text",
+      repoRoot: "C:/old",
+      relativePath: "file.ts",
+      headSha: "old",
+      content: "stale\n",
+    });
+    await Promise.resolve();
+    expect(model.getSnapshot().gitBaseline).toBe("fresh\n");
+    unsubscribe();
   });
 
   it("updates the ready document size after external formatting", async () => {

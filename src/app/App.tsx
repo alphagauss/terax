@@ -24,8 +24,8 @@ import { cn, isMarkdownPath } from "@/lib/utils";
 import { AgentNotificationsBridge, nextAttentionTabId } from "@/modules/agents";
 import {
   AgentRunBridge,
-  ApprovalToastHost,
   AiSidebarPanel,
+  ApprovalToastHost,
   flushCompletedSessionRuns,
   LocalAgentNotificationsBridge,
   SelectionAskAi,
@@ -81,6 +81,7 @@ import {
   WORKSPACE_MIN_WIDTH,
 } from "@/modules/sidebar";
 import {
+  RepositoryProvider,
   SourceControlViewContainer,
   useSourceControlContext,
 } from "@/modules/source-control";
@@ -100,9 +101,9 @@ import {
 import {
   clearFocusedTerminal,
   disposeSession,
-  terminalHasForegroundProcess,
   navigateFocusedBlocks,
   type TerminalPaneHandle,
+  terminalHasForegroundProcess,
   useTerminalFileDrop,
   whenSessionReady,
   writeToSession,
@@ -2032,5 +2033,11 @@ export default function App() {
     </ThemeProvider>
   );
 
-  return <AiComposerProvider>{shell}</AiComposerProvider>;
+  return (
+    <AiComposerProvider>
+      <RepositoryProvider controller={sourceControl}>
+        {shell}
+      </RepositoryProvider>
+    </AiComposerProvider>
+  );
 }

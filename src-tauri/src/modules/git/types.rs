@@ -2,7 +2,7 @@
 //!
 //! 所有公开结构使用 camelCase 序列化，避免前端维护额外的协议转换层。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub(crate) const DEFAULT_TIMEOUT_SECS: u64 = 30;
 pub(crate) const NETWORK_TIMEOUT_SECS: u64 = 120;
@@ -68,14 +68,29 @@ pub struct GitDiffResult {
     pub truncated: bool,
 }
 
-/// 编辑器 Quick Diff 使用的 HEAD 文本基线。
-#[derive(Serialize)]
+/// Git 差异的可变侧，明确区分工作区与暂存区。
+#[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GitQuickDiffBaseline {
-    pub repo_root: String,
-    pub relative_path: String,
-    pub revision: String,
-    pub content: String,
+pub enum GitDiffSide {
+    Worktree,
+    Index,
+}
+
+/// 编辑器 Quick Diff 使用的 HEAD 文本基线结果。
+#[derive(Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitQuickDiffBaseline {
+    Text {
+        repo_root: String,
+        relative_path: String,
+        head_sha: Option<String>,
+        content: String,
+    },
+    Unsupported,
 }
 
 #[derive(Serialize)]
@@ -167,5 +182,23 @@ impl TextSource {
             TextSource::Text(text) => text,
             TextSource::Missing | TextSource::Binary => String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GitDiffSide;
+
+    #[test]
+    fn git_diff_side_only_accepts_explicit_protocol_names() {
+        assert!(matches!(
+            serde_json::from_str::<GitDiffSide>(r#""worktree""#),
+            Ok(GitDiffSide::Worktree)
+        ));
+        assert!(matches!(
+            serde_json::from_str::<GitDiffSide>(r#""index""#),
+            Ok(GitDiffSide::Index)
+        ));
+        assert!(serde_json::from_str::<GitDiffSide>("true").is_err());
     }
 }

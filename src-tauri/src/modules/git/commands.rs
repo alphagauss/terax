@@ -7,8 +7,8 @@ use tauri::{AppHandle, Manager};
 use crate::modules::git::operations;
 use crate::modules::git::types::{
     DiscardEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult, GitDiffContentResult,
-    GitDiffResult, GitLogEntry, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo,
-    GitStatusSnapshot,
+    GitDiffResult, GitDiffSide, GitLogEntry, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline,
+    GitRepoInfo, GitStatusSnapshot,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -64,17 +64,18 @@ pub async fn git_status(
     .await
 }
 
+/// 读取指定 Git side 的 unified diff。
 #[tauri::command]
 pub async fn git_diff(
     repo_root: String,
     path: Option<String>,
-    staged: bool,
+    side: GitDiffSide,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<GitDiffResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::diff(r, &repo_root, path.as_deref(), staged, &workspace).map_err(Into::into)
+        operations::diff(r, &repo_root, path.as_deref(), side, &workspace).map_err(Into::into)
     })
     .await
 }
@@ -85,7 +86,7 @@ pub async fn git_quick_diff_baseline(
     path: String,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
-) -> Result<Option<GitQuickDiffBaseline>, String> {
+) -> Result<GitQuickDiffBaseline, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
         operations::quick_diff_baseline(r, &path, &workspace).map_err(Into::into)
@@ -93,11 +94,12 @@ pub async fn git_quick_diff_baseline(
     .await
 }
 
+/// 读取指定 Git side 的两侧文件内容。
 #[tauri::command]
 pub async fn git_diff_content(
     repo_root: String,
     path: String,
-    staged: bool,
+    side: GitDiffSide,
     original_path: Option<String>,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
@@ -108,7 +110,7 @@ pub async fn git_diff_content(
             r,
             &repo_root,
             &path,
-            staged,
+            side,
             original_path.as_deref(),
             &workspace,
         )
