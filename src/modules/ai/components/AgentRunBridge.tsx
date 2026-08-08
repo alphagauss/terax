@@ -28,8 +28,10 @@ type PendingApproval = {
 
 /** 为每个持有运行锁的会话保持独立桥接器。 */
 export function AgentRunBridge() {
-  const sessionIds = useChatStore((state) =>
-    Object.keys(state.runLockSessionIds),
+  const runLockSessionIds = useChatStore((state) => state.runLockSessionIds);
+  const sessionIds = useMemo(
+    () => Object.keys(runLockSessionIds),
+    [runLockSessionIds],
   );
   return (
     <>
