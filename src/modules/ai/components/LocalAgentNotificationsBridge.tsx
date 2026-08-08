@@ -1,15 +1,16 @@
 /**
- * 本文件把所有内置 AI 会话的运行状态接入统一 Agent 通知系统。
- * 后台会话的审批、完成和错误通知携带会话 ID，点击后切回对应会话。
+ * 本文件把内置 AI 会话的可见性和运行结果接入关注状态及统一通知系统。
+ * 后台提示只存在于内存，完成通知在会话结果提交并释放运行锁后发送。
  */
 
 import { routeAgentNotification } from "@/modules/agents/lib/route";
 import type { AgentStatus } from "@/modules/agents/lib/types";
 import { useWindowFocus } from "@/modules/agents/lib/useWindowFocus";
 import { useAgentStore } from "@/modules/agents/store/agentStore";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useChatStore, type AgentRunStatus } from "../store/chatStore";
+import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 
 const AGENT = "Terax";
 
@@ -41,6 +42,10 @@ export function LocalAgentNotificationsBridge({
   const runs = useChatStore((state) => state.agentMetaBySession);
   const sessions = useChatStore((state) => state.sessions);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const runLockSessionIds = useChatStore((state) => state.runLockSessionIds);
+  const pendingCompletionCount = useSessionAttentionStore(
+    (state) => state.pendingCompletions.length,
+  );
   const focused = useWindowFocus();
   const previous = useRef<Record<string, AgentRunStatus>>({});
 
@@ -50,6 +55,18 @@ export function LocalAgentNotificationsBridge({
   focusedRef.current = focused;
   const activeSessionRef = useRef(activeSessionId);
   activeSessionRef.current = activeSessionId;
+
+  useLayoutEffect(() => {
+    const attention = useSessionAttentionStore.getState();
+    for (const sessionId of Object.keys(runLockSessionIds)) {
+      if (visible && activeSessionId === sessionId) {
+        attention.markViewed(sessionId);
+      } else {
+        attention.markBackgroundRunning(sessionId);
+      }
+    }
+    if (visible && activeSessionId) attention.markViewed(activeSessionId);
+  }, [activeSessionId, runLockSessionIds, visible]);
 
   useEffect(() => {
     const nextLiveStatus = aggregateStatus(runs);
@@ -62,53 +79,64 @@ export function LocalAgentNotificationsBridge({
     for (const [sessionId, run] of Object.entries(runs)) {
       const was = previous.current[sessionId] ?? "idle";
       if (was === run.status) continue;
-      const sessionTitle =
-        sessions.find((session) => session.id === sessionId)?.title ||
-        t("miniWindow.newChat");
-      const fire = (
-        kind: "attention" | "finished" | "error",
-        title: string,
-        body?: string,
-        allowToast = true,
-      ) =>
+      if (run.status === "awaiting-approval") {
+        const sessionTitle =
+          sessions.find((session) => session.id === sessionId)?.title ||
+          t("miniWindow.newChat");
         routeAgentNotification({
           source: "local",
           agent: AGENT,
-          kind,
-          title,
-          body,
+          kind: "attention",
+          title: t("notifications.approvalTitle", { session: sessionTitle }),
+          body: t("notifications.approvalBody"),
           focused: focusedRef.current,
           visible: visibleRef.current && activeSessionRef.current === sessionId,
-          allowToast,
+          allowToast: false,
           sessionId,
           onActivate: () => onActivate(sessionId),
         });
-
-      if (run.status === "awaiting-approval") {
-        fire(
-          "attention",
-          t("notifications.approvalTitle", { session: sessionTitle }),
-          t("notifications.approvalBody"),
-          false,
-        );
-      } else if (run.status === "error") {
-        fire(
-          "error",
-          t("notifications.errorTitle", { session: sessionTitle }),
-          run.error ?? undefined,
-        );
-      } else if (run.status === "idle" && isBusy(was)) {
-        fire(
-          "finished",
-          t("notifications.finishedTitle", { session: sessionTitle }),
-          t("notifications.finishedBody"),
-        );
       }
     }
     previous.current = Object.fromEntries(
       Object.entries(runs).map(([sessionId, run]) => [sessionId, run.status]),
     );
   }, [onActivate, runs, sessions, t]);
+
+  useEffect(() => {
+    if (pendingCompletionCount === 0) return;
+    const completions = useSessionAttentionStore
+      .getState()
+      .takePendingCompletions();
+    for (const completion of completions) {
+      const sessionTitle =
+        useChatStore
+          .getState()
+          .sessions.find((session) => session.id === completion.sessionId)
+          ?.title || t("miniWindow.newChat");
+      const error =
+        useChatStore.getState().agentMetaBySession[completion.sessionId]?.error;
+      routeAgentNotification({
+        source: "local",
+        agent: AGENT,
+        kind: completion.outcome === "error" ? "error" : "finished",
+        title:
+          completion.outcome === "error"
+            ? t("notifications.errorTitle", { session: sessionTitle })
+            : t("notifications.finishedTitle", { session: sessionTitle }),
+        body:
+          completion.outcome === "error"
+            ? (error ?? undefined)
+            : t("notifications.finishedBody"),
+        focused: focusedRef.current,
+        visible:
+          visibleRef.current &&
+          activeSessionRef.current === completion.sessionId,
+        allowToast: true,
+        sessionId: completion.sessionId,
+        onActivate: () => onActivate(completion.sessionId),
+      });
+    }
+  }, [onActivate, pendingCompletionCount, t]);
 
   useEffect(() => () => useAgentStore.getState().setLocalAgent(null), []);
 

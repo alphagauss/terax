@@ -1,33 +1,32 @@
 /**
- * 本文件渲染当前 AI 会话的紧凑运行状态。
- * 状态严格来自活动会话，不聚合后台会话。
+ * 本文件渲染状态栏中的 AI 面板入口和聚合运行提示。
+ * 入口不展示具体会话步骤，任一会话持有运行锁时仅显示橙色呼吸灯。
  */
 
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import {
-  AiChat01Icon,
-  AlertCircleIcon,
-  AlertDiamondIcon,
-} from "@hugeicons/core-free-icons";
+import { AiChat01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
-import {
-  selectActiveAgentMeta,
-  useChatStore,
-  type AgentMeta,
-} from "../store/chatStore";
+import { useChatStore } from "../store/chatStore";
 
 type Props = {
   onClick: () => void;
   active?: boolean;
 };
 
+/** 提供 AI 侧栏开关，并以单一指示灯汇总所有会话的运行状态。 */
 export function AgentStatusPill({ onClick, active = false }: Props) {
   const { t } = useTranslation("ai");
-  const meta = useChatStore(selectActiveAgentMeta);
-  const { tone, icon, label } = describe(meta, t);
+  const hasRunningSession = useChatStore(
+    (state) => Object.keys(state.runLockSessionIds).length > 0,
+  );
+  const label = active
+    ? hasRunningSession
+      ? t("statusPill.closeAiSidebarRunning")
+      : t("statusPill.closeAiSidebar")
+    : hasRunningSession
+      ? t("statusPill.openAiSidebarRunning")
+      : t("statusPill.openAiSidebar");
 
   return (
     <button
@@ -35,64 +34,18 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
       onClick={onClick}
       className={cn(
         "flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors",
-        tone,
-        active &&
-          meta.status === "idle" &&
-          "border-border bg-accent text-foreground",
+        "border-transparent text-muted-foreground hover:border-border/60 hover:bg-accent hover:text-foreground",
+        active && "border-border bg-accent text-foreground",
       )}
-      title={
-        active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")
-      }
-      aria-label={
-        active ? t("statusPill.closeAiSidebar") : t("statusPill.openAiSidebar")
-      }
+      title={label}
+      aria-label={label}
       aria-pressed={active}
     >
-      {icon}
-      <span className="max-w-[180px] truncate">{label}</span>
+      {hasRunningSession ? (
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500 motion-reduce:animate-none" />
+      ) : null}
+      <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />
+      <span>AI</span>
     </button>
   );
-}
-
-function describe(
-  meta: AgentMeta,
-  t: TFunction<"ai">,
-): {
-  tone: string;
-  icon: React.ReactNode;
-  label: string;
-} {
-  if (meta.status === "awaiting-approval") {
-    return {
-      tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400",
-      icon: (
-        <HugeiconsIcon icon={AlertDiamondIcon} size={12} strokeWidth={1.75} />
-      ),
-      label:
-        meta.approvalsPending > 1
-          ? t("statusPill.approvalsPending", { count: meta.approvalsPending })
-          : t("statusPill.approvalNeeded"),
-    };
-  }
-  if (meta.status === "error") {
-    return {
-      tone: "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15",
-      icon: (
-        <HugeiconsIcon icon={AlertCircleIcon} size={12} strokeWidth={1.75} />
-      ),
-      label: meta.error ?? t("statusPill.error"),
-    };
-  }
-  if (meta.status === "idle") {
-    return {
-      tone: "border-transparent text-muted-foreground hover:border-border/60 hover:bg-accent hover:text-foreground",
-      icon: <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />,
-      label: "AI",
-    };
-  }
-  return {
-    tone: "border-border/60 bg-card text-muted-foreground hover:text-foreground",
-    icon: <Spinner className="size-3" />,
-    label: meta.step ?? t("statusPill.thinking"),
-  };
 }

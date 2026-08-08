@@ -21,10 +21,7 @@ import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
-import {
-  AgentNotificationsBridge,
-  nextAttentionTabId,
-} from "@/modules/agents";
+import { AgentNotificationsBridge, nextAttentionTabId } from "@/modules/agents";
 import {
   AgentRunBridge,
   ApprovalToastHost,
@@ -40,6 +37,7 @@ import {
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import { useApprovalStore } from "@/modules/ai/store/approvalStore";
+import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
@@ -1176,10 +1174,16 @@ export default function App() {
 
   const onActivateAgent = activateAgentTarget;
 
-  const onActivateLocalAgent = useCallback((sessionId?: string) => {
-    if (sessionId) useChatStore.getState().switchSession(sessionId);
-    openAiPanelAndFocus();
-  }, [openAiPanelAndFocus]);
+  const onActivateLocalAgent = useCallback(
+    (sessionId?: string) => {
+      if (sessionId) {
+        useSessionAttentionStore.getState().requestRevealLatest(sessionId);
+        useChatStore.getState().switchSession(sessionId);
+      }
+      openAiPanel();
+    },
+    [openAiPanel],
+  );
 
   const handleTerminalExit = useCallback(
     (tabId: number, _code: number) => {
@@ -1667,7 +1671,12 @@ export default function App() {
     },
     {
       id: "ai",
-      content: <AiSidebarPanel hasComposer={hasComposer} />,
+      content: (
+        <AiSidebarPanel
+          hasComposer={hasComposer}
+          visible={sidebar.isVisible("ai")}
+        />
+      ),
     },
   ];
 

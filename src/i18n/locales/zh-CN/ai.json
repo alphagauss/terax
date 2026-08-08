@@ -40,6 +40,11 @@
     "newSession": "新建会话",
     "closeAiSidebar": "关闭 AI 侧栏",
     "deleteSession": "删除会话",
+    "sessionStatus": {
+      "background-running": "正在后台运行",
+      "completed-unread": "已完成，尚未查看",
+      "error-unread": "运行失败，尚未查看"
+    },
     "empty": {
       "title": "向 Terax 提问",
       "description": "Terax 在文件管理器目录中工作，仅在需要时读取终端输出。"
@@ -163,10 +168,8 @@
     "openAiLog": "打开 AI 日志",
     "openAiSidebar": "打开 AI 侧栏",
     "closeAiSidebar": "关闭 AI 侧栏",
-    "approvalNeeded": "需要批准",
-    "approvalsPending": "{{count}} 项待批准",
-    "error": "错误",
-    "thinking": "思考中…"
+    "openAiSidebarRunning": "打开 AI 侧栏，有 AI 会话正在运行",
+    "closeAiSidebarRunning": "关闭 AI 侧栏，有 AI 会话正在运行"
   },
   "slashCommands": {
     "claudeCodeUsage": "用法：/claude-code <request>",

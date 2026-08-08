@@ -45,7 +45,13 @@ export function ApprovalToastHost(props: ApprovalToastHostProps) {
 }
 
 /** 按需加载 AI 侧边栏内容。 */
-export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
+export function AiSidebarPanel({
+  hasComposer,
+  visible,
+}: {
+  hasComposer: boolean;
+  visible: boolean;
+}) {
   const { t } = useTranslation("common");
   return (
     <Suspense
@@ -55,7 +61,7 @@ export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
         </div>
       }
     >
-      <AiSidebarPanelInner hasComposer={hasComposer} />
+      <AiSidebarPanelInner hasComposer={hasComposer} visible={visible} />
     </Suspense>
   );
 }
