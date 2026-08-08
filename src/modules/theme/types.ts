@@ -29,6 +29,9 @@ export type ThemeColors = Partial<{
   gitUntracked: string;
   gitRenamed: string;
   gitDeleted: string;
+  editorGitModified: string;
+  editorGitAdded: string;
+  editorGitDeleted: string;
   sidebar: string;
   sidebarForeground: string;
   sidebarPrimary: string;

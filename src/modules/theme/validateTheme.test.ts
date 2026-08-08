@@ -70,7 +70,7 @@ describe("validateTheme", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("accepts Git status semantic colors", () => {
+  it("accepts Git status and editor marker semantic colors", () => {
     const result = validateTheme(
       baseTheme({
         variants: {
@@ -81,6 +81,9 @@ describe("validateTheme", () => {
               gitUntracked: "#73c991",
               gitRenamed: "#73c991",
               gitDeleted: "#c74e39",
+              editorGitModified: "#0451a5",
+              editorGitAdded: "#107c10",
+              editorGitDeleted: "#cd3131",
             },
           },
         },

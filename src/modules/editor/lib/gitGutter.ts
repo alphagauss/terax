@@ -175,10 +175,14 @@ const changeGutterTheme = EditorView.baseTheme({
     width: "100%",
     height: "100%",
   },
-  ".cm-change-added": { backgroundColor: "var(--terminal-ansi-green)" },
-  ".cm-change-modified": { backgroundColor: "var(--terminal-ansi-blue)" },
+  ".cm-change-added": {
+    backgroundColor: "var(--editor-git-added)",
+  },
+  ".cm-change-modified": {
+    backgroundColor: "var(--editor-git-modified)",
+  },
   ".cm-change-deleted": {
-    boxShadow: "inset 0 -2px 0 0 var(--terminal-ansi-red)",
+    boxShadow: "inset 0 -2px 0 0 var(--editor-git-deleted)",
   },
 });
 
