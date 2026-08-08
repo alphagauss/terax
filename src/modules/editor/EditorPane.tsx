@@ -12,7 +12,7 @@ import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { matchBinding, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
 import { gotoLine } from "@codemirror/search";
@@ -58,10 +58,6 @@ import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { gitChangeGutter, setQuickDiffBaseline } from "./lib/gitGutter";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
-import {
-  loadQuickDiffBaseline,
-  useQuickDiffBaselineGeneration,
-} from "./lib/quickDiffBaseline";
 import {
   type EditorDocument,
   FORCE_READ_LIMIT,
@@ -201,6 +197,7 @@ export const EditorCore = memo(
     const {
       doc,
       baselineContent,
+      gitBaseline,
       onChange,
       save,
       reload,
@@ -227,11 +224,6 @@ export const EditorCore = memo(
       null,
     );
     const workspace = useWorkspaceEnvStore((s) => s.env);
-    const workspaceScope = workspaceScopeKey(workspace);
-    const quickDiffGeneration = useQuickDiffBaselineGeneration(
-      workspaceScope,
-      path,
-    );
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
@@ -396,35 +388,25 @@ export const EditorCore = memo(
     const pathRef = useRef(path);
     pathRef.current = path;
     useEffect(() => {
-      void quickDiffGeneration;
       if (doc.status !== "ready") return;
       let cancelled = false;
       let frame = 0;
-      const run = async () => {
+      const run = () => {
         const view = cmRef.current?.view;
         if (!view) {
           frame = requestAnimationFrame(run);
           return;
         }
-        try {
-          const baseline = await loadQuickDiffBaseline(workspaceScope, path);
-          if (!cancelled && view.dom.isConnected) {
-            view.dispatch({
-              effects: setQuickDiffBaseline.of(baseline?.content ?? null),
-            });
-          }
-        } catch {
-          if (!cancelled && view.dom.isConnected) {
-            view.dispatch({ effects: setQuickDiffBaseline.of(null) });
-          }
+        if (!cancelled && view.dom.isConnected) {
+          view.dispatch({ effects: setQuickDiffBaseline.of(gitBaseline) });
         }
       };
-      void run();
+      run();
       return () => {
         cancelled = true;
         cancelAnimationFrame(frame);
       };
-    }, [doc.status, path, quickDiffGeneration, workspaceScope]);
+    }, [doc.status, gitBaseline]);
 
     const pendingLineRef = useRef<number | null>(null);
     const restoredSourceLineRef = useRef<number | null>(null);

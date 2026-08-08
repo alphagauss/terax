@@ -15,6 +15,10 @@
     "description": "{{name}} was modified by another program while you had unsaved changes. Overwrite to keep your version.",
     "overwrite": "Overwrite"
   },
+  "diff": {
+    "loading": "Loading diff…",
+    "unavailable": "Diff preview is not available for this file."
+  },
   "binaryFile": "Binary file",
   "fileTooLarge": "File too large",
   "previewNotSupported": "preview not supported",

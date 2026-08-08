@@ -3,6 +3,7 @@
  * 负责注入当前工作区环境，不包含业务状态或缓存。
  */
 
+import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -76,13 +77,6 @@ export type GitStatusSnapshot = {
 export type GitDiffResult = {
   diffText: string;
   truncated: boolean;
-};
-
-export type GitQuickDiffBaseline = {
-  repoRoot: string;
-  relativePath: string;
-  revision: string;
-  content: string;
 };
 
 export type GitDiffContentResult = {
@@ -283,28 +277,23 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
-  gitDiff: (repoRoot: string, path: string | null, staged: boolean) =>
+  gitDiff: (repoRoot: string, path: string | null, side: GitDiffSide) =>
     invoke<GitDiffResult>("git_diff", {
       repoRoot,
       path,
-      staged,
-      workspace: currentWorkspaceEnv(),
-    }),
-  gitQuickDiffBaseline: (path: string) =>
-    invoke<GitQuickDiffBaseline | null>("git_quick_diff_baseline", {
-      path,
+      side,
       workspace: currentWorkspaceEnv(),
     }),
   gitDiffContent: (
     repoRoot: string,
     path: string,
-    staged: boolean,
+    side: GitDiffSide,
     originalPath?: string | null,
   ) =>
     invoke<GitDiffContentResult>("git_diff_content", {
       repoRoot,
       path,
-      staged,
+      side,
       originalPath: originalPath ?? null,
       workspace: currentWorkspaceEnv(),
     }),

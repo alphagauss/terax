@@ -9,7 +9,7 @@ use tempfile::TempDir;
 use terax_lib::modules::fs::to_canon;
 use terax_lib::modules::git::errors::GitError;
 use terax_lib::modules::git::operations;
-use terax_lib::modules::git::types::DiscardEntry;
+use terax_lib::modules::git::types::{DiscardEntry, GitDiffSide, GitQuickDiffBaseline};
 use terax_lib::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 fn skip_if_no_git() -> bool {
@@ -80,17 +80,25 @@ fn quick_diff_baseline_reads_head_instead_of_worktree() {
 
     let path = to_canon(fx.repo_path.join("src/main.ts"));
     let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
-        .expect("quick diff baseline")
-        .expect("tracked text file");
+        .expect("quick diff baseline");
+    let GitQuickDiffBaseline::Text {
+        repo_root,
+        relative_path,
+        head_sha,
+        content,
+    } = baseline
+    else {
+        panic!("tracked text file should have a baseline");
+    };
 
-    assert_eq!(baseline.content, "const value = 1;\n");
-    assert_eq!(baseline.relative_path, "src/main.ts");
-    assert_eq!(baseline.repo_root, fx.repo_str());
-    assert!(!baseline.revision.is_empty());
+    assert_eq!(content, "const value = 1;\n");
+    assert_eq!(relative_path, "src/main.ts");
+    assert_eq!(repo_root, fx.repo_str());
+    assert!(head_sha.is_some());
 }
 
 #[test]
-fn quick_diff_baseline_ignores_untracked_and_unborn_files() {
+fn quick_diff_baseline_uses_empty_content_for_unborn_files() {
     if skip_if_no_git() {
         return;
     }
@@ -101,7 +109,78 @@ fn quick_diff_baseline_ignores_untracked_and_unborn_files() {
     let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
         .expect("quick diff baseline");
 
-    assert!(baseline.is_none());
+    let GitQuickDiffBaseline::Text {
+        head_sha, content, ..
+    } = baseline
+    else {
+        panic!("new text file should have an empty HEAD baseline");
+    };
+    assert_eq!(content, "");
+    assert!(head_sha.is_none());
+}
+
+#[test]
+fn quick_diff_baseline_uses_empty_content_for_files_added_after_head() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("seed.txt", "seed\n");
+    fx.run_git(&["add", "seed.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    fx.write_file("new.txt", "new\n");
+    fx.run_git(&["add", "new.txt"]);
+    let path = to_canon(fx.repo_path.join("new.txt"));
+
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("quick diff baseline");
+    let GitQuickDiffBaseline::Text {
+        head_sha, content, ..
+    } = baseline
+    else {
+        panic!("added text file should have an empty HEAD baseline");
+    };
+
+    assert_eq!(content, "");
+    assert!(head_sha.is_some());
+}
+
+#[test]
+fn quick_diff_baseline_rejects_untracked_binary_and_oversized_files() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    std::fs::write(fx.repo_path.join("binary.bin"), [0, 1, 2]).expect("write binary");
+    fx.write_file("large.txt", &"x".repeat(2 * 1024 * 1024 + 1));
+
+    for path in ["binary.bin", "large.txt"] {
+        let path = to_canon(fx.repo_path.join(path));
+        let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+            .expect("quick diff baseline");
+        assert!(matches!(baseline, GitQuickDiffBaseline::Unsupported));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn quick_diff_baseline_does_not_follow_untracked_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let outside = TempDir::new().expect("outside tempdir");
+    let target = outside.path().join("secret.txt");
+    std::fs::write(&target, "secret\n").expect("write outside target");
+    symlink(target, fx.repo_path.join("link.txt")).expect("create symlink");
+    let path = to_canon(fx.repo_path.join("link.txt"));
+
+    let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
+        .expect("quick diff baseline");
+
+    assert!(matches!(baseline, GitQuickDiffBaseline::Unsupported));
 }
 
 #[test]
@@ -118,7 +197,7 @@ fn quick_diff_baseline_ignores_oversized_head_content() {
     let baseline = operations::quick_diff_baseline(&fx.registry, &path, &fx.workspace)
         .expect("quick diff baseline");
 
-    assert!(baseline.is_none());
+    assert!(matches!(baseline, GitQuickDiffBaseline::Unsupported));
 }
 
 #[test]
@@ -351,8 +430,14 @@ fn diff_shows_worktree_change() {
     fx.run_git(&["commit", "-q", "-m", "init"]);
     fx.write_file("a.txt", "alpha\nbeta\n");
 
-    let diff =
-        operations::diff(&fx.registry, &fx.repo_str(), None, false, &fx.workspace).expect("diff");
+    let diff = operations::diff(
+        &fx.registry,
+        &fx.repo_str(),
+        None,
+        GitDiffSide::Worktree,
+        &fx.workspace,
+    )
+    .expect("diff");
     assert!(diff.diff_text.contains("+beta"));
 }
 
@@ -369,8 +454,14 @@ fn diff_staged_only_shows_index_change() {
     fx.run_git(&["add", "a.txt"]);
     fx.write_file("a.txt", "alpha\nbeta\ngamma\n");
 
-    let staged = operations::diff(&fx.registry, &fx.repo_str(), None, true, &fx.workspace)
-        .expect("staged diff");
+    let staged = operations::diff(
+        &fx.registry,
+        &fx.repo_str(),
+        None,
+        GitDiffSide::Index,
+        &fx.workspace,
+    )
+    .expect("staged diff");
     assert!(staged.diff_text.contains("+beta"));
     assert!(!staged.diff_text.contains("+gamma"));
 }

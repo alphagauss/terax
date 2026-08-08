@@ -14,9 +14,9 @@ use crate::modules::git::process::{
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
-    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
-    MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
+    GitDiffContentResult, GitDiffResult, GitDiffSide, GitLogEntry, GitOutput, GitPanelSnapshot,
+    GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource,
+    DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
     authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
@@ -171,11 +171,12 @@ fn status_inner(repo_root: &ResolvedGitDirectory) -> Result<GitStatusSnapshot> {
     })
 }
 
+/// 读取工作区或暂存区的 unified diff。
 pub fn diff(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     path: Option<&str>,
-    staged: bool,
+    side: GitDiffSide,
     workspace: &WorkspaceEnv,
 ) -> Result<GitDiffResult> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
@@ -183,22 +184,21 @@ pub fn diff(
     diff_inner(
         &repo_root,
         path,
-        if staged {
-            DiffMode::Index
-        } else {
-            DiffMode::Worktree
+        match side {
+            GitDiffSide::Worktree => DiffMode::Worktree,
+            GitDiffSide::Index => DiffMode::Index,
         },
     )
 }
 
 /// 读取文件在当前 HEAD 中的文本基线。
 ///
-/// 未被 HEAD 跟踪、二进制文件以及尚无首个提交的仓库返回 `None`。
+/// HEAD 中尚不存在的文本文件返回空基线，使新增文件显示为整文件新增。
 pub fn quick_diff_baseline(
     registry: &WorkspaceRegistry,
     path: &str,
     workspace: &WorkspaceEnv,
-) -> Result<Option<GitQuickDiffBaseline>> {
+) -> Result<GitQuickDiffBaseline> {
     let (parent, file_name) = split_file_path(path)?;
     let cwd = canonical_dir(registry, parent, workspace)?;
     if !cwd.remote && !registry.is_authorized(&cwd.local_path) {
@@ -206,16 +206,13 @@ pub fn quick_diff_baseline(
     }
     ensure_git_available(&cwd.workspace)?;
     let Some(repo_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
-        return Ok(None);
+        return Ok(GitQuickDiffBaseline::Unsupported);
     };
-    let Some(revision) = git_stdout_line_opt(
+    let revision = git_stdout_line_opt(
         &repo_root.workspace,
         &repo_root.git_path,
         ["rev-parse", "--verify", "HEAD"],
-    )?
-    else {
-        return Ok(None);
-    };
+    )?;
     let file_path = format!(
         "{}/{}",
         cwd.git_path.trim_end_matches(['/', '\\']),
@@ -224,30 +221,52 @@ pub fn quick_diff_baseline(
     let relative_path = relative_git_path(&repo_root.git_path, &file_path, repo_root.remote)?;
     let relative_path =
         pathspec_from_input(&repo_root.local_path, &relative_path, repo_root.remote)?;
-    // 后续始终读取已解析出的 revision，避免 HEAD 在多条 Git 命令之间移动后返回错配内容。
-    let object = format!("{revision}:{relative_path}");
-    let Some(size) = git_stdout_line_opt(
-        &repo_root.workspace,
-        &repo_root.git_path,
-        ["cat-file", "-s", &object],
-    )?
-    .and_then(|value| value.parse::<u64>().ok()) else {
-        return Ok(None);
+    // 后续始终读取已解析出的 SHA，避免 HEAD 在多条 Git 命令之间移动后返回错配内容。
+    let content = if let Some(head_sha) = revision.as_deref() {
+        let object = format!("{head_sha}:{relative_path}");
+        let size = git_stdout_line_opt(
+            &repo_root.workspace,
+            &repo_root.git_path,
+            ["cat-file", "-s", &object],
+        )?
+        .and_then(|value| value.parse::<u64>().ok());
+        match size {
+            Some(size) if size > MAX_FILE_BYTES => {
+                return Ok(GitQuickDiffBaseline::Unsupported);
+            }
+            Some(_) => match git_show_text(&repo_root.workspace, &repo_root.git_path, &object)? {
+                TextSource::Text(content) => Some(content),
+                TextSource::Missing => new_file_baseline(&repo_root, &relative_path)?,
+                TextSource::Binary => None,
+            },
+            None => new_file_baseline(&repo_root, &relative_path)?,
+        }
+    } else {
+        new_file_baseline(&repo_root, &relative_path)?
     };
-    if size > MAX_FILE_BYTES {
-        return Ok(None);
-    }
-    let TextSource::Text(content) =
-        git_show_text(&repo_root.workspace, &repo_root.git_path, &object)?
-    else {
-        return Ok(None);
+    let Some(content) = content else {
+        return Ok(GitQuickDiffBaseline::Unsupported);
     };
-    Ok(Some(GitQuickDiffBaseline {
+    Ok(GitQuickDiffBaseline::Text {
         repo_root: repo_root.git_path,
         relative_path,
-        revision,
+        head_sha: revision,
         content,
-    }))
+    })
+}
+
+/// 验证 HEAD 中不存在的工作区文件仍是有界文本，再为其提供空基线。
+fn new_file_baseline(
+    repo_root: &ResolvedGitDirectory,
+    relative_path: &str,
+) -> Result<Option<String>> {
+    let worktree_path = repo_root.local_path.join(relative_path);
+    match read_worktree_text(repo_root, relative_path, &worktree_path) {
+        Ok(TextSource::Text(_)) => Ok(Some(String::new())),
+        Ok(TextSource::Missing | TextSource::Binary)
+        | Err(GitError::FileTooLarge { .. } | GitError::SymlinkRejected(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -296,11 +315,12 @@ fn diff_inner(
     })
 }
 
+/// 读取工作区或暂存区的两侧文件内容，供只读差异页面渲染。
 pub fn diff_content(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     path: &str,
-    staged: bool,
+    side: GitDiffSide,
     original_path: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<GitDiffContentResult> {
@@ -318,7 +338,7 @@ pub fn diff_content(
         _ => None,
     };
 
-    let original = if staged {
+    let original = if matches!(side, GitDiffSide::Index) {
         let spec = original_rel.as_deref().unwrap_or(&rel_path);
         git_show_text(
             &repo_root.workspace,
@@ -332,7 +352,7 @@ pub fn diff_content(
             &format!(":{rel_path}"),
         )?
     };
-    let modified = if staged {
+    let modified = if matches!(side, GitDiffSide::Index) {
         git_show_text(
             &repo_root.workspace,
             &repo_root.git_path,
@@ -350,10 +370,9 @@ pub fn diff_content(
         Some(diff_inner(
             &repo_root,
             Some(&rel_path),
-            if staged {
-                DiffMode::Index
-            } else {
-                DiffMode::Worktree
+            match side {
+                GitDiffSide::Worktree => DiffMode::Worktree,
+                GitDiffSide::Index => DiffMode::Index,
             },
         )?)
     } else {
@@ -1231,15 +1250,24 @@ fn read_worktree_text(
     let manager = crate::modules::remote::manager::global_manager().map_err(GitError::Spawn)?;
     let profile_id = profile_id.clone();
     let path = crate::modules::remote::session::join_remote(&repo_root.git_path, relative);
+    let symlink_path = Path::new(&path).to_path_buf();
     let bytes = tauri::async_runtime::block_on(async move {
         let workspace = manager.workspace(&profile_id).await?;
         let stat = crate::modules::remote::sftp::stat(&workspace, &path).await?;
+        if stat.kind == crate::modules::remote::sftp::RemoteEntryKind::Symlink {
+            return Ok(None);
+        }
         if stat.size > MAX_FILE_BYTES {
             return Err(format!("remote file is too large: {} bytes", stat.size));
         }
-        crate::modules::remote::sftp::read_file(&workspace, &path, MAX_FILE_BYTES).await
+        crate::modules::remote::sftp::read_file(&workspace, &path, MAX_FILE_BYTES)
+            .await
+            .map(Some)
     })
     .map_err(GitError::Spawn)?;
+    let Some(bytes) = bytes else {
+        return Err(GitError::SymlinkRejected(symlink_path));
+    };
     if bytes.iter().take(8192).any(|byte| *byte == 0) {
         return Ok(TextSource::Binary);
     }

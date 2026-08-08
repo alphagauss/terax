@@ -4,11 +4,13 @@
  * 锁定新增、修改、删除、行号移动和增量结果与完整重算一致等核心不变量。
  */
 
+import { Chunk } from "@codemirror/merge";
 import { ChangeSet, Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import {
   buildQuickDiff,
   type QuickDiffRange,
+  rangesFromChunks,
   updateQuickDiff,
 } from "./quickDiff";
 
@@ -62,6 +64,16 @@ describe("buildQuickDiff", () => {
     ]);
     expect(ranges("first\nsecond", "")).toEqual([
       { kind: "deleted", fromLine: 1, toLine: 1 },
+    ]);
+  });
+
+  it("keeps conservative line markers for an imprecise diff chunk", () => {
+    const baseline = text("first\nold\nlast");
+    const modified = text("first\nnew content\nlast");
+    const impreciseChunk = new Chunk([], 6, 10, 6, 18, false);
+
+    expect(rangesFromChunks(baseline, modified, [impreciseChunk])).toEqual([
+      { kind: "modified", fromLine: 2, toLine: 2 },
     ]);
   });
 });

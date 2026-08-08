@@ -6,6 +6,7 @@
 import i18n from "@/i18n";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
+import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import {
   activateGroup,
   activeTabId,
@@ -528,7 +529,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     (input: {
       path: string;
       repoRoot: string;
-      mode: "-" | "+";
+      side: GitDiffSide;
       originalPath?: string | null;
       title?: string;
     }) => {
@@ -537,11 +538,13 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
           tab.kind === "git-diff" &&
           tab.repoRoot === input.repoRoot &&
           tab.path === input.path &&
-          tab.mode === input.mode,
+          tab.side === input.side,
       );
       if (existing) {
         revealTab(existing.id, {
-          title: input.title ?? `${pathBasename(input.path)} (${input.mode})`,
+          title:
+            input.title ??
+            `${pathBasename(input.path)} (${input.side === "worktree" ? "W" : "I"})`,
           originalPath: input.originalPath ?? null,
         });
         return existing.id;
@@ -551,10 +554,12 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         id,
         kind: "git-diff",
         spaceId: activeSpaceIdRef.current,
-        title: input.title ?? `${pathBasename(input.path)} (${input.mode})`,
+        title:
+          input.title ??
+          `${pathBasename(input.path)} (${input.side === "worktree" ? "W" : "I"})`,
         path: input.path,
         repoRoot: input.repoRoot,
-        mode: input.mode,
+        side: input.side,
         originalPath: input.originalPath ?? null,
       };
       addPage(tab);

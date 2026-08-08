@@ -1,12 +1,12 @@
 /**
  * 本文件根据当前 Workbench 页面解析源代码管理仓库上下文。
- * 面板是否活跃由统一侧边栏模型传入，不依赖具体主副位置。
+ * 控制器常驻工作区根部，不依赖 Source Control 面板是否可见。
  */
 
 import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/workbench";
 import { useCallback, useMemo } from "react";
-import { useSourceControl } from "./useSourceControl";
+import { useRepositoryController } from "./useRepositoryController";
 
 function dirname(path: string | null): string | null {
   if (!path) return null;
@@ -73,14 +73,13 @@ export function useSourceControlContext({
     [tabs],
   );
   const sourceControlActive = hasOpenGitTab || sourceControlVisible;
-  // Ambient path tracks the explorer root so the rail badge and explorer git
-  // decorations reflect the repo you are actually looking at. cd-within-repo
-  // churn is absorbed by the status TTL + reusable-root path in useSourceControl.
+  // 非 Git 页面跟随 Explorer 根目录，使侧栏徽标和文件装饰始终对应用户正在查看的仓库。
+  // 仓库内部切换目录产生的抖动由控制器的 TTL 与复用根目录逻辑吸收。
   const badgeContextPath = explorerRoot ?? workspaceFallbackPath;
   const sourceControlPath = sourceControlActive
     ? sourceControlContextPath
     : badgeContextPath;
-  const sourceControl = useSourceControl(sourceControlPath, true);
+  const sourceControl = useRepositoryController(sourceControlPath, true);
 
   const openGitGraphFromContext = useCallback(async () => {
     const known = sourceControl.hasRepo ? sourceControl.repo : null;

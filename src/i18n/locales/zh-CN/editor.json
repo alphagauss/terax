@@ -15,6 +15,10 @@
     "description": "当你有未保存的更改时,{{name}} 被另一个程序修改。覆盖文件以保留你的版本。",
     "overwrite": "覆盖"
   },
+  "diff": {
+    "loading": "正在加载差异…",
+    "unavailable": "无法预览此文件的差异。"
+  },
   "binaryFile": "二进制文件",
   "fileTooLarge": "文件过大",
   "previewNotSupported": "不支持预览",
