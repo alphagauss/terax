@@ -45,6 +45,10 @@ import {
   type SessionMeta,
 } from "../lib/sessions";
 import { useTodosStore } from "./todoStore";
+import {
+  type SessionRunOutcome,
+  useSessionAttentionStore,
+} from "./sessionAttentionStore";
 
 export type Live = {
   explorerRoot: string | null;
@@ -191,6 +195,14 @@ const cancelledRuns = new Set<string>();
 const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
+
+/** 读取本轮最终结果，取消优先于 AI SDK 暴露的错误状态。 */
+function sessionRunOutcome(id: string): SessionRunOutcome {
+  if (cancelledRuns.has(id)) return "cancelled";
+  return getAgentMetaForSession(useChatStore.getState(), id).status === "error"
+    ? "error"
+    : "completed";
+}
 
 /** 更新聊天实例的 LRU 位置，并只驱逐没有运行锁的非活动实例。 */
 export function touchChat(id: string, c: Chat<UIMessage>) {
@@ -607,6 +619,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         persistedMessageCounts.delete(id);
         sessionMetadata.delete(id);
         pendingTurnIds.delete(id);
+        useSessionAttentionStore.getState().clearSession(id);
         const agentMetaBySession = { ...get().agentMetaBySession };
         delete agentMetaBySession[id];
         const wasActive = get().activeSessionId === id;
@@ -667,9 +680,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const sessions = get().sessions;
       const meta = sessions.find((s) => s.id === id);
       if (!meta) return;
+      const outcome = sessionRunOutcome(id);
       if (messages.length === 0 && meta.title === "New chat") {
         await releaseSessionRun(id);
+        cancelledRuns.delete(id);
         pendingTurnIds.delete(id);
+        useSessionAttentionStore.getState().finalizeRun(id, outcome);
         const runLockSessionIds = { ...get().runLockSessionIds };
         delete runLockSessionIds[id];
         set({ runLockSessionIds });
@@ -689,11 +705,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const records = serializeSessionMessages(messages.slice(persistedCount), {
         timestamp: new Date(updatedAt).toISOString(),
         turnId: pendingTurnIds.get(id) ?? newTurnId(),
-        turnStatus: cancelledRuns.has(id)
-          ? "cancelled"
-          : getAgentMetaForSession(get(), id).status === "error"
-            ? "error"
-            : "completed",
+        turnStatus: outcome,
       });
       const committedMeta = await commitSession({
         id,
@@ -709,8 +721,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
         messages: records,
       });
       persistedMessageCounts.set(id, messages.length);
-      cancelledRuns.delete(id);
-      pendingTurnIds.delete(id);
       set({
         sessions: get().sessions.map((session) =>
           session.id === id ? committedMeta : session,
@@ -718,6 +728,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       await get().refreshSessions();
       await releaseSessionRun(id);
+      cancelledRuns.delete(id);
+      pendingTurnIds.delete(id);
+      useSessionAttentionStore.getState().finalizeRun(id, outcome);
       const runLockSessionIds = { ...get().runLockSessionIds };
       delete runLockSessionIds[id];
       set({ runLockSessionIds });

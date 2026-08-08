@@ -68,7 +68,7 @@ describe("AI sidebar chat subscription", () => {
     const root = createRoot(container);
 
     await act(async () => {
-      root.render(<AiSidebarPanel hasComposer />);
+      root.render(<AiSidebarPanel hasComposer visible />);
     });
     expect(container.textContent).toContain("first");
 

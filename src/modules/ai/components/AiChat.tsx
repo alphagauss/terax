@@ -63,6 +63,7 @@ import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
+import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 import { AiChatScrollControls } from "./AiChatScrollControls";
 
 type ConversationScrollPosition = {
@@ -80,9 +81,12 @@ const conversationScrollPositions = new Map<
 >();
 
 /** 记忆并恢复会话滚动位置，滚动事件按动画帧合并，底部状态不采集消息锚点。 */
-function useConversationScrollMemory(sessionId: string) {
+function useConversationScrollMemory(sessionId: string, visible: boolean) {
   const contextRef = useRef<StickToBottomContext | null>(null);
   const remembered = conversationScrollPositions.get(sessionId);
+  const revealLatest = useSessionAttentionStore((state) =>
+    Boolean(state.revealLatestBySession[sessionId]),
+  );
 
   useLayoutEffect(() => {
     let bindFrame = 0;
@@ -172,6 +176,23 @@ function useConversationScrollMemory(sessionId: string) {
       saveNow?.();
     };
   }, [sessionId]);
+
+  useLayoutEffect(() => {
+    if (
+      !visible ||
+      !revealLatest ||
+      !useSessionAttentionStore.getState().takeRevealLatest(sessionId)
+    ) {
+      return;
+    }
+    conversationScrollPositions.delete(sessionId);
+    window.requestAnimationFrame(() => {
+      void contextRef.current?.scrollToBottom({
+        animation: "instant",
+        ignoreEscapes: true,
+      });
+    });
+  }, [revealLatest, sessionId, visible]);
 
   return {
     contextRef,
@@ -335,6 +356,7 @@ type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
 type Props = {
   sessionId: string;
+  visible: boolean;
   messages: UIMessage[];
   status: ChatStatus;
   error: Error | undefined;
@@ -344,17 +366,18 @@ type Props = {
 /**
  * AI 会话消息视图。
  *
- * 负责恢复每个会话的滚动位置、渲染流式末尾消息，并保留用户主动脱离底部后的阅读位置。
+ * 负责恢复每个会话的滚动位置、渲染流式末尾消息，并在通知导航时等待面板可见后前往最新结果。
  */
 export function AiChatView({
   sessionId,
+  visible,
   messages,
   status,
   error,
   clearError,
 }: Props) {
   const { t } = useTranslation("ai");
-  const scrollMemory = useConversationScrollMemory(sessionId);
+  const scrollMemory = useConversationScrollMemory(sessionId, visible);
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
   const showSpinner = isBusy && lastMessage?.role === "user";

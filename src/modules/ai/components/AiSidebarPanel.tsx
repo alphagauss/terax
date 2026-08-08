@@ -50,6 +50,10 @@ import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
+import {
+  type SessionAttention,
+  useSessionAttentionStore,
+} from "../store/sessionAttentionStore";
 import { AiChatView } from "./AiChat";
 import { AiInputBarConnect } from "./AiInputBar";
 import { AiSidebarComposer } from "./AiSidebarComposer";
@@ -75,7 +79,13 @@ const SUGGESTIONS = [
  *
  * 负责连接当前会话、聊天区域和输入区，关闭侧边栏不会主动终止正在运行的会话。
  */
-export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
+export function AiSidebarPanel({
+  hasComposer,
+  visible,
+}: {
+  hasComposer: boolean;
+  visible: boolean;
+}) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const revision = useChatStore((s) => s.activeSessionRevision);
   const readOnly = useChatStore((s) => {
@@ -92,6 +102,7 @@ export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
           key={`${sessionId}:${revision}`}
           sessionId={sessionId}
           readOnly={readOnly}
+          visible={visible}
         />
       ) : (
         <EmptyShell />
@@ -108,9 +119,11 @@ export function AiSidebarPanel({ hasComposer }: { hasComposer: boolean }) {
 function Body({
   sessionId,
   readOnly,
+  visible,
 }: {
   sessionId: string;
   readOnly: boolean;
+  visible: boolean;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
   const step = useChatStore(
@@ -141,6 +154,7 @@ function Body({
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
             <AiChatView
               sessionId={sessionId}
+              visible={visible}
               messages={helpers.messages}
               status={helpers.status}
               error={helpers.error}
@@ -367,6 +381,7 @@ function SessionPicker() {
   const sessions = useChatStore((s) => s.sessions);
   const activeId = useChatStore((s) => s.activeSessionId);
   const runLocks = useChatStore((s) => s.runLockSessionIds);
+  const attentionBySession = useSessionAttentionStore((s) => s.bySession);
   const switchSession = useChatStore((s) => s.switchSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
 
@@ -406,6 +421,7 @@ function SessionPicker() {
             key={s.id}
             session={s}
             active={s.id === activeId}
+            attention={attentionBySession[s.id]}
             deleteDisabled={Boolean(runLocks[s.id])}
             onSelect={() => switchSession(s.id)}
             onDelete={() => deleteSession(s.id)}
@@ -419,12 +435,14 @@ function SessionPicker() {
 function SessionRow({
   session,
   active,
+  attention,
   deleteDisabled,
   onSelect,
   onDelete,
 }: {
   session: SessionMeta;
   active: boolean;
+  attention?: SessionAttention;
   deleteDisabled: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -448,8 +466,11 @@ function SessionRow({
         active && "bg-accent/40",
       )}
     >
-      <span className="min-w-0 flex-1 truncate">
-        {session.title || t("miniWindow.newChat")}
+      <span className="flex min-w-0 flex-1 items-center gap-1">
+        <SessionAttentionIndicator attention={attention} />
+        <span className="min-w-0 flex-1 truncate">
+          {session.title || t("miniWindow.newChat")}
+        </span>
       </span>
       {updatedAt ? (
         <time
@@ -473,6 +494,33 @@ function SessionRow({
         <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
       </button>
     </DropdownMenuItem>
+  );
+}
+
+function SessionAttentionIndicator({
+  attention,
+}: {
+  attention?: SessionAttention;
+}) {
+  const { t } = useTranslation("ai");
+  const label = attention ? t(`miniWindow.sessionStatus.${attention}`) : null;
+  return (
+    <span className="flex w-2 shrink-0 items-center justify-center">
+      {attention ? (
+        <span
+          role="img"
+          aria-label={label ?? undefined}
+          title={label ?? undefined}
+          className={cn(
+            "size-1.5 rounded-full",
+            attention === "background-running" &&
+              "animate-pulse bg-amber-500 motion-reduce:animate-none",
+            attention === "completed-unread" && "bg-emerald-500",
+            attention === "error-unread" && "bg-destructive",
+          )}
+        />
+      ) : null}
+    </span>
   );
 }
 

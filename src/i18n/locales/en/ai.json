@@ -40,6 +40,11 @@
     "newSession": "New session",
     "closeAiSidebar": "Close AI sidebar",
     "deleteSession": "Delete session",
+    "sessionStatus": {
+      "background-running": "Running in the background",
+      "completed-unread": "Completed, not viewed",
+      "error-unread": "Failed, not viewed"
+    },
     "empty": {
       "title": "Ask Terax anything",
       "description": "Terax works from the Explorer folder and reads terminal output only when needed."
@@ -163,10 +168,8 @@
     "openAiLog": "Open AI log",
     "openAiSidebar": "Open AI sidebar",
     "closeAiSidebar": "Close AI sidebar",
-    "approvalNeeded": "Approval needed",
-    "approvalsPending": "{{count}} approvals",
-    "error": "Error",
-    "thinking": "Thinking…"
+    "openAiSidebarRunning": "Open AI sidebar, AI sessions are running",
+    "closeAiSidebarRunning": "Close AI sidebar, AI sessions are running"
   },
   "slashCommands": {
     "claudeCodeUsage": "Usage: /claude-code <request>",
