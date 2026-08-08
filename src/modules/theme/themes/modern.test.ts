@@ -14,6 +14,9 @@ describe("Modern Git status colors", () => {
       gitUntracked: "#007100",
       gitRenamed: "#007100",
       gitDeleted: "#AD0707",
+      editorGitModified: "#2472C8",
+      editorGitAdded: "#0DBC79",
+      editorGitDeleted: "#CD3131",
     });
   });
 
@@ -24,6 +27,9 @@ describe("Modern Git status colors", () => {
       gitUntracked: "#73C991",
       gitRenamed: "#73C991",
       gitDeleted: "#C74E39",
+      editorGitModified: "#0451A5",
+      editorGitAdded: "#107C10",
+      editorGitDeleted: "#CD3131",
     });
   });
 });

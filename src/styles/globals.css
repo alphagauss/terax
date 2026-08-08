@@ -151,6 +151,9 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --git-untracked: #007100;
     --git-renamed: #007100;
     --git-deleted: #ad0707;
+    --editor-git-modified: #2472c8;
+    --editor-git-added: #0dbc79;
+    --editor-git-deleted: #cd3131;
     --chart-1: oklch(0.872 0.007 219.6);
     --chart-2: oklch(0.56 0.021 213.5);
     --chart-3: oklch(0.45 0.017 213.2);
@@ -191,6 +194,9 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --git-untracked: #73c991;
     --git-renamed: #73c991;
     --git-deleted: #c74e39;
+    --editor-git-modified: #0451a5;
+    --editor-git-added: #107c10;
+    --editor-git-deleted: #cd3131;
     --chart-1: oklch(0.872 0.007 219.6);
     --chart-2: oklch(0.56 0.021 213.5);
     --chart-3: oklch(0.45 0.017 213.2);
@@ -501,19 +507,19 @@ html *::-webkit-scrollbar {
   right: 1px;
   left: 1px;
   min-height: 2px;
-  border-radius: 1px;
+  border-radius: 0;
 }
 
 .cm-changeOverview-added {
-  background-color: var(--terminal-ansi-green);
+  background-color: var(--editor-git-added);
 }
 
 .cm-changeOverview-modified {
-  background-color: var(--terminal-ansi-blue);
+  background-color: var(--editor-git-modified);
 }
 
 .cm-changeOverview-deleted {
-  background-color: var(--terminal-ansi-red);
+  background-color: var(--editor-git-deleted);
 }
 
 @keyframes terax-collapsible-down {

@@ -29,6 +29,9 @@ const COLOR_VAR: Record<keyof ThemeColors, string> = {
   gitUntracked: "--git-untracked",
   gitRenamed: "--git-renamed",
   gitDeleted: "--git-deleted",
+  editorGitModified: "--editor-git-modified",
+  editorGitAdded: "--editor-git-added",
+  editorGitDeleted: "--editor-git-deleted",
   sidebar: "--sidebar",
   sidebarForeground: "--sidebar-foreground",
   sidebarPrimary: "--sidebar-primary",
@@ -71,6 +74,7 @@ const ALL_VARS: readonly string[] = [
 
 let lastApplied: string | null = null;
 
+/** 应用指定模式的主题，并清理上一主题遗留的 CSS 变量。 */
 export function applyTheme(theme: Theme, mode: ThemeMode): void {
   const root = document.documentElement;
   const variant = theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;

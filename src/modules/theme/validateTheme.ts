@@ -20,6 +20,7 @@ const COLOR_KEYS: readonly (keyof ThemeColors)[] = [
   "destructive",
   "border", "input", "ring",
   "gitModified", "gitAdded", "gitUntracked", "gitRenamed", "gitDeleted",
+  "editorGitModified", "editorGitAdded", "editorGitDeleted",
   "sidebar", "sidebarForeground",
   "sidebarPrimary", "sidebarPrimaryForeground",
   "sidebarAccent", "sidebarAccentForeground",
