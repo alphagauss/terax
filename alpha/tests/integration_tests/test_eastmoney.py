@@ -3,7 +3,24 @@
 import asyncio
 from typing import Any
 
+import pytest
+
 from alpha.market import eastmoney_crawler
+
+
+@pytest.fixture(autouse=True)
+def disable_environment_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """分页测试不继承宿主机代理，避免已替换的网络层仍受环境影响。"""
+
+    for variable in (
+        "ALL_PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "all_proxy",
+        "https_proxy",
+        "http_proxy",
+    ):
+        monkeypatch.delenv(variable, raising=False)
 
 
 def test_market_realtime_pagination(monkeypatch) -> None:
@@ -13,8 +30,20 @@ def test_market_realtime_pagination(monkeypatch) -> None:
             "data": {
                 "total": 201,
                 "diff": [
-                    {"f12": "000001", "f14": "平安银行", "f3": "1.2", "f13": "0", "f124": "2026-02-27"},
-                    {"f12": "600000", "f14": "浦发银行", "f3": "1.0", "f13": "1", "f124": "2026-02-27"},
+                    {
+                        "f12": "000001",
+                        "f14": "平安银行",
+                        "f3": "1.2",
+                        "f13": "0",
+                        "f124": "2026-02-27",
+                    },
+                    {
+                        "f12": "600000",
+                        "f14": "浦发银行",
+                        "f3": "1.0",
+                        "f13": "1",
+                        "f124": "2026-02-27",
+                    },
                 ],
             }
         },
@@ -22,14 +51,22 @@ def test_market_realtime_pagination(monkeypatch) -> None:
             "data": {
                 "total": 201,
                 "diff": [
-                    {"f12": "000002", "f14": "万科A", "f3": "0.9", "f13": "0", "f124": "2026-02-27"},
+                    {
+                        "f12": "000002",
+                        "f14": "万科A",
+                        "f3": "0.9",
+                        "f13": "0",
+                        "f124": "2026-02-27",
+                    },
                 ],
             }
         },
     }
     called_pages: list[str] = []
 
-    async def fake_fetch_json(url: str, params: dict[str, Any], timeout: float, client) -> dict[str, Any]:
+    async def fake_fetch_json(
+        url: str, params: dict[str, Any], timeout: float, client
+    ) -> dict[str, Any]:
         del url, timeout, client
         page = str(params.get("pn", "1"))
         called_pages.append(page)
@@ -47,7 +84,9 @@ def test_market_realtime_pagination(monkeypatch) -> None:
 def test_market_realtime_empty_first_page(monkeypatch) -> None:
     """测试第一页无数据时返回空结果。"""
 
-    async def fake_fetch_json(url: str, params: dict[str, Any], timeout: float, client) -> dict[str, Any]:
+    async def fake_fetch_json(
+        url: str, params: dict[str, Any], timeout: float, client
+    ) -> dict[str, Any]:
         del url, params, timeout, client
         return {"data": {"total": 0, "diff": []}}
 
@@ -66,7 +105,13 @@ def test_market_realtime_break_on_empty_middle_page(monkeypatch) -> None:
             "data": {
                 "total": 600,
                 "diff": [
-                    {"f12": "000001", "f14": "平安银行", "f3": "1.2", "f13": "0", "f124": "2026-02-27"},
+                    {
+                        "f12": "000001",
+                        "f14": "平安银行",
+                        "f3": "1.2",
+                        "f13": "0",
+                        "f124": "2026-02-27",
+                    },
                 ],
             }
         },
@@ -75,14 +120,22 @@ def test_market_realtime_break_on_empty_middle_page(monkeypatch) -> None:
             "data": {
                 "total": 600,
                 "diff": [
-                    {"f12": "000002", "f14": "万科A", "f3": "0.9", "f13": "0", "f124": "2026-02-27"},
+                    {
+                        "f12": "000002",
+                        "f14": "万科A",
+                        "f3": "0.9",
+                        "f13": "0",
+                        "f124": "2026-02-27",
+                    },
                 ],
             }
         },
     }
     called_pages: list[str] = []
 
-    async def fake_fetch_json(url: str, params: dict[str, Any], timeout: float, client) -> dict[str, Any]:
+    async def fake_fetch_json(
+        url: str, params: dict[str, Any], timeout: float, client
+    ) -> dict[str, Any]:
         del url, timeout, client
         page = str(params.get("pn", "1"))
         called_pages.append(page)

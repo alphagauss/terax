@@ -24,7 +24,7 @@ def test_missing_config_is_created_with_default_data_dir(
 
     assert get_alpha_home() == alpha_home
     assert config.data_dir == (alpha_home / "data").resolve()
-    assert config.database_dir == (alpha_home / "data" / "database").resolve()
+    assert config.database_dir == (alpha_home / "data" / "sqlite_db").resolve()
     assert config.csv_dir == (alpha_home / "data" / "csv_db").resolve()
     assert config.database_dir.is_dir()
     assert config.csv_dir.is_dir()

@@ -1,6 +1,7 @@
 -r requirements-runtime.txt
 
 pytest
+pytest-asyncio
 black
 pytest-cov
 # polars[all]

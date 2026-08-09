@@ -1,6 +1,7 @@
 loguru
 pydantic
 httpx
+socksio
 pandas
 numpy
 python-dotenv
