@@ -1265,7 +1265,12 @@ def test_security_catalog_uses_profile_and_bar_symbol_union(
     db = _make_db(tmp_path, monkeypatch)
     assert db.save_security_profiles(
         [
-            {"vt_symbol": "000001.SZSE", "asset_type": "stock", "sec_name": "平安银行"},
+            {
+                "vt_symbol": "000001.SZSE",
+                "asset_type": "stock",
+                "sec_name": "平安银行",
+                "sec_abbr": "PAYH",
+            },
             {"vt_symbol": "510300.SSE", "asset_type": "etf", "sec_name": "沪深300ETF"},
         ]
     )
@@ -1288,6 +1293,7 @@ def test_security_catalog_uses_profile_and_bar_symbol_union(
         "999999.SSE": "bars_only",
     }
     complete = next(item for item in items if item["vt_symbol"] == "000001.SZSE")
+    assert complete["name"] == "平安银行"
     assert complete["coverage"]["d"]["rows"] == 2
     assert complete["total_bar_count"] == 2
 
@@ -1300,7 +1306,12 @@ def test_security_catalog_search_filters_and_facets(
     db = _make_db(tmp_path, monkeypatch)
     assert db.save_security_profiles(
         [
-            {"vt_symbol": "000001.SZSE", "asset_type": "stock", "sec_name": "平安银行"},
+            {
+                "vt_symbol": "000001.SZSE",
+                "asset_type": "stock",
+                "sec_name": "平安银行",
+                "sec_abbr": "PAYH",
+            },
             {"vt_symbol": "510300.SSE", "asset_type": "etf", "sec_name": "沪深300ETF"},
         ]
     )
@@ -1310,6 +1321,7 @@ def test_security_catalog_search_filters_and_facets(
     )
 
     by_name = db.query_security_catalog(SecurityCatalogQuery(keyword="平安"))
+    by_abbr = db.query_security_catalog(SecurityCatalogQuery(keyword="ay"))
     by_code = db.query_security_catalog(SecurityCatalogQuery(keyword="0300"))
     without_bars = db.query_security_catalog(
         SecurityCatalogQuery(data_state="profile_only")
@@ -1320,6 +1332,8 @@ def test_security_catalog_search_filters_and_facets(
     overview = db.get_data_catalog_overview()
 
     assert [item["vt_symbol"] for item in by_name["items"]] == ["000001.SZSE"]
+    assert [item["vt_symbol"] for item in by_abbr["items"]] == ["000001.SZSE"]
+    assert by_abbr["items"][0]["name"] == "平安银行"
     assert [item["vt_symbol"] for item in by_code["items"]] == ["510300.SSE"]
     assert [item["vt_symbol"] for item in without_bars["items"]] == ["510300.SSE"]
     assert [item["vt_symbol"] for item in by_exchange["items"]] == ["000001.SZSE"]

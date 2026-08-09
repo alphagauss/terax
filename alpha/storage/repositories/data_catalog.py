@@ -57,7 +57,7 @@ catalog AS (
 catalog_view AS (
     SELECT
         *,
-        COALESCE(NULLIF(TRIM(sec_abbr), ''), NULLIF(TRIM(sec_name), ''), symbol) AS name,
+        COALESCE(NULLIF(TRIM(sec_name), ''), NULLIF(TRIM(sec_abbr), ''), symbol) AS name,
         CASE
             WHEN has_profile = 1 AND has_bars = 1 THEN 'complete'
             WHEN has_profile = 1 THEN 'profile_only'
