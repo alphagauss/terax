@@ -23,16 +23,17 @@
 - `alpha/api/auth.py`: HTTP Bearer 服务凭据验证；负责保护 Alpha 业务路由，不承接领域权限判断。
 - `alpha/api/routes/events.py`: 受认证的双向 JSON WebSocket 端点；当前只提供 ping/pong 基础协议，后续在 FastAPI 内增加公共事件的显式按需订阅，不直接暴露内部事件总线。
 - `alpha/api/router.py`: Alpha API 总路由；聚合 `health`、`system`、`status`、`data`、`securities`、`bars`、`strategies`、`backtests`、`tasks`、`sync` 十组路由。自身不带前缀，由独立 FastAPI 应用统一挂载到 `/api/alpha`。
-- `alpha/api/container.py`: `AlphaServiceContainer` 持有数据库、懒加载策略管理器、事件引擎和进程任务管理器；`create_alpha_service_container()` 延迟创建核心对象，供 FastAPI 应用组装；容器只负责运行对象组装与关闭，不承接具体 API 响应编排。`_LazyStrategyManager` 额外暴露回测结果概要与单结果读取，供工作台结果页复用现有 `StrategyResult`。
+- `alpha/api/container.py`: `AlphaServiceContainer` 持有数据库、数据概览 TTL 缓存、懒加载策略管理器、事件引擎和进程任务管理器；`create_alpha_service_container()` 延迟创建核心对象，供 FastAPI 应用组装；容器只负责运行对象组装与关闭，不承接具体 API 响应编排。`_LazyStrategyManager` 额外暴露回测结果概要与单结果读取，供工作台结果页复用现有 `StrategyResult`。
+- `alpha/api/cache.py`: 单值异步 TTL 缓存；支持并发请求合并和手动强制刷新，只用于减少只读聚合，不参与业务状态持久化。
 - `alpha/api/deps.py`: FastAPI 依赖注入入口；只负责从 `app.state.alpha_services` 读取 `AlphaServiceContainer`。
-- `alpha/api/models.py`: Alpha 业务 API 响应模型，包括带服务协议和归档哈希的 `HealthResponse`、`ShutdownResponse`、带 `bars/security_profile/index_constituents` 聚合字段的 `DataOverviewResponse`、`StrategyInfo`、以及包含 `backtest_id/status` 的 `BacktestStartResponse`。
+- `alpha/api/models.py`: Alpha 业务 API 响应模型，包括服务健康、数据目录摘要与 Facets、证券目录分页与详情、策略信息和回测启动结果。
 - `alpha/api/events.py`: `EventWebSocket` 协议和带单客户端发送超时的 `EventBroadcaster`；当前 WebSocket 路由不连接该工具，后续只用于显式订阅的公共事件。
 - `alpha/api/routes/_utils.py`: Alpha 工作台路由辅助函数；集中处理分页上限、日期解析、周期/复权/产品归一、任务状态映射以及轻量字段提取，避免各 route 重复拼装。
 - `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 服务身份、协议版本和当前源码归档哈希，供 Terax 识别共享服务。
 - `alpha/api/routes/system.py`: `POST /system/shutdown`，在 Bearer 鉴权后请求当前 Uvicorn Server 正常退出，供任意 Terax 窗口停止共享服务。
 - `alpha/api/routes/status.py`: `GET /status`，返回 Alpha 是否启用、数据库是否就绪、数据目录、最新交易日、证券数量与运行中任务数；数据库异常会转换为 `database_ready=false` 的轻量状态响应。
-- `alpha/api/routes/data.py`: `GET /data/overview`，读取容器中的数据库并在路由层汇总行情数据概览；除保留旧的 `total_bar_count/bar_overview` 外，还新增按周期聚合的 `bars` 结构。
-- `alpha/api/routes/securities.py`: `GET /securities`、`GET /securities/{vt_symbol}`，复用 `DataBase.load_security_profiles()`、状态游标和股本变更接口，向前端返回证券搜索摘要、覆盖范围和受限详情。
+- `alpha/api/routes/data.py`: `GET /data/overview`，返回 union 证券目录的全局摘要与 Facets；普通请求复用进程内 TTL 缓存，`force_refresh=true` 强制重新聚合主库。
+- `alpha/api/routes/securities.py`: `GET /securities`、`GET /securities/{vt_symbol}`，提供名称/代码搜索、Facet 过滤、服务端分页、行情覆盖和受限详情，不读取真实行情分片。
 - `alpha/api/routes/bars.py`: `GET /bars`，把工作台的周期/复权参数归一为现有 `BarDataQuery`，调用数据库门面返回带数量上限保护的图表友好 K 线结构。
 - `alpha/api/routes/strategies.py`: `GET /strategies`、`GET /strategies/{strategy_id}`、`POST /strategies/reload`，读取容器中的策略管理器并在路由层过滤加载错误条目、兼容 loader 里的 `paramaters` 字段，并输出前端可直接消费的策略参数列表。
 - `alpha/api/routes/backtests.py`: `GET /backtests`、`POST /backtests` 以及 `/backtests/{id}` 下的 `summary/equity/drawdown/daily-returns/trades/config/logs/replay` 分片接口；创建时会把 Web 表单请求转换为现有 `BacktestReq`，结果读取优先复用 `StrategyResult` 已保存 JSON。
@@ -75,6 +76,7 @@ alpha.api
 - `alpha/storage/csvdb.py`: CSV 读写与交易日/股票基础信息工具。
 - `alpha/storage/transforms.py`: 复权因子和股本变化转换函数，负责从历史数据构造 sparse row 和 meta row。
 - `alpha/storage/repositories/market_data.py`: `MarketDataRepository` 处理 bar 数据、复权因子、概览表和分片聚合。
+- `alpha/storage/repositories/data_catalog.py`: `DataCatalogRepository` 以 `security_profile UNION bar_overview` 建立证券数据目录，并在主库内执行搜索、Facet 过滤、分页和全局概览聚合。
 - `alpha/storage/repositories/security.py`: `SecurityRepository` 处理证券档案、日度状态、停复牌和 ST 事件。
 - `alpha/storage/repositories/equity.py`: `EquityRepository` 处理股本变更、元数据和时间区间归一。
 - `alpha/storage/repositories/index_constituent.py`: `IndexConstituentRepository` 维护指数成分股的时间线区间与元数据。

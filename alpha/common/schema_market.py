@@ -154,6 +154,18 @@ class SecurityProfileQuery(BaseModel):
     asset_type: str | None = None
 
 
+class SecurityCatalogQuery(BaseModel):
+    """union 证券数据目录的搜索、Facet 过滤和分页条件。"""
+
+    keyword: str | None = None
+    exchange: str | None = None
+    asset_type: str | None = None
+    data_state: Literal["complete", "profile_only", "bars_only"] | None = None
+    interval: str | None = None
+    limit: int = 50
+    offset: int = 0
+
+
 class IndexConstituentQuery(BaseModel):
     """指数成分股查询条件。
 

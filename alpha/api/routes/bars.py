@@ -45,32 +45,16 @@ def _bar_item(row: dict[str, object]) -> dict[str, object]:
 
 
 def _overview_window(
-    overview: list[dict[str, object]],
-    vt_symbol: str,
-    interval: str,
+    overview: dict[str, object] | None,
 ) -> tuple[datetime | None, datetime | None]:
-    """从概览行读取查询窗口。
-
-    Args:
-        overview: K 线概览行。
-        vt_symbol: 证券代码。
-        interval: 周期。
-
-    Returns:
-        开始与结束日期时间。
-    """
-
-    for row in overview:
-        if str(row.get("vt_symbol") or "") != vt_symbol:
-            continue
-        if str(row.get("interval") or "") != interval:
-            continue
-        start_text = date_text(row.get("start"))
-        end_text = date_text(row.get("end"))
-        start = parse_datetime(start_text) if start_text else None
-        end = parse_datetime(end_text, end_of_day=True) if end_text else None
-        return start, end
-    return None, None
+    """从单条 K 线概览读取查询窗口。"""
+    if overview is None:
+        return None, None
+    start_text = date_text(overview.get("start"))
+    end_text = date_text(overview.get("end"))
+    start = parse_datetime(start_text) if start_text else None
+    end = parse_datetime(end_text, end_of_day=True) if end_text else None
+    return start, end
 
 
 @router.get("/bars", response_model=dict[str, object])
@@ -102,12 +86,11 @@ async def get_bars(
     normalized_adjust = normalize_adjust(adjust)
     normalized_limit = clamp_limit(limit, default=500, maximum=MAX_BAR_LIMIT)
 
-    overview = await services.database.get_bar_overview()
-    overview_start, overview_end = _overview_window(
-        overview,
+    overview = await services.database.get_bar_overview_item(
         vt_symbol,
         normalized_interval,
     )
+    overview_start, overview_end = _overview_window(overview)
     query_end = parse_datetime(end, end_of_day=True) or overview_end or datetime.now()
     query_start = (
         parse_datetime(start)

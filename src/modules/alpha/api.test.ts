@@ -6,6 +6,7 @@
 import {
   getAlphaBacktestSeries,
   getAlphaBars,
+  getAlphaDataOverview,
   getAlphaSecurities,
   getAlphaSettings,
   updateAlphaSettings,
@@ -35,24 +36,80 @@ describe("Alpha API client", () => {
             symbol: "000001",
             exchange: "SZ",
             name: "Ping An Bank",
-            product: "stock",
+            asset_type: "stock",
+            board: null,
+            listed_date: "1991-04-03",
+            delisted_date: null,
             status: "active",
-            latest_bar_date: "2026-07-30",
+            data_state: "complete",
+            total_bar_count: 10,
+            data_start: "2026-07-01 00:00:00",
+            data_end: "2026-07-30 00:00:00",
+            latest_updated_at: "2026-07-30 16:00:00",
+            intervals: ["d"],
+            coverage: {
+              d: {
+                start: "2026-07-01 00:00:00",
+                end: "2026-07-30 00:00:00",
+                rows: 10,
+                updated_at: "2026-07-30 16:00:00",
+              },
+            },
           },
         ],
         total: 1,
+        limit: 25,
+        offset: 50,
       },
     });
 
-    await expect(getAlphaSecurities(25)).resolves.toMatchObject({
+    await expect(
+      getAlphaSecurities({ q: "000001", limit: 25, offset: 50 }),
+    ).resolves.toMatchObject({
       total: 1,
       items: [{ vt_symbol: "000001.SZ" }],
     });
     expect(requestMock).toHaveBeenCalledWith({
       method: "GET",
       path: "/api/alpha/securities",
-      query: [{ name: "limit", value: "25" }],
+      query: [
+        { name: "q", value: "000001" },
+        { name: "limit", value: "25" },
+        { name: "offset", value: "50" },
+      ],
     });
+  });
+
+  it("bypasses the data overview cache only for manual refresh", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: {
+        summary: {
+          security_count: 1,
+          profile_count: 1,
+          bar_security_count: 1,
+          total_bar_count: 10,
+          data_start: "2026-07-01 00:00:00",
+          data_end: "2026-07-30 00:00:00",
+          latest_updated_at: "2026-07-30 16:00:00",
+        },
+        facets: {
+          exchanges: [{ value: "SZ", count: 1 }],
+          asset_types: [{ value: "stock", count: 1 }],
+          data_states: [{ value: "complete", count: 1 }],
+          intervals: [{ value: "d", security_count: 1, row_count: 10 }],
+        },
+      },
+    });
+
+    await getAlphaDataOverview();
+    await getAlphaDataOverview(true);
+
+    expect(requestMock.mock.calls.map(([request]) => request.query)).toEqual([
+      [],
+      [{ name: "force_refresh", value: "true" }],
+    ]);
   });
 
   it("uses the chart-safe daily bar query", async () => {

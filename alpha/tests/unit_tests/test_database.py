@@ -19,6 +19,7 @@ from alpha.common.schema import (
     datetime_to_timestr,
 )
 from alpha.storage.database import DataBase
+from alpha.common.schema_market import SecurityCatalogQuery
 
 
 class _SyncDatabaseHarness:
@@ -1254,3 +1255,82 @@ def test_save_share_capital_data_advances_meta_without_new_change_points(
     assert [row["trade_date"] for row in loaded] == ["2025-01-01"]
     assert meta is not None
     assert meta["latest_trade_date"] == "2025-01-02"
+
+
+def test_security_catalog_uses_profile_and_bar_symbol_union(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证证券目录保留 complete、profile_only 和 bars_only 三类记录。"""
+    db = _make_db(tmp_path, monkeypatch)
+    assert db.save_security_profiles(
+        [
+            {"vt_symbol": "000001.SZSE", "asset_type": "stock", "sec_name": "平安银行"},
+            {"vt_symbol": "510300.SSE", "asset_type": "etf", "sec_name": "沪深300ETF"},
+        ]
+    )
+    assert db.save_bar_data(
+        [
+            *_make_bars("000001.SZSE", "d", datetime(2025, 1, 2), 2),
+            *_make_bars("999999.SSE", "1h", datetime(2025, 1, 2, 10), 1),
+        ],
+        adjust="non",
+    )
+
+    page = db.query_security_catalog(SecurityCatalogQuery(limit=2, offset=0))
+    second_page = db.query_security_catalog(SecurityCatalogQuery(limit=2, offset=2))
+    items = [*page["items"], *second_page["items"]]
+
+    assert page["total"] == 3
+    assert {item["vt_symbol"]: item["data_state"] for item in items} == {
+        "000001.SZSE": "complete",
+        "510300.SSE": "profile_only",
+        "999999.SSE": "bars_only",
+    }
+    complete = next(item for item in items if item["vt_symbol"] == "000001.SZSE")
+    assert complete["coverage"]["d"]["rows"] == 2
+    assert complete["total_bar_count"] == 2
+
+
+def test_security_catalog_search_filters_and_facets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证名称代码子串搜索、Facet 过滤和全局统计口径。"""
+    db = _make_db(tmp_path, monkeypatch)
+    assert db.save_security_profiles(
+        [
+            {"vt_symbol": "000001.SZSE", "asset_type": "stock", "sec_name": "平安银行"},
+            {"vt_symbol": "510300.SSE", "asset_type": "etf", "sec_name": "沪深300ETF"},
+        ]
+    )
+    assert db.save_bar_data(
+        _make_bars("000001.SZSE", "d", datetime(2025, 1, 2), 2),
+        adjust="non",
+    )
+
+    by_name = db.query_security_catalog(SecurityCatalogQuery(keyword="平安"))
+    by_code = db.query_security_catalog(SecurityCatalogQuery(keyword="0300"))
+    without_bars = db.query_security_catalog(
+        SecurityCatalogQuery(data_state="profile_only")
+    )
+    by_exchange = db.query_security_catalog(SecurityCatalogQuery(exchange="SZSE"))
+    by_asset_type = db.query_security_catalog(SecurityCatalogQuery(asset_type="etf"))
+    by_interval = db.query_security_catalog(SecurityCatalogQuery(interval="d"))
+    overview = db.get_data_catalog_overview()
+
+    assert [item["vt_symbol"] for item in by_name["items"]] == ["000001.SZSE"]
+    assert [item["vt_symbol"] for item in by_code["items"]] == ["510300.SSE"]
+    assert [item["vt_symbol"] for item in without_bars["items"]] == ["510300.SSE"]
+    assert [item["vt_symbol"] for item in by_exchange["items"]] == ["000001.SZSE"]
+    assert [item["vt_symbol"] for item in by_asset_type["items"]] == ["510300.SSE"]
+    assert [item["vt_symbol"] for item in by_interval["items"]] == ["000001.SZSE"]
+    assert overview["summary"]["security_count"] == 2
+    assert overview["summary"]["total_bar_count"] == 2
+    assert overview["facets"]["data_states"] == [
+        {"value": "complete", "count": 1},
+        {"value": "profile_only", "count": 1},
+    ]
+    assert overview["facets"]["intervals"] == [
+        {"value": "d", "security_count": 1, "row_count": 2}
+    ]

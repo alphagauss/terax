@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from alpha.api.cache import AsyncTtlCache
 from alpha.common.schema_backtest import BacktestReq
 from alpha.config import AlphaConfig
 from alpha.runtime.event import EventEngine
@@ -164,6 +165,7 @@ class AlphaServiceContainer:
     strategy_manager: _LazyStrategyManager
     event_engine: EventEngine
     process_manager: ProcessTaskManager
+    data_overview_cache: AsyncTtlCache[dict[str, object]]
 
     async def close(self) -> None:
         """关闭容器持有的运行对象。
@@ -238,4 +240,5 @@ def create_alpha_service_container(
         strategy_manager=strategy_manager,
         event_engine=event_engine,
         process_manager=process_manager,
+        data_overview_cache=AsyncTtlCache(ttl_seconds=60),
     )

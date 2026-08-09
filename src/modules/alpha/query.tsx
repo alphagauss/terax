@@ -15,6 +15,8 @@ export const alphaQueryKeys = {
   service: ["alpha", "service"] as const,
   settings: ["alpha", "settings"] as const,
   overview: ["alpha", "overview"] as const,
+  dataOverview: ["alpha", "data-overview"] as const,
+  securities: ["alpha", "securities"] as const,
 };
 
 const alphaQueryClient = new QueryClient({

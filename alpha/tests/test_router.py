@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
+from alpha.api.cache import AsyncTtlCache
 from alpha.api.router import router
 from alpha.config import AlphaConfig
 
@@ -17,6 +18,72 @@ class FakeDatabase:
     """测试用数据库门面。"""
 
     data_dir = Path("/tmp/alpha-test-db")
+
+    async def get_data_catalog_overview(self) -> dict[str, object]:
+        """返回固定数据目录概览和 Facets。"""
+        return {
+            "summary": {
+                "security_count": 1,
+                "profile_count": 1,
+                "bar_security_count": 1,
+                "total_bar_count": 3,
+                "data_start": "2025-01-02 00:00:00",
+                "data_end": "2025-01-03 00:00:00",
+                "latest_updated_at": "2025-01-03 00:00:00",
+            },
+            "facets": {
+                "exchanges": [{"value": "SZSE", "count": 1}],
+                "asset_types": [{"value": "stock", "count": 1}],
+                "data_states": [{"value": "complete", "count": 1}],
+                "intervals": [{"value": "d", "security_count": 1, "row_count": 3}],
+            },
+        }
+
+    async def query_security_catalog(self, query: object) -> dict[str, object]:
+        """返回固定证券目录分页。"""
+        item = await self.get_security_catalog_item("000001.SZSE")
+        return {
+            "items": [item],
+            "total": 1,
+            "limit": getattr(query, "limit", 50),
+            "offset": getattr(query, "offset", 0),
+        }
+
+    async def get_security_catalog_item(
+        self, vt_symbol: str
+    ) -> dict[str, object] | None:
+        """返回固定证券目录详情。"""
+        if vt_symbol != "000001.SZSE":
+            return None
+        return {
+            "vt_symbol": vt_symbol,
+            "symbol": "000001",
+            "exchange": "SZSE",
+            "name": "平安银行",
+            "asset_type": "stock",
+            "board": None,
+            "sec_name": "平安银行",
+            "sec_abbr": "平安银行",
+            "price_tick": 0.01,
+            "trade_n": 100,
+            "listed_date": "1991-04-03",
+            "delisted_date": None,
+            "status": "active",
+            "data_state": "complete",
+            "total_bar_count": 3,
+            "data_start": "2025-01-02 00:00:00",
+            "data_end": "2025-01-03 00:00:00",
+            "latest_updated_at": "2025-01-03 00:00:00",
+            "intervals": ["d"],
+            "coverage": {
+                "d": {
+                    "start": "2025-01-02 00:00:00",
+                    "end": "2025-01-03 00:00:00",
+                    "rows": 3,
+                    "updated_at": "2025-01-03 00:00:00",
+                }
+            },
+        }
 
     async def get_bar_overview(self) -> list[dict[str, object]]:
         """返回固定行情概览行。
@@ -38,6 +105,22 @@ class FakeDatabase:
                 "updated_at": "2025-01-03 00:00:00",
             }
         ]
+
+    async def get_bar_overview_item(
+        self,
+        vt_symbol: str,
+        interval: str,
+    ) -> dict[str, object] | None:
+        """返回固定证券和周期的行情概览。"""
+        rows = await self.get_bar_overview()
+        return next(
+            (
+                row
+                for row in rows
+                if row["vt_symbol"] == vt_symbol and row["interval"] == interval
+            ),
+            None,
+        )
 
     async def load_security_profiles(self, query: object) -> list[dict[str, object]]:
         """返回固定证券资料。
@@ -99,7 +182,9 @@ class FakeDatabase:
             固定股本变化列表。
         """
 
-        return [{"vt_symbol": vt_symbol, "trade_date": "2025-01-02", "total_share": 1.0}]
+        return [
+            {"vt_symbol": vt_symbol, "trade_date": "2025-01-02", "total_share": 1.0}
+        ]
 
     async def load_bar_data(self, query: object) -> list[dict[str, object]]:
         """返回固定 K 线。
@@ -295,7 +380,11 @@ class FakeProcessManager:
                     任务快照。
                 """
 
-                return {"task_id": "bt-1", "status": "cancelled", "task_type": "backtest"}
+                return {
+                    "task_id": "bt-1",
+                    "status": "cancelled",
+                    "task_type": "backtest",
+                }
 
         return StoppedTask()
 
@@ -316,6 +405,7 @@ def _client() -> TestClient:
         database=FakeDatabase(),
         strategy_manager=FakeStrategyManager(),
         process_manager=FakeProcessManager(),
+        data_overview_cache=AsyncTtlCache(ttl_seconds=60),
         has_running_tasks=lambda: False,
     )
     app.include_router(router, prefix="/api/alpha")
@@ -338,14 +428,17 @@ def test_alpha_router_exposes_business_health() -> None:
 
 
 def test_alpha_router_builds_data_overview() -> None:
-    """验证数据接口在路由层汇总行情概览。"""
+    """验证数据接口返回 union 目录概览和 Facets。"""
 
     response = _client().get("/api/alpha/data/overview")
 
     assert response.status_code == 200
-    assert response.json()["total_bar_count"] == 3
-    assert response.json()["bar_overview"][0]["vt_symbol"] == "000001.SZSE"
-    assert response.json()["bars"]["d"]["rows"] == 3
+    assert response.json()["summary"]["total_bar_count"] == 3
+    assert response.json()["summary"]["security_count"] == 1
+    assert response.json()["facets"]["data_states"][0] == {
+        "value": "complete",
+        "count": 1,
+    }
 
 
 def test_alpha_router_reports_workbench_status() -> None:
@@ -407,12 +500,13 @@ def test_alpha_router_exposes_security_and_bar_apis() -> None:
 
     client = _client()
 
-    list_response = client.get("/api/alpha/securities?keyword=平安")
+    list_response = client.get("/api/alpha/securities?q=平安")
     detail_response = client.get("/api/alpha/securities/000001.SZSE")
     bars_response = client.get("/api/alpha/bars?vt_symbol=000001.SZSE&interval=1d")
 
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["name"] == "平安银行"
+    assert list_response.json()["items"][0]["data_state"] == "complete"
     assert detail_response.status_code == 200
     assert detail_response.json()["coverage"]["d"]["rows"] == 3
     assert bars_response.status_code == 200

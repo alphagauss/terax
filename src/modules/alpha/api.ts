@@ -16,25 +16,66 @@ const settingsSchema = z.object({
   data_dir: z.string().min(1),
 });
 
-const barCoverageSchema = z.object({
-  rows: z.number(),
+const facetCountSchema = z.object({
+  value: z.string(),
+  count: z.number(),
+});
+
+const intervalFacetSchema = z.object({
+  value: z.string(),
+  security_count: z.number(),
+  row_count: z.number(),
 });
 
 const dataOverviewSchema = z.object({
-  total_bar_count: z.number(),
-  bars: z.record(z.string(), barCoverageSchema),
+  summary: z.object({
+    security_count: z.number(),
+    profile_count: z.number(),
+    bar_security_count: z.number(),
+    total_bar_count: z.number(),
+    data_start: z.string().nullable(),
+    data_end: z.string().nullable(),
+    latest_updated_at: z.string().nullable(),
+  }),
+  facets: z.object({
+    exchanges: z.array(facetCountSchema),
+    asset_types: z.array(facetCountSchema),
+    data_states: z.array(facetCountSchema),
+    intervals: z.array(intervalFacetSchema),
+  }),
+});
+
+const barCoverageSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  rows: z.number(),
+  updated_at: z.string(),
 });
 
 const securitySchema = z.object({
   vt_symbol: z.string(),
+  symbol: z.string(),
+  exchange: z.string(),
   name: z.string(),
-  product: z.string(),
-  latest_bar_date: z.string().nullable(),
+  asset_type: z.string().nullable(),
+  board: z.number().nullable(),
+  listed_date: z.string().nullable(),
+  delisted_date: z.string().nullable(),
+  status: z.enum(["active", "delisted"]),
+  data_state: z.enum(["complete", "profile_only", "bars_only"]),
+  total_bar_count: z.number(),
+  data_start: z.string().nullable(),
+  data_end: z.string().nullable(),
+  latest_updated_at: z.string().nullable(),
+  intervals: z.array(z.string()),
+  coverage: z.record(z.string(), barCoverageSchema),
 });
 
 const securitiesSchema = z.object({
   items: z.array(securitySchema),
   total: z.number(),
+  limit: z.number(),
+  offset: z.number(),
 });
 
 const barSchema = z.object({
@@ -86,7 +127,7 @@ const drawdownSchema = z.object({
 });
 
 type AlphaStatusOverview = z.infer<typeof statusSchema>;
-type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
+export type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
 export type AlphaSecurity = z.infer<typeof securitySchema>;
 export type AlphaBar = z.infer<typeof barSchema>;
 export type AlphaBacktest = z.infer<typeof backtestSchema>;
@@ -97,6 +138,16 @@ type AlphaBacktestSeries = {
 
 export type AlphaSettings = {
   dataDir: string;
+};
+
+export type AlphaSecurityQuery = {
+  q?: string;
+  exchange?: string;
+  assetType?: string;
+  dataState?: AlphaSecurity["data_state"];
+  interval?: string;
+  limit?: number;
+  offset?: number;
 };
 
 function alphaError(status: number, body: unknown): Error {
@@ -156,18 +207,37 @@ export function getAlphaOverview(): Promise<AlphaStatusOverview> {
 }
 
 /** 查询行情数据覆盖概览。 */
-export function getAlphaDataOverview(): Promise<AlphaDataOverview> {
-  return alphaGet("/api/alpha/data/overview", dataOverviewSchema);
+export function getAlphaDataOverview(
+  forceRefresh = false,
+): Promise<AlphaDataOverview> {
+  return alphaGet(
+    "/api/alpha/data/overview",
+    dataOverviewSchema,
+    forceRefresh ? [{ name: "force_refresh", value: "true" }] : [],
+  );
 }
 
-/** 查询首批证券摘要，后续可直接扩展为服务端分页。 */
-export function getAlphaSecurities(limit = 50): Promise<{
+/** 按搜索和 Facet 条件查询证券数据目录分页。 */
+export function getAlphaSecurities(query: AlphaSecurityQuery = {}): Promise<{
   items: AlphaSecurity[];
   total: number;
+  limit: number;
+  offset: number;
 }> {
-  return alphaGet("/api/alpha/securities", securitiesSchema, [
-    { name: "limit", value: String(limit) },
-  ]);
+  const params: AlphaQueryParam[] = [];
+  const append = (name: string, value: string | number | undefined) => {
+    if (value !== undefined && value !== "") {
+      params.push({ name, value: String(value) });
+    }
+  };
+  append("q", query.q?.trim());
+  append("exchange", query.exchange);
+  append("asset_type", query.assetType);
+  append("data_state", query.dataState);
+  append("interval", query.interval);
+  append("limit", query.limit ?? 50);
+  append("offset", query.offset ?? 0);
+  return alphaGet("/api/alpha/securities", securitiesSchema, params);
 }
 
 /** 查询单证券日 K 线，示例页限制最近 500 根。 */

@@ -10,6 +10,7 @@ from alpha.common.schema_market import (
     BarDataPayload,
     BarDataQuery,
     IndexConstituentQuery,
+    SecurityCatalogQuery,
     SecurityDailyInfoQuery,
     SecurityDailyInfoRecord,
     SecurityProfilePayload,
@@ -19,12 +20,15 @@ from alpha.common.schema_market import (
     ShareCapitalPayload,
 )
 from alpha.storage.base import SQLiteStorageBase
+from alpha.storage.repositories.data_catalog import DataCatalogRepository
 from alpha.storage.repositories.equity import EquityRepository
 from alpha.storage.repositories.index_constituent import IndexConstituentRepository
 from alpha.storage.repositories.market_data import MarketDataRepository
 from alpha.storage.repositories.security import SecurityRepository
 from alpha.storage.transforms import normalize_trade_date
 from alpha.utils import log_execution_time
+
+
 class DataBase:
     """SQLite 数据库对外门面。"""
 
@@ -32,6 +36,7 @@ class DataBase:
         """使用调用方明确提供的目录初始化数据库。"""
 
         self._storage = SQLiteStorageBase(data_dir)
+        self._data_catalog = DataCatalogRepository(self._storage)
         self._equity = EquityRepository(self._storage)
         self._security = SecurityRepository(self._storage)
         self._index_constituent = IndexConstituentRepository(self._storage)
@@ -84,6 +89,30 @@ class DataBase:
     async def get_bar_overview(self) -> list[dict[str, object]]:
         """获取全局 K 线概览。"""
         return await self._market_data.get_bar_overview()
+
+    @log_execution_time()
+    async def get_bar_overview_item(
+        self,
+        vt_symbol: str,
+        interval: str,
+    ) -> dict[str, object] | None:
+        """读取单个证券和周期的 K 线覆盖摘要。"""
+        return await self._market_data.get_bar_overview_item(vt_symbol, interval)
+
+    @log_execution_time()
+    async def query_security_catalog(self, query: SecurityCatalogQuery) -> dict[str, object]:
+        """查询 union 证券数据目录分页。"""
+        return await self._data_catalog.query_securities(query)
+
+    @log_execution_time()
+    async def get_security_catalog_item(self, vt_symbol: str) -> dict[str, object] | None:
+        """读取单个证券的数据目录详情。"""
+        return await self._data_catalog.get_security(vt_symbol)
+
+    @log_execution_time()
+    async def get_data_catalog_overview(self) -> dict[str, object]:
+        """聚合证券数据目录摘要和 Facets。"""
+        return await self._data_catalog.get_overview()
 
     @log_execution_time()
     async def rebuild_bar_overview(self) -> None:

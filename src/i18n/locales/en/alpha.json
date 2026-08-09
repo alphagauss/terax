@@ -13,32 +13,49 @@
   },
   "data": {
     "title": "Data",
-    "description": "Inspect local market data coverage and preview daily bars.",
+    "description": "Search local security profiles and market-data coverage, then preview daily bars on demand.",
     "metrics": {
-      "database": "Database",
-      "ready": "Ready",
-      "unavailable": "Unavailable",
       "securities": "Securities",
+      "profiles": "Profiles",
       "rows": "Bar rows",
       "latest": "Latest trade date"
     },
-    "coverage": {
-      "title": "Bar coverage",
-      "description": "Rows stored for each available interval.",
-      "rows": "Rows",
-      "aria": "Market data rows by interval",
-      "empty": "No bar coverage is available."
-    },
     "securities": {
-      "title": "Securities",
-      "description": "{{count}} securities available. The first 50 are shown.",
-      "empty": "No securities are available."
+      "title": "Security data catalog",
+      "description": "{{count}} securities match the current query.",
+      "empty": "No securities match the current query."
+    },
+    "search": {
+      "label": "Search securities",
+      "placeholder": "Search by name or security code"
+    },
+    "filters": {
+      "exchange": "All exchanges",
+      "assetType": "All asset types",
+      "dataState": "All data states",
+      "interval": "All intervals"
+    },
+    "states": {
+      "complete": "Profile and bars",
+      "profile_only": "Profile only",
+      "bars_only": "Bars only"
+    },
+    "values": {
+      "unknown": "Unknown"
     },
     "columns": {
       "symbol": "Symbol",
       "name": "Name",
-      "product": "Product",
-      "latest": "Latest bar"
+      "assetType": "Asset type",
+      "dataState": "Data state",
+      "intervals": "Intervals",
+      "range": "Latest data",
+      "rows": "Bar rows"
+    },
+    "pagination": {
+      "page": "Page {{page}} of {{pageCount}}",
+      "previous": "Previous",
+      "next": "Next"
     },
     "chart": {
       "title": "Daily bars",

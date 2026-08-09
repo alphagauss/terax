@@ -333,7 +333,7 @@ class MarketDataRepository:
 
     async def load_bar_data(self, query: BarDataQuery) -> list[dict]:
         """按条件加载单个标的 K 线数据。"""
-        overview = await self._load_bar_overview_row(query.vt_symbol, query.interval)
+        overview = await self.get_bar_overview_item(query.vt_symbol, query.interval)
         if overview is None:
             return []
 
@@ -570,12 +570,12 @@ class MarketDataRepository:
             partitioned_bars[file_name].append(bar)
         return dict(partitioned_bars)
 
-    async def _load_bar_overview_row(
+    async def get_bar_overview_item(
         self,
         vt_symbol: str,
         interval: str,
     ) -> SQLiteRecord | None:
-        """加载单个标的的全局概览。"""
+        """读取单个证券和周期的 K 线覆盖摘要。"""
 
         def operation(conn: sqlite3.Connection) -> SQLiteRecord | None:
             cur = conn.cursor()

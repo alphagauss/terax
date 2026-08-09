@@ -29,6 +29,7 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
   "use no memo";
 
   const { t } = useTranslation("alpha");
+  const number = useMemo(() => new Intl.NumberFormat(), []);
   const columns = useMemo<ColumnDef<AlphaSecurity>[]>(
     () => [
       {
@@ -39,7 +40,10 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
             type="button"
             aria-pressed={row.original.vt_symbol === selectedSymbol}
             className="font-medium text-foreground outline-none hover:underline focus-visible:underline"
-            onClick={() => onSelect(row.original.vt_symbol)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(row.original.vt_symbol);
+            }}
           >
             {row.original.vt_symbol}
           </button>
@@ -50,17 +54,40 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
         header: t("data.columns.name"),
       },
       {
-        accessorKey: "product",
-        header: t("data.columns.product"),
+        accessorKey: "asset_type",
+        header: t("data.columns.assetType"),
+        cell: ({ getValue }) =>
+          getValue<string | null>() ?? t("data.values.unknown"),
       },
       {
-        accessorKey: "latest_bar_date",
-        header: t("data.columns.latest"),
+        accessorKey: "data_state",
+        header: t("data.columns.dataState"),
+        cell: ({ getValue }) =>
+          t(`data.states.${getValue<AlphaSecurity["data_state"]>()}`),
+      },
+      {
+        accessorKey: "intervals",
+        header: t("data.columns.intervals"),
+        cell: ({ getValue }) => {
+          const intervals = getValue<string[]>();
+          return intervals.length > 0
+            ? intervals.join(", ")
+            : t("common.unavailable");
+        },
+      },
+      {
+        accessorKey: "data_end",
+        header: t("data.columns.range"),
         cell: ({ getValue }) =>
           getValue<string | null>() ?? t("common.unavailable"),
       },
+      {
+        accessorKey: "total_bar_count",
+        header: t("data.columns.rows"),
+        cell: ({ getValue }) => number.format(getValue<number>()),
+      },
     ],
-    [onSelect, selectedSymbol, t],
+    [number, onSelect, selectedSymbol, t],
   );
   const table = useReactTable({
     data: rows,
@@ -70,8 +97,8 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
   });
 
   return (
-    <div className="max-h-96 overflow-auto rounded-lg border border-border/70">
-      <table className="w-full min-w-125 border-collapse text-left text-xs">
+    <div className="max-h-112 overflow-auto rounded-lg border border-border/70">
+      <table className="w-full min-w-200 border-collapse text-left text-xs">
         <thead className="sticky top-0 z-10 bg-muted">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
@@ -95,10 +122,18 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
           {table.getRowModel().rows.map((row) => (
             <tr
               key={row.id}
+              tabIndex={0}
               className={cn(
-                "border-b border-border/50 last:border-b-0",
+                "cursor-pointer border-b border-border/50 outline-none last:border-b-0 hover:bg-muted/40 focus-visible:bg-muted/50",
                 row.original.vt_symbol === selectedSymbol && "bg-muted/70",
               )}
+              onClick={() => onSelect(row.original.vt_symbol)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(row.original.vt_symbol);
+                }
+              }}
             >
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id} className="h-9 whitespace-nowrap px-3">
