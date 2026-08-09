@@ -381,7 +381,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(move |app, event| {
             if let tauri::RunEvent::Ready = event {
-                alpha::schedule_delayed_start();
+                alpha::schedule_runtime_coordination();
                 if let Some(main) = app.get_webview_window("main") {
                     if let Some(geometry) = window_geometry {
                         let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));

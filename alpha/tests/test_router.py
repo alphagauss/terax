@@ -420,11 +420,24 @@ def test_alpha_router_exposes_business_health() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "services_ready": True,
+        "ready": True,
         "service": "terax-alpha",
-        "protocol_version": 1,
-        "archive_hash": "development",
+        "protocol_version": 2,
+        "runtime_revision": "dev:unmanaged",
     }
+
+
+def test_alpha_health_reports_injected_runtime_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证受管进程注入的运行源码 revision 会原样返回。"""
+
+    monkeypatch.setenv("TERAX_ALPHA_RUNTIME_REVISION", "release:abc123")
+
+    response = _client().get("/api/alpha/health")
+
+    assert response.status_code == 200
+    assert response.json()["runtime_revision"] == "release:abc123"
 
 
 def test_alpha_router_builds_data_overview() -> None:

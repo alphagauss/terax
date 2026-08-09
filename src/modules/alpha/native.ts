@@ -11,8 +11,6 @@ export type AlphaStatus = {
   pythonPath: string | null;
   autoStart: boolean;
   port: number;
-  archiveHash: string;
-  serviceArchiveHash: string | null;
   issue: "portConflict" | null;
 };
 

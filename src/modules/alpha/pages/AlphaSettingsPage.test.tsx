@@ -89,8 +89,6 @@ describe("AlphaSettingsPage", () => {
       pythonPath: null,
       autoStart: true,
       port: 8765,
-      archiveHash: "archive",
-      serviceArchiveHash: null,
       issue: null,
     });
   });
@@ -139,8 +137,6 @@ describe("AlphaSettingsPage", () => {
       pythonPath: "C:/Python/python.exe",
       autoStart: true,
       port: 8765,
-      archiveHash: "archive",
-      serviceArchiveHash: "archive",
       issue: null,
     });
     mocks.open.mockResolvedValue("D:/synced-alpha");
@@ -153,8 +149,6 @@ describe("AlphaSettingsPage", () => {
       pythonPath: "C:/Python/python.exe",
       autoStart: true,
       port: 8765,
-      archiveHash: "archive",
-      serviceArchiveHash: "archive",
       issue: null,
     });
     const container = document.createElement("div");
@@ -191,8 +185,6 @@ describe("AlphaSettingsPage", () => {
       pythonPath: "C:/Python/python.exe",
       autoStart: true,
       port: 8765,
-      archiveHash: "archive",
-      serviceArchiveHash: "archive",
       issue: null,
     });
     mocks.getAlphaSettings.mockRejectedValue(new Error("settings failed"));

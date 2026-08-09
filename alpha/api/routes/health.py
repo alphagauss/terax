@@ -29,6 +29,9 @@ async def health(
 
     return HealthResponse(
         status="ok",
-        services_ready=True,
-        archive_hash=os.environ.get("TERAX_ALPHA_ARCHIVE_HASH", "development"),
+        ready=True,
+        runtime_revision=os.environ.get(
+            "TERAX_ALPHA_RUNTIME_REVISION",
+            "dev:unmanaged",
+        ),
     )

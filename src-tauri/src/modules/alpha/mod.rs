@@ -4,9 +4,19 @@
 //! Alpha 是否运行始终由受认证健康检查判定，不在各窗口复制生命周期状态。
 
 pub mod commands;
+#[cfg(debug_assertions)]
+mod dev_watcher;
 mod proxy;
 mod runtime_files;
 mod service;
 
 pub use proxy::AlphaProxyState;
-pub use service::schedule_delayed_start;
+
+/// 启动应用级 Alpha 协调，开发构建额外监听运行源码变化。
+pub fn schedule_runtime_coordination() {
+    #[cfg(debug_assertions)]
+    if let Err(error) = dev_watcher::start() {
+        log::warn!("Alpha development watcher failed: {error}");
+    }
+    service::schedule_delayed_reconcile();
+}

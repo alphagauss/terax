@@ -1,7 +1,7 @@
 //! Alpha 本机单例服务控制。
 //!
-//! 每次状态查询都以固定本机端口上的受认证健康检查为准。启动、停止和重启仅通过
-//! 一把跨进程文件锁串行化，因此所有 Terax 窗口拥有相同行为且不复制服务状态。
+//! 每次状态查询都以固定本机端口上的受认证健康检查为准。应用启动、手动操作和开发
+//! 源码变化统一通过 revision 协调，并由跨进程文件锁保证多个 Terax 窗口只替换一次。
 
 use super::runtime_files;
 use crate::modules::proc;
@@ -24,7 +24,7 @@ const ALPHA_PORT: u16 = 11123;
 const SETTINGS_STORE: &str = "alpha";
 const PYTHON_PATH_KEY: &str = "pythonPath";
 const AUTO_START_KEY: &str = "autoStart";
-const SERVICE_PROTOCOL_VERSION: u32 = 1;
+const SERVICE_PROTOCOL_VERSION: u32 = 2;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(20);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(40);
 
@@ -42,8 +42,6 @@ pub struct AlphaStatus {
     pub python_path: Option<String>,
     pub auto_start: bool,
     pub port: u16,
-    pub archive_hash: String,
-    pub service_archive_hash: Option<String>,
     pub issue: Option<AlphaStatusIssue>,
 }
 
@@ -76,17 +74,19 @@ struct RuntimeCheck {
 #[derive(Clone, Debug, Deserialize)]
 struct ServiceHealth {
     status: String,
-    services_ready: bool,
+    #[serde(alias = "services_ready")]
+    ready: bool,
     service: String,
     protocol_version: u32,
-    archive_hash: String,
+    #[serde(default, alias = "archive_hash")]
+    runtime_revision: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StartPlan {
-    AlreadyRunning,
-    ReplaceRunning,
+enum PresencePlan {
+    InspectRunning,
     Spawn,
+    LeaveStopped,
     PortConflict,
 }
 
@@ -152,28 +152,26 @@ pub async fn check_configured_python(path: Option<String>) -> Result<PythonCheck
 pub async fn status() -> Result<AlphaStatus, String> {
     let config = read_config()?;
     let token = read_token().ok();
-    let health = match token.as_deref() {
-        Some(token) => health(token).await,
+    let service = match token.as_deref() {
+        Some(token) => probe_owned_service(token).await,
         None => None,
     };
-    let port_open = if health.is_none() {
+    let port_open = if service.is_none() {
         port_is_open().await
     } else {
         true
     };
-    let issue = if health.is_none() && port_open {
+    let issue = if service.is_none() && port_open {
         Some(AlphaStatusIssue::PortConflict)
     } else {
         None
     };
     Ok(AlphaStatus {
-        running: health.is_some(),
+        running: service.as_ref().is_some_and(is_usable_service),
         configured: config.python_path.is_some(),
         python_path: config.python_path,
         auto_start: config.auto_start,
         port: ALPHA_PORT,
-        archive_hash: runtime_files::ARCHIVE_HASH.to_string(),
-        service_archive_hash: health.map(|value| value.archive_hash),
         issue,
     })
 }
@@ -181,7 +179,7 @@ pub async fn status() -> Result<AlphaStatus, String> {
 /// 幂等启动共享 Alpha 服务。
 pub async fn start() -> Result<AlphaStatus, String> {
     let _lock = acquire_operation_lock().await?;
-    start_locked().await?;
+    reconcile_locked(true).await?;
     status().await
 }
 
@@ -196,63 +194,95 @@ pub async fn stop() -> Result<AlphaStatus, String> {
 pub async fn restart() -> Result<AlphaStatus, String> {
     let _lock = acquire_operation_lock().await?;
     stop_locked().await?;
-    start_locked().await?;
+    reconcile_locked(true).await?;
     status().await
 }
 
-/// 在应用 Ready 后延迟确保共享服务已启动。
-pub fn schedule_delayed_start() {
+/// 在应用 Ready 后延迟协调共享服务，已运行的旧 revision 不受自动启动开关限制。
+pub fn schedule_delayed_reconcile() {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(3)).await;
         let Ok(config) = read_config() else {
             return;
         };
-        if config.auto_start && config.python_path.is_some() {
-            if let Err(error) = start().await {
-                log::warn!("Alpha delayed startup failed: {error}");
-            }
+        let start_if_missing = config.auto_start && config.python_path.is_some();
+        if let Err(error) = reconcile(start_if_missing).await {
+            log::warn!("Alpha delayed reconciliation failed: {error}");
         }
     });
 }
 
-async fn start_locked() -> Result<(), String> {
-    let token = ensure_token()?;
-    let running = health(&token).await;
+/// 协调运行中的服务 revision；`start_if_missing` 为 false 时不会改变停止状态。
+pub(super) async fn reconcile(start_if_missing: bool) -> Result<(), String> {
+    let _lock = acquire_operation_lock().await?;
+    reconcile_locked(start_if_missing).await
+}
+
+/// 在已持有跨进程操作锁时检查服务状态，并按需替换或启动服务。
+async fn reconcile_locked(start_if_missing: bool) -> Result<(), String> {
+    let existing_token = read_token().ok();
+    let running = match existing_token.as_deref() {
+        Some(token) => probe_owned_service(token).await,
+        None => None,
+    };
     let port_open = if running.is_none() {
         port_is_open().await
     } else {
         true
     };
-    let replace_running = match plan_start(running.as_ref(), port_open) {
-        StartPlan::AlreadyRunning => return Ok(()),
-        StartPlan::ReplaceRunning => true,
-        StartPlan::Spawn => false,
-        StartPlan::PortConflict => {
+    let replace_running = match plan_presence(running.is_some(), port_open, start_if_missing) {
+        PresencePlan::InspectRunning => true,
+        PresencePlan::Spawn => false,
+        PresencePlan::LeaveStopped => return Ok(()),
+        PresencePlan::PortConflict => {
             return Err(format!(
                 "端口 {ALPHA_PORT} 已被其他服务占用，无法启动 Alpha"
             ));
         }
     };
+    // 停止状态且不需要启动时已提前返回，避免每次开发文件保存都扫描全部源码。
+    let runtime = tokio::task::spawn_blocking(runtime_files::runtime_spec)
+        .await
+        .map_err(|error| error.to_string())??;
+    if running
+        .as_ref()
+        .is_some_and(|health| is_current_runtime(health, &runtime.revision))
+    {
+        return Ok(());
+    }
     let config = read_config()?;
     let python = config
         .python_path
         .ok_or_else(|| "尚未配置 Alpha Python 解释器".to_string())?;
     let python = validate_python_path(&python)?;
-    let code_root = tokio::task::spawn_blocking(runtime_files::code_root)
-        .await
-        .map_err(|error| error.to_string())??;
     let alpha_home = runtime_files::alpha_home()?;
     let logs_dir = runtime_files::logs_dir()?;
+    // 只有确认需要创建服务后才生成凭据，文件监听不会修改停止状态下的本机数据。
+    let token = match existing_token {
+        Some(token) => token,
+        None => ensure_token()?,
+    };
     if replace_running {
         // 先完成新服务前置检查，避免解释器或源码无效时停止仍可用的旧实例。
         stop_locked().await?;
     }
-    let process_exit = spawn_service(&python, &code_root, &alpha_home, &logs_dir, &token)?;
+    let process_exit = spawn_service(
+        &python,
+        &runtime.code_root,
+        &alpha_home,
+        &logs_dir,
+        &token,
+        &runtime.revision,
+    )?;
     let log_path = logs_dir.join("service.log");
 
     let deadline = Instant::now() + OPERATION_TIMEOUT;
     while Instant::now() < deadline {
-        if health(&token).await.is_some() {
+        if probe_owned_service(&token)
+            .await
+            .as_ref()
+            .is_some_and(|health| is_current_runtime(health, &runtime.revision))
+        {
             return Ok(());
         }
         match process_exit.try_recv() {
@@ -276,15 +306,13 @@ async fn start_locked() -> Result<(), String> {
     Err(format!("Alpha 启动超时，请检查 {}", log_path.display()))
 }
 
-/// 根据探活与端口状态决定幂等启动行为。
-fn plan_start(running: Option<&ServiceHealth>, port_open: bool) -> StartPlan {
-    match running {
-        Some(health) if health.archive_hash == runtime_files::ARCHIVE_HASH => {
-            StartPlan::AlreadyRunning
-        }
-        Some(_) => StartPlan::ReplaceRunning,
-        None if port_open => StartPlan::PortConflict,
-        None => StartPlan::Spawn,
+/// 根据受管服务、端口和启动意图决定是否需要读取运行源码。
+fn plan_presence(owned_service: bool, port_open: bool, start_if_missing: bool) -> PresencePlan {
+    match (owned_service, port_open, start_if_missing) {
+        (true, _, _) => PresencePlan::InspectRunning,
+        (false, true, _) => PresencePlan::PortConflict,
+        (false, false, true) => PresencePlan::Spawn,
+        (false, false, false) => PresencePlan::LeaveStopped,
     }
 }
 
@@ -294,7 +322,7 @@ async fn stop_locked() -> Result<(), String> {
         Err(_) if !port_is_open().await => return Ok(()),
         Err(error) => return Err(error),
     };
-    if health(&token).await.is_none() {
+    if probe_owned_service(&token).await.is_none() {
         if port_is_open().await {
             return Err(format!(
                 "端口 {ALPHA_PORT} 已被其他服务占用，拒绝停止未知进程"
@@ -330,6 +358,7 @@ fn spawn_service(
     alpha_home: &Path,
     logs_dir: &Path,
     token: &str,
+    runtime_revision: &str,
 ) -> Result<Receiver<io::Result<ExitStatus>>, String> {
     let log_path = logs_dir.join("service.log");
     let stdout = OpenOptions::new()
@@ -352,7 +381,7 @@ fn spawn_service(
         ])
         .env("TERAX_ALPHA_TOKEN", token)
         .env("TERAX_ALPHA_HOME", alpha_home)
-        .env("TERAX_ALPHA_ARCHIVE_HASH", runtime_files::ARCHIVE_HASH)
+        .env("TERAX_ALPHA_RUNTIME_REVISION", runtime_revision)
         .stdin(Stdio::null())
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr));
@@ -400,7 +429,8 @@ fn detach_process(command: &mut Command) {
     }
 }
 
-async fn health(token: &str) -> Option<ServiceHealth> {
+/// 探测凭据匹配的 Terax Alpha，即使协议已过期也保留其身份用于安全替换。
+async fn probe_owned_service(token: &str) -> Option<ServiceHealth> {
     let response = client()
         .get(format!("{}/api/alpha/health", base_url()))
         .bearer_auth(token)
@@ -413,15 +443,17 @@ async fn health(token: &str) -> Option<ServiceHealth> {
     }
     let bytes = response.bytes().await.ok()?;
     let health: ServiceHealth = serde_json::from_slice(&bytes).ok()?;
-    is_compatible_health(&health).then_some(health)
+    (health.service == "terax-alpha").then_some(health)
 }
 
-/// 校验端口上的响应确实来自已就绪且协议兼容的 Terax Alpha。
-fn is_compatible_health(health: &ServiceHealth) -> bool {
-    health.status == "ok"
-        && health.services_ready
-        && health.service == "terax-alpha"
-        && health.protocol_version == SERVICE_PROTOCOL_VERSION
+/// 判断服务是否可供当前客户端使用，不要求运行源码 revision 与当前构建一致。
+fn is_usable_service(health: &ServiceHealth) -> bool {
+    health.status == "ok" && health.ready && health.protocol_version == SERVICE_PROTOCOL_VERSION
+}
+
+/// 判断服务协议、就绪状态和运行源码是否全部与当前期望一致。
+fn is_current_runtime(health: &ServiceHealth, expected_revision: &str) -> bool {
+    is_usable_service(health) && health.runtime_revision.as_deref() == Some(expected_revision)
 }
 
 async fn port_is_open() -> bool {
@@ -608,27 +640,67 @@ mod tests {
     }
 
     #[test]
-    fn start_plan_preserves_single_current_service() {
+    fn reconciliation_plan_preserves_stopped_and_owned_service_states() {
         let current = ServiceHealth {
             status: "ok".to_string(),
-            services_ready: true,
+            ready: true,
             service: "terax-alpha".to_string(),
             protocol_version: SERVICE_PROTOCOL_VERSION,
-            archive_hash: runtime_files::ARCHIVE_HASH.to_string(),
+            runtime_revision: Some("dev:current".to_string()),
         };
-        let stale = ServiceHealth {
-            archive_hash: "stale".to_string(),
-            ..current.clone()
-        };
-
-        assert_eq!(plan_start(Some(&current), true), StartPlan::AlreadyRunning);
-        assert_eq!(plan_start(Some(&stale), true), StartPlan::ReplaceRunning);
-        assert_eq!(plan_start(None, false), StartPlan::Spawn);
-        assert_eq!(plan_start(None, true), StartPlan::PortConflict);
+        assert_eq!(
+            plan_presence(true, true, false),
+            PresencePlan::InspectRunning
+        );
+        assert_eq!(
+            plan_presence(false, false, false),
+            PresencePlan::LeaveStopped
+        );
+        assert_eq!(plan_presence(false, false, true), PresencePlan::Spawn);
+        assert_eq!(
+            plan_presence(false, true, false),
+            PresencePlan::PortConflict
+        );
+        assert!(is_current_runtime(&current, "dev:current"));
+        assert!(!is_current_runtime(&current, "dev:stale"));
 
         let mut unavailable = current;
-        unavailable.services_ready = false;
-        assert!(!is_compatible_health(&unavailable));
+        unavailable.ready = false;
+        assert!(!is_usable_service(&unavailable));
+    }
+
+    #[test]
+    fn old_protocol_service_is_owned_but_requires_replacement() {
+        let old: ServiceHealth = serde_json::from_value(serde_json::json!({
+            "status": "ok",
+            "services_ready": true,
+            "service": "terax-alpha",
+            "protocol_version": 1,
+            "archive_hash": "old"
+        }))
+        .unwrap();
+
+        assert!(!is_usable_service(&old));
+        assert_eq!(old.runtime_revision.as_deref(), Some("old"));
+        assert!(!is_current_runtime(&old, "release:new"));
+        assert_eq!(
+            plan_presence(true, true, false),
+            PresencePlan::InspectRunning
+        );
+    }
+
+    #[test]
+    fn current_health_response_deserializes_with_runtime_revision() {
+        let current: ServiceHealth = serde_json::from_value(serde_json::json!({
+            "status": "ok",
+            "ready": true,
+            "service": "terax-alpha",
+            "protocol_version": 2,
+            "runtime_revision": "release:current"
+        }))
+        .unwrap();
+
+        assert!(is_current_runtime(&current, "release:current"));
     }
 
     #[test]

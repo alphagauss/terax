@@ -78,10 +78,10 @@ def test_app_mounts_router_and_closes_container(
     assert valid.status_code == 200
     assert valid.json() == {
         "status": "ok",
-        "services_ready": True,
+        "ready": True,
         "service": "terax-alpha",
-        "protocol_version": 1,
-        "archive_hash": "development",
+        "protocol_version": 2,
+        "runtime_revision": "dev:unmanaged",
     }
     assert container.closed is True
 

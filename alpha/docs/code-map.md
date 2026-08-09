@@ -29,7 +29,7 @@
 - `alpha/api/models.py`: Alpha 业务 API 响应模型，包括服务健康、数据目录摘要与 Facets、证券目录分页与详情、策略信息和回测启动结果。
 - `alpha/api/events.py`: `EventWebSocket` 协议和带单客户端发送超时的 `EventBroadcaster`；当前 WebSocket 路由不连接该工具，后续只用于显式订阅的公共事件。
 - `alpha/api/routes/_utils.py`: Alpha 工作台路由辅助函数；集中处理分页上限、日期解析、周期/复权/产品归一、任务状态映射以及轻量字段提取，避免各 route 重复拼装。
-- `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 服务身份、协议版本和当前源码归档哈希，供 Terax 识别共享服务。
+- `alpha/api/routes/health.py`: `GET /health`，返回 Alpha 服务身份、协议版本和当前运行源码 revision，供 Terax 识别并协调共享服务。
 - `alpha/api/routes/system.py`: `POST /system/shutdown`，在 Bearer 鉴权后请求当前 Uvicorn Server 正常退出，供任意 Terax 窗口停止共享服务。
 - `alpha/api/routes/status.py`: `GET /status`，返回 Alpha 是否启用、数据库是否就绪、数据目录、最新交易日、证券数量与运行中任务数；数据库异常会转换为 `database_ready=false` 的轻量状态响应。
 - `alpha/api/routes/data.py`: `GET /data/overview`，返回 union 证券目录的全局摘要与 Facets；普通请求复用进程内 TTL 缓存，`force_refresh=true` 强制重新聚合主库。

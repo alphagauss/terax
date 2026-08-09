@@ -44,8 +44,6 @@ describe("Alpha query runtime", () => {
       pythonPath: "C:/Python/python.exe",
       autoStart: true,
       port: 11123,
-      archiveHash: "archive",
-      serviceArchiveHash: "archive",
       issue: null,
     });
   });

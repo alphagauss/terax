@@ -11,10 +11,10 @@ class HealthResponse(BaseModel):
     """Alpha 服务健康检查响应。"""
 
     status: Literal["ok"]
-    services_ready: bool
+    ready: bool
     service: Literal["terax-alpha"] = "terax-alpha"
-    protocol_version: Literal[1] = 1
-    archive_hash: str = "development"
+    protocol_version: Literal[2] = 2
+    runtime_revision: str
 
 
 class ShutdownResponse(BaseModel):

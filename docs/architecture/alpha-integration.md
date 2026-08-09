@@ -33,14 +33,14 @@ alpha-native Rust 计算模块
 | --- | --- | --- |
 | `alpha/` | FastAPI 接口、领域模型、行情、存储、策略、回测、同步、任务和事件 | 不维护 Terax 前端、AI Agent、工作区或第二套用户界面 |
 | `alpha-native/` | 适合 Rust 实现的量化计算和性能热点，通过 PyO3 供 Alpha 调用 | 不承载 FastAPI、进程生命周期或 Terax UI |
-| `src-tauri/build_support/alpha.rs` | 构建时筛选 Alpha 运行源码、生成确定性压缩归档和内容哈希 | 不包含 Python 解释器、第三方依赖、数据、测试或开发工具 |
+| `src-tauri/build_support/alpha.rs` | 构建时筛选 Alpha 运行源码、生成确定性压缩归档和 Release revision | 不包含 Python 解释器、第三方依赖、数据、测试或开发工具 |
 | `src-tauri/src/modules/alpha/` | Alpha 启停、探活、凭据注入及通用 GET、POST、WebSocket 转发 | 不复制 Alpha 领域模型，不解释或重组业务响应 |
 | `src/modules/alpha/` | Alpha 页面、图表、交互状态和 API 调用封装 | 不直接管理 Python 进程，不绕过 Rust 访问受管 Alpha 后端 |
 | `src/modules/ai/` | Alpha 相关 Agent 工具、审批和对话集成 | 通过与页面相同的 Alpha API 调用链访问业务能力 |
 
 ## 打包与运行目录
 
-- Dev 和 Test 构建不扫描或压缩 Alpha，也不把 Alpha 文件注册为 Cargo 构建输入。Rust 直接以仓库根目录为工作目录，通过用户配置的解释器执行 `python -E -m alpha`，使用固定的 `development` 版本标识。
+- Dev 和 Test 构建不压缩 Alpha，也不把 Alpha 文件注册为 Cargo 构建输入。Rust 直接以仓库根目录为工作目录，通过用户配置的解释器执行 `python -E -m alpha`，并按运行文件相对路径和内容计算 `dev:<sha256>` revision。
 - Release 构建由 `src-tauri/build_support/alpha.rs` 把必要的 `.py` 文件和 `requirements-runtime.txt` 压缩进 Terax 可执行文件，不使用 Tauri resources，也不使用 PyInstaller。
 - Release 首次启动 Alpha 时，Rust 在跨进程文件锁内把归档释放到 `~/.terax/alpha/runtime/<archive-hash>/`。先写临时目录并校验入口和哈希标记，再通过同目录重命名发布，因此其他进程不会看到半成品。
 - 内容哈希发生变化时使用新的运行目录。旧目录不在启动路径上自动删除，避免影响仍在运行的旧版本服务。
@@ -53,11 +53,14 @@ alpha-native Rust 计算模块
 - Python 解释器绝对路径和自动启动开关通过 Terax 共享设置保存。首次未配置解释器时不自动启动，由用户在 Alpha 设置中选择解释器。
 - Python 运行环境以 `requirements-runtime.txt` 作为唯一依赖清单，通过 `python -E -m alpha.runtime_check` 逐项真实导入。最低版本为 Python 3.11；保存解释器时只校验绝对文件路径，只有用户主动检查才执行版本和依赖自检，为后续前端依赖管理保留清晰边界。
 - 服务启动不重复执行 Python 自检。解释器或环境后来发生变化时，由子进程提前退出和 `~/.terax/logs/alpha/service.log` 暴露真实错误，Rust 不等待完整启动超时。
-- 应用 Ready 后延迟协调。健康检查成功且归档哈希一致时不做额外操作；服务未运行、端口空闲且已配置自动启动时才启动服务。
-- 健康服务的归档哈希与当前 Terax 不一致时，持有操作锁的新构建先请求旧服务正常退出，再以当前内嵌源码启动替代服务。
+- 应用 Ready 后延迟协调统一的 `runtime_revision`。服务未运行时只有已配置自动启动才创建服务；服务已经运行但 revision 或协议不一致时，无论自动启动开关如何都替换为当前运行源码。
+- Release revision 使用 `release:<archive-sha256>`；Dev revision 使用 `dev:<runtime-files-sha256>`。Rust 启动服务时通过 `TERAX_ALPHA_RUNTIME_REVISION` 注入，受认证健康检查返回同一值。
+- Debug 构建使用系统原生文件通知递归监听 `alpha/`，只接受生产运行集合中的 Python 文件和 `requirements-runtime.txt`。事件经过防抖后调用同一协调入口；停止状态不会因文件变化而隐式启动。
+- 多个开发窗口可能同时收到变更，但所有判断都在 `service.lock` 内重新执行。首个窗口完成替换后，其他窗口发现 revision 已一致并直接返回。
 - 启动、停止和重启共用 `~/.terax/alpha/service.lock`。该锁只串行化操作，服务是否运行始终以带凭据的健康检查为准。
 - Alpha 凭据保存在 `~/.terax/alpha/service.token`，只由 Rust 注入请求。停止通过受认证的 `/api/alpha/system/shutdown` 完成，不根据陈旧 PID 终止未知进程。
 - 若固定端口被无法认证的进程占用，Terax 报告冲突并拒绝启动或停止该进程。
+- 探活先确认凭据与 `terax-alpha` 服务身份，再独立判断协议、就绪状态和 revision。已认证的旧协议服务可以安全停止并替换，不会被误判为未知端口占用者。
 
 ## 核心原则
 
@@ -100,7 +103,7 @@ alpha-native Rust 计算模块
 
 | 变更类型 | 放置位置 |
 | --- | --- |
-| Alpha 源码筛选、压缩、内嵌归档与构建哈希 | `src-tauri/build_support/alpha.rs` |
+| Alpha 源码筛选、压缩、内嵌归档与 Release revision | `src-tauri/build_support/alpha.rs` |
 | 行情、策略、回测、同步、存储和任务行为 | `alpha/` 对应领域模块 |
 | HTTP 路由、请求模型、业务校验和事件协议 | `alpha/api/` |
 | 量化计算热点和 PyO3 接口 | `alpha-native/` |

@@ -1,16 +1,19 @@
-//! Alpha 内嵌源码的运行时释放。
+//! Alpha 运行源码定位、版本计算与内嵌归档释放。
 //!
-//! Debug 构建直接使用项目根目录；Release 构建在跨进程文件锁内把内嵌归档原子释放
-//! 到内容哈希目录，避免多个窗口看到半成品或覆盖正在运行的版本。
+//! Debug 构建直接使用项目根目录并按运行文件内容计算 revision；Release 构建在跨进程
+//! 文件锁内把内嵌归档原子释放到内容哈希目录，供统一生命周期协调逻辑比较版本。
 
 use crate::modules::app_data::{self, Directory};
 #[cfg(not(debug_assertions))]
 use crate::modules::storage::FileLock;
 #[cfg(any(not(debug_assertions), test))]
 use flate2::read::GzDecoder;
+#[cfg(any(debug_assertions, test))]
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::io;
 #[cfg(any(not(debug_assertions), test))]
-use std::io::{self, Write};
+use std::io::Write;
 #[cfg(any(not(debug_assertions), test))]
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -20,10 +23,65 @@ use std::time::Duration;
 use tar::Archive;
 
 const COMPLETE_MARKER: &str = ".complete";
+#[cfg(any(debug_assertions, test))]
+const EXCLUDED_DIRECTORIES: &[&str] = &["__pycache__", "docs", "scripts", "tests"];
 #[cfg(not(debug_assertions))]
 const ARCHIVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/alpha-runtime.tar.gz"));
-/// 当前构建内嵌 Alpha 归档的 SHA-256 内容哈希。
-pub const ARCHIVE_HASH: &str = env!("TERAX_ALPHA_ARCHIVE_SHA256");
+#[cfg(not(debug_assertions))]
+const RELEASE_ARCHIVE_HASH: &str = env!("TERAX_ALPHA_RELEASE_ARCHIVE_SHA256");
+
+/// 当前进程启动 Alpha 所需的源码目录和稳定版本标识。
+pub struct RuntimeSpec {
+    /// 传给 Python 模块启动器的工作目录。
+    pub code_root: PathBuf,
+    /// 由构建模式和运行文件内容确定的版本标识。
+    pub revision: String,
+}
+
+/// 解析当前构建应使用的 Alpha 运行目录和 revision。
+///
+/// 开发环境按运行文件的相对路径与内容实时计算 SHA-256；生产环境复用内嵌归档哈希。
+pub fn runtime_spec() -> Result<RuntimeSpec, String> {
+    let code_root = code_root()?;
+    #[cfg(debug_assertions)]
+    let revision = development_revision(&code_root)?;
+    #[cfg(not(debug_assertions))]
+    let revision = format!("release:{RELEASE_ARCHIVE_HASH}");
+    Ok(RuntimeSpec {
+        code_root,
+        revision,
+    })
+}
+
+/// 判断开发文件事件是否影响当前 Alpha 运行 revision。
+#[cfg(debug_assertions)]
+pub(super) fn is_development_runtime_path(alpha_root: &Path, path: &Path) -> bool {
+    if !is_development_runtime_scope_path(alpha_root, path) {
+        return false;
+    }
+    let relative = path
+        .strip_prefix(alpha_root)
+        .expect("Alpha 开发运行路径已经验证位于监听根目录内");
+    relative == Path::new("requirements-runtime.txt")
+        || relative.extension().and_then(|value| value.to_str()) == Some("py")
+}
+
+/// 判断开发文件事件是否位于可能包含运行文件的目录范围内。
+///
+/// 目录删除和重命名事件不一定逐个报告子文件，因此监听器需要用更宽的范围判断兜底。
+#[cfg(debug_assertions)]
+pub(super) fn is_development_runtime_scope_path(alpha_root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(alpha_root) else {
+        return false;
+    };
+    relative.components().all(|component| match component {
+        std::path::Component::Normal(name) => !EXCLUDED_DIRECTORIES
+            .iter()
+            .any(|excluded| name == *excluded),
+        std::path::Component::CurDir => true,
+        _ => false,
+    })
+}
 
 /// 返回当前构建应使用的 Alpha 代码根目录。
 ///
@@ -73,8 +131,8 @@ pub fn token_path() -> Result<PathBuf, String> {
 fn ensure_embedded_runtime() -> Result<PathBuf, String> {
     let alpha_dir = app_data::directory(Directory::Alpha)?;
     let runtime_parent = alpha_dir.join("runtime");
-    let destination = runtime_parent.join(ARCHIVE_HASH);
-    if validate_runtime(&destination, Some(ARCHIVE_HASH)).is_ok() {
+    let destination = runtime_parent.join(RELEASE_ARCHIVE_HASH);
+    if validate_runtime(&destination, Some(RELEASE_ARCHIVE_HASH)).is_ok() {
         return Ok(destination);
     }
 
@@ -82,7 +140,7 @@ fn ensure_embedded_runtime() -> Result<PathBuf, String> {
     let _lock = FileLock::acquire(&alpha_dir.join("extract.lock"), Duration::from_secs(20))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "等待其他 Terax 进程释放 Alpha 源码超时".to_string())?;
-    if validate_runtime(&destination, Some(ARCHIVE_HASH)).is_ok() {
+    if validate_runtime(&destination, Some(RELEASE_ARCHIVE_HASH)).is_ok() {
         return Ok(destination);
     }
 
@@ -101,16 +159,76 @@ fn ensure_embedded_runtime() -> Result<PathBuf, String> {
     extract_archive(ARCHIVE, temporary.path()).map_err(|error| error.to_string())?;
     fs::write(
         temporary.path().join(COMPLETE_MARKER),
-        ARCHIVE_HASH.as_bytes(),
+        RELEASE_ARCHIVE_HASH.as_bytes(),
     )
     .map_err(|error| error.to_string())?;
-    validate_runtime(temporary.path(), Some(ARCHIVE_HASH))?;
+    validate_runtime(temporary.path(), Some(RELEASE_ARCHIVE_HASH))?;
     let temporary_path = temporary.keep();
     fs::rename(&temporary_path, &destination).map_err(|error| {
         let _ = fs::remove_dir_all(&temporary_path);
         format!("无法发布 Alpha 运行目录 {}: {error}", destination.display())
     })?;
     Ok(destination)
+}
+
+/// 计算开发源码的稳定 revision，只覆盖生产归档会包含的运行文件。
+#[cfg(any(debug_assertions, test))]
+fn development_revision(project_root: &Path) -> Result<String, String> {
+    let alpha_root = project_root.join("alpha");
+    let mut files = Vec::new();
+    collect_development_files(&alpha_root, &mut files).map_err(|error| error.to_string())?;
+    let requirements = alpha_root.join("requirements-runtime.txt");
+    if !requirements.is_file() {
+        return Err(format!(
+            "Alpha 运行依赖清单不存在: {}",
+            requirements.display()
+        ));
+    }
+    files.push(requirements);
+    files.sort();
+    files.dedup();
+
+    let mut hasher = Sha256::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(project_root)
+            .map_err(|error| error.to_string())?;
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let bytes = fs::read(&file).map_err(|error| error.to_string())?;
+        hasher.update((relative.len() as u64).to_le_bytes());
+        hasher.update(relative.as_bytes());
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+    Ok(format!("dev:{:x}", hasher.finalize()))
+}
+
+/// 收集开发环境参与 revision 的 Python 运行文件，并拒绝符号链接造成的边界漂移。
+#[cfg(any(debug_assertions, test))]
+fn collect_development_files(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Alpha runtime cannot contain symlink {}", path.display()),
+            ));
+        }
+        if metadata.is_dir() {
+            let name = entry.file_name();
+            if !EXCLUDED_DIRECTORIES.contains(&name.to_string_lossy().as_ref()) {
+                collect_development_files(&path, files)?;
+            }
+        } else if metadata.is_file()
+            && path.extension().and_then(|value| value.to_str()) == Some("py")
+        {
+            files.push(path);
+        }
+    }
+    Ok(())
 }
 
 /// 校验运行目录包含入口文件和可选的完整归档标记。
@@ -213,6 +331,50 @@ mod tests {
         fs::write(dir.path().join("alpha/__main__.py"), b"").unwrap();
         assert!(validate_runtime(dir.path(), None).is_ok());
         assert!(validate_runtime(dir.path(), Some("hash")).is_err());
+    }
+
+    #[test]
+    fn development_revision_tracks_only_runtime_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let alpha = dir.path().join("alpha");
+        fs::create_dir_all(alpha.join("tests")).unwrap();
+        fs::write(alpha.join("__main__.py"), b"print('one')").unwrap();
+        fs::write(alpha.join("requirements-runtime.txt"), b"fastapi\n").unwrap();
+        fs::write(alpha.join("tests/test_main.py"), b"ignored = 1").unwrap();
+        let first = development_revision(dir.path()).unwrap();
+
+        fs::write(alpha.join("tests/test_main.py"), b"ignored = 2").unwrap();
+        assert_eq!(development_revision(dir.path()).unwrap(), first);
+
+        fs::write(alpha.join("__main__.py"), b"print('two')").unwrap();
+        assert_ne!(development_revision(dir.path()).unwrap(), first);
+    }
+
+    #[test]
+    fn development_runtime_filter_matches_revision_inputs() {
+        let root = Path::new("C:/project/alpha");
+        assert!(is_development_runtime_path(
+            root,
+            &root.join("api/routes/health.py")
+        ));
+        assert!(is_development_runtime_path(
+            root,
+            &root.join("requirements-runtime.txt")
+        ));
+        assert!(!is_development_runtime_path(
+            root,
+            &root.join("tests/test_app.py")
+        ));
+        assert!(!is_development_runtime_path(
+            root,
+            &root.join("api/__pycache__/app.pyc")
+        ));
+        assert!(!is_development_runtime_path(root, &root.join("README.md")));
+        assert!(is_development_runtime_scope_path(root, &root.join("api")));
+        assert!(!is_development_runtime_scope_path(
+            root,
+            &root.join("tests")
+        ));
     }
 
     #[test]

@@ -68,7 +68,7 @@ pub fn build_archive() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "OUT_DIR is unavailable"))?,
     );
     fs::write(out_dir.join("alpha-runtime.tar.gz"), bytes)?;
-    println!("cargo:rustc-env=TERAX_ALPHA_ARCHIVE_SHA256={hash}");
+    println!("cargo:rustc-env=TERAX_ALPHA_RELEASE_ARCHIVE_SHA256={hash}");
     Ok(())
 }
 
