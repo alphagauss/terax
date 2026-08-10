@@ -1,10 +1,10 @@
-# Testing
+# 测试
 
-This guide elaborates on `AGENTS.md` and `CONTRIBUTING.md`. If anything conflicts with those files, they win.
+本指南是对 `AGENTS.md` 和 `CONTRIBUTING.md` 的补充。如有冲突，以这两个文件为准。
 
-## Running checks locally
+## 在本地运行检查
 
-The canonical commands are what CI runs (`.github/workflows/ci.yml`):
+以下标准命令与 CI（`.github/workflows/ci.yml`）中运行的命令一致：
 
 ```bash
 pnpm lint
@@ -16,41 +16,41 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo nextest run --locked        # CI uses nextest
 ```
 
-If you do not have `cargo-nextest` installed, `cargo test --locked` is the local fallback. Install nextest with `cargo install cargo-nextest`.
+如果尚未安装 `cargo-nextest`，可在本地使用 `cargo test --locked` 作为替代。使用 `cargo install cargo-nextest` 安装 nextest。
 
-The `storage`, `workspace_process`, `ai_sessions`, and `shared_store` Rust suites also launch the current test executable as helper processes. They verify real OS-lock exclusion, release/retry behavior, and concurrent read-latest/key-mutation behavior across process boundaries, not merely two tasks sharing one in-memory state. Keep these tests in the normal Rust test command when changing Workspace locks, AI session ownership, or shared configuration.
+`storage`、`workspace_process`、`ai_sessions` 和 `shared_store` Rust 测试套件还会将当前测试可执行文件作为辅助进程启动。它们验证真实的操作系统锁互斥、释放/重试行为，以及跨进程并发读取最新值/修改 key 的行为，而不只是共享同一内存状态的两个 task。修改 Workspace 锁、AI session 所有权或共享配置时，应将这些测试保留在常规 Rust 测试命令中。
 
-## What must have a test
+## 必须添加测试的变更
 
-`CONTRIBUTING.md` requires a test for any change that touches behavior in these load-bearing paths:
+`CONTRIBUTING.md` 要求，任何涉及以下关键路径行为的变更都必须有测试：
 
-- Shell / terminal spawn (what shell launches, with which cwd, env, and login flags)
-- Workspace authorization (both the allow and deny side)
-- Git command layer (repo-root resolution, pathspec/argument guards, status parsing)
-- Filesystem mutation (atomic writes, symlink handling, no-data-loss on partial failure)
-- IPC command surface and AI tool surface
-- File transfer planning and mutation (Workspace boundaries, source identity, staging ownership, no-replace publication, cancellation, and bounded failure)
-- Pure logic with wide reach (cwd inheritance, tab/split tree transforms, OSC/prompt parsing, command guard)
+- Shell / 终端启动（启动哪个 Shell，以及使用哪个 cwd、环境变量和 login flag）
+- Workspace 授权（同时覆盖允许和拒绝路径）
+- Git command 层（仓库根目录解析、pathspec/参数防护和 status 解析）
+- 文件系统变更（原子写入、symlink 处理，以及部分失败时不丢失数据）
+- IPC command surface 和 AI tool surface
+- 文件传输规划与变更（Workspace 边界、源文件 identity、staging 所有权、no-replace publication、取消和有界失败）
+- 影响范围广的纯逻辑（cwd 继承、tab/split tree 变换、OSC/prompt 解析和 command guard）
 
-The bar is real coverage of the contract, not a placeholder. Test the edge, the deny path, the "what happens one level above home".
+标准是切实覆盖约定，而不是占位测试。应测试边界、拒绝路径，以及“home 的上一级会发生什么”。
 
-## What does not need a test
+## 不需要测试的变更
 
-UI rendering, themes, syntax-highlight tables, and anything the type-checker already guarantees do not need tests.
+UI 渲染、主题、语法高亮表格以及类型检查器已经能够保证的内容不需要测试。
 
-## Writing a good test
+## 编写优秀的测试
 
-A good test locks the invariant you are relying on. Examples from the codebase:
+优秀的测试会锁定所依赖的不变量。代码库中的示例包括：
 
-- `src-tauri/src/modules/workspace.rs` `auth_tests` verify that an authorized path, a subdir of an authorized root, an unauthorized path, a missing path, and a symlink escape all behave correctly.
-- `src-tauri/src/modules/pty/job.rs` tests verify that dropping the Job Object kills the assigned process tree on Windows.
-- `src-tauri/src/modules/pty/session.rs` tests verify that dropping a `Session` kills the child process.
-- `src-tauri/src/modules/pty/shell_init.rs` tests verify shell classification and WSL fish launch specs.
-- `src/modules/ai/lib/security.ts` is exercised by tests that assert specific paths are refused and that canonicalization catches symlink traversal.
+- `src-tauri/src/modules/workspace.rs` 的 `auth_tests` 验证已授权路径、已授权根目录的子目录、未授权路径、不存在的路径和 symlink 越界均能得到正确处理。
+- `src-tauri/src/modules/pty/job.rs` 的测试验证在 Windows 上丢弃 Job Object 会终止分配给它的进程树。
+- `src-tauri/src/modules/pty/session.rs` 的测试验证丢弃 `Session` 会终止子进程。
+- `src-tauri/src/modules/pty/shell_init.rs` 的测试验证 Shell 分类和 WSL fish 启动规范。
+- `src/modules/ai/lib/security.ts` 由相关测试覆盖，这些测试断言特定路径会被拒绝，并验证 canonicalization 能捕获 symlink traversal。
 
-## Cross-platform PTY tests
+## 跨平台 PTY 测试
 
-Platform-specific behavior must be gated:
+平台特定行为必须使用条件编译限制：
 
 ```rust
 #[cfg(unix)]
@@ -60,41 +60,41 @@ fn shell_has_children(shell_pid: u32) -> bool { ... }
 fn shell_has_children(shell_pid: u32) -> bool { ... }
 ```
 
-Tests for ConPTY/Job Object belong behind `#[cfg(windows)]`; tests for Unix PTY lifecycle belong behind `#[cfg(unix)]`. Do not assume a helper that works on one platform works on the other.
+ConPTY/Job Object 测试应放在 `#[cfg(windows)]` 后，Unix PTY 生命周期测试应放在 `#[cfg(unix)]` 后。不要假设在一个平台上可用的辅助函数也适用于另一平台。
 
-## Security function tests
+## 安全函数测试
 
-When testing `src/modules/ai/lib/security.ts` or the Rust equivalents, cover:
+测试 `src/modules/ai/lib/security.ts` 或对应的 Rust 实现时，应覆盖：
 
-1. The literal path is refused.
-2. The canonicalized path is re-refused (symlink case).
-3. Case variants match on case-insensitive filesystems.
-4. NTFS alternate data streams and trailing dot/space variants are normalized.
-5. Write-only deny prefixes block writes but allow reads where appropriate.
+1. 拒绝字面路径。
+2. 再次拒绝 canonicalized path（symlink 场景）。
+3. 在大小写不敏感的文件系统上匹配大小写变体。
+4. 对 NTFS alternate data stream 和末尾点号/空格变体进行规范化。
+5. 仅禁止写入的 prefix 在适当情况下阻止写入但允许读取。
 
-## File transfer tests
+## 文件传输测试
 
-File transfer changes must preserve these invariants:
+文件传输变更必须保持以下不变量：
 
-1. Transfer paths are normalized absolute paths, while remote cleanup cannot leave the exact task-owned destination parents.
-2. A failed or canceled task removes only its task-owned staging paths.
-3. Final publication cannot replace a destination created by another task or process.
-4. Source identity and expected size are rechecked after planning.
-5. A paused queued task does not consume a scheduler permit, and cancellation wakes all waiters.
-6. SSH connection loss reaches a terminal state within the remote I/O bound.
-7. Archive extraction is driven by the manifest, not by untrusted archive paths.
+1. 传输路径是规范化的绝对路径，同时远端清理不能遗留对应任务专属的目标父目录。
+2. 失败或取消的任务只删除其专属 staging path。
+3. 最终 publication 不能替换由其他任务或进程创建的目标。
+4. 规划完成后重新检查源文件 identity 和预期大小。
+5. 已暂停的排队任务不占用 scheduler permit，取消操作会唤醒所有 waiter。
+6. SSH 连接中断必须在远程 I/O 时间上限内进入 terminal state。
+7. Archive 解压由 manifest 驱动，而不是由不受信任的 archive path 驱动。
 
-Use a real Tauri process for WSL or SSH verification because a Vite-only page cannot exercise Workspace bootstrap, native commands, task-exclusive SFTP sessions, or filesystem notifications. For release-level transfer changes, cover both directions, files and directories, Unicode and empty entries, pause/resume, cancellation, destination conflicts, connection loss, retry, and insufficient destination space. Compare file hashes across the boundary.
+WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面无法覆盖 Workspace bootstrap、原生 command、任务独占的 SFTP session 或文件系统通知。发布级文件传输变更需要覆盖两个方向、文件与目录、Unicode 与空条目、暂停/恢复、取消、目标冲突、连接中断、重试和目标空间不足，并跨边界比较文件 hash。
 
-## Invariants
+## 不变量
 
-- A local fix with global blast radius must be caught by a test; review alone is not enough.
-- Test the deny path and the edge, not just the happy path.
-- Keep platform-specific tests behind the right `#[cfg(...)]` gate.
+- 影响范围全局的局部修复必须能被测试捕获，只依赖 review 不够。
+- 不仅测试 happy path，还要测试拒绝路径和边界。
+- 将平台特定测试放在正确的 `#[cfg(...)]` 条件后。
 
-## See also
+## 另请参阅
 
-- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
-- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) - quality bar, project layout, how to contribute
-- [`docs/README.md`](../README.md) - index of contributor guides
-- [File transfers](../architecture/file-transfers.md) - lifecycle, safety boundaries, resource limits, and verification matrix
+- [`AGENTS.md`](../../AGENTS.md) - 架构权威文档
+- [`CONTRIBUTING.md`](../../CONTRIBUTING.md) - 质量标准、项目布局和贡献方式
+- [`docs/README.md`](../README.md) - 贡献者指南索引
+- [文件传输](../architecture/file-transfers.md) - 生命周期、安全边界、资源限制和验证矩阵

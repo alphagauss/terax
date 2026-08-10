@@ -1,120 +1,120 @@
-# AI subsystem
+# AI 子系统
 
-This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
+本指南是对 `AGENTS.md` 的补充。如有冲突，以 `AGENTS.md` 为准。
 
-## Overview
+## 概览
 
-The AI subsystem is BYOK (bring your own key). It supports cloud providers via `@ai-sdk/*` and local / offline providers via OpenAI-compatible endpoints. The agent layer is built on Vercel AI SDK v6 chat semantics: `streamText`, tool definitions, and `stopWhen` step limits.
+AI 子系统采用 BYOK（bring your own key）模式。它通过 `@ai-sdk/*` 支持云 provider，并通过 OpenAI-compatible endpoint 支持本地/离线 provider。Agent 层基于 Vercel AI SDK v6 chat 语义构建，包括 `streamText`、工具定义和 `stopWhen` step limit。
 
-Main entry point: `runAgentStream` in `src/modules/ai/lib/agent.ts`.
+主要入口：`src/modules/ai/lib/agent.ts` 中的 `runAgentStream`。
 
-## Providers
+## Provider
 
-Cloud providers are defined in `src/modules/ai/config.ts`:
+云 provider 定义在 `src/modules/ai/config.ts` 中：
 
-- OpenAI, Anthropic, Google, xAI, Cerebras, Groq, DeepSeek, Mistral, OpenRouter
-- `openai-compatible` for any custom base URL
-- Local: LM Studio, MLX, Ollama
+- OpenAI、Anthropic、Google、xAI、Cerebras、Groq、DeepSeek、Mistral、OpenRouter
+- 用于任意自定义 base URL 的 `openai-compatible`
+- 本地：LM Studio、MLX、Ollama
 
-`buildLanguageModel` in `src/modules/ai/lib/agent.ts:76` branches on `provider` to construct the correct AI SDK provider instance. Local providers use `createOpenAICompatible` with a `localProxyFetch` that allows private-network access, while cloud providers use their dedicated SDK constructors.
+`src/modules/ai/lib/agent.ts:76` 中的 `buildLanguageModel` 根据 `provider` 进入不同分支，以构建正确的 AI SDK provider instance。本地 provider 使用 `createOpenAICompatible`，并传入允许访问私有网络的 `localProxyFetch`；云 provider 则使用各自专用的 SDK constructor。
 
-Model metadata (context limits, costs, reasoning behavior) lives in the model registry in `config.ts`. `resolveModel` maps a model id to its provider and defaults.
+模型 metadata（context limit、cost、reasoning behavior）存储在 `config.ts` 的模型 registry 中。`resolveModel` 将 model ID 映射到对应 provider 和默认值。
 
-### Adding a new provider
+### 新增 provider
 
-1. Add a `ProviderInfo` entry to `PROVIDERS` in `src/modules/ai/config.ts`.
-2. Add model ids and metadata to the model registry in the same file.
-3. Add a branch in `buildLanguageModel` (`src/modules/ai/lib/agent.ts:99`) that constructs the provider instance. For OpenAI-compatible APIs you can often reuse `createOpenAICompatible`.
-4. If the provider requires an API key, update `providerNeedsKey` in `config.ts` and the keyring service mapping.
-5. If it needs a dedicated `@ai-sdk/*` package, add it to `package.json` and justify the bundle cost (see `CONTRIBUTING.md`).
-6. New built-ins must justify unique value beyond `openai-compatible` and OpenRouter; `CONTRIBUTING.md` calls this out explicitly.
+1. 在 `src/modules/ai/config.ts` 的 `PROVIDERS` 中添加 `ProviderInfo` entry。
+2. 在同一文件的模型 registry 中添加 model ID 和 metadata。
+3. 在 `buildLanguageModel`（`src/modules/ai/lib/agent.ts:99`）中添加构建 provider instance 的分支。对于 OpenAI-compatible API，通常可以复用 `createOpenAICompatible`。
+4. 如果 provider 需要 API key，更新 `config.ts` 中的 `providerNeedsKey` 和 keyring service mapping。
+5. 如果需要专用的 `@ai-sdk/*` package，将其添加到 `package.json`，并说明 bundle cost 的合理性（参见 `CONTRIBUTING.md`）。
+6. 新增 built-in 必须说明其相对于 `openai-compatible` 和 OpenRouter 的独特价值；`CONTRIBUTING.md` 对此有明确要求。
 
-Keys are never persisted outside the OS keychain / Linux secrets file.
+key 绝不会持久化到操作系统 keychain / Linux secrets 文件之外。
 
-## Agent run loop
+## Agent 运行循环
 
-`runAgentStream` (`agent.ts:391`):
+`runAgentStream`（`agent.ts:391`）会：
 
-1. Resolves the model via `buildConfiguredLanguageModel`.
-2. Builds a stable system prompt from `selectSystemPrompt(modelId)`, the session working directory, optional persona, custom instructions, and `AGENTS.md` project instructions. Before contacting the model, the exact prompt and any new user message are committed to disk.
-3. Converts UI messages to model messages, prunes reasoning content if the model does not keep it, and compacts old messages if the context limit is exceeded.
-4. Streams via `streamText` with the tool set from `buildTools(ctx)` and `stopWhen: stepCountIs(MAX_AGENT_STEPS)`.
-5. Emits step labels, usage deltas, and finish metadata.
+1. 通过 `buildConfiguredLanguageModel` 解析模型。
+2. 根据 `selectSystemPrompt(modelId)`、session 工作目录、可选 persona、自定义指令和 `AGENTS.md` 项目指令构建稳定的 system prompt。联系模型前，准确的 prompt 和所有新 user message 都会 commit 到磁盘。
+3. 将 UI message 转换为 model message；如果模型不保留 reasoning content，则将其移除；context limit 超出时 compact 旧 message。
+4. 使用 `buildTools(ctx)` 提供的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输。
+5. 发出 step label、usage delta 和 finish metadata。
 
-The tool set is assembled in `src/modules/ai/tools/tools.ts` from `fs`, `edit`, `search`, `shell`, `subagent`, `terminal`, `todo`, and `managedAgent` builders.
+tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`edit`、`search`、`shell`、`subagent`、`terminal`、`todo` 和 `managedAgent` builder 组装而成。
 
-## Sub-agents
+## Sub-agent
 
-`src/modules/ai/agents/registry.ts` defines read-only sub-agents: `explore`, `code-review`, `security`, and `general`. Each has a whitelist of tools and its own system prompt. `run_subagent` cannot recurse (the subagent tool set excludes `run_subagent` itself).
+`src/modules/ai/agents/registry.ts` 定义只读 sub-agent：`explore`、`code-review`、`security` 和 `general`。每个 sub-agent 都有 tool whitelist 和自己的 system prompt。`run_subagent` 不能递归调用，因为 sub-agent tool set 不包含 `run_subagent` 本身。
 
-## Sessions
+## Session
 
-Conversations are organized into sessions. Accepted user messages and completed response records are stored as one atomic JSONL file per UUID under `~/.terax/sessions/` (`src-tauri/src/modules/ai_sessions.rs`, `src/modules/ai/lib/sessions.ts`, and `src/modules/ai/lib/sessionMessages.ts`):
+对话按 session 组织。已接受的 user message 和完整 response record 以每个 UUID 一个原子 JSONL 文件的形式存储在 `~/.terax/sessions/` 下（`src-tauri/src/modules/ai_sessions.rs`、`src/modules/ai/lib/sessions.ts` 和 `src/modules/ai/lib/sessionMessages.ts`）：
 
-- `<uuid>.jsonl`: the first line is a fixed metadata record; each remaining line is one role message
-- `<uuid>.lock`: OS lock used while one process is running the session
-- no shared session index; list operations read only the first metadata line
-- `ai_sessions_list` projects each header to an explicit lightweight summary and never returns inspection-only metadata such as `systemPrompt`
+- `<uuid>.jsonl`：第一行是固定 metadata record，其余每行是一条 role message
+- `<uuid>.lock`：一个进程运行该 session 时使用的 OS lock
+- 不使用共享 session index；list 操作只读取第一行 metadata
+- `ai_sessions_list` 将每个 header 投影为显式的 lightweight summary，绝不返回 `systemPrompt` 等仅供检查的 metadata
 
 ```json
 {"_type":"metadata","key":"<uuid>","createdAt":"2026-07-26T10:00:00.000Z","updatedAt":"2026-07-26T10:00:01.000Z","environmentKey":"local","cwd":"/workspace/project","metadata":{"title":"Session title","todos":[],"systemPrompt":"..."}}
 ```
 
-The JSONL message schema belongs to Terax rather than Vercel AI SDK. User and assistant text use direct `role` and `content` fields, reasoning uses `reasoning_content`, and tool results use `role: "tool"`. Tool calls deliberately follow the OpenAI-compatible envelope:
+JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant 文本使用直接的 `role` 和 `content` field，reasoning 使用 `reasoning_content`，tool result 使用 `role: "tool"`。tool call 刻意遵循 OpenAI-compatible envelope：
 
 ```json
 {"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"README.md\"}"}}],"timestamp":"2026-07-26T10:00:00.000Z"}
 {"role":"tool","tool_call_id":"call_1","name":"read_file","content":{"content":"..."},"timestamp":"2026-07-26T10:00:00.000Z"}
 ```
 
-`function.arguments` is always a JSON string. Explicit adapters project these records into AI SDK `UIMessage` values when a chat is hydrated. Each persistence phase sends only its new records to Rust; Rust reads the existing JSONL under the session lock, appends them, and atomically replaces the complete file. This keeps the disk format readable and makes a future SDK switch local to the adapter.
+`function.arguments` 始终为 JSON string。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
 
-Streaming state remains in the owning process. Sending first acquires the session run lock. Each locked session keeps its own runtime bridge, so the active UI may switch sessions without stopping background streaming or approval. A running session cannot be deleted. The transport commits accepted user records and the current prompt before creating the model request. `AgentRunBridge` appends only complete Assistant and tool records after that session becomes idle, errors, or is stopped and no approval is pending. The observable frontend lock is cleared only after both the terminal commit and Rust lock release succeed. Background-running and completed-unread indicators are process-local memory state: viewing the matching session clears them, and they are never written to session files. Focus/poll/normal-close paths also flush completed runs. A crash retains the latest accepted user message without writing a partial Assistant stream.
+streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和当前 prompt。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
 
-Other Workspace processes poll metadata every three seconds (paused while hidden with the AI panel closed), refresh on focus, and never overwrite a locally running session. Fingerprint changes evict inactive cached runtimes before reuse. The active session id is stored in the UUID-specific Workspace file and restores the saved id, then the most recent session file, then a fresh session.
+其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime。active session ID 存储在 UUID 对应的 Workspace 文件中，恢复顺序依次为已保存 ID、最近的 session 文件、全新 session。
 
 ## Composer
 
-`AiComposerProvider` (`src/modules/ai/lib/composer.tsx`) is a React context that holds shared input state (text, attachments, voice) for the docked input bar and any other surface. Attachments can be images, text files, or `selection` chips from the terminal or editor. Selections are wrapped as `<selection source="terminal|editor">…</selection>` blocks at submit time and are not pasted into the textarea.
+`AiComposerProvider`（`src/modules/ai/lib/composer.tsx`）是 React context，为 docked input bar 和其他 surface 保存共享输入状态（文本、附件、语音）。附件可以是图片、文本文件或来自终端/编辑器的 `selection` chip。提交时，selection 会包装为 `<selection source="terminal|editor">…</selection>` block，而不会粘贴进 textarea。
 
-The composer derives `isBusy` from the active session's entry in `agentMetaBySession` so it can mount safely before sessions hydrate while other sessions continue in the background.
+composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isBusy`，因此它可以在 session hydrate 前安全挂载，同时其他 session 继续在后台运行。
 
-A draft displays and follows the current Explorer root. Its first accepted user message promotes it to a persisted session and freezes that root as `cwd`. Persisted sessions always display and use their stored `cwd`. Files and selections are sent only when explicitly attached, as visible user-message content.
+draft 会显示并跟随当前 Explorer root。第一条被接受的 user message 会将其提升为 persisted session，并将该 root 冻结为 `cwd`。persisted session 始终显示并使用已存储的 `cwd`。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
-Each model request first commits its new user message and the exact current system prompt under the session run lock. Approval continuations overwrite only the prompt and do not duplicate the user record. Once the run reaches idle, error, or stop, the bridge appends the complete Assistant and tool records with the same turn ID. Streaming fragments are never written.
+每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 system prompt 的准确内容。approval continuation 只覆盖 prompt，不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
 
-## Tools and approval
+## 工具与审批
 
-Tool definitions live under `src/modules/ai/tools/`:
+工具定义位于 `src/modules/ai/tools/`：
 
-- Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the security deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `bash_run`, `bash_background`) set `needsApproval: true`. The AI SDK pauses and the UI renders one persistent approval toast per request, independent of the visible chat.
-- `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
+- 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过安全 deny-list 后自动执行。
+- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`bash_run`、`bash_background`）设置 `needsApproval: true`。AI SDK 会暂停，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
+- `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 
-Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
+审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
 
-## Edit diffs
+## 编辑 diff
 
-File mutation approval prepares an immutable before/after snapshot and shows a summary toast. The user may open a read-only `ai-diff` tab and approve or reject the whole tool call from either surface. Execution writes the prepared content only if the canonical path, original content, and file existence state still match. The same flow works without a Git repository.
+文件修改审批会准备不可变的 before/after snapshot，并显示 summary toast。用户可以打开只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。只有 canonical path、原始内容和文件存在状态仍然匹配时，执行阶段才会写入准备好的内容。同一流程无需 Git 仓库也能工作。
 
-## Live context bridge
+## 实时上下文桥接
 
-`App.tsx` publishes the current Explorer root for unsent drafts and a lazy terminal-buffer reader. Once a draft is sent, the session's stored `cwd` becomes the sole base for relative tool paths. Terminal output remains live and is read only when the model explicitly calls the terminal tool.
+`App.tsx` 发布当前 Explorer root 供未发送 draft 使用，并提供 lazy terminal-buffer reader。draft 发送后，session 存储的 `cwd` 成为相对 tool path 的唯一基准。终端输出保持 live，仅在模型明确调用终端工具时读取。
 
-## Invariants
+## 不变量
 
-- Keep the Vercel AI SDK v6 chat shape (`streamText`, tools, step limits); the rest of the UI depends on it.
-- Keys only via `secrets_*` commands; never disk, settings store, or `localStorage`.
-- New providers must justify their bundle cost and unique value.
-- Mutating tools require approval; read-only tools still pass the deny-list.
-- The in-memory message list, persisted message records, and model input preserve the same message content. No active tab, cwd, or environment block is injected during send.
-- A persisted session's `cwd` is immutable and every relative tool path resolves against it.
-- Acquiring a persisted session run restores the saved cwd authorization from the validated JSONL header without changing the Explorer root.
-- A session run lock owns its in-memory runtime until commit and release both succeed; session navigation must not bypass that lifecycle.
+- 保持 Vercel AI SDK v6 chat 结构（`streamText`、tool、step limit），其余 UI 依赖该结构。
+- key 只能通过 `secrets_*` command 访问，绝不能写入磁盘、settings store 或 `localStorage`。
+- 新 provider 必须说明 bundle cost 和独特价值的合理性。
+- 修改型工具需要审批；只读工具仍必须通过 deny-list。
+- 内存 message list、持久化 message record 和模型 input 保留相同的 message content。发送时不注入 active tab、cwd 或 environment block。
+- persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
+- 获取 persisted session run 时，从经过验证的 JSONL header 恢复已保存 cwd 的授权，但不改变 Explorer root。
+- session run lock 持有其内存 runtime，直到 commit 和 release 均成功；session navigation 不得绕过该生命周期。
 
-## See also
+## 另请参阅
 
-- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
-- [`docs/README.md`](../README.md) - index of contributor guides
-- [Two-process model](two-process-model.md) - IPC boundary and command catalog
-- [Security model](security-model.md) - the boundaries every tool must respect
+- [`AGENTS.md`](../../AGENTS.md) - 架构权威文档
+- [`docs/README.md`](../README.md) - 贡献者指南索引
+- [双进程模型](two-process-model.md) - IPC 边界和 command 目录
+- [安全模型](security-model.md) - 每个工具都必须遵守的边界

@@ -1,97 +1,97 @@
-# Security model
+# 安全模型
 
-This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
+本指南是对 `AGENTS.md` 的补充。如有冲突，以 `AGENTS.md` 为准。
 
-Terax runs shells, reads and writes files, and sends data to AI providers. The security model is defense-in-depth: no single guard is enough, so every boundary validates input before acting on it.
+Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全模型采用 defense-in-depth：单一防护不足以保证安全，因此每个边界都要在执行操作前验证输入。
 
-## Boundaries
+## 边界
 
-The main trust boundaries are:
+主要信任边界包括：
 
-1. **IPC boundary** - commands registered in `src-tauri/src/lib.rs`, gated by `src-tauri/capabilities/default.json`.
-2. **File-system boundary** - AI tools go through `src/modules/ai/lib/security.ts`; PTY spawn goes through the workspace authorization registry.
-3. **Network boundary** - AI HTTP proxy in `src-tauri/src/modules/net.rs` with SSRF and DNS-rebinding defenses.
-4. **Secret-storage boundary** - keys live in the OS keychain, never on disk or in `localStorage`.
-5. **Terminal escape-sequence boundary** - OSC sequences are parsed and acted on, but never blindly trusted to mutate state.
+1. **IPC 边界** - 注册在 `src-tauri/src/lib.rs` 中并受 `src-tauri/capabilities/default.json` 限制的 command。
+2. **文件系统边界** - AI 工具通过 `src/modules/ai/lib/security.ts`；PTY spawn 通过 Workspace 授权 registry。
+3. **网络边界** - `src-tauri/src/modules/net.rs` 中带有 SSRF 和 DNS rebinding 防护的 AI HTTP proxy。
+4. **秘密存储边界** - key 存储在操作系统 keychain 中，绝不存入磁盘或 `localStorage`。
+5. **终端 escape sequence 边界** - 解析 OSC sequence 并执行对应操作，但绝不直接信任它来改变状态。
 
-## Secret-path deny-list
+## 秘密路径 deny-list
 
-`src/modules/ai/lib/security.ts` refuses reads and writes of obvious secret paths. This applies **on both read and write** and must never be bypassed.
+`src/modules/ai/lib/security.ts` 会拒绝读取和写入明显包含秘密的路径。该规则**同时适用于读取和写入**，绝不能绕过。
 
-Blocked categories include:
+阻止的类别包括：
 
-- Files: `.env*`, `*.pem`, `*.key`, `*.p12`, `id_rsa*`, `known_hosts`, `credentials`, `service-account*.json`, and similar.
-- Directories: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config/gh`, `~/.git`, system dirs (`/etc`, `/proc`, `/sys`), and Windows credential stores.
-- System write prefixes: `/etc/`, `/var/db/`, `/usr/bin/`, `/windows/`, `/program files/`, etc.
+- 文件：`.env*`、`*.pem`、`*.key`、`*.p12`、`id_rsa*`、`known_hosts`、`credentials`、`service-account*.json` 等。
+- 目录：`~/.ssh`、`~/.gnupg`、`~/.aws`、`~/.kube`、`~/.config/gh`、`~/.git`、系统目录（`/etc`、`/proc`、`/sys`）和 Windows credential store。
+- 系统写入 prefix：`/etc/`、`/var/db/`、`/usr/bin/`、`/windows/`、`/program files/` 等。
 
-The comparison surface normalizes paths: backslashes to forward slashes, strips Windows drive letters, strips NTFS alternate data streams, strips trailing dots/spaces, lowercases, and collapses duplicate slashes. Protected directories are matched as exact path or descendant, not raw substring.
+路径比较前会进行规范化：将反斜杠转换为正斜杠、移除 Windows drive letter、移除 NTFS alternate data stream、移除末尾点号/空格、转换为小写并合并重复斜杠。受保护目录按完整路径或其 descendant 匹配，而不是使用原始 substring 匹配。
 
-`checkReadableCanonical` and `checkWritableCanonical` also canonicalize the path and re-check the resolved form so a symlink at an innocent path pointing into `~/.ssh` is caught.
+`checkReadableCanonical` 和 `checkWritableCanonical` 还会 canonicalize 路径并重新检查解析后的形式，因此可以发现无害路径中的 symlink 指向 `~/.ssh` 的情况。
 
-## Workspace authorization registry
+## Workspace 授权 registry
 
-`WorkspaceRegistry` (`src-tauri/src/modules/workspace.rs:20`) tracks directories that PTY spawn, git commands, and AI tools are allowed to operate in.
+`WorkspaceRegistry`（`src-tauri/src/modules/workspace.rs:20`）跟踪允许 PTY spawn、Git command 和 AI 工具操作的目录。
 
-- `workspace_authorize` adds a directory.
-- `authorize_spawn_cwd` rejects a spawn cwd outside an authorized root.
-- `authorize_user_spawn_cwd` registers the user's chosen cwd as a new root instead of rejecting it.
-- The registry is bootstrapped with the launch directory and the user's home directory (`workspace.rs:135`).
+- `workspace_authorize` 添加目录。
+- `authorize_spawn_cwd` 拒绝在已授权 root 之外使用 spawn cwd。
+- `authorize_user_spawn_cwd` 将用户选择的 cwd 注册为新 root，而不是拒绝它。
+- registry 在 bootstrap 时加入启动目录和用户 home 目录（`workspace.rs:135`）。
 
-This is the allow side of the file-system boundary. Any new feature that spawns a shell or mutates files outside the current workspace must interact with this registry.
+这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
 
-## AI tool approval flow
+## AI 工具审批流程
 
-In `src/modules/ai/tools/tools.ts`:
+在 `src/modules/ai/tools/tools.ts` 中：
 
-- Read-only tools (`read_file`, `list_directory`, `grep`, `glob`) auto-execute after passing the deny-list.
-- Mutating tools (`write_file`, `edit`, `multi_edit`, `create_directory`, `run_command`, `shell_session_run`, `shell_bg_spawn`) set `needsApproval: true`. The AI SDK pauses and the frontend routes each request to a persistent toast keyed by session and approval ID.
-- File mutations prepare the reviewed content before approval and verify the canonical path, original content, and file existence state again before writing. The diff does not depend on Git.
-- `edit` / `multi_edit` enforce a read-before-edit invariant: the model must have read the file earlier in the session.
+- 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过 deny-list 后自动执行。
+- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`run_command`、`shell_session_run`、`shell_bg_spawn`）设置 `needsApproval: true`。AI SDK 会暂停，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
+- 文件修改在审批前准备待 review 的内容，并在写入前重新验证 canonical path、原始内容和文件存在状态。diff 不依赖 Git。
+- `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 
-Auto-send after approval uses `lastAssistantMessageIsCompleteWithApprovalResponses`.
+审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
 
-## SSRF and DNS rebinding defense
+## SSRF 与 DNS rebinding 防护
 
-`src-tauri/src/modules/net.rs` proxies AI provider requests and local-model pings. Before connecting:
+`src-tauri/src/modules/net.rs` 代理 AI provider 请求和本地模型 ping。连接前会：
 
-1. Resolve the hostname once (`resolve_and_classify`).
-2. Classify every resolved IP as public, private, loopback, or blocked metadata.
-3. Block cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`, AWS IPv6 metadata, etc.).
-4. Pin reqwest to the resolved IPs so a second DNS lookup cannot return a different address (DNS rebinding).
+1. 解析一次 hostname（`resolve_and_classify`）。
+2. 将解析得到的每个 IP 分类为 public、private、loopback 或 blocked metadata。
+3. 阻止云 metadata endpoint（`169.254.169.254`、`metadata.google.internal`、AWS IPv6 metadata 等）。
+4. 将 reqwest 固定到解析得到的 IP，防止第二次 DNS 查询返回不同地址（DNS rebinding）。
 
-Local LLM endpoints are explicitly allowed because the user opted in by pointing Terax at them, but they are still classified and logged.
+本地 LLM endpoint 会被明确允许，因为用户通过将 Terax 指向这些 endpoint 主动选择了它们，但系统仍会对其分类并记录日志。
 
-## Secret storage
+## 秘密存储
 
-API keys are stored via `secrets_*` commands (`src-tauri/src/modules/secrets.rs`):
+API key 通过 `secrets_*` command（`src-tauri/src/modules/secrets.rs`）存储：
 
-- macOS: Keychain via `keyring`
-- Windows: Credential Manager via `keyring`
-- Linux: a JSON file in the app's local data dir with mode `0600` (atomic write to `.tmp` then rename)
+- macOS：通过 `keyring` 使用 Keychain
+- Windows：通过 `keyring` 使用 Credential Manager
+- Linux：使用应用本地数据目录中 mode 为 `0600` 的 JSON 文件（原子写入 `.tmp` 后 rename）
 
-Service constant: `terax-ai`. Keys never touch disk outside the keychain/Linux secrets file, never go in `localStorage`, and never appear in logs.
+服务常量为 `terax-ai`。key 绝不会写入 keychain/Linux secrets 文件以外的磁盘位置，不会进入 `localStorage`，也不会出现在日志中。
 
-## OSC trust gating
+## OSC 信任限制
 
-The terminal parses OSC sequences from the PTY byte stream:
+终端从 PTY 字节流中解析 OSC sequence：
 
-- **OSC 7** updates the tab cwd.
-- **OSC 133 A/B/C/D** marks prompt/command boundaries.
-- **OSC 777** is used by the agent detector to signal coding-agent state transitions.
+- **OSC 7** 更新 tab cwd。
+- **OSC 133 A/B/C/D** 标记 prompt/command 边界。
+- **OSC 777** 由 Agent detector 用来标记编码 Agent 的状态转换。
 
-The agent detector (`src-tauri/src/modules/pty/agent_detect.rs`) is armed by `OSC 133;C;<cmd>` or by a self-armed marker and emits `terax:agent-signal` events. It is driven **only by OSC sequences**, never by raw output, so a repainting TUI never flaps.
+Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<cmd>` 或 self-armed marker 启用，并发出 `terax:agent-signal` event。它**仅由 OSC sequence**驱动，绝不由原始输出驱动，因此 repaint 中的 TUI 不会造成状态反复变化。
 
-## Invariants
+## 不变量
 
-- The deny-list in `security.ts` applies on both read and write. Never bypass it.
-- New file-system-touching commands must respect the workspace authorization registry.
-- New network-facing commands must go through the `net.rs` proxy or reimplement the same classification and DNS pinning.
-- New plugin APIs must be added to `src-tauri/capabilities/default.json`.
-- Keys, tokens, and credentials stay in the keychain / Linux secrets file.
+- `security.ts` 中的 deny-list 同时适用于读取和写入，绝不能绕过。
+- 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
+- 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。
+- 新 plugin API 必须添加到 `src-tauri/capabilities/default.json`。
+- key、token 和 credential 只能保存在 keychain / Linux secrets 文件中。
 
-## See also
+## 另请参阅
 
-- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
-- [`docs/README.md`](../README.md) - index of contributor guides
-- [Two-process model](two-process-model.md) - IPC boundary and command catalog
-- [AI subsystem](ai-subsystem.md) - tools, approval flow, and provider handling
+- [`AGENTS.md`](../../AGENTS.md) - 架构权威文档
+- [`docs/README.md`](../README.md) - 贡献者指南索引
+- [双进程模型](two-process-model.md) - IPC 边界和 command 目录
+- [AI 子系统](ai-subsystem.md) - 工具、审批流程和 provider 处理
