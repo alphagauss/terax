@@ -10,7 +10,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/controls/select";
 import { Switch } from "@/components/ui/switch";
 import { EXPOSED_LANGUAGES } from "@/modules/editor/lib/languageDefinitions";
 import {
