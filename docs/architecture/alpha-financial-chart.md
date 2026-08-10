@@ -25,16 +25,16 @@
 
 ## 外部源码位置与审查基线
 
-假定开发者把参考项目放在 `D:\opensource`，这些目录只用于人工阅读，不得成为构建输入、运行时查找路径或 Terax 源码导入路径。
+假定开发者把参考项目放在 `D:\OneDrive\open`，这些目录只用于人工阅读，不得成为构建输入、运行时查找路径或 Terax 源码导入路径。
 
 | 项目 | 本地目录 | 审查提交 | 定位 |
 | --- | --- | --- | --- |
-| [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app) | `D:\opensource\shioaji-pro-app` | `a6c9bd2` | 最接近 Terax 技术栈的直接实现参考 |
-| [OpenTerminalUI](https://github.com/Hitheshkaranth/OpenTerminalUI) | `D:\opensource\OpenTerminalUI` | `fc16fd6` | 专业能力、边界条件和测试场景参考 |
-| [openalgo](https://github.com/marketcalls/openalgo) | `D:\opensource\openalgo` | `1b36fdf` | React 图表外壳、工具栏和控制器参考 |
-| [openalgo-charts](https://github.com/marketcalls/openalgo-charts) | `D:\opensource\openalgo-charts` | `6e55915` | 图表内核分层和状态模型参考，不直接移植 |
-| [lightweight-charts-drawing](https://github.com/deepentropy/lightweight-charts-drawing) | `D:\opensource\lightweight-charts-drawing` | `5f2afc3` | Lightweight Charts 绘图插件候选 |
-| [lightweight-charts-indicators](https://github.com/deepentropy/lightweight-charts-indicators) | `D:\opensource\lightweight-charts-indicators` | `31756c8` | JS 指标定义、元数据和结果协议参考 |
+| [shioaji-pro-app](https://github.com/Sinotrade/shioaji-pro-app) | `D:\OneDrive\open\shioaji-pro-app` | `a6c9bd2` | 最接近 Terax 技术栈的直接实现参考 |
+| [OpenTerminalUI](https://github.com/Hitheshkaranth/OpenTerminalUI) | `D:\OneDrive\open\OpenTerminalUI` | `fc16fd6` | 专业能力、边界条件和测试场景参考 |
+| [openalgo](https://github.com/marketcalls/openalgo) | `D:\OneDrive\open\openalgo` | `f1329e23d` | React 图表外壳、工具栏和控制器参考 |
+| [openalgo-charts](https://github.com/marketcalls/openalgo-charts) | `D:\OneDrive\open\openalgo-charts` | `6e55915` | 图表内核分层和状态模型参考，不直接移植 |
+| [lightweight-charts-drawing](https://github.com/deepentropy/lightweight-charts-drawing) | `D:\OneDrive\open\lightweight-charts-drawing` | `5f2afc3` | Lightweight Charts 绘图插件候选 |
+| [lightweight-charts-indicators](https://github.com/deepentropy/lightweight-charts-indicators) | `D:\OneDrive\open\lightweight-charts-indicators` | `31756c8` | JS 指标定义、元数据和结果协议参考 |
 
 开始开发前运行 `git rev-parse --short HEAD` 检查本地版本。提交不同不要求重新通读整个项目，只在本文列出的关键文件发生实质变化或命中“重新审查条件”时定向复核。
 
