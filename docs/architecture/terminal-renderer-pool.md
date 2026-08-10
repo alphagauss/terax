@@ -1,67 +1,67 @@
-# Terminal renderer pool
+# 终端 renderer pool
 
-This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
+本指南是对 `AGENTS.md` 的补充。如有冲突，以 `AGENTS.md` 为准。
 
-## Why a pool exists
+## 为什么需要 pool
 
-Terminal tabs are kept mounted and hidden on switch so PTYs and dev servers keep streaming in the background. Creating an unbounded number of live xterm + WebGL renderer instances would blow the memory budget, so Terax pools renderer slots.
+切换终端 tab 时，tab 会保持挂载并隐藏，使 PTY 和开发服务器能够继续在后台输出。如果创建无限数量的 xterm + WebGL renderer 实例，将会超出内存预算，因此 Terax 使用 renderer slot pool。
 
-The pool lives in `src/modules/terminal/lib/rendererPool.ts`.
+pool 位于 `src/modules/terminal/lib/rendererPool.ts`。
 
-The frontend terminal identity is the owning Workbench tab's `tab.id`. `TerminalTab` does not store a second runtime ID. Terminal code names that same value `terminalId` to make the local domain clear, while the native PTY keeps its own independent ID.
+前端终端 identity 是所属 Workbench tab 的 `tab.id`。`TerminalTab` 不存储第二个 runtime ID。终端代码将同一个值命名为 `terminalId` 以明确局部 domain，而原生 PTY 保留自己独立的 ID。
 
-## Slot lifecycle
+## Slot 生命周期
 
-- `POOL_MAX_SIZE` is 5 (`rendererPool.ts:22`). Each slot owns one xterm `Terminal`, `FitAddon`, `SearchAddon`, `SerializeAddon`, and optionally a `WebglAddon`.
-- A slot is created on demand and assigned to a terminal on bind.
-- `releaseSlot` detaches a slot from a terminal. If the terminal is idle, the slot is parked with `display:none` so xterm stops rendering but keeps parsing PTY bytes.
-- After a grace period, idle slots may be reaped to keep the pool size down.
+- `POOL_MAX_SIZE` 为 5（`rendererPool.ts:22`）。每个 slot 拥有一个 xterm `Terminal`、`FitAddon`、`SearchAddon`、`SerializeAddon`，以及可选的 `WebglAddon`。
+- slot 按需创建，并在 bind 时分配给终端。
+- `releaseSlot` 将 slot 与终端分离。如果终端处于 idle 状态，该 slot 会以 `display:none` 停放，使 xterm 停止渲染但继续解析 PTY 字节。
+- 经过 grace period 后，可以回收 idle slot 以控制 pool 大小。
 
-## Parking vs releasing
+## 停放与释放
 
-When a terminal becomes hidden:
+终端隐藏时：
 
-1. `parkTerminalSlot` sets the host to `display:none`. Rendering pauses but the live buffer keeps receiving bytes.
-2. If the terminal is **busy** (foreground command, agent signal, alt-screen TUI, or block-shell running mode), it keeps the slot parked indefinitely.
-3. If the terminal is **idle**, `releaseSlot` is called after `HIDDEN_RELEASE_DELAY_MS`. The slot's `currentTerminalId` is cleared and `retainedTerminalId` is set so the buffer stays live.
+1. `parkTerminalSlot` 将 host 设为 `display:none`。渲染暂停，但 live buffer 继续接收字节。
+2. 如果终端处于 **busy** 状态（前台命令、Agent signal、alt-screen TUI 或 block-shell running mode），它会无限期保持 slot 停放。
+3. 如果终端处于 **idle** 状态，则在 `HIDDEN_RELEASE_DELAY_MS` 后调用 `releaseSlot`。slot 的 `currentTerminalId` 会被清除，同时设置 `retainedTerminalId`，使 buffer 保持活动。
 
-When the terminal becomes visible again, `acquireSlot` looks for:
+终端再次可见时，`acquireSlot` 按以下顺序查找：
 
-1. A slot already bound to this terminal.
-2. A retained slot for this terminal (`retainedTerminalId === terminalId`) - fast path, no snapshot replay.
-3. A clean idle slot.
-4. If the pool is at max size, the lowest-scoring slot is evicted. Eviction serializes the retained buffer to a snapshot via `SerializeAddon` before stealing the slot.
+1. 已经 bind 到该终端的 slot。
+2. 为该终端保留的 slot（`retainedTerminalId === terminalId`），这是无需重放 snapshot 的 fast path。
+3. 干净的 idle slot。
+4. 如果 pool 已达到最大容量，则驱逐评分最低的 slot。驱逐会先通过 `SerializeAddon` 将保留的 buffer 序列化为 snapshot，再占用该 slot。
 
-## The DormantRing
+## DormantRing
 
-`src/modules/terminal/lib/dormantRing.ts` buffers PTY bytes for terminals that have no slot at all (stolen or never bound). It is capped at 1 MiB and drops oldest blocks on overflow. On drain it resumes from the next line boundary rather than resetting the terminal, so a mid-line escape sequence is not replayed from the middle.
+`src/modules/terminal/lib/dormantRing.ts` 为完全没有 slot（被占用或从未 bind）的终端缓冲 PTY 字节。其容量上限为 1 MiB，溢出时丢弃最早的 block。drain 时从下一个行边界恢复，而不是重置终端，从而避免从中间位置重放不完整的 escape sequence。
 
-## The never-serialize-mid-command invariant
+## 禁止在命令执行中序列化的不变量
 
-This is the most important rule in the pool. A terminal that is in the middle of a command must **never** be serialized. Replaying incremental TUI repaints over a stale snapshot is what used to wipe Claude Code.
+这是 pool 中最重要的规则。正在执行命令的终端绝不能被序列化。在过时 snapshot 上重放增量 TUI repaint 曾导致 Claude Code 界面被清空。
 
-The code enforces this by checking `isTerminalBusy` before eviction and by keeping slots parked (not released) while `commandRunning`, `isAgentActivePty`, or alt-screen is true.
+代码通过在驱逐前检查 `isTerminalBusy`，并在 `commandRunning`、`isAgentActivePty` 或 alt-screen 为 true 时仅停放而不释放 slot，来保证该规则。
 
-## Fast path and snapshot replay
+## Fast path 与 snapshot 重放
 
-If a retained slot exists for a terminal, `bindSlot` skips `term.clear()` / `term.reset()` and simply drains the DormantRing into the live buffer. This avoids re-rendering a large snapshot.
+如果终端存在 retained slot，`bindSlot` 会跳过 `term.clear()` / `term.reset()`，只将 DormantRing drain 到 live buffer 中，从而避免重新渲染大型 snapshot。
 
-If only a snapshot exists, `bindSlot` clears the terminal, resizes, writes the snapshot, then drains the ring. For alt-screen TUIs, the snapshot is skipped and a SIGWINCH kick is sent so the TUI repaints from scratch.
+如果只存在 snapshot，`bindSlot` 会清空终端、调整尺寸、写入 snapshot，然后 drain ring。对于 alt-screen TUI，会跳过 snapshot 并发送 SIGWINCH 触发，使 TUI 从头 repaint。
 
-## WebGL lifecycle
+## WebGL 生命周期
 
-WebGL addons are created when a slot becomes visible and reaped after a grace period when parked. The addon recovers from context loss on sleep/wake or GPU reset.
+slot 可见时创建 WebGL addon，停放后经过 grace period 再回收。addon 能从休眠/唤醒或 GPU reset 引起的 context loss 中恢复。
 
-## Invariants
+## 不变量
 
-- Never allow the pool to grow without bound; max is `POOL_MAX_SIZE`.
-- Never serialize or evict a terminal that is mid-command or in alt-screen.
-- A hidden busy terminal keeps its live grid parked with `display:none`.
-- An idle hidden terminal releases its slot but the buffer continues parsing bytes.
-- The DormantRing only buffers bytes for terminals without any slot.
+- pool 绝不能无限增长，最大容量为 `POOL_MAX_SIZE`。
+- 绝不序列化或驱逐正在执行命令或处于 alt-screen 的终端。
+- 隐藏的 busy 终端以 `display:none` 保持其 live grid 停放。
+- 隐藏的 idle 终端释放其 slot，但 buffer 继续解析字节。
+- DormantRing 只为没有任何 slot 的终端缓冲字节。
 
-## See also
+## 另请参阅
 
-- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
-- [`docs/README.md`](../README.md) - index of contributor guides
-- [PTY shell integration](pty-shell-integration.md) - sessions, OSC sequences, and ConPTY
+- [`AGENTS.md`](../../AGENTS.md) - 架构权威文档
+- [`docs/README.md`](../README.md) - 贡献者指南索引
+- [PTY Shell 集成](pty-shell-integration.md) - session、OSC sequence 和 ConPTY

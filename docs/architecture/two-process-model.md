@@ -1,98 +1,98 @@
-# Per-Workspace process pair and IPC command reference
+# 每个 Workspace 的进程对与 IPC command 参考
 
-This guide elaborates on `AGENTS.md`. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
+本指南是对 `AGENTS.md` 的补充。如有冲突，以 `AGENTS.md` 为准。
 
-## The split
+## 进程划分
 
-A Terax Workspace window is a process pair: the Rust backend (`src-tauri/`) and its webview frontend (`src/`). Opening another Workspace window starts another independent application process and therefore another pair. Runtime resources do not cross that boundary; only explicitly shared atomic files and the OS keychain are global.
+一个 Terax Workspace 窗口由一对进程组成：Rust 后端（`src-tauri/`）及其 WebView 前端（`src/`）。打开另一个 Workspace 窗口会启动另一个独立应用进程，从而形成另一对进程。runtime resource 不会跨越该边界；只有明确共享的原子文件和操作系统 keychain 是全局资源。
 
-- **Rust owns all OS access**: PTY, file system, git, shell spawn, network, secrets, workspace authorization.
-- **The webview never touches the FS, processes, or shells directly**. Every host operation goes through an `invoke()` call to a command registered in `src-tauri/src/lib.rs`.
+- **Rust 负责所有操作系统访问**：PTY、文件系统、Git、Shell spawn、网络、秘密和 Workspace 授权。
+- **WebView 绝不直接访问文件系统、进程或 Shell**。每项 host 操作都通过 `invoke()` 调用注册在 `src-tauri/src/lib.rs` 中的 command。
 
-This boundary is the root of the security model. Untrusted input (terminal escape sequences, file content, AI tool results) is parsed and validated in Rust or in carefully scoped frontend code, never executed by the renderer.
+该边界是安全模型的基础。不受信任的输入（终端 escape sequence、文件内容、AI 工具结果）由 Rust 或严格限定范围的前端代码解析和验证，绝不会由 renderer 执行。
 
-The process bootstrap selects exactly one Local, WSL, or SSH environment. Spaces only partition UI state inside that Workspace. The SSH event bridge is registered before auto-connect, and WSL/SSH tabs stay cold until environment initialization resolves the target home; a failed SSH auto-connect is recovered with credentials in the same process so secrets never cross the command line.
+进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH event bridge 在 auto-connect 前注册；WSL/SSH tab 在环境初始化解析出目标 home 前保持 cold；SSH auto-connect 失败后，会在同一进程中使用 credential 恢复连接，确保秘密永远不会通过命令行传递。
 
-## Adding a new IPC command
+## 新增 IPC command
 
-1. Write the `#[tauri::command]` async function in the appropriate `src-tauri/src/modules/<area>/` module.
-2. Register it in `src-tauri/src/lib.rs` inside the `tauri::generate_handler![...]` block (`src-tauri/src/lib.rs:191`).
-3. If the command uses a Tauri plugin API (window, clipboard, dialog, etc.), add the plugin permission to `src-tauri/capabilities/default.json`.
-4. Add a typed frontend wrapper in the matching `src/modules/<area>/lib/` directory and call it through Tauri's `invoke()` API.
-5. If the command touches the file system, network, or shell, it must go through the existing guards (`security.ts` deny-list, workspace authorization registry, SSRF guard, AI tool approval).
+1. 在合适的 `src-tauri/src/modules/<area>/` 模块中编写 `#[tauri::command]` async 函数。
+2. 在 `src-tauri/src/lib.rs` 的 `tauri::generate_handler![...]` block（`src-tauri/src/lib.rs:191`）中注册。
+3. 如果 command 使用 Tauri plugin API（window、clipboard、dialog 等），将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
+4. 在对应的 `src/modules/<area>/lib/` 目录中添加带类型的前端 wrapper，并通过 Tauri 的 `invoke()` API 调用。
+5. 如果 command 涉及文件系统、网络或 Shell，必须通过现有 guard（`security.ts` deny-list、Workspace 授权 registry、SSRF guard、AI 工具审批）。
 
-Custom commands do not need to be listed one-by-one in `default.json`; the capability covers the window. Plugin permissions do.
+自定义 command 无需逐项列入 `default.json`，capability 会覆盖整个窗口；plugin permission 则必须列出。
 
-## Command catalog
+## Command 目录
 
-The commands registered in `src-tauri/src/lib.rs` are grouped below by module. Names are the Rust function names as seen by the frontend.
+下面按模块列出注册在 `src-tauri/src/lib.rs` 中的 command。名称均为前端所见的 Rust 函数名。
 
-### PTY (`src-tauri/src/modules/pty/`)
+### PTY（`src-tauri/src/modules/pty/`）
 
-Long-lived interactive terminal sessions.
+长生命周期交互式终端 session。
 
-- `pty_open` - create a new PTY session
-- `pty_write` - send input bytes (text or control sequences)
-- `pty_resize` - resize the PTY
-- `pty_close` / `pty_close_all` - destroy one or all sessions
-- `pty_has_foreground_process` / `pty_has_foreground_job` - detect whether a command is running
-- `pty_shell_name` / `pty_list_shells` - shell detection and enumeration
+- `pty_open` - 创建新的 PTY session
+- `pty_write` - 发送输入字节（文本或 control sequence）
+- `pty_resize` - 调整 PTY 大小
+- `pty_close` / `pty_close_all` - 销毁一个或全部 session
+- `pty_has_foreground_process` / `pty_has_foreground_job` - 检测是否正在运行 command
+- `pty_shell_name` / `pty_list_shells` - Shell 检测与枚举
 
-Output streams from `pty_open` via a Tauri `Channel<PtyEvent>`.
+输出从 `pty_open` 通过 Tauri `Channel<PtyEvent>` 流式传输。
 
-### File system (`src-tauri/src/modules/fs/`)
+### 文件系统（`src-tauri/src/modules/fs/`）
 
 #### Tree
 
-- `list_subdirs` - list subdirectories
-- `fs_read_dir` - read a directory
+- `list_subdirs` - 列出子目录
+- `fs_read_dir` - 读取目录
 
 #### File
 
-- `fs_read_file` - read file contents
-- `fs_file_version` - compute file metadata and digest at the data source without returning contents
-- `fs_write_file` - write file contents
-- `fs_write_file_checked` - explicitly match a file version or overwrite, then atomically replace the file
-- `fs_stat` - file metadata
+- `fs_read_file` - 读取文件内容
+- `fs_file_version` - 在数据源计算文件 metadata 和 digest，但不返回内容
+- `fs_write_file` - 写入文件内容
+- `fs_write_file_checked` - 显式匹配文件 version 或允许覆盖，然后原子替换文件
+- `fs_stat` - 文件 metadata
 - `fs_canonicalize` - canonical path
 
-#### Mutate
+#### 修改
 
 - `fs_create_file` / `fs_create_dir`
 - `fs_rename` / `fs_delete` / `fs_copy`
 
-#### Watch
+#### 监听
 
-- `fs_watch_add` / `fs_watch_remove` - filesystem change notifications
+- `fs_watch_add` / `fs_watch_remove` - 文件系统变更通知
 
-#### Search
+#### 搜索
 
 - `fs_search` - fuzzy file finder
-- `fs_list_files` - recursive file listing
+- `fs_list_files` - 递归文件列表
 
 #### Grep
 
-- `fs_grep` - content search
-- `fs_grep_interactive` - interactive content search
-- `fs_glob` - glob matching
+- `fs_grep` - 内容搜索
+- `fs_grep_interactive` - 交互式内容搜索
+- `fs_glob` - glob 匹配
 
-### File transfers (`src-tauri/src/modules/transfers/`)
+### 文件传输（`src-tauri/src/modules/transfers/`）
 
-Background transfer execution is process-local and bound to the immutable Workspace environment. Low-frequency task history is persisted by Rust Journals. Direct and Archive are explicit strategies and share the same planner, scheduler, staging, conflict, and commit protocol.
+后台传输在进程内执行，并绑定到不可变的 Workspace 环境。低频 task 历史由 Rust Journal 持久化。Direct 和 Archive 是显式 strategy，共享同一 planner、scheduler、staging、conflict 和 commit protocol。
 
-- `transfer_enqueue` - create a task with the request's explicit strategy
-- `transfer_list` - list current Workspace task snapshots, loading Journal history on first access
-- `transfer_resolve_conflict` - resolve the current conflict with a task-bound decision
-- `transfer_retry_failure` / `transfer_ignore_failure` - update one Direct file failure
-- `transfer_pause` / `transfer_resume` / `transfer_cancel` - control queued or running tasks
-- `transfer_retry` - create a new task from a failed or canceled request
-- `transfer_remove` - remove a terminal history entry
+- `transfer_enqueue` - 使用 request 中的显式 strategy 创建 task
+- `transfer_list` - 列出当前 Workspace task snapshot，首次访问时加载 Journal 历史
+- `transfer_resolve_conflict` - 使用绑定到 task 的 decision 解决当前 conflict
+- `transfer_retry_failure` / `transfer_ignore_failure` - 更新一项 Direct file failure
+- `transfer_pause` / `transfer_resume` / `transfer_cancel` - 控制排队中或运行中的 task
+- `transfer_retry` - 根据 failed 或 canceled request 创建新 task
+- `transfer_remove` - 删除一条 terminal history entry
 
-See [File transfers](file-transfers.md) for safety invariants and resource limits.
+安全不变量和资源限制参见[文件传输](file-transfers.md)。
 
-### Git (`src-tauri/src/modules/git/`)
+### Git（`src-tauri/src/modules/git/`）
 
-All git commands are gated through the workspace authorization registry.
+所有 Git command 都通过 Workspace 授权 registry 限制。
 
 - `git_resolve_repo` / `git_panel_snapshot`
 - `git_status`
@@ -104,71 +104,71 @@ All git commands are gated through the workspace authorization registry.
 - `git_remote_url`
 - `git_list_branches` / `git_checkout_branch`
 
-### Shell (`src-tauri/src/modules/shell/`)
+### Shell（`src-tauri/src/modules/shell/`）
 
-Three distinct surfaces:
+三个独立 surface：
 
-- `shell_run_command` - one-shot subshell exec for AI tools
-- `shell_session_open` / `shell_session_run` / `shell_session_close` - persistent agent shell with state across calls
-- `shell_bg_spawn` / `shell_bg_logs` / `shell_bg_kill` / `shell_bg_list` - long-running background processes with bounded ring-buffer log capture
+- `shell_run_command` - 供 AI 工具使用的一次性 subshell exec
+- `shell_session_open` / `shell_session_run` / `shell_session_close` - 跨调用保留状态的持久 Agent Shell
+- `shell_bg_spawn` / `shell_bg_logs` / `shell_bg_kill` / `shell_bg_list` - 长时间运行的后台进程，使用有界 ring buffer 捕获日志
 
-### Workspace (`src-tauri/src/modules/workspace.rs`)
+### Workspace（`src-tauri/src/modules/workspace.rs`）
 
-- `workspace_authorize` / `workspace_current_dir` - the spawn/git/AI cwd authorization registry
+- `workspace_authorize` / `workspace_current_dir` - spawn/Git/AI cwd 授权 registry
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
-### Workspace process (`src-tauri/src/modules/workspace_process.rs`)
+### Workspace 进程（`src-tauri/src/modules/workspace_process.rs`）
 
-- `get_workspace_bootstrap` - immutable Workspace UUID, environment, launch directory, and state filenames selected before the webview renders
-- `spawn_workspace_process` - starts another executable instance for a new or existing Workspace; it never resets the caller
+- `get_workspace_bootstrap` - 在 WebView 渲染前选定的不可变 Workspace UUID、环境、启动目录和 state filename
+- `spawn_workspace_process` - 为新建或现有 Workspace 启动另一个 executable instance，绝不 reset caller
 
-Each process holds its Workspace OS lock for its lifetime.
+每个进程在其整个生命周期内持有 Workspace OS lock。
 
-### Shared configuration (`src-tauri/src/modules/shared_store.rs`)
+### 共享配置（`src-tauri/src/modules/shared_store.rs`）
 
 - `shared_store_read` / `shared_store_revision`
-- `shared_store_set` / `shared_store_delete` - lock, read the latest object, mutate one key, and atomically replace the file
+- `shared_store_set` / `shared_store_delete` - 加锁、读取最新 object、修改一个 key，并原子替换文件
 
-The writing process receives an immediate change event and other processes receive file-watcher events. Frontend listeners perform a trailing revision check, so event coalescing cannot permanently hide the final write.
+写入进程会立即收到 change event，其他进程则收到 file-watcher event。前端 listener 执行 trailing revision check，因此 event coalescing 不会永久隐藏最终写入。
 
-### AI sessions (`src-tauri/src/modules/ai_sessions.rs`)
+### AI session（`src-tauri/src/modules/ai_sessions.rs`）
 
 - `ai_sessions_list` / `ai_session_read` / `ai_session_commit` / `ai_session_delete`
-- `ai_session_run_acquire` / `ai_session_run_release` - cross-process exclusive run ownership
+- `ai_session_run_acquire` / `ai_session_run_release` - 跨进程独占 run ownership
 
-### Network (`src-tauri/src/modules/net.rs`)
+### 网络（`src-tauri/src/modules/net.rs`）
 
-- `ai_http_request` / `ai_http_stream` - AI HTTP proxy with SSRF guard
-- `lm_ping` - local-model ping
+- `ai_http_request` / `ai_http_stream` - 带 SSRF guard 的 AI HTTP proxy
+- `lm_ping` - 本地模型 ping
 
-### Secrets (`src-tauri/src/modules/secrets.rs`)
+### 秘密（`src-tauri/src/modules/secrets.rs`）
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - OS keychain access, service `terax-ai`
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - 操作系统 keychain 访问，service 为 `terax-ai`
 
-### Agent hooks (`src-tauri/src/modules/agent.rs`)
+### Agent hook（`src-tauri/src/modules/agent.rs`）
 
-- `agent_enable_hooks` / `agent_hooks_status` - install/status terminal coding-agent hooks (Claude Code, Codex, Gemini CLI)
+- `agent_enable_hooks` / `agent_hooks_status` - 安装/查询终端编码 Agent hook（Claude Code、Codex、Gemini CLI）
 
-### History (`src-tauri/src/modules/history/`)
+### 历史（`src-tauri/src/modules/history/`）
 
-- `history_suggest` / `history_commands` / `history_record` / `history_list` - shell history integration
+- `history_suggest` / `history_commands` / `history_record` / `history_list` - Shell history 集成
 
-### Settings window
+### 设置窗口
 
-- `get_launch_dir` - CLI launch directory, drained on first read
-- `open_settings_window` - open the separate settings webview (optional `tab` deep-link)
+- `get_launch_dir` - CLI 启动目录，首次读取时 drain
+- `open_settings_window` - 打开独立设置 WebView（可选 `tab` deep-link）
 
-## Invariants
+## 不变量
 
-- The webview must not spawn processes, read files, or make network calls except through the commands above.
-- New commands must be registered in `lib.rs` and guarded at the boundary (workspace auth, deny-list, SSRF, approval flow).
-- Plugin permissions must be added to `src-tauri/capabilities/default.json` if the command uses a plugin API.
-- Never pass SSH passwords, proxy passwords, or other secrets through process arguments or Workspace files.
-- Shared entity writers must mutate only their target key; never persist a stale full-list snapshot.
+- WebView 除通过上述 command 外，不得 spawn 进程、读取文件或发起网络调用。
+- 新 command 必须在 `lib.rs` 中注册，并在边界处受到保护（Workspace auth、deny-list、SSRF、approval flow）。
+- 如果 command 使用 plugin API，必须将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
+- 绝不通过进程参数或 Workspace 文件传递 SSH password、proxy password 或其他秘密。
+- 共享 entity writer 只能修改其目标 key，绝不能持久化过时的完整 list snapshot。
 
-## See also
+## 另请参阅
 
-- [`AGENTS.md`](../../AGENTS.md) - the architecture source of truth
-- [`docs/README.md`](../README.md) - index of contributor guides
-- [PTY shell integration](pty-shell-integration.md) - how sessions and shell integration work
-- [Security model](security-model.md) - the boundaries every command must respect
+- [`AGENTS.md`](../../AGENTS.md) - 架构权威文档
+- [`docs/README.md`](../README.md) - 贡献者指南索引
+- [PTY Shell 集成](pty-shell-integration.md) - session 与 Shell 集成的工作方式
+- [安全模型](security-model.md) - 每个 command 都必须遵守的边界
