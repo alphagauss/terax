@@ -146,9 +146,11 @@ security(ai): tighten path guard
 
 Types: `feat`, `fix`, `chore`, `docs`, `perf`, `refactor`, `test`, `build`, `ci`, `security`.
 
-Common scopes: `terminal`, `editor`, `explorer`, `pty`, `ai`, `agents`, `settings`, `tabs`, `shortcuts`, `ui`, `git`, `preview`, `windows`, `linux`, `macos`, `wsl`.
+Common scopes: `terminal`, `editor`, `explorer`, `pty`, `ai`, `agents`, `settings`, `tabs`, `shortcuts`, `ui`, `git`, `preview`, `windows`, `linux`, `macos`, `wsl`, `alpha`.
 
-Within a PR, individual commit messages can be free-form (they get squashed or grouped).
+Every commit that contains Alpha features, integration, or Alpha-specific infrastructure must use the `alpha` scope, for example `feat(alpha): add strategy import`. Keep Alpha changes in separate commits from public functionality so the `public` branch can exclude them without dropping unrelated changes.
+
+Except for the Alpha requirement above, individual commit messages within a PR can be free-form (they get squashed or grouped).
 
 **Fill out the PR template.** Include: what changed, why, how you tested. Screenshots/GIFs for UI changes. "Tested manually by ..." is the bare minimum.
 
