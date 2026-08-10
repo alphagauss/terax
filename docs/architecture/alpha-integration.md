@@ -1,6 +1,6 @@
 # Alpha 集成架构
 
-本文定义 Alpha 量化后端、Alpha 原生计算模块和 Terax 各层之间的长期职责边界。具体文件索引见 [`alpha/docs/code-map.md`](../../alpha/docs/code-map.md)。
+本文定义 Alpha 量化后端、Alpha 原生计算模块和 Terax 各层之间的长期职责边界。具体文件索引见 [`alpha/docs/code-map.md`](../../alpha/docs/code-map.md)，专业金融图表的参考项目、目标边界和实施顺序见 [Alpha 专业金融图表设计与参考项目指南](./alpha-financial-chart.md)。
 
 ## 架构定位
 
