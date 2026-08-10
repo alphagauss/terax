@@ -43,7 +43,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/controls/select";
 import { cn } from "@/lib/utils";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
 import {
