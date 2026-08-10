@@ -3,6 +3,13 @@
  * 页面按需查询 union 证券目录、全局 Facets 和单证券 K 线，不在浏览器中执行全量搜索。
  */
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/controls/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -26,6 +33,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const PAGE_SIZE = 50;
+const ALL_FACET_VALUES = "__all__";
 
 type Props = {
   visible: boolean;
@@ -323,7 +331,7 @@ type FacetOption = {
   label?: string;
 };
 
-/** 渲染带全局数量的轻量 Facet 选择器。 */
+/** 渲染带全局数量且复用项目统一样式与动效的 Facet 选择器。 */
 function FacetSelect({
   label,
   value,
@@ -336,18 +344,29 @@ function FacetSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <select
-      aria-label={label}
-      value={value}
-      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-      onChange={(event) => onChange(event.target.value)}
+    <Select
+      value={value || ALL_FACET_VALUES}
+      onValueChange={(nextValue) =>
+        onChange(nextValue === ALL_FACET_VALUES ? "" : nextValue)
+      }
     >
-      <option value="">{label}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label ?? option.value} ({option.count})
-        </option>
-      ))}
-    </select>
+      <SelectTrigger aria-label={label} className="w-full text-xs">
+        <SelectValue placeholder={label} />
+      </SelectTrigger>
+      <SelectContent align="start" position="popper">
+        <SelectItem value={ALL_FACET_VALUES} className="text-xs">
+          {label}
+        </SelectItem>
+        {options.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            className="text-xs"
+          >
+            {option.label ?? option.value} ({option.count})
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

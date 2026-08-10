@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 数据目录页的按需加载和手动刷新流程。
- * 重点锁定页面打开不读取行情、搜索走服务端查询，以及刷新强制绕过概览缓存。
+ * 重点锁定统一筛选控件、按需行情、服务端搜索，以及刷新强制绕过概览缓存。
  */
 
 // @vitest-environment happy-dom
@@ -123,6 +123,8 @@ describe("AlphaDataPage", () => {
     expect(mocks.getAlphaSecurities).toHaveBeenCalledWith(
       expect.objectContaining({ limit: 50, offset: 0 }),
     );
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.querySelectorAll('[role="combobox"]')).toHaveLength(4);
     expect(mocks.getAlphaBars).not.toHaveBeenCalled();
 
     const symbolButton = Array.from(container.querySelectorAll("button")).find(
