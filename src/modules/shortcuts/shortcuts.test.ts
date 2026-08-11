@@ -5,7 +5,30 @@
 
 import { IS_MAC, MOD_PROP } from "@/lib/platform";
 import { describe, expect, it } from "vitest";
-import { SHORTCUTS } from "./shortcuts";
+import {
+  matchBinding,
+  SHORTCUT_GROUPS,
+  SHORTCUTS,
+  type KeyBinding,
+} from "./shortcuts";
+
+function keyboardEvent(
+  key: string,
+  code: string,
+  modifiers: Partial<
+    Pick<KeyboardEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">
+  >,
+): KeyboardEvent {
+  return {
+    key,
+    code,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...modifiers,
+  } as KeyboardEvent;
+}
 
 describe("folder picker shortcut", () => {
   it("registers Cmd/Ctrl+O as the default binding", () => {
@@ -39,5 +62,78 @@ describe("fullscreen shortcut", () => {
         ? [{ ctrl: true, meta: true, key: "f" }]
         : [{ key: "F11" }],
     });
+  });
+});
+
+describe("tab and Space navigation shortcuts", () => {
+  it("shows Space shortcuts and registers ordered tab navigation", () => {
+    expect(SHORTCUT_GROUPS).toContain("Spaces");
+    expect(SHORTCUTS).toContainEqual({
+      id: "tab.next",
+      label: "Next recently used tab",
+      group: "Tabs",
+      defaultBindings: [{ ctrl: true, key: "Tab" }],
+      allowRepeat: true,
+    });
+    expect(SHORTCUTS).toContainEqual({
+      id: "tab.prev",
+      label: "Previous recently used tab",
+      group: "Tabs",
+      defaultBindings: [{ ctrl: true, shift: true, key: "Tab" }],
+      allowRepeat: true,
+    });
+    expect(SHORTCUTS).toContainEqual({
+      id: "tab.nextPage",
+      label: "Next tab by tab bar order",
+      group: "Tabs",
+      defaultBindings: [{ ctrl: true, key: "PageDown" }],
+      allowRepeat: true,
+    });
+    expect(SHORTCUTS).toContainEqual({
+      id: "tab.prevPage",
+      label: "Previous tab by tab bar order",
+      group: "Tabs",
+      defaultBindings: [{ ctrl: true, key: "PageUp" }],
+      allowRepeat: true,
+    });
+  });
+
+  it.each([
+    ["]", "}", "BracketRight"],
+    ["[", "{", "BracketLeft"],
+  ])("matches shifted %s from its physical key", (bindingKey, eventKey, code) => {
+    const binding: KeyBinding = {
+      [MOD_PROP]: true,
+      shift: true,
+      key: bindingKey,
+    };
+    const modifiers = IS_MAC
+      ? { metaKey: true, shiftKey: true }
+      : { ctrlKey: true, shiftKey: true };
+
+    expect(
+      matchBinding(keyboardEvent(eventKey, code, modifiers), binding),
+    ).toBe(true);
+    expect(
+      matchBinding(
+        keyboardEvent(eventKey, code, {
+          ...modifiers,
+          shiftKey: false,
+        }),
+        binding,
+      ),
+    ).toBe(false);
+    expect(
+      matchBinding(keyboardEvent(eventKey, "Semicolon", modifiers), binding),
+    ).toBe(false);
+  });
+
+  it("does not treat an unshifted letter's physical position as its value", () => {
+    expect(
+      matchBinding(keyboardEvent("y", "KeyZ", { ctrlKey: true }), {
+        ctrl: true,
+        key: "z",
+      }),
+    ).toBe(false);
   });
 });

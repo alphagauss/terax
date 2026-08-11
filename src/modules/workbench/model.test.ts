@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  adjacentTabId,
   activateTab,
   assertWorkbenchState,
   closeTab,
@@ -19,6 +20,7 @@ import {
   reorderTabByGap,
   revealTabInState,
   splitWithTab,
+  tabsForActiveGroup,
 } from "./model";
 import type { Tab, WorkbenchLayoutNode, WorkbenchState } from "./types";
 
@@ -181,6 +183,39 @@ describe("workbench model", () => {
     const active = activateTab(split, 2);
     expect(active.spaces.default.activeGroupId).toBe(1);
     expect(active.spaces.default.groups[1].activeTabId).toBe(2);
+  });
+
+  it("returns only the active group's tabs in visible order", () => {
+    const state = initial();
+    state.tabs[3] = terminal(3);
+    state.spaces.default.groups[1] = {
+      id: 1,
+      tabIds: [3, 2],
+      activeTabId: 2,
+    };
+    const split = splitWithTab(state, terminal(4), 1, 4, 5, 6, "right", false);
+
+    expect(tabsForActiveGroup(split, "default").map((tab) => tab.id)).toEqual([
+      4,
+    ]);
+    split.spaces.default.activeGroupId = 1;
+    expect(tabsForActiveGroup(split, "default").map((tab) => tab.id)).toEqual([
+      3, 2,
+    ]);
+  });
+
+  it("cycles adjacent tabs within the active group", () => {
+    const state = initial();
+    state.tabs[3] = terminal(3);
+    state.tabs[4] = terminal(4);
+    state.spaces.default.groups[1] = {
+      id: 1,
+      tabIds: [3, 2, 4],
+      activeTabId: 4,
+    };
+
+    expect(adjacentTabId(state, "default", 1)).toBe(3);
+    expect(adjacentTabId(state, "default", -1)).toBe(2);
   });
 
   it("refreshes reusable diff metadata without recreating the tab", () => {

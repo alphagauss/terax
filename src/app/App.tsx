@@ -112,6 +112,7 @@ import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import {
   DEFAULT_SPACE_ID,
   findGroupForTab,
+  tabsForActiveGroup,
   type TerminalTab,
   useStartupWarmup,
   useWorkbench,
@@ -227,6 +228,7 @@ export default function App() {
     updateTab,
     setDocumentDirty,
     selectByIndex,
+    selectAdjacentTab,
     setTerminalCwd,
     focusGroup,
     splitTab,
@@ -338,6 +340,10 @@ export default function App() {
     () =>
       tabs.filter((tab) => tab.spaceId === (activeSpaceId ?? DEFAULT_SPACE_ID)),
     [activeSpaceId, tabs],
+  );
+  const activeGroupTabs = useMemo(
+    () => tabsForActiveGroup(workbenchState, activeSpaceId ?? DEFAULT_SPACE_ID),
+    [activeSpaceId, workbenchState],
   );
 
   const showAlphaInRemote = useAlphaShowInRemote();
@@ -532,8 +538,7 @@ export default function App() {
     }
   }, [alphaAvailable, disposeTab]);
 
-  // Most-recently-used tab ids, most recent first, pruned to live tabs. Drives
-  // the Ctrl+Tab quick switcher so it cycles by recency, not strip order.
+  // Ctrl+Tab 只在当前分组中按 MRU 顺序导航，不跨越分组或 Space。
   const mruRef = useRef<number[]>([activeId]);
   useEffect(() => {
     mruRef.current = [
@@ -546,23 +551,35 @@ export default function App() {
     mruRef.current = mruRef.current.filter((id) => live.has(id));
   }, [tabs]);
 
-  const getSwitcherOrder = useCallback(() => {
-    const space = activeSpaceId ?? DEFAULT_SPACE_ID;
-    const inSpace = tabsRef.current
-      .filter((t) => t.spaceId === space)
-      .map((t) => t.id);
-    const present = new Set(inSpace);
+  const getRecentSwitcherOrder = useCallback(() => {
+    const inGroup = activeGroupTabs.map((tab) => tab.id);
+    const present = new Set(inGroup);
     const ordered = mruRef.current.filter((id) => present.has(id));
-    for (const id of inSpace) if (!ordered.includes(id)) ordered.push(id);
+    for (const id of inGroup) if (!ordered.includes(id)) ordered.push(id);
     return [activeId, ...ordered.filter((id) => id !== activeId)];
-  }, [activeId, activeSpaceId]);
+  }, [activeGroupTabs, activeId]);
 
-  const { state: switcherState, step: stepSwitcher } = useTabSwitcher({
-    getOrder: getSwitcherOrder,
+  const {
+    state: switcherState,
+    step: stepSwitcher,
+    cancel: cancelTabSwitcher,
+  } = useTabSwitcher({
+    getOrder: getRecentSwitcherOrder,
+    getActiveId: () => activeId,
     onCommit: (id) => {
-      if (tabsRef.current.some((t) => t.id === id)) setActiveId(id);
+      if (activeGroupTabs.some((tab) => tab.id === id)) setActiveId(id);
     },
   });
+
+  useEffect(() => {
+    if (
+      switcherState &&
+      (switcherState.initialId !== activeId ||
+        !activeGroupTabs.some((tab) => tab.id === switcherState.initialId))
+    ) {
+      cancelTabSwitcher();
+    }
+  }, [activeGroupTabs, activeId, cancelTabSwitcher, switcherState]);
 
   const cycleSpace = useCallback((delta: 1 | -1) => {
     const { spaces, activeId: sid, setActive } = useSpaces.getState();
@@ -997,6 +1014,8 @@ export default function App() {
       "tab.close": handleCloseActiveTab,
       "tab.next": () => stepSwitcher(1),
       "tab.prev": () => stepSwitcher(-1),
+      "tab.nextPage": () => selectAdjacentTab(1),
+      "tab.prevPage": () => selectAdjacentTab(-1),
       "tab.selectByIndex": (e) =>
         selectByIndex(
           parseInt(e.key, 10) - 1,
@@ -1047,6 +1066,7 @@ export default function App() {
       openNewWindow,
       openCommandPalette,
       stepSwitcher,
+      selectAdjacentTab,
       cycleSpace,
       handleCloseActiveTab,
       openNewTab,
@@ -1997,7 +2017,6 @@ export default function App() {
           {switcherState && (
             <TabSwitcherHud tabs={spaceTabs} state={switcherState} />
           )}
-
           <CommandPalette
             open={commandPaletteOpen}
             onOpenChange={setCommandPaletteOpen}

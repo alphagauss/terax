@@ -1,4 +1,12 @@
-export { findGroupForTab } from "@/modules/workbench/model";
+/**
+ * 本文件定义 Workbench 模块的公开导出边界。
+ * 调用方通过此入口访问状态模型、视图与纯导航查询。
+ */
+
+export {
+  findGroupForTab,
+  tabsForActiveGroup,
+} from "@/modules/workbench/model";
 export {
   type AiDiffStatus,
   type AiDiffTab,
