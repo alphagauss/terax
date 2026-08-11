@@ -8,6 +8,7 @@ import { documentPathIdentity } from "@/lib/pathIdentity";
 import { pathBasename, titleFromUrl } from "@/lib/utils";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
 import {
+  adjacentTabId,
   activateGroup,
   activeTabId,
   addTabToGroup,
@@ -22,6 +23,7 @@ import {
   reorderTabByGap as reorderTabByGapInState,
   revealTabInState,
   splitWithTab,
+  tabsForActiveGroup,
   tabsForSpace,
   updateSplitSizes,
 } from "@/modules/workbench/model";
@@ -746,8 +748,21 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
 
   const selectByIndex = useCallback(
     (index: number, spaceId = activeSpaceIdRef.current) => {
-      const tab = tabsForSpace(stateRef.current, spaceId)[index];
+      const tab = tabsForActiveGroup(stateRef.current, spaceId)[index];
       if (tab) setActiveId(tab.id);
+    },
+    [setActiveId],
+  );
+
+  /** 按当前分组标签栏顺序循环切换标签页。 */
+  const selectAdjacentTab = useCallback(
+    (delta: 1 | -1) => {
+      const id = adjacentTabId(
+        stateRef.current,
+        activeSpaceIdRef.current,
+        delta,
+      );
+      if (id !== null) setActiveId(id);
     },
     [setActiveId],
   );
@@ -865,5 +880,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     setOverrideLanguage,
     setTerminalCwd,
     selectByIndex,
+    selectAdjacentTab,
   };
 }

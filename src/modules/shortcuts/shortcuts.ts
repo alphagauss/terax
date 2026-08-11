@@ -21,6 +21,8 @@ export type ShortcutId =
   | "tab.close"
   | "tab.next"
   | "tab.prev"
+  | "tab.nextPage"
+  | "tab.prevPage"
   | "tab.selectByIndex"
   | "space.next"
   | "space.prev"
@@ -204,16 +206,30 @@ export const SHORTCUTS: Shortcut[] = [
   },
   {
     id: "tab.next",
-    label: "Next tab",
+    label: "Next recently used tab",
     group: "Tabs",
     defaultBindings: [{ ctrl: true, key: "Tab" }],
     allowRepeat: true,
   },
   {
     id: "tab.prev",
-    label: "Previous tab",
+    label: "Previous recently used tab",
     group: "Tabs",
     defaultBindings: [{ ctrl: true, shift: true, key: "Tab" }],
+    allowRepeat: true,
+  },
+  {
+    id: "tab.nextPage",
+    label: "Next tab by tab bar order",
+    group: "Tabs",
+    defaultBindings: [{ ctrl: true, key: "PageDown" }],
+    allowRepeat: true,
+  },
+  {
+    id: "tab.prevPage",
+    label: "Previous tab by tab bar order",
+    group: "Tabs",
+    defaultBindings: [{ ctrl: true, key: "PageUp" }],
     allowRepeat: true,
   },
   {
@@ -365,6 +381,7 @@ export const SHORTCUTS: Shortcut[] = [
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   "General",
   "Tabs",
+  "Spaces",
   "Workbench",
   "Terminal",
   "View",
@@ -391,8 +408,8 @@ const CODE_TO_KEY: Record<string, string> = {
   Space: " ",
 };
 
-// macOS Option combinations rewrite e.key ("«", "…", dead keys); the
-// physical key survives in e.code.
+// Shift 和 macOS Option 可能改写 e.key，例如 "]" 会变成 "}"；
+// e.code 仍保留基础物理键，用于匹配快捷键定义中的未换档字符。
 function keyFromCode(code: string): string | null {
   if (code.startsWith("Key")) return code.slice(3).toLowerCase();
   if (code.startsWith("Digit")) return code.slice(5);
@@ -411,7 +428,13 @@ export function matchBinding(
   if (id === "tab.selectByIndex") {
     if (!/^[1-9]$/.test(e.key)) return false;
   } else if (eventKey !== bindingKey) {
-    if (!binding.alt || keyFromCode(e.code) !== bindingKey) return false;
+    const shiftedPunctuation =
+      !!binding.shift && CODE_TO_KEY[e.code]?.toLowerCase() === bindingKey;
+    if (
+      (!binding.alt && !shiftedPunctuation) ||
+      keyFromCode(e.code) !== bindingKey
+    )
+      return false;
   }
 
   return (

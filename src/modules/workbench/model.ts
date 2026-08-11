@@ -158,6 +158,18 @@ export function tabsForSpace(state: WorkbenchState, spaceId: string): Tab[] {
   );
 }
 
+/** 返回指定 Space 当前分组的标签页，顺序与该分组标签栏一致。 */
+export function tabsForActiveGroup(
+  state: WorkbenchState,
+  spaceId: string,
+): Tab[] {
+  const space = state.spaces[spaceId];
+  if (!space) return [];
+  return (space.groups[space.activeGroupId]?.tabIds ?? [])
+    .map((id) => state.tabs[id])
+    .filter((tab): tab is Tab => tab !== undefined);
+}
+
 export function allTabs(state: WorkbenchState): Tab[] {
   return Object.keys(state.spaces).flatMap((spaceId) =>
     tabsForSpace(state, spaceId),
@@ -171,6 +183,20 @@ export function activeTabId(
   const space = state.spaces[spaceId];
   if (!space) return null;
   return space.groups[space.activeGroupId]?.activeTabId ?? null;
+}
+
+/** 按当前分组标签栏顺序返回相邻标签 ID，并在边界循环。 */
+export function adjacentTabId(
+  state: WorkbenchState,
+  spaceId: string,
+  delta: 1 | -1,
+): number | null {
+  const tabs = tabsForActiveGroup(state, spaceId);
+  if (tabs.length < 2) return null;
+  const currentId = activeTabId(state, spaceId);
+  const index = tabs.findIndex((tab) => tab.id === currentId);
+  if (index < 0) return null;
+  return tabs[(index + delta + tabs.length) % tabs.length]?.id ?? null;
 }
 
 export function minimumPanelPercent(childCount: number): number {
