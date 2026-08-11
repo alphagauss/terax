@@ -7,7 +7,14 @@ import {
   getWorkspaceValue,
   setWorkspaceValue,
 } from "@/modules/workspace-process";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { getSidebarContainer, SIDEBAR_CONTAINERS } from "./containers";
 import {
@@ -39,9 +46,13 @@ const RUNTIME_STORAGE_KEY = "sidebar-layout:runtime";
 
 type RuntimeUpdater = (current: SidebarRuntimeState) => SidebarRuntimeState;
 
-/** 控制容器激活、位置移动、区域折叠和最终尺寸持久化。 */
+/**
+ * 控制容器激活、位置移动、区域折叠和最终尺寸持久化。
+ * 临时隐藏期间拒绝可见性操作且不改写持久状态，退出后按原状态恢复布局。
+ */
 export function useSidebarLayout(
   unavailableContainerIds: readonly SidebarContainerId[] = [],
+  temporarilyHidden = false,
 ) {
   const unavailable = useMemo(
     () => new Set(unavailableContainerIds),
@@ -68,9 +79,12 @@ export function useSidebarLayout(
   const placementsRef = useRef(placementState.placements);
   const placementStateRef = useRef(placementState);
   const runtimeRef = useRef(runtime);
+  const temporarilyHiddenRef = useRef(temporarilyHidden);
+  const previousTemporarilyHiddenRef = useRef(false);
   placementsRef.current = placementState.placements;
   placementStateRef.current = placementState;
   runtimeRef.current = runtime;
+  temporarilyHiddenRef.current = temporarilyHidden;
 
   const panelRefs = useMemo(
     () =>
@@ -92,6 +106,7 @@ export function useSidebarLayout(
 
   const revealLocation = useCallback(
     (location: SidebarLocation, activeId?: SidebarContainerId) => {
+      if (temporarilyHiddenRef.current) return;
       const current = runtimeRef.current[location];
       const nextActiveId =
         activeId ??
@@ -110,17 +125,20 @@ export function useSidebarLayout(
 
   const closeLocation = useCallback(
     (location: SidebarLocation) => {
+      if (temporarilyHiddenRef.current) return false;
       panelRefs[location].current?.collapse();
       replaceRuntime((current) => ({
         ...current,
         [location]: { ...current[location], collapsed: true },
       }));
+      return true;
     },
     [panelRefs, replaceRuntime],
   );
 
   const openContainer = useCallback(
     (id: SidebarContainerId) => {
+      if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       replaceRuntime((current) => ({
         ...current,
@@ -131,33 +149,34 @@ export function useSidebarLayout(
         },
       }));
       revealLocation(location, id);
+      return true;
     },
     [replaceRuntime, revealLocation],
   );
 
   const toggleContainer = useCallback(
     (id: SidebarContainerId) => {
+      if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       const current = runtimeRef.current[location];
       if (current.activeId === id && !current.collapsed) {
-        closeLocation(location);
-      } else {
-        openContainer(id);
+        return closeLocation(location);
       }
+      return openContainer(id);
     },
     [closeLocation, openContainer],
   );
 
   const toggleLocation = useCallback(
     (location: SidebarLocation) => {
+      if (temporarilyHiddenRef.current) return false;
       const current = runtimeRef.current[location];
       if (!current.collapsed) {
-        closeLocation(location);
-        return;
+        return closeLocation(location);
       }
       const activeId =
         current.activeId ?? placementsRef.current[location][0] ?? null;
-      if (activeId) openContainer(activeId);
+      return activeId ? openContainer(activeId) : false;
     },
     [closeLocation, openContainer],
   );
@@ -294,6 +313,7 @@ export function useSidebarLayout(
   );
 
   const commitLayout = useCallback(() => {
+    if (temporarilyHiddenRef.current) return;
     replaceRuntime((current) => {
       const next: SidebarRuntimeState = {
         ...current,
@@ -331,14 +351,30 @@ export function useSidebarLayout(
 
   const isVisible = useCallback(
     (id: SidebarContainerId) => {
+      if (temporarilyHidden) return false;
       const location = findSidebarContainerLocation(
         placementState.placements,
         id,
       );
       return runtime[location].activeId === id && !runtime[location].collapsed;
     },
-    [placementState.placements, runtime],
+    [placementState.placements, runtime, temporarilyHidden],
   );
+
+  useLayoutEffect(() => {
+    if (previousTemporarilyHiddenRef.current === temporarilyHidden) return;
+    previousTemporarilyHiddenRef.current = temporarilyHidden;
+    for (const location of ["primary", "secondary"] as const) {
+      if (temporarilyHidden || runtimeRef.current[location].collapsed) {
+        panelRefs[location].current?.collapse();
+      } else {
+        revealLocation(
+          location,
+          runtimeRef.current[location].activeId ?? undefined,
+        );
+      }
+    }
+  }, [panelRefs, revealLocation, temporarilyHidden]);
 
   useEffect(() => {
     let dispose: (() => void) | undefined;

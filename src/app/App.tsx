@@ -112,8 +112,8 @@ import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
 import {
   DEFAULT_SPACE_ID,
   findGroupForTab,
-  tabsForActiveGroup,
   type TerminalTab,
+  tabsForActiveGroup,
   useStartupWarmup,
   useWorkbench,
   type WorkbenchChromeActions,
@@ -144,6 +144,7 @@ import { WorkspaceInputBar } from "./components/WorkspaceInputBar";
 import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
+import { useZenMode } from "./hooks/useZenMode";
 import { spaceDeleteDocuments } from "./lib/spaceDelete";
 
 type WorkspaceActivation = {
@@ -262,6 +263,30 @@ export default function App() {
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
+  /** 禅模式隐藏当前焦点所在的界面外壳时，将焦点转移到活动工作台视图。 */
+  const focusActiveWorkbench = useCallback(() => {
+    const tabId = activeIdRef.current;
+    const handle =
+      terminalRefs.current.get(tabId) ?? editorRefs.current.get(tabId);
+    if (handle) {
+      handle.focus();
+      return;
+    }
+    document
+      .querySelector<HTMLElement>(`[data-workbench-tab="${tabId}"]`)
+      ?.focus({ preventScroll: true });
+  }, []);
+  const handleZenFullscreenError = useCallback(
+    (error: unknown) => {
+      console.error("zen mode fullscreen transition failed:", error);
+      toast.error(t("zenMode.fullscreenFailed", { ns: "app" }));
+    },
+    [t],
+  );
+  const { enabled: zenMode, toggle: toggleZenMode } = useZenMode({
+    onFullscreenError: handleZenFullscreenError,
+    focusWorkbench: focusActiveWorkbench,
+  });
 
   // Session disposal follows stable terminal ids, not React lifecycles.
   const liveTerminalIdsRef = useRef<Set<number>>(new Set());
@@ -352,7 +377,7 @@ export default function App() {
     () => (alphaAvailable ? [] : (["alpha"] as const)),
     [alphaAvailable],
   );
-  const sidebar = useSidebarLayout(unavailableSidebarContainerIds);
+  const sidebar = useSidebarLayout(unavailableSidebarContainerIds, zenMode);
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
@@ -605,11 +630,11 @@ export default function App() {
     const explorer = explorerRef.current;
     if (!sidebar.isVisible("explorer")) {
       const active = document.activeElement;
+      if (!sidebar.openContainer("explorer")) return;
       explorerReturnFocusRef.current =
         active instanceof HTMLElement && active !== document.body
           ? active
           : null;
-      sidebar.openContainer("explorer");
       requestAnimationFrame(() => explorerRef.current?.focus());
       return;
     }
@@ -628,13 +653,14 @@ export default function App() {
   }, [sidebar.isVisible, sidebar.openContainer]);
 
   const openAiPanel = useCallback(() => {
-    sidebar.openContainer("ai");
+    return sidebar.openContainer("ai");
   }, [sidebar.openContainer]);
 
   const openAiPanelAndFocus = useCallback(
     (prefill: string | null = null) => {
-      openAiPanel();
+      if (!openAiPanel()) return false;
       focusInput(prefill);
+      return true;
     },
     [focusInput, openAiPanel],
   );
@@ -652,8 +678,8 @@ export default function App() {
 
   const handleAttachFileToAgent = useCallback(
     (path: string) => {
+      if (!openAiPanelAndFocus()) return;
       attachFile(path);
-      openAiPanelAndFocus();
     },
     [attachFile, openAiPanelAndFocus],
   );
@@ -665,7 +691,7 @@ export default function App() {
       return;
     }
     const source: "terminal" | "editor" = isEditorTab ? "editor" : "terminal";
-    openAiPanel();
+    if (!openAiPanel()) return;
     attachSelection(selection, source);
   }, [
     captureActiveSelection,
@@ -987,8 +1013,6 @@ export default function App() {
     void handleClose(activeId);
   }, [activeId, handleClose]);
 
-  const [zenMode, setZenMode] = useState(false);
-
   // Focus an agent's tab, switching to its Space before activating its group.
   const activateAgentTarget = useCallback(
     (tabId: number) => {
@@ -1053,7 +1077,7 @@ export default function App() {
           console.error("toggle fullscreen failed:", error),
         );
       },
-      "view.zenMode": () => setZenMode((v) => !v),
+      "view.zenMode": toggleZenMode,
       "editor.undo": () => editorRefs.current.get(activeId)?.undo(),
       "editor.redo": () => editorRefs.current.get(activeId)?.redo(),
       "editor.aiComplete": () =>
@@ -1088,12 +1112,23 @@ export default function App() {
       zoomIn,
       zoomOut,
       zoomReset,
+      toggleZenMode,
       activateAgentTarget,
     ],
   );
 
   const shortcutsDisabled = useCallback(
     (id: ShortcutId, e: KeyboardEvent) => {
+      if (
+        zenMode &&
+        (id === "view.sourceControl" ||
+          id === "sidebar.toggle" ||
+          id === "explorer.focus" ||
+          id === "ai.toggle" ||
+          id === "ai.askSelection")
+      ) {
+        return true;
+      }
       if (id === "search.focus") {
         return activeFindHandle() === null;
       }
@@ -1149,6 +1184,7 @@ export default function App() {
       captureActiveSelection,
       isEditorTab,
       workspaceEnv.kind,
+      zenMode,
     ],
   );
 
@@ -1764,7 +1800,7 @@ export default function App() {
           )}
 
           <main className="zoom-content flex min-h-0 flex-1">
-            {sidebar.activityBar.position === "default" ? (
+            {!zenMode && sidebar.activityBar.position === "default" ? (
               <SidebarActivityBar
                 {...sidebarConfigurationProps}
                 containers={primarySidebarContainers}
@@ -1795,6 +1831,8 @@ export default function App() {
               >
                 <div
                   data-sidebar-drop-zone="primary"
+                  inert={zenMode}
+                  aria-hidden={zenMode || undefined}
                   className={cn(
                     "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
                     sidebar.runtime.primary.collapsed
@@ -1832,7 +1870,8 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle
                 withHandle
-                disabled={sidebar.runtime.primary.collapsed}
+                className={cn(zenMode && "hidden")}
+                disabled={zenMode || sidebar.runtime.primary.collapsed}
               />
               <ResizablePanel
                 id="workspace"
@@ -1852,6 +1891,7 @@ export default function App() {
                           activeSpaceId={activeSpaceId ?? DEFAULT_SPACE_ID}
                           actions={workbenchActions}
                           services={workbenchServices}
+                          hideTabBars={zenMode}
                         />
                       </div>
 
@@ -1868,7 +1908,8 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle
                 withHandle
-                disabled={sidebar.runtime.secondary.collapsed}
+                className={cn(zenMode && "hidden")}
+                disabled={zenMode || sidebar.runtime.secondary.collapsed}
               />
               <ResizablePanel
                 id="secondary-sidebar"
@@ -1884,6 +1925,8 @@ export default function App() {
                 collapsedSize={0}
               >
                 <div
+                  inert={zenMode}
+                  aria-hidden={zenMode || undefined}
                   className={cn(
                     "h-full min-h-0 transition-[opacity,translate] duration-pane ease-standard",
                     sidebar.runtime.secondary.collapsed
@@ -1931,6 +1974,7 @@ export default function App() {
               views={sidebarViews}
               placements={sidebar.placements}
               runtime={sidebar.runtime}
+              temporarilyHidden={zenMode}
             />
           </main>
 

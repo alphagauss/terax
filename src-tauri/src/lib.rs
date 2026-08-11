@@ -45,6 +45,16 @@ fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// 将触发命令的当前窗口设置为指定的全屏状态。
+///
+/// 禅模式使用显式目标值恢复进入前状态，不能使用可能受并发调用影响的反转语义。
+#[tauri::command]
+fn set_fullscreen(window: tauri::Window, fullscreen: bool) -> Result<(), String> {
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let url_path = match tab.as_deref() {
@@ -360,6 +370,7 @@ pub fn run() {
             get_launch_dir,
             get_launch_files,
             toggle_fullscreen,
+            set_fullscreen,
             open_settings_window,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,

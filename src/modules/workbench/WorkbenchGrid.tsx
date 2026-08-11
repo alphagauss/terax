@@ -54,8 +54,10 @@ type Props = {
   activeGroupId: number;
   tabCount: number;
   actions: WorkbenchChromeActions;
+  hideTabBars: boolean;
 };
 
+/** 渲染 Workbench 的递归分割树，并按显示模式控制标签栏外壳。 */
 export function WorkbenchGrid(props: Props) {
   return <WorkbenchNode node={props.root} {...props} />;
 }
@@ -106,6 +108,7 @@ function WorkbenchGroup({
   activeGroupId,
   tabCount,
   actions,
+  hideTabBars,
 }: Omit<Props, "root"> & { group: WorkbenchGroupModel }) {
   const groupTabs = group.tabIds
     .map((id) => tabs[id])
@@ -118,8 +121,11 @@ function WorkbenchGroup({
       onMouseDownCapture={() => actions.activateGroup(group.id)}
       onFocusCapture={() => actions.activateGroup(group.id)}
     >
-      {groupTabs.length > 0 ? (
-        <div className="flex h-9 shrink-0 items-center border-b border-border/60 bg-card px-1.5">
+      {groupTabs.length > 0 && !hideTabBars ? (
+        <div
+          data-workbench-tab-bar={group.id}
+          className="flex h-9 shrink-0 items-center border-b border-border/60 bg-card px-1.5"
+        >
           <TabBar
             groupId={group.id}
             tabs={groupTabs}
