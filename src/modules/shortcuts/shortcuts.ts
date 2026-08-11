@@ -342,7 +342,7 @@ export const SHORTCUTS: Shortcut[] = [
     id: "view.zenMode",
     label: "Toggle zen mode",
     group: "View",
-    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "'" }],
+    defaultBindings: [{ key: "F10" }],
   },
   // 编辑器动作由各个 CodeMirror 视图处理。全局快捷键监听器不阻止这些按键，
   // 因此焦点编辑器仍可接收事件；这里只提供设置页和默认绑定的单一来源。

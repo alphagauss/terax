@@ -34,5 +34,8 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "restore": "还原"
+  },
+  "zenMode": {
+    "fullscreenFailed": "无法切换禅模式所需的全屏状态。"
   }
 }

@@ -103,8 +103,9 @@ function PooledView({
 }: PooledViewProps) {
   const [container] = useState(() => {
     const element = document.createElement("div");
-    element.className = "absolute inset-0";
+    element.className = "absolute inset-0 outline-none";
     element.dataset.workbenchTab = String(tab.id);
+    element.tabIndex = -1;
     return element;
   });
 

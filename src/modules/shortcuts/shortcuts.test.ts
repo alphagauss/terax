@@ -6,10 +6,10 @@
 import { IS_MAC, MOD_PROP } from "@/lib/platform";
 import { describe, expect, it } from "vitest";
 import {
+  type KeyBinding,
   matchBinding,
   SHORTCUT_GROUPS,
   SHORTCUTS,
-  type KeyBinding,
 } from "./shortcuts";
 
 function keyboardEvent(
@@ -61,6 +61,15 @@ describe("fullscreen shortcut", () => {
       defaultBindings: IS_MAC
         ? [{ ctrl: true, meta: true, key: "f" }]
         : [{ key: "F11" }],
+    });
+  });
+
+  it("registers F10 as the zen mode toggle", () => {
+    expect(SHORTCUTS).toContainEqual({
+      id: "view.zenMode",
+      label: "Toggle zen mode",
+      group: "View",
+      defaultBindings: [{ key: "F10" }],
     });
   });
 });

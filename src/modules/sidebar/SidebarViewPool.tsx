@@ -3,11 +3,6 @@
  * 容器切换或跨位置移动时只重挂宿主节点，不重新创建面板业务状态。
  */
 
-import type {
-  SidebarContainerId,
-  SidebarPlacements,
-  SidebarRuntimeState,
-} from "./types";
 import {
   type ReactNode,
   type RefObject,
@@ -18,6 +13,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { findSidebarContainerLocation } from "./model";
+import type {
+  SidebarContainerId,
+  SidebarPlacements,
+  SidebarRuntimeState,
+} from "./types";
 
 export type SidebarPooledView = {
   id: SidebarContainerId;
@@ -28,10 +28,16 @@ type Props = {
   views: readonly SidebarPooledView[];
   placements: SidebarPlacements;
   runtime: SidebarRuntimeState;
+  temporarilyHidden: boolean;
 };
 
 /** 按需挂载侧边栏容器，并在两个位置宿主之间保留其实例。 */
-export function SidebarViewPool({ views, placements, runtime }: Props) {
+export function SidebarViewPool({
+  views,
+  placements,
+  runtime,
+  temporarilyHidden,
+}: Props) {
   const depotRef = useRef<HTMLDivElement>(null);
   const activatedRef = useRef(new Set<SidebarContainerId>());
 
@@ -41,6 +47,7 @@ export function SidebarViewPool({ views, placements, runtime }: Props) {
       {views.map((view) => {
         const location = findSidebarContainerLocation(placements, view.id);
         const visible =
+          !temporarilyHidden &&
           runtime[location].activeId === view.id &&
           !runtime[location].collapsed;
         if (visible) activatedRef.current.add(view.id);

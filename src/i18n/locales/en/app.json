@@ -34,5 +34,8 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "restore": "Restore"
+  },
+  "zenMode": {
+    "fullscreenFailed": "Fullscreen could not be changed for Zen mode."
   }
 }
