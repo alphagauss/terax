@@ -47,6 +47,7 @@
     "view.zoomIn": "放大",
     "view.zoomOut": "缩小",
     "view.zoomReset": "重置缩放",
+    "view.fullscreen": "切换全屏",
     "view.zenMode": "切换禅模式",
     "editor.undo": "撤销",
     "editor.redo": "重做",

@@ -39,6 +39,7 @@ export type ShortcutId =
   | "view.zoomIn"
   | "view.zoomOut"
   | "view.zoomReset"
+  | "view.fullscreen"
   | "view.zenMode"
   | "ai.toggle"
   | "ai.askSelection"
@@ -312,6 +313,14 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Reset zoom",
     group: "View",
     defaultBindings: [{ [MOD_PROP]: true, key: "0" }],
+  },
+  {
+    id: "view.fullscreen",
+    label: "Toggle fullscreen",
+    group: "View",
+    defaultBindings: IS_MAC
+      ? [{ ctrl: true, meta: true, key: "f" }]
+      : [{ key: "F11" }],
   },
   {
     id: "view.zenMode",

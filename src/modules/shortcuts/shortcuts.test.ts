@@ -3,7 +3,7 @@
  * 锁定设置页展示与各模块实际处理快捷键时共用同一份注册表定义。
  */
 
-import { MOD_PROP } from "@/lib/platform";
+import { IS_MAC, MOD_PROP } from "@/lib/platform";
 import { describe, expect, it } from "vitest";
 import { SHORTCUTS } from "./shortcuts";
 
@@ -25,6 +25,19 @@ describe("temporary word wrap shortcut", () => {
       label: "Toggle word wrap",
       group: "Editor",
       defaultBindings: [{ alt: true, key: "z" }],
+    });
+  });
+});
+
+describe("fullscreen shortcut", () => {
+  it("uses the platform-standard default binding", () => {
+    expect(SHORTCUTS).toContainEqual({
+      id: "view.fullscreen",
+      label: "Toggle fullscreen",
+      group: "View",
+      defaultBindings: IS_MAC
+        ? [{ ctrl: true, meta: true, key: "f" }]
+        : [{ key: "F11" }],
     });
   });
 });
