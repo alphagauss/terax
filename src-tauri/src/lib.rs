@@ -34,6 +34,17 @@ fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
     std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
 }
 
+/// 切换触发命令的当前窗口全屏状态。
+///
+/// 直接在原生端完成读取和写入，避免前端两次 IPC 之间的窗口状态发生变化。
+#[tauri::command]
+fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
+    let fullscreen = window.is_fullscreen().map_err(|error| error.to_string())?;
+    window
+        .set_fullscreen(!fullscreen)
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
     let url_path = match tab.as_deref() {
@@ -347,6 +358,7 @@ pub fn run() {
             open_with::open_with_unregister,
             get_launch_dir,
             get_launch_files,
+            toggle_fullscreen,
             open_settings_window,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,

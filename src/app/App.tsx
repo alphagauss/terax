@@ -1005,6 +1005,11 @@ export default function App() {
       "view.zoomIn": zoomIn,
       "view.zoomOut": zoomOut,
       "view.zoomReset": zoomReset,
+      "view.fullscreen": () => {
+        void invoke("toggle_fullscreen").catch((error) =>
+          console.error("toggle fullscreen failed:", error),
+        );
+      },
       "view.zenMode": () => setZenMode((v) => !v),
       "editor.undo": () => editorRefs.current.get(activeId)?.undo(),
       "editor.redo": () => editorRefs.current.get(activeId)?.redo(),

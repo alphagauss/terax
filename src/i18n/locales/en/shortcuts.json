@@ -47,6 +47,7 @@
     "view.zoomIn": "Zoom in",
     "view.zoomOut": "Zoom out",
     "view.zoomReset": "Reset zoom",
+    "view.fullscreen": "Toggle fullscreen",
     "view.zenMode": "Toggle zen mode",
     "editor.undo": "Undo",
     "editor.redo": "Redo",
