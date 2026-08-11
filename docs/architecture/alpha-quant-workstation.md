@@ -48,6 +48,9 @@ Terax Space / Workbench
 - 公共图表组件不直接请求 Alpha API，不认识回测 ID、模拟账户、工作台面板或 Workbench 标签。
 - 页面和工作台面板通过薄场景适配层连接查询、回测标记、实时订阅和模拟交易状态。
 - Terax 顶层 SplitView 继续只使用 `react-resizable-panels`。Alpha 页面内部的自由面板网格是不同层级的布局能力，不替换顶层 SplitView。
+- Alpha Panel Grid 固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
+- 首期标的联动只提供工作台主标的跟随和单面板固定。多联动组、时间范围同步和十字线同步按真实多图需求渐进增加。
+- Alpha 内部面板不创建原生弹出窗口。完整 Alpha 工作台页面的移动或复制由 Workbench 辅助窗口能力统一负责。
 - 工作台、图表、绘图和指标状态都使用可版本化 JSON 表达，不持久化 React、Canvas、Controller、Query 或连接实例。
 - Alpha FastAPI 是量化领域和权威数据边界。Rust 只负责生命周期、凭据注入和通用代理，不复制行情、策略、订单或风险领域模型。
 - 实施顺序先完成领域架构和数据管理，再建设可复用图表、工作台、回测和模拟交易，不一次引入所有面板、指标和绘图工具。
@@ -79,9 +82,10 @@ Terax 使用 Apache-2.0。`shioaji-pro-app` 是 AGPL-3.0-only，在没有额外�
 | 能力 | 首选参考 | 补充参考 | Terax 的采用方式 |
 | --- | --- | --- | --- |
 | 综合面板工作台 | OpenTerminalUI Launchpad | shioaji-pro-app Workspace | 自有版本化面板协议、懒加载 registry、网格布局和稳定 PanelPool |
-| 终端密度与交互 | shioaji-pro-app | OpenTerminalUI | 吸收 Panel Chrome、布局模板、联动/锁定和多图工作流 |
+| 终端密度与交互 | shioaji-pro-app | OpenTerminalUI | 吸收 24 列网格、Panel Chrome、布局模板、主标的跟随和固定交互 |
 | 专业 K 线生命周期 | shioaji-pro-app | OpenTerminalUI | Lightweight Charts Controller 与 React 外壳分离 |
-| 多图与联动组 | OpenTerminalUI | shioaji-pro-app | 颜色联动频道，只传播标的、时间和十字线等必要事件 |
+| 标的联动 | shioaji-pro-app | OpenTerminalUI | 首期使用工作台主标的与 per-panel pin，多联动组按需扩展 |
+| 多图同步 | OpenTerminalUI | shioaji-pro-app | 时间范围和十字线使用独立开关与轻量运行时事件，不与标的绑定混合 |
 | 回测复盘页面 | OpenTerminalUI | shioaji-pro-app 图表 | 复用公共图表、交易标记、回放和统计面板 |
 | 模拟交易 | OpenTerminalUI | shioaji-pro-app 交互 | Alpha 维护虚拟账户、订单、成交、持仓和风险权威状态 |
 | 图表运行时和生命周期 | shioaji-pro-app | OpenTerminalUI | 只围绕 Lightweight Charts 建设 Controller、测试和扩展能力 |
@@ -91,7 +95,7 @@ Terax 使用 Apache-2.0。`shioaji-pro-app` 是 AGPL-3.0-only，在没有额外�
 正常开发的参考优先级为：
 
 1. `OpenTerminalUI`：默认主参考，覆盖综合工作台、图表、多图同步、回测、模拟交易和测试。
-2. `shioaji-pro-app`：仅在实现 Lightweight Charts 生命周期、实时更新和高密度布局时定向补充。
+2. `shioaji-pro-app`：在实现 Lightweight Charts 生命周期、实时更新、24 列高密度布局和主标的联动时定向补充。
 
 ## 工作站总体架构
 
@@ -108,11 +112,16 @@ Terax 保留两级、不同职责的布局系统：
 2. Alpha 综合工作台页面
 
    - 负责行情、研究、回测和模拟交易小面板的高密度组合。
-   - 使用 `react-grid-layout` 实现页面内部网格，其定位不是新的顶层 SplitView。
+   - 使用 24 列 `react-grid-layout` 实现页面内部网格，其定位不是新的顶层 SplitView。
+   - 禁止面板重叠，碰撞时自动重排并纵向紧凑排列；工作区可以向下扩展。
+   - 窄窗口不改写逻辑坐标，通过最小工作区宽度和横向滚动保留用户布局。
+   - 布局默认可编辑，并提供与标的固定相互独立的工作台级布局锁定。
    - 网格依赖必须随 Alpha 工作台懒加载，未打开时不得增加 eager bundle、Observer、连接或定时器。
    - 面板拖动和缩放期间由布局库通过 `transform` 更新视觉位置，只在 `onDragStop` 和 `onResizeStop` 提交最终布局。
 
 递归 SplitView 适合 IDE 资源布局，自由网格适合交易终端面板。不要让用户通过顶层 Workbench 的每个 Tab 手工模拟整套交易终端，也不要在普通 Alpha 数据页中嵌套完整网格。
+
+完整 `AlphaWorkstationPage` 将来可以由 Workbench 移动或复制到辅助窗口，但 Alpha 不拥有窗口、跨 WebView 路由或原生生命周期。具体边界见 [Workbench 辅助窗口架构](./workbench-auxiliary-windows.md)。
 
 ### 建议页面地图
 
@@ -176,7 +185,7 @@ src/modules/alpha/
     registry.ts
     layout.ts
     persistence.ts
-    selectionChannels.ts
+    symbolSelection.ts
     components/
       AlphaPanelGrid.tsx
       AlphaPanelPool.tsx
@@ -203,7 +212,7 @@ src/modules/alpha/
 - `scenes/` 把公共图表连接到行情查询、回测结果或实时事件。
 - `panels/` 把 scene 放入工作台面板外壳，不反向污染公共组件。
 - `AlphaPanelGrid` 只处理逻辑网格和拖动结果，不认识具体行情或交易模型。
-- `AlphaPanelPool` 保持昂贵面板实例稳定。移动和缩放不得重建图表、查询或订阅。
+- `AlphaPanelPool` 或等价的稳定挂载层保持昂贵面板实例。移动、缩放、自动重排和临时隐藏不得重建图表、查询或订阅；是否需要独立 Pool 由实施验证决定。
 - 所有场景共享同一个行情归一化入口，不分别实现时间、精度和颜色转换。
 
 不要设计第二种渲染引擎接口。Controller 内部可以使用 Lightweight Charts 类型，业务模型、scene 和公共组件 props 不暴露这些类型即可。这里的隔离目标是保持业务边界清晰，不是支持运行时切换引擎。
@@ -237,12 +246,14 @@ type AlphaWorkstationLayout = {
 };
 ```
 
+工作台布局固定使用 24 列坐标。模板、当前布局和持久化状态不维护 12 列或其他 breakpoint 版本；窗口宽度变化只改变坐标到像素的映射。
+
 工作台加载时必须校验：
 
 - `schemaVersion` 可识别并可迁移。
 - panel ID 唯一，grid 与 panel 一一对应。
 - 类型存在于 registry，未知类型以可恢复占位面板显示或安全移除。
-- 坐标、尺寸和最小尺寸有限且位于允许范围。
+- 坐标、尺寸和最小尺寸有限，横向范围位于 24 列内，面板互不重叠。
 - singleton 和环境能力约束成立。
 - 模板实例化生成新的运行时 ID，不与现有 Controller 或订阅冲突。
 
@@ -276,24 +287,28 @@ type AlphaPanelDescriptor<TConfig> = {
 
 五档、逐笔、下单、持仓、账户和风险面板等到 Alpha 后端存在对应权威协议时再注册。
 
-### 标的联动频道
+### 主标的联动与多图同步
 
-Shioaji 的全局跟随/锁定适合简单布局，OpenTerminalUI 的颜色 Link Group 更适合综合工作站。Terax 建议使用：
+首期采用 Shioaji 式工作台主标的与 per-panel pin，界面只需要“跟随”和“固定”两种状态：
 
 ```ts
-type AlphaLinkChannel = "red" | "blue" | "green" | "yellow";
-
 type AlphaSymbolBinding =
-  | { mode: "follow"; channel: AlphaLinkChannel }
+  | { mode: "follow" }
   | { mode: "pinned"; vtSymbol: string };
 ```
 
-- 证券列表、信号或筛选器向所属频道发布标的。
-- K 线、五档、逐笔和下单面板只跟随相同频道。
-- pinned 面板不响应频道更新。
-- 发布事件携带来源 panel ID，防止循环回写。
-- 多窗口同步通过 Terax 进程间事件或共享状态协议实现，不依赖浏览器 `BroadcastChannel`。
-- 联动只传播标的、时间范围、十字线和必要选择，不共享图表实例。
+- 证券列表、信号或筛选器更新当前工作台主标的。
+- K 线、五档、逐笔和下单面板在 follow 状态下响应主标的更新。
+- pinned 面板不消费主标的变化，也不自动覆盖主标的。
+- pinned 面板恢复 follow 后立即采用当前主标的。
+- 发布事件携带来源 panel ID，防止循环回写；联动限定在当前 Workspace 应用进程。
+
+标的联动不隐式开启多图同步。时间范围和十字线属于独立、可分别开关的图表能力，只在对应多图任务中实现：
+
+- 时间范围和十字线只传播轻量运行时事件，不写入布局，不共享图表实例。
+- 十字线事件按动画帧限流。
+- 首期不为尚未启用的同步能力创建连接、监听器或持久化字段。
+- 只有真实工作流需要两套以上独立标的联动时，才提升布局 `schemaVersion` 并增加多联动组；颜色只是一种候选 UI 表达，不是当前协议。
 
 ### 状态和持久化
 
@@ -316,6 +331,8 @@ type AlphaSymbolBinding =
    通过 Terax 白名单共享 store 执行加锁、读取最新值、最小变更和原子替换。不得使用 `localStorage` 或整表覆盖共享状态。
 
 布局拖动期间不写 React 业务状态或持久化存储。只在交互结束后读取和提交最终坐标；连续结束事件使用短暂合并，且必须可取消。
+
+Alpha 页面显示在主窗口还是未来的 Workbench 辅助窗口中，不改变上述状态所有权。Alpha 不按原生窗口复制布局或建立独立持久化协议。
 
 ## 公共金融图表和跨页面复用
 
@@ -448,7 +465,7 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - `Workspace = blocks + layout` 分离业务实例和网格坐标。
 - 24 列 `react-grid-layout` 提供高密度自由拖拽和缩放。
 - `BLOCK_META` 集中描述分类、单例、绑定能力和默认/最小尺寸。
-- `PanelChrome` 统一拖动、跟随、锁定、弹出和删除。
+- `PanelChrome` 统一拖动、跟随、固定和删除等高频操作。
 - 全局标的与 per-panel pin 组合出联动和独立面板。
 - 内置标准看盘、日内、双图、衍生品、研究等场景模板。
 
@@ -471,6 +488,7 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - 捕获并忽略所有 `series.update()` 异常的做法。
 - 固定按天数拉取 1 分钟数据并在浏览器聚合全部周期。
 - `localStorage` 布局以及拖动期间持续写状态的方式。
+- 面板级原生弹出窗口。Alpha 只提供页面内部布局，完整页面的辅助窗口托管由 Workbench 负责。
 
 ### OpenTerminalUI
 
@@ -524,8 +542,8 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 - Launchpad 的 12 列网格、面板配置、布局模板和服务端同步组成了当前参考项目中最完整的通用工作台方案。
 - 面板 registry 使用 `React.lazy()`，未打开面板不加载实现。
-- 红、蓝、绿、黄联动组比单一全局标的更适合多图和多屏。
-- `IntersectionObserver` 让离屏面板停止渲染昂贵内容，适合作为可见性策略参考。
+- 红、蓝、绿、黄联动组可作为未来多套独立标的联动的高级参考，首期不直接采用。
+- `IntersectionObserver` 可用于暂停离屏面板的非必要绘制，但不能因此销毁稳定图表实例或错误释放共享订阅。
 - Chart Workstation 使用固定 CSS Grid 模板支持 1 到 6 图，对只需要多图而不需要任意小面板的页面更简单。
 - 回测工作区把统计面板通过 registry 组合，行为清单和测试覆盖面广。
 - 把 K 线转换、尾部判断和 rAF 批处理写成纯函数，并为实时、回填、绘图、回放、同步和导出分别测试。
@@ -609,14 +627,18 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### 工作台
 
+- Panel Grid 固定使用 24 列逻辑坐标，禁止重叠，碰撞时自动重排并纵向紧凑排列。
+- 窄窗口通过横向滚动保留逻辑布局，不因容器宽度变化改写持久化坐标。
+- 布局默认可编辑；工作台级布局锁定只影响移动和缩放，不影响标的跟随或固定。
 - 面板 ID 在移动、缩放和模板内保持稳定。
 - 拖动和缩放过程不更新业务 React 状态，不写 store。
 - Panel Grid 不直接拥有行情查询或订阅。
 - 同一数据键的查询、实时连接和计算结果尽量复用。
-- 面板离屏或页面隐藏时暂停 resize、轮询和非必要绘制，恢复后只同步最终尺寸。
+- 面板离屏或页面隐藏时暂停 resize、轮询和非必要绘制，恢复后只同步最终尺寸；可见性优化不得销毁 Controller 或绕过共享订阅引用计数。
 - Panel Library 的预览默认使用静态缩略图，只允许白名单面板按需挂载一个真实预览。
 - Alpha 工作台未打开时，不加载网格、绘图、指标或模拟交易模块。
-- 多图十字线和时间范围同步只传播轻量事件，不共享图表实例。
+- 标的联动首期只使用工作台主标的与 follow/pinned，不加载多联动组基础设施。
+- 多图十字线和时间范围同步只在用户分别启用时传播轻量运行时事件，不共享图表实例。
 
 ## 模拟交易不变量
 
@@ -634,10 +656,11 @@ Alpha HTTP 权威快照 + WebSocket 增量
 ### 工作台纯函数和模型测试
 
 - schema 校验、迁移和未知 panel fallback。
-- panel/grid 一一对应、重复 ID、单例和尺寸范围。
+- panel/grid 一一对应、重复 ID、单例、24 列尺寸范围和禁止重叠。
+- 碰撞自动重排、纵向紧凑排列和窄窗口不改写持久化坐标。
 - 模板实例化生成稳定且不冲突的新 ID。
 - 增加、删除、复制和切换布局不污染原模板。
-- 标的频道跟随、pin、来源去重和跨频道隔离。
+- 主标的更新、follow、pin、恢复跟随和来源去重。
 - 拖动结束归一化与持久化合并。
 
 ### 图表纯函数测试
@@ -657,14 +680,14 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - 用户离开尾部后不自动滚回。
 - 隐藏期间不 resize，恢复后只同步最终尺寸。
 - 历史请求单飞且到达最早数据后停止。
-- 面板移动和缩放不重建 Controller。
+- 面板移动、缩放、自动重排和临时隐藏不重建 Controller。
 - 最后一个消费者离开后才解除共享订阅。
 
 ### React 测试
 
 - 页面、scene 和工作台面板使用同一个公共图表。
 - 面板 registry 懒加载、错误边界和 capability fallback。
-- 工具栏命令、受控状态和 Panel Chrome。
+- 工具栏命令、布局锁定、标的跟随/固定和 Panel Chrome。
 - loading、empty、error、delayed、stale、reconnecting 和 disconnected 状态。
 - OHLC 信息栏在十字线离开时恢复最新 bar。
 - 可访问性文本和所有用户可见文案国际化。
@@ -678,7 +701,7 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### 运行时验证
 
-实现涉及真实网格拖动、pane 调整、可见范围、命中区域、WebView Canvas、ResizeObserver 或 Pointer Events 时，按 [`ui-runtime-debugging.md`](../contributing/ui-runtime-debugging.md) 使用相同复现条件验证修改前后行为。依赖 Alpha IPC、WebSocket 或原生窗口的场景使用真实 Tauri 运行时。
+实现涉及真实网格拖动、pane 调整、可见范围、命中区域、WebView Canvas、ResizeObserver 或 Pointer Events 时，按 [`ui-runtime-debugging.md`](../contributing/ui-runtime-debugging.md) 使用相同复现条件验证修改前后行为。依赖 Alpha IPC 或 WebSocket 的场景使用真实 Tauri 运行时；只有明确包含 Workbench 辅助窗口集成时才验证原生多窗口，Alpha 内部不单独创建窗口。
 
 ## 分阶段实施顺序
 
@@ -694,8 +717,8 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - 拆分 `FinancialChartController`、公共组件、专业外壳和 scene。
 - 完成历史分页、viewport、状态、主题和导出。
 - 先用轻量占位面板完成 registry、Panel Chrome、PanelPool 和布局 schema。
-- 隔离验证 Alpha 内部网格，确认拖动结束持久化、隐藏恢复和 WebView 行为。
-- 完成面板库、布局模板和颜色联动频道。
+- 隔离验证 24 列 Alpha 内部网格，确认禁止重叠、碰撞重排、横向滚动、拖动结束持久化、隐藏恢复和 WebView 行为。
+- 完成面板库、布局模板、默认可编辑与布局锁定、工作台主标的和 follow/pinned。
 - 数据管理页、独立行情页和工作台 Chart Panel 复用同一个公共图表。
 
 ### 阶段三：策略、回测和复盘
@@ -718,8 +741,8 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 出现以下情况时才重新阅读对应项目，不需要例行重读全部仓库：
 
-- Alpha 要实现或修改自由面板工作台时，复核 Shioaji Workspace 和 OpenTerminalUI Launchpad。
-- Alpha 要实现颜色联动、多窗口同步或模板服务端同步时，复核 OpenTerminalUI 对应 Context、Store 和测试。
+- Alpha 要实现或修改 24 列自由面板工作台、主标的跟随或固定交互时，复核 Shioaji Workspace，并以 OpenTerminalUI Launchpad 补充 registry、模板和测试场景。
+- 只有 Alpha 确认需要多套独立标的联动或模板服务端同步时，才复核 OpenTerminalUI 对应 Context、Store 和测试。
 - Lightweight Charts 升级主版本或 pane、primitive、marker API 发生变化。
 - Terax 要实现实时 tick 聚合时，复核 Shioaji 和 OpenTerminalUI 的实时更新、聚合与边界测试。
 - Terax 要实现回放、多图或十字线同步时，复核 OpenTerminalUI 对应模块和测试。
@@ -727,4 +750,4 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - Terax 要实现指标 pane 或基础绘图时，只复核 OpenTerminalUI 与 Shioaji 已列出的图表模块。
 - 本文列出的关键文件在本地参考仓库中已被删除、拆分或 API 发生实质变化。
 
-若只是上游新增无关页面、绘图工具或指标数量，不需要更新本文。
+Workbench 辅助窗口是独立公共能力，不触发 Alpha 重新审查参考项目；完整 Alpha 页面接入时遵循 [Workbench 辅助窗口架构](./workbench-auxiliary-windows.md)。若只是上游新增无关页面、绘图工具或指标数量，不需要更新本文。
