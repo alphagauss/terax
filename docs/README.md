@@ -18,7 +18,7 @@
 - [终端 renderer pool](architecture/terminal-renderer-pool.md) - slot pool、DormantRing，以及禁止在命令执行中序列化的不变量。
 - [文件传输](architecture/file-transfers.md) - Direct 与 Archive 任务生命周期、staging、no-replace commit、重试、资源上限和真实环境验证。
 - [Alpha 集成](architecture/alpha-integration.md) - FastAPI 量化后端、轻量 Rust proxy、Terax UI 集成和可选的 PyO3 计算边界。
-- [Alpha 专业金融图表](architecture/alpha-financial-chart.md) - 专业 Lightweight Charts 架构、已审查的参考项目、迁移边界和分阶段实施指南。
+- [Alpha 综合量化工作站](architecture/alpha-quant-workstation.md) - 公共金融图表、面板工作台、行情回测实盘边界、已审查的参考项目和分阶段实施指南。
 
 ## 贡献指南
 

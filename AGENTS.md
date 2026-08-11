@@ -261,7 +261,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 - `docs/README.md`：贡献者文档索引
 - `docs/architecture/two-process-model.md`：IPC 边界和命令参考
 - `docs/architecture/alpha-integration.md`：Alpha FastAPI、Rust 代理、前端和 PyO3 边界
-- `docs/architecture/alpha-financial-chart.md`：Alpha 专业金融图表目标架构、外部参考项目阅读路径和分阶段实施建议
+- `docs/architecture/alpha-quant-workstation.md`：Alpha 综合量化工作站、公共金融图表、面板布局、外部参考项目和分阶段实施建议
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider
