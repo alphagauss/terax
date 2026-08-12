@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from typing import Annotated, Literal, cast
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from alpha.api.container import AlphaServiceContainer
 from alpha.api.deps import get_alpha_services
@@ -18,29 +19,83 @@ from alpha.api.routes._utils import (
     normalize_interval,
     parse_datetime,
 )
-from alpha.common.schema_market import BarDataQuery
+from alpha.common.schema_core import split_vt_symbol
+from alpha.common.schema_market import BarDataQuery, BarHistoryQuery
 
 router = APIRouter()
 
+_EXCHANGE_TIMEZONES = {
+    "SSE": ZoneInfo("Asia/Shanghai"),
+    "SZSE": ZoneInfo("Asia/Shanghai"),
+    "BSE": ZoneInfo("Asia/Shanghai"),
+    "HKEX": ZoneInfo("Asia/Hong_Kong"),
+}
 
-def _bar_item(row: dict[str, object]) -> dict[str, object]:
+
+def _exchange_timezone(vt_symbol: str) -> ZoneInfo:
+    """返回证券所属交易所时区。"""
+    _, exchange = split_vt_symbol(vt_symbol)
+    return _EXCHANGE_TIMEZONES[exchange]
+
+
+def _market_local_datetime(
+    value: str | None,
+    vt_symbol: str,
+    *,
+    end_of_day: bool = False,
+) -> datetime | None:
+    """把 API 时间边界归一到数据库使用的交易所本地时间。"""
+    parsed = parse_datetime(value, end_of_day=end_of_day)
+    if parsed is None or parsed.tzinfo is None:
+        return parsed
+    return parsed.astimezone(_exchange_timezone(vt_symbol)).replace(tzinfo=None)
+
+
+def _bar_time(row: dict[str, object], interval: str, vt_symbol: str) -> str:
+    """把存储时间转换为公共行情协议要求的时间文本。
+
+    日线和周线保留无时区交易日；盘中数据按证券所属交易所解释存储中的
+    本地时间，并输出带偏移的 ISO 时间，避免前端按系统时区猜测。
+    """
+    value = date_text(row.get("datetime") or row.get("time")) or ""
+    if interval in {"d", "w"} or not value:
+        return value
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_exchange_timezone(vt_symbol))
+    return parsed.isoformat()
+
+
+def _bar_item(
+    row: dict[str, object],
+    *,
+    interval: str,
+    vt_symbol: str,
+) -> dict[str, object]:
     """构造图表友好的 K 线行。
 
     Args:
         row: 数据库 K 线行。
+        interval: 已归一化的行情周期。
+        vt_symbol: 用于确定盘中行情交易所时区的证券代码。
 
     Returns:
         前端 K 线数据。
     """
 
     return {
-        "time": date_text(row.get("datetime") or row.get("time")) or "",
+        "time": _bar_time(row, interval, vt_symbol),
         "open": first_number(row, ("open",)) or 0,
         "high": first_number(row, ("high",)) or 0,
         "low": first_number(row, ("low",)) or 0,
         "close": first_number(row, ("close",)) or 0,
         "volume": first_number(row, ("volume",)),
         "amount": first_number(row, ("amount", "turnover")),
+        "open_interest": first_number(row, ("open_interest",)),
     }
 
 
@@ -64,6 +119,7 @@ async def get_bars(
     interval: str = "d",
     start: str | None = None,
     end: str | None = None,
+    before: str | None = None,
     adjust: str = "none",
     limit: int = 500,
 ) -> dict[str, object]:
@@ -75,6 +131,7 @@ async def get_bars(
         interval: 周期。
         start: 开始日期。
         end: 结束日期。
+        before: 历史分页使用的排他时间游标，不能与起止范围同时使用。
         adjust: 复权方式。
         limit: 最大返回条数。
 
@@ -86,14 +143,51 @@ async def get_bars(
     normalized_adjust = normalize_adjust(adjust)
     normalized_limit = clamp_limit(limit, default=500, maximum=MAX_BAR_LIMIT)
 
+    if before is not None and (start is not None or end is not None):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "before 不能与 start 或 end 同时使用",
+        )
+
+    if start is None and end is None:
+        page = await services.database.load_bar_history(
+            BarHistoryQuery(
+                vt_symbol=vt_symbol,
+                interval=cast(
+                    Literal["1m", "1h", "d", "w", "tick"],
+                    normalized_interval,
+                ),
+                adjust=normalized_adjust,
+                before=_market_local_datetime(before, vt_symbol),
+                limit=normalized_limit,
+            )
+        )
+        items = [
+            _bar_item(row, interval=normalized_interval, vt_symbol=vt_symbol)
+            for row in page["items"]
+        ]
+        return {
+            "vt_symbol": vt_symbol,
+            "interval": normalized_interval,
+            "adjust": normalized_adjust,
+            **page,
+            "items": items,
+            "actual_start": items[0]["time"] if items else None,
+            "actual_end": items[-1]["time"] if items else None,
+        }
+
     overview = await services.database.get_bar_overview_item(
         vt_symbol,
         normalized_interval,
     )
     overview_start, overview_end = _overview_window(overview)
-    query_end = parse_datetime(end, end_of_day=True) or overview_end or datetime.now()
+    query_end = (
+        _market_local_datetime(end, vt_symbol, end_of_day=True)
+        or overview_end
+        or datetime.now()
+    )
     query_start = (
-        parse_datetime(start)
+        _market_local_datetime(start, vt_symbol)
         or overview_start
         or query_end - timedelta(days=max(normalized_limit * 2, 365))
     )
@@ -101,16 +195,27 @@ async def get_bars(
     rows = await services.database.load_bar_data(
         BarDataQuery(
             vt_symbol=vt_symbol,
-            interval=cast(Literal["1m", "1h", "d", "w", "tick"], normalized_interval),
+            interval=cast(
+                Literal["1m", "1h", "d", "w", "tick"],
+                normalized_interval,
+            ),
             adjust=normalized_adjust,
             start=query_start,
             end=query_end,
         )
     )
-    items = [_bar_item(row) for row in rows][-normalized_limit:]
+    selected_rows = rows[-normalized_limit:]
+    items = [
+        _bar_item(row, interval=normalized_interval, vt_symbol=vt_symbol)
+        for row in selected_rows
+    ]
     return {
         "vt_symbol": vt_symbol,
-        "interval": interval,
-        "adjust": adjust,
+        "interval": normalized_interval,
+        "adjust": normalized_adjust,
         "items": items,
+        "has_more_before": False,
+        "next_before": None,
+        "actual_start": items[0]["time"] if items else None,
+        "actual_end": items[-1]["time"] if items else None,
     }

@@ -9,6 +9,8 @@ from alpha.common.schema_market import (
     AdjustFactorPayload,
     BarDataPayload,
     BarDataQuery,
+    BarHistoryPage,
+    BarHistoryQuery,
     IndexConstituentQuery,
     SecurityCatalogQuery,
     SecurityDailyInfoQuery,
@@ -84,6 +86,11 @@ class DataBase:
     async def load_bars_data(self, queries: list[BarDataQuery]) -> list[dict]:
         """批量加载多个查询条件的 K 线数据。"""
         return await self._market_data.load_bars_data(queries)
+
+    @log_execution_time()
+    async def load_bar_history(self, query: BarHistoryQuery) -> BarHistoryPage:
+        """按排他游标倒序限量读取一页 K 线。"""
+        return await self._market_data.load_bar_history(query)
 
     @log_execution_time()
     async def get_bar_overview(self) -> list[dict[str, object]]:

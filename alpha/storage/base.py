@@ -7,6 +7,7 @@ import os
 import re
 import sqlite3
 import threading
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -203,31 +204,41 @@ class SQLiteStorageBase:
         end: datetime,
     ) -> list[str]:
         """根据时间范围推导所需分片文件。"""
+        file_names = list(self.iter_partition_names_reverse(interval, start, end))
+        file_names.reverse()
+        return file_names
+
+    def iter_partition_names_reverse(
+        self,
+        interval: str,
+        start: datetime,
+        end: datetime,
+    ) -> Iterator[str]:
+        """从最新到最早惰性生成时间范围内的分片文件名。"""
         if end < start:
-            return []
+            return
 
         if interval == "tick":
-            current = start.replace(hour=0, minute=0, second=0, microsecond=0)
-            final = end.replace(hour=0, minute=0, second=0, microsecond=0)
-            file_names: list[str] = []
-            while current <= final:
-                file_names.append(self.get_partition_name(interval, current))
-                current += timedelta(days=1)
-            return file_names
+            first = start.replace(hour=0, minute=0, second=0, microsecond=0)
+            current = end.replace(hour=0, minute=0, second=0, microsecond=0)
+            while current >= first:
+                yield self.get_partition_name(interval, current)
+                current -= timedelta(days=1)
+            return
 
         if interval in {"d", "w"}:
-            return [f"{interval}_{year:04d}.db" for year in range(start.year, end.year + 1)]
+            for year in range(end.year, start.year - 1, -1):
+                yield f"{interval}_{year:04d}.db"
+            return
 
-        current = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        final = end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        file_names: list[str] = []
-        while current <= final:
-            file_names.append(self.get_partition_name(interval, current))
-            if current.month == 12:
-                current = current.replace(year=current.year + 1, month=1, day=1)
+        first = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        current = end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        while current >= first:
+            yield self.get_partition_name(interval, current)
+            if current.month == 1:
+                current = current.replace(year=current.year - 1, month=12, day=1)
             else:
-                current = current.replace(month=current.month + 1, day=1)
-        return file_names
+                current = current.replace(month=current.month - 1, day=1)
 
     def list_partition_files(self) -> list[Path]:
         """列出所有符合规则的分片库文件。"""

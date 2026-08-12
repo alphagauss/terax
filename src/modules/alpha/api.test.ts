@@ -120,6 +120,10 @@ describe("Alpha API client", () => {
         vt_symbol: "000001.SZ",
         interval: "d",
         adjust: "forward",
+        has_more_before: false,
+        next_before: null,
+        actual_start: "2026-07-30T00:00:00",
+        actual_end: "2026-07-30T00:00:00",
         items: [
           {
             time: "2026-07-30T00:00:00",
@@ -135,7 +139,16 @@ describe("Alpha API client", () => {
     });
 
     await expect(getAlphaBars("000001.SZ")).resolves.toMatchObject({
-      items: [{ close: 10.5 }],
+      items: [
+        {
+          time: { kind: "trading-day", date: "2026-07-30" },
+          close: 10.5,
+          amount: null,
+          openInterest: null,
+        },
+      ],
+      hasMoreBefore: false,
+      nextBefore: null,
     });
     expect(requestMock).toHaveBeenCalledWith({
       method: "GET",
@@ -149,6 +162,73 @@ describe("Alpha API client", () => {
     });
   });
 
+  it("normalizes explicitly zoned intraday bars to absolute time", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: {
+        has_more_before: false,
+        next_before: null,
+        actual_start: "2026-07-30 09:30:00",
+        actual_end: "2026-07-30 09:30:00",
+        items: [
+          {
+            time: "2026-07-30T09:30:00+08:00",
+            open: 10,
+            high: 11,
+            low: 9,
+            close: 10.5,
+            volume: 100,
+            amount: 1000,
+            open_interest: 20,
+          },
+        ],
+      },
+    });
+
+    await expect(
+      getAlphaBars("000001.SZ", { interval: "1m" }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          time: { kind: "instant", epochSeconds: 1785375000 },
+          openInterest: 20,
+        },
+      ],
+    });
+  });
+
+  it("passes the exclusive history cursor without inventing a start date", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: {
+        items: [],
+        has_more_before: false,
+        next_before: null,
+        actual_start: null,
+        actual_end: null,
+      },
+    });
+
+    await getAlphaBars("000001.SZ", {
+      before: "2026-07-30T00:00:00",
+      limit: 200,
+    });
+
+    expect(requestMock).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/alpha/bars",
+      query: [
+        { name: "vt_symbol", value: "000001.SZ" },
+        { name: "interval", value: "d" },
+        { name: "adjust", value: "forward" },
+        { name: "limit", value: "200" },
+        { name: "before", value: "2026-07-30T00:00:00" },
+      ],
+    });
+  });
+
   it("rejects malformed bar dates before they reach the financial chart", async () => {
     requestMock.mockResolvedValue({
       status: 200,
@@ -157,6 +237,10 @@ describe("Alpha API client", () => {
         vt_symbol: "000001.SZ",
         interval: "d",
         adjust: "forward",
+        has_more_before: false,
+        next_before: null,
+        actual_start: null,
+        actual_end: null,
         items: [
           {
             time: "invalid",

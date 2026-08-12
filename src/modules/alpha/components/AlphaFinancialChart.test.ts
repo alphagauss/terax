@@ -1,17 +1,22 @@
 /**
  * 本文件测试 Alpha 金融图表的数据边界。
- * 锁定日线日期不经过本地时区转换，避免交易日发生偏移。
+ * 锁定交易日和绝对时间到 Lightweight Charts 横轴类型的适配。
  */
 
-import { alphaBusinessDay } from "@/modules/alpha/components/AlphaFinancialChart";
+import { alphaChartTime } from "@/modules/alpha/components/AlphaFinancialChart";
 import { describe, expect, it } from "vitest";
 
 describe("Alpha financial chart data", () => {
-  it("converts ISO datetimes to a timezone-neutral business day", () => {
-    expect(alphaBusinessDay("2026-07-30T00:00:00+08:00")).toEqual({
-      year: 2026,
-      month: 7,
-      day: 30,
-    });
+  it("adapts normalized daily and intraday times", () => {
+    expect(alphaChartTime({ kind: "trading-day", date: "2026-07-30" })).toEqual(
+      {
+        year: 2026,
+        month: 7,
+        day: 30,
+      },
+    );
+    expect(alphaChartTime({ kind: "instant", epochSeconds: 1785375000 })).toBe(
+      1785375000,
+    );
   });
 });

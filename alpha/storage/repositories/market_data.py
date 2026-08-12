@@ -4,11 +4,17 @@ import asyncio
 import sqlite3
 from collections import defaultdict
 from collections.abc import Awaitable, Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TypeVar
 
 from alpha.common.schema_core import datetime_to_timestr
-from alpha.common.schema_market import AdjustFactorPayload, BarDataPayload, BarDataQuery
+from alpha.common.schema_market import (
+    AdjustFactorPayload,
+    BarDataPayload,
+    BarDataQuery,
+    BarHistoryPage,
+    BarHistoryQuery,
+)
 from alpha.storage.base import SQLiteStorageBase
 from alpha.storage.repositories.sqlite_rows import (
     SQLiteRecord,
@@ -387,6 +393,98 @@ class MarketDataRepository:
             merged.extend(rows)
         return merged
 
+    async def load_bar_history(self, query: BarHistoryQuery) -> BarHistoryPage:
+        """按排他游标倒序限量读取一页 K 线，并返回升序结果。"""
+        overview = await self.get_bar_overview_item(query.vt_symbol, query.interval)
+        if overview is None:
+            return self._empty_bar_history_page()
+
+        overview_start = str(overview["start"])
+        overview_end = str(overview["end"])
+        before_text = None
+        if query.before is not None:
+            # 保留调用方游标的小数秒，否则向下截断会错误排除同秒内更早的记录。
+            before_text = (
+                query.before.strftime("%Y-%m-%d %H:%M:%S.%f")
+                .rstrip("0")
+                .rstrip(".")
+            )
+        if before_text is not None and before_text <= overview_start:
+            return self._empty_bar_history_page()
+
+        partition_end = datetime.fromisoformat(overview_end)
+        if before_text is not None and before_text <= overview_end:
+            # 游标位于分片起点时直接退到上一分片，避免一次必然为空的读取。
+            partition_end = datetime.fromisoformat(before_text) - timedelta(
+                microseconds=1
+            )
+        file_names = self.storage.iter_partition_names_reverse(
+            query.interval,
+            datetime.fromisoformat(overview_start),
+            partition_end,
+        )
+
+        descending_rows: list[SQLiteRecord] = []
+        target_count = query.limit + 1
+        for file_name in file_names:
+            if not self.storage.data_dir.joinpath(file_name).exists():
+                continue
+            rows = await self._load_history_from_partition(
+                file_name=file_name,
+                query=query,
+                before_text=before_text,
+                limit=target_count - len(descending_rows),
+            )
+            descending_rows.extend(rows)
+            if len(descending_rows) >= target_count:
+                break
+
+        has_more_before = len(descending_rows) > query.limit
+        page_rows = list(reversed(descending_rows[: query.limit]))
+        if page_rows and query.adjust != "non":
+            page_start = extract_trade_date(str(page_rows[0]["datetime"]))
+            page_end = extract_trade_date(str(page_rows[-1]["datetime"]))
+            factor_rows = await self._load_factor_rows(
+                query.vt_symbol,
+                page_start,
+                page_end,
+            )
+            anchor_date = extract_trade_date(
+                overview_end if query.adjust == "pre" else overview_start
+            )
+            base_factor = await self._load_factor_at(query.vt_symbol, anchor_date)
+            page_rows = apply_adjustment(
+                page_rows,
+                factor_rows,
+                query.adjust,
+                base_factor=base_factor,
+            )
+        elif page_rows:
+            page_rows = apply_adjustment(page_rows, [], "non")
+
+        return {
+            "items": page_rows,
+            "has_more_before": has_more_before,
+            "next_before": (
+                str(page_rows[0]["datetime"])
+                if page_rows and has_more_before
+                else None
+            ),
+            "actual_start": str(page_rows[0]["datetime"]) if page_rows else None,
+            "actual_end": str(page_rows[-1]["datetime"]) if page_rows else None,
+        }
+
+    @staticmethod
+    def _empty_bar_history_page() -> BarHistoryPage:
+        """构造字段完整的空历史页，保持 API 响应结构稳定。"""
+        return {
+            "items": [],
+            "has_more_before": False,
+            "next_before": None,
+            "actual_start": None,
+            "actual_end": None,
+        }
+
     async def get_bar_overview(self) -> list[SQLiteRecord]:
         """获取全局 K 线概览。"""
 
@@ -549,6 +647,30 @@ class MarketDataRepository:
             return [previous_row, *rows]
         return rows
 
+    async def _load_factor_at(self, vt_symbol: str, trade_date: str) -> float:
+        """读取目标交易日当日或之前最近一次生效的累计复权因子。"""
+
+        def operation(conn: sqlite3.Connection) -> float:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    """
+                    SELECT adj_factor
+                    FROM adjust_factor
+                    WHERE vt_symbol = ? AND trade_date <= ?
+                    ORDER BY trade_date DESC
+                    LIMIT 1
+                    """,
+                    (vt_symbol, trade_date),
+                )
+                row = cur.fetchone()
+                factor = float(row[0]) if row is not None else 1.0
+                return factor or 1.0
+            finally:
+                cur.close()
+
+        return await self.storage.read_main(operation)
+
     def _group_bars_by_partition(
         self,
         bars: list[BarDataPayload],
@@ -706,6 +828,49 @@ class MarketDataRepository:
                         actual_end,
                     ),
                 )
+                return fetchall_records(cur, {"interval": query.interval})
+            finally:
+                cur.close()
+
+        return await self.storage.read_partition(file_name, operation)
+
+    async def _load_history_from_partition(
+        self,
+        *,
+        file_name: str,
+        query: BarHistoryQuery,
+        before_text: str | None,
+        limit: int,
+    ) -> list[SQLiteRecord]:
+        """从单个分片倒序读取有限条记录，游标边界保持排他。"""
+
+        def operation(conn: sqlite3.Connection) -> list[SQLiteRecord]:
+            cur = conn.cursor()
+            try:
+                if before_text is None:
+                    cur.execute(
+                        """
+                        SELECT vt_symbol, datetime, volume, open, high, low, close,
+                               turnover, open_interest, upper_limit, lower_limit
+                        FROM bardata
+                        WHERE vt_symbol = ?
+                        ORDER BY datetime DESC
+                        LIMIT ?
+                        """,
+                        (query.vt_symbol, limit),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT vt_symbol, datetime, volume, open, high, low, close,
+                               turnover, open_interest, upper_limit, lower_limit
+                        FROM bardata
+                        WHERE vt_symbol = ? AND datetime < ?
+                        ORDER BY datetime DESC
+                        LIMIT ?
+                        """,
+                        (query.vt_symbol, before_text, limit),
+                    )
                 return fetchall_records(cur, {"interval": query.interval})
             finally:
                 cur.close()

@@ -1,38 +1,42 @@
 /**
- * 本文件使用 Lightweight Charts 渲染 Alpha 日 K 线和成交量。
+ * 本文件使用 Lightweight Charts 渲染 Alpha K 线和成交量。
  * 图表只消费后端返回的数据，不在 WebView 中计算量化指标。
  */
 
-import type { AlphaBar } from "@/modules/alpha/api";
+import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
+import { marketTradingDayParts } from "@/modules/alpha/market/normalize";
 import { useTheme } from "@/modules/theme";
 import {
-  type BusinessDay,
   CandlestickSeries,
+  createChart,
+  HistogramSeries,
   type IChartApi,
   type ISeriesApi,
-  HistogramSeries,
-  createChart,
+  type Time,
+  type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
 type Props = {
-  bars: AlphaBar[];
+  bars: MarketBar[];
   visible: boolean;
   ariaLabel: string;
 };
-
-/** 把后端日线日期转换为不受本地时区影响的交易日。 */
-export function alphaBusinessDay(value: string): BusinessDay {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  return { year, month, day };
-}
 
 function cssColor(container: HTMLElement, name: string): string {
   return getComputedStyle(container).getPropertyValue(name).trim();
 }
 
+/** 把公共行情时间转换为 Lightweight Charts 的横轴时间。 */
+export function alphaChartTime(time: MarketTime): Time {
+  if (time.kind === "instant") {
+    return time.epochSeconds as UTCTimestamp;
+  }
+  return marketTradingDayParts(time);
+}
+
 /**
- * 渲染单证券日 K 线和独立成交量窗格。
+ * 渲染单证券 K 线和独立成交量窗格。
  *
  * 页面隐藏时保留 Canvas，恢复可见后重新适配时间轴。
  */
@@ -104,7 +108,7 @@ export function AlphaFinancialChart({ bars, visible, ariaLabel }: Props) {
     if (!candles || !volume) return;
     candles.setData(
       bars.map((bar) => ({
-        time: alphaBusinessDay(bar.time),
+        time: alphaChartTime(bar.time),
         open: bar.open,
         high: bar.high,
         low: bar.low,
@@ -113,7 +117,7 @@ export function AlphaFinancialChart({ bars, visible, ariaLabel }: Props) {
     );
     volume.setData(
       bars.map((bar) => ({
-        time: alphaBusinessDay(bar.time),
+        time: alphaChartTime(bar.time),
         value: bar.volume ?? 0,
         color:
           bar.close >= bar.open

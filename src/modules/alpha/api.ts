@@ -3,7 +3,12 @@
  * 所有响应在前端边界完成校验，并继续通过 Rust 通用代理访问本机服务。
  */
 
-import { requestAlpha, type AlphaQueryParam } from "@/modules/alpha/native";
+import type {
+  MarketBarPage,
+  MarketInterval,
+} from "@/modules/alpha/market/model";
+import { normalizeMarketBars } from "@/modules/alpha/market/normalize";
+import { type AlphaQueryParam, requestAlpha } from "@/modules/alpha/native";
 import { z } from "zod";
 
 const statusSchema = z.object({
@@ -85,10 +90,16 @@ const barSchema = z.object({
   low: z.number(),
   close: z.number(),
   volume: z.number().nullable(),
+  amount: z.number().nullable(),
+  open_interest: z.number().nullable().optional().default(null),
 });
 
 const barsSchema = z.object({
   items: z.array(barSchema),
+  has_more_before: z.boolean(),
+  next_before: z.string().nullable(),
+  actual_start: z.string().nullable(),
+  actual_end: z.string().nullable(),
 });
 
 const backtestSchema = z.object({
@@ -129,7 +140,6 @@ const drawdownSchema = z.object({
 type AlphaStatusOverview = z.infer<typeof statusSchema>;
 export type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
 export type AlphaSecurity = z.infer<typeof securitySchema>;
-export type AlphaBar = z.infer<typeof barSchema>;
 export type AlphaBacktest = z.infer<typeof backtestSchema>;
 type AlphaBacktestSeries = {
   equity: z.infer<typeof equitySchema>["items"];
@@ -148,6 +158,15 @@ export type AlphaSecurityQuery = {
   interval?: string;
   limit?: number;
   offset?: number;
+};
+
+export type AlphaBarQuery = {
+  interval?: MarketInterval;
+  adjust?: "none" | "forward" | "backward";
+  start?: string;
+  end?: string;
+  before?: string;
+  limit?: number;
 };
 
 function alphaError(status: number, body: unknown): Error {
@@ -240,16 +259,39 @@ export function getAlphaSecurities(query: AlphaSecurityQuery = {}): Promise<{
   return alphaGet("/api/alpha/securities", securitiesSchema, params);
 }
 
-/** 查询单证券日 K 线，示例页限制最近 500 根。 */
-export function getAlphaBars(vtSymbol: string): Promise<{
-  items: AlphaBar[];
-}> {
-  return alphaGet("/api/alpha/bars", barsSchema, [
+/** 查询单证券 K 线，并在 API 边界归一化为图表引擎无关模型。 */
+export async function getAlphaBars(
+  vtSymbol: string,
+  query: AlphaBarQuery = {},
+): Promise<MarketBarPage> {
+  const interval = query.interval ?? "d";
+  const params: AlphaQueryParam[] = [
     { name: "vt_symbol", value: vtSymbol },
-    { name: "interval", value: "d" },
-    { name: "adjust", value: "forward" },
-    { name: "limit", value: "500" },
-  ]);
+    { name: "interval", value: interval },
+    { name: "adjust", value: query.adjust ?? "forward" },
+    { name: "limit", value: String(query.limit ?? 500) },
+  ];
+  for (const [name, value] of [
+    ["start", query.start],
+    ["end", query.end],
+    ["before", query.before],
+  ] as const) {
+    if (value) params.push({ name, value });
+  }
+  const response = await alphaGet("/api/alpha/bars", barsSchema, params);
+  return {
+    items: normalizeMarketBars(
+      response.items.map((item) => ({
+        ...item,
+        openInterest: item.open_interest,
+      })),
+      interval,
+    ),
+    hasMoreBefore: response.has_more_before,
+    nextBefore: response.next_before,
+    actualStart: response.actual_start,
+    actualEnd: response.actual_end,
+  };
 }
 
 /** 查询最近回测和运行中任务。 */

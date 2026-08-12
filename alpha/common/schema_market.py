@@ -4,7 +4,7 @@ from datetime import date as _date
 from datetime import datetime as _datetime
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from typing_extensions import NotRequired, Self
 
 from alpha.common.enums import Exchange, Interval
@@ -125,6 +125,36 @@ class BarDataQuery(BaseModel):
         symbol, exchange = split_vt_symbol(self.vt_symbol)
         if not Interval.is_valid(self.interval):
             raise ValueError(f"{self.interval} is not a valid interval")
+
+
+class BarHistoryQuery(BaseModel):
+    """单标的 K 线倒序限量查询条件。
+
+    ``before`` 是排他游标。仓储层按时间倒序读取，但最终结果恢复为升序，
+    便于图表直接合并。复权锚点固定到完整数据覆盖范围，不随页边界变化。
+    """
+
+    vt_symbol: str
+    interval: Literal["1m", "1h", "d", "w", "tick"]
+    adjust: Literal["pre", "post", "non"] = "non"
+    before: _datetime | None = None
+    limit: int = Field(default=500, ge=1, le=5000)
+
+    def model_post_init(self, __context: Any) -> None:
+        """校验证券代码和周期。"""
+        split_vt_symbol(self.vt_symbol)
+        if not Interval.is_valid(self.interval):
+            raise ValueError(f"{self.interval} is not a valid interval")
+
+
+class BarHistoryPage(TypedDict):
+    """仓储层返回的有界 K 线历史页。"""
+
+    items: list[dict[str, object]]
+    has_more_before: bool
+    next_before: str | None
+    actual_start: str | None
+    actual_end: str | None
 
 
 class SecurityDailyInfoQuery(BaseModel):

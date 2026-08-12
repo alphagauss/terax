@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import sqlite3
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 from alpha.common.schema import (
     AdjustFactorPayload,
     BarDataQuery,
+    BarHistoryQuery,
     SecurityDailyInfoQuery,
     SecurityProfilePayload,
     SecurityProfileQuery,
@@ -475,6 +477,232 @@ def test_load_bar_data_pre_adjusted_view(tmp_path: Path, monkeypatch: pytest.Mon
     assert loaded[0]["upper_limit"] == pytest.approx(11 * 1.0 / 1.5)
     assert loaded[1]["lower_limit"] == pytest.approx(18 * 1.2 / 1.5)
     assert loaded[2]["upper_limit"] == pytest.approx(33.0)
+
+
+def test_load_bar_history_pages_across_partitions_without_duplicates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """历史游标应跨年度分片限量读取，并以升序返回无重复页面。"""
+    db = _make_db(tmp_path, monkeypatch)
+    symbol = "XYZ.SSE"
+    bars = [
+        *_make_bars(symbol, "d", datetime(2023, 12, 30), 2),
+        *_make_bars(symbol, "d", datetime(2024, 1, 1), 3),
+    ]
+    assert db.save_bar_data(bars, adjust="non") is True
+
+    latest_page = db.load_bar_history(
+        BarHistoryQuery(vt_symbol=symbol, interval="d", limit=3)
+    )
+    latest_items = latest_page["items"]
+    assert isinstance(latest_items, list)
+    assert [row["datetime"] for row in latest_items] == [
+        "2024-01-01 00:00:00",
+        "2024-01-02 00:00:00",
+        "2024-01-03 00:00:00",
+    ]
+    assert latest_page["has_more_before"] is True
+    assert latest_page["next_before"] == "2024-01-01 00:00:00"
+
+    read_files: list[str] = []
+    original_read_partition = db._db._storage.read_partition
+
+    async def recording_read_partition(file_name: str, operation: object) -> object:
+        """记录跨年游标查询打开的分片。"""
+        read_files.append(file_name)
+        return await original_read_partition(file_name, operation)
+
+    monkeypatch.setattr(
+        db._db._storage,
+        "read_partition",
+        recording_read_partition,
+    )
+
+    older_page = db.load_bar_history(
+        BarHistoryQuery(
+            vt_symbol=symbol,
+            interval="d",
+            before=datetime.fromisoformat(str(latest_page["next_before"])),
+            limit=3,
+        )
+    )
+    older_items = older_page["items"]
+    assert isinstance(older_items, list)
+    assert [row["datetime"] for row in older_items] == [
+        "2023-12-30 00:00:00",
+        "2023-12-31 00:00:00",
+    ]
+    assert older_page["has_more_before"] is False
+    assert older_page["next_before"] is None
+    assert read_files == ["d_2023.db"]
+    assert {row["datetime"] for row in latest_items}.isdisjoint(
+        row["datetime"] for row in older_items
+    )
+
+
+def test_partition_name_iteration_preserves_order_and_supports_lazy_reverse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正序分片规则保持兼容，历史读取可以按月和按日反向惰性迭代。"""
+    storage = _make_db(tmp_path, monkeypatch)._db._storage
+
+    monthly = storage.iter_partition_names(
+        "1m",
+        datetime(2023, 12, 31),
+        datetime(2024, 2, 1),
+    )
+    reverse_monthly = list(
+        storage.iter_partition_names_reverse(
+            "1m",
+            datetime(2023, 12, 31),
+            datetime(2024, 2, 1),
+        )
+    )
+    reverse_ticks = list(
+        storage.iter_partition_names_reverse(
+            "tick",
+            datetime(2024, 1, 30, 9, 30),
+            datetime(2024, 2, 1, 15),
+        )
+    )
+
+    assert monthly == ["1m_2023_12.db", "1m_2024_01.db", "1m_2024_02.db"]
+    assert reverse_monthly == list(reversed(monthly))
+    assert reverse_ticks == [
+        "tick_2024_02_01.db",
+        "tick_2024_01_31.db",
+        "tick_2024_01_30.db",
+    ]
+
+
+def test_load_bar_history_preserves_subsecond_cursor_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """小数秒游标不得因格式化截断而丢失同秒内更早的 K 线。"""
+    db = _make_db(tmp_path, monkeypatch)
+    symbol = "XYZ.SSE"
+    assert db.save_bar_data(
+        _make_bars(
+            symbol,
+            "1m",
+            datetime(2024, 1, 2, 9, 30),
+            2,
+            step=timedelta(minutes=1),
+        ),
+        adjust="non",
+    )
+
+    page = db.load_bar_history(
+        BarHistoryQuery(
+            vt_symbol=symbol,
+            interval="1m",
+            before=datetime(2024, 1, 2, 9, 30, 0, 500_000),
+            limit=10,
+        )
+    )
+
+    assert [row["datetime"] for row in page["items"]] == [
+        "2024-01-02 09:30:00"
+    ]
+
+
+def test_load_bar_history_stops_after_the_page_is_filled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """最新分片已填满页面时不得继续打开更早分片。"""
+    db = _make_db(tmp_path, monkeypatch)
+    symbol = "XYZ.SSE"
+    bars = [
+        *_make_bars(symbol, "d", datetime(2023, 12, 30), 2),
+        *_make_bars(symbol, "d", datetime(2024, 1, 1), 3),
+    ]
+    assert db.save_bar_data(bars, adjust="non") is True
+    read_files: list[str] = []
+    generated_files: list[str] = []
+    original_read_partition = db._db._storage.read_partition
+    original_partition_names = db._db._storage.iter_partition_names_reverse
+
+    async def recording_read_partition(file_name: str, operation: object) -> object:
+        """记录历史查询实际打开的分片。"""
+        read_files.append(file_name)
+        return await original_read_partition(file_name, operation)
+
+    def recording_partition_names(
+        interval: str,
+        start: datetime,
+        end: datetime,
+    ) -> Iterator[str]:
+        """记录惰性分片迭代器实际生成的文件名。"""
+        for file_name in original_partition_names(interval, start, end):
+            generated_files.append(file_name)
+            yield file_name
+
+    monkeypatch.setattr(
+        db._db._storage,
+        "read_partition",
+        recording_read_partition,
+    )
+    monkeypatch.setattr(
+        db._db._storage,
+        "iter_partition_names_reverse",
+        recording_partition_names,
+    )
+
+    page = db.load_bar_history(
+        BarHistoryQuery(vt_symbol=symbol, interval="d", limit=2)
+    )
+
+    assert page["has_more_before"] is True
+    assert read_files == ["d_2024.db"]
+    assert generated_files == ["d_2024.db"]
+
+
+@pytest.mark.parametrize("adjust", ["pre", "post"])
+def test_load_bar_history_uses_stable_adjustment_anchor_across_pages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    adjust: str,
+) -> None:
+    """每页复权必须共享完整覆盖范围锚点，拼接后与完整查询一致。"""
+    db = _make_db(tmp_path, monkeypatch)
+    symbol = "XYZ.SSE"
+    start = datetime(2024, 1, 1)
+    bars = _make_bars(symbol, "d", start, 4)
+    factors = _make_factors(symbol, start.date(), [1.0, 1.0, 2.0, 2.0])
+    assert db.save_bar_data(bars, adjust="non") is True
+    assert db.save_adjust_factors(factors) is True
+
+    latest_page = db.load_bar_history(
+        BarHistoryQuery(vt_symbol=symbol, interval="d", adjust=adjust, limit=2)
+    )
+    older_page = db.load_bar_history(
+        BarHistoryQuery(
+            vt_symbol=symbol,
+            interval="d",
+            adjust=adjust,
+            before=datetime.fromisoformat(str(latest_page["next_before"])),
+            limit=2,
+        )
+    )
+    combined = [*older_page["items"], *latest_page["items"]]
+    full = db.load_bar_data(
+        BarDataQuery(
+            vt_symbol=symbol,
+            interval="d",
+            adjust=adjust,
+            start=start,
+            end=start + timedelta(days=3),
+        )
+    )
+
+    assert [row["datetime"] for row in combined] == [row["datetime"] for row in full]
+    assert [row["close"] for row in combined] == pytest.approx(
+        [row["close"] for row in full]
+    )
 
 
 def test_load_bar_data_post_adjusted_view(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

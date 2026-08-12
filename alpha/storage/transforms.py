@@ -123,6 +123,8 @@ def apply_adjustment(
     bars: list[dict],
     factor_rows: list[dict],
     adjust: AdjustMode,
+    *,
+    base_factor: float | None = None,
 ) -> list[dict]:
     """对原始 K 线应用复权。
 
@@ -135,6 +137,8 @@ def apply_adjustment(
         bars: 原始 K 线列表。
         factor_rows: 因子查询结果。
         adjust: 复权模式。
+        base_factor: 可选的固定复权锚点。历史分页必须使用完整覆盖范围的锚点，
+            避免每页以自身首尾记录为基准而产生价格跳变。
 
     Returns:
         处理后的 K 线列表。
@@ -173,8 +177,8 @@ def apply_adjustment(
         current_factor = normalized_factors[factor_index][1]
         factor_index += 1
 
-    base_factor = current_factor
-    if adjust == "pre":
+    resolved_base_factor = current_factor if base_factor is None else base_factor
+    if base_factor is None and adjust == "pre":
         # 前复权以区间最后一个交易日为锚点，因此先预扫一遍拿到末日因子。
         preview_factor = current_factor
         preview_index = factor_index
@@ -184,10 +188,10 @@ def apply_adjustment(
         ):
             preview_factor = normalized_factors[preview_index][1]
             preview_index += 1
-        base_factor = preview_factor
+        resolved_base_factor = preview_factor
 
     previous_trade_date = ""
-    current_scale = current_factor / base_factor
+    current_scale = current_factor / resolved_base_factor
     for bar in normalized_bars:
         trade_date = extract_trade_date(str(bar["datetime"]))
         if trade_date != previous_trade_date:
@@ -198,7 +202,7 @@ def apply_adjustment(
             ):
                 current_factor = normalized_factors[factor_index][1]
                 factor_index += 1
-            current_scale = current_factor / base_factor
+            current_scale = current_factor / resolved_base_factor
             previous_trade_date = trade_date
 
         # 复权只调整当前价格视图，不改成交量与成交额等非价格字段。

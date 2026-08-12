@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ import pytest
 
 from alpha.api.cache import AsyncTtlCache
 from alpha.api.router import router
+from alpha.api.routes.bars import _market_local_datetime
 from alpha.config import AlphaConfig
 
 
@@ -207,6 +209,17 @@ class FakeDatabase:
                 "turnover": 10500,
             }
         ]
+
+    async def load_bar_history(self, query: object) -> dict[str, object]:
+        """返回固定的有界历史页。"""
+        items = await self.load_bar_data(query)
+        return {
+            "items": items,
+            "has_more_before": False,
+            "next_before": None,
+            "actual_start": items[0]["datetime"],
+            "actual_end": items[-1]["datetime"],
+        }
 
 
 class FakeStrategyManager:
@@ -524,6 +537,36 @@ def test_alpha_router_exposes_security_and_bar_apis() -> None:
     assert detail_response.json()["coverage"]["d"]["rows"] == 3
     assert bars_response.status_code == 200
     assert bars_response.json()["items"][0]["close"] == 10.5
+    assert bars_response.json()["has_more_before"] is False
+    assert bars_response.json()["next_before"] is None
+
+
+def test_alpha_bar_router_adds_exchange_timezone_to_intraday_bars() -> None:
+    """盘中行情必须返回可解析为绝对时刻的交易所时区偏移。"""
+    response = _client().get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=1m"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["time"] == "2025-01-02T00:00:00+08:00"
+    assert response.json()["actual_start"] == "2025-01-02T00:00:00+08:00"
+
+
+def test_alpha_bar_router_converts_absolute_cursor_to_exchange_time() -> None:
+    """带时区游标必须先转换为交易所本地时间，再与存储时间比较。"""
+    assert _market_local_datetime(
+        "2025-01-01T16:00:00Z",
+        "000001.SZSE",
+    ) == datetime(2025, 1, 2)
+
+
+def test_alpha_bar_router_rejects_mixed_range_and_cursor_queries() -> None:
+    """范围边界和排他游标不能混用，避免产生含糊分页语义。"""
+    response = _client().get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&start=2025-01-01&before=2025-01-02"
+    )
+
+    assert response.status_code == 422
 
 
 def test_alpha_router_exposes_backtest_result_slices() -> None:
