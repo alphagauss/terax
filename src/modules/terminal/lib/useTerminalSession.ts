@@ -35,6 +35,11 @@ import {
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import {
+  clearTerminalCommandState,
+  setTerminalCommandState,
+  terminalCommandState,
+} from "./commandState";
+import {
   acquireSlot,
   applyBackgroundActive,
   applyCursorBlink,
@@ -187,6 +192,24 @@ export function writeToSession(terminalId: number, data: string): boolean {
     return true;
   }
   queuePendingInput(s, data);
+  return true;
+}
+
+/** 向交互式 Shell 提交完整命令，并同步封住 OSC 133 回传前的忙碌窗口。 */
+export function executeCommandInSession(
+  terminalId: number,
+  command: string,
+): boolean {
+  const session = sessions.get(terminalId);
+  if (!session || session.shellExited) return false;
+  session.everSubmitted = true;
+  if (terminalCommandState(terminalId) === "idle") {
+    session.commandRunning = true;
+    setTerminalCommandState(terminalId, "running");
+    cancelHiddenRelease(session);
+  }
+  if (session.pty) void session.pty.write(`${command}\r`);
+  else queuePendingInput(session, `${command}\r`);
   return true;
 }
 
@@ -375,8 +398,9 @@ async function terminalHasForegroundJob(terminalId: number): Promise<boolean> {
 
 function onTerminalCommandState(terminalId: number, running: boolean): void {
   const s = sessions.get(terminalId);
-  if (!s || s.commandRunning === running) return;
+  if (!s) return;
   s.commandRunning = running;
+  setTerminalCommandState(terminalId, running ? "running" : "idle");
   if (!running) {
     scheduleHiddenRelease(terminalId, s);
     return;
@@ -509,6 +533,10 @@ function ensureSession(
     remoteNotice: null,
   };
   sessions.set(terminalId, session);
+  setTerminalCommandState(
+    terminalId,
+    remoteSuspended ? "unavailable" : "unknown",
+  );
 
   session.ready = (async () => {
     await ensureMonoFontsLoaded();
@@ -551,6 +579,7 @@ function surfaceSpawnFailure(terminalId: number, s: Session, e: unknown): void {
   console.error("[terax] shell spawn failed:", e);
   s.shellExited = true;
   s.spawnFailed = true;
+  setTerminalCommandState(terminalId, "unavailable");
   const detail = String(e)
     .replace(/[\x00-\x1f\x7f]/g, " ")
     .slice(0, 300);
@@ -623,6 +652,7 @@ function suspendRemoteSession(
     s.pendingExit = null;
     s.pendingInput = "";
     s.commandRunning = false;
+    setTerminalCommandState(terminalId, "unavailable");
     s.spawnFailed = false;
     s.remoteEpoch = null;
     s.remoteSuspended = true;
@@ -652,6 +682,7 @@ async function openPtyForSession(
         s.pty = null;
         s.pendingInput = "";
         s.commandRunning = false;
+        setTerminalCommandState(terminalId, "unavailable");
         if (isRecoverableRemoteExit(code)) {
           s.spawnFailed = false;
           suspendRemoteSession(terminalId, s, "closed");
@@ -864,6 +895,7 @@ export async function respawnSession(
   s.pendingInput = "";
   s.altScreenAtRelease = false;
   s.commandRunning = false;
+  setTerminalCommandState(terminalId, "unknown");
   s.spawnFailed = false;
   s.remoteEpoch = currentRemoteEpoch();
   s.remoteSuspended = false;
@@ -970,6 +1002,7 @@ export function disposeSession(terminalId: number): void {
   s.pty = null;
   s.pendingInput = "";
   sessions.delete(terminalId);
+  clearTerminalCommandState(terminalId);
   blockViewportListeners.delete(terminalId);
   readyTerminals.delete(terminalId);
   const waiters = readyWaiters.get(terminalId);

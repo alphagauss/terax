@@ -321,10 +321,22 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [newTerminalTab],
   );
 
-  /** 创建用于一次性运行文件的终端标签，并返回其稳定标识。 */
+  /** 在指定 Space 创建运行终端，已失效的原分组回退到当前活动分组。 */
   const newRunTab = useCallback(
-    (cwd: string | undefined, title: string, groupId?: number) =>
-      newTerminalTab(cwd, { title }, undefined, groupId),
+    (
+      cwd: string | undefined,
+      title: string,
+      spaceId?: string,
+      groupId?: number,
+    ) => {
+      const targetSpaceId = spaceId ?? activeSpaceIdRef.current;
+      const targetGroupId =
+        groupId !== undefined &&
+        stateRef.current.spaces[targetSpaceId]?.groups[groupId]
+          ? groupId
+          : undefined;
+      return newTerminalTab(cwd, { title }, targetSpaceId, targetGroupId);
+    },
     [newTerminalTab],
   );
 
