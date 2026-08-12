@@ -5,7 +5,8 @@
 
 export const REMOTE_TRANSPORT_CLOSED_EXIT_CODE = -255;
 export const EXIT_ALTERNATE_SCREEN_SEQUENCE = "\x1b[?1049l";
-export const REMOTE_RECONNECT_RESET_SEQUENCE = "\x1b[!p\x1b[0m\x1b[?25h";
+export const REMOTE_RECONNECT_RESET_SEQUENCE =
+  "\x1b[!p\x1b[?9;1000;1002;1003;1006;1016l\x1b[0m\x1b[?25h";
 
 export type TerminalRespawnMode = "clear" | "preserve-history";
 

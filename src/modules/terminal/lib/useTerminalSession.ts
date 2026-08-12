@@ -873,7 +873,6 @@ export async function respawnSession(
   const liveSlot = getLiveSlotForTerminal(terminalId);
   if (preserveHistory) {
     if (liveSlot) {
-      liveSlot.term.options.disableStdin = false;
       // 状态若直接跳到新 epoch，断线提示可能尚未来得及退出 alternate screen。
       if (
         !wasRemoteSuspended &&
@@ -881,8 +880,12 @@ export async function respawnSession(
       ) {
         liveSlot.term.write(EXIT_ALTERNATE_SCREEN_SEQUENCE);
       }
-      // DECSTR 只复位终端模式，不擦除普通缓冲区和 scrollback。
-      liveSlot.term.write(REMOTE_RECONNECT_RESET_SEQUENCE);
+      // DECSTR 不会复位 xterm 鼠标服务，因此显式关闭鼠标模式，并在解析完成前阻止旧模式产生输入。
+      liveSlot.term.write(REMOTE_RECONNECT_RESET_SEQUENCE, () => {
+        if (s.disposed || s.spawnGeneration !== generation) return;
+        if (getLiveSlotForTerminal(terminalId) !== liveSlot) return;
+        liveSlot.term.options.disableStdin = false;
+      });
     } else {
       if (releasedFromAltScreen) {
         s.dormantRing.push(
