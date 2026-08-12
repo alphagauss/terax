@@ -1,11 +1,11 @@
 /**
- * 本文件测试标签标题的显示规则。
- * 重点锁定终端自定义标题与路径派生标题的优先级。
+ * 本文件测试标签标题和文件路径提示的显示规则。
+ * 重点锁定终端标题优先级，以及只有文件类标签才提供路径提示。
  */
 
-import type { TerminalTab } from "@/modules/workbench";
+import type { Tab, TerminalTab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
-import { labelFor } from "./tabLabel";
+import { filePathFor, labelFor } from "./tabLabel";
 
 function terminalTab(over: Partial<TerminalTab> = {}): TerminalTab {
   return {
@@ -47,5 +47,47 @@ describe("labelFor (terminal tabs)", () => {
 
   it("handles Windows-style cwd separators", () => {
     expect(labelFor(terminalTab({ cwd: "C:\\Users\\me\\proj" }))).toBe("proj");
+  });
+});
+
+describe("filePathFor", () => {
+  it("returns the absolute path for editor and Markdown tabs", () => {
+    const tabs: Tab[] = [
+      {
+        id: 2,
+        kind: "editor",
+        spaceId: "default",
+        title: "App.tsx",
+        path: "/workspace/src/App.tsx",
+        dirty: false,
+        preview: false,
+      },
+      {
+        id: 3,
+        kind: "markdown",
+        spaceId: "default",
+        title: "README.md",
+        path: "/workspace/README.md",
+        dirty: false,
+      },
+    ];
+
+    expect(tabs.map(filePathFor)).toEqual([
+      "/workspace/src/App.tsx",
+      "/workspace/README.md",
+    ]);
+  });
+
+  it("does not expose terminal or Git history context paths", () => {
+    expect(filePathFor(terminalTab({ cwd: "/workspace" }))).toBeUndefined();
+    expect(
+      filePathFor({
+        id: 4,
+        kind: "git-history",
+        spaceId: "default",
+        title: "Git History",
+        repoRoot: "/workspace",
+      }),
+    ).toBeUndefined();
   });
 });
