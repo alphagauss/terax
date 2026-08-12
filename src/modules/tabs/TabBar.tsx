@@ -70,7 +70,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { labelFor } from "./lib/tabLabel";
+import { filePathFor, labelFor } from "./lib/tabLabel";
 
 const LANGUAGE_MENU_ENABLED = false;
 
@@ -540,7 +540,10 @@ export function TabBar({
                     )}
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
-                    <span className={cn("truncate", isPreview && "italic")}>
+                    <span
+                      title={filePathFor(t)}
+                      className={cn("truncate", isPreview && "italic")}
+                    >
                       {labelFor(t)}
                     </span>
                     {dirty || connectionAlert ? (
