@@ -1566,6 +1566,7 @@ export default function App() {
       },
       closeTab: (tabId) => void handleClose(tabId),
       runPythonFile: pythonRunner.runTab,
+      attachFileToAgent: handleAttachFileToAgent,
       pinTab,
       renameTab: handleRenameTab,
       dropTab: handleDropTab,
@@ -1577,6 +1578,7 @@ export default function App() {
     [
       handleClose,
       handleDropTab,
+      handleAttachFileToAgent,
       handleRenameTab,
       groupCwd,
       openNewEditor,

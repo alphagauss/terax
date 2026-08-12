@@ -3,7 +3,6 @@
  * 负责标签切换、拖拽和新建入口展示，菜单内容必须在不同语言和快捷键长度下保持可读。
  */
 
-import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,6 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
@@ -28,6 +28,11 @@ import {
   EXPOSED_LANGUAGES,
 } from "@/modules/editor/lib/languageDefinitions";
 import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
+import {
+  copyToClipboard,
+  relativePath,
+  revealInFinder,
+} from "@/modules/explorer/lib/contextActions";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { isPythonFile } from "@/modules/python/path";
 import { useRemoteRuntimeStore } from "@/modules/remote";
@@ -85,6 +90,7 @@ type Props = {
   onNewGitGraph: () => void;
   onClose: (id: number) => void;
   onRunPythonFile: (id: number, groupId: number) => void;
+  onAttachFileToAgent: (path: string) => void;
   /** Pin (promote) a preview tab to persistent on double-click. */
   onPin: (id: number) => void;
   /** Set a terminal tab's custom label; empty string resets to default. */
@@ -120,6 +126,7 @@ export function TabBar({
   onNewGitGraph,
   onClose,
   onRunPythonFile,
+  onAttachFileToAgent,
   onPin,
   onRename,
   onDropTab,
@@ -129,8 +136,8 @@ export function TabBar({
   compact,
 }: Props) {
   const { t: tr } = useTranslation("tabs");
+  const workspace = currentWorkspaceEnv();
   const sshDisconnected = useRemoteRuntimeStore((state) => {
-    const workspace = currentWorkspaceEnv();
     const runtime = state.snapshot;
     return (
       workspace.kind === "ssh" &&
@@ -336,6 +343,11 @@ export function TabBar({
                 );
               }
 
+              const filePath = filePathFor(t);
+              const fileRelativePath =
+                (t.kind === "editor" || t.kind === "markdown") && t.explorerRoot
+                  ? relativePath(t.explorerRoot, t.path)
+                  : undefined;
               const trigger = (
                 <TabsTrigger
                   value={String(t.id)}
@@ -538,7 +550,7 @@ export function TabBar({
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
                     <span
-                      title={filePathFor(t)}
+                      title={filePath}
                       className={cn("truncate", isPreview && "italic")}
                     >
                       {labelFor(t)}
@@ -616,6 +628,42 @@ export function TabBar({
                           onSelect={() => onRunPythonFile(t.id, groupId)}
                         >
                           {tr("runPythonFile")}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                      </>
+                    )}
+                    {filePath && (
+                      <>
+                        {workspace.kind === "local" && (
+                          <ContextMenuItem
+                            className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                            onSelect={() => void revealInFinder(filePath)}
+                          >
+                            {tr("explorer:menu.revealInFinder")}
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem
+                          className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => void copyToClipboard(filePath)}
+                        >
+                          {tr("explorer:menu.copyPath")}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          disabled={!fileRelativePath}
+                          className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => {
+                            if (fileRelativePath) {
+                              void copyToClipboard(fileRelativePath);
+                            }
+                          }}
+                        >
+                          {tr("explorer:menu.copyRelativePath")}
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          className="rounded-xl px-2.5 py-1.5 text-[13px]"
+                          onSelect={() => onAttachFileToAgent(filePath)}
+                        >
+                          {tr("explorer:menu.attachToAgent")}
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                       </>
