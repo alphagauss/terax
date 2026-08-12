@@ -5,8 +5,14 @@
 
 export { useTerminalFileDrop } from "./lib/useTerminalFileDrop";
 export {
+  subscribeTerminalCommandState,
+  terminalCommandState,
+  type TerminalCommandState,
+} from "./lib/commandState";
+export {
   clearFocusedTerminal,
   disposeSession,
+  executeCommandInSession,
   terminalHasForegroundProcess,
   terminalIdForPty,
   navigateFocusedBlocks,

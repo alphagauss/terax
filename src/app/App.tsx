@@ -409,13 +409,20 @@ export default function App() {
   const { explorerRoot: resolvedExplorerRoot, inheritedCwdForNewTab } =
     useWorkspaceCwd(activeTab, tabs, home);
   const explorerRoot = spaceTabs.length === 0 ? null : resolvedExplorerRoot;
+  const updatePythonRunTitle = useCallback(
+    (tabId: number, title: string) => updateTab(tabId, { title }),
+    [updateTab],
+  );
   const pythonRunner = usePythonFileRunner({
     workspace: workspaceEnv,
     explorerRoot,
+    activeSpaceId: activeSpaceId ?? DEFAULT_SPACE_ID,
     tabsRef,
     editorRefs,
     ensureWorkspaceReady,
     newRunTab,
+    activateTab: setActiveId,
+    updateTabTitle: updatePythonRunTitle,
   });
   const [explorerStartupReady, setExplorerStartupReady] = useState(
     () => currentWorkspaceEnv().kind === "local",

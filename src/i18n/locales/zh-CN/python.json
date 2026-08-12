@@ -18,5 +18,9 @@
     "system": "系统"
   },
   "runFailed": "无法运行 Python 文件",
-  "saveRequired": "请先保存文件再运行。"
+  "saveRequired": "请先保存文件再运行。",
+  "waitingTitle": "等待运行 {{file}}",
+  "waitingDescription": "Python 终端中的上一进程仍在运行，结束后将自动执行此文件。",
+  "cancelWaiting": "取消",
+  "runInNewTerminal": "在新终端中运行"
 }

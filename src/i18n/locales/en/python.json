@@ -18,5 +18,9 @@
     "system": "System"
   },
   "runFailed": "Could not run Python file",
-  "saveRequired": "Save the file before running it."
+  "saveRequired": "Save the file before running it.",
+  "waitingTitle": "Waiting to run {{file}}",
+  "waitingDescription": "The previous process is still running in the Python terminal. This file will run when it finishes.",
+  "cancelWaiting": "Cancel",
+  "runInNewTerminal": "Run in new terminal"
 }
