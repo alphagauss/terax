@@ -2,7 +2,7 @@
 
 本文记录 Alpha 综合量化工作站的产品边界、前后端职责、公共组件复用方式、外部参考项目审查结论、建议阅读路径和分阶段实施顺序。后续开发应先阅读本文，再按当前任务定向阅读少量参考源码，避免重复通读外部仓库或把不同项目的实现直接拼接到 Terax。
 
-本文是长期设计参考，不表示相关功能已经实现。Alpha 与 Terax 的进程和业务边界仍以 [Alpha 集成架构](./alpha-integration.md) 和根目录 `AGENTS.md` 为准。
+本文是长期设计参考，已完成实现以“当前 Terax 基线”为准，其余设计不表示相关功能已经实现。当前阶段和下一项任务记录在临时的 [实施进度](./alpha-quant-workstation-implementation.md) 中。Alpha 与 Terax 的进程和业务边界仍以 [Alpha 集成架构](./alpha-integration.md) 和根目录 `AGENTS.md` 为准。
 
 ## 产品目标
 
@@ -57,9 +57,14 @@ Terax Space / Workbench
 
 ## 当前 Terax 基线
 
+- Alpha FastAPI 共享服务、Rust 生命周期管理、凭据注入及通用 HTTP、WebSocket 代理已经接通，前端不直接管理 Python 进程或服务凭据。
+- 数据目录已经支持证券资料与行情覆盖的联合查询、服务端搜索与 Facet 过滤、分页、覆盖区间和全局摘要，数据页复用这些接口展示当前数据状态。
+- 后端已有证券、指数成分和日线同步任务，以及重叠区校验和异常报告基础；当前业务 API 只提供同步任务列表，尚未形成启动、重试、质量查看和失败恢复闭环。
+- 前端行情模型和归一化位于 `src/modules/alpha/market/`，明确区分无时区交易日和带时区绝对时间，并统一处理 OHLC 校验、顺序、去重和跨页合并。
 - 临时 K 线位于 [`AlphaFinancialChart.tsx`](../../src/modules/alpha/components/AlphaFinancialChart.tsx)，目前只在 [`AlphaDataPage.tsx`](../../src/modules/alpha/pages/AlphaDataPage.tsx) 的固定高度区域内使用。
 - 现有图表实例只在挂载时创建，日线使用 `BusinessDay`，成交量使用独立 pane，主题切换通过 `applyOptions()` 完成，页面隐藏时保留 Canvas。
-- 当前数据更新只有整体 `setData()`。[`getAlphaBars()`](../../src/modules/alpha/api.ts) 固定请求日线、前复权和最近 500 根，没有周期切换、历史分页或实时增量。
+- `/bars` 同时支持 `start + end` 范围查询和基于排他 `before` 游标的有界历史查询。历史查询从最新分片向前执行倒序 `LIMIT`，返回升序数据、`has_more_before`、下一游标和实际范围；不同页面共享完整覆盖范围的复权锚点。
+- [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据，数据页仍只使用默认的日线、前复权和最近 500 根。图表当前只有整体 `setData()`，尚未接入左侧 viewport 加载、周期切换或实时增量。
 - 当前 Alpha 页面包括数据、回测和设置，尚没有独立行情页、综合工作台、策略页、回测复盘页和模拟交易页。
 - Terax Workbench 已有递归分割树、稳定 tab ID 和 `WorkbenchViewPool`。移动、分割和隐藏页面不应重挂载其运行时实例。
 - 迁移时保留 `alphaBusinessDay()` 的时区不变量和测试，将其下沉到行情归一化模块。不要继续把新能力堆入现有临时组件。
@@ -597,18 +602,19 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ## 行情 API 与历史分页
 
-当前 [`alpha/api/routes/bars.py`](../../alpha/api/routes/bars.py) 在没有显式 `start` 时可能使用总览最早时间，存储层读取完整区间后才截取最后若干根。分钟线规模扩大后不能满足专业图表和多面板工作台的历史加载要求。
+[`alpha/api/routes/bars.py`](../../alpha/api/routes/bars.py) 保留 `start + end` 范围查询，并在没有范围参数时使用有界历史查询。`before` 是排他游标，不能与范围参数混用。
 
-首期应让存储和 API 支持真正的倒序限量查询：
+当前已完成的历史读取不变量包括：
 
 - 初次加载最近一批 K 线。
 - 以当前最早时间作为 `before` cursor 加载更早数据。
 - 存储层执行倒序 `LIMIT`，响应再恢复时间升序。
 - 响应提供 `has_more_before` 和实际覆盖范围。
 - 前端按时间去重，拒绝非法 OHLC 和非单调时间。
-- 历史 prepend 后恢复原 visible logical range。
+- 跨分片读取在填满 `limit + 1` 条后停止，前复权和后复权跨页保持统一锚点。
+- 前端同时接收 `amount` 和可选的 `open_interest`。
 
-后端输出 `amount` 时，前端 schema 必须同步接收。期货场景按需增加 `open_interest`。
+历史 prepend 后恢复原 visible logical range 属于公共图表 Controller 和 viewport 的后续工作，不由行情 API 或归一化层持有。
 
 ## 性能不变量
 

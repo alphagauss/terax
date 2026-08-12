@@ -154,7 +154,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - Rust 只负责 Alpha 生命周期、探活、凭据注入及通用 GET、POST、WebSocket 转发，不复制或解释 Alpha 领域模型。
 - Alpha 页面属于 `src/modules/alpha/`，复用 Terax 的 Workbench、组件、国际化、通知和设置。Agent 工具复用同一套 Alpha API 调用链。
 - `alpha-native/` 用于可选的 PyO3 原生计算模块。原生实现不得改变 FastAPI 协议和上层调用方式。
-- 详细职责和代码归属见 `docs/architecture/alpha-integration.md`。
+- 详细职责和代码归属见 `docs/architecture/alpha-integration.md`，工作站长期架构见 `docs/architecture/alpha-quant-workstation.md`。
+- 工作站当前阶段和下一项任务见临时文档 `docs/architecture/alpha-quant-workstation-implementation.md`。完成任务时同步更新长期架构中的当前基线和临时进度；全部阶段完成后删除临时文档并移除相关入口。
 
 ### PTY 与 Shell 集成
 
