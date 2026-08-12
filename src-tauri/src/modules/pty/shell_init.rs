@@ -1,3 +1,7 @@
+//! 构建本地与 WSL 终端的 Shell 启动命令。
+//!
+//! 本模块负责选择受信任的 Shell、注入集成脚本，并保持工作目录和用户环境不变。
+
 use std::path::PathBuf;
 
 use portable_pty::CommandBuilder;
@@ -520,6 +524,11 @@ mod windows {
             .unwrap_or_default();
         let is_powershell = shell_name == "pwsh.exe" || shell_name == "powershell.exe";
         let is_bash = shell_name == "bash.exe";
+        let shell_path = if is_powershell {
+            resolve_powershell_executable(shell_path)
+        } else {
+            shell_path
+        };
 
         let mut cmd = CommandBuilder::new(&shell_path);
         super::apply_common(&mut cmd, cwd, blocks);
@@ -560,6 +569,46 @@ mod windows {
 
         log::info!("spawning Windows shell: {}", shell_path.display());
         Ok(cmd)
+    }
+
+    /// 将无附加参数的 Scoop PowerShell shim 解析为真实可执行文件。
+    ///
+    /// 带参数或格式未知的描述文件继续使用原 shim，避免改变用户配置的启动语义。
+    fn resolve_powershell_executable(shell_path: PathBuf) -> PathBuf {
+        let descriptor = shell_path.with_extension("shim");
+        let Ok(content) = fs::read_to_string(&descriptor) else {
+            return shell_path;
+        };
+        let mut target = None;
+        for raw_line in content.lines() {
+            let line = raw_line.trim_start_matches('\u{feff}').trim();
+            if line.is_empty() {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                return shell_path;
+            };
+            if key.trim() != "path" || target.is_some() {
+                return shell_path;
+            }
+            let value = value.trim();
+            let Some(value) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {
+                return shell_path;
+            };
+            if value.is_empty() {
+                return shell_path;
+            }
+            target = Some(PathBuf::from(value));
+        }
+        let Some(target) = target.filter(|path| path.is_absolute() && path.is_file()) else {
+            return shell_path;
+        };
+        log::info!(
+            "resolved Scoop PowerShell shim {} -> {}",
+            shell_path.display(),
+            target.display()
+        );
+        target
     }
 
     fn build_wsl(cwd: Option<String>, distro: String) -> Result<CommandBuilder, String> {
@@ -854,6 +903,55 @@ mod windows {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use tempfile::tempdir;
+
+        #[test]
+        fn resolves_argumentless_scoop_powershell_shim() {
+            let dir = tempdir().unwrap();
+            let shim = dir.path().join("pwsh.exe");
+            let target = dir.path().join("apps/pwsh/current/pwsh.exe");
+            fs::create_dir_all(target.parent().unwrap()).unwrap();
+            fs::write(&shim, []).unwrap();
+            fs::write(&target, []).unwrap();
+            fs::write(
+                shim.with_extension("shim"),
+                format!("path = \"{}\"\n", target.display()),
+            )
+            .unwrap();
+
+            assert_eq!(resolve_powershell_executable(shim), target);
+        }
+
+        #[test]
+        fn preserves_scoop_powershell_shim_with_arguments() {
+            let dir = tempdir().unwrap();
+            let shim = dir.path().join("pwsh.exe");
+            let target = dir.path().join("pwsh-target.exe");
+            fs::write(&shim, []).unwrap();
+            fs::write(&target, []).unwrap();
+            fs::write(
+                shim.with_extension("shim"),
+                format!("path = \"{}\"\nargs = -NoProfile\n", target.display()),
+            )
+            .unwrap();
+
+            assert_eq!(resolve_powershell_executable(shim.clone()), shim);
+        }
+
+        #[test]
+        fn preserves_scoop_powershell_shim_with_missing_target() {
+            let dir = tempdir().unwrap();
+            let shim = dir.path().join("pwsh.exe");
+            let target = dir.path().join("missing-pwsh.exe");
+            fs::write(&shim, []).unwrap();
+            fs::write(
+                shim.with_extension("shim"),
+                format!("path = \"{}\"\n", target.display()),
+            )
+            .unwrap();
+
+            assert_eq!(resolve_powershell_executable(shim.clone()), shim);
+        }
 
         #[test]
         fn builds_wsl_zsh_launch_spec_with_env_and_login() {
