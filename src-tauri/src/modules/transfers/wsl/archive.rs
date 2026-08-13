@@ -4,34 +4,46 @@
 //! 归档，再以单流复制到宿主机。两端 SHA-256 一致后才安全解包，结果始终进入
 //! Planner 指定的 staging，最终仍使用通用 no-replace 提交。
 
-use std::path::Path;
-use std::process::Stdio;
-use std::time::Duration;
+#[cfg(windows)]
+use std::{path::Path, process::Stdio, time::Duration};
 
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
+#[cfg(windows)]
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 #[cfg(windows)]
 use uuid::Uuid;
 
+#[cfg(windows)]
 use crate::modules::transfers::archive::{
     build_wsl_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
+#[cfg(windows)]
 use crate::modules::transfers::commit::{cleanup_local_staging, commit_local_root, LocalRoot};
 #[cfg(windows)]
 use crate::modules::transfers::errors::io_failure;
 use crate::modules::transfers::errors::TransferErrorCode;
+#[cfg(windows)]
 use crate::modules::transfers::local::verify_apply_commit;
 use crate::modules::transfers::manager::TransferRunError;
+#[cfg(windows)]
 use crate::modules::transfers::models::TransferStage;
-use crate::modules::transfers::planner::{LocalPlan, WslArchiveContext};
+use crate::modules::transfers::planner::LocalPlan;
+#[cfg(windows)]
+use crate::modules::transfers::planner::WslArchiveContext;
 use crate::modules::transfers::progress::ExecutionContext;
+#[cfg(windows)]
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
+#[cfg(windows)]
 const COPY_BUFFER_BYTES: usize = 256 * 1024;
+#[cfg(windows)]
 const COMMAND_OUTPUT_LIMIT: usize = 1024 * 1024;
+#[cfg(windows)]
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
+#[cfg(windows)]
 const CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+#[cfg(windows)]
 const CLEANUP_RETRY_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 type RunResult<T> = Result<T, TransferRunError>;
@@ -724,6 +736,7 @@ async fn verify_sources(plan: &LocalPlan, context: &ExecutionContext) -> RunResu
     Ok(())
 }
 
+#[cfg(windows)]
 fn download_extract_roots(plan: &LocalPlan, sources: &[String]) -> RunResult<Vec<ExtractRoot>> {
     if sources.len() != plan.roots.len() {
         return Err(message("WSL archive root count changed"));
@@ -745,6 +758,10 @@ fn download_extract_roots(plan: &LocalPlan, sources: &[String]) -> RunResult<Vec
         .collect()
 }
 
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "非 Windows 仅保留纯函数测试")
+)]
 fn archive_source_path(source: &str) -> RunResult<String> {
     let relative = source
         .strip_prefix('/')
@@ -761,6 +778,10 @@ fn archive_source_path(source: &str) -> RunResult<String> {
 }
 
 /// 解析 WSL sha256sum 的首个完整十六进制摘要。
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "非 Windows 仅保留纯函数测试")
+)]
 fn parse_sha256(output: &[u8]) -> RunResult<String> {
     std::str::from_utf8(output)
         .map_err(|_| message("WSL archive checksum output is not UTF-8"))?

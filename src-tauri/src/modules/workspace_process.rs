@@ -780,6 +780,17 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_unsafe_wsl_distro_on_every_platform() {
+        assert!(parse_args([
+            ENV_ARG.to_string(),
+            r"wsl:..\..\Windows".to_string(),
+            POLICY_ARG.to_string(),
+            "fresh".to_string(),
+        ])
+        .is_err());
+    }
+
+    #[test]
     fn positional_directory_is_fresh_local() {
         let request = parse_args([".".to_string()]).unwrap();
         assert_eq!(request.env, WorkspaceEnv::Local);
