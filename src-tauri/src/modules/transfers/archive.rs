@@ -23,7 +23,9 @@ use super::errors::{
 };
 use super::manager::{TaskControl, TransferRunError};
 use super::metadata::EntryMetadata;
-use super::planner::{LocalPlan, PreparedTransfer, RemoteUploadPlan, TransferManifest};
+#[cfg(windows)]
+use super::planner::LocalPlan;
+use super::planner::{PreparedTransfer, RemoteUploadPlan, TransferManifest};
 use super::progress::ExecutionContext;
 use super::source::LocalSourceIdentity;
 
@@ -121,6 +123,7 @@ pub(crate) async fn build_upload_archive(
 }
 
 /// 按 WSL staging 相对路径创建本地 tar.gz，跨边界时只传输这一条归档流。
+#[cfg(windows)]
 pub(crate) async fn build_wsl_upload_archive(
     plan: &LocalPlan,
     context: &mut ExecutionContext,
@@ -782,6 +785,7 @@ fn remote_relative(path: &str, parent: &str) -> RunResult<String> {
     Ok(relative.to_string())
 }
 
+#[cfg(windows)]
 fn local_relative(path: &Path, parent: &Path) -> RunResult<String> {
     let relative = path.strip_prefix(parent).map_err(|_| {
         message(format!(

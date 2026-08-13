@@ -381,11 +381,10 @@ pub fn resolve_path(path: &str, _workspace: &WorkspaceEnv) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// True for WSL distro names safe to splice into a UNC path. Real WSL distros
-/// are alphanumeric with `.`, `_`, `-` separators (e.g. `Ubuntu-22.04`). Reject
-/// anything that could traverse out of the `\\wsl.localhost\<distro>\` prefix
-/// (`..`, `\`, `/`, `:`, `?`, `*`, control bytes) or empty names.
-#[cfg(windows)]
+/// 判断 WSL 发行版名称能否安全用于启动参数和 UNC 路径。
+///
+/// 校验保持为跨平台纯逻辑，使所有平台都能安全解析持久化的 Workspace 环境参数；
+/// 实际 WSL 命令和 UNC 路径转换仍只在 Windows 编译。
 fn is_safe_distro_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 255 {
         return false;
@@ -398,7 +397,7 @@ fn is_safe_distro_name(name: &str) -> bool {
         && !name.contains("..")
 }
 
-#[cfg(windows)]
+/// 校验 WSL 发行版名称，拒绝路径穿越、控制字符和路径元字符。
 pub(crate) fn validate_wsl_distro_name(distro: &str) -> Result<(), String> {
     if is_safe_distro_name(distro) {
         Ok(())

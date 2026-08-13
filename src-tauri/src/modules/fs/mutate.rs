@@ -198,6 +198,10 @@ async fn delete_wsl_path(_distro: &str, _path: &str) -> Result<(), String> {
 }
 
 /// 验证交给 WSL 原生命令的破坏性路径，禁止根目录和父级跳转。
+#[cfg_attr(
+    not(any(windows, test)),
+    expect(dead_code, reason = "WSL 删除仅在 Windows 执行")
+)]
 fn validate_posix_destructive_path(path: &str) -> Result<(), String> {
     if !path.starts_with('/')
         || path.contains(['\0', '\r', '\n'])

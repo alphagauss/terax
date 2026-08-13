@@ -68,6 +68,10 @@ pub(crate) struct LocalPlan {
     pub(crate) task_id: String,
     pub(crate) owner_task_id: String,
     pub(crate) wsl: WslArchiveContext,
+    #[cfg_attr(
+        not(windows),
+        expect(dead_code, reason = "WSL Archive 仅在 Windows 使用宿主目标目录")
+    )]
     pub(crate) destination_parent: PathBuf,
     pub(crate) directories: Vec<PlannedDirectory<PathBuf, PathBuf>>,
     pub(crate) files: Vec<LocalFile>,
@@ -78,10 +82,18 @@ pub(crate) struct LocalPlan {
 /// WSL Archive 执行时保留的 Linux 路径，不允许执行器从 UNC 路径反向猜测。
 pub(crate) enum WslArchiveContext {
     Upload {
+        #[cfg_attr(
+            not(windows),
+            expect(dead_code, reason = "WSL 执行器仅在 Windows 读取发行版")
+        )]
         distro: String,
         destination_parent: String,
     },
     Download {
+        #[cfg_attr(
+            not(windows),
+            expect(dead_code, reason = "WSL 执行器仅在 Windows 读取发行版")
+        )]
         distro: String,
         sources: Vec<String>,
     },

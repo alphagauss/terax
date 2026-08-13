@@ -54,6 +54,7 @@ pub(crate) async fn execute(plan: LocalPlan, context: &mut ExecutionContext) -> 
 }
 
 /// 复验 staging、恢复 Manifest 元数据并以 no-replace 方式提交全部顶层目标。
+#[cfg(windows)]
 pub(crate) async fn verify_apply_commit(
     plan: &LocalPlan,
     committed_files: u64,
