@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -41,7 +41,7 @@ def _resolve_token(token: str | None) -> str:
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """管理 Alpha 共享运行对象的完整生命周期。
 
     Args:
