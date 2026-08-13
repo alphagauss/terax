@@ -12,6 +12,8 @@ export type AlphaStatus = {
   autoStart: boolean;
   port: number;
   issue: "portConflict" | null;
+  runtimeRevision: string | null;
+  startedAt: string | null;
 };
 
 export type PythonCheck = {

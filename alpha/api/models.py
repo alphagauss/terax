@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -15,6 +16,7 @@ class HealthResponse(BaseModel):
     service: Literal["terax-alpha"] = "terax-alpha"
     protocol_version: Literal[2] = 2
     runtime_revision: str
+    started_at: datetime
 
 
 class ShutdownResponse(BaseModel):

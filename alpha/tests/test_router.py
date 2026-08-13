@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -421,6 +421,9 @@ def _client() -> TestClient:
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
         has_running_tasks=lambda: False,
     )
+    app.state.alpha_started_at = datetime(
+        2026, 8, 13, 9, 20, 31, tzinfo=timezone.utc
+    )
     app.include_router(router, prefix="/api/alpha")
     return TestClient(app)
 
@@ -437,6 +440,7 @@ def test_alpha_router_exposes_business_health() -> None:
         "service": "terax-alpha",
         "protocol_version": 2,
         "runtime_revision": "dev:unmanaged",
+        "started_at": "2026-08-13T09:20:31Z",
     }
 
 

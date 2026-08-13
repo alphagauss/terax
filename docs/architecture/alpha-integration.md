@@ -54,7 +54,7 @@ alpha-native Rust 计算模块
 - Python 运行环境以 `requirements-runtime.txt` 作为唯一依赖清单，通过 `python -E -m alpha.runtime_check` 逐项真实导入。最低版本为 Python 3.11；保存解释器时只校验绝对文件路径，只有用户主动检查才执行版本和依赖自检，为后续前端依赖管理保留清晰边界。
 - 服务启动不重复执行 Python 自检。解释器或环境后来发生变化时，由子进程提前退出和 `~/.terax/logs/alpha/service.log` 暴露真实错误，Rust 不等待完整启动超时。
 - 应用 Ready 后延迟协调统一的 `runtime_revision`。服务未运行时只有已配置自动启动才创建服务；服务已经运行但 revision 或协议不一致时，无论自动启动开关如何都替换为当前运行源码。
-- Release revision 使用 `release:<archive-sha256>`；Dev revision 使用 `dev:<runtime-files-sha256>`。Rust 启动服务时通过 `TERAX_ALPHA_RUNTIME_REVISION` 注入，受认证健康检查返回同一值。
+- Release revision 使用 `release:<archive-sha256>`；Dev revision 使用 `dev:<runtime-files-sha256>`。Rust 启动服务时通过 `TERAX_ALPHA_RUNTIME_REVISION` 注入，受认证健康检查返回同一值，并返回当前服务完成初始化的 UTC `started_at`。
 - Debug 构建使用系统原生文件通知递归监听 `alpha/`，只接受生产运行集合中的 Python 文件和 `requirements-runtime.txt`。事件经过防抖后调用同一协调入口；停止状态不会因文件变化而隐式启动。
 - 多个开发窗口可能同时收到变更，但所有判断都在 `service.lock` 内重新执行。首个窗口完成替换后，其他窗口发现 revision 已一致并直接返回。
 - 启动、停止和重启共用 `~/.terax/alpha/service.lock`。该锁只串行化操作，服务是否运行始终以带凭据的健康检查为准。

@@ -45,6 +45,8 @@ describe("Alpha query runtime", () => {
       autoStart: true,
       port: 11123,
       issue: null,
+      runtimeRevision: "release:0123456789abcdef",
+      startedAt: "2026-08-13T09:20:31Z",
     });
   });
 

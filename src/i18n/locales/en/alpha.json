@@ -151,7 +151,12 @@
     "configureRequired": "Choose a Python interpreter and start the service in Alpha settings.",
     "statusRunning": "Running",
     "statusUnknown": "Status unknown",
-    "statusStopped": "Stopped"
+    "statusStopped": "Stopped",
+    "startedAtTitle": "Started at",
+    "startedAtDescription": "Time when the current shared service became ready.",
+    "runtimeRevisionTitle": "Runtime revision",
+    "runtimeRevisionDescription": "Identifies the exact Alpha code running in this service.",
+    "unknownValue": "Unknown"
   },
   "autoStart": {
     "title": "Start after Terax launches",

@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI
 
@@ -52,6 +53,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     container = create_alpha_service_container(load_config())
     app.state.alpha_services = container
+    app.state.alpha_started_at = datetime.now(timezone.utc)
     try:
         yield
     finally:

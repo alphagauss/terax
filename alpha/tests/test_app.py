@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -72,17 +73,26 @@ def test_app_mounts_router_and_closes_container(
             "/api/alpha/health",
             headers={"Authorization": "Bearer test-token"},
         )
+        repeated = client.get(
+            "/api/alpha/health",
+            headers={"Authorization": "Bearer test-token"},
+        )
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
     assert valid.status_code == 200
-    assert valid.json() == {
+    body = valid.json()
+    started_at = body.pop("started_at")
+    assert body == {
         "status": "ok",
         "ready": True,
         "service": "terax-alpha",
         "protocol_version": 2,
         "runtime_revision": "dev:unmanaged",
     }
+    parsed_started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    assert parsed_started_at.tzinfo is not None
+    assert repeated.json()["started_at"] == started_at
     assert container.closed is True
 
 

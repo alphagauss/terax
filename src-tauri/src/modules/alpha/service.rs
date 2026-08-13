@@ -43,6 +43,8 @@ pub struct AlphaStatus {
     pub auto_start: bool,
     pub port: u16,
     pub issue: Option<AlphaStatusIssue>,
+    pub runtime_revision: Option<String>,
+    pub started_at: Option<String>,
 }
 
 /// 前端可本地化展示的 Alpha 服务状态异常。
@@ -80,6 +82,8 @@ struct ServiceHealth {
     protocol_version: u32,
     #[serde(default, alias = "archive_hash")]
     runtime_revision: Option<String>,
+    #[serde(default)]
+    started_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -166,13 +170,16 @@ pub async fn status() -> Result<AlphaStatus, String> {
     } else {
         None
     };
+    let usable_service = service.as_ref().filter(|health| is_usable_service(health));
     Ok(AlphaStatus {
-        running: service.as_ref().is_some_and(is_usable_service),
+        running: usable_service.is_some(),
         configured: config.python_path.is_some(),
         python_path: config.python_path,
         auto_start: config.auto_start,
         port: ALPHA_PORT,
         issue,
+        runtime_revision: usable_service.and_then(|health| health.runtime_revision.clone()),
+        started_at: usable_service.and_then(|health| health.started_at.clone()),
     })
 }
 
@@ -647,6 +654,7 @@ mod tests {
             service: "terax-alpha".to_string(),
             protocol_version: SERVICE_PROTOCOL_VERSION,
             runtime_revision: Some("dev:current".to_string()),
+            started_at: Some("2026-08-13T09:20:31Z".to_string()),
         };
         assert_eq!(
             plan_presence(true, true, false),
@@ -696,11 +704,31 @@ mod tests {
             "ready": true,
             "service": "terax-alpha",
             "protocol_version": 2,
-            "runtime_revision": "release:current"
+            "runtime_revision": "release:current",
+            "started_at": "2026-08-13T09:20:31Z"
         }))
         .unwrap();
 
         assert!(is_current_runtime(&current, "release:current"));
+        assert_eq!(
+            current.started_at.as_deref(),
+            Some("2026-08-13T09:20:31Z")
+        );
+    }
+
+    #[test]
+    fn old_health_response_without_started_at_remains_compatible() {
+        let old: ServiceHealth = serde_json::from_value(serde_json::json!({
+            "status": "ok",
+            "ready": true,
+            "service": "terax-alpha",
+            "protocol_version": 2,
+            "runtime_revision": "release:previous"
+        }))
+        .unwrap();
+
+        assert!(is_usable_service(&old));
+        assert_eq!(old.started_at, None);
     }
 
     #[test]

@@ -57,6 +57,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: { language: "en" },
     t: mocks.translate,
   }),
 }));
@@ -90,6 +91,8 @@ describe("AlphaSettingsPage", () => {
       autoStart: true,
       port: 8765,
       issue: null,
+      runtimeRevision: null,
+      startedAt: null,
     });
   });
 
@@ -130,6 +133,36 @@ describe("AlphaSettingsPage", () => {
     act(() => root.unmount());
   });
 
+  it("服务运行时展示启动时间和缩短的运行版本", async () => {
+    mocks.getAlphaStatus.mockResolvedValue({
+      running: true,
+      configured: true,
+      pythonPath: "C:/Python/python.exe",
+      autoStart: true,
+      port: 8765,
+      issue: null,
+      runtimeRevision: "release:0123456789abcdef",
+      startedAt: "2026-08-13T09:20:31Z",
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(AlphaSettingsPage, { visible: true }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(container.textContent).toContain("service.startedAtTitle");
+    expect(container.textContent).toContain("service.runtimeRevisionTitle");
+    expect(container.textContent).toContain("release:0123456789ab");
+    expect(
+      container.querySelector('[title="release:0123456789abcdef"]'),
+    ).not.toBeNull();
+    act(() => root.unmount());
+  });
+
   it("保存数据目录后不依赖陈旧状态直接重启共享服务", async () => {
     mocks.getAlphaStatus.mockResolvedValue({
       running: true,
@@ -138,6 +171,8 @@ describe("AlphaSettingsPage", () => {
       autoStart: true,
       port: 8765,
       issue: null,
+      runtimeRevision: "release:0123456789abcdef",
+      startedAt: "2026-08-13T09:20:31Z",
     });
     mocks.open.mockResolvedValue("D:/synced-alpha");
     mocks.updateAlphaSettings.mockResolvedValue({
@@ -150,6 +185,8 @@ describe("AlphaSettingsPage", () => {
       autoStart: true,
       port: 8765,
       issue: null,
+      runtimeRevision: "release:0123456789abcdef",
+      startedAt: "2026-08-13T09:20:31Z",
     });
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -186,6 +223,8 @@ describe("AlphaSettingsPage", () => {
       autoStart: true,
       port: 8765,
       issue: null,
+      runtimeRevision: "release:0123456789abcdef",
+      startedAt: "2026-08-13T09:20:31Z",
     });
     mocks.getAlphaSettings.mockRejectedValue(new Error("settings failed"));
     const container = document.createElement("div");

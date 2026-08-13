@@ -53,6 +53,23 @@ type Props = {
   visible: boolean;
 };
 
+/** 将 Alpha 服务的 UTC 启动时间转换为当前界面语言的本地时间。 */
+function formatStartedAt(value: string, language: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat(language, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(date);
+}
+
+/** 缩短运行代码哈希，完整 revision 仍通过标题提供。 */
+function formatRuntimeRevision(value: string): string {
+  const separator = value.indexOf(":");
+  if (separator < 0 || value.length <= separator + 13) return value;
+  return `${value.slice(0, separator + 1)}${value.slice(separator + 1, separator + 13)}`;
+}
+
 /**
  * 渲染共享 Python 解释器配置与 Alpha 服务控制。
  *
@@ -68,7 +85,7 @@ export function AlphaSettingsPage(props: Props) {
 
 /** 连接共享状态并渲染 Alpha 服务设置。 */
 function AlphaSettingsPageContent({ visible }: Props) {
-  const { t } = useTranslation("alpha");
+  const { i18n, t } = useTranslation("alpha");
   const queryClient = useQueryClient();
   const service = useAlphaServiceStatus(visible);
   const status = service.data ?? null;
@@ -381,6 +398,33 @@ function AlphaSettingsPageContent({ visible }: Props) {
                   : t("service.statusStopped")}
             </span>
           </SettingRow>
+          {status?.running ? (
+            <>
+              <SettingRow
+                title={t("service.startedAtTitle")}
+                description={t("service.startedAtDescription")}
+              >
+                <span className="text-[11px] text-muted-foreground">
+                  {status.startedAt
+                    ? formatStartedAt(status.startedAt, i18n.language)
+                    : t("service.unknownValue")}
+                </span>
+              </SettingRow>
+              <SettingRow
+                title={t("service.runtimeRevisionTitle")}
+                description={t("service.runtimeRevisionDescription")}
+              >
+                <span
+                  className="max-w-48 truncate font-mono text-[11px] text-muted-foreground"
+                  title={status.runtimeRevision ?? undefined}
+                >
+                  {status.runtimeRevision
+                    ? formatRuntimeRevision(status.runtimeRevision)
+                    : t("service.unknownValue")}
+                </span>
+              </SettingRow>
+            </>
+          ) : null}
           <SettingRow
             title={t("autoStart.title")}
             description={t("autoStart.description")}
