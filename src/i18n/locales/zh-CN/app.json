@@ -35,6 +35,10 @@
     "maximize": "最大化",
     "restore": "还原"
   },
+  "auxiliaryWindow": {
+    "loadFailedTitle": "无法打开窗口",
+    "loadFailedDescription": "无法加载这个辅助页面。请关闭窗口后重试。"
+  },
   "zenMode": {
     "fullscreenFailed": "无法切换禅模式所需的全屏状态。"
   }

@@ -1,3 +1,8 @@
+/**
+ * 本文件渲染 Windows 和 Linux 的统一窗口控制按钮。
+ * 调用方根据原生窗口真实能力决定是否显示最小化和最大化，关闭始终可用。
+ */
+
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
@@ -12,16 +17,20 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 type Props = {
-  /** Render only the close button (used by the settings window). */
-  closeOnly?: boolean;
+  minimizable?: boolean;
+  maximizable?: boolean;
 };
 
-export function WindowControls({ closeOnly = false }: Props) {
+/** 渲染与当前原生窗口能力一致的最小化、最大化和关闭按钮。 */
+export function WindowControls({
+  minimizable = true,
+  maximizable = true,
+}: Props) {
   const { t } = useTranslation("app");
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    if (!USE_CUSTOM_WINDOW_CONTROLS || closeOnly) return;
+    if (!USE_CUSTOM_WINDOW_CONTROLS || !maximizable) return;
     const w = getCurrentWindow();
     let unlisten: (() => void) | undefined;
     void w.isMaximized().then(setMaximized);
@@ -33,7 +42,7 @@ export function WindowControls({ closeOnly = false }: Props) {
         unlisten = un;
       });
     return () => unlisten?.();
-  }, [closeOnly]);
+  }, [maximizable]);
 
   if (!USE_CUSTOM_WINDOW_CONTROLS) return null;
 
@@ -41,29 +50,29 @@ export function WindowControls({ closeOnly = false }: Props) {
 
   return (
     <div className="flex h-full shrink-0 items-center gap-0.5 pr-1">
-      {!closeOnly && (
-        <>
-          <CtlButton
-            ariaLabel={t("windowControls.minimize")}
-            onClick={() => void w.minimize()}
-          >
-            <HugeiconsIcon icon={MinusSignIcon} size={12} strokeWidth={2} />
-          </CtlButton>
-          <CtlButton
-            ariaLabel={
-              maximized
-                ? t("windowControls.restore")
-                : t("windowControls.maximize")
-            }
-            onClick={() => void w.toggleMaximize()}
-          >
-            <HugeiconsIcon
-              icon={maximized ? Copy01Icon : SquareIcon}
-              size={12}
-              strokeWidth={2}
-            />
-          </CtlButton>
-        </>
+      {minimizable && (
+        <CtlButton
+          ariaLabel={t("windowControls.minimize")}
+          onClick={() => void w.minimize()}
+        >
+          <HugeiconsIcon icon={MinusSignIcon} size={12} strokeWidth={2} />
+        </CtlButton>
+      )}
+      {maximizable && (
+        <CtlButton
+          ariaLabel={
+            maximized
+              ? t("windowControls.restore")
+              : t("windowControls.maximize")
+          }
+          onClick={() => void w.toggleMaximize()}
+        >
+          <HugeiconsIcon
+            icon={maximized ? Copy01Icon : SquareIcon}
+            size={12}
+            strokeWidth={2}
+          />
+        </CtlButton>
       )}
       <CtlButton
         ariaLabel={t("common:close")}

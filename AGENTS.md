@@ -144,7 +144,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `lsp::*`：语言服务器进程及 JSON-RPC 管道；协议智能位于前端。
 - `net::*`：带 SSRF 防护的 AI HTTP 代理。
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
-- `open_settings_window`：独立设置窗口。
+- `auxiliary_window::open_auxiliary_window`：按封闭类型定义创建或复用轻量辅助窗口，设置页是首个注册页面。
 
 ### PTY 与 Shell 集成
 

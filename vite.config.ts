@@ -62,7 +62,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
     rolldownOptions: {
       input: {
         main: path.resolve(__dirname, "index.html"),
-        settings: path.resolve(__dirname, "settings.html"),
+        auxiliary: path.resolve(__dirname, "auxiliary.html"),
       },
       // Oxc drops `debugger` by default. These calls return undefined, so
       // marking them pure lets DCE strip them from production builds.
