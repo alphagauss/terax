@@ -180,7 +180,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 - 所有用户可见文本都必须翻译，包括 JSX、按钮、菜单、tooltip、`title`、`aria-label`、`placeholder`、toast、验证错误、命令面板和 macOS 原生菜单。
 - 新增用户可见文本时，同一次修改必须更新 `en` 和 `zh-CN`。
 - `language` 设置是唯一语言状态来源，不要增加第二个 store，也不要持久化到 `localStorage`。
-- 每个应用进程只有一个窗口。多窗口来自多个进程，不是同一进程中的多个 Workspace WebView。
+- 每个应用进程只有一个完整 Workspace 窗口；同一进程可以按需创建设置窗口和轻量辅助 `WebviewWindow`，但它们不能成为第二个 Workspace 运行时所有者。多个完整 Workspace 窗口仍来自多个独立进程。
 - 标签页切换时不卸载，而是通过 `invisible pointer-events-none` 隐藏，保证 PTY 和开发服务器继续运行。
 - `App.tsx` 只负责模块协调，新功能放入对应的 `src/modules/<area>/`。
 

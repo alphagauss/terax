@@ -16,7 +16,8 @@
 - [安全模型](architecture/security-model.md) - deny-list、SSRF 防护、Workspace 授权、AI 工具审批、IPC allowlist、OSC 信任机制和 keychain 处理。
 - [AI 子系统](architecture/ai-subsystem.md) - provider、Agent、sub-agent、session、composer、工具、编辑 diff 和实时上下文桥接。包含新增 provider 的完整操作说明。
 - [终端 renderer pool](architecture/terminal-renderer-pool.md) - slot pool、DormantRing，以及禁止在命令执行中序列化的不变量。
-- [Workbench 辅助窗口](architecture/workbench-auxiliary-windows.md) - 将 Workbench 工作页移动或复制到附属原生窗口时的产品边界、窗口所有权和运行时约束。
+- [通用辅助窗口](architecture/auxiliary-windows.md) - 为简单业务视图提供统一原生窗口外壳、主题和生命周期。
+- [Workspace 工作页跨窗口交接](architecture/workspace-page-handoff.md) - 基于现有多进程窗口模型复制或移动可重建的 Workbench 页面。
 - [文件传输](architecture/file-transfers.md) - Direct 与 Archive 任务生命周期、staging、no-replace commit、重试、资源上限和真实环境验证。
 - [Alpha 集成](architecture/alpha-integration.md) - FastAPI 量化后端、轻量 Rust proxy、Terax UI 集成和可选的 PyO3 计算边界。
 - [Alpha 综合量化工作站](architecture/alpha-quant-workstation.md) - 公共金融图表、面板工作台、数据管理、回测、模拟交易、参考项目和分阶段实施指南。

@@ -50,7 +50,7 @@ Terax Space / Workbench
 - Terax 顶层 SplitView 继续只使用 `react-resizable-panels`。Alpha 页面内部的自由面板网格是不同层级的布局能力，不替换顶层 SplitView。
 - Alpha Panel Grid 固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
 - 首期标的联动只提供工作台主标的跟随和单面板固定。多联动组、时间范围同步和十字线同步按真实多图需求渐进增加。
-- Alpha 内部面板不创建原生弹出窗口。完整 Alpha 工作台页面的移动或复制由 Workbench 辅助窗口能力统一负责。
+- Alpha 不自行实现原生窗口框架。轻量业务视图复用通用辅助窗口，完整工作页的移动或复制复用 Workspace 跨窗口交接能力。
 - 工作台、图表、绘图和指标状态都使用可版本化 JSON 表达，不持久化 React、Canvas、Controller、Query 或连接实例。
 - Alpha FastAPI 是量化领域和权威数据边界。Rust 只负责生命周期、凭据注入和通用代理，不复制行情、策略、订单或风险领域模型。
 - 实施顺序先完成领域架构和数据管理，再建设可复用图表、工作台、回测和模拟交易，不一次引入所有面板、指标和绘图工具。
@@ -126,7 +126,7 @@ Terax 保留两级、不同职责的布局系统：
 
 递归 SplitView 适合 IDE 资源布局，自由网格适合交易终端面板。不要让用户通过顶层 Workbench 的每个 Tab 手工模拟整套交易终端，也不要在普通 Alpha 数据页中嵌套完整网格。
 
-完整 `AlphaWorkstationPage` 将来可以由 Workbench 移动或复制到辅助窗口，但 Alpha 不拥有窗口、跨 WebView 路由或原生生命周期。具体边界见 [Workbench 辅助窗口架构](./workbench-auxiliary-windows.md)。
+完整 `AlphaWorkstationPage` 将来可以作为可重建页面复制或移动到临时 Workspace 窗口，但 Alpha 不拥有窗口启动、跨进程交接或原生生命周期。具体边界见 [Workspace 工作页跨窗口交接](./workspace-page-handoff.md)。
 
 ### 建议页面地图
 
@@ -337,7 +337,7 @@ type AlphaSymbolBinding =
 
 布局拖动期间不写 React 业务状态或持久化存储。只在交互结束后读取和提交最终坐标；连续结束事件使用短暂合并，且必须可取消。
 
-Alpha 页面显示在主窗口还是未来的 Workbench 辅助窗口中，不改变上述状态所有权。Alpha 不按原生窗口复制布局或建立独立持久化协议。
+Alpha 页面在临时 Workspace 窗口中按稳定描述重新创建，不改变上述持久化层级，也不建立窗口专用的布局协议。通用辅助窗口中的轻量 Alpha 视图由对应业务类型明确自己的状态来源。
 
 ## 公共金融图表和跨页面复用
 
@@ -493,7 +493,7 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - 捕获并忽略所有 `series.update()` 异常的做法。
 - 固定按天数拉取 1 分钟数据并在浏览器聚合全部周期。
 - `localStorage` 布局以及拖动期间持续写状态的方式。
-- 面板级原生弹出窗口。Alpha 只提供页面内部布局，完整页面的辅助窗口托管由 Workbench 负责。
+- 面板级原生弹出窗口。Alpha 页面内部布局不拆成任意浮动面板；确有需要的轻量视图通过通用辅助窗口单独设计。
 
 ### OpenTerminalUI
 
@@ -707,7 +707,7 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### 运行时验证
 
-实现涉及真实网格拖动、pane 调整、可见范围、命中区域、WebView Canvas、ResizeObserver 或 Pointer Events 时，按 [`ui-runtime-debugging.md`](../contributing/ui-runtime-debugging.md) 使用相同复现条件验证修改前后行为。依赖 Alpha IPC 或 WebSocket 的场景使用真实 Tauri 运行时；只有明确包含 Workbench 辅助窗口集成时才验证原生多窗口，Alpha 内部不单独创建窗口。
+实现涉及真实网格拖动、pane 调整、可见范围、命中区域、WebView Canvas、ResizeObserver 或 Pointer Events 时，按 [`ui-runtime-debugging.md`](../contributing/ui-runtime-debugging.md) 使用相同复现条件验证修改前后行为。依赖 Alpha IPC 或 WebSocket 的场景使用真实 Tauri 运行时；只有明确接入通用辅助窗口或 Workspace 工作页交接时才验证原生多窗口。
 
 ## 分阶段实施顺序
 
@@ -756,4 +756,4 @@ Alpha HTTP 权威快照 + WebSocket 增量
 - Terax 要实现指标 pane 或基础绘图时，只复核 OpenTerminalUI 与 Shioaji 已列出的图表模块。
 - 本文列出的关键文件在本地参考仓库中已被删除、拆分或 API 发生实质变化。
 
-Workbench 辅助窗口是独立公共能力，不触发 Alpha 重新审查参考项目；完整 Alpha 页面接入时遵循 [Workbench 辅助窗口架构](./workbench-auxiliary-windows.md)。若只是上游新增无关页面、绘图工具或指标数量，不需要更新本文。
+窗口基础设施是独立公共能力，不触发 Alpha 重新审查参考项目。轻量视图接入遵循 [通用辅助窗口](./auxiliary-windows.md)，完整 Alpha 页面接入遵循 [Workspace 工作页跨窗口交接](./workspace-page-handoff.md)。若只是上游新增无关页面、绘图工具或指标数量，不需要更新本文。
