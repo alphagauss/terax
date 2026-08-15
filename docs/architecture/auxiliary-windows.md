@@ -2,7 +2,7 @@
 
 通用辅助窗口用于在当前 Terax 进程中按需显示简单业务页面。每个窗口拥有独立 WebView 和 React Root，但不承载完整 Workbench，也不拥有第二套 Workspace 运行时。
 
-当前只有设置页接入该能力。完整工作页进入新窗口时使用 [Workspace 工作页跨窗口交接](./workspace-page-handoff.md)。
+当前只有设置页接入该能力。完整工作页进入新窗口时使用 [Workspace 工作页跨窗口复制](./workspace-page-handoff.md)。
 
 ## 实现结构
 

@@ -97,13 +97,24 @@ export async function spawnWorkspaceProcess(
   policy: WorkspacePolicy,
   launchDir?: string,
 ): Promise<number> {
+  const windowGeometry = await nextWorkspaceWindowGeometry();
+  return invoke<number>("spawn_workspace_process", {
+    env,
+    policy,
+    launchDir: launchDir ?? null,
+    windowGeometry,
+  });
+}
+
+/** 计算新 Workspace 窗口相对当前窗口错开的初始几何信息。 */
+export async function nextWorkspaceWindowGeometry(): Promise<WindowGeometry | null> {
   const window = getCurrentWindow();
   const [size, position, maximized] = await Promise.all([
     window.outerSize(),
     window.outerPosition(),
     window.isMaximized(),
   ]);
-  const windowGeometry = maximized
+  return maximized
     ? null
     : {
         width: size.width,
@@ -111,12 +122,6 @@ export async function spawnWorkspaceProcess(
         x: position.x + 32,
         y: position.y + 32,
       };
-  return invoke<number>("spawn_workspace_process", {
-    env,
-    policy,
-    launchDir: launchDir ?? null,
-    windowGeometry,
-  });
 }
 
 export function sameWorkspaceEnv(

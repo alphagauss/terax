@@ -21,6 +21,7 @@ import type {
   WorkbenchGroup as WorkbenchGroupModel,
   WorkbenchLayoutNode,
 } from "@/modules/workbench/types";
+import type { WorkspacePageHandoffMenuActions } from "@/modules/workspace-handoff";
 import { Fragment } from "react";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
 
@@ -46,6 +47,7 @@ export type WorkbenchChromeActions = {
   ) => void;
   overrideLanguage: (tabId: number, language: string | null) => void;
   resizeSplit: (splitId: number, sizes: number[]) => void;
+  pageHandoff?: WorkspacePageHandoffMenuActions;
 };
 
 type Props = {
@@ -148,6 +150,7 @@ function WorkbenchGroup({
             onSplitTab={actions.splitTab}
             canClose={tabCount > 0}
             onOverrideLanguage={actions.overrideLanguage}
+            pageHandoff={actions.pageHandoff}
             compact
           />
         </div>

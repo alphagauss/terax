@@ -146,6 +146,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `net::*`：带 SSRF 防护的 AI HTTP 代理。
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
 - `auxiliary_window::open_auxiliary_window`：按封闭类型定义创建或复用轻量辅助窗口，设置页是首个注册页面。
+- `workspace_runtime::*`：登记完整 Workspace 进程，并通过原子运行时文件投递窗口激活、打开文件和可重建工作页。
 
 ### Alpha 量化服务边界
 
@@ -173,6 +174,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 进程启动时确定的 Local、WSL 或 SSH 环境不可变。Space 只保存 UI 分组、根目录和标签页状态，不能切换进程后端。
 
 Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单 `shared_store.rs` API 执行加锁、读取最新值、最小变更和原子替换。不得重新引入共享 `LazyStore` 或整表覆盖写入。
+
+Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-workspace-runtime.json`。它是可丢弃的运行时交换文件，不是配置或恢复状态；窗口存活以既有 Workspace OS lock 为准，不增加心跳。
 
 ### 前端与国际化
 
@@ -211,6 +214,7 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 - `lsp/`：按需启用，未启用时不得产生进程、PATH 检查或额外 eager bundle 成本。没有 root marker 就不能启动 session，每个 server 最多 4 个 session。
 - `markdown/`：Markdown 预览。
 - `workspace/`、`workspace-process/`：环境模型、启动上下文和多进程策略。
+- `workspace-handoff/`：主窗口工作页复制协议、临时窗口发现和定向消息消费，不传输进程内运行时资源。
 - `theme/`：自定义主题引擎，不使用 `next-themes`。
 - `agents/`：内置 Agent 与终端编码 Agent 的通知、状态和 OSC 777 检测。
 - `command-palette/`：命令与导航面板。
@@ -267,5 +271,6 @@ Terax 自有数据统一存放在 `~/.terax`。全局可写配置通过白名单
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量
+- `docs/architecture/workspace-page-handoff.md`：主窗口向同环境临时 Workspace 复制可重建工作页
 - `docs/contributing/testing.md`：测试约定和核心子系统不变量
 - `docs/contributing/ui-runtime-debugging.md`：复杂 UI 的运行时调试和回归验证

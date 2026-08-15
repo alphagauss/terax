@@ -25,16 +25,6 @@ const STORES: &[(&str, &str)] = &[
     ("ui-layout", "terax-ui-layout.json"),
     ("keys-epoch", "terax-keys-epoch.json"),
 ];
-const WORKSPACE_FILE_OPEN_REQUESTS: &str = "workspaceFileOpenRequests";
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceFileOpenRequest {
-    environment: String,
-    workspace_id: String,
-    files: Vec<String>,
-}
-
 pub struct SharedStoreState {
     _watcher: Mutex<RecommendedWatcher>,
 }
@@ -139,102 +129,6 @@ pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
         );
     })?;
     emit_changed(app, &root, "keys-epoch")
-}
-
-pub(crate) fn request_workspace_activation(
-    environment: &str,
-    workspace_id: &str,
-) -> Result<(), String> {
-    let root = store_dir()?;
-    mutate(&root, "settings", |map| {
-        map.insert(
-            "workspaceActivation".to_string(),
-            serde_json::json!({
-                "requestId": uuid::Uuid::new_v4().to_string(),
-                "environment": environment,
-                "workspaceId": workspace_id,
-            }),
-        );
-    })
-}
-
-pub(crate) fn request_workspace_file_open(
-    environment: &str,
-    workspace_id: &str,
-    files: &[String],
-) -> Result<(), String> {
-    request_workspace_file_open_at(&store_dir()?, environment, workspace_id, files)
-}
-
-fn request_workspace_file_open_at(
-    root: &Path,
-    environment: &str,
-    workspace_id: &str,
-    files: &[String],
-) -> Result<(), String> {
-    mutate(root, "settings", |map| {
-        let requests = map
-            .entry(WORKSPACE_FILE_OPEN_REQUESTS.to_string())
-            .or_insert_with(|| Value::Array(Vec::new()));
-        if !requests.is_array() {
-            *requests = Value::Array(Vec::new());
-        }
-        requests
-            .as_array_mut()
-            .expect("workspace file open requests must be an array")
-            .push(serde_json::json!({
-                "environment": environment,
-                "workspaceId": workspace_id,
-                "files": files,
-            }));
-        map.insert(
-            "workspaceActivation".to_string(),
-            serde_json::json!({
-                "requestId": uuid::Uuid::new_v4().to_string(),
-                "environment": environment,
-                "workspaceId": workspace_id,
-            }),
-        );
-    })
-}
-
-pub(crate) fn take_workspace_file_open(
-    environment: &str,
-    workspace_id: &str,
-) -> Result<Vec<String>, String> {
-    take_workspace_file_open_at(&store_dir()?, environment, workspace_id)
-}
-
-fn take_workspace_file_open_at(
-    root: &Path,
-    environment: &str,
-    workspace_id: &str,
-) -> Result<Vec<String>, String> {
-    mutate(root, "settings", |map| {
-        let Some(Value::Array(requests)) = map.remove(WORKSPACE_FILE_OPEN_REQUESTS) else {
-            return Vec::new();
-        };
-        let mut files = Vec::new();
-        let mut pending = Vec::new();
-        for value in requests {
-            match serde_json::from_value::<WorkspaceFileOpenRequest>(value.clone()) {
-                Ok(request)
-                    if request.environment == environment
-                        && request.workspace_id == workspace_id =>
-                {
-                    files.extend(request.files);
-                }
-                _ => pending.push(value),
-            }
-        }
-        if !pending.is_empty() {
-            map.insert(
-                WORKSPACE_FILE_OPEN_REQUESTS.to_string(),
-                Value::Array(pending),
-            );
-        }
-        files
-    })
 }
 
 fn revision(path: &Path) -> String {
@@ -440,33 +334,6 @@ mod tests {
 
         assert!(result.is_err());
         assert!(map.is_empty());
-    }
-
-    #[test]
-    fn workspace_file_open_requests_are_queued_and_drained_by_workspace() {
-        let dir = tempfile::tempdir().unwrap();
-        for (workspace_id, files) in [
-            (
-                "primary",
-                vec!["C:/one.rs".to_string(), "C:/two.rs".to_string()],
-            ),
-            ("other", vec!["C:/other.rs".to_string()]),
-            ("primary", vec!["C:/three.rs".to_string()]),
-        ] {
-            request_workspace_file_open_at(dir.path(), "local", workspace_id, &files).unwrap();
-        }
-
-        assert_eq!(
-            take_workspace_file_open_at(dir.path(), "local", "primary").unwrap(),
-            vec!["C:/one.rs", "C:/two.rs", "C:/three.rs"]
-        );
-        assert_eq!(
-            take_workspace_file_open_at(dir.path(), "local", "other").unwrap(),
-            vec!["C:/other.rs"]
-        );
-        assert!(take_workspace_file_open_at(dir.path(), "local", "primary")
-            .unwrap()
-            .is_empty());
     }
 
     #[test]

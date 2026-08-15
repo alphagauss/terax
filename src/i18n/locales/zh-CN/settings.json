@@ -132,7 +132,7 @@
       },
       "workspaceWindows": {
         "title": "工作区窗口",
-        "description": "单窗口模式会为每个本地、WSL 或 SSH 环境复用一个窗口。修改仅对之后打开的窗口生效。",
+        "description": "单窗口模式会为每个本地、WSL 或 SSH 环境复用一个窗口。多窗口模式同时允许将工作页复制至临时窗口。",
         "single": "每个环境使用单个窗口",
         "multiple": "每个环境使用多个窗口"
       }

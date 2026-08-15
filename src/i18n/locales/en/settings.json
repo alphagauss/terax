@@ -132,7 +132,7 @@
       },
       "workspaceWindows": {
         "title": "Workspace windows",
-        "description": "Single window reuses one window per Local, WSL, or SSH environment. Changes apply to windows opened afterwards.",
+        "description": "Single window reuses one window per Local, WSL, or SSH environment. Multiple windows also enables copying pages to temporary windows.",
         "single": "Single window per environment",
         "multiple": "Multiple windows per environment"
       }

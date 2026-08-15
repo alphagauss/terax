@@ -16,6 +16,7 @@ const ENV_ARG: &str = "--terax-workspace-env";
 const POLICY_ARG: &str = "--terax-workspace-policy";
 const DIR_ARG: &str = "--terax-launch-dir";
 const GEOMETRY_ARG: &str = "--terax-window-geometry";
+const TEMPORARY_ID_ARG: &str = "--terax-temporary-workspace-id";
 const REGISTRY_LOCK: &str = "terax-workspace-registry.lock";
 const WINDOW_MODE_KEY: &str = "workspaceWindowMode";
 
@@ -27,7 +28,8 @@ pub enum WorkspacePolicy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkspaceWindowMode {
+/// 用户为同环境 Workspace 选择的窗口复用策略。
+pub(crate) enum WorkspaceWindowMode {
     Single,
     Multiple,
 }
@@ -62,6 +64,7 @@ pub struct LaunchRequest {
     policy: WorkspacePolicy,
     launch_paths: Vec<PathBuf>,
     window_geometry: Option<WindowGeometry>,
+    temporary_id: Option<Uuid>,
 }
 
 struct EnvironmentIdentity {
@@ -76,6 +79,7 @@ enum StateKind {
 
 pub struct WorkspaceProcessState {
     bootstrap: WorkspaceBootstrap,
+    lock_filename: String,
     _lock: FileLock,
 }
 
@@ -114,10 +118,11 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     let mut launch_dir = None;
     let mut positional = Vec::new();
     let mut window_geometry = None;
+    let mut temporary_id = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let target = match arg.as_str() {
-            ENV_ARG | POLICY_ARG | DIR_ARG | GEOMETRY_ARG => Some(
+            ENV_ARG | POLICY_ARG | DIR_ARG | GEOMETRY_ARG | TEMPORARY_ID_ARG => Some(
                 args.next()
                     .ok_or_else(|| format!("missing value for {arg}"))?,
             ),
@@ -152,13 +157,25 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
                 }
                 window_geometry = Some(parse_window_geometry(target.as_deref().unwrap())?);
             }
+            TEMPORARY_ID_ARG => {
+                if temporary_id.is_some() {
+                    return Err(format!("duplicate {TEMPORARY_ID_ARG}"));
+                }
+                temporary_id = Some(
+                    Uuid::parse_str(target.as_deref().unwrap())
+                        .map_err(|_| "invalid temporary Workspace id".to_string())?,
+                );
+            }
             _ if arg.starts_with('-') => return Err(format!("unknown argument: {arg}")),
             _ => positional.push(PathBuf::from(arg)),
         }
     }
 
-    let has_internal =
-        env.is_some() || policy.is_some() || launch_dir.is_some() || window_geometry.is_some();
+    let has_internal = env.is_some()
+        || policy.is_some()
+        || launch_dir.is_some()
+        || window_geometry.is_some()
+        || temporary_id.is_some();
     if has_internal && !positional.is_empty() {
         return Err(
             "internal Workspace arguments cannot be combined with positional paths".to_string(),
@@ -174,6 +191,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
             },
             launch_paths: positional,
             window_geometry: None,
+            temporary_id: None,
         });
     }
 
@@ -182,11 +200,15 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<LaunchReques
     if launch_dir.is_some() && (env != WorkspaceEnv::Local || policy != WorkspacePolicy::Fresh) {
         return Err("launch directory requires a fresh Local Workspace".to_string());
     }
+    if temporary_id.is_some() && (policy != WorkspacePolicy::Fresh || launch_dir.is_some()) {
+        return Err("temporary Workspace id requires an empty fresh Workspace".to_string());
+    }
     Ok(LaunchRequest {
         env,
         policy,
         launch_paths: launch_dir.into_iter().collect(),
         window_geometry,
+        temporary_id,
     })
 }
 
@@ -370,7 +392,8 @@ fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
     }
 }
 
-fn window_mode() -> WorkspaceWindowMode {
+/// 从共享设置读取当前多窗口策略；缺失或损坏时安全回退到单窗口。
+pub(crate) fn window_mode() -> WorkspaceWindowMode {
     let Ok(path) = crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)
         .map(|root| root.join("terax-settings.json"))
     else {
@@ -503,6 +526,7 @@ fn make_state(
     };
     let root =
         crate::modules::app_data::directory(crate::modules::app_data::Directory::Workspaces)?;
+    let lock_filename = lock_filename(environment, &kind);
     let state_path = root.join(state_filename(environment, &kind));
     ensure_state(&state_path)?;
     let window_state_filename = window_state_filename(environment, &kind);
@@ -524,6 +548,7 @@ fn make_state(
                 .then_some(launch_geometry)
                 .flatten(),
         },
+        lock_filename,
         _lock: lock,
     })
 }
@@ -544,6 +569,25 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
     cleanup_extra_states(root, &window_state_root, &transfer_root)?;
 
     let _policy = request.policy;
+    if let Some(id) = request.temporary_id {
+        if window_mode() != WorkspaceWindowMode::Multiple {
+            return Err("multiple Workspace windows are disabled".to_string());
+        }
+        let kind = StateKind::Extra(id);
+        let lock = FileLock::try_acquire(&root.join(lock_filename(&environment, &kind)))
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "temporary Workspace id is already in use".to_string())?;
+        return Ok(InitializeOutcome::Opened(Box::new(make_state(
+            &environment,
+            kind,
+            lock,
+            request.env,
+            launch_dir,
+            launch_files,
+            launch_geometry,
+        )?)));
+    }
+
     let single_kind = StateKind::Single;
     let single_lock_path = root.join(lock_filename(&environment, &single_kind));
     match FileLock::try_acquire(&single_lock_path).map_err(|error| error.to_string())? {
@@ -557,7 +601,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             launch_geometry,
         )?))),
         None if request.env == WorkspaceEnv::Local && !launch_files.is_empty() => {
-            crate::modules::shared_store::request_workspace_file_open(
+            crate::modules::workspace_runtime::request_workspace_file_open(
                 &environment.key,
                 &single_id(&environment).to_string(),
                 &launch_files,
@@ -565,7 +609,7 @@ pub fn initialize(root: &Path, request: LaunchRequest) -> Result<InitializeOutco
             Ok(InitializeOutcome::ActivatedExisting)
         }
         None if window_mode() == WorkspaceWindowMode::Single => {
-            crate::modules::shared_store::request_workspace_activation(
+            crate::modules::workspace_runtime::request_workspace_activation(
                 &environment.key,
                 &single_id(&environment).to_string(),
             )?;
@@ -598,7 +642,7 @@ pub fn route_local_open_files(files: &[String]) -> Result<(), String> {
         key: "local".to_string(),
         filename_key: "local".to_string(),
     };
-    crate::modules::shared_store::request_workspace_file_open(
+    crate::modules::workspace_runtime::request_workspace_file_open(
         &environment.key,
         &single_id(&environment).to_string(),
         files,
@@ -608,6 +652,11 @@ pub fn route_local_open_files(files: &[String]) -> Result<(), String> {
 impl WorkspaceProcessState {
     pub fn bootstrap(&self) -> &WorkspaceBootstrap {
         &self.bootstrap
+    }
+
+    /// 返回当前进程实际持有的 Workspace 锁文件名，供运行时窗口登记校验存活状态。
+    pub(crate) fn lock_filename(&self) -> &str {
+        &self.lock_filename
     }
 
     /// 确认 SSH Runtime 请求属于当前进程启动时绑定的不可变环境。
@@ -661,16 +710,6 @@ pub(crate) fn should_show_loading_window(environment: &WorkspaceEnv) -> bool {
     !matches!(environment, WorkspaceEnv::Local)
 }
 
-#[tauri::command]
-pub fn take_workspace_open_files(
-    state: tauri::State<'_, WorkspaceProcessState>,
-) -> Result<Vec<String>, String> {
-    crate::modules::shared_store::take_workspace_file_open(
-        &state.bootstrap.environment_key,
-        &state.bootstrap.id,
-    )
-}
-
 fn env_arg(env: &WorkspaceEnv) -> String {
     match env {
         WorkspaceEnv::Local => "local".to_string(),
@@ -684,10 +723,14 @@ fn spawn_args(
     policy: WorkspacePolicy,
     launch_dir: Option<&str>,
     window_geometry: Option<WindowGeometry>,
+    temporary_id: Option<Uuid>,
 ) -> Result<Vec<String>, String> {
     parse_env(&env_arg(env))?;
     if launch_dir.is_some() && (*env != WorkspaceEnv::Local || policy != WorkspacePolicy::Fresh) {
         return Err("launch directory requires a fresh Local Workspace".to_string());
+    }
+    if temporary_id.is_some() && (policy != WorkspacePolicy::Fresh || launch_dir.is_some()) {
+        return Err("temporary Workspace id requires an empty fresh Workspace".to_string());
     }
     let mut args = vec![
         ENV_ARG.to_string(),
@@ -715,17 +758,15 @@ fn spawn_args(
             geometry.width, geometry.height, geometry.x, geometry.y
         ));
     }
+    if let Some(id) = temporary_id {
+        args.push(TEMPORARY_ID_ARG.to_string());
+        args.push(id.to_string());
+    }
     Ok(args)
 }
 
-#[tauri::command]
-pub fn spawn_workspace_process(
-    env: WorkspaceEnv,
-    policy: WorkspacePolicy,
-    launch_dir: Option<String>,
-    window_geometry: Option<WindowGeometry>,
-) -> Result<u32, String> {
-    let args = spawn_args(&env, policy, launch_dir.as_deref(), window_geometry)?;
+/// 使用当前可执行文件启动一个完全独立的 Workspace 应用进程。
+fn spawn_process(args: Vec<String>) -> Result<u32, String> {
     #[cfg(target_os = "linux")]
     let executable = std::env::var_os("APPIMAGE")
         .filter(|value| !value.is_empty())
@@ -739,6 +780,35 @@ pub fn spawn_workspace_process(
         .spawn()
         .map_err(|e| format!("failed to start Workspace process: {e}"))?;
     Ok(child.id())
+}
+
+#[tauri::command]
+pub fn spawn_workspace_process(
+    env: WorkspaceEnv,
+    policy: WorkspacePolicy,
+    launch_dir: Option<String>,
+    window_geometry: Option<WindowGeometry>,
+) -> Result<u32, String> {
+    let args = spawn_args(&env, policy, launch_dir.as_deref(), window_geometry, None)?;
+    spawn_process(args)
+}
+
+/// 为工作页交接启动指定 UUID 的临时 Workspace 进程。
+///
+/// 环境直接取自发送进程的不可变 bootstrap，前端不能借此切换 Local、WSL 或 SSH 后端。
+pub(crate) fn spawn_temporary_workspace_process(
+    state: &WorkspaceProcessState,
+    id: Uuid,
+    window_geometry: Option<WindowGeometry>,
+) -> Result<u32, String> {
+    let args = spawn_args(
+        &state.bootstrap.env,
+        WorkspacePolicy::Fresh,
+        None,
+        window_geometry,
+        Some(id),
+    )?;
+    spawn_process(args)
 }
 
 #[cfg(test)]
@@ -860,6 +930,46 @@ mod tests {
                 y: 72,
             })
         );
+    }
+
+    #[test]
+    fn parser_accepts_an_explicit_fresh_temporary_workspace_id() {
+        let id = Uuid::new_v4();
+        let request = parse_args([
+            ENV_ARG.to_string(),
+            "local".to_string(),
+            POLICY_ARG.to_string(),
+            "fresh".to_string(),
+            TEMPORARY_ID_ARG.to_string(),
+            id.to_string(),
+        ])
+        .unwrap();
+        assert_eq!(request.temporary_id, Some(id));
+    }
+
+    #[test]
+    fn temporary_workspace_id_rejects_recent_or_launch_directory() {
+        let id = Uuid::new_v4().to_string();
+        assert!(parse_args([
+            ENV_ARG.to_string(),
+            "local".to_string(),
+            POLICY_ARG.to_string(),
+            "recent".to_string(),
+            TEMPORARY_ID_ARG.to_string(),
+            id.clone(),
+        ])
+        .is_err());
+        assert!(parse_args([
+            ENV_ARG.to_string(),
+            "local".to_string(),
+            POLICY_ARG.to_string(),
+            "fresh".to_string(),
+            DIR_ARG.to_string(),
+            ".".to_string(),
+            TEMPORARY_ID_ARG.to_string(),
+            id,
+        ])
+        .is_err());
     }
 
     #[test]

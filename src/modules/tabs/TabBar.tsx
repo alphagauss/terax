@@ -49,7 +49,9 @@ import type {
   Tab,
   WorkbenchDirection,
 } from "@/modules/workbench/types";
+import type { WorkspacePageHandoffMenuActions } from "@/modules/workspace-handoff";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { workspacePageFromTab } from "@/modules/workspace-handoff";
 import {
   Cancel01Icon,
   ChartAnalysisIcon,
@@ -106,6 +108,7 @@ type Props = {
   ) => void;
   canClose: boolean;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
+  pageHandoff?: WorkspacePageHandoffMenuActions;
   compact?: boolean;
 };
 
@@ -136,6 +139,7 @@ export function TabBar({
   onSplitTab,
   canClose,
   onOverrideLanguage,
+  pageHandoff,
   compact,
 }: Props) {
   const { t: tr } = useTranslation("tabs");
@@ -617,8 +621,19 @@ export function TabBar({
               );
 
               const canCopySplit = t.kind !== "ai-diff";
+              const handoffPage = workspacePageFromTab(t);
               const tabNode = (
-                <ContextMenu>
+                <ContextMenu
+                  onOpenChange={(open) => {
+                    if (
+                      open &&
+                      pageHandoff?.enabled &&
+                      typeof handoffPage === "object"
+                    ) {
+                      pageHandoff.refreshTargets();
+                    }
+                  }}
+                >
                   <ContextMenuTrigger asChild>{tabCell}</ContextMenuTrigger>
                   <ContextMenuContent
                     className="min-w-48 p-1"
@@ -711,6 +726,57 @@ export function TabBar({
                         )}
                       </ContextMenuSubContent>
                     </ContextMenuSub>
+                    {pageHandoff && (
+                      <>
+                        <ContextMenuSeparator />
+                        {!pageHandoff.enabled ? (
+                          <ContextMenuItem disabled>
+                            {tr("multiWindowRequired")}
+                          </ContextMenuItem>
+                        ) : handoffPage === "dirty" ? (
+                          <ContextMenuItem disabled>
+                            {tr("saveBeforeWindowCopy")}
+                          </ContextMenuItem>
+                        ) : handoffPage === "unsupported" ? (
+                          <ContextMenuItem disabled>
+                            {tr("windowCopyUnsupported")}
+                          </ContextMenuItem>
+                        ) : (
+                          <>
+                            {pageHandoff.targets.length > 0 && (
+                              <ContextMenuSub>
+                                <ContextMenuSubTrigger>
+                                  {tr("copyToTemporaryWindow")}
+                                </ContextMenuSubTrigger>
+                                <ContextMenuSubContent className="min-w-52">
+                                  {pageHandoff.targets.map((target, index) => (
+                                    <ContextMenuItem
+                                      key={target.id}
+                                      onSelect={() =>
+                                        pageHandoff.copyToWindow(
+                                          t.id,
+                                          target.id,
+                                        )
+                                      }
+                                    >
+                                      {tr("temporaryWindowLabel", {
+                                        index: index + 1,
+                                        id: target.id.slice(0, 8),
+                                      })}
+                                    </ContextMenuItem>
+                                  ))}
+                                </ContextMenuSubContent>
+                              </ContextMenuSub>
+                            )}
+                            <ContextMenuItem
+                              onSelect={() => pageHandoff.copyToNewWindow(t.id)}
+                            >
+                              {tr("copyToNewTemporaryWindow")}
+                            </ContextMenuItem>
+                          </>
+                        )}
+                      </>
+                    )}
                     {canClose && (
                       <>
                         <ContextMenuSeparator />

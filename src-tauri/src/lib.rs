@@ -8,7 +8,7 @@ pub mod modules;
 use modules::{
     agent, ai_sessions, alpha, app_data, auxiliary_window, fs, git, history, lsp, markdown_images,
     net, open_with, pty, python, remote, secrets, shared_store, shell, transfers, workspace,
-    workspace_process,
+    workspace_process, workspace_runtime,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -89,6 +89,9 @@ pub fn run() {
             std::process::exit(2);
         }
     };
+    if let Err(error) = workspace_runtime::register_window(&workspace_process) {
+        eprintln!("Terax Workspace runtime registration failed: {error}");
+    }
     let cli_dir = workspace_process.bootstrap().launch_dir.clone();
     let launch_files = workspace_process.bootstrap().launch_files.clone();
     let window_geometry = workspace_process.bootstrap().window_geometry;
@@ -153,6 +156,9 @@ pub fn run() {
                 let _ = menu::build_menu(_app.handle());
             }
             _app.manage(shared_store::SharedStoreState::new(_app.handle())?);
+            _app.manage(workspace_runtime::WorkspaceRuntimeState::new(
+                _app.handle(),
+            )?);
             Ok(())
         })
         .manage(pty::PtyState::default())
@@ -281,8 +287,11 @@ pub fn run() {
             workspace::workspace_authorize,
             workspace::workspace_current_dir,
             workspace_process::get_workspace_bootstrap,
-            workspace_process::take_workspace_open_files,
             workspace_process::spawn_workspace_process,
+            workspace_runtime::workspace_runtime_list_temporary_windows,
+            workspace_runtime::workspace_runtime_send_page,
+            workspace_runtime::workspace_runtime_spawn_with_page,
+            workspace_runtime::workspace_runtime_take_messages,
             ai_sessions::ai_sessions_list,
             ai_sessions::ai_session_read,
             ai_sessions::ai_session_commit,
@@ -347,6 +356,11 @@ pub fn run() {
             // Servers exit on stdin EOF, but destructors are not guaranteed
             // on process exit; kill explicitly.
             if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<workspace_process::WorkspaceProcessState>() {
+                    if let Err(error) = workspace_runtime::unregister_window(&state) {
+                        log::warn!("cannot unregister Workspace runtime window: {error}");
+                    }
+                }
                 if let Some(state) = app.try_state::<alpha::AlphaProxyState>() {
                     state.close_all();
                 }
