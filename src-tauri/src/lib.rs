@@ -6,14 +6,13 @@ pub mod menu;
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, alpha, app_data, fs, git, history, lsp, markdown_images, net, open_with,
-    pty, python, remote, secrets, shared_store, shell, transfers, workspace, workspace_process,
+    agent, ai_sessions, alpha, app_data, auxiliary_window, fs, git, history, lsp, markdown_images,
+    net, open_with, pty, python, remote, secrets, shared_store, shell, transfers, workspace,
+    workspace_process,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{
-    Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindowBuilder,
-};
+use tauri::{Manager, PhysicalPosition, PhysicalSize, State};
 use tauri_plugin_window_state::StateFlags;
 
 /// Drained on first read so HMR / re-mounts can't replay the launch dir.
@@ -53,78 +52,6 @@ fn set_fullscreen(window: tauri::Window, fullscreen: bool) -> Result<(), String>
     window
         .set_fullscreen(fullscreen)
         .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
-    let url_path = match tab.as_deref() {
-        Some(t) if !t.is_empty() => format!("settings.html?tab={}", t),
-        _ => "settings.html".to_string(),
-    };
-
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        if let Some(t) = tab.as_deref().filter(|s| !s.is_empty()) {
-            // emit() serializes via JSON, no string-escape footgun, unlike
-            // eval() with format!(). Frontend listens via Tauri event API.
-            let _ = window.emit("terax:settings-tab", t);
-        }
-        return Ok(());
-    }
-
-    let builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App(url_path.into()))
-        .title("Settings")
-        .inner_size(900.0, 700.0)
-        .min_inner_size(820.0, 620.0)
-        .resizable(true)
-        .visible(false);
-
-    // Keep settings above the main app and tie their lifecycle together without
-    // making the settings window globally always-on-top.
-    let builder = if let Some(main) = app.get_webview_window("main") {
-        builder.parent(&main).map_err(|e| e.to_string())?
-    } else {
-        builder
-    };
-
-    #[cfg(target_os = "macos")]
-    let builder = builder
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true);
-
-    // On Linux/Windows we render our own titlebar, so drop native chrome
-    // and make the window transparent.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    let builder = builder.decorations(false).transparent(true);
-
-    #[cfg_attr(target_os = "windows", allow(unused_variables))]
-    let window = builder.build().map_err(|e| e.to_string())?;
-
-    // Some Linux compositors (GNOME/Mutter with CSD-by-default) ignore the
-    // builder-time decorations flag, re-assert it after realize.
-    #[cfg(target_os = "linux")]
-    {
-        let _ = window.set_decorations(false);
-    }
-
-    if let Some(main) = app.get_webview_window("main") {
-        if let (Ok(main_pos), Ok(main_size), Ok(settings_size)) = (
-            main.outer_position(),
-            main.outer_size(),
-            window.outer_size(),
-        ) {
-            let x = main_pos.x
-                + ((main_size.width as i32).saturating_sub(settings_size.width as i32)) / 2;
-            let y = main_pos.y
-                + ((main_size.height as i32).saturating_sub(settings_size.height as i32)) / 2;
-            let _ = window.set_position(PhysicalPosition::new(x, y));
-        } else {
-            let _ = window.center();
-        }
-    }
-
-    Ok(())
 }
 
 /// 启动 Terax 原生进程并注册共享状态、插件和全部 IPC 命令。
@@ -190,6 +117,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_filename(window_state_path.to_string_lossy().into_owned())
+                // 每个进程只恢复完整 Workspace 窗口，辅助窗口始终按业务定义定位。
+                .with_filter(|label| label == "main")
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
         )
@@ -371,7 +300,7 @@ pub fn run() {
             get_launch_files,
             toggle_fullscreen,
             set_fullscreen,
-            open_settings_window,
+            auxiliary_window::open_auxiliary_window,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,
             secrets::secrets_get,

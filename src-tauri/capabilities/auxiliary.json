@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "auxiliary",
+  "description": "Base capability for registered auxiliary windows",
+  "windows": [
+    "auxiliary-*"
+  ],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-is-minimizable",
+    "core:window:allow-is-maximizable",
+    "core:window:allow-show",
+    "core:window:allow-set-title",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "os:allow-platform"
+  ]
+}

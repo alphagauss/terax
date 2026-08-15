@@ -36,7 +36,11 @@ import {
   deleteCustomTheme,
   saveCustomTheme,
 } from "@/modules/theme/customThemes";
-import { deleteThemeFile, emitThemeEdit } from "@/modules/theme/themeFiles";
+import {
+  deleteThemeFile,
+  emitThemeEdit,
+  type ThemeEditRequest,
+} from "@/modules/theme/themeFiles";
 import { listBuiltinThemes } from "@/modules/theme/themes";
 import { DEFAULT_THEME_ID } from "@/modules/theme/types";
 import { validateTheme } from "@/modules/theme/validateTheme";
@@ -66,15 +70,16 @@ export function ThemesSection() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bgInputRef = useRef<HTMLInputElement | null>(null);
 
-  const onCreateTheme = () => {
-    void emitThemeEdit({ action: "create" });
-    void getCurrentWindow().hide();
+  /** 将主题编辑请求交给主工作区后关闭轻量设置窗口。 */
+  const openThemeEditor = (request: ThemeEditRequest) => {
+    void emitThemeEdit(request)
+      .then(() => getCurrentWindow().close())
+      .catch((error) => console.error("打开主题编辑器失败", error));
   };
 
-  const onEditTheme = (id: string) => {
-    void emitThemeEdit({ action: "edit", id });
-    void getCurrentWindow().hide();
-  };
+  const onCreateTheme = () => openThemeEditor({ action: "create" });
+
+  const onEditTheme = (id: string) => openThemeEditor({ action: "edit", id });
 
   const editorThemePref = usePreferencesStore((s) => s.editorTheme);
   const backgroundKind = usePreferencesStore((s) => s.backgroundKind);
@@ -217,10 +222,7 @@ export function ThemesSection() {
             const selected = themeId === theme.id;
             const isCustom = customIds.has(theme.id);
             return (
-              <div
-                key={theme.id}
-                className="group relative"
-              >
+              <div key={theme.id} className="group relative">
                 <button
                   type="button"
                   aria-pressed={selected}

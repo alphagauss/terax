@@ -1,3 +1,8 @@
+/**
+ * 本文件锁定主窗口和辅助窗口公共入口的 eager bundle 边界。
+ * 编辑器、AI 和 Markdown 等重型功能只能由具体页面按需加载。
+ */
+
 import { describe, expect, it } from "vitest";
 import { traceEager } from "../../scripts/eager-graph.mjs";
 
@@ -27,7 +32,7 @@ describe("startup bundle budget", () => {
     expect(heavyEagerHits("src/main.tsx")).toEqual([]);
   });
 
-  it("settings window does not eagerly pull editor/AI/markdown stacks", () => {
-    expect(heavyEagerHits("src/settings/main.tsx")).toEqual([]);
+  it("auxiliary window does not eagerly pull editor/AI/markdown stacks", () => {
+    expect(heavyEagerHits("src/auxiliary/main.tsx")).toEqual([]);
   });
 });

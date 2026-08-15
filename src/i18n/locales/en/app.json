@@ -35,6 +35,10 @@
     "maximize": "Maximize",
     "restore": "Restore"
   },
+  "auxiliaryWindow": {
+    "loadFailedTitle": "Could not open window",
+    "loadFailedDescription": "This auxiliary page could not be loaded. Close the window and try again."
+  },
   "zenMode": {
     "fullscreenFailed": "Fullscreen could not be changed for Zen mode."
   }

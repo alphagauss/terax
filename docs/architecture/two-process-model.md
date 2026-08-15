@@ -153,10 +153,10 @@
 
 - `history_suggest` / `history_commands` / `history_record` / `history_list` - Shell history 集成
 
-### 设置窗口
+### 辅助窗口
 
 - `get_launch_dir` - CLI 启动目录，首次读取时 drain
-- `open_settings_window` - 打开独立设置 WebView（可选 `tab` deep-link）
+- `auxiliary_window::open_auxiliary_window` - 按封闭类型定义创建或复用轻量辅助 WebView 窗口
 
 ## 不变量
 
