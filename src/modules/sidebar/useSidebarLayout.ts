@@ -49,10 +49,12 @@ type RuntimeUpdater = (current: SidebarRuntimeState) => SidebarRuntimeState;
 /**
  * 控制容器激活、位置移动、区域折叠和最终尺寸持久化。
  * 临时隐藏期间拒绝可见性操作且不改写持久状态，退出后按原状态恢复布局。
+ * 新建临时窗口可在尚无运行时状态时折叠两侧，之后仍遵循窗口自身的持久状态。
  */
 export function useSidebarLayout(
   unavailableContainerIds: readonly SidebarContainerId[] = [],
   temporarilyHidden = false,
+  collapseOnInitialOpen = false,
 ) {
   const unavailable = useMemo(
     () => new Set(unavailableContainerIds),
@@ -66,13 +68,20 @@ export function useSidebarLayout(
   );
   const [initialPlacementState] = useState(getInitialSidebarPlacementState);
   const [placementState, setPlacementState] = useState(initialPlacementState);
-  const [initialRuntime] = useState(() =>
-    normalizeSidebarRuntimeState(
-      getWorkspaceValue<unknown>(RUNTIME_STORAGE_KEY),
+  const [initialRuntime] = useState(() => {
+    const storedRuntime = getWorkspaceValue<unknown>(RUNTIME_STORAGE_KEY);
+    const normalized = normalizeSidebarRuntimeState(
+      storedRuntime,
       initialPlacementState.placements,
       effectiveHiddenIds(initialPlacementState.activityBar.hiddenContainerIds),
-    ),
-  );
+    );
+    if (!collapseOnInitialOpen || storedRuntime !== undefined) return normalized;
+    return {
+      ...normalized,
+      primary: { ...normalized.primary, collapsed: true },
+      secondary: { ...normalized.secondary, collapsed: true },
+    };
+  });
   const [runtime, setRuntime] = useState(initialRuntime);
   const primaryPanelRef = useRef<PanelImperativeHandle | null>(null);
   const secondaryPanelRef = useRef<PanelImperativeHandle | null>(null);

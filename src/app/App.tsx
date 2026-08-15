@@ -122,6 +122,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import {
+  currentWorkspaceBootstrap,
   flushWorkspaceStore,
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
@@ -357,7 +358,11 @@ export default function App() {
     () => (alphaAvailable ? [] : (["alpha"] as const)),
     [alphaAvailable],
   );
-  const sidebar = useSidebarLayout(unavailableSidebarContainerIds, zenMode);
+  const sidebar = useSidebarLayout(
+    unavailableSidebarContainerIds,
+    zenMode,
+    !currentWorkspaceBootstrap().isPrimary,
+  );
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);

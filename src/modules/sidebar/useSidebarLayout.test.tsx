@@ -1,6 +1,6 @@
 /**
- * 本文件测试侧边栏布局 Hook 的临时隐藏行为。
- * 重点锁定禅模式期间不改写运行时状态，并在退出后恢复原面板布局。
+ * 本文件测试侧边栏布局 Hook 的临时隐藏和窗口初始折叠行为。
+ * 重点锁定禅模式状态恢复，并确保新建临时窗口默认关闭两侧面板。
  */
 
 // @vitest-environment happy-dom
@@ -35,12 +35,14 @@ type Controls = ReturnType<typeof useSidebarLayout>;
 /** 向测试暴露侧边栏控制器。 */
 function Harness({
   temporarilyHidden,
+  collapseOnInitialOpen = false,
   onReady,
 }: {
   temporarilyHidden: boolean;
+  collapseOnInitialOpen?: boolean;
   onReady: (controls: Controls) => void;
 }) {
-  onReady(useSidebarLayout([], temporarilyHidden));
+  onReady(useSidebarLayout([], temporarilyHidden, collapseOnInitialOpen));
   return null;
 }
 
@@ -114,5 +116,37 @@ describe("useSidebarLayout temporary hiding", () => {
     );
     expect(secondary.collapse).toHaveBeenCalledTimes(2);
     expect(current().isVisible("explorer")).toBe(true);
+  });
+
+  it("starts both sidebars collapsed only for a new temporary window", async () => {
+    workspaceStorage.get.mockReturnValue(undefined);
+    workspaceStorage.set.mockResolvedValue();
+    const root = createRoot(document.createElement("div"));
+    roots.push(root);
+    let controls: Controls | undefined;
+
+    await act(async () => {
+      root.render(
+        createElement(Harness, {
+          temporarilyHidden: false,
+          collapseOnInitialOpen: true,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      );
+    });
+
+    expect(controls?.initialRuntime.primary.collapsed).toBe(true);
+    expect(controls?.initialRuntime.secondary.collapsed).toBe(true);
+    expect(controls?.initialRuntime.primary.activeId).toBe("explorer");
+    expect(controls?.initialRuntime.secondary.activeId).toBe("ai");
+    expect(workspaceStorage.set).toHaveBeenLastCalledWith(
+      "sidebar-layout:runtime",
+      expect.objectContaining({
+        primary: expect.objectContaining({ collapsed: true }),
+        secondary: expect.objectContaining({ collapsed: true }),
+      }),
+    );
   });
 });
