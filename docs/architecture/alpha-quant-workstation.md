@@ -50,7 +50,7 @@ Terax Space / Workbench
 - Terax 顶层 SplitView 继续只使用 `react-resizable-panels`。Alpha 页面内部的自由面板网格是不同层级的布局能力，不替换顶层 SplitView。
 - Alpha Panel Grid 固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
 - 首期标的联动只提供工作台主标的跟随和单面板固定。多联动组、时间范围同步和十字线同步按真实多图需求渐进增加。
-- Alpha 不自行实现原生窗口框架。轻量业务视图复用通用辅助窗口，完整工作页的移动或复制复用 Workspace 跨窗口交接能力。
+- Alpha 不自行实现原生窗口框架。轻量业务视图复用通用辅助窗口，完整工作页的复制复用 Workspace 跨窗口能力。
 - 工作台、图表、绘图和指标状态都使用可版本化 JSON 表达，不持久化 React、Canvas、Controller、Query 或连接实例。
 - Alpha FastAPI 是量化领域和权威数据边界。Rust 只负责生命周期、凭据注入和通用代理，不复制行情、策略、订单或风险领域模型。
 - 实施顺序先完成领域架构和数据管理，再建设可复用图表、工作台、回测和模拟交易，不一次引入所有面板、指标和绘图工具。
@@ -126,7 +126,7 @@ Terax 保留两级、不同职责的布局系统：
 
 递归 SplitView 适合 IDE 资源布局，自由网格适合交易终端面板。不要让用户通过顶层 Workbench 的每个 Tab 手工模拟整套交易终端，也不要在普通 Alpha 数据页中嵌套完整网格。
 
-完整 `AlphaWorkstationPage` 将来可以作为可重建页面复制或移动到临时 Workspace 窗口，但 Alpha 不拥有窗口启动、跨进程交接或原生生命周期。具体边界见 [Workspace 工作页跨窗口交接](./workspace-page-handoff.md)。
+完整 `AlphaWorkstationPage` 将来可以作为可重建页面复制到临时 Workspace 窗口，但 Alpha 不拥有窗口启动、跨进程交接或原生生命周期。具体边界见 [Workspace 工作页跨窗口复制](./workspace-page-handoff.md)。
 
 ### 建议页面地图
 
