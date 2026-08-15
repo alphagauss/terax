@@ -124,6 +124,15 @@
 
 每个进程在其整个生命周期内持有 Workspace OS lock。
 
+### Workspace 运行时交换（`src-tauri/src/modules/workspace_runtime.rs`）
+
+- `workspace_runtime_list_temporary_windows` - 返回当前环境中仍持锁的临时窗口
+- `workspace_runtime_send_page` - 向已经运行的同环境临时窗口投递工作页描述
+- `workspace_runtime_spawn_with_page` - 投递工作页并启动指定 UUID 的临时 Workspace 进程
+- `workspace_runtime_take_messages` - 原子取走当前窗口的激活、打开文件和工作页消息
+
+运行时交换文件是可丢弃的窗口登记表和一次性消息队列，不是共享配置或恢复状态。窗口存活判断复用 Workspace OS lock，不建立心跳。
+
 ### 共享配置（`src-tauri/src/modules/shared_store.rs`）
 
 - `shared_store_read` / `shared_store_revision`
@@ -165,6 +174,7 @@
 - 如果 command 使用 plugin API，必须将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
 - 绝不通过进程参数或 Workspace 文件传递 SSH password、proxy password 或其他秘密。
 - 共享 entity writer 只能修改其目标 key，绝不能持久化过时的完整 list snapshot。
+- 工作页交接、窗口激活和打开文件请求只能进入 Workspace 运行时交换文件，不能写入共享设置。
 
 ## 另请参阅
 

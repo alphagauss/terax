@@ -17,7 +17,7 @@
 - [AI 子系统](architecture/ai-subsystem.md) - provider、Agent、sub-agent、session、composer、工具、编辑 diff 和实时上下文桥接。包含新增 provider 的完整操作说明。
 - [终端 renderer pool](architecture/terminal-renderer-pool.md) - slot pool、DormantRing，以及禁止在命令执行中序列化的不变量。
 - [通用辅助窗口](architecture/auxiliary-windows.md) - 为简单业务视图提供统一原生窗口外壳、主题和生命周期。
-- [Workspace 工作页跨窗口交接](architecture/workspace-page-handoff.md) - 基于现有多进程窗口模型复制或移动可重建的 Workbench 页面。
+- [Workspace 工作页跨窗口复制](architecture/workspace-page-handoff.md) - 基于现有多进程窗口模型复制可重建的 Workbench 页面。
 - [文件传输](architecture/file-transfers.md) - Direct 与 Archive 任务生命周期、staging、no-replace commit、重试、资源上限和真实环境验证。
 
 ## 贡献指南

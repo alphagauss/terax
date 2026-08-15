@@ -11,12 +11,8 @@ import {
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { consumeLaunchFiles, consumeWorkspaceOpenFiles } from "@/lib/launchDir";
-import {
-  flushSharedStoreWrites,
-  onSharedStoreChange,
-  readSharedStore,
-} from "@/lib/sharedStore";
+import { consumeLaunchFiles } from "@/lib/launchDir";
+import { flushSharedStoreWrites } from "@/lib/sharedStore";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
@@ -124,11 +120,14 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import {
-  currentWorkspaceBootstrap,
   flushWorkspaceStore,
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
 } from "@/modules/workspace-process";
+import {
+  type WorkspacePage,
+  useWorkspacePageHandoff,
+} from "@/modules/workspace-handoff";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -144,28 +143,6 @@ import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceEnvironment } from "./hooks/useWorkspaceEnvironment";
 import { useZenMode } from "./hooks/useZenMode";
-
-type WorkspaceActivation = {
-  requestId: string;
-  environment: string;
-  workspaceId: string;
-};
-
-function parseWorkspaceActivation(value: unknown): WorkspaceActivation | null {
-  if (!value || typeof value !== "object") return null;
-  const { requestId, environment, workspaceId } = value as Record<
-    string,
-    unknown
-  >;
-  if (
-    typeof requestId !== "string" ||
-    typeof environment !== "string" ||
-    typeof workspaceId !== "string"
-  ) {
-    return null;
-  }
-  return { requestId, environment, workspaceId };
-}
 
 function parentDirectory(path: string): string | null {
   const index = path.lastIndexOf("/");
@@ -237,6 +214,11 @@ export default function App() {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  const getTabById = useCallback(
+    (tabId: number) =>
+      tabsRef.current.find((candidate) => candidate.id === tabId),
+    [],
+  );
 
   const activeTerminalTab = useMemo(() => {
     const t = tabs.find((x) => x.id === activeId);
@@ -288,7 +270,6 @@ export default function App() {
 
   const workspaceEnv = useWorkspaceEnvStore((s) => s.env);
   const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
-  const activationRequestRef = useRef<string | null>(null);
   const {
     home,
     launchCwd,
@@ -717,11 +698,11 @@ export default function App() {
       groupId?: number,
     ) => {
       const readyHome = await ensureWorkspaceReady();
-      if (!readyHome) return;
+      if (!readyHome) return null;
       const targetCwd = cwd ?? readyHome;
-      if (kind === "block") newBlockTab(targetCwd, groupId);
-      else if (kind === "private") newPrivateTab(targetCwd, groupId);
-      else newTab(targetCwd, groupId);
+      if (kind === "block") return newBlockTab(targetCwd, groupId);
+      if (kind === "private") return newPrivateTab(targetCwd, groupId);
+      return newTab(targetCwd, groupId);
     },
     [ensureWorkspaceReady, newBlockTab, newPrivateTab, newTab],
   );
@@ -874,40 +855,74 @@ export default function App() {
     );
   }, []);
 
-  useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void onSharedStoreChange("settings", async () => {
-      const activation = parseWorkspaceActivation(
-        (await readSharedStore("settings")).workspaceActivation,
-      );
-      if (
-        !activation ||
-        activation.environment !== currentWorkspaceBootstrap().environmentKey ||
-        activation.workspaceId !== currentWorkspaceBootstrap().id ||
-        activation.requestId === activationRequestRef.current
-      ) {
-        return;
+  /** 在当前 Space 的活动 Group 中重建一个跨窗口复制的工作页。 */
+  const openWorkspacePage = useCallback(
+    async (page: WorkspacePage) => {
+      const authorize = async (...paths: Array<string | null | undefined>) => {
+        for (const path of new Set(paths.filter((value) => Boolean(value)))) {
+          await native.workspaceAuthorize(path as string);
+        }
+      };
+
+      switch (page.kind) {
+        case "terminal": {
+          const id = await openTerminalPage(
+            page.blocks ? "block" : "terminal",
+            page.cwd,
+          );
+          if (id === null)
+            throw new Error("Workspace environment is unavailable");
+          if (page.customTitle) {
+            updateTab(id, {
+              title: page.customTitle,
+              customTitle: page.customTitle,
+            });
+          }
+          return;
+        }
+        case "editor": {
+          await authorize(page.explorerRoot, parentDirectory(page.path));
+          const id = openFileTab(page.path, true, page.explorerRoot);
+          if (id === null) throw new Error("Editor page could not be opened");
+          if (page.overrideLanguage) {
+            setOverrideLanguage(id, page.overrideLanguage);
+          }
+          return;
+        }
+        case "markdown":
+          await authorize(page.explorerRoot, parentDirectory(page.path));
+          if (newMarkdownTab(page.path, page.explorerRoot) === null) {
+            throw new Error("Markdown page could not be opened");
+          }
+          return;
+        case "web-preview": {
+          const id = newWebPreviewTab(page.url);
+          if (!page.url) {
+            setTimeout(
+              () => webPreviewRefs.current.get(id)?.focusAddressBar(),
+              0,
+            );
+          }
+        }
       }
-      activationRequestRef.current = activation.requestId;
-      const window = getCurrentWindow();
-      await window.show();
-      await window.setFocus();
-      const files = await consumeWorkspaceOpenFiles();
-      if (!disposed) await openLaunchFilesRef.current(files);
-    })
-      .then((next) => {
-        if (disposed) next();
-        else unlisten = next;
-      })
-      .catch((error) =>
-        console.error("workspace activation listener failed:", error),
-      );
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
+    },
+    [
+      newMarkdownTab,
+      newWebPreviewTab,
+      openFileTab,
+      openTerminalPage,
+      setOverrideLanguage,
+      updateTab,
+    ],
+  );
+
+  const workspacePageHandoff = useWorkspacePageHandoff({
+    ready: workbenchBooted && spacesHydrated,
+    windowMode: workspaceWindowMode,
+    getTab: getTabById,
+    openFiles: openLaunchFiles,
+    openPage: openWorkspacePage,
+  });
 
   const handlePathRenamed = useCallback(
     (from: string, to: string) => {
@@ -1581,6 +1596,7 @@ export default function App() {
         void splitTab(tabId, direction, move),
       overrideLanguage: setOverrideLanguage,
       resizeSplit,
+      ...(workspacePageHandoff && { pageHandoff: workspacePageHandoff }),
     }),
     [
       handleClose,
@@ -1599,6 +1615,7 @@ export default function App() {
       setActiveId,
       setOverrideLanguage,
       splitTab,
+      workspacePageHandoff,
     ],
   );
 
