@@ -97,12 +97,12 @@ export function SettingsWindowPage() {
       className="flex min-w-0 flex-1 items-center"
       data-tauri-drag-region
     >
-      <TabsList className="mx-auto h-7 max-w-full overflow-x-auto bg-muted/40 px-2">
+      <TabsList className="mx-auto h-7 max-w-full gap-0.5 overflow-x-auto rounded-none bg-transparent p-0">
         {TABS.map((tab) => (
           <TabsTrigger
             key={tab.id}
             value={tab.id}
-            className="h-6 gap-1.5 px-2.5 text-[11.5px]"
+            className="h-7 flex-none gap-1.5 rounded-md bg-transparent px-2 text-[11.5px] data-active:bg-accent dark:data-active:bg-accent"
           >
             <HugeiconsIcon icon={tab.icon} size={12} strokeWidth={1.75} />
             <span>{t(`tabs.${tab.id}`)}</span>
