@@ -55,8 +55,8 @@ export function AuxiliaryWindowLayout({
       <header
         data-tauri-drag-region
         className={cn(
-          "flex h-11 shrink-0 items-center border-b border-border/60 bg-card/60",
-          IS_MAC ? "pr-3 pl-22" : "pr-0 pl-3",
+          "flex h-8 shrink-0 items-center gap-2 border-b border-border/60 bg-card",
+          IS_MAC ? "pr-2 pl-20" : "pr-0 pl-2",
         )}
       >
         <div
@@ -68,7 +68,13 @@ export function AuxiliaryWindowLayout({
           )}
         </div>
         {USE_CUSTOM_WINDOW_CONTROLS && (
-          <WindowControls minimizable={minimizable} maximizable={maximizable} />
+          <>
+            <span className="ml-1 h-5 w-px shrink-0 bg-border/60" />
+            <WindowControls
+              minimizable={minimizable}
+              maximizable={maximizable}
+            />
+          </>
         )}
       </header>
       {children}
