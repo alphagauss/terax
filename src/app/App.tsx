@@ -120,6 +120,7 @@ import {
   type WorkspaceEnv,
 } from "@/modules/workspace";
 import {
+  currentWorkspaceBootstrap,
   flushWorkspaceStore,
   policyForEnvironmentSelection,
   spawnWorkspaceProcess,
@@ -347,7 +348,11 @@ export default function App() {
     [activeSpaceId, workbenchState],
   );
 
-  const sidebar = useSidebarLayout(undefined, zenMode);
+  const sidebar = useSidebarLayout(
+    undefined,
+    zenMode,
+    !currentWorkspaceBootstrap().isPrimary,
+  );
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
