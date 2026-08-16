@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
+use tauri::Manager;
 use uuid::Uuid;
 
 const ENV_ARG: &str = "--terax-workspace-env";
@@ -782,13 +783,69 @@ fn spawn_process(args: Vec<String>) -> Result<u32, String> {
     Ok(child.id())
 }
 
+/// 计算从主 Workspace 窗口级联打开的新窗口几何信息。
+///
+/// 坐标使用饱和加法，避免窗口管理器返回极端位置时发生整数溢出。
+fn cascaded_window_geometry(width: u32, height: u32, x: i32, y: i32) -> WindowGeometry {
+    WindowGeometry {
+        width,
+        height,
+        x: x.saturating_add(32),
+        y: y.saturating_add(32),
+    }
+}
+
+/// 尝试读取当前进程主 Workspace 窗口的几何信息。
+///
+/// 几何信息只用于改善新窗口的初始位置。主窗口最大化、窗口不存在或原生读取失败时
+/// 返回 `None`，不得因此阻止 Workspace 子进程启动。
+fn next_main_window_geometry(app: &tauri::AppHandle) -> Option<WindowGeometry> {
+    let Some(main) = app.get_webview_window("main") else {
+        log::warn!("cannot inherit Workspace geometry: main window is unavailable");
+        return None;
+    };
+    match main.is_maximized() {
+        Ok(true) => return None,
+        Ok(false) => {}
+        Err(error) => {
+            log::warn!("cannot inherit Workspace geometry: read maximized state: {error}");
+            return None;
+        }
+    }
+    let size = match main.outer_size() {
+        Ok(size) => size,
+        Err(error) => {
+            log::warn!("cannot inherit Workspace geometry: read outer size: {error}");
+            return None;
+        }
+    };
+    let position = match main.outer_position() {
+        Ok(position) => position,
+        Err(error) => {
+            log::warn!("cannot inherit Workspace geometry: read outer position: {error}");
+            return None;
+        }
+    };
+    Some(cascaded_window_geometry(
+        size.width,
+        size.height,
+        position.x,
+        position.y,
+    ))
+}
+
+/// 使用当前可执行文件启动独立 Workspace 进程。
+///
+/// 初始几何信息始终来自本进程的主 Workspace 窗口，避免辅助设置窗口影响新窗口
+/// 尺寸。几何读取失败只会退回默认布局，不影响进程启动。
 #[tauri::command]
 pub fn spawn_workspace_process(
+    app: tauri::AppHandle,
     env: WorkspaceEnv,
     policy: WorkspacePolicy,
     launch_dir: Option<String>,
-    window_geometry: Option<WindowGeometry>,
 ) -> Result<u32, String> {
+    let window_geometry = next_main_window_geometry(&app);
     let args = spawn_args(&env, policy, launch_dir.as_deref(), window_geometry, None)?;
     spawn_process(args)
 }
@@ -929,6 +986,28 @@ mod tests {
                 x: 40,
                 y: 72,
             })
+        );
+    }
+
+    #[test]
+    fn workspace_window_geometry_cascades_with_saturating_coordinates() {
+        assert_eq!(
+            cascaded_window_geometry(1280, 800, 100, 200),
+            WindowGeometry {
+                width: 1280,
+                height: 800,
+                x: 132,
+                y: 232,
+            }
+        );
+        assert_eq!(
+            cascaded_window_geometry(900, 700, i32::MAX, i32::MAX),
+            WindowGeometry {
+                width: 900,
+                height: 700,
+                x: i32::MAX,
+                y: i32::MAX,
+            }
         );
     }
 
