@@ -1,3 +1,8 @@
+/**
+ * 本文件实现 SSH 主机密钥确认对话框。
+ * 未知密钥与已变更密钥使用不同风险提示，确认结果直接交给原生校验流程。
+ */
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,6 +16,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { remoteNative } from "./native";
 import type { HostKeyPrompt } from "./types";
 
@@ -19,7 +25,9 @@ type Props = {
   onResolved: () => void;
 };
 
+/** 展示服务端指纹并等待用户决定是否信任本次 SSH 连接。 */
 export function HostKeyDialog({ prompt, onResolved }: Props) {
+  const { t } = useTranslation("common");
   const [remember, setRemember] = useState(true);
 
   const resolve = async (accepted: boolean) => {
@@ -37,14 +45,20 @@ export function HostKeyDialog({ prompt, onResolved }: Props) {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {prompt?.changed ? "Remote host key changed" : "Trust remote host?"}
+            {t(
+              prompt?.changed
+                ? "remoteWorkspace.hostKey.changedTitle"
+                : "remoteWorkspace.hostKey.unknownTitle",
+            )}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-3 text-left">
               <p>
-                {prompt?.changed
-                  ? "The saved key no longer matches. Verify the fingerprint before continuing; this can indicate a man-in-the-middle attack."
-                  : "This host has not been seen before. Verify its fingerprint before connecting."}
+                {t(
+                  prompt?.changed
+                    ? "remoteWorkspace.hostKey.changedDescription"
+                    : "remoteWorkspace.hostKey.unknownDescription",
+                )}
               </p>
               <div className="rounded-md bg-muted/70 p-3 font-mono text-[11px] leading-relaxed text-foreground">
                 <div>
@@ -59,7 +73,7 @@ export function HostKeyDialog({ prompt, onResolved }: Props) {
                   onCheckedChange={(value) => setRemember(value === true)}
                 />
                 <Label htmlFor="ssh-remember-host-key">
-                  Remember this key for future connections
+                  {t("remoteWorkspace.hostKey.remember")}
                 </Label>
               </div>
             </div>
@@ -67,13 +81,17 @@ export function HostKeyDialog({ prompt, onResolved }: Props) {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => void resolve(false)}>
-            Cancel connection
+            {t("remoteWorkspace.hostKey.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             variant={prompt?.changed ? "destructive" : "default"}
             onClick={() => void resolve(true)}
           >
-            {prompt?.changed ? "Trust changed key" : "Trust and connect"}
+            {t(
+              prompt?.changed
+                ? "remoteWorkspace.hostKey.trustChanged"
+                : "remoteWorkspace.hostKey.trust",
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

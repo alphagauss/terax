@@ -68,6 +68,7 @@ export function useWorkspaceEnvironment() {
   );
   const [hostPrompt, setHostPrompt] = useState<HostKeyPrompt | null>(null);
   const connectionTaskRef = useRef<Promise<string | null> | null>(null);
+  const initialSshConnectStartedRef = useRef(false);
 
   useEffect(() => {
     if (env.kind !== "ssh") return;
@@ -207,6 +208,21 @@ export function useWorkspaceEnvironment() {
     },
     [applyRuntimeSnapshot, env, remoteEventsReady],
   );
+
+  // 空首页不等待网络，但 SSH 窗口仍需在事件桥就绪后完成一次身份校验和连接。
+  useEffect(() => {
+    if (
+      env.kind !== "ssh" ||
+      !remoteEventsReady ||
+      initialSshConnectStartedRef.current
+    ) {
+      return;
+    }
+    initialSshConnectStartedRef.current = true;
+    if (useRemoteRuntimeStore.getState().snapshot.phase === "idle") {
+      void connectWorkspace();
+    }
+  }, [connectWorkspace, env.kind, remoteEventsReady]);
 
   const ensureWorkspaceReady = useCallback(async (): Promise<string | null> => {
     if (env.kind === "ssh") return connectWorkspace();
