@@ -25,6 +25,16 @@
     "connectionClosed": "SSH 连接已断开",
     "reconnecting": "正在自动重新连接…",
     "manualReconnect": "需要手动重新连接。",
-    "reconnectAction": "重新连接当前 SSH"
+    "reconnectAction": "重新连接当前 SSH",
+    "hostKey": {
+      "unknownTitle": "是否信任远程主机？",
+      "changedTitle": "远程主机密钥已变更",
+      "unknownDescription": "此前未连接过此主机。请先核对指纹，再继续连接。",
+      "changedDescription": "已保存的密钥与当前密钥不匹配。继续前请核对指纹，这可能意味着存在中间人攻击。",
+      "remember": "记住此密钥，供后续连接使用",
+      "cancel": "取消连接",
+      "trust": "信任并连接",
+      "trustChanged": "信任新密钥"
+    }
   }
 }

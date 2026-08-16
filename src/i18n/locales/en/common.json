@@ -25,6 +25,16 @@
     "connectionClosed": "SSH connection closed",
     "reconnecting": "Reconnecting automatically…",
     "manualReconnect": "Manual reconnection is required.",
-    "reconnectAction": "Reconnect current SSH"
+    "reconnectAction": "Reconnect current SSH",
+    "hostKey": {
+      "unknownTitle": "Trust remote host?",
+      "changedTitle": "Remote host key changed",
+      "unknownDescription": "This host has not been seen before. Verify its fingerprint before connecting.",
+      "changedDescription": "The saved key no longer matches. Verify the fingerprint before continuing; this can indicate a man-in-the-middle attack.",
+      "remember": "Remember this key for future connections",
+      "cancel": "Cancel connection",
+      "trust": "Trust and connect",
+      "trustChanged": "Trust changed key"
+    }
   }
 }

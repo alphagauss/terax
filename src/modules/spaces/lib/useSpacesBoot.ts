@@ -50,9 +50,9 @@ function restoredPagesNeedEnvironment(loaded: LoadedSpaces): boolean {
 }
 
 /**
- * 先读取本地 Space 布局，仅在存在待恢复页面时初始化远端环境。
+ * 先读取本地 Space 布局，仅在恢复远端页面需要 Home 时等待环境就绪。
  *
- * Local 始终解析 Home；空的 WSL 或 SSH Workspace 保持未连接，直到用户执行远端操作。
+ * 空的远端 Workspace 可直接恢复默认首页；SSH 的后台连接由环境 Hook 独立管理。
  */
 export async function prepareWorkspaceBoot(
   env: ReturnType<typeof currentWorkspaceEnv>,

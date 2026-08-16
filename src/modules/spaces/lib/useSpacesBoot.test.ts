@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Workspace 启动时的环境初始化顺序。
- * 重点锁定空远端 Workspace 不连接，而待恢复页面仍会等待环境就绪。
+ * 重点锁定空远端 Workspace 不等待连接，而待恢复页面仍会等待环境就绪。
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -37,7 +37,7 @@ const terminalWorkbench: SerializedWorkbenchNode = {
 };
 
 describe("prepareWorkspaceBoot", () => {
-  it("keeps an empty remote Workspace disconnected", async () => {
+  it("restores an empty remote Workspace without waiting for its environment", async () => {
     const order: string[] = [];
     const ensureReady = vi.fn(async () => {
       order.push("environment");
