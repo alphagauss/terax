@@ -509,7 +509,11 @@
     },
     "launch": {
       "secret": "打开新工作区前，请先保存 SSH 密码。",
-      "proxy": "打开新工作区前，请先保存代理密码。"
+      "proxy": "打开新工作区前，请先保存代理密码。",
+      "openFailedAfterSave": "SSH 配置已保存，但无法启动工作区：{{error}}"
+    },
+    "persistence": {
+      "credentialsFailed": "连接信息已保存，但凭据保存失败：{{error}}"
     },
     "delete": {
       "confirm": "删除 SSH 配置“{{name}}”？"

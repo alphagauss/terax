@@ -509,7 +509,11 @@
     },
     "launch": {
       "secret": "Store the SSH password before opening a new workspace.",
-      "proxy": "Store the proxy password before opening a new workspace."
+      "proxy": "Store the proxy password before opening a new workspace.",
+      "openFailedAfterSave": "The SSH profile was saved, but the workspace could not be started: {{error}}"
+    },
+    "persistence": {
+      "credentialsFailed": "The connection details were saved, but the credential could not be stored: {{error}}"
     },
     "delete": {
       "confirm": "Delete SSH profile \"{{name}}\"?"

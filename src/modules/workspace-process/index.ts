@@ -92,17 +92,16 @@ export async function flushWorkspaceStore(): Promise<void> {
   await store.save();
 }
 
+/** 启动独立 Workspace 进程，窗口几何信息由原生命令从主窗口安全推导。 */
 export async function spawnWorkspaceProcess(
   env: WorkspaceEnv,
   policy: WorkspacePolicy,
   launchDir?: string,
 ): Promise<number> {
-  const windowGeometry = await nextWorkspaceWindowGeometry();
   return invoke<number>("spawn_workspace_process", {
     env,
     policy,
     launchDir: launchDir ?? null,
-    windowGeometry,
   });
 }
 

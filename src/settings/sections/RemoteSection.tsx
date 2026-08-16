@@ -83,6 +83,14 @@ import { SectionHeader } from "../components/SectionHeader";
 const NUMBER_INPUT_CLASS =
   "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
 
+/** 标记配置主体已经保存、但系统钥匙串操作失败的部分成功状态。 */
+class CredentialPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super(String(cause));
+    this.name = "CredentialPersistenceError";
+  }
+}
+
 function blurNumberInputOnWheel(event: React.WheelEvent<HTMLInputElement>) {
   event.currentTarget.blur();
 }
@@ -194,6 +202,7 @@ export function RemoteSection() {
     }
   }, [form.groupId, groups]);
 
+  /** 按表单中的记住选项更新系统钥匙串，不把秘密写入共享配置。 */
   const persistSecrets = async (profile: SshProfile, value: SshProfileForm) => {
     await applyCredentialMutation(
       credentialMutation({
@@ -217,6 +226,7 @@ export function RemoteSection() {
     );
   };
 
+  /** 校验表单并生成可持久化的 SSH 配置，同时保留独立管理的隧道。 */
   const profileFromValidForm = (value: SshProfileForm) => {
     const issue = profileValidationIssue(value);
     if (issue) {
@@ -230,9 +240,15 @@ export function RemoteSection() {
     };
   };
 
+  /** 保存 SSH 配置及用户要求记住的凭据，不在底层持久化函数中触发 UI 提示。 */
   const persistProfile = async (profile: SshProfile, value: SshProfileForm) => {
     await saveProfile(profile);
-    await persistSecrets(profile, value);
+    try {
+      await persistSecrets(profile, value);
+    } catch (cause) {
+      // 共享配置与系统钥匙串无法组成原子事务，保留准确的部分成功语义。
+      throw new CredentialPersistenceError(cause);
+    }
     setSelectedId(profile.id);
     setNewDraft(false);
     setForm((current) =>
@@ -249,9 +265,15 @@ export function RemoteSection() {
           }
         : current,
     );
-    toast.success(t("remote.actions.saved"));
   };
 
+  /** 将持久化错误转换为能区分配置与钥匙串状态的用户提示。 */
+  const persistenceErrorMessage = (cause: unknown) =>
+    cause instanceof CredentialPersistenceError
+      ? t("remote.persistence.credentialsFailed", { error: cause.message })
+      : String(cause);
+
+  /** 显式保存当前 SSH 配置，并只在全部持久化步骤成功后提示已保存。 */
   const save = async () => {
     const value = form;
     const profile = profileFromValidForm(value);
@@ -260,13 +282,15 @@ export function RemoteSection() {
     setError(null);
     try {
       await persistProfile(profile, value);
+      toast.success(t("remote.actions.saved"));
     } catch (cause) {
-      setError(String(cause));
+      setError(persistenceErrorMessage(cause));
     } finally {
       setBusy(false);
     }
   };
 
+  /** 静默保存当前配置后启动远程 Workspace，并准确报告启动阶段的部分失败。 */
   const openWorkspace = async () => {
     const value = form;
     const issue = launchSecretIssue(value);
@@ -278,14 +302,21 @@ export function RemoteSection() {
     if (!profile) return;
     setBusy(true);
     setError(null);
+    // 配置和请求记住的凭据都完成后，后续错误才属于 Workspace 启动阶段。
+    let persisted = false;
     try {
       await persistProfile(profile, value);
+      persisted = true;
       await spawnWorkspaceProcess(
         { kind: "ssh", profileId: profile.id },
         "recent",
       );
     } catch (cause) {
-      setError(String(cause));
+      setError(
+        persisted
+          ? t("remote.launch.openFailedAfterSave", { error: String(cause) })
+          : persistenceErrorMessage(cause),
+      );
     } finally {
       setBusy(false);
     }
