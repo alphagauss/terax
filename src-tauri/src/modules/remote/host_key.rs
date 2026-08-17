@@ -25,12 +25,13 @@ struct PendingVerification {
     host: String,
     port: u16,
     key: String,
+    prompt: HostKeyPrompt,
     sender: oneshot::Sender<bool>,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct HostKeyPrompt {
+pub struct HostKeyPrompt {
     request_id: String,
     profile_id: String,
     host: String,
@@ -158,15 +159,6 @@ impl HostKeyVerifier {
         }
         let request_id = uuid::Uuid::new_v4().to_string();
         let (sender, receiver) = oneshot::channel();
-        self.pending.lock().await.insert(
-            request_id.clone(),
-            PendingVerification {
-                host: host.to_string(),
-                port,
-                key: key_line,
-                sender,
-            },
-        );
         let prompt = HostKeyPrompt {
             request_id: request_id.clone(),
             profile_id: profile_id.to_string(),
@@ -176,6 +168,16 @@ impl HostKeyVerifier {
             fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
             changed: status == HostKeyStatus::Changed,
         };
+        self.pending.lock().await.insert(
+            request_id.clone(),
+            PendingVerification {
+                host: host.to_string(),
+                port,
+                key: key_line,
+                prompt: prompt.clone(),
+                sender,
+            },
+        );
         if app.emit("terax://ssh-host-key", prompt).is_err() {
             self.pending.lock().await.remove(&request_id);
             return false;
@@ -191,6 +193,16 @@ impl HostKeyVerifier {
                 false
             }
         }
+    }
+
+    /// 返回指定 profile 当前仍在等待处理的主机密钥提示。
+    pub async fn pending_prompt(&self, profile_id: &str) -> Option<HostKeyPrompt> {
+        self.pending
+            .lock()
+            .await
+            .values()
+            .find(|pending| pending.prompt.profile_id == profile_id)
+            .map(|pending| pending.prompt.clone())
     }
 
     /// 完成一次仍在等待的主机密钥确认，并按用户选择写入 known_hosts。
@@ -220,5 +232,39 @@ impl HostKeyVerifier {
         }
         let _ = pending.sender.send(accepted);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn pending_prompt_survives_event_bridge_registration_race() {
+        let verifier = HostKeyVerifier::new(std::env::temp_dir().join("terax-known-hosts-test"));
+        let prompt = HostKeyPrompt {
+            request_id: "request".to_string(),
+            profile_id: "profile".to_string(),
+            host: "example.com".to_string(),
+            port: 22,
+            key_type: "ssh-ed25519".to_string(),
+            fingerprint: "SHA256:test".to_string(),
+            changed: false,
+        };
+        let (sender, _receiver) = oneshot::channel();
+        verifier.pending.lock().await.insert(
+            prompt.request_id.clone(),
+            PendingVerification {
+                host: prompt.host.clone(),
+                port: prompt.port,
+                key: "key".to_string(),
+                prompt: prompt.clone(),
+                sender,
+            },
+        );
+
+        let restored = verifier.pending_prompt("profile").await.unwrap();
+        assert_eq!(restored.request_id, prompt.request_id);
+        assert!(verifier.pending_prompt("other").await.is_none());
     }
 }

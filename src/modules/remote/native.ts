@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   HostKeyPrompt,
   ImportedHost,
+  RemoteForegroundIntent,
   RemoteRuntimeSnapshot,
   SshCredentialInput,
   TunnelConfig,
@@ -28,12 +29,15 @@ export const remoteNative = {
   disconnectRuntime: () => invoke<void>("ssh_runtime_disconnect"),
   runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
   wakeRuntime: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_wake"),
+  setForeground: (intent: RemoteForegroundIntent) =>
+    invoke<void>("ssh_runtime_set_foreground", { intent }),
   confirmHostKey: (requestId: string, accepted: boolean, remember: boolean) =>
     invoke<void>("ssh_confirm_host_key", {
       requestId,
       accepted,
       remember,
     }),
+  pendingHostKey: () => invoke<HostKeyPrompt | null>("ssh_pending_host_key"),
   importConfig: () => invoke<ImportedHost[]>("ssh_import_config"),
   listTunnels: (profileId: string) =>
     invoke<TunnelInfo[]>("ssh_tunnel_list", {

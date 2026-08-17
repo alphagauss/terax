@@ -6,7 +6,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SerializedWorkbenchNode } from "./serialize";
 import type { LoadedSpaces } from "./store";
-import { prepareWorkspaceBoot } from "./useSpacesBoot";
+import {
+  foregroundIntentForLoadedSpaces,
+  prepareWorkspaceBoot,
+} from "./useSpacesBoot";
 
 /** 创建包含指定持久化布局的测试状态。 */
 function loaded(
@@ -135,5 +138,63 @@ describe("prepareWorkspaceBoot", () => {
 
     expect(ensureReady).not.toHaveBeenCalled();
     expect(prepared).not.toBeNull();
+  });
+
+  it("does not block layout restoration when the foreground hint fails", async () => {
+    const ensureReady = vi.fn(async () => "/home/remote");
+
+    const prepared = await prepareWorkspaceBoot(
+      { kind: "ssh", profileId: "server" },
+      null,
+      ensureReady,
+      async () => loaded(terminalWorkbench),
+      async () => {
+        throw new Error("IPC unavailable");
+      },
+    );
+
+    expect(ensureReady).toHaveBeenCalledOnce();
+    expect(prepared).not.toBeNull();
+  });
+});
+
+describe("foregroundIntentForLoadedSpaces", () => {
+  it("reports the explicitly active terminal before waiting for SSH", () => {
+    const workbench: SerializedWorkbenchNode = {
+      kind: "split",
+      axis: "row",
+      children: [
+        {
+          kind: "group",
+          tabs: [{ kind: "editor", path: "/srv/a.ts" }],
+          activeTabIndex: 0,
+        },
+        {
+          kind: "group",
+          tabs: [{ kind: "terminal", cwd: "/srv/project", blocks: true }],
+          activeTabIndex: 0,
+          active: true,
+        },
+      ],
+    };
+
+    expect(foregroundIntentForLoadedSpaces(loaded(workbench))).toEqual({
+      kind: "terminal",
+      cwd: "/srv/project",
+      blocks: true,
+    });
+  });
+
+  it("prioritizes Explorer when the active page is not a terminal", () => {
+    const workbench: SerializedWorkbenchNode = {
+      kind: "group",
+      tabs: [{ kind: "editor", path: "/srv/a.ts" }],
+      activeTabIndex: 0,
+      active: true,
+    };
+
+    expect(foregroundIntentForLoadedSpaces(loaded(workbench))).toEqual({
+      kind: "explorer",
+    });
   });
 });

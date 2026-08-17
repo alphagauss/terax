@@ -162,10 +162,28 @@ pub struct CredentialOverride {
     pub proxy_secret: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+/// 启动阶段需要优先准备的前台资源。
+pub enum ForegroundIntent {
+    Terminal {
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        blocks: bool,
+    },
+    Explorer,
+    None,
+}
+
 /// 当前进程唯一 SSH Runtime 的权威状态快照。
 ///
 /// `version` 在每次状态迁移时递增，前端据此拒绝迟到事件；`epoch` 只在新 transport
-/// 完整通过 shell、Workspace root 与 SFTP 探测后递增，用于失效旧的终端和文件请求。
+/// 完整通过 shell 与 Workspace root 探测后递增，用于失效旧的终端和文件请求。
 /// `reconnecting` 表示自动恢复仍在进行，`disconnected` 表示流程已停止并需要用户处理。
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(
@@ -400,6 +418,24 @@ mod tests {
     #[test]
     fn rejects_inline_proxy_password() {
         assert!(ProxyConfig::parse("http://alice:secret@proxy:8080", None).is_err());
+    }
+
+    #[test]
+    fn foreground_terminal_intent_uses_the_ipc_contract() {
+        let intent: ForegroundIntent = serde_json::from_value(serde_json::json!({
+            "kind": "terminal",
+            "cwd": "/srv/project",
+            "blocks": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            intent,
+            ForegroundIntent::Terminal {
+                cwd: Some("/srv/project".to_string()),
+                blocks: true
+            }
+        );
     }
 
     #[test]

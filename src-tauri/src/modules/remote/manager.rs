@@ -1,9 +1,9 @@
 //! 当前进程唯一 SSH Runtime 的连接、重连与资源生命周期协调。
 //!
-//! 所有状态迁移由本模块串行发布；新 transport 通过 shell、Workspace root 与 SFTP
-//! 探测后才获得新 epoch。旧 workspace 的迟到失败只能结束自身，不能覆盖新连接。
+//! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，目录 SFTP
+//! 独立预热。旧 workspace 的迟到失败不能覆盖新连接。
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -13,7 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, RemoteRuntimeSnapshot, TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
+    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, TunnelConfig, TunnelEvent,
+    TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace};
 use super::tunnel::{TunnelFailure, TunnelManager};
@@ -33,6 +34,12 @@ struct RuntimeLifecycle {
     cancellation: CancellationToken,
 }
 
+/// 已发布 connecting、等待配置和凭据准备完成的连接意图。
+pub(crate) struct ReservedConnect {
+    profile_id: String,
+    lifecycle: RuntimeLifecycle,
+}
+
 struct RuntimeData {
     snapshot: RemoteRuntimeSnapshot,
     workspace: Option<Arc<RemoteWorkspace>>,
@@ -43,6 +50,10 @@ struct RuntimeData {
 pub struct RemoteManager {
     runtime: RwLock<RuntimeData>,
     connect_lock: Mutex<()>,
+    foreground_intent: Arc<Mutex<Option<ForegroundIntent>>>,
+    prepared_terminal: Mutex<Option<super::terminal::PreparedTerminal>>,
+    prepared_terminal_priority: AtomicBool,
+    foreground_filesystem_priority: Arc<AtomicBool>,
     next_version: AtomicU64,
     next_epoch: AtomicU64,
     next_lifecycle: AtomicU64,
@@ -65,6 +76,10 @@ impl Default for RemoteManager {
                 },
             }),
             connect_lock: Mutex::new(()),
+            foreground_intent: Arc::new(Mutex::new(None)),
+            prepared_terminal: Mutex::new(None),
+            prepared_terminal_priority: AtomicBool::new(false),
+            foreground_filesystem_priority: Arc::new(AtomicBool::new(false)),
             next_version: AtomicU64::new(1),
             next_epoch: AtomicU64::new(1),
             next_lifecycle: AtomicU64::new(1),
@@ -75,28 +90,64 @@ impl Default for RemoteManager {
 }
 
 impl RemoteManager {
+    /// 更新启动阶段唯一的前台资源提示。
+    pub async fn set_foreground_intent(&self, intent: ForegroundIntent) {
+        let accepting = matches!(
+            self.runtime.read().await.snapshot,
+            RemoteRuntimeSnapshot::Idle { .. } | RemoteRuntimeSnapshot::Connecting { .. }
+        );
+        if accepting {
+            self.foreground_filesystem_priority
+                .store(intent != ForegroundIntent::None, Ordering::Release);
+            *self.foreground_intent.lock().await = Some(intent);
+        }
+    }
+
     /// 破坏式建立当前进程唯一的 SSH Runtime。
     ///
-    /// 已有 workspace 会先被完整关闭。新连接必须完成 root 与 SFTP 探测才能发布
-    /// `connected`，失败后保持 `disconnected`，不会回退复用旧 transport。
+    /// 已有 workspace 会先被完整关闭。新连接完成 root 探测即可发布 `connected`，
+    /// 文件系统并行预热；失败后保持 `disconnected`，不会回退复用旧 transport。
     pub async fn connect(
         self: &Arc<Self>,
         request: ConnectRequest,
         app: tauri::AppHandle,
     ) -> Result<RemoteRuntimeSnapshot, String> {
+        let reserved = self.reserve_connect(&request.profile.id, &app).await?;
+        self.connect_reserved(request, reserved, app).await
+    }
+
+    /// 在读取可能阻塞的系统凭据前发布连接状态，避免前端重复发起自动连接。
+    pub(crate) async fn reserve_connect(
+        &self,
+        profile_id: &str,
+        app: &tauri::AppHandle,
+    ) -> Result<ReservedConnect, String> {
         let lifecycle = self.begin_lifecycle().await;
-        if !self
-            .publish_connecting(&app, &lifecycle, &request.profile.id)
-            .await
-        {
+        if !self.publish_connecting(app, &lifecycle, profile_id).await {
             return Err(CONNECT_SUPERSEDED.into());
         }
+        Ok(ReservedConnect {
+            profile_id: profile_id.to_string(),
+            lifecycle,
+        })
+    }
+
+    /// 使用已发布的连接意图建立 transport，并在预处理失败时收敛状态。
+    pub(crate) async fn connect_reserved(
+        self: &Arc<Self>,
+        request: ConnectRequest,
+        reserved: ReservedConnect,
+        app: tauri::AppHandle,
+    ) -> Result<RemoteRuntimeSnapshot, String> {
+        let ReservedConnect {
+            profile_id,
+            lifecycle,
+        } = reserved;
         let _guard = self.connect_lock.lock().await;
         if !self.is_lifecycle_current(lifecycle.id).await {
             return Err(CONNECT_SUPERSEDED.into());
         }
         self.stop_current(&app).await;
-        let profile_id = request.profile.id.clone();
         let result = self.connect_locked(request, &lifecycle, &app).await;
         if let Err(error) = &result {
             if error != CONNECT_SUPERSEDED && self.is_lifecycle_current(lifecycle.id).await {
@@ -105,6 +156,19 @@ impl RemoteManager {
             }
         }
         result
+    }
+
+    /// 结束仍是当前意图的预处理失败连接。
+    pub(crate) async fn reject_reserved(
+        &self,
+        reserved: &ReservedConnect,
+        app: &tauri::AppHandle,
+        error: String,
+    ) {
+        if self.is_lifecycle_current(reserved.lifecycle.id).await {
+            self.publish_disconnected(app, &reserved.lifecycle, &reserved.profile_id, error)
+                .await;
+        }
     }
 
     /// 在调用方已持有连接锁时建立一个新 epoch。
@@ -125,16 +189,25 @@ impl RemoteManager {
             app.clone(),
             self.host_keys.clone(),
             lifecycle.cancellation.clone(),
+            self.foreground_intent.clone(),
+            self.foreground_filesystem_priority.clone(),
         );
-        let workspace = match tokio::select! {
+        let connected = match tokio::select! {
             _ = lifecycle.cancellation.cancelled() => return Err(CONNECT_SUPERSEDED.into()),
             result = connect => result,
         } {
-            Ok(workspace) => workspace,
+            Ok(connected) => connected,
             Err(error) => return Err(error),
         };
+        let super::session::WorkspaceConnect {
+            workspace,
+            prepared_terminal,
+        } = connected;
 
         if !self.is_lifecycle_current(lifecycle.id).await {
+            if let Some(prepared) = prepared_terminal {
+                prepared.close().await;
+            }
             workspace.disconnect().await;
             return Err(CONNECT_SUPERSEDED.into());
         }
@@ -158,12 +231,29 @@ impl RemoteManager {
             }
         };
         if !installed {
+            if let Some(prepared) = prepared_terminal {
+                prepared.close().await;
+            }
             workspace.disconnect().await;
             return Err(CONNECT_SUPERSEDED.into());
         }
+        *self.foreground_intent.lock().await = None;
+        let has_prepared_terminal = prepared_terminal.is_some();
+        let previous = {
+            let mut slot = self.prepared_terminal.lock().await;
+            std::mem::replace(&mut *slot, prepared_terminal)
+        };
+        if let Some(previous) = previous {
+            previous.close().await;
+        }
+        self.prepared_terminal_priority
+            .store(has_prepared_terminal, Ordering::Release);
         self.tunnels.activate_profile_epoch(&profile_id, epoch);
         let _ = app.emit("terax://ssh-runtime", snapshot.clone());
         self.spawn_monitor(workspace.clone(), epoch, lifecycle.clone(), app.clone());
+        if has_prepared_terminal {
+            self.spawn_prepared_terminal_expiry(workspace.clone(), epoch, lifecycle.id);
+        }
         self.spawn_tunnel_start(
             profile_id,
             workspace,
@@ -175,8 +265,37 @@ impl RemoteManager {
         Ok(snapshot)
     }
 
+    /// 关闭未被首个前端 PTY 接管的预启动终端，避免页面切换后保留远端 shell。
+    fn spawn_prepared_terminal_expiry(
+        self: &Arc<Self>,
+        workspace: Arc<RemoteWorkspace>,
+        epoch: u64,
+        lifecycle_id: u64,
+    ) {
+        let manager = Arc::downgrade(self);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
+            if !manager.is_current(&workspace, epoch, lifecycle_id).await {
+                return;
+            }
+            let prepared = manager.prepared_terminal.lock().await.take();
+            if let Some(prepared) = prepared {
+                prepared.close().await;
+            }
+        });
+    }
+
     /// 关闭并移除当前 epoch 的 workspace 与隧道。
     async fn stop_current(&self, app: &tauri::AppHandle) {
+        self.prepared_terminal_priority
+            .store(false, Ordering::Release);
+        let prepared = self.prepared_terminal.lock().await.take();
+        if let Some(prepared) = prepared {
+            prepared.close().await;
+        }
         let workspace = self.runtime.write().await.workspace.take();
         let Some(workspace) = workspace else {
             return;
@@ -218,6 +337,12 @@ impl RemoteManager {
         tauri::async_runtime::spawn(async move {
             if !manager.is_current(&workspace, epoch, lifecycle_id).await {
                 return;
+            }
+            if manager
+                .foreground_filesystem_priority
+                .load(Ordering::Acquire)
+            {
+                workspace.wait_for_foreground_filesystem().await;
             }
             let started = manager
                 .tunnels
@@ -528,6 +653,29 @@ impl RemoteManager {
         Ok(self.workspace_with_epoch(profile_id).await?.0)
     }
 
+    /// 取出与首次前端 PTY 请求一致的预启动终端。
+    pub async fn take_prepared_terminal(
+        &self,
+        profile_id: &str,
+        cwd: Option<&str>,
+        blocks: bool,
+    ) -> Option<super::terminal::PreparedTerminal> {
+        let mut slot = self.prepared_terminal.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|prepared| prepared.matches(profile_id, cwd, blocks))
+        {
+            slot.take()
+        } else {
+            None
+        }
+    }
+
+    /// 返回后续终端是否需要让 Explorer 首目录先完成。
+    pub fn should_gate_background_terminal(&self) -> bool {
+        self.prepared_terminal_priority.load(Ordering::Acquire)
+    }
+
     /// 原子返回当前 workspace 及其连接代际，供新建资源绑定正确 epoch。
     async fn workspace_with_epoch(
         &self,
@@ -562,10 +710,11 @@ impl RemoteManager {
         cwd: Option<&str>,
         timeout: Duration,
     ) -> Result<ExecOutput, String> {
-        self.workspace(profile_id)
-            .await?
-            .exec(command, cwd, timeout)
-            .await
+        let workspace = self.workspace(profile_id).await?;
+        if self.foreground_filesystem_priority.load(Ordering::Acquire) {
+            workspace.wait_for_foreground_filesystem().await;
+        }
+        workspace.exec(command, cwd, timeout).await
     }
 
     /// 将一条手动隧道绑定到当前 Runtime epoch 后启动。
@@ -706,6 +855,8 @@ mod tests {
         reconnect_delay, RemoteManager, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_INTERVAL,
         TRANSPORT_PROBE_TIMEOUT,
     };
+    use crate::modules::remote::models::ForegroundIntent;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     #[test]
@@ -731,5 +882,23 @@ mod tests {
         assert!(!second.cancellation.is_cancelled());
         assert!(!manager.is_lifecycle_current(first.id).await);
         assert!(manager.is_lifecycle_current(second.id).await);
+    }
+
+    #[tokio::test]
+    async fn filesystem_priority_survives_consuming_the_startup_intent() {
+        let manager = RemoteManager::default();
+        manager
+            .set_foreground_intent(ForegroundIntent::Explorer)
+            .await;
+        *manager.foreground_intent.lock().await = None;
+
+        assert!(manager
+            .foreground_filesystem_priority
+            .load(Ordering::Acquire));
+
+        manager.set_foreground_intent(ForegroundIntent::None).await;
+        assert!(!manager
+            .foreground_filesystem_priority
+            .load(Ordering::Acquire));
     }
 }

@@ -1,19 +1,21 @@
 //! 基于 SFTP 的远程文件系统实现。
 //!
-//! 普通 Explorer 操作复用缓存会话，编辑器条件写入在服务器端校验摘要后提交临时文件。
-//! 后台传输由 transfers 子系统持有独占会话，破坏性操作拒绝符号链接和危险根路径。
+//! Explorer 使用不查询扩展的 raw session 流水线读取目录；其他文件操作复用高层会话。
+//! 后台传输持有独占会话，编辑器条件写入与破坏性操作维持既有安全校验。
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::session::{join_remote, shell_quote, validate_remote_path, RemoteWorkspace};
 
 const RECURSIVE_DELETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+const DIRECTORY_READ_PIPELINE: usize = 2;
 
 #[derive(Clone, Debug)]
 pub struct RemoteDirEntry {
@@ -137,6 +139,52 @@ pub async fn session(
     let session = open_cached_session(workspace).await?;
     *cached = Some(session.clone());
     Ok(session)
+}
+
+/// 提前建立 Explorer 专用的标准 SFTP v3 session。
+pub async fn warm_directory_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), String> {
+    directory_session(workspace).await.map(|_| ())
+}
+
+/// 返回 Explorer 目录元数据专用的 raw SFTP session。
+async fn directory_session(
+    workspace: &Arc<RemoteWorkspace>,
+) -> Result<Arc<russh_sftp::client::RawSftpSession>, String> {
+    let mut cached = workspace.remote_fs.directory_session.lock().await;
+    if let Some(session) = cached.as_ref() {
+        return Ok(session.clone());
+    }
+    let channel = workspace
+        .handle
+        .channel_open_session()
+        .await
+        .map_err(|error| format!("open directory SFTP channel: {error}"))?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .map_err(|error| format!("request directory SFTP subsystem: {error}"))?;
+    let session = russh_sftp::client::RawSftpSession::new(channel.into_stream());
+    session
+        .init()
+        .await
+        .map_err(|error| format!("initialize directory SFTP: {error}"))?;
+    session.set_timeout(30);
+    let session = Arc::new(session);
+    *cached = Some(session.clone());
+    Ok(session)
+}
+
+async fn invalidate_directory_session(
+    workspace: &Arc<RemoteWorkspace>,
+    failed: &Arc<russh_sftp::client::RawSftpSession>,
+) {
+    let mut cached = workspace.remote_fs.directory_session.lock().await;
+    if cached
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, failed))
+    {
+        *cached = None;
+    }
 }
 
 /// 创建仅供 Explorer 和普通文件操作复用的缓存 SFTP 会话。
@@ -267,29 +315,33 @@ pub async fn read_dir(
 pub(crate) async fn read_dir_uncached(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
-    show_hidden: bool,
 ) -> Result<Vec<RemoteDirEntry>, String> {
     validate_remote_path(path)?;
-    let remote_path = path.to_string();
-    let read = retry_sftp_read(
-        workspace,
-        format!("read remote directory {path}"),
-        move |sftp| {
-            let path = remote_path.clone();
-            Box::pin(async move { sftp.read_dir(path).await })
-        },
-    )
-    .await?;
+    let session = directory_session(workspace).await?;
+    let read = match read_directory_pipelined(session.clone(), path).await {
+        Ok(entries) => entries,
+        Err(error) if should_invalidate_session(&error) => {
+            invalidate_directory_session(workspace, &session).await;
+            let retry = directory_session(workspace).await?;
+            match read_directory_pipelined(retry.clone(), path).await {
+                Ok(entries) => entries,
+                Err(retry_error) => {
+                    if should_invalidate_session(&retry_error) {
+                        invalidate_directory_session(workspace, &retry).await;
+                    }
+                    return Err(format!("read remote directory {path}: {retry_error}"));
+                }
+            }
+        }
+        Err(error) => return Err(format!("read remote directory {path}: {error}")),
+    };
     let mut entries = Vec::new();
     for entry in read {
-        let name = entry.file_name();
+        let name = entry.filename;
         if name == "." || name == ".." {
             continue;
         }
-        if !show_hidden && name.starts_with('.') {
-            continue;
-        }
-        let metadata = entry.metadata();
+        let metadata = entry.attrs;
         entries.push(RemoteDirEntry {
             name,
             kind: entry_kind(metadata.file_type()),
@@ -311,6 +363,44 @@ pub(crate) async fn read_dir_uncached(
         rank(a)
             .cmp(&rank(b))
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(entries)
+}
+
+/// 使用多个并发 READDIR 请求覆盖目录项与 EOF 的串行往返，CLOSE 在后台回收句柄。
+async fn read_directory_pipelined(
+    session: Arc<russh_sftp::client::RawSftpSession>,
+    path: &str,
+) -> Result<Vec<russh_sftp::protocol::File>, russh_sftp::client::error::Error> {
+    let handle = session.opendir(path.to_string()).await?.handle;
+    let mut pending = FuturesUnordered::new();
+    for _ in 0..DIRECTORY_READ_PIPELINE {
+        pending.push(session.readdir(handle.clone()));
+    }
+    let mut entries = Vec::new();
+    let mut eof = false;
+    while let Some(result) = pending.next().await {
+        match result {
+            Ok(names) => {
+                entries.extend(names.files);
+                if !eof {
+                    pending.push(session.readdir(handle.clone()));
+                }
+            }
+            Err(russh_sftp::client::error::Error::Status(status))
+                if status.status_code == StatusCode::Eof =>
+            {
+                eof = true;
+            }
+            Err(error) => {
+                let _ = session.close(handle).await;
+                return Err(error);
+            }
+        }
+    }
+    let close_session = session.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = close_session.close(handle).await;
     });
     Ok(entries)
 }

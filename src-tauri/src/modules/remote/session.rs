@@ -1,7 +1,7 @@
 //! SSH transport、认证、远端环境探测与命令执行。
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
-//! channel。本模块确认 shell 与 Workspace root，上层 Runtime 还会在发布连接前验证 SFTP。
+//! channel。激活终端可在同一 PTY 中确认 Workspace root；目录 SFTP 从认证完成后预热。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
 
@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
 use super::host_key::HostKeyVerifier;
-use super::models::{ConnectRequest, ProxyConfig, SshAuthMethod, SshProfile};
+use super::models::{ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshProfile};
 use super::remote_fs::RemoteFs;
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
@@ -113,16 +113,24 @@ pub struct RemoteWorkspace {
     last_probe_success: StdMutex<Instant>,
 }
 
+/// 完成认证与前台探测后的 Workspace 资源。
+pub struct WorkspaceConnect {
+    pub workspace: Arc<RemoteWorkspace>,
+    pub prepared_terminal: Option<super::terminal::PreparedTerminal>,
+}
+
 impl RemoteWorkspace {
-    /// 建立 SSH transport，并确认远端 Linux、bash、Workspace root 与 SFTP。
+    /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
     ///
-    /// 远端环境探测与 SFTP 初始化并行执行，成功返回即满足 Runtime 的完整就绪语义。
+    /// SFTP 与环境探测并行预热，但只由首次文件请求观察其结果，避免文件子系统阻塞终端。
     pub async fn connect(
         request: ConnectRequest,
         app: tauri::AppHandle,
         host_keys: Arc<HostKeyVerifier>,
         cancellation: CancellationToken,
-    ) -> Result<Arc<Self>, String> {
+        foreground_intent: Arc<Mutex<Option<ForegroundIntent>>>,
+        foreground_filesystem_priority: Arc<AtomicBool>,
+    ) -> Result<WorkspaceConnect, String> {
         let started_at = Instant::now();
         request.profile.validate()?;
         let profile = request.profile;
@@ -202,41 +210,102 @@ impl RemoteWorkspace {
             probe_lock: Mutex::new(()),
             last_probe_success: StdMutex::new(Instant::now()),
         });
-        let (probe, sftp) = tokio::join!(
-            detect_workspace(&workspace, &root_assignment, &requested_root),
-            super::sftp::session(&workspace)
-        );
-        let probe = match probe {
-            Ok(probe) => probe,
+        let intent = foreground_intent
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(ForegroundIntent::None);
+        let prime_filesystem = intent != ForegroundIntent::None
+            || foreground_filesystem_priority.load(Ordering::Acquire);
+        if prime_filesystem {
+            let filesystem = workspace.clone();
+            tauri::async_runtime::spawn(async move {
+                let started_at = Instant::now();
+                match super::sftp::warm_directory_session(&filesystem).await {
+                    Ok(_) => log::info!(
+                        "SSH filesystem ready profile={} sftp_ms={}",
+                        filesystem.profile.id,
+                        started_at.elapsed().as_millis()
+                    ),
+                    Err(error) => {
+                        if !filesystem.is_closed() {
+                            log::warn!(
+                                "SSH filesystem warmup failed profile={}: {error}",
+                                filesystem.profile.id
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
+        let probe_started_at = Instant::now();
+        let foreground = match intent {
+            ForegroundIntent::Terminal { cwd, blocks } => {
+                match super::terminal::prepare(
+                    workspace.clone(),
+                    &root_assignment,
+                    &requested_root,
+                    cwd,
+                    blocks,
+                )
+                .await
+                {
+                    Ok((prepared, probe)) => Ok((probe, Some(prepared))),
+                    Err(error) => {
+                        log::warn!(
+                            "prepared SSH terminal failed profile={}: {error}",
+                            workspace.profile.id
+                        );
+                        detect_workspace(&workspace, &root_assignment, &requested_root)
+                            .await
+                            .map_err(|probe_error| {
+                                format!("{error}; fallback workspace probe failed: {probe_error}")
+                            })
+                            .map(|probe| (probe, None))
+                    }
+                }
+            }
+            ForegroundIntent::Explorer | ForegroundIntent::None => {
+                detect_workspace(&workspace, &root_assignment, &requested_root)
+                    .await
+                    .map(|probe| (probe, None))
+            }
+        };
+        let (probe, prepared_terminal) = match foreground {
+            Ok(foreground) => foreground,
             Err(error) => {
                 workspace.disconnect().await;
                 return Err(error);
             }
         };
-        if let Err(error) = sftp {
-            workspace.disconnect().await;
-            return Err(format!("initialize SSH filesystem: {error}"));
-        }
-        if let Err(error) = super::sftp::stat(&workspace, &probe.root).await {
-            workspace.disconnect().await;
-            return Err(format!(
-                "initialize SSH filesystem at {}: {error}",
-                probe.root
-            ));
-        }
+        let probe_elapsed = probe_started_at.elapsed();
         *workspace.login_home.write().await = probe.login_home;
-        *workspace.home.write().await = probe.root;
+        *workspace.home.write().await = probe.root.clone();
+        if prime_filesystem {
+            let primed_workspace = workspace.clone();
+            let primed_root = probe.root;
+            tauri::async_runtime::spawn(async move {
+                let _ = primed_workspace
+                    .remote_fs
+                    .read_dir(primed_workspace.clone(), primed_root, true)
+                    .await;
+            });
+        }
         let ready_at = Instant::now();
         workspace.record_transport_success(ready_at);
         log::info!(
-            "SSH Runtime ready profile={} transport_ms={} auth_ms={} workspace_ms={} total_ms={}",
+            "SSH Runtime ready profile={} transport_ms={} auth_ms={} probe_ms={} total_ms={}",
             workspace.profile.id,
             transport_ready_at.duration_since(started_at).as_millis(),
             auth_ready_at.duration_since(transport_ready_at).as_millis(),
-            ready_at.duration_since(auth_ready_at).as_millis(),
+            probe_elapsed.as_millis(),
             ready_at.duration_since(started_at).as_millis()
         );
-        Ok(workspace)
+        Ok(WorkspaceConnect {
+            workspace,
+            prepared_terminal,
+        })
     }
 
     /// 复制保存在内存中的连接参数，供当前生命周期自动重连使用。
@@ -256,6 +325,11 @@ impl RemoteWorkspace {
     /// 返回远端账户登录 Home。
     pub async fn login_home(&self) -> String {
         self.login_home.read().await.clone()
+    }
+
+    /// 等待 Explorer 首个目录完成，供非前台资源避免争抢启动 transport。
+    pub async fn wait_for_foreground_filesystem(&self) {
+        self.remote_fs.wait_for_first_directory().await;
     }
 
     /// 判断 transport 是否已被探活永久失效或底层 session 已关闭。
@@ -316,10 +390,25 @@ impl RemoteWorkspace {
     /// 在固定截止时间内尽力关闭旧 transport，不允许失效连接阻塞新 epoch。
     pub async fn disconnect(&self) {
         self.mark_transport_failed();
+        // SFTP 可能正在初始化并持有锁，关闭 transport 不能反过来等待它。
+        let sftp = self
+            .remote_fs
+            .session
+            .try_lock()
+            .ok()
+            .and_then(|mut session| session.take());
+        let directory_sftp = self
+            .remote_fs
+            .directory_session
+            .try_lock()
+            .ok()
+            .and_then(|mut session| session.take());
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
-            let sftp = self.remote_fs.session.lock().await.take();
             if let Some(sftp) = sftp {
                 let _ = sftp.close().await;
+            }
+            if let Some(sftp) = directory_sftp {
+                let _ = sftp.close_session();
             }
             let _ = self
                 .handle
@@ -355,23 +444,16 @@ impl RemoteWorkspace {
 
         let run = async {
             let mut output = ExecOutput::default();
+            let mut completion = ExecCompletion::default();
             loop {
-                match channel.wait().await {
-                    Some(ChannelMsg::Data { data }) => {
-                        append_bounded(&mut output.stdout, &data, &mut output.truncated)
-                    }
-                    Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        append_bounded(&mut output.stderr, &data, &mut output.truncated)
-                    }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        output.exit_code = Some(exit_status as i32)
-                    }
-                    Some(ChannelMsg::ExitSignal { signal_name, .. }) => {
-                        output.exit_code = Some(signal_exit_code(&signal_name))
-                    }
-                    Some(ChannelMsg::Eof) => {}
-                    Some(ChannelMsg::Close) | None => break,
-                    _ => {}
+                let Some(message) = channel.wait().await else {
+                    break;
+                };
+                if collect_exec_message(&mut output, &mut completion, message) {
+                    // EOF 锁定完整输出，退出状态锁定命令结果。主动关闭可避开部分
+                    // 高延迟服务端迟发 Close 的额外等待。
+                    let _ = channel.close().await;
+                    break;
                 }
             }
             output
@@ -387,6 +469,42 @@ impl RemoteWorkspace {
             }
         }
     }
+}
+
+#[derive(Default)]
+struct ExecCompletion {
+    eof: bool,
+    exited: bool,
+}
+
+/// 收集一次性命令输出，并在收到最终退出状态或 Close 时结束等待。
+fn collect_exec_message(
+    output: &mut ExecOutput,
+    completion: &mut ExecCompletion,
+    message: ChannelMsg,
+) -> bool {
+    match message {
+        ChannelMsg::Data { data } => {
+            append_bounded(&mut output.stdout, &data, &mut output.truncated);
+            return false;
+        }
+        ChannelMsg::ExtendedData { data, .. } => {
+            append_bounded(&mut output.stderr, &data, &mut output.truncated);
+            return false;
+        }
+        ChannelMsg::ExitStatus { exit_status } => {
+            output.exit_code = Some(exit_status as i32);
+            completion.exited = true;
+        }
+        ChannelMsg::ExitSignal { signal_name, .. } => {
+            output.exit_code = Some(signal_exit_code(&signal_name));
+            completion.exited = true;
+        }
+        ChannelMsg::Eof => completion.eof = true,
+        ChannelMsg::Close => return true,
+        _ => return false,
+    }
+    completion.eof && completion.exited
 }
 
 fn client_config() -> client::Config {
@@ -431,9 +549,9 @@ async fn connect_transport(
 }
 
 #[derive(Debug)]
-struct WorkspaceProbe {
-    login_home: String,
-    root: String,
+pub(crate) struct WorkspaceProbe {
+    pub login_home: String,
+    pub root: String,
 }
 
 /// 构造远端 root 赋值语句，保持既有 `~`、`$HOME` 和相对路径语义。
@@ -511,7 +629,15 @@ fn parse_workspace_probe(
             )
         }
     }
-    let fields: Vec<&[u8]> = output.stdout.split(|byte| *byte == 0).collect();
+    parse_workspace_probe_bytes(&output.stdout, requested_root)
+}
+
+/// 解析远端探测的四个 NUL 分隔字段。
+pub(crate) fn parse_workspace_probe_bytes(
+    bytes: &[u8],
+    _requested_root: &str,
+) -> Result<WorkspaceProbe, String> {
+    let fields: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
     if fields.len() != 4
         || fields[0] != b"Linux"
         || fields[1].is_empty()
@@ -767,9 +893,11 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod path_tests {
     use super::{
-        client_config, parse_workspace_probe, password_auth_result, workspace_root_assignment,
-        ExecOutput, PrimaryAuthResult,
+        client_config, collect_exec_message, parse_workspace_probe, password_auth_result,
+        workspace_root_assignment, ExecCompletion, ExecOutput, PrimaryAuthResult,
     };
+    use bytes::Bytes;
+    use russh::ChannelMsg;
 
     #[test]
     fn builds_safe_workspace_root_assignments() {
@@ -866,5 +994,49 @@ mod path_tests {
         )
         .unwrap_err();
         assert!(failed.contains("no such file"));
+    }
+
+    #[test]
+    fn exec_completion_does_not_wait_for_server_close() {
+        let mut output = ExecOutput::default();
+        let mut completion = ExecCompletion::default();
+
+        assert!(!collect_exec_message(
+            &mut output,
+            &mut completion,
+            ChannelMsg::Data {
+                data: Bytes::from_static(b"ready")
+            }
+        ));
+        assert!(!collect_exec_message(
+            &mut output,
+            &mut completion,
+            ChannelMsg::Eof
+        ));
+        assert!(collect_exec_message(
+            &mut output,
+            &mut completion,
+            ChannelMsg::ExitStatus { exit_status: 0 }
+        ));
+        assert_eq!(output.stdout, b"ready");
+        assert_eq!(output.exit_code, Some(0));
+    }
+
+    #[test]
+    fn exec_completion_accepts_exit_status_before_eof() {
+        let mut output = ExecOutput::default();
+        let mut completion = ExecCompletion::default();
+
+        assert!(!collect_exec_message(
+            &mut output,
+            &mut completion,
+            ChannelMsg::ExitStatus { exit_status: 7 }
+        ));
+        assert!(collect_exec_message(
+            &mut output,
+            &mut completion,
+            ChannelMsg::Eof
+        ));
+        assert_eq!(output.exit_code, Some(7));
     }
 }
