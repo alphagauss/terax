@@ -31,6 +31,11 @@ export type SshCredentialInput = {
   proxySecret: string | null;
 };
 
+export type RemoteForegroundIntent =
+  | { kind: "terminal"; cwd: string | null; blocks: boolean }
+  | { kind: "explorer" }
+  | { kind: "none" };
+
 export type SshTunnel = {
   id: string;
   enabled: boolean;

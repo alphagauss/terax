@@ -7,11 +7,98 @@ use crate::modules::{secrets, secrets::SecretsState};
 
 use super::manager::RemoteState;
 use super::models::{
-    ConnectRequest, CredentialOverride, ImportedHost, RemoteRuntimeSnapshot, SshAuthMethod,
-    TunnelConfig, TunnelEventKind, TunnelInfo,
+    ConnectRequest, CredentialOverride, ForegroundIntent, ImportedHost, RemoteRuntimeSnapshot,
+    SshAuthMethod, SshProfile, TunnelConfig, TunnelEventKind, TunnelInfo,
 };
 
 const SSH_SECRET_SERVICE: &str = "terax-ssh";
+
+/// 将 profile、单次凭据覆盖或系统密钥链合并为内存连接请求。
+fn connect_request(
+    profile: SshProfile,
+    credentials: Option<CredentialOverride>,
+    app: &tauri::AppHandle,
+    secrets_state: &SecretsState,
+) -> Result<ConnectRequest, String> {
+    let (secret, proxy_secret) = match credentials {
+        Some(credentials) => (
+            credentials.secret.filter(|value| !value.is_empty()),
+            credentials.proxy_secret.filter(|value| !value.is_empty()),
+        ),
+        None => {
+            let secret = if profile.auth_method == SshAuthMethod::Agent {
+                None
+            } else {
+                secrets::get(app, secrets_state, SSH_SECRET_SERVICE, &profile.id)?
+                    .filter(|value| !value.is_empty())
+            };
+            let proxy_secret = if profile
+                .proxy_url
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                secrets::get(
+                    app,
+                    secrets_state,
+                    SSH_SECRET_SERVICE,
+                    &format!("{}:proxy", profile.id),
+                )?
+                .filter(|value| !value.is_empty())
+            } else {
+                None
+            };
+            (secret, proxy_secret)
+        }
+    };
+    Ok(ConnectRequest {
+        profile,
+        secret,
+        proxy_secret,
+    })
+}
+
+/// 使用持久化 profile 和密钥链内容建立一次连接。
+pub(crate) async fn connect_saved_profile(
+    state: &RemoteState,
+    workspace: &WorkspaceProcessState,
+    secrets_state: &SecretsState,
+    app: tauri::AppHandle,
+    profile_id: String,
+    credentials: Option<CredentialOverride>,
+) -> Result<RemoteRuntimeSnapshot, String> {
+    let profile = super::profile::load(&profile_id)?;
+    profile.validate()?;
+    workspace.assert_ssh_runtime_owner(&profile)?;
+    let request = connect_request(profile, credentials, &app, secrets_state)?;
+    state.manager.connect(request, app).await
+}
+
+/// 启动期先发布 connecting，再读取系统凭据并建立连接。
+pub(crate) async fn connect_startup_profile(
+    state: &RemoteState,
+    workspace: &WorkspaceProcessState,
+    secrets_state: &SecretsState,
+    app: tauri::AppHandle,
+    profile_id: String,
+) -> Result<RemoteRuntimeSnapshot, String> {
+    let reserved = state.manager.reserve_connect(&profile_id, &app).await?;
+    let request = match (|| {
+        let profile = super::profile::load(&profile_id)?;
+        profile.validate()?;
+        workspace.assert_ssh_runtime_owner(&profile)?;
+        connect_request(profile, None, &app, secrets_state)
+    })() {
+        Ok(request) => request,
+        Err(error) => {
+            state
+                .manager
+                .reject_reserved(&reserved, &app, error.clone())
+                .await;
+            return Err(error);
+        }
+    };
+    state.manager.connect_reserved(request, reserved, app).await
+}
 
 #[tauri::command]
 /// 建立当前 SSH Workspace 唯一 Runtime，并返回权威快照。
@@ -23,45 +110,15 @@ pub async fn ssh_runtime_connect(
     profile_id: String,
     credentials: Option<CredentialOverride>,
 ) -> Result<RemoteRuntimeSnapshot, String> {
-    let profile = super::profile::load(&profile_id)?;
-    profile.validate()?;
-    workspace.assert_ssh_runtime_owner(&profile)?;
-    let (secret, proxy_secret) = match credentials {
-        Some(credentials) => (
-            credentials.secret.filter(|value| !value.is_empty()),
-            credentials.proxy_secret.filter(|value| !value.is_empty()),
-        ),
-        None => {
-            let secret = if profile.auth_method == SshAuthMethod::Agent {
-                None
-            } else {
-                secrets::get(&app, &secrets_state, SSH_SECRET_SERVICE, &profile.id)?
-                    .filter(|value| !value.is_empty())
-            };
-            let proxy_secret = if profile
-                .proxy_url
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-            {
-                secrets::get(
-                    &app,
-                    &secrets_state,
-                    SSH_SECRET_SERVICE,
-                    &format!("{}:proxy", profile.id),
-                )?
-                .filter(|value| !value.is_empty())
-            } else {
-                None
-            };
-            (secret, proxy_secret)
-        }
-    };
-    let request = ConnectRequest {
-        profile,
-        secret,
-        proxy_secret,
-    };
-    state.manager.connect(request, app).await
+    connect_saved_profile(
+        &state,
+        &workspace,
+        &secrets_state,
+        app,
+        profile_id,
+        credentials,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -91,6 +148,23 @@ pub async fn ssh_runtime_wake(
 }
 
 #[tauri::command]
+/// 提交本地恢复状态中的前台资源，不触发新的连接生命周期。
+pub async fn ssh_runtime_set_foreground(
+    state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+    intent: ForegroundIntent,
+) -> Result<(), String> {
+    if workspace.bootstrap().env.ssh_profile_id().is_none() {
+        return Err("foreground SSH intent requires an SSH Workspace".to_string());
+    }
+    if let ForegroundIntent::Terminal { cwd: Some(cwd), .. } = &intent {
+        super::session::validate_remote_path(cwd)?;
+    }
+    state.manager.set_foreground_intent(intent).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn ssh_confirm_host_key(
     state: tauri::State<'_, RemoteState>,
     request_id: String,
@@ -102,6 +176,20 @@ pub async fn ssh_confirm_host_key(
         .host_keys
         .confirm(&request_id, accepted, remember)
         .await
+}
+
+#[tauri::command]
+/// 返回事件桥注册前已经产生的主机密钥提示。
+pub async fn ssh_pending_host_key(
+    state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+) -> Result<Option<super::host_key::HostKeyPrompt>, String> {
+    let profile_id = workspace
+        .bootstrap()
+        .env
+        .ssh_profile_id()
+        .ok_or_else(|| "host-key prompts require an SSH Workspace".to_string())?;
+    Ok(state.manager.host_keys.pending_prompt(profile_id).await)
 }
 
 #[tauri::command]

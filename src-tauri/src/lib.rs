@@ -159,6 +159,7 @@ pub fn run() {
             _app.manage(workspace_runtime::WorkspaceRuntimeState::new(
                 _app.handle(),
             )?);
+            remote::start_workspace_connection(_app.handle().clone());
             Ok(())
         })
         .manage(pty::PtyState::default())
@@ -203,7 +204,9 @@ pub fn run() {
             remote::commands::ssh_runtime_disconnect,
             remote::commands::ssh_runtime_snapshot,
             remote::commands::ssh_runtime_wake,
+            remote::commands::ssh_runtime_set_foreground,
             remote::commands::ssh_confirm_host_key,
+            remote::commands::ssh_pending_host_key,
             remote::commands::ssh_import_config,
             remote::commands::ssh_tunnel_start,
             remote::commands::ssh_tunnel_stop,

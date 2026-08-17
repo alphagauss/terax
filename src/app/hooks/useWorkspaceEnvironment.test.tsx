@@ -10,12 +10,15 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceEnvironment } from "./useWorkspaceEnvironment";
 
+let latestEnvironment: ReturnType<typeof useWorkspaceEnvironment> | null = null;
+
 const mocks = vi.hoisted(() => ({
   env: { kind: "ssh", profileId: "server" } as const,
   snapshot: { phase: "idle", version: 0 } as Record<string, unknown>,
   applySnapshot: vi.fn(),
   onRuntime: vi.fn(),
   onHostKey: vi.fn(),
+  pendingHostKey: vi.fn(),
   runtimeSnapshot: vi.fn(),
   wakeRuntime: vi.fn(),
   connectRuntime: vi.fn(),
@@ -52,6 +55,7 @@ vi.mock("@/modules/remote", () => {
     remoteNative: {
       onRuntime: mocks.onRuntime,
       onHostKey: mocks.onHostKey,
+      pendingHostKey: mocks.pendingHostKey,
       runtimeSnapshot: mocks.runtimeSnapshot,
       wakeRuntime: mocks.wakeRuntime,
       connectRuntime: mocks.connectRuntime,
@@ -63,7 +67,7 @@ vi.mock("@/modules/remote", () => {
 
 /** 挂载被测 Hook，使启动副作用按真实 React 生命周期执行。 */
 function Harness() {
-  useWorkspaceEnvironment();
+  latestEnvironment = useWorkspaceEnvironment();
   return null;
 }
 
@@ -72,9 +76,11 @@ describe("useWorkspaceEnvironment", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    latestEnvironment = null;
     mocks.snapshot = { phase: "idle", version: 0 };
     mocks.onRuntime.mockResolvedValue(() => {});
     mocks.onHostKey.mockResolvedValue(() => {});
+    mocks.pendingHostKey.mockResolvedValue(null);
     mocks.runtimeSnapshot.mockImplementation(async () => mocks.snapshot);
     mocks.wakeRuntime.mockImplementation(async () => mocks.snapshot);
     mocks.connectRuntime.mockResolvedValue({
@@ -141,5 +147,37 @@ describe("useWorkspaceEnvironment", () => {
     await act(async () => Promise.resolve());
 
     expect(mocks.wakeRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores a host-key prompt created before event registration", async () => {
+    mocks.snapshot = {
+      phase: "connecting",
+      version: 1,
+      profileId: "server",
+    };
+    mocks.pendingHostKey.mockResolvedValue({
+      requestId: "request",
+      profileId: "server",
+      host: "example.com",
+      port: 22,
+      keyType: "ssh-ed25519",
+      fingerprint: "SHA256:test",
+      changed: false,
+    });
+
+    await renderHarness();
+
+    expect(latestEnvironment?.hostPrompt).toMatchObject({
+      requestId: "request",
+      profileId: "server",
+    });
+  });
+
+  it("keeps the runtime bridge when pending host-key lookup fails", async () => {
+    mocks.pendingHostKey.mockRejectedValue(new Error("IPC unavailable"));
+
+    await renderHarness();
+
+    expect(mocks.connectRuntime).toHaveBeenCalledOnce();
   });
 });

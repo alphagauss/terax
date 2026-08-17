@@ -6,11 +6,11 @@
 import { native } from "@/modules/ai/lib/native";
 import {
   connectedRuntimeHome,
+  type HostKeyPrompt,
   remoteNative,
+  type SshCredentialInput,
   useRemoteRuntimeStore,
   waitForRuntimeSettlement,
-  type HostKeyPrompt,
-  type SshCredentialInput,
 } from "@/modules/remote";
 import { currentWorkspaceEnv, getWslHome } from "@/modules/workspace";
 import { homeDir } from "@tauri-apps/api/path";
@@ -71,9 +71,13 @@ export function useWorkspaceEnvironment() {
           unlistenHostKey();
           return;
         }
-        const snapshot = await remoteNative.runtimeSnapshot();
+        const [snapshot, pendingHostKey] = await Promise.all([
+          remoteNative.runtimeSnapshot(),
+          remoteNative.pendingHostKey().catch(() => null),
+        ]);
         if (!active) return;
         applyRuntimeSnapshot(snapshot);
+        if (pendingHostKey) setHostPrompt(pendingHostKey);
         setRemoteEventsReady(true);
       } catch (error) {
         unlistenRuntime?.();

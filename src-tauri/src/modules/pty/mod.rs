@@ -61,9 +61,30 @@ pub async fn pty_open(
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     if let WorkspaceEnv::Ssh { profile_id } = &workspace {
         let remote_workspace = remote.manager.workspace(profile_id).await?;
-        let session =
-            remote::terminal::open(remote_workspace, cols, rows, cwd, blocks, on_data, on_exit)
-                .await?;
+        let prepared = remote
+            .manager
+            .take_prepared_terminal(profile_id, cwd.as_deref(), blocks)
+            .await;
+        if prepared.is_none() && remote.manager.should_gate_background_terminal() {
+            remote_workspace.wait_for_foreground_filesystem().await;
+        }
+        let session = match prepared {
+            Some(prepared) => {
+                remote::terminal::attach_prepared(
+                    remote_workspace,
+                    prepared,
+                    cols,
+                    rows,
+                    on_data,
+                    on_exit,
+                )
+                .await?
+            }
+            None => {
+                remote::terminal::open(remote_workspace, cols, rows, cwd, blocks, on_data, on_exit)
+                    .await?
+            }
+        };
         state
             .remote_sessions
             .write()

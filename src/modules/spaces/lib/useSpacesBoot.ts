@@ -1,18 +1,21 @@
 /**
- * 本文件负责等待环境就绪并恢复当前 Workspace 的 Space 状态。
+ * 本文件在等待环境时恢复 Workspace 的 Space 状态，并提前报告 SSH 前台资源。
  * 新 Workspace 默认进入空态，显式 Local 启动目录仍创建对应终端。
  */
 
 import { native } from "@/modules/ai/lib/native";
 import { getInitialAlphaShowInRemote } from "@/modules/alpha/preferences";
+import { type RemoteForegroundIntent, remoteNative } from "@/modules/remote";
 import { initialWorkspaceRoot } from "@/modules/spaces/lib/activeSpace";
 import {
   freshSpaceWorkbench,
   hydrateSpaceWorkbench,
+  type SerializedTab,
+  type SerializedWorkbenchNode,
 } from "@/modules/spaces/lib/serialize";
 import {
-  loadAll,
   type LoadedSpaces,
+  loadAll,
   type SpaceMeta,
   saveActiveId,
   saveSpacesList,
@@ -50,6 +53,57 @@ function restoredPagesNeedEnvironment(loaded: LoadedSpaces): boolean {
   return [...loaded.states.values()].some((state) => state.workbench !== null);
 }
 
+/** 返回序列化布局中显式激活的可恢复标签。 */
+function explicitlyActiveSerializedTab(
+  node: SerializedWorkbenchNode,
+): SerializedTab | null {
+  if (node.kind === "group") {
+    return node.active
+      ? (node.tabs[node.activeTabIndex] ?? node.tabs[0] ?? null)
+      : null;
+  }
+  for (const child of node.children) {
+    const tab = explicitlyActiveSerializedTab(child);
+    if (tab) return tab;
+  }
+  return null;
+}
+
+/** 返回序列化布局中的第一个可恢复标签，供缺少 active 标记的旧状态使用。 */
+function firstSerializedTab(
+  node: SerializedWorkbenchNode,
+): SerializedTab | null {
+  if (node.kind === "group") return node.tabs[0] ?? null;
+  for (const child of node.children) {
+    const tab = firstSerializedTab(child);
+    if (tab) return tab;
+  }
+  return null;
+}
+
+/** 从本地恢复状态提取 SSH 启动阶段的前台资源提示。 */
+export function foregroundIntentForLoadedSpaces(
+  loaded: LoadedSpaces,
+): RemoteForegroundIntent {
+  const activeSpaceId =
+    loaded.activeId && loaded.states.has(loaded.activeId)
+      ? loaded.activeId
+      : loaded.spaces[0]?.id;
+  const workbench = activeSpaceId
+    ? loaded.states.get(activeSpaceId)?.workbench
+    : null;
+  if (!workbench) return { kind: "none" };
+  const tab =
+    explicitlyActiveSerializedTab(workbench) ?? firstSerializedTab(workbench);
+  return tab?.kind === "terminal"
+    ? {
+        kind: "terminal",
+        cwd: tab.cwd ?? null,
+        blocks: tab.blocks ?? false,
+      }
+    : { kind: "explorer" };
+}
+
 /**
  * 先读取本地 Space 布局，仅在恢复远端页面需要 Home 时等待环境就绪。
  *
@@ -60,8 +114,14 @@ export async function prepareWorkspaceBoot(
   environmentHome: string | null,
   ensureWorkspaceReady: () => Promise<string | null>,
   loadWorkspaceState: () => Promise<LoadedSpaces>,
+  onLoaded?: (loaded: LoadedSpaces) => Promise<void>,
 ): Promise<LoadedSpaces | null> {
   const loaded = discardOrphanedStates(await loadWorkspaceState());
+  try {
+    await onLoaded?.(loaded);
+  } catch {
+    // 前台提示只影响预热策略，不能阻止本地布局恢复。
+  }
   const needsEnvironment =
     env.kind === "local" || restoredPagesNeedEnvironment(loaded);
   if (!needsEnvironment) return loaded;
@@ -107,6 +167,12 @@ export function useSpacesBoot({
           environmentHome,
           ensureWorkspaceReady,
           loadAll,
+          env.kind === "ssh"
+            ? (state) =>
+                remoteNative.setForeground(
+                  foregroundIntentForLoadedSpaces(state),
+                )
+            : undefined,
         );
         if (!loaded) {
           done.current = false;

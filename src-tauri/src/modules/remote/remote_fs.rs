@@ -1,12 +1,14 @@
 //! 当前 SSH epoch 的远端文件系统资源与请求合并。
 //!
-//! 缓存 SFTP session，并将同一路径、同一可见性选项的并发目录读取合并为一次网络操作。
-//! 领头请求在独立任务中完成，单个前端调用被取消不会遗留永不收敛的等待者。
+//! 普通文件与目录元数据使用独立 SFTP session；同一路径的可见与隐藏目录请求共享
+//! 一次完整列表，再在调用边界过滤。领头请求不依赖单个前端调用的生命周期。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, Notify};
 
 use super::session::RemoteWorkspace;
 use super::sftp::{self, RemoteDirEntry};
@@ -16,14 +18,16 @@ type DirectoryResult = Result<Vec<RemoteDirEntry>, String>;
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct DirectoryKey {
     path: String,
-    show_hidden: bool,
 }
 
-/// 一个 transport epoch 内共享的 SFTP session 与目录读取协调器。
+/// 一个 transport epoch 内共享的普通文件、目录元数据 session 与请求协调器。
 #[derive(Default)]
 pub struct RemoteFs {
     pub(crate) session: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
+    pub(crate) directory_session: Mutex<Option<Arc<russh_sftp::client::RawSftpSession>>>,
     directory_reads: Mutex<HashMap<DirectoryKey, Vec<oneshot::Sender<DirectoryResult>>>>,
+    first_directory_ready: AtomicBool,
+    first_directory_notify: Notify,
 }
 
 impl RemoteFs {
@@ -34,17 +38,52 @@ impl RemoteFs {
         path: String,
         show_hidden: bool,
     ) -> DirectoryResult {
-        let key = DirectoryKey { path, show_hidden };
+        let started_at = Instant::now();
+        let profile_id = workspace.profile.id.clone();
+        let key = DirectoryKey { path };
         let (receiver, leader) = self.subscribe(key.clone()).await;
         if leader {
             tauri::async_runtime::spawn(async move {
-                let result = sftp::read_dir_uncached(&workspace, &key.path, key.show_hidden).await;
+                let result = sftp::read_dir_uncached(&workspace, &key.path).await;
                 workspace.remote_fs.complete(key, result).await;
             });
         }
-        receiver
+        let result = receiver
             .await
-            .map_err(|_| "remote directory request was cancelled".to_string())?
+            .map_err(|_| "remote directory request was cancelled".to_string())?;
+        let first_directory = self.settle_first_directory();
+        let mut entries = result?;
+        if !show_hidden {
+            entries.retain(|entry| !entry.name.starts_with('.'));
+        }
+        if first_directory {
+            log::info!(
+                "SSH first directory ready profile={} elapsed_ms={}",
+                profile_id,
+                started_at.elapsed().as_millis()
+            );
+        }
+        Ok(entries)
+    }
+
+    /// 等待首个前台目录返回；失败或慢服务端不会无限阻塞后台资源。
+    pub async fn wait_for_first_directory(&self) {
+        if self.first_directory_ready.load(Ordering::Acquire) {
+            return;
+        }
+        let notified = self.first_directory_notify.notified();
+        if self.first_directory_ready.load(Ordering::Acquire) {
+            return;
+        }
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(3), notified).await;
+    }
+
+    fn settle_first_directory(&self) -> bool {
+        let first = !self.first_directory_ready.swap(true, Ordering::AcqRel);
+        if first {
+            self.first_directory_notify.notify_waiters();
+        }
+        first
     }
 
     async fn subscribe(&self, key: DirectoryKey) -> (oneshot::Receiver<DirectoryResult>, bool) {
@@ -72,7 +111,6 @@ mod tests {
         let fs = RemoteFs::default();
         let key = DirectoryKey {
             path: "/workspace".to_string(),
-            show_hidden: false,
         };
         let (first, first_leader) = fs.subscribe(key.clone()).await;
         let (second, second_leader) = fs.subscribe(key.clone()).await;
@@ -85,22 +123,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn visibility_options_do_not_share_directory_requests() {
+    async fn visibility_options_share_the_same_network_request() {
         let fs = RemoteFs::default();
-        let (_, visible_leader) = fs
-            .subscribe(DirectoryKey {
-                path: "/workspace".to_string(),
-                show_hidden: false,
-            })
-            .await;
-        let (_, hidden_leader) = fs
-            .subscribe(DirectoryKey {
-                path: "/workspace".to_string(),
-                show_hidden: true,
-            })
-            .await;
+        let key = DirectoryKey {
+            path: "/workspace".to_string(),
+        };
+        let (_, visible_leader) = fs.subscribe(key.clone()).await;
+        let (_, hidden_leader) = fs.subscribe(key).await;
 
         assert!(visible_leader);
-        assert!(hidden_leader);
+        assert!(!hidden_leader);
+    }
+
+    #[tokio::test]
+    async fn failed_first_directory_releases_background_waiters() {
+        let fs = Arc::new(RemoteFs::default());
+        let key = DirectoryKey {
+            path: "/workspace".to_string(),
+        };
+        let (receiver, leader) = fs.subscribe(key.clone()).await;
+        assert!(leader);
+        let waiter = tokio::spawn({
+            let fs = fs.clone();
+            async move { fs.wait_for_first_directory().await }
+        });
+
+        fs.complete(key, Err("unavailable".to_string())).await;
+        let result = receiver.await.unwrap();
+        fs.settle_first_directory();
+        assert!(result.is_err());
+        tokio::time::timeout(std::time::Duration::from_millis(100), waiter)
+            .await
+            .unwrap()
+            .unwrap();
     }
 }
