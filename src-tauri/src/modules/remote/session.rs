@@ -20,6 +20,7 @@ use zeroize::Zeroizing;
 use super::host_key::HostKeyVerifier;
 use super::models::{ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshProfile};
 use super::remote_fs::RemoteFs;
+use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
@@ -123,13 +124,14 @@ impl RemoteWorkspace {
     /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
     ///
     /// SFTP 与环境探测并行预热，但只由首次文件请求观察其结果，避免文件子系统阻塞终端。
-    pub async fn connect(
+    pub(super) async fn connect(
         request: ConnectRequest,
         app: tauri::AppHandle,
         host_keys: Arc<HostKeyVerifier>,
         cancellation: CancellationToken,
         foreground_intent: Arc<Mutex<Option<ForegroundIntent>>>,
         foreground_filesystem_priority: Arc<AtomicBool>,
+        traffic: Arc<SshTrafficMeter>,
     ) -> Result<WorkspaceConnect, String> {
         let started_at = Instant::now();
         request.profile.validate()?;
@@ -155,14 +157,21 @@ impl RemoteWorkspace {
         let config = Arc::new(client_config());
 
         let remote_forwards = RemoteForwardRegistry::default();
+        let handler = || ClientHandler {
+            app: app.clone(),
+            profile_id: profile.id.clone(),
+            host: profile.host.clone(),
+            port: profile.port,
+            host_keys: host_keys.clone(),
+            remote_forwards: remote_forwards.clone(),
+            cancellation: cancellation.clone(),
+        };
         let mut handle = connect_transport(
             &profile,
             proxy.as_ref(),
             config.clone(),
-            app.clone(),
-            host_keys.clone(),
-            remote_forwards.clone(),
-            cancellation.clone(),
+            handler(),
+            traffic.clone(),
         )
         .await?;
         let transport_ready_at = Instant::now();
@@ -180,16 +189,8 @@ impl RemoteWorkspace {
                     "en",
                 )
                 .await;
-            handle = connect_transport(
-                &profile,
-                proxy.as_ref(),
-                config,
-                app,
-                host_keys,
-                remote_forwards.clone(),
-                cancellation,
-            )
-            .await?;
+            handle =
+                connect_transport(&profile, proxy.as_ref(), config, handler(), traffic).await?;
             if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
                 .await?
             {
@@ -518,20 +519,9 @@ async fn connect_transport(
     profile: &SshProfile,
     proxy: Option<&ProxyConfig>,
     config: Arc<client::Config>,
-    app: tauri::AppHandle,
-    host_keys: Arc<HostKeyVerifier>,
-    remote_forwards: RemoteForwardRegistry,
-    cancellation: CancellationToken,
+    handler: ClientHandler,
+    traffic: Arc<SshTrafficMeter>,
 ) -> Result<Handle<ClientHandler>, String> {
-    let handler = ClientHandler {
-        app,
-        profile_id: profile.id.clone(),
-        host: profile.host.clone(),
-        port: profile.port,
-        host_keys,
-        remote_forwards,
-        cancellation,
-    };
     let stream = tokio::time::timeout(
         Duration::from_secs(15),
         super::proxy::connect(proxy, &profile.host, profile.port),
@@ -539,6 +529,7 @@ async fn connect_transport(
     .await
     .map_err(|_| "SSH TCP connection timed out".to_string())?
     .map_err(|e| format!("SSH TCP connection failed: {e}"))?;
+    let stream = CountingSshStream::new(stream, traffic);
     tokio::time::timeout(
         Duration::from_secs(20),
         client::connect_stream(config, stream, handler),

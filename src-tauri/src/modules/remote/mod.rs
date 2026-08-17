@@ -14,6 +14,7 @@ pub mod session;
 pub mod sftp;
 mod ssh_config;
 pub mod terminal;
+mod traffic;
 pub mod tunnel;
 
 pub use manager::RemoteState;

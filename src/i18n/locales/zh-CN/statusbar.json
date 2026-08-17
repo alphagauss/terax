@@ -152,6 +152,13 @@
       "finished": "已完成"
     }
   },
+  "sshTraffic": {
+    "label": "SSH 流量",
+    "title": "SSH 流量",
+    "description": "当前进程中本机与远程主机之间的累计 SSH 流量，包括终端、文件访问、Shell 和隧道。",
+    "uploaded": "累计上传",
+    "downloaded": "累计下载"
+  },
   "tunnels": {
     "label": "隧道",
     "count": "隧道 {{count}}",

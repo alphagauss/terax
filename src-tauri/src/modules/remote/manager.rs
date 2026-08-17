@@ -1,4 +1,4 @@
-//! 当前进程唯一 SSH Runtime 的连接、重连与资源生命周期协调。
+//! 当前进程唯一 SSH Runtime 的连接、重连、流量统计与资源生命周期协调。
 //!
 //! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，目录 SFTP
 //! 独立预热。旧 workspace 的迟到失败不能覆盖新连接。
@@ -13,10 +13,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, TunnelConfig, TunnelEvent,
-    TunnelEventKind, TunnelInfo,
+    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshTrafficSnapshot, TunnelConfig,
+    TunnelEvent, TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace};
+use super::traffic::SshTrafficMeter;
 use super::tunnel::{TunnelFailure, TunnelManager};
 
 const TRANSPORT_PROBE_INTERVAL: Duration = Duration::from_secs(2);
@@ -57,6 +58,7 @@ pub struct RemoteManager {
     next_version: AtomicU64,
     next_epoch: AtomicU64,
     next_lifecycle: AtomicU64,
+    traffic: Arc<SshTrafficMeter>,
     pub host_keys: Arc<HostKeyVerifier>,
     tunnels: TunnelManager,
 }
@@ -83,6 +85,7 @@ impl Default for RemoteManager {
             next_version: AtomicU64::new(1),
             next_epoch: AtomicU64::new(1),
             next_lifecycle: AtomicU64::new(1),
+            traffic: Arc::new(SshTrafficMeter::default()),
             host_keys: Arc::new(HostKeyVerifier::new(path)),
             tunnels: TunnelManager::default(),
         }
@@ -191,6 +194,7 @@ impl RemoteManager {
             lifecycle.cancellation.clone(),
             self.foreground_intent.clone(),
             self.foreground_filesystem_priority.clone(),
+            self.traffic.clone(),
         );
         let connected = match tokio::select! {
             _ = lifecycle.cancellation.cancelled() => return Err(CONNECT_SUPERSEDED.into()),
@@ -619,6 +623,11 @@ impl RemoteManager {
     /// 返回当前权威状态快照。
     pub async fn snapshot(&self) -> RemoteRuntimeSnapshot {
         self.runtime.read().await.snapshot.clone()
+    }
+
+    /// 返回当前应用进程累计的 SSH transport 收发字节。
+    pub fn traffic_snapshot(&self) -> SshTrafficSnapshot {
+        self.traffic.snapshot()
     }
 
     /// 窗口重新激活时立即确认长时间未探活的 transport，并复用统一重连流程。

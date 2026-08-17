@@ -152,6 +152,13 @@
       "finished": "Finished"
     }
   },
+  "sshTraffic": {
+    "label": "SSH traffic",
+    "title": "SSH traffic",
+    "description": "Cumulative SSH traffic between this process and the remote host, including terminals, file access, shells, and tunnels.",
+    "uploaded": "Uploaded",
+    "downloaded": "Downloaded"
+  },
   "tunnels": {
     "label": "Tunnels",
     "count": "Tunnels {{count}}",
