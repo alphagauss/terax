@@ -1,6 +1,6 @@
 /**
  * 本文件实现应用底部状态栏。
- * 负责组合工作区、诊断、Python、隐私、后台传输、SSH 隧道和 Agent 状态，不持有各子系统业务状态。
+ * 负责组合工作区、诊断、Python、隐私、后台传输、SSH 流量、隧道和 Agent 状态，不持有各子系统业务状态。
  */
 
 import {
@@ -11,7 +11,7 @@ import {
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
 import type { PythonInterpreter } from "@/modules/python/native";
-import { TunnelStatusControl } from "@/modules/remote";
+import { SshTrafficControl, TunnelStatusControl } from "@/modules/remote";
 import { TransferStatusControl } from "@/modules/transfers";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon, SourceCodeIcon } from "@hugeicons/core-free-icons";
@@ -116,6 +116,7 @@ export function StatusBar({
           </Tooltip>
         ) : null}
         <TransferStatusControl />
+        <SshTrafficControl />
         <TunnelStatusControl />
         <AgentStatusPill onClick={onToggleAi} active={aiOpen} />
       </div>

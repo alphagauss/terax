@@ -1,5 +1,5 @@
 /**
- * 本文件定义 SSH profile、连接和隧道在前端与 Tauri 命令之间共享的数据类型。
+ * 本文件定义 SSH profile、连接、流量和隧道在前端与 Tauri 命令之间共享的数据类型。
  * 持久化隧道使用稳定配置 ID，运行时隧道 ID 只用于当前进程的资源控制。
  */
 
@@ -72,6 +72,11 @@ export type RemoteRuntimeSnapshot =
       profileId: string;
       reason: string;
     };
+
+export type SshTrafficSnapshot = {
+  uploadedBytes: number;
+  downloadedBytes: number;
+};
 
 export type HostKeyPrompt = {
   requestId: string;

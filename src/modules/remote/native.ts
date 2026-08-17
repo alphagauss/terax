@@ -1,5 +1,5 @@
 /**
- * 本文件封装 SSH 连接、终端和隧道相关的 Tauri IPC。
+ * 本文件封装 SSH 连接、transport 流量、终端和隧道相关的 Tauri IPC。
  * 文件传输统一由 transfers 模块管理，这里不暴露平行上传或下载入口。
  */
 
@@ -11,6 +11,7 @@ import type {
   RemoteForegroundIntent,
   RemoteRuntimeSnapshot,
   SshCredentialInput,
+  SshTrafficSnapshot,
   TunnelConfig,
   TunnelEvent,
   TunnelInfo,
@@ -28,6 +29,7 @@ export const remoteNative = {
     }),
   disconnectRuntime: () => invoke<void>("ssh_runtime_disconnect"),
   runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
+  trafficSnapshot: () => invoke<SshTrafficSnapshot>("ssh_traffic_snapshot"),
   wakeRuntime: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_wake"),
   setForeground: (intent: RemoteForegroundIntent) =>
     invoke<void>("ssh_runtime_set_foreground", { intent }),

@@ -1,4 +1,4 @@
-//! SSH 配置、连接和隧道的跨进程数据模型。
+//! SSH 配置、连接、流量和隧道的跨进程数据模型。
 //!
 //! 本模块定义写入共享 SSH profile 存储的持久化隧道，以及仅在当前
 //! Workspace 进程中有效的运行时隧道信息。持久化 ID 与运行时 ID 分离，
@@ -150,6 +150,14 @@ pub struct ConnectRequest {
     pub profile: SshProfile,
     pub secret: Option<String>,
     pub proxy_secret: Option<String>,
+}
+
+/// 当前应用进程经 SSH transport 传输的累计字节数。
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTrafficSnapshot {
+    pub uploaded_bytes: u64,
+    pub downloaded_bytes: u64,
 }
 
 /// 前端凭据对话框对本次连接提供的临时覆盖值。
