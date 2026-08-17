@@ -17,10 +17,8 @@ const mocks = vi.hoisted(() => ({
   onRuntime: vi.fn(),
   onHostKey: vi.fn(),
   runtimeSnapshot: vi.fn(),
+  wakeRuntime: vi.fn(),
   connectRuntime: vi.fn(),
-  getSecret: vi.fn(),
-  getProxySecret: vi.fn(),
-  loadProfiles: vi.fn(),
   workspaceAuthorize: vi.fn(),
 }));
 
@@ -55,14 +53,10 @@ vi.mock("@/modules/remote", () => {
       onRuntime: mocks.onRuntime,
       onHostKey: mocks.onHostKey,
       runtimeSnapshot: mocks.runtimeSnapshot,
+      wakeRuntime: mocks.wakeRuntime,
       connectRuntime: mocks.connectRuntime,
-      getSecret: mocks.getSecret,
-      getProxySecret: mocks.getProxySecret,
     },
     useRemoteRuntimeStore,
-    useRemoteStore: {
-      getState: () => ({ load: mocks.loadProfiles }),
-    },
     waitForRuntimeSettlement: vi.fn(async () => null),
   };
 });
@@ -82,22 +76,7 @@ describe("useWorkspaceEnvironment", () => {
     mocks.onRuntime.mockResolvedValue(() => {});
     mocks.onHostKey.mockResolvedValue(() => {});
     mocks.runtimeSnapshot.mockImplementation(async () => mocks.snapshot);
-    mocks.getSecret.mockResolvedValue("secret");
-    mocks.getProxySecret.mockResolvedValue(null);
-    mocks.loadProfiles.mockResolvedValue([
-      {
-        id: "server",
-        groupId: "default",
-        name: "Server",
-        host: "ssh.example.com",
-        port: 22,
-        username: "developer",
-        authMethod: "password",
-        reconnectEnabled: true,
-        reconnectMaxAttempts: 2,
-        tunnels: [],
-      },
-    ]);
+    mocks.wakeRuntime.mockImplementation(async () => mocks.snapshot);
     mocks.connectRuntime.mockResolvedValue({
       phase: "connected",
       version: 1,
@@ -131,6 +110,7 @@ describe("useWorkspaceEnvironment", () => {
     const root = await renderHarness();
 
     expect(mocks.connectRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.connectRuntime).toHaveBeenCalledWith("server", undefined);
     expect(mocks.onRuntime.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.connectRuntime.mock.invocationCallOrder[0],
     );
@@ -153,5 +133,13 @@ describe("useWorkspaceEnvironment", () => {
     await renderHarness();
 
     expect(mocks.connectRuntime).not.toHaveBeenCalled();
+  });
+
+  it("asks Rust to verify a focused SSH window", async () => {
+    await renderHarness();
+    window.dispatchEvent(new Event("focus"));
+    await act(async () => Promise.resolve());
+
+    expect(mocks.wakeRuntime).toHaveBeenCalledTimes(1);
   });
 });

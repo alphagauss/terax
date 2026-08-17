@@ -9,7 +9,7 @@ import type {
   HostKeyPrompt,
   ImportedHost,
   RemoteRuntimeSnapshot,
-  SshProfile,
+  SshCredentialInput,
   TunnelConfig,
   TunnelEvent,
   TunnelInfo,
@@ -20,20 +20,14 @@ const proxySecretAccount = (profileId: string) => `${profileId}:proxy`;
 
 /** SSH Runtime、隧道、主机密钥与凭据的原生调用边界。 */
 export const remoteNative = {
-  connectRuntime: (
-    profile: SshProfile,
-    secret?: string | null,
-    proxySecret?: string | null,
-  ) =>
+  connectRuntime: (profileId: string, credentials?: SshCredentialInput) =>
     invoke<RemoteRuntimeSnapshot>("ssh_runtime_connect", {
-      request: {
-        profile,
-        secret: secret || null,
-        proxySecret: proxySecret || null,
-      },
+      profileId,
+      credentials: credentials ?? null,
     }),
   disconnectRuntime: () => invoke<void>("ssh_runtime_disconnect"),
   runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
+  wakeRuntime: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_wake"),
   confirmHostKey: (requestId: string, accepted: boolean, remember: boolean) =>
     invoke<void>("ssh_confirm_host_key", {
       requestId,

@@ -8,38 +8,13 @@ import {
   connectedRuntimeHome,
   remoteNative,
   useRemoteRuntimeStore,
-  useRemoteStore,
   waitForRuntimeSettlement,
   type HostKeyPrompt,
-  type RemoteRuntimeSnapshot,
   type SshCredentialInput,
-  type SshProfile,
 } from "@/modules/remote";
 import { currentWorkspaceEnv, getWslHome } from "@/modules/workspace";
 import { homeDir } from "@tauri-apps/api/path";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-/** 从当前 profile 和系统密钥链构造一次完整 SSH 连接。 */
-async function connectSshProfile(
-  profile: SshProfile,
-  credentials?: SshCredentialInput,
-): Promise<RemoteRuntimeSnapshot> {
-  const [storedSecret, storedProxySecret] = credentials
-    ? [credentials.secret, credentials.proxySecret]
-    : await Promise.all([
-        profile.authMethod === "agent"
-          ? null
-          : remoteNative.getSecret(profile.id),
-        profile.proxyUrl?.trim()
-          ? remoteNative.getProxySecret(profile.id)
-          : null,
-      ]);
-  return remoteNative.connectRuntime(
-    profile,
-    storedSecret ?? "",
-    storedProxySecret ?? "",
-  );
-}
 
 /**
  * 管理当前进程绑定环境的就绪入口。
@@ -75,6 +50,13 @@ export function useWorkspaceEnvironment() {
     let active = true;
     let unlistenRuntime: (() => void) | undefined;
     let unlistenHostKey: (() => void) | undefined;
+    const wakeRuntime = () => {
+      void remoteNative
+        .wakeRuntime()
+        .then(applyRuntimeSnapshot)
+        .catch(() => {});
+    };
+    window.addEventListener("focus", wakeRuntime);
     setRemoteEventsReady(false);
     setRemoteBridgeError(null);
     void (async () => {
@@ -106,6 +88,7 @@ export function useWorkspaceEnvironment() {
     })();
     return () => {
       active = false;
+      window.removeEventListener("focus", wakeRuntime);
       unlistenRuntime?.();
       unlistenHostKey?.();
     };
@@ -169,12 +152,10 @@ export function useWorkspaceEnvironment() {
       setHostPrompt(null);
       const task = (async () => {
         try {
-          const profiles = await useRemoteStore.getState().load();
-          const profile = profiles.find((item) => item.id === env.profileId);
-          if (!profile) {
-            throw new Error(`SSH profile not found: ${env.profileId}`);
-          }
-          const snapshot = await connectSshProfile(profile, credentials);
+          const snapshot = await remoteNative.connectRuntime(
+            env.profileId,
+            credentials,
+          );
           applyRuntimeSnapshot(snapshot);
           setEnvironmentActionError(null);
           const readyHome = connectedRuntimeHome(snapshot);

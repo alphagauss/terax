@@ -130,7 +130,7 @@ pub async fn walk(
 pub async fn session(
     workspace: &Arc<RemoteWorkspace>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
-    let mut cached = workspace.sftp.lock().await;
+    let mut cached = workspace.remote_fs.session.lock().await;
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
     }
@@ -163,7 +163,7 @@ async fn invalidate_session(
     workspace: &Arc<RemoteWorkspace>,
     failed: &Arc<russh_sftp::client::SftpSession>,
 ) {
-    let mut cached = workspace.sftp.lock().await;
+    let mut cached = workspace.remote_fs.session.lock().await;
     if cached
         .as_ref()
         .is_some_and(|current| Arc::ptr_eq(current, failed))
@@ -253,6 +253,18 @@ fn should_invalidate_session(error: &russh_sftp::client::error::Error) -> bool {
 }
 
 pub async fn read_dir(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    show_hidden: bool,
+) -> Result<Vec<RemoteDirEntry>, String> {
+    workspace
+        .remote_fs
+        .read_dir(workspace.clone(), path.to_string(), show_hidden)
+        .await
+}
+
+/// 执行一次未合并的底层 SFTP 目录读取。
+pub(crate) async fn read_dir_uncached(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     show_hidden: bool,

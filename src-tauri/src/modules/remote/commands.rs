@@ -3,21 +3,64 @@
 //! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
 use crate::modules::workspace_process::WorkspaceProcessState;
+use crate::modules::{secrets, secrets::SecretsState};
 
 use super::manager::RemoteState;
 use super::models::{
-    ConnectRequest, ImportedHost, RemoteRuntimeSnapshot, TunnelConfig, TunnelEventKind, TunnelInfo,
+    ConnectRequest, CredentialOverride, ImportedHost, RemoteRuntimeSnapshot, SshAuthMethod,
+    TunnelConfig, TunnelEventKind, TunnelInfo,
 };
+
+const SSH_SECRET_SERVICE: &str = "terax-ssh";
 
 #[tauri::command]
 /// 建立当前 SSH Workspace 唯一 Runtime，并返回权威快照。
 pub async fn ssh_runtime_connect(
     state: tauri::State<'_, RemoteState>,
     workspace: tauri::State<'_, WorkspaceProcessState>,
+    secrets_state: tauri::State<'_, SecretsState>,
     app: tauri::AppHandle,
-    request: ConnectRequest,
+    profile_id: String,
+    credentials: Option<CredentialOverride>,
 ) -> Result<RemoteRuntimeSnapshot, String> {
-    workspace.assert_ssh_runtime_owner(&request.profile.id)?;
+    let profile = super::profile::load(&profile_id)?;
+    profile.validate()?;
+    workspace.assert_ssh_runtime_owner(&profile)?;
+    let (secret, proxy_secret) = match credentials {
+        Some(credentials) => (
+            credentials.secret.filter(|value| !value.is_empty()),
+            credentials.proxy_secret.filter(|value| !value.is_empty()),
+        ),
+        None => {
+            let secret = if profile.auth_method == SshAuthMethod::Agent {
+                None
+            } else {
+                secrets::get(&app, &secrets_state, SSH_SECRET_SERVICE, &profile.id)?
+                    .filter(|value| !value.is_empty())
+            };
+            let proxy_secret = if profile
+                .proxy_url
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                secrets::get(
+                    &app,
+                    &secrets_state,
+                    SSH_SECRET_SERVICE,
+                    &format!("{}:proxy", profile.id),
+                )?
+                .filter(|value| !value.is_empty())
+            } else {
+                None
+            };
+            (secret, proxy_secret)
+        }
+    };
+    let request = ConnectRequest {
+        profile,
+        secret,
+        proxy_secret,
+    };
     state.manager.connect(request, app).await
 }
 
@@ -36,6 +79,15 @@ pub async fn ssh_runtime_snapshot(
     state: tauri::State<'_, RemoteState>,
 ) -> Result<RemoteRuntimeSnapshot, String> {
     Ok(state.manager.snapshot().await)
+}
+
+#[tauri::command]
+/// 窗口激活时确认当前 transport，必要时立即进入统一重连流程。
+pub async fn ssh_runtime_wake(
+    state: tauri::State<'_, RemoteState>,
+    app: tauri::AppHandle,
+) -> Result<RemoteRuntimeSnapshot, String> {
+    state.manager.wake(&app).await
 }
 
 #[tauri::command]

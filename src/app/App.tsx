@@ -99,7 +99,6 @@ import {
   type TerminalPaneHandle,
   terminalHasForegroundProcess,
   useTerminalFileDrop,
-  whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
@@ -410,29 +409,8 @@ export default function App() {
     activateTab: setActiveId,
     updateTabTitle: updatePythonRunTitle,
   });
-  const [explorerStartupReady, setExplorerStartupReady] = useState(
-    () => currentWorkspaceEnv().kind === "local",
-  );
-
-  useEffect(() => {
-    if (explorerStartupReady || !spacesHydrated) return;
-    if (workspaceEnv.kind === "local" || activeTab?.kind !== "terminal") {
-      setExplorerStartupReady(true);
-      return;
-    }
-
-    let active = true;
-    // 只在首次远端启动且前台页为终端时排序，后续切换标签不重复阻塞 Explorer。
-    void whenSessionReady(activeTab.id).then(() => {
-      if (active) setExplorerStartupReady(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, [activeTab, explorerStartupReady, spacesHydrated, workspaceEnv.kind]);
-
   useStartupWarmup({
-    enabled: workbenchBooted && spacesHydrated && explorerStartupReady,
+    enabled: workbenchBooted && spacesHydrated,
     state: workbenchState,
     activeSpaceId: activeSpaceId ?? DEFAULT_SPACE_ID,
     activeTab,
@@ -440,7 +418,7 @@ export default function App() {
   });
 
   useExplorerDirectoryPrefetch({
-    enabled: workbenchBooted && spacesHydrated && explorerStartupReady,
+    enabled: workbenchBooted && spacesHydrated,
     tabs,
     currentRoot: explorerRoot,
   });
@@ -1713,17 +1691,13 @@ export default function App() {
       content: (
         <FileExplorer
           ref={explorerRef}
-          rootPath={explorerStartupReady ? explorerRoot : null}
+          rootPath={explorerRoot}
           rootPending={
             workspaceBootPending
               ? workspaceEnv.kind === "ssh"
                 ? "connection"
                 : "loading"
-              : spaceTabs.length > 0 &&
-                  !explorerStartupReady &&
-                  !environmentError
-                ? "loading"
-                : undefined
+              : undefined
           }
           onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
           onOpenHome={

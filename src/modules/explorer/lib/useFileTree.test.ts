@@ -9,6 +9,7 @@ import {
   fileTreeScopes,
   isPathDeleting,
   overlapsDeletingPath,
+  remoteDirectoryPollPaths,
 } from "./useFileTree";
 
 describe("file tree runtime scopes", () => {
@@ -35,6 +36,17 @@ describe("ancestorDirs", () => {
 
   it("does not reveal paths outside the current root", () => {
     expect(ancestorDirs("/workspace", "/other/main.ts")).toEqual([]);
+  });
+});
+
+describe("remoteDirectoryPollPaths", () => {
+  it("polls only the root and currently expanded directories", () => {
+    expect(
+      remoteDirectoryPollPaths(
+        "/workspace",
+        new Set(["/workspace/src", "/workspace/src/components"]),
+      ),
+    ).toEqual(["/workspace", "/workspace/src", "/workspace/src/components"]);
   });
 });
 

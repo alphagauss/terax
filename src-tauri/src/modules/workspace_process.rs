@@ -308,33 +308,13 @@ fn canonical_launch_target(paths: Vec<PathBuf>) -> Result<(Option<String>, Vec<S
     Ok((dir, files))
 }
 
-fn ssh_profile(profile_id: &str) -> Result<crate::modules::remote::models::SshProfile, String> {
-    let path = crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)?
-        .join("terax-ssh-profiles.json");
-    let value: Value = serde_json::from_slice(
-        &fs::read(&path)
-            .map_err(|e| format!("cannot read SSH profiles {}: {e}", path.display()))?,
-    )
-    .map_err(|e| format!("invalid SSH profiles store: {e}"))?;
-    let profile = value
-        .as_object()
-        .and_then(|map| map.get(&format!("profile:{profile_id}")))
-        .ok_or_else(|| format!("SSH profile not found: {profile_id}"))?;
-    serde_json::from_value(profile.clone()).map_err(|e| format!("invalid SSH profile: {e}"))
-}
-
 fn environment_identity(env: &WorkspaceEnv) -> Result<EnvironmentIdentity, String> {
     let key = match env {
         WorkspaceEnv::Local => "local".to_string(),
         WorkspaceEnv::Wsl { distro } => format!("wsl:{distro}"),
         WorkspaceEnv::Ssh { profile_id } => {
-            let profile = ssh_profile(profile_id)?;
-            format!(
-                "ssh:{}:{}:{}",
-                profile.host.to_ascii_lowercase(),
-                profile.port,
-                profile.username
-            )
+            let profile = crate::modules::remote::profile::load(profile_id)?;
+            profile.endpoint_key()
         }
     };
     let filename_key = match env {
@@ -387,7 +367,7 @@ fn validate_environment(env: &WorkspaceEnv) -> Result<(), String> {
             }
         }
         WorkspaceEnv::Ssh { profile_id } => {
-            ssh_profile(profile_id)?.validate()?;
+            crate::modules::remote::profile::load(profile_id)?.validate()?;
             Ok(())
         }
     }
@@ -661,8 +641,15 @@ impl WorkspaceProcessState {
     }
 
     /// 确认 SSH Runtime 请求属于当前进程启动时绑定的不可变环境。
-    pub fn assert_ssh_runtime_owner(&self, profile_id: &str) -> Result<(), String> {
-        assert_ssh_runtime_owner(&self.bootstrap.env, profile_id)
+    pub fn assert_ssh_runtime_owner(
+        &self,
+        profile: &crate::modules::remote::models::SshProfile,
+    ) -> Result<(), String> {
+        assert_ssh_runtime_owner(
+            &self.bootstrap.env,
+            &self.bootstrap.environment_key,
+            profile,
+        )
     }
 
     pub fn assert_ssh_tunnel_owner(&self, profile_id: &str) -> Result<(), String> {
@@ -670,11 +657,20 @@ impl WorkspaceProcessState {
     }
 }
 
-fn assert_ssh_runtime_owner(environment: &WorkspaceEnv, profile_id: &str) -> Result<(), String> {
+fn assert_ssh_runtime_owner(
+    environment: &WorkspaceEnv,
+    environment_key: &str,
+    profile: &crate::modules::remote::models::SshProfile,
+) -> Result<(), String> {
     match environment {
         WorkspaceEnv::Ssh {
             profile_id: active_profile,
-        } if active_profile == profile_id => Ok(()),
+        } if active_profile == &profile.id && environment_key == profile.endpoint_key() => Ok(()),
+        WorkspaceEnv::Ssh {
+            profile_id: active_profile,
+        } if active_profile == &profile.id => {
+            Err("SSH endpoint changed; open a new Workspace for this profile".into())
+        }
         WorkspaceEnv::Ssh { .. } => Err("SSH profile does not match this Workspace".into()),
         _ => Err("SSH connection requires an SSH Workspace".into()),
     }
@@ -1089,9 +1085,31 @@ mod tests {
         let ssh = WorkspaceEnv::Ssh {
             profile_id: "prod".to_string(),
         };
-        assert!(assert_ssh_runtime_owner(&ssh, "prod").is_ok());
-        assert!(assert_ssh_runtime_owner(&ssh, "staging").is_err());
-        assert!(assert_ssh_runtime_owner(&WorkspaceEnv::Local, "prod").is_err());
+        let profile = crate::modules::remote::models::SshProfile {
+            id: "prod".to_string(),
+            name: "Production".to_string(),
+            host: "prod.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            auth_method: crate::modules::remote::models::SshAuthMethod::Agent,
+            identity_file: None,
+            proxy_url: None,
+            reconnect_enabled: true,
+            reconnect_max_attempts: 2,
+            root_path: Some("~".to_string()),
+            tunnels: Vec::new(),
+        };
+        let environment_key = profile.endpoint_key();
+        assert!(assert_ssh_runtime_owner(&ssh, &environment_key, &profile).is_ok());
+
+        let mut changed = profile.clone();
+        changed.host = "other.example.com".to_string();
+        assert!(assert_ssh_runtime_owner(&ssh, &environment_key, &changed).is_err());
+
+        let mut staging = profile.clone();
+        staging.id = "staging".to_string();
+        assert!(assert_ssh_runtime_owner(&ssh, &environment_key, &staging).is_err());
+        assert!(assert_ssh_runtime_owner(&WorkspaceEnv::Local, "local", &profile).is_err());
     }
 
     #[test]

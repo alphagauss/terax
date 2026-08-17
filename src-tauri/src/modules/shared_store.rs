@@ -5,6 +5,7 @@
 
 use crate::modules::storage::{write_atomic, FileLock};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::hash_map::DefaultHasher;
@@ -73,6 +74,18 @@ fn read_map(path: &Path) -> Result<Map<String, Value>, String> {
         .as_object()
         .cloned()
         .ok_or_else(|| format!("shared store {} must contain an object", path.display()))
+}
+
+/// 从白名单共享存储读取并反序列化一个键。
+///
+/// 文件由原子替换保证完整性；缺失键返回 `None`，格式错误不会回退到旧值。
+pub(crate) fn read_value<T: DeserializeOwned>(store: &str, key: &str) -> Result<Option<T>, String> {
+    let path = store_path(&store_dir()?, store)?;
+    read_map(&path)?
+        .remove(key)
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| format!("shared store {store} key {key} is invalid: {error}"))
 }
 
 fn mutate<T>(
