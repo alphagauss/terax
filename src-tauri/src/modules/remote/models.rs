@@ -95,6 +95,16 @@ impl SshProfile {
             .map(|tunnel| tunnel.config(&self.id))
             .collect()
     }
+
+    /// 返回决定 Workspace 进程身份的不可变 SSH endpoint。
+    pub fn endpoint_key(&self) -> String {
+        format!(
+            "ssh:{}:{}:{}",
+            self.host.to_ascii_lowercase(),
+            self.port,
+            self.username
+        )
+    }
 }
 
 /// SSH profile 中持久化的一条隧道配置。
@@ -134,11 +144,18 @@ impl SshTunnel {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 /// 建立 Runtime 所需的 profile 与仅驻留内存的凭据。
+#[derive(Clone, Debug)]
 pub struct ConnectRequest {
     pub profile: SshProfile,
+    pub secret: Option<String>,
+    pub proxy_secret: Option<String>,
+}
+
+/// 前端凭据对话框对本次连接提供的临时覆盖值。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialOverride {
     #[serde(default)]
     pub secret: Option<String>,
     #[serde(default)]
@@ -450,6 +467,18 @@ mod tests {
                 "SSH reconnect attempts must be between 1 and 20"
             );
         }
+    }
+
+    #[test]
+    fn credential_override_preserves_explicit_missing_values() {
+        let credentials: CredentialOverride = serde_json::from_value(serde_json::json!({
+            "secret": null,
+            "proxySecret": "proxy-password"
+        }))
+        .unwrap();
+
+        assert!(credentials.secret.is_none());
+        assert_eq!(credentials.proxy_secret.as_deref(), Some("proxy-password"));
     }
 
     #[test]

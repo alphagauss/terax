@@ -11,7 +11,7 @@
 
 该边界是安全模型的基础。不受信任的输入（终端 escape sequence、文件内容、AI 工具结果）由 Rust 或严格限定范围的前端代码解析和验证，绝不会由 renderer 执行。
 
-进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH event bridge 在 auto-connect 前注册；WSL/SSH tab 在环境初始化解析出目标 home 前保持 cold；SSH auto-connect 失败后，会在同一进程中使用 credential 恢复连接，确保秘密永远不会通过命令行传递。
+进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH event bridge 在 auto-connect 前注册；WSL/SSH tab 在环境初始化解析出目标 home 前保持 cold。SSH auto-connect 只向 Rust 提交稳定 profile ID，由原生端读取 profile 和系统密钥链；只有凭据对话框可以为单次连接提交内存覆盖值。连接在一次合并的 Linux、bash、Home、root 探测与并行 SFTP 初始化完成，并由 SFTP stat 验证 root 后才发布 connected。Explorer 复用该 epoch 的 RemoteFs，合并相同目录请求并与终端启动并行。SSH auto-connect 失败后，会在同一进程中使用 credential 恢复连接，确保秘密永远不会通过命令行或自动连接的 WebView 往返传递。
 
 ## 新增 IPC command
 

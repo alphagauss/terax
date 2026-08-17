@@ -6,8 +6,8 @@
 //! 补充参考 meatshell。
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 
 use russh::client::{self, Handle, Handler, KeyboardInteractiveAuthResponse, Msg};
 use russh::keys::ssh_key::{HashAlg, PublicKey};
@@ -19,6 +19,7 @@ use zeroize::Zeroizing;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{ConnectRequest, ProxyConfig, SshAuthMethod, SshProfile};
+use super::remote_fs::RemoteFs;
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
@@ -102,26 +103,37 @@ pub struct RemoteWorkspace {
     pub profile: SshProfile,
     pub handle: Arc<Handle<ClientHandler>>,
     pub(super) remote_forwards: RemoteForwardRegistry,
-    pub(crate) sftp: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
+    pub(crate) remote_fs: RemoteFs,
     home: RwLock<String>,
     login_home: RwLock<String>,
     secret: Zeroizing<String>,
     proxy_secret: Zeroizing<String>,
     transport_failed: AtomicBool,
+    probe_lock: Mutex<()>,
+    last_probe_success: StdMutex<Instant>,
 }
 
 impl RemoteWorkspace {
-    /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
+    /// 建立 SSH transport，并确认远端 Linux、bash、Workspace root 与 SFTP。
     ///
-    /// SFTP 会话由调用方按需创建，Runtime 建立流程会在发布连接前主动完成首次探测。
+    /// 远端环境探测与 SFTP 初始化并行执行，成功返回即满足 Runtime 的完整就绪语义。
     pub async fn connect(
         request: ConnectRequest,
         app: tauri::AppHandle,
         host_keys: Arc<HostKeyVerifier>,
         cancellation: CancellationToken,
     ) -> Result<Arc<Self>, String> {
+        let started_at = Instant::now();
         request.profile.validate()?;
         let profile = request.profile;
+        let requested_root = profile
+            .root_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("~")
+            .to_string();
+        let root_assignment = workspace_root_assignment(&requested_root)?;
         let secret = Zeroizing::new(request.secret.unwrap_or_default());
         let proxy_secret = Zeroizing::new(request.proxy_secret.unwrap_or_default());
         let proxy = ProxyConfig::parse(
@@ -145,6 +157,7 @@ impl RemoteWorkspace {
             cancellation.clone(),
         )
         .await?;
+        let transport_ready_at = Instant::now();
 
         if authenticate_primary(&mut handle, &profile, secret.as_str()).await?
             == PrimaryAuthResult::KeyboardInteractiveRequired
@@ -175,41 +188,54 @@ impl RemoteWorkspace {
                 return Err("SSH server rejected the supplied credentials".into());
             }
         }
+        let auth_ready_at = Instant::now();
         let workspace = Arc::new(Self {
             profile,
             handle: Arc::new(handle),
             remote_forwards,
-            sftp: Mutex::new(None),
+            remote_fs: RemoteFs::default(),
             home: RwLock::new("/".into()),
             login_home: RwLock::new("/".into()),
             secret,
             proxy_secret,
             transport_failed: AtomicBool::new(false),
+            probe_lock: Mutex::new(()),
+            last_probe_success: StdMutex::new(Instant::now()),
         });
-        let detected_home = match detect_linux_bash_home(&workspace).await {
-            Ok(home) => home,
+        let (probe, sftp) = tokio::join!(
+            detect_workspace(&workspace, &root_assignment, &requested_root),
+            super::sftp::session(&workspace)
+        );
+        let probe = match probe {
+            Ok(probe) => probe,
             Err(error) => {
                 workspace.disconnect().await;
                 return Err(error);
             }
         };
-        *workspace.login_home.write().await = detected_home.clone();
-        let requested_root = workspace
-            .profile
-            .root_path
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| expand_remote_home(value, &detected_home))
-            .unwrap_or(detected_home);
-        let root = match resolve_workspace_root(&workspace, &requested_root).await {
-            Ok(root) => root,
-            Err(error) => {
-                workspace.disconnect().await;
-                return Err(format!("invalid SSH rootPath {requested_root}: {error}"));
-            }
-        };
-        *workspace.home.write().await = root;
+        if let Err(error) = sftp {
+            workspace.disconnect().await;
+            return Err(format!("initialize SSH filesystem: {error}"));
+        }
+        if let Err(error) = super::sftp::stat(&workspace, &probe.root).await {
+            workspace.disconnect().await;
+            return Err(format!(
+                "initialize SSH filesystem at {}: {error}",
+                probe.root
+            ));
+        }
+        *workspace.login_home.write().await = probe.login_home;
+        *workspace.home.write().await = probe.root;
+        let ready_at = Instant::now();
+        workspace.record_transport_success(ready_at);
+        log::info!(
+            "SSH Runtime ready profile={} transport_ms={} auth_ms={} workspace_ms={} total_ms={}",
+            workspace.profile.id,
+            transport_ready_at.duration_since(started_at).as_millis(),
+            auth_ready_at.duration_since(transport_ready_at).as_millis(),
+            ready_at.duration_since(auth_ready_at).as_millis(),
+            ready_at.duration_since(started_at).as_millis()
+        );
         Ok(workspace)
     }
 
@@ -242,8 +268,23 @@ impl RemoteWorkspace {
     /// TCP 在本机断网后可能仍保持 established，不能用 socket 或 sender 是否关闭代替
     /// 可用性判断。ping 超时或 session 关闭会永久使当前 workspace 失效。
     pub async fn probe_transport(&self, timeout: Duration) -> bool {
+        self.probe_transport_if_stale(Duration::ZERO, timeout).await
+    }
+
+    /// 探活记录仍新鲜时直接复用结果，否则串行执行一次真实 ping。
+    pub async fn probe_transport_if_stale(&self, max_age: Duration, timeout: Duration) -> bool {
+        let _guard = self.probe_lock.lock().await;
         if self.transport_failed.load(Ordering::Acquire) {
             return false;
+        }
+        if max_age > Duration::ZERO
+            && self
+                .last_probe_success
+                .lock()
+                .ok()
+                .is_some_and(|last| last.elapsed() <= max_age)
+        {
+            return true;
         }
         let healthy = tokio::time::timeout(timeout, async {
             !self.handle.is_closed()
@@ -254,8 +295,17 @@ impl RemoteWorkspace {
         .unwrap_or(false);
         if !healthy {
             self.mark_transport_failed();
+        } else {
+            self.record_transport_success(Instant::now());
         }
         healthy
+    }
+
+    /// 记录最近一次足以证明当前 transport 可用的完成时刻。
+    fn record_transport_success(&self, completed_at: Instant) {
+        if let Ok(mut last) = self.last_probe_success.lock() {
+            *last = completed_at;
+        }
     }
 
     /// 将探活已确认失效或正在显式关闭的 transport 标记为不可继续复用。
@@ -267,7 +317,7 @@ impl RemoteWorkspace {
     pub async fn disconnect(&self) {
         self.mark_transport_failed();
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
-            let sftp = self.sftp.lock().await.take();
+            let sftp = self.remote_fs.session.lock().await.take();
             if let Some(sftp) = sftp {
                 let _ = sftp.close().await;
             }
@@ -380,86 +430,115 @@ async fn connect_transport(
     .map_err(|e| format!("SSH handshake failed: {e}"))
 }
 
-async fn detect_linux_bash_home(workspace: &RemoteWorkspace) -> Result<String, String> {
-    const PROBE: &str = "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${SHELL##*/}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; printf '%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\"";
-    let output = workspace.exec(PROBE, None, Duration::from_secs(10)).await?;
+#[derive(Debug)]
+struct WorkspaceProbe {
+    login_home: String,
+    root: String,
+}
+
+/// 构造远端 root 赋值语句，保持既有 `~`、`$HOME` 和相对路径语义。
+fn workspace_root_assignment(requested_root: &str) -> Result<String, String> {
+    validate_remote_path(requested_root)?;
+    let requested_root = requested_root.trim();
+    if requested_root.is_empty() || matches!(requested_root, "~" | "$HOME" | "${HOME}") {
+        return Ok("requested=\"$HOME\"".to_string());
+    }
+    for prefix in ["~/", "$HOME/", "${HOME}/"] {
+        if let Some(rest) = requested_root.strip_prefix(prefix) {
+            return Ok(format!("requested=\"$HOME\"/{}", shell_quote(rest)));
+        }
+    }
+    if requested_root.starts_with('/') {
+        Ok(format!("requested={}", shell_quote(requested_root)))
+    } else {
+        Ok(format!(
+            "requested=\"$HOME\"/{}",
+            shell_quote(requested_root)
+        ))
+    }
+}
+
+/// 使用一次远端进程确认 Linux、bash、登录 Home 和物理 Workspace root。
+async fn detect_workspace(
+    workspace: &RemoteWorkspace,
+    root_assignment: &str,
+    requested_root: &str,
+) -> Result<WorkspaceProbe, String> {
+    let probe = format!(
+        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; printf '%s\\000%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\" \"$root\""
+    );
+    let output = workspace
+        .exec(&probe, None, Duration::from_secs(10))
+        .await?;
+    parse_workspace_probe(output, requested_root)
+}
+
+/// 解析合并探测结果并锁定绝对、无控制字符的 Home 与 Workspace root。
+fn parse_workspace_probe(
+    output: ExecOutput,
+    requested_root: &str,
+) -> Result<WorkspaceProbe, String> {
     if output.timed_out {
-        return Err("timed out while detecting the remote Linux/bash environment".into());
+        return Err("timed out while detecting the remote SSH workspace".into());
+    }
+    if output.truncated {
+        return Err("remote SSH workspace probe exceeded the size limit".into());
     }
     match output.exit_code {
         Some(0) => {}
         Some(92) => return Err("Remote SSH currently supports Linux hosts only".into()),
         Some(93) => return Err("Remote SSH currently requires bash as the login shell".into()),
         Some(94) => return Err("Remote SSH login did not provide a HOME directory".into()),
+        Some(95) => {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("remote Workspace root is not accessible: {requested_root}")
+            } else {
+                format!("remote Workspace root is not accessible: {detail}")
+            });
+        }
         Some(code) => {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(if detail.is_empty() {
-                format!("failed to detect the remote Linux/bash environment (exit {code})")
+                format!("failed to detect the remote SSH workspace (exit {code})")
             } else {
-                format!("failed to detect the remote Linux/bash environment: {detail}")
+                format!("failed to detect the remote SSH workspace: {detail}")
             });
         }
         None => {
             return Err(
-                "SSH server closed the environment probe without reporting an exit status".into(),
+                "SSH server closed the workspace probe without reporting an exit status".into(),
             )
         }
     }
     let fields: Vec<&[u8]> = output.stdout.split(|byte| *byte == 0).collect();
-    if fields.len() != 3 || fields[0] != b"Linux" || fields[1].is_empty() || fields[2].is_empty() {
-        return Err("SSH server returned an invalid Linux/bash environment probe".into());
+    if fields.len() != 4
+        || fields[0] != b"Linux"
+        || fields[1].is_empty()
+        || fields[2].is_empty()
+        || fields[3].is_empty()
+    {
+        return Err("SSH server returned an invalid workspace probe".into());
     }
-    let home = std::str::from_utf8(fields[2])
+    let login_home = std::str::from_utf8(fields[2])
         .map_err(|_| "Remote SSH HOME is not valid UTF-8".to_string())?
         .to_string();
-    validate_remote_path(&home)?;
-    if !home.starts_with('/') {
-        return Err(format!("Remote SSH HOME is not an absolute path: {home}"));
+    validate_remote_path(&login_home)?;
+    if !login_home.starts_with('/') {
+        return Err(format!(
+            "Remote SSH HOME is not an absolute path: {login_home}"
+        ));
     }
-    Ok(home)
-}
-
-/// 通过远端 shell 确认 Workspace root 可进入，并返回物理规范路径。
-///
-/// 该探测不启动 SFTP，使认证后的前台终端无需等待文件管理协议初始化。
-async fn resolve_workspace_root(
-    workspace: &RemoteWorkspace,
-    requested_root: &str,
-) -> Result<String, String> {
-    validate_remote_path(requested_root)?;
-    let output = workspace
-        .exec("pwd -P", Some(requested_root), Duration::from_secs(10))
-        .await?;
-    parse_workspace_root(output)
-}
-
-/// 解析 root 探测结果并锁定绝对、无控制字符的远端路径。
-fn parse_workspace_root(output: ExecOutput) -> Result<String, String> {
-    if output.timed_out {
-        return Err("timed out while resolving the remote Workspace root".into());
-    }
-    if output.truncated {
-        return Err("remote Workspace root output exceeded the size limit".into());
-    }
-    if output.exit_code != Some(0) {
-        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if detail.is_empty() {
-            "remote Workspace root is not an accessible directory".into()
-        } else {
-            format!("remote Workspace root is not accessible: {detail}")
-        });
-    }
-    let root = std::str::from_utf8(&output.stdout)
-        .map_err(|_| "remote Workspace root is not valid UTF-8".to_string())?;
-    let root = root.strip_suffix('\n').unwrap_or(root);
-    let root = root.strip_suffix('\r').unwrap_or(root).to_string();
+    let root = std::str::from_utf8(fields[3])
+        .map_err(|_| "remote Workspace root is not valid UTF-8".to_string())?
+        .to_string();
     validate_remote_path(&root)?;
     if !root.starts_with('/') {
         return Err(format!(
             "remote Workspace root is not an absolute path: {root}"
         ));
     }
-    Ok(root)
+    Ok(WorkspaceProbe { login_home, root })
 }
 
 #[derive(Default, Debug)]
@@ -678,22 +757,6 @@ fn expand_local_home(path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(path)
 }
 
-fn expand_remote_home(path: &str, home: &str) -> String {
-    if matches!(path, "~" | "$HOME" | "${HOME}") {
-        return home.to_string();
-    }
-    for prefix in ["~/", "$HOME/", "${HOME}/"] {
-        if let Some(rest) = path.strip_prefix(prefix) {
-            return join_remote(home, rest);
-        }
-    }
-    if path.starts_with('/') {
-        path.to_string()
-    } else {
-        join_remote(home, path)
-    }
-}
-
 pub fn validate_remote_path(path: &str) -> Result<(), String> {
     if path.is_empty() || path.contains('\0') || path.contains('\r') || path.contains('\n') {
         return Err("invalid remote path".into());
@@ -704,20 +767,29 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod path_tests {
     use super::{
-        client_config, expand_remote_home, parse_workspace_root, password_auth_result, ExecOutput,
-        PrimaryAuthResult,
+        client_config, parse_workspace_probe, password_auth_result, workspace_root_assignment,
+        ExecOutput, PrimaryAuthResult,
     };
 
     #[test]
-    fn expands_common_remote_home_forms() {
-        assert_eq!(expand_remote_home("~", "/home/me"), "/home/me");
-        assert_eq!(expand_remote_home("~/code", "/home/me"), "/home/me/code");
+    fn builds_safe_workspace_root_assignments() {
         assert_eq!(
-            expand_remote_home("${HOME}/code", "/home/me"),
-            "/home/me/code"
+            workspace_root_assignment("~").unwrap(),
+            "requested=\"$HOME\""
         );
-        assert_eq!(expand_remote_home("/srv/code", "/home/me"), "/srv/code");
-        assert_eq!(expand_remote_home("code", "/home/me"), "/home/me/code");
+        assert_eq!(
+            workspace_root_assignment("${HOME}/code").unwrap(),
+            "requested=\"$HOME\"/'code'"
+        );
+        assert_eq!(
+            workspace_root_assignment("code").unwrap(),
+            "requested=\"$HOME\"/'code'"
+        );
+        assert_eq!(
+            workspace_root_assignment("/srv/code").unwrap(),
+            "requested='/srv/code'"
+        );
+        assert!(workspace_root_assignment("bad\npath").is_err());
     }
 
     #[test]
@@ -739,43 +811,59 @@ mod path_tests {
     }
 
     #[test]
-    fn workspace_root_probe_requires_a_successful_absolute_path() {
-        let valid = parse_workspace_root(ExecOutput {
-            stdout: b"/srv/project\n".to_vec(),
-            exit_code: Some(0),
-            ..ExecOutput::default()
-        })
+    fn workspace_probe_requires_valid_absolute_paths() {
+        let valid = parse_workspace_probe(
+            ExecOutput {
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project".to_vec(),
+                exit_code: Some(0),
+                ..ExecOutput::default()
+            },
+            "~",
+        )
         .unwrap();
-        assert_eq!(valid, "/srv/project");
+        assert_eq!(valid.login_home, "/home/me");
+        assert_eq!(valid.root, "/srv/project");
 
-        let trailing_space = parse_workspace_root(ExecOutput {
-            stdout: b"/srv/project \n".to_vec(),
-            exit_code: Some(0),
-            ..ExecOutput::default()
-        })
+        let trailing_space = parse_workspace_probe(
+            ExecOutput {
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project ".to_vec(),
+                exit_code: Some(0),
+                ..ExecOutput::default()
+            },
+            "~",
+        )
         .unwrap();
-        assert_eq!(trailing_space, "/srv/project ");
+        assert_eq!(trailing_space.root, "/srv/project ");
 
-        let newline_in_path = parse_workspace_root(ExecOutput {
-            stdout: b"/srv/project\n\n".to_vec(),
-            exit_code: Some(0),
-            ..ExecOutput::default()
-        });
+        let newline_in_path = parse_workspace_probe(
+            ExecOutput {
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project\n".to_vec(),
+                exit_code: Some(0),
+                ..ExecOutput::default()
+            },
+            "~",
+        );
         assert!(newline_in_path.is_err());
 
-        let relative = parse_workspace_root(ExecOutput {
-            stdout: b"project\n".to_vec(),
-            exit_code: Some(0),
-            ..ExecOutput::default()
-        })
+        let relative = parse_workspace_probe(
+            ExecOutput {
+                stdout: b"Linux\0/bin/bash\0/home/me\0project".to_vec(),
+                exit_code: Some(0),
+                ..ExecOutput::default()
+            },
+            "~",
+        )
         .unwrap_err();
         assert!(relative.contains("absolute"));
 
-        let failed = parse_workspace_root(ExecOutput {
-            stderr: b"cd: no such file or directory".to_vec(),
-            exit_code: Some(1),
-            ..ExecOutput::default()
-        })
+        let failed = parse_workspace_probe(
+            ExecOutput {
+                stderr: b"cd: no such file or directory".to_vec(),
+                exit_code: Some(95),
+                ..ExecOutput::default()
+            },
+            "/missing",
+        )
         .unwrap_err();
         assert!(failed.contains("no such file"));
     }

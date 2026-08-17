@@ -23,6 +23,10 @@ const TRANSPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const TRANSPORT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 const CONNECT_SUPERSEDED: &str = "SSH connection attempt was superseded";
 
+fn reconnect_delay(attempt: u32) -> Duration {
+    Duration::from_secs(u64::from(attempt.saturating_sub(1).min(5)))
+}
+
 #[derive(Clone)]
 struct RuntimeLifecycle {
     id: u64,
@@ -136,23 +140,6 @@ impl RemoteManager {
         }
 
         let home = workspace.home().await;
-        let sftp_probe = super::sftp::stat(&workspace, &home);
-        let sftp_result = tokio::select! {
-            _ = lifecycle.cancellation.cancelled() => {
-                workspace.disconnect().await;
-                return Err(CONNECT_SUPERSEDED.into());
-            }
-            result = sftp_probe => result,
-        };
-        if let Err(error) = sftp_result {
-            workspace.disconnect().await;
-            if !self.is_lifecycle_current(lifecycle.id).await {
-                return Err(CONNECT_SUPERSEDED.into());
-            }
-            let error = format!("initialize SSH filesystem at {home}: {error}");
-            return Err(error);
-        }
-
         let epoch = self.next_epoch.fetch_add(1, Ordering::Relaxed);
         let snapshot = RemoteRuntimeSnapshot::Connected {
             version: self.version(),
@@ -333,7 +320,7 @@ impl RemoteManager {
         for attempt in 1..=profile.reconnect_max_attempts {
             tokio::select! {
                 _ = lifecycle.cancellation.cancelled() => return,
-                _ = tokio::time::sleep(Duration::from_secs((attempt as u64).min(5))) => {}
+                _ = tokio::time::sleep(reconnect_delay(attempt)) => {}
             }
             let guard = tokio::select! {
                 _ = lifecycle.cancellation.cancelled() => return,
@@ -507,6 +494,33 @@ impl RemoteManager {
     /// 返回当前权威状态快照。
     pub async fn snapshot(&self) -> RemoteRuntimeSnapshot {
         self.runtime.read().await.snapshot.clone()
+    }
+
+    /// 窗口重新激活时立即确认长时间未探活的 transport，并复用统一重连流程。
+    pub async fn wake(
+        self: &Arc<Self>,
+        app: &tauri::AppHandle,
+    ) -> Result<RemoteRuntimeSnapshot, String> {
+        let current = {
+            let runtime = self.runtime.read().await;
+            match (&runtime.snapshot, &runtime.workspace) {
+                (RemoteRuntimeSnapshot::Connected { epoch, .. }, Some(workspace)) => {
+                    Some((workspace.clone(), *epoch, runtime.lifecycle.clone()))
+                }
+                _ => None,
+            }
+        };
+        let Some((workspace, epoch, lifecycle)) = current else {
+            return Ok(self.snapshot().await);
+        };
+        if !workspace
+            .probe_transport_if_stale(TRANSPORT_PROBE_INTERVAL, TRANSPORT_PROBE_TIMEOUT)
+            .await
+        {
+            self.handle_transport_closed(workspace, epoch, lifecycle, app)
+                .await;
+        }
+        Ok(self.snapshot().await)
     }
 
     /// 返回与当前 connected 快照一致的 workspace，其他阶段一律拒绝。
@@ -689,7 +703,8 @@ pub fn exec_blocking(
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteManager, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_INTERVAL, TRANSPORT_PROBE_TIMEOUT,
+        reconnect_delay, RemoteManager, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_INTERVAL,
+        TRANSPORT_PROBE_TIMEOUT,
     };
     use std::time::Duration;
 
@@ -697,6 +712,13 @@ mod tests {
     fn silent_transport_failure_is_detected_within_five_seconds() {
         assert!(TRANSPORT_PROBE_INTERVAL + TRANSPORT_PROBE_TIMEOUT <= Duration::from_secs(5));
         assert!(TRANSPORT_CLEANUP_TIMEOUT <= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn reconnect_attempts_start_immediately_then_back_off() {
+        assert_eq!(reconnect_delay(1), Duration::ZERO);
+        assert_eq!(reconnect_delay(2), Duration::from_secs(1));
+        assert_eq!(reconnect_delay(7), Duration::from_secs(5));
     }
 
     #[tokio::test]

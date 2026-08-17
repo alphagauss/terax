@@ -1,21 +1,7 @@
-//! Secret storage with platform-appropriate backends.
+//! 跨平台秘密存储及其原生读取边界。
 //!
-//! - macOS: macOS Keychain (via `keyring` crate)
-//! - Windows: Credential Manager (via `keyring` crate)
-//! - Linux: a file in the app's local data dir, mode 0600. The default
-//!   `keyring` backend on Linux is the Secret Service over D-Bus, which
-//!   silently fails on systems without gnome-keyring/kwallet (and on the
-//!   "login" collection not being created). For an open-source desktop
-//!   app shipped via AppImage/deb/rpm, we cannot assume a keyring daemon
-//!   exists. The file backend is the same approach Brave/Chromium fall
-//!   back to in that scenario; user-only file permissions provide the
-//!   isolation the secret-service collection would have otherwise.
-//!
-//! The frontend talks to `secrets_get`, `secrets_set`, `secrets_delete`,
-//! and `secrets_get_all` — no platform branching in JS.
-//!
-//! All commands take `&AppHandle` so we can resolve the data directory
-//! once via Tauri's path API.
+//! macOS 和 Windows 使用系统密钥链，Linux 使用权限为 0600 的应用本地文件。
+//! SSH Runtime 可在 Rust 内直接读取凭据，避免自动连接时将秘密返回 WebView。
 
 use std::sync::Mutex;
 
@@ -110,6 +96,30 @@ fn entry(service: &str, account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(service, account).map_err(|e| e.to_string())
 }
 
+/// 从当前平台的秘密存储读取一个值。
+pub(crate) fn get(
+    app: &AppHandle,
+    state: &SecretsState,
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let key = key(service, account);
+        with_store(app, state, |map| map.get(&key).cloned())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (app, state);
+        let entry = entry(service, account)?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn secrets_get(
     app: AppHandle,
@@ -117,22 +127,7 @@ pub async fn secrets_get(
     service: String,
     account: String,
 ) -> Result<Option<String>, String> {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = state; // capture
-        let key = key(&service, &account);
-        with_store(&app, &state, |m| m.get(&key).cloned())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (app, state);
-        let e = entry(&service, &account)?;
-        match e.get_password() {
-            Ok(v) => Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(err) => Err(err.to_string()),
-        }
-    }
+    get(&app, &state, &service, &account)
 }
 
 #[tauri::command]

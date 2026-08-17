@@ -150,6 +150,14 @@ export function fileTreeScopes(
   };
 }
 
+/** 返回 SSH 轮询应覆盖的根目录与当前展开目录。 */
+export function remoteDirectoryPollPaths(
+  rootPath: string,
+  expanded: ReadonlySet<string>,
+): string[] {
+  return [...new Set([rootPath, ...expanded])];
+}
+
 /**
  * 管理指定 Workspace 根目录的文件树状态和变更操作。
  *
@@ -459,9 +467,13 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   useEffect(() => {
     if (workspace.kind !== "ssh" || !rootPath || !remoteReady) return;
     const timer = window.setInterval(() => {
-      for (const [path, state] of Object.entries(nodesRef.current)) {
+      for (const path of remoteDirectoryPollPaths(
+        rootPath,
+        expandedRef.current,
+      )) {
+        const state = nodesRef.current[path];
         if (
-          state.status === "loaded" &&
+          state?.status === "loaded" &&
           !isPathDeleting(path, deletingPathsRef.current)
         ) {
           void fetchChildren(path);

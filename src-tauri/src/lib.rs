@@ -202,6 +202,7 @@ pub fn run() {
             remote::commands::ssh_runtime_connect,
             remote::commands::ssh_runtime_disconnect,
             remote::commands::ssh_runtime_snapshot,
+            remote::commands::ssh_runtime_wake,
             remote::commands::ssh_confirm_host_key,
             remote::commands::ssh_import_config,
             remote::commands::ssh_tunnel_start,
