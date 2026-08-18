@@ -173,6 +173,7 @@ pub struct SshHealthSnapshot {
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SshFileCapability {
+    Detecting,
     Available,
     #[default]
     Unavailable,

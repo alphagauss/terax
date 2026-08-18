@@ -212,10 +212,10 @@ fn is_sha256(revision: &str) -> bool {
 }
 
 fn validate_version(version: &FileVersion) -> Result<(), String> {
-    if is_sha256(&version.revision) {
+    if is_sha256(&version.revision) && version.size <= FORCE_MAX_READ_BYTES {
         Ok(())
     } else {
-        Err("invalid file revision".into())
+        Err("invalid file version".into())
     }
 }
 
@@ -1213,6 +1213,17 @@ mod tests {
         let invalid = FileVersion {
             revision: "not-a-digest".into(),
             size: 1,
+            mtime: 1,
+        };
+
+        assert!(validate_version(&invalid).is_err());
+    }
+
+    #[test]
+    fn rejects_versions_above_the_bounded_read_limit() {
+        let invalid = FileVersion {
+            revision: "a".repeat(64),
+            size: FORCE_MAX_READ_BYTES + 1,
             mtime: 1,
         };
 

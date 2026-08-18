@@ -103,16 +103,31 @@ pub(crate) async fn write_overwrite(
                 return Ok(mtime);
             }
             Ok(RemoteCheckedWrite::Conflict { .. }) => {
-                record_python_fallback(
+                let error = PythonFileError {
+                    dispatched: true,
+                    disable_backend: true,
+                };
+                record_python_fallback(workspace, "write_overwrite", &error);
+                return reconcile_dispatched_overwrite(
                     workspace,
-                    "write_overwrite",
-                    &PythonFileError {
-                        dispatched: true,
-                        disable_backend: true,
-                    },
-                );
+                    path,
+                    content.len(),
+                    replacement_revision,
+                )
+                .await;
             }
-            Err(error) => record_python_fallback(workspace, "write_overwrite", &error),
+            Err(error) => {
+                record_python_fallback(workspace, "write_overwrite", &error);
+                if error.dispatched {
+                    return reconcile_dispatched_overwrite(
+                        workspace,
+                        path,
+                        content.len(),
+                        replacement_revision,
+                    )
+                    .await;
+                }
+            }
         }
     }
     let result = sftp::write_file(workspace, path, content).await;
@@ -124,6 +139,36 @@ pub(crate) async fn write_overwrite(
         result.is_ok(),
     );
     result
+}
+
+/// 收敛结果不明确的 Python 覆盖写，不重新执行无条件覆盖。
+///
+/// helper 可能已经提交后，目标若不是 replacement，就无法区分原值与第三方后续修改。
+/// 此时必须拒绝 SFTP 重试，避免把并发写入静默覆盖。
+async fn reconcile_dispatched_overwrite(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    replacement_size: usize,
+    replacement_revision: &str,
+) -> Result<u64, String> {
+    let current = sftp::file_version(workspace, path, replacement_size as u64)
+        .await
+        .ok()
+        .flatten();
+    reconciled_overwrite_mtime(current, replacement_revision)
+}
+
+/// 仅在远端内容已经等于 replacement 时接受不明确的覆盖结果。
+fn reconciled_overwrite_mtime(
+    current: Option<RemoteVersion>,
+    replacement_revision: &str,
+) -> Result<u64, String> {
+    current
+        .filter(|version| version.revision == replacement_revision)
+        .map(|version| version.mtime)
+        .ok_or_else(|| {
+            "remote Python overwrite result is ambiguous; refusing an unconditional retry".into()
+        })
 }
 
 /// 仅在远端目标仍不存在时原子创建文件。
@@ -241,5 +286,32 @@ fn record_python_fallback(
             operation,
             error.dispatched
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reconciled_overwrite_mtime, RemoteVersion};
+
+    #[test]
+    fn ambiguous_overwrite_only_converges_to_the_replacement() {
+        let replacement = "b".repeat(64);
+        let matching = RemoteVersion {
+            revision: replacement.clone(),
+            size: 4,
+            mtime: 123,
+        };
+        let changed = RemoteVersion {
+            revision: "c".repeat(64),
+            size: 4,
+            mtime: 456,
+        };
+
+        assert_eq!(
+            reconciled_overwrite_mtime(Some(matching), &replacement),
+            Ok(123)
+        );
+        assert!(reconciled_overwrite_mtime(Some(changed), &replacement).is_err());
+        assert!(reconciled_overwrite_mtime(None, &replacement).is_err());
     }
 }

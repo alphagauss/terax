@@ -10,7 +10,9 @@ use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf};
 use tauri::ipc::{Channel, Response};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::session::{shell_quote, signal_exit_code, validate_remote_path, RemoteWorkspace};
+use super::session::{
+    python_probe_assignment, shell_quote, signal_exit_code, validate_remote_path, RemoteWorkspace,
+};
 use crate::modules::pty::shell_init::{bashrc_script, normalize_script};
 
 /// 底层 SSH transport 已关闭时向前端返回的专用退出码。
@@ -131,7 +133,12 @@ pub(crate) async fn prepare(
         .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
         .await
         .map_err(|error| format!("allocate prepared terminal PTY: {error}"))?;
-    let command = bootstrap_bash_command(root_assignment, cwd.as_deref(), blocks);
+    let command = bootstrap_bash_command(
+        root_assignment,
+        cwd.as_deref(),
+        blocks,
+        workspace.file_acceleration_enabled(),
+    );
     channel
         .exec(true, command.into_bytes())
         .await
@@ -363,13 +370,19 @@ fn integrated_bash_command(cwd: &str, blocks: bool) -> String {
 }
 
 /// 构造校验 Workspace 后直接进入集成 bash 的单 channel 启动命令。
-fn bootstrap_bash_command(root_assignment: &str, cwd: Option<&str>, blocks: bool) -> String {
+fn bootstrap_bash_command(
+    root_assignment: &str,
+    cwd: Option<&str>,
+    blocks: bool,
+    file_acceleration_enabled: bool,
+) -> String {
     let terminal_cwd = cwd
         .map(|cwd| format!("terminal_cwd={}", shell_quote(cwd)))
         .unwrap_or_else(|| "terminal_cwd=\"$root\"".to_string());
     let blocks = if blocks { " TERAX_BLOCKS=1" } else { "" };
+    let python_probe = python_probe_assignment(file_acceleration_enabled);
     format!(
-        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; python_version=$(python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))' 2>/dev/null) || python_version=; {terminal_cwd}; cd -- \"$terminal_cwd\" 2>/dev/null || cd -- \"$root\" || exit 96; printf '\\000TERAX-SSH-BOOT\\000%s\\000%s\\000%s\\000%s\\000%s\\000TERAX-SSH-READY\\000' \"$os\" \"$SHELL\" \"$HOME\" \"$root\" \"$python_version\"; exec env TERAX_TERMINAL=1{blocks} /bin/bash --rcfile <(printf %s {}) -i",
+        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; {python_probe}; {terminal_cwd}; cd -- \"$terminal_cwd\" 2>/dev/null || cd -- \"$root\" || exit 96; printf '\\000TERAX-SSH-BOOT\\000%s\\000%s\\000%s\\000%s\\000%s\\000TERAX-SSH-READY\\000' \"$os\" \"$SHELL\" \"$HOME\" \"$root\" \"$python_version\"; exec env TERAX_TERMINAL=1{blocks} /bin/bash --rcfile <(printf %s {}) -i",
         shell_quote(&normalize_script(bashrc_script()))
     )
 }
@@ -428,11 +441,20 @@ mod tests {
 
     #[test]
     fn prepared_terminal_command_quotes_cwd_and_falls_back_to_root() {
-        let command = bootstrap_bash_command("requested=\"$HOME\"", Some("/srv/it's here"), true);
+        let command =
+            bootstrap_bash_command("requested=\"$HOME\"", Some("/srv/it's here"), true, true);
 
         assert!(command.contains("terminal_cwd='/srv/it'\\''s here'"));
         assert!(command.contains("|| cd -- \"$root\" || exit 96"));
         assert!(command.contains("TERAX_BLOCKS=1"));
         assert!(command.contains("TERAX-SSH-BOOT"));
+    }
+
+    #[test]
+    fn prepared_terminal_skips_python_probe_when_acceleration_is_disabled() {
+        let command = bootstrap_bash_command("requested=\"$HOME\"", None, false, false);
+
+        assert!(!command.contains("python3"));
+        assert!(command.contains("python_version="));
     }
 }

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { remoteNative } from "./native";
 import { useRemoteRuntimeStore } from "./runtimeStore";
@@ -49,9 +49,9 @@ export function SshRttIndicator() {
       ? runtime.epoch
       : null;
   const [health, setHealth] = useState<SshHealthSnapshot>(EMPTY_HEALTH);
-  const [fileBackend, setFileBackend] = useState<SshFileBackendSnapshot>(
-    EMPTY_FILE_BACKEND,
-  );
+  const [fileBackend, setFileBackend] =
+    useState<SshFileBackendSnapshot>(EMPTY_FILE_BACKEND);
+  const fileBackendEventRevision = useRef(0);
 
   useEffect(() => {
     if (epoch === null) {
@@ -98,12 +98,18 @@ export function SshRttIndicator() {
       setFileBackend(snapshot);
     };
     void (async () => {
-      unlisten = await remoteNative.onFileBackend(apply);
+      unlisten = await remoteNative.onFileBackend((snapshot) => {
+        if (!active || snapshot.epoch !== epoch) return;
+        fileBackendEventRevision.current += 1;
+        apply(snapshot);
+      });
       if (!active) {
         unlisten();
         return;
       }
-      apply(await remoteNative.fileBackendSnapshot());
+      const revision = fileBackendEventRevision.current;
+      const snapshot = await remoteNative.fileBackendSnapshot();
+      if (fileBackendEventRevision.current === revision) apply(snapshot);
     })().catch(() => undefined);
     return () => {
       active = false;
@@ -113,12 +119,23 @@ export function SshRttIndicator() {
 
   useEffect(() => {
     if (epoch === null || !preferencesHydrated) return;
+    let active = true;
+    const revision = fileBackendEventRevision.current;
     void remoteNative
       .setFileBackendEnabled(fileAcceleration)
       .then((snapshot) => {
-        if (snapshot.epoch === epoch) setFileBackend(snapshot);
+        if (
+          active &&
+          snapshot.epoch === epoch &&
+          fileBackendEventRevision.current === revision
+        ) {
+          setFileBackend(snapshot);
+        }
       })
       .catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, [epoch, fileAcceleration, preferencesHydrated]);
 
   if (epoch === null) return null;
@@ -131,24 +148,27 @@ export function SshRttIndicator() {
       : t("sshRtt.tooltip", { value: currentHealth.rttMs });
   const currentFileBackend =
     fileBackend.epoch === epoch ? fileBackend : EMPTY_FILE_BACKEND;
-  const showFileMarker = currentFileBackend.capability === "available";
-  const fileTooltip = currentFileBackend.fallback
-    ? t("sshFileBackend.fallback")
-    : currentFileBackend.activeBackend === "python"
-      ? t("sshFileBackend.python", {
-          version: currentFileBackend.pythonVersion ?? "--",
-        })
-      : currentFileBackend.capability === "available" &&
-          currentFileBackend.enabled &&
-          !currentFileBackend.latencyEligible
-        ? t("sshFileBackend.lowLatency", {
-            threshold: currentFileBackend.rttThresholdMs,
-          })
-      : currentFileBackend.capability === "available"
-        ? t("sshFileBackend.disabled", {
-            version: currentFileBackend.pythonVersion ?? "--",
-          })
-        : t("sshFileBackend.sftp");
+  const showFileMarker = currentFileBackend.capability !== "unavailable";
+  const fileTooltip =
+    currentFileBackend.capability === "detecting"
+      ? t("sshFileBackend.detecting")
+      : currentFileBackend.fallback
+        ? t("sshFileBackend.fallback")
+        : currentFileBackend.activeBackend === "python"
+          ? t("sshFileBackend.python", {
+              version: currentFileBackend.pythonVersion ?? "--",
+            })
+          : currentFileBackend.capability === "available" &&
+              currentFileBackend.enabled &&
+              !currentFileBackend.latencyEligible
+            ? t("sshFileBackend.lowLatency", {
+                threshold: currentFileBackend.rttThresholdMs,
+              })
+            : currentFileBackend.capability === "available"
+              ? t("sshFileBackend.disabled", {
+                  version: currentFileBackend.pythonVersion ?? "--",
+                })
+              : t("sshFileBackend.sftp");
 
   return (
     <Tooltip>

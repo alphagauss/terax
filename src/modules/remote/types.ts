@@ -86,7 +86,7 @@ export type SshHealthSnapshot = {
 
 export type SshFileBackendSnapshot = {
   epoch: number | null;
-  capability: "available" | "unavailable";
+  capability: "detecting" | "available" | "unavailable";
   activeBackend: "sftp" | "python";
   pythonVersion: string | null;
   enabled: boolean;

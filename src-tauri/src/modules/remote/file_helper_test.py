@@ -68,6 +68,51 @@ class FileHelperTests(unittest.TestCase):
         self.assertEqual(response["status"], "error")
         self.assertEqual(response["code"], "invalidRequest")
 
+    def test_checked_write_rejects_invalid_expected_version(self):
+        with self.assertRaisesRegex(ValueError, "expected version is invalid"):
+            helper._validate_expected(
+                {"revision": "not-a-digest", "size": helper.MAX_BODY_BYTES + 1}
+            )
+
+    def test_checked_write_conflicts_on_size_before_hashing_or_staging(self):
+        path = os.path.abspath("note.txt")
+        captured, response_patch = self.capture_response()
+        metadata = mock.Mock(st_size=8, st_mtime=1)
+
+        with (
+            response_patch,
+            mock.patch.object(helper, "_canonical_target", return_value=path),
+            mock.patch.object(helper.os, "stat", return_value=metadata),
+            mock.patch.object(helper, "_hash_file") as hash_file,
+            mock.patch.object(helper, "_stage_file") as stage_file,
+        ):
+            helper._write_checked(
+                {
+                    "path": path,
+                    "expected": {"revision": "a" * 64, "size": 7},
+                    "replacementRevision": hashlib.sha256(b"after").hexdigest(),
+                },
+                b"after",
+            )
+
+        self.assertEqual(captured[0][0]["status"], "conflict")
+        hash_file.assert_not_called()
+        stage_file.assert_not_called()
+
+    def test_stage_file_removes_temporary_when_close_fails(self):
+        with (
+            mock.patch.object(helper.tempfile, "mkstemp", return_value=(7, "/tmp/staged")),
+            mock.patch.object(helper.os, "fchmod", create=True),
+            mock.patch.object(helper.os, "write", return_value=4),
+            mock.patch.object(helper.os, "fsync"),
+            mock.patch.object(helper.os, "close", side_effect=OSError("close failed")),
+            mock.patch.object(helper.os, "unlink") as unlink,
+        ):
+            with self.assertRaisesRegex(OSError, "close failed"):
+                helper._stage_file("/tmp/target", b"data", 0o600)
+
+        unlink.assert_called_once_with("/tmp/staged")
+
     @unittest.skipUnless(os.name == "posix", "原子权限语义只在远端 Linux 上执行")
     def test_checked_write_preserves_mode_and_commits_expected_content(self):
         with tempfile.TemporaryDirectory() as directory:
