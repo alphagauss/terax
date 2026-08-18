@@ -235,11 +235,11 @@ pub async fn fs_read_file(
         } else {
             MAX_READ_BYTES
         };
-        return match remote::sftp::read_file_snapshot(&workspace, &path, limit).await? {
-            remote::sftp::RemoteFileRead::TooLarge { size, mtime } => {
+        return match remote::file_service::read_snapshot(&workspace, &path, limit).await? {
+            remote::file_service::RemoteFileRead::TooLarge { size, mtime } => {
                 Ok(ReadResult::TooLarge { size, limit, mtime })
             }
-            remote::sftp::RemoteFileRead::Content { bytes, mtime, .. } => {
+            remote::file_service::RemoteFileRead::Content { bytes, mtime, .. } => {
                 classify_bytes(bytes, mtime)
             }
         };
@@ -256,11 +256,11 @@ pub async fn fs_read_binary(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let workspace = remote.manager.workspace(profile_id).await?;
-        return match remote::sftp::read_file_snapshot(&workspace, &path, MAX_READ_BYTES).await? {
-            remote::sftp::RemoteFileRead::TooLarge { size, .. } => {
+        return match remote::file_service::read_snapshot(&workspace, &path, MAX_READ_BYTES).await? {
+            remote::file_service::RemoteFileRead::TooLarge { size, .. } => {
                 Err(format!("file is too large: {size} bytes"))
             }
-            remote::sftp::RemoteFileRead::Content { bytes, size, .. } => {
+            remote::file_service::RemoteFileRead::Content { bytes, size, .. } => {
                 Ok(BinaryReadResult { size, bytes })
             }
         };
@@ -279,7 +279,7 @@ pub async fn fs_file_version(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let workspace = remote.manager.workspace(profile_id).await?;
-        return remote::sftp::file_version(&workspace, &path, FORCE_MAX_READ_BYTES)
+        return remote::file_service::read_version(&workspace, &path, FORCE_MAX_READ_BYTES)
             .await
             .map(|version| {
                 version.map(|value| FileVersion {
@@ -790,7 +790,11 @@ pub async fn fs_write_file(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let workspace = remote.manager.workspace(profile_id).await?;
-        let mtime = remote::sftp::write_file(&workspace, &path, content.as_bytes()).await?;
+        let bytes = content.as_bytes();
+        let replacement_revision = content_revision(bytes);
+        let mtime =
+            remote::file_service::write_overwrite(&workspace, &path, bytes, &replacement_revision)
+                .await?;
         emit_file_written(&app, &path, source);
         return Ok(mtime);
     }
@@ -832,12 +836,12 @@ pub async fn fs_write_file_checked(
         let workspace = remote.manager.workspace(profile_id).await?;
         match &condition {
             WriteCondition::Match { version } => {
-                let expected = remote::sftp::RemoteVersion {
+                let expected = remote::file_service::RemoteVersion {
                     revision: version.revision.clone(),
                     size: version.size,
                     mtime: version.mtime,
                 };
-                match remote::sftp::write_file_checked(
+                match remote::file_service::write_checked(
                     &workspace,
                     &path,
                     bytes,
@@ -846,14 +850,14 @@ pub async fn fs_write_file_checked(
                 )
                 .await?
                 {
-                    remote::sftp::RemoteCheckedWrite::Written { mtime } => {
+                    remote::file_service::RemoteCheckedWrite::Written { mtime } => {
                         CheckedWriteResult::Written {
                             revision: replacement_revision,
                             size: bytes.len() as u64,
                             mtime,
                         }
                     }
-                    remote::sftp::RemoteCheckedWrite::Conflict { current } => {
+                    remote::file_service::RemoteCheckedWrite::Conflict { current } => {
                         CheckedWriteResult::Conflict {
                             current: current.map(|value| ObservedMetadata {
                                 size: value.size,
@@ -864,15 +868,22 @@ pub async fn fs_write_file_checked(
                 }
             }
             WriteCondition::Missing => {
-                match remote::sftp::write_file_missing(&workspace, &path, bytes).await? {
-                    remote::sftp::RemoteCheckedWrite::Written { mtime } => {
+                match remote::file_service::write_missing(
+                    &workspace,
+                    &path,
+                    bytes,
+                    &replacement_revision,
+                )
+                .await?
+                {
+                    remote::file_service::RemoteCheckedWrite::Written { mtime } => {
                         CheckedWriteResult::Written {
                             revision: replacement_revision,
                             size: bytes.len() as u64,
                             mtime,
                         }
                     }
-                    remote::sftp::RemoteCheckedWrite::Conflict { current } => {
+                    remote::file_service::RemoteCheckedWrite::Conflict { current } => {
                         CheckedWriteResult::Conflict {
                             current: current.map(|value| ObservedMetadata {
                                 size: value.size,
@@ -883,7 +894,13 @@ pub async fn fs_write_file_checked(
                 }
             }
             WriteCondition::Overwrite => {
-                let mtime = remote::sftp::write_file(&workspace, &path, bytes).await?;
+                let mtime = remote::file_service::write_overwrite(
+                    &workspace,
+                    &path,
+                    bytes,
+                    &replacement_revision,
+                )
+                .await?;
                 CheckedWriteResult::Written {
                     revision: replacement_revision,
                     size: bytes.len() as u64,

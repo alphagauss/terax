@@ -1,4 +1,4 @@
-//! 远端 PTY channel 桥接与生命周期管理。
+//! 远端 PTY channel、Workspace capability 探测与生命周期管理。
 //!
 //! 本模块使用 Tauri raw IPC channel 接入既有 xterm 和 PTY 前端。只有底层 SSH handle
 //! 已关闭时才返回 transport 退出码，Runtime 是否断线仍由统一 ping 探活决定。
@@ -369,7 +369,7 @@ fn bootstrap_bash_command(root_assignment: &str, cwd: Option<&str>, blocks: bool
         .unwrap_or_else(|| "terminal_cwd=\"$root\"".to_string());
     let blocks = if blocks { " TERAX_BLOCKS=1" } else { "" };
     format!(
-        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; {terminal_cwd}; cd -- \"$terminal_cwd\" 2>/dev/null || cd -- \"$root\" || exit 96; printf '\\000TERAX-SSH-BOOT\\000%s\\000%s\\000%s\\000%s\\000TERAX-SSH-READY\\000' \"$os\" \"$SHELL\" \"$HOME\" \"$root\"; exec env TERAX_TERMINAL=1{blocks} /bin/bash --rcfile <(printf %s {}) -i",
+        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; python_version=$(python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))' 2>/dev/null) || python_version=; {terminal_cwd}; cd -- \"$terminal_cwd\" 2>/dev/null || cd -- \"$root\" || exit 96; printf '\\000TERAX-SSH-BOOT\\000%s\\000%s\\000%s\\000%s\\000%s\\000TERAX-SSH-READY\\000' \"$os\" \"$SHELL\" \"$HOME\" \"$root\" \"$python_version\"; exec env TERAX_TERMINAL=1{blocks} /bin/bash --rcfile <(printf %s {}) -i",
         shell_quote(&normalize_script(bashrc_script()))
     )
 }
@@ -415,13 +415,14 @@ mod tests {
     #[test]
     fn prepared_terminal_bootstrap_is_hidden_from_shell_output() {
         let mut bytes = Vec::from(BOOTSTRAP_PREFIX);
-        bytes.extend_from_slice(b"Linux\0/bin/bash\0/home/me\0/srv/project");
+        bytes.extend_from_slice(b"Linux\0/bin/bash\0/home/me\0/srv/project\x003.12.1");
         bytes.extend_from_slice(BOOTSTRAP_SUFFIX);
         bytes.extend_from_slice(b"prompt> ");
 
         let (probe, buffered) = parse_bootstrap(&bytes, "~").unwrap().unwrap();
         assert_eq!(probe.login_home, "/home/me");
         assert_eq!(probe.root, "/srv/project");
+        assert_eq!(probe.python_version.as_deref(), Some("3.12.1"));
         assert_eq!(buffered, b"prompt> ");
     }
 

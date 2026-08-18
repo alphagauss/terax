@@ -1,7 +1,7 @@
-//! 当前进程唯一 SSH Runtime 的连接、健康监督、重连与资源生命周期协调。
+//! 当前进程唯一 SSH Runtime 的连接、文件后端、健康监督、重连与资源生命周期协调。
 //!
-//! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，目录 SFTP
-//! 独立预热。业务入站流量抑制重复保活，旧 workspace 的迟到失败不能覆盖新连接。
+//! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，raw 读取
+//! SFTP 独立预热。业务入站流量抑制重复保活，旧 workspace 的迟到失败不能覆盖新连接。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshHealthSnapshot, SshTrafficSnapshot,
-    TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
+    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshFileBackendSnapshot,
+    SshHealthSnapshot, SshTrafficSnapshot, TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace, TransportProbeOutcome};
 use super::traffic::SshTrafficMeter;
@@ -221,6 +221,7 @@ impl RemoteManager {
 
         let home = workspace.home().await;
         let epoch = self.next_epoch.fetch_add(1, Ordering::Relaxed);
+        workspace.set_runtime_epoch(epoch);
         let snapshot = RemoteRuntimeSnapshot::Connected {
             version: self.version(),
             epoch,
@@ -258,6 +259,7 @@ impl RemoteManager {
         self.tunnels.activate_profile_epoch(&profile_id, epoch);
         let _ = app.emit("terax://ssh-runtime", snapshot.clone());
         Self::emit_health(app, workspace.health_snapshot(epoch));
+        workspace.emit_file_backend_snapshot().await;
         self.spawn_monitor(workspace.clone(), epoch, lifecycle.clone(), app.clone());
         if has_prepared_terminal {
             self.spawn_prepared_terminal_expiry(workspace.clone(), epoch, lifecycle.id);
@@ -405,6 +407,8 @@ impl RemoteManager {
                     TransportProbeOutcome::Sampled => {
                         if manager.is_current(&workspace, epoch, lifecycle.id).await {
                             Self::emit_health(&app, workspace.health_snapshot(epoch));
+                            workspace.prepare_file_helper_channel();
+                            workspace.emit_file_backend_snapshot().await;
                         }
                     }
                     TransportProbeOutcome::Failed => {
@@ -669,6 +673,37 @@ impl RemoteManager {
         }
     }
 
+    /// 返回当前 connected epoch 的文件后端状态。
+    pub async fn file_backend_snapshot(&self) -> SshFileBackendSnapshot {
+        let workspace = {
+            let runtime = self.runtime.read().await;
+            matches!(&runtime.snapshot, RemoteRuntimeSnapshot::Connected { .. })
+                .then(|| runtime.workspace.clone())
+                .flatten()
+        };
+        match workspace {
+            Some(workspace) => workspace.file_backend_snapshot().await,
+            None => SshFileBackendSnapshot::default(),
+        }
+    }
+
+    /// 更新当前 connected epoch 的文件加速策略。
+    pub async fn set_file_acceleration_enabled(&self, enabled: bool) -> SshFileBackendSnapshot {
+        let workspace = {
+            let runtime = self.runtime.read().await;
+            matches!(&runtime.snapshot, RemoteRuntimeSnapshot::Connected { .. })
+                .then(|| runtime.workspace.clone())
+                .flatten()
+        };
+        match workspace {
+            Some(workspace) => {
+                workspace.set_python_file_acceleration_enabled(enabled);
+                workspace.file_backend_snapshot().await
+            }
+            None => SshFileBackendSnapshot::default(),
+        }
+    }
+
     /// 窗口重新激活时立即确认长时间未探活的 transport，并复用统一重连流程。
     pub async fn wake(
         self: &Arc<Self>,
@@ -694,6 +729,8 @@ impl RemoteManager {
             TransportProbeOutcome::Sampled => {
                 if self.is_current(&workspace, epoch, lifecycle.id).await {
                     Self::emit_health(app, workspace.health_snapshot(epoch));
+                    workspace.prepare_file_helper_channel();
+                    workspace.emit_file_backend_snapshot().await;
                 }
             }
             TransportProbeOutcome::Failed => {

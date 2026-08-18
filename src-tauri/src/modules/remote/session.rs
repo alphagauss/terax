@@ -2,11 +2,12 @@
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
 //! channel。激活终端可在同一 PTY 中确认 Workspace root；两类 SFTP 从认证完成后预热，
-//! 文件保存可在上传期间预开提交 channel，transport 失败和 RTT 统一进入进程级健康监督器。
+//! 文件保存可在上传期间预开提交 channel，可选 Python 文件操作复用单槽预开 channel，
+//! transport 失败和 RTT 统一进入进程级健康监督器。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -21,13 +22,15 @@ use zeroize::Zeroizing;
 use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshHealthSnapshot, SshProfile,
+    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshFileBackend,
+    SshFileBackendSnapshot, SshFileCapability, SshHealthSnapshot, SshProfile,
 };
 use super::remote_fs::RemoteFs;
 use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
+const FILE_ACCELERATION_RTT_THRESHOLD_MS: u64 = 100;
 
 /// 处理 SSH 客户端事件、主机密钥确认和远端转发请求。
 pub struct ClientHandler {
@@ -130,6 +133,13 @@ pub struct RemoteWorkspace {
     proxy_secret: Zeroizing<String>,
     health: Arc<SshTransportHealth>,
     probe_lock: Mutex<()>,
+    python_version: RwLock<Option<String>>,
+    file_acceleration_enabled: AtomicBool,
+    file_acceleration_failed: AtomicBool,
+    prepared_file_channel: Mutex<Option<russh::Channel<Msg>>>,
+    file_channel_preparing: AtomicBool,
+    runtime_epoch: AtomicU64,
+    app: tauri::AppHandle,
 }
 
 /// 一次统一 transport 健康检查的结果。
@@ -247,6 +257,18 @@ impl RemoteWorkspace {
             proxy_secret,
             health,
             probe_lock: Mutex::new(()),
+            python_version: RwLock::new(None),
+            file_acceleration_enabled: AtomicBool::new(
+                crate::modules::shared_store::read_value::<bool>("settings", "sshFileAcceleration")
+                    .ok()
+                    .flatten()
+                    .unwrap_or(true),
+            ),
+            file_acceleration_failed: AtomicBool::new(false),
+            prepared_file_channel: Mutex::new(None),
+            file_channel_preparing: AtomicBool::new(false),
+            runtime_epoch: AtomicU64::new(0),
+            app: app.clone(),
         });
         let intent = foreground_intent
             .lock()
@@ -256,20 +278,20 @@ impl RemoteWorkspace {
         let prime_filesystem = intent != ForegroundIntent::None
             || foreground_filesystem_priority.load(Ordering::Acquire);
         if prime_filesystem {
-            let directory_filesystem = workspace.clone();
+            let read_filesystem = workspace.clone();
             tauri::async_runtime::spawn(async move {
                 let started_at = Instant::now();
-                match super::sftp::warm_directory_session(&directory_filesystem).await {
+                match super::sftp::warm_read_session(&read_filesystem).await {
                     Ok(_) => log::info!(
-                        "SSH directory filesystem ready profile={} sftp_ms={}",
-                        directory_filesystem.profile.id,
+                        "SSH read filesystem ready profile={} sftp_ms={}",
+                        read_filesystem.profile.id,
                         started_at.elapsed().as_millis()
                     ),
                     Err(error) => {
-                        if !directory_filesystem.is_closed() {
+                        if !read_filesystem.is_closed() {
                             log::warn!(
-                                "SSH directory filesystem warmup failed profile={}: {error}",
-                                directory_filesystem.profile.id
+                                "SSH read filesystem warmup failed profile={}: {error}",
+                                read_filesystem.profile.id
                             );
                         }
                     }
@@ -320,6 +342,8 @@ impl RemoteWorkspace {
         let probe_elapsed = probe_started_at.elapsed();
         *workspace.login_home.write().await = probe.login_home;
         *workspace.home.write().await = probe.root.clone();
+        *workspace.python_version.write().await = probe.python_version;
+        workspace.prepare_file_helper_channel();
         if prime_filesystem {
             let primed_workspace = workspace.clone();
             let primed_root = probe.root;
@@ -362,6 +386,159 @@ impl RemoteWorkspace {
     /// 返回远端账户登录 Home。
     pub async fn login_home(&self) -> String {
         self.login_home.read().await.clone()
+    }
+
+    /// 返回当前 epoch 是否支持 Python 文件加速器，不包含 RTT 策略。
+    async fn python_file_acceleration_supported(&self) -> bool {
+        self.file_acceleration_enabled.load(Ordering::Acquire)
+            && !self.file_acceleration_failed.load(Ordering::Acquire)
+            && self.python_version.read().await.is_some()
+    }
+
+    /// 返回当前 RTT 是否足以抵消一次性 Python helper 的启动成本。
+    pub(crate) async fn python_file_write_acceleration_available(&self) -> bool {
+        self.python_file_acceleration_supported().await
+            && file_acceleration_rtt_eligible(self.health.snapshot(0).rtt_ms)
+    }
+
+    /// 返回探测到的远端 Python 版本。
+    pub(crate) async fn python_version(&self) -> Option<String> {
+        self.python_version.read().await.clone()
+    }
+
+    /// 安装 manager 分配的 epoch，使派生文件后端事件可以拒绝旧连接状态。
+    pub(crate) fn set_runtime_epoch(&self, epoch: u64) {
+        self.runtime_epoch.store(epoch, Ordering::Release);
+    }
+
+    /// 返回当前 epoch 的文件加速器权威状态。
+    pub(crate) async fn file_backend_snapshot(&self) -> SshFileBackendSnapshot {
+        let python_version = self.python_version().await;
+        let enabled = self.file_acceleration_enabled.load(Ordering::Acquire);
+        let fallback = self.file_acceleration_failed.load(Ordering::Acquire);
+        let available = python_version.is_some();
+        let latency_eligible = file_acceleration_rtt_eligible(self.health.snapshot(0).rtt_ms);
+        SshFileBackendSnapshot {
+            epoch: match self.runtime_epoch.load(Ordering::Acquire) {
+                0 => None,
+                epoch => Some(epoch),
+            },
+            capability: if available {
+                SshFileCapability::Available
+            } else {
+                SshFileCapability::Unavailable
+            },
+            active_backend: if enabled && available && !fallback && latency_eligible {
+                SshFileBackend::Python
+            } else {
+                SshFileBackend::Sftp
+            },
+            python_version,
+            enabled,
+            fallback,
+            latency_eligible,
+            rtt_threshold_ms: FILE_ACCELERATION_RTT_THRESHOLD_MS,
+        }
+    }
+
+    /// 向当前窗口发布文件后端状态；事件不包含路径、命令或 helper 错误。
+    pub(crate) async fn emit_file_backend_snapshot(&self) {
+        let _ = tauri::Emitter::emit(
+            &self.app,
+            "terax://ssh-file-backend",
+            self.file_backend_snapshot().await,
+        );
+    }
+
+    /// 标记当前 epoch 的 Python 文件后端失效，后续请求直接走 SFTP。
+    pub(crate) fn disable_python_file_acceleration(self: &Arc<Self>) {
+        self.file_acceleration_failed.store(true, Ordering::Release);
+        if let Ok(mut slot) = self.prepared_file_channel.try_lock() {
+            if let Some(channel) = slot.take() {
+                tauri::async_runtime::spawn(async move {
+                    let _ = channel.close().await;
+                });
+            }
+        }
+        let workspace = self.clone();
+        tauri::async_runtime::spawn(async move {
+            workspace.emit_file_backend_snapshot().await;
+        });
+    }
+
+    /// 更新当前 epoch 的加速策略；重新启用时允许本 epoch 再尝试一次 helper。
+    pub(crate) fn set_python_file_acceleration_enabled(self: &Arc<Self>, enabled: bool) {
+        self.file_acceleration_enabled
+            .store(enabled, Ordering::Release);
+        if enabled {
+            self.file_acceleration_failed
+                .store(false, Ordering::Release);
+            self.prepare_file_helper_channel();
+        } else if let Ok(mut slot) = self.prepared_file_channel.try_lock() {
+            if let Some(channel) = slot.take() {
+                tauri::async_runtime::spawn(async move {
+                    let _ = channel.close().await;
+                });
+            }
+        }
+        let workspace = self.clone();
+        tauri::async_runtime::spawn(async move {
+            workspace.emit_file_backend_snapshot().await;
+        });
+    }
+
+    /// 取得一个预开的 helper channel；无可用预热资源时只为当前请求打开一次。
+    pub(crate) async fn take_file_helper_channel(
+        self: &Arc<Self>,
+    ) -> Result<russh::Channel<Msg>, String> {
+        if !self.python_file_write_acceleration_available().await {
+            return Err("remote Python file accelerator is unavailable".into());
+        }
+        if let Some(channel) = self.prepared_file_channel.lock().await.take() {
+            self.prepare_file_helper_channel();
+            return Ok(channel);
+        }
+        let channel = self.open_exec_channel().await?;
+        self.prepare_file_helper_channel();
+        Ok(channel)
+    }
+
+    /// 后台维持一个未执行命令的单槽 channel，隐藏下一次业务调用的 channel 往返。
+    pub(crate) fn prepare_file_helper_channel(self: &Arc<Self>) {
+        if self.file_channel_preparing.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let workspace = self.clone();
+        tauri::async_runtime::spawn(async move {
+            if !workspace.python_file_write_acceleration_available().await {
+                workspace
+                    .file_channel_preparing
+                    .store(false, Ordering::Release);
+                return;
+            }
+            let opened = workspace.open_exec_channel().await;
+            workspace
+                .file_channel_preparing
+                .store(false, Ordering::Release);
+            if let Ok(channel) = opened {
+                if workspace.python_file_write_acceleration_available().await {
+                    let close = {
+                        let mut slot = workspace.prepared_file_channel.lock().await;
+                        if slot.is_none() {
+                            *slot = Some(channel);
+                            None
+                        } else {
+                            Some(channel)
+                        }
+                    };
+                    if let Some(channel) = close {
+                        let _ = channel.close().await;
+                    }
+                } else {
+                    let _ = channel.close().await;
+                }
+            }
+        });
     }
 
     /// 等待 Explorer 首个目录完成，供非前台资源避免争抢启动 transport。
@@ -434,18 +611,26 @@ impl RemoteWorkspace {
             .try_lock()
             .ok()
             .and_then(|mut session| session.take());
-        let directory_sftp = self
+        let read_sftp = self
             .remote_fs
-            .directory_session
+            .read_session
             .try_lock()
             .ok()
             .and_then(|mut session| session.take());
+        let prepared_file_channel = self
+            .prepared_file_channel
+            .try_lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
+            if let Some(channel) = prepared_file_channel {
+                let _ = channel.close().await;
+            }
             if let Some(sftp) = sftp {
                 let _ = sftp.close().await;
             }
-            if let Some(sftp) = directory_sftp {
-                let _ = sftp.close_session();
+            if let Some(sftp) = read_sftp {
+                let _ = sftp.session.close_session();
             }
             let _ = self
                 .handle
@@ -491,6 +676,22 @@ impl RemoteWorkspace {
         let command = build_exec_command(command, cwd)?;
         run_exec_channel(channel, command, timeout).await
     }
+
+    /// 在预开的 channel 上执行一次带标准输入的命令，并使用调用方提供的输出上限。
+    ///
+    /// 文件加速器在 exec 请求后立即发送完整长度帧和 EOF，SSH channel 自身负责窗口
+    /// 背压。命令一旦发送，后续错误必须被调用方视为结果可能不明确。
+    pub(crate) async fn exec_on_channel_with_input(
+        &self,
+        channel: russh::Channel<Msg>,
+        command: &str,
+        input: Vec<u8>,
+        timeout: Duration,
+        max_output: usize,
+    ) -> Result<ExecOutput, String> {
+        let command = build_exec_command(command, None)?;
+        run_exec_channel_with_input(channel, command, Some(input), timeout, max_output).await
+    }
 }
 
 /// 构造一次远端命令，保持工作目录参数的既有转义规则。
@@ -506,14 +707,35 @@ fn build_exec_command(command: &str, cwd: Option<&str>) -> Result<String, String
 
 /// 在已打开的 channel 上发送命令，并有界收集完成状态和输出。
 async fn run_exec_channel(
-    mut channel: russh::Channel<Msg>,
+    channel: russh::Channel<Msg>,
     command: String,
     timeout: Duration,
+) -> Result<ExecOutput, String> {
+    run_exec_channel_with_input(channel, command, None, timeout, MAX_EXEC_OUTPUT).await
+}
+
+/// 发送命令和可选标准输入，并有界收集完成状态与输出。
+async fn run_exec_channel_with_input(
+    mut channel: russh::Channel<Msg>,
+    command: String,
+    input: Option<Vec<u8>>,
+    timeout: Duration,
+    max_output: usize,
 ) -> Result<ExecOutput, String> {
     channel
         .exec(true, command.into_bytes())
         .await
         .map_err(|error| format!("start remote command: {error}"))?;
+    if let Some(input) = input {
+        channel
+            .data_bytes(input)
+            .await
+            .map_err(|error| format!("write remote command input: {error}"))?;
+        channel
+            .eof()
+            .await
+            .map_err(|error| format!("finish remote command input: {error}"))?;
+    }
 
     let run = async {
         let mut output = ExecOutput::default();
@@ -522,7 +744,7 @@ async fn run_exec_channel(
             let Some(message) = channel.wait().await else {
                 break;
             };
-            if collect_exec_message(&mut output, &mut completion, message) {
+            if collect_exec_message_bounded(&mut output, &mut completion, message, max_output) {
                 // EOF 锁定完整输出，退出状态锁定命令结果。主动关闭可避开部分
                 // 高延迟服务端迟发 Close 的额外等待。
                 let _ = channel.close().await;
@@ -550,18 +772,29 @@ struct ExecCompletion {
 }
 
 /// 收集一次性命令输出，并在收到最终退出状态或 Close 时结束等待。
+#[cfg(test)]
 fn collect_exec_message(
     output: &mut ExecOutput,
     completion: &mut ExecCompletion,
     message: ChannelMsg,
 ) -> bool {
+    collect_exec_message_bounded(output, completion, message, MAX_EXEC_OUTPUT)
+}
+
+/// 按调用方上限收集一次性命令消息。
+fn collect_exec_message_bounded(
+    output: &mut ExecOutput,
+    completion: &mut ExecCompletion,
+    message: ChannelMsg,
+    max_output: usize,
+) -> bool {
     match message {
         ChannelMsg::Data { data } => {
-            append_bounded(&mut output.stdout, &data, &mut output.truncated);
+            append_bounded(&mut output.stdout, &data, &mut output.truncated, max_output);
             return false;
         }
         ChannelMsg::ExtendedData { data, .. } => {
-            append_bounded(&mut output.stderr, &data, &mut output.truncated);
+            append_bounded(&mut output.stderr, &data, &mut output.truncated, max_output);
             return false;
         }
         ChannelMsg::ExitStatus { exit_status } => {
@@ -615,6 +848,7 @@ async fn connect_transport(
 pub(crate) struct WorkspaceProbe {
     pub login_home: String,
     pub root: String,
+    pub python_version: Option<String>,
 }
 
 /// 构造远端 root 赋值语句，保持既有 `~`、`$HOME` 和相对路径语义。
@@ -646,7 +880,7 @@ async fn detect_workspace(
     requested_root: &str,
 ) -> Result<WorkspaceProbe, String> {
     let probe = format!(
-        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; printf '%s\\000%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\" \"$root\""
+        "os=$(uname -s 2>/dev/null) || exit 91; [ \"$os\" = Linux ] || exit 92; [ -n \"$SHELL\" ] && [ \"${{SHELL##*/}}\" = bash ] && [ -x \"$SHELL\" ] && [ -x /bin/bash ] || exit 93; [ -n \"$HOME\" ] || exit 94; {root_assignment}; cd -- \"$requested\" || exit 95; root=$(pwd -P) || exit 95; python_version=$(python3 -c 'import sys; print(\".\".join(map(str, sys.version_info[:3])))' 2>/dev/null) || python_version=; printf '%s\\000%s\\000%s\\000%s\\000%s' \"$os\" \"$SHELL\" \"$HOME\" \"$root\" \"$python_version\""
     );
     let output = workspace
         .exec(&probe, None, Duration::from_secs(10))
@@ -701,7 +935,7 @@ pub(crate) fn parse_workspace_probe_bytes(
     _requested_root: &str,
 ) -> Result<WorkspaceProbe, String> {
     let fields: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
-    if fields.len() != 4
+    if fields.len() != 5
         || fields[0] != b"Linux"
         || fields[1].is_empty()
         || fields[2].is_empty()
@@ -727,7 +961,35 @@ pub(crate) fn parse_workspace_probe_bytes(
             "remote Workspace root is not an absolute path: {root}"
         ));
     }
-    Ok(WorkspaceProbe { login_home, root })
+    let python_version = std::str::from_utf8(fields[4])
+        .ok()
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 32
+                && value
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '.')
+                && python_version_supported(value)
+        })
+        .map(str::to_string);
+    Ok(WorkspaceProbe {
+        login_home,
+        root,
+        python_version,
+    })
+}
+
+/// Python helper 使用 3.9 起支持的内置泛型语法，旧版本保持 SFTP 回退。
+fn python_version_supported(version: &str) -> bool {
+    let mut parts = version
+        .split('.')
+        .filter_map(|part| part.parse::<u32>().ok());
+    matches!((parts.next(), parts.next()), (Some(major), Some(minor)) if major > 3 || major == 3 && minor >= 9)
+}
+
+/// 未采样或低 RTT 时保留 SFTP，避免 helper 启动成本抵消复合写入收益。
+fn file_acceleration_rtt_eligible(rtt_ms: Option<u64>) -> bool {
+    rtt_ms.is_some_and(|rtt| rtt >= FILE_ACCELERATION_RTT_THRESHOLD_MS)
 }
 
 #[derive(Default, Debug)]
@@ -740,8 +1002,8 @@ pub struct ExecOutput {
     pub truncated: bool,
 }
 
-fn append_bounded(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool) {
-    let remaining = MAX_EXEC_OUTPUT.saturating_sub(target.len());
+fn append_bounded(target: &mut Vec<u8>, data: &[u8], truncated: &mut bool, max_output: usize) {
+    let remaining = max_output.saturating_sub(target.len());
     if remaining < data.len() {
         *truncated = true;
     }
@@ -956,9 +1218,9 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod path_tests {
     use super::{
-        build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
-        password_auth_result, workspace_root_assignment, ExecCompletion, ExecOutput,
-        PrimaryAuthResult,
+        build_exec_command, client_config, collect_exec_message, file_acceleration_rtt_eligible,
+        parse_workspace_probe, password_auth_result, python_version_supported,
+        workspace_root_assignment, ExecCompletion, ExecOutput, PrimaryAuthResult,
     };
     use bytes::Bytes;
     use russh::ChannelMsg;
@@ -982,6 +1244,23 @@ mod path_tests {
             "requested='/srv/code'"
         );
         assert!(workspace_root_assignment("bad\npath").is_err());
+    }
+
+    #[test]
+    fn file_helper_requires_python_3_9_or_newer() {
+        assert!(!python_version_supported("3.8.20"));
+        assert!(python_version_supported("3.9.0"));
+        assert!(python_version_supported("3.12.1"));
+        assert!(python_version_supported("4.0.0"));
+        assert!(!python_version_supported("invalid"));
+    }
+
+    #[test]
+    fn file_helper_requires_a_stable_high_latency_sample() {
+        assert!(!file_acceleration_rtt_eligible(None));
+        assert!(!file_acceleration_rtt_eligible(Some(99)));
+        assert!(file_acceleration_rtt_eligible(Some(100)));
+        assert!(file_acceleration_rtt_eligible(Some(200)));
     }
 
     #[test]
@@ -1019,7 +1298,7 @@ mod path_tests {
     fn workspace_probe_requires_valid_absolute_paths() {
         let valid = parse_workspace_probe(
             ExecOutput {
-                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project".to_vec(),
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project\x003.12.1".to_vec(),
                 exit_code: Some(0),
                 ..ExecOutput::default()
             },
@@ -1028,10 +1307,11 @@ mod path_tests {
         .unwrap();
         assert_eq!(valid.login_home, "/home/me");
         assert_eq!(valid.root, "/srv/project");
+        assert_eq!(valid.python_version.as_deref(), Some("3.12.1"));
 
         let trailing_space = parse_workspace_probe(
             ExecOutput {
-                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project ".to_vec(),
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project \0".to_vec(),
                 exit_code: Some(0),
                 ..ExecOutput::default()
             },
@@ -1042,7 +1322,7 @@ mod path_tests {
 
         let newline_in_path = parse_workspace_probe(
             ExecOutput {
-                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project\n".to_vec(),
+                stdout: b"Linux\0/bin/bash\0/home/me\0/srv/project\n\0".to_vec(),
                 exit_code: Some(0),
                 ..ExecOutput::default()
             },
@@ -1052,7 +1332,7 @@ mod path_tests {
 
         let relative = parse_workspace_probe(
             ExecOutput {
-                stdout: b"Linux\0/bin/bash\0/home/me\0project".to_vec(),
+                stdout: b"Linux\0/bin/bash\0/home/me\0project\0".to_vec(),
                 exit_code: Some(0),
                 ..ExecOutput::default()
             },
