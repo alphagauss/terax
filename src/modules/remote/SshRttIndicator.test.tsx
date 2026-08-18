@@ -1,13 +1,13 @@
 /**
- * 本文件测试状态栏 SSH RTT 与文件后端的 epoch 隔离和事件更新。
- * 锁定旧连接样本不能污染新 Runtime，且设置只更新当前原生文件后端。
+ * 本文件测试状态栏 SSH RTT 的 epoch 隔离、事件更新和写入降级提示。
+ * 锁定旧连接样本不能污染新 Runtime，且永久回退只在当前 epoch 显示 I/O 标记。
  */
 
 // @vitest-environment happy-dom
 
 import { act, createElement, type ReactElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   environmentKind: "ssh",
@@ -22,11 +22,6 @@ const mocks = vi.hoisted(() => ({
   onHealth: vi.fn(),
   healthHandler: null as ((snapshot: unknown) => void) | null,
   unlisten: vi.fn(),
-  fileBackendSnapshot: vi.fn(),
-  setFileBackendEnabled: vi.fn(),
-  onFileBackend: vi.fn(),
-  fileBackendHandler: null as ((snapshot: unknown) => void) | null,
-  fileUnlisten: vi.fn(),
 }));
 
 vi.mock("@/components/ui/tooltip", () => ({
@@ -47,21 +42,10 @@ vi.mock("@/modules/remote/runtimeStore", () => ({
   useRemoteRuntimeStore: (select: (state: { snapshot: unknown }) => unknown) =>
     select({ snapshot: mocks.runtime }),
 }));
-vi.mock("@/modules/settings/preferences", () => ({
-  usePreferencesStore: (
-    select: (state: {
-      sshFileAcceleration: boolean;
-      hydrated: boolean;
-    }) => unknown,
-  ) => select({ sshFileAcceleration: true, hydrated: true }),
-}));
 vi.mock("@/modules/remote/native", () => ({
   remoteNative: {
     healthSnapshot: mocks.healthSnapshot,
     onHealth: mocks.onHealth,
-    fileBackendSnapshot: mocks.fileBackendSnapshot,
-    setFileBackendEnabled: mocks.setFileBackendEnabled,
-    onFileBackend: mocks.onFileBackend,
   },
 }));
 vi.mock("react-i18next", () => ({
@@ -81,33 +65,6 @@ function render(element: ReactElement) {
   return { container, root };
 }
 
-beforeEach(() => {
-  mocks.fileBackendSnapshot.mockResolvedValue({
-    epoch: 7,
-    capability: "unavailable",
-    activeBackend: "sftp",
-    pythonVersion: null,
-    enabled: true,
-    fallback: false,
-    latencyEligible: false,
-    rttThresholdMs: 100,
-  });
-  mocks.setFileBackendEnabled.mockResolvedValue({
-    epoch: 7,
-    capability: "unavailable",
-    activeBackend: "sftp",
-    pythonVersion: null,
-    enabled: true,
-    fallback: false,
-    latencyEligible: false,
-    rttThresholdMs: 100,
-  });
-  mocks.onFileBackend.mockImplementation(async (handler) => {
-    mocks.fileBackendHandler = handler;
-    return mocks.fileUnlisten;
-  });
-});
-
 afterEach(() => {
   mocks.environmentKind = "ssh";
   mocks.runtime = {
@@ -121,35 +78,6 @@ afterEach(() => {
   mocks.onHealth.mockReset();
   mocks.healthHandler = null;
   mocks.unlisten.mockReset();
-  mocks.fileBackendSnapshot.mockReset();
-  mocks.fileBackendSnapshot.mockResolvedValue({
-    epoch: 7,
-    capability: "unavailable",
-    activeBackend: "sftp",
-    pythonVersion: null,
-    enabled: true,
-    fallback: false,
-    latencyEligible: false,
-    rttThresholdMs: 100,
-  });
-  mocks.setFileBackendEnabled.mockReset();
-  mocks.setFileBackendEnabled.mockResolvedValue({
-    epoch: 7,
-    capability: "unavailable",
-    activeBackend: "sftp",
-    pythonVersion: null,
-    enabled: true,
-    fallback: false,
-    latencyEligible: false,
-    rttThresholdMs: 100,
-  });
-  mocks.onFileBackend.mockReset();
-  mocks.onFileBackend.mockImplementation(async (handler) => {
-    mocks.fileBackendHandler = handler;
-    return mocks.fileUnlisten;
-  });
-  mocks.fileBackendHandler = null;
-  mocks.fileUnlisten.mockReset();
   document.body.replaceChildren();
 });
 
@@ -163,6 +91,7 @@ describe("SSH RTT indicator", () => {
       epoch: 7,
       rttMs: null,
       sampledAt: null,
+      fileWriteFallback: false,
     });
     const { container, root } = render(createElement(SshRttIndicator));
 
@@ -170,8 +99,18 @@ describe("SSH RTT indicator", () => {
     expect(container.textContent).toContain("-- ms");
 
     act(() => {
-      mocks.healthHandler?.({ epoch: 6, rttMs: 999, sampledAt: 1 });
-      mocks.healthHandler?.({ epoch: 7, rttMs: 268, sampledAt: 2 });
+      mocks.healthHandler?.({
+        epoch: 6,
+        rttMs: 999,
+        sampledAt: 1,
+        fileWriteFallback: true,
+      });
+      mocks.healthHandler?.({
+        epoch: 7,
+        rttMs: 268,
+        sampledAt: 2,
+        fileWriteFallback: false,
+      });
     });
     expect(container.textContent).toContain("268 ms");
 
@@ -179,97 +118,12 @@ describe("SSH RTT indicator", () => {
     expect(mocks.unlisten).toHaveBeenCalledOnce();
   });
 
-  it("shows Python acceleration only for the current epoch", async () => {
-    mocks.onHealth.mockResolvedValue(mocks.unlisten);
-    mocks.healthSnapshot.mockResolvedValue({
-      epoch: 7,
-      rttMs: 200,
-      sampledAt: 1,
-    });
-    const { container, root } = render(createElement(SshRttIndicator));
-    await act(async () => Promise.resolve());
-
-    act(() => {
-      mocks.fileBackendHandler?.({
-        epoch: 6,
-        capability: "available",
-        activeBackend: "python",
-        pythonVersion: "3.12.1",
-        enabled: true,
-        fallback: false,
-        latencyEligible: true,
-        rttThresholdMs: 100,
-      });
-    });
-    expect(container.textContent).not.toContain("I/O");
-
-    act(() => {
-      mocks.fileBackendHandler?.({
-        epoch: 7,
-        capability: "detecting",
-        activeBackend: "sftp",
-        pythonVersion: null,
-        enabled: true,
-        fallback: false,
-        latencyEligible: true,
-        rttThresholdMs: 100,
-      });
-    });
-    expect(container.textContent).toContain("I/O");
-    expect(container.textContent).toContain("sshFileBackend.detecting");
-
-    act(() => {
-      mocks.fileBackendHandler?.({
-        epoch: 7,
-        capability: "available",
-        activeBackend: "python",
-        pythonVersion: "3.12.1",
-        enabled: true,
-        fallback: false,
-        latencyEligible: true,
-        rttThresholdMs: 100,
-      });
-    });
-    expect(container.textContent).toContain("I/O");
-    expect(container.textContent).toContain("sshFileBackend.python");
-
-    act(() => root.unmount());
-    expect(mocks.fileUnlisten).toHaveBeenCalledOnce();
-  });
-
-  it("keeps SFTP active below the acceleration RTT threshold", async () => {
-    mocks.onHealth.mockResolvedValue(mocks.unlisten);
-    mocks.healthSnapshot.mockResolvedValue({
-      epoch: 7,
-      rttMs: 5,
-      sampledAt: 1,
-    });
-    const { container, root } = render(createElement(SshRttIndicator));
-    await act(async () => Promise.resolve());
-
-    act(() => {
-      mocks.fileBackendHandler?.({
-        epoch: 7,
-        capability: "available",
-        activeBackend: "sftp",
-        pythonVersion: "3.12.1",
-        enabled: true,
-        fallback: false,
-        latencyEligible: false,
-        rttThresholdMs: 100,
-      });
-    });
-
-    expect(container.textContent).toContain("I/O");
-    expect(container.textContent).toContain("sshFileBackend.lowLatency");
-    act(() => root.unmount());
-  });
-
   it("does not let a delayed initial snapshot replace a newer event", async () => {
     let resolveSnapshot!: (snapshot: {
       epoch: number;
       rttMs: null;
       sampledAt: null;
+      fileWriteFallback: false;
     }) => void;
     mocks.onHealth.mockImplementation(async (handler) => {
       mocks.healthHandler = handler;
@@ -285,10 +139,20 @@ describe("SSH RTT indicator", () => {
 
     await act(async () => Promise.resolve());
     act(() => {
-      mocks.healthHandler?.({ epoch: 7, rttMs: 268, sampledAt: 2 });
+      mocks.healthHandler?.({
+        epoch: 7,
+        rttMs: 268,
+        sampledAt: 2,
+        fileWriteFallback: false,
+      });
     });
     await act(async () => {
-      resolveSnapshot({ epoch: 7, rttMs: null, sampledAt: null });
+      resolveSnapshot({
+        epoch: 7,
+        rttMs: null,
+        sampledAt: null,
+        fileWriteFallback: false,
+      });
       await Promise.resolve();
     });
 
@@ -296,60 +160,52 @@ describe("SSH RTT indicator", () => {
     act(() => root.unmount());
   });
 
-  it("does not let a delayed file snapshot replace a newer backend event", async () => {
-    let resolveSnapshot!: (snapshot: {
-      epoch: number;
-      capability: "unavailable";
-      activeBackend: "sftp";
-      pythonVersion: null;
-      enabled: boolean;
-      fallback: boolean;
-      latencyEligible: boolean;
-      rttThresholdMs: number;
-    }) => void;
-    mocks.onHealth.mockResolvedValue(mocks.unlisten);
+  it("shows I/O only after the current epoch permanently falls back", async () => {
+    mocks.onHealth.mockImplementation(async (handler) => {
+      mocks.healthHandler = handler;
+      return mocks.unlisten;
+    });
     mocks.healthSnapshot.mockResolvedValue({
       epoch: 7,
-      rttMs: 200,
+      rttMs: 20,
       sampledAt: 1,
+      fileWriteFallback: false,
     });
-    mocks.fileBackendSnapshot.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveSnapshot = resolve;
-        }),
-    );
     const { container, root } = render(createElement(SshRttIndicator));
 
     await act(async () => Promise.resolve());
+    expect(container.textContent).not.toContain("I/O");
+
     act(() => {
-      mocks.fileBackendHandler?.({
+      mocks.healthHandler?.({
         epoch: 7,
-        capability: "available",
-        activeBackend: "sftp",
-        pythonVersion: "3.12.1",
-        enabled: true,
-        fallback: true,
-        latencyEligible: true,
-        rttThresholdMs: 100,
+        rttMs: 20,
+        sampledAt: 1,
+        fileWriteFallback: true,
       });
+    });
+    expect(container.textContent).toContain("I/O");
+    expect(container.textContent).toContain("sshRtt.fileWriteFallback");
+
+    mocks.runtime = {
+      phase: "connected",
+      version: 2,
+      epoch: 8,
+      profileId: "server",
+      home: "/root",
+    };
+    mocks.healthSnapshot.mockResolvedValue({
+      epoch: 8,
+      rttMs: 21,
+      sampledAt: 2,
+      fileWriteFallback: false,
     });
     await act(async () => {
-      resolveSnapshot({
-        epoch: 7,
-        capability: "unavailable",
-        activeBackend: "sftp",
-        pythonVersion: null,
-        enabled: true,
-        fallback: false,
-        latencyEligible: false,
-        rttThresholdMs: 100,
-      });
+      root.render(createElement(SshRttIndicator));
       await Promise.resolve();
     });
+    expect(container.textContent).not.toContain("I/O");
 
-    expect(container.textContent).toContain("I/O");
-    expect(container.textContent).toContain("sshFileBackend.fallback");
     act(() => root.unmount());
   });
 

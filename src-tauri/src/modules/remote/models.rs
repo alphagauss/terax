@@ -1,4 +1,4 @@
-//! SSH 配置、连接、文件后端、流量和隧道的跨进程数据模型。
+//! SSH 配置、连接健康、流量和隧道的跨进程数据模型。
 //!
 //! 本模块定义写入共享 SSH profile 存储的持久化隧道，以及仅在当前
 //! Workspace 进程中有效的运行时隧道信息。持久化 ID 与运行时 ID 分离，
@@ -160,46 +160,14 @@ pub struct SshTrafficSnapshot {
     pub downloaded_bytes: u64,
 }
 
-/// 当前进程 SSH transport 最近一次低频健康探测结果。
+/// 当前进程 SSH transport 的低频 RTT 与文件写入降级状态。
 #[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SshHealthSnapshot {
     pub epoch: Option<u64>,
     pub rtt_ms: Option<u64>,
     pub sampled_at: Option<u64>,
-}
-
-/// 当前 SSH epoch 的文件加速 capability。
-#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SshFileCapability {
-    Detecting,
-    Available,
-    #[default]
-    Unavailable,
-}
-
-/// 当前 SSH 文件内容操作实际选择的后端。
-#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SshFileBackend {
-    #[default]
-    Sftp,
-    Python,
-}
-
-/// 当前 epoch 的 Python 文件加速器权威快照。
-#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SshFileBackendSnapshot {
-    pub epoch: Option<u64>,
-    pub capability: SshFileCapability,
-    pub active_backend: SshFileBackend,
-    pub python_version: Option<String>,
-    pub enabled: bool,
-    pub fallback: bool,
-    pub latency_eligible: bool,
-    pub rtt_threshold_ms: u64,
+    pub file_write_fallback: bool,
 }
 
 /// 前端凭据对话框对本次连接提供的临时覆盖值。
@@ -519,34 +487,6 @@ mod tests {
                 "phase": "reconnecting",
                 "version": 8,
                 "profileId": "server"
-            })
-        );
-    }
-
-    #[test]
-    fn file_backend_snapshot_serializes_epoch_bound_capability() {
-        let snapshot = SshFileBackendSnapshot {
-            epoch: Some(3),
-            capability: SshFileCapability::Available,
-            active_backend: SshFileBackend::Python,
-            python_version: Some("3.12.1".into()),
-            enabled: true,
-            fallback: false,
-            latency_eligible: true,
-            rtt_threshold_ms: 100,
-        };
-
-        assert_eq!(
-            serde_json::to_value(snapshot).unwrap(),
-            serde_json::json!({
-                "epoch": 3,
-                "capability": "available",
-                "activeBackend": "python",
-                "pythonVersion": "3.12.1",
-                "enabled": true,
-                "fallback": false,
-                "latencyEligible": true,
-                "rttThresholdMs": 100
             })
         );
     }

@@ -39,17 +39,18 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
 
-## SSH Python 文件加速器
+## SSH Bash 文件写入 helper
 
-远端 Python 只是一种可选任务后端，不是通用远端服务。helper 源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器磁盘、不监听端口、不读取凭据，也不接受任意命令名称。
+远端 Bash helper 是三种条件写入的封闭实现，不是通用远端服务。源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器脚本、不监听端口、不读取凭据，也不接受调用方提供的任意命令。
 
-- 首期协议只允许三种明确写入条件；后续批量文件任务必须增加明确 operation、输入 schema、资源上限和结果类型。
-- 请求使用长度前缀和原始正文，Rust 在分配内存前验证协议版本与全部长度。
-- Python 重新验证绝对路径，并在提交时解析物理目标。
+- 协议只允许 Match、Missing 和 Overwrite 三种明确写入条件。
+- Rust 验证绝对路径、摘要和正文上限，将动态参数逐项 shell 转义；正文只通过 stdin 传输。
+- helper 解析物理目标，不使用 `eval`，也不接收脚本片段。
+- 远端依赖已经由 Linux 与 Bash 环境提供的 GNU coreutils，不维护 BusyBox 参数兼容分支。
 - 写入使用目标同目录排他临时文件、权限恢复、fsync 和条件原子发布。
 - helper 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
 - 提交响应丢失时通过 expected 和 replacement revision 收敛结果，不盲目覆盖。
-- Python 不可用、被关闭或当前 epoch 失败后，文件服务回退既有 SFTP 安全路径。
+- helper 执行环境或协议失效后，当前连接直接回退既有 SFTP 安全路径。
 
 ## AI 工具审批流程
 
@@ -96,7 +97,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 ## 不变量
 
 - `security.ts` 中的 deny-list 同时适用于读取和写入，绝不能绕过。
-- Python 文件 helper 只能实现封闭文件协议，不能演变为绕过 Shell 审批的命令执行入口。
+- Bash 文件 helper 只能实现封闭写入协议，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。
 - 新 plugin API 必须添加到 `src-tauri/capabilities/default.json`。

@@ -1,6 +1,7 @@
-//! SSH transport 的进程级健康状态与 RTT 快照。
+//! SSH transport 的进程级健康状态、RTT 与文件写入降级快照。
 //!
-//! 所有 channel 共享最近入站活动和失败信号；只有统一监督器可以主动发送健康探测。
+//! 所有 channel 共享最近入站活动和失败信号；文件 helper 的永久回退由 Workspace
+//! 合并进同一 epoch 快照，只有统一监督器可以主动发送健康探测。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -105,6 +106,7 @@ impl SshTransportHealth {
             epoch: Some(epoch),
             rtt_ms: (rtt != NO_RTT).then_some(rtt),
             sampled_at: (rtt != NO_RTT).then(|| self.sampled_at_ms.load(Ordering::Acquire)),
+            file_write_fallback: false,
         }
     }
 
@@ -148,6 +150,7 @@ mod tests {
         assert_eq!(snapshot.epoch, Some(7));
         assert_eq!(snapshot.rtt_ms, Some(268));
         assert!(snapshot.sampled_at.is_some());
+        assert!(!snapshot.file_write_fallback);
     }
 
     #[tokio::test]

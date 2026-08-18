@@ -1,16 +1,16 @@
 //! SSH 文件内容操作的后端无关服务边界。
 //!
-//! Tauri 文件命令只通过本模块读取版本化快照和提交文件。当前默认后端仍是 SFTP，
-//! 后续可选加速器必须复用相同结果语义，并在本层完成选择、回退和耗时记录。
+//! Tauri 文件命令只通过本模块读取版本化快照和提交文件。读取固定使用 SFTP；写入
+//! 优先通过单次 Bash helper 合并远端阶段，并在本层完成安全回退和耗时记录。
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
-use super::python_file::{self, PythonFileError};
 use super::session::RemoteWorkspace;
 use super::sftp;
+use super::shell_file::{self, ShellFileError};
 
 /// 一次有界远端文件读取的正文或过大结果。
 pub(crate) enum RemoteFileRead {
@@ -96,19 +96,19 @@ pub(crate) async fn write_overwrite(
     replacement_revision: &str,
 ) -> Result<u64, String> {
     let started_at = Instant::now();
-    if workspace.python_file_write_acceleration_available().await {
-        match python_file::write_overwrite(workspace, path, content, replacement_revision).await {
+    if workspace.shell_file_write_available() {
+        match shell_file::write_overwrite(workspace, path, content, replacement_revision).await {
             Ok(RemoteCheckedWrite::Written { mtime }) => {
-                log_backend_completion(workspace, "write_overwrite", "python", started_at, true);
+                log_backend_completion(workspace, "write_overwrite", "bash", started_at, true);
                 return Ok(mtime);
             }
             Ok(RemoteCheckedWrite::Conflict { .. }) => {
-                let error = PythonFileError {
-                    dispatched: true,
+                let error = ShellFileError {
+                    may_have_committed: true,
                     disable_backend: true,
                 };
-                record_python_fallback(workspace, "write_overwrite", &error);
-                return reconcile_dispatched_overwrite(
+                record_shell_fallback(workspace, "write_overwrite", &error);
+                return reconcile_ambiguous_overwrite(
                     workspace,
                     path,
                     content.len(),
@@ -117,9 +117,9 @@ pub(crate) async fn write_overwrite(
                 .await;
             }
             Err(error) => {
-                record_python_fallback(workspace, "write_overwrite", &error);
-                if error.dispatched {
-                    return reconcile_dispatched_overwrite(
+                record_shell_fallback(workspace, "write_overwrite", &error);
+                if error.may_have_committed {
+                    return reconcile_ambiguous_overwrite(
                         workspace,
                         path,
                         content.len(),
@@ -141,11 +141,11 @@ pub(crate) async fn write_overwrite(
     result
 }
 
-/// 收敛结果不明确的 Python 覆盖写，不重新执行无条件覆盖。
+/// 收敛结果不明确的 Bash 覆盖写，不重新执行无条件覆盖。
 ///
 /// helper 可能已经提交后，目标若不是 replacement，就无法区分原值与第三方后续修改。
 /// 此时必须拒绝 SFTP 重试，避免把并发写入静默覆盖。
-async fn reconcile_dispatched_overwrite(
+async fn reconcile_ambiguous_overwrite(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     replacement_size: usize,
@@ -167,7 +167,7 @@ fn reconciled_overwrite_mtime(
         .filter(|version| version.revision == replacement_revision)
         .map(|version| version.mtime)
         .ok_or_else(|| {
-            "remote Python overwrite result is ambiguous; refusing an unconditional retry".into()
+            "remote Bash overwrite result is ambiguous; refusing an unconditional retry".into()
         })
 }
 
@@ -179,21 +179,22 @@ pub(crate) async fn write_missing(
     replacement_revision: &str,
 ) -> Result<RemoteCheckedWrite, String> {
     let started_at = Instant::now();
-    let mut dispatched = false;
-    if workspace.python_file_write_acceleration_available().await {
-        match python_file::write_missing(workspace, path, content, replacement_revision).await {
+    let mut may_have_committed = false;
+    if workspace.shell_file_write_available() {
+        match shell_file::write_missing(workspace, path, content, replacement_revision).await {
             Ok(result) => {
-                log_backend_completion(workspace, "write_missing", "python", started_at, true);
+                log_backend_completion(workspace, "write_missing", "bash", started_at, true);
                 return Ok(result);
             }
             Err(error) => {
-                dispatched = error.dispatched;
-                record_python_fallback(workspace, "write_missing", &error);
+                may_have_committed = error.may_have_committed;
+                record_shell_fallback(workspace, "write_missing", &error);
             }
         }
     }
     let result = sftp::write_file_missing(workspace, path, content).await;
-    let result = if dispatched && matches!(result, Ok(RemoteCheckedWrite::Conflict { .. })) {
+    let result = if may_have_committed && matches!(result, Ok(RemoteCheckedWrite::Conflict { .. }))
+    {
         match sftp::file_version(workspace, path, content.len() as u64).await {
             Ok(Some(version)) if version.revision == replacement_revision => {
                 Ok(RemoteCheckedWrite::Written {
@@ -224,15 +225,15 @@ pub(crate) async fn write_checked(
     replacement_revision: &str,
 ) -> Result<RemoteCheckedWrite, String> {
     let started_at = Instant::now();
-    if workspace.python_file_write_acceleration_available().await {
-        match python_file::write_checked(workspace, path, content, expected, replacement_revision)
+    if workspace.shell_file_write_available() {
+        match shell_file::write_checked(workspace, path, content, expected, replacement_revision)
             .await
         {
             Ok(result) => {
-                log_backend_completion(workspace, "write_checked", "python", started_at, true);
+                log_backend_completion(workspace, "write_checked", "bash", started_at, true);
                 return Ok(result);
             }
-            Err(error) => record_python_fallback(workspace, "write_checked", &error),
+            Err(error) => record_shell_fallback(workspace, "write_checked", &error),
         }
     }
     let result =
@@ -265,26 +266,26 @@ fn log_backend_completion(
     );
 }
 
-/// 记录 helper 失败并在协议或执行环境失效时关闭当前 epoch 的加速路径。
-fn record_python_fallback(
+/// 记录 helper 失败并在协议或执行环境失效时关闭当前连接的快速写入路径。
+fn record_shell_fallback(
     workspace: &Arc<RemoteWorkspace>,
     operation: &str,
-    error: &PythonFileError,
+    error: &ShellFileError,
 ) {
     if error.disable_backend {
-        workspace.disable_python_file_acceleration();
+        workspace.disable_shell_file_write();
         log::warn!(
-            "SSH Python file accelerator disabled profile={} operation={} dispatched={}",
+            "SSH Bash file helper disabled profile={} operation={} may_have_committed={}",
             workspace.profile.id,
             operation,
-            error.dispatched
+            error.may_have_committed
         );
     } else {
         log::debug!(
-            "SSH Python file operation fell back profile={} operation={} dispatched={}",
+            "SSH Bash file operation fell back profile={} operation={} may_have_committed={}",
             workspace.profile.id,
             operation,
-            error.dispatched
+            error.may_have_committed
         );
     }
 }
