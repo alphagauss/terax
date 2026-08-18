@@ -14,11 +14,12 @@ export { FORCE_READ_LIMIT } from "./documentModel";
 
 type Options = {
   path: string;
+  active?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 };
 
-/** 订阅指定路径的共享文档，并暴露稳定的编辑、保存和重载动作。 */
-export function useDocument({ path, onDirtyChange }: Options) {
+/** 订阅指定路径的共享文档，登记前后台轮询优先级并暴露稳定的编辑、保存和重载动作。 */
+export function useDocument({ path, active = true, onDirtyChange }: Options) {
   const workspace = useWorkspaceEnvStore((state) => state.env);
   const repository = useRepositorySnapshot();
   const model = useMemo(
@@ -31,12 +32,19 @@ export function useDocument({ path, onDirtyChange }: Options) {
     model.getSnapshot,
   );
   const onDirtyChangeRef = useRef(onDirtyChange);
+  const remotePollingOwnerRef = useRef(Symbol(path));
   useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
   }, [onDirtyChange]);
   useEffect(() => {
     onDirtyChangeRef.current?.(snapshot.dirty);
   }, [snapshot.dirty]);
+
+  useEffect(() => {
+    const owner = remotePollingOwnerRef.current;
+    model.setRemotePollingActive(owner, active);
+    return () => model.clearRemotePollingOwner(owner);
+  }, [active, model]);
 
   useEffect(() => {
     if (

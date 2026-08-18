@@ -160,6 +160,15 @@ pub struct SshTrafficSnapshot {
     pub downloaded_bytes: u64,
 }
 
+/// 当前进程 SSH transport 最近一次低频健康探测结果。
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshHealthSnapshot {
+    pub epoch: Option<u64>,
+    pub rtt_ms: Option<u64>,
+    pub sampled_at: Option<u64>,
+}
+
 /// 前端凭据对话框对本次连接提供的临时覆盖值。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

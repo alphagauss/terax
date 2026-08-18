@@ -110,6 +110,7 @@ export function MarkdownPreviewPane({
   );
   const { doc, dirty } = useDocument({
     path,
+    active: visible,
     onDirtyChange: handleDirtyChange,
   });
 
@@ -443,6 +444,7 @@ export function MarkdownPreviewPane({
             <MarkdownRawPane
               ref={handleEditorRef}
               path={path}
+              remotePollingActive={visible}
               lspEnabled={focused}
               initialSourceLine={pendingRawSourceLineRef.current}
               onViewportSourceLineChange={handleRawViewportLine}

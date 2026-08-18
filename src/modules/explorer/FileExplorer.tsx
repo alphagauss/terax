@@ -125,6 +125,7 @@ function TransferStrategyMenu({
 type Props = {
   rootPath: string | null;
   rootPending?: "connection" | "loading";
+  remotePollingEnabled?: boolean;
   onOpenFolder?: () => void;
   onOpenHome?: () => void;
   onOpenPath?: (path: string) => void;
@@ -391,13 +392,14 @@ function buildRows(
  * 文件资源管理器组件。
  *
  * 展示当前终端驱动的目录树，并呈现 SSH 恢复进度和统一的手动重连入口。
- * 按运行环境提供本地根目录选择或后台传输操作。
+ * 按运行环境提供本地根目录选择或后台传输操作，隐藏时暂停远端目录轮询。
  */
 export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
     {
       rootPath,
       rootPending,
+      remotePollingEnabled,
       onOpenFolder,
       onOpenHome,
       onOpenPath,
@@ -415,7 +417,11 @@ export const FileExplorer = memo(
     ref,
   ) {
     const { t } = useTranslation(["explorer", "statusbar"]);
-    const tree = useFileTree(rootPath, { onPathRenamed, onPathDeleted });
+    const tree = useFileTree(rootPath, {
+      onPathRenamed,
+      onPathDeleted,
+      remotePollingEnabled,
+    });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
     const runtime = useRemoteRuntimeStore((state) => state.snapshot);
     const remotePhase =

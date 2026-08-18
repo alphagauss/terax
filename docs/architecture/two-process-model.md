@@ -11,7 +11,7 @@
 
 该边界是安全模型的基础。不受信任的输入（终端 escape sequence、文件内容、AI 工具结果）由 Rust 或严格限定范围的前端代码解析和验证，绝不会由 renderer 执行。
 
-进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH Workspace 在 Tauri setup 中立即读取 profile 和系统密钥链并开始连接，不等待 WebView；事件桥注册后同时读取权威 Runtime 与待确认主机密钥，避免启动事件竞态。前端读取本地 Space 状态后、等待环境前提交一次前台资源提示。激活终端使用 prepared PTY 在同一 channel 中完成 Linux、bash、Home、root 校验并直接进入集成 bash；其他页面继续使用合并 exec 探测。目录 SFTP 从认证完成时并行预热，使用标准 SFTP v3 的 READDIR 流水线，根目录首读先于 connected 事件进入 single-flight；普通文件和批量传输仍使用各自 session。只有凭据对话框可以为单次连接提交内存覆盖值，秘密不会通过命令行或自动连接的 WebView 往返传递。
+进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH Workspace 在 Tauri setup 中立即读取 profile 和系统密钥链并开始连接，不等待 WebView；事件桥注册后同时读取权威 Runtime 与待确认主机密钥，避免启动事件竞态。前端读取本地 Space 状态后、等待环境前提交一次前台资源提示。激活终端使用 prepared PTY 在同一 channel 中完成 Linux、bash、Home、root 校验并直接进入集成 bash；其他页面继续使用合并 exec 探测。目录 SFTP 从认证完成时按前台提示预热；首个实际目录请求同时确保普通文件 SFTP 已开始预热，使终端专用 Workspace 不承担未使用的文件资源。目录 session 使用标准 SFTP v3 的 READDIR 流水线，根目录首读进入 single-flight，普通文件小文件读取将 STAT 与 OPEN 合并为同一依赖阶段，批量传输仍使用独占 session。远端保存仍执行摘要冲突校验、单次耐久刷新、权限恢复和原子替换，但会并行恢复临时文件权限并在上传期间预开提交 channel。每个进程只有一个 SSH 健康监督器：业务入站流量证明 transport 新鲜，底层关闭立即唤醒重连，空闲保活与状态栏 RTT 复用低频 SSH ping。只有凭据对话框可以为单次连接提交内存覆盖值，秘密不会通过命令行或自动连接的 WebView 往返传递。
 
 ## 新增 IPC command
 
@@ -52,7 +52,7 @@
 - `fs_read_file` - 读取文件内容
 - `fs_file_version` - 在数据源计算文件 metadata 和 digest，但不返回内容
 - `fs_write_file` - 写入文件内容
-- `fs_write_file_checked` - 显式匹配文件 version 或允许覆盖，然后原子替换文件
+- `fs_write_file_checked` - 显式匹配文件 version、仅在缺失时创建或允许覆盖，然后原子提交文件
 - `fs_stat` - 文件 metadata
 - `fs_canonicalize` - canonical path
 

@@ -129,6 +129,7 @@ export function WorkbenchRegisteredView({
       {tab.kind === "editor" && (
         <EditorView
           tab={tab}
+          visible={visible}
           focused={focused}
           registerHandle={services.registerEditorHandle}
           onDirtyChange={services.onEditorDirtyChange}

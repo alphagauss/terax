@@ -1,6 +1,6 @@
 //! 工作区文件的读取、原子写入与版本校验。
 //!
-//! 编辑器以内容摘要作为磁盘版本，并通过条件写入避免静默覆盖外部修改。
+//! 编辑器和 AI 文件工具以内容摘要作为磁盘版本，并通过条件写入避免静默覆盖外部修改。
 
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -29,6 +29,12 @@ const WSL_CHECKED_WRITE_SCRIPT: &str = "if [ ! -f \"$1\" ]; then printf missing;
     if [ \"$actual\" = \"$3\" ]; then rm -f -- \"$4\" && printf converged; \
     elif [ \"$actual\" != \"$2\" ]; then printf conflict; \
     else chmod --reference=\"$1\" \"$4\" && mv -f -- \"$4\" \"$1\" && printf written; fi";
+#[cfg(windows)]
+const WSL_MISSING_WRITE_SCRIPT: &str =
+    "if [ -e \"$1\" ] || [ -L \"$1\" ]; then rm -f -- \"$2\"; printf conflict; exit 0; fi; \
+    if ln -- \"$2\" \"$1\" 2>/dev/null; then rm -f -- \"$2\"; printf written; \
+    elif [ -e \"$1\" ] || [ -L \"$1\" ]; then rm -f -- \"$2\"; printf conflict; \
+    else rm -f -- \"$2\"; exit 74; fi";
 
 /// 将可能阻塞的本地磁盘访问和 WSL 进程调用移出异步执行器。
 async fn run_blocking<T, F>(operation: F) -> Result<T, String>
@@ -78,11 +84,12 @@ pub struct ObservedMetadata {
     pub mtime: u64,
 }
 
-/// 编辑器写入条件。覆盖必须由调用方显式声明，遗漏参数不会退化为覆盖。
+/// 文件写入条件。覆盖和仅缺失时创建都必须由调用方显式声明。
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum WriteCondition {
     Match { version: FileVersion },
+    Missing,
     Overwrite,
 }
 
@@ -223,21 +230,19 @@ pub async fn fs_read_file(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let workspace = remote.manager.workspace(profile_id).await?;
-        let meta = remote::sftp::stat(&workspace, &path).await?;
         let limit = if force.unwrap_or(false) {
             FORCE_MAX_READ_BYTES
         } else {
             MAX_READ_BYTES
         };
-        if meta.size > limit {
-            return Ok(ReadResult::TooLarge {
-                size: meta.size,
-                limit,
-                mtime: meta.mtime,
-            });
-        }
-        let bytes = remote::sftp::read_file_with_size(&workspace, &path, limit, meta.size).await?;
-        return classify_bytes(bytes, meta.mtime);
+        return match remote::sftp::read_file_snapshot(&workspace, &path, limit).await? {
+            remote::sftp::RemoteFileRead::TooLarge { size, mtime } => {
+                Ok(ReadResult::TooLarge { size, limit, mtime })
+            }
+            remote::sftp::RemoteFileRead::Content { bytes, mtime, .. } => {
+                classify_bytes(bytes, mtime)
+            }
+        };
     }
     read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
 }
@@ -251,16 +256,14 @@ pub async fn fs_read_binary(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let workspace = remote.manager.workspace(profile_id).await?;
-        let meta = remote::sftp::stat(&workspace, &path).await?;
-        if meta.size > MAX_READ_BYTES {
-            return Err(format!("file is too large: {} bytes", meta.size));
-        }
-        let bytes =
-            remote::sftp::read_file_with_size(&workspace, &path, MAX_READ_BYTES, meta.size).await?;
-        return Ok(BinaryReadResult {
-            size: meta.size,
-            bytes,
-        });
+        return match remote::sftp::read_file_snapshot(&workspace, &path, MAX_READ_BYTES).await? {
+            remote::sftp::RemoteFileRead::TooLarge { size, .. } => {
+                Err(format!("file is too large: {size} bytes"))
+            }
+            remote::sftp::RemoteFileRead::Content { bytes, size, .. } => {
+                Ok(BinaryReadResult { size, bytes })
+            }
+        };
     }
 
     read_binary_sync(&resolve_path(&path, &workspace))
@@ -474,6 +477,30 @@ fn overwrite_local(target: &Path, content: &[u8]) -> Result<CheckedWriteResult, 
     })
 }
 
+/// 仅在本地目标仍不存在时发布已同步的临时文件。
+fn missing_write_sync(target: &Path, content: &[u8]) -> Result<CheckedWriteResult, String> {
+    let revision = content_revision(content);
+    let staged = stage_local_write(target, content).map_err(|error| error.to_string())?;
+    let persisted = match staged.persist_noclobber(target) {
+        Ok(file) => file,
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Ok(CheckedWriteResult::Conflict {
+                current: fs::metadata(target)
+                    .ok()
+                    .map(|metadata| observed_metadata(&metadata)),
+            });
+        }
+        Err(error) => return Err(error.error.to_string()),
+    };
+    drop(persisted);
+    let metadata = fs::metadata(target).map_err(|error| error.to_string())?;
+    Ok(CheckedWriteResult::Written {
+        revision,
+        size: metadata.len(),
+        mtime: mtime_millis(&metadata),
+    })
+}
+
 /// 校验本地文件的内容版本后原子写入。
 fn checked_write_sync(
     target: &Path,
@@ -616,6 +643,41 @@ fn overwrite_wsl(
     })
 }
 
+/// 仅在 WSL 目标仍不存在时使用同目录硬链接原子发布临时文件。
+#[cfg(windows)]
+fn missing_write_wsl_sync(
+    distro: &str,
+    path: &str,
+    target: &Path,
+    content: &[u8],
+) -> Result<CheckedWriteResult, String> {
+    let staged = stage_local_write(target, content).map_err(|error| error.to_string())?;
+    let temporary = wsl_temporary_path(path, &staged)?;
+    let temporary_guard = staged.into_temp_path();
+    let output = crate::modules::workspace::wsl_exec_capture(
+        distro,
+        "sh",
+        &["-c", WSL_MISSING_WRITE_SCRIPT, "terax", path, &temporary],
+    );
+    drop(temporary_guard);
+    match output?.trim() {
+        "written" => {
+            let metadata = fs::metadata(target).map_err(|error| error.to_string())?;
+            Ok(CheckedWriteResult::Written {
+                revision: content_revision(content),
+                size: metadata.len(),
+                mtime: mtime_millis(&metadata),
+            })
+        }
+        "conflict" => Ok(CheckedWriteResult::Conflict {
+            current: fs::metadata(target)
+                .ok()
+                .map(|metadata| observed_metadata(&metadata)),
+        }),
+        _ => Err("WSL missing-only write returned an invalid status".into()),
+    }
+}
+
 /// 在 WSL 发行版内完成最终摘要比较和替换，避免把旧文件读回 Windows。
 #[cfg(windows)]
 fn checked_write_wsl_sync(
@@ -747,9 +809,9 @@ pub async fn fs_write_file(
     Ok(mtime)
 }
 
-/// 按内容版本条件写入编辑器文件。
+/// 按内容版本或缺失条件写入编辑器与 AI 工具文件。
 ///
-/// 普通保存必须显式匹配最近读取或成功写入的版本；覆盖也必须显式声明。
+/// 普通保存必须显式匹配最近读取或成功写入的版本；新文件和覆盖也必须显式声明。
 #[tauri::command]
 pub async fn fs_write_file_checked(
     remote: tauri::State<'_, RemoteState>,
@@ -757,6 +819,7 @@ pub async fn fs_write_file_checked(
     content: String,
     condition: WriteCondition,
     workspace: Option<WorkspaceEnv>,
+    source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<CheckedWriteResult, String> {
     if let WriteCondition::Match { version } = &condition {
@@ -800,6 +863,25 @@ pub async fn fs_write_file_checked(
                     }
                 }
             }
+            WriteCondition::Missing => {
+                match remote::sftp::write_file_missing(&workspace, &path, bytes).await? {
+                    remote::sftp::RemoteCheckedWrite::Written { mtime } => {
+                        CheckedWriteResult::Written {
+                            revision: replacement_revision,
+                            size: bytes.len() as u64,
+                            mtime,
+                        }
+                    }
+                    remote::sftp::RemoteCheckedWrite::Conflict { current } => {
+                        CheckedWriteResult::Conflict {
+                            current: current.map(|value| ObservedMetadata {
+                                size: value.size,
+                                mtime: value.mtime,
+                            }),
+                        }
+                    }
+                }
+            }
             WriteCondition::Overwrite => {
                 let mtime = remote::sftp::write_file(&workspace, &path, bytes).await?;
                 CheckedWriteResult::Written {
@@ -820,12 +902,16 @@ pub async fn fs_write_file_checked(
                     (WorkspaceEnv::Wsl { distro }, WriteCondition::Match { version }) => {
                         checked_write_wsl_sync(distro, &write_path, &target, bytes, version)
                     }
+                    (WorkspaceEnv::Wsl { distro }, WriteCondition::Missing) => {
+                        missing_write_wsl_sync(distro, &write_path, &target, bytes)
+                    }
                     (WorkspaceEnv::Wsl { distro }, WriteCondition::Overwrite) => {
                         overwrite_wsl(distro, &write_path, &target, bytes)
                     }
                     (_, WriteCondition::Match { version }) => {
                         checked_write_sync(&target, bytes, version)
                     }
+                    (_, WriteCondition::Missing) => missing_write_sync(&target, bytes),
                     (_, WriteCondition::Overwrite) => overwrite_local(&target, bytes),
                 }
             }
@@ -835,6 +921,7 @@ pub async fn fs_write_file_checked(
                     WriteCondition::Match { version } => {
                         checked_write_sync(&target, bytes, version)
                     }
+                    WriteCondition::Missing => missing_write_sync(&target, bytes),
                     WriteCondition::Overwrite => overwrite_local(&target, bytes),
                 }
             }
@@ -843,7 +930,7 @@ pub async fn fs_write_file_checked(
     };
 
     if matches!(&result, CheckedWriteResult::Written { .. }) {
-        emit_file_written(&app, &path, Some("editor".to_string()));
+        emit_file_written(&app, &path, source);
     }
     Ok(result)
 }
@@ -1092,6 +1179,19 @@ mod tests {
     }
 
     #[test]
+    fn missing_write_creates_once_without_overwriting_a_new_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("note.txt");
+
+        let created = missing_write_sync(&target, b"approved").unwrap();
+        assert!(matches!(created, CheckedWriteResult::Written { .. }));
+
+        let conflict = missing_write_sync(&target, b"overwrite").unwrap();
+        assert!(matches!(conflict, CheckedWriteResult::Conflict { .. }));
+        assert_eq!(std::fs::read(&target).unwrap(), b"approved");
+    }
+
+    #[test]
     fn rejects_invalid_file_revisions() {
         let invalid = FileVersion {
             revision: "not-a-digest".into(),
@@ -1103,8 +1203,15 @@ mod tests {
     }
 
     #[test]
-    fn write_condition_must_explicitly_match_or_overwrite() {
+    fn write_condition_must_explicitly_match_create_or_overwrite() {
         assert!(serde_json::from_value::<WriteCondition>(serde_json::json!({})).is_err());
+        assert!(matches!(
+            serde_json::from_value::<WriteCondition>(serde_json::json!({
+                "type": "missing"
+            }))
+            .unwrap(),
+            WriteCondition::Missing
+        ));
         assert!(matches!(
             serde_json::from_value::<WriteCondition>(serde_json::json!({
                 "type": "overwrite"
@@ -1120,6 +1227,8 @@ mod tests {
         assert!(WSL_ATOMIC_WRITE_SCRIPT.contains("chmod --reference=\"$1\" \"$2\""));
         assert!(WSL_CHECKED_WRITE_SCRIPT.contains("chmod --reference=\"$1\" \"$4\""));
         assert!(WSL_CHECKED_WRITE_SCRIPT.contains("&& mv -f -- \"$4\" \"$1\""));
+        assert!(WSL_MISSING_WRITE_SCRIPT.contains("ln -- \"$2\" \"$1\""));
+        assert!(WSL_MISSING_WRITE_SCRIPT.contains("[ -L \"$1\" ]"));
     }
 
     #[cfg(unix)]

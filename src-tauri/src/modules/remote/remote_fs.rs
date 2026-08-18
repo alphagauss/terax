@@ -26,6 +26,7 @@ pub struct RemoteFs {
     pub(crate) session: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
     pub(crate) directory_session: Mutex<Option<Arc<russh_sftp::client::RawSftpSession>>>,
     directory_reads: Mutex<HashMap<DirectoryKey, Vec<oneshot::Sender<DirectoryResult>>>>,
+    file_warmup_started: AtomicBool,
     first_directory_ready: AtomicBool,
     first_directory_notify: Notify,
 }
@@ -43,9 +44,31 @@ impl RemoteFs {
         let key = DirectoryKey { path };
         let (receiver, leader) = self.subscribe(key.clone()).await;
         if leader {
+            if !self.file_warmup_started.swap(true, Ordering::AcqRel) {
+                let file_workspace = workspace.clone();
+                tauri::async_runtime::spawn(async move {
+                    let started_at = Instant::now();
+                    match sftp::warm_file_session(&file_workspace).await {
+                        Ok(()) => log::info!(
+                            "SSH file filesystem ready profile={} sftp_ms={}",
+                            file_workspace.profile.id,
+                            started_at.elapsed().as_millis()
+                        ),
+                        Err(error) => {
+                            if !file_workspace.is_closed() {
+                                log::warn!(
+                                    "SSH file filesystem warmup failed profile={}: {error}",
+                                    file_workspace.profile.id
+                                );
+                            }
+                        }
+                    }
+                });
+            }
+            let read_workspace = workspace.clone();
             tauri::async_runtime::spawn(async move {
-                let result = sftp::read_dir_uncached(&workspace, &key.path).await;
-                workspace.remote_fs.complete(key, result).await;
+                let result = sftp::read_dir_uncached(&read_workspace, &key.path).await;
+                read_workspace.remote_fs.complete(key, result).await;
             });
         }
         let result = receiver

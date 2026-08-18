@@ -1,4 +1,4 @@
-//! SSH 连接、transport 流量、终端与隧道的 Tauri command 适配层。
+//! SSH 连接、transport 健康与流量、终端和隧道的 Tauri command 适配层。
 //!
 //! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
@@ -8,7 +8,8 @@ use crate::modules::{secrets, secrets::SecretsState};
 use super::manager::RemoteState;
 use super::models::{
     ConnectRequest, CredentialOverride, ForegroundIntent, ImportedHost, RemoteRuntimeSnapshot,
-    SshAuthMethod, SshProfile, SshTrafficSnapshot, TunnelConfig, TunnelEventKind, TunnelInfo,
+    SshAuthMethod, SshHealthSnapshot, SshProfile, SshTrafficSnapshot, TunnelConfig,
+    TunnelEventKind, TunnelInfo,
 };
 
 const SSH_SECRET_SERVICE: &str = "terax-ssh";
@@ -142,6 +143,14 @@ pub async fn ssh_runtime_snapshot(
 /// 返回当前应用进程累计的 SSH transport 收发字节。
 pub fn ssh_traffic_snapshot(state: tauri::State<'_, RemoteState>) -> SshTrafficSnapshot {
     state.manager.traffic_snapshot()
+}
+
+#[tauri::command]
+/// 返回当前 connected epoch 最近一次低频 SSH RTT 样本。
+pub async fn ssh_health_snapshot(
+    state: tauri::State<'_, RemoteState>,
+) -> Result<SshHealthSnapshot, String> {
+    Ok(state.manager.health_snapshot().await)
 }
 
 #[tauri::command]

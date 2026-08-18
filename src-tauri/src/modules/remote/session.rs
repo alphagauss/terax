@@ -1,12 +1,13 @@
 //! SSH transport、认证、远端环境探测与命令执行。
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
-//! channel。激活终端可在同一 PTY 中确认 Workspace root；目录 SFTP 从认证完成后预热。
+//! channel。激活终端可在同一 PTY 中确认 Workspace root；两类 SFTP 从认证完成后预热，
+//! 文件保存可在上传期间预开提交 channel，transport 失败和 RTT 统一进入进程级健康监督器。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use russh::client::{self, Handle, Handler, KeyboardInteractiveAuthResponse, Msg};
@@ -17,8 +18,11 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
 
+use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
-use super::models::{ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshProfile};
+use super::models::{
+    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshHealthSnapshot, SshProfile,
+};
 use super::remote_fs::RemoteFs;
 use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
@@ -34,6 +38,7 @@ pub struct ClientHandler {
     pub host_keys: Arc<HostKeyVerifier>,
     pub(super) remote_forwards: RemoteForwardRegistry,
     pub cancellation: CancellationToken,
+    health: Arc<SshTransportHealth>,
 }
 
 impl Handler for ClientHandler {
@@ -54,6 +59,20 @@ impl Handler for ClientHandler {
             Ok(host_keys
                 .check(&app, &profile_id, &host, port, &key, &cancellation)
                 .await)
+        }
+    }
+
+    fn disconnected(
+        &mut self,
+        reason: russh::client::DisconnectReason<Self::Error>,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+        let health = self.health.clone();
+        async move {
+            health.mark_failed();
+            match reason {
+                russh::client::DisconnectReason::ReceivedDisconnect(_) => Ok(()),
+                russh::client::DisconnectReason::Error(error) => Err(error),
+            }
         }
     }
 
@@ -109,9 +128,15 @@ pub struct RemoteWorkspace {
     login_home: RwLock<String>,
     secret: Zeroizing<String>,
     proxy_secret: Zeroizing<String>,
-    transport_failed: AtomicBool,
+    health: Arc<SshTransportHealth>,
     probe_lock: Mutex<()>,
-    last_probe_success: StdMutex<Instant>,
+}
+
+/// 一次统一 transport 健康检查的结果。
+pub(crate) enum TransportProbeOutcome {
+    Fresh,
+    Sampled,
+    Failed,
 }
 
 /// 完成认证与前台探测后的 Workspace 资源。
@@ -157,7 +182,7 @@ impl RemoteWorkspace {
         let config = Arc::new(client_config());
 
         let remote_forwards = RemoteForwardRegistry::default();
-        let handler = || ClientHandler {
+        let handler = |health: Arc<SshTransportHealth>| ClientHandler {
             app: app.clone(),
             profile_id: profile.id.clone(),
             host: profile.host.clone(),
@@ -165,13 +190,16 @@ impl RemoteWorkspace {
             host_keys: host_keys.clone(),
             remote_forwards: remote_forwards.clone(),
             cancellation: cancellation.clone(),
+            health,
         };
+        let mut health = Arc::new(SshTransportHealth::new());
         let mut handle = connect_transport(
             &profile,
             proxy.as_ref(),
             config.clone(),
-            handler(),
+            handler(health.clone()),
             traffic.clone(),
+            health.clone(),
         )
         .await?;
         let transport_ready_at = Instant::now();
@@ -189,8 +217,18 @@ impl RemoteWorkspace {
                     "en",
                 )
                 .await;
-            handle =
-                connect_transport(&profile, proxy.as_ref(), config, handler(), traffic).await?;
+            handle = {
+                health = Arc::new(SshTransportHealth::new());
+                connect_transport(
+                    &profile,
+                    proxy.as_ref(),
+                    config,
+                    handler(health.clone()),
+                    traffic,
+                    health.clone(),
+                )
+                .await?
+            };
             if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
                 .await?
             {
@@ -207,9 +245,8 @@ impl RemoteWorkspace {
             login_home: RwLock::new("/".into()),
             secret,
             proxy_secret,
-            transport_failed: AtomicBool::new(false),
+            health,
             probe_lock: Mutex::new(()),
-            last_probe_success: StdMutex::new(Instant::now()),
         });
         let intent = foreground_intent
             .lock()
@@ -219,20 +256,20 @@ impl RemoteWorkspace {
         let prime_filesystem = intent != ForegroundIntent::None
             || foreground_filesystem_priority.load(Ordering::Acquire);
         if prime_filesystem {
-            let filesystem = workspace.clone();
+            let directory_filesystem = workspace.clone();
             tauri::async_runtime::spawn(async move {
                 let started_at = Instant::now();
-                match super::sftp::warm_directory_session(&filesystem).await {
+                match super::sftp::warm_directory_session(&directory_filesystem).await {
                     Ok(_) => log::info!(
-                        "SSH filesystem ready profile={} sftp_ms={}",
-                        filesystem.profile.id,
+                        "SSH directory filesystem ready profile={} sftp_ms={}",
+                        directory_filesystem.profile.id,
                         started_at.elapsed().as_millis()
                     ),
                     Err(error) => {
-                        if !filesystem.is_closed() {
+                        if !directory_filesystem.is_closed() {
                             log::warn!(
-                                "SSH filesystem warmup failed profile={}: {error}",
-                                filesystem.profile.id
+                                "SSH directory filesystem warmup failed profile={}: {error}",
+                                directory_filesystem.profile.id
                             );
                         }
                     }
@@ -294,7 +331,6 @@ impl RemoteWorkspace {
             });
         }
         let ready_at = Instant::now();
-        workspace.record_transport_success(ready_at);
         log::info!(
             "SSH Runtime ready profile={} transport_ms={} auth_ms={} probe_ms={} total_ms={}",
             workspace.profile.id,
@@ -335,32 +371,43 @@ impl RemoteWorkspace {
 
     /// 判断 transport 是否已被探活永久失效或底层 session 已关闭。
     pub fn is_closed(&self) -> bool {
-        self.transport_failed.load(Ordering::Acquire) || self.handle.is_closed()
+        self.health.is_failed() || self.handle.is_closed()
     }
 
-    /// 主动验证 SSH transport 能否在截止时间内完成一次往返。
-    ///
-    /// TCP 在本机断网后可能仍保持 established，不能用 socket 或 sender 是否关闭代替
-    /// 可用性判断。ping 超时或 session 关闭会永久使当前 workspace 失效。
-    pub async fn probe_transport(&self, timeout: Duration) -> bool {
-        self.probe_transport_if_stale(Duration::ZERO, timeout).await
+    /// 返回当前 epoch 的进程级 SSH RTT 快照。
+    pub(crate) fn health_snapshot(&self, epoch: u64) -> SshHealthSnapshot {
+        self.health.snapshot(epoch)
+    }
+
+    /// 判断统一监督器是否需要发送空闲保活或 RTT 采样。
+    pub(crate) fn health_probe_due(&self, idle_age: Duration, max_rtt_age: Duration) -> bool {
+        self.health.probe_due(idle_age, max_rtt_age)
+    }
+
+    /// 等待底层 transport 明确关闭或被业务边界确认失效。
+    pub(crate) async fn transport_failed(&self) {
+        self.health.failed().await;
+    }
+
+    /// 将明确的连接级错误上报给唯一重连监督器。
+    pub(crate) fn report_transport_failure(&self) {
+        self.health.mark_failed();
     }
 
     /// 探活记录仍新鲜时直接复用结果，否则串行执行一次真实 ping。
-    pub async fn probe_transport_if_stale(&self, max_age: Duration, timeout: Duration) -> bool {
+    pub(crate) async fn probe_transport_if_stale(
+        &self,
+        max_age: Duration,
+        timeout: Duration,
+    ) -> TransportProbeOutcome {
         let _guard = self.probe_lock.lock().await;
-        if self.transport_failed.load(Ordering::Acquire) {
-            return false;
+        if self.health.is_failed() {
+            return TransportProbeOutcome::Failed;
         }
-        if max_age > Duration::ZERO
-            && self
-                .last_probe_success
-                .lock()
-                .ok()
-                .is_some_and(|last| last.elapsed() <= max_age)
-        {
-            return true;
+        if max_age > Duration::ZERO && self.health.is_fresh(max_age) {
+            return TransportProbeOutcome::Fresh;
         }
+        let started_at = Instant::now();
         let healthy = tokio::time::timeout(timeout, async {
             !self.handle.is_closed()
                 && self.handle.send_ping().await.is_ok()
@@ -369,28 +416,17 @@ impl RemoteWorkspace {
         .await
         .unwrap_or(false);
         if !healthy {
-            self.mark_transport_failed();
+            self.health.mark_failed();
+            TransportProbeOutcome::Failed
         } else {
-            self.record_transport_success(Instant::now());
+            self.health.record_probe(started_at.elapsed());
+            TransportProbeOutcome::Sampled
         }
-        healthy
-    }
-
-    /// 记录最近一次足以证明当前 transport 可用的完成时刻。
-    fn record_transport_success(&self, completed_at: Instant) {
-        if let Ok(mut last) = self.last_probe_success.lock() {
-            *last = completed_at;
-        }
-    }
-
-    /// 将探活已确认失效或正在显式关闭的 transport 标记为不可继续复用。
-    fn mark_transport_failed(&self) {
-        self.transport_failed.store(true, Ordering::Release);
     }
 
     /// 在固定截止时间内尽力关闭旧 transport，不允许失效连接阻塞新 epoch。
     pub async fn disconnect(&self) {
-        self.mark_transport_failed();
+        self.health.mark_failed();
         // SFTP 可能正在初始化并持有锁，关闭 transport 不能反过来等待它。
         let sftp = self
             .remote_fs
@@ -426,48 +462,83 @@ impl RemoteWorkspace {
         cwd: Option<&str>,
         timeout: Duration,
     ) -> Result<ExecOutput, String> {
-        if command.trim().is_empty() {
-            return Err("empty remote command".into());
-        }
-        let command = match cwd.filter(|cwd| !cwd.trim().is_empty()) {
-            Some(cwd) => format!("cd -- {} && {command}", shell_quote(cwd)),
-            None => command.to_string(),
-        };
-        let mut channel = self
-            .handle
+        let command = build_exec_command(command, cwd)?;
+        let channel = self.open_exec_channel().await?;
+        run_exec_channel(channel, command, timeout).await
+    }
+
+    /// 预开一个尚未发送命令的 session channel。
+    ///
+    /// 调用方必须在不再使用时执行命令或关闭 channel，避免长期占用服务端资源。
+    pub(crate) async fn open_exec_channel(&self) -> Result<russh::Channel<Msg>, String> {
+        self.handle
             .channel_open_session()
             .await
-            .map_err(|error| format!("open SSH exec channel: {error}"))?;
-        channel
-            .exec(true, command.into_bytes())
-            .await
-            .map_err(|error| format!("start remote command: {error}"))?;
+            .map_err(|error| format!("open SSH exec channel: {error}"))
+    }
 
-        let run = async {
-            let mut output = ExecOutput::default();
-            let mut completion = ExecCompletion::default();
-            loop {
-                let Some(message) = channel.wait().await else {
-                    break;
-                };
-                if collect_exec_message(&mut output, &mut completion, message) {
-                    // EOF 锁定完整输出，退出状态锁定命令结果。主动关闭可避开部分
-                    // 高延迟服务端迟发 Close 的额外等待。
-                    let _ = channel.close().await;
-                    break;
-                }
-            }
-            output
-        };
-        match tokio::time::timeout(timeout, run).await {
-            Ok(output) => Ok(output),
-            Err(_) => {
+    /// 在已打开的 session channel 上执行一次命令。
+    ///
+    /// 文件保存用它把 channel 建立往返隐藏在临时文件上传期间；命令仍只在上传和
+    /// `fsync` 成功后发送，不能提前观察或替换未完成的临时文件。
+    pub(crate) async fn exec_on_channel(
+        &self,
+        channel: russh::Channel<Msg>,
+        command: &str,
+        cwd: Option<&str>,
+        timeout: Duration,
+    ) -> Result<ExecOutput, String> {
+        let command = build_exec_command(command, cwd)?;
+        run_exec_channel(channel, command, timeout).await
+    }
+}
+
+/// 构造一次远端命令，保持工作目录参数的既有转义规则。
+fn build_exec_command(command: &str, cwd: Option<&str>) -> Result<String, String> {
+    if command.trim().is_empty() {
+        return Err("empty remote command".into());
+    }
+    Ok(match cwd.filter(|cwd| !cwd.trim().is_empty()) {
+        Some(cwd) => format!("cd -- {} && {command}", shell_quote(cwd)),
+        None => command.to_string(),
+    })
+}
+
+/// 在已打开的 channel 上发送命令，并有界收集完成状态和输出。
+async fn run_exec_channel(
+    mut channel: russh::Channel<Msg>,
+    command: String,
+    timeout: Duration,
+) -> Result<ExecOutput, String> {
+    channel
+        .exec(true, command.into_bytes())
+        .await
+        .map_err(|error| format!("start remote command: {error}"))?;
+
+    let run = async {
+        let mut output = ExecOutput::default();
+        let mut completion = ExecCompletion::default();
+        loop {
+            let Some(message) = channel.wait().await else {
+                break;
+            };
+            if collect_exec_message(&mut output, &mut completion, message) {
+                // EOF 锁定完整输出，退出状态锁定命令结果。主动关闭可避开部分
+                // 高延迟服务端迟发 Close 的额外等待。
                 let _ = channel.close().await;
-                Ok(ExecOutput {
-                    timed_out: true,
-                    ..ExecOutput::default()
-                })
+                break;
             }
+        }
+        output
+    };
+    match tokio::time::timeout(timeout, run).await {
+        Ok(output) => Ok(output),
+        Err(_) => {
+            let _ = channel.close().await;
+            Ok(ExecOutput {
+                timed_out: true,
+                ..ExecOutput::default()
+            })
         }
     }
 }
@@ -521,6 +592,7 @@ async fn connect_transport(
     config: Arc<client::Config>,
     handler: ClientHandler,
     traffic: Arc<SshTrafficMeter>,
+    health: Arc<SshTransportHealth>,
 ) -> Result<Handle<ClientHandler>, String> {
     let stream = tokio::time::timeout(
         Duration::from_secs(15),
@@ -529,7 +601,7 @@ async fn connect_transport(
     .await
     .map_err(|_| "SSH TCP connection timed out".to_string())?
     .map_err(|e| format!("SSH TCP connection failed: {e}"))?;
-    let stream = CountingSshStream::new(stream, traffic);
+    let stream = CountingSshStream::new(stream, traffic, health);
     tokio::time::timeout(
         Duration::from_secs(20),
         client::connect_stream(config, stream, handler),
@@ -884,8 +956,9 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod path_tests {
     use super::{
-        client_config, collect_exec_message, parse_workspace_probe, password_auth_result,
-        workspace_root_assignment, ExecCompletion, ExecOutput, PrimaryAuthResult,
+        build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
+        password_auth_result, workspace_root_assignment, ExecCompletion, ExecOutput,
+        PrimaryAuthResult,
     };
     use bytes::Bytes;
     use russh::ChannelMsg;
@@ -927,6 +1000,19 @@ mod path_tests {
         assert!(!banner.contains("OpenSSH"), "unexpected banner: {banner}");
         assert!(banner.contains("russh"), "unexpected banner: {banner}");
         assert_eq!(config.keepalive_interval, None);
+    }
+
+    #[test]
+    fn preopened_exec_preserves_command_validation_and_quoting() {
+        assert_eq!(
+            build_exec_command("printf ok", Some("/srv/a b")).unwrap(),
+            "cd -- '/srv/a b' && printf ok"
+        );
+        assert_eq!(
+            build_exec_command("printf ok", Some("  ")).unwrap(),
+            "printf ok"
+        );
+        assert!(build_exec_command("  ", None).is_err());
     }
 
     #[test]

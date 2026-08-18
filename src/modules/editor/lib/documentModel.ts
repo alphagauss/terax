@@ -91,9 +91,23 @@ type Listener = () => void;
 type ReloadMode = "none" | "probe" | "full";
 
 const REMOTE_POLL_MS = 3000;
-const REMOTE_DIGEST_POLL_COUNT = 10;
+const REMOTE_BACKGROUND_POLL_MS = 15_000;
+const REMOTE_DIGEST_POLL_MS = 30_000;
 const MODEL_DISPOSE_DELAY_MS = 30_000;
 const REMOTE_POLL_CONCURRENCY = 8;
+
+/** 返回可见或后台 SSH 文档的元数据轮询周期。 */
+export function remoteDocumentPollInterval(active: boolean): number {
+  return active ? REMOTE_POLL_MS : REMOTE_BACKGROUND_POLL_MS;
+}
+
+/** 返回元数据未变化时触发摘要兜底所需的轮询次数。 */
+export function remoteDocumentDigestPollCount(active: boolean): number {
+  return Math.max(
+    1,
+    Math.ceil(REMOTE_DIGEST_POLL_MS / remoteDocumentPollInterval(active)),
+  );
+}
 
 /** 组合 Quick Diff 基线的仓库与提交身份，避免相同 SHA 的不同仓库共享缓存。 */
 function gitBaselineKey(repoRoot: string, headSha: string | null): string {
@@ -106,7 +120,9 @@ let remotePollInFlight = false;
 
 /** 只在存在已订阅的 SSH 文档时维持一个进程级轮询定时器。 */
 function syncRemotePolling(): void {
-  const active = [...models.values()].some((model) => model.shouldPollRemote());
+  const active = [...models.values()].some((model) =>
+    model.hasRemoteSubscribers(),
+  );
   if (!active) {
     if (remotePollTimer) clearInterval(remotePollTimer);
     remotePollTimer = null;
@@ -121,11 +137,16 @@ function syncRemotePolling(): void {
 
 /** 分批探测活跃 SSH 文档，限制瞬时 IPC 与远端请求并发。 */
 async function pollRemoteDocuments(): Promise<void> {
-  if (remotePollInFlight) return;
+  if (
+    remotePollInFlight ||
+    (typeof document !== "undefined" && document.visibilityState === "hidden")
+  )
+    return;
   remotePollInFlight = true;
   try {
+    const now = Date.now();
     const active = [...models.values()].filter((model) =>
-      model.shouldPollRemote(),
+      model.shouldPollRemote(now),
     );
     for (
       let index = 0;
@@ -216,6 +237,8 @@ class SharedDocumentModel {
   private savePromise: Promise<boolean> | null = null;
   private reloadPromise: Promise<void> | null = null;
   private unchangedRemotePolls = 0;
+  private lastRemotePollAt = 0;
+  private readonly remotePollOwners = new Map<symbol, boolean>();
   private gitBaselineGeneration = 0;
   private gitBaselineLoadedKey: string | null = null;
   private gitBaselinePromise: Promise<void> | null = null;
@@ -389,6 +412,7 @@ class SharedDocumentModel {
   discard(): void {
     if (models.get(this.key) === this) models.delete(this.key);
     this.listeners.clear();
+    this.remotePollOwners.clear();
     this.clearAutoSaveTimer();
     if (this.disposeTimer) clearTimeout(this.disposeTimer);
     this.disposeTimer = null;
@@ -646,6 +670,7 @@ class SharedDocumentModel {
       content: diskContent,
       condition,
       workspace: this.workspace,
+      source: "editor",
     });
     if (result.status === "conflict") {
       const wasConflicted = this.conflictDisk !== undefined;
@@ -721,13 +746,32 @@ class SharedDocumentModel {
     return `save-conflict:${this.key}`;
   }
 
-  /** 返回当前模型是否需要参与共享 SSH 轮询。 */
-  shouldPollRemote(): boolean {
+  /** 返回当前模型是否仍有需要远端一致性的订阅者。 */
+  hasRemoteSubscribers(): boolean {
     return this.workspace.kind === "ssh" && this.listeners.size > 0;
+  }
+
+  /** 更新一个视图是否处于前台，多个可见视图共享最高轮询优先级。 */
+  setRemotePollingActive(owner: symbol, active: boolean): void {
+    this.remotePollOwners.set(owner, active);
+    syncRemotePolling();
+  }
+
+  clearRemotePollingOwner(owner: symbol): void {
+    this.remotePollOwners.delete(owner);
+    syncRemotePolling();
+  }
+
+  /** 按前台或后台周期判断本轮是否需要探测远端。 */
+  shouldPollRemote(now: number): boolean {
+    if (!this.hasRemoteSubscribers()) return false;
+    const interval = remoteDocumentPollInterval(this.isRemotePollingActive());
+    return now - this.lastRemotePollAt >= interval;
   }
 
   /** 使用元数据快路径轮询远端，并以低频摘要兜底秒级时间戳碰撞。 */
   async pollRemote(): Promise<void> {
+    this.lastRemotePollAt = Date.now();
     const stat = await invoke<FileStat>("fs_stat", {
       path: this.path,
       workspace: this.workspace,
@@ -743,10 +787,15 @@ class SharedDocumentModel {
         return;
       }
       this.unchangedRemotePolls += 1;
-      if (this.unchangedRemotePolls < REMOTE_DIGEST_POLL_COUNT) return;
+      if (
+        this.unchangedRemotePolls <
+        remoteDocumentDigestPollCount(this.isRemotePollingActive())
+      )
+        return;
     }
     this.unchangedRemotePolls = 0;
-    this.checkForChanges();
+    if (unchanged) this.checkForChanges();
+    else this.reload();
   }
 
   private scheduleAutoSave(): void {
@@ -763,6 +812,13 @@ class SharedDocumentModel {
       this.autoSaveTimer = null;
       void this.save().catch((error) => console.error("[autosave]", error));
     }, preferences.editorAutoSaveDelay);
+  }
+
+  private isRemotePollingActive(): boolean {
+    return (
+      this.remotePollOwners.size === 0 ||
+      [...this.remotePollOwners.values()].some(Boolean)
+    );
   }
 
   private clearAutoSaveTimer(): void {

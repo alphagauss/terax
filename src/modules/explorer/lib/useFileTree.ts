@@ -133,7 +133,10 @@ function sameDirListing(a: DirEntry[], b: DirEntry[]): boolean {
 type Options = {
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
+  remotePollingEnabled?: boolean;
 };
+
+export const REMOTE_DIRECTORY_POLL_DELAY_MS = 3_000;
 
 /** 为文件树生成稳定展开域和随 Runtime epoch 变化的请求域。 */
 export function fileTreeScopes(
@@ -173,6 +176,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       ? runtime.epoch
       : null;
   const remoteReady = workspace.kind !== "ssh" || remoteEpoch !== null;
+  const remotePollingEnabled = options?.remotePollingEnabled ?? true;
   const { expansionScope, treeScope } = fileTreeScopes(
     workspace,
     rootPath,
@@ -462,26 +466,74 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     // Re-list loaded directories when visibility or git-decoration prefs change.
   }, [showHidden, gitDecorations, rootPath, fetchChildren]);
 
-  // SFTP has no portable server-push file watcher. Poll only directories that
-  // are already visible so remote changes appear without walking the project.
+  // SFTP 没有通用的服务端推送监听。仅在 Explorer 可见时轮询已展示目录，并从上一轮
+  // 完成后再计算等待时间，避免高延迟连接形成持续堆积的请求。
   useEffect(() => {
-    if (workspace.kind !== "ssh" || !rootPath || !remoteReady) return;
-    const timer = window.setInterval(() => {
-      for (const path of remoteDirectoryPollPaths(
-        rootPath,
-        expandedRef.current,
-      )) {
-        const state = nodesRef.current[path];
-        if (
-          state?.status === "loaded" &&
-          !isPathDeleting(path, deletingPathsRef.current)
-        ) {
-          void fetchChildren(path);
-        }
+    if (
+      workspace.kind !== "ssh" ||
+      !rootPath ||
+      !remoteReady ||
+      !remotePollingEnabled
+    )
+      return;
+    let disposed = false;
+    let running = false;
+    let timer: number | null = null;
+
+    const clearTimer = () => {
+      if (timer === null) return;
+      window.clearTimeout(timer);
+      timer = null;
+    };
+    const schedule = () => {
+      clearTimer();
+      if (disposed || document.visibilityState !== "visible") return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void refreshVisibleDirectories();
+      }, REMOTE_DIRECTORY_POLL_DELAY_MS);
+    };
+    const refreshVisibleDirectories = async () => {
+      if (disposed || running || document.visibilityState !== "visible") return;
+      running = true;
+      try {
+        const requests = remoteDirectoryPollPaths(
+          rootPath,
+          expandedRef.current,
+        ).flatMap((path) => {
+          const state = nodesRef.current[path];
+          return state?.status === "loaded" &&
+            !isPathDeleting(path, deletingPathsRef.current)
+            ? [fetchChildren(path)]
+            : [];
+        });
+        await Promise.all(requests);
+      } finally {
+        running = false;
+        schedule();
       }
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [workspace.kind, rootPath, remoteReady, fetchChildren]);
+    };
+    const onVisibilityChange = () => {
+      clearTimer();
+      if (document.visibilityState === "visible") {
+        void refreshVisibleDirectories();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    schedule();
+    return () => {
+      disposed = true;
+      clearTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [
+    workspace.kind,
+    rootPath,
+    remoteReady,
+    remotePollingEnabled,
+    fetchChildren,
+  ]);
 
   const toggle = useCallback(
     (path: string) => {

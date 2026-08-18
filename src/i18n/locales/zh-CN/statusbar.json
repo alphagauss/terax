@@ -159,6 +159,10 @@
     "uploaded": "累计上传",
     "downloaded": "累计下载"
   },
+  "sshRtt": {
+    "pending": "正在等待首次低频 SSH 延迟采样。",
+    "tooltip": "SSH 往返延迟：{{value}} 毫秒。由连接健康监督器测量。"
+  },
   "tunnels": {
     "label": "隧道",
     "count": "隧道 {{count}}",
