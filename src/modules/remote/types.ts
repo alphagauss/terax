@@ -1,5 +1,5 @@
 /**
- * 本文件定义 SSH profile、连接、文件后端、健康、流量和隧道的跨进程数据类型。
+ * 本文件定义 SSH profile、连接、健康、流量和隧道的跨进程数据类型。
  * 持久化隧道使用稳定配置 ID，运行时隧道 ID 只用于当前进程的资源控制。
  */
 
@@ -82,17 +82,7 @@ export type SshHealthSnapshot = {
   epoch: number | null;
   rttMs: number | null;
   sampledAt: number | null;
-};
-
-export type SshFileBackendSnapshot = {
-  epoch: number | null;
-  capability: "detecting" | "available" | "unavailable";
-  activeBackend: "sftp" | "python";
-  pythonVersion: string | null;
-  enabled: boolean;
-  fallback: boolean;
-  latencyEligible: boolean;
-  rttThresholdMs: number;
+  fileWriteFallback: boolean;
 };
 
 export type HostKeyPrompt = {

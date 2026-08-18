@@ -1,4 +1,4 @@
-//! SSH Runtime、可选文件加速器、远端文件系统、终端和隧道的原生实现。
+//! SSH Runtime、远端文件系统、终端和隧道的原生实现。
 //!
 //! 当前 Workspace 进程独占一条 transport；profile、凭据和连接状态均由 Rust 管理，
 //! WebView 只提交稳定 profile ID 或一次性凭据覆盖值。
@@ -11,10 +11,10 @@ pub mod manager;
 pub mod models;
 pub(crate) mod profile;
 mod proxy;
-mod python_file;
 mod remote_fs;
 pub mod session;
 pub mod sftp;
+mod shell_file;
 mod ssh_config;
 pub mod terminal;
 mod traffic;

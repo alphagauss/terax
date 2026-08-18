@@ -419,10 +419,6 @@
       "title": "远程",
       "description": "用于打开远程工作区的 SSH 配置。隧道由主工作区窗口在状态栏中管理。"
     },
-    "fileAcceleration": {
-      "title": "加速 SSH 文件操作",
-      "description": "服务器支持时使用隔离的远端 Python 进程，并在异常时自动回退 SFTP。"
-    },
     "actions": {
       "new": "新建配置",
       "import": "导入 SSH 配置",

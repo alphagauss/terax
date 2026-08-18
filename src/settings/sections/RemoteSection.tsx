@@ -1,15 +1,22 @@
 /**
- * 本文件提供 SSH 文件加速设置，以及配置与分组的创建、编辑、导入和凭据保存界面。
+ * 本文件提供 SSH 配置与分组的创建、编辑、导入和凭据保存界面。
  * 分组只用于管理和导航；隧道仍由主 SSH Workspace 管理并随配置保存。
  */
 
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/controls/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/menu/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +27,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -28,54 +42,37 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/menu/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/controls/select";
 import { cn } from "@/lib/utils";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
+import {
+  DEFAULT_SSH_GROUP_ID,
+  groupNameIssue,
+  groupSshProfiles,
+} from "@/modules/remote/groups";
 import {
   applyCredentialMutation,
   credentialMutation,
   emptySshProfileForm,
   launchSecretIssue,
   profileValidationIssue,
+  type SshProfileForm,
   sshProfileFormFrom,
   sshProfileFromForm,
-  type SshProfileForm,
 } from "@/modules/remote/profileForm";
-import type { SshProfile } from "@/modules/remote/types";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import { setSshFileAcceleration } from "@/modules/settings/store";
-import {
-  DEFAULT_SSH_GROUP_ID,
-  groupNameIssue,
-  groupSshProfiles,
-} from "@/modules/remote/groups";
 import { newGroupId, newProfileId } from "@/modules/remote/store";
+import type { SshProfile } from "@/modules/remote/types";
 import { spawnWorkspaceProcess } from "@/modules/workspace-process";
 import {
   Add01Icon,
   ArrowDown01Icon,
+  Delete02Icon,
   Download01Icon,
   Edit02Icon,
   FloppyDiskIcon,
   FolderAddIcon,
   MoreHorizontalIcon,
-  Delete02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -109,9 +106,6 @@ export function RemoteSection() {
   const deleteGroup = useRemoteStore((state) => state.deleteGroup);
   const saveProfiles = useRemoteStore((state) => state.saveProfiles);
   const deleteProfile = useRemoteStore((state) => state.deleteProfile);
-  const sshFileAcceleration = usePreferencesStore(
-    (state) => state.sshFileAcceleration,
-  );
   const [form, setForm] = useState<SshProfileForm>(() =>
     emptySshProfileForm(newProfileId()),
   );
@@ -481,26 +475,6 @@ export function RemoteSection() {
         title={t("remote.header.title")}
         description={t("remote.header.description")}
       />
-
-      <div className="flex items-center justify-between gap-5 rounded-xl border border-border/60 bg-card/60 px-4 py-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium">
-            {t("remote.fileAcceleration.title")}
-          </div>
-          <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-            {t("remote.fileAcceleration.description")}
-          </div>
-        </div>
-        <Switch
-          checked={sshFileAcceleration}
-          aria-label={t("remote.fileAcceleration.title")}
-          onCheckedChange={(checked) =>
-            void setSshFileAcceleration(checked).catch((cause) =>
-              toast.error(String(cause)),
-            )
-          }
-        />
-      </div>
 
       <div className="grid min-w-0 gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-card/60">

@@ -219,6 +219,15 @@ fn validate_version(version: &FileVersion) -> Result<(), String> {
     }
 }
 
+/// 校验并规范化调用方提交的写入条件，使所有后端按同一小写摘要比较。
+fn normalize_write_condition(mut condition: WriteCondition) -> Result<WriteCondition, String> {
+    if let WriteCondition::Match { version } = &mut condition {
+        validate_version(version)?;
+        version.revision.make_ascii_lowercase();
+    }
+    Ok(condition)
+}
+
 /// 读取文件并为文本内容返回基于原始字节的稳定版本。
 #[tauri::command]
 pub async fn fs_read_file(
@@ -826,9 +835,7 @@ pub async fn fs_write_file_checked(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<CheckedWriteResult, String> {
-    if let WriteCondition::Match { version } = &condition {
-        validate_version(version)?;
-    }
+    let condition = normalize_write_condition(condition)?;
     let workspace = WorkspaceEnv::from_option(workspace);
     let result = if let Some(profile_id) = workspace.ssh_profile_id() {
         let bytes = content.as_bytes();
@@ -1217,6 +1224,23 @@ mod tests {
         };
 
         assert!(validate_version(&invalid).is_err());
+    }
+
+    #[test]
+    fn write_conditions_normalize_valid_uppercase_revisions() {
+        let condition = normalize_write_condition(WriteCondition::Match {
+            version: FileVersion {
+                revision: "A".repeat(64),
+                size: 1,
+                mtime: 1,
+            },
+        })
+        .unwrap();
+
+        let WriteCondition::Match { version } = condition else {
+            panic!("expected match condition");
+        };
+        assert_eq!(version.revision, "a".repeat(64));
     }
 
     #[test]

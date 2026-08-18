@@ -161,15 +161,8 @@
   },
   "sshRtt": {
     "pending": "正在等待首次低频 SSH 延迟采样。",
-    "tooltip": "SSH 往返延迟：{{value}} 毫秒。由连接健康监督器测量。"
-  },
-  "sshFileBackend": {
-    "detecting": "正在检查远端 Python 是否可以加速高延迟文件写入。",
-    "python": "高延迟复合写入使用远端 Python {{version}}，读取继续使用 SFTP。",
-    "lowLatency": "远端 Python 可用，但 RTT 低于 {{threshold}} 毫秒，当前文件操作使用 SFTP 更快。",
-    "disabled": "远端 Python {{version}} 可用，但文件加速已关闭。",
-    "fallback": "当前连接的 Python 文件加速器已失败，文件操作正在使用 SFTP。",
-    "sftp": "文件操作正在使用 SFTP。"
+    "tooltip": "SSH 往返延迟：{{value}} 毫秒。由连接健康监督器测量。",
+    "fileWriteFallback": "快速远程写入不可用，当前连接的文件写入已回退到 SFTP。"
   },
   "tunnels": {
     "label": "隧道",

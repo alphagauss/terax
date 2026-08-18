@@ -4,6 +4,11 @@
  */
 
 import {
+  onSharedStoreChange,
+  readSharedStore,
+  setSharedStoreKey,
+} from "@/lib/sharedStore";
+import {
   type AutocompleteProviderId,
   type CustomEndpoint,
   DEFAULT_AUTOCOMPLETE_MODEL,
@@ -19,11 +24,6 @@ import {
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
-import {
-  onSharedStoreChange,
-  readSharedStore,
-  setSharedStoreKey,
-} from "@/lib/sharedStore";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export type ThemePref = "system" | "light" | "dark";
@@ -74,7 +74,10 @@ export function isEditorThemeId(v: unknown): v is EditorThemeId {
   );
 }
 
-export const EDITOR_THEME_MODE: Record<EditorThemeId, "light" | "dark" | "both"> = {
+export const EDITOR_THEME_MODE: Record<
+  EditorThemeId,
+  "light" | "dark" | "both"
+> = {
   modern: "both",
   kanagawa: "dark",
   "kanagawa-lotus": "light",
@@ -144,7 +147,6 @@ export type Preferences = {
   autostart: boolean;
   restoreWindowState: boolean;
   workspaceWindowMode: WorkspaceWindowMode;
-  sshFileAcceleration: boolean;
   autocompleteEnabled: boolean;
   autocompleteTrigger: AutocompleteTrigger;
   autocompleteProvider: AutocompleteProviderId;
@@ -261,7 +263,6 @@ const KEY_DIFF_VIEW_MODE = "diffViewMode";
 const KEY_SHOW_HIDDEN = "showHidden";
 const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
 const KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT = "sourceControlShowUndoCommit";
-const KEY_SSH_FILE_ACCELERATION = "sshFileAcceleration";
 const KEY_TERMINAL_WEBGL_ENABLED = "terminalWebglEnabled";
 const KEY_TERMINAL_CURSOR_BLINK = "terminalCursorBlink";
 const KEY_TERMINAL_SMART_COPY_PASTE = "terminalSmartCopyPaste";
@@ -346,7 +347,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   showHidden: false,
   explorerGitDecorations: true,
   sourceControlShowUndoCommit: true,
-  sshFileAcceleration: true,
   terminalWebglEnabled: true,
   terminalCursorBlink: false,
   terminalSmartCopyPaste: true,
@@ -483,9 +483,6 @@ export async function loadPreferences(): Promise<Preferences> {
     sourceControlShowUndoCommit:
       get<boolean>(KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT) ??
       DEFAULT_PREFERENCES.sourceControlShowUndoCommit,
-    sshFileAcceleration:
-      get<boolean>(KEY_SSH_FILE_ACCELERATION) ??
-      DEFAULT_PREFERENCES.sshFileAcceleration,
     terminalWebglEnabled:
       get<boolean>(KEY_TERMINAL_WEBGL_ENABLED) ??
       DEFAULT_PREFERENCES.terminalWebglEnabled,
@@ -768,11 +765,6 @@ export async function setSourceControlShowUndoCommit(
   await writePref(KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT, value);
 }
 
-/** 设置 SSH 文件操作是否自动使用可用的 Python 加速器。 */
-export async function setSshFileAcceleration(value: boolean): Promise<void> {
-  await writePref(KEY_SSH_FILE_ACCELERATION, value);
-}
-
 export async function setTerminalWebglEnabled(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_WEBGL_ENABLED, value);
 }
@@ -940,7 +932,6 @@ export async function onPreferencesChange(
     [KEY_SHOW_HIDDEN]: "showHidden",
     [KEY_EXPLORER_GIT_DECORATIONS]: "explorerGitDecorations",
     [KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT]: "sourceControlShowUndoCommit",
-    [KEY_SSH_FILE_ACCELERATION]: "sshFileAcceleration",
     [KEY_TERMINAL_WEBGL_ENABLED]: "terminalWebglEnabled",
     [KEY_TERMINAL_CURSOR_BLINK]: "terminalCursorBlink",
     [KEY_TERMINAL_SMART_COPY_PASTE]: "terminalSmartCopyPaste",

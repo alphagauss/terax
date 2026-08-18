@@ -11,9 +11,9 @@
 
 该边界是安全模型的基础。不受信任的输入（终端 escape sequence、文件内容、AI 工具结果）由 Rust 或严格限定范围的前端代码解析和验证，绝不会由 renderer 执行。
 
-进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH Workspace 在 Tauri setup 中立即读取 profile 和系统密钥链并开始连接，不等待 WebView；事件桥注册后同时读取权威 Runtime 与待确认主机密钥，避免启动事件竞态。前端读取本地 Space 状态后、等待环境前提交一次前台资源提示。激活终端使用 prepared PTY 在同一 channel 中完成 Linux、bash、Home、root 与 Python capability 探测并直接进入集成 bash；其他页面继续使用合并 exec 探测。目录和文件正文读取共享标准 SFTP v3 raw session，READDIR 与按 offset 的文件 READ 都使用有界流水线，根目录首读进入 single-flight；普通文件元数据和写入使用独立高层 session，批量传输仍使用任务独占 session。远端保存继续执行摘要冲突校验、单次耐久刷新、权限恢复和原子替换，并在同一提交命令中返回最终元数据。启用自动文件加速、远端存在 Python 3.9 以上版本且已有 RTT 样本不低于 100 ms 时，每个 Workspace epoch 后台维持一个预开 session channel，通过不落盘的一次性 helper 合并条件提交；读取固定使用 SFTP。helper 缺失、异常或协议不匹配时安全回退 SFTP。每个进程只有一个 SSH 健康监督器：业务入站流量证明 transport 新鲜，底层关闭立即唤醒重连，空闲保活、加速器选择与状态栏 RTT 复用同一低频 SSH ping。只有凭据对话框可以为单次连接提交内存覆盖值，秘密不会通过命令行或自动连接的 WebView 往返传递。
+进程 bootstrap 只选择一个 Local、WSL 或 SSH 环境。Space 只划分该 Workspace 内部的 UI 状态。SSH Workspace 在 Tauri setup 中立即读取 profile 和系统密钥链并开始连接，不等待 WebView；事件桥注册后同时读取权威 Runtime 与待确认主机密钥，避免启动事件竞态。前端读取本地 Space 状态后、等待环境前提交一次前台资源提示。激活终端使用 prepared PTY 在同一 channel 中完成 Linux、bash、Home 与 root 探测并直接进入集成 bash；其他页面继续使用合并 exec 探测。目录和文件正文读取共享标准 SFTP v3 raw session，READDIR 与按 offset 的文件 READ 都使用有界流水线，根目录首读进入 single-flight；普通文件元数据和 SFTP 回退写入使用独立高层 session，批量传输仍使用任务独占 session。条件写入优先通过不落盘的内嵌 Bash helper 在一次调用中完成正文接收、摘要冲突校验、耐久刷新、权限恢复和原子发布；helper 异常或协议不匹配时安全回退 SFTP。已有 RTT 样本不低于 100 ms 时，每个 Workspace 后台维持一个预开 session channel，仅用于隐藏下一次 channel-open 往返。连接级 helper 永久失效会复用健康快照立即显示琥珀色 I/O 降级标记，重连后清除。每个进程只有一个 SSH 健康监督器：业务入站流量证明 transport 新鲜，底层关闭立即唤醒重连，空闲保活、channel 预热与状态栏 RTT 复用同一低频 SSH ping。只有凭据对话框可以为单次连接提交内存覆盖值，秘密不会通过命令行或自动连接的 WebView 往返传递。
 
-SSH 文件内容 command 统一进入 `remote/file_service.rs`。该服务按操作与 RTT 在 SFTP 和封闭 Python helper 之间选择，不负责 Git、搜索或既有批量传输。Python helper 源码编译进应用，通过 `python3 -I -u -c` 在独立 channel 中处理一个长度前缀请求后退出，不写入远端磁盘、不监听端口，也不暴露通用命令入口。后续批量文件任务可以扩展明确的协议 operation，但必须拥有独立资源预算和回退语义。后端状态绑定 transport epoch，并通过独立 snapshot 和事件投影到状态栏。
+SSH 文件内容 command 统一进入 `remote/file_service.rs`。读取固定使用 SFTP；三种条件写入优先通过 `remote/shell_file.rs` 调用内嵌 Bash helper，失败时由服务边界执行 SFTP 回退或版本收敛。helper 源码编译进应用，通过 exec command 接收固定操作和已转义参数，通过 stdin 接收原始正文，不写入远端脚本、不监听端口，也不暴露通用命令入口。该服务不负责 Git、搜索或既有批量传输。
 
 ## 新增 IPC command
 
