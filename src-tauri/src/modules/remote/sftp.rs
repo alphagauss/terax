@@ -795,15 +795,20 @@ async fn prepare_remote_write(
         sftp.canonicalize(path).await,
     )
     .await?;
-    let (target, permissions) = if let Some(target) = existing {
-        let metadata = sftp_result(
+    let existing = if let Some(target) = existing {
+        let metadata = optional_sftp_result(
             workspace,
             &sftp,
             format!("read remote file metadata {target}"),
             sftp.metadata(&target).await,
         )
         .await?;
-        (target, metadata.permissions)
+        existing_write_target(target, metadata)
+    } else {
+        None
+    };
+    let (target, permissions) = if let Some(existing) = existing {
+        existing
     } else {
         (
             canonical_target_for_new_file(workspace, &sftp, path).await?,
@@ -811,6 +816,17 @@ async fn prepare_remote_write(
         )
     };
     Ok((sftp, target, permissions))
+}
+
+/// 只有规范路径和元数据同时存在时才将目标视为现有文件。
+///
+/// 部分 OpenSSH 服务端会为不存在的末级路径返回成功的 `REALPATH`，不能仅凭规范路径
+/// 继承权限或跳过新文件的父目录解析。
+fn existing_write_target(
+    target: String,
+    metadata: Option<FileAttributes>,
+) -> Option<(String, Option<u32>)> {
+    metadata.map(|metadata| (target, metadata.permissions))
 }
 
 /// 上传排他临时文件，同时预开仅在上传成功后使用的提交 channel。
@@ -1334,9 +1350,9 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_commit_command, missing_commit_command, parse_sha256, permission_attributes,
-        recursive_delete_command, remote_parent_name, sanitize_local_name, should_fail_transport,
-        should_invalidate_session, validate_destructive_path,
+        checked_commit_command, existing_write_target, missing_commit_command, parse_sha256,
+        permission_attributes, recursive_delete_command, remote_parent_name, sanitize_local_name,
+        should_fail_transport, should_invalidate_session, validate_destructive_path,
     };
 
     #[test]
@@ -1461,5 +1477,16 @@ mod tests {
         assert_eq!(attributes.gid, None);
         assert_eq!(attributes.atime, None);
         assert_eq!(attributes.mtime, None);
+    }
+
+    #[test]
+    fn canonical_path_without_metadata_is_still_a_new_write_target() {
+        assert_eq!(existing_write_target("/tmp/new.txt".into(), None), None);
+
+        let existing = existing_write_target(
+            "/tmp/existing.txt".into(),
+            Some(permission_attributes(0o100751)),
+        );
+        assert_eq!(existing, Some(("/tmp/existing.txt".into(), Some(0o100751))));
     }
 }
