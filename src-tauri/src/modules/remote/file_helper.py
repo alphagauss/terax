@@ -115,13 +115,23 @@ def _stage_file(target: str, content: bytes, mode: int) -> str:
             written += count
         os.fsync(fd)
     except BaseException:
-        os.close(fd)
+        try:
+            os.close(fd)
+        except OSError:
+            pass
         try:
             os.unlink(temporary)
         except OSError:
             pass
         raise
-    os.close(fd)
+    try:
+        os.close(fd)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
     return temporary
 
 
@@ -153,14 +163,32 @@ def _validate_replacement(header: dict[str, Any], body: bytes) -> str:
     return actual
 
 
+def _validate_expected(value: Any) -> tuple[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError("expected version is invalid")
+    revision = value.get("revision")
+    size = value.get("size")
+    if (
+        not isinstance(revision, str)
+        or len(revision) != 64
+        or any(character not in "0123456789abcdefABCDEF" for character in revision)
+        or isinstance(size, bool)
+        or not isinstance(size, int)
+        or not 0 <= size <= MAX_BODY_BYTES
+    ):
+        raise ValueError("expected version is invalid")
+    return revision.lower(), size
+
+
 def _write_checked(header: dict[str, Any], body: bytes) -> None:
     path = _validate_path(header.get("path"))
-    expected = header.get("expected")
-    if not isinstance(expected, dict) or not isinstance(expected.get("revision"), str):
-        raise ValueError("expected version is invalid")
+    expected_revision, expected_size = _validate_expected(header.get("expected"))
     replacement = _validate_replacement(header, body)
     target = _canonical_target(path, False)
     metadata = os.stat(target)
+    if metadata.st_size not in (expected_size, len(body)):
+        _write_response({"status": "conflict", "current": _observed(metadata)})
+        return
     temporary = _stage_file(target, body, stat.S_IMODE(metadata.st_mode))
     try:
         current, revision = _hash_file(target)
@@ -168,7 +196,7 @@ def _write_checked(header: dict[str, Any], body: bytes) -> None:
             os.unlink(temporary)
             _write_result(target, replacement)
             return
-        if current.st_size != expected.get("size") or revision != expected["revision"]:
+        if current.st_size != expected_size or revision != expected_revision:
             os.unlink(temporary)
             _write_response({"status": "conflict", "current": _observed(current)})
             return

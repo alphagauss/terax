@@ -156,13 +156,15 @@ async fn execute(
     body: Vec<u8>,
 ) -> Result<HelperResponse, PythonFileError> {
     let input = encode_request(&request, body)?;
-    let channel = workspace
-        .take_file_helper_channel()
-        .await
-        .map_err(|_| PythonFileError {
-            dispatched: false,
-            disable_backend: false,
-        })?;
+    let channel = match workspace.take_file_helper_channel().await {
+        Ok(channel) => channel,
+        Err(_) => {
+            return Err(PythonFileError {
+                dispatched: false,
+                disable_backend: workspace.python_file_write_acceleration_available().await,
+            })
+        }
+    };
     let command = format!("python3 -I -u -c {}", shell_quote(HELPER_SOURCE));
     let output = workspace
         .exec_on_channel_with_input(channel, &command, input, HELPER_TIMEOUT, MAX_RESPONSE_BYTES)

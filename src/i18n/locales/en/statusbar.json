@@ -164,6 +164,7 @@
     "tooltip": "SSH round-trip latency: {{value}} ms. Measured by the connection health supervisor."
   },
   "sshFileBackend": {
+    "detecting": "Checking whether remote Python can accelerate high-latency file writes.",
     "python": "High-latency compound writes use remote Python {{version}}. Reads continue through SFTP.",
     "lowLatency": "Remote Python is available, but RTT is below {{threshold}} ms. SFTP is faster for current file operations.",
     "disabled": "Remote Python {{version}} is available, but file acceleration is disabled.",
