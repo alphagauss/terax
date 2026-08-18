@@ -2,7 +2,7 @@
 //!
 //! 上传先在宿主机生成归档并以单流复制到 WSL 私有临时目录；下载先在 WSL 内生成
 //! 归档，再以单流复制到宿主机。两端 SHA-256 一致后才安全解包，结果始终进入
-//! Planner 指定的 staging，最终仍使用通用 no-replace 提交。
+//! Planner 指定的 staging。WSL 上传在目标侧批量提交，避免小文件被放大为 UNC 往返。
 
 #[cfg(windows)]
 use std::{path::Path, process::Stdio, time::Duration};
@@ -19,7 +19,10 @@ use crate::modules::transfers::archive::{
     build_wsl_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 #[cfg(windows)]
-use crate::modules::transfers::commit::{cleanup_local_staging, commit_local_root, LocalRoot};
+use crate::modules::transfers::commit::{
+    cleanup_local_staging, commit_local_root, local_cleanup_ticket_for_paths, remote_backup_paths,
+    remote_commit_command, schedule_local_cleanup, LocalRoot, RemoteRoot,
+};
 #[cfg(windows)]
 use crate::modules::transfers::errors::io_failure;
 use crate::modules::transfers::errors::TransferErrorCode;
@@ -108,6 +111,15 @@ async fn execute_upload(
         )
         .await?;
         publish_upload_staging(plan, distro, &directory, context).await?;
+        commit_upload_roots(
+            plan,
+            distro,
+            destination_parent,
+            &directory,
+            archive.file_count,
+            context,
+        )
+        .await?;
         if !cleanup_work_dir(distro, &directory, &plan.task_id).await {
             schedule_cleanup_work_dir(
                 distro.to_string(),
@@ -117,7 +129,6 @@ async fn execute_upload(
             );
         }
         work_dir = None;
-        verify_apply_commit(plan, archive.file_count, context).await?;
         Ok(())
     }
     .await;
@@ -289,7 +300,7 @@ async fn ensure_capability(distro: &str) -> RunResult<()> {
         "sh",
         &[
             "-c",
-            "command -v tar >/dev/null && command -v gzip >/dev/null && command -v mktemp >/dev/null && (command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null)",
+            "command -v bash >/dev/null && command -v tar >/dev/null && command -v gzip >/dev/null && command -v mktemp >/dev/null && (command -v sha256sum >/dev/null || command -v shasum >/dev/null || command -v openssl >/dev/null)",
         ],
     )
     .await
@@ -297,7 +308,7 @@ async fn ensure_capability(distro: &str) -> RunResult<()> {
     .map_err(|_| {
         TransferRunError::failed(
             TransferErrorCode::ArchiveUnavailable,
-            "WSL Archive requires tar, gzip, mktemp, and a SHA-256 tool",
+            "WSL Archive requires bash, tar, gzip, mktemp, and a SHA-256 tool",
         )
     })
 }
@@ -509,11 +520,35 @@ async fn capture_wsl(distro: &str, program: &str, args: &[&str]) -> RunResult<St
 }
 
 #[cfg(windows)]
+/// 运行可响应任务暂停和取消的 WSL 数据面程序。
 async fn run_wsl_program(
     distro: &str,
     program: &str,
     args: &[&str],
     context: &ExecutionContext,
+) -> RunResult<Vec<u8>> {
+    run_wsl_program_inner(distro, program, args, context, true).await
+}
+
+#[cfg(windows)]
+/// 运行进入最终提交边界后不可暂停或取消的 WSL 程序。
+async fn run_wsl_commit_program(
+    distro: &str,
+    program: &str,
+    args: &[&str],
+    context: &ExecutionContext,
+) -> RunResult<Vec<u8>> {
+    run_wsl_program_inner(distro, program, args, context, false).await
+}
+
+#[cfg(windows)]
+/// 统一收集 WSL 程序输出，并按提交边界决定是否响应控制信号。
+async fn run_wsl_program_inner(
+    distro: &str,
+    program: &str,
+    args: &[&str],
+    context: &ExecutionContext,
+    interruptible: bool,
 ) -> RunResult<Vec<u8>> {
     crate::modules::workspace::validate_wsl_distro_name(distro)
         .map_err(|error| message(format!("invalid WSL archive environment: {error}")))?;
@@ -556,43 +591,57 @@ async fn run_wsl_program(
         .map_err(|_| message("WSL archive process did not report a valid process id"))?;
     let stdout_task = tokio::spawn(read_limited(stdout));
     let stderr_task = tokio::spawn(read_limited(stderr));
-    let control = context.control();
-    let mut stopped = false;
     let timeout = tokio::time::sleep(COMMAND_TIMEOUT);
     tokio::pin!(timeout);
 
-    let status = loop {
-        if control.is_cancelled() {
-            let _ = signal_wsl(distro, pid, "KILL").await;
-            let _ = child.kill().await;
-            return Err(TransferRunError::Canceled);
-        }
-        let paused = control.is_paused();
-        if paused != stopped {
-            if let Err(error) = signal_wsl(distro, pid, if paused { "STOP" } else { "CONT" }).await
-            {
-                match child.try_wait() {
-                    Ok(Some(status)) => break status,
-                    Ok(None) => return Err(error),
-                    Err(wait_error) => {
-                        return Err(message(format!(
-                            "inspect WSL archive command: {wait_error}"
-                        )));
+    let status = if interruptible {
+        let control = context.control();
+        let mut stopped = false;
+        loop {
+            if control.is_cancelled() {
+                let _ = signal_wsl(distro, pid, "KILL").await;
+                let _ = child.kill().await;
+                return Err(TransferRunError::Canceled);
+            }
+            let paused = control.is_paused();
+            if paused != stopped {
+                if let Err(error) =
+                    signal_wsl(distro, pid, if paused { "STOP" } else { "CONT" }).await
+                {
+                    match child.try_wait() {
+                        Ok(Some(status)) => break status,
+                        Ok(None) => return Err(error),
+                        Err(wait_error) => {
+                            return Err(message(format!(
+                                "inspect WSL archive command: {wait_error}"
+                            )));
+                        }
                     }
                 }
+                stopped = paused;
             }
-            stopped = paused;
-        }
-        tokio::select! {
-            status = child.wait() => {
-                break status.map_err(|error| message(format!("wait for WSL archive command: {error}")))?;
-            }
-            change = control.wait_for_change() => {
-                if change.is_err() {
+            tokio::select! {
+                status = child.wait() => {
+                    break status.map_err(|error| message(format!("wait for WSL archive command: {error}")))?;
+                }
+                change = control.wait_for_change() => {
+                    if change.is_err() {
+                        let _ = signal_wsl(distro, pid, "KILL").await;
+                        let _ = child.kill().await;
+                        return Err(TransferRunError::Canceled);
+                    }
+                }
+                _ = &mut timeout => {
                     let _ = signal_wsl(distro, pid, "KILL").await;
                     let _ = child.kill().await;
-                    return Err(TransferRunError::Canceled);
+                    return Err(message("WSL archive command timed out"));
                 }
+            }
+        }
+    } else {
+        tokio::select! {
+            status = child.wait() => {
+                status.map_err(|error| message(format!("wait for WSL archive command: {error}")))?
             }
             _ = &mut timeout => {
                 let _ = signal_wsl(distro, pid, "KILL").await;
@@ -681,6 +730,108 @@ async fn publish_upload_staging(
         .await?;
     }
     Ok(())
+}
+
+#[cfg(windows)]
+/// 在 WSL 内一次性原位提交上传根，保持最终仍存在的目录身份。
+async fn commit_upload_roots(
+    plan: &LocalPlan,
+    distro: &str,
+    destination_parent: &str,
+    work_dir: &str,
+    file_count: u64,
+    context: &mut ExecutionContext,
+) -> RunResult<()> {
+    let parent = destination_parent.trim_end_matches('/');
+    let mut roots = Vec::with_capacity(plan.roots.len());
+    for root in &plan.roots {
+        let final_name = root
+            .final_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| message("WSL destination root has no UTF-8 filename"))?;
+        let stage_name = root
+            .stage
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| message("WSL staging root has no UTF-8 filename"))?;
+        roots.push(RemoteRoot {
+            source_path: root.source_path.clone(),
+            stage: join_wsl_child(parent, stage_name),
+            final_path: join_wsl_child(parent, final_name),
+            kind: root.kind,
+            destination_kind: root.destination_kind,
+            mode: root.mode,
+            merge_preconditions: Vec::new(),
+        });
+    }
+
+    let workspace = WorkspaceEnv::Wsl {
+        distro: distro.to_string(),
+    };
+    let (command, cleanup_paths) = remote_commit_command(&roots);
+    // 长脚本写入任务私有目录，避免经过 Windows CreateProcess 的参数长度上限。
+    let script_path = format!("{work_dir}/commit.sh");
+    let host_script_path = resolve_path(&script_path, &workspace);
+    let mut script = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&host_script_path)
+        .await
+        .map_err(|error| message(format!("create WSL commit script: {error}")))?;
+    script
+        .write_all(command.as_bytes())
+        .await
+        .map_err(|error| message(format!("write WSL commit script: {error}")))?;
+    script
+        .sync_all()
+        .await
+        .map_err(|error| message(format!("sync WSL commit script: {error}")))?;
+    drop(script);
+
+    context.begin_finalizing().await?;
+    context.checkpoint().await?;
+    let mut ticket = context
+        .register_cleanup_ticket(local_cleanup_ticket_for_paths(
+            &plan.task_id,
+            &plan.owner_task_id,
+            remote_backup_paths(&roots)
+                .iter()
+                .map(|path| resolve_path(path, &workspace)),
+        )?)
+        .await?;
+    let output = run_wsl_commit_program(distro, "bash", &[&script_path], context).await?;
+    let cleanup_pending = output
+        .windows(crate::modules::transfers::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER.len())
+        .any(|value| {
+            value
+                == crate::modules::transfers::commit::REMOTE_COMMIT_CLEANUP_PENDING_MARKER
+                    .as_bytes()
+        });
+    context
+        .complete_cleanup_ticket(ticket.as_mut(), cleanup_pending)
+        .await?;
+    if cleanup_pending {
+        schedule_local_cleanup(
+            &plan.owner_task_id,
+            cleanup_paths
+                .iter()
+                .map(|path| resolve_path(path, &workspace))
+                .collect(),
+        );
+    }
+    context
+        .roots_committed(plan.roots.len() as u64, file_count)
+        .await
+}
+
+#[cfg(windows)]
+fn join_wsl_child(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        format!("/{name}")
+    } else {
+        format!("{parent}/{name}")
+    }
 }
 
 #[cfg(windows)]

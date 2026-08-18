@@ -6,7 +6,8 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::commit::{
-    cleanup_local_staging, commit_local_root, commit_local_roots, schedule_local_cleanup,
+    cleanup_local_staging, commit_local_root_tracked, commit_local_roots_tracked,
+    schedule_local_cleanup,
 };
 use super::errors::{io_failure, TransferErrorCode};
 use super::manager::TransferRunError;
@@ -136,7 +137,9 @@ async fn verify_apply_commit_inner(
     if count_after_commit {
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            let pending_cleanup = commit_local_root(root).await?;
+            let pending_cleanup =
+                commit_local_root_tracked(root, &plan.task_id, &plan.owner_task_id, context)
+                    .await?;
             let completed = plan
                 .files
                 .iter()
@@ -149,7 +152,9 @@ async fn verify_apply_commit_inner(
         }
     } else {
         context.checkpoint().await?;
-        let pending_cleanup = commit_local_roots(&plan.roots).await?;
+        let pending_cleanup =
+            commit_local_roots_tracked(&plan.roots, &plan.task_id, &plan.owner_task_id, context)
+                .await?;
         let progress = context
             .roots_committed(plan.roots.len() as u64, transaction_files)
             .await;

@@ -1,7 +1,7 @@
-//! Direct 传输计划的流式执行与原子提交。
+//! Direct 传输计划的流式执行与可回滚提交。
 //!
 //! 本模块只消费已经扫描并持有最终目标 reservation 的计划。失败时仅清理任务私有
-//! staging 路径，已经原子提交的顶层目标不会被回滚删除。
+//! staging 路径；一个顶层目标提交完成后，后续根的失败不会回滚它。
 
 use super::manager::TransferRunError;
 use super::planner::{PreparedTransfer, TransferManifest};

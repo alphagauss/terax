@@ -13,8 +13,8 @@ use crate::modules::transfers::archive::{
     build_upload_archive, extract_download_archive_roots, ArchiveEntryKind, ExtractRoot,
 };
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, commit_local_roots, commit_remote_roots, ensure_remote_target_available,
-    schedule_local_cleanup,
+    cleanup_local_staging, commit_local_roots_tracked, commit_remote_roots_tracked,
+    ensure_remote_target_available, schedule_local_cleanup,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::{TaskControl, TransferRunError};
@@ -102,7 +102,10 @@ pub(crate) async fn execute_upload(
 
         context.begin_finalizing().await?;
         context.checkpoint().await?;
-        pending_cleanup.extend(commit_remote_roots(&plan.workspace, &plan.roots).await?);
+        pending_cleanup.extend(
+            commit_remote_roots_tracked(&plan.workspace, &plan.roots, &cleanup_scope, context)
+                .await?,
+        );
         context
             .roots_committed(plan.roots.len() as u64, archive.file_count)
             .await?;
@@ -199,7 +202,9 @@ pub(crate) async fn execute_download(
         context.set_archive_file_count(file_count).await?;
         context.begin_finalizing().await?;
         context.checkpoint().await?;
-        let pending_local_cleanup = commit_local_roots(&plan.roots).await?;
+        let pending_local_cleanup =
+            commit_local_roots_tracked(&plan.roots, &plan.task_id, &plan.owner_task_id, context)
+                .await?;
         let progress = context
             .roots_committed(plan.roots.len() as u64, file_count)
             .await;

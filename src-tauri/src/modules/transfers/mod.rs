@@ -4,6 +4,7 @@
 //! 持有，WebView 仅负责选择策略、入队和展示，因此关闭传输面板不会中断文件复制。
 
 mod archive;
+mod cleanup_ticket;
 pub mod commands;
 mod commit;
 mod conflicts;

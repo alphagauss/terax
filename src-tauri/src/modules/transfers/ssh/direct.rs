@@ -15,7 +15,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 use crate::modules::transfers::commit::{
-    cleanup_local_staging, commit_local_root, commit_remote_root, schedule_local_cleanup,
+    cleanup_local_staging, commit_local_root_tracked, commit_remote_root_tracked,
+    schedule_local_cleanup,
 };
 use crate::modules::transfers::errors::{io_failure, TransferErrorCode};
 use crate::modules::transfers::manager::TransferRunError;
@@ -339,7 +340,16 @@ pub(crate) async fn execute_upload(
         context.begin_finalizing().await?;
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            pending_cleanup.extend(commit_remote_root(&plan.workspace, &plan.session, root).await?);
+            pending_cleanup.extend(
+                commit_remote_root_tracked(
+                    &plan.workspace,
+                    &plan.session,
+                    root,
+                    &cleanup_scope,
+                    context,
+                )
+                .await?,
+            );
             let completed = plan
                 .files
                 .iter()
@@ -442,7 +452,9 @@ pub(crate) async fn execute_download(
         context.begin_finalizing().await?;
         for (root_index, root) in plan.roots.iter().enumerate() {
             context.checkpoint().await?;
-            let pending_cleanup = commit_local_root(root).await?;
+            let pending_cleanup =
+                commit_local_root_tracked(root, &plan.task_id, &plan.owner_task_id, context)
+                    .await?;
             let completed = plan
                 .files
                 .iter()

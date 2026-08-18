@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::modules::remote::manager::global_manager;
 use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
 
+use super::super::cleanup_ticket::{CleanupTicket, CleanupTicketTarget};
 use super::super::errors::TransferErrorCode;
 use super::super::manager::TransferRunError;
 
@@ -118,6 +119,71 @@ impl RemoteCleanupScope {
             staging_parents: Vec::new(),
             allow_download_tmp: true,
         }
+    }
+
+    /// 为经过当前端点和路径授权校验的 backup 创建 recovery 票据。
+    pub(crate) fn cleanup_ticket(
+        &self,
+        paths: Vec<String>,
+    ) -> Result<Option<CleanupTicket>, TransferRunError> {
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        if paths
+            .iter()
+            .any(|path| !path.ends_with(".backup") || !self.owns(path))
+        {
+            return Err(TransferRunError::failed(
+                TransferErrorCode::InvalidRequest,
+                "invalid remote transfer cleanup path",
+            ));
+        }
+        Ok(Some(CleanupTicket::recovery(CleanupTicketTarget::Ssh {
+            profile_id: self.profile_id.clone(),
+            endpoint_host: self.endpoint_host.clone(),
+            endpoint_port: self.endpoint_port,
+            endpoint_username: self.endpoint_username.clone(),
+            staging_task_id: self.task_id.clone(),
+            owner_task_id: self.owner_task_id.clone(),
+            staging_parents: self.staging_parents.clone(),
+            paths,
+        })))
+    }
+
+    /// 从 Journal 票据恢复与原任务等价的远程清理授权。
+    pub(crate) fn from_ticket(target: &CleanupTicketTarget) -> Option<(Self, Vec<String>)> {
+        let CleanupTicketTarget::Ssh {
+            profile_id,
+            endpoint_host,
+            endpoint_port,
+            endpoint_username,
+            staging_task_id,
+            owner_task_id,
+            staging_parents,
+            paths,
+        } = target
+        else {
+            return None;
+        };
+        let scope = Self {
+            profile_id: profile_id.clone(),
+            endpoint_host: endpoint_host.clone(),
+            endpoint_port: *endpoint_port,
+            endpoint_username: endpoint_username.clone(),
+            task_id: staging_task_id.clone(),
+            owner_task_id: owner_task_id.clone(),
+            staging_parents: staging_parents.clone(),
+            allow_download_tmp: false,
+        };
+        paths
+            .iter()
+            .all(|path| path.ends_with(".backup") && scope.owns(path))
+            .then(|| (scope, paths.clone()))
+    }
+
+    /// 返回票据绑定的 profile，只用于取得当前 Workspace 连接。
+    pub(crate) fn profile_id(&self) -> &str {
+        &self.profile_id
     }
 }
 
@@ -259,7 +325,8 @@ pub(crate) fn cleanup_command<'a>(paths: impl IntoIterator<Item = &'a str>) -> S
 
 impl RemoteCleanupScope {
     /// 同时绑定 profile 与稳定端点，避免 profile 改绑后清理到另一台服务器。
-    fn matches_workspace(&self, workspace: &RemoteWorkspace) -> bool {
+    /// 确认当前 Workspace 仍连接票据捕获的同一稳定 endpoint。
+    pub(crate) fn matches_workspace(&self, workspace: &RemoteWorkspace) -> bool {
         self.matches_endpoint(
             &workspace.profile.id,
             &workspace.profile.host,
@@ -360,6 +427,20 @@ mod tests {
             "/srv/releases/.terax-part-{}-0",
             uuid::Uuid::new_v4()
         )));
+        assert!(scope.cleanup_ticket(vec![stage.clone()]).is_err());
+        let ticket = scope
+            .cleanup_ticket(vec![format!("{stage}.backup")])
+            .unwrap()
+            .unwrap();
+        let (restored, paths) = RemoteCleanupScope::from_ticket(&ticket.target).unwrap();
+        assert_eq!(restored.profile_id(), "profile");
+        assert_eq!(paths, vec![format!("{stage}.backup")]);
+        let mut invalid_target = ticket.target;
+        let CleanupTicketTarget::Ssh { paths, .. } = &mut invalid_target else {
+            unreachable!();
+        };
+        *paths = vec![stage.clone()];
+        assert!(RemoteCleanupScope::from_ticket(&invalid_target).is_none());
 
         let download_scope = RemoteCleanupScope {
             allow_download_tmp: true,
