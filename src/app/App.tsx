@@ -1692,6 +1692,7 @@ export default function App() {
         <FileExplorer
           ref={explorerRef}
           rootPath={explorerRoot}
+          remotePollingEnabled={sidebar.isVisible("explorer") && !zenMode}
           rootPending={
             workspaceBootPending
               ? workspaceEnv.kind === "ssh"

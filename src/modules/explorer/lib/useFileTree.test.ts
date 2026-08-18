@@ -9,6 +9,7 @@ import {
   fileTreeScopes,
   isPathDeleting,
   overlapsDeletingPath,
+  REMOTE_DIRECTORY_POLL_DELAY_MS,
   remoteDirectoryPollPaths,
 } from "./useFileTree";
 
@@ -40,6 +41,10 @@ describe("ancestorDirs", () => {
 });
 
 describe("remoteDirectoryPollPaths", () => {
+  it("backs off between completed remote directory refreshes", () => {
+    expect(REMOTE_DIRECTORY_POLL_DELAY_MS).toBe(3_000);
+  });
+
   it("polls only the root and currently expanded directories", () => {
     expect(
       remoteDirectoryPollPaths(

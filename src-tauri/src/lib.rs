@@ -203,6 +203,7 @@ pub fn run() {
             remote::commands::ssh_runtime_disconnect,
             remote::commands::ssh_runtime_snapshot,
             remote::commands::ssh_traffic_snapshot,
+            remote::commands::ssh_health_snapshot,
             remote::commands::ssh_runtime_wake,
             remote::commands::ssh_runtime_set_foreground,
             remote::commands::ssh_confirm_host_key,

@@ -1,7 +1,8 @@
 //! 基于 SFTP 的远程文件系统实现。
 //!
 //! Explorer 使用不查询扩展的 raw session 流水线读取目录；其他文件操作复用高层会话。
-//! 后台传输持有独占会话，编辑器条件写入与破坏性操作维持既有安全校验。
+//! 编辑器保存重叠临时文件刷盘、权限恢复和提交 channel 建立，条件写入与破坏性操作
+//! 维持既有安全校验。
 
 use std::future::Future;
 use std::pin::Pin;
@@ -37,6 +38,19 @@ pub struct RemoteStat {
     pub kind: RemoteEntryKind,
     pub size: u64,
     pub mtime: u64,
+}
+
+/// 一次有界远端文件读取的正文或过大结果。
+pub enum RemoteFileRead {
+    Content {
+        bytes: Vec<u8>,
+        size: u64,
+        mtime: u64,
+    },
+    TooLarge {
+        size: u64,
+        mtime: u64,
+    },
 }
 
 /// 编辑器已确认的远端文件版本。
@@ -146,6 +160,11 @@ pub async fn warm_directory_session(workspace: &Arc<RemoteWorkspace>) -> Result<
     directory_session(workspace).await.map(|_| ())
 }
 
+/// 提前建立普通文件、元数据和修改操作复用的高层 SFTP session。
+pub async fn warm_file_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), String> {
+    session(workspace).await.map(|_| ())
+}
+
 /// 返回 Explorer 目录元数据专用的 raw SFTP session。
 async fn directory_session(
     workspace: &Arc<RemoteWorkspace>,
@@ -229,6 +248,9 @@ async fn sftp_result<T>(
     match result {
         Ok(value) => Ok(value),
         Err(error) => {
+            if should_fail_transport(&error) {
+                workspace.report_transport_failure();
+            }
             if should_invalidate_session(&error) {
                 invalidate_session(workspace, session).await;
             }
@@ -252,6 +274,9 @@ async fn optional_sftp_result<T>(
             Ok(None)
         }
         Err(error) => {
+            if should_fail_transport(&error) {
+                workspace.report_transport_failure();
+            }
             if should_invalidate_session(&error) {
                 invalidate_session(workspace, session).await;
             }
@@ -278,6 +303,10 @@ where
         match operation(current.clone()).await {
             Ok(value) => return Ok(value),
             Err(error) if should_invalidate_session(&error) => {
+                if should_fail_transport(&error) {
+                    workspace.report_transport_failure();
+                    return Err(format!("{context}: {error}"));
+                }
                 invalidate_session(workspace, &current).await;
                 if attempt == 1 {
                     return Err(format!("{context}: {error}"));
@@ -298,6 +327,18 @@ fn should_invalidate_session(error: &russh_sftp::client::error::Error) -> bool {
         russh_sftp::client::error::Error::Limited(_) => false,
         _ => true,
     }
+}
+
+/// 仅将明确的连接关闭上报给 Runtime，普通 SFTP 超时仍允许重建子会话。
+fn should_fail_transport(error: &russh_sftp::client::error::Error) -> bool {
+    matches!(
+        error,
+        russh_sftp::client::error::Error::Status(status)
+            if matches!(
+                status.status_code,
+                StatusCode::NoConnection | StatusCode::ConnectionLost
+            )
+    )
 }
 
 pub async fn read_dir(
@@ -321,11 +362,18 @@ pub(crate) async fn read_dir_uncached(
     let read = match read_directory_pipelined(session.clone(), path).await {
         Ok(entries) => entries,
         Err(error) if should_invalidate_session(&error) => {
+            if should_fail_transport(&error) {
+                workspace.report_transport_failure();
+                return Err(format!("read remote directory {path}: {error}"));
+            }
             invalidate_directory_session(workspace, &session).await;
             let retry = directory_session(workspace).await?;
             match read_directory_pipelined(retry.clone(), path).await {
                 Ok(entries) => entries,
                 Err(retry_error) => {
+                    if should_fail_transport(&retry_error) {
+                        workspace.report_transport_failure();
+                    }
                     if should_invalidate_session(&retry_error) {
                         invalidate_directory_session(workspace, &retry).await;
                     }
@@ -465,37 +513,46 @@ pub async fn read_file(
     path: &str,
     limit: u64,
 ) -> Result<Vec<u8>, String> {
-    let metadata = stat(workspace, path).await?;
-    read_file_with_size(workspace, path, limit, metadata.size).await
+    match read_file_snapshot(workspace, path, limit).await? {
+        RemoteFileRead::Content { bytes, .. } => Ok(bytes),
+        RemoteFileRead::TooLarge { size, .. } => {
+            Err(format!("REMOTE_FILE_TOO_LARGE:{size}:{limit}"))
+        }
+    }
 }
 
-/// 使用调用方已经取得的大小提示读取远端文件，流式上限仍会防止读取期间增长。
-pub async fn read_file_with_size(
+/// 并发取得目标元数据与文件 handle，再按已确认大小完成有界读取。
+///
+/// 小文件只保留 `STAT + OPEN` 和 `READ` 两个依赖阶段；准确长度使读取完成时无需
+/// 再发送一次仅用于确认 EOF 的 SFTP 请求。
+pub async fn read_file_snapshot(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     limit: u64,
-    size: u64,
-) -> Result<Vec<u8>, String> {
-    if size > limit {
-        return Err(format!("REMOTE_FILE_TOO_LARGE:{size}:{limit}"));
-    }
+) -> Result<RemoteFileRead, String> {
+    validate_remote_path(path)?;
     let remote_path = path.to_string();
-    let capacity = size.min(limit).min(1024 * 1024) as usize;
-    let output = retry_sftp_read(workspace, format!("read remote file {path}"), move |sftp| {
-        let path = remote_path.clone();
+    retry_sftp_read(workspace, format!("read remote file {path}"), move |sftp| {
+        let metadata_path = remote_path.clone();
+        let open_path = remote_path.clone();
         Box::pin(async move {
-            let file = sftp.open(path).await?;
-            let mut output = Vec::with_capacity(capacity);
-            let mut bounded = file.take(limit.saturating_add(1));
-            bounded.read_to_end(&mut output).await?;
-            Ok(output)
+            let (metadata, file) =
+                tokio::try_join!(sftp.metadata(metadata_path), sftp.open(open_path),)?;
+            let size = metadata.len();
+            let mtime = remote_mtime(&metadata);
+            if size > limit {
+                return Ok(RemoteFileRead::TooLarge { size, mtime });
+            }
+            let mut output = vec![0; size as usize];
+            file.take(size).read_exact(&mut output).await?;
+            Ok(RemoteFileRead::Content {
+                bytes: output,
+                size,
+                mtime,
+            })
         })
     })
-    .await?;
-    if output.len() as u64 > limit {
-        return Err(format!("REMOTE_FILE_TOO_LARGE:{}:{limit}", output.len()));
-    }
-    Ok(output)
+    .await
 }
 
 /// 原子写入远程文件并保留已有文件的权限。
@@ -508,8 +565,9 @@ pub async fn write_file(
     content: &[u8],
 ) -> Result<u64, String> {
     let (sftp, target, permissions) = prepare_remote_write(workspace, path).await?;
-    let temporary = stage_remote_write(workspace, &sftp, &target, permissions, content).await?;
-    replace_remote_file(workspace, &sftp, &temporary, &target).await?;
+    let (temporary, channel) =
+        stage_remote_write_and_open_commit(workspace, &sftp, &target, permissions, content).await?;
+    replace_remote_file(workspace, &sftp, channel, &temporary, &target).await?;
     let metadata = sftp_result(
         workspace,
         &sftp,
@@ -518,6 +576,53 @@ pub async fn write_file(
     )
     .await?;
     Ok(remote_mtime(&metadata))
+}
+
+/// 仅在远端目标仍不存在时原子创建文件。
+///
+/// 临时文件与目标位于同一目录，最终通过硬链接执行原子 no-clobber 发布；目标在审批后
+/// 出现时返回冲突，不能退化为覆盖。
+pub async fn write_file_missing(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    content: &[u8],
+) -> Result<RemoteCheckedWrite, String> {
+    validate_remote_path(path)?;
+    let sftp = session(workspace).await?;
+    let target = canonical_target_for_new_file(workspace, &sftp, path).await?;
+    let (temporary, channel) =
+        stage_remote_write_and_open_commit(workspace, &sftp, &target, None, content).await?;
+    let outcome = commit_remote_missing(workspace, channel, &temporary, &target).await;
+    match outcome {
+        Ok(RemoteCommit::Complete) => {
+            let metadata = sftp_result(
+                workspace,
+                &sftp,
+                format!("read created remote file metadata {target}"),
+                sftp.metadata(&target).await,
+            )
+            .await?;
+            Ok(RemoteCheckedWrite::Written {
+                mtime: remote_mtime(&metadata),
+            })
+        }
+        Ok(RemoteCommit::Conflict) => {
+            let current = optional_sftp_result(
+                workspace,
+                &sftp,
+                format!("read conflicting remote file metadata {target}"),
+                sftp.metadata(&target).await,
+            )
+            .await?
+            .map(|metadata| remote_observed(&metadata));
+            Ok(RemoteCheckedWrite::Conflict { current })
+        }
+        Ok(RemoteCommit::Missing) => Err("remote missing-only write returned missing".into()),
+        Err(error) => {
+            let _ = sftp.remove_file(&temporary).await;
+            Err(error)
+        }
+    }
 }
 
 /// 解析现有远端文件并读取一次目标元数据，不额外执行存在性探测。
@@ -627,10 +732,17 @@ pub async fn write_file_checked(
         }
     }
 
-    let temporary =
-        stage_remote_write(workspace, &sftp, &target, metadata.permissions, content).await?;
+    let (temporary, channel) = stage_remote_write_and_open_commit(
+        workspace,
+        &sftp,
+        &target,
+        metadata.permissions,
+        content,
+    )
+    .await?;
     let outcome = commit_remote_checked(
         workspace,
+        channel,
         &temporary,
         &target,
         &expected.revision,
@@ -701,64 +813,102 @@ async fn prepare_remote_write(
     Ok((sftp, target, permissions))
 }
 
-/// 将新内容上传到目标同目录的排他临时文件。
-async fn stage_remote_write(
+/// 上传排他临时文件，同时预开仅在上传成功后使用的提交 channel。
+///
+/// 两条并发分支任一失败都会关闭或删除另一条已经创建的资源，远端不会遗留仅为本次
+/// 提交准备的 channel 或临时文件。
+async fn stage_remote_write_and_open_commit(
     workspace: &Arc<RemoteWorkspace>,
     sftp: &Arc<russh_sftp::client::SftpSession>,
     target: &str,
     permissions: Option<u32>,
     content: &[u8],
-) -> Result<String, String> {
+) -> Result<(String, russh::Channel<russh::client::Msg>), String> {
     let temporary = temporary_sibling(target)?;
+    let (stage_result, channel_result) = tokio::join!(
+        stage_remote_write(workspace, sftp, &temporary, permissions, content),
+        workspace.open_exec_channel(),
+    );
+    match (stage_result, channel_result) {
+        (Ok(()), Ok(channel)) => Ok((temporary, channel)),
+        (Err(stage_error), Ok(channel)) => {
+            let _ = channel.close().await;
+            Err(stage_error)
+        }
+        (Ok(()), Err(channel_error)) => {
+            let _ = sftp.remove_file(&temporary).await;
+            Err(channel_error)
+        }
+        (Err(stage_error), Err(_)) => Err(stage_error),
+    }
+}
+
+/// 将新内容上传到目标同目录的排他临时文件。
+///
+/// `russh-sftp` 的 `flush()` 会先等待全部写入确认，再在服务端支持时执行一次
+/// `fsync@openssh.com`；因此不能再调用 `sync_all()` 重复一次高延迟往返。
+async fn stage_remote_write(
+    workspace: &Arc<RemoteWorkspace>,
+    sftp: &Arc<russh_sftp::client::SftpSession>,
+    temporary: &str,
+    permissions: Option<u32>,
+    content: &[u8],
+) -> Result<(), String> {
     let mut file = sftp_result(
         workspace,
         sftp,
         format!("create temporary remote file {temporary}"),
         sftp.open_with_flags(
-            &temporary,
+            temporary,
             OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
         )
         .await,
     )
     .await?;
-    if let Err(error) = file.write_all(content).await {
+    let write_and_flush = async {
+        file.write_all(content)
+            .await
+            .map_err(|error| format!("write temporary remote file {temporary}: {error}"))?;
+        file.flush()
+            .await
+            .map_err(|error| format!("flush temporary remote file {temporary}: {error}"))
+    };
+    let preserve_permissions = async {
+        match permissions {
+            Some(permissions) => {
+                let attributes = permission_attributes(permissions);
+                sftp.set_metadata(temporary, attributes).await
+            }
+            None => Ok(()),
+        }
+    };
+    let (write_result, permissions_result) = tokio::join!(write_and_flush, preserve_permissions);
+    if let Err(error) = write_result {
         invalidate_session(workspace, sftp).await;
-        let _ = sftp.remove_file(&temporary).await;
-        return Err(format!("write temporary remote file {temporary}: {error}"));
-    }
-    if let Err(error) = file.flush().await {
-        invalidate_session(workspace, sftp).await;
-        let _ = sftp.remove_file(&temporary).await;
-        return Err(format!("flush temporary remote file {temporary}: {error}"));
-    }
-    if let Err(error) = file.sync_all().await {
-        invalidate_session(workspace, sftp).await;
-        let _ = sftp.remove_file(&temporary).await;
-        return Err(format!("sync temporary remote file {temporary}: {error}"));
+        let _ = sftp.remove_file(temporary).await;
+        return Err(error);
     }
     if let Err(error) = file.shutdown().await {
         invalidate_session(workspace, sftp).await;
-        let _ = sftp.remove_file(&temporary).await;
+        let _ = sftp.remove_file(temporary).await;
         return Err(format!("close temporary remote file {temporary}: {error}"));
     }
-    if let Some(permissions) = permissions {
-        let attributes = permission_attributes(permissions);
-        if let Err(error) = sftp.set_metadata(&temporary, attributes).await {
-            if should_invalidate_session(&error) {
-                invalidate_session(workspace, sftp).await;
-            }
-            let _ = sftp.remove_file(&temporary).await;
-            return Err(format!(
-                "preserve permissions on temporary remote file {temporary}: {error}"
-            ));
+    if let Err(error) = permissions_result {
+        if should_invalidate_session(&error) {
+            invalidate_session(workspace, sftp).await;
         }
+        let _ = sftp.remove_file(temporary).await;
+        return Err(format!(
+            "preserve permissions on temporary remote file {temporary}: {error}"
+        ));
     }
-    Ok(temporary)
+    Ok(())
 }
 
 async fn replace_remote_file(
     workspace: &Arc<RemoteWorkspace>,
     sftp: &Arc<russh_sftp::client::SftpSession>,
+    channel: russh::Channel<russh::client::Msg>,
     temporary: &str,
     target: &str,
 ) -> Result<(), String> {
@@ -767,9 +917,16 @@ async fn replace_remote_file(
         shell_quote(temporary),
         shell_quote(target)
     );
-    let moved = workspace
-        .exec(&command, None, std::time::Duration::from_secs(15))
-        .await?;
+    let moved = match workspace
+        .exec_on_channel(channel, &command, None, std::time::Duration::from_secs(15))
+        .await
+    {
+        Ok(moved) => moved,
+        Err(error) => {
+            let _ = sftp.remove_file(temporary).await;
+            return Err(error);
+        }
+    };
     if moved.timed_out || moved.exit_code != Some(0) {
         let _ = sftp.remove_file(temporary).await;
         let detail = String::from_utf8_lossy(&moved.stderr).trim().to_string();
@@ -835,6 +992,7 @@ enum RemoteCommit {
 
 async fn commit_remote_checked(
     workspace: &Arc<RemoteWorkspace>,
+    channel: russh::Channel<russh::client::Msg>,
     temporary: &str,
     target: &str,
     expected_revision: &str,
@@ -843,7 +1001,7 @@ async fn commit_remote_checked(
     let command =
         checked_commit_command(temporary, target, expected_revision, replacement_revision);
     let output = workspace
-        .exec(&command, None, Duration::from_secs(60))
+        .exec_on_channel(channel, &command, None, Duration::from_secs(60))
         .await?;
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote checked replace failed".into());
@@ -855,6 +1013,41 @@ async fn commit_remote_checked(
         "conflict" => Ok(RemoteCommit::Conflict),
         _ => Err("remote checked replace returned an invalid status".into()),
     }
+}
+
+/// 在已预开的 channel 上原子发布一个仍缺失的远端目标。
+async fn commit_remote_missing(
+    workspace: &Arc<RemoteWorkspace>,
+    channel: russh::Channel<russh::client::Msg>,
+    temporary: &str,
+    target: &str,
+) -> Result<RemoteCommit, String> {
+    let command = missing_commit_command(temporary, target);
+    let output = workspace
+        .exec_on_channel(channel, &command, None, Duration::from_secs(60))
+        .await?;
+    if output.timed_out || output.exit_code != Some(0) {
+        return Err("remote missing-only write failed".into());
+    }
+    let status = String::from_utf8_lossy(&output.stdout);
+    match status.trim() {
+        "written" => Ok(RemoteCommit::Complete),
+        "conflict" => Ok(RemoteCommit::Conflict),
+        _ => Err("remote missing-only write returned an invalid status".into()),
+    }
+}
+
+/// 构造使用同目录硬链接完成原子 no-clobber 发布的安全命令。
+fn missing_commit_command(temporary: &str, target: &str) -> String {
+    format!(
+        "target={target}; temporary={temporary}; \
+         if [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; printf 'conflict'; \
+         elif ln -- \"$temporary\" \"$target\" 2>/dev/null; then rm -f -- \"$temporary\"; printf 'written'; \
+         elif [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; printf 'conflict'; \
+         else rm -f -- \"$temporary\"; exit 74; fi",
+        target = shell_quote(target),
+        temporary = shell_quote(temporary),
+    )
 }
 
 /// 构造在同一远端进程内完成摘要比较和替换的安全命令。
@@ -1141,9 +1334,9 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_commit_command, parse_sha256, permission_attributes, recursive_delete_command,
-        remote_parent_name, sanitize_local_name, should_invalidate_session,
-        validate_destructive_path,
+        checked_commit_command, missing_commit_command, parse_sha256, permission_attributes,
+        recursive_delete_command, remote_parent_name, sanitize_local_name, should_fail_transport,
+        should_invalidate_session, validate_destructive_path,
     };
 
     #[test]
@@ -1184,6 +1377,20 @@ mod tests {
             .contains("if [ ! -f \"$target\" ]; then rm -f -- \"$temporary\"; printf 'missing'"));
         assert!(command.contains("then rm -f -- \"$temporary\"; printf 'conflict'"));
         assert!(!command.contains("target=/tmp/target"));
+    }
+
+    #[test]
+    fn missing_commit_uses_atomic_no_clobber_and_quotes_paths() {
+        let command = missing_commit_command(
+            "/tmp/stage'; echo bad; '",
+            "/tmp/target'; touch /tmp/pwned; '",
+        );
+
+        assert!(command.contains("target='/tmp/target'\\''; touch /tmp/pwned; '\\''';"));
+        assert!(command.contains("temporary='/tmp/stage'\\''; echo bad; '\\''';"));
+        assert!(command.contains("[ -e \"$target\" ] || [ -L \"$target\" ]"));
+        assert!(command.contains("ln -- \"$temporary\" \"$target\""));
+        assert!(!command.contains("mv -f"));
     }
 
     #[test]
@@ -1234,6 +1441,12 @@ mod tests {
             russh_sftp::protocol::StatusCode::ConnectionLost
         )));
         assert!(!should_invalidate_session(&status_error(
+            russh_sftp::protocol::StatusCode::PermissionDenied
+        )));
+        assert!(should_fail_transport(&status_error(
+            russh_sftp::protocol::StatusCode::ConnectionLost
+        )));
+        assert!(!should_fail_transport(&status_error(
             russh_sftp::protocol::StatusCode::PermissionDenied
         )));
     }

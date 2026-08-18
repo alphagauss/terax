@@ -159,6 +159,10 @@
     "uploaded": "Uploaded",
     "downloaded": "Downloaded"
   },
+  "sshRtt": {
+    "pending": "Waiting for the first low-frequency SSH latency sample.",
+    "tooltip": "SSH round-trip latency: {{value}} ms. Measured by the connection health supervisor."
+  },
   "tunnels": {
     "label": "Tunnels",
     "count": "Tunnels {{count}}",

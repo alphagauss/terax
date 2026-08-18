@@ -4,6 +4,7 @@
 //! WebView 只提交稳定 profile ID 或一次性凭据覆盖值。
 
 pub mod commands;
+mod health;
 mod host_key;
 pub mod manager;
 pub mod models;

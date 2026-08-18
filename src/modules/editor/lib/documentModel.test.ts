@@ -32,11 +32,22 @@ import {
   discardSharedDocumentModel,
   documentResourceKey,
   getSharedDocumentModel,
+  remoteDocumentDigestPollCount,
+  remoteDocumentPollInterval,
   resetSharedDocumentModelsForTests,
   saveAutoSaveDocumentsBeforeClose,
 } from "./documentModel";
 
 const local = { kind: "local" } satisfies WorkspaceEnv;
+
+describe("remote document polling", () => {
+  it("keeps visible documents responsive while backing off hidden views", () => {
+    expect(remoteDocumentPollInterval(true)).toBe(3_000);
+    expect(remoteDocumentPollInterval(false)).toBe(15_000);
+    expect(remoteDocumentDigestPollCount(true)).toBe(10);
+    expect(remoteDocumentDigestPollCount(false)).toBe(2);
+  });
+});
 
 function text(content: string, revision = `revision:${content}`, mtime = 1) {
   return {

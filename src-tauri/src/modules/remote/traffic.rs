@@ -1,7 +1,7 @@
 //! SSH transport 的进程级双向流量统计。
 //!
-//! 本模块在 russh 接管连接前包装底层流，只累计本机与远端之间实际完成的读写字节。
-//! 计数器跨 SSH 重连复用，不解析 channel，也不参与持久化。
+//! 本模块在 russh 接管连接前包装底层流，累计实际读写字节并把有效入站活动投递给
+//! 当前 transport 的健康状态。流量计数跨 SSH 重连复用，不解析 channel，也不持久化。
 
 use std::io::IoSlice;
 use std::pin::Pin;
@@ -11,6 +11,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+use super::health::SshTransportHealth;
 use super::models::SshTrafficSnapshot;
 
 /// 当前进程共享的 SSH 收发字节计数器。
@@ -50,11 +51,20 @@ impl SshTrafficMeter {
 pub(super) struct CountingSshStream<S> {
     inner: S,
     traffic: Arc<SshTrafficMeter>,
+    health: Arc<SshTransportHealth>,
 }
 
 impl<S> CountingSshStream<S> {
-    pub(super) fn new(inner: S, traffic: Arc<SshTrafficMeter>) -> Self {
-        Self { inner, traffic }
+    pub(super) fn new(
+        inner: S,
+        traffic: Arc<SshTrafficMeter>,
+        health: Arc<SshTransportHealth>,
+    ) -> Self {
+        Self {
+            inner,
+            traffic,
+            health,
+        }
     }
 }
 
@@ -65,10 +75,19 @@ impl<S: AsyncRead + Unpin> AsyncRead for CountingSshStream<S> {
         buffer: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let before = buffer.filled().len();
+        let expected_data = buffer.remaining() > 0;
         let result = Pin::new(&mut self.inner).poll_read(cx, buffer);
-        if matches!(result, Poll::Ready(Ok(()))) {
-            self.traffic
-                .record_download(buffer.filled().len().saturating_sub(before));
+        match &result {
+            Poll::Ready(Ok(())) => {
+                let bytes = buffer.filled().len().saturating_sub(before);
+                self.traffic.record_download(bytes);
+                self.health.record_inbound(bytes);
+                if expected_data && bytes == 0 {
+                    self.health.mark_failed();
+                }
+            }
+            Poll::Ready(Err(_)) => self.health.mark_failed(),
+            Poll::Pending => {}
         }
         result
     }
@@ -81,8 +100,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CountingSshStream<S> {
         buffer: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write(cx, buffer);
-        if let Poll::Ready(Ok(written)) = result {
-            self.traffic.record_upload(written);
+        match &result {
+            Poll::Ready(Ok(written)) => self.traffic.record_upload(*written),
+            Poll::Ready(Err(_)) => self.health.mark_failed(),
+            Poll::Pending => {}
         }
         result
     }
@@ -93,8 +114,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CountingSshStream<S> {
         buffers: &[IoSlice<'_>],
     ) -> Poll<std::io::Result<usize>> {
         let result = Pin::new(&mut self.inner).poll_write_vectored(cx, buffers);
-        if let Poll::Ready(Ok(written)) = result {
-            self.traffic.record_upload(written);
+        match &result {
+            Poll::Ready(Ok(written)) => self.traffic.record_upload(*written),
+            Poll::Ready(Err(_)) => self.health.mark_failed(),
+            Poll::Pending => {}
         }
         result
     }
@@ -104,11 +127,19 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for CountingSshStream<S> {
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(cx)
+        let result = Pin::new(&mut self.inner).poll_flush(cx);
+        if matches!(result, Poll::Ready(Err(_))) {
+            self.health.mark_failed();
+        }
+        result
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(cx)
+        let result = Pin::new(&mut self.inner).poll_shutdown(cx);
+        if matches!(result, Poll::Ready(Err(_))) {
+            self.health.mark_failed();
+        }
+        result
     }
 }
 
@@ -121,8 +152,9 @@ mod tests {
     #[tokio::test]
     async fn counts_completed_reads_and_writes_by_transport_direction() {
         let traffic = Arc::new(SshTrafficMeter::default());
+        let health = Arc::new(SshTransportHealth::new());
         let (mut peer, stream) = tokio::io::duplex(64);
-        let mut stream = CountingSshStream::new(stream, traffic.clone());
+        let mut stream = CountingSshStream::new(stream, traffic.clone(), health.clone());
 
         peer.write_all(b"download").await.unwrap();
         let mut downloaded = [0; 8];
@@ -141,5 +173,6 @@ mod tests {
                 downloaded_bytes: 8,
             }
         );
+        assert!(health.is_fresh(std::time::Duration::from_secs(1)));
     }
 }

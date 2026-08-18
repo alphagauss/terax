@@ -1,7 +1,7 @@
-//! 当前进程唯一 SSH Runtime 的连接、重连、流量统计与资源生命周期协调。
+//! 当前进程唯一 SSH Runtime 的连接、健康监督、重连与资源生命周期协调。
 //!
 //! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，目录 SFTP
-//! 独立预热。旧 workspace 的迟到失败不能覆盖新连接。
+//! 独立预热。业务入站流量抑制重复保活，旧 workspace 的迟到失败不能覆盖新连接。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -13,14 +13,17 @@ use tokio_util::sync::CancellationToken;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshTrafficSnapshot, TunnelConfig,
-    TunnelEvent, TunnelEventKind, TunnelInfo,
+    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshHealthSnapshot, SshTrafficSnapshot,
+    TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
 };
-use super::session::{ExecOutput, RemoteWorkspace};
+use super::session::{ExecOutput, RemoteWorkspace, TransportProbeOutcome};
 use super::traffic::SshTrafficMeter;
 use super::tunnel::{TunnelFailure, TunnelManager};
 
-const TRANSPORT_PROBE_INTERVAL: Duration = Duration::from_secs(2);
+const HEALTH_MONITOR_TICK: Duration = Duration::from_secs(15);
+const IDLE_PROBE_AGE: Duration = Duration::from_secs(30);
+const MAX_RTT_AGE: Duration = Duration::from_secs(60);
+const WAKE_PROBE_AGE: Duration = Duration::from_secs(5);
 const TRANSPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const TRANSPORT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 const CONNECT_SUPERSEDED: &str = "SSH connection attempt was superseded";
@@ -254,6 +257,7 @@ impl RemoteManager {
             .store(has_prepared_terminal, Ordering::Release);
         self.tunnels.activate_profile_epoch(&profile_id, epoch);
         let _ = app.emit("terax://ssh-runtime", snapshot.clone());
+        Self::emit_health(app, workspace.health_snapshot(epoch));
         self.spawn_monitor(workspace.clone(), epoch, lifecycle.clone(), app.clone());
         if has_prepared_terminal {
             self.spawn_prepared_terminal_expiry(workspace.clone(), epoch, lifecycle.id);
@@ -371,7 +375,11 @@ impl RemoteManager {
         let manager = Arc::downgrade(self);
         tauri::async_runtime::spawn(async move {
             loop {
-                tokio::time::sleep(TRANSPORT_PROBE_INTERVAL).await;
+                let failed = tokio::select! {
+                    _ = lifecycle.cancellation.cancelled() => return,
+                    _ = workspace.transport_failed() => true,
+                    _ = tokio::time::sleep(HEALTH_MONITOR_TICK) => false,
+                };
                 let Some(manager) = manager.upgrade() else {
                     return;
                 };
@@ -380,11 +388,31 @@ impl RemoteManager {
                 {
                     return;
                 }
-                if !workspace.probe_transport(TRANSPORT_PROBE_TIMEOUT).await {
+                if failed {
                     manager
                         .handle_transport_closed(workspace, epoch, lifecycle, &app)
                         .await;
                     return;
+                }
+                if !workspace.health_probe_due(IDLE_PROBE_AGE, MAX_RTT_AGE) {
+                    continue;
+                }
+                match workspace
+                    .probe_transport_if_stale(Duration::ZERO, TRANSPORT_PROBE_TIMEOUT)
+                    .await
+                {
+                    TransportProbeOutcome::Fresh => {}
+                    TransportProbeOutcome::Sampled => {
+                        if manager.is_current(&workspace, epoch, lifecycle.id).await {
+                            Self::emit_health(&app, workspace.health_snapshot(epoch));
+                        }
+                    }
+                    TransportProbeOutcome::Failed => {
+                        manager
+                            .handle_transport_closed(workspace, epoch, lifecycle, &app)
+                            .await;
+                        return;
+                    }
                 }
             }
         });
@@ -630,6 +658,17 @@ impl RemoteManager {
         self.traffic.snapshot()
     }
 
+    /// 返回当前 connected epoch 的低频 SSH RTT 快照。
+    pub async fn health_snapshot(&self) -> SshHealthSnapshot {
+        let runtime = self.runtime.read().await;
+        match (&runtime.snapshot, &runtime.workspace) {
+            (RemoteRuntimeSnapshot::Connected { epoch, .. }, Some(workspace)) => {
+                workspace.health_snapshot(*epoch)
+            }
+            _ => SshHealthSnapshot::default(),
+        }
+    }
+
     /// 窗口重新激活时立即确认长时间未探活的 transport，并复用统一重连流程。
     pub async fn wake(
         self: &Arc<Self>,
@@ -647,12 +686,20 @@ impl RemoteManager {
         let Some((workspace, epoch, lifecycle)) = current else {
             return Ok(self.snapshot().await);
         };
-        if !workspace
-            .probe_transport_if_stale(TRANSPORT_PROBE_INTERVAL, TRANSPORT_PROBE_TIMEOUT)
+        match workspace
+            .probe_transport_if_stale(WAKE_PROBE_AGE, TRANSPORT_PROBE_TIMEOUT)
             .await
         {
-            self.handle_transport_closed(workspace, epoch, lifecycle, app)
-                .await;
+            TransportProbeOutcome::Fresh => {}
+            TransportProbeOutcome::Sampled => {
+                if self.is_current(&workspace, epoch, lifecycle.id).await {
+                    Self::emit_health(app, workspace.health_snapshot(epoch));
+                }
+            }
+            TransportProbeOutcome::Failed => {
+                self.handle_transport_closed(workspace, epoch, lifecycle, app)
+                    .await;
+            }
         }
         Ok(self.snapshot().await)
     }
@@ -786,6 +833,10 @@ impl RemoteManager {
         );
     }
 
+    fn emit_health(app: &tauri::AppHandle, snapshot: SshHealthSnapshot) {
+        let _ = app.emit("terax://ssh-health", snapshot);
+    }
+
     fn emit_tunnel_start(
         app: &tauri::AppHandle,
         profile_id: &str,
@@ -861,16 +912,19 @@ pub fn exec_blocking(
 #[cfg(test)]
 mod tests {
     use super::{
-        reconnect_delay, RemoteManager, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_INTERVAL,
-        TRANSPORT_PROBE_TIMEOUT,
+        reconnect_delay, RemoteManager, HEALTH_MONITOR_TICK, IDLE_PROBE_AGE,
+        TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_TIMEOUT,
     };
     use crate::modules::remote::models::ForegroundIntent;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
 
     #[test]
-    fn silent_transport_failure_is_detected_within_five_seconds() {
-        assert!(TRANSPORT_PROBE_INTERVAL + TRANSPORT_PROBE_TIMEOUT <= Duration::from_secs(5));
+    fn idle_transport_is_probed_within_a_bounded_window() {
+        assert!(
+            IDLE_PROBE_AGE + HEALTH_MONITOR_TICK + TRANSPORT_PROBE_TIMEOUT
+                <= Duration::from_secs(50)
+        );
         assert!(TRANSPORT_CLEANUP_TIMEOUT <= Duration::from_secs(1));
     }
 

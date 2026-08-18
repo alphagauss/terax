@@ -95,6 +95,7 @@ export type EditorPaneHandle = FindHandle & {
 
 export type EditorPaneProps = {
   path: string;
+  remotePollingActive?: boolean;
   overrideLanguage?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
@@ -168,6 +169,7 @@ export const EditorPane = memo(
     const { onDirtyChange, ...coreProps } = props;
     const document = useDocument({
       path: props.path,
+      active: props.remotePollingActive,
       onDirtyChange,
     });
     return <EditorCore {...coreProps} ref={ref} document={document} />;

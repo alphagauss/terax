@@ -1,5 +1,5 @@
 /**
- * 本文件封装 SSH 连接、transport 流量、终端和隧道相关的 Tauri IPC。
+ * 本文件封装 SSH 连接、transport 健康与流量、终端和隧道相关的 Tauri IPC。
  * 文件传输统一由 transfers 模块管理，这里不暴露平行上传或下载入口。
  */
 
@@ -11,6 +11,7 @@ import type {
   RemoteForegroundIntent,
   RemoteRuntimeSnapshot,
   SshCredentialInput,
+  SshHealthSnapshot,
   SshTrafficSnapshot,
   TunnelConfig,
   TunnelEvent,
@@ -30,6 +31,7 @@ export const remoteNative = {
   disconnectRuntime: () => invoke<void>("ssh_runtime_disconnect"),
   runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
   trafficSnapshot: () => invoke<SshTrafficSnapshot>("ssh_traffic_snapshot"),
+  healthSnapshot: () => invoke<SshHealthSnapshot>("ssh_health_snapshot"),
   wakeRuntime: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_wake"),
   setForeground: (intent: RemoteForegroundIntent) =>
     invoke<void>("ssh_runtime_set_foreground", { intent }),
@@ -92,6 +94,10 @@ export const remoteNative = {
     handler: (info: RemoteRuntimeSnapshot) => void,
   ): Promise<UnlistenFn> =>
     listen<RemoteRuntimeSnapshot>("terax://ssh-runtime", (event) =>
+      handler(event.payload),
+    ),
+  onHealth: (handler: (snapshot: SshHealthSnapshot) => void) =>
+    listen<SshHealthSnapshot>("terax://ssh-health", (event) =>
       handler(event.payload),
     ),
   onTunnel: (handler: (event: TunnelEvent) => void): Promise<UnlistenFn> =>

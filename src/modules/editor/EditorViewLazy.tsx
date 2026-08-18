@@ -16,6 +16,7 @@ const EditorViewInner = lazy(() =>
 
 type Props = {
   tab: EditorTab;
+  visible: boolean;
   focused: boolean;
   onDirtyChange: (id: number, dirty: boolean) => void;
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
@@ -29,6 +30,7 @@ type Props = {
  */
 export function EditorView({
   tab,
+  visible,
   focused,
   onDirtyChange,
   registerHandle,
@@ -41,6 +43,7 @@ export function EditorView({
   );
   const document = useDocument({
     path: tab.path,
+    active: visible,
     onDirtyChange: handleDirtyChange,
   });
 
