@@ -1,6 +1,6 @@
 /**
  * 本文件定义前端与 Tauri 原生命令之间的类型化调用边界。
- * 负责注入当前工作区环境，不包含业务状态或缓存。
+ * 负责注入当前工作区环境，并为文件工具暴露版本化条件写入，不包含业务状态或缓存。
  */
 
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
@@ -8,9 +8,32 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 
 export type ReadResult =
-  | { kind: "text"; content: string; size: number }
-  | { kind: "binary"; size: number }
-  | { kind: "toolarge"; size: number; limit: number };
+  | {
+      kind: "text";
+      content: string;
+      size: number;
+      mtime: number;
+      revision: string;
+    }
+  | { kind: "binary"; size: number; mtime: number }
+  | { kind: "toolarge"; size: number; limit: number; mtime: number };
+
+export type FileVersion = {
+  revision: string;
+  size: number;
+  mtime: number;
+};
+
+export type FileWriteCondition =
+  | { type: "match"; version: FileVersion }
+  | { type: "missing" };
+
+export type CheckedWriteResult =
+  | { status: "written"; revision: string; size: number; mtime: number }
+  | {
+      status: "conflict";
+      current: { size: number; mtime: number } | null;
+    };
 
 export type DirEntry = {
   name: string;
@@ -156,11 +179,17 @@ export const native = {
       path,
       workspace: currentWorkspaceEnv(),
     }),
-  writeFile: (path: string, content: string) =>
-    invoke<void>("fs_write_file", {
+  writeFileChecked: (
+    path: string,
+    content: string,
+    condition: FileWriteCondition,
+  ) =>
+    invoke<CheckedWriteResult>("fs_write_file_checked", {
       path,
       content,
+      condition,
       workspace: currentWorkspaceEnv(),
+      source: "ai",
     }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {

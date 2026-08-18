@@ -3,7 +3,7 @@
  * 审批预览与最终写入共享同一快照，并在写入前验证路径和文件基线未变化。
  */
 
-import { native } from "../lib/native";
+import { native, type FileVersion } from "../lib/native";
 import { checkWritableCanonical } from "../lib/security";
 import { resolvePath } from "./context";
 
@@ -21,6 +21,7 @@ export type PreparedFileMutation = {
   before: string;
   after: string;
   isNewFile: boolean;
+  version: FileVersion | null;
   replacements: number;
 };
 
@@ -35,6 +36,7 @@ type PrepareInput = {
 type TextSnapshot = {
   content: string;
   isNewFile: boolean;
+  version: FileVersion | null;
 };
 
 const preparedMutations = new Map<string, PreparedFileMutation>();
@@ -167,6 +169,7 @@ async function prepareFileMutationOnce({
     before: snapshot.content,
     after,
     isNewFile: snapshot.isNewFile,
+    version: snapshot.version,
     replacements,
   };
   return prepared;
@@ -203,7 +206,7 @@ export function isTerminalFileMutationState(
 
 /**
  * 提交已经审查的文件修改。
- * 路径重解析或文件内容发生变化时拒绝覆盖，成功后清理运行时快照。
+ * 路径重解析或后端版本条件不再成立时拒绝覆盖，成功后清理运行时快照。
  */
 export async function commitPreparedFileMutation(
   prepared: PreparedFileMutation,
@@ -216,16 +219,18 @@ export async function commitPreparedFileMutation(
   if (normalizePath(safety.canonical) !== normalizePath(prepared.path)) {
     throw new Error("file path changed after approval");
   }
-  const current = await readTextSnapshot(prepared.path);
-  if (
-    current.isNewFile !== prepared.isNewFile ||
-    current.content !== prepared.before
-  ) {
+  const result = await native.writeFileChecked(
+    prepared.path,
+    prepared.after,
+    prepared.version
+      ? { type: "match", version: prepared.version }
+      : { type: "missing" },
+  );
+  if (result.status === "conflict") {
     throw new Error(
       "file changed after approval; review the updated file again",
     );
   }
-  await native.writeFile(prepared.path, prepared.after);
   clearPreparedFileMutation(prepared.sessionId, prepared.toolCallId);
 }
 
@@ -267,10 +272,15 @@ async function readTextSnapshot(path: string): Promise<TextSnapshot> {
     return {
       content: result.content,
       isNewFile: false,
+      version: {
+        revision: result.revision,
+        size: result.size,
+        mtime: result.mtime,
+      },
     };
   } catch (error) {
     if (!isNotFoundError(error)) throw error;
-    return { content: "", isNewFile: true };
+    return { content: "", isNewFile: true, version: null };
   }
 }
 

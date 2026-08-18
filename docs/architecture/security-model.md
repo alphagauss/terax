@@ -45,7 +45,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 - 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过 deny-list 后自动执行。
 - 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`run_command`、`shell_session_run`、`shell_bg_spawn`）设置 `needsApproval: true`。AI SDK 会暂停，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
-- 文件修改在审批前准备待 review 的内容，并在写入前重新验证 canonical path、原始内容和文件存在状态。diff 不依赖 Git。
+- 文件修改在审批前准备待 review 的内容和文件版本，批准后重新验证 canonical path，并由原生条件写入原子匹配原版本或目标仍缺失的状态。diff 不依赖 Git。
 - `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。

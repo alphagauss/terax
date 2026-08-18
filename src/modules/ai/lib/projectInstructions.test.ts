@@ -23,6 +23,8 @@ describe("readAgentsMd", () => {
       kind: "text",
       content: "# Project instructions",
       size: 22,
+      mtime: 1,
+      revision: "a".repeat(64),
     });
 
     await expect(readAgentsMd("C:/work/project-available")).resolves.toBe(
@@ -45,6 +47,8 @@ describe("readAgentsMd", () => {
       kind: "text",
       content,
       size: content.length,
+      mtime: 1,
+      revision: "a".repeat(64),
     });
 
     const result = await readAgentsMd("C:/work/project-large");

@@ -95,7 +95,7 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 
 ## 编辑 diff
 
-文件修改审批会准备不可变的 before/after snapshot，并显示 summary toast。用户可以打开只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。只有 canonical path、原始内容和文件存在状态仍然匹配时，执行阶段才会写入准备好的内容。同一流程无需 Git 仓库也能工作。
+文件修改审批会准备不可变的 before/after snapshot 和原始文件版本，并显示 summary toast。用户可以打开只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。批准后会重新验证 canonical path，再由原生条件写入原子匹配原版本或目标仍缺失的状态，不执行第二次完整文件读取。同一流程无需 Git 仓库也能工作。
 
 ## 实时上下文桥接
 

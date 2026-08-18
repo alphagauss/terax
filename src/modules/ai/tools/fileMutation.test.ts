@@ -16,16 +16,31 @@ import {
 const nativeMock = vi.hoisted(() => ({
   canonicalize: vi.fn(),
   readFile: vi.fn(),
-  writeFile: vi.fn(),
+  writeFileChecked: vi.fn(),
 }));
 
 vi.mock("../lib/native", () => ({ native: nativeMock }));
+
+function text(content: string, revision = "base", mtime = 1) {
+  return {
+    kind: "text" as const,
+    content,
+    size: content.length,
+    mtime,
+    revision,
+  };
+}
 
 describe("file mutation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     nativeMock.canonicalize.mockImplementation(async (path: string) => path);
-    nativeMock.writeFile.mockResolvedValue(undefined);
+    nativeMock.writeFileChecked.mockResolvedValue({
+      status: "written",
+      revision: "written",
+      size: 5,
+      mtime: 2,
+    });
   });
 
   it("applies ordered edits to the running buffer", () => {
@@ -62,7 +77,7 @@ describe("file mutation", () => {
   });
 
   it("shares one preparation for concurrent callers", async () => {
-    let resolveRead!: (value: { kind: "text"; content: string }) => void;
+    let resolveRead!: (value: ReturnType<typeof text>) => void;
     nativeMock.readFile.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -80,7 +95,7 @@ describe("file mutation", () => {
     const first = prepareFileMutation(input);
     const second = prepareFileMutation(input);
     await vi.waitFor(() => expect(nativeMock.readFile).toHaveBeenCalledOnce());
-    resolveRead({ kind: "text", content: "before" });
+    resolveRead(text("before"));
 
     const [firstPrepared, secondPrepared] = await Promise.all([first, second]);
     expect(secondPrepared).toBe(firstPrepared);
@@ -90,7 +105,7 @@ describe("file mutation", () => {
   });
 
   it("does not let a cleared in-flight preparation repopulate the cache", async () => {
-    let resolveRead!: (value: { kind: "text"; content: string }) => void;
+    let resolveRead!: (value: ReturnType<typeof text>) => void;
     nativeMock.readFile.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -107,7 +122,7 @@ describe("file mutation", () => {
     const preparing = prepareFileMutation(input);
     await vi.waitFor(() => expect(nativeMock.readFile).toHaveBeenCalledOnce());
     clearPreparedFileMutation(input.sessionId, input.toolCallId);
-    resolveRead({ kind: "text", content: "before" });
+    resolveRead(text("before"));
     await preparing;
 
     expect(
@@ -116,10 +131,7 @@ describe("file mutation", () => {
   });
 
   it("writes the exact approved snapshot when the source is unchanged", async () => {
-    nativeMock.readFile.mockResolvedValue({
-      kind: "text",
-      content: "before",
-    });
+    nativeMock.readFile.mockResolvedValue(text("before"));
     const prepared = await prepareFileMutation({
       sessionId: "session",
       toolCallId: "tool-commit",
@@ -134,16 +146,23 @@ describe("file mutation", () => {
 
     await commitPreparedFileMutation(prepared);
 
-    expect(nativeMock.writeFile).toHaveBeenCalledWith(
+    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
       "/workspace/a.txt",
       "after",
+      {
+        type: "match",
+        version: { revision: "base", size: 6, mtime: 1 },
+      },
     );
+    expect(nativeMock.readFile).toHaveBeenCalledOnce();
   });
 
   it("refuses to overwrite a file changed after approval", async () => {
-    nativeMock.readFile
-      .mockResolvedValueOnce({ kind: "text", content: "before" })
-      .mockResolvedValueOnce({ kind: "text", content: "change" });
+    nativeMock.readFile.mockResolvedValueOnce(text("before"));
+    nativeMock.writeFileChecked.mockResolvedValueOnce({
+      status: "conflict",
+      current: { size: 6, mtime: 2 },
+    });
     const prepared = await prepareFileMutation({
       sessionId: "session",
       toolCallId: "tool-stale",
@@ -155,13 +174,23 @@ describe("file mutation", () => {
     await expect(commitPreparedFileMutation(prepared)).rejects.toThrow(
       "file changed after approval",
     );
-    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+    expect(nativeMock.readFile).toHaveBeenCalledOnce();
+    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
+      "/workspace/a.txt",
+      "approved",
+      {
+        type: "match",
+        version: { revision: "base", size: 6, mtime: 1 },
+      },
+    );
   });
 
   it("refuses to overwrite an empty file created after new-file approval", async () => {
-    nativeMock.readFile
-      .mockRejectedValueOnce(new Error("not found"))
-      .mockResolvedValueOnce({ kind: "text", content: "" });
+    nativeMock.readFile.mockRejectedValueOnce(new Error("not found"));
+    nativeMock.writeFileChecked.mockResolvedValueOnce({
+      status: "conflict",
+      current: { size: 0, mtime: 2 },
+    });
     const prepared = await prepareFileMutation({
       sessionId: "session",
       toolCallId: "tool-created",
@@ -173,6 +202,11 @@ describe("file mutation", () => {
     await expect(commitPreparedFileMutation(prepared)).rejects.toThrow(
       "file changed after approval",
     );
-    expect(nativeMock.writeFile).not.toHaveBeenCalled();
+    expect(nativeMock.readFile).toHaveBeenCalledOnce();
+    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
+      "/workspace/new.txt",
+      "approved",
+      { type: "missing" },
+    );
   });
 });
