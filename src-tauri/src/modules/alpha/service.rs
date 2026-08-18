@@ -710,10 +710,7 @@ mod tests {
         .unwrap();
 
         assert!(is_current_runtime(&current, "release:current"));
-        assert_eq!(
-            current.started_at.as_deref(),
-            Some("2026-08-13T09:20:31Z")
-        );
+        assert_eq!(current.started_at.as_deref(), Some("2026-08-13T09:20:31Z"));
     }
 
     #[test]
