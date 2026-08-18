@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
+use super::cleanup_ticket::CleanupTicket;
 use super::manager::{TaskControl, TransferManager, TransferRunError};
 use super::models::{
     TransferConflict, TransferConflictDecision, TransferFileFailure, TransferStage,
@@ -143,6 +144,40 @@ impl ExecutionContext {
         self.manager
             .begin_finalizing(&self.app, &self.task_id)
             .await
+    }
+
+    /// 在破坏性提交前持久化 recovery 清理票据。
+    pub(crate) async fn register_cleanup_ticket(
+        &self,
+        ticket: Option<CleanupTicket>,
+    ) -> Result<Option<CleanupTicket>, TransferRunError> {
+        if let Some(ticket) = ticket.as_ref() {
+            self.manager
+                .persist_cleanup_ticket(&self.task_id, ticket)
+                .await?;
+        }
+        Ok(ticket)
+    }
+
+    /// 提交成功后完成票据，或在仍有残留路径时标记为可自动删除。
+    pub(crate) async fn complete_cleanup_ticket(
+        &self,
+        ticket: Option<&mut CleanupTicket>,
+        cleanup_pending: bool,
+    ) -> Result<(), TransferRunError> {
+        let Some(ticket) = ticket else {
+            return Ok(());
+        };
+        if cleanup_pending {
+            ticket.mark_disposable();
+            self.manager
+                .persist_cleanup_ticket(&self.task_id, ticket)
+                .await
+        } else {
+            self.manager
+                .finish_cleanup_ticket(&self.task_id, &ticket.id)
+                .await
+        }
     }
 
     /// 在扫描完成后发布稳定的文件数和总字节数。

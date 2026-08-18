@@ -1,8 +1,10 @@
 //! 文件传输任务的扁平 Journal 持久化。
 //!
 //! 每个任务只使用 `~/.terax/transfers` 下一个 JSONL 文件。创建、追加、读取和删除
-//! 共用一个短时注册锁，避免多个 Workspace 进程交叉写入；进度字节不逐次落盘。
+//! 共用一个短时注册锁，避免多个 Workspace 进程交叉写入。进度字节不逐次落盘，
+//! 提交 backup 的 recovery/disposable 转换则必须同步持久化。
 
+use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,7 @@ use crate::modules::storage::FileLock;
 use crate::modules::workspace::WorkspaceEnv;
 use crate::modules::workspace_process::environment_filename_key;
 
+use super::cleanup_ticket::CleanupTicket;
 use super::errors::{TransferErrorCode, TransferFailure};
 use super::models::{
     EnqueueTransferRequest, TransferFileFailure, TransferStatus, TransferTaskSnapshot,
@@ -42,6 +45,12 @@ enum JournalRecord {
         completed_files: u64,
         updated_at: u64,
     },
+    CleanupTicket {
+        ticket: CleanupTicket,
+    },
+    CleanupFinished {
+        ticket_id: String,
+    },
 }
 
 /// 从 Journal 恢复的任务及其原始请求。
@@ -49,6 +58,37 @@ pub(crate) struct LoadedTask {
     pub(crate) request: EnqueueTransferRequest,
     pub(crate) snapshot: TransferTaskSnapshot,
     pub(crate) path: PathBuf,
+    pub(crate) cleanup_tickets: Vec<CleanupTicket>,
+}
+
+/// 追加一条 recovery 或 disposable 清理票据。
+pub(crate) async fn append_cleanup_ticket(
+    path: &Path,
+    ticket: &CleanupTicket,
+) -> Result<(), TransferFailure> {
+    append_record(
+        path,
+        &JournalRecord::CleanupTicket {
+            ticket: ticket.clone(),
+        },
+        "append transfer cleanup ticket",
+    )
+    .await
+}
+
+/// 记录指定清理票据已经完成，重放时不再执行。
+pub(crate) async fn append_cleanup_finished(
+    path: &Path,
+    ticket_id: &str,
+) -> Result<(), TransferFailure> {
+    append_record(
+        path,
+        &JournalRecord::CleanupFinished {
+            ticket_id: ticket_id.to_string(),
+        },
+        "finish transfer cleanup ticket",
+    )
+    .await
 }
 
 /// 创建任务 Journal，并把请求和首个快照写为第一行。
@@ -265,6 +305,7 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
     let data = fs::read(path).map_err(|error| error.to_string())?;
     let mut request = None;
     let mut snapshot = None;
+    let mut cleanup_tickets = HashMap::new();
     let lines: Vec<_> = data.split(|byte| *byte == b'\n').collect();
     for (index, line) in lines.iter().enumerate() {
         if line.iter().all(u8::is_ascii_whitespace) {
@@ -326,6 +367,12 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
                 current.completed_files = completed_files;
                 current.updated_at = updated_at;
             }
+            JournalRecord::CleanupTicket { ticket } => {
+                cleanup_tickets.insert(ticket.id.clone(), ticket);
+            }
+            JournalRecord::CleanupFinished { ticket_id } => {
+                cleanup_tickets.remove(&ticket_id);
+            }
         }
     }
     match (request, snapshot) {
@@ -333,6 +380,7 @@ fn read_task(path: &Path) -> Result<Option<LoadedTask>, String> {
             request,
             snapshot,
             path: path.to_path_buf(),
+            cleanup_tickets: cleanup_tickets.into_values().collect(),
         })),
         (None, None) => Ok(None),
         _ => Err("journal is missing its created record".into()),
@@ -549,6 +597,71 @@ mod tests {
         assert!(loaded.snapshot.is_directory);
         assert_eq!(loaded.snapshot.file_failures[0].id, "failure");
         assert_eq!(loaded.snapshot.file_failures[1].id, "second-failure");
+    }
+
+    #[test]
+    fn journal_replay_keeps_only_unfinished_cleanup_tickets() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("task.jsonl");
+        std::fs::File::create(&path).unwrap();
+        append_blocking(
+            &path,
+            &JournalRecord::Created {
+                request: EnqueueTransferRequest {
+                    direction: TransferDirection::Upload,
+                    strategy: TransferStrategy::Archive,
+                    sources: vec!["folder".into()],
+                    destination: "/tmp".into(),
+                },
+                snapshot: snapshot(TransferStatus::Running, 1),
+            },
+        )
+        .unwrap();
+        let mut pending =
+            CleanupTicket::recovery(super::super::cleanup_ticket::CleanupTicketTarget::Local {
+                staging_task_id: "staging".into(),
+                owner_task_id: "task".into(),
+                paths: vec!["/tmp/.terax-part-staging-0.backup".into()],
+            });
+        let finished =
+            CleanupTicket::recovery(super::super::cleanup_ticket::CleanupTicketTarget::Local {
+                staging_task_id: "other".into(),
+                owner_task_id: "task".into(),
+                paths: vec!["/tmp/.terax-part-other-0.backup".into()],
+            });
+        append_blocking(
+            &path,
+            &JournalRecord::CleanupTicket {
+                ticket: pending.clone(),
+            },
+        )
+        .unwrap();
+        pending.mark_disposable();
+        append_blocking(
+            &path,
+            &JournalRecord::CleanupTicket {
+                ticket: pending.clone(),
+            },
+        )
+        .unwrap();
+        append_blocking(
+            &path,
+            &JournalRecord::CleanupTicket {
+                ticket: finished.clone(),
+            },
+        )
+        .unwrap();
+        append_blocking(
+            &path,
+            &JournalRecord::CleanupFinished {
+                ticket_id: finished.id,
+            },
+        )
+        .unwrap();
+
+        let loaded = read_task(&path).unwrap().unwrap();
+
+        assert_eq!(loaded.cleanup_tickets, vec![pending]);
     }
 
     #[test]

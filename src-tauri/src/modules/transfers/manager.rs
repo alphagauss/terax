@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::modules::workspace::WorkspaceEnv;
 
+use super::cleanup_ticket::{CleanupTicket, CleanupTicketState, CleanupTicketTarget};
 use super::errors::{TransferErrorCode, TransferFailure};
 use super::models::{
     EnqueueTransferRequest, ResolveTransferConflictRequest, TransferConflict,
@@ -1032,6 +1033,30 @@ impl TransferManager {
             .await
     }
 
+    /// 追加 recovery 或 disposable 清理票据，不改变前端任务快照。
+    pub(crate) async fn persist_cleanup_ticket(
+        &self,
+        id: &str,
+        ticket: &CleanupTicket,
+    ) -> Result<(), TransferRunError> {
+        let path = self.journal_path(id).await?;
+        journal::append_cleanup_ticket(&path, ticket)
+            .await
+            .map_err(TransferRunError::from)
+    }
+
+    /// 记录一条清理票据已完成或其路径已不存在。
+    pub(crate) async fn finish_cleanup_ticket(
+        &self,
+        id: &str,
+        ticket_id: &str,
+    ) -> Result<(), TransferRunError> {
+        let path = self.journal_path(id).await?;
+        journal::append_cleanup_finished(&path, ticket_id)
+            .await
+            .map_err(TransferRunError::from)
+    }
+
     /// 发布冲突并把任务切换到等待用户状态。
     pub(crate) async fn begin_conflict(
         &self,
@@ -1236,9 +1261,26 @@ impl TransferManager {
         if *loaded {
             return Ok(());
         }
+        // 历史加载、票据所有权登记和清除必须串行，避免刚恢复的 Journal 被并发删除。
+        let _history = self.history_operations.lock().await;
         let recovered = journal::load(workspace, workspace_id).await?;
+        let mut cleanup_tickets = Vec::new();
         let mut tasks = self.tasks.write().await;
         for task in recovered {
+            for ticket in task
+                .cleanup_tickets
+                .into_iter()
+                .filter(|ticket| ticket.state == CleanupTicketState::Disposable)
+            {
+                if ticket.owner_task_id() == task.snapshot.id {
+                    cleanup_tickets.push((task.path.clone(), ticket));
+                } else {
+                    log::warn!(
+                        "refused transfer cleanup ticket with mismatched owner task id in {}",
+                        task.path.display()
+                    );
+                }
+            }
             tasks
                 .entry(task.snapshot.id.clone())
                 .or_insert(ManagedTask {
@@ -1248,7 +1290,11 @@ impl TransferManager {
                     control: None,
                 });
         }
+        drop(tasks);
         *loaded = true;
+        for (journal_path, ticket) in cleanup_tickets {
+            recover_disposable_cleanup(journal_path, ticket);
+        }
         Ok(())
     }
 
@@ -1270,6 +1316,75 @@ impl TransferManager {
             .get(id)
             .map(|task| task.journal_path.clone())
             .ok_or_else(|| task_not_found(id))
+    }
+}
+
+/// 首次加载历史时只对已标记 disposable 的精确路径启动一次清理。
+fn recover_disposable_cleanup(journal_path: PathBuf, ticket: CleanupTicket) {
+    let owner_task_id = ticket.owner_task_id().to_string();
+    begin_deferred_cleanup(&owner_task_id);
+    tauri::async_runtime::spawn(async move {
+        let _ownership = RecoveredCleanupOwnership(owner_task_id);
+        match &ticket.target {
+            CleanupTicketTarget::Local {
+                staging_task_id,
+                owner_task_id,
+                paths,
+            } => {
+                let Some(remaining) =
+                    super::commit::remove_persisted_local_backups(staging_task_id, paths).await
+                else {
+                    return;
+                };
+                if remaining.is_empty() {
+                    finish_recovered_cleanup(&journal_path, &ticket.id).await;
+                } else {
+                    super::commit::schedule_local_cleanup(owner_task_id, remaining);
+                }
+            }
+            CleanupTicketTarget::Ssh { .. } => {
+                let Some((scope, paths)) =
+                    super::ssh::cleanup::RemoteCleanupScope::from_ticket(&ticket.target)
+                else {
+                    return;
+                };
+                let workspace = match crate::modules::remote::manager::global_manager() {
+                    Ok(manager) => manager.workspace(scope.profile_id()).await.ok(),
+                    Err(_) => None,
+                };
+                let Some(workspace) = workspace else {
+                    super::ssh::cleanup::schedule(scope, paths);
+                    return;
+                };
+                if !scope.matches_workspace(&workspace) {
+                    return;
+                }
+                let remaining = super::ssh::cleanup::remove_now(&workspace, &scope, &paths).await;
+                if remaining.is_empty() {
+                    finish_recovered_cleanup(&journal_path, &ticket.id).await;
+                } else {
+                    super::ssh::cleanup::schedule(scope, remaining);
+                }
+            }
+        }
+    });
+}
+
+/// 确保一次恢复清理在任何退出路径都释放临时历史所有权。
+struct RecoveredCleanupOwnership(String);
+
+impl Drop for RecoveredCleanupOwnership {
+    fn drop(&mut self) {
+        finish_deferred_cleanup(&self.0);
+    }
+}
+
+async fn finish_recovered_cleanup(journal_path: &std::path::Path, ticket_id: &str) {
+    if let Err(error) = journal::append_cleanup_finished(journal_path, ticket_id).await {
+        log::warn!(
+            "failed to finish recovered transfer cleanup ticket: {}",
+            error.detail
+        );
     }
 }
 

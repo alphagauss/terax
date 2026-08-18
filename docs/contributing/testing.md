@@ -83,6 +83,8 @@ ConPTY/Job Object 测试应放在 `#[cfg(windows)]` 后，Unix PTY 生命周期�
 5. 已暂停的排队任务不占用 scheduler permit，取消操作会唤醒所有 waiter。
 6. SSH 连接中断必须在远程 I/O 时间上限内进入 terminal state。
 7. Archive 解压由 manifest 驱动，而不是由不受信任的 archive path 驱动。
+8. 传输前后同路径均为目录时，Direct、Archive 和所有目录冲突决策都不得替换该目录的文件系统身份。
+9. 异常退出恢复只能自动删除已持久化为 disposable 的精确 backup 路径；recovery 票据、改绑的 SSH endpoint 和不匹配 task ID 的路径必须拒绝清理。
 
 WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面无法覆盖 Workspace bootstrap、原生 command、任务独占的 SFTP session 或文件系统通知。发布级文件传输变更需要覆盖两个方向、文件与目录、Unicode 与空条目、暂停/恢复、取消、目标冲突、连接中断、重试和目标空间不足，并跨边界比较文件 hash。
 
