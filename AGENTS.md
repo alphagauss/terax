@@ -162,6 +162,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 
 - Shell 初始化脚本位于 `src-tauri/src/modules/pty/scripts/`，负责 OSC 7 和 OSC 133 标记。
 - Unix 和 Windows 平台代码必须放入正确的 `#[cfg]` 分支。
+- SSH 文件内容操作统一经过 `remote/file_service.rs`。目录与正文读取共享 raw SFTP 流水线，元数据和写入使用独立高层 session。
+- 可选 Python 远端任务后端首期只在 RTT 不低于 100 ms 时加速条件写入，通过不落盘的一次性进程运行；读取继续使用 SFTP。后续批量任务必须使用封闭、版本化且有资源上限的协议，不可用或失败时安全回退 SFTP，不能成为通用命令入口。
 - Windows ConPTY 创建必须由 `SPAWN_LOCK` 包围；并发创建会造成某个 PTY 输出管道停滞。
 - 每个 Windows ConPTY 子进程必须进入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object，保证 Terax 退出时清理整个进程树。
 - 终端 Enter 必须发送 `\r`，不能发送 `\n`，否则 Windows PowerShell 无法正确处理。

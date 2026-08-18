@@ -1,4 +1,4 @@
-//! SSH 连接、transport 健康与流量、终端和隧道的 Tauri command 适配层。
+//! SSH 连接、文件后端、transport 健康与流量、终端和隧道的 Tauri command 适配层。
 //!
 //! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
@@ -8,8 +8,8 @@ use crate::modules::{secrets, secrets::SecretsState};
 use super::manager::RemoteState;
 use super::models::{
     ConnectRequest, CredentialOverride, ForegroundIntent, ImportedHost, RemoteRuntimeSnapshot,
-    SshAuthMethod, SshHealthSnapshot, SshProfile, SshTrafficSnapshot, TunnelConfig,
-    TunnelEventKind, TunnelInfo,
+    SshAuthMethod, SshFileBackendSnapshot, SshHealthSnapshot, SshProfile, SshTrafficSnapshot,
+    TunnelConfig, TunnelEventKind, TunnelInfo,
 };
 
 const SSH_SECRET_SERVICE: &str = "terax-ssh";
@@ -151,6 +151,23 @@ pub async fn ssh_health_snapshot(
     state: tauri::State<'_, RemoteState>,
 ) -> Result<SshHealthSnapshot, String> {
     Ok(state.manager.health_snapshot().await)
+}
+
+#[tauri::command]
+/// 返回当前 connected epoch 的文件加速器状态。
+pub async fn ssh_file_backend_snapshot(
+    state: tauri::State<'_, RemoteState>,
+) -> Result<SshFileBackendSnapshot, String> {
+    Ok(state.manager.file_backend_snapshot().await)
+}
+
+#[tauri::command]
+/// 更新当前 SSH epoch 的文件加速策略。
+pub async fn ssh_file_backend_set_enabled(
+    state: tauri::State<'_, RemoteState>,
+    enabled: bool,
+) -> Result<SshFileBackendSnapshot, String> {
+    Ok(state.manager.set_file_acceleration_enabled(enabled).await)
 }
 
 #[tauri::command]

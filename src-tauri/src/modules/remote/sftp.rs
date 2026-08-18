@@ -1,9 +1,9 @@
 //! 基于 SFTP 的远程文件系统实现。
 //!
-//! Explorer 使用不查询扩展的 raw session 流水线读取目录；其他文件操作复用高层会话。
-//! 编辑器保存重叠临时文件刷盘、权限恢复和提交 channel 建立，条件写入与破坏性操作
-//! 维持既有安全校验。
+//! Explorer 使用不查询扩展的 raw session 流水线读取目录；文件内容操作由上层服务
+//! 选择后端，本模块实现默认 SFTP 传输、原子提交和破坏性操作的安全约束。
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -11,12 +11,31 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags, StatusCode};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
+use tokio::sync::OnceCell;
 
+use super::file_service::{
+    RemoteCheckedWrite, RemoteFileRead, RemoteObservedVersion, RemoteVersion,
+};
 use super::session::{join_remote, shell_quote, validate_remote_path, RemoteWorkspace};
 
 const RECURSIVE_DELETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DIRECTORY_READ_PIPELINE: usize = 2;
+const FILE_READ_PIPELINE: usize = 8;
+const DEFAULT_FILE_READ_CHUNK: u32 = 240 * 1024;
+
+/// 目录与文件正文读取共享的 raw SFTP session 及服务端读取能力。
+pub(crate) struct RemoteReadSession {
+    pub(crate) session: Arc<russh_sftp::client::RawSftpSession>,
+    supports_limits: bool,
+    read_len: OnceCell<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FileReadChunk {
+    offset: u64,
+    len: u32,
+}
 
 #[derive(Clone, Debug)]
 pub struct RemoteDirEntry {
@@ -38,43 +57,6 @@ pub struct RemoteStat {
     pub kind: RemoteEntryKind,
     pub size: u64,
     pub mtime: u64,
-}
-
-/// 一次有界远端文件读取的正文或过大结果。
-pub enum RemoteFileRead {
-    Content {
-        bytes: Vec<u8>,
-        size: u64,
-        mtime: u64,
-    },
-    TooLarge {
-        size: u64,
-        mtime: u64,
-    },
-}
-
-/// 编辑器已确认的远端文件版本。
-pub struct RemoteVersion {
-    pub revision: String,
-    pub size: u64,
-    pub mtime: u64,
-}
-
-/// 条件写入观察到的远端元数据。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RemoteObservedVersion {
-    pub size: u64,
-    pub mtime: u64,
-}
-
-/// 远端条件写入结果。
-pub enum RemoteCheckedWrite {
-    Written {
-        mtime: u64,
-    },
-    Conflict {
-        current: Option<RemoteObservedVersion>,
-    },
 }
 
 #[derive(Clone, Debug)]
@@ -155,9 +137,9 @@ pub async fn session(
     Ok(session)
 }
 
-/// 提前建立 Explorer 专用的标准 SFTP v3 session。
-pub async fn warm_directory_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), String> {
-    directory_session(workspace).await.map(|_| ())
+/// 提前建立目录和文件正文读取共享的标准 SFTP v3 session。
+pub async fn warm_read_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), String> {
+    read_session(workspace).await.map(|_| ())
 }
 
 /// 提前建立普通文件、元数据和修改操作复用的高层 SFTP session。
@@ -165,11 +147,9 @@ pub async fn warm_file_session(workspace: &Arc<RemoteWorkspace>) -> Result<(), S
     session(workspace).await.map(|_| ())
 }
 
-/// 返回 Explorer 目录元数据专用的 raw SFTP session。
-async fn directory_session(
-    workspace: &Arc<RemoteWorkspace>,
-) -> Result<Arc<russh_sftp::client::RawSftpSession>, String> {
-    let mut cached = workspace.remote_fs.directory_session.lock().await;
+/// 返回目录和文件正文读取共享的 raw SFTP session。
+async fn read_session(workspace: &Arc<RemoteWorkspace>) -> Result<Arc<RemoteReadSession>, String> {
+    let mut cached = workspace.remote_fs.read_session.lock().await;
     if let Some(session) = cached.as_ref() {
         return Ok(session.clone());
     }
@@ -183,21 +163,28 @@ async fn directory_session(
         .await
         .map_err(|error| format!("request directory SFTP subsystem: {error}"))?;
     let session = russh_sftp::client::RawSftpSession::new(channel.into_stream());
-    session
+    let version = session
         .init()
         .await
         .map_err(|error| format!("initialize directory SFTP: {error}"))?;
     session.set_timeout(30);
-    let session = Arc::new(session);
+    let session = Arc::new(RemoteReadSession {
+        session: Arc::new(session),
+        supports_limits: version
+            .extensions
+            .get(russh_sftp::extensions::LIMITS)
+            .is_some_and(|value| value == "1"),
+        read_len: OnceCell::new(),
+    });
     *cached = Some(session.clone());
     Ok(session)
 }
 
-async fn invalidate_directory_session(
+async fn invalidate_read_session(
     workspace: &Arc<RemoteWorkspace>,
-    failed: &Arc<russh_sftp::client::RawSftpSession>,
+    failed: &Arc<RemoteReadSession>,
 ) {
-    let mut cached = workspace.remote_fs.directory_session.lock().await;
+    let mut cached = workspace.remote_fs.read_session.lock().await;
     if cached
         .as_ref()
         .is_some_and(|current| Arc::ptr_eq(current, failed))
@@ -358,24 +345,24 @@ pub(crate) async fn read_dir_uncached(
     path: &str,
 ) -> Result<Vec<RemoteDirEntry>, String> {
     validate_remote_path(path)?;
-    let session = directory_session(workspace).await?;
-    let read = match read_directory_pipelined(session.clone(), path).await {
+    let session = read_session(workspace).await?;
+    let read = match read_directory_pipelined(session.session.clone(), path).await {
         Ok(entries) => entries,
         Err(error) if should_invalidate_session(&error) => {
             if should_fail_transport(&error) {
                 workspace.report_transport_failure();
                 return Err(format!("read remote directory {path}: {error}"));
             }
-            invalidate_directory_session(workspace, &session).await;
-            let retry = directory_session(workspace).await?;
-            match read_directory_pipelined(retry.clone(), path).await {
+            invalidate_read_session(workspace, &session).await;
+            let retry = read_session(workspace).await?;
+            match read_directory_pipelined(retry.session.clone(), path).await {
                 Ok(entries) => entries,
                 Err(retry_error) => {
                     if should_fail_transport(&retry_error) {
                         workspace.report_transport_failure();
                     }
                     if should_invalidate_session(&retry_error) {
-                        invalidate_directory_session(workspace, &retry).await;
+                        invalidate_read_session(workspace, &retry).await;
                     }
                     return Err(format!("read remote directory {path}: {retry_error}"));
                 }
@@ -521,38 +508,201 @@ pub async fn read_file(
     }
 }
 
-/// 并发取得目标元数据与文件 handle，再按已确认大小完成有界读取。
+/// 并发取得目标元数据与文件 handle，再流水线读取已确认大小的正文。
 ///
-/// 小文件只保留 `STAT + OPEN` 和 `READ` 两个依赖阶段；准确长度使读取完成时无需
-/// 再发送一次仅用于确认 EOF 的 SFTP 请求。
-pub async fn read_file_snapshot(
+/// 小文件只保留 `STAT + OPEN` 和 `READ` 两个依赖阶段；大文件按固定 offset 维持
+/// 有上限的 in-flight 请求，响应可以乱序到达，不再按块串行等待 RTT。
+pub(crate) async fn read_file_snapshot(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     limit: u64,
 ) -> Result<RemoteFileRead, String> {
     validate_remote_path(path)?;
-    let remote_path = path.to_string();
-    retry_sftp_read(workspace, format!("read remote file {path}"), move |sftp| {
-        let metadata_path = remote_path.clone();
-        let open_path = remote_path.clone();
-        Box::pin(async move {
-            let (metadata, file) =
-                tokio::try_join!(sftp.metadata(metadata_path), sftp.open(open_path),)?;
-            let size = metadata.len();
-            let mtime = remote_mtime(&metadata);
-            if size > limit {
-                return Ok(RemoteFileRead::TooLarge { size, mtime });
+    let context = format!("read remote file {path}");
+    for attempt in 0..2 {
+        let current = read_session(workspace).await?;
+        match read_file_snapshot_once(current.clone(), path, limit).await {
+            Ok(value) => return Ok(value),
+            Err(error) if should_invalidate_session(&error) => {
+                if should_fail_transport(&error) {
+                    workspace.report_transport_failure();
+                    return Err(format!("{context}: {error}"));
+                }
+                invalidate_read_session(workspace, &current).await;
+                if attempt == 1 {
+                    return Err(format!("{context}: {error}"));
+                }
             }
-            let mut output = vec![0; size as usize];
-            file.take(size).read_exact(&mut output).await?;
-            Ok(RemoteFileRead::Content {
-                bytes: output,
-                size,
-                mtime,
-            })
+            Err(error) => return Err(format!("{context}: {error}")),
+        }
+    }
+    unreachable!("raw SFTP read retry loop always returns")
+}
+
+/// 在一次 raw session 上完成元数据、handle 和正文读取。
+async fn read_file_snapshot_once(
+    read_session: Arc<RemoteReadSession>,
+    path: &str,
+    limit: u64,
+) -> Result<RemoteFileRead, russh_sftp::client::error::Error> {
+    let session = read_session.session.clone();
+    let metadata_path = path.to_string();
+    let open_path = path.to_string();
+    let (chunk_len, metadata, opened) = tokio::join!(
+        file_read_chunk_len(&read_session),
+        session.stat(metadata_path),
+        session.open(open_path, OpenFlags::READ, FileAttributes::empty()),
+    );
+    let (metadata, handle) = match (metadata, opened) {
+        (Ok(metadata), Ok(handle)) => (metadata.attrs, handle.handle),
+        (Err(error), Ok(handle)) => {
+            close_read_handle(session, handle.handle);
+            return Err(error);
+        }
+        (Ok(_), Err(error)) | (Err(error), Err(_)) => return Err(error),
+    };
+    let size = metadata.len();
+    let mtime = remote_mtime(&metadata);
+    if size > limit {
+        close_read_handle(session, handle);
+        return Ok(RemoteFileRead::TooLarge { size, mtime });
+    }
+    let bytes = match read_file_pipelined(session.clone(), handle.clone(), size, chunk_len).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            close_read_handle(session, handle);
+            return Err(error);
+        }
+    };
+    close_read_handle(session, handle);
+    Ok(RemoteFileRead::Content { bytes, size, mtime })
+}
+
+/// 首次文件读取时并行查询服务端 limits，失败时使用保守块大小。
+async fn file_read_chunk_len(session: &RemoteReadSession) -> u32 {
+    *session
+        .read_len
+        .get_or_init(|| async {
+            if !session.supports_limits {
+                return DEFAULT_FILE_READ_CHUNK;
+            }
+            session
+                .session
+                .limits()
+                .await
+                .ok()
+                .and_then(|limits| u32::try_from(limits.max_read_len).ok())
+                .filter(|limit| *limit > 0)
+                .map(|limit| limit.min(DEFAULT_FILE_READ_CHUNK))
+                .unwrap_or(DEFAULT_FILE_READ_CHUNK)
         })
-    })
-    .await
+        .await
+}
+
+/// 按 offset 规划完整且不重叠的文件读取块。
+fn plan_file_read_chunks(size: u64, chunk_len: u32) -> VecDeque<FileReadChunk> {
+    debug_assert!(chunk_len > 0);
+    let mut chunks = VecDeque::new();
+    let mut offset = 0;
+    while offset < size {
+        let len = (size - offset).min(u64::from(chunk_len)) as u32;
+        chunks.push_back(FileReadChunk { offset, len });
+        offset += u64::from(len);
+    }
+    chunks
+}
+
+/// 在单个 handle 上维持固定数量的并发 offset 读取，并按位置组装乱序响应。
+async fn read_file_pipelined(
+    session: Arc<russh_sftp::client::RawSftpSession>,
+    handle: String,
+    size: u64,
+    chunk_len: u32,
+) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
+    let output_len = usize::try_from(size).map_err(|_| {
+        russh_sftp::client::error::Error::UnexpectedBehavior(
+            "remote file does not fit in local memory".into(),
+        )
+    })?;
+    let mut output = vec![0; output_len];
+    let mut queued = plan_file_read_chunks(size, chunk_len);
+    let mut pending = FuturesUnordered::new();
+    fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle);
+
+    while let Some((chunk, result)) = pending.next().await {
+        let data = result?.data;
+        if data.is_empty() || data.len() > chunk.len as usize {
+            return Err(russh_sftp::client::error::Error::UnexpectedBehavior(
+                "remote file returned an invalid read length".into(),
+            ));
+        }
+        let start = usize::try_from(chunk.offset).map_err(|_| {
+            russh_sftp::client::error::Error::UnexpectedBehavior(
+                "remote file offset does not fit in local memory".into(),
+            )
+        })?;
+        let end = start.checked_add(data.len()).ok_or_else(|| {
+            russh_sftp::client::error::Error::UnexpectedBehavior(
+                "remote file read overflowed its destination".into(),
+            )
+        })?;
+        if end > output.len() {
+            return Err(russh_sftp::client::error::Error::UnexpectedBehavior(
+                "remote file read exceeded its declared size".into(),
+            ));
+        }
+        output[start..end].copy_from_slice(&data);
+        if data.len() < chunk.len as usize {
+            queued.push_front(FileReadChunk {
+                offset: chunk.offset + data.len() as u64,
+                len: chunk.len - data.len() as u32,
+            });
+        }
+        fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle);
+    }
+    Ok(output)
+}
+
+/// 将待处理块补充到固定并发上限。
+fn fill_file_read_pipeline(
+    pending: &mut FuturesUnordered<FileReadFuture>,
+    queued: &mut VecDeque<FileReadChunk>,
+    session: &Arc<russh_sftp::client::RawSftpSession>,
+    handle: &str,
+) {
+    while pending.len() < FILE_READ_PIPELINE {
+        let Some(chunk) = queued.pop_front() else {
+            break;
+        };
+        pending.push(Box::pin(read_file_chunk(
+            session.clone(),
+            handle.to_string(),
+            chunk,
+        )));
+    }
+}
+
+type FileReadResult = (
+    FileReadChunk,
+    Result<russh_sftp::protocol::Data, russh_sftp::client::error::Error>,
+);
+type FileReadFuture = Pin<Box<dyn Future<Output = FileReadResult> + Send>>;
+
+/// 发送一个带固定 offset 的 raw SFTP READ。
+async fn read_file_chunk(
+    session: Arc<russh_sftp::client::RawSftpSession>,
+    handle: String,
+    chunk: FileReadChunk,
+) -> FileReadResult {
+    let result = session.read(handle, chunk.offset, chunk.len).await;
+    (chunk, result)
+}
+
+/// 后台关闭已完成或失败的读取 handle，不把 CLOSE 往返加入用户可见延迟。
+fn close_read_handle(session: Arc<russh_sftp::client::RawSftpSession>, handle: String) {
+    tauri::async_runtime::spawn(async move {
+        let _ = session.close(handle).await;
+    });
 }
 
 /// 原子写入远程文件并保留已有文件的权限。
@@ -567,7 +717,11 @@ pub async fn write_file(
     let (sftp, target, permissions) = prepare_remote_write(workspace, path).await?;
     let (temporary, channel) =
         stage_remote_write_and_open_commit(workspace, &sftp, &target, permissions, content).await?;
-    replace_remote_file(workspace, &sftp, channel, &temporary, &target).await?;
+    if let Some(written) =
+        replace_remote_file(workspace, &sftp, channel, &temporary, &target).await?
+    {
+        return Ok(written.mtime);
+    }
     let metadata = sftp_result(
         workspace,
         &sftp,
@@ -582,7 +736,7 @@ pub async fn write_file(
 ///
 /// 临时文件与目标位于同一目录，最终通过硬链接执行原子 no-clobber 发布；目标在审批后
 /// 出现时返回冲突，不能退化为覆盖。
-pub async fn write_file_missing(
+pub(crate) async fn write_file_missing(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     content: &[u8],
@@ -594,7 +748,10 @@ pub async fn write_file_missing(
         stage_remote_write_and_open_commit(workspace, &sftp, &target, None, content).await?;
     let outcome = commit_remote_missing(workspace, channel, &temporary, &target).await;
     match outcome {
-        Ok(RemoteCommit::Complete) => {
+        Ok(RemoteCommit::Complete(Some(written))) => Ok(RemoteCheckedWrite::Written {
+            mtime: written.mtime,
+        }),
+        Ok(RemoteCommit::Complete(None)) => {
             let metadata = sftp_result(
                 workspace,
                 &sftp,
@@ -606,7 +763,10 @@ pub async fn write_file_missing(
                 mtime: remote_mtime(&metadata),
             })
         }
-        Ok(RemoteCommit::Conflict) => {
+        Ok(RemoteCommit::Conflict(Some(current))) => Ok(RemoteCheckedWrite::Conflict {
+            current: Some(current),
+        }),
+        Ok(RemoteCommit::Conflict(None)) => {
             let current = optional_sftp_result(
                 workspace,
                 &sftp,
@@ -656,7 +816,7 @@ async fn existing_remote_file(
 }
 
 /// 在远端计算文件版本，只返回元数据和摘要。
-pub async fn file_version(
+pub(crate) async fn file_version(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     max_size: u64,
@@ -686,7 +846,7 @@ pub async fn file_version(
 }
 
 /// 在远端数据源上校验摘要并提交临时文件，正常保存不下载旧文件正文。
-pub async fn write_file_checked(
+pub(crate) async fn write_file_checked(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     content: &[u8],
@@ -750,7 +910,10 @@ pub async fn write_file_checked(
     )
     .await;
     match outcome {
-        Ok(RemoteCommit::Complete) => {
+        Ok(RemoteCommit::Complete(Some(written))) => Ok(RemoteCheckedWrite::Written {
+            mtime: written.mtime,
+        }),
+        Ok(RemoteCommit::Complete(None)) => {
             let metadata = sftp_result(
                 workspace,
                 &sftp,
@@ -763,7 +926,10 @@ pub async fn write_file_checked(
             })
         }
         Ok(RemoteCommit::Missing) => Ok(RemoteCheckedWrite::Conflict { current: None }),
-        Ok(RemoteCommit::Conflict) => {
+        Ok(RemoteCommit::Conflict(Some(current))) => Ok(RemoteCheckedWrite::Conflict {
+            current: Some(current),
+        }),
+        Ok(RemoteCommit::Conflict(None)) => {
             let metadata = sftp_result(
                 workspace,
                 &sftp,
@@ -927,11 +1093,12 @@ async fn replace_remote_file(
     channel: russh::Channel<russh::client::Msg>,
     temporary: &str,
     target: &str,
-) -> Result<(), String> {
+) -> Result<Option<RemoteObservedVersion>, String> {
     let command = format!(
-        "mv -f -- {} {}",
-        shell_quote(temporary),
-        shell_quote(target)
+        "target={target}; mv -f -- {temporary} \"$target\" || exit 74; \
+         metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s' \"$metadata\"",
+        temporary = shell_quote(temporary),
+        target = shell_quote(target),
     );
     let moved = match workspace
         .exec_on_channel(channel, &command, None, std::time::Duration::from_secs(15))
@@ -954,7 +1121,7 @@ async fn replace_remote_file(
             format!("replace remote file {target} failed: {detail}")
         });
     }
-    Ok(())
+    Ok(parse_remote_observed(&moved.stdout))
 }
 
 fn remote_mtime(metadata: &FileAttributes) -> u64 {
@@ -1000,10 +1167,11 @@ async fn remote_sha256(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<S
     parse_sha256(&output.stdout)
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum RemoteCommit {
-    Complete,
+    Complete(Option<RemoteObservedVersion>),
     Missing,
-    Conflict,
+    Conflict(Option<RemoteObservedVersion>),
 }
 
 async fn commit_remote_checked(
@@ -1022,13 +1190,8 @@ async fn commit_remote_checked(
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote checked replace failed".into());
     }
-    let status = String::from_utf8_lossy(&output.stdout);
-    match status.trim() {
-        "written" | "converged" => Ok(RemoteCommit::Complete),
-        "missing" => Ok(RemoteCommit::Missing),
-        "conflict" => Ok(RemoteCommit::Conflict),
-        _ => Err("remote checked replace returned an invalid status".into()),
-    }
+    parse_remote_commit(&output.stdout)
+        .map_err(|_| "remote checked replace returned an invalid status".into())
 }
 
 /// 在已预开的 channel 上原子发布一个仍缺失的远端目标。
@@ -1045,21 +1208,51 @@ async fn commit_remote_missing(
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote missing-only write failed".into());
     }
-    let status = String::from_utf8_lossy(&output.stdout);
-    match status.trim() {
-        "written" => Ok(RemoteCommit::Complete),
-        "conflict" => Ok(RemoteCommit::Conflict),
+    match parse_remote_commit(&output.stdout) {
+        Ok(RemoteCommit::Complete(observed)) => Ok(RemoteCommit::Complete(observed)),
+        Ok(RemoteCommit::Conflict(observed)) => Ok(RemoteCommit::Conflict(observed)),
         _ => Err("remote missing-only write returned an invalid status".into()),
     }
+}
+
+/// 解析提交状态及同一远端进程返回的可选 size、mtime。
+fn parse_remote_commit(output: &[u8]) -> Result<RemoteCommit, String> {
+    let mut fields = output.splitn(2, |byte| *byte == 0);
+    let status = std::str::from_utf8(fields.next().unwrap_or_default())
+        .map_err(|_| "remote commit status is not UTF-8")?
+        .trim();
+    let observed = fields.next().and_then(parse_remote_observed);
+    match status {
+        "written" | "converged" => Ok(RemoteCommit::Complete(observed)),
+        "missing" => Ok(RemoteCommit::Missing),
+        "conflict" => Ok(RemoteCommit::Conflict(observed)),
+        _ => Err("unknown remote commit status".into()),
+    }
+}
+
+/// 解析 Linux stat 输出，并转换为与 SFTP v3 相同的毫秒时间戳。
+fn parse_remote_observed(output: &[u8]) -> Option<RemoteObservedVersion> {
+    let output = std::str::from_utf8(output).ok()?;
+    let mut fields = output.split_whitespace();
+    let size = fields.next()?.parse().ok()?;
+    let mtime_seconds: u64 = fields.next()?.parse().ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    Some(RemoteObservedVersion {
+        size,
+        mtime: mtime_seconds.saturating_mul(1000),
+    })
 }
 
 /// 构造使用同目录硬链接完成原子 no-clobber 发布的安全命令。
 fn missing_commit_command(temporary: &str, target: &str) -> String {
     format!(
         "target={target}; temporary={temporary}; \
-         if [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; printf 'conflict'; \
-         elif ln -- \"$temporary\" \"$target\" 2>/dev/null; then rm -f -- \"$temporary\"; printf 'written'; \
-         elif [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; printf 'conflict'; \
+         report() {{ metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s\\000%s' \"$1\" \"$metadata\"; }}; \
+         if [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; report conflict; \
+         elif ln -- \"$temporary\" \"$target\" 2>/dev/null; then rm -f -- \"$temporary\"; report written; \
+         elif [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; report conflict; \
          else rm -f -- \"$temporary\"; exit 74; fi",
         target = shell_quote(target),
         temporary = shell_quote(temporary),
@@ -1075,14 +1268,15 @@ fn checked_commit_command(
 ) -> String {
     format!(
         "target={target}; temporary={temporary}; expected={expected}; replacement={replacement}; \
+         report() {{ metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s\\000%s' \"$1\" \"$metadata\"; }}; \
          if [ ! -f \"$target\" ]; then rm -f -- \"$temporary\"; printf 'missing'; exit 0; fi; \
          if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum -- \"$target\") || exit 73; \
          elif command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 -- \"$target\") || exit 73; \
          elif command -v openssl >/dev/null 2>&1; then actual=$(openssl dgst -sha256 -r \"$target\") || exit 73; \
          else exit 72; fi; actual=${{actual%% *}}; \
-         if [ \"$actual\" = \"$replacement\" ]; then rm -f -- \"$temporary\" && printf 'converged'; \
-         elif [ \"$actual\" != \"$expected\" ]; then rm -f -- \"$temporary\"; printf 'conflict'; \
-         else mv -f -- \"$temporary\" \"$target\" && printf 'written'; fi",
+         if [ \"$actual\" = \"$replacement\" ]; then rm -f -- \"$temporary\" && report converged; \
+         elif [ \"$actual\" != \"$expected\" ]; then rm -f -- \"$temporary\"; report conflict; \
+         else mv -f -- \"$temporary\" \"$target\" && report written; fi",
         target = shell_quote(target),
         temporary = shell_quote(temporary),
         expected = shell_quote(expected_revision),
@@ -1350,10 +1544,39 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_commit_command, existing_write_target, missing_commit_command, parse_sha256,
-        permission_attributes, recursive_delete_command, remote_parent_name, sanitize_local_name,
-        should_fail_transport, should_invalidate_session, validate_destructive_path,
+        checked_commit_command, existing_write_target, missing_commit_command, parse_remote_commit,
+        parse_sha256, permission_attributes, plan_file_read_chunks, recursive_delete_command,
+        remote_parent_name, sanitize_local_name, should_fail_transport, should_invalidate_session,
+        validate_destructive_path, FileReadChunk, RemoteCommit, RemoteObservedVersion,
+        DEFAULT_FILE_READ_CHUNK, FILE_READ_PIPELINE,
     };
+
+    #[test]
+    fn plans_file_reads_as_complete_non_overlapping_chunks() {
+        let size = u64::from(DEFAULT_FILE_READ_CHUNK) * (FILE_READ_PIPELINE as u64 + 2) + 17;
+        let chunks = plan_file_read_chunks(size, DEFAULT_FILE_READ_CHUNK);
+        let mut expected_offset = 0;
+
+        for chunk in &chunks {
+            assert_eq!(chunk.offset, expected_offset);
+            assert!(chunk.len > 0 && chunk.len <= DEFAULT_FILE_READ_CHUNK);
+            expected_offset += u64::from(chunk.len);
+        }
+        assert_eq!(expected_offset, size);
+        assert!(chunks.len() > FILE_READ_PIPELINE);
+    }
+
+    #[test]
+    fn plans_empty_and_boundary_file_reads_without_eof_probe() {
+        assert!(plan_file_read_chunks(0, DEFAULT_FILE_READ_CHUNK).is_empty());
+        assert_eq!(
+            plan_file_read_chunks(u64::from(DEFAULT_FILE_READ_CHUNK), DEFAULT_FILE_READ_CHUNK),
+            std::collections::VecDeque::from([FileReadChunk {
+                offset: 0,
+                len: DEFAULT_FILE_READ_CHUNK,
+            }])
+        );
+    }
 
     #[test]
     fn destructive_paths_reject_root_and_parent_traversal() {
@@ -1391,7 +1614,8 @@ mod tests {
         assert!(command.contains("temporary='/tmp/stage'\\''; echo bad; '\\''';"));
         assert!(command
             .contains("if [ ! -f \"$target\" ]; then rm -f -- \"$temporary\"; printf 'missing'"));
-        assert!(command.contains("then rm -f -- \"$temporary\"; printf 'conflict'"));
+        assert!(command.contains("then rm -f -- \"$temporary\"; report conflict"));
+        assert!(command.contains("stat -c '%s %Y'"));
         assert!(!command.contains("target=/tmp/target"));
     }
 
@@ -1417,6 +1641,27 @@ mod tests {
             digest
         );
         assert!(parse_sha256(b"not-a-digest").is_err());
+    }
+
+    #[test]
+    fn parses_commit_status_with_optional_metadata() {
+        assert_eq!(
+            parse_remote_commit(b"written\0"),
+            Ok(RemoteCommit::Complete(None))
+        );
+        assert_eq!(
+            parse_remote_commit(b"converged\0"),
+            Ok(RemoteCommit::Complete(None))
+        );
+        assert_eq!(
+            parse_remote_commit(b"conflict\x0010 1735689600"),
+            Ok(RemoteCommit::Conflict(Some(RemoteObservedVersion {
+                size: 10,
+                mtime: 1_735_689_600_000,
+            })))
+        );
+        assert_eq!(parse_remote_commit(b"missing"), Ok(RemoteCommit::Missing));
+        assert!(parse_remote_commit(b"unknown").is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! 当前 SSH epoch 的远端文件系统资源与请求合并。
 //!
-//! 普通文件与目录元数据使用独立 SFTP session；同一路径的可见与隐藏目录请求共享
-//! 一次完整列表，再在调用边界过滤。领头请求不依赖单个前端调用的生命周期。
+//! 目录与文件正文读取共享可流水线化的 raw SFTP session，元数据和写入使用独立高层
+//! session；同一路径目录请求共享一次完整列表，再在调用边界过滤。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,7 +24,7 @@ struct DirectoryKey {
 #[derive(Default)]
 pub struct RemoteFs {
     pub(crate) session: Mutex<Option<Arc<russh_sftp::client::SftpSession>>>,
-    pub(crate) directory_session: Mutex<Option<Arc<russh_sftp::client::RawSftpSession>>>,
+    pub(crate) read_session: Mutex<Option<Arc<sftp::RemoteReadSession>>>,
     directory_reads: Mutex<HashMap<DirectoryKey, Vec<oneshot::Sender<DirectoryResult>>>>,
     file_warmup_started: AtomicBool,
     first_directory_ready: AtomicBool,

@@ -419,6 +419,10 @@
       "title": "Remote",
       "description": "SSH profiles used to open remote workspaces. Tunnels are managed from the primary workspace window."
     },
+    "fileAcceleration": {
+      "title": "Accelerate SSH file operations",
+      "description": "Use an isolated remote Python process when supported, with automatic SFTP fallback."
+    },
     "actions": {
       "new": "New profile",
       "import": "Import SSH config",

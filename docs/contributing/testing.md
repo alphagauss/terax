@@ -88,6 +88,10 @@ WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面�
 
 ## 不变量
 
+- SSH 文件后端契约测试必须同时锁定正文、revision、TooLarge、Conflict、Missing 和 Overwrite 语义。
+- raw SFTP 文件读取测试必须覆盖空文件、块边界、超过流水线并发度和乱序响应组装。
+- Python helper 测试必须覆盖协议长度、权限、fsync、条件提交、响应丢失收敛和无 Python 回退。
+- 文件后端事件必须绑定当前 epoch，旧连接的 capability 或回退事件不能覆盖新 Runtime。
 - 影响范围全局的局部修复必须能被测试捕获，只依赖 review 不够。
 - 不仅测试 happy path，还要测试拒绝路径和边界。
 - 将平台特定测试放在正确的 `#[cfg(...)]` 条件后。
