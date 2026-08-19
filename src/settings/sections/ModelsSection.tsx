@@ -165,6 +165,7 @@ const getLocalMeta = (t: TFn): Partial<Record<ProviderId, LocalMeta>> => ({
   },
 });
 
+/** 模型设置主区域，组合云端、本地和语音提供商配置。 */
 export function ModelsSection() {
   const { t } = useTranslation();
   const localMeta = getLocalMeta(t);
@@ -1131,7 +1132,7 @@ function CustomEndpointCard({
           size={12}
           strokeWidth={2}
           className={cn(
-            "shrink-0 text-muted-foreground/60 transition-transform",
+            "shrink-0 text-muted-foreground transition-transform",
             !expanded && "-rotate-90",
           )}
         />

@@ -31,6 +31,7 @@ function maskKey(key: string): string {
   return `${key.slice(0, 4)}${"•".repeat(8)}${key.slice(-4)}`;
 }
 
+/** 提供商密钥配置卡片，保持密钥操作状态和辅助控件在明暗主题下清晰可辨。 */
 export function ProviderKeyCard({
   provider,
   currentKey,
@@ -156,7 +157,7 @@ export function ProviderKeyCard({
                 type="button"
                 onClick={() => setReveal((v) => !v)}
                 tabIndex={-1}
-                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground/60 hover:text-foreground"
+                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 aria-label={
                   reveal ? t("models.card.hideKey") : t("models.card.showKey")
                 }
@@ -216,3 +217,7 @@ export function ProviderKeyCard({
     </div>
   );
 }
+/**
+ * 本文件渲染模型提供商密钥配置卡片。
+ * 负责密钥输入、显示切换、验证和删除操作，不直接持久化其他模型设置。
+ */

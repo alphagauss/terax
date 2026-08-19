@@ -421,7 +421,7 @@ function ModelDropdown() {
             icon={Search01Icon}
             size={16}
             strokeWidth={1.75}
-            className="shrink-0 text-muted-foreground/70"
+            className="shrink-0 text-muted-foreground"
           />
           <input
             ref={inputRef}
@@ -496,7 +496,7 @@ function ModelDropdown() {
           {/* Models list */}
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
             {activeProvider === COMPAT_PROVIDER_ID && (
-              <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
+              <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground">
                 <HugeiconsIcon icon={PlugIcon} size={13} strokeWidth={1.75} />
                 <span>{t("statusBar.openaiCompatible")}</span>
               </div>
@@ -617,7 +617,7 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
   const p = PROVIDERS.find((x) => x.id === providerId);
   if (!p) return null;
   return (
-    <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground/90">
+    <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground">
       <HugeiconsIcon icon={PROVIDER_ICON[p.id]} size={13} strokeWidth={1.75} />
       <span>{p.label}</span>
     </div>
@@ -671,7 +671,7 @@ function ModelRow({
       }}
       className={cn(
         "group mx-1 my-0.5 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
-        selected ? "bg-accent/60 text-foreground" : "text-foreground/85",
+        selected ? "bg-accent/60 text-foreground" : "text-foreground",
         !hasKey && "opacity-60",
       )}
     >
@@ -703,7 +703,7 @@ function ModelRow({
           icon={PROVIDER_ICON[model.provider]}
           size={13}
           strokeWidth={1.5}
-          className="shrink-0 text-muted-foreground/70"
+          className="shrink-0 text-muted-foreground"
         />
       ) : null}
 
@@ -772,7 +772,7 @@ function CapBar({
         icon={icon}
         size={10}
         strokeWidth={1.75}
-        className="text-muted-foreground/60"
+        className="text-muted-foreground"
       />
       <span className="flex items-center gap-px">
         {[1, 2, 3, 4, 5].map((i) => (
