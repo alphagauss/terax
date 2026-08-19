@@ -69,6 +69,11 @@ function statusBadgeClass(status: string): string {
   }
 }
 
+/**
+ * Git 提交详情视图。
+ *
+ * 展示提交元信息和文件变更，并提供使用统一交互语义色的文件打开入口。
+ */
 export function CommitDetail({
   commit,
   filesEntry,
@@ -228,7 +233,7 @@ function CommitFileRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex h-7 w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left hover:bg-accent/40"
+      className="flex h-7 w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left hover:bg-interactive-hover"
     >
       {iconUrl ? (
         <img src={iconUrl} alt="" className="size-3.5 shrink-0" />

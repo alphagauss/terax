@@ -115,6 +115,11 @@ function withFilesEntry(
   return next;
 }
 
+/**
+ * Source Control 提交图谱区域。
+ *
+ * 渲染可分页的提交列表，并管理当前提交详情及一致的行交互状态。
+ */
 export const GraphSection = memo(function GraphSection({
   repoRoot,
   headSha,
@@ -395,8 +400,9 @@ export const GraphSection = memo(function GraphSection({
                   onClick={(event) => openCommit(commit, event.currentTarget)}
                   title={`${commit.shortSha} ${commit.subject}`}
                   className={cn(
-                    "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-accent/35",
-                    openAnchor?.sha === commit.sha && "bg-accent/55",
+                    "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
+                    openAnchor?.sha === commit.sha &&
+                      "bg-interactive-active hover:bg-interactive-active",
                   )}
                   style={{
                     height: virtualRow.size,

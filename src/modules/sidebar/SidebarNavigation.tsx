@@ -521,7 +521,7 @@ function NavigationItems({
                     "h-7 max-w-44 justify-center gap-1.5 px-2.5 text-[11px] font-medium",
                   active
                     ? "text-foreground"
-                    : "hover:bg-foreground/[0.045] hover:text-foreground",
+                    : "hover:bg-interactive-hover hover:text-foreground",
                 )}
               >
                 {active ? (
@@ -690,7 +690,7 @@ export function SecondarySidebarTabs({
           <button
             type="button"
             onClick={onClose}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-control hover:bg-foreground/[0.045] hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-control hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
             aria-label={t("closeSecondary")}
           >
             <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />

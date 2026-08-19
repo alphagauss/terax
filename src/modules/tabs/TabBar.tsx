@@ -290,7 +290,7 @@ export function TabBar({
             <span
               aria-hidden
               className={cn(
-                "pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-foreground/[0.07] shadow-sm ring-1 ring-inset",
+                "pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-interactive-active shadow-sm ring-1 ring-inset",
                 activeGroup ? "ring-primary/60" : "ring-foreground/[0.05]",
               )}
               style={
@@ -326,7 +326,7 @@ export function TabBar({
                     <div
                       data-tab-id={t.id}
                       className={cn(
-                        "flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent text-xs text-foreground",
+                        "flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-interactive-active text-xs text-foreground",
                         compact ? "px-1.5" : "px-2",
                       )}
                     >
@@ -433,8 +433,8 @@ export function TabBar({
                     "group relative z-[1] h-7 flex-none justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
                     isNew && "terax-tab-in",
                     isActive
-                      ? "text-foreground dark:text-foreground"
-                      : "text-muted-foreground hover:text-foreground/80 dark:text-muted-foreground",
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
                     draggingId === t.id && "opacity-50",
                     compact
                       ? canClose

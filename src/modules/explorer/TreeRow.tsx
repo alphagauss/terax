@@ -132,17 +132,18 @@ function EntryRowImpl(props: EntryRowProps) {
       onClick={handleClick}
       onDoubleClick={() => !isDir && onOpenFile(path, true)}
       className={cn(
-        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
+        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-interactive-hover",
         isDeleting &&
           "cursor-wait text-muted-foreground hover:bg-transparent disabled:opacity-80",
         isContextTarget
-          ? "bg-accent text-foreground"
+          ? "bg-interactive-active text-foreground hover:bg-interactive-active"
           : isSelected
-            ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
+            ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70 hover:bg-primary/12"
             : gitignored
               ? "text-muted-foreground"
               : "text-foreground",
-        isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
+        isDropTarget &&
+          "bg-primary/10 ring-1 ring-inset ring-primary/60 hover:bg-primary/10",
       )}
       style={{ paddingLeft }}
     >

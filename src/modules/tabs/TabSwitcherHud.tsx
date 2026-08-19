@@ -20,6 +20,11 @@ function subtitleFor(tab: Tab): string | null {
   return null;
 }
 
+/**
+ * 渲染键盘标签切换浮层。
+ *
+ * 保持当前候选项清晰可辨，并展示工作页名称及必要的路径辅助信息。
+ */
 export function TabSwitcherHud({
   tabs,
   state,
@@ -47,7 +52,7 @@ export function TabSwitcherHud({
               className={cn(
                 "flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs",
                 t.id === selectedId
-                  ? "bg-accent text-foreground"
+                  ? "bg-interactive-active text-foreground"
                   : "text-muted-foreground",
               )}
             >

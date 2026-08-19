@@ -830,7 +830,7 @@ function SourceControlViewContainerComponent({
                                   }
                                   className={cn(
                                     "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/65 transition-colors",
-                                    "hover:bg-foreground/[0.06] hover:text-foreground",
+                                    "hover:bg-interactive-hover hover:text-foreground",
                                     "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/65",
                                   )}
                                 >
@@ -1268,7 +1268,7 @@ const EntryRow = memo(function EntryRow({
           onMouseDown={() => onFocusRow(row.key)}
           className={cn(
             "group relative flex h-6 items-center gap-1.5 rounded-sm px-1.5 transition-colors duration-feedback",
-            focused ? "bg-accent/60" : "hover:bg-accent/30",
+            focused ? "bg-interactive-active" : "hover:bg-interactive-hover",
           )}
         >
           <span
