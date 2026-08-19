@@ -493,7 +493,7 @@ const CompactionNotice = memo(function CompactionNotice({
   const { t } = useTranslation("ai");
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-      <span className="size-1.5 shrink-0 rounded-full bg-amber-500/80" />
+      <span className="size-1.5 shrink-0 rounded-full bg-warning/80" />
       <span className="flex-1 truncate">
         {t("chat.contextCompacted", { count: droppedCount })}
       </span>

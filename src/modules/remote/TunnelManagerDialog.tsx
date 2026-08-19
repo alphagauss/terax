@@ -413,7 +413,7 @@ function StatusDot({ status, label }: { status: TunnelStatus; label: string }) {
       className={cn(
         "size-1.5 shrink-0 rounded-full transition-colors duration-control ease-standard",
         status === "active"
-          ? "bg-emerald-500"
+          ? "bg-success"
           : status === "failed"
             ? "bg-destructive"
             : "bg-muted-foreground/45",

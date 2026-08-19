@@ -26,7 +26,7 @@ Terax 的应用主题负责 UI 表面、文字、交互、Git、图表、侧边�
 
 ## UI 字段
 
-当前每个完整变体包含 45 个 UI 字段。
+当前每个完整变体包含 48 个 UI 字段。
 
 ### 基础表面与文字
 
@@ -47,6 +47,9 @@ Terax 的应用主题负责 UI 表面、文字、交互、Git、图表、侧边�
 | `accent` | `--accent` | 菜单、控件等强调表面 |
 | `accentForeground` | `--accent-foreground` | Accent 表面上的文字 |
 | `destructive` | `--destructive` | 删除、失败和危险操作 |
+| `success` | `--success` | 成功、已连接和新增状态 |
+| `warning` | `--warning` | 警告、等待和已修改状态 |
+| `info` | `--info` | 信息、重命名和普通提示状态 |
 | `border` | `--border` | 常规边框和分隔线 |
 | `input` | `--input` | 输入控件边界和表面 |
 | `ring` | `--ring` | 键盘焦点和强调描边 |

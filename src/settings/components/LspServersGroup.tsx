@@ -29,6 +29,7 @@ import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingRow } from "./SettingRow";
 
+/** 语言服务器设置分组，展示启用状态并提供配置操作。 */
 export function LspServersGroup() {
   const { t } = useTranslation();
   const activation = usePreferencesStore((s) => s.lspActivation);
@@ -86,7 +87,7 @@ function ServerRow({
         <span className="flex items-center gap-1.5">
           {server.name}
           {detected ? (
-            <span className="size-1.5 rounded-full bg-emerald-500" />
+            <span className="size-1.5 rounded-full bg-success" />
           ) : null}
         </span>
       }
@@ -245,3 +246,7 @@ function AddCustomServerDialog({
     </Dialog>
   );
 }
+/**
+ * 本文件渲染语言服务器设置分组和连接状态。
+ * 负责启停、配置入口和状态反馈，不直接管理 LSP 进程。
+ */

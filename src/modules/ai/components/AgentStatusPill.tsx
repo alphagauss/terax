@@ -42,7 +42,7 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
       aria-pressed={active}
     >
       {hasRunningSession ? (
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500 motion-reduce:animate-none" />
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning motion-reduce:animate-none" />
       ) : null}
       <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />
       <span>AI</span>
