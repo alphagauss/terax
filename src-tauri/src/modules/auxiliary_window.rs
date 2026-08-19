@@ -4,15 +4,73 @@
 //! Workspace 主窗口，不拥有第二套 Workspace 运行时，也不恢复窗口位置或尺寸。
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub const AUXILIARY_OPEN_EVENT: &str = "terax:auxiliary-open";
 
 const SETTINGS_LABEL: &str = "auxiliary-settings";
+const FILE_PROPERTIES_LABEL: &str = "auxiliary-file-properties";
 const AUXILIARY_ENTRY: &str = "auxiliary.html";
+const SOURCE_POINT_OFFSET: f64 = 16.0;
+const MONITOR_EDGE_MARGIN: i32 = 12;
 
 static AUXILIARY_WINDOW_LOCK: Mutex<()> = Mutex::new(());
+
+/// 主 WebView 内的逻辑坐标，仅作为原生窗口首次定位的来源提示。
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AuxiliarySourcePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// 带单调版本的辅助窗口打开请求。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuxiliaryOpenEnvelope {
+    pub revision: u64,
+    pub request: OpenAuxiliaryWindowRequest,
+}
+
+/// 保存各单例辅助窗口最近一次打开请求，避免页面挂载与复用事件之间丢失目标。
+pub struct AuxiliaryWindowState {
+    next_revision: AtomicU64,
+    latest: Mutex<HashMap<String, AuxiliaryOpenEnvelope>>,
+}
+
+impl Default for AuxiliaryWindowState {
+    fn default() -> Self {
+        Self {
+            next_revision: AtomicU64::new(1),
+            latest: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl AuxiliaryWindowState {
+    fn record(&self, label: &str, request: OpenAuxiliaryWindowRequest) -> AuxiliaryOpenEnvelope {
+        let envelope = AuxiliaryOpenEnvelope {
+            revision: self.next_revision.fetch_add(1, Ordering::Relaxed),
+            request,
+        };
+        self.latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(label.to_string(), envelope.clone());
+        envelope
+    }
+
+    fn latest(&self, label: &str) -> Option<AuxiliaryOpenEnvelope> {
+        self.latest
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(label)
+            .cloned()
+    }
+}
 
 /// 允许设置窗口打开的分区。
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -47,12 +105,21 @@ impl SettingsTab {
 ///
 /// 枚举同时作为 IPC 和窗口重用事件的协议，未知类型、字段或设置分区会在进入
 /// 窗口创建逻辑前被 serde 拒绝。
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum OpenAuxiliaryWindowRequest {
     Settings {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tab: Option<SettingsTab>,
+    },
+    FileProperties {
+        path: String,
+        #[serde(
+            rename = "sourcePoint",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        source_point: Option<AuxiliarySourcePoint>,
     },
 }
 
@@ -61,6 +128,7 @@ pub enum OpenAuxiliaryWindowRequest {
 pub enum AuxiliaryWindowPlacement {
     ParentCenter,
     MonitorCenter,
+    NearSourcePoint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,6 +158,17 @@ impl OpenAuxiliaryWindowRequest {
                 maximizable: false,
                 placement: AuxiliaryWindowPlacement::ParentCenter,
             },
+            Self::FileProperties { .. } => AuxiliaryWindowDefinition {
+                label: FILE_PROPERTIES_LABEL,
+                width: 520.0,
+                height: 620.0,
+                min_width: 440.0,
+                min_height: 480.0,
+                resizable: true,
+                minimizable: false,
+                maximizable: false,
+                placement: AuxiliaryWindowPlacement::NearSourcePoint,
+            },
         }
     }
 
@@ -99,6 +178,14 @@ impl OpenAuxiliaryWindowRequest {
                 format!("{AUXILIARY_ENTRY}?tab={}", tab.as_str())
             }
             Self::Settings { tab: None } => AUXILIARY_ENTRY.to_string(),
+            Self::FileProperties { .. } => AUXILIARY_ENTRY.to_string(),
+        }
+    }
+
+    fn source_point(&self) -> Option<AuxiliarySourcePoint> {
+        match self {
+            Self::FileProperties { source_point, .. } => *source_point,
+            Self::Settings { .. } => None,
         }
     }
 }
@@ -114,17 +201,20 @@ impl OpenAuxiliaryWindowRequest {
 pub async fn open_auxiliary_window(
     app: tauri::AppHandle,
     request: OpenAuxiliaryWindowRequest,
+    state: tauri::State<'_, AuxiliaryWindowState>,
 ) -> Result<(), String> {
     let _open_guard = AUXILIARY_WINDOW_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let definition = request.definition();
+    let source_point = request.source_point();
+    let envelope = state.record(definition.label, request.clone());
 
     if let Some(window) = app.get_webview_window(definition.label) {
         window.show().map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
         window
-            .emit(AUXILIARY_OPEN_EVENT, request)
+            .emit(AUXILIARY_OPEN_EVENT, envelope)
             .map_err(|error| error.to_string())?;
         return Ok(());
     }
@@ -162,14 +252,34 @@ pub async fn open_auxiliary_window(
         let _ = window.set_decorations(false);
     }
 
-    place_window(&window, &main, definition.placement);
+    place_window(&window, &main, definition.placement, source_point);
     Ok(())
+}
+
+/// 返回当前辅助窗口最近一次经过原生层验证的打开请求。
+#[tauri::command]
+pub fn get_auxiliary_window_request(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, AuxiliaryWindowState>,
+) -> Result<AuxiliaryOpenEnvelope, String> {
+    let label = window.label();
+    if !label.starts_with("auxiliary-") {
+        return Err("当前窗口不是辅助窗口".into());
+    }
+    state
+        .latest(label)
+        .ok_or_else(|| format!("辅助窗口 {label} 尚无打开请求"))
 }
 
 /// 按静态策略设置辅助窗口的首次位置。
 ///
 /// 父窗口尺寸读取失败时退回显示器居中，避免因定位失败而阻止窗口打开。
-fn place_window(window: &WebviewWindow, main: &WebviewWindow, placement: AuxiliaryWindowPlacement) {
+fn place_window(
+    window: &WebviewWindow,
+    main: &WebviewWindow,
+    placement: AuxiliaryWindowPlacement,
+    source_point: Option<AuxiliarySourcePoint>,
+) {
     match placement {
         AuxiliaryWindowPlacement::MonitorCenter => {
             let _ = window.center();
@@ -191,7 +301,74 @@ fn place_window(window: &WebviewWindow, main: &WebviewWindow, placement: Auxilia
                 let _ = window.center();
             }
         }
+        AuxiliaryWindowPlacement::NearSourcePoint => {
+            if place_near_source(window, main, source_point).is_err() {
+                place_window(window, main, AuxiliaryWindowPlacement::ParentCenter, None);
+            }
+        }
     }
+}
+
+/// 将来源点转换到屏幕物理坐标，并把窗口限制在对应显示器工作区内。
+fn place_near_source(
+    window: &WebviewWindow,
+    main: &WebviewWindow,
+    source_point: Option<AuxiliarySourcePoint>,
+) -> Result<(), String> {
+    let point = source_point.ok_or_else(|| "missing source point".to_string())?;
+    if !point.x.is_finite() || !point.y.is_finite() || point.x < 0.0 || point.y < 0.0 {
+        return Err("invalid source point".into());
+    }
+    let scale = main.scale_factor().map_err(|error| error.to_string())?;
+    let main_size = main.inner_size().map_err(|error| error.to_string())?;
+    let max_x = main_size.width as f64 / scale;
+    let max_y = main_size.height as f64 / scale;
+    if point.x > max_x || point.y > max_y {
+        return Err("source point is outside the main window".into());
+    }
+    let main_position = main.inner_position().map_err(|error| error.to_string())?;
+    let window_size = window.outer_size().map_err(|error| error.to_string())?;
+    let anchor_x = main_position.x + (point.x * scale).round() as i32;
+    let anchor_y = main_position.y + (point.y * scale).round() as i32;
+    let offset = (SOURCE_POINT_OFFSET * scale).round() as i32;
+    let monitors = main
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let monitor = monitors
+        .iter()
+        .find(|monitor| {
+            let area = monitor.work_area();
+            anchor_x >= area.position.x
+                && anchor_y >= area.position.y
+                && anchor_x < area.position.x.saturating_add_unsigned(area.size.width)
+                && anchor_y < area.position.y.saturating_add_unsigned(area.size.height)
+        })
+        .or_else(|| monitors.first())
+        .ok_or_else(|| "no monitor is available".to_string())?;
+    let area = monitor.work_area();
+    let min_x = area.position.x.saturating_add(MONITOR_EDGE_MARGIN);
+    let min_y = area.position.y.saturating_add(MONITOR_EDGE_MARGIN);
+    let max_x = area
+        .position
+        .x
+        .saturating_add_unsigned(area.size.width)
+        .saturating_sub(window_size.width as i32)
+        .saturating_sub(MONITOR_EDGE_MARGIN);
+    let max_y = area
+        .position
+        .y
+        .saturating_add_unsigned(area.size.height)
+        .saturating_sub(window_size.height as i32)
+        .saturating_sub(MONITOR_EDGE_MARGIN);
+    let x = anchor_x
+        .saturating_add(offset)
+        .clamp(min_x, max_x.max(min_x));
+    let y = anchor_y
+        .saturating_add(offset)
+        .clamp(min_y, max_y.max(min_y));
+    window
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -241,5 +418,56 @@ mod tests {
             r#"{"kind":"settings","extra":true}"#
         )
         .is_err());
+        assert!(serde_json::from_str::<OpenAuxiliaryWindowRequest>(
+            r#"{"kind":"file-properties","path":"/work/file","sourcePoint":{"x":12,"y":24}}"#
+        )
+        .is_ok());
+        assert!(serde_json::from_str::<OpenAuxiliaryWindowRequest>(
+            r#"{"kind":"file-properties","path":"/work/file","source_point":{"x":12,"y":24}}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn file_properties_uses_singleton_near_source_definition() {
+        let request = OpenAuxiliaryWindowRequest::FileProperties {
+            path: "/workspace/src/main.rs".into(),
+            source_point: Some(AuxiliarySourcePoint { x: 42.0, y: 84.0 }),
+        };
+        let definition = request.definition();
+
+        assert_eq!(definition.label, "auxiliary-file-properties");
+        assert_eq!((definition.width, definition.height), (520.0, 620.0));
+        assert_eq!(
+            definition.placement,
+            AuxiliaryWindowPlacement::NearSourcePoint
+        );
+        assert_eq!(request.initial_url(), "auxiliary.html");
+        assert_eq!(
+            request.source_point(),
+            Some(AuxiliarySourcePoint { x: 42.0, y: 84.0 })
+        );
+    }
+
+    #[test]
+    fn latest_request_uses_monotonic_revisions_per_window() {
+        let state = AuxiliaryWindowState::default();
+        let first = state.record(
+            FILE_PROPERTIES_LABEL,
+            OpenAuxiliaryWindowRequest::FileProperties {
+                path: "/first".into(),
+                source_point: None,
+            },
+        );
+        let second = state.record(
+            FILE_PROPERTIES_LABEL,
+            OpenAuxiliaryWindowRequest::FileProperties {
+                path: "/second".into(),
+                source_point: None,
+            },
+        );
+
+        assert!(second.revision > first.revision);
+        assert_eq!(state.latest(FILE_PROPERTIES_LABEL), Some(second));
     }
 }

@@ -3,11 +3,8 @@
  * 页面复用公共辅助窗口外壳，只持有设置分区选择，不管理原生窗口生命周期。
  */
 
-import {
-  AUXILIARY_OPEN_EVENT,
-  type AuxiliaryWindowOpenRequest,
-} from "@/auxiliary/openAuxiliaryWindow";
 import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
+import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
@@ -34,7 +31,6 @@ import {
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { type JSX, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -64,6 +60,7 @@ function readInitialTab(): SettingsTab {
 export function SettingsWindowPage() {
   const { t } = useTranslation("settings");
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
+  const openEnvelope = useAuxiliaryOpenRequest();
   const init = usePreferencesStore((state) => state.init);
   const ActiveSection = TABS.find((tab) => tab.id === active)?.component;
 
@@ -72,22 +69,11 @@ export function SettingsWindowPage() {
   }, [init]);
 
   useEffect(() => {
-    const unlistenPromise =
-      getCurrentWebviewWindow().listen<AuxiliaryWindowOpenRequest>(
-        AUXILIARY_OPEN_EVENT,
-        (event) => {
-          if (
-            event.payload.kind === "settings" &&
-            isSettingsTab(event.payload.tab)
-          ) {
-            setActive(event.payload.tab);
-          }
-        },
-      );
-    return () => {
-      void unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, []);
+    const request = openEnvelope?.request;
+    if (request?.kind === "settings" && isSettingsTab(request.tab)) {
+      setActive(request.tab);
+    }
+  }, [openEnvelope]);
 
   const headerContent = (
     <Tabs

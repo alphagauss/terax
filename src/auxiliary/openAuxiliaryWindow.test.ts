@@ -1,9 +1,10 @@
 /**
- * 本文件验证辅助窗口 IPC 请求保持封闭且设置页只使用统一原生命令。
- * 测试锁定 command 名称和序列化结构，避免重新引入设置页专用命令。
+ * 本文件验证辅助窗口 IPC 请求保持封闭且业务页只使用统一原生命令。
+ * 测试锁定设置与文件属性请求的 command 名称和序列化结构。
  */
 
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
+import { openFileProperties } from "@/modules/file-properties/openFileProperties";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAuxiliaryWindow } from "./openAuxiliaryWindow";
 
@@ -29,6 +30,18 @@ describe("辅助窗口打开协议", () => {
 
     expect(mocks.invoke).toHaveBeenCalledWith("open_auxiliary_window", {
       request: { kind: "settings", tab: "shortcuts" },
+    });
+  });
+
+  it("文件属性请求只携带路径和主窗口内的来源点", async () => {
+    await openFileProperties("/workspace/src/main.ts", { x: 32, y: 96 });
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_auxiliary_window", {
+      request: {
+        kind: "file-properties",
+        path: "/workspace/src/main.ts",
+        sourcePoint: { x: 32, y: 96 },
+      },
     });
   });
 });

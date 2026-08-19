@@ -59,6 +59,20 @@ pub struct RemoteStat {
     pub mtime: u64,
 }
 
+/// 属性页使用的一次 LSTAT 结果，保留服务端可选的 POSIX 身份字段。
+#[derive(Clone, Debug)]
+pub struct RemotePropertyStat {
+    pub kind: RemoteEntryKind,
+    pub size: u64,
+    pub atime: Option<u64>,
+    pub mtime: Option<u64>,
+    pub permissions: Option<u32>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub user: Option<String>,
+    pub group: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct RemoteWalkEntry {
     pub path: String,
@@ -478,6 +492,35 @@ pub async fn stat(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<Remote
             .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or(0),
+    })
+}
+
+/// 使用一次 LSTAT 读取属性页所需的远端元数据，不跟随符号链接。
+pub async fn property_stat(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+) -> Result<RemotePropertyStat, String> {
+    validate_remote_path(path)?;
+    let remote_path = path.to_string();
+    let metadata = retry_sftp_read(
+        workspace,
+        format!("read remote properties {path}"),
+        move |sftp| {
+            let path = remote_path.clone();
+            Box::pin(async move { sftp.symlink_metadata(path).await })
+        },
+    )
+    .await?;
+    Ok(RemotePropertyStat {
+        kind: entry_kind(metadata.file_type()),
+        size: metadata.len(),
+        atime: metadata.atime.map(|value| u64::from(value) * 1000),
+        mtime: metadata.mtime.map(|value| u64::from(value) * 1000),
+        permissions: metadata.permissions.map(|value| value & 0o7777),
+        uid: metadata.uid,
+        gid: metadata.gid,
+        user: metadata.user,
+        group: metadata.group,
     })
 }
 

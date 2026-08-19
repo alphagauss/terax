@@ -28,6 +28,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { openFileProperties } from "@/modules/file-properties/openFileProperties";
 import { isPythonFile } from "@/modules/python/path";
 import {
   useRemoteRuntimeStore,
@@ -537,6 +538,10 @@ export const FileExplorer = memo(
     const [menuTarget, setMenuTarget] = useState<EntryTarget | null>(null);
     const [contextMenuPath, setContextMenuPath] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
+    const menuSourcePointRef = useRef<{
+      x: number;
+      y: number;
+    } | null>(null);
     const [permanentDeleteTarget, setPermanentDeleteTarget] =
       useState<EntryTarget | null>(null);
     // Bumped on every right-click so the menu content remounts and the popper
@@ -682,6 +687,18 @@ export const FileExplorer = memo(
         });
       },
       [t, tree.deletePath],
+    );
+
+    const requestProperties = useCallback(
+      (path: string) => {
+        void openFileProperties(
+          path,
+          menuSourcePointRef.current ?? undefined,
+        ).catch((error) =>
+          toast.error(t("menu.propertiesOpenFailed", { error: String(error) })),
+        );
+      },
+      [t],
     );
 
     useGlobalShortcuts({
@@ -1093,6 +1110,10 @@ export const FileExplorer = memo(
                       : null,
                   );
                   setDeleteConfirm(false);
+                  menuSourcePointRef.current =
+                    e.clientX === 0 && e.clientY === 0
+                      ? null
+                      : { x: e.clientX, y: e.clientY };
                   setMenuNonce((n) => n + 1);
                 }}
               >
@@ -1292,6 +1313,12 @@ export const FileExplorer = memo(
                       ? t("menu.confirmDelete")
                       : t("common:delete")}
                   </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onSelect={() => requestProperties(menuTarget.path)}
+                  >
+                    {t("menu.properties")}
+                  </ContextMenuItem>
                 </>
               ) : (
                 <>
@@ -1346,6 +1373,10 @@ export const FileExplorer = memo(
                     onSelect={() => tree.refresh(rootPath)}
                   >
                     {t("menu.refresh")}
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onSelect={() => requestProperties(rootPath)}>
+                    {t("menu.properties")}
                   </ContextMenuItem>
                 </>
               )}

@@ -168,6 +168,14 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。读取固定使
 
 - `get_launch_dir` - CLI 启动目录，首次读取时 drain
 - `auxiliary_window::open_auxiliary_window` - 按封闭类型定义创建或复用轻量辅助 WebView 窗口
+- `auxiliary_window::get_auxiliary_window_request` - 返回当前辅助窗口带 revision 的最新受控打开请求
+
+### 文件属性
+
+- `fs_properties_get` - 按当前进程绑定的 Local、WSL 或 SSH 环境读取目标自身属性
+- `fs_properties_scan` / `fs_properties_scan_cancel` - 启动或取消不跟随符号链接的目录递归汇总
+
+SSH 目录汇总优先在一个受控只读 exec channel 内完成服务端聚合，避免文件夹数量放大为网络往返；远端 helper 不可用时回退有界并发 SFTP 读取。helper 路径参数经过转义，不接受任意命令，也不读取文件正文或修改远端状态。
 
 ## 不变量
 
