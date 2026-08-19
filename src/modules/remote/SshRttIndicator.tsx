@@ -89,7 +89,7 @@ export function SshRttIndicator() {
         <span className="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground">
           <span>{value} ms</span>
           {currentHealth.fileWriteFallback ? (
-            <span className="font-medium text-amber-600 dark:text-amber-400">
+            <span className="font-medium text-warning">
               I/O
             </span>
           ) : null}

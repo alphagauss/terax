@@ -139,7 +139,7 @@ function ApprovalToast({
   return (
     <div className="w-[360px] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning" />
         <HugeiconsIcon
           icon={Icon}
           size={14}

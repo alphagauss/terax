@@ -21,6 +21,9 @@ export type ThemeColors = Partial<{
   accent: string;
   accentForeground: string;
   destructive: string;
+  success: string;
+  warning: string;
+  info: string;
   border: string;
   input: string;
   ring: string;

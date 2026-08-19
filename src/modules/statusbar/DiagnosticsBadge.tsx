@@ -6,6 +6,7 @@ type Props = {
   filePath: string | null;
 };
 
+/** 展示当前文件的错误与警告数量。 */
 export function DiagnosticsBadge({ filePath }: Props) {
   const counts = useDiagnosticsStore((s) =>
     filePath ? s.byPath[filePath] : undefined,
@@ -21,7 +22,7 @@ export function DiagnosticsBadge({ filePath }: Props) {
         </span>
       ) : null}
       {counts.warnings > 0 ? (
-        <span className="flex items-center gap-0.5 text-amber-700 dark:text-amber-400">
+        <span className="flex items-center gap-0.5 text-warning">
           <HugeiconsIcon icon={Alert02Icon} size={11} strokeWidth={2} />
           {counts.warnings}
         </span>
@@ -29,3 +30,7 @@ export function DiagnosticsBadge({ filePath }: Props) {
     </span>
   );
 }
+/**
+ * 本文件渲染状态栏诊断计数。
+ * 错误复用 destructive，警告使用主题 warning 语义色。
+ */

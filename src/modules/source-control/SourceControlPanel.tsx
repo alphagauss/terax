@@ -155,15 +155,15 @@ function upstreamBadgeLabel(
 function statusAccent(code: string): string {
   switch (code) {
     case "A":
-      return "bg-emerald-500/85";
+      return "bg-success";
     case "U":
       return "bg-teal-500/85";
     case "M":
-      return "bg-amber-500/85";
+      return "bg-warning";
     case "D":
-      return "bg-rose-500/85";
+      return "bg-destructive";
     case "R":
-      return "bg-sky-500/85";
+      return "bg-info";
     default:
       return "bg-muted-foreground/40";
   }

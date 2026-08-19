@@ -56,14 +56,14 @@ function commitBody(commit: GitLogEntry, message: string): string {
 function statusBadgeClass(status: string): string {
   switch (status.toUpperCase()) {
     case "A":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "text-success";
     case "M":
-      return "text-amber-600 dark:text-amber-300";
+      return "text-warning";
     case "D":
-      return "text-rose-600 dark:text-rose-400";
+      return "text-destructive";
     case "R":
     case "C":
-      return "text-sky-600 dark:text-sky-300";
+      return "text-info";
     default:
       return "text-muted-foreground";
   }
@@ -177,12 +177,12 @@ export function CommitDetail({
           Changed {commit.filesChanged}{" "}
           {commit.filesChanged === 1 ? "file" : "files"}
           {commit.insertions > 0 ? (
-            <span className="ml-1.5 font-semibold text-emerald-600 dark:text-emerald-400">
+            <span className="ml-1.5 font-semibold text-success">
               {commit.insertions} insertions(+)
             </span>
           ) : null}
           {commit.deletions > 0 ? (
-            <span className="ml-1.5 font-semibold text-rose-600 dark:text-rose-400">
+            <span className="ml-1.5 font-semibold text-destructive">
               {commit.deletions} deletions(-)
             </span>
           ) : null}
@@ -263,10 +263,10 @@ function CommitFileRow({
         </span>
       ) : (
         <span className="flex w-16 shrink-0 justify-end gap-1.5 text-[10px] tabular-nums">
-          <span className="text-emerald-600 dark:text-emerald-400">
+          <span className="text-success">
             +{file.added}
           </span>
-          <span className="text-rose-600 dark:text-rose-400">
+          <span className="text-destructive">
             −{file.removed}
           </span>
         </span>

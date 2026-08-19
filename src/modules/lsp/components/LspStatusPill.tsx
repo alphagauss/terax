@@ -28,6 +28,7 @@ type Props = {
 const PILL_CLASS =
   "terax-pill-in ml-1.5 flex h-6 shrink-0 cursor-pointer [&_button]:cursor-pointer items-center gap-1 rounded-full border border-border/50 bg-accent/50 px-2 text-[10.5px] font-medium text-muted-foreground transition-colors duration-surface hover:bg-accent hover:text-foreground";
 
+/** 编辑器语言服务器状态入口，按当前文件展示会话和诊断信息。 */
 export function LspStatusPill({ filePath }: Props) {
   const { t } = useTranslation("lsp");
   const hint = useLspHint(filePath);
@@ -251,7 +252,7 @@ function ActivePill({
               className="animate-spin"
             />
           ) : (
-            <span className="size-1.5 rounded-full bg-emerald-500" />
+            <span className="size-1.5 rounded-full bg-success" />
           )}
           <span>{t("pillLabel", { name: preset.name })}</span>
         </button>
@@ -295,3 +296,7 @@ function ActivePill({
     </Popover>
   );
 }
+/**
+ * 本文件渲染编辑器语言服务器状态、详情和恢复操作。
+ * 状态颜色使用应用主题语义，不直接绑定具体调色板。
+ */

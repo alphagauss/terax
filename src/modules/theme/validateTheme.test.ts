@@ -78,6 +78,9 @@ describe("validateTheme", () => {
             colors: {
               interactiveHover: "rgba(255,255,255,0.09)",
               interactiveActive: "rgba(255,255,255,0.13)",
+              success: "#73c991",
+              warning: "#e2c08d",
+              info: "#4daafc",
               gitModified: "#e2c08d",
               gitAdded: "#81b88b",
               gitUntracked: "#73c991",

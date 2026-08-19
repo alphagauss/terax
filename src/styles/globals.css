@@ -43,6 +43,9 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --color-info: var(--info);
     --color-interactive-hover: var(--interactive-hover);
     --color-interactive-active: var(--interactive-active);
     --color-git-modified: var(--git-modified);
@@ -146,6 +149,9 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --accent: #f2f2f2;
     --accent-foreground: #3b3b3b;
     --destructive: #f85149;
+    --success: #188038;
+    --warning: #895503;
+    --info: #005fb8;
     --border: #e5e5e5;
     --input: #e5e5e5;
     --ring: #005fb8;
@@ -191,6 +197,9 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --accent: #2b2b2b;
     --accent-foreground: #cccccc;
     --destructive: #f85149;
+    --success: #73c991;
+    --warning: #e2c08d;
+    --info: #4daafc;
     --border: #2b2b2b;
     --input: #313131;
     --ring: #0078d4;

@@ -133,10 +133,10 @@ export function WorkspaceEnvSelector({
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    connectionStatus === "connected" && "bg-emerald-500",
+                    connectionStatus === "connected" && "bg-success",
                     (connectionStatus === "connecting" ||
                       connectionStatus === "reconnecting") &&
-                      "animate-pulse bg-amber-500 motion-reduce:animate-none",
+                      "animate-pulse bg-warning motion-reduce:animate-none",
                     connectionStatus === "disconnected" &&
                       "bg-muted-foreground/50",
                   )}

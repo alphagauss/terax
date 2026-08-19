@@ -514,8 +514,8 @@ function SessionAttentionIndicator({
           className={cn(
             "size-1.5 rounded-full",
             attention === "background-running" &&
-              "animate-pulse bg-amber-500 motion-reduce:animate-none",
-            attention === "completed-unread" && "bg-emerald-500",
+              "animate-pulse bg-warning motion-reduce:animate-none",
+            attention === "completed-unread" && "bg-success",
             attention === "error-unread" && "bg-destructive",
           )}
         />
