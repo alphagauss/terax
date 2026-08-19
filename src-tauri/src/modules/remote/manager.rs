@@ -20,9 +20,10 @@ use super::session::{ExecOutput, RemoteWorkspace, TransportProbeOutcome};
 use super::traffic::SshTrafficMeter;
 use super::tunnel::{TunnelFailure, TunnelManager};
 
-const HEALTH_MONITOR_TICK: Duration = Duration::from_secs(15);
+const INITIAL_RTT_PROBE_GRACE: Duration = Duration::from_millis(100);
+const HEALTH_MONITOR_TICK: Duration = Duration::from_secs(2);
 const IDLE_PROBE_AGE: Duration = Duration::from_secs(30);
-const MAX_RTT_AGE: Duration = Duration::from_secs(60);
+const MAX_RTT_AGE: Duration = Duration::from_secs(10);
 const WAKE_PROBE_AGE: Duration = Duration::from_secs(5);
 const TRANSPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const TRANSPORT_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -366,6 +367,9 @@ impl RemoteManager {
     }
 
     /// 监听当前 transport 结束，并在同一连接锁内执行唯一的自动重连流程。
+    ///
+    /// 首次 RTT 让前台目录读取先行，但不等待后续低频周期；常规 tick
+    /// 只检查是否到期，实际网络频率由空闲保活和 RTT 样本期限控制。
     fn spawn_monitor(
         self: &Arc<Self>,
         workspace: Arc<RemoteWorkspace>,
@@ -375,12 +379,31 @@ impl RemoteManager {
     ) {
         let manager = Arc::downgrade(self);
         tauri::async_runtime::spawn(async move {
+            let mut first_probe = true;
             loop {
                 let failed = tokio::select! {
                     _ = lifecycle.cancellation.cancelled() => return,
                     _ = workspace.transport_failed() => true,
-                    _ = tokio::time::sleep(HEALTH_MONITOR_TICK) => false,
+                    _ = async {
+                        if first_probe {
+                            // Explorer 首目录是启动关键路径，最多等待其现有的 3 秒上限后再占用 transport。
+                            if manager
+                                .upgrade()
+                                .is_some_and(|manager| {
+                                    manager
+                                        .foreground_filesystem_priority
+                                        .load(Ordering::Acquire)
+                                })
+                            {
+                                workspace.wait_for_foreground_filesystem().await;
+                            }
+                            tokio::time::sleep(INITIAL_RTT_PROBE_GRACE).await;
+                        } else {
+                            tokio::time::sleep(HEALTH_MONITOR_TICK).await;
+                        }
+                    } => false,
                 };
+                first_probe = false;
                 let Some(manager) = manager.upgrade() else {
                     return;
                 };
@@ -916,7 +939,7 @@ pub fn exec_blocking(
 mod tests {
     use super::{
         reconnect_delay, RemoteManager, HEALTH_MONITOR_TICK, IDLE_PROBE_AGE,
-        TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_TIMEOUT,
+        INITIAL_RTT_PROBE_GRACE, MAX_RTT_AGE, TRANSPORT_CLEANUP_TIMEOUT, TRANSPORT_PROBE_TIMEOUT,
     };
     use crate::modules::remote::models::ForegroundIntent;
     use std::sync::atomic::Ordering;
@@ -929,6 +952,14 @@ mod tests {
                 <= Duration::from_secs(50)
         );
         assert!(TRANSPORT_CLEANUP_TIMEOUT <= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn rtt_monitor_uses_responsive_sampling_windows() {
+        assert!(INITIAL_RTT_PROBE_GRACE <= Duration::from_millis(100));
+        assert_eq!(HEALTH_MONITOR_TICK, Duration::from_secs(2));
+        assert_eq!(IDLE_PROBE_AGE, Duration::from_secs(30));
+        assert_eq!(MAX_RTT_AGE, Duration::from_secs(10));
     }
 
     #[test]
