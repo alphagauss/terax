@@ -21,8 +21,8 @@ export type ChipTone =
 // the tone prop stays so call sites keep their semantics.
 type Tone = { box: string; icon: string };
 
-const BOX = "border-border/40 bg-foreground/[0.03] text-foreground/85";
-const TONE: Tone = { box: BOX, icon: "text-foreground/60" };
+const BOX = "border-border/40 bg-foreground/[0.03] text-foreground";
+const TONE: Tone = { box: BOX, icon: "text-muted-foreground" };
 
 const TONES: Record<ChipTone, Tone> = {
   neutral: TONE,
@@ -46,6 +46,7 @@ type Props = {
   children?: ReactNode;
 };
 
+/** 渲染紧凑上下文标签，并以完整语义文字色区分值、前缀和图标。 */
 export function Chip({
   tone = "neutral",
   icon,

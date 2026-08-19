@@ -286,7 +286,7 @@ function BranchDropdown({
           <>
             {localBranches.length > 0 && (
               <>
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
+                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.localBranches")}
                 </DropdownMenuLabel>
                 <DropdownMenuGroup>
@@ -315,7 +315,7 @@ function BranchDropdown({
             {worktrees.length > 0 && (
               <>
                 {localBranches.length > 0 && <DropdownMenuSeparator />}
-                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
+                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.worktrees")}
                 </DropdownMenuLabel>
                 <DropdownMenuGroup>
@@ -829,9 +829,9 @@ function SourceControlViewContainerComponent({
                                     void scm.generateCommitMessage()
                                   }
                                   className={cn(
-                                    "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground/65 transition-colors",
+                                    "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors",
                                     "hover:bg-interactive-hover hover:text-foreground",
-                                    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground/65",
+                                    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
                                   )}
                                 >
                                   {scm.actionBusy === "generate-message" ? (
@@ -1192,7 +1192,7 @@ function ListHeader({
 
   return (
     <div className="flex h-6 items-center gap-1.5 px-2">
-      <span className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
+      <span className="text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
         Changes
       </span>
       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 px-1 text-[9.5px] font-semibold tabular-nums text-muted-foreground">

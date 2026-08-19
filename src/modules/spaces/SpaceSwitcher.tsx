@@ -256,7 +256,7 @@ export function SpaceSwitcher({
         <button
           type="button"
           title={shortcut ? t("titleWithShortcut", { shortcut }) : t("title")}
-          className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground/90 outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+          className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
         >
           <span className="max-w-36 truncate text-xs font-medium">
             {current.name}
@@ -444,7 +444,7 @@ function SpaceRow({
             e.stopPropagation();
             onToggle();
           }}
-          className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground"
+          className="flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
         >
           <HugeiconsIcon
             icon={expanded ? ArrowDown01Icon : ArrowRight01Icon}
@@ -662,7 +662,7 @@ function RowAction({
         onClick();
       }}
       className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors",
+        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
         destructive
           ? "hover:bg-destructive/10 hover:text-destructive"
           : "hover:bg-accent hover:text-foreground",

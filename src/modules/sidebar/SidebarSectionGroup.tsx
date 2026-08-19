@@ -62,6 +62,7 @@ function storageKey(id: string): string {
   return `sidebar:sections:${id}`;
 }
 
+/** 渲染可折叠和可调整尺寸的侧边栏分区组。 */
 export function SidebarSectionGroup({ id, sections, className }: Props) {
   const [initialLayout] = useState(() =>
     normalizeSidebarSectionLayout(
@@ -264,7 +265,7 @@ function SidebarSectionHeader({
             expanded ? "rotate-0" : "-rotate-90",
           )}
         />
-        <span className="min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground/85">
+        <span className="min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.12em] text-foreground">
           {title}
         </span>
         {badge !== undefined ? (
