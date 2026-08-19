@@ -24,13 +24,12 @@ import {
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import { DEFAULT_THEME_ID } from "@/modules/theme/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export type ThemePref = "system" | "light" | "dark";
 
 export type DiffViewMode = "inline" | "split";
-
-export const DEFAULT_THEME_ID = "modern";
 
 export type BackgroundKind = "none" | "image";
 

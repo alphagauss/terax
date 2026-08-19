@@ -1,11 +1,11 @@
 /**
  * 本文件定义对齐 VS Code Modern 的明暗主题。
- * UI、终端和 Git 状态色分别使用对应模式的默认配色。
+ * UI、交互、图表、滚动条、Git 和终端字段保持完整，作为其他主题的基准模板。
  */
 
-import type { Theme, ThemeVariant } from "../types";
+import type { CompleteThemeVariant, Theme } from "../types";
 
-export const darkModernVariant: ThemeVariant = {
+export const darkModernVariant: CompleteThemeVariant = {
   colors: {
     background: "#1f1f1f",
     foreground: "#cccccc",
@@ -25,6 +25,8 @@ export const darkModernVariant: ThemeVariant = {
     border: "#2b2b2b",
     input: "#313131",
     ring: "#0078d4",
+    interactiveHover: "rgba(204, 204, 204, 0.09)",
+    interactiveActive: "rgba(204, 204, 204, 0.13)",
     gitModified: "#E2C08D",
     gitAdded: "#81B88B",
     gitUntracked: "#73C991",
@@ -33,6 +35,11 @@ export const darkModernVariant: ThemeVariant = {
     editorGitModified: "#0451A5",
     editorGitAdded: "#107C10",
     editorGitDeleted: "#CD3131",
+    chart1: "#4DAAFC",
+    chart2: "#73C991",
+    chart3: "#E2C08D",
+    chart4: "#D670D6",
+    chart5: "#C74E39",
     sidebar: "#181818",
     sidebarForeground: "#cccccc",
     sidebarPrimary: "#0078d4",
@@ -41,6 +48,9 @@ export const darkModernVariant: ThemeVariant = {
     sidebarAccentForeground: "#cccccc",
     sidebarBorder: "#2b2b2b",
     sidebarRing: "#0078d4",
+    scrollbarThumb: "#79797966",
+    scrollbarThumbHover: "#646464B3",
+    scrollbarTrack: "transparent",
     radius: "0.5rem",
   },
   terminal: {
@@ -48,7 +58,7 @@ export const darkModernVariant: ThemeVariant = {
     foreground: "#cccccc",
     cursor: "#aeafad",
     cursorAccent: "#181818",
-    selection: "rgba(38,79,120,0.68)",
+    selection: "rgba(38, 79, 120, 0.68)",
     ansi: [
       "#000000", "#cd3131", "#0dbc79", "#e5e510",
       "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
@@ -58,7 +68,7 @@ export const darkModernVariant: ThemeVariant = {
   },
 };
 
-export const lightModernVariant: ThemeVariant = {
+export const lightModernVariant: CompleteThemeVariant = {
   colors: {
     background: "#ffffff",
     foreground: "#3b3b3b",
@@ -78,6 +88,8 @@ export const lightModernVariant: ThemeVariant = {
     border: "#e5e5e5",
     input: "#e5e5e5",
     ring: "#005fb8",
+    interactiveHover: "rgba(59, 59, 59, 0.09)",
+    interactiveActive: "rgba(59, 59, 59, 0.13)",
     gitModified: "#895503",
     gitAdded: "#587C0C",
     gitUntracked: "#007100",
@@ -86,6 +98,11 @@ export const lightModernVariant: ThemeVariant = {
     editorGitModified: "#2472C8",
     editorGitAdded: "#0DBC79",
     editorGitDeleted: "#CD3131",
+    chart1: "#005FB8",
+    chart2: "#007100",
+    chart3: "#895503",
+    chart4: "#AF00DB",
+    chart5: "#AD0707",
     sidebar: "#f8f8f8",
     sidebarForeground: "#3b3b3b",
     sidebarPrimary: "#005fb8",
@@ -94,6 +111,9 @@ export const lightModernVariant: ThemeVariant = {
     sidebarAccentForeground: "#3b3b3b",
     sidebarBorder: "#e5e5e5",
     sidebarRing: "#005fb8",
+    scrollbarThumb: "#64646466",
+    scrollbarThumbHover: "#646464B3",
+    scrollbarTrack: "transparent",
     radius: "0.5rem",
   },
   terminal: {

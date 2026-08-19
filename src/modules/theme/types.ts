@@ -24,6 +24,8 @@ export type ThemeColors = Partial<{
   border: string;
   input: string;
   ring: string;
+  interactiveHover: string;
+  interactiveActive: string;
   gitModified: string;
   gitAdded: string;
   gitUntracked: string;
@@ -32,6 +34,11 @@ export type ThemeColors = Partial<{
   editorGitModified: string;
   editorGitAdded: string;
   editorGitDeleted: string;
+  chart1: string;
+  chart2: string;
+  chart3: string;
+  chart4: string;
+  chart5: string;
   sidebar: string;
   sidebarForeground: string;
   sidebarPrimary: string;
@@ -40,6 +47,9 @@ export type ThemeColors = Partial<{
   sidebarAccentForeground: string;
   sidebarBorder: string;
   sidebarRing: string;
+  scrollbarThumb: string;
+  scrollbarThumbHover: string;
+  scrollbarTrack: string;
   radius: string;
 }>;
 
@@ -58,6 +68,18 @@ export type TerminalPalette = Partial<{
 export type ThemeVariant = {
   colors?: ThemeColors;
   terminal?: TerminalPalette;
+};
+
+/** 默认基准主题必须显式提供的完整 UI 配色。 */
+export type CompleteThemeColors = Required<ThemeColors>;
+
+/** 默认基准主题必须显式提供的完整终端调色板。 */
+export type CompleteTerminalPalette = Required<TerminalPalette>;
+
+/** 用于默认基准与参考模板的完整主题变体。 */
+export type CompleteThemeVariant = {
+  colors: CompleteThemeColors;
+  terminal: CompleteTerminalPalette;
 };
 
 export type Theme = {

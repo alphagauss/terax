@@ -1,9 +1,15 @@
+/**
+ * 本文件管理自定义主题文件的创建、校验、读写与编辑事件。
+ * 新主题以完整 Modern Dark 变体为起点，避免遗漏新增的主题语义字段。
+ */
+
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { appConfigDir, join } from "@tauri-apps/api/path";
 import type { Theme } from "./types";
 import { validateTheme, type ValidationResult } from "./validateTheme";
+import { darkModernVariant } from "./themes/modern";
 
 const THEME_FILE_EXT = ".terax-theme";
 const THEME_EDIT_EVENT = "terax://theme-edit";
@@ -12,6 +18,7 @@ export type ThemeEditRequest =
   | { action: "create" }
   | { action: "edit"; id: string };
 
+/** 判断路径是否指向 Terax 自定义主题文件。 */
 export function isThemeFilePath(path: string): boolean {
   return path.toLowerCase().endsWith(THEME_FILE_EXT);
 }
@@ -20,10 +27,12 @@ async function themesDir(): Promise<string> {
   return join(await appConfigDir(), "themes");
 }
 
+/** 返回指定自定义主题的配置文件路径。 */
 export async function themeFilePath(id: string): Promise<string> {
   return join(await themesDir(), `${id}${THEME_FILE_EXT}`);
 }
 
+/** 将已校验主题写入应用主题目录并返回最终路径。 */
 export async function writeThemeFile(theme: Theme): Promise<string> {
   const dir = await themesDir();
   const ws = currentWorkspaceEnv();
@@ -43,15 +52,17 @@ export async function writeThemeFile(theme: Theme): Promise<string> {
   return path;
 }
 
+/** 删除指定自定义主题，文件不存在时保持幂等。 */
 export async function deleteThemeFile(id: string): Promise<void> {
   try {
     const path = await themeFilePath(id);
     await invoke("fs_delete", { path, workspace: currentWorkspaceEnv() });
   } catch {
-    /* file may not exist yet — nothing to clean up */
+    /* 文件可能尚未创建，此时无需清理。 */
   }
 }
 
+/** 解析并校验自定义主题文件正文。 */
 export function parseThemeFile(text: string): ValidationResult {
   let parsed: unknown;
   try {
@@ -65,53 +76,32 @@ export function parseThemeFile(text: string): ValidationResult {
   return validateTheme(parsed);
 }
 
+/** 创建字段完整、可直接编辑的 Modern Dark 自定义主题模板。 */
 export function starterTheme(): Theme {
   const id = `my-theme-${crypto.randomUUID().slice(0, 8)}`;
   return {
     id,
     name: "My Theme",
-    description: "Custom theme.",
+    description: "Custom theme based on the complete Modern Dark template.",
+    editorTheme: { dark: "modern" },
     variants: {
       dark: {
-        colors: {
-          background: "#0d0d10",
-          foreground: "#e8e8ea",
-          card: "#15151a",
-          cardForeground: "#e8e8ea",
-          popover: "#15151a",
-          popoverForeground: "#e8e8ea",
-          primary: "#7dd3fc",
-          primaryForeground: "#0d0d10",
-          muted: "#1c1c22",
-          mutedForeground: "#a0a0a8",
-          accent: "#1c1c22",
-          accentForeground: "#e8e8ea",
-          border: "rgba(255,255,255,0.08)",
-          input: "rgba(255,255,255,0.12)",
-          ring: "#7dd3fc",
-          sidebar: "#0a0a0d",
-          sidebarForeground: "#e8e8ea",
-          sidebarPrimary: "#7dd3fc",
-          sidebarAccent: "#1c1c22",
-          sidebarBorder: "rgba(255,255,255,0.08)",
-          sidebarRing: "#7dd3fc",
-        },
+        colors: { ...darkModernVariant.colors },
         terminal: {
-          background: "#0d0d10",
-          foreground: "#e8e8ea",
-          cursor: "#e8e8ea",
-          cursorAccent: "#0d0d10",
-          selection: "rgba(125,211,252,0.22)",
+          ...darkModernVariant.terminal,
+          ansi: [...darkModernVariant.terminal.ansi],
         },
       },
     },
   };
 }
 
+/** 广播主题创建或编辑请求。 */
 export function emitThemeEdit(req: ThemeEditRequest): Promise<void> {
   return emit(THEME_EDIT_EVENT, req);
 }
 
+/** 订阅主题编辑请求并返回解除订阅函数。 */
 export function onThemeEdit(
   cb: (req: ThemeEditRequest) => void,
 ): Promise<UnlistenFn> {
