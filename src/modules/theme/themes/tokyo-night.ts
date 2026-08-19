@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Tokyo Night 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const tokyoNight: Theme = {
   id: "tokyo-night",
   name: "Tokyo Night",
   description: "Calm, blue-leaning dark theme.",
-  editorTheme: { dark: "tokyo-night" },
   variants: {
     dark: {
       colors: {
@@ -45,6 +48,29 @@ export const tokyoNight: Theme = {
           "#414868", "#ff7a93", "#b9f27c", "#ff9e64",
           "#7da6ff", "#bb9af7", "#0db9d7", "#c0caf5",
         ],
+      },
+      editor: {
+        background: "#1a1b26",
+        foreground: "#c0caf5",
+        caret: "#c0caf5",
+        selection: "#33467c",
+        lineHighlight: "#292e42",
+        gutterForeground: "#565f89",
+        comment: "#565f89",
+        keyword: "#bb9af7",
+        string: "#9ece6a",
+        number: "#ff9e64",
+        constant: "#ff9e64",
+        function: "#7aa2f7",
+        variable: "#c0caf5",
+        property: "#73daca",
+        type: "#2ac3de",
+        operator: "#89ddff",
+        tag: "#f7768e",
+        attribute: "#e0af68",
+        heading: "#7aa2f7",
+        link: "#7dcfff",
+        invalid: "#f7768e",
       },
     },
   },

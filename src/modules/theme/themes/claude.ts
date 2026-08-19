@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Claude 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const claude: Theme = {
   id: "claude",
   name: "Claude",
   description: "Warm clay accent on paper.",
-  editorTheme: { dark: "copilot", light: "github-light" },
   variants: {
     dark: {
       colors: {
@@ -47,6 +50,29 @@ export const claude: Theme = {
           "#a9c3e0", "#e0b0c6", "#9bd4cf", "#f5f4ee",
         ],
       },
+      editor: {
+        background: "#1f1e1d",
+        foreground: "#f5f4ee",
+        caret: "#d97757",
+        selection: "#4a332b",
+        lineHighlight: "#2a2926",
+        gutterForeground: "#756f65",
+        comment: "#8f887c",
+        keyword: "#cf9bb0",
+        string: "#b3c98c",
+        number: "#e8b87a",
+        constant: "#8fb0d9",
+        function: "#d97757",
+        variable: "#f5f4ee",
+        property: "#82c0bb",
+        type: "#e8b87a",
+        operator: "#cf9bb0",
+        tag: "#e5634d",
+        attribute: "#e8b87a",
+        heading: "#d97757",
+        link: "#8fb0d9",
+        invalid: "#e5634d",
+      },
     },
     light: {
       colors: {
@@ -88,6 +114,29 @@ export const claude: Theme = {
           "#73705f", "#d04a3a", "#6a9048", "#c08a3a",
           "#4a7eb5", "#b0608a", "#3a9398", "#3d3a2f",
         ],
+      },
+      editor: {
+        background: "#faf9f5",
+        foreground: "#3d3a2f",
+        caret: "#c15f3c",
+        selection: "#f0ddd5",
+        lineHighlight: "#f0eee6",
+        gutterForeground: "#8c877a",
+        comment: "#8c877a",
+        keyword: "#a05278",
+        string: "#5a7d3c",
+        number: "#b07a2a",
+        constant: "#3a6ea5",
+        function: "#c15f3c",
+        variable: "#3d3a2f",
+        property: "#2a8085",
+        type: "#a66a24",
+        operator: "#a05278",
+        tag: "#c0392b",
+        attribute: "#b07a2a",
+        heading: "#c15f3c",
+        link: "#3a6ea5",
+        invalid: "#c0392b",
       },
     },
   },

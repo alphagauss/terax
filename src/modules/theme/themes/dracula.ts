@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Dracula 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const dracula: Theme = {
   id: "dracula",
   name: "Dracula",
   description: "The classic high-contrast purple dark theme.",
-  editorTheme: { dark: "dracula" },
   variants: {
     dark: {
       colors: {
@@ -45,6 +48,28 @@ export const dracula: Theme = {
           "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5",
           "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
         ],
+      },
+      editor: {
+        background: "#282a36",
+        foreground: "#f8f8f2",
+        caret: "#f8f8f0",
+        selection: "#44475a",
+        lineHighlight: "#343746",
+        gutterForeground: "#6272a4",
+        comment: "#6272a4",
+        keyword: "#ff79c6",
+        string: "#f1fa8c",
+        number: "#bd93f9",
+        function: "#50fa7b",
+        variable: "#f8f8f2",
+        property: "#8be9fd",
+        type: "#8be9fd",
+        operator: "#ff79c6",
+        tag: "#ff79c6",
+        attribute: "#50fa7b",
+        heading: "#bd93f9",
+        link: "#8be9fd",
+        invalid: "#ff5555",
       },
     },
   },

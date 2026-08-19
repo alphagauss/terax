@@ -1,5 +1,5 @@
 /**
- * 本文件测试 Modern 基准主题的字段完整性和关键语义色。
+ * 本文件测试 Modern 基准主题的 UI、终端、编辑器完整性和关键语义色。
  * 锁定明暗变体可作为其他主题模板，并保持 VS Code Git decoration 配色。
  */
 
@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  EDITOR_PALETTE_REQUIRED_KEYS,
   TERMINAL_ANSI_VARIABLES,
   TERMINAL_BASE_KEYS,
   TERMINAL_BASE_VARIABLES,
@@ -38,6 +39,9 @@ describe("Modern reference template", () => {
       [...TERMINAL_BASE_KEYS, "ansi"].sort(),
     );
     expect(variant.terminal.ansi).toHaveLength(16);
+    for (const key of EDITOR_PALETTE_REQUIRED_KEYS) {
+      expect(variant.editor[key]).toBeTruthy();
+    }
   });
 
   it("keeps the pre-React window background aligned with Modern", () => {

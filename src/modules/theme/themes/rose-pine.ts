@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Rosé Pine 与 Dawn 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const rosePine: Theme = {
   id: "rose-pine",
   name: "Rosé Pine",
   description: "Soho vibes, all-natural pine and rose.",
-  editorTheme: { dark: "rose-pine", light: "rose-pine-dawn" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,28 @@ export const rosePine: Theme = {
           "#9ccfd8", "#c4a7e7", "#ebbcba", "#e0def4",
         ],
       },
+      editor: {
+        background: "#191724",
+        foreground: "#e0def4",
+        caret: "#e0def4",
+        selection: "#403d52",
+        lineHighlight: "#1f1d2e",
+        gutterForeground: "#6e6a86",
+        comment: "#6e6a86",
+        keyword: "#31748f",
+        string: "#f6c177",
+        number: "#ebbcba",
+        function: "#ebbcba",
+        variable: "#e0def4",
+        property: "#9ccfd8",
+        type: "#9ccfd8",
+        operator: "#908caa",
+        tag: "#9ccfd8",
+        attribute: "#ebbcba",
+        heading: "#c4a7e7",
+        link: "#c4a7e7",
+        invalid: "#eb6f92",
+      },
     },
     light: {
       colors: {
@@ -86,6 +111,28 @@ export const rosePine: Theme = {
           "#9893a5", "#b4637a", "#286983", "#ea9d34",
           "#56949f", "#907aa9", "#d7827e", "#575279",
         ],
+      },
+      editor: {
+        background: "#faf4ed",
+        foreground: "#575279",
+        caret: "#575279",
+        selection: "#dfdad9",
+        lineHighlight: "#f2e9e1",
+        gutterForeground: "#9893a5",
+        comment: "#9893a5",
+        keyword: "#286983",
+        string: "#ea9d34",
+        number: "#d7827e",
+        function: "#d7827e",
+        variable: "#575279",
+        property: "#56949f",
+        type: "#56949f",
+        operator: "#797593",
+        tag: "#56949f",
+        attribute: "#d7827e",
+        heading: "#907aa9",
+        link: "#907aa9",
+        invalid: "#b4637a",
       },
     },
   },

@@ -63,7 +63,7 @@ export const EDITOR_THEMES = [
 
 export type EditorThemeId = (typeof EDITOR_THEMES)[number];
 
-/** "auto" follows the active app theme's editorTheme pairing (resolved live). */
+/** "auto" 实时跟随当前应用主题内嵌的编辑器调色板。 */
 export const EDITOR_THEME_AUTO = "auto" as const;
 export type EditorThemePref = typeof EDITOR_THEME_AUTO | EditorThemeId;
 

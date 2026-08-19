@@ -1,71 +1,67 @@
+/**
+ * 本文件测试应用主题内嵌编辑器调色板和用户显式预设的解析顺序。
+ * 锁定自动模式不依赖额外主题 ID 配对表。
+ */
+
 import { describe, expect, it } from "vitest";
-import { resolveEditorThemeId } from "./resolveEditorTheme";
+import { resolveEditorTheme } from "./resolveEditorTheme";
 import { getBuiltinTheme } from "./themes";
+import { darkModernVariant, lightModernVariant } from "./themes/modern";
 import type { Theme } from "./types";
 
 const custom: Theme = {
   id: "my-theme",
   name: "Mine",
-  editorTheme: { dark: "dracula", light: "github-light" },
-  variants: { dark: {}, light: {} },
+  variants: {
+    dark: { editor: darkModernVariant.editor },
+    light: { editor: lightModernVariant.editor },
+  },
 };
 
-describe("resolveEditorThemeId", () => {
-  it("returns an explicit pref unchanged, ignoring app theme", () => {
-    expect(resolveEditorThemeId("nord", "kanagawa", [], "dark")).toBe("nord");
-    expect(resolveEditorThemeId("nord", "kanagawa", [], "light")).toBe("nord");
+describe("resolveEditorTheme", () => {
+  it("returns an explicit preset unchanged", () => {
+    expect(resolveEditorTheme("nord", "kanagawa", [], "dark")).toEqual({
+      kind: "preset",
+      id: "nord",
+    });
   });
 
-  it("auto follows the builtin app theme pairing per mode", () => {
-    expect(resolveEditorThemeId("auto", "kanagawa", [], "dark")).toBe("kanagawa");
-    expect(resolveEditorThemeId("auto", "kanagawa", [], "light")).toBe(
-      "kanagawa-lotus",
-    );
+  it("auto reads the matching builtin variant palette", () => {
+    const theme = getBuiltinTheme("kanagawa");
+    expect(resolveEditorTheme("auto", "kanagawa", [], "dark")).toEqual({
+      kind: "inline",
+      mode: "dark",
+      palette: theme?.variants.dark?.editor,
+    });
+    expect(resolveEditorTheme("auto", "kanagawa", [], "light")).toEqual({
+      kind: "inline",
+      mode: "light",
+      palette: theme?.variants.light?.editor,
+    });
   });
 
-  it("switches the Modern palette with the active mode", () => {
-    expect(resolveEditorThemeId("auto", "modern", [], "dark")).toBe("modern");
-    expect(resolveEditorThemeId("auto", "modern", [], "light")).toBe("modern");
-    const theme = getBuiltinTheme("modern");
-    expect(theme?.variants.dark).toBeDefined();
-    expect(theme?.variants.light).toBeDefined();
+  it("reports the actual mode when a single-mode theme is reused", () => {
+    const theme = getBuiltinTheme("kanagawa-dragon");
+    expect(resolveEditorTheme("auto", "kanagawa-dragon", [], "light")).toEqual({
+      kind: "inline",
+      mode: "dark",
+      palette: theme?.variants.dark?.editor,
+    });
   });
 
-  it("auto falls back to the other mode when a pairing is missing", () => {
-    // Dragon only declares a dark pairing.
-    expect(resolveEditorThemeId("auto", "kanagawa-dragon", [], "light")).toBe(
-      "kanagawa-dragon",
-    );
+  it("prefers a matching custom theme over builtins", () => {
+    expect(resolveEditorTheme("auto", "my-theme", [custom], "light")).toEqual({
+      kind: "inline",
+      mode: "light",
+      palette: lightModernVariant.editor,
+    });
   });
 
-  it("auto prefers a matching custom theme over builtins", () => {
-    expect(resolveEditorThemeId("auto", "my-theme", [custom], "dark")).toBe(
-      "dracula",
-    );
-    expect(resolveEditorThemeId("auto", "my-theme", [custom], "light")).toBe(
-      "github-light",
-    );
-  });
-
-  it("auto with an unknown app theme uses the default theme pairing", () => {
-    expect(resolveEditorThemeId("auto", "does-not-exist", [], "dark")).toBe(
-      "modern",
-    );
-    expect(resolveEditorThemeId("auto", "does-not-exist", [], "light")).toBe(
-      "modern",
-    );
-  });
-
-  it("auto falls back to a neutral theme when the pairing is invalid", () => {
-    const bad: Theme = {
-      id: "bad",
-      name: "Bad",
-      editorTheme: { dark: "not-a-real-theme" },
-      variants: { dark: {} },
-    };
-    expect(resolveEditorThemeId("auto", "bad", [bad], "dark")).toBe("atomone");
-    expect(resolveEditorThemeId("auto", "bad", [bad], "light")).toBe(
-      "github-light",
-    );
+  it("uses Modern for an unknown app theme", () => {
+    expect(resolveEditorTheme("auto", "does-not-exist", [], "dark")).toEqual({
+      kind: "inline",
+      mode: "dark",
+      palette: darkModernVariant.editor,
+    });
   });
 });

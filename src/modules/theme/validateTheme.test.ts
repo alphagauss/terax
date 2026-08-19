@@ -1,16 +1,19 @@
 /**
  * 本文件测试自定义主题配置的结构校验。
- * 锁定可用颜色字段、变体要求和终端调色板边界。
+ * 锁定 UI、终端、编辑器字段及严格的主题结构边界。
  */
 
 import { describe, expect, it } from "vitest";
+import { darkModernVariant } from "./themes/modern";
 import { validateTheme } from "./validateTheme";
+
+const editor = darkModernVariant.editor;
 
 function baseTheme(over: Record<string, unknown> = {}) {
   return {
     id: "ok-id",
     name: "Cool Theme",
-    variants: { dark: { colors: { background: "#000" } } },
+    variants: { dark: { colors: { background: "#000" }, editor } },
     ...over,
   };
 }
@@ -44,18 +47,20 @@ describe("validateTheme", () => {
     });
   });
 
-  it("accepts a minimal single-variant theme", () => {
+  it("accepts a single-variant theme with an embedded editor palette", () => {
     const result = validateTheme({
       id: "ok-id",
       name: "X",
-      variants: { dark: {} },
+      variants: { dark: { editor } },
     });
     expect(result.ok).toBe(true);
   });
 
   it("rejects unrecognized color keys", () => {
     const result = validateTheme(
-      baseTheme({ variants: { dark: { colors: { nope: "#fff" } } } }),
+      baseTheme({
+        variants: { dark: { colors: { nope: "#fff" }, editor } },
+      }),
     );
     expect(result).toEqual({
       ok: false,
@@ -65,7 +70,9 @@ describe("validateTheme", () => {
 
   it("rejects empty color values", () => {
     const result = validateTheme(
-      baseTheme({ variants: { dark: { colors: { background: "" } } } }),
+      baseTheme({
+        variants: { dark: { colors: { background: "" }, editor } },
+      }),
     );
     expect(result.ok).toBe(false);
   });
@@ -75,6 +82,7 @@ describe("validateTheme", () => {
       baseTheme({
         variants: {
           dark: {
+            editor,
             colors: {
               interactiveHover: "rgba(255,255,255,0.09)",
               interactiveActive: "rgba(255,255,255,0.13)",
@@ -107,7 +115,9 @@ describe("validateTheme", () => {
 
   it("requires the terminal ansi palette to have exactly 16 entries", () => {
     const result = validateTheme(
-      baseTheme({ variants: { dark: { terminal: { ansi: ["#000"] } } } }),
+      baseTheme({
+        variants: { dark: { terminal: { ansi: ["#000"] }, editor } },
+      }),
     );
     expect(result).toEqual({
       ok: false,
@@ -117,7 +127,9 @@ describe("validateTheme", () => {
 
   it("rejects unregistered terminal fields", () => {
     const result = validateTheme(
-      baseTheme({ variants: { dark: { terminal: { nope: "#000" } } } }),
+      baseTheme({
+        variants: { dark: { terminal: { nope: "#000" }, editor } },
+      }),
     );
     expect(result).toEqual({
       ok: false,
@@ -125,19 +137,48 @@ describe("validateTheme", () => {
     });
   });
 
-  it("captures optional author, description, and editor theme", () => {
+  it("requires every variant to embed a complete editor palette", () => {
+    const missing = validateTheme({
+      id: "no-editor",
+      name: "No Editor",
+      variants: { dark: {} },
+    });
+    expect(missing).toEqual({
+      ok: false,
+      error: "variants.dark.editor must be an object",
+    });
+
+    const incomplete = validateTheme({
+      id: "bad-editor",
+      name: "Bad Editor",
+      variants: { dark: { editor: { background: "#000" } } },
+    });
+    expect(incomplete).toEqual({
+      ok: false,
+      error: "variants.dark.editor.foreground must be a non-empty string",
+    });
+  });
+
+  it("rejects the removed top-level editorTheme reference", () => {
+    expect(validateTheme(baseTheme({ editorTheme: { dark: "tokyo" } }))).toEqual(
+      {
+        ok: false,
+        error: "editorTheme is not a recognized theme key",
+      },
+    );
+  });
+
+  it("captures optional author and description", () => {
     const result = validateTheme(
       baseTheme({
         author: "me",
         description: "a theme",
-        editorTheme: { dark: "tokyo" },
       }),
     );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.theme.author).toBe("me");
       expect(result.theme.description).toBe("a theme");
-      expect(result.theme.editorTheme).toEqual({ dark: "tokyo" });
     }
   });
 });

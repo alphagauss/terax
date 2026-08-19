@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Caffeine 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const caffeine: Theme = {
   id: "caffeine",
   name: "Caffeine",
   description: "Warm coffee tones — cream and espresso.",
-  editorTheme: { dark: "copilot", light: "github-light" },
   variants: {
     dark: {
       colors: {
@@ -47,6 +50,29 @@ export const caffeine: Theme = {
           "#a9c3e0", "#ddc0db", "#a4d4da", "#f0e6d6",
         ],
       },
+      editor: {
+        background: "#111111",
+        foreground: "#eeeeee",
+        caret: "#ffe0c2",
+        selection: "#4a3b31",
+        lineHighlight: "#222222",
+        gutterForeground: "#6f665e",
+        comment: "#7f756b",
+        keyword: "#cba6c9",
+        string: "#b5c98f",
+        number: "#ffd9a0",
+        constant: "#8fb0d9",
+        function: "#ffe0c2",
+        variable: "#eeeeee",
+        property: "#88c0c8",
+        type: "#ffd9a0",
+        operator: "#cba6c9",
+        tag: "#e06c75",
+        attribute: "#ffd9a0",
+        heading: "#ffe0c2",
+        link: "#8fb0d9",
+        invalid: "#e54d2e",
+      },
     },
     light: {
       colors: {
@@ -88,6 +114,29 @@ export const caffeine: Theme = {
           "#6b6258", "#d04a3a", "#6a9048", "#c08a3a",
           "#4a7eb5", "#aa5f9a", "#3a989c", "#202020",
         ],
+      },
+      editor: {
+        background: "#f9f9f9",
+        foreground: "#202020",
+        caret: "#644a40",
+        selection: "#eadfd9",
+        lineHighlight: "#efefef",
+        gutterForeground: "#77706a",
+        comment: "#77706a",
+        keyword: "#9a4f8a",
+        string: "#5a7d3c",
+        number: "#a9762a",
+        constant: "#3a6ea5",
+        function: "#644a40",
+        variable: "#202020",
+        property: "#2a8589",
+        type: "#8b6426",
+        operator: "#9a4f8a",
+        tag: "#c0392b",
+        attribute: "#a9762a",
+        heading: "#644a40",
+        link: "#3a6ea5",
+        invalid: "#e54d2e",
       },
     },
   },

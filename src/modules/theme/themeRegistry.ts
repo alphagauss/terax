@@ -3,7 +3,7 @@
  * 主题应用、文件校验和终端读取必须复用本表，新增字段时不得在各模块重复维护清单。
  */
 
-import type { TerminalPalette, ThemeColors } from "./types";
+import type { EditorPalette, TerminalPalette, ThemeColors } from "./types";
 
 /** 应用 UI 主题字段对应的 CSS 变量。 */
 export const THEME_COLOR_VARIABLES = {
@@ -116,3 +116,40 @@ export const TERMINAL_TOKEN_VARIABLES = {
   ansiBrightCyan: TERMINAL_ANSI_VARIABLES[14],
   ansiBrightWhite: TERMINAL_ANSI_VARIABLES[15],
 } as const;
+
+/** 编辑器调色板必须显式提供的颜色字段。 */
+export const EDITOR_PALETTE_REQUIRED_KEYS = [
+  "background",
+  "foreground",
+  "caret",
+  "selection",
+  "lineHighlight",
+  "gutterForeground",
+  "comment",
+  "keyword",
+  "string",
+  "number",
+  "function",
+  "variable",
+  "property",
+  "type",
+  "operator",
+  "tag",
+  "attribute",
+  "heading",
+  "link",
+  "invalid",
+] as const satisfies readonly (keyof EditorPalette)[];
+
+/** 编辑器调色板可选的颜色回退字段。 */
+export const EDITOR_PALETTE_OPTIONAL_COLOR_KEYS = [
+  "constant",
+  "tagBracket",
+  "attributeValue",
+] as const satisfies readonly (keyof EditorPalette)[];
+
+/** 编辑器调色板可选的字体样式字段。 */
+export const EDITOR_PALETTE_BOOLEAN_KEYS = [
+  "commentItalic",
+  "boldKeyword",
+] as const satisfies readonly (keyof EditorPalette)[];

@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Everforest 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const everforest: Theme = {
   id: "everforest",
   name: "Everforest",
   description: "Soft, low-contrast green forest palette.",
-  editorTheme: { dark: "everforest", light: "everforest-light" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,28 @@ export const everforest: Theme = {
           "#7fbbb3", "#d699b6", "#83c092", "#fffbef",
         ],
       },
+      editor: {
+        background: "#2d353b",
+        foreground: "#d3c6aa",
+        caret: "#d3c6aa",
+        selection: "#4c3743",
+        lineHighlight: "#343f44",
+        gutterForeground: "#7a8478",
+        comment: "#859289",
+        keyword: "#e67e80",
+        string: "#a7c080",
+        number: "#d699b6",
+        function: "#a7c080",
+        variable: "#d3c6aa",
+        property: "#83c092",
+        type: "#dbbc7f",
+        operator: "#e69875",
+        tag: "#e67e80",
+        attribute: "#dbbc7f",
+        heading: "#a7c080",
+        link: "#7fbbb3",
+        invalid: "#e67e80",
+      },
     },
     light: {
       colors: {
@@ -86,6 +111,28 @@ export const everforest: Theme = {
           "#829181", "#f85552", "#8da101", "#dfa000",
           "#3a94c5", "#df69ba", "#35a77c", "#fdf6e3",
         ],
+      },
+      editor: {
+        background: "#fdf6e3",
+        foreground: "#5c6a72",
+        caret: "#5c6a72",
+        selection: "#e6e2cc",
+        lineHighlight: "#efebd4",
+        gutterForeground: "#a6b0a0",
+        comment: "#939f91",
+        keyword: "#f85552",
+        string: "#8da101",
+        number: "#df69ba",
+        function: "#8da101",
+        variable: "#5c6a72",
+        property: "#35a77c",
+        type: "#dfa000",
+        operator: "#f57d26",
+        tag: "#f85552",
+        attribute: "#dfa000",
+        heading: "#8da101",
+        link: "#3a94c5",
+        invalid: "#f85552",
       },
     },
   },

@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Catppuccin Mocha 与 Latte 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const catppuccin: Theme = {
   id: "catppuccin",
   name: "Catppuccin",
   description: "Mocha + Latte — soothing pastel.",
-  editorTheme: { dark: "catppuccin-mocha", light: "catppuccin-latte" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,28 @@ export const catppuccin: Theme = {
           "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
         ],
       },
+      editor: {
+        background: "#1e1e2e",
+        foreground: "#cdd6f4",
+        caret: "#f5e0dc",
+        selection: "#45475a",
+        lineHighlight: "#313244",
+        gutterForeground: "#6c7086",
+        comment: "#6c7086",
+        keyword: "#cba6f7",
+        string: "#a6e3a1",
+        number: "#fab387",
+        function: "#89b4fa",
+        variable: "#cdd6f4",
+        property: "#89b4fa",
+        type: "#f9e2af",
+        operator: "#89dceb",
+        tag: "#f38ba8",
+        attribute: "#fab387",
+        heading: "#f38ba8",
+        link: "#89b4fa",
+        invalid: "#f38ba8",
+      },
     },
     light: {
       colors: {
@@ -86,6 +111,28 @@ export const catppuccin: Theme = {
           "#6c6f85", "#d20f39", "#40a02b", "#df8e1d",
           "#1e66f5", "#ea76cb", "#179299", "#bcc0cc",
         ],
+      },
+      editor: {
+        background: "#eff1f5",
+        foreground: "#4c4f69",
+        caret: "#dc8a78",
+        selection: "#ccced7",
+        lineHighlight: "#e6e9ef",
+        gutterForeground: "#8c8fa1",
+        comment: "#8c8fa1",
+        keyword: "#8839ef",
+        string: "#40a02b",
+        number: "#fe640b",
+        function: "#1e66f5",
+        variable: "#4c4f69",
+        property: "#1e66f5",
+        type: "#df8e1d",
+        operator: "#04a5e5",
+        tag: "#d20f39",
+        attribute: "#fe640b",
+        heading: "#d20f39",
+        link: "#1e66f5",
+        invalid: "#d20f39",
       },
     },
   },
