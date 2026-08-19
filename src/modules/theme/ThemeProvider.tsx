@@ -1,14 +1,19 @@
+/**
+ * 本文件提供应用主题状态、模式解析和主题运行时应用。
+ * 首次绘制前应用已知主题，持久化同步和自定义主题加载保持异步。
+ */
+
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
 import { setI18nLanguage } from "@/i18n";
 import {
-  DEFAULT_THEME_ID,
   loadPreferences,
   onPreferencesChange,
   setTheme as persistTheme,
@@ -22,7 +27,7 @@ import {
 } from "./customThemes";
 import { SurfaceLayer } from "./SurfaceLayer";
 import { getBuiltinTheme, getDefaultTheme } from "./themes";
-import type { Theme } from "./types";
+import { DEFAULT_THEME_ID, type Theme } from "./types";
 
 export type { Theme };
 export type ThemeModePref = ThemePref;
@@ -71,6 +76,11 @@ function resolveTheme(id: string, custom: Theme[]): Theme {
   return custom.find((t) => t.id === id) ?? getBuiltinTheme(id) ?? getDefaultTheme();
 }
 
+/**
+ * 应用主题提供器。
+ *
+ * 负责解析系统明暗模式、内置与自定义主题，并在浏览器绘制前写入完整主题变量。
+ */
 export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderProps) {
   const [mode, setModeState] = useState<ThemePref>(() => readFastMode(defaultMode));
   const [themeId, setThemeIdState] = useState<string>(() => readFastThemeId());
@@ -131,14 +141,14 @@ export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderP
   const resolvedMode: "dark" | "light" =
     mode === "system" ? (systemDark ? "dark" : "light") : mode;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(resolvedMode);
   }, [resolvedMode]);
 
   const effectiveId = previewId ?? themeId;
-  useEffect(() => {
+  useLayoutEffect(() => {
     applyTheme(resolveTheme(effectiveId, customThemes), resolvedMode);
   }, [effectiveId, resolvedMode, customThemes]);
 
@@ -180,6 +190,7 @@ export function ThemeProvider({ children, defaultMode = "dark" }: ThemeProviderP
   );
 }
 
+/** 读取当前主题状态和主题切换操作。 */
 export function useTheme(): ThemeProviderState {
   const ctx = useContext(ThemeProviderContext);
   if (!ctx) throw new Error("useTheme must be used within a <ThemeProvider>");

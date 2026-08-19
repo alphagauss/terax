@@ -1,8 +1,16 @@
 /*
- * 本文件定义 Workspace 冷启动占位样式。
+ * 本文件定义主窗口与辅助窗口的 Modern 冷启动背景，以及 Workspace 占位样式。
  *
  * 样式必须保持为外部资源，避免 Tauri 为 style-src 注入 nonce 后阻止运行时组件样式。
  */
+
+html {
+  background-color: #ffffff;
+}
+
+html.dark {
+  background-color: #1f1f1f;
+}
 
 #workspace-bootstrap {
   position: fixed;

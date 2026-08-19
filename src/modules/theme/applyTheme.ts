@@ -1,95 +1,77 @@
 /**
  * 本文件负责将主题配置写入根元素的 CSS 变量。
- * 切换主题时会清理上一主题的内联变量，使缺失字段回退到全局默认值。
+ * 切换主题时会清理上一主题的内联变量，并以完整 Modern 变体补齐缺失字段。
  */
 
-import type { Theme, ThemeColors, ThemeMode, TerminalPalette } from "./types";
-
-const COLOR_VAR: Record<keyof ThemeColors, string> = {
-  background: "--background",
-  foreground: "--foreground",
-  card: "--card",
-  cardForeground: "--card-foreground",
-  popover: "--popover",
-  popoverForeground: "--popover-foreground",
-  primary: "--primary",
-  primaryForeground: "--primary-foreground",
-  secondary: "--secondary",
-  secondaryForeground: "--secondary-foreground",
-  muted: "--muted",
-  mutedForeground: "--muted-foreground",
-  accent: "--accent",
-  accentForeground: "--accent-foreground",
-  destructive: "--destructive",
-  border: "--border",
-  input: "--input",
-  ring: "--ring",
-  gitModified: "--git-modified",
-  gitAdded: "--git-added",
-  gitUntracked: "--git-untracked",
-  gitRenamed: "--git-renamed",
-  gitDeleted: "--git-deleted",
-  editorGitModified: "--editor-git-modified",
-  editorGitAdded: "--editor-git-added",
-  editorGitDeleted: "--editor-git-deleted",
-  sidebar: "--sidebar",
-  sidebarForeground: "--sidebar-foreground",
-  sidebarPrimary: "--sidebar-primary",
-  sidebarPrimaryForeground: "--sidebar-primary-foreground",
-  sidebarAccent: "--sidebar-accent",
-  sidebarAccentForeground: "--sidebar-accent-foreground",
-  sidebarBorder: "--sidebar-border",
-  sidebarRing: "--sidebar-ring",
-  radius: "--radius",
-};
-
-const ANSI_VARS: readonly string[] = [
-  "--terminal-ansi-black",
-  "--terminal-ansi-red",
-  "--terminal-ansi-green",
-  "--terminal-ansi-yellow",
-  "--terminal-ansi-blue",
-  "--terminal-ansi-magenta",
-  "--terminal-ansi-cyan",
-  "--terminal-ansi-white",
-  "--terminal-ansi-bright-black",
-  "--terminal-ansi-bright-red",
-  "--terminal-ansi-bright-green",
-  "--terminal-ansi-bright-yellow",
-  "--terminal-ansi-bright-blue",
-  "--terminal-ansi-bright-magenta",
-  "--terminal-ansi-bright-cyan",
-  "--terminal-ansi-bright-white",
-];
+import {
+  TERMINAL_ANSI_VARIABLES,
+  TERMINAL_BASE_KEYS,
+  TERMINAL_BASE_VARIABLES,
+  THEME_COLOR_VARIABLES,
+} from "./themeRegistry";
+import {
+  darkModernVariant,
+  lightModernVariant,
+} from "./themes/modern";
+import type {
+  CompleteThemeVariant,
+  Theme,
+  ThemeColors,
+  ThemeMode,
+  ThemeVariant,
+  TerminalPalette,
+} from "./types";
 
 const ALL_VARS: readonly string[] = [
-  ...Object.values(COLOR_VAR),
-  "--terminal-background",
-  "--terminal-foreground",
-  "--terminal-cursor",
-  "--terminal-cursor-accent",
-  "--terminal-selection",
-  ...ANSI_VARS,
+  ...Object.values(THEME_COLOR_VARIABLES),
+  ...Object.values(TERMINAL_BASE_VARIABLES),
+  ...TERMINAL_ANSI_VARIABLES,
 ];
 
 let lastApplied: string | null = null;
 
+/** 按请求模式选择主题变体，单变体主题继续沿用其已有配色。 */
+function selectVariant(theme: Theme, mode: ThemeMode): ThemeVariant | undefined {
+  return theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
+}
+
+/**
+ * 将局部主题补全到 Modern 基准。
+ *
+ * 这样自定义主题和待整理的内置主题不会依赖全局 CSS 中散落的隐式颜色。
+ */
+function completeVariant(
+  variant: ThemeVariant,
+  mode: ThemeMode,
+): CompleteThemeVariant {
+  const baseline =
+    mode === "dark" ? darkModernVariant : lightModernVariant;
+  return {
+    colors: { ...baseline.colors, ...variant.colors },
+    terminal: {
+      ...baseline.terminal,
+      ...variant.terminal,
+      ansi: variant.terminal?.ansi ?? baseline.terminal.ansi,
+    },
+  };
+}
+
 /** 应用指定模式的主题，并清理上一主题遗留的 CSS 变量。 */
 export function applyTheme(theme: Theme, mode: ThemeMode): void {
   const root = document.documentElement;
-  const variant = theme.variants[mode] ?? theme.variants.dark ?? theme.variants.light;
+  const variant = selectVariant(theme, mode);
   if (!variant) {
     clearTheme();
     return;
   }
-  const colors = variant.colors;
-  const terminal = variant.terminal;
+  const completed = completeVariant(variant, mode);
   for (const v of ALL_VARS) root.style.removeProperty(v);
-  if (colors) writeColors(root, colors);
-  if (terminal) writeTerminal(root, terminal);
+  writeColors(root, completed.colors);
+  writeTerminal(root, completed.terminal);
   lastApplied = theme.id;
 }
 
+/** 清理主题写入的全部内联变量，恢复冷启动 CSS 安全回退。 */
 export function clearTheme(): void {
   if (lastApplied === null) return;
   const root = document.documentElement;
@@ -100,19 +82,22 @@ export function clearTheme(): void {
 function writeColors(root: HTMLElement, c: ThemeColors): void {
   for (const k of Object.keys(c) as (keyof ThemeColors)[]) {
     const v = c[k];
-    if (v) root.style.setProperty(COLOR_VAR[k], v);
+    if (v) root.style.setProperty(THEME_COLOR_VARIABLES[k], v);
   }
 }
 
 function writeTerminal(root: HTMLElement, t: TerminalPalette): void {
-  if (t.background) root.style.setProperty("--terminal-background", t.background);
-  if (t.foreground) root.style.setProperty("--terminal-foreground", t.foreground);
-  if (t.cursor) root.style.setProperty("--terminal-cursor", t.cursor);
-  if (t.cursorAccent) root.style.setProperty("--terminal-cursor-accent", t.cursorAccent);
-  if (t.selection) root.style.setProperty("--terminal-selection", t.selection);
+  for (const k of TERMINAL_BASE_KEYS) {
+    const value = t[k];
+    if (value) root.style.setProperty(TERMINAL_BASE_VARIABLES[k], value);
+  }
   if (t.ansi) {
-    for (let i = 0; i < ANSI_VARS.length && i < t.ansi.length; i++) {
-      root.style.setProperty(ANSI_VARS[i], t.ansi[i]);
+    for (
+      let i = 0;
+      i < TERMINAL_ANSI_VARIABLES.length && i < t.ansi.length;
+      i++
+    ) {
+      root.style.setProperty(TERMINAL_ANSI_VARIABLES[i], t.ansi[i]);
     }
   }
 }

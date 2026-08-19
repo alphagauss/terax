@@ -70,12 +70,14 @@ describe("validateTheme", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("accepts Git status and editor marker semantic colors", () => {
+  it("accepts registered interaction, Git, chart, and scrollbar colors", () => {
     const result = validateTheme(
       baseTheme({
         variants: {
           dark: {
             colors: {
+              interactiveHover: "rgba(255,255,255,0.09)",
+              interactiveActive: "rgba(255,255,255,0.13)",
               gitModified: "#e2c08d",
               gitAdded: "#81b88b",
               gitUntracked: "#73c991",
@@ -84,6 +86,14 @@ describe("validateTheme", () => {
               editorGitModified: "#0451a5",
               editorGitAdded: "#107c10",
               editorGitDeleted: "#cd3131",
+              chart1: "#111111",
+              chart2: "#222222",
+              chart3: "#333333",
+              chart4: "#444444",
+              chart5: "#555555",
+              scrollbarThumb: "#666666",
+              scrollbarThumbHover: "#777777",
+              scrollbarTrack: "transparent",
             },
           },
         },
@@ -99,6 +109,16 @@ describe("validateTheme", () => {
     expect(result).toEqual({
       ok: false,
       error: "variants.dark.terminal.ansi must be an array of 16 strings",
+    });
+  });
+
+  it("rejects unregistered terminal fields", () => {
+    const result = validateTheme(
+      baseTheme({ variants: { dark: { terminal: { nope: "#000" } } } }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: "variants.dark.terminal.nope is not a recognized terminal key",
     });
   });
 

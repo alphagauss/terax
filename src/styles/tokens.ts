@@ -1,52 +1,18 @@
-export type TerminalTokens = {
-  background: string;
-  foreground: string;
-  cursor: string;
-  cursorAccent: string;
-  selection: string;
-  ansiBlack: string;
-  ansiRed: string;
-  ansiGreen: string;
-  ansiYellow: string;
-  ansiBlue: string;
-  ansiMagenta: string;
-  ansiCyan: string;
-  ansiWhite: string;
-  ansiBrightBlack: string;
-  ansiBrightRed: string;
-  ansiBrightGreen: string;
-  ansiBrightYellow: string;
-  ansiBrightBlue: string;
-  ansiBrightMagenta: string;
-  ansiBrightCyan: string;
-  ansiBrightWhite: string;
-};
+/**
+ * 本文件读取当前主题已经解析的终端 CSS token。
+ * 字段与变量映射由主题注册表统一提供，本模块只负责浏览器计算值读取。
+ */
 
-const VAR_BY_KEY: Record<keyof TerminalTokens, string> = {
-  background: "--terminal-background",
-  foreground: "--terminal-foreground",
-  cursor: "--terminal-cursor",
-  cursorAccent: "--terminal-cursor-accent",
-  selection: "--terminal-selection",
-  ansiBlack: "--terminal-ansi-black",
-  ansiRed: "--terminal-ansi-red",
-  ansiGreen: "--terminal-ansi-green",
-  ansiYellow: "--terminal-ansi-yellow",
-  ansiBlue: "--terminal-ansi-blue",
-  ansiMagenta: "--terminal-ansi-magenta",
-  ansiCyan: "--terminal-ansi-cyan",
-  ansiWhite: "--terminal-ansi-white",
-  ansiBrightBlack: "--terminal-ansi-bright-black",
-  ansiBrightRed: "--terminal-ansi-bright-red",
-  ansiBrightGreen: "--terminal-ansi-bright-green",
-  ansiBrightYellow: "--terminal-ansi-bright-yellow",
-  ansiBrightBlue: "--terminal-ansi-bright-blue",
-  ansiBrightMagenta: "--terminal-ansi-bright-magenta",
-  ansiBrightCyan: "--terminal-ansi-bright-cyan",
-  ansiBrightWhite: "--terminal-ansi-bright-white",
-};
+import { TERMINAL_TOKEN_VARIABLES } from "@/modules/theme/themeRegistry";
 
-const KEYS = Object.keys(VAR_BY_KEY) as (keyof TerminalTokens)[];
+export type TerminalTokens = Record<
+  keyof typeof TERMINAL_TOKEN_VARIABLES,
+  string
+>;
+
+const KEYS = Object.keys(
+  TERMINAL_TOKEN_VARIABLES,
+) as (keyof TerminalTokens)[];
 
 let probe: HTMLDivElement | null = null;
 
@@ -66,11 +32,12 @@ function resolve(el: HTMLDivElement, varName: string): string {
   return getComputedStyle(el).color;
 }
 
+/** 读取当前文档中全部终端主题 token 的计算颜色。 */
 export function readTerminalTokens(): TerminalTokens {
   const el = getProbe();
   const out = {} as TerminalTokens;
   for (const k of KEYS) {
-    out[k] = resolve(el, VAR_BY_KEY[k]);
+    out[k] = resolve(el, TERMINAL_TOKEN_VARIABLES[k]);
   }
   return out;
 }

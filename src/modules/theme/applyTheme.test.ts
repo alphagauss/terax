@@ -1,12 +1,13 @@
 /**
  * 本文件测试主题 CSS 变量的应用。
- * 重点锁定编辑器 Git 标记使用当前主题模式显式声明的语义色。
+ * 重点锁定局部主题继承 Modern 基准，并允许覆盖交互状态和 Git 标记语义色。
  */
 
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it } from "vitest";
 import { applyTheme, clearTheme } from "./applyTheme";
+import { darkModernVariant } from "./themes/modern";
 import type { Theme } from "./types";
 
 afterEach(() => {
@@ -14,6 +15,52 @@ afterEach(() => {
 });
 
 describe("applyTheme", () => {
+  it("applies optional interaction colors and resets omissions to Modern", () => {
+    const customized: Theme = {
+      id: "interaction-customized",
+      name: "Interaction Customized",
+      variants: {
+        dark: {
+          colors: {
+            interactiveHover: "custom-hover",
+            interactiveActive: "custom-active",
+          },
+        },
+      },
+    };
+    const fallback: Theme = {
+      id: "interaction-fallback",
+      name: "Interaction Fallback",
+      variants: { dark: {} },
+    };
+
+    applyTheme(customized, "dark");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--interactive-hover"),
+    ).toBe("custom-hover");
+    expect(
+      document.documentElement.style.getPropertyValue("--interactive-active"),
+    ).toBe("custom-active");
+
+    applyTheme(fallback, "dark");
+
+    expect(
+      document.documentElement.style.getPropertyValue("--interactive-hover"),
+    ).toBe(darkModernVariant.colors.interactiveHover);
+    expect(
+      document.documentElement.style.getPropertyValue("--interactive-active"),
+    ).toBe(darkModernVariant.colors.interactiveActive);
+    expect(
+      document.documentElement.style.getPropertyValue("--foreground"),
+    ).toBe(darkModernVariant.colors.foreground);
+    expect(
+      document.documentElement.style.getPropertyValue(
+        "--terminal-ansi-yellow",
+      ),
+    ).toBe(darkModernVariant.terminal.ansi[3]);
+  });
+
   it("uses the active mode semantic colors for editor Git markers", () => {
     const theme: Theme = {
       id: "editor-git",

@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="stylesheet" href="/src/styles/workspace-bootstrap.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Terax</title>
     <script>
@@ -16,8 +17,6 @@
                 ? "dark"
                 : "light";
           document.documentElement.classList.add(resolved);
-          document.documentElement.style.backgroundColor =
-            resolved === "dark" ? "#0a0a0a" : "#ffffff";
         } catch (e) {}
       })();
     </script>

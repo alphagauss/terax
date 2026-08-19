@@ -3,30 +3,15 @@
  * 只接受已登记的主题字段，避免未知键静默失效。
  */
 
+import {
+  TERMINAL_BASE_KEYS,
+  THEME_COLOR_KEYS,
+} from "./themeRegistry";
 import type { Theme, ThemeColors, ThemeVariant, TerminalPalette } from "./types";
 
 export type ValidationResult =
   | { ok: true; theme: Theme }
   | { ok: false; error: string };
-
-const COLOR_KEYS: readonly (keyof ThemeColors)[] = [
-  "background", "foreground",
-  "card", "cardForeground",
-  "popover", "popoverForeground",
-  "primary", "primaryForeground",
-  "secondary", "secondaryForeground",
-  "muted", "mutedForeground",
-  "accent", "accentForeground",
-  "destructive",
-  "border", "input", "ring",
-  "gitModified", "gitAdded", "gitUntracked", "gitRenamed", "gitDeleted",
-  "editorGitModified", "editorGitAdded", "editorGitDeleted",
-  "sidebar", "sidebarForeground",
-  "sidebarPrimary", "sidebarPrimaryForeground",
-  "sidebarAccent", "sidebarAccentForeground",
-  "sidebarBorder", "sidebarRing",
-  "radius",
-];
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
 
@@ -43,7 +28,7 @@ function parseColors(raw: unknown, path: string): ThemeColors | string {
   if (!isObj(raw)) return `${path} must be an object`;
   const out: ThemeColors = {};
   for (const k of Object.keys(raw)) {
-    if (!(COLOR_KEYS as string[]).includes(k)) {
+    if (!THEME_COLOR_KEYS.includes(k as keyof ThemeColors)) {
       return `${path}.${k} is not a recognized color key`;
     }
     const v = raw[k];
@@ -57,25 +42,21 @@ function parseTerminal(raw: unknown, path: string): TerminalPalette | string {
   if (raw === undefined) return {};
   if (!isObj(raw)) return `${path} must be an object`;
   const out: TerminalPalette = {};
-  if (raw.background !== undefined) {
-    if (!isStr(raw.background)) return `${path}.background must be a string`;
-    out.background = raw.background;
+  for (const k of Object.keys(raw)) {
+    if (
+      k !== "ansi" &&
+      !TERMINAL_BASE_KEYS.includes(
+        k as Exclude<keyof TerminalPalette, "ansi">,
+      )
+    ) {
+      return `${path}.${k} is not a recognized terminal key`;
+    }
   }
-  if (raw.foreground !== undefined) {
-    if (!isStr(raw.foreground)) return `${path}.foreground must be a string`;
-    out.foreground = raw.foreground;
-  }
-  if (raw.cursor !== undefined) {
-    if (!isStr(raw.cursor)) return `${path}.cursor must be a string`;
-    out.cursor = raw.cursor;
-  }
-  if (raw.cursorAccent !== undefined) {
-    if (!isStr(raw.cursorAccent)) return `${path}.cursorAccent must be a string`;
-    out.cursorAccent = raw.cursorAccent;
-  }
-  if (raw.selection !== undefined) {
-    if (!isStr(raw.selection)) return `${path}.selection must be a string`;
-    out.selection = raw.selection;
+  for (const k of TERMINAL_BASE_KEYS) {
+    const value = raw[k];
+    if (value === undefined) continue;
+    if (!isStr(value)) return `${path}.${k} must be a string`;
+    out[k] = value;
   }
   if (raw.ansi !== undefined) {
     if (!Array.isArray(raw.ansi) || raw.ansi.length !== 16) {
@@ -98,6 +79,7 @@ function parseVariant(raw: unknown, path: string): ThemeVariant | string {
   return { colors, terminal };
 }
 
+/** 校验未知主题配置并返回仅包含受支持字段的规范主题。 */
 export function validateTheme(raw: unknown): ValidationResult {
   if (!isObj(raw)) return { ok: false, error: "Theme must be a JSON object" };
   if (!isStr(raw.id) || !ID_RE.test(raw.id)) {
