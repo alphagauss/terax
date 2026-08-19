@@ -76,7 +76,7 @@ function NavItem({
         // Workbench 打开函数可接收 groupId，不能把 React 点击事件透传过去。
         onClick();
       }}
-      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors duration-control hover:bg-foreground/[0.045] hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+      className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors duration-control hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
     >
       <HugeiconsIcon icon={icon} size={15} strokeWidth={1.8} />
       <span>{label}</span>

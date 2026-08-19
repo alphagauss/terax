@@ -385,7 +385,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
             <span
               className={
                 status?.running
-                  ? "text-[11px] font-medium text-emerald-500"
+                  ? "text-[11px] font-medium text-success"
                   : status
                     ? "text-[11px] font-medium text-destructive"
                     : "text-[11px] font-medium text-muted-foreground"

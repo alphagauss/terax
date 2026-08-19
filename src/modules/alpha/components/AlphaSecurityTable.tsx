@@ -124,8 +124,9 @@ export function AlphaSecurityTable({ rows, selectedSymbol, onSelect }: Props) {
               key={row.id}
               tabIndex={0}
               className={cn(
-                "cursor-pointer border-b border-border/50 outline-none last:border-b-0 hover:bg-muted/40 focus-visible:bg-muted/50",
-                row.original.vt_symbol === selectedSymbol && "bg-muted/70",
+                "cursor-pointer border-b border-border/50 outline-none last:border-b-0 hover:bg-interactive-hover focus-visible:bg-interactive-active",
+                row.original.vt_symbol === selectedSymbol &&
+                  "bg-interactive-active hover:bg-interactive-active",
               )}
               onClick={() => onSelect(row.original.vt_symbol)}
               onKeyDown={(event) => {

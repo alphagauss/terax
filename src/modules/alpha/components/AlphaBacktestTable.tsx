@@ -119,7 +119,7 @@ export function AlphaBacktestTable({ rows, selectedId, onSelect }: Props) {
               key={row.id}
               className={cn(
                 "border-b border-border/50 last:border-b-0",
-                row.original.id === selectedId && "bg-muted/70",
+                row.original.id === selectedId && "bg-interactive-active",
               )}
             >
               {row.getVisibleCells().map((cell) => (
