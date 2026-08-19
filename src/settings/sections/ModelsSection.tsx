@@ -634,7 +634,7 @@ function DefaultModelPicker({
                     onSelect={() => void setDefaultModel(mod.id as ModelId)}
                     className={cn(
                       "flex items-start gap-2 text-[12px]",
-                      mod.id === defaultModel && "bg-accent/50",
+                      mod.id === defaultModel && "bg-interactive-active",
                     )}
                   >
                     <span className="flex flex-1 flex-col">
@@ -794,7 +794,7 @@ function AutocompleteRow({
                         onSelect={() => pConfigured && setModel(m.id, p.id)}
                         className={cn(
                           "text-[11.5px]",
-                          m.id === modelId && "bg-accent/50",
+                          m.id === modelId && "bg-interactive-active",
                         )}
                       >
                         <span className="flex flex-col">
@@ -1391,7 +1391,7 @@ function VoiceBlock() {
                 onSelect={() => void setSttProvider(p)}
                 className={cn(
                   "flex items-center gap-2 text-[12px]",
-                  p === sttProvider && "bg-accent/50",
+                  p === sttProvider && "bg-interactive-active",
                 )}
               >
                 <span>{sttLabel(t, p)}</span>

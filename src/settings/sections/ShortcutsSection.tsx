@@ -200,7 +200,7 @@ function ShortcutRow({
   const hasBindings = bindings && bindings.length > 0;
 
   return (
-    <div className="group flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-muted/30">
+    <div className="group flex items-center justify-between px-3 py-2.5 transition-colors hover:bg-interactive-hover">
       <div className="flex flex-col gap-0.5">
         <span className="text-[12.5px] font-medium">
           {t(`shortcuts:label.${shortcut.id}`)}
@@ -338,7 +338,7 @@ function Recorder({
   }, [onRecord, onCancel]);
 
   return (
-    <div className="flex items-center gap-2 rounded bg-accent/50 px-2 py-1 text-[11px] ring-1 ring-accent">
+    <div className="flex items-center gap-2 rounded bg-interactive-active px-2 py-1 text-[11px] ring-1 ring-accent">
       <span className="animate-pulse font-medium">
         {t("shortcuts.recording")}
       </span>

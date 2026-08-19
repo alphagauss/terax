@@ -566,8 +566,8 @@ function TabButton({
       className={cn(
         "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
         active
-          ? "bg-accent text-foreground"
-          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+          ? "bg-interactive-active text-foreground"
+          : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
       )}
     >
       <HugeiconsIcon icon={icon} size={12} strokeWidth={1.75} />
@@ -602,10 +602,10 @@ function ProviderPill({
       className={cn(
         "relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors",
         active
-          ? "bg-accent text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
+          ? "bg-interactive-active text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
           : muted
-            ? "text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground"
-            : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+            ? "text-muted-foreground/50 hover:bg-interactive-hover hover:text-foreground"
+            : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
       )}
     >
       <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
@@ -632,7 +632,7 @@ function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
     <button
       type="button"
       onClick={() => void openSettingsWindow("models")}
-      className="group mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+      className="group mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-interactive-hover hover:text-foreground"
     >
       <HugeiconsIcon icon={Settings01Icon} size={13} strokeWidth={1.75} />
       <span className="flex-1 truncate">
@@ -671,7 +671,7 @@ function ModelRow({
       }}
       className={cn(
         "group mx-1 my-0.5 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
-        selected ? "bg-accent/60 text-foreground" : "text-foreground",
+        selected ? "bg-interactive-active text-foreground" : "text-foreground",
         !hasKey && "opacity-60",
       )}
     >

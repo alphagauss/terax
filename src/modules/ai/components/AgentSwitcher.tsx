@@ -42,6 +42,7 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   spark: SparklesIcon,
 };
 
+/** Agent 人设切换器，统一展示当前项和可用人设列表。 */
 export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
   const { t } = useTranslation("aiAgents");
   // Subscribe to customAgents + activeId so the trigger updates live.
@@ -94,7 +95,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
               onSelect={() => setActiveId(a.id)}
               className={cn(
                 "flex items-start gap-2 pr-2 text-[12px]",
-                a.id === activeId && "bg-accent/40",
+                a.id === activeId && "bg-interactive-active",
               )}
             >
               <HugeiconsIcon
@@ -139,7 +140,7 @@ export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
                   onSelect={() => setActiveId(a.id)}
                   className={cn(
                     "flex items-start gap-2 text-[12px]",
-                    a.id === activeId && "bg-accent/40",
+                    a.id === activeId && "bg-interactive-active",
                   )}
                 >
                   <HugeiconsIcon

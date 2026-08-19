@@ -802,7 +802,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
       <CollapsibleTrigger
         className={cn(
           "flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] leading-4",
-          "transition-colors hover:bg-muted/50",
+          "transition-colors hover:bg-interactive-hover",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
       >
