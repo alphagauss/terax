@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Tide 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const tide: Theme = {
   id: "tide",
   name: "Tide",
   description: "Deep slate with muted teal.",
-  editorTheme: { dark: "nord", light: "github-light" },
   variants: {
     dark: {
       colors: {
@@ -47,6 +50,29 @@ export const tide: Theme = {
           "#82bbd9", "#d0aed0", "#82c8c2", "#e0eaeb",
         ],
       },
+      editor: {
+        background: "#14191c",
+        foreground: "#cdd9da",
+        caret: "#6cb6b0",
+        selection: "#29413f",
+        lineHighlight: "#232c30",
+        gutterForeground: "#657475",
+        comment: "#718182",
+        keyword: "#c39bc4",
+        string: "#8fc99a",
+        number: "#d9bd80",
+        constant: "#6fa8c9",
+        function: "#6cb6b0",
+        variable: "#cdd9da",
+        property: "#82c8c2",
+        type: "#d9bd80",
+        operator: "#93a3a4",
+        tag: "#e07a6a",
+        attribute: "#d9bd80",
+        heading: "#6cb6b0",
+        link: "#6fa8c9",
+        invalid: "#e07a6a",
+      },
     },
     light: {
       colors: {
@@ -88,6 +114,29 @@ export const tide: Theme = {
           "#5a6968", "#d04a3a", "#469a5f", "#b8902a",
           "#4a7eb5", "#aa6a9a", "#3a958c", "#2b3a39",
         ],
+      },
+      editor: {
+        background: "#f2f6f5",
+        foreground: "#2b3a39",
+        caret: "#2f7d76",
+        selection: "#d6e7e4",
+        lineHighlight: "#e6eceb",
+        gutterForeground: "#74817f",
+        comment: "#74817f",
+        keyword: "#8a4f7a",
+        string: "#3a8a4f",
+        number: "#a9802a",
+        constant: "#3a6ea5",
+        function: "#2f7d76",
+        variable: "#2b3a39",
+        property: "#3a958c",
+        type: "#897126",
+        operator: "#5f6e6d",
+        tag: "#c0392b",
+        attribute: "#a9802a",
+        heading: "#2f7d76",
+        link: "#3a6ea5",
+        invalid: "#c0392b",
       },
     },
   },

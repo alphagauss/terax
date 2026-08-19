@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Sage 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const sage: Theme = {
   id: "sage",
   name: "Sage",
   description: "Muted forest green — calm and soft.",
-  editorTheme: { dark: "atomone", light: "github-light" },
   variants: {
     dark: {
       colors: {
@@ -47,6 +50,29 @@ export const sage: Theme = {
           "#93c7bf", "#e0a8c2", "#95cfa1", "#e8e0d0",
         ],
       },
+      editor: {
+        background: "#1c211e",
+        foreground: "#d8e0d2",
+        caret: "#a7c080",
+        selection: "#33402f",
+        lineHighlight: "#2a322c",
+        gutterForeground: "#687367",
+        comment: "#7b8778",
+        keyword: "#d699b6",
+        string: "#a7c080",
+        number: "#dbbc7f",
+        constant: "#7fbbb3",
+        function: "#83c092",
+        variable: "#d8e0d2",
+        property: "#83c092",
+        type: "#dbbc7f",
+        operator: "#9aa597",
+        tag: "#e67e80",
+        attribute: "#dbbc7f",
+        heading: "#a7c080",
+        link: "#7fbbb3",
+        invalid: "#e67e80",
+      },
     },
     light: {
       colors: {
@@ -88,6 +114,29 @@ export const sage: Theme = {
           "#6b7563", "#d04a3a", "#5f8a3a", "#b8902a",
           "#4a8a7e", "#aa6a9a", "#3a958f", "#36422f",
         ],
+      },
+      editor: {
+        background: "#f4f6f0",
+        foreground: "#36422f",
+        caret: "#5a7a3f",
+        selection: "#dce6d2",
+        lineHighlight: "#e8ecdf",
+        gutterForeground: "#7d8775",
+        comment: "#7d8775",
+        keyword: "#8a4f7a",
+        string: "#4f7a2f",
+        number: "#a97f2a",
+        constant: "#3a7a6e",
+        function: "#5a7a3f",
+        variable: "#36422f",
+        property: "#2a8580",
+        type: "#8b6d24",
+        operator: "#6b7563",
+        tag: "#c0392b",
+        attribute: "#a97f2a",
+        heading: "#5a7a3f",
+        link: "#3a7a6e",
+        invalid: "#c0392b",
       },
     },
   },

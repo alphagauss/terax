@@ -1,36 +1,57 @@
+/**
+ * 本文件解析编辑器最终使用的内嵌调色板或用户显式预设。
+ * 自动模式只读取当前应用主题文件，不维护额外的主题 ID 配对表。
+ */
+
 import {
   EDITOR_THEME_AUTO,
-  isEditorThemeId,
   type EditorThemeId,
   type EditorThemePref,
 } from "@/modules/settings/store";
 import { getBuiltinTheme, getDefaultTheme } from "./themes";
-import type { Theme } from "./types";
+import type { EditorPalette, Theme, ThemeMode } from "./types";
 
-const FALLBACK: Record<"light" | "dark", EditorThemeId> = {
-  light: "github-light",
-  dark: "atomone",
-};
+export type ResolvedEditorTheme =
+  | { kind: "inline"; mode: ThemeMode; palette: EditorPalette }
+  | { kind: "preset"; id: EditorThemeId };
 
-/**
- * Resolve the concrete CodeMirror theme to apply. In "auto" the editor follows
- * the active app theme's editorTheme pairing for the current mode (live, so it
- * never goes stale); an explicit pref always wins.
- */
-export function resolveEditorThemeId(
+/** 解析应用主题，优先使用同 ID 的自定义主题。 */
+function resolveAppTheme(themeId: string, customThemes: Theme[]): Theme {
+  return (
+    customThemes.find((theme) => theme.id === themeId) ??
+    getBuiltinTheme(themeId) ??
+    getDefaultTheme()
+  );
+}
+
+/** 选择请求模式，单模式主题则明确返回其实际变体模式。 */
+function selectEditorVariant(
+  theme: Theme,
+  mode: ThemeMode,
+): { mode: ThemeMode; palette: EditorPalette } {
+  const matching = theme.variants[mode];
+  if (matching) return { mode, palette: matching.editor };
+  if (theme.variants.dark) {
+    return { mode: "dark", palette: theme.variants.dark.editor };
+  }
+  const light = theme.variants.light;
+  if (!light) {
+    throw new Error(`Theme ${theme.id} has no editor variant`);
+  }
+  return { mode: "light", palette: light.editor };
+}
+
+/** 解析编辑器主题，显式预设优先于应用主题内嵌调色板。 */
+export function resolveEditorTheme(
   pref: EditorThemePref,
   themeId: string,
   customThemes: Theme[],
-  mode: "light" | "dark",
-): EditorThemeId {
-  if (pref !== EDITOR_THEME_AUTO) return pref;
-  const theme =
-    customThemes.find((t) => t.id === themeId) ??
-    getBuiltinTheme(themeId) ??
-    getDefaultTheme();
-  const mapped =
-    theme.editorTheme?.[mode] ??
-    theme.editorTheme?.dark ??
-    theme.editorTheme?.light;
-  return isEditorThemeId(mapped) ? mapped : FALLBACK[mode];
+  mode: ThemeMode,
+): ResolvedEditorTheme {
+  if (pref !== EDITOR_THEME_AUTO) return { kind: "preset", id: pref };
+  const selected = selectEditorVariant(
+    resolveAppTheme(themeId, customThemes),
+    mode,
+  );
+  return { kind: "inline", ...selected };
 }

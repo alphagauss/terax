@@ -86,7 +86,6 @@ export function starterTheme(): Theme {
     id,
     name: "My Theme",
     description: "Custom theme based on the complete Modern light and dark templates.",
-    editorTheme: { light: "modern", dark: "modern" },
     variants: {
       light: {
         colors: { ...lightModernVariant.colors },
@@ -94,6 +93,7 @@ export function starterTheme(): Theme {
           ...lightModernVariant.terminal,
           ansi: [...lightModernVariant.terminal.ansi],
         },
+        editor: { ...lightModernVariant.editor },
       },
       dark: {
         colors: { ...darkModernVariant.colors },
@@ -101,6 +101,7 @@ export function starterTheme(): Theme {
           ...darkModernVariant.terminal,
           ansi: [...darkModernVariant.terminal.ansi],
         },
+        editor: { ...darkModernVariant.editor },
       },
     },
   };

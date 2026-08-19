@@ -1,5 +1,5 @@
 /**
- * 本文件定义应用主题、终端调色板及主题变体的数据结构。
+ * 本文件定义应用、终端和编辑器调色板及主题变体的数据结构。
  * 颜色字段均为可选项，未声明的字段由全局主题变量提供回退值。
  */
 
@@ -68,9 +68,39 @@ export type TerminalPalette = Partial<{
   ];
 }>;
 
+/** CodeMirror 编辑器表面与语法高亮调色板。 */
+export type EditorPalette = {
+  background: string;
+  foreground: string;
+  caret: string;
+  selection: string;
+  lineHighlight: string;
+  gutterForeground: string;
+  comment: string;
+  commentItalic?: boolean;
+  keyword: string;
+  boldKeyword?: boolean;
+  string: string;
+  number: string;
+  constant?: string;
+  function: string;
+  variable: string;
+  property: string;
+  type: string;
+  operator: string;
+  tag: string;
+  tagBracket?: string;
+  attribute: string;
+  attributeValue?: string;
+  heading: string;
+  link: string;
+  invalid: string;
+};
+
 export type ThemeVariant = {
   colors?: ThemeColors;
   terminal?: TerminalPalette;
+  editor: EditorPalette;
 };
 
 /** 默认基准主题必须显式提供的完整 UI 配色。 */
@@ -83,6 +113,7 @@ export type CompleteTerminalPalette = Required<TerminalPalette>;
 export type CompleteThemeVariant = {
   colors: CompleteThemeColors;
   terminal: CompleteTerminalPalette;
+  editor: EditorPalette;
 };
 
 export type Theme = {
@@ -93,10 +124,6 @@ export type Theme = {
   variants: {
     light?: ThemeVariant;
     dark?: ThemeVariant;
-  };
-  editorTheme?: {
-    light?: string;
-    dark?: string;
   };
 };
 

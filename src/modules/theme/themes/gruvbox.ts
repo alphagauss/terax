@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Gruvbox 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const gruvbox: Theme = {
   id: "gruvbox",
   name: "Gruvbox",
   description: "Warm, earthy retro palette.",
-  editorTheme: { dark: "gruvbox-dark", light: "github-light" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,29 @@ export const gruvbox: Theme = {
           "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
         ],
       },
+      editor: {
+        background: "#282828",
+        foreground: "#ebdbb2",
+        caret: "#ebdbb2",
+        selection: "#504945",
+        lineHighlight: "#3c3836",
+        gutterForeground: "#7c6f64",
+        comment: "#928374",
+        keyword: "#fb4934",
+        string: "#b8bb26",
+        number: "#d3869b",
+        constant: "#d79921",
+        function: "#b8bb26",
+        variable: "#ebdbb2",
+        property: "#83a598",
+        type: "#fabd2f",
+        operator: "#fe8019",
+        tag: "#fb4934",
+        attribute: "#fabd2f",
+        heading: "#b8bb26",
+        link: "#83a598",
+        invalid: "#cc241d",
+      },
     },
     light: {
       colors: {
@@ -86,6 +112,29 @@ export const gruvbox: Theme = {
           "#928374", "#cc241d", "#98971a", "#d79921",
           "#458588", "#b16286", "#689d6a", "#3c3836",
         ],
+      },
+      editor: {
+        background: "#fbf1c7",
+        foreground: "#3c3836",
+        caret: "#3c3836",
+        selection: "#ebdbb2",
+        lineHighlight: "#f2e5bc",
+        gutterForeground: "#928374",
+        comment: "#928374",
+        keyword: "#9d0006",
+        string: "#79740e",
+        number: "#8f3f71",
+        constant: "#b57614",
+        function: "#79740e",
+        variable: "#3c3836",
+        property: "#076678",
+        type: "#b57614",
+        operator: "#af3a03",
+        tag: "#9d0006",
+        attribute: "#b57614",
+        heading: "#79740e",
+        link: "#076678",
+        invalid: "#cc241d",
       },
     },
   },

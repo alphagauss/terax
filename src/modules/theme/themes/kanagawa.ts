@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Kanagawa Wave 与 Lotus 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const kanagawa: Theme = {
   id: "kanagawa",
   name: "Kanagawa",
   description: "Inky dark inspired by Hokusai; warm Lotus light.",
-  editorTheme: { dark: "kanagawa", light: "kanagawa-lotus" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,32 @@ export const kanagawa: Theme = {
           "#7fb4ca", "#938aa9", "#7aa89f", "#dcd7ba",
         ],
       },
+      editor: {
+        background: "#1f1f28",
+        foreground: "#dcd7ba",
+        caret: "#c8c093",
+        selection: "#223249",
+        lineHighlight: "#2a2a37",
+        gutterForeground: "#54546d",
+        comment: "#727169",
+        keyword: "#957fb8",
+        boldKeyword: true,
+        string: "#98bb6c",
+        number: "#d27e99",
+        constant: "#ffa066",
+        function: "#7e9cd8",
+        variable: "#dcd7ba",
+        property: "#e6c384",
+        type: "#7aa89f",
+        operator: "#c0a36e",
+        tag: "#7aa89f",
+        tagBracket: "#9cabca",
+        attribute: "#957fb8",
+        attributeValue: "#98bb6c",
+        heading: "#7e9cd8",
+        link: "#7fb4ca",
+        invalid: "#e82424",
+      },
     },
     light: {
       colors: {
@@ -86,6 +115,30 @@ export const kanagawa: Theme = {
           "#8a8980", "#d7474b", "#6e915f", "#836f4a",
           "#6693bf", "#624c83", "#5e857a", "#43436c",
         ],
+      },
+      editor: {
+        background: "#f2ecbc",
+        foreground: "#545464",
+        caret: "#43436c",
+        selection: "#dcd5ac",
+        lineHighlight: "#e5ddb0",
+        gutterForeground: "#8a8980",
+        comment: "#8a8980",
+        keyword: "#624c83",
+        boldKeyword: true,
+        string: "#6f894e",
+        number: "#b35b79",
+        constant: "#cc6d00",
+        function: "#4d699b",
+        variable: "#545464",
+        property: "#836f4a",
+        type: "#597b75",
+        operator: "#5a5a72",
+        tag: "#c84053",
+        attribute: "#4d699b",
+        heading: "#4d699b",
+        link: "#4e8ca2",
+        invalid: "#c84053",
       },
     },
   },

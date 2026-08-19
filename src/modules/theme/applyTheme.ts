@@ -53,6 +53,7 @@ function completeVariant(
       ...variant.terminal,
       ansi: variant.terminal?.ansi ?? baseline.terminal.ansi,
     },
+    editor: variant.editor,
   };
 }
 

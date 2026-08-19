@@ -1,3 +1,7 @@
+/**
+ * 本文件完整描述 Nord 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 const NORD_ANSI = [
@@ -11,7 +15,6 @@ export const nord: Theme = {
   id: "nord",
   name: "Nord",
   description: "Arctic, north-bluish palette.",
-  editorTheme: { dark: "nord", light: "xcode-light" },
   variants: {
     dark: {
       colors: {
@@ -48,6 +51,29 @@ export const nord: Theme = {
         selection: "rgba(136,192,208,0.25)",
         ansi: NORD_ANSI,
       },
+      editor: {
+        background: "#2e3440",
+        foreground: "#d8dee9",
+        caret: "#88c0d0",
+        selection: "#434c5e",
+        lineHighlight: "#3b4252",
+        gutterForeground: "#616e88",
+        comment: "#616e88",
+        keyword: "#81a1c1",
+        string: "#a3be8c",
+        number: "#b48ead",
+        constant: "#5e81ac",
+        function: "#88c0d0",
+        variable: "#d8dee9",
+        property: "#8fbcbb",
+        type: "#8fbcbb",
+        operator: "#81a1c1",
+        tag: "#81a1c1",
+        attribute: "#d08770",
+        heading: "#88c0d0",
+        link: "#5e81ac",
+        invalid: "#bf616a",
+      },
     },
     light: {
       colors: {
@@ -83,6 +109,29 @@ export const nord: Theme = {
         cursorAccent: "#eceff4",
         selection: "rgba(94,129,172,0.25)",
         ansi: NORD_ANSI,
+      },
+      editor: {
+        background: "#eceff4",
+        foreground: "#2e3440",
+        caret: "#5e81ac",
+        selection: "#d8dee9",
+        lineHighlight: "#e5e9f0",
+        gutterForeground: "#7b88a1",
+        comment: "#7b88a1",
+        keyword: "#5e81ac",
+        string: "#4f7f45",
+        number: "#8c5c8c",
+        constant: "#5e81ac",
+        function: "#3b6ea8",
+        variable: "#2e3440",
+        property: "#397f78",
+        type: "#397f78",
+        operator: "#5e81ac",
+        tag: "#5e81ac",
+        attribute: "#a05a2c",
+        heading: "#3b6ea8",
+        link: "#5e81ac",
+        invalid: "#bf616a",
       },
     },
   },

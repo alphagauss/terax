@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Solarized 明暗主题的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const solarized: Theme = {
   id: "solarized",
   name: "Solarized",
   description: "Ethan Schoonover's precision low-glare palette.",
-  editorTheme: { dark: "solarized-dark", light: "solarized-light" },
   variants: {
     dark: {
       colors: {
@@ -46,6 +49,28 @@ export const solarized: Theme = {
           "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
         ],
       },
+      editor: {
+        background: "#002b36",
+        foreground: "#839496",
+        caret: "#839496",
+        selection: "#073642",
+        lineHighlight: "#073642",
+        gutterForeground: "#586e75",
+        comment: "#586e75",
+        keyword: "#859900",
+        string: "#2aa198",
+        number: "#d33682",
+        function: "#268bd2",
+        variable: "#839496",
+        property: "#268bd2",
+        type: "#b58900",
+        operator: "#859900",
+        tag: "#268bd2",
+        attribute: "#93a1a1",
+        heading: "#cb4b16",
+        link: "#6c71c4",
+        invalid: "#dc322f",
+      },
     },
     light: {
       colors: {
@@ -86,6 +111,28 @@ export const solarized: Theme = {
           "#fdf6e3", "#cb4b16", "#93a1a1", "#839496",
           "#657b83", "#6c71c4", "#586e75", "#002b36",
         ],
+      },
+      editor: {
+        background: "#fdf6e3",
+        foreground: "#657b83",
+        caret: "#657b83",
+        selection: "#eee8d5",
+        lineHighlight: "#eee8d5",
+        gutterForeground: "#93a1a1",
+        comment: "#93a1a1",
+        keyword: "#859900",
+        string: "#2aa198",
+        number: "#d33682",
+        function: "#268bd2",
+        variable: "#657b83",
+        property: "#268bd2",
+        type: "#b58900",
+        operator: "#859900",
+        tag: "#268bd2",
+        attribute: "#586e75",
+        heading: "#cb4b16",
+        link: "#6c71c4",
+        invalid: "#dc322f",
       },
     },
   },

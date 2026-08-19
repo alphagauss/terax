@@ -7,7 +7,10 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { applyTheme, clearTheme } from "./applyTheme";
-import { darkModernVariant } from "./themes/modern";
+import {
+  darkModernVariant,
+  lightModernVariant,
+} from "./themes/modern";
 import type { Theme } from "./types";
 
 afterEach(() => {
@@ -21,6 +24,7 @@ describe("applyTheme", () => {
       name: "Interaction Customized",
       variants: {
         dark: {
+          editor: darkModernVariant.editor,
           colors: {
             interactiveHover: "custom-hover",
             interactiveActive: "custom-active",
@@ -31,7 +35,7 @@ describe("applyTheme", () => {
     const fallback: Theme = {
       id: "interaction-fallback",
       name: "Interaction Fallback",
-      variants: { dark: {} },
+      variants: { dark: { editor: darkModernVariant.editor } },
     };
 
     applyTheme(customized, "dark");
@@ -67,6 +71,7 @@ describe("applyTheme", () => {
       name: "Editor Git",
       variants: {
         dark: {
+          editor: darkModernVariant.editor,
           colors: {
             editorGitDeleted: "dark-red",
             editorGitAdded: "dark-green",
@@ -74,6 +79,7 @@ describe("applyTheme", () => {
           },
         },
         light: {
+          editor: lightModernVariant.editor,
           colors: {
             editorGitDeleted: "light-red",
             editorGitAdded: "light-green",

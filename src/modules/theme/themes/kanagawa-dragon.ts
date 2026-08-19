@@ -1,10 +1,13 @@
+/**
+ * 本文件完整描述 Kanagawa Dragon 的应用、终端和编辑器配色。
+ */
+
 import type { Theme } from "../types";
 
 export const kanagawaDragon: Theme = {
   id: "kanagawa-dragon",
   name: "Kanagawa Dragon",
   description: "The muted, near-black Dragon variant of Kanagawa.",
-  editorTheme: { dark: "kanagawa-dragon" },
   variants: {
     dark: {
       colors: {
@@ -45,6 +48,30 @@ export const kanagawaDragon: Theme = {
           "#a6a69c", "#e46876", "#87a987", "#e6c384",
           "#7fb4ca", "#938aa9", "#7aa89f", "#c5c9c5",
         ],
+      },
+      editor: {
+        background: "#181616",
+        foreground: "#c5c9c5",
+        caret: "#c5c9c5",
+        selection: "#223249",
+        lineHighlight: "#282727",
+        gutterForeground: "#54544f",
+        comment: "#737c73",
+        keyword: "#957fb8",
+        boldKeyword: true,
+        string: "#87a987",
+        number: "#a292a3",
+        constant: "#b6927b",
+        function: "#8ba4b0",
+        variable: "#c5c9c5",
+        property: "#c4b28a",
+        type: "#8ea4a2",
+        operator: "#c4746e",
+        tag: "#c4746e",
+        attribute: "#8ba4b0",
+        heading: "#8ba4b0",
+        link: "#8ea4a2",
+        invalid: "#e46876",
       },
     },
   },

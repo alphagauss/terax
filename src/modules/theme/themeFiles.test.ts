@@ -1,6 +1,6 @@
 /**
  * 本文件测试自定义主题起始模板的完整性。
- * 锁定新主题复制 Modern 明暗全部字段，且不会共享可变的颜色和 ANSI 容器。
+ * 锁定新主题复制 Modern 明暗全部 UI、终端和编辑器字段，且不共享可变容器。
  */
 
 import { describe, expect, it } from "vitest";
@@ -27,5 +27,7 @@ describe("starterTheme", () => {
     expect(variant?.colors).not.toBe(baseline.colors);
     expect(variant?.terminal?.ansi).toEqual(baseline.terminal.ansi);
     expect(variant?.terminal?.ansi).not.toBe(baseline.terminal.ansi);
+    expect(variant?.editor).toEqual(baseline.editor);
+    expect(variant?.editor).not.toBe(baseline.editor);
   });
 });

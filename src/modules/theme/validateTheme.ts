@@ -4,16 +4,27 @@
  */
 
 import {
+  EDITOR_PALETTE_BOOLEAN_KEYS,
+  EDITOR_PALETTE_OPTIONAL_COLOR_KEYS,
+  EDITOR_PALETTE_REQUIRED_KEYS,
   TERMINAL_BASE_KEYS,
   THEME_COLOR_KEYS,
 } from "./themeRegistry";
-import type { Theme, ThemeColors, ThemeVariant, TerminalPalette } from "./types";
+import type {
+  EditorPalette,
+  Theme,
+  ThemeColors,
+  ThemeVariant,
+  TerminalPalette,
+} from "./types";
 
 export type ValidationResult =
   | { ok: true; theme: Theme }
   | { ok: false; error: string };
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const THEME_KEYS = ["id", "name", "author", "description", "variants"];
+const VARIANT_KEYS = ["colors", "terminal", "editor"];
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -21,6 +32,10 @@ function isObj(v: unknown): v is Record<string, unknown> {
 
 function isStr(v: unknown): v is string {
   return typeof v === "string";
+}
+
+function isBool(v: unknown): v is boolean {
+  return typeof v === "boolean";
 }
 
 function parseColors(raw: unknown, path: string): ThemeColors | string {
@@ -70,18 +85,62 @@ function parseTerminal(raw: unknown, path: string): TerminalPalette | string {
   return out;
 }
 
+function parseEditor(raw: unknown, path: string): EditorPalette | string {
+  if (!isObj(raw)) return `${path} must be an object`;
+  const knownKeys = [
+    ...EDITOR_PALETTE_REQUIRED_KEYS,
+    ...EDITOR_PALETTE_OPTIONAL_COLOR_KEYS,
+    ...EDITOR_PALETTE_BOOLEAN_KEYS,
+  ] as readonly string[];
+  for (const k of Object.keys(raw)) {
+    if (!knownKeys.includes(k)) {
+      return `${path}.${k} is not a recognized editor key`;
+    }
+  }
+  for (const k of EDITOR_PALETTE_REQUIRED_KEYS) {
+    if (!isStr(raw[k]) || raw[k].length === 0) {
+      return `${path}.${k} must be a non-empty string`;
+    }
+  }
+  for (const k of EDITOR_PALETTE_OPTIONAL_COLOR_KEYS) {
+    const value = raw[k];
+    if (value !== undefined && (!isStr(value) || value.length === 0)) {
+      return `${path}.${k} must be a non-empty string`;
+    }
+  }
+  for (const k of EDITOR_PALETTE_BOOLEAN_KEYS) {
+    const value = raw[k];
+    if (value !== undefined && !isBool(value)) {
+      return `${path}.${k} must be a boolean`;
+    }
+  }
+  return { ...raw } as EditorPalette;
+}
+
 function parseVariant(raw: unknown, path: string): ThemeVariant | string {
   if (!isObj(raw)) return `${path} must be an object`;
+  for (const k of Object.keys(raw)) {
+    if (!VARIANT_KEYS.includes(k)) {
+      return `${path}.${k} is not a recognized variant key`;
+    }
+  }
   const colors = parseColors(raw.colors, `${path}.colors`);
   if (typeof colors === "string") return colors;
   const terminal = parseTerminal(raw.terminal, `${path}.terminal`);
   if (typeof terminal === "string") return terminal;
-  return { colors, terminal };
+  const editor = parseEditor(raw.editor, `${path}.editor`);
+  if (typeof editor === "string") return editor;
+  return { colors, terminal, editor };
 }
 
 /** 校验未知主题配置并返回仅包含受支持字段的规范主题。 */
 export function validateTheme(raw: unknown): ValidationResult {
   if (!isObj(raw)) return { ok: false, error: "Theme must be a JSON object" };
+  for (const k of Object.keys(raw)) {
+    if (!THEME_KEYS.includes(k)) {
+      return { ok: false, error: `${k} is not a recognized theme key` };
+    }
+  }
   if (!isStr(raw.id) || !ID_RE.test(raw.id)) {
     return { ok: false, error: "id must be a kebab-case string (a-z, 0-9, -)" };
   }
@@ -110,11 +169,5 @@ export function validateTheme(raw: unknown): ValidationResult {
   };
   if (isStr(raw.author)) theme.author = raw.author;
   if (isStr(raw.description)) theme.description = raw.description;
-  if (isObj(raw.editorTheme)) {
-    const et: Theme["editorTheme"] = {};
-    if (isStr(raw.editorTheme.light)) et.light = raw.editorTheme.light;
-    if (isStr(raw.editorTheme.dark)) et.dark = raw.editorTheme.dark;
-    if (et.light || et.dark) theme.editorTheme = et;
-  }
   return { ok: true, theme };
 }
