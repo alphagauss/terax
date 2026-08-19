@@ -64,6 +64,15 @@ function renderEntryRow(
 }
 
 describe("EntryRow Git decorations", () => {
+  it("uses the shared interaction color for hover feedback", () => {
+    const { container, root } = renderEntryRow();
+
+    expect(container.querySelector("button")?.className).toContain(
+      "hover:bg-interactive-hover",
+    );
+    act(() => root.unmount());
+  });
+
   it.each([
     "M",
     "U",

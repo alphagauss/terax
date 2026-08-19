@@ -198,6 +198,11 @@ function highlight(text: string, query: string): ReactNode {
   );
 }
 
+/**
+ * Git 历史主面板。
+ *
+ * 组合提交图谱、搜索、分页和详情视图，并保持当前提交与悬停行层级清晰。
+ */
 export function GitHistoryPane({
   repoRoot,
   visible,
@@ -815,7 +820,9 @@ const CommitRow = memo(function CommitRow({
       onClick={(event) => onClick(commit.sha, event)}
       className={cn(
         "group relative grid h-full w-full cursor-pointer items-center gap-3 border-l-2 border-transparent pr-3 text-left transition-colors",
-        active ? "border-l-primary/70 bg-accent/45" : "hover:bg-accent/25",
+        active
+          ? "border-l-primary/70 bg-interactive-active"
+          : "hover:bg-interactive-hover",
       )}
       style={{ gridTemplateColumns: gridTemplate }}
     >

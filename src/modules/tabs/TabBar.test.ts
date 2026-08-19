@@ -34,6 +34,14 @@ describe("TabBar new-tab control", () => {
   });
 });
 
+describe("TabBar interaction colors", () => {
+  it("uses shared active and hover semantics without mode overrides", () => {
+    expect(source).toContain("bg-interactive-active shadow-sm");
+    expect(source).toContain('"text-muted-foreground hover:text-foreground"');
+    expect(source).not.toContain("hover:text-foreground/80");
+  });
+});
+
 describe("TabBar file actions", () => {
   it("offers only the requested Explorer actions for file tabs", () => {
     expect(source).toContain('tr("explorer:menu.revealInFinder")');

@@ -78,6 +78,11 @@ function subtitleFor(tab: Tab): string | null {
   return null;
 }
 
+/**
+ * 工作区 Space 切换器。
+ *
+ * 负责 Space 与工作页的选择、拖放和管理，并统一列表交互状态反馈。
+ */
 export function SpaceSwitcher({
   open,
   onOpenChange,
@@ -314,7 +319,7 @@ export function SpaceSwitcher({
           <button
             type="button"
             onClick={onNewSpace}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
           >
             <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.75} />
             <span className="flex-1">{t("newSpace")}</span>
@@ -427,8 +432,8 @@ function SpaceRow({
           moveTarget
             ? "bg-primary/10 ring-1 ring-inset ring-primary/40"
             : isActive
-              ? "bg-accent"
-              : "hover:bg-accent/50",
+              ? "bg-interactive-active"
+              : "hover:bg-interactive-hover",
         )}
       >
         <button
@@ -567,7 +572,7 @@ function TabRow({
           }
         }}
         className={cn(
-          "group/tab relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-primary/40",
+          "group/tab relative flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1 outline-none transition-colors hover:bg-interactive-hover focus-visible:ring-2 focus-visible:ring-primary/40",
           isDragging && "opacity-50",
         )}
       >

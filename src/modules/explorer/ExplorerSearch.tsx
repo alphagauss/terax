@@ -63,6 +63,11 @@ export type ExplorerSearchHandle = {
   isFocused: () => boolean;
 };
 
+/**
+ * 文件资源管理器搜索视图。
+ *
+ * 负责查询、键盘选择和结果操作，当前项与悬停项沿用工作台交互语义色。
+ */
 export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function ExplorerSearch({
   rootPath,
   onOpenFile,
@@ -255,7 +260,9 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(function E
                         }}
                         className={cn(
                           "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors",
-                          isSelected ? "bg-accent text-foreground" : "hover:bg-accent/50 text-foreground"
+                          isSelected
+                            ? "bg-interactive-active text-foreground"
+                            : "text-foreground hover:bg-interactive-hover",
                         )}
                         title={hit.path}
                       >
