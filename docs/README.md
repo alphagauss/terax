@@ -23,3 +23,4 @@
 ## 贡献指南
 
 - [测试](contributing/testing.md) - 测试约定、检查运行方式，以及优秀核心子系统测试的标准。
+- [主题开发](contributing/themes.md) - Modern 基准、完整字段、透明度规则、自定义主题和新增内置主题流程。
