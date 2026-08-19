@@ -275,4 +275,5 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量
 - `docs/architecture/workspace-page-handoff.md`：主窗口向同环境临时 Workspace 复制可重建工作页
 - `docs/contributing/testing.md`：测试约定和核心子系统不变量
+- `docs/contributing/themes.md`：主题字段、Modern 基准、透明度规则和新增主题流程
 - `docs/contributing/ui-runtime-debugging.md`：复杂 UI 的运行时调试和回归验证
