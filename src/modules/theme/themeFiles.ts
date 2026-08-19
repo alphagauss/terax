@@ -1,6 +1,6 @@
 /**
  * 本文件管理自定义主题文件的创建、校验、读写与编辑事件。
- * 新主题以完整 Modern Dark 变体为起点，避免遗漏新增的主题语义字段。
+ * 新主题以完整 Modern 明暗变体为起点，避免遗漏新增的主题语义字段。
  */
 
 import { currentWorkspaceEnv } from "@/modules/workspace";
@@ -9,7 +9,10 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { appConfigDir, join } from "@tauri-apps/api/path";
 import type { Theme } from "./types";
 import { validateTheme, type ValidationResult } from "./validateTheme";
-import { darkModernVariant } from "./themes/modern";
+import {
+  darkModernVariant,
+  lightModernVariant,
+} from "./themes/modern";
 
 const THEME_FILE_EXT = ".terax-theme";
 const THEME_EDIT_EVENT = "terax://theme-edit";
@@ -76,15 +79,22 @@ export function parseThemeFile(text: string): ValidationResult {
   return validateTheme(parsed);
 }
 
-/** 创建字段完整、可直接编辑的 Modern Dark 自定义主题模板。 */
+/** 创建字段完整、可直接编辑的 Modern 明暗双变体自定义主题模板。 */
 export function starterTheme(): Theme {
   const id = `my-theme-${crypto.randomUUID().slice(0, 8)}`;
   return {
     id,
     name: "My Theme",
-    description: "Custom theme based on the complete Modern Dark template.",
-    editorTheme: { dark: "modern" },
+    description: "Custom theme based on the complete Modern light and dark templates.",
+    editorTheme: { light: "modern", dark: "modern" },
     variants: {
+      light: {
+        colors: { ...lightModernVariant.colors },
+        terminal: {
+          ...lightModernVariant.terminal,
+          ansi: [...lightModernVariant.terminal.ansi],
+        },
+      },
       dark: {
         colors: { ...darkModernVariant.colors },
         terminal: {
