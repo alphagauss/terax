@@ -14,6 +14,12 @@ const PAGE_LOADERS: Record<string, () => Promise<AuxiliaryPageModule>> = {
     const module = await import("@/modules/settings/window/SettingsWindowPage");
     return { default: module.SettingsWindowPage };
   },
+  "auxiliary-file-properties": async () => {
+    const module = await import(
+      "@/modules/file-properties/window/FilePropertiesWindowPage"
+    );
+    return { default: module.FilePropertiesWindowPage };
+  },
 };
 
 /** 根据精确窗口 label 懒加载已注册页面。 */

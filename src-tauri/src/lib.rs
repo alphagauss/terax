@@ -164,12 +164,14 @@ pub fn run() {
         })
         .manage(pty::PtyState::default())
         .manage(workspace_process)
+        .manage(auxiliary_window::AuxiliaryWindowState::default())
         .manage(ai_sessions::AiSessionsState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
         .manage(transfers::TransferState::default())
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
+        .manage(fs::properties::FilePropertiesState::default())
         .manage(history::HistoryState::default())
         .manage(alpha::AlphaProxyState::default())
         .manage(lsp::LspState::default())
@@ -235,6 +237,9 @@ pub fn run() {
             fs::file::fs_write_file_checked,
             fs::file::fs_stat,
             fs::file::fs_canonicalize,
+            fs::properties::fs_properties_get,
+            fs::properties::fs_properties_scan,
+            fs::properties::fs_properties_scan_cancel,
             markdown_images::markdown_image_prepare,
             markdown_images::markdown_image_release,
             markdown_images::markdown_image_save_as,
@@ -316,6 +321,7 @@ pub fn run() {
             toggle_fullscreen,
             set_fullscreen,
             auxiliary_window::open_auxiliary_window,
+            auxiliary_window::get_auxiliary_window_request,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,
             secrets::secrets_get,

@@ -36,6 +36,8 @@
     "attachToAgent": "Attach to Agent",
     "confirmDelete": "Click again to confirm",
     "refresh": "Refresh",
+    "properties": "Properties",
+    "propertiesOpenFailed": "Could not open properties: {{error}}",
     "deletePermanentlyTitle": "Delete permanently?",
     "deletePermanentlyDescription": "{{name}} cannot be moved to the Recycle Bin. Permanently delete it?",
     "deletePermanently": "Delete permanently"

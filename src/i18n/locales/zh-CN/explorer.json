@@ -36,6 +36,8 @@
     "attachToAgent": "附加到 Agent",
     "confirmDelete": "再次点击以确认",
     "refresh": "刷新",
+    "properties": "属性",
+    "propertiesOpenFailed": "无法打开属性窗口：{{error}}",
     "deletePermanentlyTitle": "永久删除？",
     "deletePermanentlyDescription": "{{name}} 无法移动到回收站。确定要永久删除吗？",
     "deletePermanently": "永久删除"

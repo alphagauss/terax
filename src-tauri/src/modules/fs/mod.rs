@@ -1,6 +1,11 @@
+//! 文件系统命令与跨平台路径表示的统一入口。
+//!
+//! 各子模块分别负责正文、目录、变更、搜索、属性和监听，规范路径统一使用正斜杠。
+
 pub mod file;
 pub mod grep;
 pub mod mutate;
+pub mod properties;
 pub mod search;
 pub mod tree;
 pub mod watch;
