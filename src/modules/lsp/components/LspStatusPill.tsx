@@ -26,7 +26,7 @@ type Props = {
 };
 
 const PILL_CLASS =
-  "terax-pill-in ml-1.5 flex h-6 shrink-0 cursor-pointer [&_button]:cursor-pointer items-center gap-1 rounded-full border border-border/50 bg-accent/50 px-2 text-[10.5px] font-medium text-muted-foreground transition-colors duration-surface hover:bg-accent hover:text-foreground";
+  "terax-pill-in ml-1.5 flex h-6 shrink-0 cursor-pointer [&_button]:cursor-pointer items-center gap-1 rounded-full border border-border/50 bg-interactive-hover px-2 text-[10.5px] font-medium text-muted-foreground transition-colors duration-surface hover:bg-interactive-active hover:text-foreground";
 
 /** 编辑器语言服务器状态入口，按当前文件展示会话和诊断信息。 */
 export function LspStatusPill({ filePath }: Props) {
@@ -126,7 +126,7 @@ function DismissButton({ preset }: { preset: LspPreset }) {
   return (
     <button
       type="button"
-      className="rounded-full p-0.5 hover:bg-foreground/10"
+      className="rounded-full p-0.5 hover:bg-interactive-active"
       onClick={() => void setLspActivation(preset.id, "dismissed")}
       title={t("dismissTitle")}
     >
