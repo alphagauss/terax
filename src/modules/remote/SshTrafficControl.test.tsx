@@ -32,8 +32,8 @@ vi.mock("@/modules/remote/native", () => ({
   remoteNative: { trafficSnapshot: mocks.trafficSnapshot },
 }));
 vi.mock("@hugeicons/core-free-icons", () => ({
-  ArrowDown01Icon: {},
-  ArrowUp01Icon: {},
+  ArrowDown02Icon: {},
+  ArrowUp02Icon: {},
 }));
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("react-i18next", () => ({
@@ -43,6 +43,7 @@ vi.mock("react-i18next", () => ({
 import {
   calculateSshTrafficRate,
   formatSshTrafficBytes,
+  formatSshTrafficRate,
   SshTrafficControl,
 } from "@/modules/remote/SshTrafficControl";
 
@@ -74,6 +75,15 @@ describe("SSH traffic calculations", () => {
     expect(formatSshTrafficBytes(0.5)).toBe("1 B");
     expect(formatSshTrafficBytes(2_396_160)).toBe("2.29 MB");
     expect(formatSshTrafficBytes(12_345)).toBe("12.1 KB");
+  });
+
+  it("keeps low rates stable and compact", () => {
+    expect(formatSshTrafficRate(0)).toBe("0 KB/s");
+    expect(formatSshTrafficRate(1)).toBe("<1 KB/s");
+    expect(formatSshTrafficRate(1_023)).toBe("<1 KB/s");
+    expect(formatSshTrafficRate(1_024)).toBe("1.00 KB/s");
+    expect(formatSshTrafficRate(999 * 1_024)).toBe("999 KB/s");
+    expect(formatSshTrafficRate(1_023 * 1_024)).toBe("1.00 MB/s");
   });
 });
 
@@ -138,7 +148,9 @@ describe("SSH traffic control", () => {
 
     const { container, root } = render(createElement(SshTrafficControl));
     await act(async () => Promise.resolve());
-    expect(container.querySelector("button")?.textContent).toBe("0 B/s0 B/s");
+    expect(container.querySelector("button")?.textContent).toBe(
+      "0 KB/s0 KB/s",
+    );
 
     sampledAt = 1_000;
     await act(async () => {
@@ -152,7 +164,9 @@ describe("SSH traffic control", () => {
 
     visibility = "hidden";
     act(() => document.dispatchEvent(new Event("visibilitychange")));
-    expect(container.querySelector("button")?.textContent).toBe("0 B/s0 B/s");
+    expect(container.querySelector("button")?.textContent).toBe(
+      "0 KB/s0 KB/s",
+    );
     await vi.advanceTimersByTimeAsync(2_000);
     expect(mocks.trafficSnapshot).toHaveBeenCalledTimes(2);
 
@@ -163,7 +177,9 @@ describe("SSH traffic control", () => {
       await Promise.resolve();
     });
     expect(mocks.trafficSnapshot).toHaveBeenCalledTimes(3);
-    expect(container.querySelector("button")?.textContent).toBe("0 B/s0 B/s");
+    expect(container.querySelector("button")?.textContent).toBe(
+      "0 KB/s0 KB/s",
+    );
     expect(container.textContent).toContain("2.98 KB");
     expect(container.textContent).toContain("5.95 KB");
 

@@ -9,7 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
-import { ArrowDown01Icon, ArrowUp01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown02Icon, ArrowUp02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -60,6 +60,26 @@ export function formatSshTrafficBytes(bytes: number): string {
   const value = bytes / 1_024 ** index;
   const digits = index === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2;
   return `${value.toFixed(digits)} ${TRAFFIC_UNITS[index]}`;
+}
+
+/** 将每秒速率格式化为固定展示宽度内的紧凑文本。 */
+export function formatSshTrafficRate(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return "0 KB/s";
+  if (bytesPerSecond < 1_024) return "<1 KB/s";
+  let index = Math.max(
+    1,
+    Math.min(
+      TRAFFIC_UNITS.length - 1,
+      Math.floor(Math.log2(bytesPerSecond) / 10),
+    ),
+  );
+  let value = bytesPerSecond / 1_024 ** index;
+  if (value >= 1_000 && index < TRAFFIC_UNITS.length - 1) {
+    index += 1;
+    value = bytesPerSecond / 1_024 ** index;
+  }
+  const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${TRAFFIC_UNITS[index]}/s`;
 }
 
 /** 读取当前进程累计流量，并在相邻可见采样之间计算平均速率。 */
@@ -196,25 +216,25 @@ export function SshTrafficControl() {
 function SshTrafficPanel() {
   const { t } = useTranslation("statusbar");
   const traffic = useSshTraffic();
-  const uploadRate = `${formatSshTrafficBytes(traffic.uploadRate)}/s`;
-  const downloadRate = `${formatSshTrafficBytes(traffic.downloadRate)}/s`;
+  const uploadRate = formatSshTrafficRate(traffic.uploadRate);
+  const downloadRate = formatSshTrafficRate(traffic.downloadRate);
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex h-6 items-center rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="flex h-6 items-center gap-1.5 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
           title={t("sshTraffic.label")}
           aria-label={t("sshTraffic.label")}
         >
-          <span className="flex w-[84px] items-center justify-end gap-0.5 whitespace-nowrap">
-            <HugeiconsIcon icon={ArrowUp01Icon} size={11} strokeWidth={1.8} />
-            {uploadRate}
+          <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
+            <HugeiconsIcon icon={ArrowUp02Icon} size={11} strokeWidth={1.8} />
+            <span>{uploadRate}</span>
           </span>
-          <span className="flex w-[84px] items-center justify-end gap-0.5 whitespace-nowrap">
-            <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={1.8} />
-            {downloadRate}
+          <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
+            <HugeiconsIcon icon={ArrowDown02Icon} size={11} strokeWidth={1.8} />
+            <span>{downloadRate}</span>
           </span>
         </button>
       </PopoverTrigger>
