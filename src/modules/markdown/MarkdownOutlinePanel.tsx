@@ -92,9 +92,9 @@ export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
                   onClick={() => onSelect(item)}
                   className={cn(
                     "mx-2 h-7 w-[calc(100%-1rem)] truncate rounded-md pr-2 text-left text-xs leading-7 transition-colors",
-                    "hover:bg-muted/70 hover:text-foreground",
+                    "hover:bg-interactive-hover hover:text-foreground",
                     activeId === item.id
-                      ? "bg-accent/70 font-semibold text-foreground"
+                      ? "bg-interactive-active font-semibold text-foreground"
                       : "font-normal text-muted-foreground",
                   )}
                   style={{

@@ -50,6 +50,7 @@ const ICON_OPTIONS: AgentIconId[] = [
   "spark",
 ];
 
+/** 自定义 Agent 设置区域。 */
 export function AgentsSection() {
   const { t } = useTranslation();
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
@@ -370,8 +371,8 @@ function AgentEditorDialog({
                       className={cn(
                         "flex size-7 items-center justify-center rounded-md border transition-colors",
                         active
-                          ? "border-foreground/40 bg-accent"
-                          : "border-border/60 hover:bg-accent/40",
+                          ? "border-foreground/40 bg-interactive-active"
+                          : "border-border/60 hover:bg-interactive-hover",
                       )}
                     >
                       <HugeiconsIcon icon={Icon} size={13} strokeWidth={1.75} />
@@ -577,3 +578,7 @@ function Label({ children }: { children: React.ReactNode }) {
     </span>
   );
 }
+/**
+ * 本文件呈现自定义 AI Agent 设置及编辑对话框。
+ * 负责 Agent 列表、图标选择和配置输入，不改变运行时 Agent 调度逻辑。
+ */

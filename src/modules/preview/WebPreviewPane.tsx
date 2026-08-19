@@ -29,6 +29,7 @@ type Props = {
 // server page can hold hundreds of MB inside the WebView.
 export const WEB_PREVIEW_SUSPEND_AFTER_MS = 5 * 60 * 1000;
 
+/** 创建预览不可见后的延迟挂起任务，并返回取消函数。 */
 export function scheduleWebPreviewSuspension(
   onSuspend: () => void,
 ): () => void {
@@ -36,6 +37,7 @@ export function scheduleWebPreviewSuspension(
   return () => clearTimeout(timer);
 }
 
+/** 网页预览面板，隐藏足够长时间后卸载 iframe 以释放 WebView 内存。 */
 export const WebPreviewPane = forwardRef<WebPreviewPaneHandle, Props>(
   function WebPreviewPane({ url, visible, onUrlChange }, ref) {
     const { t } = useTranslation("webPreview");
@@ -153,7 +155,7 @@ function SuspendedState({ onReload }: { onReload: () => void }) {
       <button
         type="button"
         onClick={onReload}
-        className="rounded-md border border-border/60 bg-card px-3 py-1 text-[11px] hover:bg-accent/50"
+        className="rounded-md border border-border/60 bg-card px-3 py-1 text-[11px] hover:bg-interactive-hover"
       >
         {t("suspended.reload")}
       </button>
@@ -203,3 +205,7 @@ function isLocalUrl(url: string): boolean {
     return false;
   }
 }
+/**
+ * 本文件渲染开发服务器网页预览及其空闲挂起状态。
+ * 负责 iframe 生命周期和恢复入口，不管理开发服务器进程。
+ */

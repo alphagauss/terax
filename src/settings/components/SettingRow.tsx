@@ -22,7 +22,7 @@ export function SettingRow({ title, description, children, className }: Props) {
   return (
     <div
       className={cn(
-        "flex items-start justify-between gap-4 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5 transition-[background-color,border-color,box-shadow] duration-control ease-standard hover:bg-accent/30 focus-within:border-border",
+        "flex items-start justify-between gap-4 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5 transition-[background-color,border-color,box-shadow] duration-control ease-standard hover:bg-interactive-hover focus-within:border-border",
         className,
       )}
     >

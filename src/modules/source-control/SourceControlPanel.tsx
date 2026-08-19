@@ -261,7 +261,7 @@ function BranchDropdown({
         <button
           type="button"
           disabled={checkingOut}
-          className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-foreground/5 px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-foreground/10 disabled:cursor-default disabled:opacity-70"
+          className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-md bg-interactive-hover px-2 py-1 text-[11.5px] font-medium leading-none text-foreground transition-colors hover:bg-interactive-active disabled:cursor-default disabled:opacity-70"
         >
           <HugeiconsIcon
             icon={FolderGitTwoIcon}

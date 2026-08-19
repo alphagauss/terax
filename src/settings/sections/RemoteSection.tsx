@@ -812,7 +812,7 @@ export function RemoteSection() {
             <CollapsibleTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-muted-foreground transition-colors duration-control ease-standard hover:bg-accent/30"
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-muted-foreground transition-colors duration-control ease-standard hover:bg-interactive-hover"
               >
                 {t("remote.advanced.title")}
                 <HugeiconsIcon

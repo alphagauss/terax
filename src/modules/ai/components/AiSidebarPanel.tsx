@@ -463,7 +463,7 @@ function SessionRow({
       }}
       className={cn(
         "group flex items-center justify-between gap-2 text-xs",
-        active && "bg-accent/40",
+        active && "bg-interactive-active",
       )}
     >
       <span className="flex min-w-0 flex-1 items-center gap-1">
@@ -554,11 +554,11 @@ function EmptyState({
             }
             className={cn(
               "group flex items-center gap-2.5 bg-card/70 rounded-lg px-2.5 py-2 border border-border text-left",
-              "transition-colors hover:bg-muted/50 hover:text-foreground",
+              "transition-colors hover:bg-interactive-hover hover:text-foreground",
               "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-card/70 disabled:hover:text-inherit",
             )}
           >
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground transition-colors group-hover:bg-foreground/5 group-hover:text-foreground">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground transition-colors group-hover:bg-interactive-active group-hover:text-foreground">
               <HugeiconsIcon icon={s.icon} size={13} strokeWidth={1.75} />
             </div>
             <div className="min-w-0 flex-1">

@@ -84,7 +84,9 @@ export function FilePickerContent({
                   onMouseEnter={() => onHover(idx)}
                   className={cn(
                     "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px]",
-                    idx === activeIndex ? "bg-accent" : "hover:bg-accent/60",
+                    idx === activeIndex
+                      ? "bg-interactive-active"
+                      : "hover:bg-interactive-hover",
                   )}
                 >
                   <img

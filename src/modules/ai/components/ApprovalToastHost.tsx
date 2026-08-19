@@ -163,7 +163,7 @@ function ApprovalToast({
         disabled={!request.preview}
         className={cn(
           "block w-full px-3 py-2.5 text-left",
-          request.preview && "hover:bg-muted/50",
+          request.preview && "hover:bg-interactive-hover",
           !request.preview && "cursor-default",
         )}
       >

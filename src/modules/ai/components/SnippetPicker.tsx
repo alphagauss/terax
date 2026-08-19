@@ -64,8 +64,8 @@ export function SnippetPickerContent({
                         className={cn(
                           "flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px]",
                           i === activeIndex
-                            ? "bg-accent"
-                            : "hover:bg-accent/60",
+                            ? "bg-interactive-active"
+                            : "hover:bg-interactive-hover",
                         )}
                       >
                         <HugeiconsIcon
@@ -107,8 +107,8 @@ export function SnippetPickerContent({
                         className={cn(
                           "flex w-full flex-col items-start gap-0.5 px-2 py-1.5 text-left text-[12px]",
                           i === activeIndex
-                            ? "bg-accent"
-                            : "hover:bg-accent/60",
+                            ? "bg-interactive-active"
+                            : "hover:bg-interactive-hover",
                         )}
                       >
                         <span className="flex w-full items-center gap-1.5">

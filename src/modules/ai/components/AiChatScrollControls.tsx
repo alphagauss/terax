@@ -176,7 +176,7 @@ export function AiChatScrollControls({
                   key={message.id}
                   type="button"
                   onClick={() => handleJumpToMessage(message.id)}
-                  className="group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-[11.5px] leading-relaxed text-foreground transition-colors duration-control hover:bg-muted/60"
+                  className="group flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left text-[11.5px] leading-relaxed text-foreground transition-colors duration-control hover:bg-interactive-hover"
                 >
                   <span className="mt-0.5 shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-[9.5px] font-medium text-muted-foreground transition-colors duration-control group-hover:text-foreground">
                     {message.index + 1}
