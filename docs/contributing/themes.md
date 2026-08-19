@@ -1,6 +1,6 @@
 # 主题开发指南
 
-Terax 的应用主题负责 UI 表面、文字、交互、Git、图表、侧边栏、滚动条和终端配色。编辑器语法高亮是独立体系，由应用主题的 `editorTheme` 选择对应的 CodeMirror 主题。
+Terax 的每个主题文件完整描述 UI 表面、文字、交互、Git、图表、侧边栏、滚动条、终端和编辑器语法配色。Light 与 Dark 的每个 variant 都直接包含 `colors`、`terminal` 和 `editor`，不再通过额外 ID 查找另一份编辑器配置。
 
 ## 权威来源
 
@@ -8,6 +8,7 @@ Terax 的应用主题负责 UI 表面、文字、交互、Git、图表、侧边�
 - `src/modules/theme/themeRegistry.ts`：主题字段到 CSS 变量的唯一注册表。
 - `src/modules/theme/themes/modern.ts`：完整的 Light Modern 和 Dark Modern 基准。
 - `src/modules/theme/applyTheme.ts`：模式选择、Modern 补全和 CSS 变量写入。
+- `src/modules/editor/lib/editorTheme.ts`：将 variant 内嵌 editor 调色板构建为 CodeMirror 扩展。
 - `src/styles/globals.css`：React 挂载前的 Modern 安全回退。
 - `src/styles/workspace-bootstrap.css`：主窗口和辅助窗口的冷启动背景。
 
@@ -16,13 +17,13 @@ Terax 的应用主题负责 UI 表面、文字、交互、Git、图表、侧边�
 ## 解析与兼容规则
 
 1. Light Modern 和 Dark Modern 是对应模式的完整基准。
-2. 当前主题只覆盖自己显式声明的 UI 和终端字段。
+2. 当前主题可以局部覆盖 UI 和终端字段，但 editor 调色板必须完整内嵌。
 3. 未声明字段由当前模式的 Modern 补全。
 4. 只有一个变体的主题在另一模式下继续使用其已有变体，但缺失字段仍由请求模式的 Modern 补全。
-5. 自定义主题允许局部配置，以兼容已有 `.terax-theme` 文件。
+5. 自定义主题的 UI 和终端允许局部配置，editor 不允许引用外部主题 ID。
 6. 未登记字段会被校验器拒绝，避免拼写错误静默失效。
 
-`CompleteThemeVariant` 用于 Modern 等基准主题，确保新增字段时编译器立即报告遗漏。新建内置主题也应优先使用完整变体，现有局部主题可在后续主题整理中逐步补齐。
+`CompleteThemeVariant` 用于 Modern 等基准主题，确保新增字段时编译器立即报告遗漏。所有 `ThemeVariant` 都要求 editor，因此内置和自定义主题始终可以单文件恢复完整编辑器外观。
 
 ## UI 字段
 
@@ -120,6 +121,37 @@ Hover、active、selected、focus、右键目标和拖放目标是不同状态�
 
 `ansi` 必须包含 16 个颜色，顺序固定为：black、red、green、yellow、blue、magenta、cyan、white，然后是对应的 8 个 bright 颜色。
 
+## 编辑器字段
+
+每个 light 或 dark variant 必须包含完整的 `editor` 对象。以下颜色字段必填：
+
+| 字段 | 用途 |
+| --- | --- |
+| `background` | 编辑器和 gutter 背景 |
+| `foreground` | 默认代码文字 |
+| `caret` | 插入光标 |
+| `selection` | 选区和匹配选区 |
+| `lineHighlight` | 当前行背景 |
+| `gutterForeground` | 行号和 gutter 辅助文字 |
+| `comment` | 注释和处理指令 |
+| `keyword` | 关键字、修饰符和控制关键字 |
+| `string` | 字符串、正则和字符字面量 |
+| `number` | 数字字面量 |
+| `function` | 函数、标签和宏名称 |
+| `variable` | 变量和定义名称 |
+| `property` | 属性名称 |
+| `type` | 类型、类、命名空间和注解 |
+| `operator` | 运算符 |
+| `tag` | 标签名称 |
+| `attribute` | 属性名称 |
+| `heading` | Markdown 标题 |
+| `link` | 链接和 URL |
+| `invalid` | 无效语法 |
+
+可选颜色字段为 `constant`、`tagBracket` 和 `attributeValue`，未提供时分别回退到 number、tag 和 attribute。可选布尔字段为 `commentItalic` 和 `boldKeyword`。
+
+设置中的编辑器主题选择为用户覆盖项。选择“自动”时使用当前应用主题 variant 内的 editor；显式选择 Atom One、GitHub、Xcode 等独立预设时，用户选择优先。
+
 ## 透明度规则
 
 透明度只应用于确实需要叠加到底层表面的效果，不用于反复弱化有意义的文字。
@@ -144,7 +176,7 @@ Hover、active、selected、focus、右键目标和拖放目标是不同状态�
 
 ## 新建自定义主题
 
-设置页的新建主题操作会创建同时包含 `light` 和 `dark` 的完整 Modern 模板，然后在 Terax 代码编辑器中打开 `.terax-theme` 文件。两个变体都包含全部 UI、终端和 ANSI 字段。
+设置页的新建主题操作会创建同时包含 `light` 和 `dark` 的完整 Modern 模板，然后在 Terax 代码编辑器中打开 `.terax-theme` 文件。两个变体都包含全部 UI、终端、ANSI 和 editor 字段。
 
 只需要单模式时可以删除另一变体。保留双模式时，应分别调整两套颜色，不能仅复制数值并依赖 `.dark` Tailwind 覆盖。
 
@@ -153,7 +185,7 @@ Hover、active、selected、focus、右键目标和拖放目标是不同状态�
 1. 复制 `src/modules/theme/themes/modern.ts` 的字段结构。
 2. 为 light 和 dark 分别配置颜色；确实只有单模式时可以只提供一个变体。
 3. 使用 `CompleteThemeVariant`，避免遗漏新增字段。
-4. 指定合适的 `editorTheme`，不要把语法高亮颜色复制到应用主题中。
+4. 在每个 variant 内配置 editor，确保主题文件可以独立分享和恢复。
 5. 在 `themes/index.ts` 注册主题，并同步设置中的主题模式和名称元数据。
 6. 检查普通文字、次级小字号文字、hover、active、focus、Git 状态和终端 ANSI。
 7. 增加测试锁定字段完整性和主题关键身份色。

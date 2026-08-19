@@ -8,7 +8,7 @@ import { resolveEditorTheme, useTheme } from "@/modules/theme";
 import type { Extension } from "@codemirror/state";
 import { useMemo } from "react";
 import { createEditorThemeExtension } from "./editorTheme";
-import { EDITOR_THEME_EXT, MODERN_EDITOR_THEME_EXT } from "./themes";
+import { getEditorThemePreset } from "./themes";
 
 /** 解析当前 CodeMirror 主题扩展，并优先应用用户显式预设。 */
 export function useEditorThemeExt(): Extension {
@@ -24,9 +24,6 @@ export function useEditorThemeExt(): Extension {
     if (resolved.kind === "inline") {
       return createEditorThemeExtension(resolved.palette, resolved.mode);
     }
-    if (resolved.id === "modern") {
-      return MODERN_EDITOR_THEME_EXT[resolvedMode];
-    }
-    return EDITOR_THEME_EXT[resolved.id] ?? EDITOR_THEME_EXT.atomone;
+    return getEditorThemePreset(resolved.id, resolvedMode);
   }, [pref, themeId, customThemes, resolvedMode]);
 }
