@@ -131,6 +131,13 @@ pub enum AuxiliaryWindowPlacement {
     NearSourcePoint,
 }
 
+/// 辅助窗口与 Workspace 主窗口之间的原生层级关系。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuxiliaryWindowLevel {
+    Independent,
+    AboveWorkspace,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct AuxiliaryWindowDefinition {
     label: &'static str,
@@ -142,6 +149,7 @@ struct AuxiliaryWindowDefinition {
     minimizable: bool,
     maximizable: bool,
     placement: AuxiliaryWindowPlacement,
+    level: AuxiliaryWindowLevel,
 }
 
 impl OpenAuxiliaryWindowRequest {
@@ -157,6 +165,7 @@ impl OpenAuxiliaryWindowRequest {
                 minimizable: false,
                 maximizable: false,
                 placement: AuxiliaryWindowPlacement::MainWindowCenter,
+                level: AuxiliaryWindowLevel::AboveWorkspace,
             },
             Self::FileProperties { .. } => AuxiliaryWindowDefinition {
                 label: FILE_PROPERTIES_LABEL,
@@ -168,6 +177,7 @@ impl OpenAuxiliaryWindowRequest {
                 minimizable: false,
                 maximizable: false,
                 placement: AuxiliaryWindowPlacement::NearSourcePoint,
+                level: AuxiliaryWindowLevel::Independent,
             },
         }
     }
@@ -232,6 +242,12 @@ pub async fn open_auxiliary_window(
         .maximizable(definition.maximizable)
         .closable(true)
         .visible(false);
+    let builder = match definition.level {
+        AuxiliaryWindowLevel::Independent => builder,
+        AuxiliaryWindowLevel::AboveWorkspace => {
+            builder.parent(&main).map_err(|error| error.to_string())?
+        }
+    };
 
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -426,6 +442,7 @@ mod tests {
             definition.placement,
             AuxiliaryWindowPlacement::MainWindowCenter
         );
+        assert_eq!(definition.level, AuxiliaryWindowLevel::AboveWorkspace);
         assert_eq!(request.initial_url(), "auxiliary.html?tab=themes");
     }
 
@@ -476,6 +493,7 @@ mod tests {
             definition.placement,
             AuxiliaryWindowPlacement::NearSourcePoint
         );
+        assert_eq!(definition.level, AuxiliaryWindowLevel::Independent);
         assert_eq!(request.initial_url(), "auxiliary.html");
         assert_eq!(
             request.source_point(),
