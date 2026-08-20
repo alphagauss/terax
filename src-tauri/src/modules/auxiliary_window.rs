@@ -1,7 +1,7 @@
 //! 轻量辅助窗口的原生创建与复用。
 //!
-//! 本模块通过封闭请求类型选择受信任页面和窗口定义。辅助窗口始终从属于当前
-//! Workspace 主窗口，不拥有第二套 Workspace 运行时，也不恢复窗口位置或尺寸。
+//! 本模块通过封闭请求类型选择受信任页面和窗口定义。辅助窗口在逻辑和生命周期上
+//! 从属于当前 Workspace，但保持独立原生层级，不拥有第二套运行时，也不恢复位置或尺寸。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -126,7 +126,7 @@ pub enum OpenAuxiliaryWindowRequest {
 /// 辅助窗口首次创建时的位置策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuxiliaryWindowPlacement {
-    ParentCenter,
+    MainWindowCenter,
     MonitorCenter,
     NearSourcePoint,
 }
@@ -156,7 +156,7 @@ impl OpenAuxiliaryWindowRequest {
                 resizable: true,
                 minimizable: false,
                 maximizable: false,
-                placement: AuxiliaryWindowPlacement::ParentCenter,
+                placement: AuxiliaryWindowPlacement::MainWindowCenter,
             },
             Self::FileProperties { .. } => AuxiliaryWindowDefinition {
                 label: FILE_PROPERTIES_LABEL,
@@ -231,9 +231,7 @@ pub async fn open_auxiliary_window(
         .minimizable(definition.minimizable)
         .maximizable(definition.maximizable)
         .closable(true)
-        .visible(false)
-        .parent(&main)
-        .map_err(|error| error.to_string())?;
+        .visible(false);
 
     #[cfg(target_os = "macos")]
     let builder = builder
@@ -271,9 +269,20 @@ pub fn get_auxiliary_window_request(
         .ok_or_else(|| format!("辅助窗口 {label} 尚无打开请求"))
 }
 
+/// 主窗口销毁后关闭本进程的所有辅助窗口，避免独立原生窗口阻止进程退出。
+pub fn destroy_all_auxiliary_windows(app: &tauri::AppHandle) {
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("auxiliary-") {
+            if let Err(error) = window.destroy() {
+                log::warn!("cannot destroy auxiliary window {label}: {error}");
+            }
+        }
+    }
+}
+
 /// 按静态策略设置辅助窗口的首次位置。
 ///
-/// 父窗口尺寸读取失败时退回显示器居中，避免因定位失败而阻止窗口打开。
+/// 主窗口尺寸读取失败时退回显示器居中，避免因定位失败而阻止窗口打开。
 fn place_window(
     window: &WebviewWindow,
     main: &WebviewWindow,
@@ -284,7 +293,7 @@ fn place_window(
         AuxiliaryWindowPlacement::MonitorCenter => {
             let _ = window.center();
         }
-        AuxiliaryWindowPlacement::ParentCenter => {
+        AuxiliaryWindowPlacement::MainWindowCenter => {
             if let (Ok(main_pos), Ok(main_size), Ok(window_size)) = (
                 main.outer_position(),
                 main.outer_size(),
@@ -303,7 +312,12 @@ fn place_window(
         }
         AuxiliaryWindowPlacement::NearSourcePoint => {
             if place_near_source(window, main, source_point).is_err() {
-                place_window(window, main, AuxiliaryWindowPlacement::ParentCenter, None);
+                place_window(
+                    window,
+                    main,
+                    AuxiliaryWindowPlacement::MainWindowCenter,
+                    None,
+                );
             }
         }
     }
@@ -376,7 +390,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auxiliary_capability_allows_requested_and_final_window_close() {
+    fn auxiliary_capability_allows_focus_and_window_close_lifecycle() {
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../../capabilities/auxiliary.json")).unwrap();
         let permissions = capability["permissions"].as_array().unwrap();
@@ -387,6 +401,9 @@ mod tests {
         assert!(permissions
             .iter()
             .any(|value| value == "core:window:allow-destroy"));
+        assert!(permissions
+            .iter()
+            .any(|value| value == "core:window:allow-set-focus"));
     }
 
     #[test]
@@ -405,7 +422,10 @@ mod tests {
         assert!(definition.resizable);
         assert!(!definition.minimizable);
         assert!(!definition.maximizable);
-        assert_eq!(definition.placement, AuxiliaryWindowPlacement::ParentCenter);
+        assert_eq!(
+            definition.placement,
+            AuxiliaryWindowPlacement::MainWindowCenter
+        );
         assert_eq!(request.initial_url(), "auxiliary.html?tab=themes");
     }
 

@@ -341,6 +341,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app, event| {
+            if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if label == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                    auxiliary_window::destroy_all_auxiliary_windows(app);
+                }
+            }
             if let tauri::RunEvent::Ready = event {
                 if let Some(main) = app.get_webview_window("main") {
                     if let Some(geometry) = window_geometry {
