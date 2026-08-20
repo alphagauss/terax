@@ -25,6 +25,10 @@
   "copyToTemporaryWindow": "Copy to Temporary Window",
   "copyToNewTemporaryWindow": "Copy to New Temporary Window",
   "temporaryWindowLabel": "Temporary Window {{index}} · {{id}}",
+  "windowTitle": {
+    "local": "Local",
+    "temporary": "Temp {{id}}"
+  },
   "multiWindowRequired": "Enable multiple windows to copy this page",
   "saveBeforeWindowCopy": "Save this page before copying it to a window",
   "windowCopyUnsupported": "This page cannot be copied to another window",
