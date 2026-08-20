@@ -1,6 +1,6 @@
 /**
  * 本文件验证文件资源管理器在目录根异步变化时保持 Hook 顺序，
- * 并锁定顶部创建目标、SSH 恢复状态、Local 目录选择入口与非本地 Workspace 的后台传输入口。
+ * 并锁定顶部创建目标、根目录标题交互、SSH 恢复状态、Local 目录选择入口与非本地 Workspace 的后台传输入口。
  */
 
 // @vitest-environment happy-dom
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   mocks.environmentKind = "local";
   mocks.rootStatus = "loaded";
   mocks.remoteReady = true;
@@ -118,9 +119,10 @@ vi.mock("@hugeicons/core-free-icons", () => ({
 }));
 vi.mock("@hugeicons/react", () => ({ HugeiconsIcon: () => null }));
 vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: () => ({
-    getTotalSize: () => 0,
-    getVirtualItems: () => [],
+  useVirtualizer: ({ count }: { count: number }) => ({
+    getTotalSize: () => count * 24,
+    getVirtualItems: () =>
+      count > 0 ? [{ index: 0, key: "first-row", size: 24, start: 0 }] : [],
     scrollToIndex: vi.fn(),
   }),
 }));
@@ -133,7 +135,8 @@ vi.mock("./ExplorerSearch", () => ({
 }));
 vi.mock("./InlineInput", () => ({ InlineInput: () => null }));
 vi.mock("./TreeRow", () => ({
-  EntryRow: () => null,
+  EntryRow: ({ path, name }: { path: string; name: string }) =>
+    createElement("div", { "data-fs-path": path }, name),
   PendingRow: () => null,
   StatusRow: () => null,
 }));
@@ -178,7 +181,10 @@ vi.mock("./lib/useFileTree", () => ({
     joinPath: (parent: string, name: string) => `${parent}/${name}`,
     movePath: vi.fn(),
     nodes: {
-      "/home/remote": { status: mocks.rootStatus, entries: [] },
+      "/home/remote": {
+        status: mocks.rootStatus,
+        entries: [{ name: "file.txt", kind: "file", gitignored: false }],
+      },
     },
     pendingCreate: null,
     remoteReady: mocks.remoteReady,
@@ -260,6 +266,80 @@ describe("pending create position", () => {
     expect(
       resolvePendingCreateIndex([{ kind: "dir" }, { kind: "dir" }], "file"),
     ).toBe(2);
+  });
+});
+
+describe("root title interactions", () => {
+  it("smoothly scrolls the file tree to the top and respects reduced motion", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    const title = container.querySelector<HTMLButtonElement>(
+      'button[data-explorer-context="root"]',
+    );
+    const tree = container.querySelector<HTMLElement>('[role="tree"]');
+    expect(title).not.toBeNull();
+    expect(tree).not.toBeNull();
+    if (!title || !tree) return;
+
+    const scrollTo = vi.fn();
+    tree.scrollTo = scrollTo;
+    tree.scrollTop = 120;
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+    act(() => title.click());
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: "smooth" });
+
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    act(() => title.click());
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: "auto" });
+    act(() => root.unmount());
+  });
+
+  it("uses the root menu after a file row was the previous context target", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+
+    const row = container.querySelector<HTMLElement>("[data-fs-path]");
+    const title = container.querySelector<HTMLElement>(
+      '[data-explorer-context="root"]',
+    );
+    expect(row).not.toBeNull();
+    expect(title).not.toBeNull();
+    if (!row || !title) return;
+
+    act(() =>
+      row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
+    );
+    expect(container.textContent).toContain("menu.open");
+
+    act(() =>
+      title.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
+    );
+    expect(container.textContent).not.toContain("menu.open");
+    expect(container.textContent).toContain("menu.refresh");
+    act(() => root.unmount());
   });
 });
 
