@@ -3,7 +3,7 @@
 //! 基础查询始终使用当前进程绑定的 Workspace 环境。目录扫描不跟随符号链接，
 //! POSIX 远端优先在服务端聚合以避免逐目录网络往返，失败时安全回退 SFTP。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -25,8 +25,14 @@ const SFTP_SCAN_CONCURRENCY: usize = 6;
 /// 文件属性页使用的共享任务状态。
 #[derive(Default)]
 pub struct FilePropertiesState {
-    scans: Mutex<HashMap<Uuid, CancellationToken>>,
+    scans: Mutex<ScanRegistry>,
     ssh_helper_supported: Mutex<Option<bool>>,
+}
+
+#[derive(Default)]
+struct ScanRegistry {
+    active: HashMap<Uuid, CancellationToken>,
+    pending_cancellations: HashSet<Uuid>,
 }
 
 /// 目录扫描注册守卫，确保命令被取消或异常终止时也会释放扫描 ID。
@@ -41,6 +47,7 @@ impl Drop for ScanRegistration<'_> {
             .scans
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .active
             .remove(&self.id);
     }
 }
@@ -55,10 +62,13 @@ fn register_scan(
         .scans
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if scans.contains_key(&id) {
+    if scans.active.contains_key(&id) {
         return Err("directory scan id is already active".into());
     }
-    scans.insert(id, cancellation.clone());
+    if scans.pending_cancellations.remove(&id) {
+        cancellation.cancel();
+    }
+    scans.active.insert(id, cancellation.clone());
     drop(scans);
     Ok((cancellation, ScanRegistration { state, id }))
 }
@@ -186,16 +196,23 @@ pub fn fs_properties_scan_cancel(
     scan_id: String,
 ) -> Result<(), String> {
     let id = Uuid::parse_str(&scan_id).map_err(|_| "invalid directory scan id".to_string())?;
-    let cancellation = state
+    cancel_scan(state.inner(), id);
+    Ok(())
+}
+
+/// 取消活动扫描，或记录尚未注册扫描的提前取消请求。
+fn cancel_scan(state: &FilePropertiesState, id: Uuid) {
+    let mut scans = state
         .scans
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(&id)
-        .cloned();
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let cancellation = scans.active.get(&id).cloned();
     if let Some(cancellation) = cancellation {
         cancellation.cancel();
+    } else {
+        // IPC 命令可能并发调度，先到达的取消请求必须由稍后注册的扫描消费。
+        scans.pending_cancellations.insert(id);
     }
-    Ok(())
 }
 
 fn display_name(path: &str) -> String {
@@ -806,6 +823,18 @@ mod tests {
         assert!(register_scan(&state, id).is_err());
         drop(registration);
         assert!(register_scan(&state, id).is_ok());
+    }
+
+    #[test]
+    fn cancellation_before_registration_cancels_the_later_scan() {
+        let state = FilePropertiesState::default();
+        let id = Uuid::new_v4();
+
+        cancel_scan(&state, id);
+        let (cancellation, _registration) = register_scan(&state, id).unwrap();
+
+        assert!(cancellation.is_cancelled());
+        assert!(state.scans.lock().unwrap().pending_cancellations.is_empty());
     }
 
     #[test]

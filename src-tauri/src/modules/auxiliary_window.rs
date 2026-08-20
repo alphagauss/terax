@@ -376,6 +376,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn auxiliary_capability_allows_requested_and_final_window_close() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/auxiliary.json")).unwrap();
+        let permissions = capability["permissions"].as_array().unwrap();
+
+        assert!(permissions
+            .iter()
+            .any(|value| value == "core:window:allow-close"));
+        assert!(permissions
+            .iter()
+            .any(|value| value == "core:window:allow-destroy"));
+    }
+
+    #[test]
     fn settings_request_uses_singleton_window_definition() {
         let request = OpenAuxiliaryWindowRequest::Settings {
             tab: Some(SettingsTab::Themes),
