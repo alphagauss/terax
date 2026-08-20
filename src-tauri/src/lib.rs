@@ -2,6 +2,7 @@
 //!
 //! 本模块注册原生命令、共享状态和插件，并建立 WebView 与系统能力之间的边界。
 
+mod fullscreen;
 pub mod menu;
 pub mod modules;
 
@@ -31,27 +32,6 @@ fn get_launch_dir(state: State<'_, LaunchDir>) -> Option<String> {
 #[tauri::command]
 fn get_launch_files(state: State<'_, LaunchFiles>) -> Vec<String> {
     std::mem::take(&mut *state.0.lock().expect("LaunchFiles mutex poisoned"))
-}
-
-/// 切换触发命令的当前窗口全屏状态。
-///
-/// 直接在原生端完成读取和写入，避免前端两次 IPC 之间的窗口状态发生变化。
-#[tauri::command]
-fn toggle_fullscreen(window: tauri::Window) -> Result<(), String> {
-    let fullscreen = window.is_fullscreen().map_err(|error| error.to_string())?;
-    window
-        .set_fullscreen(!fullscreen)
-        .map_err(|error| error.to_string())
-}
-
-/// 将触发命令的当前窗口设置为指定的全屏状态。
-///
-/// 禅模式使用显式目标值恢复进入前状态，不能使用可能受并发调用影响的反转语义。
-#[tauri::command]
-fn set_fullscreen(window: tauri::Window, fullscreen: bool) -> Result<(), String> {
-    window
-        .set_fullscreen(fullscreen)
-        .map_err(|error| error.to_string())
 }
 
 /// 启动 Terax 原生进程并注册共享状态、插件和全部 IPC 命令。
@@ -192,6 +172,7 @@ pub fn run() {
         })
         .manage(LaunchDir(Mutex::new(cli_dir)))
         .manage(LaunchFiles(Mutex::new(launch_files)))
+        .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
             pty::pty_open,
             pty::pty_write,
@@ -318,8 +299,8 @@ pub fn run() {
             open_with::open_with_unregister,
             get_launch_dir,
             get_launch_files,
-            toggle_fullscreen,
-            set_fullscreen,
+            fullscreen::toggle_fullscreen,
+            fullscreen::set_fullscreen,
             auxiliary_window::open_auxiliary_window,
             auxiliary_window::get_auxiliary_window_request,
             agent::agent_enable_hooks,
