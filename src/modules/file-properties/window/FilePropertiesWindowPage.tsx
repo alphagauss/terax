@@ -11,11 +11,11 @@ import { cn } from "@/lib/utils";
 import { formatBytes, formatPosixMode } from "@/modules/file-properties/format";
 import {
   cancelDirectoryPropertiesScan,
-  getFileProperties,
-  scanDirectoryProperties,
   type DirectorySummary,
   type FilePropertiesSnapshot,
+  getFileProperties,
   type PropertyKind,
+  scanDirectoryProperties,
 } from "@/modules/file-properties/native";
 import {
   File02Icon,
@@ -71,7 +71,6 @@ export function FilePropertiesWindowPage() {
   const [scan, setScan] = useState<ScanState>({ status: "idle" });
   const [refreshVersion, setRefreshVersion] = useState(0);
   const activeScanRef = useRef<string | null>(null);
-  const forceCloseRef = useRef(false);
   const loadTarget = target ? `${target}\0${refreshVersion}` : null;
 
   useEffect(() => {
@@ -80,7 +79,6 @@ export function FilePropertiesWindowPage() {
     let unlisten: (() => void) | undefined;
     void nativeWindow
       .onCloseRequested((event) => {
-        if (forceCloseRef.current) return;
         const scanId = activeScanRef.current;
         if (!scanId) return;
         event.preventDefault();
@@ -91,8 +89,9 @@ export function FilePropertiesWindowPage() {
           )
           .finally(() => {
             if (disposed) return;
-            forceCloseRef.current = true;
-            void nativeWindow.close();
+            void nativeWindow
+              .destroy()
+              .catch((error) => console.error("销毁文件属性窗口失败", error));
           });
       })
       .then((dispose) => {
