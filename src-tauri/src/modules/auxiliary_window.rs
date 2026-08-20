@@ -169,9 +169,9 @@ impl OpenAuxiliaryWindowRequest {
             },
             Self::FileProperties { .. } => AuxiliaryWindowDefinition {
                 label: FILE_PROPERTIES_LABEL,
-                width: 520.0,
-                height: 620.0,
-                min_width: 440.0,
+                width: 420.0,
+                height: 520.0,
+                min_width: 400.0,
                 min_height: 480.0,
                 resizable: true,
                 minimizable: false,
@@ -488,7 +488,11 @@ mod tests {
         let definition = request.definition();
 
         assert_eq!(definition.label, "auxiliary-file-properties");
-        assert_eq!((definition.width, definition.height), (520.0, 620.0));
+        assert_eq!((definition.width, definition.height), (420.0, 520.0));
+        assert_eq!(
+            (definition.min_width, definition.min_height),
+            (400.0, 480.0)
+        );
         assert_eq!(
             definition.placement,
             AuxiliaryWindowPlacement::NearSourcePoint
