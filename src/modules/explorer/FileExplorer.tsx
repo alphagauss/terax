@@ -5,6 +5,16 @@
  */
 
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/menu/context-menu";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -15,24 +25,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from "@/components/menu/context-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import { openFileProperties } from "@/modules/file-properties/openFileProperties";
 import { isPythonFile } from "@/modules/python/path";
 import {
-  useRemoteRuntimeStore,
   type RemoteRuntimeSnapshot,
+  useRemoteRuntimeStore,
 } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
@@ -102,15 +102,10 @@ function TransferStrategyMenu({
   const { t } = useTranslation("explorer");
   return (
     <ContextMenuSub>
-      <ContextMenuSubTrigger>
-        {label}
-      </ContextMenuSubTrigger>
+      <ContextMenuSubTrigger>{label}</ContextMenuSubTrigger>
       <ContextMenuSubContent>
         {(["direct", "archive"] as const).map((strategy) => (
-          <ContextMenuItem
-            key={strategy}
-            onSelect={() => onSelect(strategy)}
-          >
+          <ContextMenuItem key={strategy} onSelect={() => onSelect(strategy)}>
             {t(
               strategy === "direct"
                 ? "menu.directTransfer"
@@ -394,6 +389,7 @@ function buildRows(
  *
  * 展示当前终端驱动的目录树，并呈现 SSH 恢复进度和统一的手动重连入口。
  * 按运行环境提供本地根目录选择或后台传输操作，隐藏时暂停远端目录轮询。
+ * 根目录标题可快速返回文件树顶部，并与树空白区域共享根目录右键菜单。
  */
 export const FileExplorer = memo(
   forwardRef<FileExplorerHandle, Props>(function FileExplorer(
@@ -957,432 +953,477 @@ export const FileExplorer = memo(
       }
     };
 
+    /** 使用 AI 会话消息跳转相同的原生平滑滚动，并尊重系统的减弱动态效果设置。 */
+    const scrollTreeToTop = () => {
+      const scrollElement = scrollRef.current;
+      if (!scrollElement || scrollElement.scrollTop <= 0) return;
+      scrollElement.scrollTo({
+        top: 0,
+        behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")
+          .matches
+          ? "auto"
+          : "smooth",
+      });
+    };
+
+    /** 为文件行、文件树空白处和根目录标题准备同一个右键菜单上下文。 */
+    const prepareContextMenu = (e: React.MouseEvent<HTMLDivElement>) => {
+      const contextSurface = (e.target as HTMLElement).closest<HTMLElement>(
+        "[data-explorer-context]",
+      );
+      if (!contextSurface) {
+        e.stopPropagation();
+        return;
+      }
+
+      const el = (e.target as HTMLElement).closest<HTMLElement>(
+        "[data-fs-path]",
+      );
+      const path = el?.getAttribute("data-fs-path") ?? null;
+      const idx = path != null ? entryIndexByPath.get(path) : undefined;
+      const row = idx !== undefined ? rows[idx] : undefined;
+      const target =
+        row && row.kind === "entry" && !row.isDeleting
+          ? { path: row.path, name: row.name, isDir: row.isDir }
+          : null;
+      setContextMenuPath(target?.path ?? null);
+      setMenuTarget(target);
+      setDeleteConfirm(false);
+      menuSourcePointRef.current =
+        e.clientX === 0 && e.clientY === 0
+          ? null
+          : { x: e.clientX, y: e.clientY };
+      setMenuNonce((n) => n + 1);
+    };
+
     return (
       <div ref={containerRef} className="flex h-full flex-col outline-none">
-        <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2">
-          <span
-            className="flex min-w-0 flex-1 items-center truncate text-xs font-medium text-foreground"
-            title={rootPath}
-          >
-            <img
-              src={folderIconUrl(basename(rootPath), false)}
-              alt=""
-              height={15}
-              width={15}
-              className="mx-1.5"
-            />
-            {basename(rootPath)}
-          </span>
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteConfirm(false);
+              setContextMenuPath(null);
+            }
+          }}
+        >
+          <ContextMenuTrigger asChild>
+            <div
+              className="flex min-h-0 flex-1 flex-col"
+              onContextMenuCapture={prepareContextMenu}
+            >
+              <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2">
+                <button
+                  type="button"
+                  data-explorer-context="root"
+                  className="flex h-6 min-w-0 flex-1 cursor-pointer items-center truncate rounded-sm text-left text-xs font-medium text-foreground transition-colors duration-control hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  title={rootPath}
+                  onClick={scrollTreeToTop}
+                  onKeyDown={(event) => {
+                    if (event.key === "Home") {
+                      event.preventDefault();
+                      scrollTreeToTop();
+                    }
+                  }}
+                >
+                  <img
+                    src={folderIconUrl(basename(rootPath), false)}
+                    alt=""
+                    height={15}
+                    width={15}
+                    className="mx-1.5"
+                  />
+                  <span className="truncate">{basename(rootPath)}</span>
+                </button>
 
-          <div className="ml-0.5 flex shrink-0 items-center gap-0">
-            {onOpenFolder ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-6 text-muted-foreground hover:text-foreground"
-                onClick={onOpenFolder}
-                title={t("openFolder")}
-                aria-label={t("openFolder")}
-              >
-                <HugeiconsIcon
-                  icon={FolderOpenIcon}
-                  size={13}
-                  strokeWidth={2}
-                />
-              </Button>
-            ) : null}
+                <div className="ml-0.5 flex shrink-0 items-center gap-0">
+                  {onOpenFolder ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 text-muted-foreground hover:text-foreground"
+                      onClick={onOpenFolder}
+                      title={t("openFolder")}
+                      aria-label={t("openFolder")}
+                    >
+                      <HugeiconsIcon
+                        icon={FolderOpenIcon}
+                        size={13}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  ) : null}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => setIsSearchOpen((v) => !v)}
-              title={t("searchFiles")}
-              aria-label={t("searchFiles")}
-            >
-              <HugeiconsIcon icon={Search01Icon} size={13} strokeWidth={2} />
-            </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsSearchOpen((v) => !v)}
+                    title={t("searchFiles")}
+                    aria-label={t("searchFiles")}
+                  >
+                    <HugeiconsIcon
+                      icon={Search01Icon}
+                      size={13}
+                      strokeWidth={2}
+                    />
+                  </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => tree.beginCreate(toolbarCreateParent, "file")}
-              title={t("newFile")}
-            >
-              <HugeiconsIcon icon={FileAddIcon} size={13} strokeWidth={2} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => tree.beginCreate(toolbarCreateParent, "dir")}
-              title={t("newFolder")}
-            >
-              <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => tree.refresh(rootPath)}
-              title="Refresh"
-              aria-label="Refresh"
-            >
-              <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={tree.collapseAll}
-              title="Collapse All"
-              aria-label="Collapse All"
-            >
-              <HugeiconsIcon
-                icon={ListChevronsDownUpIcon}
-                size={13}
-                strokeWidth={2}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      tree.beginCreate(toolbarCreateParent, "file")
+                    }
+                    title={t("newFile")}
+                  >
+                    <HugeiconsIcon
+                      icon={FileAddIcon}
+                      size={13}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => tree.beginCreate(toolbarCreateParent, "dir")}
+                    title={t("newFolder")}
+                  >
+                    <HugeiconsIcon
+                      icon={FolderAddIcon}
+                      size={13}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={() => tree.refresh(rootPath)}
+                    title="Refresh"
+                    aria-label="Refresh"
+                  >
+                    <HugeiconsIcon
+                      icon={Refresh01Icon}
+                      size={12}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-muted-foreground hover:text-foreground"
+                    onClick={tree.collapseAll}
+                    title="Collapse All"
+                    aria-label="Collapse All"
+                  >
+                    <HugeiconsIcon
+                      icon={ListChevronsDownUpIcon}
+                      size={13}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                </div>
+              </div>
+
+              <ExplorerSearch
+                ref={searchRef}
+                rootPath={rootPath}
+                onOpenFile={onOpenFile}
+                open={isSearchOpen}
+                onRequestClose={() => setIsSearchOpen(false)}
+                onActiveChange={setIsSearchActive}
+                onRevealInTerminal={onRevealInTerminal}
+                onAttachToAgent={onAttachToAgent}
               />
-            </Button>
-          </div>
-        </div>
 
-        <ExplorerSearch
-          ref={searchRef}
-          rootPath={rootPath}
-          onOpenFile={onOpenFile}
-          open={isSearchOpen}
-          onRequestClose={() => setIsSearchOpen(false)}
-          onActiveChange={setIsSearchActive}
-          onRevealInTerminal={onRevealInTerminal}
-          onAttachToAgent={onAttachToAgent}
-        />
-
-        {!isSearchActive ? (
-          <ContextMenu
-            onOpenChange={(open) => {
-              if (!open) {
-                setDeleteConfirm(false);
-                setContextMenuPath(null);
-              }
+              {!isSearchActive ? (
+                <div
+                  ref={(node) => {
+                    scrollRef.current = node;
+                    treeRef.current = node;
+                  }}
+                  data-explorer-drop=""
+                  data-explorer-context="tree"
+                  role="tree"
+                  aria-label={t("files")}
+                  aria-activedescendant={
+                    selectedPath
+                      ? `file-tree-item-${encodeURIComponent(selectedPath)}`
+                      : undefined
+                  }
+                  tabIndex={0}
+                  className={cn(
+                    "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
+                    rootIsDropTarget &&
+                      "rounded-sm ring-1 ring-inset ring-primary/50",
+                  )}
+                  onPointerDown={dnd.onPointerDown}
+                  onClickCapture={dnd.onClickCapture}
+                  onKeyDown={handleKeyDown}
+                >
+                  {root?.status === "loading" && (
+                    <div
+                      role="treeitem"
+                      aria-level={1}
+                      aria-disabled
+                      tabIndex={-1}
+                      className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
+                    >
+                      <Spinner
+                        className="size-3 motion-reduce:animate-none"
+                        aria-hidden="true"
+                      />
+                      <span>{t("loading")}</span>
+                    </div>
+                  )}
+                  {root?.status === "error" && (
+                    <div
+                      role="treeitem"
+                      aria-level={1}
+                      aria-disabled
+                      tabIndex={-1}
+                      className="px-3 py-2 text-[11px] text-destructive"
+                    >
+                      {root.message}
+                    </div>
+                  )}
+                  {root?.status === "loaded" ? (
+                    <div
+                      style={{
+                        height: virtualizer.getTotalSize(),
+                        position: "relative",
+                        width: "100%",
+                      }}
+                    >
+                      {virtualizer.getVirtualItems().map((virtualRow) => {
+                        const row = rows[virtualRow.index];
+                        if (!row) return null;
+                        return (
+                          <div
+                            key={virtualRow.key}
+                            data-virtual-row-index={virtualRow.index}
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: virtualRow.size,
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            {renderRow(row)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            key={menuNonce}
+            onCloseAutoFocus={(e) => {
+              if (tree.renaming || tree.pendingCreate) e.preventDefault();
             }}
           >
-            <ContextMenuTrigger asChild>
-              <div
-                ref={(node) => {
-                  scrollRef.current = node;
-                  treeRef.current = node;
-                }}
-                data-explorer-drop=""
-                role="tree"
-                aria-label={t("files")}
-                aria-activedescendant={
-                  selectedPath
-                    ? `file-tree-item-${encodeURIComponent(selectedPath)}`
-                    : undefined
-                }
-                tabIndex={0}
-                className={cn(
-                  "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
-                  rootIsDropTarget &&
-                    "rounded-sm ring-1 ring-inset ring-primary/50",
+            {menuTarget ? (
+              <>
+                {!menuTarget.isDir && (
+                  <ContextMenuItem
+                    onSelect={() => onOpenFile(menuTarget.path, true)}
+                  >
+                    {t("menu.open")}
+                  </ContextMenuItem>
                 )}
-                onPointerDown={dnd.onPointerDown}
-                onClickCapture={dnd.onClickCapture}
-                onKeyDown={handleKeyDown}
-                onContextMenuCapture={(e) => {
-                  const el = (e.target as HTMLElement).closest<HTMLElement>(
-                    "[data-fs-path]",
-                  );
-                  const path = el?.getAttribute("data-fs-path") ?? null;
-                  const idx =
-                    path != null ? entryIndexByPath.get(path) : undefined;
-                  const row = idx !== undefined ? rows[idx] : undefined;
-                  setContextMenuPath(
-                    row && row.kind === "entry" && !row.isDeleting
-                      ? row.path
-                      : null,
-                  );
-                  setMenuTarget(
-                    row && row.kind === "entry" && !row.isDeleting
-                      ? { path: row.path, name: row.name, isDir: row.isDir }
-                      : null,
-                  );
-                  setDeleteConfirm(false);
-                  menuSourcePointRef.current =
-                    e.clientX === 0 && e.clientY === 0
-                      ? null
-                      : { x: e.clientX, y: e.clientY };
-                  setMenuNonce((n) => n + 1);
-                }}
-              >
-                {root?.status === "loading" && (
-                  <div
-                    role="treeitem"
-                    aria-level={1}
-                    aria-disabled
-                    tabIndex={-1}
-                    className="flex items-center gap-2 px-3 py-2 text-[11px] text-muted-foreground"
-                  >
-                    <Spinner
-                      className="size-3 motion-reduce:animate-none"
-                      aria-hidden="true"
-                    />
-                    <span>{t("loading")}</span>
-                  </div>
-                )}
-                {root?.status === "error" && (
-                  <div
-                    role="treeitem"
-                    aria-level={1}
-                    aria-disabled
-                    tabIndex={-1}
-                    className="px-3 py-2 text-[11px] text-destructive"
-                  >
-                    {root.message}
-                  </div>
-                )}
-                {root?.status === "loaded" ? (
-                  <div
-                    style={{
-                      height: virtualizer.getTotalSize(),
-                      position: "relative",
-                      width: "100%",
-                    }}
-                  >
-                    {virtualizer.getVirtualItems().map((virtualRow) => {
-                      const row = rows[virtualRow.index];
-                      if (!row) return null;
-                      return (
-                        <div
-                          key={virtualRow.key}
-                          data-virtual-row-index={virtualRow.index}
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            width: "100%",
-                            height: virtualRow.size,
-                            transform: `translateY(${virtualRow.start}px)`,
-                          }}
-                        >
-                          {renderRow(row)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent
-              key={menuNonce}
-              onCloseAutoFocus={(e) => {
-                if (tree.renaming || tree.pendingCreate) e.preventDefault();
-              }}
-            >
-              {menuTarget ? (
-                <>
-                  {!menuTarget.isDir && (
+                {!menuTarget.isDir &&
+                  isPythonFile(menuTarget.path) &&
+                  onRunPythonFile && (
                     <ContextMenuItem
-                      onSelect={() => onOpenFile(menuTarget.path, true)}
-                    >
-                      {t("menu.open")}
-                    </ContextMenuItem>
-                  )}
-                  {!menuTarget.isDir &&
-                    isPythonFile(menuTarget.path) &&
-                    onRunPythonFile && (
-                      <ContextMenuItem
-                        onSelect={() =>
-                          onRunPythonFile(menuTarget.path, rootPath)
-                        }
-                      >
-                        {t("menu.runPythonFile")}
-                      </ContextMenuItem>
-                    )}
-                  <ContextMenuItem
-                    onSelect={() => tree.beginRename(menuTarget.path)}
-                  >
-                    {t("common:rename")}
-                  </ContextMenuItem>
-                  {menuTarget.isDir && onRevealInTerminal && (
-                    <ContextMenuItem
-                      onSelect={() => onRevealInTerminal(menuTarget.path)}
-                    >
-                      {t("menu.openInTerminal")}
-                    </ContextMenuItem>
-                  )}
-                  {workspaceEnv.kind !== "local" ? (
-                    <>
-                      <TransferStrategyMenu
-                        label={t("menu.downloadToLocal")}
-                        onSelect={(strategy) =>
-                          void enqueueDownload(menuTarget.path, strategy)
-                        }
-                      />
-                      {(["files", "folders"] as const).map((kind) => (
-                        <TransferStrategyMenu
-                          key={kind}
-                          label={t(
-                            kind === "files"
-                              ? "menu.uploadFiles"
-                              : "menu.uploadFolder",
-                          )}
-                          onSelect={(strategy) => {
-                            const remoteDir = menuTarget.isDir
-                              ? menuTarget.path
-                              : parentOf(menuTarget.path, rootPath);
-                            void enqueueUpload(remoteDir, kind, strategy);
-                          }}
-                        />
-                      ))}
-                    </>
-                  ) : (
-                    <ContextMenuItem
-                      onSelect={() => void revealInFinder(menuTarget.path)}
-                    >
-                      {t("menu.revealInFinder")}
-                    </ContextMenuItem>
-                  )}
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() =>
-                      tree.beginCreate(
-                        menuTarget.isDir
-                          ? menuTarget.path
-                          : parentOf(menuTarget.path, rootPath),
-                        "file",
-                      )
-                    }
-                  >
-                    {t("menu.newFile")}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onSelect={() =>
-                      tree.beginCreate(
-                        menuTarget.isDir
-                          ? menuTarget.path
-                          : parentOf(menuTarget.path, rootPath),
-                        "dir",
-                      )
-                    }
-                  >
-                    {t("menu.newFolder")}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => void copyToClipboard(menuTarget.path)}
-                  >
-                    {t("menu.copyPath")}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onSelect={() =>
-                      void copyToClipboard(
-                        relativePath(rootPath, menuTarget.path),
-                      )
-                    }
-                  >
-                    {t("menu.copyRelativePath")}
-                  </ContextMenuItem>
-                  {!menuTarget.isDir && (
-                    <>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        onSelect={() => onAttachToAgent?.(menuTarget.path)}
-                      >
-                        {t("menu.attachToAgent")}
-                      </ContextMenuItem>
-                    </>
-                  )}
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    variant="destructive"
-                    onSelect={(e) => {
-                      if (deleteConfirm) {
-                        requestPermanentDelete(menuTarget.path);
-                      } else {
-                        // Keep the menu open on the first click so the user
-                        // can confirm; let it close normally on the second.
-                        e.preventDefault();
-                        setDeleteConfirm(true);
+                      onSelect={() =>
+                        onRunPythonFile(menuTarget.path, rootPath)
                       }
-                    }}
-                  >
-                    {deleteConfirm
-                      ? t("menu.confirmDelete")
-                      : t("common:delete")}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => requestProperties(menuTarget.path)}
-                  >
-                    {t("menu.properties")}
-                  </ContextMenuItem>
-                </>
-              ) : (
-                <>
-                  {onRevealInTerminal && (
-                    <ContextMenuItem
-                      onSelect={() => onRevealInTerminal(rootPath)}
                     >
-                      {t("menu.openInTerminal")}
+                      {t("menu.runPythonFile")}
                     </ContextMenuItem>
                   )}
-                  {workspaceEnv.kind !== "local" ? (
-                    <>
-                      {(["files", "folders"] as const).map((kind) => (
-                        <TransferStrategyMenu
-                          key={kind}
-                          label={t(
-                            kind === "files"
-                              ? "menu.uploadFiles"
-                              : "menu.uploadFolder",
-                          )}
-                          onSelect={(strategy) =>
-                            void enqueueUpload(rootPath, kind, strategy)
-                          }
-                        />
-                      ))}
-                    </>
-                  ) : (
+                <ContextMenuItem
+                  onSelect={() => tree.beginRename(menuTarget.path)}
+                >
+                  {t("common:rename")}
+                </ContextMenuItem>
+                {menuTarget.isDir && onRevealInTerminal && (
+                  <ContextMenuItem
+                    onSelect={() => onRevealInTerminal(menuTarget.path)}
+                  >
+                    {t("menu.openInTerminal")}
+                  </ContextMenuItem>
+                )}
+                {workspaceEnv.kind !== "local" ? (
+                  <>
+                    <TransferStrategyMenu
+                      label={t("menu.downloadToLocal")}
+                      onSelect={(strategy) =>
+                        void enqueueDownload(menuTarget.path, strategy)
+                      }
+                    />
+                    {(["files", "folders"] as const).map((kind) => (
+                      <TransferStrategyMenu
+                        key={kind}
+                        label={t(
+                          kind === "files"
+                            ? "menu.uploadFiles"
+                            : "menu.uploadFolder",
+                        )}
+                        onSelect={(strategy) => {
+                          const remoteDir = menuTarget.isDir
+                            ? menuTarget.path
+                            : parentOf(menuTarget.path, rootPath);
+                          void enqueueUpload(remoteDir, kind, strategy);
+                        }}
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <ContextMenuItem
+                    onSelect={() => void revealInFinder(menuTarget.path)}
+                  >
+                    {t("menu.revealInFinder")}
+                  </ContextMenuItem>
+                )}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() =>
+                    tree.beginCreate(
+                      menuTarget.isDir
+                        ? menuTarget.path
+                        : parentOf(menuTarget.path, rootPath),
+                      "file",
+                    )
+                  }
+                >
+                  {t("menu.newFile")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() =>
+                    tree.beginCreate(
+                      menuTarget.isDir
+                        ? menuTarget.path
+                        : parentOf(menuTarget.path, rootPath),
+                      "dir",
+                    )
+                  }
+                >
+                  {t("menu.newFolder")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => void copyToClipboard(menuTarget.path)}
+                >
+                  {t("menu.copyPath")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() =>
+                    void copyToClipboard(
+                      relativePath(rootPath, menuTarget.path),
+                    )
+                  }
+                >
+                  {t("menu.copyRelativePath")}
+                </ContextMenuItem>
+                {!menuTarget.isDir && (
+                  <>
+                    <ContextMenuSeparator />
                     <ContextMenuItem
-                      onSelect={() => void revealInFinder(rootPath)}
+                      onSelect={() => onAttachToAgent?.(menuTarget.path)}
                     >
-                      {t("menu.revealInFinder")}
+                      {t("menu.attachToAgent")}
                     </ContextMenuItem>
-                  )}
-                  <ContextMenuSeparator />
+                  </>
+                )}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  variant="destructive"
+                  onSelect={(e) => {
+                    if (deleteConfirm) {
+                      requestPermanentDelete(menuTarget.path);
+                    } else {
+                      // Keep the menu open on the first click so the user
+                      // can confirm; let it close normally on the second.
+                      e.preventDefault();
+                      setDeleteConfirm(true);
+                    }
+                  }}
+                >
+                  {deleteConfirm ? t("menu.confirmDelete") : t("common:delete")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => requestProperties(menuTarget.path)}
+                >
+                  {t("menu.properties")}
+                </ContextMenuItem>
+              </>
+            ) : (
+              <>
+                {onRevealInTerminal && (
                   <ContextMenuItem
-                    onSelect={() => tree.beginCreate(rootPath, "file")}
+                    onSelect={() => onRevealInTerminal(rootPath)}
                   >
-                    {t("menu.newFile")}
+                    {t("menu.openInTerminal")}
                   </ContextMenuItem>
+                )}
+                {workspaceEnv.kind !== "local" ? (
+                  (["files", "folders"] as const).map((kind) => (
+                    <TransferStrategyMenu
+                      key={kind}
+                      label={t(
+                        kind === "files"
+                          ? "menu.uploadFiles"
+                          : "menu.uploadFolder",
+                      )}
+                      onSelect={(strategy) =>
+                        void enqueueUpload(rootPath, kind, strategy)
+                      }
+                    />
+                  ))
+                ) : (
                   <ContextMenuItem
-                    onSelect={() => tree.beginCreate(rootPath, "dir")}
+                    onSelect={() => void revealInFinder(rootPath)}
                   >
-                    {t("menu.newFolder")}
+                    {t("menu.revealInFinder")}
                   </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem
-                    onSelect={() => void copyToClipboard(rootPath)}
-                  >
-                    {t("menu.copyPath")}
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onSelect={() => tree.refresh(rootPath)}
-                  >
-                    {t("menu.refresh")}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onSelect={() => requestProperties(rootPath)}>
-                    {t("menu.properties")}
-                  </ContextMenuItem>
-                </>
-              )}
-            </ContextMenuContent>
-          </ContextMenu>
-        ) : null}
+                )}
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => tree.beginCreate(rootPath, "file")}
+                >
+                  {t("menu.newFile")}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onSelect={() => tree.beginCreate(rootPath, "dir")}
+                >
+                  {t("menu.newFolder")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => void copyToClipboard(rootPath)}
+                >
+                  {t("menu.copyPath")}
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => tree.refresh(rootPath)}>
+                  {t("menu.refresh")}
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={() => requestProperties(rootPath)}>
+                  {t("menu.properties")}
+                </ContextMenuItem>
+              </>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
 
         <AlertDialog
           open={permanentDeleteTarget !== null}
