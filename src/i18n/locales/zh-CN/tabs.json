@@ -22,6 +22,10 @@
   "copyToTemporaryWindow": "复制至临时窗口",
   "copyToNewTemporaryWindow": "复制至新的临时窗口",
   "temporaryWindowLabel": "临时窗口 {{index}} · {{id}}",
+  "windowTitle": {
+    "local": "Local",
+    "temporary": "Temp {{id}}"
+  },
   "multiWindowRequired": "开启多窗口后可复制至临时窗口",
   "saveBeforeWindowCopy": "请先保存此工作页再复制至窗口",
   "windowCopyUnsupported": "此工作页不支持复制至其他窗口",

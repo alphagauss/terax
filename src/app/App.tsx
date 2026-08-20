@@ -423,7 +423,7 @@ export default function App() {
     currentRoot: explorerRoot,
   });
 
-  useWindowTitle(activeTab, explorerRoot);
+  useWindowTitle(activeTab);
 
   useEffect(() => {
     setActiveEditorHandle(editorRefs.current.get(activeId) ?? null);
