@@ -18,6 +18,8 @@ import {
   scanDirectoryProperties,
 } from "@/modules/file-properties/native";
 import {
+  CheckmarkCircle01Icon,
+  CopyIcon,
   File02Icon,
   Folder01Icon,
   Refresh01Icon,
@@ -48,7 +50,7 @@ function PropertyRow({
   mono?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-[118px_minmax(0,1fr)] gap-3 py-1.5 text-[12px]">
+    <div className="grid grid-cols-[108px_minmax(0,1fr)] gap-3 py-1 text-[12px]">
       <dt className="text-muted-foreground">{label}</dt>
       <dd
         className={cn("min-w-0 break-words", mono && "font-mono text-[11.5px]")}
@@ -69,8 +71,10 @@ export function FilePropertiesWindowPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanState>({ status: "idle" });
+  const [pathCopied, setPathCopied] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const activeScanRef = useRef<string | null>(null);
+  const copyFeedbackTimeoutRef = useRef<number>(0);
   const loadTarget = target ? `${target}\0${refreshVersion}` : null;
 
   useEffect(() => {
@@ -104,6 +108,11 @@ export function FilePropertiesWindowPage() {
     };
   }, []);
 
+  useEffect(
+    () => () => window.clearTimeout(copyFeedbackTimeoutRef.current),
+    [],
+  );
+
   useEffect(() => {
     if (!target || !loadTarget) return;
     let active = true;
@@ -111,6 +120,8 @@ export function FilePropertiesWindowPage() {
     setError(null);
     setSnapshot(null);
     setScan({ status: "idle" });
+    window.clearTimeout(copyFeedbackTimeoutRef.current);
+    setPathCopied(false);
 
     void (async () => {
       try {
@@ -158,6 +169,29 @@ export function FilePropertiesWindowPage() {
     void cancelDirectoryPropertiesScan(scanId).catch(() => {});
   };
 
+  /** 启动一次刷新，并立即锁定入口以避免结果返回前重复触发。 */
+  const refreshProperties = () => {
+    if (!target || loading || scan.status === "loading") return;
+    setLoading(true);
+    setRefreshVersion((value) => value + 1);
+  };
+
+  /** 将完整路径写入系统剪贴板，并短暂显示复制成功状态。 */
+  const copyPath = async () => {
+    if (!target || !navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(target);
+      window.clearTimeout(copyFeedbackTimeoutRef.current);
+      setPathCopied(true);
+      copyFeedbackTimeoutRef.current = window.setTimeout(
+        () => setPathCopied(false),
+        3000,
+      );
+    } catch {
+      // 与 Markdown 代码块一致，剪贴板拒绝时保持原状态。
+    }
+  };
+
   const formatDate = (value: number | null) =>
     value === null
       ? t("unavailable")
@@ -172,8 +206,34 @@ export function FilePropertiesWindowPage() {
     : t("title");
 
   return (
-    <AuxiliaryWindowLayout title={title}>
-      <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-6 py-5">
+    <AuxiliaryWindowLayout
+      title={title}
+      headerContent={
+        <div
+          data-tauri-drag-region
+          className="flex min-w-0 flex-1 items-center gap-1"
+        >
+          <span
+            data-tauri-drag-region
+            className="min-w-0 flex-1 truncate text-[12px] font-medium"
+          >
+            {title}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="size-6 text-muted-foreground"
+            disabled={!target || loading || scan.status === "loading"}
+            onClick={refreshProperties}
+            aria-label={t("common:refresh")}
+            title={t("common:refresh")}
+          >
+            <HugeiconsIcon icon={Refresh01Icon} size={13} strokeWidth={1.75} />
+          </Button>
+        </div>
+      }
+    >
+      <main className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-5 pt-3 pb-2">
         {!target || loading || (!error && !snapshotMatchesTarget) ? (
           <div className="flex h-full min-h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
             <Spinner className="size-4 motion-reduce:animate-none" />
@@ -194,12 +254,12 @@ export function FilePropertiesWindowPage() {
             </Button>
           </div>
         ) : snapshotMatchesTarget && snapshot ? (
-          <div className="mx-auto flex w-full max-w-xl flex-col gap-5">
-            <section className="flex min-w-0 items-center gap-3 border-b border-border/60 pb-4">
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <div className="mx-auto flex w-full max-w-xl flex-col gap-3.5">
+            <section className="flex min-w-0 items-center gap-2.5 border-b border-border/60 pb-2.5">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                 <HugeiconsIcon
                   icon={kindIcon(snapshot.kind)}
-                  size={24}
+                  size={21}
                   strokeWidth={1.5}
                 />
               </div>
@@ -207,14 +267,33 @@ export function FilePropertiesWindowPage() {
                 <h1 className="truncate text-[15px] font-semibold">
                   {snapshot.name}
                 </h1>
-                <p className="mt-0.5 break-all font-mono text-[10.5px] text-muted-foreground select-text">
-                  {snapshot.path}
-                </p>
+                <div className="mt-0.5 flex min-w-0 items-start gap-1">
+                  <p className="min-w-0 flex-1 break-all font-mono text-[10.5px] text-muted-foreground select-text">
+                    {snapshot.path}
+                  </p>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    onClick={() => void copyPath()}
+                    className="size-5 shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={
+                      pathCopied ? t("common:copied") : t("common:copy")
+                    }
+                    title={pathCopied ? t("common:copied") : t("common:copy")}
+                  >
+                    <HugeiconsIcon
+                      icon={pathCopied ? CheckmarkCircle01Icon : CopyIcon}
+                      size={11}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                </div>
               </div>
             </section>
 
             <section>
-              <h2 className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+              <h2 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                 {t("general")}
               </h2>
               <dl>
@@ -246,7 +325,7 @@ export function FilePropertiesWindowPage() {
 
             {snapshot.kind === "directory" ? (
               <section>
-                <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="mb-1 flex items-center justify-between gap-3">
                   <h2 className="text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                     {t("contents")}
                   </h2>
@@ -265,7 +344,7 @@ export function FilePropertiesWindowPage() {
                   ) : null}
                 </div>
                 {scan.status === "loading" ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-card/50 px-3 py-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-xs text-muted-foreground">
                     <Spinner className="size-3.5 motion-reduce:animate-none" />
                     {t("calculating")}
                   </div>
@@ -329,7 +408,7 @@ export function FilePropertiesWindowPage() {
             ) : null}
 
             <section>
-              <h2 className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+              <h2 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                 {t("timestamps")}
               </h2>
               <dl>
@@ -359,7 +438,7 @@ export function FilePropertiesWindowPage() {
             </section>
 
             <section>
-              <h2 className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+              <h2 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                 {t("access")}
               </h2>
               <dl>
@@ -411,24 +490,6 @@ export function FilePropertiesWindowPage() {
           </div>
         ) : null}
       </main>
-      <footer className="flex h-12 shrink-0 items-center justify-end gap-2 border-t border-border/60 bg-card px-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={!target || loading}
-          onClick={() => setRefreshVersion((value) => value + 1)}
-        >
-          <HugeiconsIcon icon={Refresh01Icon} size={13} strokeWidth={1.75} />
-          {t("common:refresh")}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void getCurrentWindow().close()}
-        >
-          {t("common:close")}
-        </Button>
-      </footer>
     </AuxiliaryWindowLayout>
   );
 }
