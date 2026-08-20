@@ -1,6 +1,6 @@
 /**
  * 本文件渲染 Windows 和 Linux 的统一窗口控制按钮。
- * 调用方根据原生窗口真实能力决定是否显示最小化和最大化，关闭始终可用。
+ * 同步最大化与全屏状态，并确保指针焦点不会跨窗口形态残留。
  */
 
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
@@ -12,6 +12,7 @@ import {
   SquareIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,27 +22,54 @@ type Props = {
   maximizable?: boolean;
 };
 
-/** 渲染与当前原生窗口能力一致的最小化、最大化和关闭按钮。 */
+/**
+ * 渲染与当前原生窗口能力一致的最小化、还原和关闭按钮。
+ *
+ * 全屏时还原按钮退出全屏；并发 resize 查询只提交最后一次结果。
+ */
 export function WindowControls({
   minimizable = true,
   maximizable = true,
 }: Props) {
   const { t } = useTranslation("app");
   const [maximized, setMaximized] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
     if (!USE_CUSTOM_WINDOW_CONTROLS || !maximizable) return;
     const w = getCurrentWindow();
+    let disposed = false;
+    let syncRevision = 0;
     let unlisten: (() => void) | undefined;
-    void w.isMaximized().then(setMaximized);
-    void w
-      .onResized(() => {
-        void w.isMaximized().then(setMaximized);
-      })
-      .then((un) => {
-        unlisten = un;
+    const syncWindowState = async () => {
+      const revision = ++syncRevision;
+      const [nextMaximized, nextFullscreen] = await Promise.all([
+        w.isMaximized(),
+        w.isFullscreen(),
+      ]);
+      if (disposed || revision !== syncRevision) return;
+      setMaximized(nextMaximized);
+      setFullscreen(nextFullscreen);
+    };
+    const requestWindowStateSync = () => {
+      void syncWindowState().catch((error) => {
+        if (!disposed) console.error("window state sync failed:", error);
       });
-    return () => unlisten?.();
+    };
+    requestWindowStateSync();
+    void w
+      .onResized(requestWindowStateSync)
+      .then((un) => {
+        if (disposed) un();
+        else unlisten = un;
+      })
+      .catch((error) => {
+        if (!disposed) console.error("window resize listener failed:", error);
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, [maximizable]);
 
   if (!USE_CUSTOM_WINDOW_CONTROLS) return null;
@@ -61,14 +89,20 @@ export function WindowControls({
       {maximizable && (
         <CtlButton
           ariaLabel={
-            maximized
+            maximized || fullscreen
               ? t("windowControls.restore")
               : t("windowControls.maximize")
           }
-          onClick={() => void w.toggleMaximize()}
+          onClick={() => {
+            if (fullscreen) {
+              void invoke("set_fullscreen", { fullscreen: false });
+            } else {
+              void w.toggleMaximize();
+            }
+          }}
         >
           <HugeiconsIcon
-            icon={maximized ? Copy01Icon : SquareIcon}
+            icon={maximized || fullscreen ? Copy01Icon : SquareIcon}
             size={12}
             strokeWidth={2}
           />
@@ -101,7 +135,12 @@ function CtlButton({
       type="button"
       aria-label={ariaLabel}
       title={ariaLabel}
-      onClick={onClick}
+      onClick={(event) => {
+        onClick();
+        // 鼠标或触控点击不应把焦点外观带入随后的全屏状态；键盘触发的
+        // click.detail 为 0，继续保留焦点以维持键盘导航可见性。
+        if (event.detail > 0) event.currentTarget.blur();
+      }}
       className={cn(
         "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors",
         danger
