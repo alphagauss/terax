@@ -38,9 +38,11 @@ export function AuxiliaryWindowLayout({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
-      void getCurrentWindow()
+      const nativeWindow = getCurrentWindow();
+      void nativeWindow
         .show()
-        .catch((error) => console.error("显示辅助窗口失败", error));
+        .then(() => nativeWindow.setFocus())
+        .catch((error) => console.error("显示并聚焦辅助窗口失败", error));
     });
     return () => window.cancelAnimationFrame(frame);
   }, []);
