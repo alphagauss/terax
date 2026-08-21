@@ -1,9 +1,9 @@
 /**
- * 本文件测试文件传输前端快照的并发合并规则。
- * 锁定列表初始化不得覆盖事件监听期间收到的较新任务状态。
+ * 本文件测试文件传输前端快照的并发合并和面板延迟展示规则。
+ * 锁定初始化竞态、冲突预检、取消决策和正式执行阶段的展示边界。
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   hasExpandableTransferFailures,
   isActiveTransfer,
@@ -14,7 +14,7 @@ vi.mock("./native", () => ({ transferNative: {} }));
 
 import {
   mergeTransferTasks,
-  openTransferPanel,
+  requestTransferPanel,
   useTransferStore,
 } from "./store";
 
@@ -46,6 +46,14 @@ function task(id: string, updatedAt: number): TransferTask {
     updatedAt,
   };
 }
+
+beforeEach(() => {
+  useTransferStore.setState({
+    tasks: {},
+    panelOpen: false,
+    pendingPanelTaskIds: {},
+  });
+});
 
 describe("transfer snapshot merge", () => {
   it("keeps event snapshots newer than the initial list", () => {
@@ -81,12 +89,63 @@ describe("transfer snapshot merge", () => {
 });
 
 describe("transfer panel state", () => {
-  it("opens the status panel when a transfer is queued elsewhere", () => {
-    useTransferStore.getState().setPanelOpen(false);
+  it("waits through all conflict checks and opens when execution starts", () => {
+    requestTransferPanel("transfer");
 
-    openTransferPanel();
+    const scanning = task("transfer", 1);
+    scanning.stage = "scanning";
+    useTransferStore.getState().upsert(scanning);
+    expect(useTransferStore.getState().panelOpen).toBe(false);
+
+    const conflict = task("transfer", 2);
+    conflict.status = "awaiting_decision";
+    conflict.stage = "checking_conflicts";
+    useTransferStore.getState().upsert(conflict);
+
+    const betweenConflicts = task("transfer", 3);
+    betweenConflicts.stage = "checking_conflicts";
+    useTransferStore.getState().upsert(betweenConflicts);
+    expect(useTransferStore.getState().panelOpen).toBe(false);
+
+    useTransferStore.getState().upsert(task("transfer", 4));
+    expect(useTransferStore.getState().panelOpen).toBe(true);
+    expect(useTransferStore.getState().pendingPanelTaskIds).toEqual({});
+  });
+
+  it("opens immediately when the execution event arrived before registration", () => {
+    useTransferStore.setState({
+      tasks: { transfer: task("transfer", 1) },
+      panelOpen: false,
+      pendingPanelTaskIds: {},
+    });
+
+    requestTransferPanel("transfer");
 
     expect(useTransferStore.getState().panelOpen).toBe(true);
+  });
+
+  it("does not open after the conflict decision cancels the transfer", () => {
+    const canceled = task("transfer", 2);
+    canceled.status = "canceled";
+    canceled.stage = "finished";
+    requestTransferPanel("transfer");
+
+    useTransferStore.getState().upsert(canceled);
+
+    expect(useTransferStore.getState().panelOpen).toBe(false);
+    expect(useTransferStore.getState().pendingPanelTaskIds).toEqual({});
+  });
+
+  it("opens to show a task that fails during preflight", () => {
+    const failed = task("transfer", 2);
+    failed.status = "failed";
+    failed.stage = "finished";
+    requestTransferPanel("transfer");
+
+    useTransferStore.getState().upsert(failed);
+
+    expect(useTransferStore.getState().panelOpen).toBe(true);
+    expect(useTransferStore.getState().pendingPanelTaskIds).toEqual({});
   });
 
   it("removes a batch of local task snapshots in one update", () => {
@@ -102,7 +161,6 @@ describe("transfer panel state", () => {
     expect(useTransferStore.getState().tasks).toEqual({
       second: task("second", 2),
     });
-    useTransferStore.setState({ tasks: {} });
   });
 });
 
