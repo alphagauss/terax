@@ -57,7 +57,7 @@
   - 未采用上游将默认值改为竖线的行为，继续使用下游原有方块光标，避免升级后静默改变既有用户体验；设置名称和选项已补齐中英文资源。
 - 建议后续统一决定：
   - `9f329a2`：已手工移植为 `2d96e73`。本地和 SSH 目录读取统一使用数字感知的自然排序，并通过共享函数保持文件树与面包屑一致。
-  - 注册表已有 AI SDK 与各 provider、Babel、TypeScript、TanStack Table、Marked、size-limit 和 Node 类型等跨主版本更新。建议分别建立迁移批次并验证 API、构建和体积，不在纯依赖同步中直接升级；KaTeX 的 `0.16` 到 `0.18` 同样按可能破坏兼容的升级处理。
+  - 包注册表已有 AI SDK 与各 provider、Babel、TypeScript、TanStack Table、Marked、size-limit 和 Node 类型等跨主版本更新，但截至 `f675a71` 上游并未采用这些新主版本；TanStack Table 和 Marked 还是下游专用依赖，因此它们不属于本轮上游移植。若上游以后完成某项跨主版本迁移，且提交没有配套修改函数调用接口，则下游原则上同步跟进，先直接升级并验证，再单独修复暴露出的下游自有逻辑问题。KaTeX 的 `0.16` 到 `0.18` 同样按可能破坏兼容的升级处理。
   - `pnpm-workspace.yaml` 要求依赖发布至少满三天。`pnpm outdated` 显示但 `wanted` 未接受的同主版本更新继续等待观察期，不绕过 `minimumReleaseAgeStrict`。
 - 暂缓，等待针对性验证或产品决策：
   - `bd577d8`：暂不移植。该提交主要修复 macOS WKWebView 下韩文 IME 不触发标准 composition 事件以及快速输入丢字的问题；中文输入通常由 xterm 的原生 composition 路径处理，当前直接收益有限。实现还依赖 xterm 私有按键状态，待出现韩文用户需求或相关缺陷反馈时再吸收；届时以上游已完成的功能测试为可信基线，不要求本轮预先进行真实 macOS 复验。
