@@ -6,6 +6,7 @@
 import { IS_MAC, MOD_PROP } from "@/lib/platform";
 import { describe, expect, it } from "vitest";
 import {
+  getBindingTokens,
   type KeyBinding,
   matchBinding,
   SHORTCUT_GROUPS,
@@ -38,6 +39,26 @@ describe("folder picker shortcut", () => {
       group: "General",
       defaultBindings: [{ [MOD_PROP]: true, key: "o" }],
     });
+  });
+});
+
+describe("shortcut display tokens", () => {
+  it("空绑定不产生标签", () => {
+    expect(getBindingTokens(undefined)).toEqual([]);
+  });
+
+  it("依次展示修饰键并规范化按键标签", () => {
+    const primary = IS_MAC ? "⌃" : "Ctrl";
+    const shift = IS_MAC ? "⇧" : "Shift";
+    expect(getBindingTokens({ key: "k", ctrl: true, shift: true })).toEqual([
+      primary,
+      shift,
+      "K",
+    ]);
+    expect(getBindingTokens({ key: "ArrowUp", alt: true }).slice(-1)[0]).toBe(
+      "↑",
+    );
+    expect(getBindingTokens({ key: " " }).slice(-1)[0]).toBe("Space");
   });
 });
 
@@ -110,32 +131,35 @@ describe("tab and Space navigation shortcuts", () => {
   it.each([
     ["]", "}", "BracketRight"],
     ["[", "{", "BracketLeft"],
-  ])("matches shifted %s from its physical key", (bindingKey, eventKey, code) => {
-    const binding: KeyBinding = {
-      [MOD_PROP]: true,
-      shift: true,
-      key: bindingKey,
-    };
-    const modifiers = IS_MAC
-      ? { metaKey: true, shiftKey: true }
-      : { ctrlKey: true, shiftKey: true };
+  ])(
+    "matches shifted %s from its physical key",
+    (bindingKey, eventKey, code) => {
+      const binding: KeyBinding = {
+        [MOD_PROP]: true,
+        shift: true,
+        key: bindingKey,
+      };
+      const modifiers = IS_MAC
+        ? { metaKey: true, shiftKey: true }
+        : { ctrlKey: true, shiftKey: true };
 
-    expect(
-      matchBinding(keyboardEvent(eventKey, code, modifiers), binding),
-    ).toBe(true);
-    expect(
-      matchBinding(
-        keyboardEvent(eventKey, code, {
-          ...modifiers,
-          shiftKey: false,
-        }),
-        binding,
-      ),
-    ).toBe(false);
-    expect(
-      matchBinding(keyboardEvent(eventKey, "Semicolon", modifiers), binding),
-    ).toBe(false);
-  });
+      expect(
+        matchBinding(keyboardEvent(eventKey, code, modifiers), binding),
+      ).toBe(true);
+      expect(
+        matchBinding(
+          keyboardEvent(eventKey, code, {
+            ...modifiers,
+            shiftKey: false,
+          }),
+          binding,
+        ),
+      ).toBe(false);
+      expect(
+        matchBinding(keyboardEvent(eventKey, "Semicolon", modifiers), binding),
+      ).toBe(false);
+    },
+  );
 
   it("does not treat an unshifted letter's physical position as its value", () => {
     expect(
@@ -143,6 +167,52 @@ describe("tab and Space navigation shortcuts", () => {
         ctrl: true,
         key: "z",
       }),
+    ).toBe(false);
+  });
+
+  it("要求所有修饰键精确一致", () => {
+    const binding: KeyBinding = { key: "c", ctrl: true };
+    expect(
+      matchBinding(keyboardEvent("C", "KeyC", { ctrlKey: true }), binding),
+    ).toBe(true);
+    expect(matchBinding(keyboardEvent("c", "KeyC", {}), binding)).toBe(false);
+    expect(
+      matchBinding(
+        keyboardEvent("c", "KeyC", { ctrlKey: true, shiftKey: true }),
+        binding,
+      ),
+    ).toBe(false);
+  });
+
+  it("Alt 改写字符时使用物理键回退", () => {
+    expect(
+      matchBinding(keyboardEvent("ç", "KeyC", { altKey: true }), {
+        key: "c",
+        alt: true,
+      }),
+    ).toBe(true);
+    expect(
+      matchBinding(keyboardEvent("ç", "KeyD", { altKey: true }), {
+        key: "c",
+        alt: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("按索引选择标签只接受数字键", () => {
+    expect(
+      matchBinding(
+        keyboardEvent("3", "Digit3", {}),
+        { key: "1" },
+        "tab.selectByIndex",
+      ),
+    ).toBe(true);
+    expect(
+      matchBinding(
+        keyboardEvent("x", "KeyX", {}),
+        { key: "1" },
+        "tab.selectByIndex",
+      ),
     ).toBe(false);
   });
 });
