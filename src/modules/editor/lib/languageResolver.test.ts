@@ -1,3 +1,10 @@
+/**
+ * 本文件测试编辑器语言解析与解析器加载。
+ * 重点锁定特殊文件名、扩展名边界以及框架专用语言模式。
+ */
+
+import { syntaxTree } from "@codemirror/language";
+import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { resolveDisplayName, resolveLanguage } from "./languageResolver";
 
@@ -7,6 +14,7 @@ describe("resolveDisplayName", () => {
     expect(resolveDisplayName("main.go")).toBe("Go");
     expect(resolveDisplayName("README.md")).toBe("Markdown");
     expect(resolveDisplayName("query.sql")).toBe("SQL");
+    expect(resolveDisplayName("Component.svelte")).toBe("Svelte");
   });
 
   it("strips directories before resolving", () => {
@@ -36,6 +44,22 @@ describe("resolveDisplayName", () => {
     expect(result?.name).toBe("Dotenv");
     expect(result?.id).toBe("env");
     expect(result?.ext).toBeTruthy();
+  });
+
+  it("使用专用语言模式解析 Svelte 文件", async () => {
+    const result = await resolveLanguage("/project/Component.svelte");
+    if (!result) throw new Error("无法加载 Svelte 语言模式");
+
+    expect(result.name).toBe("Svelte");
+    expect(result.id).toBe("svelte");
+
+    const state = EditorState.create({
+      doc: "{#if ready}<button on:click={run}>{label}</button>{/if}",
+      extensions: [result.ext],
+    });
+    const tree = syntaxTree(state).toString();
+    expect(tree).toContain("IfBlock");
+    expect(tree).toContain("DirectiveOn");
   });
 
   // The prefix fallback must not let extension languages capture lookalike

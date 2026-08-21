@@ -1,3 +1,8 @@
+/**
+ * 本文件定义编辑器支持的语言、文件匹配规则与按需加载入口。
+ * 各语言解析器必须保持懒加载，避免未打开对应文件时增加启动成本。
+ */
+
 import type { StreamParser } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 
@@ -158,8 +163,15 @@ export const LANGUAGES: LanguageDefinition[] = [
     userSelectable: true,
   },
   {
+    name: "Svelte",
+    extensions: ["svelte"],
+    loader: () =>
+      import("@replit/codemirror-lang-svelte").then((m) => m.svelte()),
+    userSelectable: true,
+  },
+  {
     name: "HTML",
-    extensions: ["html", "htm", "svelte", "twig"],
+    extensions: ["html", "htm", "twig"],
     loader: () => import("@codemirror/lang-html").then((m) => m.html()),
     userSelectable: true,
   },
