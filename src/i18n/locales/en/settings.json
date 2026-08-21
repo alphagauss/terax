@@ -117,7 +117,27 @@
       "label": "Agents",
       "notifications": {
         "title": "Coding agent notifications",
-        "description": "Alert when Claude Code or Codex running in a terminal needs your input or finishes. Desktop notification when Terax is unfocused, in-app otherwise."
+        "description": "Alert when a coding agent needs your input or finishes. Native notification when Terax is unfocused, in-app otherwise.",
+        "test": {
+          "notificationTitle": "Terax notifications are working",
+          "notificationBody": "You will be notified when an agent needs your attention.",
+          "label": {
+            "idle": "Test in 2s",
+            "waiting": "Switch apps...",
+            "sending": "Sending...",
+            "requested": "Requested",
+            "denied": "Blocked",
+            "failed": "Failed"
+          },
+          "hint": {
+            "idle": "Send a native test notification after two seconds",
+            "waiting": "Switch to another app to verify native delivery",
+            "sending": "Requesting a native notification",
+            "requested": "The native notification was requested",
+            "denied": "Notifications are disabled by the system",
+            "failed": "Terax could not request a native notification"
+          }
+        }
       }
     },
     "startup": {

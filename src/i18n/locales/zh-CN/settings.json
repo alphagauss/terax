@@ -117,7 +117,27 @@
       "label": "智能体",
       "notifications": {
         "title": "编码智能体通知",
-        "description": "当终端中运行的 Claude Code 或 Codex 需要你输入或已完成时提醒你。Terax 未聚焦时发送桌面通知，否则应用内提示。"
+        "description": "当编码智能体需要你输入或已完成时提醒你。Terax 未聚焦时发送系统通知，否则使用应用内提示。",
+        "test": {
+          "notificationTitle": "Terax 通知工作正常",
+          "notificationBody": "智能体需要你关注时，Terax 会发送通知。",
+          "label": {
+            "idle": "2 秒后测试",
+            "waiting": "请切换应用...",
+            "sending": "正在发送...",
+            "requested": "已请求",
+            "denied": "已阻止",
+            "failed": "失败"
+          },
+          "hint": {
+            "idle": "两秒后发送一条系统测试通知",
+            "waiting": "请切换到其他应用以验证系统通知",
+            "sending": "正在请求系统通知",
+            "requested": "已请求发送系统通知",
+            "denied": "系统已禁用通知权限",
+            "failed": "Terax 无法请求系统通知"
+          }
+        }
       }
     },
     "startup": {
