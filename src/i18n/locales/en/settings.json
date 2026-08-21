@@ -69,6 +69,15 @@
         "title": "Cursor blinking",
         "description": "Blink the terminal cursor. Off by default for lower idle CPU, matching VS Code and the macOS terminal."
       },
+      "cursorStyle": {
+        "title": "Cursor style",
+        "description": "Shape of the terminal cursor.",
+        "options": {
+          "block": "Block",
+          "bar": "Bar",
+          "underline": "Underline"
+        }
+      },
       "smartCopyPaste": {
         "title": "Smart copy and paste",
         "description": "When enabled, Ctrl+C copies selected text and otherwise interrupts; Ctrl+V pastes. Ctrl+Shift+C and Ctrl+Shift+V always remain available."

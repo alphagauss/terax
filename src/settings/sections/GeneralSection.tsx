@@ -37,6 +37,7 @@ import {
   setShowHidden,
   setSourceControlShowUndoCommit,
   setTerminalCursorBlink,
+  setTerminalCursorStyle,
   setTerminalFontFamily,
   setTerminalFontSize,
   setTerminalFontWeight,
@@ -82,6 +83,7 @@ const TERMINAL_FONT_WEIGHTS = [
   { value: "600", labelKey: "semibold" },
   { value: "bold", labelKey: "bold" },
 ] as const;
+const TERMINAL_CURSOR_STYLES = ["block", "bar", "underline"] as const;
 const LETTER_SPACINGS = [-4, -3, -2, -1, 0, 1, 2, 3, 4] as const;
 
 type ShellInfo = { name: string; path: string; integrated: boolean };
@@ -116,6 +118,9 @@ export function GeneralSection() {
     (s) => s.terminalWebglEnabled,
   );
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
+  const terminalCursorStyle = usePreferencesStore(
+    (s) => s.terminalCursorStyle,
+  );
   const terminalSmartCopyPaste = usePreferencesStore(
     (s) => s.terminalSmartCopyPaste,
   );
@@ -377,6 +382,30 @@ export function GeneralSection() {
             checked={terminalCursorBlink}
             onCheckedChange={(v) => void setTerminalCursorBlink(v)}
           />
+        </SettingRow>
+        <SettingRow
+          title={t("general.terminal.cursorStyle.title")}
+          description={t("general.terminal.cursorStyle.description")}
+        >
+          <Select
+            value={terminalCursorStyle}
+            onValueChange={(value) => void setTerminalCursorStyle(value)}
+          >
+            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TERMINAL_CURSOR_STYLES.map((style) => (
+                <SelectItem
+                  key={style}
+                  value={style}
+                  className="text-[12px]"
+                >
+                  {t(`general.terminal.cursorStyle.options.${style}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </SettingRow>
         {!IS_MAC && (
           <SettingRow

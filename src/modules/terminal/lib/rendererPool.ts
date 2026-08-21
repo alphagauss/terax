@@ -7,6 +7,7 @@ import { resolveFontFamily } from "@/lib/fonts";
 import { openExternalUrl } from "@/lib/external-link";
 import { IS_MAC } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import type { TerminalCursorStyle } from "@/modules/settings/store";
 import { buildTerminalTheme } from "@/styles/terminalTheme";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -232,7 +233,7 @@ function termOptions() {
     fontSize: Math.max(4, Math.round(prefs.terminalFontSize * prefs.zoomLevel)),
     theme: buildTerminalTheme(),
     cursorBlink: false,
-    cursorStyle: "block" as const,
+    cursorStyle: prefs.terminalCursorStyle,
     cursorInactiveStyle: "outline" as const,
     scrollback: prefs.terminalScrollback,
     smoothScrollDuration: 120,
@@ -1073,6 +1074,14 @@ export function applyCursorBlink(enabled: boolean): void {
       slot,
       adapter?.isTerminalFocused(slot.currentTerminalId) ?? false,
     );
+  }
+}
+
+/** 将光标样式同步到活动、停放和待复用的全部 renderer slot。 */
+export function applyCursorStyle(style: TerminalCursorStyle): void {
+  for (const slot of slots) {
+    if (slot.term.options.cursorStyle === style) continue;
+    slot.term.options.cursorStyle = style;
   }
 }
 
