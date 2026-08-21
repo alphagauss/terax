@@ -22,6 +22,10 @@ import {
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import {
+  osNotify,
+  type OsNotificationResult,
+} from "@/modules/agents/lib/notify";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type Language,
@@ -85,6 +89,13 @@ const SHELL_AUTO = "auto";
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.0;
 const ZOOM_STEP = 0.05;
+const NOTIFICATION_TEST_DELAY_MS = 2_000;
+
+type NotificationTestState =
+  | OsNotificationResult
+  | "idle"
+  | "waiting"
+  | "sending";
 
 /** 常规设置分区。 */
 export function GeneralSection() {
@@ -121,9 +132,28 @@ export function GeneralSection() {
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const language = usePreferencesStore((s) => s.language);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  const [notificationTest, setNotificationTest] =
+    useState<NotificationTestState>("idle");
+  const notificationTestPending =
+    notificationTest === "waiting" || notificationTest === "sending";
   const [openWithAction, setOpenWithAction] = useState<
     "register" | "remove" | null
   >(null);
+
+  /** 延迟发送测试通知，给用户留出切换到其他应用的时间。 */
+  const testNotification = async () => {
+    setNotificationTest("waiting");
+    await new Promise((resolve) =>
+      setTimeout(resolve, NOTIFICATION_TEST_DELAY_MS),
+    );
+    setNotificationTest("sending");
+    setNotificationTest(
+      await osNotify(
+        t("general.agents.notifications.test.notificationTitle"),
+        t("general.agents.notifications.test.notificationBody"),
+      ),
+    );
+  };
 
   useEffect(() => {
     let alive = true;
@@ -502,10 +532,30 @@ export function GeneralSection() {
           title={t("general.agents.notifications.title")}
           description={t("general.agents.notifications.description")}
         >
-          <Switch
-            checked={agentNotifications}
-            onCheckedChange={(v) => void setAgentNotifications(v)}
-          />
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled={!agentNotifications || notificationTestPending}
+              title={t(
+                `general.agents.notifications.test.hint.${notificationTest}`,
+              )}
+              onClick={() => void testNotification()}
+            >
+              {t(
+                `general.agents.notifications.test.label.${notificationTest}`,
+              )}
+            </Button>
+            <Switch
+              checked={agentNotifications}
+              disabled={notificationTestPending}
+              onCheckedChange={(value) => {
+                setNotificationTest("idle");
+                void setAgentNotifications(value);
+              }}
+            />
+          </div>
         </SettingRow>
       </div>
 
