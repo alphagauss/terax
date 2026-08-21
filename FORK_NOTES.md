@@ -52,13 +52,16 @@
   - `e14f7f1` 中的纯通知渠道选择和 `5f5b216` 已手工汇总移植为 `605a550`。同一通知目标在两秒内只投递一次，并限制去重缓存容量；按下游身份模型使用 `tabId` 和可选 `sessionId`，避免不同内置 AI 会话互相抑制。
   - 系统通知现在区分已请求、权限阻止和原生调用失败；常规设置增加已国际化的延迟测试入口，方便切换到其他应用后验证真实系统投递。
   - 按本轮决策未引入 `notification.mp3`、Web Audio 播放逻辑或声音偏好。底层系统通知接口保持通用，Agent 模块继续拥有投递策略。
+- 选入第五批终端偏好移植：
+  - `4e2f7f7`：已手工移植为 `e64c2a3`。增加方块、竖线和下划线三种终端光标样式，并通过共享设置同步到现有与新建终端的全部 renderer slot。
+  - 未采用上游将默认值改为竖线的行为，继续使用下游原有方块光标，避免升级后静默改变既有用户体验；设置名称和选项已补齐中英文资源。
 - 建议后续统一决定：
   - `9f329a2`：已手工移植为 `2d96e73`。本地和 SSH 目录读取统一使用数字感知的自然排序，并通过共享函数保持文件树与面包屑一致。
   - 注册表已有 AI SDK 与各 provider、Babel、TypeScript、TanStack Table、Marked、size-limit 和 Node 类型等跨主版本更新。建议分别建立迁移批次并验证 API、构建和体积，不在纯依赖同步中直接升级；KaTeX 的 `0.16` 到 `0.18` 同样按可能破坏兼容的升级处理。
   - `pnpm-workspace.yaml` 要求依赖发布至少满三天。`pnpm outdated` 显示但 `wanted` 未接受的同主版本更新继续等待观察期，不绕过 `minimumReleaseAgeStrict`。
 - 暂缓，等待针对性验证或产品决策：
   - `bd577d8`：macOS 韩文及中日韩文字 IME 桥接。该修复有价值，但依赖 xterm 私有状态，采用前必须在真实 macOS Tauri 运行时中复现并完成回归验证。
-  - `4e2f7f7`、`6af950d`、`93b6b24` 和 `40ad56b`：光标样式、批量关闭标签、换行列数和运行中进程关闭确认偏好属于可选 UX 功能，不是回归修复。
+  - `6af950d`、`93b6b24` 和 `40ad56b`：批量关闭标签、换行列数和运行中进程关闭确认偏好属于可选 UX 功能，不是回归修复。
   - `e14f7f1` 中的声音部分和 `f675a71`：通知音频资源、播放和声音偏好暂不移植。若以后出现第二个声音消费者，再考虑抽取公共通知声音能力。
   - `c1ec0e6`、`0b5e81b`、`81e718c` 和 `ae7dd20`：编码 Agent 启动器和注意状态系列。该系列此前已经暂缓，目前仍与下游 Agent 和 Workbench 身份模型重叠。
   - `21cbca6`、`aa65cb1`、`1648ba3`、`0ec16d8`、`2dd6361` 和 `b3f053b`：内置 CLI 控制平面。该系列新增经过认证的 IPC 接口，并与 Workspace runtime 和 handoff 职责重叠，应作为独立架构提案处理。
@@ -94,11 +97,12 @@
   - `daddf29` 已通过冻结锁文件安装、`pnpm check-types`、`pnpm lint` 和更新前的完整 996 项前端测试；lint 保留 32 项既有警告和 2 项既有提示。
   - `dfa41bf` 已通过 `cargo fmt --all -- --check`、全目标 clippy 和 `cargo test --locked`；库单元测试 483 项、文件系统集成测试 25 项和 Git 集成测试 40 项全部通过。
   - 第二批新增或扩展的 14 个测试文件已通过 64 项针对性测试、`pnpm check-types` 和逐文件 lint。
-  - 完整前端验证已通过：201 个测试文件、1064 项测试、`pnpm check-types`、`pnpm lint`、`pnpm build` 和前端 eager graph 检查。lint 保留 32 项既有警告和 2 项既有提示，本批新增文件的逐文件 lint 无诊断；Svelte 解析器未进入启动加载链路。
+  - 完整前端验证已通过：202 个测试文件、1066 项测试、`pnpm check-types`、`pnpm lint`、`pnpm build` 和前端 eager graph 检查。lint 保留 32 项既有警告和 2 项既有提示，本批新增文件的逐文件 lint 无诊断；Svelte 解析器未进入启动加载链路。
   - 完整 Rust 验证已通过：`cargo fmt --all -- --check`、`cargo clippy --all-targets --locked -- -D warnings` 和 `cargo test --locked`。本机没有 nextest，已按项目约定回退；库单元测试 483 项、文件系统集成测试 25 项、Git 集成测试 40 项全部通过。
   - `c7ecca3` 已通过 Svelte 语言解析与外部格式化器的 12 项针对性测试、`pnpm check-types` 和修改文件 lint。
   - `20a7ad3` 已通过快捷键与命令面板的 21 项针对性测试、`pnpm check-types` 和修改文件 lint；`App.tsx` 保留 3 项与本次修改无关的既有警告。
   - `605a550` 已通过通知渠道、去重窗口和系统通知失败处理的 11 项针对性测试、`pnpm check-types`、修改文件 lint、完整前端测试和生产构建。未增加音频资源或声音相关运行时。
+  - `e64c2a3` 已通过光标样式归一化的 2 项针对性测试、`pnpm check-types`、完整前端测试和生产构建。修改文件 lint 仅保留 `store.ts` 中 1 项既有警告，全量 lint 基线未变化。
 - 剩余合并阻塞项：本机没有 Fish，`177ae3d` 的可执行回归需要由新增 Linux CI 步骤确认。macOS CJK IME 和其余可选 UX 功能不属于本轮必要修复，保留在本章节等待后续统一决策。
 
 ## 同步历史
