@@ -28,7 +28,7 @@
 - 临时分支：`chore/upstream-merge-review-2026-08-21`
 - 跟踪的上游分支：`upstream/main`
 - 审查范围：`fcff6c5b4cff4d00c85e6c2d587672d33f30ea38..f675a713ffc4562cf3f11b3abab4e60384ce9e2e`
-- 状态：已拉取并分类 86 个提交；必要修复、依赖与 CI 更新，以及适用于下游现有功能的测试均已完成移植。
+- 状态：已拉取并分类 86 个提交；必要修复、依赖与 CI 更新、适用于下游现有功能的测试，以及首批低耦合功能均已完成移植。
 - 选入第一批移植：
   - `ed3c7e1`：已移植为 `44579fa`。保留 release 配置中的 `strip = true`，但禁止剥离构建依赖，确保 macOS 的 proc-macro 动态库可以正常加载。
   - `70bfbde`：已移植为 `177ae3d`。避免 Conda 保留 Terax 包装函数时出现 Fish 提示符递归，并加入可执行的 Fish 回归测试和 CI 接入。
@@ -45,14 +45,16 @@
   - `1aa587a`、`3eec888`、`60cd093` 和 `253d761` 已汇总移植为 `e9afbf5`，覆盖 Agent 名称、待办约束、子 Agent 失败收敛和模型偏好去重。
   - `36aff66` 和 `66baaff` 已手工移植为 `c665695`，适配下游 Workbench 命令标识和上下文结构。
   - `74a9a68` 已移植为 `3a2ee53`，锁定 Git 历史图轨道宽度上限。
+- 选入第三批低耦合功能移植：
+  - `1fdbc50`：已手工移植为 `c7ecca3`。为 `.svelte` 文件增加按需加载的专用 CodeMirror 解析器，使已有 Svelte LSP 和 Prettier 路径使用正确的语言标识；未照搬上游已不适用于下游分块策略的 Vite 配置。
+  - `a975822`：已手工移植为 `20a7ad3`。复用下游现有隐藏文件偏好和侧栏控制器，增加 `Cmd/Ctrl+Shift+.` 默认快捷键、命令面板入口，以及快捷键设置页所需的中英文名称；下游已有的物理标点键匹配逻辑无需重复修改。
 - 建议后续统一决定：
   - `9f329a2`：已手工移植为 `2d96e73`。本地和 SSH 目录读取统一使用数字感知的自然排序，并通过共享函数保持文件树与面包屑一致。
-  - `1fdbc50`：建议在确认需要完整 Svelte 编辑体验后，增加按需加载的 Svelte 语法支持和 Prettier 适用范围。该变更耦合较低，但会新增一个生产依赖，应作为独立功能提交。
   - 注册表已有 AI SDK 与各 provider、Babel、TypeScript、TanStack Table、Marked、size-limit 和 Node 类型等跨主版本更新。建议分别建立迁移批次并验证 API、构建和体积，不在纯依赖同步中直接升级；KaTeX 的 `0.16` 到 `0.18` 同样按可能破坏兼容的升级处理。
   - `pnpm-workspace.yaml` 要求依赖发布至少满三天。`pnpm outdated` 显示但 `wanted` 未接受的同主版本更新继续等待观察期，不绕过 `minimumReleaseAgeStrict`。
 - 暂缓，等待针对性验证或产品决策：
   - `bd577d8`：macOS 韩文及中日韩文字 IME 桥接。该修复有价值，但依赖 xterm 私有状态，采用前必须在真实 macOS Tauri 运行时中复现并完成回归验证。
-  - `4e2f7f7`、`6af950d`、`93b6b24`、`40ad56b` 和 `a975822`：光标样式、批量关闭标签、换行列数、运行中进程关闭确认偏好和隐藏文件快捷键属于可选 UX 功能，不是回归修复。
+  - `4e2f7f7`、`6af950d`、`93b6b24` 和 `40ad56b`：光标样式、批量关闭标签、换行列数和运行中进程关闭确认偏好属于可选 UX 功能，不是回归修复。
   - `e14f7f1`、`5f5b216` 和 `f675a71`：通知声音和通知投递加固。移植前应结合下游通知 store 和已国际化的设置界面重新评估。
   - `c1ec0e6`、`0b5e81b`、`81e718c` 和 `ae7dd20`：编码 Agent 启动器和注意状态系列。该系列此前已经暂缓，目前仍与下游 Agent 和 Workbench 身份模型重叠。
   - `21cbca6`、`aa65cb1`、`1648ba3`、`0ec16d8`、`2dd6361` 和 `b3f053b`：内置 CLI 控制平面。该系列新增经过认证的 IPC 接口，并与 Workspace runtime 和 handoff 职责重叠，应作为独立架构提案处理。
@@ -88,9 +90,11 @@
   - `daddf29` 已通过冻结锁文件安装、`pnpm check-types`、`pnpm lint` 和更新前的完整 996 项前端测试；lint 保留 32 项既有警告和 2 项既有提示。
   - `dfa41bf` 已通过 `cargo fmt --all -- --check`、全目标 clippy 和 `cargo test --locked`；库单元测试 483 项、文件系统集成测试 25 项和 Git 集成测试 40 项全部通过。
   - 第二批新增或扩展的 14 个测试文件已通过 64 项针对性测试、`pnpm check-types` 和逐文件 lint。
-  - 完整前端验证已通过：198 个测试文件、1049 项测试、`pnpm check-types` 和 `pnpm lint`。lint 保留 32 项既有警告和 2 项既有提示，本批新增文件的逐文件 lint 无诊断。
+  - 完整前端验证已通过：198 个测试文件、1053 项测试、`pnpm check-types`、`pnpm lint`、`pnpm build` 和前端 eager graph 检查。lint 保留 32 项既有警告和 2 项既有提示，本批新增文件的逐文件 lint 无诊断；Svelte 解析器未进入启动加载链路。
   - 完整 Rust 验证已通过：`cargo fmt --all -- --check`、`cargo clippy --all-targets --locked -- -D warnings` 和 `cargo test --locked`。本机没有 nextest，已按项目约定回退；库单元测试 483 项、文件系统集成测试 25 项、Git 集成测试 40 项全部通过。
-- 剩余合并阻塞项：本机没有 Fish，`177ae3d` 的可执行回归需要由新增 Linux CI 步骤确认。macOS CJK IME 等暂缓项、Svelte 支持和可选 UX 功能不属于本轮必要修复，保留在本章节等待后续统一决策。
+  - `c7ecca3` 已通过 Svelte 语言解析与外部格式化器的 12 项针对性测试、`pnpm check-types` 和修改文件 lint。
+  - `20a7ad3` 已通过快捷键与命令面板的 21 项针对性测试、`pnpm check-types` 和修改文件 lint；`App.tsx` 保留 3 项与本次修改无关的既有警告。
+- 剩余合并阻塞项：本机没有 Fish，`177ae3d` 的可执行回归需要由新增 Linux CI 步骤确认。macOS CJK IME 和其余可选 UX 功能不属于本轮必要修复，保留在本章节等待后续统一决策。
 
 ## 同步历史
 
