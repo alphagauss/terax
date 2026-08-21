@@ -1,28 +1,75 @@
-# Upstream Tracking
+# 上游跟踪说明
 
-- Upstream repository: https://github.com/crynta/terax-ai.git
-- Tracked upstream branch: `upstream/main`
-- Initial base commit: `78a0b3dd79554ad4af89e61d97004f3475cd9953`
+- 上游仓库：https://github.com/crynta/terax-ai.git
+- 跟踪的上游分支：`upstream/main`
+- 初始基线提交：`78a0b3dd79554ad4af89e61d97004f3475cd9953`
 
-## Sync policy
+## 同步策略
 
-This project is an independent downstream fork. Upstream changes are reviewed and selectively ported rather than merged wholesale.
+本项目是独立维护的下游分支。上游变更必须经过审查并选择性移植，不整体合并。
 
-## Update workflow
+本文件及后续新增的上游审查记录统一使用中文。
 
-For each upstream review, create a temporary branch and add a temporary update section to this file. Keep it current throughout the review so downstream adaptation can continue across multiple work sessions.
+## 更新流程
 
-The temporary section must record:
+每次审查上游更新时，创建临时分支，并在本文件中添加临时更新章节。审查期间持续维护该章节，保证下游适配工作可以跨多个工作会话延续。
 
-- The temporary branch, tracked upstream branch, and reviewed commit or range.
-- Each selected, skipped, or deferred upstream change and the reason for that decision.
-- Downstream-specific adaptations, fixes, unresolved issues, and follow-up work.
-- Verification already completed and any remaining merge blockers.
+临时章节必须记录：
 
-When the update is complete and ready to merge into downstream `main`, remove the temporary details and retain only the concise entry under Sync history.
+- 临时分支、跟踪的上游分支，以及已审查的提交或提交范围。
+- 每项选中、跳过或暂缓的上游变更及其原因。
+- 下游专用适配、修复、未解决问题和后续工作。
+- 已完成的验证以及剩余的合并阻塞项。
 
-## Sync history
+更新完成并可以合入下游 `main` 后，删除临时详情，仅在同步历史中保留简洁记录。
 
-- 2026-07-10: Synced selected upstream changes into downstream `main` at `6bdcd1ed40b633dfabb859957a8fcd8d9f8e5f7c`.
-- 2026-07-14: Reviewed `upstream/main` through `a2c8329662ade6fef8c1e11f7353a7231256937d` and ported the accepted changes on `chore/upstream-merge-review-2026-07-14`.
-- 2026-07-19: Reviewed `upstream/main` through `fcff6c5`, cherry-picked `fcff6c5`, manually ported `ac88362`, and removed the stale Star History embed. Deferred agent-tab status, `5c2f4cd`, Pi support, alert collapse, and SignPath attribution.
+## 当前审查：2026-08-21
+
+- 临时分支：`chore/upstream-merge-review-2026-08-21`
+- 跟踪的上游分支：`upstream/main`
+- 审查范围：`fcff6c5b4cff4d00c85e6c2d587672d33f30ea38..f675a713ffc4562cf3f11b3abab4e60384ce9e2e`
+- 状态：已拉取并分类 86 个提交，尚未移植任何上游代码。
+- 选入第一批移植：
+  - `ed3c7e1`：保留 release 配置中的 `strip = true`，但禁止剥离构建依赖，确保 macOS 的 proc-macro 动态库可以正常加载。完整补丁可以干净应用。
+  - `70bfbde`：避免 Conda 保留 Terax 包装函数时出现 Fish 提示符递归。完整补丁可以干净应用，包括可执行的 Fish 回归测试和 CI 接入。
+  - `4634739` 和 `2b2973f`：在 alternate screen 应用中将 readline 按键交给原生应用处理。下游仍存在该问题，但终端身份和剪贴板逻辑已经变化，需要手工移植纯按键映射规则及其测试。
+  - `7037d55`：限制活动状态下的 Explorer 搜索区域高度，避免长搜索结果溢出外层侧栏。下游仍缺少这一行行为修复；由于动画 token 不同，需要手工移植。
+  - `5459024`：通过原生 opener 打开终端 OSC 8 链接，校验支持的协议，并恢复终端焦点。下游已经使用原生 opener 打开检测到的普通 URL，且 Markdown 渲染器不同，因此只应适配共享辅助函数和终端相关部分。
+  - `a61bce2`：仅在 Space 和 Workbench 恢复完成后消费冷启动的 Open With 文件。下游仍会立即取出启动文件，而 `useSpacesBoot` 随后可能替换 Workbench，因此同一标签丢失竞态依然存在，需要适配到新的启动状态模型。
+- 选入后续改进：
+  - `9f329a2`：为 Explorer 条目增加数字感知的自然排序。移植比较器时，应在本地和 SSH 目录读取后统一应用，并为两条路径补充不变量测试。
+  - `1fdbc50`：增加按需加载的 Svelte 语法支持和 Prettier 适用范围。该变更耦合较低，但会新增一个生产依赖，因此应与缺陷修复分开处理。
+  - `46b6073`：在独立的纯 CI 变更中将 `actions/setup-node` 从 v6 更新到 v7，并检查所有下游工作流。
+- 暂缓，等待针对性验证或产品决策：
+  - `bd577d8`：macOS 韩文及中日韩文字 IME 桥接。该修复有价值，但依赖 xterm 私有状态，采用前必须在真实 macOS Tauri 运行时中复现并完成回归验证。
+  - `4e2f7f7`、`6af950d`、`93b6b24`、`40ad56b` 和 `a975822`：光标样式、批量关闭标签、换行列数、运行中进程关闭确认偏好和隐藏文件快捷键属于可选 UX 功能，不是回归修复。
+  - `e14f7f1`、`5f5b216` 和 `f675a71`：通知声音和通知投递加固。移植前应结合下游通知 store 和已国际化的设置界面重新评估。
+  - `c1ec0e6`、`0b5e81b`、`81e718c` 和 `ae7dd20`：编码 Agent 启动器和注意状态系列。该系列此前已经暂缓，目前仍与下游 Agent 和 Workbench 身份模型重叠。
+  - `21cbca6`、`aa65cb1`、`1648ba3`、`0ec16d8`、`2dd6361` 和 `b3f053b`：内置 CLI 控制平面。该系列新增经过认证的 IPC 接口，并与 Workspace runtime 和 handoff 职责重叠，应作为独立架构提案处理。
+  - `2825090`、`c67f021`、`9fd09f5`、`66f61a6` 和 `fd630a4`：面板重设计、默认主题重写、Xcode 主题和原生窗口背景。这些是成套的上游设计选择，不适合作为安全的同步材料。
+  - `5676de7` 和 `d23e16f`：SignPath 发布签名。工作流内包含上游 SignPath 组织和项目标识，缺少下游自有凭据和发布策略时不能复用。
+- 跳过，下游已有独立等价实现或更先进的实现：
+  - `d630bb3`：eager-graph 的 shebang 已经不存在。
+  - `2e86730`：Explorer 拖拽和操作系统文件拖拽已经可以写入终端。
+  - `40c4c89`：Workbench 已经支持工作树和提交文件 diff 标签。
+  - `fa68ae3`：LSP 状态提示和已国际化的预设已经提供安装指导。
+  - `28d7578`：标签关闭控件已经与触发器分离，并阻止指针事件冒泡。
+  - `3d53686`：下游仓库控制器已经支持重新发现和选定嵌套仓库。
+  - `89c65f0` 和 `cf30c25`：下游已经持久化终端字体家族、大小、字重和间距，并实时更新 renderer。上游的主题级字体覆盖只应作为独立主题功能重新考虑。
+  - `33cc6aa`：下游快捷键匹配已经支持 Shift 改写后的物理标点键，并使用自己的国际化快捷键定义。
+  - `c1744ff`：下游通过较新的多侧栏布局模型持久化侧栏运行时宽度。
+- 不直接 cherry-pick：
+  - 版本更新、Nix 源变更、Dependabot 批量更新和仅与发布相关的元数据（`fd1e78c`、`5463119`、`156fbfb`、`b8dc2bd`、`e9ee1d6`、`2141d16`、`6f81665`、`b16b663`、`f428f9b`、`65902bf`、`307cb35`、`649727a`、`eab7bb7`、`cc628f8`、`26a334c`、`e50a04b`、`4eced10`、`d1cd31b`、`d1daa87`、`486639a`、`e048347` 和 `f86ba9f`）必须结合下游依赖、打包和品牌要求重新审查。
+  - 上游 README、路线图、翻译、截图和工具注释（`04c6091`、`222fc62`、`4d5f454` 和 `a86fd9f`）不描述下游产品。
+  - 纯测试提交（`f3abcb3`、`d010ba4`、`fd99bf6`、`4a4a167`、`75332f6`、`fcfbded`、`1aa587a`、`3eec888`、`66baaff`、`36aff66`、`ebed02e`、`74a9a68`、`60cd093` 和 `253d761`）可以作为断言参考，但相关 API 已经分叉。移植相应行为时应吸收有价值的测试场景，不整体 cherry-pick。
+- 已完成的验证：
+  - 已确认上次审查点是 `upstream/main` 的祖先，并检查了范围内每个提交及其变更文件集合。
+  - 已比较补丁等价性和当前下游功能标记。新增提交中没有与下游补丁完全相同的提交，但部分功能已有上文列出的独立等价实现。
+  - 已对推荐补丁运行 `git apply --check`。`ed3c7e1` 和 `70bfbde` 可以完整应用，其余选中变更需要手工适配。
+- 剩余合并阻塞项：实现选中的各批次；适配代码时补充要求的中文文件级和代码项文档；任何用户可见设置都要同时更新英文和简体中文文本；完成上文要求的前端、Rust、Fish、macOS 运行时或 CI 针对性检查。
+
+## 同步历史
+
+- 2026-07-10：已将选定的上游变更同步到下游 `main`，对应下游提交为 `6bdcd1ed40b633dfabb859957a8fcd8d9f8e5f7c`。
+- 2026-07-14：已审查 `upstream/main` 至 `a2c8329662ade6fef8c1e11f7353a7231256937d`，并在 `chore/upstream-merge-review-2026-07-14` 上移植已接受的变更。
+- 2026-07-19：已审查 `upstream/main` 至 `fcff6c5`，cherry-pick `fcff6c5`，手工移植 `ac88362`，并移除过期的 Star History 嵌入。暂缓 Agent 标签状态、`5c2f4cd`、Pi 支持、警告折叠和 SignPath 署名。
