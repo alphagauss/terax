@@ -35,6 +35,8 @@ export type BackgroundKind = "none" | "image";
 
 export type WorkspaceWindowMode = "single" | "multiple";
 
+export type TerminalCursorStyle = "bar" | "block" | "underline";
+
 export const EDITOR_THEMES = [
   "modern",
   "kanagawa",
@@ -174,6 +176,7 @@ export type Preferences = {
   sourceControlShowUndoCommit: boolean;
   terminalWebglEnabled: boolean;
   terminalCursorBlink: boolean;
+  terminalCursorStyle: TerminalCursorStyle;
   terminalSmartCopyPaste: boolean;
   terminalFontFamily: string;
   terminalFontWeight: string;
@@ -264,6 +267,7 @@ const KEY_EXPLORER_GIT_DECORATIONS = "explorerGitDecorations";
 const KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT = "sourceControlShowUndoCommit";
 const KEY_TERMINAL_WEBGL_ENABLED = "terminalWebglEnabled";
 const KEY_TERMINAL_CURSOR_BLINK = "terminalCursorBlink";
+const KEY_TERMINAL_CURSOR_STYLE = "terminalCursorStyle";
 const KEY_TERMINAL_SMART_COPY_PASTE = "terminalSmartCopyPaste";
 const KEY_TERMINAL_FONT_FAMILY = "terminalFontFamily";
 const KEY_TERMINAL_FONT_WEIGHT = "terminalFontWeight";
@@ -348,6 +352,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   sourceControlShowUndoCommit: true,
   terminalWebglEnabled: true,
   terminalCursorBlink: false,
+  terminalCursorStyle: "block",
   terminalSmartCopyPaste: true,
   terminalFontFamily: "",
   terminalFontWeight: "normal",
@@ -488,6 +493,9 @@ export async function loadPreferences(): Promise<Preferences> {
     terminalCursorBlink:
       get<boolean>(KEY_TERMINAL_CURSOR_BLINK) ??
       DEFAULT_PREFERENCES.terminalCursorBlink,
+    terminalCursorStyle: coerceTerminalCursorStyle(
+      get<unknown>(KEY_TERMINAL_CURSOR_STYLE),
+    ),
     terminalSmartCopyPaste:
       get<boolean>(KEY_TERMINAL_SMART_COPY_PASTE) ??
       DEFAULT_PREFERENCES.terminalSmartCopyPaste,
@@ -772,6 +780,18 @@ export async function setTerminalCursorBlink(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_CURSOR_BLINK, value);
 }
 
+/** 将持久化值限制为 xterm 支持的活动光标样式。 */
+export function coerceTerminalCursorStyle(value: unknown): TerminalCursorStyle {
+  return value === "bar" || value === "block" || value === "underline"
+    ? value
+    : DEFAULT_PREFERENCES.terminalCursorStyle;
+}
+
+/** 保存终端光标样式，非法输入回退到下游原有的方块样式。 */
+export async function setTerminalCursorStyle(value: unknown): Promise<void> {
+  await writePref(KEY_TERMINAL_CURSOR_STYLE, coerceTerminalCursorStyle(value));
+}
+
 /** 更新终端智能复制粘贴开关。 */
 export async function setTerminalSmartCopyPaste(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_SMART_COPY_PASTE, value);
@@ -933,6 +953,7 @@ export async function onPreferencesChange(
     [KEY_SOURCE_CONTROL_SHOW_UNDO_COMMIT]: "sourceControlShowUndoCommit",
     [KEY_TERMINAL_WEBGL_ENABLED]: "terminalWebglEnabled",
     [KEY_TERMINAL_CURSOR_BLINK]: "terminalCursorBlink",
+    [KEY_TERMINAL_CURSOR_STYLE]: "terminalCursorStyle",
     [KEY_TERMINAL_SMART_COPY_PASTE]: "terminalSmartCopyPaste",
     [KEY_TERMINAL_FONT_FAMILY]: "terminalFontFamily",
     [KEY_TERMINAL_FONT_WEIGHT]: "terminalFontWeight",

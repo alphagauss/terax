@@ -69,6 +69,15 @@
         "title": "光标闪烁",
         "description": "让终端光标闪烁。默认关闭以降低空闲 CPU 占用，与 VS Code 和 macOS 终端一致。"
       },
+      "cursorStyle": {
+        "title": "光标样式",
+        "description": "终端光标的显示形状。",
+        "options": {
+          "block": "方块",
+          "bar": "竖线",
+          "underline": "下划线"
+        }
+      },
       "smartCopyPaste": {
         "title": "智能复制与粘贴",
         "description": "开启后，Ctrl+C 在有选区时复制，否则发送中断；Ctrl+V 执行粘贴。Ctrl+Shift+C 和 Ctrl+Shift+V 始终可用。"
