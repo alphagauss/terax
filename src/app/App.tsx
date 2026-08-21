@@ -11,7 +11,10 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { consumeLaunchFiles } from "@/lib/launchDir";
+import {
+  canConsumeLaunchFiles,
+  consumeLaunchFiles,
+} from "@/lib/launchDir";
 import { flushSharedStoreWrites } from "@/lib/sharedStore";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -856,10 +859,13 @@ export default function App() {
   openLaunchFilesRef.current = openLaunchFiles;
 
   useEffect(() => {
+    // 启动文件只能读取一次。必须等 Space hydration 和 Workbench 恢复都结束，
+    // 否则 useSpacesBoot 随后的整体替换会丢弃刚打开的文件标签。
+    if (!canConsumeLaunchFiles(workbenchBooted, spacesHydrated)) return;
     void consumeLaunchFiles().then((files) =>
       openLaunchFilesRef.current(files),
     );
-  }, []);
+  }, [spacesHydrated, workbenchBooted]);
 
   /** 在当前 Space 的活动 Group 中重建一个跨窗口复制的工作页。 */
   const openWorkspacePage = useCallback(
