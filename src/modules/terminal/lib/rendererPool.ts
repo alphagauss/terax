@@ -17,9 +17,7 @@ import { type FontWeight, Terminal } from "@xterm/xterm";
 import { shouldCursorBlink } from "./cursorBlink";
 import {
   terminalClipboardIntent,
-  terminalDeleteSequence,
-  terminalLineNavigationSequence,
-  terminalWordNavigationSequence,
+  terminalReadlineSequence,
 } from "./keymap";
 import {
   shouldUseLocalTerminalMouse,
@@ -333,24 +331,13 @@ function createSlot(): Slot {
     if (terminalId === null) return false;
     const bridge = adapter?.resolveTerminal(terminalId);
     if (!bridge) return true;
-    const lineNavigation = terminalLineNavigationSequence(event, {
+    const readlineSequence = terminalReadlineSequence(event, {
       isMac: IS_MAC,
+      isAlternateScreen: isAltScreen(slot),
     });
-    if (lineNavigation) {
+    if (readlineSequence) {
       event.preventDefault();
-      if (event.type === "keydown") bridge.writeToPty(lineNavigation);
-      return false;
-    }
-    const wordNavigation = terminalWordNavigationSequence(event);
-    if (wordNavigation) {
-      event.preventDefault();
-      if (event.type === "keydown") bridge.writeToPty(wordNavigation);
-      return false;
-    }
-    const deleteSeq = terminalDeleteSequence(event, { isMac: IS_MAC });
-    if (deleteSeq) {
-      event.preventDefault();
-      if (event.type === "keydown") bridge.writeToPty(deleteSeq);
+      if (event.type === "keydown") bridge.writeToPty(readlineSequence);
       return false;
     }
     if (isShiftEnter(event)) {

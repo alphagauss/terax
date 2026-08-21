@@ -51,6 +51,24 @@ export function terminalDeleteSequence(
   return null;
 }
 
+/**
+ * 解析仅适用于普通终端缓冲区的 readline 按键映射。
+ *
+ * alternate screen 通常由 TUI 自行解释组合键，必须保持浏览器和 xterm
+ * 生成的原始按键序列，避免主程序的行导航和删除映射覆盖应用内快捷键。
+ */
+export function terminalReadlineSequence(
+  event: TerminalKeyEvent,
+  opts: PlatformOpts & { isAlternateScreen: boolean },
+): string | null {
+  if (opts.isAlternateScreen) return null;
+  return (
+    terminalLineNavigationSequence(event, opts) ??
+    terminalWordNavigationSequence(event) ??
+    terminalDeleteSequence(event, opts)
+  );
+}
+
 export type TerminalClipboardIntent = "copy" | "paste";
 
 export type TerminalClipboardOptions = {
