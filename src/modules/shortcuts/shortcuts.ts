@@ -38,6 +38,7 @@ export type ShortcutId =
   | "search.focus"
   | "explorer.search"
   | "explorer.focus"
+  | "explorer.toggleHidden"
   | "view.zoomIn"
   | "view.zoomOut"
   | "view.zoomReset"
@@ -303,6 +304,13 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Toggle file explorer focus",
     group: "View",
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "e" }],
+  },
+  {
+    id: "explorer.toggleHidden",
+    label: "Toggle hidden files",
+    group: "View",
+    // 沿用文件管理器的常见组合，并按物理句点键匹配 Shift 改写后的字符。
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "." }],
   },
   {
     id: "view.zoomIn",

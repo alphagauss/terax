@@ -46,6 +46,7 @@
     "agent.focusAttention": "Jump to agent needing attention",
     "sidebar.toggle": "Toggle file explorer",
     "explorer.focus": "Toggle file explorer focus",
+    "explorer.toggleHidden": "Toggle hidden files",
     "view.zoomIn": "Zoom in",
     "view.zoomOut": "Zoom out",
     "view.zoomReset": "Reset zoom",

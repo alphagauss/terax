@@ -66,6 +66,7 @@ import {
 import { HostKeyDialog, SshConnectionDialog } from "@/modules/remote";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setShowHidden } from "@/modules/settings/store";
 import {
   type ShortcutHandlers,
   type ShortcutId,
@@ -368,6 +369,10 @@ export default function App() {
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
+  const toggleHiddenFiles = useCallback(() => {
+    sidebar.openContainer("explorer");
+    void setShowHidden(!usePreferencesStore.getState().showHidden);
+  }, [sidebar.openContainer]);
   const commitWorkbenchLayout = useCallback(
     (_layout: Layout, meta: LayoutChangedMeta) => {
       if (!meta.isUserInteraction) return;
@@ -1079,6 +1084,7 @@ export default function App() {
       "folder.open": () => void openFolder(),
       "sidebar.toggle": toggleSidebar,
       "explorer.focus": toggleExplorerFocus,
+      "explorer.toggleHidden": toggleHiddenFiles,
       "view.zoomIn": zoomIn,
       "view.zoomOut": zoomOut,
       "view.zoomReset": zoomReset,
@@ -1119,6 +1125,7 @@ export default function App() {
       openFolder,
       toggleSidebar,
       toggleExplorerFocus,
+      toggleHiddenFiles,
       zoomIn,
       zoomOut,
       zoomReset,
@@ -1455,6 +1462,7 @@ export default function App() {
             focusSearch: focusFind,
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
+            toggleHiddenFiles,
             setActivityBarPosition: sidebar.setActivityBarPosition,
             setActivityBarSize: sidebar.setActivityBarSize,
             toggleAi: toggleAiPanel,
@@ -1490,6 +1498,7 @@ export default function App() {
       splitActiveTab,
       focusFind,
       toggleSidebar,
+      toggleHiddenFiles,
       sidebar.setActivityBarPosition,
       sidebar.setActivityBarSize,
       toggleAiPanel,

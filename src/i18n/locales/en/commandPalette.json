@@ -30,6 +30,7 @@
     "search.focus": "Find in current tab",
     "explorer.search": "Search files by name",
     "sidebar.toggle": "Toggle file explorer",
+    "explorer.toggleHidden": "Toggle hidden files",
     "activityBar.position.default": "Activity Bar Position: Default",
     "activityBar.position.top": "Activity Bar Position: Top",
     "activityBar.position.bottom": "Activity Bar Position: Bottom",

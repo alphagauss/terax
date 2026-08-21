@@ -95,6 +95,35 @@ describe("fullscreen shortcut", () => {
   });
 });
 
+describe("隐藏文件快捷键", () => {
+  it("在视图分组注册主修饰键加 Shift 和句点", () => {
+    expect(SHORTCUTS).toContainEqual({
+      id: "explorer.toggleHidden",
+      label: "Toggle hidden files",
+      group: "View",
+      defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "." }],
+    });
+  });
+
+  it("使用物理句点键匹配 Shift 改写后的大于号", () => {
+    const modifiers = IS_MAC
+      ? { metaKey: true, shiftKey: true }
+      : { ctrlKey: true, shiftKey: true };
+    const shortcut = SHORTCUTS.find(
+      (candidate) => candidate.id === "explorer.toggleHidden",
+    );
+
+    if (!shortcut) throw new Error("未注册隐藏文件快捷键");
+    expect(
+      matchBinding(
+        keyboardEvent(">", "Period", modifiers),
+        shortcut.defaultBindings[0],
+        shortcut.id,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("tab and Space navigation shortcuts", () => {
   it("shows Space shortcuts and registers ordered tab navigation", () => {
     expect(SHORTCUT_GROUPS).toContain("Spaces");
