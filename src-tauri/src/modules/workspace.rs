@@ -701,6 +701,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn decode_command_output_reads_plain_utf8() {
+        assert_eq!(decode_command_output(b"hello world"), "hello world");
+    }
+
+    #[test]
+    fn decode_command_output_strips_utf16le_bom() {
+        // BOM（FF FE）后跟小端 UTF-16 编码的 "hi"。
+        let bytes = [0xff, 0xfe, 0x68, 0x00, 0x69, 0x00];
+        assert_eq!(decode_command_output(&bytes), "hi");
+    }
+
+    #[test]
+    fn decode_command_output_detects_bomless_utf16le() {
+        // 无 BOM 的小端 UTF-16 "test"；奇数位置的 NUL 会触发启发式检测。
+        let bytes = [0x74, 0x00, 0x65, 0x00, 0x73, 0x00, 0x74, 0x00];
+        assert_eq!(decode_command_output(&bytes), "test");
+    }
+
+    #[test]
+    fn decode_command_output_keeps_ascii_without_nuls_as_utf8() {
+        assert_eq!(decode_command_output(b"C:\\Users"), "C:\\Users");
+    }
+
+    #[test]
     fn distro_validator_accepts_real_names() {
         assert!(is_safe_distro_name("Ubuntu"));
         assert!(is_safe_distro_name("Ubuntu-22.04"));
