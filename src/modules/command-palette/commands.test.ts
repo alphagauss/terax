@@ -84,4 +84,27 @@ describe("command palette commands", () => {
       createCommandItems(ctx).some((item) => item.id === "window.new"),
     ).toBe(false);
   });
+
+  it("根据当前视图状态禁用拆分、关闭和搜索", () => {
+    const ctx = context();
+    const items = createCommandItems(ctx);
+    const reason = (id: string) =>
+      items.find((item) => item.id === id)?.disabledReason;
+
+    expect(reason("workbench.splitRight")).toBeDefined();
+    expect(reason("workbench.splitDown")).toBeDefined();
+    expect(reason("tab.close")).toBe("Last tab");
+    expect(reason("search.focus")).toBeDefined();
+    expect(reason("explorer.search")).toBeDefined();
+  });
+
+  it("为活动 Space 标记当前状态", () => {
+    const ctx = context();
+    ctx.spaces = [{ id: "space-a", name: "One" }];
+    ctx.activeSpaceId = "space-a";
+    const item = createCommandItems(ctx).find(
+      (candidate) => candidate.id === "spaces.switch.space-a",
+    );
+    expect(item?.disabledReason).toBe("Current space");
+  });
 });
