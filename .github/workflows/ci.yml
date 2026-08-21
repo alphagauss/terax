@@ -18,7 +18,7 @@ jobs:
 
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -75,7 +75,7 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.12
         with:
           tool: cargo-nextest,cargo-machete
 
@@ -115,7 +115,7 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.12
         with:
           tool: cargo-nextest
 
@@ -151,7 +151,7 @@ jobs:
           workspaces: ./src-tauri -> target
           key: coverage
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.12
         with:
           tool: cargo-llvm-cov,cargo-nextest
 
