@@ -32,6 +32,7 @@ function context(): CommandPaletteActionContext {
     focusSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,
+    toggleHiddenFiles: noop,
     setActivityBarPosition: noop,
     setActivityBarSize: noop,
     toggleAi: noop,
@@ -106,5 +107,16 @@ describe("command palette commands", () => {
       (candidate) => candidate.id === "spaces.switch.space-a",
     );
     expect(item?.disabledReason).toBe("Current space");
+  });
+
+  it("连接显示隐藏文件命令及其快捷键", () => {
+    const ctx = context();
+    const item = createCommandItems(ctx).find(
+      (candidate) => candidate.id === "explorer.toggleHidden",
+    );
+
+    expect(item?.shortcutId).toBe("explorer.toggleHidden");
+    item?.run();
+    expect(ctx.toggleHiddenFiles).toHaveBeenCalledOnce();
   });
 });

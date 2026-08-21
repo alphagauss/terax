@@ -46,6 +46,7 @@
     "agent.focusAttention": "跳到需要关注的智能体",
     "sidebar.toggle": "切换文件资源管理器",
     "explorer.focus": "切换文件资源管理器焦点",
+    "explorer.toggleHidden": "切换隐藏文件显示",
     "view.zoomIn": "放大",
     "view.zoomOut": "缩小",
     "view.zoomReset": "重置缩放",

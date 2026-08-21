@@ -23,6 +23,7 @@ import {
   SourceCodeIcon,
   SparklesIcon,
   TerminalIcon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import type { PaletteItem } from "./types";
 
@@ -61,6 +62,7 @@ export type CommandPaletteActionContext = {
   focusSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
+  toggleHiddenFiles: () => void;
   setActivityBarPosition: (position: ActivityBarPosition) => void;
   setActivityBarSize: (size: ActivityBarSize) => void;
   toggleAi: () => void;
@@ -305,6 +307,15 @@ export function createCommandItems(
       icon: SidebarLeftIcon,
       shortcutId: "sidebar.toggle",
       run: ctx.toggleSidebar,
+    },
+    {
+      id: "explorer.toggleHidden",
+      title: t("cmd.explorer.toggleHidden"),
+      group: "View",
+      keywords: ["dotfiles", "hidden", "explorer", "gitignore", "env"],
+      icon: ViewIcon,
+      shortcutId: "explorer.toggleHidden",
+      run: ctx.toggleHiddenFiles,
     },
     ...(["default", "top", "bottom", "hidden"] as const).map((position) => ({
       id: `activityBar.position.${position}`,

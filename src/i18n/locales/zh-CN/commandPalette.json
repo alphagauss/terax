@@ -30,6 +30,7 @@
     "search.focus": "在当前标签页查找",
     "explorer.search": "按名称搜索文件",
     "sidebar.toggle": "切换文件资源管理器",
+    "explorer.toggleHidden": "切换隐藏文件显示",
     "activityBar.position.default": "活动栏位置:默认",
     "activityBar.position.top": "活动栏位置:顶部",
     "activityBar.position.bottom": "活动栏位置:底部",
