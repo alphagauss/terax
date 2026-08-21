@@ -1,3 +1,8 @@
+/**
+ * 本文件测试外部格式化器的语言适用范围与覆盖优先级。
+ * 全局格式化器不得错误处理不支持的语言。
+ */
+
 import { describe, expect, it } from "vitest";
 import { resolveFormatter } from "./externalFormat";
 
@@ -15,6 +20,7 @@ describe("resolveFormatter", () => {
     expect(resolveFormatter("ts", prefs("biome"))).toBe("biome");
     expect(resolveFormatter("py", prefs("biome"))).toBe("lsp");
     expect(resolveFormatter("rs", prefs("prettier"))).toBe("lsp");
+    expect(resolveFormatter("svelte", prefs("prettier"))).toBe("prettier");
   });
 
   it("lsp and custom globals always apply", () => {

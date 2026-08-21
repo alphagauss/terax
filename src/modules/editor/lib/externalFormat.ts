@@ -59,6 +59,7 @@ export const FORMATTERS: Record<
       "css",
       "html",
       "vue",
+      "svelte",
       "md",
       "yaml",
     ],
