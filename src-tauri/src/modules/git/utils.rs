@@ -1,3 +1,7 @@
+//! Git 工作目录、路径和上游引用的公共校验辅助函数。
+//!
+//! 本模块在进入 Git 命令层前规范化路径，并确保本地目标仍位于已授权工作区内。
+
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -149,6 +153,33 @@ fn resolve_deleted_within_repo(repo_root: &Path, joined: &Path, rel: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_upstream_separates_remote_and_branch() {
+        assert_eq!(
+            split_upstream("origin/main"),
+            (Some("origin".to_string()), Some("main".to_string()))
+        );
+    }
+
+    #[test]
+    fn split_upstream_splits_on_the_first_slash_only() {
+        assert_eq!(
+            split_upstream("origin/feature/x"),
+            (Some("origin".to_string()), Some("feature/x".to_string()))
+        );
+    }
+
+    #[test]
+    fn split_upstream_without_slash_yields_branch_only() {
+        assert_eq!(split_upstream("main"), (None, Some("main".to_string())));
+    }
+
+    #[test]
+    fn normalize_git_path_converts_backslashes_to_slashes() {
+        assert_eq!(normalize_git_path("a\\b\\c"), "a/b/c");
+        assert_eq!(normalize_git_path("a/b"), "a/b");
+    }
 
     #[test]
     fn safe_pathspec_accepts_normal_paths() {
