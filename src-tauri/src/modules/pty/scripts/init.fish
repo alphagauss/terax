@@ -54,6 +54,14 @@ end
 # where a framework prompt (starship etc.) would otherwise override fish_prompt
 # and drop our markers.
 function __terax_install_prompt
+    # 当前仅识别 Conda 的命名包装形态；若其他提示符框架也间接保留 Terax，
+    # 再扩展这一窄范围保护，避免误判普通的提示符替换。
+    if not set -q TERAX_BLOCKS
+        and functions -q __fish_prompt_orig
+        and functions fish_prompt | string match -q '*__fish_prompt_orig*'
+        and functions __fish_prompt_orig | string match -q '*__terax_user_prompt*'
+        return
+    end
     __terax_capture_user_prompt
     if set -q TERAX_BLOCKS
         function fish_right_prompt
