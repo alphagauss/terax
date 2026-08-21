@@ -1,6 +1,6 @@
 /**
  * 本文件维护当前 Workspace 的文件传输前端快照。
- * Rust 是任务状态的唯一事实来源，Zustand 只合并列表快照、更新事件和移除事件。
+ * Rust 是任务状态的唯一事实来源，Zustand 合并任务事件并在预检结束后展示传输面板。
  */
 
 import { useEffect } from "react";
@@ -11,12 +11,44 @@ import type { TransferTask } from "./types";
 type TransferStore = {
   tasks: Record<string, TransferTask>;
   panelOpen: boolean;
+  pendingPanelTaskIds: Record<string, true>;
   mergeList: (tasks: TransferTask[]) => void;
   upsert: (task: TransferTask) => void;
   removeLocal: (id: string) => void;
   removeLocalMany: (ids: readonly string[]) => void;
   setPanelOpen: (open: boolean) => void;
+  requestPanelForTask: (id: string) => void;
 };
+
+type PanelRequestResult = {
+  pendingPanelTaskIds: Record<string, true>;
+  openPanel: boolean;
+};
+
+/** 在任务结束预检或提前失败后消费面板展示请求。 */
+function resolvePanelRequests(
+  tasks: Record<string, TransferTask>,
+  pendingPanelTaskIds: Record<string, true>,
+): PanelRequestResult {
+  let nextPending = pendingPanelTaskIds;
+  let openPanel = false;
+  for (const id of Object.keys(pendingPanelTaskIds)) {
+    const task = tasks[id];
+    if (!task) continue;
+    const canceled = task.status === "canceling" || task.status === "canceled";
+    const preflight =
+      task.stage === "queued" ||
+      task.stage === "scanning" ||
+      task.stage === "checking_conflicts";
+    if (!canceled && preflight) continue;
+    if (nextPending === pendingPanelTaskIds) {
+      nextPending = { ...pendingPanelTaskIds };
+    }
+    delete nextPending[id];
+    if (!canceled) openPanel = true;
+  }
+  return { pendingPanelTaskIds: nextPending, openPanel };
+}
 
 /** 合并后端列表，同时保留监听期间收到的更新版本。 */
 export function mergeTransferTasks(
@@ -37,13 +69,31 @@ export function mergeTransferTasks(
 export const useTransferStore = create<TransferStore>((set) => ({
   tasks: {},
   panelOpen: false,
+  pendingPanelTaskIds: {},
   mergeList: (tasks) =>
-    set((state) => ({ tasks: mergeTransferTasks(state.tasks, tasks) })),
+    set((state) => {
+      const nextTasks = mergeTransferTasks(state.tasks, tasks);
+      const request = resolvePanelRequests(
+        nextTasks,
+        state.pendingPanelTaskIds,
+      );
+      return {
+        tasks: nextTasks,
+        pendingPanelTaskIds: request.pendingPanelTaskIds,
+        panelOpen: request.openPanel || state.panelOpen,
+      };
+    }),
   upsert: (task) =>
     set((state) => {
       const known = state.tasks[task.id];
       if (known && known.updatedAt > task.updatedAt) return state;
-      return { tasks: { ...state.tasks, [task.id]: task } };
+      const tasks = { ...state.tasks, [task.id]: task };
+      const request = resolvePanelRequests(tasks, state.pendingPanelTaskIds);
+      return {
+        tasks,
+        pendingPanelTaskIds: request.pendingPanelTaskIds,
+        panelOpen: request.openPanel || state.panelOpen,
+      };
     }),
   removeLocal: (id) =>
     set((state) => {
@@ -64,11 +114,23 @@ export const useTransferStore = create<TransferStore>((set) => ({
       return changed ? { tasks } : state;
     }),
   setPanelOpen: (panelOpen) => set({ panelOpen }),
+  requestPanelForTask: (id) =>
+    set((state) => {
+      const pendingPanelTaskIds = {
+        ...state.pendingPanelTaskIds,
+        [id]: true as const,
+      };
+      const request = resolvePanelRequests(state.tasks, pendingPanelTaskIds);
+      return {
+        pendingPanelTaskIds: request.pendingPanelTaskIds,
+        panelOpen: request.openPanel || state.panelOpen,
+      };
+    }),
 }));
 
-/** 请求打开状态栏传输面板，供资源管理器等非状态栏模块调用。 */
-export function openTransferPanel(): void {
-  useTransferStore.getState().setPanelOpen(true);
+/** 登记任务在完成预检后自动展示，登记时同步检查已到达的最新快照。 */
+export function requestTransferPanel(id: string): void {
+  useTransferStore.getState().requestPanelForTask(id);
 }
 
 /** 在状态栏挂载期间订阅传输事件，并在订阅建立后读取完整快照。 */
@@ -102,13 +164,22 @@ export function useTransferBridge(): void {
         }
         const tasks = await transferNative.list();
         if (active) {
-          useTransferStore.setState((state) => ({
-            tasks: mergeTransferTasks(
+          useTransferStore.setState((state) => {
+            const nextTasks = mergeTransferTasks(
               state.tasks,
               tasks,
               removedDuringInitialization,
-            ),
-          }));
+            );
+            const request = resolvePanelRequests(
+              nextTasks,
+              state.pendingPanelTaskIds,
+            );
+            return {
+              tasks: nextTasks,
+              pendingPanelTaskIds: request.pendingPanelTaskIds,
+              panelOpen: request.openPanel || state.panelOpen,
+            };
+          });
           initialized = true;
         }
       } catch (error) {

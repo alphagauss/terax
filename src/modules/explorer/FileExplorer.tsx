@@ -43,7 +43,7 @@ import {
 } from "@/modules/transfers/dialogs";
 import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
-import { openTransferPanel } from "@/modules/transfers/store";
+import { requestTransferPanel } from "@/modules/transfers/store";
 import type { TransferStrategy } from "@/modules/transfers/types";
 import type { WorkbenchDropTarget } from "@/modules/workbench/dragSession";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
@@ -444,13 +444,13 @@ export const FileExplorer = memo(
               ? await pickUploadFiles(t("menu.uploadFiles"))
               : await pickUploadFolders(t("menu.uploadFolder"));
           if (sources.length === 0) return;
-          await transferNative.enqueue({
+          const task = await transferNative.enqueue({
             direction: "upload",
             strategy,
             sources,
             destination,
           });
-          openTransferPanel();
+          requestTransferPanel(task.id);
         } catch (error) {
           toast.error(
             t("menu.transferFailed", {
@@ -470,13 +470,13 @@ export const FileExplorer = memo(
             t("menu.downloadToLocal"),
           );
           if (!destination) return;
-          await transferNative.enqueue({
+          const task = await transferNative.enqueue({
             direction: "download",
             strategy,
             sources: [source],
             destination,
           });
-          openTransferPanel();
+          requestTransferPanel(task.id);
         } catch (error) {
           toast.error(
             t("menu.transferFailed", {

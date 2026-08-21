@@ -5,6 +5,7 @@
 
 import { formatTransferError } from "@/modules/transfers/errors";
 import { transferNative } from "@/modules/transfers/native";
+import { requestTransferPanel } from "@/modules/transfers/store";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -94,7 +95,10 @@ export function useExplorerFileDrop({ rootPath, isDir, onCopied }: Options) {
                 sources: p.paths,
                 destination: dir,
               })
-              .then(() => toast.success(t("menu.transferQueued")))
+              .then((task) => {
+                requestTransferPanel(task.id);
+                toast.success(t("menu.transferQueued"));
+              })
               .catch((error) =>
                 toast.error(
                   t("menu.transferFailed", {
