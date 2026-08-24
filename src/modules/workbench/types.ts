@@ -43,6 +43,7 @@ export type MarkdownTab = TabBase & {
   kind: "markdown";
   path: string;
   dirty: boolean;
+  preview: boolean;
   explorerRoot?: string;
 };
 

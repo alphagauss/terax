@@ -69,6 +69,7 @@ describe("filePathFor", () => {
         title: "README.md",
         path: "/workspace/README.md",
         dirty: false,
+        preview: false,
       },
     ];
 

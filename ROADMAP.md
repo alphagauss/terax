@@ -52,6 +52,11 @@ The themes below frame every scope decision.
 - [x] Icon theme with full file-type coverage
 - [x] Fuzzy search, keyboard navigation, inline rename, context actions
 
+### Workspace Search
+
+- [x] Lightweight on-demand content search with case, whole-word, regex, include, and exclude filters
+- [x] Shared search engine for the Search sidebar and AI grep, without a persistent index or file watcher
+
 ### Git / Source Control
 
 - [x] Source control panel (stage, commit, branch)
@@ -131,7 +136,7 @@ See `good-first-issue` and `help-wanted` labels on GitHub Issues for concrete ta
 
 Categories that will not be built into Terax. Individual feature requests in these categories will be closed.
 
-- **Heavy IDE features.** Full language-server integration, integrated debuggers, refactoring engines, project-wide search at IDE scale. Use a real editor for those.
+- **Heavy IDE features.** Full language-server integration, integrated debuggers, refactoring engines, and IDE-scale project search with persistent indexing, search editors, or cross-file replacement. Lightweight on-demand workspace search remains in scope; use a real editor for the larger workflows.
 - **Notebook and document workspaces.** Anything that turns Terax into a document host rather than a terminal.
 - **Package manager and toolchain UIs.** Use `npm`, `pip`, `cargo` and friends in the terminal directly.
 - **Full web browser features.** Preview pane stays scoped to local dev servers and lightweight doc viewing. No navigation history, no bookmarks, no dev tools.

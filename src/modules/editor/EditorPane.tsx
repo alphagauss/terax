@@ -68,6 +68,12 @@ import { previewMediaKind, usePreviewAssetUrl } from "./lib/usePreviewAssetUrl";
 import { useVimExtension } from "./lib/useVimExtension";
 import { vimHandlersExtension } from "./lib/vimHandlers";
 
+/** 编辑器源码行内的 UTF-16 选区。 */
+export type EditorSourceSelection = {
+  start: number;
+  end: number;
+};
+
 export type EditorPaneHandle = FindHandle & {
   focus: () => void;
   getSelection: () => string | null;
@@ -78,8 +84,8 @@ export type EditorPaneHandle = FindHandle & {
   reload: () => void;
   /** 先核对数据源端版本，只有内容变化时才读取正文。 */
   checkForChanges: () => void;
-  /** Move the cursor to a 1-based line and center it, once content is ready. */
-  gotoLine: (line: number) => void;
+  /** 内容就绪后跳到从一开始计数的行，并可选中该行内的 UTF-16 区间。 */
+  gotoLine: (line: number, selection?: EditorSourceSelection) => void;
   /** Scroll a 1-based source line to the viewport activation line. */
   scrollToSourceLine: (line: number) => void;
   /** Apply CodeMirror's undo/redo commands. */
@@ -410,28 +416,64 @@ export const EditorCore = memo(
       };
     }, [doc.status, gitBaseline]);
 
-    const pendingLineRef = useRef<number | null>(null);
+    const pendingLineRef = useRef<{
+      line: number;
+      selection?: EditorSourceSelection;
+    } | null>(null);
+    const pendingGotoFrameRef = useRef(0);
     const restoredSourceLineRef = useRef<number | null>(null);
     const statusRef = useRef(doc.status);
     statusRef.current = doc.status;
 
-    const applyPendingGoto = useCallback(() => {
+    /** 在内容就绪后应用跳转和可选搜索选区，避免新标签挂载时丢失定位。 */
+    const applyPendingGoto = useCallback((): boolean => {
       const view = cmRef.current?.view;
-      const line = pendingLineRef.current;
-      if (!view || line == null || statusRef.current !== "ready") return;
-      const target = Math.max(1, Math.min(line, view.state.doc.lines));
-      const at = view.state.doc.line(target).from;
+      const pending = pendingLineRef.current;
+      if (!pending) return true;
+      if (!view || statusRef.current !== "ready") return false;
+      const target = Math.max(1, Math.min(pending.line, view.state.doc.lines));
+      const line = view.state.doc.line(target);
+      const start = Math.max(
+        0,
+        Math.min(pending.selection?.start ?? 0, line.length),
+      );
+      const end = Math.max(
+        start,
+        Math.min(pending.selection?.end ?? start, line.length),
+      );
+      const from = line.from + start;
       view.dispatch({
-        selection: { anchor: at },
-        effects: EditorView.scrollIntoView(at, { y: "center" }),
+        selection: { anchor: from, head: line.from + end },
+        effects: EditorView.scrollIntoView(from, { y: "center" }),
       });
       view.focus();
       pendingLineRef.current = null;
+      return true;
     }, []);
 
+    /** 等待文档与 CodeMirror 同时就绪后再消费定位，覆盖首次挂载和 Markdown 懒加载。 */
+    const schedulePendingGoto = useCallback(() => {
+      if (pendingGotoFrameRef.current) return;
+      const run = () => {
+        pendingGotoFrameRef.current = 0;
+        if (applyPendingGoto()) return;
+        if (statusRef.current !== "loading" && statusRef.current !== "ready") {
+          pendingLineRef.current = null;
+          return;
+        }
+        pendingGotoFrameRef.current = requestAnimationFrame(run);
+      };
+      run();
+    }, [applyPendingGoto]);
+
     useEffect(() => {
-      if (doc.status === "ready") applyPendingGoto();
-    }, [doc.status, applyPendingGoto]);
+      if (doc.status === "ready") schedulePendingGoto();
+    }, [doc.status, schedulePendingGoto]);
+
+    useEffect(
+      () => () => cancelAnimationFrame(pendingGotoFrameRef.current),
+      [],
+    );
 
     useEffect(() => {
       if (
@@ -681,9 +723,9 @@ export const EditorCore = memo(
         },
         reload: () => reloadRef.current(),
         checkForChanges: () => checkForChangesRef.current(),
-        gotoLine: (line: number) => {
-          pendingLineRef.current = line;
-          applyPendingGoto();
+        gotoLine: (line: number, selection?: EditorSourceSelection) => {
+          pendingLineRef.current = { line, selection };
+          schedulePendingGoto();
         },
         scrollToSourceLine: (line: number) => {
           const view = cmRef.current?.view;
@@ -713,7 +755,7 @@ export const EditorCore = memo(
           startCompletion(view);
         },
       }),
-      [path, applyPendingGoto],
+      [path, schedulePendingGoto],
     );
 
     const previewKind = previewMediaKind(path);

@@ -7,7 +7,11 @@ import type { HugeiconsIcon } from "@hugeicons/react";
 
 export type SidebarLocation = "primary" | "secondary";
 
-export type SidebarContainerId = "explorer" | "source-control" | "ai";
+export type SidebarContainerId =
+  | "explorer"
+  | "search"
+  | "source-control"
+  | "ai";
 
 export type ActivityBarPosition = "default" | "top" | "bottom" | "hidden";
 
@@ -21,7 +25,7 @@ export type ActivityBarSettings = {
 
 export type SidebarContainerDefinition = {
   id: SidebarContainerId;
-  titleKey: "files" | "sourceControl" | "ai";
+  titleKey: "files" | "search" | "sourceControl" | "ai";
   icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
   defaultLocation: SidebarLocation;
   defaultOrder: number;

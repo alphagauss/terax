@@ -30,6 +30,7 @@ function context(): CommandPaletteActionContext {
     splitGroupRight: noop,
     splitGroupDown: noop,
     focusSearch: noop,
+    openWorkspaceSearch: noop,
     focusExplorerSearch: noop,
     toggleSidebar: noop,
     toggleHiddenFiles: noop,
@@ -118,5 +119,16 @@ describe("command palette commands", () => {
     expect(item?.shortcutId).toBe("explorer.toggleHidden");
     item?.run();
     expect(ctx.toggleHiddenFiles).toHaveBeenCalledOnce();
+  });
+
+  it("直接打开工作区搜索侧边栏", () => {
+    const ctx = context();
+    const item = createCommandItems(ctx).find(
+      (candidate) => candidate.id === "search.content",
+    );
+
+    expect(item?.shortcutId).toBe("workspaceSearch.focus");
+    item?.run();
+    expect(ctx.openWorkspaceSearch).toHaveBeenCalledOnce();
   });
 });

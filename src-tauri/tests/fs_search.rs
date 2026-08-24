@@ -1,9 +1,30 @@
+//! 文件名、内容与 glob 搜索的集成测试。
+//!
+//! 测试锁定 ignore、匹配选项、路径过滤、结果上限和自然排序等工作区搜索不变量。
+
 mod common;
 
 use common::{git_available, FsFixture, GitRepoFixture};
-use terax_lib::modules::fs::grep::{fs_glob, fs_grep};
+use terax_lib::modules::fs::grep::{
+    fs_glob, search_content, ContentSearchCaseMode, ContentSearchRequest, ContentSearchSyntax,
+};
 use terax_lib::modules::fs::search::{fs_list_files, fs_search};
 use terax_lib::modules::fs::tree::{fs_read_dir, list_subdirs, EntryKind};
+
+fn content_request(root: String, pattern: &str) -> ContentSearchRequest {
+    ContentSearchRequest {
+        root,
+        pattern: pattern.into(),
+        syntax: ContentSearchSyntax::Regex,
+        case_mode: ContentSearchCaseMode::Sensitive,
+        whole_word: false,
+        includes: Vec::new(),
+        excludes: Vec::new(),
+        max_results: None,
+        cancel_previous: false,
+        workspace: None,
+    }
+}
 
 #[tokio::test]
 async fn grep_finds_matches_and_returns_relative_paths() {
@@ -14,7 +35,7 @@ async fn grep_finds_matches_and_returns_relative_paths() {
     );
     fx.write("src/lib.rs", "pub fn greet() {}\n");
 
-    let res = fs_grep("hello".into(), fx.root_str(), None, None, None, None)
+    let res = search_content(content_request(fx.root_str(), "hello"))
         .await
         .expect("grep");
 
@@ -32,14 +53,14 @@ async fn grep_case_insensitive_finds_mixed_case() {
     let fx = FsFixture::new();
     fx.write("a.txt", "Hello World\n");
 
-    let strict = fs_grep("hello".into(), fx.root_str(), None, Some(false), None, None)
+    let strict = search_content(content_request(fx.root_str(), "hello"))
         .await
         .expect("grep");
     assert!(strict.hits.is_empty());
 
-    let loose = fs_grep("hello".into(), fx.root_str(), None, Some(true), None, None)
-        .await
-        .expect("grep");
+    let mut request = content_request(fx.root_str(), "hello");
+    request.case_mode = ContentSearchCaseMode::Insensitive;
+    let loose = search_content(request).await.expect("grep");
     assert_eq!(loose.hits.len(), 1);
 }
 
@@ -49,16 +70,9 @@ async fn grep_glob_filter_restricts_files() {
     fx.write("a.rs", "target\n");
     fx.write("b.ts", "target\n");
 
-    let res = fs_grep(
-        "target".into(),
-        fx.root_str(),
-        Some(vec!["*.rs".into()]),
-        None,
-        None,
-        None,
-    )
-    .await
-    .expect("grep");
+    let mut request = content_request(fx.root_str(), "target");
+    request.includes = vec!["*.rs".into()];
+    let res = search_content(request).await.expect("grep");
 
     assert_eq!(res.hits.len(), 1);
     assert_eq!(res.hits[0].rel, "a.rs");
@@ -71,9 +85,9 @@ async fn grep_max_results_truncates() {
         fx.write(&format!("f{i}.txt"), "needle\n");
     }
 
-    let res = fs_grep("needle".into(), fx.root_str(), None, None, Some(3), None)
-        .await
-        .expect("grep");
+    let mut request = content_request(fx.root_str(), "needle");
+    request.max_results = Some(3);
+    let res = search_content(request).await.expect("grep");
 
     assert!(res.hits.len() <= 3);
     assert!(res.truncated);
@@ -82,21 +96,13 @@ async fn grep_max_results_truncates() {
 #[tokio::test]
 async fn grep_empty_pattern_errors() {
     let fx = FsFixture::new();
-    let err = fs_grep("".into(), fx.root_str(), None, None, None, None).await;
+    let err = search_content(content_request(fx.root_str(), "")).await;
     assert!(err.is_err());
 }
 
 #[tokio::test]
 async fn grep_non_dir_root_errors() {
-    let err = fs_grep(
-        "x".into(),
-        "/this/does/not/exist".into(),
-        None,
-        None,
-        None,
-        None,
-    )
-    .await;
+    let err = search_content(content_request("/this/does/not/exist".into(), "x")).await;
     assert!(err.is_err());
 }
 
@@ -107,13 +113,44 @@ async fn grep_respects_ignore_file() {
     fx.write("ignored.txt", "secret\n");
     fx.write("visible.txt", "secret\n");
 
-    let res = fs_grep("secret".into(), fx.root_str(), None, None, None, None)
+    let res = search_content(content_request(fx.root_str(), "secret"))
         .await
         .expect("grep");
 
     let rels: Vec<&str> = res.hits.iter().map(|h| h.rel.as_str()).collect();
     assert!(rels.contains(&"visible.txt"));
     assert!(!rels.contains(&"ignored.txt"));
+}
+
+#[tokio::test]
+async fn content_search_supports_literal_whole_word_and_excludes() {
+    let fx = FsFixture::new();
+    fx.write("src/keep.txt", "a.b aXb a.bigger\n");
+    fx.write("generated/skip.txt", "a.b\n");
+
+    let mut request = content_request(fx.root_str(), "a.b");
+    request.syntax = ContentSearchSyntax::Literal;
+    request.whole_word = true;
+    request.excludes = vec!["generated/**".into()];
+    let res = search_content(request).await.expect("content search");
+
+    assert_eq!(res.hits.len(), 1);
+    assert_eq!(res.hits[0].rel, "src/keep.txt");
+    assert_eq!(res.hits[0].ranges.len(), 1);
+}
+
+#[tokio::test]
+async fn content_search_reports_utf16_match_ranges() {
+    let fx = FsFixture::new();
+    fx.write("unicode.txt", "前\u{1F600}needle后\n");
+
+    let res = search_content(content_request(fx.root_str(), "needle"))
+        .await
+        .expect("content search");
+
+    assert_eq!(res.hits.len(), 1);
+    assert_eq!(res.hits[0].ranges[0].start, 3);
+    assert_eq!(res.hits[0].ranges[0].end, 9);
 }
 
 #[tokio::test]

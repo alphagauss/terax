@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 Space 删除时共享文档的生命周期处理。
+ * 重点锁定仍有视图的文档不会被丢弃，失去最后视图的脏文档会被正确识别。
+ */
+
 import type { Tab } from "@/modules/workbench";
 import { describe, expect, it } from "vitest";
 import { spaceDeleteDocuments } from "./spaceDelete";
@@ -21,6 +26,7 @@ describe("Space deletion document lifecycle", () => {
         title: "orphan.md",
         path: "C:\\work\\orphan.md",
         dirty: true,
+        preview: false,
       },
       {
         id: 3,

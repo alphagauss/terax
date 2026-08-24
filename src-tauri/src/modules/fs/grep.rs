@@ -1,3 +1,8 @@
+//! 工作区文件内容搜索与路径 glob 匹配。
+//!
+//! 内容搜索由用户侧边栏和 AI grep 共享，统一处理匹配语义、ignore、结果上限与远端回退；
+//! 交互式调用可取消上一轮扫描，但不会取消并发的 AI 搜索。
+
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,7 +13,7 @@ use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::{WalkBuilder, WalkState};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::to_canon;
 use crate::modules::remote;
@@ -18,28 +23,121 @@ const FILE_SIZE_CAP: u64 = 5 * 1024 * 1024;
 const DEFAULT_MAX_RESULTS: usize = 200;
 const HARD_MAX_RESULTS: usize = 2000;
 
-/// Supersession counter for interactive content search. Each new interactive
-/// query bumps the generation; in-flight walks observe the change and quit,
-/// so fast typing stops superseded searches server-side instead of letting
-/// them run to completion.
+/// 搜索面板交互请求的取消状态。
+///
+/// 每次新查询推进 generation，正在扫描的旧查询观察到变化后尽快退出；AI 查询不使用此状态。
 #[derive(Default)]
 pub struct ContentSearchState {
     generation: Arc<AtomicU64>,
 }
 
-#[derive(Serialize)]
-pub struct GrepHit {
-    pub path: String,
-    pub rel: String,
-    pub line: u64,
-    pub text: String,
+/// 内容搜索的查询语法。
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentSearchSyntax {
+    /// 将查询作为普通文本处理。
+    Literal,
+    /// 将查询作为 Rust ripgrep 正则处理。
+    Regex,
 }
 
+/// 内容搜索的大小写模式。
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentSearchCaseMode {
+    /// 区分大小写。
+    Sensitive,
+    /// 忽略大小写。
+    Insensitive,
+}
+
+/// 用户搜索面板与 AI grep 共用的内容搜索请求。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentSearchRequest {
+    /// 搜索根目录。
+    pub root: String,
+    /// 查询文本或正则表达式。
+    pub pattern: String,
+    /// 查询语法。
+    pub syntax: ContentSearchSyntax,
+    /// 大小写模式。
+    pub case_mode: ContentSearchCaseMode,
+    /// 是否只接受完整单词匹配。
+    pub whole_word: bool,
+    /// 相对根目录的包含 glob。
+    #[serde(default)]
+    pub includes: Vec<String>,
+    /// 相对根目录的排除 glob。
+    #[serde(default)]
+    pub excludes: Vec<String>,
+    /// 返回结果上限，后端仍会约束到硬上限。
+    pub max_results: Option<usize>,
+    /// 是否取消上一轮搜索面板请求。
+    #[serde(default)]
+    pub cancel_previous: bool,
+    /// 进程启动时固定的工作区环境。
+    pub workspace: Option<WorkspaceEnv>,
+}
+
+/// 匹配文本在结果行中的 UTF-16 半开区间。
 #[derive(Serialize)]
-pub struct GrepResponse {
-    pub hits: Vec<GrepHit>,
+#[serde(rename_all = "camelCase")]
+pub struct MatchRange {
+    /// 起始 UTF-16 偏移。
+    pub start: usize,
+    /// 结束 UTF-16 偏移。
+    pub end: usize,
+}
+
+/// 单个文件行的内容搜索结果。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentSearchHit {
+    /// 工作区环境内的绝对路径。
+    pub path: String,
+    /// 相对于搜索根目录的规范路径。
+    pub rel: String,
+    /// 从一开始计数的行号。
+    pub line: u64,
+    /// 匹配所在的完整文本行。
+    pub text: String,
+    /// 该行内所有非重叠匹配区间。
+    pub ranges: Vec<MatchRange>,
+}
+
+/// 一次内容搜索的有界响应。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentSearchResponse {
+    /// 按路径和行号排序的匹配结果。
+    pub hits: Vec<ContentSearchHit>,
+    /// 是否因结果或传输上限截断。
     pub truncated: bool,
+    /// 实际读取并检查的文件数量。
     pub files_scanned: usize,
+}
+
+fn empty_content_search_response() -> ContentSearchResponse {
+    ContentSearchResponse {
+        hits: Vec::new(),
+        truncated: false,
+        files_scanned: 0,
+    }
+}
+
+/// 预编译的包含与排除路径规则。
+#[derive(Clone)]
+struct PathFilters {
+    includes: Option<GlobSet>,
+    excludes: Option<GlobSet>,
+}
+
+impl PathFilters {
+    fn matches(&self, path: &str) -> bool {
+        self.includes.as_ref().is_none_or(|set| set.is_match(path))
+            && !self.excludes.as_ref().is_some_and(|set| set.is_match(path))
+    }
 }
 
 fn build_globset(patterns: &[String]) -> Result<Option<GlobSet>, String> {
@@ -55,6 +153,14 @@ fn build_globset(patterns: &[String]) -> Result<Option<GlobSet>, String> {
     Ok(Some(set))
 }
 
+/// 将包含与排除 glob 分别编译，保证排除规则始终优先。
+fn build_path_filters(includes: &[String], excludes: &[String]) -> Result<PathFilters, String> {
+    Ok(PathFilters {
+        includes: build_globset(includes)?,
+        excludes: build_globset(excludes)?,
+    })
+}
+
 fn escape_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 8);
     for c in s.chars() {
@@ -66,16 +172,56 @@ fn escape_literal(s: &str) -> String {
     out
 }
 
+/// 按统一请求构造本地与 SFTP 回退共用的 ripgrep matcher。
+fn build_matcher(request: &ContentSearchRequest) -> Result<RegexMatcher, String> {
+    let pattern = match request.syntax {
+        ContentSearchSyntax::Literal => escape_literal(&request.pattern),
+        ContentSearchSyntax::Regex => request.pattern.clone(),
+    };
+    let mut builder = RegexMatcherBuilder::new();
+    builder
+        .case_insensitive(matches!(
+            request.case_mode,
+            ContentSearchCaseMode::Insensitive
+        ))
+        .word(request.whole_word)
+        .line_terminator(Some(b'\n'));
+    builder
+        .build(&pattern)
+        .map_err(|error| format!("invalid regular expression: {error}"))
+}
+
+/// 将 UTF-8 字节偏移转换为前端字符串使用的 UTF-16 偏移。
+fn utf16_offset(text: &str, byte_offset: usize) -> usize {
+    text.get(..byte_offset)
+        .map(|prefix| prefix.encode_utf16().count())
+        .unwrap_or_default()
+}
+
+/// 收集单行内所有非重叠匹配，供搜索结果高亮使用。
+fn match_ranges(matcher: &RegexMatcher, text: &str) -> Vec<MatchRange> {
+    let mut ranges = Vec::new();
+    let _ = matcher.find_iter(text.as_bytes(), |matched| {
+        ranges.push(MatchRange {
+            start: utf16_offset(text, matched.start()),
+            end: utf16_offset(text, matched.end()),
+        });
+        true
+    });
+    ranges
+}
+
 #[allow(clippy::too_many_arguments)]
+/// 并行扫描本地或 WSL 文件树，并在命中上限或取消时尽快停止。
 fn search_tree(
     root_path: &Path,
     root_display: &str,
     workspace: &WorkspaceEnv,
     matcher: &RegexMatcher,
-    globs: &Option<GlobSet>,
+    filters: &PathFilters,
     cap: usize,
     cancel: &(dyn Fn() -> bool + Sync),
-) -> GrepResponse {
+) -> ContentSearchResponse {
     let walker = WalkBuilder::new(root_path)
         .hidden(true)
         .git_ignore(true)
@@ -86,13 +232,13 @@ fn search_tree(
         .follow_links(false)
         .build_parallel();
 
-    let hits: Arc<Mutex<Vec<GrepHit>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits: Arc<Mutex<Vec<ContentSearchHit>>> = Arc::new(Mutex::new(Vec::new()));
     let scanned = Arc::new(AtomicUsize::new(0));
     let truncated = Arc::new(AtomicBool::new(false));
 
     walker.run(|| {
         let matcher = matcher.clone();
-        let globs = globs.clone();
+        let filters = filters.clone();
         let hits = hits.clone();
         let scanned = scanned.clone();
         let truncated = truncated.clone();
@@ -116,10 +262,8 @@ fn search_tree(
                 Ok(r) => to_canon(r),
                 Err(_) => return WalkState::Continue,
             };
-            if let Some(set) = globs.as_ref() {
-                if !set.is_match(&rel) {
-                    return WalkState::Continue;
-                }
+            if !filters.matches(&rel) {
+                return WalkState::Continue;
             }
             if let Ok(meta) = std::fs::metadata(path) {
                 if meta.len() > FILE_SIZE_CAP {
@@ -140,16 +284,18 @@ fn search_tree(
                 &matcher,
                 path,
                 UTF8(|line_num, text| {
-                    let line_text = text.trim_end_matches('\n').to_string();
+                    let line_text = text.trim_end_matches(['\r', '\n']).to_string();
+                    let ranges = match_ranges(&matcher, &line_text);
                     let mut guard = hits.lock().unwrap();
                     if guard.len() >= cap {
                         truncated.store(true, Ordering::Relaxed);
                         return Ok(false);
                     }
-                    guard.push(GrepHit {
+                    guard.push(ContentSearchHit {
                         path: abs.clone(),
                         rel: rel_clone.clone(),
                         line: line_num,
+                        ranges,
                         text: line_text,
                     });
                     Ok(true)
@@ -164,137 +310,89 @@ fn search_tree(
         .map(|m| m.into_inner().unwrap())
         .unwrap_or_default();
 
-    GrepResponse {
+    let mut final_hits = final_hits;
+    final_hits.sort_by(|left, right| {
+        left.rel
+            .cmp(&right.rel)
+            .then_with(|| left.line.cmp(&right.line))
+    });
+
+    ContentSearchResponse {
         hits: final_hits,
         truncated: truncated.load(Ordering::Relaxed),
         files_scanned: scanned.load(Ordering::Relaxed),
     }
 }
 
-#[tauri::command]
-pub async fn fs_grep(
-    pattern: String,
-    root: String,
-    glob: Option<Vec<String>>,
-    case_insensitive: Option<bool>,
-    max_results: Option<usize>,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<GrepResponse, String> {
-    if pattern.is_empty() {
+/// 使用统一请求执行一次内容搜索，不启用交互式取消。
+///
+/// 测试和非 Tauri 调用使用此入口；UI 与 AI 的 IPC 统一经过 `fs_content_search`。
+pub async fn search_content(
+    request: ContentSearchRequest,
+) -> Result<ContentSearchResponse, String> {
+    search_content_with_cancel(request, &|| false).await
+}
+
+/// 执行统一搜索流程，并把调用方取消信号传入本地或远端回退扫描。
+async fn search_content_with_cancel(
+    request: ContentSearchRequest,
+    cancel: &(dyn Fn() -> bool + Sync),
+) -> Result<ContentSearchResponse, String> {
+    if request.pattern.is_empty() {
         return Err("empty pattern".into());
     }
-    let workspace = WorkspaceEnv::from_option(workspace);
-    if let Some(profile_id) = workspace.ssh_profile_id() {
-        let cap = max_results
-            .unwrap_or(DEFAULT_MAX_RESULTS)
-            .clamp(1, HARD_MAX_RESULTS);
-        let globs_input = glob.as_deref().unwrap_or(&[]);
-        if let Some(response) = search_remote_rg(
-            profile_id,
-            &root,
-            &pattern,
-            globs_input,
-            case_insensitive.unwrap_or(false),
-            false,
-            cap,
-        )
-        .await?
-        {
-            return Ok(response);
-        }
-        let matcher = RegexMatcherBuilder::new()
-            .case_insensitive(case_insensitive.unwrap_or(false))
-            .line_terminator(Some(b'\n'))
-            .build(&pattern)
-            .map_err(|e| format!("bad regex: {e}"))?;
-        let globs = build_globset(globs_input)?;
-        return search_remote_sftp(profile_id, &root, &matcher, &globs, cap, &|| false).await;
-    }
-    let root_path = resolve_path(&root, &workspace);
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
-    }
-    let cap = max_results
+    let workspace = WorkspaceEnv::from_option(request.workspace.clone());
+    let cap = request
+        .max_results
         .unwrap_or(DEFAULT_MAX_RESULTS)
         .clamp(1, HARD_MAX_RESULTS);
-
-    let matcher = RegexMatcherBuilder::new()
-        .case_insensitive(case_insensitive.unwrap_or(false))
-        .line_terminator(Some(b'\n'))
-        .build(&pattern)
-        .map_err(|e| format!("bad regex: {e}"))?;
-
-    let globs = build_globset(glob.as_deref().unwrap_or(&[]))?;
+    let matcher = build_matcher(&request)?;
+    let filters = build_path_filters(&request.includes, &request.excludes)?;
+    if let Some(profile_id) = workspace.ssh_profile_id() {
+        if let Some(response) = search_remote_rg(profile_id, &request.root, &request, cap).await? {
+            return if cancel() {
+                Ok(empty_content_search_response())
+            } else {
+                Ok(response)
+            };
+        }
+        return search_remote_sftp(profile_id, &request.root, &matcher, &filters, cap, cancel)
+            .await;
+    }
+    let root_path = resolve_path(&request.root, &workspace);
+    if !root_path.is_dir() {
+        return Err(format!("not a directory: {}", request.root));
+    }
 
     Ok(search_tree(
         &root_path,
-        &root,
+        &request.root,
         &workspace,
         &matcher,
-        &globs,
+        &filters,
         cap,
-        &|| false,
+        cancel,
     ))
 }
 
-/// Interactive content search for the command palette. Treats the query as a
-/// literal (smart-case), and self-cancels when a newer query arrives.
+/// 执行 UI 与 AI 共用的工作区内容搜索。
+///
+/// `cancelPrevious` 只供唯一的搜索面板使用；AI 并发查询不会推进 generation，
+/// 因而不会互相取消或被用户输入取消。
 #[tauri::command]
-pub async fn fs_grep_interactive(
+pub async fn fs_content_search(
     state: tauri::State<'_, ContentSearchState>,
-    pattern: String,
-    root: String,
-    max_results: Option<usize>,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<GrepResponse, String> {
-    if pattern.trim().is_empty() {
-        return Err("empty pattern".into());
+    request: ContentSearchRequest,
+) -> Result<ContentSearchResponse, String> {
+    if !request.cancel_previous {
+        return search_content(request).await;
     }
     let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
-
-    let workspace = WorkspaceEnv::from_option(workspace);
-    if let Some(profile_id) = workspace.ssh_profile_id() {
-        let cap = max_results
-            .unwrap_or(DEFAULT_MAX_RESULTS)
-            .clamp(1, HARD_MAX_RESULTS);
-        if let Some(response) =
-            search_remote_rg(profile_id, &root, &pattern, &[], false, true, cap).await?
-        {
-            if state.generation.load(Ordering::SeqCst) != my_gen {
-                return Ok(GrepResponse {
-                    hits: Vec::new(),
-                    truncated: false,
-                    files_scanned: 0,
-                });
-            }
-            return Ok(response);
-        }
-        let matcher = RegexMatcherBuilder::new()
-            .case_smart(true)
-            .line_terminator(Some(b'\n'))
-            .build(&escape_literal(&pattern))
-            .map_err(|e| format!("bad pattern: {e}"))?;
-        let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
-        return search_remote_sftp(profile_id, &root, &matcher, &None, cap, &cancel).await;
+    if request.pattern.is_empty() {
+        return Ok(empty_content_search_response());
     }
-    let root_path = resolve_path(&root, &workspace);
-    if !root_path.is_dir() {
-        return Err(format!("not a directory: {root}"));
-    }
-    let cap = max_results
-        .unwrap_or(DEFAULT_MAX_RESULTS)
-        .clamp(1, HARD_MAX_RESULTS);
-
-    let matcher = RegexMatcherBuilder::new()
-        .case_smart(true)
-        .line_terminator(Some(b'\n'))
-        .build(&escape_literal(&pattern))
-        .map_err(|e| format!("bad pattern: {e}"))?;
-
     let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
-    Ok(search_tree(
-        &root_path, &root, &workspace, &matcher, &None, cap, &cancel,
-    ))
+    search_content_with_cancel(request, &cancel).await
 }
 
 #[derive(Serialize)]
@@ -401,10 +499,10 @@ async fn search_remote_sftp(
     profile_id: &str,
     root: &str,
     matcher: &RegexMatcher,
-    globs: &Option<GlobSet>,
+    filters: &PathFilters,
     cap: usize,
     cancel: &(dyn Fn() -> bool + Sync),
-) -> Result<GrepResponse, String> {
+) -> Result<ContentSearchResponse, String> {
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
     let (entries, mut truncated) = remote::sftp::walk(&workspace, root, false, 16, 50_000).await?;
@@ -417,7 +515,7 @@ async fn search_remote_sftp(
         if entry.kind != remote::sftp::RemoteEntryKind::File || entry.size > FILE_SIZE_CAP {
             continue;
         }
-        if globs.as_ref().is_some_and(|set| !set.is_match(&entry.rel)) {
+        if !filters.matches(&entry.rel) {
             continue;
         }
         let bytes = match remote::sftp::read_file(&workspace, &entry.path, FILE_SIZE_CAP).await {
@@ -432,10 +530,11 @@ async fn search_remote_sftp(
                     truncated = true;
                     break;
                 }
-                hits.push(GrepHit {
+                hits.push(ContentSearchHit {
                     path: entry.path.clone(),
                     rel: entry.rel.clone(),
                     line: index as u64 + 1,
+                    ranges: match_ranges(matcher, line),
                     text: line.to_string(),
                 });
             }
@@ -444,44 +543,25 @@ async fn search_remote_sftp(
             break;
         }
     }
-    Ok(GrepResponse {
+    hits.sort_by(|left, right| {
+        left.rel
+            .cmp(&right.rel)
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    Ok(ContentSearchResponse {
         hits,
         truncated,
         files_scanned,
     })
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn search_remote_rg(
     profile_id: &str,
     root: &str,
-    pattern: &str,
-    globs: &[String],
-    case_insensitive: bool,
-    fixed_smart_case: bool,
+    request: &ContentSearchRequest,
     cap: usize,
-) -> Result<Option<GrepResponse>, String> {
-    let mut args = vec![
-        "rg".to_string(),
-        "--json".to_string(),
-        "--no-messages".to_string(),
-        "--max-filesize".to_string(),
-        FILE_SIZE_CAP.to_string(),
-    ];
-    if case_insensitive {
-        args.push("--ignore-case".into());
-    }
-    if fixed_smart_case {
-        args.push("--fixed-strings".into());
-        args.push("--smart-case".into());
-    }
-    for glob in globs {
-        args.push("--glob".into());
-        args.push(glob.clone());
-    }
-    args.push("--".into());
-    args.push(pattern.to_string());
-    args.push(root.to_string());
+) -> Result<Option<ContentSearchResponse>, String> {
+    let args = remote_content_search_args(root, request);
     let command = remote_rg_command(&args);
     let manager = remote::manager::global_manager()?;
     let output = manager
@@ -509,6 +589,38 @@ async fn search_remote_rg(
         None => return Err("remote ripgrep closed without an exit status".into()),
     }
     parse_remote_rg(&output.stdout, root, cap, output.truncated).map(Some)
+}
+
+/// 构造远端 ripgrep 参数，保持本地 matcher 与 SSH 快速路径的选项一致。
+fn remote_content_search_args(root: &str, request: &ContentSearchRequest) -> Vec<String> {
+    let mut args = vec![
+        "rg".to_string(),
+        "--json".to_string(),
+        "--no-messages".to_string(),
+        "--max-filesize".to_string(),
+        FILE_SIZE_CAP.to_string(),
+    ];
+    if matches!(request.case_mode, ContentSearchCaseMode::Insensitive) {
+        args.push("--ignore-case".into());
+    }
+    if matches!(request.syntax, ContentSearchSyntax::Literal) {
+        args.push("--fixed-strings".into());
+    }
+    if request.whole_word {
+        args.push("--word-regexp".into());
+    }
+    for glob in &request.includes {
+        args.push("--glob".into());
+        args.push(glob.clone());
+    }
+    for glob in &request.excludes {
+        args.push("--glob".into());
+        args.push(format!("!{glob}"));
+    }
+    args.push("--".into());
+    args.push(request.pattern.clone());
+    args.push(root.to_string());
+    args
 }
 
 async fn glob_remote_rg(
@@ -591,7 +703,7 @@ fn parse_remote_rg(
     root: &str,
     cap: usize,
     output_truncated: bool,
-) -> Result<GrepResponse, String> {
+) -> Result<ContentSearchResponse, String> {
     let text = String::from_utf8_lossy(stdout);
     let lines: Vec<&str> = text.lines().collect();
     let mut hits = Vec::new();
@@ -621,17 +733,39 @@ fn parse_remote_rg(
                     continue;
                 };
                 let absolute = remote_absolute(root, path);
-                hits.push(GrepHit {
+                let ranges = data["submatches"]
+                    .as_array()
+                    .map(|matches| {
+                        matches
+                            .iter()
+                            .filter_map(|matched| {
+                                let start = matched["start"].as_u64()? as usize;
+                                let end = matched["end"].as_u64()? as usize;
+                                Some(MatchRange {
+                                    start: utf16_offset(line_text, start),
+                                    end: utf16_offset(line_text, end),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                hits.push(ContentSearchHit {
                     rel: remote_relative(root, &absolute),
                     path: absolute,
                     line: line_number,
+                    ranges,
                     text: line_text.trim_end_matches(['\r', '\n']).to_string(),
                 });
             }
             _ => {}
         }
     }
-    Ok(GrepResponse {
+    hits.sort_by(|left, right| {
+        left.rel
+            .cmp(&right.rel)
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    Ok(ContentSearchResponse {
         truncated: output_truncated || total_matches > cap,
         hits,
         files_scanned,
@@ -704,19 +838,45 @@ mod tests {
     }
 
     #[test]
+    fn remote_content_search_args_preserve_shared_options() {
+        let request = ContentSearchRequest {
+            root: "/repo".into(),
+            pattern: "needle".into(),
+            syntax: ContentSearchSyntax::Literal,
+            case_mode: ContentSearchCaseMode::Insensitive,
+            whole_word: true,
+            includes: vec!["src/**".into()],
+            excludes: vec!["generated/**".into()],
+            max_results: Some(50),
+            cancel_previous: false,
+            workspace: None,
+        };
+        let args = remote_content_search_args("/repo", &request);
+
+        assert!(args.contains(&"--fixed-strings".to_string()));
+        assert!(args.contains(&"--ignore-case".to_string()));
+        assert!(args.contains(&"--word-regexp".to_string()));
+        assert!(args.windows(2).any(|pair| pair == ["--glob", "src/**"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--glob", "!generated/**"]));
+    }
+
+    #[test]
     fn search_tree_respects_cancellation() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("a.txt"), "hello\nfind me here\n").unwrap();
         let matcher = RegexMatcherBuilder::new().build("find").unwrap();
         let ws = WorkspaceEnv::from_option(None);
         let root_display = dir.path().to_string_lossy().to_string();
+        let filters = build_path_filters(&[], &[]).unwrap();
 
         let live = search_tree(
             dir.path(),
             &root_display,
             &ws,
             &matcher,
-            &None,
+            &filters,
             100,
             &|| false,
         );
@@ -727,7 +887,7 @@ mod tests {
             &root_display,
             &ws,
             &matcher,
-            &None,
+            &filters,
             100,
             &|| true,
         );

@@ -1,3 +1,8 @@
+/**
+ * 本文件测试编辑器与 Markdown 标签共享的文档身份规则。
+ * 重点锁定跨分组路径归一化、脏文档计数和最后视图判断。
+ */
+
 import type { Tab } from "@/modules/workbench/types";
 import { describe, expect, it } from "vitest";
 import {
@@ -25,6 +30,7 @@ describe("document tab identity", () => {
       title: "readme.md",
       path: "c:/work/README.md",
       dirty: true,
+      preview: false,
     } satisfies Tab;
 
     expect(isDocumentTab(markdown)).toBe(true);

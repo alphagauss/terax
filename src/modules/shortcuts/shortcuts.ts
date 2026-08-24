@@ -11,7 +11,7 @@ import { IS_MAC, MOD_PROP } from "@/lib/platform";
 
 export type ShortcutId =
   | "commandPalette.open"
-  | "commandPalette.content"
+  | "workspaceSearch.focus"
   | "window.new"
   | "tab.new"
   | "tab.newBlock"
@@ -90,12 +90,6 @@ export const SHORTCUTS: Shortcut[] = [
     label: "Open command palette",
     group: "General",
     defaultBindings: [{ [MOD_PROP]: true, key: "p" }],
-  },
-  {
-    id: "commandPalette.content",
-    label: "Find in files",
-    group: "General",
-    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "p" }],
   },
   {
     id: "window.new",
@@ -258,10 +252,16 @@ export const SHORTCUTS: Shortcut[] = [
     defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "s" }],
   },
   {
+    id: "workspaceSearch.focus",
+    label: "Find in files",
+    group: "Search",
+    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "f" }],
+  },
+  {
     id: "explorer.search",
     label: "Search files",
     group: "Search",
-    defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "f" }],
+    defaultBindings: [],
   },
   {
     id: "search.focus",

@@ -1,3 +1,8 @@
+/**
+ * 本文件实现当前标签页的查找与替换浮层。
+ * 单文件导航和替换状态由调用方提供，查询输入复用共享的匹配模式控件。
+ */
+
 import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
@@ -12,14 +17,20 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import {
   forwardRef,
   type KeyboardEvent,
-  type ReactNode,
   useCallback,
   useImperativeHandle,
-  useLayoutEffect,
   useRef,
 } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  FindControlButton,
+  type FindOptions,
+  FindPatternField,
+  type FindPatternFieldHandle,
+} from "./FindPatternField";
 import "./find-widget.css";
+
+export type { FindOptions } from "./FindPatternField";
 
 export const FIND_PRESENCE_MS = 160;
 
@@ -29,12 +40,6 @@ export type FindHandle = {
 
 export type FindWidgetHandle = {
   focus: (select?: boolean) => void;
-};
-
-export type FindOptions = {
-  caseSensitive: boolean;
-  wholeWord: boolean;
-  regexp: boolean;
 };
 
 export type FindResult = {
@@ -85,50 +90,11 @@ type FindWidgetBaseProps = FindWidgetProps & {
   replace?: FindReplaceState;
 };
 
-type FindButtonProps = {
-  label: string;
-  children: ReactNode;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  className?: string;
-};
-
 export function isFindKeyboardEventComposing(input: {
   isComposing: boolean;
   keyCode: number;
 }): boolean {
   return input.isComposing || input.keyCode === 229;
-}
-
-function FindButton({
-  label,
-  children,
-  onClick,
-  active,
-  disabled,
-  className,
-}: FindButtonProps) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active === undefined ? undefined : active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex size-5.5 shrink-0 items-center justify-center rounded border border-transparent text-[11px] font-medium text-muted-foreground transition-colors duration-control",
-        "hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        "disabled:pointer-events-none disabled:opacity-35",
-        active &&
-          "border-primary bg-accent text-foreground ring-1 ring-primary/60 ring-inset",
-        className,
-      )}
-    >
-      {children}
-    </button>
-  );
 }
 
 const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
@@ -152,21 +118,14 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
     ref,
   ) {
     const { t } = useTranslation("find");
-    const findInputRef = useRef<HTMLInputElement>(null);
+    const patternRef = useRef<FindPatternFieldHandle>(null);
     const replaceInputRef = useRef<HTMLInputElement>(null);
 
     const focus = useCallback((select = false) => {
-      const input = findInputRef.current;
-      if (!input) return;
-      input.focus({ preventScroll: true });
-      if (select) input.select();
+      patternRef.current?.focus(select);
     }, []);
 
     useImperativeHandle(ref, () => ({ focus }), [focus]);
-
-    useLayoutEffect(() => {
-      if (autoFocus) focus(true);
-    }, [autoFocus, focus]);
 
     const retainInput = useCallback(
       (input: HTMLInputElement | null, action: (() => void) | undefined) => {
@@ -228,9 +187,10 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
       }
 
       if (event.key !== "Enter") return;
-      if (event.target === findInputRef.current) {
+      const findInput = patternRef.current?.element() ?? null;
+      if (event.target === findInput) {
         event.preventDefault();
-        retainInput(findInputRef.current, event.shiftKey ? onPrevious : onNext);
+        retainInput(findInput, event.shiftKey ? onPrevious : onNext);
       } else if (event.target === replaceInputRef.current) {
         event.preventDefault();
         retainInput(replaceInputRef.current, replace?.onReplace);
@@ -266,7 +226,7 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
       >
         <div className="terax-find-widget__find-row flex min-w-0 items-center gap-0.5 p-1">
           {hasReplace && replace ? (
-            <FindButton
+            <FindControlButton
               label={t("toggleReplace")}
               active={replace.open}
               onClick={() => replace.onOpenChange(!replace.open)}
@@ -281,56 +241,19 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                   replace.open && "rotate-90",
                 )}
               />
-            </FindButton>
+            </FindControlButton>
           ) : null}
 
-          <div
-            className={cn(
-              "terax-find-widget__find-field flex h-7 min-w-0 flex-1 items-center overflow-hidden rounded-md border bg-background/75",
-              invalid && hasQuery
-                ? "border-destructive"
-                : "border-input focus-within:border-ring",
-            )}
-          >
-            <input
-              ref={findInputRef}
-              main-field="true"
-              type="text"
-              value={query}
-              autoComplete="off"
-              spellCheck={false}
-              aria-label={t("findLabel")}
-              aria-invalid={invalid && hasQuery}
-              placeholder={t("findPlaceholder")}
-              onChange={(event) => onQueryChange(event.target.value)}
-              className="h-full min-w-10 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/65"
-            />
-            {options && onOptionsChange ? (
-              <div className="flex shrink-0 items-center pr-0.5">
-                <FindButton
-                  label={t("matchCase")}
-                  active={options.caseSensitive}
-                  onClick={() => changeOption("caseSensitive")}
-                >
-                  Aa
-                </FindButton>
-                <FindButton
-                  label={t("wholeWord")}
-                  active={options.wholeWord}
-                  onClick={() => changeOption("wholeWord")}
-                >
-                  ab
-                </FindButton>
-                <FindButton
-                  label={t("regex")}
-                  active={options.regexp}
-                  onClick={() => changeOption("regexp")}
-                >
-                  .*
-                </FindButton>
-              </div>
-            ) : null}
-          </div>
+          <FindPatternField
+            ref={patternRef}
+            query={query}
+            onQueryChange={onQueryChange}
+            options={options}
+            onOptionsChange={onOptionsChange}
+            invalid={invalid}
+            autoFocus={autoFocus}
+            className="terax-find-widget__find-field"
+          />
 
           <span
             aria-live="polite"
@@ -348,20 +271,24 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
           </span>
 
           {onPrevious ? (
-            <FindButton
+            <FindControlButton
               label={t("previous")}
               disabled={!canNavigate}
-              onClick={() => retainInput(findInputRef.current, onPrevious)}
+              onClick={() =>
+                retainInput(patternRef.current?.element() ?? null, onPrevious)
+              }
               className="terax-find-widget__previous"
             >
               <HugeiconsIcon icon={ArrowUp01Icon} size={14} strokeWidth={1.8} />
-            </FindButton>
+            </FindControlButton>
           ) : null}
           {onNext ? (
-            <FindButton
+            <FindControlButton
               label={t("next")}
               disabled={!canNavigate}
-              onClick={() => retainInput(findInputRef.current, onNext)}
+              onClick={() =>
+                retainInput(patternRef.current?.element() ?? null, onNext)
+              }
               className="terax-find-widget__next"
             >
               <HugeiconsIcon
@@ -369,10 +296,10 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                 size={14}
                 strokeWidth={1.8}
               />
-            </FindButton>
+            </FindControlButton>
           ) : null}
           {selection ? (
-            <FindButton
+            <FindControlButton
               label={t("findInSelection")}
               active={selection.active}
               disabled={!selection.available}
@@ -387,15 +314,15 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                 size={14}
                 strokeWidth={1.8}
               />
-            </FindButton>
+            </FindControlButton>
           ) : null}
-          <FindButton
+          <FindControlButton
             label={t("close")}
             onClick={onClose}
             className="terax-find-widget__close"
           >
             <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />
-          </FindButton>
+          </FindControlButton>
         </div>
 
         {hasReplace && replace ? (
@@ -418,7 +345,7 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                   onChange={(event) => replace.onChange(event.target.value)}
                   className="h-full min-w-10 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/65"
                 />
-                <FindButton
+                <FindControlButton
                   label={t("preserveCase")}
                   active={replace.preserveCase}
                   onClick={() => {
@@ -427,9 +354,9 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                   }}
                 >
                   AB
-                </FindButton>
+                </FindControlButton>
               </div>
-              <FindButton
+              <FindControlButton
                 label={t("replace")}
                 disabled={!canNavigate}
                 onClick={() =>
@@ -438,8 +365,8 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                 className="terax-find-widget__replace-one"
               >
                 <HugeiconsIcon icon={ReplaceIcon} size={14} strokeWidth={1.8} />
-              </FindButton>
-              <FindButton
+              </FindControlButton>
+              <FindControlButton
                 label={t("replaceAll")}
                 disabled={!canNavigate}
                 onClick={() =>
@@ -452,7 +379,7 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
                   size={14}
                   strokeWidth={1.8}
                 />
-              </FindButton>
+              </FindControlButton>
             </div>
           </div>
         ) : null}

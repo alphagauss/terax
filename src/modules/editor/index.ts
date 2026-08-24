@@ -3,7 +3,7 @@
  */
 
 export { AiDiffView } from "./AiDiffViewLazy";
-export type { EditorPaneHandle } from "./EditorPane";
+export type { EditorPaneHandle, EditorSourceSelection } from "./EditorPane";
 export { EditorView } from "./EditorViewLazy";
 export { GitDiffView } from "./GitDiffViewLazy";
 export {

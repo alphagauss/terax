@@ -198,6 +198,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `preview/`：开发服务器预览。
 - `tabs/`：Workbench 标签页展示层，标签顺序和激活状态只由 Workbench 管理。
 - `find/`：共享查找和替换 UI，搜索状态仍由编辑器、终端或 Git 等调用方持有。
+- `workspace-search/`：轻量工作区内容搜索面板和公共请求类型；与 AI `grep` 共享 `fs_content_search`，不建立索引、watcher 或持久搜索历史。
 - `header/`、`statusbar/`、`sidebar/`：应用框架、状态和侧边栏。
 - `shortcuts/`：快捷键注册；跨平台组合键使用 `metaKey || ctrlKey`。
 - `settings/`：白名单共享设置。
@@ -222,7 +223,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 跟随 Explorer 根目录，首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
-- `read_file`、`list_directory`、`fs_search`、`fs_grep` 自动执行；写入、重命名、删除、命令和后台进程必须经过 UI 审批。
+- `read_file`、`list_directory`、`grep`、`glob` 自动执行；写入、重命名、删除、命令和后台进程必须经过 UI 审批。
 - `lib/security.ts` 的秘密路径拒绝规则必须同时用于读取和写入。
 - AI 修改通过 `ai-diff` 标签页逐 hunk 接受或拒绝，接受前不得实际写入。
 

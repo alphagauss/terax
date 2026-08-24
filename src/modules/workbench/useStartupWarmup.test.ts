@@ -70,6 +70,7 @@ describe("startup warmup selection", () => {
         title: "README.md",
         path: "/README.md",
         dirty: false,
+        preview: false,
         cold: true,
       },
       {
@@ -96,6 +97,7 @@ describe("startup warmup selection", () => {
         title: "README.md",
         path: "/README.md",
         dirty: false,
+        preview: false,
         cold: true,
       },
       { id: 2, kind: "terminal", spaceId: "other", title: "other", cold: true },

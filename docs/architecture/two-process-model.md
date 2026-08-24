@@ -74,9 +74,10 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。读取固定使
 
 #### Grep
 
-- `fs_grep` - 内容搜索
-- `fs_grep_interactive` - 交互式内容搜索
+- `fs_content_search` - 用户搜索面板与 AI `grep` 共用的内容搜索，支持普通文本、正则、大小写、整词、包含和排除 glob；搜索面板请求可以取消上一轮扫描
 - `fs_glob` - glob 匹配
+
+内容搜索按需扫描并遵守 ignore 文件，不建立持久索引、文件 watcher 或搜索历史。Local 与 WSL 使用内嵌 Rust grep 实现；SSH 优先使用远端 `rg`，不可用时回退有界 SFTP 扫描。用户面板和 AI 共享匹配引擎，但 AI 结果仍必须经过独立的秘密路径过滤。
 
 ### 文件传输（`src-tauri/src/modules/transfers/`）
 

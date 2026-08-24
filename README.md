@@ -70,6 +70,7 @@ Terax is a lightweight open-source terminal (ADE) built on Tauri 2 + Rust and Re
 
 - Catppuccin icon theme
 - Fuzzy search, keyboard navigation, inline rename, context actions
+- Lightweight workspace content search with case, whole-word, regex, include, and exclude filters
 - Attach files and selections directly to the AI side-panel
 
 ### Web preview

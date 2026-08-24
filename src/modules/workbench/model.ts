@@ -43,17 +43,7 @@ export function patchTab(
           patch.title ?? titleFromUrl(patch.url, i18n.t("tabs:webPreview")),
       }),
     };
-  } else if (tab.kind === "markdown") {
-    next = {
-      ...tab,
-      ...(patch.title !== undefined && { title: patch.title }),
-      ...(patch.path !== undefined && { path: patch.path }),
-      ...(patch.dirty !== undefined && { dirty: patch.dirty }),
-      ...(patch.explorerRoot !== undefined && {
-        explorerRoot: patch.explorerRoot,
-      }),
-    };
-  } else if (tab.kind === "editor") {
+  } else if (tab.kind === "editor" || tab.kind === "markdown") {
     next = {
       ...tab,
       ...(patch.dirty === true && tab.preview && { preview: false }),
@@ -61,9 +51,10 @@ export function patchTab(
       ...(patch.title !== undefined && { title: patch.title }),
       ...(patch.path !== undefined && { path: patch.path }),
       ...(patch.dirty !== undefined && { dirty: patch.dirty }),
-      ...(patch.overrideLanguage !== undefined && {
-        overrideLanguage: patch.overrideLanguage,
-      }),
+      ...(tab.kind === "editor" &&
+        patch.overrideLanguage !== undefined && {
+          overrideLanguage: patch.overrideLanguage,
+        }),
       ...(patch.explorerRoot !== undefined && {
         explorerRoot: patch.explorerRoot,
       }),

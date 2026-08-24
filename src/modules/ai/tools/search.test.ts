@@ -10,11 +10,14 @@ import type { ToolContext } from "./context";
 const nativeMock = vi.hoisted(() => ({
   canonicalize: vi.fn(async (path: string) => path),
   glob: vi.fn(),
-  grep: vi.fn(),
 }));
+const searchContentMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/native", () => ({
   native: nativeMock,
+}));
+vi.mock("@/modules/workspace-search/api", () => ({
+  searchContent: searchContentMock,
 }));
 
 import { buildSearchTools } from "./search";
@@ -50,39 +53,43 @@ describe("AI search tools path safety", () => {
   beforeEach(() => {
     nativeMock.canonicalize.mockClear();
     nativeMock.glob.mockReset();
-    nativeMock.grep.mockReset();
+    searchContentMock.mockReset();
   });
 
   it("filters grep hits that read_file would refuse", async () => {
-    nativeMock.grep.mockResolvedValue({
+    searchContentMock.mockResolvedValue({
       hits: [
         {
           path: "/workspace/src/app.ts",
           rel: "workspace/src/app.ts",
           line: 7,
           text: "const tokenName = 'safe fixture';",
+          ranges: [],
         },
         {
           path: "/workspace/secrets.json",
           rel: "workspace/secrets.json",
           line: 1,
           text: '{"token":"secret"}',
+          ranges: [],
         },
         {
           path: "/workspace/server.pem",
           rel: "workspace/server.pem",
           line: 1,
           text: "BEGIN PRIVATE KEY",
+          ranges: [],
         },
         {
           path: "/etc/passwd",
           rel: "etc/passwd",
           line: 1,
           text: "root:x:0:0:root:/root:/bin/sh",
+          ranges: [],
         },
       ],
       truncated: false,
-      files_scanned: 4,
+      filesScanned: 4,
     });
 
     const tools = buildSearchTools(makeContext());
@@ -97,6 +104,13 @@ describe("AI search tools path safety", () => {
     expect(result.hits.map((h) => h.text)).toEqual([
       "const tokenName = 'safe fixture';",
     ]);
+    expect(searchContentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        syntax: "regex",
+        caseMode: "sensitive",
+        wholeWord: false,
+      }),
+    );
   });
 
   it("filters glob hits that enumerate sensitive paths", async () => {

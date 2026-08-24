@@ -308,7 +308,8 @@ export function TabBar({
               }
             />
             {tabs.map((t, i) => {
-              const isPreview = t.kind === "editor" && (t as EditorTab).preview;
+              const isPreview =
+                (t.kind === "editor" || t.kind === "markdown") && t.preview;
               const isActive = t.id === activeId;
               const isNew = !firstRender && !seen.has(t.id);
               const dirty =

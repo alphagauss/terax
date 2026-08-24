@@ -5,7 +5,10 @@
  */
 
 import { cn } from "@/lib/utils";
-import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
+import type {
+  EditorPaneHandle,
+  EditorSourceSelection,
+} from "@/modules/editor/EditorPane";
 import { useDocument } from "@/modules/editor/lib/useDocument";
 import {
   MARKDOWN_ACTIVATION_OFFSET,
@@ -38,8 +41,15 @@ import { useTranslation } from "react-i18next";
 
 type ViewMode = "rendered" | "raw";
 
+/** Markdown 渲染视图与源码编辑器共用的导航句柄。 */
 export type MarkdownPreviewPaneHandle = {
+  /** 在当前模式中跳转到源码行。 */
   gotoSourceLine: (sourceLine: number) => void;
+  /** 切换到源码模式，并在内容就绪后选中行内区间。 */
+  openSourceLocation: (
+    sourceLine: number,
+    selection?: EditorSourceSelection,
+  ) => void;
 };
 
 type Props = {
@@ -95,6 +105,10 @@ export function MarkdownPreviewPane({
   const editorRef = useRef<EditorPaneHandle>(null);
   const navigationFrameRef = useRef(0);
   const pendingRawSourceLineRef = useRef<number | null>(null);
+  const pendingSourceNavigationRef = useRef<{
+    line: number;
+    selection?: EditorSourceSelection;
+  } | null>(null);
   const resizeSourceLineRef = useRef<number | null>(null);
   const navigationTargetRef = useRef<(sourceLine: number) => void>(() => {});
   const callbackRef = useRef({
@@ -331,6 +345,7 @@ export function MarkdownPreviewPane({
         pendingRawSourceLineRef.current = scrollRef.current
           ? (readRenderedViewportSourceLine(scrollRef.current) ?? null)
           : null;
+        pendingSourceNavigationRef.current = null;
         setViewMode("raw");
         return;
       }
@@ -346,6 +361,11 @@ export function MarkdownPreviewPane({
     (handle: EditorPaneHandle | null) => {
       editorRef.current = handle;
       callbackRef.current.registerEditorHandle(id, handle);
+      const navigation = pendingSourceNavigationRef.current;
+      if (handle && navigation) {
+        pendingSourceNavigationRef.current = null;
+        handle.gotoLine(navigation.line, navigation.selection);
+      }
     },
     [id],
   );
@@ -379,9 +399,32 @@ export function MarkdownPreviewPane({
     }
   };
 
+  const sourceNavigationTargetRef = useRef<
+    (sourceLine: number, selection?: EditorSourceSelection) => void
+  >(() => {});
+  // 搜索结果必须复用本标签的源码编辑器，保证模式切换、脏状态和滚动恢复仍由 Markdown 持有。
+  sourceNavigationTargetRef.current = (sourceLine, selection) => {
+    const active = document
+      ? findActiveOutlineId(document.outline, sourceLine)
+      : null;
+    setActiveOutlineId(active);
+    pendingRawSourceLineRef.current = sourceLine;
+    pendingSourceNavigationRef.current = { line: sourceLine, selection };
+    if (viewMode !== "raw") {
+      setViewMode("raw");
+      return;
+    }
+    if (editorRef.current) {
+      pendingSourceNavigationRef.current = null;
+      editorRef.current.gotoLine(sourceLine, selection);
+    }
+  };
+
   useEffect(() => {
     const handle: MarkdownPreviewPaneHandle = {
       gotoSourceLine: (sourceLine) => navigationTargetRef.current(sourceLine),
+      openSourceLocation: (sourceLine, selection) =>
+        sourceNavigationTargetRef.current(sourceLine, selection),
     };
     registerNavigationHandle(id, handle);
     return () => registerNavigationHandle(id, null);

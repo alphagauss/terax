@@ -40,6 +40,7 @@ import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionSto
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
+  type EditorSourceSelection,
   hasOtherDocumentView,
   isDocumentTab,
   NewEditorDialog,
@@ -106,6 +107,11 @@ import {
   writeToSession,
 } from "@/modules/terminal";
 import { ThemeProvider, useThemeFileEditing } from "@/modules/theme";
+import {
+  type ContentSearchHit,
+  WorkspaceSearchPanel,
+  type WorkspaceSearchPanelHandle,
+} from "@/modules/workspace-search";
 import {
   DEFAULT_SPACE_ID,
   findGroupForTab,
@@ -235,7 +241,38 @@ export default function App() {
   const markdownNavigationRefs = useRef(
     new Map<number, MarkdownPreviewPaneHandle>(),
   );
-  const pendingGotoLine = useRef<Map<number, number>>(new Map());
+  const pendingContentNavigation = useRef<
+    Map<
+      number,
+      {
+        line: number;
+        selection?: EditorSourceSelection;
+        markdownSource?: boolean;
+      }
+    >
+  >(new Map());
+  /**
+   * 将待处理定位投递给已经注册的编辑器或 Markdown 视图。
+   * 已有标签由调用方立即消费，新标签则在对应 handle 注册后消费。
+   */
+  const applyPendingContentNavigation = useCallback((id: number) => {
+    const pending = pendingContentNavigation.current.get(id);
+    if (!pending) return;
+    const markdownNavigation = markdownNavigationRefs.current.get(id);
+    if (markdownNavigation) {
+      pendingContentNavigation.current.delete(id);
+      if (pending.markdownSource) {
+        markdownNavigation.openSourceLocation(pending.line, pending.selection);
+      } else {
+        markdownNavigation.gotoSourceLine(pending.line);
+      }
+      return;
+    }
+    const editor = editorRefs.current.get(id);
+    if (!editor) return;
+    pendingContentNavigation.current.delete(id);
+    editor.gotoLine(pending.line, pending.selection);
+  }, []);
   const webPreviewRefs = useRef<Map<number, WebPreviewPaneHandle>>(new Map());
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [activeEditorHandle, setActiveEditorHandle] =
@@ -244,6 +281,7 @@ export default function App() {
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
+  const workspaceSearchRef = useRef<WorkspaceSearchPanelHandle>(null);
   /** 禅模式隐藏当前焦点所在的界面外壳时，将焦点转移到活动工作台视图。 */
   const focusActiveWorkbench = useCallback(() => {
     const tabId = activeIdRef.current;
@@ -363,6 +401,10 @@ export default function App() {
     sidebar.openContainer("explorer");
     void setShowHidden(!usePreferencesStore.getState().showHidden);
   }, [sidebar.openContainer]);
+  const openWorkspaceSearch = useCallback(() => {
+    if (!sidebar.openContainer("search")) return;
+    requestAnimationFrame(() => workspaceSearchRef.current?.focus());
+  }, [sidebar.openContainer]);
   const commitWorkbenchLayout = useCallback(
     (_layout: Layout, meta: LayoutChangedMeta) => {
       if (!meta.isUserInteraction) return;
@@ -372,16 +414,7 @@ export default function App() {
   );
   const [newEditorOpen, setNewEditorOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [paletteInitialMode, setPaletteInitialMode] = useState<
-    "commands" | "content"
-  >("commands");
-  const openCommandPalette = useCallback(
-    (mode: "commands" | "content" = "commands") => {
-      setPaletteInitialMode(mode);
-      setCommandPaletteOpen(true);
-    },
-    [],
-  );
+  const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
   const focusInput = useChatStore((s) => s.focusInput);
   const setLive = useChatStore((s) => s.setLive);
   const respondApproval = useApprovalStore((state) => state.respond);
@@ -455,7 +488,7 @@ export default function App() {
       // explicit cleanup here.
       editorRefs.current.delete(id);
       markdownNavigationRefs.current.delete(id);
-      pendingGotoLine.current.delete(id);
+      pendingContentNavigation.current.delete(id);
       webPreviewRefs.current.delete(id);
       gitHistoryRefs.current.delete(id);
     },
@@ -801,7 +834,8 @@ export default function App() {
       // Markdown opens in its rendered view by default; a per-tab toggle flips
       // it to the raw editor. Other files default to preview (pin=false);
       // explicit actions like context-menu "Open" pass pin=true to persist.
-      if (isMarkdownPath(path)) newMarkdownTab(path, explorerRoot ?? undefined);
+      if (isMarkdownPath(path))
+        newMarkdownTab(path, true, explorerRoot ?? undefined);
       else openFileTab(path, pin ?? false, explorerRoot ?? undefined);
     },
     [explorerRoot, openFileTab, newMarkdownTab],
@@ -815,7 +849,13 @@ export default function App() {
       const groupId = target.groupId;
       const forceNew = target.kind !== "tabs" && target.zone !== "center";
       const id = isMarkdownPath(path)
-        ? newMarkdownTab(path, explorerRoot ?? undefined, groupId, forceNew)
+        ? newMarkdownTab(
+            path,
+            true,
+            explorerRoot ?? undefined,
+            groupId,
+            forceNew,
+          )
         : openFileTab(path, true, explorerRoot ?? undefined, groupId, forceNew);
       if (id === null) return;
       if (target.kind === "tabs") {
@@ -885,7 +925,7 @@ export default function App() {
         }
         case "markdown":
           await authorize(page.explorerRoot, parentDirectory(page.path));
-          if (newMarkdownTab(page.path, page.explorerRoot) === null) {
+          if (newMarkdownTab(page.path, true, page.explorerRoot) === null) {
             throw new Error("Markdown page could not be opened");
           }
           return;
@@ -1019,8 +1059,8 @@ export default function App() {
 
   const shortcutHandlers = useMemo<ShortcutHandlers>(
     () => ({
-      "commandPalette.open": () => openCommandPalette("commands"),
-      "commandPalette.content": () => openCommandPalette("content"),
+      "commandPalette.open": openCommandPalette,
+      "workspaceSearch.focus": openWorkspaceSearch,
       "window.new": openNewWindow,
       "tab.new": openNewTab,
       "tab.newBlock": openNewBlockTab,
@@ -1082,6 +1122,7 @@ export default function App() {
       activeId,
       openNewWindow,
       openCommandPalette,
+      openWorkspaceSearch,
       stepSwitcher,
       selectAdjacentTab,
       cycleSpace,
@@ -1196,33 +1237,25 @@ export default function App() {
     (id: number, h: EditorPaneHandle | null) => {
       if (h) {
         editorRefs.current.set(id, h);
-        const line = pendingGotoLine.current.get(id);
-        if (line != null) {
-          pendingGotoLine.current.delete(id);
-          h.gotoLine(line);
-        }
+        applyPendingContentNavigation(id);
       } else {
         editorRefs.current.delete(id);
       }
       if (id === activeIdRef.current) setActiveEditorHandle(h);
     },
-    [],
+    [applyPendingContentNavigation],
   );
 
   const registerMarkdownNavigationHandle = useCallback(
     (id: number, handle: MarkdownPreviewPaneHandle | null) => {
       if (handle) {
         markdownNavigationRefs.current.set(id, handle);
-        const line = pendingGotoLine.current.get(id);
-        if (line != null) {
-          pendingGotoLine.current.delete(id);
-          handle.gotoSourceLine(line);
-        }
+        applyPendingContentNavigation(id);
       } else {
         markdownNavigationRefs.current.delete(id);
       }
     },
-    [],
+    [applyPendingContentNavigation],
   );
 
   const registerWebPreviewHandle = useCallback(
@@ -1437,6 +1470,7 @@ export default function App() {
             splitGroupRight: () => splitActiveTab("right"),
             splitGroupDown: () => splitActiveTab("down"),
             focusSearch: focusFind,
+            openWorkspaceSearch,
             focusExplorerSearch: () => explorerRef.current?.focusSearch(),
             toggleSidebar,
             toggleHiddenFiles,
@@ -1474,6 +1508,7 @@ export default function App() {
       handleCloseActiveTab,
       splitActiveTab,
       focusFind,
+      openWorkspaceSearch,
       toggleSidebar,
       toggleHiddenFiles,
       sidebar.setActivityBarPosition,
@@ -1486,17 +1521,26 @@ export default function App() {
   );
 
   const openContentHit = useCallback(
-    (path: string, line: number) => {
+    (
+      path: string,
+      line: number,
+      selection?: EditorSourceSelection,
+      temporary = false,
+    ) => {
       const markdown = isMarkdownPath(path);
-      const id = markdown ? newMarkdownTab(path) : openFileTab(path, true);
+      const root = explorerRoot ?? undefined;
+      const id = markdown
+        ? newMarkdownTab(path, !temporary, root)
+        : openFileTab(path, !temporary, root);
       if (id == null) return;
-      const editor = editorRefs.current.get(id);
-      const markdownNavigation = markdownNavigationRefs.current.get(id);
-      if (markdownNavigation) markdownNavigation.gotoSourceLine(line);
-      else if (editor) editor.gotoLine(line);
-      else pendingGotoLine.current.set(id, line);
+      pendingContentNavigation.current.set(id, {
+        line,
+        selection,
+        markdownSource: markdown && temporary,
+      });
+      applyPendingContentNavigation(id);
     },
-    [newMarkdownTab, openFileTab],
+    [applyPendingContentNavigation, explorerRoot, newMarkdownTab, openFileTab],
   );
 
   useEffect(() => {
@@ -1738,6 +1782,19 @@ export default function App() {
       ),
     },
     {
+      id: "search",
+      content: (
+        <WorkspaceSearchPanel
+          ref={workspaceSearchRef}
+          rootPath={explorerRoot}
+          visible={sidebar.isVisible("search") && !zenMode}
+          onOpenHit={(hit: ContentSearchHit) =>
+            openContentHit(hit.path, hit.line, hit.ranges[0], true)
+          }
+        />
+      ),
+    },
+    {
       id: "source-control",
       content: (
         <SourceControlViewContainer
@@ -1770,7 +1827,7 @@ export default function App() {
           {!zenMode && (
             <Header
               onToggleSidebar={toggleSidebar}
-              onOpenCommandPalette={() => openCommandPalette("commands")}
+              onOpenCommandPalette={openCommandPalette}
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
@@ -2047,10 +2104,7 @@ export default function App() {
           <CommandPalette
             open={commandPaletteOpen}
             onOpenChange={setCommandPaletteOpen}
-            initialMode={paletteInitialMode}
             commandItems={commandPaletteItems}
-            workspaceRoot={explorerRoot}
-            onOpenContentHit={openContentHit}
             insertCommand={insertHistoryCommand}
           />
 

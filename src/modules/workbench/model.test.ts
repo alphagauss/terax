@@ -320,6 +320,25 @@ describe("workbench model", () => {
     );
   });
 
+  it("pins a Markdown preview when it becomes dirty", () => {
+    const current = initial();
+    const markdown: Tab = {
+      id: 2,
+      kind: "markdown",
+      spaceId: "default",
+      title: "README.md",
+      path: "/work/README.md",
+      dirty: false,
+      preview: true,
+    };
+    const state = { ...current, tabs: { 2: markdown } };
+
+    expect(patchTab(state, 2, { dirty: true }).tabs[2]).toMatchObject({
+      dirty: true,
+      preview: false,
+    });
+  });
+
   it("keeps dirty metadata in sync for cold views of the same document", () => {
     const editor = {
       id: 10,
@@ -337,6 +356,7 @@ describe("workbench model", () => {
       title: "README.md",
       path: "c:/work/README.md",
       dirty: false,
+      preview: false,
       cold: true,
     } satisfies Tab;
     const unrelated = {

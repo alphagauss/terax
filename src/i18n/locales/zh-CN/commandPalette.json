@@ -52,27 +52,21 @@
   },
   "ui": {
     "placeholderThemes": "搜索主题...",
-    "placeholderContent": "在文件中查找文本...",
     "placeholderHistory": "搜索命令历史...",
-    "placeholderDefault": "输入命令,> 查历史,# 在文件中查找",
+    "placeholderDefault": "输入命令,> 查历史",
     "dialogTitle": "命令面板",
-    "dialogDescription": "运行命令、切换主题,或搜索工作区。",
+    "dialogDescription": "运行命令或切换主题。",
     "back": "返回",
     "headingThemes": "主题",
-    "headingContents": "内容",
     "headingHistory": "命令历史",
     "noThemes": "无主题",
-    "noWorkspaceRoot": "无工作区根目录",
-    "typeAtLeast2": "至少输入 2 个字符",
-    "noMatches": "无匹配项",
     "openTerminalForHistory": "打开终端以运行历史命令",
     "noHistory": "无历史记录",
     "searchModes": "搜索模式",
     "modeHintHistory": "搜索命令历史",
-    "modeHintContent": "在文件中查找文本",
     "searchFailed": "搜索失败",
     "retry": "重试",
     "searching": "搜索中...",
-    "noCommandsFound": "未找到命令。输入 ? 查看搜索模式。"
+    "noCommandsFound": "未找到命令。输入 ? 查看命令模式。"
   }
 }

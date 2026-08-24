@@ -1,3 +1,8 @@
+/**
+ * 本文件实现命令、历史和主题切换组成的命令面板。
+ * 工作区内容搜索由独立侧边栏负责，命令面板只提供打开该视图的普通命令。
+ */
+
 import {
   Command,
   CommandDialog,
@@ -8,7 +13,6 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   getBindingTokens,
@@ -29,22 +33,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { COMMAND_GROUPS } from "./commands";
 import { useCommandHistory } from "./hooks/useCommandHistory";
-import {
-  CONTENT_SEARCH_MIN_QUERY,
-  useContentSearch,
-} from "./hooks/useContentSearch";
 import { fuzzyBest } from "./lib/fuzzy";
-import { MODE_HINTS, parseQuery } from "./lib/mode";
+import { parseQuery } from "./lib/mode";
 import { mruRank, mruSnapshot, recordUse } from "./lib/mru";
 import type { PaletteItem } from "./types";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initialMode?: "commands" | "content";
   commandItems: PaletteItem[];
-  workspaceRoot: string | null;
-  onOpenContentHit: (path: string, line: number) => void;
   insertCommand: ((cmd: string) => void) | null;
 };
 
@@ -54,10 +51,7 @@ const THEME_PREVIEW_DELAY_MS = 140;
 export function CommandPalette({
   open,
   onOpenChange,
-  initialMode,
   commandItems,
-  workspaceRoot,
-  onOpenContentHit,
   insertCommand,
 }: Props) {
   const { t } = useTranslation("commandPalette");
@@ -71,11 +65,6 @@ export function CommandPalette({
   const inThemes = page === "themes";
   const themeFilter = inThemes ? query.trim() : "";
 
-  const content = useContentSearch(
-    workspaceRoot,
-    parsed.term,
-    open && !inThemes && parsed.mode === "content",
-  );
   const history = useCommandHistory(
     parsed.term,
     open && !inThemes && parsed.mode === "history",
@@ -117,13 +106,13 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) return;
-    setQuery(initialMode === "content" ? "#" : "");
+    setQuery("");
     setPage("root");
     const handle = window.setTimeout(() => {
       document.getElementById("terax-command-palette-input")?.focus();
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [open, initialMode]);
+  }, [open]);
 
   useEffect(() => {
     if (!inThemes || !value.startsWith("theme:")) return;
@@ -161,19 +150,11 @@ export function CommandPalette({
     (item: PaletteItem) => {
       if (item.disabledReason) return;
       if (item.id === "theme.pick") return enterThemes();
-      if (item.id === "search.content") return setQuery("#");
       if (item.id === "history.open") return setQuery(">");
       recordUse(item.id);
       runAfterClose(item.run);
     },
     [enterThemes, runAfterClose],
-  );
-
-  const openContent = useCallback(
-    (path: string, line: number) => {
-      runAfterClose(() => onOpenContentHit(path, line));
-    },
-    [onOpenContentHit, runAfterClose],
   );
 
   const runHistory = useCallback(
@@ -206,11 +187,9 @@ export function CommandPalette({
 
   const placeholder = inThemes
     ? t("ui.placeholderThemes")
-    : parsed.mode === "content"
-      ? t("ui.placeholderContent")
-      : parsed.mode === "history"
-        ? t("ui.placeholderHistory")
-        : t("ui.placeholderDefault");
+    : parsed.mode === "history"
+      ? t("ui.placeholderHistory")
+      : t("ui.placeholderDefault");
 
   return (
     <CommandDialog
@@ -299,43 +278,6 @@ export function CommandPalette({
                   );
                 })
               )
-            ) : parsed.mode === "content" ? (
-              <CommandGroup heading={t("ui.headingContents")}>
-                {!workspaceRoot ? (
-                  <StatusItem label={t("ui.noWorkspaceRoot")} />
-                ) : parsed.term.length < CONTENT_SEARCH_MIN_QUERY ? (
-                  <StatusItem label={t("ui.typeAtLeast2")} />
-                ) : (
-                  <AsyncBody
-                    loading={content.loading}
-                    error={content.error}
-                    empty={content.results.length === 0}
-                    emptyLabel={t("ui.noMatches")}
-                    onRetry={content.retry}
-                  >
-                    {content.results.map((hit) => (
-                      <CommandItem
-                        key={`${hit.path}:${hit.line}`}
-                        value={`content:${hit.path}:${hit.line}`}
-                        onSelect={() => openContent(hit.path, hit.line)}
-                        className="text-[12.5px]"
-                      >
-                        <img
-                          src={fileIconUrl(basename(hit.rel))}
-                          alt=""
-                          className="size-4 shrink-0"
-                        />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px]">
-                          {hit.text.trim()}
-                        </span>
-                        <span className="ml-auto max-w-64 shrink-0 truncate text-[11px] font-normal text-muted-foreground">
-                          {hit.rel}:{hit.line}
-                        </span>
-                      </CommandItem>
-                    ))}
-                  </AsyncBody>
-                )}
-              </CommandGroup>
             ) : parsed.mode === "history" ? (
               <CommandGroup heading={t("ui.headingHistory")}>
                 {!insertCommand ? (
@@ -371,23 +313,16 @@ export function CommandPalette({
               </CommandGroup>
             ) : (
               <CommandGroup heading={t("ui.searchModes")}>
-                {MODE_HINTS.map((hint) => (
-                  <CommandItem
-                    key={hint.sigil}
-                    value={`hint:${hint.sigil}`}
-                    onSelect={() => setQuery(hint.sigil)}
-                    className="text-[12.5px]"
-                  >
-                    <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                      {hint.sigil}
-                    </kbd>
-                    <span>
-                      {hint.sigil === ">"
-                        ? t("ui.modeHintHistory")
-                        : t("ui.modeHintContent")}
-                    </span>
-                  </CommandItem>
-                ))}
+                <CommandItem
+                  value="hint:>"
+                  onSelect={() => setQuery(">")}
+                  className="text-[12.5px]"
+                >
+                  <kbd className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                    &gt;
+                  </kbd>
+                  <span>{t("ui.modeHintHistory")}</span>
+                </CommandItem>
               </CommandGroup>
             )}
           </CommandList>
@@ -528,11 +463,6 @@ function EmptyHint() {
       <span>{t("ui.noCommandsFound")}</span>
     </div>
   );
-}
-
-function basename(rel: string): string {
-  const parts = rel.split(/[\\/]/);
-  return parts[parts.length - 1] || rel;
 }
 
 function formatShortcut(

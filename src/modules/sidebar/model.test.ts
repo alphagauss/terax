@@ -27,7 +27,7 @@ describe("normalizeSidebarPlacementState", () => {
     ).toEqual({
       version: 1,
       placements: {
-        primary: ["ai", "source-control"],
+        primary: ["ai", "search", "source-control"],
         secondary: ["explorer"],
       },
       activityBar: {
@@ -45,6 +45,18 @@ describe("normalizeSidebarPlacementState", () => {
         placements: { primary: ["ai"], secondary: [] },
       }),
     ).toEqual(DEFAULT_SIDEBAR_PLACEMENT_STATE);
+  });
+
+  it("将新增搜索容器插入文件管理器后面", () => {
+    expect(
+      normalizeSidebarPlacementState({
+        version: 1,
+        placements: {
+          primary: ["explorer", "source-control"],
+          secondary: ["ai"],
+        },
+      }).placements.primary,
+    ).toEqual(["explorer", "search", "source-control"]);
   });
 
   it("normalizes activity bar settings and hidden containers", () => {
@@ -76,7 +88,7 @@ describe("moveSidebarContainer", () => {
     );
 
     expect(placements).toEqual({
-      primary: ["explorer"],
+      primary: ["explorer", "search"],
       secondary: ["source-control", "ai"],
     });
     expect(findSidebarContainerLocation(placements, "source-control")).toBe(
@@ -92,7 +104,11 @@ describe("moveSidebarContainer", () => {
       1,
     );
 
-    expect(placements.primary).toEqual(["source-control", "explorer"]);
+    expect(placements.primary).toEqual([
+      "search",
+      "explorer",
+      "source-control",
+    ]);
   });
 
   it("returns the original placements when the requested order is unchanged", () => {
@@ -145,7 +161,7 @@ describe("normalizeSidebarRuntimeState", () => {
         ["explorer", "ai"],
       ),
     ).toMatchObject({
-      primary: { activeId: "source-control", collapsed: false },
+      primary: { activeId: "search", collapsed: false },
       secondary: { activeId: null, collapsed: true },
     });
   });
@@ -190,8 +206,8 @@ describe("runtimeAfterSidebarContainerMove", () => {
     ).toEqual({
       version: 1,
       primary: {
-        activeId: null,
-        collapsed: true,
+        activeId: "search",
+        collapsed: false,
         width: 260,
       },
       secondary: {
