@@ -26,7 +26,7 @@ export const SIDEBAR_LOCATIONS = ["primary", "secondary"] as const;
 export const DEFAULT_SIDEBAR_PLACEMENT_STATE: SidebarPlacementState = {
   version: 1,
   placements: {
-    primary: ["explorer", "source-control", "alpha"],
+    primary: ["explorer", "search", "source-control", "alpha"],
     secondary: ["ai"],
   },
   activityBar: {
@@ -99,6 +99,20 @@ function validIdsAtLocation(
   return result;
 }
 
+/** 按内置默认顺序插入尚未出现在持久化布局中的新容器。 */
+function insertMissingContainer(
+  placements: SidebarPlacements,
+  id: SidebarContainerId,
+): void {
+  const container = getSidebarContainer(id);
+  const target = placements[container.defaultLocation];
+  const index = target.findIndex(
+    (candidate) =>
+      getSidebarContainer(candidate).defaultOrder > container.defaultOrder,
+  );
+  target.splice(index < 0 ? target.length : index, 0, id);
+}
+
 /** 将未知或损坏的全局布局归一化为完整、无重复的容器位置。 */
 export function normalizeSidebarPlacementState(
   value: unknown,
@@ -121,7 +135,7 @@ export function normalizeSidebarPlacementState(
     (left, right) => left.defaultOrder - right.defaultOrder,
   )) {
     if (!claimed.has(container.id)) {
-      placements[container.defaultLocation].push(container.id);
+      insertMissingContainer(placements, container.id);
     }
   }
 

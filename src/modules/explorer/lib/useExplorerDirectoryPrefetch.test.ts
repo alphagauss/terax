@@ -46,6 +46,7 @@ describe("Explorer directory prefetch", () => {
         title: "README.md",
         path: "C:/Docs/README.md",
         dirty: false,
+        preview: false,
       },
     ];
 

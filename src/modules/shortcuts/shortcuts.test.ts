@@ -42,6 +42,21 @@ describe("folder picker shortcut", () => {
   });
 });
 
+describe("工作区搜索快捷键", () => {
+  it("将主修饰键加 Shift 和 F 分配给内容搜索", () => {
+    expect(SHORTCUTS).toContainEqual({
+      id: "workspaceSearch.focus",
+      label: "Find in files",
+      group: "Search",
+      defaultBindings: [{ [MOD_PROP]: true, shift: true, key: "f" }],
+    });
+    expect(
+      SHORTCUTS.find((shortcut) => shortcut.id === "explorer.search")
+        ?.defaultBindings,
+    ).toEqual([]);
+  });
+});
+
 describe("shortcut display tokens", () => {
   it("空绑定不产生标签", () => {
     expect(getBindingTokens(undefined)).toEqual([]);

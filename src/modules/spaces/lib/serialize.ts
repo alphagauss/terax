@@ -221,6 +221,7 @@ function hydrateTab(
         title: pathBasename(serialized.path),
         path: serialized.path,
         dirty: false,
+        preview: false,
         ...(serialized.explorerRoot !== undefined && {
           explorerRoot: serialized.explorerRoot,
         }),

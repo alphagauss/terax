@@ -52,27 +52,21 @@
   },
   "ui": {
     "placeholderThemes": "Search themes...",
-    "placeholderContent": "Find text in files...",
     "placeholderHistory": "Search command history...",
-    "placeholderDefault": "Type a command, > for history, # to find in files",
+    "placeholderDefault": "Type a command, > for history",
     "dialogTitle": "Command Palette",
-    "dialogDescription": "Run a command, switch theme, or search your workspace.",
+    "dialogDescription": "Run a command or switch theme.",
     "back": "Back",
     "headingThemes": "Themes",
-    "headingContents": "Contents",
     "headingHistory": "Command history",
     "noThemes": "No themes",
-    "noWorkspaceRoot": "No workspace root",
-    "typeAtLeast2": "Type at least 2 characters",
-    "noMatches": "No matches",
     "openTerminalForHistory": "Open a terminal to run history",
     "noHistory": "No history",
     "searchModes": "Search modes",
     "modeHintHistory": "Search command history",
-    "modeHintContent": "Find text in files",
     "searchFailed": "Search failed",
     "retry": "Retry",
     "searching": "Searching...",
-    "noCommandsFound": "No commands found. Type ? to see search modes."
+    "noCommandsFound": "No commands found. Type ? to see command modes."
   }
 }

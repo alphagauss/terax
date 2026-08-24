@@ -12,7 +12,7 @@
   },
   "label": {
     "commandPalette.open": "Open command palette",
-    "commandPalette.content": "Find in files",
+    "workspaceSearch.focus": "Find in files",
     "window.new": "New window",
     "settings.open": "Open settings",
     "folder.open": "Open folder",

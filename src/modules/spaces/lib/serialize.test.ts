@@ -45,6 +45,7 @@ function state(): WorkbenchState {
     path: "/work/docs/guide.md",
     explorerRoot: "/work",
     dirty: false,
+    preview: false,
   };
   const webPreview: Tab = {
     id: 4,

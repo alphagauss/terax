@@ -1,3 +1,8 @@
+/**
+ * 本文件解析命令面板的前缀模式。
+ * 工作区内容搜索已迁移到独立侧边栏，这里只保留命令历史和帮助。
+ */
+
 import type { PaletteMode } from "../types";
 
 export type ParsedQuery = {
@@ -8,7 +13,6 @@ export type ParsedQuery = {
 
 const PREFIXES: ReadonlyArray<{ sigil: string; mode: PaletteMode }> = [
   { sigil: ">", mode: "history" },
-  { sigil: "#", mode: "content" },
   { sigil: "?", mode: "help" },
 ];
 
@@ -20,8 +24,3 @@ export function parseQuery(raw: string): ParsedQuery {
   }
   return { mode: "commands", term: raw.trim(), raw };
 }
-
-export const MODE_HINTS: ReadonlyArray<{ sigil: string; label: string }> = [
-  { sigil: ">", label: "Search command history" },
-  { sigil: "#", label: "Find text in files" },
-];

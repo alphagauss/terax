@@ -8,6 +8,7 @@ import {
   ChartCandlestickIcon,
   FolderGitTwoIcon,
   FolderTreeIcon,
+  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import type { SidebarContainerDefinition, SidebarContainerId } from "./types";
 
@@ -22,11 +23,20 @@ export const SIDEBAR_CONTAINERS = [
     minimumWidth: 180,
   },
   {
+    id: "search",
+    titleKey: "search",
+    icon: Search01Icon,
+    defaultLocation: "primary",
+    defaultOrder: 1,
+    allowedLocations: ["primary", "secondary"],
+    minimumWidth: 220,
+  },
+  {
     id: "source-control",
     titleKey: "sourceControl",
     icon: FolderGitTwoIcon,
     defaultLocation: "primary",
-    defaultOrder: 1,
+    defaultOrder: 2,
     allowedLocations: ["primary", "secondary"],
     minimumWidth: 220,
   },
@@ -35,7 +45,7 @@ export const SIDEBAR_CONTAINERS = [
     titleKey: "alpha",
     icon: ChartCandlestickIcon,
     defaultLocation: "primary",
-    defaultOrder: 2,
+    defaultOrder: 3,
     allowedLocations: ["primary", "secondary"],
     minimumWidth: 180,
   },

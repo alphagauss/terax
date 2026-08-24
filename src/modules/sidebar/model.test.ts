@@ -27,7 +27,7 @@ describe("normalizeSidebarPlacementState", () => {
     ).toEqual({
       version: 1,
       placements: {
-        primary: ["ai", "source-control", "alpha"],
+        primary: ["ai", "search", "source-control", "alpha"],
         secondary: ["explorer"],
       },
       activityBar: {
@@ -45,6 +45,18 @@ describe("normalizeSidebarPlacementState", () => {
         placements: { primary: ["ai"], secondary: [] },
       }),
     ).toEqual(DEFAULT_SIDEBAR_PLACEMENT_STATE);
+  });
+
+  it("将新增搜索容器插入文件管理器后面", () => {
+    expect(
+      normalizeSidebarPlacementState({
+        version: 1,
+        placements: {
+          primary: ["explorer", "source-control", "alpha"],
+          secondary: ["ai"],
+        },
+      }).placements.primary,
+    ).toEqual(["explorer", "search", "source-control", "alpha"]);
   });
 
   it("normalizes activity bar settings and hidden containers", () => {
@@ -76,7 +88,7 @@ describe("moveSidebarContainer", () => {
     );
 
     expect(placements).toEqual({
-      primary: ["explorer", "alpha"],
+      primary: ["explorer", "search", "alpha"],
       secondary: ["source-control", "ai"],
     });
     expect(findSidebarContainerLocation(placements, "source-control")).toBe(
@@ -92,7 +104,12 @@ describe("moveSidebarContainer", () => {
       1,
     );
 
-    expect(placements.primary).toEqual(["source-control", "explorer", "alpha"]);
+    expect(placements.primary).toEqual([
+      "search",
+      "explorer",
+      "source-control",
+      "alpha",
+    ]);
   });
 
   it("returns the original placements when the requested order is unchanged", () => {
@@ -145,7 +162,7 @@ describe("normalizeSidebarRuntimeState", () => {
         ["explorer", "ai"],
       ),
     ).toMatchObject({
-      primary: { activeId: "source-control", collapsed: false },
+      primary: { activeId: "search", collapsed: false },
       secondary: { activeId: null, collapsed: true },
     });
   });
@@ -190,7 +207,7 @@ describe("runtimeAfterSidebarContainerMove", () => {
     ).toEqual({
       version: 1,
       primary: {
-        activeId: "alpha",
+        activeId: "search",
         collapsed: false,
         width: 260,
       },

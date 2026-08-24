@@ -36,6 +36,7 @@ describe("Workspace page handoff", () => {
         kind: "markdown",
         path: "/repo/readme.md",
         dirty: true,
+        preview: false,
       }),
     ).toBe("dirty");
     expect(

@@ -60,6 +60,7 @@ export type CommandPaletteActionContext = {
   splitGroupRight: () => void;
   splitGroupDown: () => void;
   focusSearch: () => void;
+  openWorkspaceSearch: () => void;
   focusExplorerSearch: () => void;
   toggleSidebar: () => void;
   toggleHiddenFiles: () => void;
@@ -265,8 +266,8 @@ export function createCommandItems(
       group: "Search",
       keywords: ["grep", "ripgrep", "text", "contents", "search in files"],
       icon: FileSearchIcon,
-      trailing: "#",
-      run: noop,
+      shortcutId: "workspaceSearch.focus",
+      run: ctx.openWorkspaceSearch,
     },
     {
       id: "history.open",

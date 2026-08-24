@@ -61,11 +61,14 @@ function firstGroupId(space: SpaceWorkbench): number {
   return groupIds(space.root)[0];
 }
 
-function replaceEditorPreview(
+type PreviewDocumentTab = EditorTab | MarkdownTab;
+
+/** 用新的编辑器或 Markdown 页面原位替换当前分组中的临时预览。 */
+function replaceDocumentPreview(
   state: WorkbenchState,
   groupId: number,
   previousId: number,
-  tab: EditorTab,
+  tab: PreviewDocumentTab,
 ): WorkbenchState {
   const owner = findGroupForTab(state, previousId);
   if (!owner || owner.group.id !== groupId) return state;
@@ -99,7 +102,7 @@ function cloneForSplit(tab: Tab, id: number): Tab | null {
     case "editor":
       return { ...tab, id, preview: false, cold: false };
     case "markdown":
-      return { ...tab, id, cold: false };
+      return { ...tab, id, preview: false, cold: false };
     case "ai-diff":
       return null;
     default:
@@ -357,7 +360,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     (id: number) =>
       commit((current) => {
         const tab = current.tabs[id];
-        if (tab?.kind !== "editor" || !tab.preview) return current;
+        if (
+          (tab?.kind !== "editor" && tab?.kind !== "markdown") ||
+          !tab.preview
+        )
+          return current;
         return {
           ...current,
           tabs: { ...current.tabs, [id]: { ...tab, preview: false } },
@@ -379,9 +386,15 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
       if (!group) return null;
-      const editorTabs = group.tabIds
+      const documentTabs = group.tabIds
         .map((id) => stateRef.current.tabs[id])
-        .filter((tab): tab is EditorTab => tab?.kind === "editor");
+        .filter(
+          (tab): tab is PreviewDocumentTab =>
+            tab?.kind === "editor" || tab?.kind === "markdown",
+        );
+      const editorTabs = documentTabs.filter(
+        (tab): tab is EditorTab => tab.kind === "editor",
+      );
       const workspace = currentWorkspaceEnv();
       const resourcePath = documentPathIdentity(workspace, path);
       const existing = forceNew
@@ -408,10 +421,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         ...(explorerRoot !== undefined && { explorerRoot }),
       };
       if (!pin && !forceNew) {
-        const preview = editorTabs.find((candidate) => candidate.preview);
+        const preview = documentTabs.find((candidate) => candidate.preview);
         if (preview) {
           commit((current) =>
-            replaceEditorPreview(current, target, preview.id, tab),
+            replaceDocumentPreview(current, target, preview.id, tab),
           );
           return id;
         }
@@ -422,9 +435,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [addPage, allocId, commit, revealTab, targetGroup],
   );
 
+  /** 打开或复用 Markdown 标签，并与普通编辑器共享同一个临时预览槽。 */
   const newMarkdownTab = useCallback(
     (
       path: string,
+      pin = true,
       explorerRoot?: string,
       groupId?: number,
       forceNew = false,
@@ -433,40 +448,54 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const target = groupId ?? targetGroup(spaceId);
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
+      if (!group) return null;
+      const documentTabs = group.tabIds
+        .map((id) => stateRef.current.tabs[id])
+        .filter(
+          (tab): tab is PreviewDocumentTab =>
+            tab?.kind === "editor" || tab?.kind === "markdown",
+        );
       const workspace = currentWorkspaceEnv();
       const resourcePath = documentPathIdentity(workspace, path);
       const existing = forceNew
         ? undefined
-        : group?.tabIds
-            .map((id) => stateRef.current.tabs[id])
-            .find((tab): tab is MarkdownTab =>
-              Boolean(
-                tab?.kind === "markdown" &&
-                  documentPathIdentity(workspace, tab.path) === resourcePath,
-              ),
-            );
+        : documentTabs.find((tab): tab is MarkdownTab =>
+            Boolean(
+              tab?.kind === "markdown" &&
+                documentPathIdentity(workspace, tab.path) === resourcePath,
+            ),
+          );
       if (existing) {
         revealTab(existing.id, {
+          ...(pin && { preview: false }),
           ...(explorerRoot !== undefined && { explorerRoot }),
         });
         return existing.id;
       }
       const id = allocId();
-      addPage(
-        {
-          id,
-          kind: "markdown",
-          spaceId,
-          title: pathBasename(path),
-          path,
-          dirty: false,
-          ...(explorerRoot !== undefined && { explorerRoot }),
-        },
-        target,
-      );
+      const tab: MarkdownTab = {
+        id,
+        kind: "markdown",
+        spaceId,
+        title: pathBasename(path),
+        path,
+        dirty: false,
+        preview: !pin,
+        ...(explorerRoot !== undefined && { explorerRoot }),
+      };
+      if (!pin && !forceNew) {
+        const preview = documentTabs.find((candidate) => candidate.preview);
+        if (preview) {
+          commit((current) =>
+            replaceDocumentPreview(current, target, preview.id, tab),
+          );
+          return id;
+        }
+      }
+      addPage(tab, target);
       return id;
     },
-    [addPage, allocId, revealTab, targetGroup],
+    [addPage, allocId, commit, revealTab, targetGroup],
   );
 
   const newWebPreviewTab = useCallback(

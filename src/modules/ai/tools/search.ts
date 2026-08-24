@@ -5,6 +5,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
+import { searchContent } from "@/modules/workspace-search/api";
 import { native } from "../lib/native";
 import { checkReadable, checkReadableCanonical } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
@@ -83,11 +84,13 @@ export function buildSearchTools(ctx: ToolContext) {
         r.path = safety.canonical;
         const cap = Math.min(max_results ?? 30, 500);
         try {
-          const res = await native.grep({
+          const res = await searchContent({
             pattern,
             root: r.path,
-            glob,
-            caseInsensitive: case_insensitive,
+            syntax: "regex",
+            caseMode: case_insensitive ? "insensitive" : "sensitive",
+            wholeWord: false,
+            includes: glob,
             maxResults: cap,
           });
           const hits = res.hits.filter((h) =>
@@ -102,7 +105,7 @@ export function buildSearchTools(ctx: ToolContext) {
               text: clipLine(h.text),
             })),
             truncated: res.truncated,
-            files_scanned: res.files_scanned,
+            files_scanned: res.filesScanned,
           };
         } catch (e) {
           return { error: String(e), root: r.path };

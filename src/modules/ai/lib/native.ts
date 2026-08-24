@@ -51,19 +51,6 @@ export type CommandOutput = {
   truncated: boolean;
 };
 
-export type GrepHit = {
-  path: string;
-  rel: string;
-  line: number;
-  text: string;
-};
-
-export type GrepResponse = {
-  hits: GrepHit[];
-  truncated: boolean;
-  files_scanned: number;
-};
-
 export type GlobHit = { path: string; rel: string };
 export type GlobResponse = { hits: GlobHit[]; truncated: boolean };
 
@@ -206,21 +193,6 @@ export const native = {
     invoke<DirEntry[]>("fs_read_dir", {
       path,
       showHidden: false,
-      workspace: currentWorkspaceEnv(),
-    }),
-  grep: (params: {
-    pattern: string;
-    root: string;
-    glob?: string[];
-    caseInsensitive?: boolean;
-    maxResults?: number;
-  }) =>
-    invoke<GrepResponse>("fs_grep", {
-      pattern: params.pattern,
-      root: params.root,
-      glob: params.glob ?? null,
-      caseInsensitive: params.caseInsensitive ?? null,
-      maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
     }),
   glob: (params: { pattern: string; root: string; maxResults?: number }) =>

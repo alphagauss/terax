@@ -88,6 +88,7 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 工具定义位于 `src/modules/ai/tools/`：
 
 - 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过安全 deny-list 后自动执行。
+- `grep` 通过 `src/modules/workspace-search/api.ts` 调用与用户搜索面板相同的 `fs_content_search`。共享后端只统一匹配、ignore 和路径筛选语义，AI 命中仍在工具层执行 canonical root 检查和秘密路径过滤。
 - 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`bash_run`、`bash_background`）设置 `needsApproval: true`。AI SDK 会暂停，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
 - `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 
