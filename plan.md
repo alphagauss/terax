@@ -128,12 +128,14 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 
 ### 批次三：文件版本与文件系统变更
 
-- [ ] 新增 Bash `file_version`，一次完成物理路径解析、大小检查、前后 stat 和摘要。
-- [ ] 高层 `read_version` 使用 Bash 优先、现有 SFTP/exec 实现回退。
-- [ ] 新增 Bash `create_directory`，一次完成父链处理和最终目录语义。
-- [ ] 根据收益和契约复杂度评估 rename 与递归 delete 是否迁入 mutation task；没有明确收益时保留现状。
+- [x] 新增 Bash `file_version`，一次完成物理路径解析、大小检查、前后 stat 和摘要。
+- [x] 高层 `read_version` 使用 Bash 优先、现有 SFTP/exec 实现回退。
+- [x] 新增 Bash `create_directory`，一次完成父链处理和最终目录语义。
+- [x] 根据收益和契约复杂度评估 rename 与递归 delete 是否迁入 mutation task；没有明确收益时保留现状。
 - [ ] 将 SFTP fallback 中仍需执行的摘要与原子提交命令移出 `sftp.rs`，由文件服务和任务运行时集中管理。
 - [ ] 确保 `remote/sftp.rs` 最终只保留 SFTP primitive。
+
+评估结论：rename 的 Bash `mv -n` 会引入跨文件系统复制和 no-clobber 语义差异，且只减少一个往返；文件删除的 SFTP `stat + remove` 与新开 Bash exec 阶段数相当，递归目录删除已经使用单次受控命令。因此本批保留现状，不为它们新增 helper。
 
 验证：
 
