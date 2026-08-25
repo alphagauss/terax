@@ -15,8 +15,12 @@ use tokio_util::sync::CancellationToken;
 
 use super::session::{ExecOutput, RemoteWorkspace};
 
+pub(crate) mod create_directory;
+pub(crate) mod file_version;
+
 /// 高 RTT 连接才维持一个内部任务预开 channel，避免低延迟连接长期占用服务端资源。
 pub(crate) const TASK_PREHEAT_RTT_MS: u64 = 100;
+pub(crate) const TASK_OUTPUT_LIMIT: usize = 1024;
 
 /// 允许通过封闭任务运行时执行的内部操作。
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -29,6 +33,10 @@ pub(crate) enum TaskKind {
     TreeList,
     /// ripgrep 内容搜索与文件枚举。
     Ripgrep,
+    /// 稳定文件版本读取。
+    FileVersion,
+    /// 递归创建目录。
+    CreateDirectory,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

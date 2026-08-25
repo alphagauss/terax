@@ -9,6 +9,7 @@ mod health;
 mod host_key;
 pub mod manager;
 pub mod models;
+pub(crate) mod mutation_service;
 pub(crate) mod profile;
 mod proxy;
 mod remote_fs;

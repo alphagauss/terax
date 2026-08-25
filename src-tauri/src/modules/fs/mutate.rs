@@ -51,7 +51,7 @@ pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Res
         let profile_id = profile_id.to_string();
         let manager = remote::manager::global_manager()?;
         let workspace = manager.workspace(&profile_id).await?;
-        return remote::sftp::create_dir(&workspace, &path).await;
+        return remote::mutation_service::create_directory(&workspace, &path).await;
     }
     let p = resolve_path(&path, &workspace);
     if p.exists() {

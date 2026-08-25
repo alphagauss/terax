@@ -1,7 +1,7 @@
 //! SSH 文件内容操作的后端无关服务边界。
 //!
-//! Tauri 文件命令只通过本模块读取版本化快照和提交文件。读取固定使用 SFTP；写入
-//! 优先通过单次 Bash helper 合并远端阶段，并在本层完成安全回退和耗时记录。
+//! Tauri 文件命令只通过本模块读取版本化快照和提交文件。正文读取固定使用 SFTP；
+//! 版本读取与写入优先通过 Bash 合并远端阶段，并在本层完成安全回退和耗时记录。
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::session::RemoteWorkspace;
 use super::sftp;
 use super::shell_file::{self, ShellFileError};
+use super::tasks::{file_version, TaskKind};
 
 /// 一次有界远端文件读取的正文或过大结果。
 pub(crate) enum RemoteFileRead {
@@ -77,6 +78,31 @@ pub(crate) async fn read_version(
     max_size: u64,
 ) -> Result<Option<RemoteVersion>, String> {
     let started_at = Instant::now();
+    if workspace.tasks.should_attempt(TaskKind::FileVersion) {
+        match file_version::read(workspace, path, max_size).await {
+            Ok(result) => {
+                workspace.tasks.mark_available(TaskKind::FileVersion);
+                log_backend_completion(workspace, "read_version", "bash", started_at, true);
+                return Ok(result);
+            }
+            Err(file_version::FileVersionTaskError::Unsupported(reason))
+            | Err(file_version::FileVersionTaskError::Protocol(reason)) => {
+                workspace
+                    .tasks
+                    .mark_unavailable(TaskKind::FileVersion, &reason);
+                log::warn!(
+                    "SSH Bash file version disabled profile={} reason={}",
+                    workspace.profile.id,
+                    reason
+                );
+            }
+            Err(file_version::FileVersionTaskError::Business(error))
+            | Err(file_version::FileVersionTaskError::Transport(error)) => {
+                log_backend_completion(workspace, "read_version", "bash", started_at, false);
+                return Err(error);
+            }
+        }
+    }
     let result = sftp::file_version(workspace, path, max_size).await;
     log_backend_completion(
         workspace,
