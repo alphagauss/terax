@@ -13,6 +13,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags, StatusCode};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
+use tokio_util::sync::CancellationToken;
 
 use super::file_service::{
     RemoteCheckedWrite, RemoteFileRead, RemoteObservedVersion, RemoteVersion,
@@ -89,6 +90,18 @@ pub async fn walk(
     max_depth: usize,
     max_entries: usize,
 ) -> Result<(Vec<RemoteWalkEntry>, bool), String> {
+    walk_cancellable(workspace, root, show_hidden, max_depth, max_entries, None).await
+}
+
+/// 递归枚举远端树，并允许交互式调用在目录边界停止后续 SFTP 请求。
+pub(crate) async fn walk_cancellable(
+    workspace: &Arc<RemoteWorkspace>,
+    root: &str,
+    show_hidden: bool,
+    max_depth: usize,
+    max_entries: usize,
+    cancellation: Option<&CancellationToken>,
+) -> Result<(Vec<RemoteWalkEntry>, bool), String> {
     const PRUNE: &[&str] = &[
         "node_modules",
         ".git",
@@ -106,10 +119,16 @@ pub async fn walk(
     let mut output = Vec::new();
     let mut truncated = false;
     while let Some((directory, relative, depth)) = pending.pop() {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(super::session::EXEC_CANCELLED_ERROR.into());
+        }
         if depth >= max_depth {
             continue;
         }
         for entry in read_dir(workspace, &directory, show_hidden).await? {
+            if cancellation.is_some_and(CancellationToken::is_cancelled) {
+                return Err(super::session::EXEC_CANCELLED_ERROR.into());
+            }
             if output.len() >= max_entries {
                 truncated = true;
                 break;

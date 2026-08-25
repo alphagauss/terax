@@ -30,6 +30,7 @@ use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
+pub(crate) const EXEC_CANCELLED_ERROR: &str = "remote command cancelled";
 
 /// 处理 SSH 客户端事件、主机密钥确认和远端转发请求。
 pub struct ClientHandler {
@@ -556,7 +557,29 @@ impl RemoteWorkspace {
         max_output: usize,
     ) -> Result<ExecOutput, String> {
         let command = build_exec_command(command, None)?;
-        run_exec_channel_with_input(channel, command, Some(input), timeout, max_output).await
+        run_exec_channel_with_input(channel, command, Some(input), timeout, max_output, None).await
+    }
+
+    /// 执行可取消的内部只读任务，取消后主动关闭所属 channel。
+    pub(crate) async fn exec_task_on_channel_cancellable(
+        &self,
+        channel: russh::Channel<Msg>,
+        command: &str,
+        input: Vec<u8>,
+        timeout: Duration,
+        max_output: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecOutput, String> {
+        let command = build_exec_command(command, None)?;
+        run_exec_channel_with_input(
+            channel,
+            command,
+            Some(input),
+            timeout,
+            max_output,
+            Some(cancellation),
+        )
+        .await
     }
 }
 
@@ -577,7 +600,7 @@ async fn run_exec_channel(
     command: String,
     timeout: Duration,
 ) -> Result<ExecOutput, String> {
-    run_exec_channel_with_input(channel, command, None, timeout, MAX_EXEC_OUTPUT).await
+    run_exec_channel_with_input(channel, command, None, timeout, MAX_EXEC_OUTPUT, None).await
 }
 
 /// 发送命令和可选标准输入，并有界收集完成状态与输出。
@@ -587,6 +610,7 @@ async fn run_exec_channel_with_input(
     input: Option<Vec<u8>>,
     timeout: Duration,
     max_output: usize,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<ExecOutput, String> {
     channel
         .exec(true, command.into_bytes())
@@ -601,6 +625,10 @@ async fn run_exec_channel_with_input(
             .eof()
             .await
             .map_err(|error| format!("finish remote command input: {error}"))?;
+    }
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        let _ = channel.close().await;
+        return Err(EXEC_CANCELLED_ERROR.into());
     }
 
     let run = async {
@@ -619,14 +647,26 @@ async fn run_exec_channel_with_input(
         }
         output
     };
-    match tokio::time::timeout(timeout, run).await {
-        Ok(output) => Ok(output),
-        Err(_) => {
+    let outcome = if let Some(cancellation) = cancellation {
+        tokio::select! {
+            _ = cancellation.cancelled() => None,
+            result = tokio::time::timeout(timeout, run) => Some(result),
+        }
+    } else {
+        Some(tokio::time::timeout(timeout, run).await)
+    };
+    match outcome {
+        Some(Ok(output)) => Ok(output),
+        Some(Err(_)) => {
             let _ = channel.close().await;
             Ok(ExecOutput {
                 timed_out: true,
                 ..ExecOutput::default()
             })
+        }
+        None => {
+            let _ = channel.close().await;
+            Err(EXEC_CANCELLED_ERROR.into())
         }
     }
 }

@@ -11,6 +11,7 @@ use std::time::Duration;
 use russh::client::Msg;
 use russh::Channel;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio_util::sync::CancellationToken;
 
 use super::session::{ExecOutput, RemoteWorkspace};
 
@@ -24,6 +25,8 @@ pub(crate) enum TaskKind {
     FileWrite,
     /// 递归目录属性汇总。
     TreeSummary,
+    /// 递归目录与文件枚举。
+    TreeList,
     /// ripgrep 内容搜索与文件枚举。
     Ripgrep,
 }
@@ -63,6 +66,29 @@ impl RemoteTaskRuntime {
                 input.unwrap_or_default(),
                 timeout,
                 max_output,
+            )
+            .await
+    }
+
+    /// 执行可取消的只读任务；取消会关闭当前 SSH channel。
+    pub(crate) async fn run_cancellable(
+        self: &Arc<Self>,
+        workspace: &Arc<RemoteWorkspace>,
+        task: TaskKind,
+        command: &str,
+        timeout: Duration,
+        max_output: usize,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecOutput, String> {
+        let channel = self.take_channel(workspace, task).await?;
+        workspace
+            .exec_task_on_channel_cancellable(
+                channel,
+                command,
+                Vec::new(),
+                timeout,
+                max_output,
+                cancellation,
             )
             .await
     }
@@ -181,6 +207,16 @@ impl RemoteTaskRuntime {
             let _ = channel.close().await;
         }
     }
+}
+
+/// 构造只允许固定参数数组的 ripgrep 命令，并在同一调用内探测依赖。
+pub(crate) fn ripgrep_command(args: &[String]) -> String {
+    let command = args
+        .iter()
+        .map(|argument| super::session::shell_quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("command -v rg >/dev/null 2>&1 || exit 127; exec {command}")
 }
 
 #[cfg(test)]

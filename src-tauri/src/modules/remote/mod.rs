@@ -19,6 +19,7 @@ mod ssh_config;
 pub(crate) mod tasks;
 pub mod terminal;
 mod traffic;
+pub(crate) mod tree_service;
 pub mod tunnel;
 
 pub use manager::RemoteState;

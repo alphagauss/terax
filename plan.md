@@ -109,13 +109,13 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 
 ### 批次二：统一搜索与路径枚举
 
-- [ ] 将内容搜索、文件列表、glob 和模糊搜索整理为统一搜索域，Tauri command 保持薄包装。
-- [ ] 搜索面板与 AI `grep` 继续共享 `fs_content_search`。
-- [ ] `fs_list_files` 与 `fs_glob` 共享 Bash 优先的远端文件枚举实现。
-- [ ] Explorer 模糊搜索使用 Bash tree task，失败时回退有界并发 SFTP 遍历。
-- [ ] 远端缺少 `rg` 时复用 tree service，不重复建立逐目录实现。
-- [ ] 把交互式取消改为 `CancellationToken`，新请求关闭旧 SSH exec channel。
-- [ ] 保留 AI 命中结果的秘密路径过滤。
+- [x] 将内容搜索、文件列表、glob 和模糊搜索整理为统一搜索域，Tauri command 保持薄包装。
+- [x] 搜索面板与 AI `grep` 继续共享 `fs_content_search`。
+- [x] `fs_list_files` 与 `fs_glob` 共享 Bash 优先的远端文件枚举实现。
+- [x] Explorer 模糊搜索使用 Bash tree task，失败时回退有界并发 SFTP 遍历。
+- [x] 远端缺少 `rg` 时复用 tree service，不重复建立逐目录实现。
+- [x] 把交互式取消改为 `CancellationToken`，新请求关闭旧 SSH exec channel。
+- [x] 保留 AI 命中结果的秘密路径过滤。
 
 验证：
 
