@@ -1,4 +1,4 @@
-//! SSH 连接、transport 健康与流量、终端和隧道的 Tauri command 适配层。
+//! SSH 连接、transport 健康、服务器能力、流量、终端和隧道的 Tauri command 适配层。
 //!
 //! 文件传输命令由 transfers 子系统统一提供，本模块不保留可绕过任务管理器的入口。
 
@@ -8,8 +8,8 @@ use crate::modules::{secrets, secrets::SecretsState};
 use super::manager::RemoteState;
 use super::models::{
     ConnectRequest, CredentialOverride, ForegroundIntent, ImportedHost, RemoteRuntimeSnapshot,
-    SshAuthMethod, SshHealthSnapshot, SshProfile, SshTrafficSnapshot, TunnelConfig,
-    TunnelEventKind, TunnelInfo,
+    SshAuthMethod, SshCapabilitySnapshot, SshHealthSnapshot, SshProfile, SshTrafficSnapshot,
+    TunnelConfig, TunnelEventKind, TunnelInfo,
 };
 
 const SSH_SECRET_SERVICE: &str = "terax-ssh";
@@ -151,6 +151,29 @@ pub async fn ssh_health_snapshot(
     state: tauri::State<'_, RemoteState>,
 ) -> Result<SshHealthSnapshot, String> {
     Ok(state.manager.health_snapshot().await)
+}
+
+#[tauri::command]
+/// 返回当前 connected epoch 的统一服务器能力快照。
+pub async fn ssh_capabilities_snapshot(
+    state: tauri::State<'_, RemoteState>,
+) -> Result<SshCapabilitySnapshot, String> {
+    Ok(state.manager.capability_snapshot().await)
+}
+
+#[tauri::command]
+/// 用户显式重新检测当前 SSH Workspace 的服务器能力。
+pub async fn ssh_capabilities_reprobe(
+    state: tauri::State<'_, RemoteState>,
+    workspace: tauri::State<'_, WorkspaceProcessState>,
+) -> Result<SshCapabilitySnapshot, String> {
+    let profile_id = workspace
+        .bootstrap()
+        .env
+        .ssh_profile_id()
+        .ok_or_else(|| "capability probe requires an SSH Workspace".to_string())?;
+    let remote_workspace = state.manager.workspace(profile_id).await?;
+    super::tasks::capability_probe::probe(&remote_workspace, true).await
 }
 
 #[tauri::command]

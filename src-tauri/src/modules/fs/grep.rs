@@ -1,8 +1,10 @@
 //! 工作区文件内容搜索与路径 glob 匹配。
 //!
-//! 内容搜索由用户侧边栏和 AI grep 共享，统一处理匹配语义、ignore、结果上限与远端回退；
+//! 内容搜索由用户侧边栏和 AI grep 共享，统一处理匹配语义、ignore、结果上限与远端
+//! ripgrep、GNU grep、SFTP 回退；
 //! 交互式调用可取消上一轮扫描，但不会取消并发的 AI 搜索。
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -396,6 +398,25 @@ async fn search_content_with_cancel(
                 Ok(response)
             };
         }
+        if matches!(request.syntax, ContentSearchSyntax::Literal) {
+            if let Some(response) = search_remote_grep(
+                profile_id,
+                &request.root,
+                &request,
+                &matcher,
+                &filters,
+                cap,
+                remote_cancellation,
+            )
+            .await?
+            {
+                return if cancel() {
+                    Ok(empty_content_search_response())
+                } else {
+                    Ok(response)
+                };
+            }
+        }
         return search_remote_sftp(
             profile_id,
             &request.root,
@@ -421,6 +442,141 @@ async fn search_content_with_cancel(
         cap,
         cancel,
     ))
+}
+
+/// 在缺少 ripgrep 时使用 GNU find 与 grep 执行服务端字面量搜索。
+async fn search_remote_grep(
+    profile_id: &str,
+    root: &str,
+    request: &ContentSearchRequest,
+    matcher: &RegexMatcher,
+    filters: &PathFilters,
+    cap: usize,
+    cancellation: Option<&CancellationToken>,
+) -> Result<Option<ContentSearchResponse>, String> {
+    let manager = remote::manager::global_manager()?;
+    let workspace = manager.workspace(profile_id).await?;
+    let task = remote::tasks::TaskKind::GrepContent;
+    if !workspace.tasks.should_attempt(task) {
+        return Ok(None);
+    }
+    let output = remote::tasks::grep::content(
+        &workspace,
+        remote::tasks::grep::ContentRequest {
+            root,
+            pattern: &request.pattern,
+            ignore_case: matches!(request.case_mode, ContentSearchCaseMode::Insensitive),
+            whole_word: request.whole_word,
+            max_depth: 16,
+            max_size: FILE_SIZE_CAP,
+        },
+        cancellation,
+    )
+    .await?;
+    if output.timed_out {
+        return Err("remote GNU grep search timed out".into());
+    }
+    match output.exit_code {
+        Some(126) => {
+            workspace.mark_task_unavailable(task, "GNU grep search options are unavailable");
+            Ok(None)
+        }
+        Some(127) => {
+            workspace.mark_task_unavailable(task, "GNU find or grep is unavailable");
+            Ok(None)
+        }
+        Some(73) => Err(format!("not a directory: {root}")),
+        Some(0) => {
+            workspace.tasks.mark_available(task);
+            parse_remote_grep(&output.stdout, matcher, filters, cap, output.truncated).map(Some)
+        }
+        Some(code) => Err(format!(
+            "remote GNU grep search failed with exit code {code}"
+        )),
+        None => Err("remote GNU grep search closed without an exit status".into()),
+    }
+}
+
+/// 解析物理根目录及 `filename NUL line:content LF` 记录，并由 Rust matcher 锁定公共语义。
+fn parse_remote_grep(
+    bytes: &[u8],
+    matcher: &RegexMatcher,
+    filters: &PathFilters,
+    cap: usize,
+    output_truncated: bool,
+) -> Result<ContentSearchResponse, String> {
+    const MARKER: &[u8] = b"TERAX_GREP_CONTENT_V1\0";
+    let Some(mut remaining) = bytes.strip_prefix(MARKER) else {
+        return Err("remote GNU grep marker is invalid".into());
+    };
+    let Some(root_end) = remaining.iter().position(|byte| *byte == 0) else {
+        return Err("remote GNU grep root terminator is missing".into());
+    };
+    let physical_root = std::str::from_utf8(&remaining[..root_end])
+        .map_err(|_| "remote GNU grep root is not UTF-8".to_string())?;
+    if !physical_root.starts_with('/') {
+        return Err("remote GNU grep root is not absolute".into());
+    }
+    remaining = &remaining[root_end + 1..];
+    let mut hits = Vec::new();
+    let mut matched_files = HashSet::new();
+    let mut truncated = output_truncated;
+    while !remaining.is_empty() {
+        let Some(path_end) = remaining.iter().position(|byte| *byte == 0) else {
+            if output_truncated {
+                truncated = true;
+                break;
+            }
+            return Err("remote GNU grep path terminator is missing".into());
+        };
+        let path = std::str::from_utf8(&remaining[..path_end])
+            .map_err(|_| "remote GNU grep path is not UTF-8".to_string())?;
+        remaining = &remaining[path_end + 1..];
+        let Some(line_end) = remaining.iter().position(|byte| *byte == b'\n') else {
+            if output_truncated {
+                truncated = true;
+                break;
+            }
+            return Err("remote GNU grep line terminator is missing".into());
+        };
+        let record = &remaining[..line_end];
+        remaining = &remaining[line_end + 1..];
+        let Some(separator) = record.iter().position(|byte| *byte == b':') else {
+            return Err("remote GNU grep line number is missing".into());
+        };
+        let line = std::str::from_utf8(&record[..separator])
+            .map_err(|_| "remote GNU grep line number is not UTF-8".to_string())?
+            .parse::<u64>()
+            .map_err(|_| "remote GNU grep line number is invalid".to_string())?;
+        let text = String::from_utf8_lossy(&record[separator + 1..]).into_owned();
+        let absolute = remote_absolute(physical_root, path);
+        let rel = remote_relative(physical_root, &absolute);
+        if !filters.matches(&rel) || !matcher.is_match(text.as_bytes()).unwrap_or(false) {
+            continue;
+        }
+        matched_files.insert(absolute.clone());
+        if hits.len() >= cap {
+            truncated = true;
+            continue;
+        }
+        hits.push(ContentSearchHit {
+            path: absolute,
+            rel,
+            line,
+            ranges: match_ranges(matcher, &text),
+            text,
+        });
+    }
+    hits.sort_by(|left, right| {
+        left.rel
+            .cmp(&right.rel)
+            .then_with(|| left.line.cmp(&right.line))
+    });
+    Ok(ContentSearchResponse {
+        hits,
+        truncated,
+        files_scanned: matched_files.len(),
+    })
 }
 
 /// 执行 UI 与 AI 共用的工作区内容搜索。
@@ -812,6 +968,31 @@ mod tests {
         assert_eq!(parsed.hits[0].rel, "a.txt");
         assert_eq!(parsed.hits[0].text, "first");
         assert!(parsed.truncated);
+        assert_eq!(parsed.files_scanned, 1);
+    }
+
+    #[test]
+    fn parses_remote_gnu_grep_nul_records_and_applies_filters() {
+        let request = ContentSearchRequest {
+            root: "/repo".into(),
+            pattern: "needle".into(),
+            syntax: ContentSearchSyntax::Literal,
+            case_mode: ContentSearchCaseMode::Sensitive,
+            whole_word: false,
+            includes: vec!["src/**".into()],
+            excludes: Vec::new(),
+            max_results: Some(50),
+            cancel_previous: false,
+            workspace: None,
+        };
+        let matcher = build_matcher(&request).unwrap();
+        let filters = build_path_filters(&request.includes, &request.excludes).unwrap();
+        let bytes = b"TERAX_GREP_CONTENT_V1\0/repo\0/repo/src/a file.txt\x0012:needle here\n/repo/docs/a.txt\x003:needle docs\n";
+        let parsed = parse_remote_grep(bytes, &matcher, &filters, 50, false).unwrap();
+
+        assert_eq!(parsed.hits.len(), 1);
+        assert_eq!(parsed.hits[0].rel, "src/a file.txt");
+        assert_eq!(parsed.hits[0].line, 12);
         assert_eq!(parsed.files_scanned, 1);
     }
 

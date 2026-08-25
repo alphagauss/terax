@@ -1,4 +1,4 @@
-//! 当前进程唯一 SSH Runtime 的连接、健康监督、重连与资源生命周期协调。
+//! 当前进程唯一 SSH Runtime 的连接、健康监督、服务器能力、重连与资源生命周期协调。
 //!
 //! 所有状态迁移由本模块串行发布；启动提示允许首个 PTY 合并 root 探测，raw 读取
 //! SFTP 独立预热。业务入站流量抑制重复保活，旧 workspace 的迟到失败不能覆盖新连接。
@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshHealthSnapshot, SshTrafficSnapshot,
-    TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
+    ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshCapabilitySnapshot,
+    SshHealthSnapshot, SshTrafficSnapshot, TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
 };
 use super::session::{ExecOutput, RemoteWorkspace, TransportProbeOutcome};
 use super::traffic::SshTrafficMeter;
@@ -261,6 +261,7 @@ impl RemoteManager {
         let _ = app.emit("terax://ssh-runtime", snapshot.clone());
         Self::emit_health(app, workspace.health_snapshot(epoch));
         self.spawn_monitor(workspace.clone(), epoch, lifecycle.clone(), app.clone());
+        self.spawn_capability_probe(workspace.clone(), epoch, lifecycle.id);
         if has_prepared_terminal {
             self.spawn_prepared_terminal_expiry(workspace.clone(), epoch, lifecycle.id);
         }
@@ -273,6 +274,35 @@ impl RemoteManager {
             app.clone(),
         );
         Ok(snapshot)
+    }
+
+    /// 在连接发布后低优先级执行一次完整命令能力探测。
+    fn spawn_capability_probe(
+        self: &Arc<Self>,
+        workspace: Arc<RemoteWorkspace>,
+        epoch: u64,
+        lifecycle_id: u64,
+    ) {
+        let manager = Arc::downgrade(self);
+        tauri::async_runtime::spawn(async move {
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
+            if manager
+                .foreground_filesystem_priority
+                .load(Ordering::Acquire)
+            {
+                workspace.wait_for_foreground_filesystem().await;
+            }
+            if !manager.is_current(&workspace, epoch, lifecycle_id).await {
+                return;
+            }
+            if let Err(error) = super::tasks::capability_probe::probe(&workspace, false).await {
+                if manager.is_current(&workspace, epoch, lifecycle_id).await {
+                    log::debug!("SSH capability probe failed: {error}");
+                }
+            }
+        });
     }
 
     /// 关闭未被首个前端 PTY 接管的预启动终端，避免页面切换后保留远端 shell。
@@ -691,6 +721,17 @@ impl RemoteManager {
                 workspace.health_snapshot(*epoch)
             }
             _ => SshHealthSnapshot::default(),
+        }
+    }
+
+    /// 返回当前 connected epoch 的统一服务器能力快照。
+    pub async fn capability_snapshot(&self) -> SshCapabilitySnapshot {
+        let runtime = self.runtime.read().await;
+        match (&runtime.snapshot, &runtime.workspace) {
+            (RemoteRuntimeSnapshot::Connected { .. }, Some(workspace)) => {
+                workspace.capability_snapshot()
+            }
+            _ => SshCapabilitySnapshot::default(),
         }
     }
 

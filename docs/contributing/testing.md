@@ -92,10 +92,10 @@ WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面�
 
 - SSH 文件后端契约测试必须同时锁定正文、revision、TooLarge、Conflict、Missing 和 Overwrite 语义。
 - raw SFTP 文件读取测试必须覆盖空文件、块边界、超过流水线并发度和乱序响应组装。
-- Bash task 测试必须覆盖固定协议、实际参数探测、权限、fsync、三种条件提交、服务器端日志分块和临时文件清理。
-- SSH task 测试必须覆盖依赖缺失、协议截断、取消、epoch capability 隔离和传统后端回退；递归树、文件版本、目录创建和后台状态脚本均需独立契约测试。
+- Bash task 测试必须覆盖固定协议、实际参数探测、权限、fsync、三种条件提交和临时文件清理；后台日志测试必须覆盖 raw SFTP 非零 offset、分块边界、单 in-flight READ 和追加后的连续读取。
+- SSH task 测试必须覆盖依赖缺失、协议截断、取消、epoch capability 隔离、统一能力探测和传统后端回退；递归树、文件版本、目录创建、GNU grep 搜索和后台状态脚本均需独立契约测试。
 - helper 响应丢失后的 Rust 测试必须锁定 Overwrite 收敛以及 Match、Missing 的安全回退。
-- 状态栏 I/O 标记只能反映当前 epoch 的永久写入回退，正常 Bash 写入和路径级失败不得显示。
+- 状态栏能力灯只能接受当前 epoch 的能力事件；自动探测失败必须保留 lazy probe，瞬时 transport 错误不得显示为永久依赖缺失。
 - 影响范围全局的局部修复必须能被测试捕获，只依赖 review 不够。
 - 不仅测试 happy path，还要测试拒绝路径和边界。
 - 将平台特定测试放在正确的 `#[cfg(...)]` 条件后。

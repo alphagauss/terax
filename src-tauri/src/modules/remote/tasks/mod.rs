@@ -13,13 +13,16 @@ use russh::Channel;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
+use super::models::SshCapabilitySnapshot;
 use super::session::{ExecOutput, RemoteWorkspace};
 
 pub(crate) mod background;
+pub(crate) mod capability_probe;
 pub(crate) mod create_directory;
 pub(crate) mod delete;
 pub(crate) mod file_version;
 pub(crate) mod file_write;
+pub(crate) mod grep;
 pub(crate) mod ripgrep;
 pub(crate) mod sftp_fallback;
 pub(crate) mod tree_list;
@@ -46,12 +49,12 @@ pub(crate) enum TaskKind {
     RipgrepContent,
     /// ripgrep 文件枚举。
     RipgrepFiles,
+    /// GNU grep 字面量内容搜索。
+    GrepContent,
     /// 稳定文件版本读取。
     FileVersion,
     /// 递归创建目录。
     CreateDirectory,
-    /// 增量日志与单个进程状态。
-    BackgroundLogs,
     /// 批量进程状态。
     BackgroundList,
     /// 递归删除目录。
@@ -64,6 +67,8 @@ pub(crate) enum TaskKind {
     SftpCommitMissing,
     /// SFTP 按版本条件提交。
     SftpCommitChecked,
+    /// 当前 epoch 的统一命令能力探测。
+    CapabilityProbe,
 }
 
 impl TaskKind {
@@ -76,15 +81,16 @@ impl TaskKind {
             Self::TreeList => "tree_list",
             Self::RipgrepContent => "ripgrep_content",
             Self::RipgrepFiles => "ripgrep_files",
+            Self::GrepContent => "grep_content",
             Self::FileVersion => "file_version",
             Self::CreateDirectory => "create_directory",
-            Self::BackgroundLogs => "background_logs",
             Self::BackgroundList => "background_list",
             Self::RecursiveDelete => "recursive_delete",
             Self::SftpHash => "sftp_hash",
             Self::SftpReplace => "sftp_replace",
             Self::SftpCommitMissing => "sftp_commit_missing",
             Self::SftpCommitChecked => "sftp_commit_checked",
+            Self::CapabilityProbe => "capability_probe",
         }
     }
 }
@@ -119,7 +125,9 @@ enum Capability {
 #[derive(Default)]
 pub(crate) struct RemoteTaskRuntime {
     capabilities: Mutex<HashMap<TaskKind, Capability>>,
+    capability_snapshot: Mutex<SshCapabilitySnapshot>,
     prepared_channel: AsyncMutex<Option<Channel<Msg>>>,
+    pub(super) probe_lock: AsyncMutex<()>,
     channel_preparing: AtomicBool,
 }
 
@@ -207,6 +215,45 @@ impl RemoteTaskRuntime {
         if !matches!(capabilities.get(&task), Some(Capability::Unavailable(_))) {
             capabilities.insert(task, Capability::Available);
         }
+    }
+
+    /// 由一次完整统一探测替换任务状态，允许用户安装依赖后在同一 epoch 重新启用。
+    pub(super) fn replace_capability(
+        &self,
+        task: TaskKind,
+        available: bool,
+        reason: impl Into<String>,
+    ) {
+        self.capabilities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                task,
+                if available {
+                    Capability::Available
+                } else {
+                    Capability::Unavailable(reason.into())
+                },
+            );
+    }
+
+    /// 保存不含连接 epoch 的最新能力明细。
+    pub(super) fn set_capability_snapshot(&self, snapshot: SshCapabilitySnapshot) {
+        *self
+            .capability_snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
+    }
+
+    /// 返回绑定调用方 epoch 的统一能力快照。
+    pub(crate) fn capability_snapshot(&self, epoch: u64) -> SshCapabilitySnapshot {
+        let mut snapshot = self
+            .capability_snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        snapshot.epoch = (epoch != 0).then_some(epoch);
+        snapshot
     }
 
     /// 标记任务在当前连接不可用，并返回状态是否首次发生变化。

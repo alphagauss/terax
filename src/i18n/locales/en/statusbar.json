@@ -164,6 +164,42 @@
     "tooltip": "SSH round-trip latency: {{value}} ms. Measured by the connection health supervisor.",
     "fileWriteFallback": "Fast remote writes are unavailable. This connection is using SFTP for file writes."
   },
+  "sshCapabilities": {
+    "title": "SSH server capabilities",
+    "aria": "SSH server capabilities: {{state}}",
+    "summary": "{{ready}}/{{total}} preferred capabilities ready",
+    "recheck": "Recheck",
+    "checking": "Checking",
+    "featuresTitle": "Feature status",
+    "commandsTitle": "Required commands",
+    "notAvailable": "Unavailable",
+    "checkedAt": "Last checked: {{value}}",
+    "ripgrepSuggestion": "Install ripgrep to enable full fast content search and file listing. Terax never installs remote software automatically.",
+    "states": {
+      "unknown": "Not checked",
+      "checking": "Checking",
+      "ready": "All ready",
+      "fallback": "Compatibility mode",
+      "unavailable": "Some features unavailable"
+    },
+    "commandStates": {
+      "ready": "Ready",
+      "missing": "Missing",
+      "unsupported": "Unsupported options"
+    },
+    "features": {
+      "file_version": "File version",
+      "tree_listing": "Recursive tree listing",
+      "directory_summary": "Directory summary",
+      "file_write": "Conditional file writes",
+      "create_directory": "Directory creation",
+      "background_logs": "Background command logs",
+      "background_processes": "Background process status",
+      "recursive_delete": "Recursive deletion",
+      "content_search": "Content search",
+      "file_listing": "Fast file listing"
+    }
+  },
   "tunnels": {
     "label": "Tunnels",
     "count": "Tunnels {{count}}",

@@ -1,5 +1,5 @@
 /**
- * 本文件定义 SSH profile、连接、健康、流量和隧道的跨进程数据类型。
+ * 本文件定义 SSH profile、连接、健康、服务器能力、流量和隧道的跨进程数据类型。
  * 持久化隧道使用稳定配置 ID，运行时隧道 ID 只用于当前进程的资源控制。
  */
 
@@ -84,6 +84,35 @@ export type SshHealthSnapshot = {
   sampledAt: number | null;
   fileWriteFallback: boolean;
   taskFallbacks?: Array<{ task: string; reason: string }>;
+};
+
+export type SshCapabilityState =
+  | "unknown"
+  | "checking"
+  | "ready"
+  | "fallback"
+  | "unavailable";
+
+export type SshCommandCapability = {
+  id: string;
+  command: string;
+  state: "ready" | "missing" | "unsupported";
+  detail: string | null;
+};
+
+export type SshFeatureCapability = {
+  id: string;
+  state: SshCapabilityState;
+  backend: string | null;
+  commands: string[];
+};
+
+export type SshCapabilitySnapshot = {
+  epoch: number | null;
+  state: SshCapabilityState;
+  checkedAt: number | null;
+  commands: SshCommandCapability[];
+  features: SshFeatureCapability[];
 };
 
 export type HostKeyPrompt = {

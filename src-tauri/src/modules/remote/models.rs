@@ -1,4 +1,4 @@
-//! SSH 配置、连接健康、流量和隧道的跨进程数据模型。
+//! SSH 配置、连接健康、服务器能力、流量和隧道的跨进程数据模型。
 //!
 //! 本模块定义写入共享 SSH profile 存储的持久化隧道，以及仅在当前
 //! Workspace 进程中有效的运行时隧道信息。持久化 ID 与运行时 ID 分离，
@@ -177,6 +177,63 @@ pub struct SshHealthSnapshot {
     pub sampled_at: Option<u64>,
     pub file_write_fallback: bool,
     pub task_fallbacks: Vec<SshTaskFallback>,
+}
+
+/// SSH 能力探测、功能后端和命令检查共用的状态等级。
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SshCapabilityState {
+    /// 当前 epoch 尚未完成探测。
+    #[default]
+    Unknown,
+    /// 探测正在后台执行。
+    Checking,
+    /// 首选服务端快速路径可用。
+    Ready,
+    /// 功能可用，但正在使用次级或 SFTP 后端。
+    Fallback,
+    /// 当前连接没有安全可用的实现。
+    Unavailable,
+}
+
+/// 实际命令及参数组合的就绪状态。
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SshCommandCapabilityState {
+    Ready,
+    Missing,
+    Unsupported,
+}
+
+/// 一个实际命令及所需参数组合的探测结果。
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshCommandCapability {
+    pub id: String,
+    pub command: String,
+    pub state: SshCommandCapabilityState,
+    pub detail: Option<String>,
+}
+
+/// 一个用户可感知 SSH 功能的后端选择结果。
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshFeatureCapability {
+    pub id: String,
+    pub state: SshCapabilityState,
+    pub backend: Option<String>,
+    pub commands: Vec<String>,
+}
+
+/// 当前 SSH epoch 的统一服务器能力快照。
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshCapabilitySnapshot {
+    pub epoch: Option<u64>,
+    pub state: SshCapabilityState,
+    pub checked_at: Option<u64>,
+    pub commands: Vec<SshCommandCapability>,
+    pub features: Vec<SshFeatureCapability>,
 }
 
 /// 前端凭据对话框对本次连接提供的临时覆盖值。

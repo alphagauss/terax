@@ -1,5 +1,5 @@
 /**
- * 本文件封装 SSH 连接、transport 健康与流量、终端和隧道相关的 Tauri IPC。
+ * 本文件封装 SSH 连接、transport 健康、服务器能力、流量、终端和隧道相关的 Tauri IPC。
  * 文件传输统一由 transfers 模块管理，这里不暴露平行上传或下载入口。
  */
 
@@ -11,6 +11,7 @@ import type {
   RemoteForegroundIntent,
   RemoteRuntimeSnapshot,
   SshCredentialInput,
+  SshCapabilitySnapshot,
   SshHealthSnapshot,
   SshTrafficSnapshot,
   TunnelConfig,
@@ -32,6 +33,10 @@ export const remoteNative = {
   runtimeSnapshot: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_snapshot"),
   trafficSnapshot: () => invoke<SshTrafficSnapshot>("ssh_traffic_snapshot"),
   healthSnapshot: () => invoke<SshHealthSnapshot>("ssh_health_snapshot"),
+  capabilitiesSnapshot: () =>
+    invoke<SshCapabilitySnapshot>("ssh_capabilities_snapshot"),
+  reprobeCapabilities: () =>
+    invoke<SshCapabilitySnapshot>("ssh_capabilities_reprobe"),
   wakeRuntime: () => invoke<RemoteRuntimeSnapshot>("ssh_runtime_wake"),
   setForeground: (intent: RemoteForegroundIntent) =>
     invoke<void>("ssh_runtime_set_foreground", { intent }),
@@ -98,6 +103,10 @@ export const remoteNative = {
     ),
   onHealth: (handler: (snapshot: SshHealthSnapshot) => void) =>
     listen<SshHealthSnapshot>("terax://ssh-health", (event) =>
+      handler(event.payload),
+    ),
+  onCapabilities: (handler: (snapshot: SshCapabilitySnapshot) => void) =>
+    listen<SshCapabilitySnapshot>("terax://ssh-capabilities", (event) =>
       handler(event.payload),
     ),
   onTunnel: (handler: (event: TunnelEvent) => void): Promise<UnlistenFn> =>

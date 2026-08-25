@@ -51,6 +51,8 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - task 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
 - 提交响应丢失时通过 expected 和 replacement revision 收敛结果，不盲目覆盖。
 - capability 与缺失依赖按任务绑定当前 SSH epoch，一个任务失效不会关闭其他任务；安全的只读或执行前失败回退既有 SFTP 路径。
+- 统一能力探测只运行编译进应用的固定脚本，不接收用户命令，不扫描 Workspace；需要验证写入参数时只使用 `${TMPDIR:-/tmp}` 下的随机目录并在同一次脚本内清理。
+- 能力面板只提供缺失依赖与安装建议，绝不执行包管理器、上传工具或自动修改服务器。
 - 写入或文件系统变更在 dispatch 后结果不明确时不得盲目回退，必须由语义服务收敛或返回错误。
 
 ## AI 工具审批流程

@@ -1,6 +1,6 @@
 /**
- * 本文件测试状态栏 SSH RTT 的 epoch 隔离、事件更新和写入降级提示。
- * 锁定旧连接样本不能污染新 Runtime，且永久回退只在当前 epoch 显示 I/O 标记。
+ * 本文件测试状态栏 SSH RTT 的 epoch 隔离和事件更新。
+ * 锁定旧连接样本不能污染新 Runtime，任务降级由独立能力控件负责展示。
  */
 
 // @vitest-environment happy-dom
@@ -160,7 +160,7 @@ describe("SSH RTT indicator", () => {
     act(() => root.unmount());
   });
 
-  it("shows I/O only after the current epoch permanently falls back", async () => {
+  it("leaves task fallback rendering to the capability control", async () => {
     mocks.onHealth.mockImplementation(async (handler) => {
       mocks.healthHandler = handler;
       return mocks.unlisten;
@@ -184,8 +184,7 @@ describe("SSH RTT indicator", () => {
         fileWriteFallback: true,
       });
     });
-    expect(container.textContent).toContain("I/O");
-    expect(container.textContent).toContain("sshRtt.fileWriteFallback");
+    expect(container.textContent).not.toContain("I/O");
 
     mocks.runtime = {
       phase: "connected",

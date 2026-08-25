@@ -1,6 +1,6 @@
 /**
- * 本文件实现状态栏中的低频 SSH RTT 与文件写入降级提示。
- * RTT 和 Bash helper 永久回退由同一 epoch 快照承载，正常写入不增加状态栏标记。
+ * 本文件实现状态栏中的低频 SSH RTT 提示。
+ * 服务器命令能力和任务降级由独立能力灯展示，本组件只维护 transport 延迟。
  */
 
 import {
@@ -53,10 +53,7 @@ export function SshRttIndicator() {
         }
         return {
           ...snapshot,
-          fileWriteFallback:
-            current.epoch === snapshot.epoch
-              ? current.fileWriteFallback || snapshot.fileWriteFallback
-              : snapshot.fileWriteFallback,
+          fileWriteFallback: snapshot.fileWriteFallback,
         };
       });
     };
@@ -88,20 +85,10 @@ export function SshRttIndicator() {
       <TooltipTrigger asChild>
         <span className="flex h-6 shrink-0 cursor-default items-center gap-1 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground">
           <span>{value} ms</span>
-          {currentHealth.fileWriteFallback ? (
-            <span className="font-medium text-warning">
-              I/O
-            </span>
-          ) : null}
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-[11px]">
         <div>{tooltip}</div>
-        {currentHealth.fileWriteFallback ? (
-          <div className="mt-1 text-muted-foreground">
-            {t("sshRtt.fileWriteFallback")}
-          </div>
-        ) : null}
       </TooltipContent>
     </Tooltip>
   );

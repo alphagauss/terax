@@ -1,6 +1,6 @@
 /**
  * 本文件实现应用底部状态栏。
- * 负责组合工作区、诊断、Python、隐私、后台传输、SSH RTT 与流量、隧道和 Agent 状态，不持有各子系统业务状态。
+ * 负责组合工作区、诊断、Python、隐私、后台传输、SSH RTT、能力与流量、隧道和 Agent 状态，不持有各子系统业务状态。
  */
 
 import {
@@ -12,6 +12,7 @@ import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
 import type { PythonInterpreter } from "@/modules/python/native";
 import {
+  SshCapabilityControl,
   SshRttIndicator,
   SshTrafficControl,
   TunnelStatusControl,
@@ -70,6 +71,7 @@ export function StatusBar({
           onCurrentReconnect={onWorkspaceReconnect}
         />
         <SshRttIndicator />
+        <SshCapabilityControl />
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />
