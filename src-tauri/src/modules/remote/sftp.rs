@@ -26,6 +26,7 @@ use super::tasks::TaskKind;
 const DIRECTORY_READ_PIPELINE: usize = 2;
 const FILE_READ_PIPELINE: usize = 8;
 const DEFAULT_FILE_READ_CHUNK: u32 = 240 * 1024;
+const DEFAULT_RANGE_READ_CHUNK: u32 = 64 * 1024;
 
 /// 目录与文件正文读取共享的 raw SFTP session 及服务端读取能力。
 pub(crate) struct RemoteReadSession {
@@ -575,6 +576,38 @@ pub async fn read_file(
     }
 }
 
+/// 从固定字节偏移开始流水线读取一个有界区间。
+///
+/// 后台日志使用该入口避免大块 stdout 占用 exec channel；读取前观察到的文件大小锁定
+/// 本次区间，追加内容由下一次 offset 请求继续获取，文件缩短时返回空块。
+pub(crate) async fn read_file_range(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+    offset: u64,
+    limit: u64,
+) -> Result<Vec<u8>, String> {
+    validate_remote_path(path)?;
+    let context = format!("read remote file range {path}");
+    for attempt in 0..2 {
+        let current = read_session(workspace).await?;
+        match read_file_range_once(current.clone(), path, offset, limit).await {
+            Ok(value) => return Ok(value),
+            Err(error) if should_invalidate_session(&error) => {
+                if should_fail_transport(&error) {
+                    workspace.report_transport_failure();
+                    return Err(format!("{context}: {error}"));
+                }
+                invalidate_read_session(workspace, &current).await;
+                if attempt == 1 {
+                    return Err(format!("{context}: {error}"));
+                }
+            }
+            Err(error) => return Err(format!("{context}: {error}")),
+        }
+    }
+    unreachable!("raw SFTP range read retry loop always returns")
+}
+
 /// 并发取得目标元数据与文件 handle，再流水线读取已确认大小的正文。
 ///
 /// 小文件只保留 `STAT + OPEN` 和 `READ` 两个依赖阶段；大文件按固定 offset 维持
@@ -645,6 +678,54 @@ async fn read_file_snapshot_once(
     Ok(RemoteFileRead::Content { bytes, size, mtime })
 }
 
+/// 在一次 raw session 上观察文件大小并读取指定区间。
+async fn read_file_range_once(
+    read_session: Arc<RemoteReadSession>,
+    path: &str,
+    offset: u64,
+    limit: u64,
+) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
+    let session = read_session.session.clone();
+    let metadata_path = path.to_string();
+    let open_path = path.to_string();
+    let (chunk_len, metadata, opened) = tokio::join!(
+        file_read_chunk_len(&read_session),
+        session.stat(metadata_path),
+        session.open(open_path, OpenFlags::READ, FileAttributes::empty()),
+    );
+    let (metadata, handle) = match (metadata, opened) {
+        (Ok(metadata), Ok(handle)) => (metadata.attrs, handle.handle),
+        (Err(error), Ok(handle)) => {
+            close_read_handle(session, handle.handle);
+            return Err(error);
+        }
+        (Ok(_), Err(error)) | (Err(error), Err(_)) => return Err(error),
+    };
+    let size = metadata.len().saturating_sub(offset).min(limit);
+    if size == 0 {
+        close_read_handle(session, handle);
+        return Ok(Vec::new());
+    }
+    let bytes = match read_file_range_pipelined(
+        session.clone(),
+        handle.clone(),
+        offset,
+        size,
+        chunk_len.min(DEFAULT_RANGE_READ_CHUNK),
+        1,
+    )
+    .await
+    {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                close_read_handle(session, handle);
+                return Err(error);
+            }
+    };
+    close_read_handle(session, handle);
+    Ok(bytes)
+}
+
 /// 首次文件读取时并行查询服务端 limits，失败时使用保守块大小。
 async fn file_read_chunk_len(session: &RemoteReadSession) -> u32 {
     *session
@@ -667,14 +748,25 @@ async fn file_read_chunk_len(session: &RemoteReadSession) -> u32 {
 }
 
 /// 按 offset 规划完整且不重叠的文件读取块。
+#[cfg(test)]
 fn plan_file_read_chunks(size: u64, chunk_len: u32) -> VecDeque<FileReadChunk> {
+    plan_file_read_range_chunks(0, size, chunk_len)
+}
+
+/// 从绝对 offset 规划一个完整且不重叠的有界读取区间。
+fn plan_file_read_range_chunks(
+    start_offset: u64,
+    size: u64,
+    chunk_len: u32,
+) -> VecDeque<FileReadChunk> {
     debug_assert!(chunk_len > 0);
     let mut chunks = VecDeque::new();
-    let mut offset = 0;
-    while offset < size {
-        let len = (size - offset).min(u64::from(chunk_len)) as u32;
+    let mut consumed = 0;
+    while consumed < size {
+        let len = (size - consumed).min(u64::from(chunk_len)) as u32;
+        let offset = start_offset.saturating_add(consumed);
         chunks.push_back(FileReadChunk { offset, len });
-        offset += u64::from(len);
+        consumed += u64::from(len);
     }
     chunks
 }
@@ -686,15 +778,41 @@ async fn read_file_pipelined(
     size: u64,
     chunk_len: u32,
 ) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
+    read_file_range_pipelined(
+        session,
+        handle,
+        0,
+        size,
+        chunk_len,
+        FILE_READ_PIPELINE,
+    )
+    .await
+}
+
+/// 在单个 handle 上流水线读取绝对 offset 对应的有界区间。
+async fn read_file_range_pipelined(
+    session: Arc<russh_sftp::client::RawSftpSession>,
+    handle: String,
+    base_offset: u64,
+    size: u64,
+    chunk_len: u32,
+    max_inflight: usize,
+) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
     let output_len = usize::try_from(size).map_err(|_| {
         russh_sftp::client::error::Error::UnexpectedBehavior(
             "remote file does not fit in local memory".into(),
         )
     })?;
     let mut output = vec![0; output_len];
-    let mut queued = plan_file_read_chunks(size, chunk_len);
+    let mut queued = plan_file_read_range_chunks(base_offset, size, chunk_len);
     let mut pending = FuturesUnordered::new();
-    fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle);
+    fill_file_read_pipeline(
+        &mut pending,
+        &mut queued,
+        &session,
+        &handle,
+        max_inflight,
+    );
 
     while let Some((chunk, result)) = pending.next().await {
         let data = result?.data;
@@ -703,7 +821,7 @@ async fn read_file_pipelined(
                 "remote file returned an invalid read length".into(),
             ));
         }
-        let start = usize::try_from(chunk.offset).map_err(|_| {
+        let start = usize::try_from(chunk.offset.saturating_sub(base_offset)).map_err(|_| {
             russh_sftp::client::error::Error::UnexpectedBehavior(
                 "remote file offset does not fit in local memory".into(),
             )
@@ -725,7 +843,13 @@ async fn read_file_pipelined(
                 len: chunk.len - data.len() as u32,
             });
         }
-        fill_file_read_pipeline(&mut pending, &mut queued, &session, &handle);
+        fill_file_read_pipeline(
+            &mut pending,
+            &mut queued,
+            &session,
+            &handle,
+            max_inflight,
+        );
     }
     Ok(output)
 }
@@ -736,8 +860,10 @@ fn fill_file_read_pipeline(
     queued: &mut VecDeque<FileReadChunk>,
     session: &Arc<russh_sftp::client::RawSftpSession>,
     handle: &str,
+    max_inflight: usize,
 ) {
-    while pending.len() < FILE_READ_PIPELINE {
+    debug_assert!(max_inflight > 0);
+    while pending.len() < max_inflight {
         let Some(chunk) = queued.pop_front() else {
             break;
         };
@@ -1404,9 +1530,10 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        existing_write_target, permission_attributes, plan_file_read_chunks, remote_parent_name,
-        sanitize_local_name, should_fail_transport, should_invalidate_session, FileReadChunk,
-        DEFAULT_FILE_READ_CHUNK, FILE_READ_PIPELINE,
+        existing_write_target, permission_attributes, plan_file_read_chunks,
+        plan_file_read_range_chunks, remote_parent_name, sanitize_local_name,
+        should_fail_transport, should_invalidate_session, FileReadChunk, DEFAULT_FILE_READ_CHUNK,
+        FILE_READ_PIPELINE,
     };
 
     #[test]
@@ -1433,6 +1560,28 @@ mod tests {
                 offset: 0,
                 len: DEFAULT_FILE_READ_CHUNK,
             }])
+        );
+    }
+
+    #[test]
+    fn plans_log_ranges_with_absolute_offsets() {
+        let chunks = plan_file_read_range_chunks(4096, 10, 4);
+        assert_eq!(
+            chunks,
+            std::collections::VecDeque::from([
+                FileReadChunk {
+                    offset: 4096,
+                    len: 4,
+                },
+                FileReadChunk {
+                    offset: 4100,
+                    len: 4,
+                },
+                FileReadChunk {
+                    offset: 4104,
+                    len: 2,
+                },
+            ])
         );
     }
 
