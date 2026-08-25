@@ -21,6 +21,7 @@ use super::file_service::{
 };
 use super::session::{join_remote, validate_remote_path, RemoteWorkspace};
 use super::tasks::sftp_fallback::{self, RemoteCommit};
+use super::tasks::TaskKind;
 
 const DIRECTORY_READ_PIPELINE: usize = 2;
 const FILE_READ_PIPELINE: usize = 8;
@@ -140,7 +141,10 @@ pub(crate) async fn walk_cancellable(
                 format!("{relative}/{}", entry.name)
             };
             let path = join_remote(&directory, &entry.name);
-            if entry.kind == RemoteEntryKind::Dir && !PRUNE.contains(&entry.name.as_str()) {
+            if entry.kind == RemoteEntryKind::Dir {
+                if PRUNE.contains(&entry.name.as_str()) {
+                    continue;
+                }
                 pending.push((path.clone(), rel.clone(), depth + 1));
             }
             output.push(RemoteWalkEntry {
@@ -778,6 +782,7 @@ pub async fn write_file(
     content: &[u8],
 ) -> Result<u64, String> {
     let (sftp, target, permissions) = prepare_remote_write(workspace, path).await?;
+    sftp_fallback::ensure_available(workspace, TaskKind::SftpReplace)?;
     let (temporary, channel) =
         stage_remote_write_and_open_commit(workspace, &sftp, &target, permissions, content).await?;
     if let Some(written) =
@@ -807,6 +812,7 @@ pub(crate) async fn write_file_missing(
     validate_remote_path(path)?;
     let sftp = session(workspace).await?;
     let target = canonical_target_for_new_file(workspace, &sftp, path).await?;
+    sftp_fallback::ensure_available(workspace, TaskKind::SftpCommitMissing)?;
     let (temporary, channel) =
         stage_remote_write_and_open_commit(workspace, &sftp, &target, None, content).await?;
     let outcome = sftp_fallback::commit_missing(workspace, channel, &temporary, &target).await;
@@ -955,6 +961,7 @@ pub(crate) async fn write_file_checked(
         }
     }
 
+    sftp_fallback::ensure_available(workspace, TaskKind::SftpCommitChecked)?;
     let (temporary, channel) = stage_remote_write_and_open_commit(
         workspace,
         &sftp,

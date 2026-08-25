@@ -8,15 +8,15 @@ helper="$script_dir/create_directory.sh"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-target_path="$work/a/b/c" bash "$helper" >"$work/created.bin"
+target_path="$work/a/b/c" probe_features=1 "$BASH" "$helper" >"$work/created.bin"
 test -d "$work/a/b/c"
 grep -aFq 'created' "$work/created.bin"
 
-target_path="$work/a/b/c" bash "$helper" >"$work/exists.bin"
+target_path="$work/a/b/c" probe_features=1 "$BASH" "$helper" >"$work/exists.bin"
 grep -aFq 'exists' "$work/exists.bin"
 
 mkdir -p -- "$work/real"
 ln -s -- "$work/real" "$work/link"
-target_path="$work/link/nested" bash "$helper" >"$work/link.bin"
+target_path="$work/link/nested" probe_features=1 "$BASH" "$helper" >"$work/link.bin"
 test -d "$work/real/nested"
 grep -aFq 'created' "$work/link.bin"

@@ -1,7 +1,7 @@
-//! SSH transport 的进程级健康状态、RTT 与文件写入降级快照。
+//! SSH transport 的进程级健康状态、RTT 与内部任务降级快照。
 //!
-//! 所有 channel 共享最近入站活动和失败信号；文件 helper 的永久回退由 Workspace
-//! 合并进同一 epoch 快照，只有统一监督器可以主动发送健康探测。
+//! 所有 channel 共享最近入站活动和失败信号；内部任务的永久回退由 Workspace 合并进
+//! 同一 epoch 快照，只有统一监督器可以主动发送健康探测。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

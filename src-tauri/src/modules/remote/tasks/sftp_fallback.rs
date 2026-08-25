@@ -26,7 +26,7 @@ pub(crate) async fn replace(
     temporary: &str,
     target: &str,
 ) -> Result<Option<RemoteObservedVersion>, String> {
-    ensure_available(workspace)?;
+    ensure_available(workspace, TaskKind::SftpReplace)?;
     let command = format!(
         "command -v mv >/dev/null 2>&1 && command -v stat >/dev/null 2>&1 || exit 72; \
          target={target}; mv -f -- {temporary} \"$target\" || exit 74; \
@@ -38,7 +38,7 @@ pub(crate) async fn replace(
         .exec_on_channel(channel, &command, None, Duration::from_secs(15))
         .await?;
     if output.exit_code == Some(72) {
-        disable(workspace, "missing mv or stat");
+        disable(workspace, TaskKind::SftpReplace, "missing mv or stat");
         return Err("remote SFTP commit dependencies are unavailable".into());
     }
     if output.timed_out || output.exit_code != Some(0) {
@@ -51,13 +51,13 @@ pub(crate) async fn replace(
             format!("replace remote file {target} failed: {detail}")
         });
     }
-    workspace.tasks.mark_available(TaskKind::SftpCommit);
+    workspace.tasks.mark_available(TaskKind::SftpReplace);
     Ok(parse_remote_observed(&output.stdout))
 }
 
 /// 使用服务器已有的受支持工具计算 SHA-256。
 pub(crate) async fn sha256(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<String, String> {
-    ensure_available(workspace)?;
+    ensure_available(workspace, TaskKind::SftpHash)?;
     let path = shell_quote(path);
     let command = format!(
         "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {path}; \
@@ -69,13 +69,13 @@ pub(crate) async fn sha256(workspace: &Arc<RemoteWorkspace>, path: &str) -> Resu
         .exec(&command, None, Duration::from_secs(60))
         .await?;
     if output.exit_code == Some(72) {
-        disable(workspace, "missing SHA-256 provider");
+        disable(workspace, TaskKind::SftpHash, "missing SHA-256 provider");
         return Err("remote SHA-256 command failed or is unavailable".into());
     }
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote SHA-256 command failed or is unavailable".into());
     }
-    workspace.tasks.mark_available(TaskKind::SftpCommit);
+    workspace.tasks.mark_available(TaskKind::SftpHash);
     parse_sha256(&output.stdout)
 }
 
@@ -88,20 +88,24 @@ pub(crate) async fn commit_checked(
     expected_revision: &str,
     replacement_revision: &str,
 ) -> Result<RemoteCommit, String> {
-    ensure_available(workspace)?;
+    ensure_available(workspace, TaskKind::SftpCommitChecked)?;
     let command =
         checked_commit_command(temporary, target, expected_revision, replacement_revision);
     let output = workspace
         .exec_on_channel(channel, &command, None, Duration::from_secs(60))
         .await?;
     if output.exit_code == Some(72) {
-        disable(workspace, "missing checked commit dependencies");
+        disable(
+            workspace,
+            TaskKind::SftpCommitChecked,
+            "missing checked commit dependencies",
+        );
         return Err("remote checked replace dependencies are unavailable".into());
     }
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote checked replace failed".into());
     }
-    workspace.tasks.mark_available(TaskKind::SftpCommit);
+    workspace.tasks.mark_available(TaskKind::SftpCommitChecked);
     parse_remote_commit(&output.stdout)
         .map_err(|_| "remote checked replace returned an invalid status".into())
 }
@@ -113,7 +117,7 @@ pub(crate) async fn commit_missing(
     temporary: &str,
     target: &str,
 ) -> Result<RemoteCommit, String> {
-    ensure_available(workspace)?;
+    ensure_available(workspace, TaskKind::SftpCommitMissing)?;
     let output = workspace
         .exec_on_channel(
             channel,
@@ -123,13 +127,17 @@ pub(crate) async fn commit_missing(
         )
         .await?;
     if output.exit_code == Some(72) {
-        disable(workspace, "missing no-clobber commit dependencies");
+        disable(
+            workspace,
+            TaskKind::SftpCommitMissing,
+            "missing no-clobber commit dependencies",
+        );
         return Err("remote missing-only write dependencies are unavailable".into());
     }
     if output.timed_out || output.exit_code != Some(0) {
         return Err("remote missing-only write failed".into());
     }
-    workspace.tasks.mark_available(TaskKind::SftpCommit);
+    workspace.tasks.mark_available(TaskKind::SftpCommitMissing);
     match parse_remote_commit(&output.stdout) {
         Ok(RemoteCommit::Complete(observed)) => Ok(RemoteCommit::Complete(observed)),
         Ok(RemoteCommit::Conflict(observed)) => Ok(RemoteCommit::Conflict(observed)),
@@ -147,18 +155,17 @@ fn parse_sha256(output: &[u8]) -> Result<String, String> {
     Ok(revision.to_ascii_lowercase())
 }
 
-fn ensure_available(workspace: &RemoteWorkspace) -> Result<(), String> {
-    if workspace.tasks.should_attempt(TaskKind::SftpCommit) {
+/// 在上传临时正文前确认对应的原子提交能力仍可尝试。
+pub(crate) fn ensure_available(workspace: &RemoteWorkspace, task: TaskKind) -> Result<(), String> {
+    if workspace.tasks.should_attempt(task) {
         Ok(())
     } else {
         Err("remote SFTP commit task is unavailable".into())
     }
 }
 
-fn disable(workspace: &RemoteWorkspace, reason: &str) {
-    workspace
-        .tasks
-        .mark_unavailable(TaskKind::SftpCommit, reason);
+fn disable(workspace: &Arc<RemoteWorkspace>, task: TaskKind, reason: &str) {
+    workspace.mark_task_unavailable(task, reason);
 }
 
 fn parse_remote_commit(output: &[u8]) -> Result<RemoteCommit, String> {

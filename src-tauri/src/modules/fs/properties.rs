@@ -557,14 +557,15 @@ async fn ssh_scan(
             return Err("directory scan target is not a directory".into());
         }
         if output.exit_code == Some(72) {
-            workspace
-                .tasks
-                .mark_unavailable(task, "missing GNU find or awk");
-        } else if let Ok(summary) =
-            parse_scan_output(&output.stdout, &output.stderr, output.exit_code == Some(0))
-        {
-            workspace.tasks.mark_available(task);
-            return Ok(summary);
+            workspace.mark_task_unavailable(task, "missing GNU find or awk");
+        } else {
+            match parse_scan_output(&output.stdout, &output.stderr, output.exit_code == Some(0)) {
+                Ok(summary) => {
+                    workspace.tasks.mark_available(task);
+                    return Ok(summary);
+                }
+                Err(error) => workspace.mark_task_unavailable(task, error),
+            }
         }
     }
     sftp_scan(path, workspace, cancellation).await

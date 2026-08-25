@@ -4,9 +4,18 @@
 
 set -eu
 
-for tool in mkdir readlink; do
-  command -v "$tool" >/dev/null 2>&1 || exit 72
-done
+if [ "$probe_features" = 1 ]; then
+  for tool in mkdir readlink mktemp rm; do
+    command -v "$tool" >/dev/null 2>&1 || exit 72
+  done
+  readlink -f -- /dev/null >/dev/null 2>&1 || exit 72
+  probe=$(mktemp -d) || exit 72
+  if ! mkdir -p -- "$probe/a/b" 2>/dev/null; then
+    rm -rf -- "$probe"
+    exit 72
+  fi
+  rm -rf -- "$probe" || exit 72
+fi
 
 case $target_path in
   /*) ;;

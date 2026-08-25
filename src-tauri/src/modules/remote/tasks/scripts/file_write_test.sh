@@ -1,10 +1,11 @@
-# Bash 文件 helper 的独立语义测试。
+#!/usr/bin/env bash
+# Bash 文件写入任务的独立语义测试。
 #
 # 测试锁定条件写入、冲突、缺失创建、覆盖和权限保留，不依赖 SSH 或仓库运行时。
 
-set -eu
+set -euo pipefail
 
-helper=${BASH_SOURCE[0]%/*}/file_helper.sh
+helper=${BASH_SOURCE[0]%/*}/file_write.sh
 root=$(mktemp -d)
 trap 'rm -rf -- "$root"' EXIT HUP INT TERM
 
@@ -30,7 +31,8 @@ terax_run_file() {
     expected_size=$expected_size \
     replacement_revision=$replacement_revision \
     replacement_size=$replacement_size \
-    bash "$helper" <"$body_path" >"$root/response"
+    probe_features=1 \
+    "$BASH" "$helper" <"$body_path" >"$root/response"
   grep -a -q 'TERAX_SHELL_FILE_V1' "$root/response"
 }
 
@@ -74,10 +76,30 @@ if printf '%s' "$body" | \
   expected_size=0 \
   replacement_revision=$replacement_revision \
   replacement_size=${#body} \
-  bash "$helper" >"$root/response" 2>/dev/null; then
+  probe_features=1 \
+  "$BASH" "$helper" >"$root/response" 2>/dev/null; then
   exit 1
 fi
 [ -z "$(find "$directory" -mindepth 1 -print -quit)" ]
+
+dangling_target=$root/dangling-target
+dangling_link=$root/dangling-link
+ln -s "$dangling_target" "$dangling_link"
+body=rejected
+replacement_revision=$(printf '%s' "$body" | terax_revision)
+if printf '%s' "$body" | \
+  operation=write_missing \
+  target_path=$dangling_link \
+  expected_revision= \
+  expected_size=0 \
+  replacement_revision=$replacement_revision \
+  replacement_size=${#body} \
+  probe_features=1 \
+  "$BASH" "$helper" >"$root/response" 2>/dev/null; then
+  exit 1
+fi
+[ -L "$dangling_link" ]
+[ ! -e "$dangling_target" ]
 
 binary=$root/binary
 printf '\000raw\377' >"$root/binary-request"

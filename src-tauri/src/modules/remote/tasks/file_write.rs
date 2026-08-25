@@ -1,4 +1,4 @@
-//! 不落盘 Bash 文件写入 helper 的 SSH 协议适配。
+//! 不落盘 Bash 文件写入任务的 SSH 协议适配。
 //!
 //! 每次调用在独立 session channel 中执行仓库内嵌脚本，参数经过 shell 转义，正文
 //! 通过 stdin 原样传输。模块不决定 SFTP 回退，只报告目标是否可能已经提交。
@@ -6,19 +6,23 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::file_service::{RemoteCheckedWrite, RemoteObservedVersion, RemoteVersion};
-use super::session::{shell_quote, validate_remote_path, ExecOutput, RemoteWorkspace};
-use super::tasks::TaskKind;
+use super::{TaskKind, TaskRunError};
+use crate::modules::remote::file_service::{
+    RemoteCheckedWrite, RemoteObservedVersion, RemoteVersion,
+};
+use crate::modules::remote::session::{
+    shell_quote, validate_remote_path, ExecOutput, RemoteWorkspace,
+};
 
-const HELPER_SOURCE: &str = include_str!("file_helper.sh");
+const HELPER_SOURCE: &str = include_str!("scripts/file_write.sh");
 const PROTOCOL_MARKER: &[u8] = b"TERAX_SHELL_FILE_V1";
 const MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 1024;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Bash helper 失败及失败时目标是否可能已经提交。
+/// Bash 文件写入任务失败及失败时目标是否可能已经提交。
 #[derive(Debug)]
-pub(crate) struct ShellFileError {
+pub(crate) struct FileWriteTaskError {
     pub(crate) may_have_committed: bool,
     pub(crate) disable_backend: bool,
 }
@@ -30,16 +34,17 @@ struct HelperResponse {
     mtime: u64,
 }
 
-/// 通过 Bash helper 按已确认版本提交远端文件。
+/// 通过 Bash 任务按已确认版本提交远端文件。
 pub(crate) async fn write_checked(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     content: &[u8],
     expected: &RemoteVersion,
     replacement_revision: &str,
-) -> Result<RemoteCheckedWrite, ShellFileError> {
+) -> Result<RemoteCheckedWrite, FileWriteTaskError> {
     write(
         workspace,
+        TaskKind::FileWriteChecked,
         "write_checked",
         path,
         content,
@@ -49,15 +54,16 @@ pub(crate) async fn write_checked(
     .await
 }
 
-/// 通过 Bash helper 仅在目标缺失时创建远端文件。
+/// 通过 Bash 任务仅在目标缺失时创建远端文件。
 pub(crate) async fn write_missing(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     content: &[u8],
     replacement_revision: &str,
-) -> Result<RemoteCheckedWrite, ShellFileError> {
+) -> Result<RemoteCheckedWrite, FileWriteTaskError> {
     write(
         workspace,
+        TaskKind::FileWriteMissing,
         "write_missing",
         path,
         content,
@@ -67,15 +73,16 @@ pub(crate) async fn write_missing(
     .await
 }
 
-/// 通过 Bash helper 无条件覆盖远端文件。
+/// 通过 Bash 任务无条件覆盖远端文件。
 pub(crate) async fn write_overwrite(
     workspace: &Arc<RemoteWorkspace>,
     path: &str,
     content: &[u8],
     replacement_revision: &str,
-) -> Result<RemoteCheckedWrite, ShellFileError> {
+) -> Result<RemoteCheckedWrite, FileWriteTaskError> {
     write(
         workspace,
+        TaskKind::FileWriteOverwrite,
         "write_overwrite",
         path,
         content,
@@ -87,12 +94,13 @@ pub(crate) async fn write_overwrite(
 
 async fn write(
     workspace: &Arc<RemoteWorkspace>,
+    task: TaskKind,
     operation: &str,
     path: &str,
     content: &[u8],
     expected: Option<&RemoteVersion>,
     replacement_revision: &str,
-) -> Result<RemoteCheckedWrite, ShellFileError> {
+) -> Result<RemoteCheckedWrite, FileWriteTaskError> {
     validate_request(path, content, expected, replacement_revision)?;
     let response = execute(
         workspace,
@@ -102,8 +110,10 @@ async fn write(
             expected,
             replacement_revision,
             content.len(),
+            workspace.tasks.should_probe(task),
         ),
         content.to_vec(),
+        task,
     )
     .await?;
     match response.status.as_str() {
@@ -125,38 +135,40 @@ async fn write(
     }
 }
 
-/// 在一个 SSH channel 上执行一次 Bash helper 请求。
+/// 在一个 SSH channel 上执行一次 Bash 文件写入请求。
 async fn execute(
     workspace: &Arc<RemoteWorkspace>,
     command: String,
     input: Vec<u8>,
-) -> Result<HelperResponse, ShellFileError> {
-    let channel = workspace
-        .tasks
-        .take_channel(workspace, TaskKind::FileWrite)
-        .await
-        .map_err(|_| ShellFileError {
-            may_have_committed: false,
-            disable_backend: false,
-        })?;
+    task: TaskKind,
+) -> Result<HelperResponse, FileWriteTaskError> {
     let output = workspace
-        .exec_on_channel_with_input(channel, &command, input, HELPER_TIMEOUT, MAX_RESPONSE_BYTES)
+        .tasks
+        .run_classified(
+            workspace,
+            task,
+            &command,
+            Some(input),
+            HELPER_TIMEOUT,
+            MAX_RESPONSE_BYTES,
+        )
         .await
-        .map_err(|_| ShellFileError {
-            may_have_committed: true,
+        .map_err(|error| FileWriteTaskError {
+            may_have_committed: matches!(error, TaskRunError::AfterDispatch(_)),
             disable_backend: false,
         })?;
     let response = decode_output(output)?;
-    workspace.tasks.mark_available(TaskKind::FileWrite);
+    workspace.tasks.mark_available(task);
     Ok(response)
 }
 
-fn decode_output(output: ExecOutput) -> Result<HelperResponse, ShellFileError> {
+fn decode_output(output: ExecOutput) -> Result<HelperResponse, FileWriteTaskError> {
     if output.timed_out || output.truncated || output.exit_code != Some(0) {
-        let rejected_before_commit = matches!(output.exit_code, Some(64 | 72 | 73));
-        return Err(ShellFileError {
+        let rejected_before_commit = matches!(output.exit_code, Some(64 | 72 | 73 | 76));
+        let disable_backend = matches!(output.exit_code, Some(64 | 72 | 73));
+        return Err(FileWriteTaskError {
             may_have_committed: !rejected_before_commit,
-            disable_backend: rejected_before_commit,
+            disable_backend,
         });
     }
     decode_response(&output.stdout).map_err(|_| protocol_error())
@@ -169,18 +181,20 @@ fn helper_command(
     expected: Option<&RemoteVersion>,
     replacement_revision: &str,
     replacement_size: usize,
+    probe_features: bool,
 ) -> String {
     let expected_revision = expected
         .map(|value| value.revision.to_ascii_lowercase())
         .unwrap_or_default();
     let replacement_revision = replacement_revision.to_ascii_lowercase();
     format!(
-        "operation={operation}; target_path={path}; expected_revision={expected_revision}; expected_size={expected_size}; replacement_revision={replacement_revision}; replacement_size={replacement_size}; {HELPER_SOURCE}",
+        "operation={operation}; target_path={path}; expected_revision={expected_revision}; expected_size={expected_size}; replacement_revision={replacement_revision}; replacement_size={replacement_size}; probe_features={probe_features}; {HELPER_SOURCE}",
         operation = shell_quote(operation),
         path = shell_quote(path),
         expected_revision = shell_quote(&expected_revision),
         expected_size = expected.map(|value| value.size).unwrap_or(0),
         replacement_revision = shell_quote(&replacement_revision),
+        probe_features = usize::from(probe_features),
     )
 }
 
@@ -189,7 +203,7 @@ fn validate_request(
     content: &[u8],
     expected: Option<&RemoteVersion>,
     replacement_revision: &str,
-) -> Result<(), ShellFileError> {
+) -> Result<(), FileWriteTaskError> {
     validate_remote_path(path).map_err(|_| request_error())?;
     if !path.starts_with('/')
         || path.chars().any(char::is_control)
@@ -234,15 +248,15 @@ fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn protocol_error() -> ShellFileError {
-    ShellFileError {
+fn protocol_error() -> FileWriteTaskError {
+    FileWriteTaskError {
         may_have_committed: true,
         disable_backend: true,
     }
 }
 
-fn request_error() -> ShellFileError {
-    ShellFileError {
+fn request_error() -> FileWriteTaskError {
+    FileWriteTaskError {
         may_have_committed: false,
         disable_backend: false,
     }
@@ -250,7 +264,7 @@ fn request_error() -> ShellFileError {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_output, decode_response, helper_command, validate_request};
+    use super::{decode_output, decode_response, helper_command, validate_request, HELPER_SOURCE};
     use crate::modules::remote::file_service::RemoteVersion;
     use crate::modules::remote::session::ExecOutput;
 
@@ -267,12 +281,14 @@ mod tests {
             Some(&expected),
             &"B".repeat(64),
             4,
+            true,
         );
 
         assert!(command.contains("target_path='/tmp/it'\\''s here'"));
         assert!(command.contains(&format!("expected_revision='{}'", "a".repeat(64))));
         assert!(command.contains(&format!("replacement_revision='{}'", "b".repeat(64))));
         assert!(command.contains("expected_size=4"));
+        assert!(command.contains("probe_features=1"));
         assert!(!command.contains("body"));
     }
 
@@ -303,6 +319,14 @@ mod tests {
         assert!(!unsupported.may_have_committed);
         assert!(unsupported.disable_backend);
 
+        let path_conflict = decode_output(ExecOutput {
+            exit_code: Some(76),
+            ..ExecOutput::default()
+        })
+        .unwrap_err();
+        assert!(!path_conflict.may_have_committed);
+        assert!(!path_conflict.disable_backend);
+
         let ambiguous = decode_output(ExecOutput {
             exit_code: Some(74),
             ..ExecOutput::default()
@@ -310,5 +334,15 @@ mod tests {
         .unwrap_err();
         assert!(ambiguous.may_have_committed);
         assert!(!ambiguous.disable_backend);
+    }
+
+    #[test]
+    fn script_probes_nonportable_commit_features_before_writing() {
+        assert!(HELPER_SOURCE.contains("conv=fsync"));
+        assert!(HELPER_SOURCE.contains("mv -T"));
+        assert!(HELPER_SOURCE.contains("ln -T"));
+        assert!(HELPER_SOURCE.contains("shasum -a 256"));
+        assert!(HELPER_SOURCE.contains("openssl dgst -sha256 -r"));
+        assert!(HELPER_SOURCE.contains("probe_features"));
     }
 }

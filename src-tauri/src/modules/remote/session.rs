@@ -330,7 +330,7 @@ impl RemoteWorkspace {
         let probe_elapsed = probe_started_at.elapsed();
         *workspace.login_home.write().await = probe.login_home;
         *workspace.home.write().await = probe.root.clone();
-        workspace.prepare_file_helper_channel();
+        workspace.prepare_task_channel();
         if prime_filesystem {
             let primed_workspace = workspace.clone();
             let primed_root = probe.root;
@@ -375,17 +375,13 @@ impl RemoteWorkspace {
         self.login_home.read().await.clone()
     }
 
-    /// 返回当前连接是否仍可尝试 Bash 单次写入。
-    pub(crate) fn shell_file_write_available(&self) -> bool {
-        self.tasks.should_attempt(TaskKind::FileWrite)
-    }
-
-    /// 标记当前连接的 Bash helper 失效，后续写入直接回退 SFTP。
-    pub(crate) fn disable_shell_file_write(self: &Arc<Self>) {
-        if self
-            .tasks
-            .mark_unavailable(TaskKind::FileWrite, "file helper unavailable")
-        {
+    /// 标记当前连接的内部任务失效，并立即发布绑定 epoch 的健康快照。
+    pub(crate) fn mark_task_unavailable(
+        self: &Arc<Self>,
+        task: TaskKind,
+        reason: impl Into<String>,
+    ) {
+        if self.tasks.mark_unavailable(task, reason) {
             let epoch = self.runtime_epoch.load(Ordering::Acquire);
             if epoch != 0 {
                 let _ = tauri::Emitter::emit(
@@ -405,7 +401,7 @@ impl RemoteWorkspace {
     /// 后台只为高 RTT 连接维持内部任务单槽 channel。
     ///
     /// 兼容入口由现有连接和健康监督器调用，预热不参与后端选择。
-    pub(crate) fn prepare_file_helper_channel(self: &Arc<Self>) {
+    pub(crate) fn prepare_task_channel(self: &Arc<Self>) {
         self.tasks.prepare_channel(self);
     }
 
@@ -427,7 +423,13 @@ impl RemoteWorkspace {
     /// 返回当前 epoch 的进程级 SSH RTT 快照。
     pub(crate) fn health_snapshot(&self, epoch: u64) -> SshHealthSnapshot {
         let mut snapshot = self.health.snapshot(epoch);
-        snapshot.file_write_fallback = self.tasks.is_unavailable(TaskKind::FileWrite);
+        snapshot.file_write_fallback = [
+            TaskKind::FileWriteChecked,
+            TaskKind::FileWriteMissing,
+            TaskKind::FileWriteOverwrite,
+        ]
+        .into_iter()
+        .any(|task| self.tasks.is_unavailable(task));
         snapshot.task_fallbacks = self
             .tasks
             .unavailable_tasks()
@@ -1136,7 +1138,7 @@ mod path_tests {
     }
 
     #[test]
-    fn file_helper_preheats_only_for_a_stable_high_latency_sample() {
+    fn task_channel_preheats_only_for_a_stable_high_latency_sample() {
         assert!(!task_preheat_eligible(None));
         assert!(!task_preheat_eligible(Some(99)));
         assert!(task_preheat_eligible(Some(100)));

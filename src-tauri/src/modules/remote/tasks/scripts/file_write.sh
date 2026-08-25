@@ -1,4 +1,4 @@
-# Terax SSH 文件写入 helper。
+# Terax SSH 文件写入任务。
 #
 # 脚本通过 exec command 接收封闭参数，通过 stdin 接收原始正文。它不落盘自身，
 # 只实现条件写入、缺失创建和显式覆盖，并用固定 NUL 分隔帧返回结果。
@@ -7,14 +7,46 @@ set -eu
 
 terax_require_tools() {
   local tool
-  for tool in mktemp stat readlink dd chmod rm mv ln sha256sum; do
+  for tool in mktemp stat readlink dd chmod rm mv; do
     command -v "$tool" >/dev/null 2>&1 || return 72
   done
+  if [ "$operation" = write_missing ]; then
+    command -v ln >/dev/null 2>&1 || return 72
+  fi
+}
+
+terax_probe_features() {
+  local probe
+  probe=$(mktemp -d) || return 72
+  : >"$probe/source"
+  : >"$probe/target"
+  if ! stat -c '%s' -- /dev/null >/dev/null 2>&1 ||
+    ! readlink -f -- /dev/null >/dev/null 2>&1 ||
+    ! terax_hash_file /dev/null >/dev/null 2>&1 ||
+    ! dd if=/dev/null of="$probe/synced" bs=1 count=0 conv=fsync 2>/dev/null ||
+    ! mv -T -- "$probe/source" "$probe/target" 2>/dev/null; then
+    rm -rf -- "$probe"
+    return 72
+  fi
+  if [ "$operation" = write_missing ] &&
+    ! ln -T -- "$probe/target" "$probe/linked" 2>/dev/null; then
+    rm -rf -- "$probe"
+    return 72
+  fi
+  rm -rf -- "$probe" || return 72
 }
 
 terax_hash_file() {
   local output
-  output=$(sha256sum -- "$1") || return 74
+  if command -v sha256sum >/dev/null 2>&1; then
+    output=$(sha256sum -- "$1") || return 74
+  elif command -v shasum >/dev/null 2>&1; then
+    output=$(shasum -a 256 -- "$1") || return 74
+  elif command -v openssl >/dev/null 2>&1; then
+    output=$(openssl dgst -sha256 -r "$1") || return 74
+  else
+    return 72
+  fi
   output=${output%% *}
   [ "${#output}" -eq 64 ] || return 73
   printf '%s' "$output"
@@ -88,7 +120,13 @@ terax_finish_existing() {
   fi
 }
 
-terax_require_tools || exit $?
+if [ "$probe_features" = 1 ]; then
+  terax_require_tools || exit $?
+  terax_probe_features || exit $?
+fi
+if [ "$operation" = write_missing ] && [ -L "$target_path" ] && [ ! -e "$target_path" ]; then
+  exit 76
+fi
 target=$(terax_canonical_target) || exit $?
 
 case $operation in

@@ -8,8 +8,9 @@ set -eu
 case $operation in
   logs)
     command -v tail >/dev/null 2>&1 || exit 72
+    command -v head >/dev/null 2>&1 || exit 72
     if [ -f "$log_path" ]; then
-      tail -c "+$start_offset" -- "$log_path"
+      tail -c "+$start_offset" -- "$log_path" | head -c "$max_log_bytes"
     fi
     if kill -0 "$process_id" 2>/dev/null; then
       state=running

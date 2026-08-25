@@ -46,7 +46,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - 协议只允许 Match、Missing 和 Overwrite 三种明确写入条件。
 - Rust 验证绝对路径、摘要和正文上限，将动态参数逐项 shell 转义；正文只通过 stdin 传输。
 - helper 解析物理目标，不使用 `eval`，也不接收脚本片段。
-- 远端依赖已经由 Linux 与 Bash 环境提供的 GNU coreutils，不维护 BusyBox 参数兼容分支。
+- 远端依赖优先使用 Linux 与 Bash 环境提供的 GNU coreutils，不维护 BusyBox 参数兼容分支；首次任务仍在同一调用内探测实际参数能力，能力不足时安全回退。
 - 写入使用目标同目录排他临时文件、权限恢复、fsync 和条件原子发布。
 - task 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
 - 提交响应丢失时通过 expected 和 replacement revision 收敛结果，不盲目覆盖。
@@ -98,7 +98,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 ## 不变量
 
 - `security.ts` 中的 deny-list 同时适用于读取和写入，绝不能绕过。
-- Bash task 只能实现 Rust 枚举的封闭协议，不能演变为绕过 Shell 审批的命令执行入口。
+- Bash task 只能实现 Rust 枚举的封闭协议；通用执行方法只对 `remote/tasks/` 子模块可见，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。
 - 新 plugin API 必须添加到 `src-tauri/capabilities/default.json`。
