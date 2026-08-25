@@ -555,29 +555,44 @@ async fn search_remote_sftp(
     })
 }
 
+/// 使用当前 SSH epoch 的集中式 ripgrep 任务执行内容搜索。
 async fn search_remote_rg(
     profile_id: &str,
     root: &str,
     request: &ContentSearchRequest,
     cap: usize,
 ) -> Result<Option<ContentSearchResponse>, String> {
+    const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
     let args = remote_content_search_args(root, request);
     let command = remote_rg_command(&args);
     let manager = remote::manager::global_manager()?;
-    let output = manager
-        .exec(
-            profile_id,
+    let workspace = manager.workspace(profile_id).await?;
+    let task = remote::tasks::TaskKind::Ripgrep;
+    if !workspace.tasks.should_attempt(task) {
+        return Ok(None);
+    }
+    let output = workspace
+        .tasks
+        .run(
+            &workspace,
+            task,
             &command,
             None,
             std::time::Duration::from_secs(30),
+            OUTPUT_LIMIT,
         )
         .await?;
     if output.timed_out {
         return Err("remote ripgrep search timed out".into());
     }
     match output.exit_code {
-        Some(127) => return Ok(None),
-        Some(0 | 1) => {}
+        Some(127) => {
+            workspace
+                .tasks
+                .mark_unavailable(task, "ripgrep unavailable");
+            return Ok(None);
+        }
+        Some(0 | 1) => workspace.tasks.mark_available(task),
         Some(code) => {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(if detail.is_empty() {
@@ -623,12 +638,14 @@ fn remote_content_search_args(root: &str, request: &ContentSearchRequest) -> Vec
     args
 }
 
+/// 使用当前 SSH epoch 的集中式 ripgrep 任务枚举匹配文件。
 async fn glob_remote_rg(
     profile_id: &str,
     root: &str,
     pattern: &str,
     cap: usize,
 ) -> Result<Option<GlobResponse>, String> {
+    const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
     let args = vec![
         "rg".to_string(),
         "--files".to_string(),
@@ -640,20 +657,33 @@ async fn glob_remote_rg(
         root.to_string(),
     ];
     let manager = remote::manager::global_manager()?;
-    let output = manager
-        .exec(
-            profile_id,
+    let workspace = manager.workspace(profile_id).await?;
+    let task = remote::tasks::TaskKind::Ripgrep;
+    if !workspace.tasks.should_attempt(task) {
+        return Ok(None);
+    }
+    let output = workspace
+        .tasks
+        .run(
+            &workspace,
+            task,
             &remote_rg_command(&args),
             None,
             std::time::Duration::from_secs(30),
+            OUTPUT_LIMIT,
         )
         .await?;
     if output.timed_out {
         return Err("remote ripgrep file listing timed out".into());
     }
     match output.exit_code {
-        Some(127) => return Ok(None),
-        Some(0 | 1) => {}
+        Some(127) => {
+            workspace
+                .tasks
+                .mark_unavailable(task, "ripgrep unavailable");
+            return Ok(None);
+        }
+        Some(0 | 1) => workspace.tasks.mark_available(task),
         Some(code) => {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(if detail.is_empty() {
