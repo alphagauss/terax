@@ -164,6 +164,42 @@
     "tooltip": "SSH 往返延迟：{{value}} 毫秒。由连接健康监督器测量。",
     "fileWriteFallback": "快速远程写入不可用，当前连接的文件写入已回退到 SFTP。"
   },
+  "sshCapabilities": {
+    "title": "SSH 服务器能力",
+    "aria": "SSH 服务器能力：{{state}}",
+    "summary": "{{ready}}/{{total}} 项首选能力就绪",
+    "recheck": "重新检测",
+    "checking": "检测中",
+    "featuresTitle": "功能状态",
+    "commandsTitle": "所需命令",
+    "notAvailable": "不可用",
+    "checkedAt": "上次检测：{{value}}",
+    "ripgrepSuggestion": "建议安装 ripgrep 以启用完整的快速内容搜索和文件枚举。Terax 不会自动安装远端软件。",
+    "states": {
+      "unknown": "尚未检测",
+      "checking": "正在检测",
+      "ready": "全部就绪",
+      "fallback": "兼容模式",
+      "unavailable": "部分功能不可用"
+    },
+    "commandStates": {
+      "ready": "就绪",
+      "missing": "缺失",
+      "unsupported": "参数不兼容"
+    },
+    "features": {
+      "file_version": "文件版本",
+      "tree_listing": "递归树枚举",
+      "directory_summary": "目录汇总",
+      "file_write": "条件文件写入",
+      "create_directory": "目录创建",
+      "background_logs": "后台命令日志",
+      "background_processes": "后台进程状态",
+      "recursive_delete": "递归删除",
+      "content_search": "内容搜索",
+      "file_listing": "快速文件枚举"
+    }
+  },
   "tunnels": {
     "label": "隧道",
     "count": "隧道 {{count}}",

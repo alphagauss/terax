@@ -161,7 +161,7 @@ TERAX_FILE_VERSION_V1\0status\0...
 - [x] 传统多 exec 查询保留为 capability 或协议失败时的回退。
 - [x] 删除剩余可回退内部任务的 inline capability 和重复 channel 管理。
 - [x] `SshHealthSnapshot` 从任务运行时派生统一降级状态，保留前端需要的兼容字段或同步升级前端。
-- [x] 后台日志在服务器端按固定分块读取，客户端输出上限不再导致重复下载剩余整段日志。
+- [x] 后台日志正文通过 raw SFTP 按 offset 流水线分块读取，Bash task 只批量返回轻量 PID 状态。
 
 验证：
 
@@ -209,7 +209,10 @@ TERAX_FILE_VERSION_V1\0status\0...
 - `cargo clippy --all-targets --locked -- -D warnings` 通过。
 - 本机没有 `cargo nextest`，已回退 `cargo test --locked`，495 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试全部通过。
 - 原方案完成时，文件写入、树枚举、目录汇总、文件版本、目录创建和后台状态的 6 组 Bash 独立契约测试通过。
-- 2026-08-25 使用现有无交互 SSH 配置连接 `177.55.234.153:22`，在 5 秒连接截止时间内超时，因此未执行真实服务器性能和变更验证。没有请求密码，也没有修改远端状态。
-- 后续静态审查修复了 capability 交叉污染与并发重新启用、搜索回退取消、旧版 ripgrep 参数回退、文件版本身份校验、后台日志服务器端限流和本地/SSH 剪枝差异。真实 SSH 兼容性、重连和性能验证按用户要求留到下一任务。
+- 2026-08-26 通过真实 Terax/Tauri 进程和系统 keyring 连接 `117.55.234.153:22`，实测 RTT 约 168 ms。文件版本、递归树、目录汇总、六层目录创建和 10 个后台 PID 批量查询相对旧路径分别提升约 5.96 至 33.66 倍、39.43 至 55.07 倍、16.91 至 17.80 倍、9.49 至 13.93 倍和 11.12 至 21.18 倍。
+- 实测发现后台日志即使降为 1 MiB 并放宽到 30 秒，大块随机 stdout 仍会导致目标服务器断开 exec transport。最终实现将日志正文迁到现有 raw SFTP offset 流水线，Bash task 只保留轻量 PID 状态查询。
+- 最终 raw SFTP 日志路径使用 256 KiB 响应区间、64 KiB 单 in-flight READ。真实 Terax 连续读取 1,621,053 字节随机后台输出时完整返回 7 段，SSH epoch 始终为 1，没有触发重连或 transport 错误。
+- 同一服务器缺少 `rg`。连接后统一能力脚本在一次调用中完成 16 项实际参数探测，正确选择 GNU grep 内容搜索和 GNU find 文件枚举兼容路径；真实 WebView 中能力灯显示兼容模式，字面量 grep 搜索约 345 ms 并正确过滤隐藏目录。
+- 统一能力和最终日志路径完成后，`cargo clippy --all-targets --locked -- -D warnings` 通过；`cargo test --locked` 通过 505 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试；`pnpm test` 通过 205 个测试文件、1078 个测试。
 - 静态审查修复后的 `cargo clippy --all-targets --locked -- -D warnings` 通过；`cargo test --locked` 通过，共 500 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试。
-- 12 个 Bash task 与契约脚本通过 `sh -n` 语法检查。Cygwin 本地执行中，tree list、file version 和 background 三组契约通过；file write 权限、tree summary 符号链接和 create directory 符号链接断言依赖真实 Linux 语义，留到下一任务执行。
+- 16 个 Bash task 与契约脚本通过 Bash 语法检查；统一能力探测和 GNU grep 新增契约在 Git Bash 中通过，真实 Linux 服务器上的统一探测与 grep 搜索也已通过。file write 权限、tree summary 符号链接和 create directory 符号链接的完整契约仍需在后续 Linux 自动化环境持续覆盖。

@@ -22,8 +22,8 @@ use zeroize::Zeroizing;
 use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshHealthSnapshot, SshProfile,
-    SshTaskFallback,
+    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshCapabilitySnapshot,
+    SshHealthSnapshot, SshProfile, SshTaskFallback,
 };
 use super::remote_fs::RemoteFs;
 use super::tasks::{RemoteTaskRuntime, TaskKind, TASK_PREHEAT_RTT_MS};
@@ -389,6 +389,7 @@ impl RemoteWorkspace {
                     "terax://ssh-health",
                     self.health_snapshot(epoch),
                 );
+                self.emit_capability_snapshot();
             }
         }
     }
@@ -396,6 +397,26 @@ impl RemoteWorkspace {
     /// 安装 manager 分配的 epoch，使降级提示不会污染后续连接。
     pub(crate) fn set_runtime_epoch(&self, epoch: u64) {
         self.runtime_epoch.store(epoch, Ordering::Release);
+    }
+
+    /// 返回绑定当前连接 epoch 的统一服务器能力快照。
+    pub(crate) fn capability_snapshot(&self) -> SshCapabilitySnapshot {
+        let mut snapshot = self
+            .tasks
+            .capability_snapshot(self.runtime_epoch.load(Ordering::Acquire));
+        super::tasks::capability_probe::overlay_runtime_fallbacks(
+            &mut snapshot,
+            &self.tasks.unavailable_tasks(),
+        );
+        snapshot
+    }
+
+    /// 发布当前 epoch 的能力状态，旧连接事件由前端按 epoch 丢弃。
+    pub(crate) fn emit_capability_snapshot(&self) {
+        let snapshot = self.capability_snapshot();
+        if snapshot.epoch.is_some() {
+            let _ = tauri::Emitter::emit(&self.app, "terax://ssh-capabilities", snapshot);
+        }
     }
 
     /// 后台只为高 RTT 连接维持内部任务单槽 channel。
