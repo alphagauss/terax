@@ -151,8 +151,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 
 - Shell 初始化脚本位于 `src-tauri/src/modules/pty/scripts/`，负责 OSC 7 和 OSC 133 标记。
 - Unix 和 Windows 平台代码必须放入正确的 `#[cfg]` 分支。
-- SSH 文件内容操作统一经过 `remote/file_service.rs`。目录与正文读取共享 raw SFTP 流水线，元数据和写入使用独立高层 session。
-- SSH 单文件读取固定使用 SFTP；条件写入通过不落盘的内嵌 Bash helper 和 GNU coreutils 合并为一次远端调用，不可用或失败时安全回退 SFTP。helper 只接受封闭写入操作，不能成为通用命令入口；高 RTT 只影响是否预开一个 exec channel，不改变写入后端。
+- SSH 文件内容操作统一经过 `remote/file_service.rs`。目录与正文读取共享 raw SFTP 流水线，版本读取、元数据和写入使用独立高层 session 或封闭任务。
+- Terax 内部可回退的 SSH Bash 操作统一经过连接级 `remote/tasks/` 运行时，按任务缓存当前 epoch 的依赖能力，并共享高 RTT 单槽预开 channel。单文件正文和单层目录读取固定使用 SFTP；文件版本、条件写入、递归树、目录汇总、目录创建和后台状态使用 Bash 优先、传统实现回退。任务只接受 Rust 枚举的封闭操作，不能成为通用命令入口。
 - Windows ConPTY 创建必须由 `SPAWN_LOCK` 包围；并发创建会造成某个 PTY 输出管道停滞。
 - 每个 Windows ConPTY 子进程必须进入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object，保证 Terax 退出时清理整个进程树。
 - 终端 Enter 必须发送 `\r`，不能发送 `\n`，否则 Windows PowerShell 无法正确处理。

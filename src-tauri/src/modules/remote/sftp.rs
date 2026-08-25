@@ -1,13 +1,14 @@
 //! 基于 SFTP 的远程文件系统实现。
 //!
 //! Explorer 使用不查询扩展的 raw session 流水线读取目录；文件内容操作由上层服务
-//! 选择后端，本模块实现默认 SFTP 传输、原子提交和破坏性操作的安全约束。
+//! 选择后端，本模块只实现默认 SFTP 传输 primitive；摘要、原子提交和递归变更由
+//! 上层文件服务与封闭任务模块管理。
 
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use russh_sftp::protocol::{FileAttributes, FileType, OpenFlags, StatusCode};
@@ -18,9 +19,9 @@ use tokio_util::sync::CancellationToken;
 use super::file_service::{
     RemoteCheckedWrite, RemoteFileRead, RemoteObservedVersion, RemoteVersion,
 };
-use super::session::{join_remote, shell_quote, validate_remote_path, RemoteWorkspace};
+use super::session::{join_remote, validate_remote_path, RemoteWorkspace};
+use super::tasks::sftp_fallback::{self, RemoteCommit};
 
-const RECURSIVE_DELETE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const DIRECTORY_READ_PIPELINE: usize = 2;
 const FILE_READ_PIPELINE: usize = 8;
 const DEFAULT_FILE_READ_CHUNK: u32 = 240 * 1024;
@@ -808,7 +809,7 @@ pub(crate) async fn write_file_missing(
     let target = canonical_target_for_new_file(workspace, &sftp, path).await?;
     let (temporary, channel) =
         stage_remote_write_and_open_commit(workspace, &sftp, &target, None, content).await?;
-    let outcome = commit_remote_missing(workspace, channel, &temporary, &target).await;
+    let outcome = sftp_fallback::commit_missing(workspace, channel, &temporary, &target).await;
     match outcome {
         Ok(RemoteCommit::Complete(Some(written))) => Ok(RemoteCheckedWrite::Written {
             mtime: written.mtime,
@@ -889,7 +890,7 @@ pub(crate) async fn file_version(
     if before.len() > max_size {
         return Err(format!("remote file exceeds version limit: {max_size}"));
     }
-    let revision = remote_sha256(workspace, &target).await?;
+    let revision = sftp_fallback::sha256(workspace, &target).await?;
     let after = sftp_result(
         workspace,
         &sftp,
@@ -925,7 +926,7 @@ pub(crate) async fn write_file_checked(
         });
     }
     if current.mtime != expected.mtime {
-        let revision = remote_sha256(workspace, &target).await?;
+        let revision = sftp_fallback::sha256(workspace, &target).await?;
         let Some(after) = optional_sftp_result(
             workspace,
             &sftp,
@@ -962,7 +963,7 @@ pub(crate) async fn write_file_checked(
         content,
     )
     .await?;
-    let outcome = commit_remote_checked(
+    let outcome = sftp_fallback::commit_checked(
         workspace,
         channel,
         &temporary,
@@ -1156,34 +1157,13 @@ async fn replace_remote_file(
     temporary: &str,
     target: &str,
 ) -> Result<Option<RemoteObservedVersion>, String> {
-    let command = format!(
-        "target={target}; mv -f -- {temporary} \"$target\" || exit 74; \
-         metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s' \"$metadata\"",
-        temporary = shell_quote(temporary),
-        target = shell_quote(target),
-    );
-    let moved = match workspace
-        .exec_on_channel(channel, &command, None, std::time::Duration::from_secs(15))
-        .await
-    {
-        Ok(moved) => moved,
+    match sftp_fallback::replace(workspace, channel, temporary, target).await {
+        Ok(observed) => Ok(observed),
         Err(error) => {
             let _ = sftp.remove_file(temporary).await;
-            return Err(error);
+            Err(error)
         }
-    };
-    if moved.timed_out || moved.exit_code != Some(0) {
-        let _ = sftp.remove_file(temporary).await;
-        let detail = String::from_utf8_lossy(&moved.stderr).trim().to_string();
-        return Err(if moved.timed_out {
-            format!("timed out replacing remote file {target}")
-        } else if detail.is_empty() {
-            format!("replace remote file {target} failed")
-        } else {
-            format!("replace remote file {target} failed: {detail}")
-        });
     }
-    Ok(parse_remote_observed(&moved.stdout))
 }
 
 fn remote_mtime(metadata: &FileAttributes) -> u64 {
@@ -1200,150 +1180,6 @@ fn remote_observed(metadata: &FileAttributes) -> RemoteObservedVersion {
         size: metadata.len(),
         mtime: remote_mtime(metadata),
     }
-}
-
-fn parse_sha256(output: &[u8]) -> Result<String, String> {
-    let output = String::from_utf8_lossy(output);
-    let revision = output
-        .split_whitespace()
-        .next()
-        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| "remote SHA-256 output is invalid".to_string())?;
-    Ok(revision.to_ascii_lowercase())
-}
-
-async fn remote_sha256(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<String, String> {
-    let path = shell_quote(path);
-    let command = format!(
-        "if command -v sha256sum >/dev/null 2>&1; then sha256sum -- {path}; \
-         elif command -v shasum >/dev/null 2>&1; then shasum -a 256 -- {path}; \
-         elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r {path}; \
-         else exit 72; fi"
-    );
-    let output = workspace
-        .exec(&command, None, Duration::from_secs(60))
-        .await?;
-    if output.timed_out || output.exit_code != Some(0) {
-        return Err("remote SHA-256 command failed or is unavailable".into());
-    }
-    parse_sha256(&output.stdout)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum RemoteCommit {
-    Complete(Option<RemoteObservedVersion>),
-    Missing,
-    Conflict(Option<RemoteObservedVersion>),
-}
-
-async fn commit_remote_checked(
-    workspace: &Arc<RemoteWorkspace>,
-    channel: russh::Channel<russh::client::Msg>,
-    temporary: &str,
-    target: &str,
-    expected_revision: &str,
-    replacement_revision: &str,
-) -> Result<RemoteCommit, String> {
-    let command =
-        checked_commit_command(temporary, target, expected_revision, replacement_revision);
-    let output = workspace
-        .exec_on_channel(channel, &command, None, Duration::from_secs(60))
-        .await?;
-    if output.timed_out || output.exit_code != Some(0) {
-        return Err("remote checked replace failed".into());
-    }
-    parse_remote_commit(&output.stdout)
-        .map_err(|_| "remote checked replace returned an invalid status".into())
-}
-
-/// 在已预开的 channel 上原子发布一个仍缺失的远端目标。
-async fn commit_remote_missing(
-    workspace: &Arc<RemoteWorkspace>,
-    channel: russh::Channel<russh::client::Msg>,
-    temporary: &str,
-    target: &str,
-) -> Result<RemoteCommit, String> {
-    let command = missing_commit_command(temporary, target);
-    let output = workspace
-        .exec_on_channel(channel, &command, None, Duration::from_secs(60))
-        .await?;
-    if output.timed_out || output.exit_code != Some(0) {
-        return Err("remote missing-only write failed".into());
-    }
-    match parse_remote_commit(&output.stdout) {
-        Ok(RemoteCommit::Complete(observed)) => Ok(RemoteCommit::Complete(observed)),
-        Ok(RemoteCommit::Conflict(observed)) => Ok(RemoteCommit::Conflict(observed)),
-        _ => Err("remote missing-only write returned an invalid status".into()),
-    }
-}
-
-/// 解析提交状态及同一远端进程返回的可选 size、mtime。
-fn parse_remote_commit(output: &[u8]) -> Result<RemoteCommit, String> {
-    let mut fields = output.splitn(2, |byte| *byte == 0);
-    let status = std::str::from_utf8(fields.next().unwrap_or_default())
-        .map_err(|_| "remote commit status is not UTF-8")?
-        .trim();
-    let observed = fields.next().and_then(parse_remote_observed);
-    match status {
-        "written" | "converged" => Ok(RemoteCommit::Complete(observed)),
-        "missing" => Ok(RemoteCommit::Missing),
-        "conflict" => Ok(RemoteCommit::Conflict(observed)),
-        _ => Err("unknown remote commit status".into()),
-    }
-}
-
-/// 解析 Linux stat 输出，并转换为与 SFTP v3 相同的毫秒时间戳。
-fn parse_remote_observed(output: &[u8]) -> Option<RemoteObservedVersion> {
-    let output = std::str::from_utf8(output).ok()?;
-    let mut fields = output.split_whitespace();
-    let size = fields.next()?.parse().ok()?;
-    let mtime_seconds: u64 = fields.next()?.parse().ok()?;
-    if fields.next().is_some() {
-        return None;
-    }
-    Some(RemoteObservedVersion {
-        size,
-        mtime: mtime_seconds.saturating_mul(1000),
-    })
-}
-
-/// 构造使用同目录硬链接完成原子 no-clobber 发布的安全命令。
-fn missing_commit_command(temporary: &str, target: &str) -> String {
-    format!(
-        "target={target}; temporary={temporary}; \
-         report() {{ metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s\\000%s' \"$1\" \"$metadata\"; }}; \
-         if [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; report conflict; \
-         elif ln -- \"$temporary\" \"$target\" 2>/dev/null; then rm -f -- \"$temporary\"; report written; \
-         elif [ -e \"$target\" ] || [ -L \"$target\" ]; then rm -f -- \"$temporary\"; report conflict; \
-         else rm -f -- \"$temporary\"; exit 74; fi",
-        target = shell_quote(target),
-        temporary = shell_quote(temporary),
-    )
-}
-
-/// 构造在同一远端进程内完成摘要比较和替换的安全命令。
-fn checked_commit_command(
-    temporary: &str,
-    target: &str,
-    expected_revision: &str,
-    replacement_revision: &str,
-) -> String {
-    format!(
-        "target={target}; temporary={temporary}; expected={expected}; replacement={replacement}; \
-         report() {{ metadata=$(stat -c '%s %Y' -- \"$target\" 2>/dev/null) || metadata=; printf '%s\\000%s' \"$1\" \"$metadata\"; }}; \
-         if [ ! -f \"$target\" ]; then rm -f -- \"$temporary\"; printf 'missing'; exit 0; fi; \
-         if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum -- \"$target\") || exit 73; \
-         elif command -v shasum >/dev/null 2>&1; then actual=$(shasum -a 256 -- \"$target\") || exit 73; \
-         elif command -v openssl >/dev/null 2>&1; then actual=$(openssl dgst -sha256 -r \"$target\") || exit 73; \
-         else exit 72; fi; actual=${{actual%% *}}; \
-         if [ \"$actual\" = \"$replacement\" ]; then rm -f -- \"$temporary\" && report converged; \
-         elif [ \"$actual\" != \"$expected\" ]; then rm -f -- \"$temporary\"; report conflict; \
-         else mv -f -- \"$temporary\" \"$target\" && report written; fi",
-        target = shell_quote(target),
-        temporary = shell_quote(temporary),
-        expected = shell_quote(expected_revision),
-        replacement = shell_quote(replacement_revision),
-    )
 }
 
 /// 构造仅包含权限位的 SFTP 属性。
@@ -1462,52 +1298,20 @@ pub async fn rename(workspace: &Arc<RemoteWorkspace>, from: &str, to: &str) -> R
     .await
 }
 
-/// 删除远端文件或目录。
-///
-/// 文件仍使用单次 SFTP 删除；目录改由远端 `rm` 在服务器本地递归，避免文件数量
-/// 放大为逐项网络往返。命令参数经过 POSIX shell 转义，且危险根路径会被提前拒绝。
-pub async fn delete(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), String> {
-    validate_destructive_path(path)?;
-    let metadata = stat(workspace, path).await?;
-    if metadata.kind != RemoteEntryKind::Dir {
-        let sftp = session(workspace).await?;
-        return sftp_result(
-            workspace,
-            &sftp,
-            format!("remove remote file {path}"),
-            sftp.remove_file(path).await,
-        )
-        .await;
-    }
-
-    let command = recursive_delete_command(path);
-    let output = workspace
-        .exec(&command, None, RECURSIVE_DELETE_TIMEOUT)
-        .await?;
-    if output.timed_out {
-        return Err(format!("remote recursive delete timed out: {path}"));
-    }
-    if output.exit_code == Some(0) {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let detail = stderr.trim();
-    if detail.is_empty() {
-        Err(format!(
-            "remote recursive delete failed with exit {:?}: {path}",
-            output.exit_code
-        ))
-    } else {
-        Err(format!("remote recursive delete failed: {detail}"))
-    }
-}
-
-/// 构造只包含一个已转义路径参数的远端递归删除命令。
-fn recursive_delete_command(path: &str) -> String {
-    format!(
-        "rm -rf -- {}",
-        super::session::shell_quote(path.trim_end_matches('/'))
+/// 使用单次 SFTP 请求删除文件或符号链接。
+pub(crate) async fn remove_file(
+    workspace: &Arc<RemoteWorkspace>,
+    path: &str,
+) -> Result<(), String> {
+    validate_remote_path(path)?;
+    let sftp = session(workspace).await?;
+    sftp_result(
+        workspace,
+        &sftp,
+        format!("remove remote file {path}"),
+        sftp.remove_file(path).await,
     )
+    .await
 }
 
 async fn canonical_target_for_new_file(
@@ -1558,19 +1362,6 @@ fn entry_kind(kind: FileType) -> RemoteEntryKind {
     }
 }
 
-fn validate_destructive_path(path: &str) -> Result<(), String> {
-    validate_remote_path(path)?;
-    let normalized = path.trim_matches('/');
-    if normalized.is_empty()
-        || path
-            .split('/')
-            .any(|component| component == "." || component == "..")
-    {
-        return Err("refusing to delete remote root or empty path".into());
-    }
-    Ok(())
-}
-
 /// 将远端文件名转换为 Windows、macOS 和 Linux 均可创建的本地名称。
 pub(crate) fn sanitize_local_name(name: &str) -> String {
     let mut value: String = name
@@ -1606,10 +1397,8 @@ pub(crate) fn sanitize_local_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        checked_commit_command, existing_write_target, missing_commit_command, parse_remote_commit,
-        parse_sha256, permission_attributes, plan_file_read_chunks, recursive_delete_command,
-        remote_parent_name, sanitize_local_name, should_fail_transport, should_invalidate_session,
-        validate_destructive_path, FileReadChunk, RemoteCommit, RemoteObservedVersion,
+        existing_write_target, permission_attributes, plan_file_read_chunks, remote_parent_name,
+        sanitize_local_name, should_fail_transport, should_invalidate_session, FileReadChunk,
         DEFAULT_FILE_READ_CHUNK, FILE_READ_PIPELINE,
     };
 
@@ -1638,92 +1427,6 @@ mod tests {
                 len: DEFAULT_FILE_READ_CHUNK,
             }])
         );
-    }
-
-    #[test]
-    fn destructive_paths_reject_root_and_parent_traversal() {
-        for path in ["/", "//", ".", "..", "/tmp/..", "a/../b", "a/./b"] {
-            assert!(validate_destructive_path(path).is_err(), "accepted {path}");
-        }
-        assert!(validate_destructive_path("/home/me/project/file.txt").is_ok());
-        assert!(validate_destructive_path("relative/file.txt").is_ok());
-    }
-
-    #[test]
-    fn recursive_delete_command_quotes_one_exact_path() {
-        assert_eq!(
-            recursive_delete_command("/home/me/a b/it's"),
-            "rm -rf -- '/home/me/a b/it'\\''s'"
-        );
-        assert_eq!(
-            recursive_delete_command("/home/me/project///"),
-            "rm -rf -- '/home/me/project'"
-        );
-        let injected = recursive_delete_command("/tmp/a'; touch /tmp/pwned; '");
-        assert_eq!(injected, "rm -rf -- '/tmp/a'\\''; touch /tmp/pwned; '\\'''");
-    }
-
-    #[test]
-    fn checked_commit_command_quotes_every_dynamic_value() {
-        let command = checked_commit_command(
-            "/tmp/stage'; echo bad; '",
-            "/tmp/target'; touch /tmp/pwned; '",
-            "expected'; false; '",
-            "replacement'; false; '",
-        );
-
-        assert!(command.contains("target='/tmp/target'\\''; touch /tmp/pwned; '\\''';"));
-        assert!(command.contains("temporary='/tmp/stage'\\''; echo bad; '\\''';"));
-        assert!(command
-            .contains("if [ ! -f \"$target\" ]; then rm -f -- \"$temporary\"; printf 'missing'"));
-        assert!(command.contains("then rm -f -- \"$temporary\"; report conflict"));
-        assert!(command.contains("stat -c '%s %Y'"));
-        assert!(!command.contains("target=/tmp/target"));
-    }
-
-    #[test]
-    fn missing_commit_uses_atomic_no_clobber_and_quotes_paths() {
-        let command = missing_commit_command(
-            "/tmp/stage'; echo bad; '",
-            "/tmp/target'; touch /tmp/pwned; '",
-        );
-
-        assert!(command.contains("target='/tmp/target'\\''; touch /tmp/pwned; '\\''';"));
-        assert!(command.contains("temporary='/tmp/stage'\\''; echo bad; '\\''';"));
-        assert!(command.contains("[ -e \"$target\" ] || [ -L \"$target\" ]"));
-        assert!(command.contains("ln -- \"$temporary\" \"$target\""));
-        assert!(!command.contains("mv -f"));
-    }
-
-    #[test]
-    fn parses_standard_sha256_outputs() {
-        let digest = "a".repeat(64);
-        assert_eq!(
-            parse_sha256(format!("{digest}  /tmp/file\n").as_bytes()).unwrap(),
-            digest
-        );
-        assert!(parse_sha256(b"not-a-digest").is_err());
-    }
-
-    #[test]
-    fn parses_commit_status_with_optional_metadata() {
-        assert_eq!(
-            parse_remote_commit(b"written\0"),
-            Ok(RemoteCommit::Complete(None))
-        );
-        assert_eq!(
-            parse_remote_commit(b"converged\0"),
-            Ok(RemoteCommit::Complete(None))
-        );
-        assert_eq!(
-            parse_remote_commit(b"conflict\x0010 1735689600"),
-            Ok(RemoteCommit::Conflict(Some(RemoteObservedVersion {
-                size: 10,
-                mtime: 1_735_689_600_000,
-            })))
-        );
-        assert_eq!(parse_remote_commit(b"missing"), Ok(RemoteCommit::Missing));
-        assert!(parse_remote_commit(b"unknown").is_err());
     }
 
     #[test]

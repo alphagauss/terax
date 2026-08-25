@@ -160,14 +160,23 @@ pub struct SshTrafficSnapshot {
     pub downloaded_bytes: u64,
 }
 
-/// 当前进程 SSH transport 的低频 RTT 与文件写入降级状态。
-#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+/// 当前 SSH epoch 中一个已回退任务及其稳定原因。
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTaskFallback {
+    pub task: String,
+    pub reason: String,
+}
+
+/// 当前进程 SSH transport 的低频 RTT 与内部任务降级状态。
+#[derive(Clone, Debug, Default, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SshHealthSnapshot {
     pub epoch: Option<u64>,
     pub rtt_ms: Option<u64>,
     pub sampled_at: Option<u64>,
     pub file_write_fallback: bool,
+    pub task_fallbacks: Vec<SshTaskFallback>,
 }
 
 /// 前端凭据对话框对本次连接提供的临时覆盖值。

@@ -92,7 +92,7 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 
 ### 批次一：运行时基础与现有 helper 迁移
 
-- [ ] 新增任务类型、统一协议解析、执行阶段错误和 capability 状态。
+- [x] 新增任务类型、统一 channel、取消与输出边界、版本化协议和 capability 状态。
 - [x] 将 `RemoteWorkspace` 的文件 helper 失败状态与预开 channel 移入 `RemoteTaskRuntime`。
 - [x] 将现有 Bash 条件写入迁入任务运行时，保持三种写入条件和 SFTP 回退不变。
 - [x] 将属性目录扫描迁入 tree task，删除 `FilePropertiesState.ssh_helper_supported`。
@@ -132,8 +132,8 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - [x] 高层 `read_version` 使用 Bash 优先、现有 SFTP/exec 实现回退。
 - [x] 新增 Bash `create_directory`，一次完成父链处理和最终目录语义。
 - [x] 根据收益和契约复杂度评估 rename 与递归 delete 是否迁入 mutation task；没有明确收益时保留现状。
-- [ ] 将 SFTP fallback 中仍需执行的摘要与原子提交命令移出 `sftp.rs`，由文件服务和任务运行时集中管理。
-- [ ] 确保 `remote/sftp.rs` 最终只保留 SFTP primitive。
+- [x] 将 SFTP fallback 中仍需执行的摘要与原子提交命令移出 `sftp.rs`，由文件服务和任务运行时集中管理。
+- [x] 确保 `remote/sftp.rs` 最终只保留 SFTP primitive。
 
 评估结论：rename 的 Bash `mv -n` 会引入跨文件系统复制和 no-clobber 语义差异，且只减少一个往返；文件删除的 SFTP `stat + remove` 与新开 Bash exec 阶段数相当，递归目录删除已经使用单次受控命令。因此本批保留现状，不为它们新增 helper。
 
@@ -152,7 +152,7 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - [x] `bash_list` 一次批量检查全部远端 PID，不逐项串行 exec。
 - [x] 已确认退出的远端进程在本地缓存终态，后续列表不再访问服务器。
 - [x] 传统多 exec 查询保留为 capability 或协议失败时的回退。
-- [ ] 删除剩余可回退内部任务的 inline capability 和重复 channel 管理。
+- [x] 删除剩余可回退内部任务的 inline capability 和重复 channel 管理。
 - [x] `SshHealthSnapshot` 从任务运行时派生统一降级状态，保留前端需要的兼容字段或同步升级前端。
 
 验证：
@@ -191,3 +191,13 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - 同一语义的 UI 与 AI 调用共享服务层和远端后端。
 - 高延迟环境不再出现按目录、按文件或按后台进程线性放大的串行 SSH 往返。
 - 全量验证通过，高延迟服务器测试没有数据损坏、残留临时文件或旧 epoch 状态。
+
+## 本次验证记录
+
+- `pnpm lint` 通过，保留仓库既有的 32 条 warning，未修改无关文件。
+- `pnpm check-types` 通过。
+- `pnpm test` 通过，共 204 个测试文件、1076 个测试。
+- `cargo clippy --all-targets --locked -- -D warnings` 通过。
+- 本机没有 `cargo nextest`，已回退 `cargo test --locked`，495 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试全部通过。
+- 文件写入、树枚举、目录汇总、文件版本、目录创建和后台状态的 6 组 Bash 独立契约测试通过。
+- 2026-08-25 使用现有无交互 SSH 配置连接 `177.55.234.153:22`，在 5 秒连接截止时间内超时，因此未执行真实服务器性能和变更验证。没有请求密码，也没有修改远端状态。

@@ -39,18 +39,19 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
 
-## SSH Bash 文件写入 helper
+## SSH 封闭 Bash 任务
 
-远端 Bash helper 是三种条件写入的封闭实现，不是通用远端服务。源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器脚本、不监听端口、不读取凭据，也不接受调用方提供的任意命令。
+远端 Bash task 是文件版本、条件写入、递归树、目录汇总、目录创建和后台状态查询的封闭实现，不是通用远端服务。源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器脚本、不监听端口、不读取凭据，也不接受调用方提供的任意命令。
 
 - 协议只允许 Match、Missing 和 Overwrite 三种明确写入条件。
 - Rust 验证绝对路径、摘要和正文上限，将动态参数逐项 shell 转义；正文只通过 stdin 传输。
 - helper 解析物理目标，不使用 `eval`，也不接收脚本片段。
 - 远端依赖已经由 Linux 与 Bash 环境提供的 GNU coreutils，不维护 BusyBox 参数兼容分支。
 - 写入使用目标同目录排他临时文件、权限恢复、fsync 和条件原子发布。
-- helper 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
+- task 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
 - 提交响应丢失时通过 expected 和 replacement revision 收敛结果，不盲目覆盖。
-- helper 执行环境或协议失效后，当前连接直接回退既有 SFTP 安全路径。
+- capability 与缺失依赖按任务绑定当前 SSH epoch，一个任务失效不会关闭其他任务；安全的只读或执行前失败回退既有 SFTP 路径。
+- 写入或文件系统变更在 dispatch 后结果不明确时不得盲目回退，必须由语义服务收敛或返回错误。
 
 ## AI 工具审批流程
 
@@ -97,7 +98,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 ## 不变量
 
 - `security.ts` 中的 deny-list 同时适用于读取和写入，绝不能绕过。
-- Bash 文件 helper 只能实现封闭写入协议，不能演变为绕过 Shell 审批的命令执行入口。
+- Bash task 只能实现 Rust 枚举的封闭协议，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。
 - 新 plugin API 必须添加到 `src-tauri/capabilities/default.json`。
