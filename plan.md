@@ -93,11 +93,11 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 ### 批次一：运行时基础与现有 helper 迁移
 
 - [ ] 新增任务类型、统一协议解析、执行阶段错误和 capability 状态。
-- [ ] 将 `RemoteWorkspace` 的文件 helper 失败状态与预开 channel 移入 `RemoteTaskRuntime`。
-- [ ] 将现有 Bash 条件写入迁入任务运行时，保持三种写入条件和 SFTP 回退不变。
-- [ ] 将属性目录扫描迁入 tree task，删除 `FilePropertiesState.ssh_helper_supported`。
-- [ ] 将远端 `rg` 调用迁入 search task，缓存当前 epoch 的 capability。
-- [ ] 保持现有 Tauri command 和前端类型不变。
+- [x] 将 `RemoteWorkspace` 的文件 helper 失败状态与预开 channel 移入 `RemoteTaskRuntime`。
+- [x] 将现有 Bash 条件写入迁入任务运行时，保持三种写入条件和 SFTP 回退不变。
+- [x] 将属性目录扫描迁入 tree task，删除 `FilePropertiesState.ssh_helper_supported`。
+- [x] 将远端 `rg` 调用迁入 search task，缓存当前 epoch 的 capability。
+- [x] 保持现有 Tauri command 和前端类型不变。
 
 验证：
 

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use super::file_service::{RemoteCheckedWrite, RemoteObservedVersion, RemoteVersion};
 use super::session::{shell_quote, validate_remote_path, ExecOutput, RemoteWorkspace};
+use super::tasks::TaskKind;
 
 const HELPER_SOURCE: &str = include_str!("file_helper.sh");
 const PROTOCOL_MARKER: &[u8] = b"TERAX_SHELL_FILE_V1";
@@ -131,7 +132,8 @@ async fn execute(
     input: Vec<u8>,
 ) -> Result<HelperResponse, ShellFileError> {
     let channel = workspace
-        .take_file_helper_channel()
+        .tasks
+        .take_channel(workspace, TaskKind::FileWrite)
         .await
         .map_err(|_| ShellFileError {
             may_have_committed: false,
@@ -144,7 +146,9 @@ async fn execute(
             may_have_committed: true,
             disable_backend: false,
         })?;
-    decode_output(output)
+    let response = decode_output(output)?;
+    workspace.tasks.mark_available(TaskKind::FileWrite);
+    Ok(response)
 }
 
 fn decode_output(output: ExecOutput) -> Result<HelperResponse, ShellFileError> {

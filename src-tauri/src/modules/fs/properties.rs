@@ -26,7 +26,6 @@ const SFTP_SCAN_CONCURRENCY: usize = 6;
 #[derive(Default)]
 pub struct FilePropertiesState {
     scans: Mutex<ScanRegistry>,
-    ssh_helper_supported: Mutex<Option<bool>>,
 }
 
 #[derive(Default)]
@@ -175,7 +174,7 @@ pub async fn fs_properties_scan(
             WorkspaceEnv::Ssh { profile_id } => {
                 let remote_workspace = remote.manager.workspace(profile_id).await?;
                 process.assert_ssh_runtime_owner(&remote_workspace.profile)?;
-                ssh_scan(&path, remote_workspace, cancellation, state.inner()).await
+                ssh_scan(&path, remote_workspace, cancellation).await
             }
             WorkspaceEnv::Wsl { distro } => wsl_scan(distro, &path, cancellation).await,
             WorkspaceEnv::Local => {
@@ -542,22 +541,26 @@ async fn wsl_scan(
     Err("WSL properties are only available on Windows".into())
 }
 
+/// 使用集中式 Bash 任务汇总 SSH 目录，能力不可用时回退并发 SFTP 遍历。
 async fn ssh_scan(
     path: &str,
     workspace: Arc<RemoteWorkspace>,
     cancellation: CancellationToken,
-    state: &FilePropertiesState,
 ) -> Result<DirectorySummary, String> {
     remote::session::validate_remote_path(path)?;
-    let helper_supported = *state
-        .ssh_helper_supported
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if helper_supported != Some(false) {
+    let task = remote::tasks::TaskKind::TreeSummary;
+    if workspace.tasks.should_attempt(task) {
         let command = ssh_scan_command(path);
         let output = tokio::select! {
             _ = cancellation.cancelled() => return Err("directory scan cancelled".into()),
-            output = workspace.exec(&command, None, DIRECTORY_SCAN_TIMEOUT) => output?,
+            output = workspace.tasks.run(
+                &workspace,
+                task,
+                &command,
+                None,
+                DIRECTORY_SCAN_TIMEOUT,
+                1024,
+            ) => output?,
         };
         if output.timed_out {
             return Err(format!("remote directory scan timed out: {path}"));
@@ -566,17 +569,13 @@ async fn ssh_scan(
             return Err("directory scan target is not a directory".into());
         }
         if output.exit_code == Some(72) {
-            *state
-                .ssh_helper_supported
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(false);
+            workspace
+                .tasks
+                .mark_unavailable(task, "missing GNU find or awk");
         } else if let Ok(summary) =
             parse_scan_output(&output.stdout, &output.stderr, output.exit_code == Some(0))
         {
-            *state
-                .ssh_helper_supported
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(true);
+            workspace.tasks.mark_available(task);
             return Ok(summary);
         }
     }

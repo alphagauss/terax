@@ -2,7 +2,7 @@
 //!
 //! 每个 Remote Workspace 复用一条 transport，并为终端、SFTP、命令和隧道打开独立
 //! channel。激活终端可在同一 PTY 中确认 Workspace root；两类 SFTP 从认证完成后预热，
-//! 文件保存可在上传期间预开提交 channel，Bash 单次写入复用高 RTT 单槽预开 channel，
+//! 文件保存可在上传期间预开提交 channel，内部 Bash 任务复用高 RTT 单槽预开 channel，
 //! transport 失败和 RTT 统一进入进程级健康监督器。
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
@@ -25,11 +25,11 @@ use super::models::{
     ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshHealthSnapshot, SshProfile,
 };
 use super::remote_fs::RemoteFs;
+use super::tasks::{RemoteTaskRuntime, TaskKind, TASK_PREHEAT_RTT_MS};
 use super::traffic::{CountingSshStream, SshTrafficMeter};
 use super::tunnel::{copy_bidirectional_counted, RemoteForwardRegistry};
 
 const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
-const FILE_HELPER_PREHEAT_RTT_MS: u64 = 100;
 
 /// 处理 SSH 客户端事件、主机密钥确认和远端转发请求。
 pub struct ClientHandler {
@@ -132,9 +132,7 @@ pub struct RemoteWorkspace {
     proxy_secret: Zeroizing<String>,
     health: Arc<SshTransportHealth>,
     probe_lock: Mutex<()>,
-    file_helper_failed: AtomicBool,
-    prepared_file_channel: Mutex<Option<russh::Channel<Msg>>>,
-    file_channel_preparing: AtomicBool,
+    pub(crate) tasks: Arc<RemoteTaskRuntime>,
     runtime_epoch: AtomicU64,
     app: tauri::AppHandle,
 }
@@ -254,9 +252,7 @@ impl RemoteWorkspace {
             proxy_secret,
             health,
             probe_lock: Mutex::new(()),
-            file_helper_failed: AtomicBool::new(false),
-            prepared_file_channel: Mutex::new(None),
-            file_channel_preparing: AtomicBool::new(false),
+            tasks: Arc::new(RemoteTaskRuntime::default()),
             runtime_epoch: AtomicU64::new(0),
             app: app.clone(),
         });
@@ -379,13 +375,15 @@ impl RemoteWorkspace {
 
     /// 返回当前连接是否仍可尝试 Bash 单次写入。
     pub(crate) fn shell_file_write_available(&self) -> bool {
-        !self.file_helper_failed.load(Ordering::Acquire)
+        self.tasks.should_attempt(TaskKind::FileWrite)
     }
 
     /// 标记当前连接的 Bash helper 失效，后续写入直接回退 SFTP。
     pub(crate) fn disable_shell_file_write(self: &Arc<Self>) {
-        if !self.file_helper_failed.swap(true, Ordering::AcqRel) {
-            self.prepare_file_helper_channel();
+        if self
+            .tasks
+            .mark_unavailable(TaskKind::FileWrite, "file helper unavailable")
+        {
             let epoch = self.runtime_epoch.load(Ordering::Acquire);
             if epoch != 0 {
                 let _ = tauri::Emitter::emit(
@@ -402,83 +400,16 @@ impl RemoteWorkspace {
         self.runtime_epoch.store(epoch, Ordering::Release);
     }
 
-    /// 取得一个预开的 helper channel；无可用预热资源时只为当前请求打开一次。
-    pub(crate) async fn take_file_helper_channel(
-        self: &Arc<Self>,
-    ) -> Result<russh::Channel<Msg>, String> {
-        if !self.shell_file_write_available() {
-            return Err("remote Bash file helper is unavailable".into());
-        }
-        let prepared = self.prepared_file_channel.lock().await.take();
-        if !self.shell_file_write_available() {
-            if let Some(channel) = prepared {
-                let _ = channel.close().await;
-            }
-            return Err("remote Bash file helper is unavailable".into());
-        }
-        if let Some(channel) = prepared {
-            self.prepare_file_helper_channel();
-            return Ok(channel);
-        }
-        let channel = self.open_exec_channel().await?;
-        if !self.shell_file_write_available() {
-            let _ = channel.close().await;
-            return Err("remote Bash file helper is unavailable".into());
-        }
-        self.prepare_file_helper_channel();
-        Ok(channel)
-    }
-
-    /// 后台只为高 RTT 连接维持单槽 channel，低 RTT 写入按需打开。
+    /// 后台只为高 RTT 连接维持内部任务单槽 channel。
     ///
-    /// 预热只改变下一次调用是否包含 channel-open RTT，不参与写入后端选择。
+    /// 兼容入口由现有连接和健康监督器调用，预热不参与后端选择。
     pub(crate) fn prepare_file_helper_channel(self: &Arc<Self>) {
-        let workspace = self.clone();
-        tauri::async_runtime::spawn(async move {
-            if !workspace.file_helper_preheat_eligible() {
-                let channel = workspace.prepared_file_channel.lock().await.take();
-                if let Some(channel) = channel {
-                    let _ = channel.close().await;
-                }
-                return;
-            }
-            if workspace.prepared_file_channel.lock().await.is_some() {
-                return;
-            }
-            if workspace
-                .file_channel_preparing
-                .swap(true, Ordering::AcqRel)
-            {
-                return;
-            }
-            let opened = workspace.open_exec_channel().await;
-            workspace
-                .file_channel_preparing
-                .store(false, Ordering::Release);
-            if let Ok(channel) = opened {
-                if workspace.file_helper_preheat_eligible() {
-                    let close = {
-                        let mut slot = workspace.prepared_file_channel.lock().await;
-                        if slot.is_none() {
-                            *slot = Some(channel);
-                            None
-                        } else {
-                            Some(channel)
-                        }
-                    };
-                    if let Some(channel) = close {
-                        let _ = channel.close().await;
-                    }
-                } else {
-                    let _ = channel.close().await;
-                }
-            }
-        });
+        self.tasks.prepare_channel(self);
     }
 
-    fn file_helper_preheat_eligible(&self) -> bool {
-        self.shell_file_write_available()
-            && file_helper_preheat_eligible(self.health.snapshot(0).rtt_ms)
+    /// 返回当前 RTT 是否值得为内部任务维持一个空闲 channel。
+    pub(crate) fn task_preheat_eligible(&self) -> bool {
+        task_preheat_eligible(self.health.snapshot(0).rtt_ms)
     }
 
     /// 等待 Explorer 首个目录完成，供非前台资源避免争抢启动 transport。
@@ -494,7 +425,7 @@ impl RemoteWorkspace {
     /// 返回当前 epoch 的进程级 SSH RTT 快照。
     pub(crate) fn health_snapshot(&self, epoch: u64) -> SshHealthSnapshot {
         let mut snapshot = self.health.snapshot(epoch);
-        snapshot.file_write_fallback = self.file_helper_failed.load(Ordering::Acquire);
+        snapshot.file_write_fallback = self.tasks.is_unavailable(TaskKind::FileWrite);
         snapshot
     }
 
@@ -559,15 +490,8 @@ impl RemoteWorkspace {
             .try_lock()
             .ok()
             .and_then(|mut session| session.take());
-        let prepared_file_channel = self
-            .prepared_file_channel
-            .try_lock()
-            .ok()
-            .and_then(|mut slot| slot.take());
         let _ = tokio::time::timeout(Duration::from_secs(1), async {
-            if let Some(channel) = prepared_file_channel {
-                let _ = channel.close().await;
-            }
+            self.tasks.close().await;
             if let Some(sftp) = sftp {
                 let _ = sftp.close().await;
             }
@@ -905,9 +829,9 @@ pub(crate) fn parse_workspace_probe_bytes(
     Ok(WorkspaceProbe { login_home, root })
 }
 
-/// 只在已有高 RTT 样本时占用一个空闲 channel 隐藏下次打开往返。
-fn file_helper_preheat_eligible(rtt_ms: Option<u64>) -> bool {
-    rtt_ms.is_some_and(|rtt| rtt >= FILE_HELPER_PREHEAT_RTT_MS)
+/// 只在已有高 RTT 样本时占用一个空闲 channel 隐藏下次任务打开往返。
+fn task_preheat_eligible(rtt_ms: Option<u64>) -> bool {
+    rtt_ms.is_some_and(|rtt| rtt >= TASK_PREHEAT_RTT_MS)
 }
 
 #[derive(Default, Debug)]
@@ -1136,8 +1060,8 @@ pub fn validate_remote_path(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod path_tests {
     use super::{
-        build_exec_command, client_config, collect_exec_message, file_helper_preheat_eligible,
-        parse_workspace_probe, password_auth_result, workspace_root_assignment, ExecCompletion,
+        build_exec_command, client_config, collect_exec_message, parse_workspace_probe,
+        password_auth_result, task_preheat_eligible, workspace_root_assignment, ExecCompletion,
         ExecOutput, PrimaryAuthResult,
     };
     use bytes::Bytes;
@@ -1166,10 +1090,10 @@ mod path_tests {
 
     #[test]
     fn file_helper_preheats_only_for_a_stable_high_latency_sample() {
-        assert!(!file_helper_preheat_eligible(None));
-        assert!(!file_helper_preheat_eligible(Some(99)));
-        assert!(file_helper_preheat_eligible(Some(100)));
-        assert!(file_helper_preheat_eligible(Some(200)));
+        assert!(!task_preheat_eligible(None));
+        assert!(!task_preheat_eligible(Some(99)));
+        assert!(task_preheat_eligible(Some(100)));
+        assert!(task_preheat_eligible(Some(200)));
     }
 
     #[test]
