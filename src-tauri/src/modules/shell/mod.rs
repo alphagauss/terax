@@ -411,7 +411,7 @@ impl RemoteBackgroundProc {
                 }
                 Err(remote::tasks::background::BackgroundTaskError::Unsupported(reason))
                 | Err(remote::tasks::background::BackgroundTaskError::Protocol(reason)) => {
-                    workspace.tasks.mark_unavailable(task, reason);
+                    workspace.mark_task_unavailable(task, reason);
                 }
                 Err(remote::tasks::background::BackgroundTaskError::Business(error))
                 | Err(remote::tasks::background::BackgroundTaskError::Transport(error)) => {
@@ -424,14 +424,25 @@ impl RemoteBackgroundProc {
 
     async fn read_logs_legacy(&self, since: u64) -> Result<BackgroundLogResponse, String> {
         let command = format!(
-            "if [ -f {log} ]; then tail -c +{start} -- {log}; fi",
+            "if [ -f {log} ]; then tail -c +{start} -- {log} | head -c {limit}; fi",
             log = remote::session::shell_quote(&self.log_path),
             start = since.saturating_add(1),
+            limit = remote::tasks::background::LOG_CHUNK_BYTES,
         );
         let manager = remote::manager::global_manager()?;
         let output = manager
             .exec(&self.profile_id, &command, None, Duration::from_secs(10))
             .await?;
+        if output.timed_out || output.truncated || output.exit_code != Some(0) {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if output.timed_out {
+                "remote background log fallback timed out".into()
+            } else if detail.is_empty() {
+                "remote background log fallback failed".into()
+            } else {
+                format!("remote background log fallback failed: {detail}")
+            });
+        }
         let bytes = output.stdout;
         let running = self.is_running().await;
         Ok(BackgroundLogResponse {
@@ -554,7 +565,7 @@ async fn batch_remote_statuses(profile_id: &str, pids: &[u32]) -> Option<HashMap
         }
         Err(remote::tasks::background::BackgroundTaskError::Unsupported(reason))
         | Err(remote::tasks::background::BackgroundTaskError::Protocol(reason)) => {
-            workspace.tasks.mark_unavailable(task, reason);
+            workspace.mark_task_unavailable(task, reason);
             None
         }
         Err(remote::tasks::background::BackgroundTaskError::Business(error))

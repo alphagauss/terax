@@ -429,7 +429,7 @@ impl RemoteManager {
                     TransportProbeOutcome::Sampled => {
                         if manager.is_current(&workspace, epoch, lifecycle.id).await {
                             Self::emit_health(&app, workspace.health_snapshot(epoch));
-                            workspace.prepare_file_helper_channel();
+                            workspace.prepare_task_channel();
                         }
                     }
                     TransportProbeOutcome::Failed => {
@@ -719,7 +719,7 @@ impl RemoteManager {
             TransportProbeOutcome::Sampled => {
                 if self.is_current(&workspace, epoch, lifecycle.id).await {
                     Self::emit_health(app, workspace.health_snapshot(epoch));
-                    workspace.prepare_file_helper_channel();
+                    workspace.prepare_task_channel();
                 }
             }
             TransportProbeOutcome::Failed => {

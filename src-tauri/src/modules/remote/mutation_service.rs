@@ -26,10 +26,10 @@ pub(crate) async fn create_directory(
                 return Err(format!("already exists: {path}"));
             }
             Err(CreateDirectoryTaskError::Unsupported(reason)) => {
-                workspace.tasks.mark_unavailable(task, reason);
+                workspace.mark_task_unavailable(task, reason);
             }
             Err(CreateDirectoryTaskError::Protocol(error)) => {
-                workspace.tasks.mark_unavailable(task, &error);
+                workspace.mark_task_unavailable(task, &error);
                 return Err(error);
             }
             Err(CreateDirectoryTaskError::Business(error))

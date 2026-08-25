@@ -52,41 +52,48 @@ Bash primary   SFTP / legacy fallback
 ```text
 remote/tasks/
   mod.rs
-  runtime.rs
-  capability.rs
-  protocol.rs
+  background.rs
+  create_directory.rs
+  delete.rs
+  file_version.rs
+  file_write.rs
+  ripgrep.rs
+  sftp_fallback.rs
+  tree_list.rs
+  tree_summary.rs
   scripts/
-    common.sh
-    file_write.sh
-    file_version.sh
-    search.sh
-    tree.sh
-    mutation.sh
     background.sh
+    create_directory.sh
+    file_version.sh
+    file_write.sh
+    tree_list.sh
+    tree_summary.sh
 ```
 
 运行时只负责：
 
-- 执行 Rust `TaskKind` 枚举对应的内嵌脚本。
+- 只允许 `remote/tasks/` 内的适配器执行 Rust `TaskKind` 对应的固定命令或内嵌脚本，通用命令执行接口不暴露到任务目录之外。
 - 统一输入输出上限、超时、取消和 SSH channel 生命周期。
 - 高 RTT 时维护一个内部任务预开 channel，并在消费后后台补充。
-- 按任务缓存 `Unknown`、`Available`、`Unavailable` 和 `Broken` 状态。
-- 返回 `Success`、`Unsupported`、`BusinessError`、`Cancelled`、`FailedBeforeDispatch`、`FailedAfterDispatch` 或 `TransportFailed`。
+- 按实际依赖集合缓存单调的 `Unknown`、`Available` 和 `Unavailable` 状态；同一 epoch 的 `Unavailable` 不能被并发成功请求重新启用。
+- 在通用执行层区分 `FailedBeforeDispatch` 与 `FailedAfterDispatch`，具体 task 适配器再解释成功、能力缺失、业务错误、取消、协议错误和传输错误。
 - 提供当前 epoch 的 capability snapshot，记录缺失命令或不支持的参数特性。
 
 业务 service 负责解释任务结果、决定回退、执行冲突收敛和归一化返回值。
 
 ### 协议与依赖
 
-所有任务共享协议头：
+每个有结构化输出的任务使用独立的版本化协议标记，例如：
 
 ```text
-TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
+TERAX_FILE_VERSION_V1\0status\0...
 ```
+
+运行时不重复包装一个无业务字段的公共协议头，避免两层解析；协议源码和解析器由同一个 task 模块配对维护。
 
 依赖检测采用懒执行。第一次运行任务时在同一次 Bash 调用内检查实际需要的能力，不增加独立 RTT；缺失后在当前 epoch 直接回退。诊断入口可以按需用一次调用检查全部已注册任务。
 
-检测目标包括命令和实际参数能力，例如 `rg --json`、`rg --files`、GNU `find -printf`、`stat -c`、`readlink -f`、`dd conv=fsync`、`mv -T`、`ln -T` 和 `sha256sum`。
+检测目标包括命令和实际参数能力，例如 `rg --json`、`rg --files`、GNU `find -printf`、`stat -c`、`readlink -f`、`dd conv=fsync`、`mv -T`、`ln -T` 和可用的 SHA-256 provider。内容搜索、文件枚举、三种文件写入及 SFTP 摘要与提交使用独立 capability，某个依赖集合缺失不能污染无关操作。
 
 ## 实施批次
 
@@ -154,6 +161,7 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - [x] 传统多 exec 查询保留为 capability 或协议失败时的回退。
 - [x] 删除剩余可回退内部任务的 inline capability 和重复 channel 管理。
 - [x] `SshHealthSnapshot` 从任务运行时派生统一降级状态，保留前端需要的兼容字段或同步升级前端。
+- [x] 后台日志在服务器端按固定分块读取，客户端输出上限不再导致重复下载剩余整段日志。
 
 验证：
 
@@ -169,6 +177,7 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - `remote/sftp.rs` 不调用 `workspace.exec`，不包含 shell 命令构造。
 - 所有可回退的内部 Bash 加速任务只通过 `RemoteTaskRuntime`。
 - helper capability 不再散落在各模块 Boolean 中。
+- capability 按真实依赖集合拆分并在当前 epoch 单调降级，正文上传前完成对应 SFTP 提交能力检查。
 - 搜索、文件列表和目录遍历没有重复的 SSH 递归实现。
 - 用户 Shell、PTY、Git、LSP 和 transfer Archive 仍保持独立边界。
 - 文档同步更新 `AGENTS.md`、`docs/architecture/two-process-model.md`、`docs/architecture/security-model.md` 和 `docs/contributing/testing.md`。
@@ -199,5 +208,8 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 - `pnpm test` 通过，共 204 个测试文件、1076 个测试。
 - `cargo clippy --all-targets --locked -- -D warnings` 通过。
 - 本机没有 `cargo nextest`，已回退 `cargo test --locked`，495 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试全部通过。
-- 文件写入、树枚举、目录汇总、文件版本、目录创建和后台状态的 6 组 Bash 独立契约测试通过。
+- 原方案完成时，文件写入、树枚举、目录汇总、文件版本、目录创建和后台状态的 6 组 Bash 独立契约测试通过。
 - 2026-08-25 使用现有无交互 SSH 配置连接 `177.55.234.153:22`，在 5 秒连接截止时间内超时，因此未执行真实服务器性能和变更验证。没有请求密码，也没有修改远端状态。
+- 后续静态审查修复了 capability 交叉污染与并发重新启用、搜索回退取消、旧版 ripgrep 参数回退、文件版本身份校验、后台日志服务器端限流和本地/SSH 剪枝差异。真实 SSH 兼容性、重连和性能验证按用户要求留到下一任务。
+- 静态审查修复后的 `cargo clippy --all-targets --locked -- -D warnings` 通过；`cargo test --locked` 通过，共 500 个单元测试、27 个搜索集成测试和 40 个 Git 集成测试。
+- 12 个 Bash task 与契约脚本通过 `sh -n` 语法检查。Cygwin 本地执行中，tree list、file version 和 background 三组契约通过；file write 权限、tree summary 符号链接和 create directory 符号链接断言依赖真实 Linux 语义，留到下一任务执行。

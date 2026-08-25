@@ -8,17 +8,17 @@ helper="$script_dir/file_version.sh"
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
-target_path="$work/missing.txt" max_size=1024 bash "$helper" >"$work/missing.bin"
+target_path="$work/missing.txt" max_size=1024 probe_features=1 "$BASH" "$helper" >"$work/missing.bin"
 grep -aFq 'missing' "$work/missing.bin"
 
 printf 'payload' >"$work/file.txt"
-target_path="$work/file.txt" max_size=1024 bash "$helper" >"$work/version.bin"
+target_path="$work/file.txt" max_size=1024 probe_features=1 "$BASH" "$helper" >"$work/version.bin"
 grep -aFq 'version' "$work/version.bin"
 grep -aFq '7' "$work/version.bin"
 
 ln -s -- "$work/file.txt" "$work/link.txt"
-target_path="$work/link.txt" max_size=1024 bash "$helper" >"$work/link.bin"
+target_path="$work/link.txt" max_size=1024 probe_features=1 "$BASH" "$helper" >"$work/link.bin"
 cmp "$work/version.bin" "$work/link.bin"
 
-target_path="$work/file.txt" max_size=3 bash "$helper" >"$work/toolarge.bin"
+target_path="$work/file.txt" max_size=3 probe_features=1 "$BASH" "$helper" >"$work/toolarge.bin"
 grep -aFq 'toolarge' "$work/toolarge.bin"

@@ -13,7 +13,8 @@ const SOURCE: &str = include_str!("scripts/background.sh");
 const LOGS_MARKER: &[u8] = b"TERAX_BG_LOGS_V1";
 const LIST_MARKER: &[u8] = b"TERAX_BG_LIST_V1";
 const TIMEOUT: Duration = Duration::from_secs(10);
-const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
+pub(crate) const LOG_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const OUTPUT_LIMIT: usize = LOG_CHUNK_BYTES;
 
 /// 一次远端日志读取及其进程运行状态。
 pub(crate) struct BackgroundLogs {
@@ -40,13 +41,18 @@ pub(crate) async fn read_logs(
     crate::modules::remote::session::validate_remote_path(log_path)
         .map_err(BackgroundTaskError::Business)?;
     let script = format!(
-        "operation=logs; process_id={pid}; log_path={}; start_offset={}; {SOURCE}",
+        "operation=logs; process_id={pid}; log_path={}; start_offset={}; max_log_bytes={LOG_CHUNK_BYTES}; {SOURCE}",
         shell_quote(log_path),
         since.saturating_add(1),
     );
     let output = run(workspace, TaskKind::BackgroundLogs, script).await?;
     match output.exit_code {
         Some(0) => {
+            if output.truncated {
+                return Err(BackgroundTaskError::Protocol(
+                    "remote background log chunk exceeded its output limit".into(),
+                ));
+            }
             let running =
                 parse_logs_status(&output.stderr).map_err(BackgroundTaskError::Protocol)?;
             Ok(BackgroundLogs {
@@ -54,7 +60,9 @@ pub(crate) async fn read_logs(
                 running,
             })
         }
-        Some(72) => Err(BackgroundTaskError::Unsupported("missing tail".into())),
+        Some(72) => Err(BackgroundTaskError::Unsupported(
+            "missing tail or head".into(),
+        )),
         Some(code) => Err(BackgroundTaskError::Business(format!(
             "remote background log task failed with exit code {code}"
         ))),
@@ -157,7 +165,7 @@ fn parse_list(bytes: &[u8]) -> Result<HashMap<u32, bool>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_list, parse_logs_status};
+    use super::{parse_list, parse_logs_status, SOURCE};
 
     #[test]
     fn parses_separate_log_status() {
@@ -170,5 +178,10 @@ mod tests {
         let statuses = parse_list(b"TERAX_BG_LIST_V1\x0010\0running\x0020\0exited\0END\0").unwrap();
         assert_eq!(statuses.get(&10), Some(&true));
         assert_eq!(statuses.get(&20), Some(&false));
+    }
+
+    #[test]
+    fn log_script_limits_bytes_on_the_server() {
+        assert!(SOURCE.contains("head -c \"$max_log_bytes\""));
     }
 }

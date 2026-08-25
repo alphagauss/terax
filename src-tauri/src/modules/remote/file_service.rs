@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::session::RemoteWorkspace;
 use super::sftp;
-use super::shell_file::{self, ShellFileError};
+use super::tasks::file_write::{self, FileWriteTaskError};
 use super::tasks::{file_version, TaskKind};
 
 /// 一次有界远端文件读取的正文或过大结果。
@@ -87,9 +87,7 @@ pub(crate) async fn read_version(
             }
             Err(file_version::FileVersionTaskError::Unsupported(reason))
             | Err(file_version::FileVersionTaskError::Protocol(reason)) => {
-                workspace
-                    .tasks
-                    .mark_unavailable(TaskKind::FileVersion, &reason);
+                workspace.mark_task_unavailable(TaskKind::FileVersion, &reason);
                 log::warn!(
                     "SSH Bash file version disabled profile={} reason={}",
                     workspace.profile.id,
@@ -122,18 +120,19 @@ pub(crate) async fn write_overwrite(
     replacement_revision: &str,
 ) -> Result<u64, String> {
     let started_at = Instant::now();
-    if workspace.shell_file_write_available() {
-        match shell_file::write_overwrite(workspace, path, content, replacement_revision).await {
+    let task = TaskKind::FileWriteOverwrite;
+    if workspace.tasks.should_attempt(task) {
+        match file_write::write_overwrite(workspace, path, content, replacement_revision).await {
             Ok(RemoteCheckedWrite::Written { mtime }) => {
                 log_backend_completion(workspace, "write_overwrite", "bash", started_at, true);
                 return Ok(mtime);
             }
             Ok(RemoteCheckedWrite::Conflict { .. }) => {
-                let error = ShellFileError {
+                let error = FileWriteTaskError {
                     may_have_committed: true,
                     disable_backend: true,
                 };
-                record_shell_fallback(workspace, "write_overwrite", &error);
+                record_file_write_fallback(workspace, task, "write_overwrite", &error);
                 return reconcile_ambiguous_overwrite(
                     workspace,
                     path,
@@ -143,7 +142,7 @@ pub(crate) async fn write_overwrite(
                 .await;
             }
             Err(error) => {
-                record_shell_fallback(workspace, "write_overwrite", &error);
+                record_file_write_fallback(workspace, task, "write_overwrite", &error);
                 if error.may_have_committed {
                     return reconcile_ambiguous_overwrite(
                         workspace,
@@ -206,15 +205,16 @@ pub(crate) async fn write_missing(
 ) -> Result<RemoteCheckedWrite, String> {
     let started_at = Instant::now();
     let mut may_have_committed = false;
-    if workspace.shell_file_write_available() {
-        match shell_file::write_missing(workspace, path, content, replacement_revision).await {
+    let task = TaskKind::FileWriteMissing;
+    if workspace.tasks.should_attempt(task) {
+        match file_write::write_missing(workspace, path, content, replacement_revision).await {
             Ok(result) => {
                 log_backend_completion(workspace, "write_missing", "bash", started_at, true);
                 return Ok(result);
             }
             Err(error) => {
                 may_have_committed = error.may_have_committed;
-                record_shell_fallback(workspace, "write_missing", &error);
+                record_file_write_fallback(workspace, task, "write_missing", &error);
             }
         }
     }
@@ -251,15 +251,16 @@ pub(crate) async fn write_checked(
     replacement_revision: &str,
 ) -> Result<RemoteCheckedWrite, String> {
     let started_at = Instant::now();
-    if workspace.shell_file_write_available() {
-        match shell_file::write_checked(workspace, path, content, expected, replacement_revision)
+    let task = TaskKind::FileWriteChecked;
+    if workspace.tasks.should_attempt(task) {
+        match file_write::write_checked(workspace, path, content, expected, replacement_revision)
             .await
         {
             Ok(result) => {
                 log_backend_completion(workspace, "write_checked", "bash", started_at, true);
                 return Ok(result);
             }
-            Err(error) => record_shell_fallback(workspace, "write_checked", &error),
+            Err(error) => record_file_write_fallback(workspace, task, "write_checked", &error),
         }
     }
     let result =
@@ -292,16 +293,17 @@ fn log_backend_completion(
     );
 }
 
-/// 记录 helper 失败并在协议或执行环境失效时关闭当前连接的快速写入路径。
-fn record_shell_fallback(
+/// 记录文件写入任务失败，并在协议或执行环境失效时关闭对应快速路径。
+fn record_file_write_fallback(
     workspace: &Arc<RemoteWorkspace>,
+    task: TaskKind,
     operation: &str,
-    error: &ShellFileError,
+    error: &FileWriteTaskError,
 ) {
     if error.disable_backend {
-        workspace.disable_shell_file_write();
+        workspace.mark_task_unavailable(task, "file write task unavailable");
         log::warn!(
-            "SSH Bash file helper disabled profile={} operation={} may_have_committed={}",
+            "SSH Bash file write task disabled profile={} operation={} may_have_committed={}",
             workspace.profile.id,
             operation,
             error.may_have_committed

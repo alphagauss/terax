@@ -13,5 +13,5 @@ printf 'abc' >"$work/root/a.txt"
 printf 'wxyz' >"$work/root/nested/b.txt"
 ln -s -- "$work/root/nested" "$work/root/link"
 
-target_path="$work/root" bash "$helper" >"$work/summary.txt"
+target_path="$work/root" "$BASH" "$helper" >"$work/summary.txt"
 grep -Fq 'TERAX_PROPERTIES_SCAN_V1 2 1 1 7 ' "$work/summary.txt"

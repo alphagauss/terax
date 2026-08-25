@@ -35,8 +35,9 @@ pub(crate) async fn read(
         ));
     }
     let script = format!(
-        "target_path={}; max_size={max_size}; {SOURCE}",
-        shell_quote(path)
+        "target_path={}; max_size={max_size}; probe_features={}; {SOURCE}",
+        shell_quote(path),
+        usize::from(workspace.tasks.should_probe(TaskKind::FileVersion)),
     );
     let command = format!(
         "command -v bash >/dev/null 2>&1 || exit 72; exec bash -c {}",
@@ -68,7 +69,7 @@ pub(crate) async fn read(
             }
         }),
         Some(72) => Err(FileVersionTaskError::Unsupported(
-            "missing readlink, stat, or sha256sum".into(),
+            "missing required stat, readlink, or SHA-256 capability".into(),
         )),
         Some(75) => Err(FileVersionTaskError::Business(
             "remote file changed while computing its revision".into(),
@@ -126,7 +127,7 @@ fn parse_u64(field: Option<&[u8]>, name: &str) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, SOURCE};
 
     #[test]
     fn parses_missing_and_stable_versions() {
@@ -147,5 +148,12 @@ mod tests {
         let error = parse(b"TERAX_FILE_VERSION_V1\0toolarge\x002048\0", 1024).unwrap_err();
         assert!(error.contains("1024"));
         assert!(error.contains("2048"));
+    }
+
+    #[test]
+    fn script_checks_path_identity_and_alternate_hash_providers() {
+        assert!(SOURCE.contains("%d:%i:%s:%y:%z"));
+        assert!(SOURCE.contains("shasum -a 256"));
+        assert!(SOURCE.contains("openssl dgst -sha256 -r"));
     }
 }

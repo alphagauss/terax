@@ -40,7 +40,11 @@ pub(crate) async fn create(
             "remote directory requires a safe absolute path".into(),
         ));
     }
-    let script = format!("target_path={}; {SOURCE}", shell_quote(target));
+    let script = format!(
+        "target_path={}; probe_features={}; {SOURCE}",
+        shell_quote(target),
+        usize::from(workspace.tasks.should_probe(TaskKind::CreateDirectory)),
+    );
     let command = format!(
         "command -v bash >/dev/null 2>&1 || exit 72; exec bash -c {}",
         shell_quote(&script)

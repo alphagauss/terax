@@ -5,9 +5,12 @@
 
 set -eu
 
-command -v find >/dev/null 2>&1 || exit 72
-command -v readlink >/dev/null 2>&1 || exit 72
-find /dev/null -maxdepth 0 -printf '' >/dev/null 2>&1 || exit 72
+if [ "$probe_features" = 1 ]; then
+  command -v find >/dev/null 2>&1 || exit 72
+  command -v readlink >/dev/null 2>&1 || exit 72
+  find /dev/null -maxdepth 0 -printf '' >/dev/null 2>&1 || exit 72
+  readlink -f -- /dev/null >/dev/null 2>&1 || exit 72
+fi
 
 root=$(readlink -f -- "$target_path") || exit 73
 [ -d "$root" ] || exit 73
@@ -20,7 +23,7 @@ if [ "$show_hidden" = 1 ]; then
       -name node_modules -o -name .git -o -name target -o -name dist -o \
       -name build -o -name .next -o -name .turbo -o -name .cache -o \
       -name .venv -o -name __pycache__ \
-    \) -printf '%y\000%s\000%P\000' -prune \) -o \
+    \) -prune \) -o \
     -printf '%y\000%s\000%P\000'
 else
   find -P "$root" -mindepth 1 -maxdepth "$max_depth" \
@@ -29,7 +32,7 @@ else
       -name node_modules -o -name target -o -name dist -o -name build -o \
       -name .next -o -name .turbo -o -name .cache -o -name .venv -o \
       -name __pycache__ \
-    \) -printf '%y\000%s\000%P\000' -prune \) -o \
+    \) -prune \) -o \
     -printf '%y\000%s\000%P\000'
 fi
 

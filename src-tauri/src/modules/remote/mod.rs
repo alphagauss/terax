@@ -15,7 +15,6 @@ mod proxy;
 mod remote_fs;
 pub mod session;
 pub mod sftp;
-mod shell_file;
 mod ssh_config;
 pub(crate) mod tasks;
 pub mod terminal;

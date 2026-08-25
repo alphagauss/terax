@@ -3,20 +3,15 @@
 //! 递归文件列表、路径搜索和搜索回退共享同一 Bash 优先实现。服务器缺少所需 GNU
 //! 能力或协议失配时，服务回退现有 raw SFTP walker，调用方不接触后端选择。
 
-use std::sync::Arc;
-use std::time::Duration;
-
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
-use super::session::{join_remote, shell_quote, RemoteWorkspace};
+use super::session::{join_remote, RemoteWorkspace};
 use super::sftp::{self, RemoteEntryKind, RemoteWalkEntry};
-use super::tasks::TaskKind;
+use super::tasks::{self, TaskKind};
 
-const TREE_LIST_SOURCE: &str = include_str!("tasks/scripts/tree_list.sh");
 const TREE_LIST_MARKER: &[u8] = b"TERAX_TREE_LIST_V1";
-const TREE_LIST_TIMEOUT: Duration = Duration::from_secs(30);
-const TREE_LIST_OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
 
 /// 使用 ripgrep 首选路径或共享树回退枚举文件。
 pub(crate) async fn list_files(
@@ -28,7 +23,7 @@ pub(crate) async fn list_files(
     max_results: usize,
 ) -> Result<(Vec<RemoteWalkEntry>, bool), String> {
     let matcher = pattern.map(build_globset).transpose()?;
-    let task = TaskKind::Ripgrep;
+    let task = TaskKind::RipgrepFiles;
     if workspace.tasks.should_attempt(task) {
         match list_files_rg(
             workspace,
@@ -45,11 +40,11 @@ pub(crate) async fn list_files(
                 return Ok(result);
             }
             Err(TreeTaskError::Unavailable(reason)) => {
-                workspace.tasks.mark_unavailable(task, reason);
+                workspace.mark_task_unavailable(task, reason);
             }
             Err(TreeTaskError::Business(error)) => return Err(error),
             Err(TreeTaskError::Protocol(error)) => {
-                workspace.tasks.mark_unavailable(task, error);
+                workspace.mark_task_unavailable(task, error);
             }
             Err(TreeTaskError::Transport(error)) => return Err(error),
         }
@@ -111,11 +106,11 @@ pub(crate) async fn walk_cancellable(
                 return Ok(result);
             }
             Err(TreeTaskError::Unavailable(reason)) => {
-                workspace.tasks.mark_unavailable(task, reason);
+                workspace.mark_task_unavailable(task, reason);
             }
             Err(TreeTaskError::Business(error)) => return Err(error),
             Err(TreeTaskError::Protocol(error)) => {
-                workspace.tasks.mark_unavailable(task, error);
+                workspace.mark_task_unavailable(task, error);
             }
             Err(TreeTaskError::Transport(error)) => return Err(error),
         }
@@ -180,16 +175,7 @@ async fn list_files_rg(
     }
     args.push("--".into());
     args.push(root.to_string());
-    let output = workspace
-        .tasks
-        .run(
-            workspace,
-            TaskKind::Ripgrep,
-            &super::tasks::ripgrep_command(&args),
-            None,
-            TREE_LIST_TIMEOUT,
-            TREE_LIST_OUTPUT_LIMIT,
-        )
+    let output = tasks::ripgrep::files(workspace, &args)
         .await
         .map_err(TreeTaskError::Transport)?;
     if output.timed_out {
@@ -198,6 +184,9 @@ async fn list_files_rg(
         ));
     }
     match output.exit_code {
+        Some(126) => Err(TreeTaskError::Unavailable(
+            "ripgrep file-list options are unavailable".into(),
+        )),
         Some(127) => Err(TreeTaskError::Unavailable("ripgrep unavailable".into())),
         Some(0 | 1) => parse_rg_files(&output.stdout, root, max_results, output.truncated)
             .map_err(TreeTaskError::Protocol),
@@ -285,36 +274,9 @@ async fn walk_bash(
     cancellation: Option<&CancellationToken>,
 ) -> Result<(Vec<RemoteWalkEntry>, bool), TreeTaskError> {
     super::session::validate_remote_path(root).map_err(TreeTaskError::Business)?;
-    let command = tree_list_command(root, show_hidden, max_depth);
-    let output = match cancellation {
-        Some(cancellation) => {
-            workspace
-                .tasks
-                .run_cancellable(
-                    workspace,
-                    TaskKind::TreeList,
-                    &command,
-                    TREE_LIST_TIMEOUT,
-                    TREE_LIST_OUTPUT_LIMIT,
-                    cancellation,
-                )
-                .await
-        }
-        None => {
-            workspace
-                .tasks
-                .run(
-                    workspace,
-                    TaskKind::TreeList,
-                    &command,
-                    None,
-                    TREE_LIST_TIMEOUT,
-                    TREE_LIST_OUTPUT_LIMIT,
-                )
-                .await
-        }
-    }
-    .map_err(TreeTaskError::Transport)?;
+    let output = tasks::tree_list::run(workspace, root, show_hidden, max_depth, cancellation)
+        .await
+        .map_err(TreeTaskError::Transport)?;
     if output.timed_out {
         return Err(TreeTaskError::Transport(
             "remote tree listing timed out".into(),
@@ -336,20 +298,6 @@ async fn walk_bash(
             "remote tree listing closed without an exit status".into(),
         )),
     }
-}
-
-fn tree_list_command(root: &str, show_hidden: bool, max_depth: usize) -> String {
-    let script = format!(
-        "target_path={}; show_hidden={}; max_depth={}; {}",
-        shell_quote(root),
-        usize::from(show_hidden),
-        max_depth,
-        TREE_LIST_SOURCE
-    );
-    format!(
-        "command -v bash >/dev/null 2>&1 || exit 72; exec bash -c {}",
-        shell_quote(&script)
-    )
 }
 
 fn parse_tree_list(
@@ -423,7 +371,7 @@ fn decode_field<'a>(field: Option<&'a [u8]>, name: &str) -> Result<&'a str, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_rg_files, parse_tree_list, tree_list_command};
+    use super::{parse_rg_files, parse_tree_list};
     use crate::modules::remote::sftp::RemoteEntryKind;
 
     #[test]
@@ -442,14 +390,6 @@ mod tests {
         let (entries, truncated) = parse_tree_list(bytes, 10, true).unwrap();
         assert_eq!(entries.len(), 1);
         assert!(truncated);
-    }
-
-    #[test]
-    fn tree_command_quotes_paths_and_uses_fixed_script() {
-        let command = tree_list_command("/srv/a b'c", false, 8);
-        assert!(command.starts_with("command -v bash"));
-        assert!(command.contains("max_depth=8"));
-        assert!(command.contains("TERAX_TREE_LIST_V1"));
     }
 
     #[test]

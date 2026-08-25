@@ -396,8 +396,16 @@ async fn search_content_with_cancel(
                 Ok(response)
             };
         }
-        return search_remote_sftp(profile_id, &request.root, &matcher, &filters, cap, cancel)
-            .await;
+        return search_remote_sftp(
+            profile_id,
+            &request.root,
+            &matcher,
+            &filters,
+            cap,
+            cancel,
+            remote_cancellation,
+        )
+        .await;
     }
     let root_path = resolve_path(&request.root, &workspace);
     if !root_path.is_dir() {
@@ -538,11 +546,13 @@ async fn search_remote_sftp(
     filters: &PathFilters,
     cap: usize,
     cancel: &(dyn Fn() -> bool + Sync),
+    cancellation: Option<&CancellationToken>,
 ) -> Result<ContentSearchResponse, String> {
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
     let (entries, mut truncated) =
-        remote::tree_service::walk(&workspace, root, false, 16, 50_000).await?;
+        remote::tree_service::walk_cancellable(&workspace, root, false, 16, 50_000, cancellation)
+            .await?;
     let mut hits = Vec::new();
     let mut files_scanned = 0usize;
     for entry in entries {
@@ -600,51 +610,24 @@ async fn search_remote_rg(
     cap: usize,
     cancellation: Option<&CancellationToken>,
 ) -> Result<Option<ContentSearchResponse>, String> {
-    const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
     let args = remote_content_search_args(root, request);
-    let command = remote::tasks::ripgrep_command(&args);
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
-    let task = remote::tasks::TaskKind::Ripgrep;
+    let task = remote::tasks::TaskKind::RipgrepContent;
     if !workspace.tasks.should_attempt(task) {
         return Ok(None);
     }
-    let output = match cancellation {
-        Some(cancellation) => {
-            workspace
-                .tasks
-                .run_cancellable(
-                    &workspace,
-                    task,
-                    &command,
-                    std::time::Duration::from_secs(30),
-                    OUTPUT_LIMIT,
-                    cancellation,
-                )
-                .await?
-        }
-        None => {
-            workspace
-                .tasks
-                .run(
-                    &workspace,
-                    task,
-                    &command,
-                    None,
-                    std::time::Duration::from_secs(30),
-                    OUTPUT_LIMIT,
-                )
-                .await?
-        }
-    };
+    let output = remote::tasks::ripgrep::content(&workspace, &args, cancellation).await?;
     if output.timed_out {
         return Err("remote ripgrep search timed out".into());
     }
     match output.exit_code {
+        Some(126) => {
+            workspace.mark_task_unavailable(task, "ripgrep content-search options are unavailable");
+            return Ok(None);
+        }
         Some(127) => {
-            workspace
-                .tasks
-                .mark_unavailable(task, "ripgrep unavailable");
+            workspace.mark_task_unavailable(task, "ripgrep unavailable");
             return Ok(None);
         }
         Some(0 | 1) => workspace.tasks.mark_available(task),

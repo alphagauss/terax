@@ -31,13 +31,9 @@ pub(crate) async fn recursive(workspace: &Arc<RemoteWorkspace>, path: &str) -> R
         return Err(format!("remote recursive delete timed out: {path}"));
     }
     if output.exit_code == Some(0) {
-        workspace.tasks.mark_available(TaskKind::RecursiveDelete);
         return Ok(());
     }
     if output.exit_code == Some(72) {
-        workspace
-            .tasks
-            .mark_unavailable(TaskKind::RecursiveDelete, "missing rm");
         return Err("remote recursive delete requires rm".into());
     }
     let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();

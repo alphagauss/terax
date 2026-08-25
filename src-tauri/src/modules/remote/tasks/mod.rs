@@ -19,7 +19,10 @@ pub(crate) mod background;
 pub(crate) mod create_directory;
 pub(crate) mod delete;
 pub(crate) mod file_version;
+pub(crate) mod file_write;
+pub(crate) mod ripgrep;
 pub(crate) mod sftp_fallback;
+pub(crate) mod tree_list;
 pub(crate) mod tree_summary;
 
 /// 高 RTT 连接才维持一个内部任务预开 channel，避免低延迟连接长期占用服务端资源。
@@ -29,14 +32,20 @@ pub(crate) const TASK_OUTPUT_LIMIT: usize = 1024;
 /// 允许通过封闭任务运行时执行的内部操作。
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum TaskKind {
-    /// 条件文件写入。
-    FileWrite,
+    /// 按版本条件写入文件。
+    FileWriteChecked,
+    /// 仅在目标缺失时创建文件。
+    FileWriteMissing,
+    /// 无条件覆盖文件。
+    FileWriteOverwrite,
     /// 递归目录属性汇总。
     TreeSummary,
     /// 递归目录与文件枚举。
     TreeList,
-    /// ripgrep 内容搜索与文件枚举。
-    Ripgrep,
+    /// ripgrep 内容搜索。
+    RipgrepContent,
+    /// ripgrep 文件枚举。
+    RipgrepFiles,
     /// 稳定文件版本读取。
     FileVersion,
     /// 递归创建目录。
@@ -47,23 +56,53 @@ pub(crate) enum TaskKind {
     BackgroundList,
     /// 递归删除目录。
     RecursiveDelete,
-    /// SFTP 写入回退的摘要与原子提交。
-    SftpCommit,
+    /// SFTP 写入回退的摘要计算。
+    SftpHash,
+    /// SFTP 无条件原子替换。
+    SftpReplace,
+    /// SFTP 缺失目标原子创建。
+    SftpCommitMissing,
+    /// SFTP 按版本条件提交。
+    SftpCommitChecked,
 }
 
 impl TaskKind {
     fn name(self) -> &'static str {
         match self {
-            Self::FileWrite => "file_write",
+            Self::FileWriteChecked => "file_write_checked",
+            Self::FileWriteMissing => "file_write_missing",
+            Self::FileWriteOverwrite => "file_write_overwrite",
             Self::TreeSummary => "tree_summary",
             Self::TreeList => "tree_list",
-            Self::Ripgrep => "ripgrep",
+            Self::RipgrepContent => "ripgrep_content",
+            Self::RipgrepFiles => "ripgrep_files",
             Self::FileVersion => "file_version",
             Self::CreateDirectory => "create_directory",
             Self::BackgroundLogs => "background_logs",
             Self::BackgroundList => "background_list",
             Self::RecursiveDelete => "recursive_delete",
-            Self::SftpCommit => "sftp_commit",
+            Self::SftpHash => "sftp_hash",
+            Self::SftpReplace => "sftp_replace",
+            Self::SftpCommitMissing => "sftp_commit_missing",
+            Self::SftpCommitChecked => "sftp_commit_checked",
+        }
+    }
+}
+
+/// 内部任务命令失败时是否已经进入可能执行的阶段。
+#[derive(Debug)]
+pub(super) enum TaskRunError {
+    /// 尚未取得 channel，服务器不可能观察到任务命令。
+    BeforeDispatch(String),
+    /// 已取得 channel 并尝试发送命令，调用方必须按可能已执行处理。
+    AfterDispatch(String),
+}
+
+impl TaskRunError {
+    /// 丢弃执行阶段，仅保留只读任务需要的错误文本。
+    pub(super) fn into_message(self) -> String {
+        match self {
+            Self::BeforeDispatch(message) | Self::AfterDispatch(message) => message,
         }
     }
 }
@@ -86,7 +125,7 @@ pub(crate) struct RemoteTaskRuntime {
 
 impl RemoteTaskRuntime {
     /// 在统一任务 channel 上执行一次固定命令，并按调用方上限收集输出。
-    pub(crate) async fn run(
+    async fn run_classified(
         self: &Arc<Self>,
         workspace: &Arc<RemoteWorkspace>,
         task: TaskKind,
@@ -94,8 +133,11 @@ impl RemoteTaskRuntime {
         input: Option<Vec<u8>>,
         timeout: Duration,
         max_output: usize,
-    ) -> Result<ExecOutput, String> {
-        let channel = self.take_channel(workspace, task).await?;
+    ) -> Result<ExecOutput, TaskRunError> {
+        let channel = self
+            .take_channel(workspace, task)
+            .await
+            .map_err(TaskRunError::BeforeDispatch)?;
         workspace
             .exec_on_channel_with_input(
                 channel,
@@ -105,10 +147,26 @@ impl RemoteTaskRuntime {
                 max_output,
             )
             .await
+            .map_err(TaskRunError::AfterDispatch)
+    }
+
+    /// 为具体 task 适配器执行命令；任意命令字符串不会暴露到 tasks 模块之外。
+    async fn run(
+        self: &Arc<Self>,
+        workspace: &Arc<RemoteWorkspace>,
+        task: TaskKind,
+        command: &str,
+        input: Option<Vec<u8>>,
+        timeout: Duration,
+        max_output: usize,
+    ) -> Result<ExecOutput, String> {
+        self.run_classified(workspace, task, command, input, timeout, max_output)
+            .await
+            .map_err(TaskRunError::into_message)
     }
 
     /// 执行可取消的只读任务；取消会关闭当前 SSH channel。
-    pub(crate) async fn run_cancellable(
+    async fn run_cancellable(
         self: &Arc<Self>,
         workspace: &Arc<RemoteWorkspace>,
         task: TaskKind,
@@ -135,12 +193,20 @@ impl RemoteTaskRuntime {
         !matches!(self.capability(task), Capability::Unavailable(_))
     }
 
+    /// 仅在当前 epoch 尚未成功执行过任务时探测远端依赖参数能力。
+    pub(crate) fn should_probe(&self, task: TaskKind) -> bool {
+        matches!(self.capability(task), Capability::Unknown)
+    }
+
     /// 标记任务在当前连接可用。
     pub(crate) fn mark_available(&self, task: TaskKind) {
-        self.capabilities
+        let mut capabilities = self
+            .capabilities
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(task, Capability::Available);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !matches!(capabilities.get(&task), Some(Capability::Unavailable(_))) {
+            capabilities.insert(task, Capability::Available);
+        }
     }
 
     /// 标记任务在当前连接不可用，并返回状态是否首次发生变化。
@@ -186,7 +252,7 @@ impl RemoteTaskRuntime {
     }
 
     /// 取得一个内部任务 channel，并在高 RTT 时异步补充单槽预热资源。
-    pub(crate) async fn take_channel(
+    async fn take_channel(
         self: &Arc<Self>,
         workspace: &Arc<RemoteWorkspace>,
         task: TaskKind,
@@ -263,16 +329,6 @@ impl RemoteTaskRuntime {
     }
 }
 
-/// 构造只允许固定参数数组的 ripgrep 命令，并在同一调用内探测依赖。
-pub(crate) fn ripgrep_command(args: &[String]) -> String {
-    let command = args
-        .iter()
-        .map(|argument| super::session::shell_quote(argument))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("command -v rg >/dev/null 2>&1 || exit 127; exec {command}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{RemoteTaskRuntime, TaskKind};
@@ -280,20 +336,34 @@ mod tests {
     #[test]
     fn task_capabilities_are_isolated() {
         let runtime = RemoteTaskRuntime::default();
-        assert!(runtime.should_attempt(TaskKind::FileWrite));
+        assert!(runtime.should_attempt(TaskKind::FileWriteChecked));
         assert!(runtime.should_attempt(TaskKind::TreeSummary));
 
-        assert!(runtime.mark_unavailable(TaskKind::FileWrite, "missing sha256sum"));
-        assert!(!runtime.should_attempt(TaskKind::FileWrite));
+        assert!(runtime.mark_unavailable(TaskKind::FileWriteChecked, "missing sha256sum"));
+        assert!(!runtime.should_attempt(TaskKind::FileWriteChecked));
         assert!(runtime.should_attempt(TaskKind::TreeSummary));
-        assert!(!runtime.mark_unavailable(TaskKind::FileWrite, "still unavailable"));
+        assert!(!runtime.mark_unavailable(TaskKind::FileWriteChecked, "still unavailable"));
         assert_eq!(
             runtime.unavailable_tasks(),
-            vec![("file_write".into(), "still unavailable".into())]
+            vec![("file_write_checked".into(), "still unavailable".into())]
         );
 
-        runtime.mark_available(TaskKind::FileWrite);
-        assert!(runtime.should_attempt(TaskKind::FileWrite));
-        assert!(runtime.unavailable_tasks().is_empty());
+        runtime.mark_available(TaskKind::FileWriteChecked);
+        assert!(!runtime.should_attempt(TaskKind::FileWriteChecked));
+        assert_eq!(
+            runtime.unavailable_tasks(),
+            vec![("file_write_checked".into(), "still unavailable".into())]
+        );
+    }
+
+    #[test]
+    fn sftp_write_capabilities_do_not_cross_disable() {
+        let runtime = RemoteTaskRuntime::default();
+        runtime.mark_unavailable(TaskKind::SftpHash, "missing hash provider");
+
+        assert!(!runtime.should_attempt(TaskKind::SftpHash));
+        assert!(runtime.should_attempt(TaskKind::SftpReplace));
+        assert!(runtime.should_attempt(TaskKind::SftpCommitMissing));
+        assert!(runtime.should_attempt(TaskKind::SftpCommitChecked));
     }
 }
