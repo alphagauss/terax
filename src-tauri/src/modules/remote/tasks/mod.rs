@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::session::{ExecOutput, RemoteWorkspace};
 
+pub(crate) mod background;
 pub(crate) mod create_directory;
 pub(crate) mod file_version;
 
@@ -37,6 +38,10 @@ pub(crate) enum TaskKind {
     FileVersion,
     /// 递归创建目录。
     CreateDirectory,
+    /// 增量日志与单个进程状态。
+    BackgroundLogs,
+    /// 批量进程状态。
+    BackgroundList,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

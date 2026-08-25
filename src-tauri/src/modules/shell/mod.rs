@@ -1,3 +1,8 @@
+//! AI Shell、持久 cwd 会话与本地/SSH 后台进程管理。
+//!
+//! 用户命令保持独立审批边界；远端后台日志和状态查询通过封闭任务批量执行，并保留
+//! 现有多 exec 实现作为安全回退。
+
 pub mod background;
 pub mod ringbuffer;
 pub mod session;
@@ -6,7 +11,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -311,9 +316,7 @@ pub async fn shell_bg_list(
         let map = state.remote_bg.read().unwrap();
         map.iter().map(|(id, proc)| (*id, proc.clone())).collect()
     };
-    for (id, proc) in remote {
-        out.push(proc.info(id).await);
-    }
+    out.extend(remote_background_infos(remote).await);
     out.sort_by_key(|i| i.handle);
     Ok(out)
 }
@@ -326,6 +329,7 @@ struct RemoteBackgroundProc {
     pid: u32,
     log_path: String,
     started_at_ms: u64,
+    exited: Arc<AtomicBool>,
 }
 
 impl RemoteBackgroundProc {
@@ -380,10 +384,45 @@ impl RemoteBackgroundProc {
             pid,
             log_path,
             started_at_ms,
+            exited: Arc::new(AtomicBool::new(false)),
         })
     }
 
     async fn read_logs(&self, since: u64) -> Result<BackgroundLogResponse, String> {
+        let manager = remote::manager::global_manager()?;
+        let workspace = manager.workspace(&self.profile_id).await?;
+        let task = remote::tasks::TaskKind::BackgroundLogs;
+        if workspace.tasks.should_attempt(task) {
+            match remote::tasks::background::read_logs(&workspace, self.pid, &self.log_path, since)
+                .await
+            {
+                Ok(result) => {
+                    workspace.tasks.mark_available(task);
+                    if !result.running {
+                        self.exited.store(true, Ordering::Release);
+                    }
+                    return Ok(BackgroundLogResponse {
+                        next_offset: since.saturating_add(result.bytes.len() as u64),
+                        bytes: String::from_utf8_lossy(&result.bytes).into_owned(),
+                        dropped: 0,
+                        exited: !result.running,
+                        exit_code: None,
+                    });
+                }
+                Err(remote::tasks::background::BackgroundTaskError::Unsupported(reason))
+                | Err(remote::tasks::background::BackgroundTaskError::Protocol(reason)) => {
+                    workspace.tasks.mark_unavailable(task, reason);
+                }
+                Err(remote::tasks::background::BackgroundTaskError::Business(error))
+                | Err(remote::tasks::background::BackgroundTaskError::Transport(error)) => {
+                    log::debug!("remote background log task fallback: {error}");
+                }
+            }
+        }
+        self.read_logs_legacy(since).await
+    }
+
+    async fn read_logs_legacy(&self, since: u64) -> Result<BackgroundLogResponse, String> {
         let command = format!(
             "if [ -f {log} ]; then tail -c +{start} -- {log}; fi",
             log = remote::session::shell_quote(&self.log_path),
@@ -405,10 +444,13 @@ impl RemoteBackgroundProc {
     }
 
     async fn is_running(&self) -> bool {
+        if self.exited.load(Ordering::Acquire) {
+            return false;
+        }
         let Ok(manager) = remote::manager::global_manager() else {
             return false;
         };
-        manager
+        let running = manager
             .exec(
                 &self.profile_id,
                 &format!("kill -0 {} 2>/dev/null", self.pid),
@@ -416,7 +458,11 @@ impl RemoteBackgroundProc {
                 Duration::from_secs(5),
             )
             .await
-            .is_ok_and(|output| output.exit_code == Some(0))
+            .is_ok_and(|output| output.exit_code == Some(0));
+        if !running {
+            self.exited.store(true, Ordering::Release);
+        }
+        running
     }
 
     async fn kill(&self) -> Result<(), String> {
@@ -425,20 +471,96 @@ impl RemoteBackgroundProc {
             pid = self.pid,
             log = remote::session::shell_quote(&self.log_path),
         );
-        remote::manager::global_manager()?
+        let result = remote::manager::global_manager()?
             .exec(&self.profile_id, &command, None, Duration::from_secs(10))
             .await
-            .map(|_| ())
+            .map(|_| ());
+        if result.is_ok() {
+            self.exited.store(true, Ordering::Release);
+        }
+        result
     }
 
     async fn info(&self, handle: u32) -> BackgroundProcInfo {
+        self.info_with_running(handle, self.is_running().await)
+    }
+
+    fn info_with_running(&self, handle: u32, running: bool) -> BackgroundProcInfo {
+        if !running {
+            self.exited.store(true, Ordering::Release);
+        }
         BackgroundProcInfo {
             handle,
             command: self.command.clone(),
             cwd: self.cwd.clone(),
             started_at_ms: self.started_at_ms,
-            exited: !self.is_running().await,
+            exited: !running,
             exit_code: None,
+        }
+    }
+}
+
+/// 按 SSH profile 批量查询远端后台进程，任务失败时回退原有逐项探测。
+async fn remote_background_infos(
+    processes: Vec<(u32, RemoteBackgroundProc)>,
+) -> Vec<BackgroundProcInfo> {
+    let mut groups: HashMap<String, Vec<(u32, RemoteBackgroundProc)>> = HashMap::new();
+    for process in processes {
+        groups
+            .entry(process.1.profile_id.clone())
+            .or_default()
+            .push(process);
+    }
+    let mut infos = Vec::new();
+    for (profile_id, group) in groups {
+        let active: Vec<_> = group
+            .iter()
+            .filter(|(_, process)| !process.exited.load(Ordering::Acquire))
+            .map(|(_, process)| process.pid)
+            .collect();
+        let statuses = batch_remote_statuses(&profile_id, &active).await;
+        match statuses {
+            Some(statuses) => {
+                for (handle, process) in group {
+                    let running = !process.exited.load(Ordering::Acquire)
+                        && statuses.get(&process.pid).copied().unwrap_or(false);
+                    infos.push(process.info_with_running(handle, running));
+                }
+            }
+            None => {
+                for (handle, process) in group {
+                    infos.push(process.info(handle).await);
+                }
+            }
+        }
+    }
+    infos
+}
+
+async fn batch_remote_statuses(profile_id: &str, pids: &[u32]) -> Option<HashMap<u32, bool>> {
+    if pids.is_empty() {
+        return Some(HashMap::new());
+    }
+    let manager = remote::manager::global_manager().ok()?;
+    let workspace = manager.workspace(profile_id).await.ok()?;
+    let task = remote::tasks::TaskKind::BackgroundList;
+    if !workspace.tasks.should_attempt(task) {
+        return None;
+    }
+    match remote::tasks::background::list_running(&workspace, pids).await {
+        Ok(statuses) => {
+            workspace.tasks.mark_available(task);
+            Some(statuses)
+        }
+        Err(remote::tasks::background::BackgroundTaskError::Unsupported(reason))
+        | Err(remote::tasks::background::BackgroundTaskError::Protocol(reason)) => {
+            workspace.tasks.mark_unavailable(task, reason);
+            None
+        }
+        Err(remote::tasks::background::BackgroundTaskError::Business(error))
+        | Err(remote::tasks::background::BackgroundTaskError::Transport(error)) => {
+            log::debug!("remote background list task fallback: {error}");
+            None
         }
     }
 }

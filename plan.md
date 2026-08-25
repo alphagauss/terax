@@ -148,12 +148,12 @@ TERAX_REMOTE_TASK_V1\0task_kind\0status\0...
 
 ### 批次四：后台进程查询与清理
 
-- [ ] `bash_logs` 在一次任务中返回增量日志和运行状态。
-- [ ] `bash_list` 一次批量检查全部远端 PID，不逐项串行 exec。
-- [ ] 已确认退出的远端进程在本地缓存终态，后续列表不再访问服务器。
-- [ ] 传统多 exec 查询保留为 capability 或协议失败时的回退。
+- [x] `bash_logs` 在一次任务中返回增量日志和运行状态。
+- [x] `bash_list` 一次批量检查全部远端 PID，不逐项串行 exec。
+- [x] 已确认退出的远端进程在本地缓存终态，后续列表不再访问服务器。
+- [x] 传统多 exec 查询保留为 capability 或协议失败时的回退。
 - [ ] 删除剩余可回退内部任务的 inline capability 和重复 channel 管理。
-- [ ] `SshHealthSnapshot` 从任务运行时派生统一降级状态，保留前端需要的兼容字段或同步升级前端。
+- [x] `SshHealthSnapshot` 从任务运行时派生统一降级状态，保留前端需要的兼容字段或同步升级前端。
 
 验证：
 
