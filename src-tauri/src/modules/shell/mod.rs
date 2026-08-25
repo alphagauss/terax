@@ -1,7 +1,7 @@
 //! AI Shell、持久 cwd 会话与本地/SSH 后台进程管理。
 //!
-//! 用户命令保持独立审批边界；远端后台日志和状态查询通过封闭任务批量执行，并保留
-//! 现有多 exec 实现作为安全回退。
+//! 用户命令保持独立审批边界；远端后台日志正文使用 raw SFTP offset 读取，进程状态
+//! 通过封闭任务批量执行，并保留现有逐项 exec 作为安全回退。
 
 pub mod background;
 pub mod ringbuffer;
@@ -30,6 +30,7 @@ use session::{SessionRunOutput, ShellSession};
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_TIMEOUT_SECS: u64 = 300;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+const REMOTE_LOG_CHUNK_BYTES: u64 = 256 * 1024;
 
 #[derive(Serialize)]
 pub struct CommandOutput {
@@ -391,60 +392,20 @@ impl RemoteBackgroundProc {
     async fn read_logs(&self, since: u64) -> Result<BackgroundLogResponse, String> {
         let manager = remote::manager::global_manager()?;
         let workspace = manager.workspace(&self.profile_id).await?;
-        let task = remote::tasks::TaskKind::BackgroundLogs;
-        if workspace.tasks.should_attempt(task) {
-            match remote::tasks::background::read_logs(&workspace, self.pid, &self.log_path, since)
-                .await
-            {
-                Ok(result) => {
-                    workspace.tasks.mark_available(task);
-                    if !result.running {
-                        self.exited.store(true, Ordering::Release);
-                    }
-                    return Ok(BackgroundLogResponse {
-                        next_offset: since.saturating_add(result.bytes.len() as u64),
-                        bytes: String::from_utf8_lossy(&result.bytes).into_owned(),
-                        dropped: 0,
-                        exited: !result.running,
-                        exit_code: None,
-                    });
-                }
-                Err(remote::tasks::background::BackgroundTaskError::Unsupported(reason))
-                | Err(remote::tasks::background::BackgroundTaskError::Protocol(reason)) => {
-                    workspace.mark_task_unavailable(task, reason);
-                }
-                Err(remote::tasks::background::BackgroundTaskError::Business(error))
-                | Err(remote::tasks::background::BackgroundTaskError::Transport(error)) => {
-                    log::debug!("remote background log task fallback: {error}");
-                }
-            }
+        let bytes = remote::sftp::read_file_range(
+            &workspace,
+            &self.log_path,
+            since,
+            REMOTE_LOG_CHUNK_BYTES,
+        )
+        .await?;
+        let running = match batch_remote_statuses(&self.profile_id, &[self.pid]).await {
+            Some(statuses) => statuses.get(&self.pid).copied().unwrap_or(false),
+            None => self.is_running().await,
+        };
+        if !running {
+            self.exited.store(true, Ordering::Release);
         }
-        self.read_logs_legacy(since).await
-    }
-
-    async fn read_logs_legacy(&self, since: u64) -> Result<BackgroundLogResponse, String> {
-        let command = format!(
-            "if [ -f {log} ]; then tail -c +{start} -- {log} | head -c {limit}; fi",
-            log = remote::session::shell_quote(&self.log_path),
-            start = since.saturating_add(1),
-            limit = remote::tasks::background::LOG_CHUNK_BYTES,
-        );
-        let manager = remote::manager::global_manager()?;
-        let output = manager
-            .exec(&self.profile_id, &command, None, Duration::from_secs(10))
-            .await?;
-        if output.timed_out || output.truncated || output.exit_code != Some(0) {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if output.timed_out {
-                "remote background log fallback timed out".into()
-            } else if detail.is_empty() {
-                "remote background log fallback failed".into()
-            } else {
-                format!("remote background log fallback failed: {detail}")
-            });
-        }
-        let bytes = output.stdout;
-        let running = self.is_running().await;
         Ok(BackgroundLogResponse {
             next_offset: since.saturating_add(bytes.len() as u64),
             bytes: String::from_utf8_lossy(&bytes).into_owned(),
