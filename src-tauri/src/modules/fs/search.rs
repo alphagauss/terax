@@ -1,7 +1,15 @@
+//! 工作区路径枚举与模糊搜索。
+//!
+//! Explorer 搜索和 AI 文件列表共享跨环境路径语义；SSH 递归枚举统一进入远端树服务，
+//! 交互式模糊搜索会取消上一条本地遍历或远端 exec。
+
 use ignore::WalkBuilder;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::Serialize;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use super::to_canon;
 use crate::modules::remote;
@@ -45,13 +53,90 @@ const PRUNE_DIRS: &[&str] = &[
     "__pycache__",
 ];
 
+/// Explorer 唯一路径搜索面的取消状态。
+#[derive(Default)]
+pub struct PathSearchState {
+    generation: AtomicU64,
+    active_remote: Mutex<Option<(u64, CancellationToken)>>,
+}
+
+impl PathSearchState {
+    fn begin(&self) -> (u64, CancellationToken) {
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let cancellation = CancellationToken::new();
+        let mut active = self
+            .active_remote
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, previous)) = active.replace((generation, cancellation.clone())) {
+            previous.cancel();
+        }
+        (generation, cancellation)
+    }
+
+    fn finish(&self, generation: u64) {
+        let mut active = self
+            .active_remote
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if active
+            .as_ref()
+            .is_some_and(|(current, _)| *current == generation)
+        {
+            *active = None;
+        }
+    }
+}
+
+/// 执行 Explorer 交互式路径搜索，并取消上一条尚未完成的请求。
 #[tauri::command]
 pub async fn fs_search(
+    state: tauri::State<'_, PathSearchState>,
     root: String,
     query: String,
     limit: Option<usize>,
     workspace: Option<WorkspaceEnv>,
     show_hidden: Option<bool>,
+) -> Result<SearchResult, String> {
+    let (generation, cancellation) = state.begin();
+    let result = search_paths_with_cancel(
+        root,
+        query,
+        limit,
+        workspace,
+        show_hidden,
+        Some(&cancellation),
+    )
+    .await;
+    state.finish(generation);
+    if cancellation.is_cancelled() {
+        Ok(SearchResult {
+            hits: Vec::new(),
+            truncated: false,
+        })
+    } else {
+        result
+    }
+}
+
+/// 执行不参与交互式取消的路径搜索，供测试和内部调用复用。
+pub async fn search_paths(
+    root: String,
+    query: String,
+    limit: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+    show_hidden: Option<bool>,
+) -> Result<SearchResult, String> {
+    search_paths_with_cancel(root, query, limit, workspace, show_hidden, None).await
+}
+
+async fn search_paths_with_cancel(
+    root: String,
+    query: String,
+    limit: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+    show_hidden: Option<bool>,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<SearchResult, String> {
     let q = query.trim();
     if q.is_empty() {
@@ -64,8 +149,15 @@ pub async fn fs_search(
     let show_hidden = show_hidden.unwrap_or(false);
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let (entries, truncated) =
-            remote_walk(profile_id, &root, show_hidden, 16, MAX_SCANNED).await?;
+        let (entries, truncated) = remote_walk(
+            profile_id,
+            &root,
+            show_hidden,
+            16,
+            MAX_SCANNED,
+            cancellation,
+        )
+        .await?;
         let candidates = entries
             .into_iter()
             .map(|entry| SearchHit {
@@ -111,6 +203,9 @@ pub async fn fs_search(
         .build();
 
     for dent in walker.flatten() {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(crate::modules::remote::session::EXEC_CANCELLED_ERROR.into());
+        }
         scanned += 1;
         if scanned > MAX_SCANNED {
             truncated = true;
@@ -171,6 +266,7 @@ pub struct ListFilesResult {
     pub truncated: bool,
 }
 
+/// 返回工作区中的有界文件列表，供 AI Composer 等轻量调用方使用。
 #[tauri::command]
 pub async fn fs_list_files(
     root: String,
@@ -189,18 +285,18 @@ pub async fn fs_list_files(
     let show_hidden = show_hidden.unwrap_or(false);
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let (entries, mut truncated) =
-            remote_walk(profile_id, &root, show_hidden, depth, MAX_SCANNED).await?;
-        let mut files: Vec<String> = entries
-            .into_iter()
-            .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::File)
-            .map(|entry| entry.rel)
-            .take(cap + 1)
-            .collect();
-        if files.len() > cap {
-            files.truncate(cap);
-            truncated = true;
-        }
+        let manager = remote::manager::global_manager()?;
+        let remote_workspace = manager.workspace(profile_id).await?;
+        let (entries, truncated) = remote::tree_service::list_files(
+            &remote_workspace,
+            &root,
+            None,
+            show_hidden,
+            depth,
+            cap,
+        )
+        .await?;
+        let mut files: Vec<String> = entries.into_iter().map(|entry| entry.rel).collect();
         files.sort_by_key(|path| path.to_lowercase());
         return Ok(ListFilesResult { files, truncated });
     }
@@ -268,10 +364,12 @@ async fn remote_walk(
     show_hidden: bool,
     depth: usize,
     cap: usize,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<(Vec<remote::sftp::RemoteWalkEntry>, bool), String> {
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
-    remote::sftp::walk(&workspace, root, show_hidden, depth, cap).await
+    remote::tree_service::walk_cancellable(&workspace, root, show_hidden, depth, cap, cancellation)
+        .await
 }
 
 fn display_path(
@@ -326,5 +424,24 @@ mod tests {
         let out = rank_fuzzy(cands, "cmdp", 10);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rel, "CommandPalette.tsx");
+    }
+
+    #[test]
+    fn newer_path_search_cancels_the_previous_token() {
+        let state = PathSearchState::default();
+        let (first_generation, first) = state.begin();
+        let (second_generation, second) = state.begin();
+
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+        state.finish(first_generation);
+        assert!(state
+            .active_remote
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == second_generation));
+        state.finish(second_generation);
+        assert!(state.active_remote.lock().unwrap().is_none());
     }
 }

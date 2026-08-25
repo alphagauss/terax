@@ -14,6 +14,7 @@ use grep_searcher::sinks::UTF8;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::{WalkBuilder, WalkState};
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 
 use super::to_canon;
 use crate::modules::remote;
@@ -29,6 +30,36 @@ const HARD_MAX_RESULTS: usize = 2000;
 #[derive(Default)]
 pub struct ContentSearchState {
     generation: Arc<AtomicU64>,
+    active_remote: Mutex<Option<(u64, CancellationToken)>>,
+}
+
+impl ContentSearchState {
+    /// 安装当前交互式搜索 token，并立即取消上一条远端命令。
+    fn replace_remote_cancellation(&self, generation: u64) -> CancellationToken {
+        let cancellation = CancellationToken::new();
+        let mut active = self
+            .active_remote
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, previous)) = active.replace((generation, cancellation.clone())) {
+            previous.cancel();
+        }
+        cancellation
+    }
+
+    /// 仅清理仍属于指定 generation 的远端 token。
+    fn finish_remote_cancellation(&self, generation: u64) {
+        let mut active = self
+            .active_remote
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if active
+            .as_ref()
+            .is_some_and(|(current, _)| *current == generation)
+        {
+            *active = None;
+        }
+    }
 }
 
 /// 内容搜索的查询语法。
@@ -330,13 +361,14 @@ fn search_tree(
 pub async fn search_content(
     request: ContentSearchRequest,
 ) -> Result<ContentSearchResponse, String> {
-    search_content_with_cancel(request, &|| false).await
+    search_content_with_cancel(request, &|| false, None).await
 }
 
 /// 执行统一搜索流程，并把调用方取消信号传入本地或远端回退扫描。
 async fn search_content_with_cancel(
     request: ContentSearchRequest,
     cancel: &(dyn Fn() -> bool + Sync),
+    remote_cancellation: Option<&CancellationToken>,
 ) -> Result<ContentSearchResponse, String> {
     if request.pattern.is_empty() {
         return Err("empty pattern".into());
@@ -349,7 +381,15 @@ async fn search_content_with_cancel(
     let matcher = build_matcher(&request)?;
     let filters = build_path_filters(&request.includes, &request.excludes)?;
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        if let Some(response) = search_remote_rg(profile_id, &request.root, &request, cap).await? {
+        if let Some(response) = search_remote_rg(
+            profile_id,
+            &request.root,
+            &request,
+            cap,
+            remote_cancellation,
+        )
+        .await?
+        {
             return if cancel() {
                 Ok(empty_content_search_response())
             } else {
@@ -388,11 +428,20 @@ pub async fn fs_content_search(
         return search_content(request).await;
     }
     let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let cancellation = state.replace_remote_cancellation(my_gen);
     if request.pattern.is_empty() {
+        state.finish_remote_cancellation(my_gen);
         return Ok(empty_content_search_response());
     }
-    let cancel = || state.generation.load(Ordering::SeqCst) != my_gen;
-    search_content_with_cancel(request, &cancel).await
+    let cancel =
+        || cancellation.is_cancelled() || state.generation.load(Ordering::SeqCst) != my_gen;
+    let result = search_content_with_cancel(request, &cancel, Some(&cancellation)).await;
+    state.finish_remote_cancellation(my_gen);
+    if cancellation.is_cancelled() {
+        Ok(empty_content_search_response())
+    } else {
+        result
+    }
 }
 
 #[derive(Serialize)]
@@ -420,31 +469,18 @@ pub async fn fs_glob(
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let cap = max_results.unwrap_or(500).clamp(1, HARD_MAX_RESULTS);
-        if let Some(response) = glob_remote_rg(profile_id, &root, &pattern, cap).await? {
-            return Ok(response);
-        }
-        let glob = Glob::new(&pattern).map_err(|e| format!("bad glob: {e}"))?;
-        let mut builder = GlobSetBuilder::new();
-        builder.add(glob);
-        let set = builder.build().map_err(|e| format!("globset build: {e}"))?;
         let manager = remote::manager::global_manager()?;
         let workspace = manager.workspace(profile_id).await?;
-        let (entries, mut truncated) =
-            remote::sftp::walk(&workspace, &root, false, 16, 50_000).await?;
-        let mut hits = Vec::new();
-        for entry in entries {
-            if entry.kind != remote::sftp::RemoteEntryKind::File || !set.is_match(&entry.rel) {
-                continue;
-            }
-            if hits.len() >= cap {
-                truncated = true;
-                break;
-            }
-            hits.push(GlobHit {
+        let (entries, truncated) =
+            remote::tree_service::list_files(&workspace, &root, Some(&pattern), false, 16, cap)
+                .await?;
+        let hits = entries
+            .into_iter()
+            .map(|entry| GlobHit {
                 path: entry.path,
                 rel: entry.rel,
-            });
-        }
+            })
+            .collect();
         return Ok(GlobResponse { hits, truncated });
     }
     let root_path = resolve_path(&root, &workspace);
@@ -505,7 +541,8 @@ async fn search_remote_sftp(
 ) -> Result<ContentSearchResponse, String> {
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
-    let (entries, mut truncated) = remote::sftp::walk(&workspace, root, false, 16, 50_000).await?;
+    let (entries, mut truncated) =
+        remote::tree_service::walk(&workspace, root, false, 16, 50_000).await?;
     let mut hits = Vec::new();
     let mut files_scanned = 0usize;
     for entry in entries {
@@ -561,27 +598,45 @@ async fn search_remote_rg(
     root: &str,
     request: &ContentSearchRequest,
     cap: usize,
+    cancellation: Option<&CancellationToken>,
 ) -> Result<Option<ContentSearchResponse>, String> {
     const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
     let args = remote_content_search_args(root, request);
-    let command = remote_rg_command(&args);
+    let command = remote::tasks::ripgrep_command(&args);
     let manager = remote::manager::global_manager()?;
     let workspace = manager.workspace(profile_id).await?;
     let task = remote::tasks::TaskKind::Ripgrep;
     if !workspace.tasks.should_attempt(task) {
         return Ok(None);
     }
-    let output = workspace
-        .tasks
-        .run(
-            &workspace,
-            task,
-            &command,
-            None,
-            std::time::Duration::from_secs(30),
-            OUTPUT_LIMIT,
-        )
-        .await?;
+    let output = match cancellation {
+        Some(cancellation) => {
+            workspace
+                .tasks
+                .run_cancellable(
+                    &workspace,
+                    task,
+                    &command,
+                    std::time::Duration::from_secs(30),
+                    OUTPUT_LIMIT,
+                    cancellation,
+                )
+                .await?
+        }
+        None => {
+            workspace
+                .tasks
+                .run(
+                    &workspace,
+                    task,
+                    &command,
+                    None,
+                    std::time::Duration::from_secs(30),
+                    OUTPUT_LIMIT,
+                )
+                .await?
+        }
+    };
     if output.timed_out {
         return Err("remote ripgrep search timed out".into());
     }
@@ -636,96 +691,6 @@ fn remote_content_search_args(root: &str, request: &ContentSearchRequest) -> Vec
     args.push(request.pattern.clone());
     args.push(root.to_string());
     args
-}
-
-/// 使用当前 SSH epoch 的集中式 ripgrep 任务枚举匹配文件。
-async fn glob_remote_rg(
-    profile_id: &str,
-    root: &str,
-    pattern: &str,
-    cap: usize,
-) -> Result<Option<GlobResponse>, String> {
-    const OUTPUT_LIMIT: usize = 16 * 1024 * 1024;
-    let args = vec![
-        "rg".to_string(),
-        "--files".to_string(),
-        "--null".to_string(),
-        "--no-messages".to_string(),
-        "--glob".to_string(),
-        pattern.to_string(),
-        "--".to_string(),
-        root.to_string(),
-    ];
-    let manager = remote::manager::global_manager()?;
-    let workspace = manager.workspace(profile_id).await?;
-    let task = remote::tasks::TaskKind::Ripgrep;
-    if !workspace.tasks.should_attempt(task) {
-        return Ok(None);
-    }
-    let output = workspace
-        .tasks
-        .run(
-            &workspace,
-            task,
-            &remote_rg_command(&args),
-            None,
-            std::time::Duration::from_secs(30),
-            OUTPUT_LIMIT,
-        )
-        .await?;
-    if output.timed_out {
-        return Err("remote ripgrep file listing timed out".into());
-    }
-    match output.exit_code {
-        Some(127) => {
-            workspace
-                .tasks
-                .mark_unavailable(task, "ripgrep unavailable");
-            return Ok(None);
-        }
-        Some(0 | 1) => workspace.tasks.mark_available(task),
-        Some(code) => {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if detail.is_empty() {
-                format!("remote ripgrep file listing failed with exit code {code}")
-            } else {
-                format!("remote ripgrep file listing failed: {detail}")
-            });
-        }
-        None => return Err("remote ripgrep file listing closed without an exit status".into()),
-    }
-    let mut hits = Vec::new();
-    let mut truncated = output.truncated;
-    let chunks: Vec<&[u8]> = output.stdout.split(|byte| *byte == 0).collect();
-    for (index, bytes) in chunks.iter().enumerate() {
-        if bytes.is_empty() {
-            continue;
-        }
-        if output.truncated && index + 1 == chunks.len() && !output.stdout.ends_with(&[0]) {
-            truncated = true;
-            break;
-        }
-        if hits.len() >= cap {
-            truncated = true;
-            break;
-        }
-        let path = String::from_utf8_lossy(bytes).to_string();
-        let absolute = remote_absolute(root, &path);
-        hits.push(GlobHit {
-            rel: remote_relative(root, &absolute),
-            path: absolute,
-        });
-    }
-    Ok(Some(GlobResponse { hits, truncated }))
-}
-
-fn remote_rg_command(args: &[String]) -> String {
-    let command = args
-        .iter()
-        .map(|argument| remote::session::shell_quote(argument))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("command -v rg >/dev/null 2>&1 || exit 127; exec {command}")
 }
 
 fn parse_remote_rg(
@@ -922,5 +887,24 @@ mod tests {
             &|| true,
         );
         assert!(stopped.hits.is_empty(), "cancelled search yields nothing");
+    }
+
+    #[test]
+    fn newer_remote_search_cancels_and_owns_the_active_token() {
+        let state = ContentSearchState::default();
+        let first = state.replace_remote_cancellation(1);
+        let second = state.replace_remote_cancellation(2);
+
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+        state.finish_remote_cancellation(1);
+        assert!(state
+            .active_remote
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == 2));
+        state.finish_remote_cancellation(2);
+        assert!(state.active_remote.lock().unwrap().is_none());
     }
 }

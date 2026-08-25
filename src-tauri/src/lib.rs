@@ -157,6 +157,7 @@ pub fn run() {
         .manage(lsp::LspState::default())
         .manage(markdown_images::MarkdownImageState::default())
         .manage(fs::grep::ContentSearchState::default())
+        .manage(fs::search::PathSearchState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);

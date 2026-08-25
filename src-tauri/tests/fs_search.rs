@@ -8,7 +8,7 @@ use common::{git_available, FsFixture, GitRepoFixture};
 use terax_lib::modules::fs::grep::{
     fs_glob, search_content, ContentSearchCaseMode, ContentSearchRequest, ContentSearchSyntax,
 };
-use terax_lib::modules::fs::search::{fs_list_files, fs_search};
+use terax_lib::modules::fs::search::{fs_list_files, search_paths};
 use terax_lib::modules::fs::tree::{fs_read_dir, list_subdirs, EntryKind};
 
 fn content_request(root: String, pattern: &str) -> ContentSearchRequest {
@@ -196,7 +196,7 @@ async fn search_substring_matches_filename() {
     fx.write("src/lib.rs", "");
     fx.write("docs/main.md", "");
 
-    let res = fs_search(fx.root_str(), "main".into(), None, None, None)
+    let res = search_paths(fx.root_str(), "main".into(), None, None, None)
         .await
         .expect("search");
     let rels: Vec<&str> = res.hits.iter().map(|h| h.rel.as_str()).collect();
@@ -209,7 +209,7 @@ async fn search_substring_matches_filename() {
 async fn search_is_case_insensitive() {
     let fx = FsFixture::new();
     fx.write("README.md", "");
-    let res = fs_search(fx.root_str(), "readme".into(), None, None, None)
+    let res = search_paths(fx.root_str(), "readme".into(), None, None, None)
         .await
         .expect("search");
     assert_eq!(res.hits.len(), 1);
@@ -219,7 +219,7 @@ async fn search_is_case_insensitive() {
 async fn search_empty_query_returns_empty() {
     let fx = FsFixture::new();
     fx.write("a.txt", "");
-    let res = fs_search(fx.root_str(), "   ".into(), None, None, None)
+    let res = search_paths(fx.root_str(), "   ".into(), None, None, None)
         .await
         .expect("search");
     assert!(res.hits.is_empty());
@@ -232,7 +232,7 @@ async fn search_prunes_node_modules() {
     fx.write("node_modules/lodash/index.js", "");
     fx.write("src/index.js", "");
 
-    let res = fs_search(fx.root_str(), "index".into(), None, None, None)
+    let res = search_paths(fx.root_str(), "index".into(), None, None, None)
         .await
         .expect("search");
     let rels: Vec<&str> = res.hits.iter().map(|h| h.rel.as_str()).collect();
@@ -246,7 +246,7 @@ async fn search_ranks_filename_hits_before_path_hits() {
     fx.write("zeta/inner.txt", "");
     fx.write("beta/zeta.txt", "");
 
-    let res = fs_search(fx.root_str(), "zeta".into(), None, None, None)
+    let res = search_paths(fx.root_str(), "zeta".into(), None, None, None)
         .await
         .expect("search");
     let zeta_file = res
