@@ -83,6 +83,7 @@ export type SshHealthSnapshot = {
   rttMs: number | null;
   sampledAt: number | null;
   fileWriteFallback: boolean;
+  taskFallbacks?: Array<{ task: string; reason: string }>;
 };
 
 export type HostKeyPrompt = {

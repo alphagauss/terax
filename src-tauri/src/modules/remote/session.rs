@@ -23,6 +23,7 @@ use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
 use super::models::{
     ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshHealthSnapshot, SshProfile,
+    SshTaskFallback,
 };
 use super::remote_fs::RemoteFs;
 use super::tasks::{RemoteTaskRuntime, TaskKind, TASK_PREHEAT_RTT_MS};
@@ -427,6 +428,12 @@ impl RemoteWorkspace {
     pub(crate) fn health_snapshot(&self, epoch: u64) -> SshHealthSnapshot {
         let mut snapshot = self.health.snapshot(epoch);
         snapshot.file_write_fallback = self.tasks.is_unavailable(TaskKind::FileWrite);
+        snapshot.task_fallbacks = self
+            .tasks
+            .unavailable_tasks()
+            .into_iter()
+            .map(|(task, reason)| SshTaskFallback { task, reason })
+            .collect();
         snapshot
     }
 

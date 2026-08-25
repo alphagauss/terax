@@ -17,7 +17,10 @@ use super::session::{ExecOutput, RemoteWorkspace};
 
 pub(crate) mod background;
 pub(crate) mod create_directory;
+pub(crate) mod delete;
 pub(crate) mod file_version;
+pub(crate) mod sftp_fallback;
+pub(crate) mod tree_summary;
 
 /// 高 RTT 连接才维持一个内部任务预开 channel，避免低延迟连接长期占用服务端资源。
 pub(crate) const TASK_PREHEAT_RTT_MS: u64 = 100;
@@ -42,6 +45,27 @@ pub(crate) enum TaskKind {
     BackgroundLogs,
     /// 批量进程状态。
     BackgroundList,
+    /// 递归删除目录。
+    RecursiveDelete,
+    /// SFTP 写入回退的摘要与原子提交。
+    SftpCommit,
+}
+
+impl TaskKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::FileWrite => "file_write",
+            Self::TreeSummary => "tree_summary",
+            Self::TreeList => "tree_list",
+            Self::Ripgrep => "ripgrep",
+            Self::FileVersion => "file_version",
+            Self::CreateDirectory => "create_directory",
+            Self::BackgroundLogs => "background_logs",
+            Self::BackgroundList => "background_list",
+            Self::RecursiveDelete => "recursive_delete",
+            Self::SftpCommit => "sftp_commit",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -133,6 +157,23 @@ impl RemoteTaskRuntime {
     /// 返回任务是否已经永久降级到传统后端。
     pub(crate) fn is_unavailable(&self, task: TaskKind) -> bool {
         matches!(self.capability(task), Capability::Unavailable(_))
+    }
+
+    /// 返回当前 epoch 已知的任务降级及缺失原因。
+    pub(crate) fn unavailable_tasks(&self) -> Vec<(String, String)> {
+        let capabilities = self
+            .capabilities
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut tasks: Vec<_> = capabilities
+            .iter()
+            .filter_map(|(task, capability)| match capability {
+                Capability::Unavailable(reason) => Some((task.name().to_string(), reason.clone())),
+                Capability::Unknown | Capability::Available => None,
+            })
+            .collect();
+        tasks.sort_by(|left, right| left.0.cmp(&right.0));
+        tasks
     }
 
     fn capability(&self, task: TaskKind) -> Capability {
@@ -246,8 +287,13 @@ mod tests {
         assert!(!runtime.should_attempt(TaskKind::FileWrite));
         assert!(runtime.should_attempt(TaskKind::TreeSummary));
         assert!(!runtime.mark_unavailable(TaskKind::FileWrite, "still unavailable"));
+        assert_eq!(
+            runtime.unavailable_tasks(),
+            vec![("file_write".into(), "still unavailable".into())]
+        );
 
         runtime.mark_available(TaskKind::FileWrite);
         assert!(runtime.should_attempt(TaskKind::FileWrite));
+        assert!(runtime.unavailable_tasks().is_empty());
     }
 }

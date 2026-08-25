@@ -1,4 +1,4 @@
-# Terax Bash 目录属性统计 helper。
+# Terax Bash 目录属性统计任务。
 #
 # 目标路径由调用方放入 target_path，脚本只执行只读遍历并输出固定数字协议。
 

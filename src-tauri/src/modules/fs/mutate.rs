@@ -105,7 +105,7 @@ pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<
         let profile_id = profile_id.to_string();
         let manager = remote::manager::global_manager()?;
         let workspace = manager.workspace(&profile_id).await?;
-        return remote::sftp::delete(&workspace, &path).await;
+        return remote::mutation_service::delete(&workspace, &path).await;
     }
     if let WorkspaceEnv::Wsl { distro } = &workspace {
         // Windows 盘挂载已经由 resolve_path 映射为本机盘符，继续走原生文件系统更快，

@@ -13,12 +13,11 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::modules::remote::session::{shell_quote, RemoteWorkspace};
+use crate::modules::remote::session::RemoteWorkspace;
 use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use crate::modules::workspace_process::WorkspaceProcessState;
 
-const POSIX_SCAN_HELPER: &str = include_str!("properties_helper.sh");
 const DIRECTORY_SCAN_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const SFTP_SCAN_CONCURRENCY: usize = 6;
 
@@ -550,18 +549,7 @@ async fn ssh_scan(
     remote::session::validate_remote_path(path)?;
     let task = remote::tasks::TaskKind::TreeSummary;
     if workspace.tasks.should_attempt(task) {
-        let command = ssh_scan_command(path);
-        let output = tokio::select! {
-            _ = cancellation.cancelled() => return Err("directory scan cancelled".into()),
-            output = workspace.tasks.run(
-                &workspace,
-                task,
-                &command,
-                None,
-                DIRECTORY_SCAN_TIMEOUT,
-                1024,
-            ) => output?,
-        };
+        let output = remote::tasks::tree_summary::run(&workspace, path, &cancellation).await?;
         if output.timed_out {
             return Err(format!("remote directory scan timed out: {path}"));
         }
@@ -642,16 +630,7 @@ async fn sftp_scan(
 }
 
 fn posix_scan_script(path: &str) -> String {
-    format!("target_path={}; {}", shell_quote(path), POSIX_SCAN_HELPER)
-}
-
-/// 通过远端登录 Shell 显式进入 Bash，避免用户默认 Shell 改变 helper 语义。
-fn ssh_scan_command(path: &str) -> String {
-    let script = posix_scan_script(path);
-    format!(
-        "command -v bash >/dev/null 2>&1 || exit 72; exec bash -c {}",
-        shell_quote(&script)
-    )
+    remote::tasks::tree_summary::script(path)
 }
 
 fn parse_scan_output(
@@ -801,16 +780,13 @@ mod tests {
     }
 
     #[test]
-    fn scan_commands_quote_path_and_require_bash_for_ssh() {
+    fn scan_script_quotes_path_and_uses_fixed_protocol() {
         let script = posix_scan_script("/work/a'b");
-        let command = ssh_scan_command("/work/a'b");
 
         assert!(script.starts_with("target_path='/work/a'\\''b';"));
         assert!(script.contains("exit 73"));
-        assert!(command.starts_with("command -v bash"));
-        assert!(command.contains("exec bash -c"));
-        assert!(command.contains("TERAX_PROPERTIES_SCAN_V1"));
-        assert!(command.contains("find -P \"$target_path\""));
+        assert!(script.contains("TERAX_PROPERTIES_SCAN_V1"));
+        assert!(script.contains("find -P \"$target_path\""));
     }
 
     #[test]

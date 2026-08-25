@@ -107,6 +107,7 @@ impl SshTransportHealth {
             rtt_ms: (rtt != NO_RTT).then_some(rtt),
             sampled_at: (rtt != NO_RTT).then(|| self.sampled_at_ms.load(Ordering::Acquire)),
             file_write_fallback: false,
+            task_fallbacks: Vec::new(),
         }
     }
 

@@ -38,3 +38,42 @@ pub(crate) async fn create_directory(
     }
     super::sftp::create_dir(workspace, path).await
 }
+
+/// 删除远端文件、符号链接或目录；目录在服务器本地递归处理。
+pub(crate) async fn delete(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<(), String> {
+    validate_destructive_path(path)?;
+    let metadata = super::sftp::stat(workspace, path).await?;
+    if metadata.kind != super::sftp::RemoteEntryKind::Dir {
+        return super::sftp::remove_file(workspace, path).await;
+    }
+    super::tasks::delete::recursive(workspace, path).await
+}
+
+fn validate_destructive_path(path: &str) -> Result<(), String> {
+    super::session::validate_remote_path(path)?;
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed
+            .split('/')
+            .any(|component| matches!(component, "." | ".."))
+    {
+        return Err("refusing to delete unsafe remote path".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_destructive_path;
+
+    #[test]
+    fn destructive_paths_reject_root_and_parent_traversal() {
+        for path in ["/", "//", ".", "..", "/tmp/..", "a/../b", "a/./b"] {
+            assert!(validate_destructive_path(path).is_err(), "accepted {path}");
+        }
+        assert!(validate_destructive_path("/home/me/project/file.txt").is_ok());
+        assert!(validate_destructive_path("relative/file.txt").is_ok());
+    }
+}
