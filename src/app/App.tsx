@@ -1567,7 +1567,6 @@ export default function App() {
     explorerRoot,
     setActiveId,
     newTab,
-    openWebPreviewTab,
     newAgentTab,
     ensureWorkspaceReady,
     terminalRefs,

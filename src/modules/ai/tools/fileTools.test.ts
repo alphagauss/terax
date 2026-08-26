@@ -32,7 +32,6 @@ const context: ToolContext = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
-  openWebPreview: () => false,
   spawnAgent: async () => null,
   readAgentOutput: () => null,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
@@ -67,6 +66,7 @@ describe("AI file tools", () => {
       "edit",
       "multi_edit",
       "create_directory",
+      "open_web_preview",
     ]) {
       expect(tools).not.toHaveProperty(name);
     }

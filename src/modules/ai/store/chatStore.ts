@@ -57,7 +57,6 @@ export type Live = {
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
-  openWebPreview: (url: string) => boolean;
   spawnManagedAgent: (
     prompt: string,
     sessionId: string,
@@ -185,7 +184,6 @@ const NOOP_LIVE: Live = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
-  openWebPreview: () => false,
   spawnManagedAgent: async () => null,
   readTerminalBuffer: () => null,
 };
