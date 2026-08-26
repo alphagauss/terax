@@ -31,7 +31,6 @@ const context: ToolContext = {
   openWebPreview: () => false,
   spawnAgent: async () => null,
   readAgentOutput: () => null,
-  readCache: new Map(),
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
 };
 

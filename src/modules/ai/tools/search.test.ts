@@ -1,6 +1,6 @@
 /**
- * 本文件测试 AI 文件搜索工具的路径解析与原生调用边界。
- * 测试上下文使用异步 Agent 启动契约，避免绕过 Workspace 就绪流程。
+ * 本文件测试 AI 路径发现与正文搜索的薄原生桥接。
+ * 测试锁定固定会话根目录、新参数命名和旧 glob 工具已经移除。
  */
 
 import type { ToolExecutionOptions } from "ai";
@@ -8,17 +8,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 
 const nativeMock = vi.hoisted(() => ({
-  canonicalize: vi.fn(async (path: string) => path),
-  glob: vi.fn(),
+  agentFileFind: vi.fn(),
+  agentFileGrep: vi.fn(),
 }));
-const searchContentMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../lib/native", () => ({
-  native: nativeMock,
-}));
-vi.mock("@/modules/workspace-search/api", () => ({
-  searchContent: searchContentMock,
-}));
+vi.mock("../lib/native", () => ({ native: nativeMock }));
 
 import { buildSearchTools } from "./search";
 
@@ -36,105 +30,80 @@ function makeContext(): ToolContext {
     openWebPreview: () => false,
     spawnAgent: async () => null,
     readAgentOutput: () => null,
-    readCache: new Map(),
     getSessionId: () => "session",
   };
 }
 
-type GrepToolResult = {
-  hits: { path: string; rel: string; line: number; text: string }[];
-};
-
-type GlobToolResult = {
-  hits: { path: string; rel: string }[];
-};
-
-describe("AI search tools path safety", () => {
+describe("AI search tools", () => {
   beforeEach(() => {
-    nativeMock.canonicalize.mockClear();
-    nativeMock.glob.mockReset();
-    searchContentMock.mockReset();
+    vi.clearAllMocks();
+    nativeMock.agentFileFind.mockResolvedValue({ entries: [] });
+    nativeMock.agentFileGrep.mockResolvedValue({ hits: [] });
   });
 
-  it("filters grep hits that read_file would refuse", async () => {
-    searchContentMock.mockResolvedValue({
-      hits: [
-        {
-          path: "/workspace/src/app.ts",
-          rel: "workspace/src/app.ts",
-          line: 7,
-          text: "const tokenName = 'safe fixture';",
-          ranges: [],
-        },
-        {
-          path: "/workspace/secrets.json",
-          rel: "workspace/secrets.json",
-          line: 1,
-          text: '{"token":"secret"}',
-          ranges: [],
-        },
-        {
-          path: "/workspace/server.pem",
-          rel: "workspace/server.pem",
-          line: 1,
-          text: "BEGIN PRIVATE KEY",
-          ranges: [],
-        },
-        {
-          path: "/etc/passwd",
-          rel: "etc/passwd",
-          line: 1,
-          text: "root:x:0:0:root:/root:/bin/sh",
-          ranges: [],
-        },
-      ],
-      truncated: false,
-      filesScanned: 4,
-    });
+  it("uses find_files for immediate or recursive discovery", async () => {
+    const execute = buildSearchTools(makeContext()).find_files.execute;
+    if (!execute) throw new Error("find_files execute missing");
 
-    const tools = buildSearchTools(makeContext());
-    const execute = tools.grep.execute;
-    if (!execute) throw new Error("grep tool execute missing");
-    const result = (await execute(
-      { pattern: "token|root|PRIVATE KEY", root: "/" },
+    await execute(
+      {
+        path: "src",
+        glob: "**/*.ts",
+        recursive: true,
+        include_directories: true,
+        offset: 20,
+        limit: 50,
+      },
       toolOptions,
-    )) as GrepToolResult;
-
-    expect(result.hits.map((h) => h.path)).toEqual(["/workspace/src/app.ts"]);
-    expect(result.hits.map((h) => h.text)).toEqual([
-      "const tokenName = 'safe fixture';",
-    ]);
-    expect(searchContentMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        syntax: "regex",
-        caseMode: "sensitive",
-        wholeWord: false,
-      }),
     );
+
+    expect(nativeMock.agentFileFind).toHaveBeenCalledWith({
+      ownerSessionId: "session",
+      root: "/workspace",
+      path: "src",
+      glob: "**/*.ts",
+      recursive: true,
+      includeDirectories: true,
+      includeHidden: undefined,
+      offset: 20,
+      limit: 50,
+    });
   });
 
-  it("filters glob hits that enumerate sensitive paths", async () => {
-    nativeMock.glob.mockResolvedValue({
-      hits: [
-        { path: "/home/me/project/src/index.ts", rel: "src/index.ts" },
-        { path: "/home/me/project/id_rsa", rel: "id_rsa" },
-        { path: "/home/me/project/.ssh/config", rel: ".ssh/config" },
-        { path: "service-account-prod.json", rel: "service-account-prod.json" },
-        { path: "/etc/passwd", rel: "../../etc/passwd" },
-      ],
-      truncated: false,
-    });
+  it("maps grep modes and context to the unified backend", async () => {
+    const execute = buildSearchTools(makeContext()).grep.execute;
+    if (!execute) throw new Error("grep execute missing");
 
-    const tools = buildSearchTools(makeContext());
-    const execute = tools.glob.execute;
-    if (!execute) throw new Error("glob tool execute missing");
-    const result = (await execute(
-      { pattern: "**/*", root: "/home/me/project" },
+    await execute(
+      {
+        pattern: "literal text",
+        path: "src",
+        syntax: "literal",
+        output: "count",
+        context_lines: 2,
+        include: ["**/*.ts"],
+        offset: 10,
+        limit: 25,
+      },
       toolOptions,
-    )) as GlobToolResult;
+    );
 
-    expect(result.hits).toEqual([
-      { path: "/home/me/project/src/index.ts", rel: "src/index.ts" },
-    ]);
+    expect(nativeMock.agentFileGrep).toHaveBeenCalledWith({
+      ownerSessionId: "session",
+      root: "/workspace",
+      path: "src",
+      pattern: "literal text",
+      syntax: "literal",
+      caseInsensitive: undefined,
+      include: ["**/*.ts"],
+      output: "count",
+      contextLines: 2,
+      offset: 10,
+      limit: 25,
+    });
+  });
+
+  it("does not expose the removed standalone glob tool", () => {
+    expect(buildSearchTools(makeContext())).not.toHaveProperty("glob");
   });
 });

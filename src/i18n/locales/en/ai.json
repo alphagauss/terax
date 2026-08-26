@@ -52,9 +52,18 @@
   },
   "toolApproval": {
     "writeFile": "Write file",
-    "editFile": "Edit file",
     "editFileBatch": "Edit file (batch)",
-    "createDirectory": "Create directory",
+    "fileOperation": "Manage file",
+    "fileOperations": {
+      "move": "Move",
+      "copy": "Copy",
+      "delete": "Delete",
+      "createDirectory": "Create empty directory"
+    },
+    "destination": "Destination",
+    "recursiveDelete": "Delete the directory and all of its contents",
+    "fileCount_one": "{{count}} file",
+    "fileCount_other": "{{count}} files",
     "runShellCommand": "Run shell command",
     "writeShellInput": "Write shell input",
     "needsApproval": "needs approval",

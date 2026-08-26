@@ -35,18 +35,18 @@ describe("AI collapsible details", () => {
 
   it("keeps completed tool output unmounted until explicitly opened", () => {
     const props = {
-      toolName: "list_directory",
+      toolName: "find_files",
       state: "output-available" as const,
       input: { path: "/workspace" },
       output: {
-        entries: [{ name: "lazy-detail.txt", kind: "file" }],
+        entries: [{ rel: "lazy-detail.txt", kind: "file" }],
       },
     };
 
     const closed = renderToStaticMarkup(<Tool {...props} />);
     const open = renderToStaticMarkup(<Tool {...props} defaultOpen />);
 
-    expect(closed).toContain("List");
+    expect(closed).toContain("Find");
     expect(closed).not.toContain("lazy-detail.txt");
     expect(open).toContain("lazy-detail.txt");
   });
@@ -83,5 +83,23 @@ describe("AI collapsible details", () => {
     expect(markup).toContain("pnpm dev");
     expect(markup).toContain("00000000-0000-4000-8000-000000000002");
     expect(markup).toContain("ready");
+  });
+
+  it("shows both paths for a structural file operation", () => {
+    const markup = renderToStaticMarkup(
+      <Tool
+        toolName="file_operation"
+        state="approval-requested"
+        input={{
+          operation: "move",
+          path: "old.txt",
+          destination: "archive/new.txt",
+        }}
+        defaultOpen
+      />,
+    );
+
+    expect(markup).toContain("old.txt");
+    expect(markup).toContain("archive/new.txt");
   });
 });

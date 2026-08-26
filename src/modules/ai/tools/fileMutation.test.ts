@@ -1,212 +1,118 @@
 /**
- * 本文件测试 AI 文件修改快照的纯文本变换规则。
- * 测试锁定批量原子顺序、唯一替换和失败时不返回部分结果。
+ * 本文件测试 AI 文件修改的原生桥接。
+ * 测试锁定新工具输入映射、提交键和异步清理，不保留旧编辑工具契约。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  applyTextEdits,
-  clearPreparedFileMutation,
-  commitPreparedFileMutation,
-  getPreparedFileMutation,
-  isTerminalFileMutationState,
-  prepareFileMutation,
-} from "./fileMutation";
 
 const nativeMock = vi.hoisted(() => ({
-  canonicalize: vi.fn(),
-  readFile: vi.fn(),
-  writeFileChecked: vi.fn(),
+  agentPrepareMutation: vi.fn(),
+  agentCommitMutation: vi.fn(),
+  agentClearMutation: vi.fn(),
 }));
 
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
-function text(content: string, revision = "base", mtime = 1) {
-  return {
-    kind: "text" as const,
-    content,
-    size: content.length,
-    mtime,
-    revision,
-  };
-}
+import {
+  clearPreparedFileMutation,
+  commitPreparedFileMutation,
+  isTerminalFileMutationState,
+  prepareFileMutation,
+} from "./fileMutation";
 
-describe("file mutation", () => {
+describe("file mutation bridge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    nativeMock.canonicalize.mockImplementation(async (path: string) => path);
-    nativeMock.writeFileChecked.mockResolvedValue({
-      status: "written",
-      revision: "written",
-      size: 5,
-      mtime: 2,
+    nativeMock.agentPrepareMutation.mockResolvedValue({ files: [] });
+    nativeMock.agentCommitMutation.mockResolvedValue({ files: [] });
+    nativeMock.agentClearMutation.mockResolvedValue(undefined);
+  });
+
+  it("maps a complete write to an explicit native mode", async () => {
+    await prepareFileMutation({
+      sessionId: "session",
+      toolCallId: "call",
+      toolName: "write_file",
+      input: { path: "a.txt", content: "after", mode: "rewrite" },
+      cwd: "/workspace",
+    });
+
+    expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith({
+      ownerSessionId: "session",
+      toolCallId: "call",
+      root: "/workspace",
+      mutation: {
+        kind: "write",
+        path: "a.txt",
+        content: "after",
+        mode: "rewrite",
+      },
     });
   });
 
-  it("applies ordered edits to the running buffer", () => {
-    expect(
-      applyTextEdits("alpha beta", [
-        { old_string: "alpha", new_string: "gamma" },
-        { old_string: "gamma beta", new_string: "done" },
-      ]),
-    ).toEqual({ content: "done", replacements: 2 });
+  it("maps a multi-file exact patch without compatibility fields", async () => {
+    await prepareFileMutation({
+      sessionId: "session",
+      toolCallId: "call",
+      toolName: "apply_patch",
+      input: {
+        files: [
+          {
+            path: "a.txt",
+            edits: [
+              {
+                old_text: "before",
+                new_text: "after",
+                replace_all: true,
+              },
+            ],
+          },
+        ],
+      },
+      cwd: "/workspace",
+    });
+
+    expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mutation: {
+          kind: "patch",
+          files: [
+            {
+              path: "a.txt",
+              edits: [
+                {
+                  old_text: "before",
+                  new_text: "after",
+                  replace_all: true,
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
   });
 
-  it("rejects an ambiguous single replacement", () => {
-    expect(() =>
-      applyTextEdits("same same", [
-        { old_string: "same", new_string: "changed" },
-      ]),
-    ).toThrow("not unique");
+  it("commits and clears by owner plus tool call", async () => {
+    await commitPreparedFileMutation("session", "call");
+    clearPreparedFileMutation("session", "call");
+    await vi.waitFor(() =>
+      expect(nativeMock.agentClearMutation).toHaveBeenCalledWith(
+        "session",
+        "call",
+      ),
+    );
+    expect(nativeMock.agentCommitMutation).toHaveBeenCalledWith(
+      "session",
+      "call",
+    );
   });
 
-  it("counts replace-all operations", () => {
-    expect(
-      applyTextEdits("x-x-x", [
-        { old_string: "x", new_string: "y", replace_all: true },
-      ]),
-    ).toEqual({ content: "y-y-y", replacements: 3 });
-  });
-
-  it("keeps the approved snapshot until the tool reaches a terminal state", () => {
+  it("recognizes only terminal approval states", () => {
     expect(isTerminalFileMutationState("approval-requested")).toBe(false);
     expect(isTerminalFileMutationState("approval-responded")).toBe(false);
     expect(isTerminalFileMutationState("output-available")).toBe(true);
     expect(isTerminalFileMutationState("output-error")).toBe(true);
     expect(isTerminalFileMutationState("output-denied")).toBe(true);
-  });
-
-  it("shares one preparation for concurrent callers", async () => {
-    let resolveRead!: (value: ReturnType<typeof text>) => void;
-    nativeMock.readFile.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveRead = resolve;
-        }),
-    );
-
-    const input = {
-      sessionId: "session",
-      toolCallId: "tool-concurrent",
-      toolName: "write_file" as const,
-      input: { path: "a.txt", content: "after" },
-      cwd: "/workspace",
-    };
-    const first = prepareFileMutation(input);
-    const second = prepareFileMutation(input);
-    await vi.waitFor(() => expect(nativeMock.readFile).toHaveBeenCalledOnce());
-    resolveRead(text("before"));
-
-    const [firstPrepared, secondPrepared] = await Promise.all([first, second]);
-    expect(secondPrepared).toBe(firstPrepared);
-    expect(getPreparedFileMutation(input.sessionId, input.toolCallId)).toBe(
-      firstPrepared,
-    );
-  });
-
-  it("does not let a cleared in-flight preparation repopulate the cache", async () => {
-    let resolveRead!: (value: ReturnType<typeof text>) => void;
-    nativeMock.readFile.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveRead = resolve;
-        }),
-    );
-    const input = {
-      sessionId: "session",
-      toolCallId: "tool-cleared",
-      toolName: "write_file" as const,
-      input: { path: "a.txt", content: "after" },
-      cwd: "/workspace",
-    };
-    const preparing = prepareFileMutation(input);
-    await vi.waitFor(() => expect(nativeMock.readFile).toHaveBeenCalledOnce());
-    clearPreparedFileMutation(input.sessionId, input.toolCallId);
-    resolveRead(text("before"));
-    await preparing;
-
-    expect(
-      getPreparedFileMutation(input.sessionId, input.toolCallId),
-    ).toBeNull();
-  });
-
-  it("writes the exact approved snapshot when the source is unchanged", async () => {
-    nativeMock.readFile.mockResolvedValue(text("before"));
-    const prepared = await prepareFileMutation({
-      sessionId: "session",
-      toolCallId: "tool-commit",
-      toolName: "edit",
-      input: {
-        path: "a.txt",
-        old_string: "before",
-        new_string: "after",
-      },
-      cwd: "/workspace",
-    });
-
-    await commitPreparedFileMutation(prepared);
-
-    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
-      "/workspace/a.txt",
-      "after",
-      {
-        type: "match",
-        version: { revision: "base", size: 6, mtime: 1 },
-      },
-    );
-    expect(nativeMock.readFile).toHaveBeenCalledOnce();
-  });
-
-  it("refuses to overwrite a file changed after approval", async () => {
-    nativeMock.readFile.mockResolvedValueOnce(text("before"));
-    nativeMock.writeFileChecked.mockResolvedValueOnce({
-      status: "conflict",
-      current: { size: 6, mtime: 2 },
-    });
-    const prepared = await prepareFileMutation({
-      sessionId: "session",
-      toolCallId: "tool-stale",
-      toolName: "write_file",
-      input: { path: "a.txt", content: "approved" },
-      cwd: "/workspace",
-    });
-
-    await expect(commitPreparedFileMutation(prepared)).rejects.toThrow(
-      "file changed after approval",
-    );
-    expect(nativeMock.readFile).toHaveBeenCalledOnce();
-    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
-      "/workspace/a.txt",
-      "approved",
-      {
-        type: "match",
-        version: { revision: "base", size: 6, mtime: 1 },
-      },
-    );
-  });
-
-  it("refuses to overwrite an empty file created after new-file approval", async () => {
-    nativeMock.readFile.mockRejectedValueOnce(new Error("not found"));
-    nativeMock.writeFileChecked.mockResolvedValueOnce({
-      status: "conflict",
-      current: { size: 0, mtime: 2 },
-    });
-    const prepared = await prepareFileMutation({
-      sessionId: "session",
-      toolCallId: "tool-created",
-      toolName: "write_file",
-      input: { path: "new.txt", content: "approved" },
-      cwd: "/workspace",
-    });
-
-    await expect(commitPreparedFileMutation(prepared)).rejects.toThrow(
-      "file changed after approval",
-    );
-    expect(nativeMock.readFile).toHaveBeenCalledOnce();
-    expect(nativeMock.writeFileChecked).toHaveBeenCalledWith(
-      "/workspace/new.txt",
-      "approved",
-      { type: "missing" },
-    );
   });
 });

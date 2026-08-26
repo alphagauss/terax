@@ -20,7 +20,6 @@ export type ToolContext = {
   spawnAgent: (prompt: string) => Promise<number | null>;
   /** 读取托管 Agent 所在终端的滚动缓冲区尾部。 */
   readAgentOutput: (tabId: number) => string | null;
-  readCache: Map<string, { size: number; hash: number }>;
   /** 当前聊天会话 ID，供待办事项等按会话持久化的工具使用。 */
   getSessionId: () => string;
 };

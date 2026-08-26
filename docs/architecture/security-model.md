@@ -9,24 +9,23 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 主要信任边界包括：
 
 1. **IPC 边界** - 注册在 `src-tauri/src/lib.rs` 中并受 `src-tauri/capabilities/default.json` 限制的 command。
-2. **文件系统边界** - AI 工具通过 `src/modules/ai/lib/security.ts`；PTY spawn 通过 Workspace 授权 registry。
+2. **文件系统边界** - AI 文件工具通过 `src-tauri/src/modules/fs/agent.rs`；PTY spawn 通过 Workspace 授权 registry。
 3. **网络边界** - `src-tauri/src/modules/net.rs` 中带有 SSRF 和 DNS rebinding 防护的 AI HTTP proxy。
 4. **秘密存储边界** - key 存储在操作系统 keychain 中，绝不存入磁盘或 `localStorage`。
 5. **终端 escape sequence 边界** - 解析 OSC sequence 并执行对应操作，但绝不直接信任它来改变状态。
 
 ## 秘密路径 deny-list
 
-`src/modules/ai/lib/security.ts` 会拒绝读取和写入明显包含秘密的路径。该规则**同时适用于读取和写入**，绝不能绕过。
+`src-tauri/src/modules/fs/agent.rs` 会拒绝读取和修改明显包含秘密的路径。该规则同时适用于所有六个 Agent 文件工具，不能被前端参数或 full-access 模式绕过。
 
 阻止的类别包括：
 
 - 文件：`.env*`、`*.pem`、`*.key`、`*.p12`、`id_rsa*`、`known_hosts`、`credentials`、`service-account*.json` 等。
 - 目录：`~/.ssh`、`~/.gnupg`、`~/.aws`、`~/.kube`、`~/.config/gh`、`~/.git`、系统目录（`/etc`、`/proc`、`/sys`）和 Windows credential store。
-- 系统写入 prefix：`/etc/`、`/var/db/`、`/usr/bin/`、`/windows/`、`/program files/` 等。
 
-路径比较前会进行规范化：将反斜杠转换为正斜杠、移除 Windows drive letter、移除 NTFS alternate data stream、移除末尾点号/空格、转换为小写并合并重复斜杠。受保护目录按完整路径或其 descendant 匹配，而不是使用原始 substring 匹配。
+路径比较前会进行规范化：将反斜杠转换为正斜杠、识别 Windows drive letter、移除末尾点号/空格并转换为小写。Windows Local 额外拒绝 NTFS alternate data stream 和 DOS 设备名。受保护目录按完整 component 或其 descendant 匹配，而不是使用原始 substring 匹配；`etc`、`proc`、`sys` 等系统目录只在文件系统根位置命中，不会误伤项目内同名目录。
 
-`checkReadableCanonical` 和 `checkWritableCanonical` 还会 canonicalize 路径并重新检查解析后的形式，因此可以发现无害路径中的 symlink 指向 `~/.ssh` 的情况。
+后端同时检查字面路径和 canonical path。目标不存在时会向上寻找最近存在祖先，解析后再拼回缺失尾部，因此多级新目录下的已有 symlink 也不能跳入 Workspace 外或敏感目录。执行正文 I/O 时使用授权得到的稳定物理路径，避免检查后父 symlink 换向；移动和删除最终 symlink 时仍只操作链接本身。Local、WSL 和 SSH 使用同一授权结果；读取正文前还会拒绝设备、FIFO、socket 和其他非普通文件。
 
 ## Workspace 授权 registry
 
@@ -35,6 +34,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - `workspace_authorize` 添加目录。
 - `authorize_spawn_cwd` 拒绝在已授权 root 之外使用 spawn cwd。
 - `authorize_user_spawn_cwd` 将用户选择的 cwd 注册为新 root，而不是拒绝它。
+- Agent 文件工具要求会话 cwd 与一个已登记 root 精确相等，并将聊天 owner 绑定到该 canonical root 和不可变 Workspace 环境。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和审批快照。
 - registry 在 bootstrap 时加入启动目录和用户 home 目录（`workspace.rs:135`）。
 
 这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
@@ -48,7 +48,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - helper 解析物理目标，不使用 `eval`，也不接收脚本片段。
 - 远端依赖优先使用 Linux 与 Bash 环境提供的 GNU coreutils，不维护 BusyBox 参数兼容分支；首次任务仍在同一调用内探测实际参数能力，能力不足时安全回退。
 - 写入使用目标同目录排他临时文件、权限恢复、fsync 和条件原子发布。
-- task 故障不会取消 `security.ts` 的字面与 canonical deny-list；AI 工具仍在调用原生文件 command 前执行相同检查。
+- task 故障不会取消 `fs/agent.rs` 的 Workspace 根、字面与 canonical 路径检查；Local、WSL、SSH 的 Agent 文件调用共享同一 Rust 策略。
 - 提交响应丢失时通过 expected 和 replacement revision 收敛结果，不盲目覆盖。
 - capability 与缺失依赖按任务绑定当前 SSH epoch，一个任务失效不会关闭其他任务；安全的只读或执行前失败回退既有 SFTP 路径。
 - 统一能力探测只运行编译进应用的固定脚本，不接收用户命令，不扫描 Workspace；需要验证写入参数时只使用 `${TMPDIR:-/tmp}` 下的随机目录并在同一次脚本内清理。
@@ -59,12 +59,12 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 在 `src/modules/ai/tools/tools.ts` 中：
 
-- 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过 deny-list 后自动执行。
-- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。AI SDK 会暂停需要审批的调用，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
+- 只读工具（`read_file`、`find_files`、`grep`）自动执行，但 Rust 会将聊天 owner 绑定到固定且已授权的 Workspace 根，并拒绝越界、敏感路径、非普通文件和不安全符号链接。
+- 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。AI SDK 会暂停需要审批的调用，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
 - Agent Shell 在前端审批前和 Rust IPC 边界分别检查不可审阅字符及灾难性命令。cwd 必须属于当前授权 Workspace，Local 子进程使用最小环境变量集合，避免把宿主 API key 和 token 继承到模型可读取的 stdout。
 - Agent 进程通过聊天 owner 和不可复用 UUID 登记，控制和列表 IPC 同时校验 owner 与 Workspace。每聊天与每应用都有原子执行的运行数量上限，聊天删除、超时、显式终止和应用退出都会回收 Local、WSL 或 SSH 完整进程树。Windows Local 进程在恢复执行前加入 Job Object，避免启动竞态使子进程逃逸。
-- 文件修改在审批前准备待 review 的内容和文件版本，批准后重新验证 canonical path，并由原生条件写入原子匹配原版本或目标仍缺失的状态。diff 不依赖 Git。
-- `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
+- 文件修改在 Rust 中准备待 review 的逐文件内容和版本，批准后重新验证 Workspace 根、canonical path 和全部基线，再由原生条件写入匹配原版本或目标仍缺失的状态。diff 不依赖 Git。
+- `write_file` rewrite 和 `apply_patch` 强制执行 owner 隔离的 read-before-edit；create 要求目标缺失。`file_operation` 的目标默认不能覆盖，目录删除必须显式声明 recursive。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
 
@@ -101,7 +101,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 
 ## 不变量
 
-- `security.ts` 中的 deny-list 同时适用于读取和写入，绝不能绕过。
+- `fs/agent.rs` 中的 Workspace 根、敏感路径、普通文件和 canonical 检查同时适用于读取与修改，绝不能由模型参数绕过。`security.ts` 只负责 Shell 审批前反馈。
 - Bash task 只能实现 Rust 枚举的封闭协议；通用执行方法只对 `remote/tasks/` 子模块可见，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。

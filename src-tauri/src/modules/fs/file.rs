@@ -70,7 +70,7 @@ pub enum ReadResult {
 }
 
 /// 编辑器已确认的磁盘内容版本。
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct FileVersion {
     pub revision: String,
     pub size: u64,
@@ -85,7 +85,7 @@ pub struct ObservedMetadata {
 }
 
 /// 文件写入条件。覆盖和仅缺失时创建都必须由调用方显式声明。
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum WriteCondition {
     Match { version: FileVersion },
@@ -776,7 +776,7 @@ fn checked_write_wsl_sync(
     }
 }
 
-fn emit_file_written(app: &tauri::AppHandle, path: &str, source: Option<String>) {
+pub(crate) fn emit_file_written(app: &tauri::AppHandle, path: &str, source: Option<String>) {
     let _ = app.emit(
         "fs:file-written",
         FileWrittenEvent {

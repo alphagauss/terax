@@ -52,9 +52,18 @@
   },
   "toolApproval": {
     "writeFile": "写入文件",
-    "editFile": "编辑文件",
     "editFileBatch": "编辑文件（批量）",
-    "createDirectory": "创建目录",
+    "fileOperation": "管理文件",
+    "fileOperations": {
+      "move": "移动",
+      "copy": "复制",
+      "delete": "删除",
+      "createDirectory": "创建空目录"
+    },
+    "destination": "目标路径",
+    "recursiveDelete": "删除目录及其中的全部内容",
+    "fileCount_one": "{{count}} 个文件",
+    "fileCount_other": "{{count}} 个文件",
     "runShellCommand": "运行 shell 命令",
     "writeShellInput": "写入 shell 输入",
     "needsApproval": "需要批准",

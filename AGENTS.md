@@ -137,6 +137,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 
 - `pty::pty_*`：长生命周期交互式 PTY，由 `PtyState` 管理，通过 `Channel<PtyEvent>` 输出。
 - `fs::*`：文件树、读取、写入、元数据、搜索、grep、glob 和变更操作。
+- `fs::agent::*`：按聊天 owner 和固定 Workspace 根隔离的 AI 文件读取、发现、搜索、审批快照、条件提交与结构操作，统一路由 Local、WSL、SSH。
 - `git::commands::*`：状态、diff、暂存、提交、同步和历史；所有操作都经过工作区授权。
 - `shell::shell_run_command`：编辑器格式化等非 AI 功能使用的有界一次性子 Shell。
 - `shell::shell_exec`、`shell::shell_process`、`shell::shell_list`：按聊天 owner 隔离的统一 Agent 进程启动、stdin/EOF/增量输出/终止和发现；`shell_clear_owner` 在聊天删除时回收所属进程。
@@ -157,6 +158,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - 每个 Windows ConPTY 子进程必须进入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object，保证 Terax 退出时清理整个进程树。
 - AI 短命令与长任务统一登记为 Agent 进程。Local 使用 Unix process group 或 Windows Job Object，Windows 进程必须挂起启动并在恢复前加入 Job Object；WSL 与 SSH 使用独立远端进程组。超时、取消、聊天删除和应用退出必须清理完整进程树。
 - Agent 进程运行中输出使用 4 MiB 有界全局 offset 日志，终态压缩为最近 256 KiB，模型单次最多读取 256 KiB；stdin、EOF、固定文本等待和终止统一通过 `shell_process`，不建立第二套后台进程类型。
+- AI 文件工具统一经过 `fs/agent.rs`。Rust 负责 Workspace 根授权、有界 owner 绑定、敏感路径、最近存在祖先 canonicalize、稳定物理 I/O 路径、普通文件检查、读取版本和 prepared mutation；TypeScript 只声明工具 schema、审批和展示。
+- `write_file` 自动创建父目录并显式区分 create 与 rewrite；`apply_patch` 只对已读取的现有 UTF-8 文件执行严格替换，并保留 CRLF 文件的换行风格。多文件补丁先全部校验，再逐文件原子发布，不得宣称跨文件系统原子性。
 - 终端 Enter 必须发送 `\r`，不能发送 `\n`，否则 Windows PowerShell 无法正确处理。
 - `AiComposerProvider` 必须始终挂载在 `App.tsx` 根部。条件包装会在密钥加载后重挂载整棵树并重新创建所有 PTY。
 
@@ -225,9 +228,9 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 跟随 Explorer 根目录，首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
-- `read_file`、`list_directory`、`grep`、`glob` 自动执行；写入、重命名、删除、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
-- `lib/security.ts` 的秘密路径拒绝规则必须同时用于读取和写入。
-- AI 修改通过 `ai-diff` 标签页逐 hunk 接受或拒绝，接受前不得实际写入。
+- `read_file`、`find_files`、`grep` 自动执行；`write_file`、`apply_patch`、`file_operation`、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
+- AI 文件路径只能位于会话冻结 cwd 对应的已授权 Workspace 根内。读取和写入共享 Rust 敏感路径与 canonical 检查；`lib/security.ts` 只保留 Shell 审批前快速拒绝。
+- `write_file` 和 `apply_patch` 通过一个或多个 `ai-diff` 标签页审阅，并按整个 tool call 批准或拒绝；批准前不得实际写入。
 
 ### UI 与路径约定
 

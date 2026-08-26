@@ -63,15 +63,21 @@ fn shell_has_children(shell_pid: u32) -> bool { ... }
 
 ConPTY/Job Object 测试应放在 `#[cfg(windows)]` 后，Unix PTY 生命周期测试应放在 `#[cfg(unix)]` 后。不要假设在一个平台上可用的辅助函数也适用于另一平台。
 
-## 安全函数测试
+## Agent 文件后端测试
 
-测试 `src/modules/ai/lib/security.ts` 或对应的 Rust 实现时，应覆盖：
+修改 `src-tauri/src/modules/fs/agent.rs` 时，应覆盖：
 
-1. 拒绝字面路径。
-2. 再次拒绝 canonicalized path（symlink 场景）。
-3. 在大小写不敏感的文件系统上匹配大小写变体。
-4. 对 NTFS alternate data stream 和末尾点号/空格变体进行规范化。
-5. 仅禁止写入的 prefix 在适当情况下阻止写入但允许读取。
+1. owner 不能切换 Workspace 环境或已绑定的根目录，进程内 owner scope 总数必须有界。
+2. 根目录必须是已经登记的 Workspace 根，目标 canonical path 不能越界。
+3. 不存在的目标向上解析最近存在祖先，已有符号链接不能绕过根目录或敏感路径。
+4. Windows Local 的 NTFS alternate data stream、DOS 设备名、末尾点号或空格、大小写变体和密钥文件名都被规范化拒绝；项目内普通 `etc`、`proc`、`sys` 目录不能误判为系统根。
+5. `read_file` 去重同时匹配内容版本和读取范围，UTF-8 输出截断保持字符边界。
+6. rewrite 与 patch 要求当前 owner 已读取相同版本；CRLF 文件的跨行精确补丁保留原换行；create、审批后变化和目标占用必须拒绝覆盖。
+7. 多文件修改先校验全部基线，单文件原子发布；中途失败测试必须验证回滚和准确错误。
+8. `file_operation` 拒绝 Workspace 根、隐式覆盖和未显式声明的目录递归删除；copy 使用 no-clobber 发布，远端存在性错误不能当作目标缺失。
+9. Local Windows 路径比较可以忽略大小写，WSL 与 SSH 路径必须保持大小写敏感；显式单文件 `grep` 只搜索该文件。
+
+`src/modules/ai/lib/security.ts` 只保留 Shell 审批前快速拒绝，对应测试不再承载文件路径安全不变量。
 
 ## 文件传输测试
 
@@ -96,6 +102,7 @@ WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面�
 - Bash task 测试必须覆盖固定协议、实际参数探测、权限、fsync、三种条件提交和临时文件清理。
 - SSH task 测试必须覆盖依赖缺失、协议截断、取消、epoch capability 隔离、统一能力探测和传统后端回退；递归树、文件版本、目录创建和 GNU grep 搜索均需独立契约测试。
 - Agent Shell 测试必须分别锁定 owner 隔离、输入边界、终态计时、Local stdin、Unix process group、Windows 挂起启动与 Job Object，以及 WSL/SSH `setsid` 命令构造和远端进程组清理协议。只验证直接 Shell 进程退出不能替代子孙进程清理测试。
+- Agent 文件测试必须分别锁定 Local 的真实文件行为、WSL 路径映射和 SSH SFTP/task 路由；仅测试前端 schema 不能替代 Rust Workspace、安全、版本和提交测试。
 - helper 响应丢失后的 Rust 测试必须锁定 Overwrite 收敛以及 Match、Missing 的安全回退。
 - 状态栏能力灯只能接受当前 epoch 的能力事件；自动探测失败必须保留 lazy probe，瞬时 transport 错误不得显示为永久依赖缺失。
 - 影响范围全局的局部修复必须能被测试捕获，只依赖 review 不够。
