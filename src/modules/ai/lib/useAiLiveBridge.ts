@@ -85,16 +85,6 @@ export function useAiLiveBridge(params: Params) {
         const t = tabs.find((x) => x.id === activeId);
         return t?.kind === "terminal" && t.private === true;
       },
-      injectIntoActivePty: (text) => {
-        const { activeId, tabs } = ref.current;
-        const t = tabs.find((x) => x.id === activeId);
-        if (t?.kind !== "terminal") return false;
-        const term = terminalRefs.current.get(t.id);
-        if (!term) return false;
-        term.write(text);
-        term.focus();
-        return true;
-      },
     });
   }, [params.explorerRoot, setLive, terminalRefs]);
 }

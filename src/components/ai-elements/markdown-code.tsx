@@ -28,20 +28,18 @@ export function markdownCodeText(children?: ReactNode): string {
 /**
  * Markdown 代码节点渲染器。
  *
- * `data-block` 用于区分无语言标识的围栏代码，variant 只控制场景交互。
+ * `data-block` 用于区分无语言标识的围栏代码，variant 只控制 Mermaid 场景能力。
  */
 export function MarkdownCode({
   className,
   children,
   node: _node,
-  onRun,
   variant = "chat",
   ...rest
 }: {
   className?: string;
   children?: ReactNode;
   node?: unknown;
-  onRun?: (command: string) => boolean;
   variant?: "chat" | "document";
   "data-block"?: string;
 }) {
@@ -63,7 +61,6 @@ export function MarkdownCode({
     <ChatCodeBlock
       code={code}
       lang={match?.[1] ?? null}
-      onRun={onRun}
       variant={variant}
     />
   );

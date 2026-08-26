@@ -1,7 +1,7 @@
 /**
  * 本文件测试 Markdown 代码块的语言识别和上下文行为。
  *
- * 锁定无标签围栏代码内容，以及 Shell 执行仅属于聊天上下文的不变量。
+ * 锁定无标签围栏代码内容，以及 Shell 与其他语言共享只读代码块行为。
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -35,25 +35,23 @@ describe("MarkdownCode", () => {
     expect(html).toContain("first line\nsecond line");
   });
 
-  it("keeps shell execution exclusive to chat code blocks", () => {
-    const document = renderToStaticMarkup(
-      <MarkdownCode
-        className="language-bash"
-        data-block="true"
-        variant="document"
-      >
+  it("renders shell and regular languages with the same copy-only actions", () => {
+    const shell = renderToStaticMarkup(
+      <MarkdownCode className="language-bash" data-block="true">
         echo hello
       </MarkdownCode>,
     );
-    const chat = renderToStaticMarkup(
-      <MarkdownCode className="language-bash" data-block="true" onRun={() => true}>
-        echo hello
+    const regular = renderToStaticMarkup(
+      <MarkdownCode className="language-typescript" data-block="true">
+        const value = 1;
       </MarkdownCode>,
     );
 
-    expect(document).not.toContain("Run in active terminal");
-    expect(chat).toContain("Run in active terminal");
-    expect(document).toContain("data-markdown-code-block");
-    expect(chat).toContain("data-markdown-code-block");
+    expect(shell).not.toContain("Run in active terminal");
+    expect(regular).not.toContain("Run in active terminal");
+    expect(shell).toContain('aria-label="Copy code"');
+    expect(regular).toContain('aria-label="Copy code"');
+    expect(shell).toContain("data-markdown-code-block");
+    expect(regular).toContain("data-markdown-code-block");
   });
 });
