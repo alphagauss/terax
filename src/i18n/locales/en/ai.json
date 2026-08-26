@@ -56,7 +56,7 @@
     "editFileBatch": "Edit file (batch)",
     "createDirectory": "Create directory",
     "runShellCommand": "Run shell command",
-    "spawnBackgroundProcess": "Spawn background process",
+    "writeShellInput": "Write shell input",
     "needsApproval": "needs approval",
     "deny": "Deny",
     "approve": "Approve",

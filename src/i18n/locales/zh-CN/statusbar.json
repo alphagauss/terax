@@ -193,8 +193,7 @@
       "directory_summary": "目录汇总",
       "file_write": "条件文件写入",
       "create_directory": "目录创建",
-      "background_logs": "后台命令日志",
-      "background_processes": "后台进程状态",
+      "agent_processes": "可交互 Agent 进程",
       "recursive_delete": "递归删除",
       "content_search": "内容搜索",
       "file_listing": "快速文件枚举"

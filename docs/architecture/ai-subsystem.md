@@ -89,7 +89,8 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 
 - 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过安全 deny-list 后自动执行。
 - `grep` 通过 `src/modules/workspace-search/api.ts` 调用与用户搜索面板相同的 `fs_content_search`。共享后端只统一匹配、ignore 和路径筛选语义，AI 命中仍在工具层执行 canonical root 检查和秘密路径过滤。
-- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`bash_run`、`bash_background`）设置 `needsApproval: true`。AI SDK 会暂停，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
+- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
+- Shell 工具只有 `shell_exec`、`shell_process`、`shell_list`。短命令和长任务共享按聊天 owner 隔离的原生进程表，stdin、EOF、增量 offset、固定文本等待、hard timeout 和完整进程树终止不通过前端模拟。POSIX 环境默认使用 Bash，Windows Local 默认使用 PowerShell。
 - `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
@@ -110,6 +111,7 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 - 修改型工具需要审批；只读工具仍必须通过 deny-list。
 - 内存 message list、持久化 message record 和模型 input 保留相同的 message content。发送时不注入 active tab、cwd 或 environment block。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
+- `shell_exec` 未显式传 cwd 时延续该聊天最近同步完成的 Shell cwd；已经返回为长任务的进程不得在稍后退出时异步改变聊天 cwd。
 - 获取 persisted session run 时，从经过验证的 JSONL header 恢复已保存 cwd 的授权，但不改变 Explorer root。
 - session run lock 持有其内存 runtime，直到 commit 和 release 均成功；session navigation 不得绕过该生命周期。
 

@@ -51,6 +51,50 @@ export type CommandOutput = {
   truncated: boolean;
 };
 
+export type ShellKind =
+  | "default"
+  | "bash"
+  | "sh"
+  | "zsh"
+  | "powershell"
+  | "cmd";
+
+export type ShellProcessStatus =
+  | "running"
+  | "exited"
+  | "timed_out"
+  | "terminated";
+
+export type ShellProcessResponse = {
+  process_id: string;
+  status: ShellProcessStatus;
+  stdout: string;
+  stderr: string;
+  exit_code: number | null;
+  elapsed_ms: number;
+  truncated: boolean;
+  dropped_bytes: number;
+  next_offset: number;
+  available_from: number;
+  cwd: string;
+  cwd_after: string | null;
+  wait_for_matched: boolean | null;
+};
+
+export type ShellProcessInfo = {
+  process_id: string;
+  command: string;
+  cwd: string;
+  shell: ShellKind;
+  workspace: "local" | "wsl" | "ssh";
+  status: ShellProcessStatus;
+  started_at_ms: number;
+  elapsed_ms: number;
+  idle_ms: number;
+  exit_code: number | null;
+  unread_output: boolean;
+};
+
 export type GlobHit = { path: string; rel: string };
 export type GlobResponse = { hits: GlobHit[]; truncated: boolean };
 
@@ -210,59 +254,51 @@ export const native = {
       workspace: currentWorkspaceEnv(),
     }),
 
-  shellSessionOpen: (cwd?: string | null) =>
-    invoke<number>("shell_session_open", {
-      cwd: cwd ?? null,
+  shellExec: (params: {
+    ownerSessionId: string;
+    command: string;
+    initialCwd: string;
+    cwd?: string | null;
+    timeoutSecs: number;
+    yieldTimeMs: number;
+    maxOutputBytes: number;
+    shell: ShellKind;
+    login: boolean;
+  }) =>
+    invoke<ShellProcessResponse>("shell_exec", {
+      ...params,
+      cwd: params.cwd ?? null,
       workspace: currentWorkspaceEnv(),
     }),
-  shellSessionRun: (
-    id: number,
-    command: string,
-    cwd?: string | null,
-    timeoutSecs?: number,
-  ) =>
-    invoke<{
-      stdout: string;
-      stderr: string;
-      exit_code: number | null;
-      timed_out: boolean;
-      truncated: boolean;
-      cwd_after: string;
-    }>("shell_session_run", {
-      id,
-      command,
-      cwd: cwd ?? null,
-      timeoutSecs: timeoutSecs ?? null,
+  shellProcess: (params: {
+    ownerSessionId: string;
+    processId: string;
+    action: "poll" | "write" | "close_stdin" | "terminate";
+    input?: string | null;
+    closeStdin?: boolean;
+    sinceOffset?: number | null;
+    yieldTimeMs?: number | null;
+    waitFor?: string | null;
+    waitTimeoutMs?: number | null;
+    maxOutputBytes?: number | null;
+  }) =>
+    invoke<ShellProcessResponse>("shell_process", {
+      input: null,
+      closeStdin: false,
+      sinceOffset: null,
+      yieldTimeMs: null,
+      waitFor: null,
+      waitTimeoutMs: null,
+      maxOutputBytes: null,
+      ...params,
       workspace: currentWorkspaceEnv(),
     }),
-  shellSessionClose: (id: number) =>
-    invoke<void>("shell_session_close", { id }),
-  shellBgSpawn: (command: string, cwd?: string | null) =>
-    invoke<number>("shell_bg_spawn", {
-      command,
-      cwd: cwd ?? null,
+  shellList: (ownerSessionId: string, includeExited = false) =>
+    invoke<ShellProcessInfo[]>("shell_list", {
+      ownerSessionId,
+      includeExited,
       workspace: currentWorkspaceEnv(),
     }),
-  shellBgLogs: (handle: number, sinceOffset?: number) =>
-    invoke<{
-      bytes: string;
-      next_offset: number;
-      dropped: number;
-      exited: boolean;
-      exit_code: number | null;
-    }>("shell_bg_logs", { handle, sinceOffset: sinceOffset ?? null }),
-  shellBgKill: (handle: number) => invoke<void>("shell_bg_kill", { handle }),
-  shellBgList: () =>
-    invoke<
-      {
-        handle: number;
-        command: string;
-        cwd: string | null;
-        started_at_ms: number;
-        exited: boolean;
-        exit_code: number | null;
-      }[]
-    >("shell_bg_list"),
   gitResolveRepo: (cwd: string) =>
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,

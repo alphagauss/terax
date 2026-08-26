@@ -20,6 +20,7 @@ const MARKER: &[u8] = b"TERAX_CAPABILITIES_V1";
 const TIMEOUT: Duration = Duration::from_secs(20);
 const COMMANDS: &[(&str, &str)] = &[
     ("bash", "bash"),
+    ("setsid", "setsid --wait"),
     ("find", "find -printf"),
     ("readlink", "readlink -f"),
     ("stat", "stat -c"),
@@ -255,16 +256,14 @@ fn build_snapshot(commands: Vec<SshCommandCapability>) -> SshCapabilitySnapshot 
         &create,
     );
     push(
-        "background_logs",
-        SshCapabilityState::Ready,
-        Some("sftp"),
-        &[],
-    );
-    push(
-        "background_processes",
-        SshCapabilityState::Ready,
-        Some("bash"),
-        &["bash"],
+        "agent_processes",
+        if ready("setsid") {
+            SshCapabilityState::Ready
+        } else {
+            SshCapabilityState::Unavailable
+        },
+        ready("setsid").then_some("ssh-channel"),
+        &["bash", "setsid"],
     );
     push(
         "recursive_delete",
@@ -362,7 +361,6 @@ fn apply_task_capabilities(workspace: &RemoteWorkspace, snapshot: &SshCapability
         all(&["mkdir", "readlink", "mktemp", "rm"]),
         "missing directory-creation dependencies",
     );
-    set(TaskKind::BackgroundList, true, "");
     set(TaskKind::RecursiveDelete, ready("rm"), "missing rm");
     set(
         TaskKind::RipgrepContent,
@@ -436,18 +434,9 @@ pub(crate) fn overlay_runtime_fallbacks(
         ("tree_list", "tree_listing"),
         ("tree_summary", "directory_summary"),
         ("create_directory", "create_directory"),
-        ("background_list", "background_processes"),
     ] {
         if unavailable.contains(task) {
-            fallback(
-                snapshot,
-                feature,
-                if task.starts_with("background_") {
-                    "legacy"
-                } else {
-                    "sftp"
-                },
-            );
+            fallback(snapshot, feature, "sftp");
         }
     }
     if unavailable.contains("ripgrep_content") {

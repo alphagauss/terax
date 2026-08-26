@@ -1,144 +1,196 @@
 /**
- * 本文件定义 AI 的前台命令、后台进程及日志工具。
- * 命令执行始终经过安全检查，完全访问模式只省略逐次批准。
+ * 本文件定义 AI 的统一 Shell 启动、进程控制和进程发现工具。
+ * 所有命令进入原生受管进程表，Local、WSL 与 SSH 共享同一交互和输出契约。
  */
 
-import { currentWorkspaceEnv, workspaceScopeKey } from "@/modules/workspace";
 import { tool } from "ai";
 import { z } from "zod";
-import { native } from "../lib/native";
+import {
+  native,
+  type ShellProcessInfo,
+  type ShellProcessResponse,
+} from "../lib/native";
+import { redactSensitive } from "../lib/redact";
 import { checkShellCommand } from "../lib/security";
 import { useChatStore } from "../store/chatStore";
 import { resolvePath, type ToolContext } from "./context";
 
-/**
- * Per-session lazy shell-session id. The agent gets one persistent shell per
- * chat session, so cwd survives across tool calls (cd, mkdir+cd, etc).
- */
-const sessionShells = new Map<string, Promise<number>>();
+const DEFAULT_TIMEOUT_SECS = 300;
+const DEFAULT_YIELD_MS = 10_000;
+const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 
-async function getSessionShell(
-  sessionId: string,
-  cwd: string | null,
-): Promise<number> {
-  let p = sessionShells.get(sessionId);
-  if (!p) {
-    p = native.shellSessionOpen(cwd);
-    sessionShells.set(sessionId, p);
-  }
-  return p;
-}
+const outputOptions = {
+  since_offset: z.number().int().min(0).optional(),
+  max_output_bytes: z
+    .number()
+    .int()
+    .min(1024)
+    .max(256 * 1024)
+    .optional(),
+};
 
-function workspaceSessionKey(sessionId: string): string {
-  return `${sessionId}:${workspaceScopeKey(currentWorkspaceEnv())}`;
-}
+const waitOptions = {
+  yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+  wait_for: z.string().min(1).max(4096).optional(),
+  wait_timeout_ms: z.number().int().min(0).max(120_000).optional(),
+};
 
-/** 创建 Shell 工具，并在每次命令调用时读取最新权限模式。 */
+const processInputSchema = z.discriminatedUnion("action", [
+  z.object({
+    process_id: z.string().uuid(),
+    action: z.literal("poll"),
+    ...outputOptions,
+    ...waitOptions,
+  }),
+  z.object({
+    process_id: z.string().uuid(),
+    action: z.literal("write"),
+    input: z.string().max(256 * 1024),
+    close_stdin: z.boolean().optional(),
+    ...outputOptions,
+    ...waitOptions,
+  }),
+  z.object({
+    process_id: z.string().uuid(),
+    action: z.literal("close_stdin"),
+    ...outputOptions,
+    yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+  }),
+  z.object({
+    process_id: z.string().uuid(),
+    action: z.literal("terminate"),
+    ...outputOptions,
+  }),
+]);
+
+/** 创建统一 Shell 工具，并在每次有副作用的调用前读取最新权限模式。 */
 export function buildShellTools(ctx: ToolContext) {
   return {
-    bash_run: tool({
+    shell_exec: tool({
       description:
-        "Run a foreground shell command in this session's persistent agent shell. cwd persists across calls (so `cd foo` then `bash_run pwd` works). Use for short-lived commands (lint, test, search, build). For long-running or daemon processes (dev servers, watch tasks), use `bash_background`. NEVER invoke interactive tools (vim, less, top), which will hang. Follows the current approval mode.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. The call waits briefly and returns a process_id whether the command exits or keeps running. Bash is the default in POSIX environments and PowerShell is the default in Windows Local workspaces. Use timeout_secs=null for intentional long-running processes. Never start full-screen TTY programs such as vim, less, or top. Supports Local, WSL, and SSH workspaces. Follows the current approval mode.",
       inputSchema: z.object({
-        command: z.string(),
-        timeout_secs: z.number().int().min(1).max(300).optional(),
+        command: z
+          .string()
+          .min(1)
+          .max(256 * 1024),
+        cwd: z
+          .string()
+          .max(32 * 1024)
+          .nullable()
+          .optional(),
+        timeout_secs: z.number().int().min(1).max(3600).nullable().optional(),
+        yield_time_ms: z.number().int().min(0).max(30_000).optional(),
+        max_output_bytes: z
+          .number()
+          .int()
+          .min(1024)
+          .max(256 * 1024)
+          .optional(),
+        shell: z
+          .enum(["default", "bash", "sh", "zsh", "powershell", "cmd"])
+          .optional(),
+        login: z.boolean().optional(),
       }),
       needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ command, timeout_secs }) => {
-        const safety = checkShellCommand(command);
+      execute: async (input) => {
+        const safety = checkShellCommand(input.command);
         if (!safety.ok) return { error: safety.reason };
-        const sid = ctx.getSessionId();
-        if (!sid) return { error: "no active chat session" };
+        const sessionId = ctx.getSessionId();
+        if (!sessionId) return { error: "no active chat session" };
         try {
-          const cwd = ctx.getCwd();
-          const shellId = await getSessionShell(workspaceSessionKey(sid), cwd);
-          const r = await native.shellSessionRun(
-            shellId,
-            command,
-            cwd,
-            timeout_secs,
-          );
+          const response = await native.shellExec({
+            ownerSessionId: sessionId,
+            command: input.command,
+            initialCwd: ctx.getCwd(),
+            cwd: input.cwd ? resolvePath(input.cwd, ctx.getCwd()) : null,
+            timeoutSecs:
+              input.timeout_secs === null
+                ? 0
+                : (input.timeout_secs ?? DEFAULT_TIMEOUT_SECS),
+            yieldTimeMs: input.yield_time_ms ?? DEFAULT_YIELD_MS,
+            maxOutputBytes: input.max_output_bytes ?? DEFAULT_OUTPUT_BYTES,
+            shell: input.shell ?? "default",
+            login: input.login ?? false,
+          });
+          return redactProcessResponse(response);
+        } catch (error) {
+          return { error: String(error) };
+        }
+      },
+    }),
+
+    shell_process: tool({
+      description:
+        "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output.",
+      inputSchema: processInputSchema,
+      needsApproval: (input) =>
+        input.action === "write" &&
+        useChatStore.getState().permissionMode === "ask",
+      execute: async (input) => {
+        const sessionId = ctx.getSessionId();
+        if (!sessionId) return { error: "no active chat session" };
+        try {
+          const response = await native.shellProcess({
+            ownerSessionId: sessionId,
+            processId: input.process_id,
+            action: input.action,
+            input: input.action === "write" ? input.input : null,
+            closeStdin:
+              input.action === "write" ? (input.close_stdin ?? false) : false,
+            sinceOffset: input.since_offset ?? null,
+            yieldTimeMs:
+              "yield_time_ms" in input ? (input.yield_time_ms ?? null) : null,
+            waitFor: "wait_for" in input ? (input.wait_for ?? null) : null,
+            waitTimeoutMs:
+              "wait_timeout_ms" in input
+                ? (input.wait_timeout_ms ?? null)
+                : null,
+            maxOutputBytes: input.max_output_bytes ?? null,
+          });
+          return redactProcessResponse(response);
+        } catch (error) {
+          return { error: String(error) };
+        }
+      },
+    }),
+
+    shell_list: tool({
+      description:
+        "List managed shell processes owned by this chat in the current Workspace. Call this before starting a dev server or watcher so an existing process can be reused instead of duplicated. Auto-executes.",
+      inputSchema: z.object({
+        include_exited: z.boolean().optional(),
+      }),
+      execute: async ({ include_exited }) => {
+        const sessionId = ctx.getSessionId();
+        if (!sessionId) return { error: "no active chat session" };
+        try {
           return {
-            command,
-            stdout: r.stdout,
-            stderr: r.stderr,
-            exit_code: r.exit_code,
-            timed_out: r.timed_out,
-            truncated: r.truncated,
-            cwd_after: r.cwd_after,
+            processes: (
+              await native.shellList(sessionId, include_exited ?? false)
+            ).map(redactProcessInfo),
           };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    }),
-
-    bash_background: tool({
-      description:
-        "Spawn a long-running background process (e.g. `pnpm dev`, `cargo watch`, log tailers). Returns a handle; use `bash_logs` to read its output and `bash_kill` to stop it. Output is captured into a 4MB ring buffer. Follows the current approval mode.",
-      inputSchema: z.object({
-        command: z.string(),
-        cwd: z.string().nullable().optional(),
-      }),
-      needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ command, cwd }) => {
-        const safety = checkShellCommand(command);
-        if (!safety.ok) return { error: safety.reason };
-        try {
-          const effectiveCwd = cwd
-            ? resolvePath(cwd, ctx.getCwd())
-            : ctx.getCwd();
-          const handle = await native.shellBgSpawn(command, effectiveCwd);
-          return { handle, command, cwd: effectiveCwd, ok: true };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    }),
-
-    bash_logs: tool({
-      description:
-        "Read accumulated logs from a `bash_background` process. Pass `since_offset` from the previous response's `next_offset` to tail incrementally. `dropped` reports bytes evicted by the ring buffer.",
-      inputSchema: z.object({
-        handle: z.number().int(),
-        since_offset: z.number().int().optional(),
-      }),
-      execute: async ({ handle, since_offset }) => {
-        try {
-          const r = await native.shellBgLogs(handle, since_offset);
-          return r;
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    }),
-
-    bash_list: tool({
-      description:
-        "List all background processes spawned by `bash_background` in this app — running and exited. **Always call this BEFORE spawning a new long-running process** (especially dev servers like `pnpm dev`, `next dev`, `vite`) to avoid duplicates. If a matching process is already running, reuse it (call `open_web_preview` again instead of respawning). Auto-executes.",
-      inputSchema: z.object({}),
-      execute: async () => {
-        try {
-          const list = await native.shellBgList();
-          return { processes: list };
-        } catch (e) {
-          return { error: String(e) };
-        }
-      },
-    }),
-
-    bash_kill: tool({
-      description:
-        "Terminate a `bash_background` process by handle. Idempotent — kills nothing if the handle is unknown or already exited.",
-      inputSchema: z.object({ handle: z.number().int() }),
-      execute: async ({ handle }) => {
-        try {
-          await native.shellBgKill(handle);
-          return { handle, ok: true };
-        } catch (e) {
-          return { error: String(e) };
+        } catch (error) {
+          return { error: String(error) };
         }
       },
     }),
   } as const;
+}
+
+function redactProcessResponse(
+  response: ShellProcessResponse,
+): ShellProcessResponse {
+  return {
+    ...response,
+    stdout: redactSensitive(response.stdout),
+    stderr: redactSensitive(response.stderr),
+  };
+}
+
+function redactProcessInfo(process: ShellProcessInfo): ShellProcessInfo {
+  return {
+    ...process,
+    command: redactSensitive(process.command),
+  };
 }

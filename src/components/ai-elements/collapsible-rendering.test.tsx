@@ -54,7 +54,7 @@ describe("AI collapsible details", () => {
   it("keeps error details folded by default", () => {
     const closed = renderToStaticMarkup(
       <Tool
-        toolName="bash_run"
+        toolName="shell_exec"
         state="output-error"
         errorText="private-error-detail"
       />,
@@ -62,5 +62,26 @@ describe("AI collapsible details", () => {
 
     expect(closed).toContain("failed");
     expect(closed).not.toContain("private-error-detail");
+  });
+
+  it("renders the unified Shell process identity when expanded", () => {
+    const markup = renderToStaticMarkup(
+      <Tool
+        toolName="shell_exec"
+        state="output-available"
+        input={{ command: "pnpm dev" }}
+        output={{
+          process_id: "00000000-0000-4000-8000-000000000002",
+          status: "running",
+          stdout: "ready",
+          stderr: "",
+        }}
+        defaultOpen
+      />,
+    );
+
+    expect(markup).toContain("pnpm dev");
+    expect(markup).toContain("00000000-0000-4000-8000-000000000002");
+    expect(markup).toContain("ready");
   });
 });

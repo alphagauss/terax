@@ -41,7 +41,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 ## SSH 封闭 Bash 任务
 
-远端 Bash task 是文件版本、条件写入、递归树、目录汇总、目录创建和后台状态查询的封闭实现，不是通用远端服务。源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器脚本、不监听端口、不读取凭据，也不接受调用方提供的任意命令。
+远端 Bash task 是文件版本、条件写入、递归树、目录汇总和目录创建的封闭实现，不是通用远端服务。源码由应用内嵌并通过独立 SSH session channel 执行，不写入服务器脚本、不监听端口、不读取凭据，也不接受调用方提供的任意命令。
 
 - 协议只允许 Match、Missing 和 Overwrite 三种明确写入条件。
 - Rust 验证绝对路径、摘要和正文上限，将动态参数逐项 shell 转义；正文只通过 stdin 传输。
@@ -60,7 +60,9 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 在 `src/modules/ai/tools/tools.ts` 中：
 
 - 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过 deny-list 后自动执行。
-- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`run_command`、`shell_session_run`、`shell_bg_spawn`）设置 `needsApproval: true`。AI SDK 会暂停，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
+- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。AI SDK 会暂停需要审批的调用，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
+- Agent Shell 在前端审批前和 Rust IPC 边界分别检查不可审阅字符及灾难性命令。cwd 必须属于当前授权 Workspace，Local 子进程使用最小环境变量集合，避免把宿主 API key 和 token 继承到模型可读取的 stdout。
+- Agent 进程通过聊天 owner 和不可复用 UUID 登记，控制和列表 IPC 同时校验 owner 与 Workspace。每聊天与每应用都有原子执行的运行数量上限，聊天删除、超时、显式终止和应用退出都会回收 Local、WSL 或 SSH 完整进程树。Windows Local 进程在恢复执行前加入 Job Object，避免启动竞态使子进程逃逸。
 - 文件修改在审批前准备待 review 的内容和文件版本，批准后重新验证 canonical path，并由原生条件写入原子匹配原版本或目标仍缺失的状态。diff 不依赖 Git。
 - `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
 

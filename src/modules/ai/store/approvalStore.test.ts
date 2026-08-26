@@ -9,7 +9,7 @@ import { approvalRequestKey, useApprovalStore } from "./approvalStore";
 const request = {
   approvalId: "approval-1",
   toolCallId: "tool-1",
-  toolName: "bash_run",
+  toolName: "shell_exec",
   input: { command: "pnpm test" },
 };
 

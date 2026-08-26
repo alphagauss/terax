@@ -15,7 +15,7 @@
 
 SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固定使用 SFTP；文件版本和三种条件写入优先通过 `remote/tasks/` 执行内嵌 Bash 任务，失败时由服务边界执行 SFTP 回退或版本收敛。任务源码编译进应用，通过 exec command 接收固定操作和已转义参数，正文只通过 stdin 传输，不写入远端脚本、不监听端口。通用任务执行方法只对 `remote/tasks/` 子模块可见，业务模块不能提交任意命令。Git、用户 Shell、PTY 和批量传输保持独立边界。
 
-每个 `RemoteWorkspace` 拥有一个连接级 `RemoteTaskRuntime`。运行时按实际依赖集合缓存当前 epoch 的 Available 或 Unavailable 状态，业务观察到的永久失败保持单调降级；只有一次完整、带 generation 的用户重检可以替换状态。运行时集中管理输出上限、取消和高 RTT 单槽预开 channel，重连会创建全新状态。ripgrep 内容搜索与文件枚举、GNU grep 字面量搜索、三种 Bash 文件写入、SFTP 摘要与三种提交分别缓存能力，单个依赖缺失不会关闭无关路径。递归树、文件列表、属性汇总、目录创建和后台进程查询均使用 Bash 首选路径，并保留 raw SFTP 或原有多 exec 实现回退。`remote/sftp.rs` 只保留 SFTP primitive，SFTP 条件提交所需的固定摘要与原子发布命令也集中位于任务模块。
+每个 `RemoteWorkspace` 拥有一个连接级 `RemoteTaskRuntime`。运行时按实际依赖集合缓存当前 epoch 的 Available 或 Unavailable 状态，业务观察到的永久失败保持单调降级；只有一次完整、带 generation 的用户重检可以替换状态。运行时集中管理输出上限、取消和高 RTT 单槽预开 channel，重连会创建全新状态。ripgrep 内容搜索与文件枚举、GNU grep 字面量搜索、三种 Bash 文件写入、SFTP 摘要与三种提交分别缓存能力，单个依赖缺失不会关闭无关路径。递归树、文件列表、属性汇总和目录创建使用 Bash 首选路径，并保留 raw SFTP 回退。`remote/sftp.rs` 只保留 SFTP primitive，SFTP 条件提交所需的固定摘要与原子发布命令也集中位于任务模块。
 
 ## 新增 IPC command
 
@@ -111,11 +111,13 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 
 ### Shell（`src-tauri/src/modules/shell/`）
 
-三个独立 surface：
+两个明确 surface：
 
-- `shell_run_command` - 供 AI 工具使用的一次性 subshell exec
-- `shell_session_open` / `shell_session_run` / `shell_session_close` - 跨调用保留状态的持久 Agent Shell
-- `shell_bg_spawn` / `shell_bg_logs` / `shell_bg_kill` / `shell_bg_list` - 长时间运行的后台进程，使用有界 ring buffer 捕获日志
+- `shell_run_command`：供编辑器格式化等非 AI 模块使用的一次性 subshell exec，输出和超时有界。
+- `shell_exec` / `shell_process` / `shell_list`：AI 短命令与长任务共享且按聊天 owner 隔离的 Agent 进程表。启动调用首次等待后返回统一 `process_id`；后续可以增量读取 stdout/stderr、等待固定文本、写 stdin、发送 EOF 或终止完整进程树。
+- `shell_clear_owner`：聊天删除时终止并移除该 owner 的全部 Agent 进程和 cwd 状态。
+
+运行中的 Agent 进程保留 4 MiB 全局字节 offset 输出，流式解码和截断保持 UTF-8 字符边界；进入终态后压缩为最近 256 KiB，单次 IPC 最多返回 256 KiB。每聊天最多运行 4 个、每应用最多运行 16 个，容量检查与进程登记在同一 spawn 临界区完成；最近终态最多保留 50 条并在 30 分钟后回收。Local 使用 Unix process group 或 Windows Job Object，Windows 进程挂起启动并在恢复前加入 Job Object；WSL 与 SSH 使用 `setsid` 建立远端进程组。POSIX Agent 命令默认使用 Bash。SSH stdin/stdout/stderr 保持在长生命周期 exec channel 上，不写远端日志文件。
 
 ### Workspace（`src-tauri/src/modules/workspace.rs`）
 

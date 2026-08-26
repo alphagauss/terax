@@ -56,7 +56,7 @@
     "editFileBatch": "编辑文件（批量）",
     "createDirectory": "创建目录",
     "runShellCommand": "运行 shell 命令",
-    "spawnBackgroundProcess": "启动后台进程",
+    "writeShellInput": "写入 shell 输入",
     "needsApproval": "需要批准",
     "deny": "拒绝",
     "approve": "批准",

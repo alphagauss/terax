@@ -24,6 +24,7 @@ terax_simple_probe() {
 
 printf 'TERAX_CAPABILITIES_V1\000'
 terax_emit bash ready ''
+terax_simple_probe setsid setsid setsid --wait /bin/sh -c 'exit 0'
 
 terax_simple_probe find find find /dev/null -maxdepth 0 -printf ''
 terax_simple_probe readlink readlink readlink -f -- /dev/null
