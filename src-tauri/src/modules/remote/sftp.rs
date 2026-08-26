@@ -26,7 +26,6 @@ use super::tasks::TaskKind;
 const DIRECTORY_READ_PIPELINE: usize = 2;
 const FILE_READ_PIPELINE: usize = 8;
 const DEFAULT_FILE_READ_CHUNK: u32 = 240 * 1024;
-const DEFAULT_RANGE_READ_CHUNK: u32 = 64 * 1024;
 
 /// 目录与文件正文读取共享的 raw SFTP session 及服务端读取能力。
 pub(crate) struct RemoteReadSession {
@@ -576,38 +575,6 @@ pub async fn read_file(
     }
 }
 
-/// 从固定字节偏移开始流水线读取一个有界区间。
-///
-/// 后台日志使用该入口避免大块 stdout 占用 exec channel；读取前观察到的文件大小锁定
-/// 本次区间，追加内容由下一次 offset 请求继续获取，文件缩短时返回空块。
-pub(crate) async fn read_file_range(
-    workspace: &Arc<RemoteWorkspace>,
-    path: &str,
-    offset: u64,
-    limit: u64,
-) -> Result<Vec<u8>, String> {
-    validate_remote_path(path)?;
-    let context = format!("read remote file range {path}");
-    for attempt in 0..2 {
-        let current = read_session(workspace).await?;
-        match read_file_range_once(current.clone(), path, offset, limit).await {
-            Ok(value) => return Ok(value),
-            Err(error) if should_invalidate_session(&error) => {
-                if should_fail_transport(&error) {
-                    workspace.report_transport_failure();
-                    return Err(format!("{context}: {error}"));
-                }
-                invalidate_read_session(workspace, &current).await;
-                if attempt == 1 {
-                    return Err(format!("{context}: {error}"));
-                }
-            }
-            Err(error) => return Err(format!("{context}: {error}")),
-        }
-    }
-    unreachable!("raw SFTP range read retry loop always returns")
-}
-
 /// 并发取得目标元数据与文件 handle，再流水线读取已确认大小的正文。
 ///
 /// 小文件只保留 `STAT + OPEN` 和 `READ` 两个依赖阶段；大文件按固定 offset 维持
@@ -676,54 +643,6 @@ async fn read_file_snapshot_once(
     };
     close_read_handle(session, handle);
     Ok(RemoteFileRead::Content { bytes, size, mtime })
-}
-
-/// 在一次 raw session 上观察文件大小并读取指定区间。
-async fn read_file_range_once(
-    read_session: Arc<RemoteReadSession>,
-    path: &str,
-    offset: u64,
-    limit: u64,
-) -> Result<Vec<u8>, russh_sftp::client::error::Error> {
-    let session = read_session.session.clone();
-    let metadata_path = path.to_string();
-    let open_path = path.to_string();
-    let (chunk_len, metadata, opened) = tokio::join!(
-        file_read_chunk_len(&read_session),
-        session.stat(metadata_path),
-        session.open(open_path, OpenFlags::READ, FileAttributes::empty()),
-    );
-    let (metadata, handle) = match (metadata, opened) {
-        (Ok(metadata), Ok(handle)) => (metadata.attrs, handle.handle),
-        (Err(error), Ok(handle)) => {
-            close_read_handle(session, handle.handle);
-            return Err(error);
-        }
-        (Ok(_), Err(error)) | (Err(error), Err(_)) => return Err(error),
-    };
-    let size = metadata.len().saturating_sub(offset).min(limit);
-    if size == 0 {
-        close_read_handle(session, handle);
-        return Ok(Vec::new());
-    }
-    let bytes = match read_file_range_pipelined(
-        session.clone(),
-        handle.clone(),
-        offset,
-        size,
-        chunk_len.min(DEFAULT_RANGE_READ_CHUNK),
-        1,
-    )
-    .await
-    {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                close_read_handle(session, handle);
-                return Err(error);
-            }
-    };
-    close_read_handle(session, handle);
-    Ok(bytes)
 }
 
 /// 首次文件读取时并行查询服务端 limits，失败时使用保守块大小。

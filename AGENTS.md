@@ -139,8 +139,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `pty::pty_*`：长生命周期交互式 PTY，由 `PtyState` 管理，通过 `Channel<PtyEvent>` 输出。
 - `fs::*`：文件树、读取、写入、元数据、搜索、grep、glob 和变更操作。
 - `git::commands::*`：状态、diff、暂存、提交、同步和历史；所有操作都经过工作区授权。
-- `shell::shell_run_command`：AI 工具使用的一次性子 Shell，不是用户交互终端。
-- `shell::shell_session_*`、`shell::shell_bg_*`：持久 Agent Shell 和后台进程。
+- `shell::shell_run_command`：编辑器格式化等非 AI 功能使用的有界一次性子 Shell。
+- `shell::shell_exec`、`shell::shell_process`、`shell::shell_list`：按聊天 owner 隔离的统一 Agent 进程启动、stdin/EOF/增量输出/终止和发现；`shell_clear_owner` 在聊天删除时回收所属进程。
 - `workspace::*`：工作区授权、当前目录和 WSL 桥接。
 - `lsp::*`：语言服务器进程及 JSON-RPC 管道；协议智能位于前端。
 - `net::*`：带 SSRF 防护的 AI HTTP 代理。
@@ -163,9 +163,11 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - Shell 初始化脚本位于 `src-tauri/src/modules/pty/scripts/`，负责 OSC 7 和 OSC 133 标记。
 - Unix 和 Windows 平台代码必须放入正确的 `#[cfg]` 分支。
 - SSH 文件内容操作统一经过 `remote/file_service.rs`。目录与正文读取共享 raw SFTP 流水线，版本读取、元数据和写入使用独立高层 session 或封闭任务。
-- Terax 内部可回退的 SSH Bash 操作统一经过连接级 `remote/tasks/` 运行时，按任务缓存当前 epoch 的依赖能力，并共享高 RTT 单槽预开 channel。单文件正文和单层目录读取固定使用 SFTP；文件版本、条件写入、递归树、目录汇总、目录创建和后台状态使用 Bash 优先、传统实现回退。任务只接受 Rust 枚举的封闭操作，不能成为通用命令入口。
+- Terax 内部可回退的 SSH Bash 操作统一经过连接级 `remote/tasks/` 运行时，按任务缓存当前 epoch 的依赖能力，并共享高 RTT 单槽预开 channel。单文件正文和单层目录读取固定使用 SFTP；文件版本、条件写入、递归树、目录汇总和目录创建使用 Bash 优先、传统实现回退。任务只接受 Rust 枚举的封闭操作，不能成为通用命令入口。
 - Windows ConPTY 创建必须由 `SPAWN_LOCK` 包围；并发创建会造成某个 PTY 输出管道停滞。
 - 每个 Windows ConPTY 子进程必须进入带 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job Object，保证 Terax 退出时清理整个进程树。
+- AI 短命令与长任务统一登记为 Agent 进程。Local 使用 Unix process group 或 Windows Job Object，Windows 进程必须挂起启动并在恢复前加入 Job Object；WSL 与 SSH 使用独立远端进程组。超时、取消、聊天删除和应用退出必须清理完整进程树。
+- Agent 进程运行中输出使用 4 MiB 有界全局 offset 日志，终态压缩为最近 256 KiB，模型单次最多读取 256 KiB；stdin、EOF、固定文本等待和终止统一通过 `shell_process`，不建立第二套后台进程类型。
 - 终端 Enter 必须发送 `\r`，不能发送 `\n`，否则 Windows PowerShell 无法正确处理。
 - `AiComposerProvider` 必须始终挂载在 `App.tsx` 根部。条件包装会在密钥加载后重挂载整棵树并重新创建所有 PTY。
 
@@ -234,7 +236,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 跟随 Explorer 根目录，首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
-- `read_file`、`list_directory`、`grep`、`glob` 自动执行；写入、重命名、删除、命令和后台进程必须经过 UI 审批。
+- `read_file`、`list_directory`、`grep`、`glob` 自动执行；写入、重命名、删除、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
 - `lib/security.ts` 的秘密路径拒绝规则必须同时用于读取和写入。
 - AI 修改通过 `ai-diff` 标签页逐 hunk 接受或拒绝，接受前不得实际写入。
 

@@ -12,6 +12,7 @@ const io = vi.hoisted(() => ({
   commit: vi.fn(),
   read: vi.fn(),
   remove: vi.fn(),
+  clearProcesses: vi.fn(),
   workspaceGet: vi.fn(),
   workspaceSet: vi.fn(),
 }));
@@ -24,6 +25,7 @@ vi.mock("../lib/sessions", async (importOriginal) => ({
   commitSession: io.commit,
   readSession: io.read,
   deleteSessionFile: io.remove,
+  clearSessionProcesses: io.clearProcesses,
 }));
 
 vi.mock("@/modules/workspace-process", () => ({
@@ -120,6 +122,7 @@ describe("chat store multi-process lifecycle", () => {
       sessionFile(id === first.id ? first : second),
     );
     io.remove.mockResolvedValue(undefined);
+    io.clearProcesses.mockResolvedValue(undefined);
     io.workspaceGet.mockReturnValue(undefined);
     io.workspaceSet.mockResolvedValue(undefined);
     useChatStore.setState({
@@ -306,6 +309,7 @@ describe("chat store multi-process lifecycle", () => {
 
     expect(useChatStore.getState().activeSessionId).toBe(draftId);
     expect(useChatStore.getState().draftSessionId).toBe(draftId);
+    expect(io.clearProcesses).toHaveBeenCalledWith(first.id);
   });
 
   it("keeps the observable run lock when Rust release fails", async () => {

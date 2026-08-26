@@ -193,8 +193,7 @@
       "directory_summary": "Directory summary",
       "file_write": "Conditional file writes",
       "create_directory": "Directory creation",
-      "background_logs": "Background command logs",
-      "background_processes": "Background process status",
+      "agent_processes": "Interactive Agent processes",
       "recursive_delete": "Recursive deletion",
       "content_search": "Content search",
       "file_listing": "Fast file listing"

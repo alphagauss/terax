@@ -32,6 +32,7 @@ import {
 } from "../lib/sessionMessages";
 import {
   acquireSessionRun,
+  clearSessionProcesses,
   commitSession,
   deleteSessionFile,
   deriveTitle,
@@ -610,6 +611,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     sessionSwitchSequence++;
     void (async () => {
       try {
+        await clearSessionProcesses(id);
         await deleteSessionFile(id);
         await useTodosStore.getState().clearSession(id);
         const remaining = get().sessions.filter((session) => session.id !== id);

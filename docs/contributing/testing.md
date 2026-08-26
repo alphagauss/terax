@@ -25,6 +25,7 @@ cargo nextest run --locked        # CI uses nextest
 `CONTRIBUTING.md` 要求，任何涉及以下关键路径行为的变更都必须有测试：
 
 - Shell / 终端启动（启动哪个 Shell，以及使用哪个 cwd、环境变量和 login flag）
+- Agent 进程（stdin、EOF、输出 offset、等待文本、数量上限、终态回收和完整进程树终止）
 - Workspace 授权（同时覆盖允许和拒绝路径）
 - Git command 层（仓库根目录解析、pathspec/参数防护和 status 解析）
 - 文件系统变更（原子写入、symlink 处理，以及部分失败时不丢失数据）
@@ -43,7 +44,7 @@ UI 渲染、主题、语法高亮表格以及类型检查器已经能够保证�
 优秀的测试会锁定所依赖的不变量。代码库中的示例包括：
 
 - `src-tauri/src/modules/workspace.rs` 的 `auth_tests` 验证已授权路径、已授权根目录的子目录、未授权路径、不存在的路径和 symlink 越界均能得到正确处理。
-- `src-tauri/src/modules/pty/job.rs` 的测试验证在 Windows 上丢弃 Job Object 会终止分配给它的进程树。
+- `src-tauri/src/modules/proc/job.rs` 的测试验证 Windows 进程在 Job Object 内恢复执行，且丢弃 Job Object 会终止分配给它的进程树。
 - `src-tauri/src/modules/pty/session.rs` 的测试验证丢弃 `Session` 会终止子进程。
 - `src-tauri/src/modules/pty/shell_init.rs` 的测试验证 Shell 分类和 WSL fish 启动规范。
 - `src/modules/ai/lib/security.ts` 由相关测试覆盖，这些测试断言特定路径会被拒绝，并验证 canonicalization 能捕获 symlink traversal。
@@ -92,8 +93,9 @@ WSL 或 SSH 验证应使用真实 Tauri 进程，因为仅运行 Vite 的页面�
 
 - SSH 文件后端契约测试必须同时锁定正文、revision、TooLarge、Conflict、Missing 和 Overwrite 语义。
 - raw SFTP 文件读取测试必须覆盖空文件、块边界、超过流水线并发度和乱序响应组装。
-- Bash task 测试必须覆盖固定协议、实际参数探测、权限、fsync、三种条件提交和临时文件清理；后台日志测试必须覆盖 raw SFTP 非零 offset、分块边界、单 in-flight READ 和追加后的连续读取。
-- SSH task 测试必须覆盖依赖缺失、协议截断、取消、epoch capability 隔离、统一能力探测和传统后端回退；递归树、文件版本、目录创建、GNU grep 搜索和后台状态脚本均需独立契约测试。
+- Bash task 测试必须覆盖固定协议、实际参数探测、权限、fsync、三种条件提交和临时文件清理。
+- SSH task 测试必须覆盖依赖缺失、协议截断、取消、epoch capability 隔离、统一能力探测和传统后端回退；递归树、文件版本、目录创建和 GNU grep 搜索均需独立契约测试。
+- Agent Shell 测试必须分别锁定 owner 隔离、输入边界、终态计时、Local stdin、Unix process group、Windows 挂起启动与 Job Object，以及 WSL/SSH `setsid` 命令构造和远端进程组清理协议。只验证直接 Shell 进程退出不能替代子孙进程清理测试。
 - helper 响应丢失后的 Rust 测试必须锁定 Overwrite 收敛以及 Match、Missing 的安全回退。
 - 状态栏能力灯只能接受当前 epoch 的能力事件；自动探测失败必须保留 lazy probe，瞬时 transport 错误不得显示为永久依赖缺失。
 - 影响范围全局的局部修复必须能被测试捕获，只依赖 review 不够。

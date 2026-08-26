@@ -17,7 +17,7 @@ tr '\000' '\n' <"$output" >"$lines"
 [ "$(tail -n 1 "$lines")" = END ]
 [ -z "$(find "$probe_root" -mindepth 1 -maxdepth 1 -print -quit)" ]
 
-for id in bash find readlink stat awk rm mktemp mkdir chmod dd mv ln sha256 \
+for id in bash setsid find readlink stat awk rm mktemp mkdir chmod dd mv ln sha256 \
   rg_content rg_files grep; do
   [ "$(grep -cx "$id" "$lines")" -eq 1 ]
 done

@@ -1,31 +1,7 @@
 /**
- * Path-safety guards for AI tool calls.
- *
- * Goals:
- *  - Block reads of files that almost always contain secrets (.env*, *.pem,
- *    id_rsa*, .aws/credentials, .ssh/, .git/, kube/azure config, etc.).
- *  - Block writes/exec into the same set, plus directories where automated
- *    mutation is dangerous (system dirs, Windows system dirs).
- *
- * This is a *defense layer*, not a sandbox. The model may still be coaxed
- * into doing something silly within allowed paths — the user-confirmation
- * UI for write/exec is the real safety net. These checks ensure that
- * read tools (which auto-approve) can never silently exfiltrate obvious
- * secrets, and that a single bad approval can't blow up the system.
- *
- * Defense-in-depth notes:
- *  - Comparison surface is lowercased *only for matching*. Original path is
- *    preserved for basename pattern checks and error messages.
- *  - Windows drive prefix (e.g. `C:`) is stripped from the comparison form so
- *    Unix-style root prefix checks behave consistently on both platforms.
- *  - Protected directories match exact-equal-or-descendant, not raw
- *    substring-with-trailing-slash. Bare names (`/Users/me/.ssh`) and
- *    case-variants (`/Users/me/.SSH/config` on macOS/Windows case-insensitive
- *    filesystems) are caught.
- *  - The caller is expected to additionally validate the *canonical* path
- *    (post symlink resolution) via `native.canonicalize` + a second
- *    `checkReadable` pass, since a symlink at an "innocent" path can point
- *    into a protected directory.
+ * 本文件实现 AI 文件与 Shell 工具的前端安全检查。
+ * 读取和写入拒绝常见秘密路径，命令审批前拒绝不可审阅字符和灾难性操作；这些检查
+ * 是 Rust 授权与用户审批之外的纵深防御，不构成独立沙箱。
  */
 
 const SECRET_BASENAME_PATTERNS: RegExp[] = [
@@ -248,12 +224,6 @@ export function checkWritable(path: string): SafetyResult {
 }
 
 /**
- * Lightweight heuristic for blocking obviously destructive shell commands
- * even after the user has approved them. The approval UI shows the command
- * verbatim, so the user is the primary gate; this just catches a couple of
- * patterns that almost certainly indicate the model went off the rails.
- */
-/**
  * Two-phase safety check that also defends against symlink traversal: first
  * checks the literal path, then (if it exists) canonicalizes it via the
  * native FS and re-checks the resolved path. A symlink at `./innocent.txt`
@@ -321,18 +291,21 @@ export async function checkWritableCanonical(
   }
 }
 
+/**
+ * 在审批前拒绝不可可靠审阅或明显会破坏主机的 Shell 命令。
+ *
+ * 这是用户审批和 Rust IPC 校验之外的快速反馈层，不负责解析完整 Shell 语法。
+ */
 export function checkShellCommand(cmd: string): SafetyResult {
   const c = cmd.trim();
   if (c.length === 0) {
     return { ok: false, reason: "Refused: empty command." };
   }
-  // Block C0 controls. CR/LF would let a second statement smuggle past the
-  // approval UI, which shows the command as one logical line.
-  if (/[\x00-\x1f]/.test(c)) {
+  // 多行命令会由审批 UI 原样展示；仍拒绝无法可靠审阅或传入进程参数的控制字符。
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(c)) {
     return {
       ok: false,
-      reason:
-        "Refused: command contains control characters (including CR/LF). Commands must be single-line.",
+      reason: "Refused: command contains unsafe control characters.",
     };
   }
   // Block Unicode bidi-override and invisible directional marks. These let an
@@ -347,7 +320,7 @@ export function checkShellCommand(cmd: string): SafetyResult {
   }
   // rm -rf / (and variants with quoted /, --no-preserve-root, etc.)
   if (
-    /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(['"]?\/['"]?\s*($|;|&|\|))/.test(
+    /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\s+(['"]?\/(?:\*|\.\*)?['"]?\s*($|;|&|\|))/.test(
       c,
     )
   ) {

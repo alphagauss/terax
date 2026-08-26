@@ -45,12 +45,9 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     multi_edit: (i) => `Editing ${shortPath(i.path)}`,
     write_file: (i) => `Writing ${shortPath(i.path)}`,
     create_directory: (i) => `Creating ${shortPath(i.path)}`,
-    bash_run: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
-    bash_background: (i) =>
-      `Spawning ${ellipsize(String(i.command ?? ""), 60)}`,
-    bash_logs: () => `Reading logs`,
-    bash_list: () => `Listing background processes`,
-    bash_kill: () => `Stopping background process`,
+    shell_exec: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
+    shell_process: (i) => `${String(i.action ?? "Polling")} shell process`,
+    shell_list: () => `Listing shell processes`,
     suggest_command: (i) =>
       `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
     todo_write: (i) =>

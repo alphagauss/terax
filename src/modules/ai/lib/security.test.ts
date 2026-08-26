@@ -1,3 +1,8 @@
+/**
+ * 本文件验证 AI 文件路径与 Shell 命令的前端安全规则。
+ * 测试锁定秘密路径、规范路径、不可审阅字符和灾难性命令的拒绝边界。
+ */
+
 import { describe, expect, it } from "vitest";
 import {
   checkReadable,
@@ -196,25 +201,31 @@ describe("checkShellCommand — Trojan Source / bidi defense", () => {
   });
 });
 
-describe("checkShellCommand — control-character / newline injection", () => {
+describe("checkShellCommand control characters", () => {
   it.each([
-    ["LF", "echo safe\nwhoami"],
-    ["CR", "echo safe\rwhoami"],
-    ["CRLF", "echo safe\r\nwhoami"],
-    ["tab", "echo safe\twhoami"],
     ["NUL", "echo safe\x00whoami"],
     ["VT", "echo safe\x0bwhoami"],
   ])("rejects commands containing %s", (_label, cmd) => {
     expect(checkShellCommand(cmd)).toMatchObject({ ok: false });
   });
 
-  it("rejects newline-smuggled exfil that bypasses per-pattern guards", () => {
-    expect(checkShellCommand("echo safe\ncat /etc/passwd")).toMatchObject({
+  it("allows reviewable multiline and tabbed commands", () => {
+    expect(checkShellCommand("echo safe\nwhoami")).toMatchObject({ ok: true });
+    expect(checkShellCommand("echo safe\r\nwhoami")).toMatchObject({
+      ok: true,
+    });
+    expect(checkShellCommand("printf '\\tvalue'")).toMatchObject({ ok: true });
+  });
+
+  it("still detects destructive commands on later lines", () => {
+    expect(checkShellCommand("echo safe\nrm -rf /")).toMatchObject({
       ok: false,
     });
-    expect(checkShellCommand("echo safe\nprintenv")).toMatchObject({
-      ok: false,
-    });
+  });
+
+  it("rejects recursive deletion through root wildcards", () => {
+    expect(checkShellCommand("rm -rf /*")).toMatchObject({ ok: false });
+    expect(checkShellCommand("rm -rf '/.*'")).toMatchObject({ ok: false });
   });
 });
 

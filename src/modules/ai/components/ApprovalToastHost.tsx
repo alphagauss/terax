@@ -47,9 +47,12 @@ const TOOL_META: Record<
     labelKey: "toolApproval.createDirectory",
     icon: FolderAddIcon,
   },
-  bash_run: { labelKey: "toolApproval.runShellCommand", icon: TerminalIcon },
-  bash_background: {
-    labelKey: "toolApproval.spawnBackgroundProcess",
+  shell_exec: {
+    labelKey: "toolApproval.runShellCommand",
+    icon: TerminalIcon,
+  },
+  shell_process: {
+    labelKey: "toolApproval.writeShellInput",
     icon: TerminalIcon,
   },
 };
@@ -243,10 +246,7 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
       </div>
     );
   }
-  if (
-    request.toolName === "bash_run" ||
-    request.toolName === "bash_background"
-  ) {
+  if (request.toolName === "shell_exec") {
     return (
       <div className="space-y-1.5">
         {typeof request.input.cwd === "string" ? (
@@ -256,6 +256,21 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
         ) : null}
         <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed">
           {String(request.input.command ?? "")}
+        </pre>
+      </div>
+    );
+  }
+  if (
+    request.toolName === "shell_process" &&
+    request.input.action === "write"
+  ) {
+    return (
+      <div className="space-y-1.5">
+        <div className="font-mono text-[10.5px] text-muted-foreground">
+          {String(request.input.process_id ?? "")}
+        </div>
+        <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-muted/60 p-2 font-mono text-[11px] leading-relaxed">
+          {String(request.input.input ?? "")}
         </pre>
       </div>
     );

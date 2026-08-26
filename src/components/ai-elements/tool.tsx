@@ -34,7 +34,6 @@ import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
 import { isValidElement, memo, useState } from "react";
 
-
 export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
 const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
@@ -44,11 +43,9 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   create_directory: { label: "Create dir", icon: FolderAddIcon },
   edit: { label: "Edit", icon: FileEditIcon },
   multi_edit: { label: "Edit", icon: Edit02Icon },
-  bash_run: { label: "Run", icon: TerminalIcon },
-  bash_background: { label: "Spawn", icon: TerminalIcon },
-  bash_logs: { label: "Logs", icon: TerminalIcon },
-  bash_list: { label: "Jobs", icon: TerminalIcon },
-  bash_kill: { label: "Kill", icon: TerminalIcon },
+  shell_exec: { label: "Run", icon: TerminalIcon },
+  shell_process: { label: "Process", icon: TerminalIcon },
+  shell_list: { label: "Processes", icon: TerminalIcon },
   grep: { label: "Search", icon: GlobalSearchIcon },
   glob: { label: "Glob", icon: Folder01Icon },
   suggest_command: { label: "Suggest", icon: SparklesIcon },
@@ -91,12 +88,10 @@ function deriveSummary(toolName: string, input: unknown): string | null {
     case "create_directory":
     case "list_directory":
       return str("path");
-    case "bash_run":
-    case "bash_background":
+    case "shell_exec":
       return str("command");
-    case "bash_logs":
-    case "bash_kill":
-      return str("id");
+    case "shell_process":
+      return str("process_id");
     case "grep":
       return str("pattern") ?? str("query");
     case "glob":
@@ -281,7 +276,7 @@ function renderInputPreview(
   const str = (k: string) =>
     typeof i[k] === "string" ? (i[k] as string) : null;
 
-  if (toolName === "bash_run" || toolName === "bash_background") {
+  if (toolName === "shell_exec") {
     const cmd = str("command");
     const cwd = str("cwd");
     if (!cmd) return null;
@@ -295,6 +290,24 @@ function renderInputPreview(
         <pre className="overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed">
           {cmd}
         </pre>
+      </div>
+    );
+  }
+  if (toolName === "shell_process") {
+    const processId = str("process_id");
+    const action = str("action");
+    const value = str("input");
+    if (!processId || !action) return null;
+    return (
+      <div className="space-y-1 font-mono text-[11px]">
+        <div className="text-muted-foreground">
+          {action} · {processId}
+        </div>
+        {value ? (
+          <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2">
+            {value}
+          </pre>
+        ) : null}
       </div>
     );
   }
@@ -442,8 +455,46 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "bash_run") {
-    return <BashRunOutput data={o} />;
+  if (toolName === "shell_exec" || toolName === "shell_process") {
+    return <ShellProcessOutput data={o} />;
+  }
+
+  if (toolName === "shell_list") {
+    const processes = Array.isArray(o.processes)
+      ? (o.processes as Array<Record<string, unknown>>)
+      : [];
+    if (processes.length === 0) {
+      return (
+        <div className="text-[11px] italic text-muted-foreground">
+          no processes
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-1 font-mono text-[11px]">
+        {processes.map((process) => (
+          <div
+            key={String(process.process_id)}
+            className="flex items-center gap-1.5 rounded bg-muted/30 px-2 py-1"
+          >
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                process.status === "running"
+                  ? "bg-emerald-500"
+                  : "bg-muted-foreground/50",
+              )}
+            />
+            <span className="min-w-0 flex-1 truncate">
+              {String(process.command ?? "")}
+            </span>
+            <span className="text-muted-foreground">
+              {String(process.status ?? "")}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   if (toolName === "suggest_command") {
@@ -571,33 +622,19 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "bash_background") {
-    const handle = typeof o.handle === "string" ? o.handle : null;
-    const cmd = typeof o.command === "string" ? o.command : "";
-    return (
-      <div className="space-y-0.5 font-mono text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          {handle ? <span className="text-foreground">{handle}</span> : null}
-          <span className="text-muted-foreground">running</span>
-        </div>
-        {cmd ? (
-          <div className="truncate text-muted-foreground">{cmd}</div>
-        ) : null}
-      </div>
-    );
-  }
-
   return null;
 }
 
-function BashRunOutput({ data }: { data: Record<string, unknown> }) {
+function ShellProcessOutput({ data }: { data: Record<string, unknown> }) {
   const stdout = typeof data.stdout === "string" ? data.stdout : "";
   const stderr = typeof data.stderr === "string" ? data.stderr : "";
   const exit = typeof data.exit_code === "number" ? data.exit_code : null;
   const cwdAfter = typeof data.cwd_after === "string" ? data.cwd_after : null;
   const truncated = Boolean(data.truncated);
-  const timedOut = Boolean(data.timed_out);
+  const status = typeof data.status === "string" ? data.status : "";
+  const processId =
+    typeof data.process_id === "string" ? data.process_id : null;
+  const timedOut = status === "timed_out";
 
   const hasStdout = stdout.length > 0;
   const hasStderr = stderr.length > 0;
@@ -637,6 +674,11 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
           </button>
         ))}
         <span className="flex-1" />
+        {status === "running" && processId ? (
+          <span className="max-w-32 truncate rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
+            {processId}
+          </span>
+        ) : null}
         {exit != null ? (
           <span
             className={cn(
@@ -652,6 +694,11 @@ function BashRunOutput({ data }: { data: Record<string, unknown> }) {
         {timedOut ? (
           <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400">
             timed out
+          </span>
+        ) : null}
+        {status === "terminated" ? (
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            terminated
           </span>
         ) : null}
         {truncated ? (

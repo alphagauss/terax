@@ -16,7 +16,6 @@ use tokio_util::sync::CancellationToken;
 use super::models::SshCapabilitySnapshot;
 use super::session::{ExecOutput, RemoteWorkspace};
 
-pub(crate) mod background;
 pub(crate) mod capability_probe;
 pub(crate) mod create_directory;
 pub(crate) mod delete;
@@ -55,8 +54,6 @@ pub(crate) enum TaskKind {
     FileVersion,
     /// 递归创建目录。
     CreateDirectory,
-    /// 批量进程状态。
-    BackgroundList,
     /// 递归删除目录。
     RecursiveDelete,
     /// SFTP 写入回退的摘要计算。
@@ -84,7 +81,6 @@ impl TaskKind {
             Self::GrepContent => "grep_content",
             Self::FileVersion => "file_version",
             Self::CreateDirectory => "create_directory",
-            Self::BackgroundList => "background_list",
             Self::RecursiveDelete => "recursive_delete",
             Self::SftpHash => "sftp_hash",
             Self::SftpReplace => "sftp_replace",
