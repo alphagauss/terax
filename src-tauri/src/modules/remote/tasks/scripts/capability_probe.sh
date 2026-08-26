@@ -67,7 +67,7 @@ terax_probe_in_temp() {
 }
 
 terax_probe_in_temp mkdir mkdir mkdir -p -- "$probe_dir/a/b"
-terax_probe_in_temp chmod chmod chmod 600 -- "$probe_dir"
+terax_probe_in_temp chmod chmod chmod 700 -- "$probe_dir"
 terax_probe_in_temp dd dd dd if=/dev/null of="$probe_dir/synced" bs=1 count=0 conv=fsync
 
 if [ -n "$probe_dir" ]; then
