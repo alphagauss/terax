@@ -1,6 +1,6 @@
 /**
- * 本文件定义 AI 工具可访问的固定会话目录与实时 Workbench 能力。
- * 路径基准来自会话，终端和页面操作通过受控回调执行。
+ * 本文件定义 AI 工具可访问的固定会话目录与实时终端能力。
+ * 路径基准来自会话，终端和托管 Agent 操作通过受控回调执行。
  */
 
 export type ToolContext = {
@@ -14,8 +14,6 @@ export type ToolContext = {
    * 没有可写入的活动终端标签时返回 false。
    */
   injectIntoActivePty: (text: string) => boolean;
-  /** Open a new preview tab (in-app iframe) at the given URL. */
-  openWebPreview: (url: string) => boolean;
   /** 在新终端标签中启动绑定到当前会话的 Claude Code Agent。 */
   spawnAgent: (prompt: string) => Promise<number | null>;
   /** 读取托管 Agent 所在终端的滚动缓冲区尾部。 */

@@ -55,12 +55,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         state.live.injectIntoActivePty(text)
       );
     },
-    openWebPreview: (url) => {
-      const state = useChatStore.getState();
-      return (
-        state.activeSessionId === sessionId && state.live.openWebPreview(url)
-      );
-    },
     spawnAgent: (prompt) =>
       useChatStore
         .getState()

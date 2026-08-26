@@ -42,7 +42,6 @@ type Params = {
   explorerRoot: string | null;
   setActiveId: (tabId: number) => void;
   newTab: (cwd?: string) => number;
-  openWebPreviewTab: (url: string) => void;
   newAgentTab: (cwd: string | undefined, title: string) => number;
   ensureWorkspaceReady: () => Promise<string | null>;
   terminalRefs: RefObject<Map<number, TerminalPaneHandle>>;
@@ -116,10 +115,6 @@ export function useAiLiveBridge(params: Params) {
         if (!term) return false;
         term.write(text);
         term.focus();
-        return true;
-      },
-      openWebPreview: (url: string) => {
-        ref.current.openWebPreviewTab(url);
         return true;
       },
       spawnManagedAgent: async (

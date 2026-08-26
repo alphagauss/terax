@@ -15,7 +15,6 @@ import {
   ArrowRight01Icon,
   CheckListIcon,
   Edit02Icon,
-  EyeIcon,
   File01Icon,
   FilePlusIcon,
   FolderOpenIcon,
@@ -44,7 +43,6 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   shell_list: { label: "Processes", icon: TerminalIcon },
   grep: { label: "Search", icon: GlobalSearchIcon },
   suggest_command: { label: "Suggest", icon: SparklesIcon },
-  open_web_preview: { label: "Web Preview", icon: EyeIcon },
   run_subagent: { label: "Subagent", icon: RobotIcon },
   todo_write: { label: "Todos", icon: CheckListIcon },
 };
@@ -99,8 +97,6 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("pattern") ?? str("query");
     case "suggest_command":
       return str("intent") ?? str("description");
-    case "open_web_preview":
-      return str("path") ?? str("url");
     case "run_subagent":
       return str("agent") ?? str("task");
     case "todo_write": {
@@ -311,11 +307,7 @@ function renderInputPreview(
       </div>
     );
   }
-  if (
-    toolName === "read_file" ||
-    toolName === "find_files" ||
-    toolName === "open_web_preview"
-  ) {
+  if (toolName === "read_file" || toolName === "find_files") {
     const path = str("path") ?? str("url");
     if (!path) return null;
     return (

@@ -27,7 +27,6 @@ function makeContext(): ToolContext {
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     injectIntoActivePty: () => false,
-    openWebPreview: () => false,
     spawnAgent: async () => null,
     readAgentOutput: () => null,
     getSessionId: () => "session",
