@@ -1,7 +1,7 @@
 /**
  * 本文件实现聊天与文档共用的 Markdown 代码块。
  *
- * 负责延迟高亮、Shell 命令卡片和 Mermaid 渲染，流式阶段避免解析未完成代码。
+ * 负责延迟高亮、复制操作和 Mermaid 渲染，流式阶段避免解析未完成代码。
  */
 
 "use client";
@@ -12,11 +12,9 @@ import { useTheme } from "@/modules/theme";
 import type { MermaidConfig } from "@streamdown/mermaid";
 import {
   ArrowAllDirectionIcon,
-  ArrowRight01Icon,
   CheckmarkCircle01Icon,
   CopyIcon,
   FitToScreenIcon,
-  TerminalIcon,
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
 } from "@hugeicons/core-free-icons";
@@ -41,16 +39,6 @@ const POSIX_SHELL = new Set([
   "console",
   "shellscript",
 ]);
-const WINDOWS_SHELL = new Set([
-  "powershell",
-  "pwsh",
-  "ps1",
-  "ps",
-  "cmd",
-  "bat",
-  "batch",
-]);
-const SHELL_LANGS = new Set([...POSIX_SHELL, ...WINDOWS_SHELL]);
 const DIAGRAM_LANGS = new Set(["mermaid"]);
 
 type MermaidInstance = import("@streamdown/mermaid").MermaidInstance;
@@ -123,11 +111,6 @@ function mermaidConfig(
   };
 }
 
-function shellPrompt(lang: string): string {
-  if (WINDOWS_SHELL.has(lang)) return lang === "cmd" || lang === "bat" || lang === "batch" ? ">" : "PS>";
-  return "$";
-}
-
 function normalizeLangLabel(raw: string): string {
   const lower = raw.toLowerCase();
   if (POSIX_SHELL.has(lower)) return "bash";
@@ -143,19 +126,17 @@ export function isDiagramLanguage(raw: string | null): boolean {
 export type ChatCodeBlockProps = {
   code: string;
   lang: string | null;
-  onRun?: (command: string) => boolean;
   variant?: "chat" | "document";
 };
 
 /**
  * Markdown 围栏代码块。
  *
- * 聊天上下文允许执行 Shell 命令，文档上下文提供完整 Mermaid 浏览能力。
+ * 普通代码在聊天和文档中使用同一只读外壳，文档上下文仅扩展 Mermaid 浏览能力。
  */
 export function ChatCodeBlock({
   code,
   lang,
-  onRun,
   variant = "chat",
 }: ChatCodeBlockProps) {
   const streaming = useContext(StreamingCtx);
@@ -172,10 +153,6 @@ export function ChatCodeBlock({
         documentContext={variant === "document"}
       />
     );
-  }
-
-  if (variant === "chat" && onRun && SHELL_LANGS.has(label)) {
-    return <CommandCard code={code} lang={label} onRun={onRun} />;
   }
 
   return <FinalizedCodeBlock code={code} lang={label} />;
@@ -520,88 +497,6 @@ const HighlightedPre = memo(function HighlightedPre({
     </pre>
   );
 });
-
-function CommandCard({
-  code,
-  lang,
-  onRun,
-}: {
-  code: string;
-  lang: string;
-  onRun: (command: string) => boolean;
-}) {
-  const isMultiline = code.includes("\n");
-  const prompt = shellPrompt(lang);
-  return (
-    <div
-      data-markdown-code-block
-      className="not-prose my-2 overflow-hidden rounded-lg border border-border/50 bg-muted/40"
-    >
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-          {normalizeLangLabel(lang)}
-        </span>
-        <div className="flex items-center gap-1">
-          <RunInTerminalButton command={code} onRun={onRun} />
-          <CopyButton text={code} />
-        </div>
-      </div>
-      <div className="border-t border-border/40 bg-background/40">
-        <pre
-          className={cn(
-            "m-0 overflow-x-auto px-3 py-2 font-mono text-[12px] leading-relaxed text-foreground",
-            isMultiline ? "whitespace-pre" : "whitespace-pre-wrap",
-          )}
-        >
-          {code.split("\n").map((line, i) => (
-            // eslint-disable-next-line react/no-array-index-key
-            <span key={i} className="flex">
-              <span className="mr-2 select-none text-muted-foreground/70">
-                {prompt}
-              </span>
-              <span>{line}</span>
-            </span>
-          ))}
-        </pre>
-      </div>
-    </div>
-  );
-}
-
-function RunInTerminalButton({
-  command,
-  onRun,
-}: {
-  command: string;
-  onRun: (command: string) => boolean;
-}) {
-  const [sent, setSent] = useState(false);
-  const tRef = useRef<number>(0);
-  useEffect(() => () => window.clearTimeout(tRef.current), []);
-  const handleRun = () => {
-    if (!onRun(command)) return;
-    setSent(true);
-    tRef.current = window.setTimeout(() => setSent(false), 1500);
-  };
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="ghost"
-      onClick={handleRun}
-      className="h-5 gap-1 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
-      aria-label="Run in active terminal"
-      title="Run in active terminal"
-    >
-      <HugeiconsIcon
-        icon={sent ? TerminalIcon : ArrowRight01Icon}
-        size={11}
-        strokeWidth={1.75}
-      />
-      <span>{sent ? "Sent" : "Run"}</span>
-    </Button>
-  );
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);

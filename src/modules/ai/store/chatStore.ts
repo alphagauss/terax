@@ -56,7 +56,6 @@ export type Live = {
   revealWorkingDirectory: (cwd: string) => Promise<void>;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
-  injectIntoActivePty: (text: string) => boolean;
 };
 
 export type AgentRunStatus =
@@ -177,7 +176,6 @@ const NOOP_LIVE: Live = {
   revealWorkingDirectory: async () => {},
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
-  injectIntoActivePty: () => false,
 };
 
 const CHATS_LRU_CAP = 8;

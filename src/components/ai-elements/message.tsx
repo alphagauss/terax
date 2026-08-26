@@ -16,7 +16,6 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
-import { useChatStore } from "@/modules/ai/store/chatStore";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -330,14 +329,7 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   streaming?: boolean;
 };
 
-const runInActiveTerminal = (command: string) =>
-  useChatStore.getState().live.injectIntoActivePty(command);
-
-const ChatMarkdownCode = (props: ComponentProps<typeof MarkdownCode>) => (
-  <MarkdownCode {...props} onRun={runInActiveTerminal} />
-);
-
-const streamdownComponents = { code: ChatMarkdownCode };
+const streamdownComponents = { code: MarkdownCode };
 
 /**
  * Markdown 消息正文。
