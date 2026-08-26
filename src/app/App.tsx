@@ -194,7 +194,6 @@ export default function App() {
     setActiveSpace,
     newTab,
     newBlockTab,
-    newAgentTab,
     newRunTab,
     newPrivateTab,
     openFileTab,
@@ -1567,7 +1566,6 @@ export default function App() {
     explorerRoot,
     setActiveId,
     newTab,
-    newAgentTab,
     ensureWorkspaceReady,
     terminalRefs,
   });

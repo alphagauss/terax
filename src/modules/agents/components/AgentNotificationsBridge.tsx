@@ -9,12 +9,10 @@ import type { Tab } from "@/modules/workbench";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { displayAgent } from "../lib/format";
-import { maybeTriggerManagedReview } from "../lib/review";
 import { routeAgentNotification } from "../lib/route";
 import type { AgentSession, AgentSignal } from "../lib/types";
 import { useWindowFocus } from "../lib/useWindowFocus";
 import { useAgentStore } from "../store/agentStore";
-import { useManagedAgentsStore } from "../store/managedAgentsStore";
 
 type Activate = (tabId: number) => void;
 type Ctx = {
@@ -80,12 +78,10 @@ function handleSignal(sig: AgentSignal, ctx: Ctx): void {
       store.setStatus(tabId, "waiting");
       const session = store.sessions[tabId];
       if (session) route(session, "finished", ctx);
-      maybeTriggerManagedReview(tabId);
       return;
     }
     case "exited":
       store.finish(tabId);
-      useManagedAgentsStore.getState().remove(tabId);
       return;
   }
 }

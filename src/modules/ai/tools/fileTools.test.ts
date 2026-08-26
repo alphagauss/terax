@@ -31,9 +31,6 @@ const context: ToolContext = {
   getCwd: () => "/workspace",
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
-  injectIntoActivePty: () => false,
-  spawnAgent: async () => null,
-  readAgentOutput: () => null,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
 };
 
@@ -67,6 +64,10 @@ describe("AI file tools", () => {
       "multi_edit",
       "create_directory",
       "open_web_preview",
+      "suggest_command",
+      "spawn_coding_agent",
+      "send_to_agent",
+      "read_agent_output",
     ]) {
       expect(tools).not.toHaveProperty(name);
     }

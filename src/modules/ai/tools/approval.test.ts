@@ -1,12 +1,11 @@
 /**
  * 本文件验证 AI 权限模式的动态审批与执行期安全边界。
- * 测试锁定完全访问只省略批准，不削弱 Shell 拒绝规则或外部 Agent 审批。
+ * 测试锁定完全访问只省略批准，不削弱 Shell 命令拒绝规则。
  */
 
 import type { ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
-import { buildManagedAgentTools } from "./agent";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
 
@@ -27,9 +26,6 @@ const context: ToolContext = {
   getCwd: () => "/workspace",
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
-  injectIntoActivePty: () => false,
-  spawnAgent: async () => null,
-  readAgentOutput: () => null,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
 };
 
@@ -51,13 +47,6 @@ describe("AI tool approval mode", () => {
     expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(true);
     useChatStore.setState({ permissionMode: "full-access" });
     expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(false);
-  });
-
-  it("keeps external coding-agent actions behind approval", () => {
-    useChatStore.setState({ permissionMode: "full-access" });
-    const tools = buildManagedAgentTools(context);
-    expect(tools.spawn_coding_agent.needsApproval).toBe(true);
-    expect(tools.send_to_agent.needsApproval).toBe(true);
   });
 
   it("still rejects destructive shell commands in full access", async () => {

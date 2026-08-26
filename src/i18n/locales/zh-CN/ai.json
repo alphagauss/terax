@@ -181,9 +181,7 @@
     "closeAiSidebarRunning": "关闭 AI 侧栏，有 AI 会话正在运行"
   },
   "slashCommands": {
-    "claudeCodeUsage": "用法：/claude-code <request>",
-    "initLabel": "初始化工作区",
-    "claudeCodeLabel": "委派给 Claude Code"
+    "initLabel": "初始化工作区"
   },
   "whisper": {
     "transcriptionFailed": "转写失败",

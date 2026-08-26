@@ -316,12 +316,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [newTerminalTab],
   );
 
-  const newAgentTab = useCallback(
-    (cwd: string | undefined, title: string) =>
-      newTerminalTab(cwd, { title }, undefined),
-    [newTerminalTab],
-  );
-
   /** 在指定 Space 创建运行终端，已失效的原分组回退到当前活动分组。 */
   const newRunTab = useCallback(
     (
@@ -909,7 +903,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     newTabInSpace,
     newTab,
     newBlockTab,
-    newAgentTab,
     newRunTab,
     newPrivateTab,
     openFileTab,

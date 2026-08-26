@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
-  ArrowRight01Icon,
   CheckListIcon,
   Edit02Icon,
   File01Icon,
@@ -20,11 +19,9 @@ import {
   FolderOpenIcon,
   GlobalSearchIcon,
   RobotIcon,
-  SparklesIcon,
   TerminalIcon,
   ToolsIcon,
 } from "@hugeicons/core-free-icons";
-import { useChatStore } from "@/modules/ai/store/chatStore";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import type { ComponentProps, ReactNode } from "react";
@@ -42,7 +39,6 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   shell_process: { label: "Process", icon: TerminalIcon },
   shell_list: { label: "Processes", icon: TerminalIcon },
   grep: { label: "Search", icon: GlobalSearchIcon },
-  suggest_command: { label: "Suggest", icon: SparklesIcon },
   run_subagent: { label: "Subagent", icon: RobotIcon },
   todo_write: { label: "Todos", icon: CheckListIcon },
 };
@@ -95,8 +91,6 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("process_id");
     case "grep":
       return str("pattern") ?? str("query");
-    case "suggest_command":
-      return str("intent") ?? str("description");
     case "run_subagent":
       return str("agent") ?? str("task");
     case "todo_write": {
@@ -503,14 +497,6 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "suggest_command") {
-    const cmd = typeof o.command === "string" ? o.command : null;
-    const explanation =
-      typeof o.explanation === "string" ? o.explanation : null;
-    if (!cmd) return null;
-    return <SuggestCommandCard command={cmd} explanation={explanation} />;
-  }
-
   if (toolName === "grep") {
     const files = Array.isArray(o.files) ? (o.files as string[]) : [];
     const counts = Array.isArray(o.counts)
@@ -734,54 +720,6 @@ function CodeBlockMini({ code }: { code: string; language: string }) {
     <pre className="max-h-60 overflow-auto rounded bg-muted/40 p-2 font-mono text-[11px] leading-relaxed text-foreground whitespace-pre-wrap">
       {code}
     </pre>
-  );
-}
-
-function SuggestCommandCard({
-  command,
-  explanation,
-}: {
-  command: string;
-  explanation: string | null;
-}) {
-  const [inserted, setInserted] = useState(false);
-  const onInsert = () => {
-    const ok = useChatStore
-      .getState()
-      .live.injectIntoActivePty(command);
-    if (ok) setInserted(true);
-  };
-  return (
-    <div className="space-y-1.5">
-      {explanation ? (
-        <div className="text-[11px] text-muted-foreground">{explanation}</div>
-      ) : null}
-      <div className="flex items-stretch gap-1.5 rounded bg-muted/40 overflow-hidden">
-        <pre className="flex-1 overflow-auto p-2 font-mono text-[11px] leading-relaxed">
-          {command}
-        </pre>
-        <button
-          type="button"
-          onClick={onInsert}
-          disabled={inserted}
-          className={cn(
-            "shrink-0 flex items-center gap-1 px-2.5 text-[11px] font-medium",
-            "border-l border-border/60",
-            "hover:bg-muted/80 active:bg-muted",
-            "disabled:opacity-60 disabled:cursor-default disabled:hover:bg-transparent",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-          )}
-          aria-label="Insert into active terminal"
-        >
-          <HugeiconsIcon
-            icon={inserted ? TerminalIcon : ArrowRight01Icon}
-            size={12}
-            strokeWidth={1.75}
-          />
-          <span>{inserted ? "Inserted" : "Insert"}</span>
-        </button>
-      </div>
-    </div>
   );
 }
 
