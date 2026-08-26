@@ -3,7 +3,6 @@
  * 所有文件与 Shell 相对路径由具体工具统一基于会话固定工作目录解析。
  */
 
-import { buildManagedAgentTools } from "./agent";
 import { buildFsTools } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildSearchTools } from "./search";
@@ -30,7 +29,6 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildSubagentTools(ctx),
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
-    ...buildManagedAgentTools(ctx),
   } as const;
 }
 

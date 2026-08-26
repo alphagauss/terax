@@ -6,7 +6,6 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { firePendingReviewForSession } from "@/modules/agents/lib/review";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import {
@@ -19,10 +18,8 @@ import { flushCompletedSessionRuns, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /**
- * Startup wiring for the AI subsystem: loads provider keys (and keeps them in
- * sync), hydrates the preference store and mirrors the default model, hydrates
- * chat/agents/snippets stores, and fires any pending review for the active
- * session. Returns the two derived flags the shell needs.
+ * 初始化 AI 子系统并保持提供商密钥同步。
+ * 同时加载偏好、会话、Agent 与片段状态，并返回应用外壳需要的派生标记。
  */
 export function useAiBootstrap(): {
   hasComposer: boolean;
@@ -32,20 +29,10 @@ export function useAiBootstrap(): {
   const setApiKeys = useChatStore((s) => s.setApiKeys);
   const setCustomEndpointKeys = useChatStore((s) => s.setCustomEndpointKeys);
   const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
-  const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const activeSessionRunLocked = useChatStore((s) =>
-    s.activeSessionId ? Boolean(s.runLockSessionIds[s.activeSessionId]) : false,
-  );
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
-
-  useEffect(() => {
-    if (activeSessionId && !activeSessionRunLocked) {
-      firePendingReviewForSession(activeSessionId);
-    }
-  }, [activeSessionId, activeSessionRunLocked]);
 
   const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);

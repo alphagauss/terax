@@ -57,12 +57,6 @@ export type Live = {
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
   injectIntoActivePty: (text: string) => boolean;
-  spawnManagedAgent: (
-    prompt: string,
-    sessionId: string,
-    cwd: string,
-  ) => Promise<number | null>;
-  readTerminalBuffer: (tabId: number) => string | null;
 };
 
 export type AgentRunStatus =
@@ -184,8 +178,6 @@ const NOOP_LIVE: Live = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   injectIntoActivePty: () => false,
-  spawnManagedAgent: async () => null,
-  readTerminalBuffer: () => null,
 };
 
 const CHATS_LRU_CAP = 8;

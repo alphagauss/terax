@@ -26,9 +26,6 @@ function makeContext(): ToolContext {
     getCwd: () => "/workspace",
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
-    injectIntoActivePty: () => false,
-    spawnAgent: async () => null,
-    readAgentOutput: () => null,
     getSessionId: () => "session",
   };
 }

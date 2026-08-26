@@ -48,8 +48,6 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     shell_exec: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
     shell_process: (i) => `${String(i.action ?? "Polling")} shell process`,
     shell_list: () => `Listing shell processes`,
-    suggest_command: (i) =>
-      `Suggesting ${ellipsize(String(i.command ?? ""), 60)}`,
     todo_write: (i) =>
       `Updating plan (${Array.isArray(i.todos) ? i.todos.length : 0} items)`,
     run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,

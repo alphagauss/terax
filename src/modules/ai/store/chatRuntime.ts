@@ -48,19 +48,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         state.live.isActiveTerminalPrivate()
       );
     },
-    injectIntoActivePty: (text) => {
-      const state = useChatStore.getState();
-      return (
-        state.activeSessionId === sessionId &&
-        state.live.injectIntoActivePty(text)
-      );
-    },
-    spawnAgent: (prompt) =>
-      useChatStore
-        .getState()
-        .live.spawnManagedAgent(prompt, sessionId, getSessionCwd()),
-    readAgentOutput: (tabId) =>
-      useChatStore.getState().live.readTerminalBuffer(tabId),
     getSessionId: () => sessionId,
   };
 

@@ -181,9 +181,7 @@
     "closeAiSidebarRunning": "Close AI sidebar, AI sessions are running"
   },
   "slashCommands": {
-    "claudeCodeUsage": "Usage: /claude-code <request>",
-    "initLabel": "Initialize workspace",
-    "claudeCodeLabel": "Delegate to Claude Code"
+    "initLabel": "Initialize workspace"
   },
   "whisper": {
     "transcriptionFailed": "Transcription failed",

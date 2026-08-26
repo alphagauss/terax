@@ -1,35 +1,14 @@
 /**
  * 本文件定义输入框支持的斜杠命令及其解析规则。
- * 命令只负责本地状态切换或生成提示词，不直接绕过工具审批执行写操作。
+ * 命令只生成受普通工具审批约束的提示词，不直接执行写操作。
  */
 
-import { ClaudeIcon, SparklesIcon } from "@hugeicons/core-free-icons";
+import { SparklesIcon } from "@hugeicons/core-free-icons";
 
-/**
- * Outcome of intercepting a slash command from the composer.
- *
- * - `"handled"`: command ran; the composer should NOT send a chat message.
- * - `"send-prompt"`: replace the user's text with `prompt` and send normally.
- * - `"none"`: not a slash command; let the composer behave as usual.
- */
+/** 斜杠命令解析结果：改写为提示词或保持普通输入。 */
 export type SlashOutcome =
-  | { kind: "handled"; toast?: string }
   | { kind: "send-prompt"; prompt: string; commandName?: string }
   | { kind: "none" };
-
-function claudeCodeDirective(request: string): string {
-  return `The user wants to drive a Claude Code agent through you. Their request:
-
-<request>
-${request}
-</request>
-
-You are the orchestrator, not the implementer. Do not write the code yourself.
-1. Call read_agent_output to see whether a Claude Code agent is already active in this session.
-2. If none is active: turn the request into one clear, complete, self-contained prompt (state the concrete goal, relevant constraints, and what "done" looks like) and call spawn_coding_agent with it.
-3. If one is active: read its latest output, then craft a precise follow-up and call send_to_agent.
-Sharpen vague requests into precise engineering instructions; keep each agent prompt focused on one coherent unit of work.`;
-}
 
 const INIT_PROMPT = `Scan this workspace and create or update AGENTS.md at the workspace root with:
 
@@ -57,20 +36,10 @@ export const SLASH_COMMANDS: Record<string, SlashCommandMeta> = {
     label: "Initialize workspace",
     icon: SparklesIcon,
   },
-  "claude-code": {
-    name: "claude-code",
-    invocation: "/claude-code",
-    label: "Delegate to Claude Code",
-    icon: ClaudeIcon,
-  },
 };
 
 export const TERAX_CMD_RE =
   /^<terax-command\s+name="([a-z0-9-]+)"(?:\s+state="([a-z]+)")?\s*\/>(?:\n+|$)/;
-
-export function wrapWithCommandMarker(prompt: string, name: string): string {
-  return `<terax-command name="${name}" />\n\n${prompt}`;
-}
 
 /**
  * 解析并执行输入框中的斜杠命令或命令选择器标记。
@@ -81,9 +50,8 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
   const trimmed = input.trim();
   const lead = trimmed[0];
   if (lead !== "/" && lead !== "#") return { kind: "none" };
-  const [head, ...rest] = trimmed.slice(1).split(/\s+/);
+  const [head] = trimmed.slice(1).split(/\s+/);
   if (lead === "#" && !SLASH_COMMANDS[head]) return { kind: "none" };
-  const tail = rest.join(" ").trim();
 
   switch (head) {
     case "init": {
@@ -91,16 +59,6 @@ export function tryRunSlashCommand(input: string): SlashOutcome {
         kind: "send-prompt",
         prompt: INIT_PROMPT,
         commandName: "init",
-      };
-    }
-    case "claude-code": {
-      if (!tail) {
-        return { kind: "handled", toast: "Usage: /claude-code <request>" };
-      }
-      return {
-        kind: "send-prompt",
-        prompt: claudeCodeDirective(tail),
-        commandName: "claude-code",
       };
     }
     default:
