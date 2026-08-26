@@ -41,7 +41,7 @@ key 绝不会持久化到操作系统 keychain / Linux secrets 文件之外。
 4. 使用 `buildTools(ctx)` 提供的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输。
 5. 发出 step label、usage delta 和 finish metadata。
 
-tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`edit`、`search`、`shell`、`subagent`、`terminal`、`todo` 和 `managedAgent` builder 组装而成。
+tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal`、`todo` 和 `managedAgent` builder 组装而成。
 
 ## Sub-agent
 
@@ -87,17 +87,18 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 
 工具定义位于 `src/modules/ai/tools/`：
 
-- 只读工具（`read_file`、`list_directory`、`grep`、`glob`）通过安全 deny-list 后自动执行。
-- `grep` 通过 `src/modules/workspace-search/api.ts` 调用与用户搜索面板相同的 `fs_content_search`。共享后端只统一匹配、ignore 和路径筛选语义，AI 命中仍在工具层执行 canonical root 检查和秘密路径过滤。
-- 修改型工具（`write_file`、`edit`、`multi_edit`、`create_directory`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
+- 只读工具是 `read_file`、`find_files`、`grep`。全文写入使用 `write_file`，已有文件精确编辑使用 `apply_patch`，移动、复制、删除和空目录创建使用 `file_operation`。
+- 六个模型文件工具全部进入 `src-tauri/src/modules/fs/agent.rs`。该后端将聊天 owner 绑定到固定 Workspace 根，在 Rust 中统一执行路径解析、敏感路径、普通文件、分页、读取版本、修改快照和 Local、WSL、SSH 路由；前端不再实现文件路径安全或正文变换。
+- `find_files` 同时覆盖直接目录列举和递归 glob。`grep` 复用 `fs_content_search` 匹配引擎，支持目录和显式单文件目标，并在 Agent 后端完成安全过滤、content/files/count 聚合、上下文和分页。
+- 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
 - Shell 工具只有 `shell_exec`、`shell_process`、`shell_list`。短命令和长任务共享按聊天 owner 隔离的原生进程表，stdin、EOF、增量 offset、固定文本等待、hard timeout 和完整进程树终止不通过前端模拟。POSIX 环境默认使用 Bash，Windows Local 默认使用 PowerShell。
-- `edit` / `multi_edit` 强制执行 read-before-edit 不变量：模型必须在本 session 中提前读取过该文件。
+- `write_file` 的 rewrite 模式和 `apply_patch` 强制执行 read-before-edit：模型必须在本 session 中提前读取相同版本。create 模式要求目标缺失并自动创建父目录。精确补丁按读取结果使用 LF 匹配，同时保留既有 CRLF 文件的换行风格。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
 
 ## 编辑 diff
 
-文件修改审批会准备不可变的 before/after snapshot 和原始文件版本，并显示 summary toast。用户可以打开只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。批准后会重新验证 canonical path，再由原生条件写入原子匹配原版本或目标仍缺失的状态，不执行第二次完整文件读取。同一流程无需 Git 仓库也能工作。
+文件修改审批由 Rust 准备不可变的逐文件 before/after snapshot 和原始文件版本，并显示 summary toast。用户可以为一个多文件调用打开多个只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。批准后后端重新验证 Workspace 根、canonical path 和全部文件版本，再逐文件条件写入。每个文件独立原子发布，多文件调用不承诺跨文件系统原子性，运行中失败会尽力回滚已发布文件。同一流程无需 Git 仓库也能工作。
 
 ## 实时上下文桥接
 
@@ -108,7 +109,7 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 - 保持 Vercel AI SDK v6 chat 结构（`streamText`、tool、step limit），其余 UI 依赖该结构。
 - key 只能通过 `secrets_*` command 访问，绝不能写入磁盘、settings store 或 `localStorage`。
 - 新 provider 必须说明 bundle cost 和独特价值的合理性。
-- 修改型工具需要审批；只读工具仍必须通过 deny-list。
+- 修改型工具需要审批；只读工具仍必须通过 Rust Workspace 根、canonical path 和敏感路径检查。
 - 内存 message list、持久化 message record 和模型 input 保留相同的 message content。发送时不注入 active tab、cwd 或 environment block。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
 - `shell_exec` 未显式传 cwd 时延续该聊天最近同步完成的 Shell cwd；已经返回为长任务的进程不得在稍后退出时异步改变聊天 cwd。

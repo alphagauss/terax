@@ -519,6 +519,21 @@ pub async fn stat(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<Remote
     })
 }
 
+/// 判断远端路径是否存在，并保留连接或权限错误，供拒绝覆盖的调用方安全区分失败与缺失。
+pub(crate) async fn exists(workspace: &Arc<RemoteWorkspace>, path: &str) -> Result<bool, String> {
+    validate_remote_path(path)?;
+    let remote_path = path.to_string();
+    retry_sftp_read(
+        workspace,
+        format!("check remote path {path}"),
+        move |sftp| {
+            let path = remote_path.clone();
+            Box::pin(async move { sftp.try_exists(path).await })
+        },
+    )
+    .await
+}
+
 /// 使用一次 LSTAT 读取属性页所需的远端元数据，不跟随符号链接。
 pub async fn property_stat(
     workspace: &Arc<RemoteWorkspace>,

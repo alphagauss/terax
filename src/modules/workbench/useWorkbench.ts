@@ -524,7 +524,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       isNewFile: boolean;
     }) => {
       const existing = Object.values(stateRef.current.tabs).find(
-        (tab) => tab.kind === "ai-diff" && tab.requestKey === input.requestKey,
+        (tab) =>
+          tab.kind === "ai-diff" &&
+          tab.requestKey === input.requestKey &&
+          tab.path === input.path,
       );
       if (existing) {
         revealTab(existing.id);
@@ -552,14 +555,17 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
   const setAiDiffStatus = useCallback(
     (requestKey: string, status: AiDiffStatus) =>
       commit((current) => {
-        const tab = Object.values(current.tabs).find(
-          (candidate) =>
-            candidate.kind === "ai-diff" && candidate.requestKey === requestKey,
-        );
-        if (tab?.kind !== "ai-diff") return current;
+        let changed = false;
+        const tabs = { ...current.tabs };
+        for (const tab of Object.values(tabs)) {
+          if (tab.kind !== "ai-diff" || tab.requestKey !== requestKey) continue;
+          tabs[tab.id] = { ...tab, status };
+          changed = true;
+        }
+        if (!changed) return current;
         return {
           ...current,
-          tabs: { ...current.tabs, [tab.id]: { ...tab, status } },
+          tabs,
         };
       }),
     [commit],

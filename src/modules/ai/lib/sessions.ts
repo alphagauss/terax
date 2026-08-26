@@ -112,9 +112,12 @@ export function deleteSessionFile(id: string): Promise<void> {
   return invoke("ai_session_delete", { id });
 }
 
-/** 终止并清理指定聊天拥有的全部 Agent Shell 进程。 */
-export function clearSessionProcesses(id: string): Promise<void> {
-  return invoke("shell_clear_owner", { ownerSessionId: id });
+/** 清理指定聊天拥有的 Agent Shell 进程和文件工具运行时状态。 */
+export async function clearSessionProcesses(id: string): Promise<void> {
+  await Promise.all([
+    invoke("shell_clear_owner", { ownerSessionId: id }),
+    invoke("agent_file_clear_owner", { ownerSessionId: id }),
+  ]);
 }
 
 /** 尝试取得跨进程会话运行锁。 */

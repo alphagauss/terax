@@ -1,7 +1,12 @@
+/**
+ * 本文件压缩发送给模型的历史消息和大型工具结果。
+ * 文件读取结果按路径保留最新有效版本，修改后的旧读取内容可以安全省略。
+ */
+
 import type { ModelMessage } from "ai";
 
 const KEEP_TAIL = 24;
-const ELISION_TEXT = "[elided to save context — see prior tool call in history]";
+const ELISION_TEXT = "[elided to save context; see prior tool call in history]";
 
 type ToolPart = {
   type: string;
@@ -62,14 +67,21 @@ function collectMutationPaths(messages: ModelMessage[]): Set<string> {
     for (const part of m.content as ToolPart[]) {
       if (part.type !== "tool-call") continue;
       const name = part.toolName;
-      if (
-        name === "edit" ||
-        name === "multi_edit" ||
-        name === "write_file" ||
-        name === "create_directory"
-      ) {
+      if (name === "write_file" || name === "file_operation") {
         const p = pathOfInput(part.input);
         if (p) paths.add(p);
+      }
+      if (
+        name === "apply_patch" &&
+        part.input &&
+        typeof part.input === "object"
+      ) {
+        const files = (part.input as { files?: unknown }).files;
+        if (!Array.isArray(files)) continue;
+        for (const file of files) {
+          const p = pathOfInput(file);
+          if (p) paths.add(p);
+        }
       }
     }
   }

@@ -23,7 +23,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 2. 在 `src-tauri/src/lib.rs` 的 `tauri::generate_handler![...]` block（`src-tauri/src/lib.rs:191`）中注册。
 3. 如果 command 使用 Tauri plugin API（window、clipboard、dialog 等），将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
 4. 在对应的 `src/modules/<area>/lib/` 目录中添加带类型的前端 wrapper，并通过 Tauri 的 `invoke()` API 调用。
-5. 如果 command 涉及文件系统、网络或 Shell，必须通过现有 guard（`security.ts` deny-list、Workspace 授权 registry、SSRF guard、AI 工具审批）。
+5. 如果 command 涉及文件系统、网络或 Shell，必须通过现有 guard（Agent 文件 Rust 策略、Workspace 授权 registry、SSRF guard、Shell 安全检查和 AI 工具审批）。
 
 自定义 command 无需逐项列入 `default.json`，capability 会覆盖整个窗口；plugin permission 则必须列出。
 
@@ -79,7 +79,18 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 - `fs_content_search` - 用户搜索面板与 AI `grep` 共用的内容搜索，支持普通文本、正则、大小写、整词、包含和排除 glob；搜索面板请求可以取消上一轮扫描
 - `fs_glob` - glob 匹配
 
-内容搜索按需扫描并遵守 ignore 文件，不建立持久索引、文件 watcher 或搜索历史。Local 与 WSL 使用内嵌 Rust grep 实现；SSH 优先使用远端 `rg`，缺少 `rg` 的字面量搜索使用 GNU `find + grep` 服务端兼容路径，仍不可用时通过共享 tree service 回退有界 SFTP 扫描。GNU grep 只负责返回候选行，路径过滤和最终匹配区间仍由 Rust matcher 收敛。文件列表与 glob 共享同一 `rg --files` 主路径，缺失时依次使用 GNU find 树任务和 SFTP；Explorer 模糊搜索复用同一树服务。交互式新请求会取消并关闭旧远端 task channel。用户面板和 AI 共享匹配引擎，但 AI 结果仍必须经过独立的秘密路径过滤。
+内容搜索按需扫描并遵守 ignore 文件，不建立持久索引、文件 watcher 或搜索历史。Local 与 WSL 使用内嵌 Rust grep 实现；SSH 优先使用远端 `rg`，缺少 `rg` 的字面量搜索使用 GNU `find + grep` 服务端兼容路径，仍不可用时通过共享 tree service 回退有界 SFTP 扫描。GNU grep 只负责返回候选行，路径过滤和最终匹配区间仍由 Rust matcher 收敛。文件列表与 glob 共享同一 `rg --files` 主路径，缺失时依次使用 GNU find 树任务和 SFTP；Explorer 模糊搜索复用同一树服务。交互式新请求会取消并关闭旧远端 task channel。AI `grep` 复用匹配引擎，但通过 Agent 文件后端独立执行 Workspace 授权、敏感路径过滤、聚合和分页。
+
+#### Agent 文件服务
+
+- `agent_file_read` - owner 隔离的带行号文本读取和版本登记
+- `agent_file_find` - 直接目录列举与递归 glob 的统一路径发现
+- `agent_file_grep` - literal/regex 搜索及 content/files/count 聚合
+- `agent_file_prepare_mutation` / `agent_file_commit_mutation` / `agent_file_clear_mutation` - Rust 审批快照与条件提交生命周期
+- `agent_file_operation` - move、copy、delete、create_directory 结构操作
+- `agent_file_clear_owner` - 聊天删除时清理读取版本、固定 scope 和审批快照
+
+模型只看到 `read_file`、`find_files`、`grep`、`write_file`、`apply_patch`、`file_operation`。所有请求在 Rust 中把 owner 绑定到已授权 Workspace 根，再路由到 Local、WSL 或 SSH primitive。`write_file` 创建父目录并区分 create/rewrite；`apply_patch` 只对当前聊天已读取的现有 UTF-8 文件执行精确替换。多文件提交先验证全部基线，再逐文件原子发布，不提供跨文件系统事务保证。
 
 ### 文件传输（`src-tauri/src/modules/transfers/`）
 

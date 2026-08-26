@@ -17,10 +17,7 @@ import {
   Edit02Icon,
   EyeIcon,
   File01Icon,
-  FileEditIcon,
   FilePlusIcon,
-  Folder01Icon,
-  FolderAddIcon,
   FolderOpenIcon,
   GlobalSearchIcon,
   RobotIcon,
@@ -38,16 +35,14 @@ export type ToolPart = ToolUIPart | DynamicToolUIPart;
 
 const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   read_file: { label: "Read", icon: File01Icon },
-  list_directory: { label: "List", icon: FolderOpenIcon },
+  find_files: { label: "Find", icon: FolderOpenIcon },
   write_file: { label: "Write", icon: FilePlusIcon },
-  create_directory: { label: "Create dir", icon: FolderAddIcon },
-  edit: { label: "Edit", icon: FileEditIcon },
-  multi_edit: { label: "Edit", icon: Edit02Icon },
+  apply_patch: { label: "Edit", icon: Edit02Icon },
+  file_operation: { label: "Manage", icon: ToolsIcon },
   shell_exec: { label: "Run", icon: TerminalIcon },
   shell_process: { label: "Process", icon: TerminalIcon },
   shell_list: { label: "Processes", icon: TerminalIcon },
   grep: { label: "Search", icon: GlobalSearchIcon },
-  glob: { label: "Glob", icon: Folder01Icon },
   suggest_command: { label: "Suggest", icon: SparklesIcon },
   open_web_preview: { label: "Web Preview", icon: EyeIcon },
   run_subagent: { label: "Subagent", icon: RobotIcon },
@@ -83,19 +78,25 @@ function deriveSummary(toolName: string, input: unknown): string | null {
   switch (toolName) {
     case "read_file":
     case "write_file":
-    case "edit":
-    case "multi_edit":
-    case "create_directory":
-    case "list_directory":
       return str("path");
+    case "file_operation": {
+      const operation = str("operation") ?? "manage";
+      const path = str("path") ?? "";
+      const destination = str("destination");
+      return `${operation} ${path}${destination ? ` → ${destination}` : ""}`;
+    }
+    case "find_files":
+      return str("path") ?? ".";
+    case "apply_patch": {
+      const files = Array.isArray(i.files) ? i.files : [];
+      return `${files.length} file${files.length === 1 ? "" : "s"}`;
+    }
     case "shell_exec":
       return str("command");
     case "shell_process":
       return str("process_id");
     case "grep":
       return str("pattern") ?? str("query");
-    case "glob":
-      return str("pattern");
     case "suggest_command":
       return str("intent") ?? str("description");
     case "open_web_preview":
@@ -128,8 +129,7 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
 // and duplicates information.
 const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
-  "edit",
-  "multi_edit",
+  "apply_patch",
   "run_subagent",
   "todo_write",
 ]);
@@ -313,14 +313,28 @@ function renderInputPreview(
   }
   if (
     toolName === "read_file" ||
-    toolName === "list_directory" ||
-    toolName === "create_directory" ||
+    toolName === "find_files" ||
     toolName === "open_web_preview"
   ) {
     const path = str("path") ?? str("url");
     if (!path) return null;
     return (
       <div className="font-mono text-[11px] text-muted-foreground">{path}</div>
+    );
+  }
+  if (toolName === "file_operation") {
+    const operation = str("operation");
+    const path = str("path");
+    const destination = str("destination");
+    if (!operation || !path) return null;
+    return (
+      <div className="space-y-0.5 font-mono text-[11px]">
+        <div className="text-foreground">{operation}</div>
+        <div className="text-muted-foreground">{path}</div>
+        {destination ? (
+          <div className="text-muted-foreground">→ {destination}</div>
+        ) : null}
+      </div>
     );
   }
   if (toolName === "grep") {
@@ -406,9 +420,9 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "list_directory") {
+  if (toolName === "find_files") {
     const entries = Array.isArray(o.entries)
-      ? (o.entries as Array<{ name: string; kind: string }>)
+      ? (o.entries as Array<{ rel: string; kind: string }>)
       : [];
     if (entries.length === 0) {
       return (
@@ -425,7 +439,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono text-[11px]">
         {dirs.map((e) => (
           <div
-            key={`d-${e.name}`}
+            key={`d-${e.rel}`}
             className="flex items-center gap-1.5 truncate"
           >
             <HugeiconsIcon
@@ -434,12 +448,12 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
               strokeWidth={1.75}
               className="shrink-0 text-muted-foreground"
             />
-            <span className="truncate text-foreground">{e.name}/</span>
+            <span className="truncate text-foreground">{e.rel}/</span>
           </div>
         ))}
         {files.map((e) => (
           <div
-            key={`f-${e.name}`}
+            key={`f-${e.rel}`}
             className="flex items-center gap-1.5 truncate"
           >
             <HugeiconsIcon
@@ -448,7 +462,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
               strokeWidth={1.75}
               className="shrink-0 text-muted-foreground"
             />
-            <span className="truncate text-muted-foreground">{e.name}</span>
+            <span className="truncate text-muted-foreground">{e.rel}</span>
           </div>
         ))}
       </div>
@@ -506,6 +520,10 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
   }
 
   if (toolName === "grep") {
+    const files = Array.isArray(o.files) ? (o.files as string[]) : [];
+    const counts = Array.isArray(o.counts)
+      ? (o.counts as Array<{ path: string; count: number }>)
+      : [];
     const hits = Array.isArray(o.hits)
       ? (o.hits as Array<{
           rel?: string;
@@ -514,10 +532,22 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
           text: string;
         }>)
       : [];
-    const pattern = typeof o.pattern === "string" ? o.pattern : null;
     const truncated = Boolean(o.truncated);
     const filesScanned =
-      typeof o.files_scanned === "number" ? o.files_scanned : null;
+      typeof o.filesScanned === "number" ? o.filesScanned : null;
+
+    if (files.length > 0 || counts.length > 0) {
+      const rows = files.length > 0 ? files : counts.map((item) => `${item.path}: ${item.count}`);
+      return (
+        <div className="max-h-60 overflow-auto rounded bg-muted/30 px-2 py-1 font-mono text-[11px]">
+          {rows.map((row) => (
+            <div key={row} className="truncate text-muted-foreground">
+              {row}
+            </div>
+          ))}
+        </div>
+      );
+    }
 
     if (hits.length === 0) {
       return (
@@ -540,7 +570,7 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
                 {h.rel ?? h.path}:{h.line}
               </span>
               <span className="min-w-0 flex-1 truncate text-foreground">
-                {pattern ? highlightMatch(h.text, pattern) : h.text}
+                {h.text}
               </span>
             </div>
           ))}
@@ -560,63 +590,42 @@ function renderToolOutput(toolName: string, output: unknown): ReactNode | null {
     );
   }
 
-  if (toolName === "glob") {
-    const matches = Array.isArray(o.matches)
-      ? (o.matches as string[])
-      : Array.isArray(o.paths)
-        ? (o.paths as string[])
-        : [];
-    if (matches.length === 0) {
-      return (
-        <div className="text-[11px] italic text-muted-foreground">
-          no matches
-        </div>
-      );
-    }
+  if (toolName === "write_file" || toolName === "apply_patch") {
+    const files = Array.isArray(o.files)
+      ? (o.files as Array<{
+          path: string;
+          bytesWritten: number;
+          replacements: number;
+        }> )
+      : [];
     return (
-      <div className="max-h-60 overflow-auto rounded bg-muted/30 px-2 py-1 font-mono text-[11px]">
-        {matches.slice(0, 300).map((p) => (
-          <div key={p} className="truncate text-muted-foreground">
-            {p}
+      <div className="space-y-0.5 font-mono text-[11px]">
+        {files.map((file) => (
+          <div key={file.path} className="flex items-center gap-1.5">
+            <span className="text-emerald-600 dark:text-emerald-400">✓</span>
+            <span className="truncate text-muted-foreground">{file.path}</span>
+            <span className="shrink-0 text-muted-foreground">
+              {toolName === "apply_patch"
+                ? `${file.replacements} replacement${file.replacements === 1 ? "" : "s"}`
+                : formatBytes(file.bytesWritten)}
+            </span>
           </div>
         ))}
       </div>
     );
   }
 
-  if (toolName === "edit" || toolName === "multi_edit") {
-    const ok = o.ok === true || typeof o.replacements === "number";
-    if (ok) {
-      const reps = typeof o.replacements === "number" ? o.replacements : null;
-      const path = typeof o.path === "string" ? o.path : "";
-      return (
-        <div className="flex items-center gap-1.5 font-mono text-[11px]">
-          <span className="text-emerald-600 dark:text-emerald-400">✓</span>
-          {reps != null ? (
-            <span className="text-foreground">
-              {reps} replacement{reps === 1 ? "" : "s"}
-            </span>
-          ) : null}
-          {path ? (
-            <span className="text-muted-foreground">· {path}</span>
-          ) : null}
-        </div>
-      );
-    }
-  }
-
-  if (toolName === "write_file" || toolName === "create_directory") {
+  if (toolName === "file_operation" && o.ok === true) {
+    const operation = typeof o.operation === "string" ? o.operation : "updated";
     const path = typeof o.path === "string" ? o.path : "";
-    const bytes = typeof o.bytesWritten === "number" ? o.bytesWritten : null;
+    const destination = typeof o.destination === "string" ? o.destination : null;
     return (
       <div className="flex items-center gap-1.5 font-mono text-[11px]">
         <span className="text-emerald-600 dark:text-emerald-400">✓</span>
-        <span className="text-foreground">
-          {toolName === "create_directory" ? "created" : "wrote"}
-        </span>
-        {path ? <span className="text-muted-foreground">· {path}</span> : null}
-        {bytes != null ? (
-          <span className="text-muted-foreground">({formatBytes(bytes)})</span>
+        <span className="text-foreground">{operation}</span>
+        <span className="truncate text-muted-foreground">{path}</span>
+        {destination ? (
+          <span className="truncate text-muted-foreground">→ {destination}</span>
         ) : null}
       </div>
     );
@@ -716,29 +725,6 @@ function ShellProcessOutput({ data }: { data: Record<string, unknown> }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-function highlightMatch(text: string, pattern: string): ReactNode {
-  if (!pattern) return text;
-  let re: RegExp;
-  try {
-    re = new RegExp(
-      `(${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-      "gi",
-    );
-  } catch {
-    return text;
-  }
-  const parts = text.split(re);
-  return parts.map((p, i) =>
-    i % 2 === 1 ? (
-      <mark key={i} className="rounded bg-amber-500/30 px-0.5 text-foreground">
-        {p}
-      </mark>
-    ) : (
-      <span key={i}>{p}</span>
-    ),
   );
 }
 

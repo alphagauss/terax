@@ -40,6 +40,14 @@ impl WorkspaceRegistry {
         set.iter().any(|root| target.starts_with(root))
     }
 
+    /// 判断路径本身是否是已经登记的 Workspace 根，而不接受其子目录冒充根。
+    pub fn is_authorized_root(&self, target: &Path) -> bool {
+        self.roots
+            .lock()
+            .expect("workspace registry poisoned")
+            .contains(target)
+    }
+
     pub fn canonicalize_cached<P: AsRef<Path>>(&self, path: P) -> std::io::Result<PathBuf> {
         let key = path.as_ref().to_path_buf();
         {

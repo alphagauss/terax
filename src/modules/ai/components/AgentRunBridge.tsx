@@ -283,12 +283,8 @@ function clearSessionFileMutations(
 
 function isFileMutation(
   toolName: string,
-): toolName is "write_file" | "edit" | "multi_edit" {
-  return (
-    toolName === "write_file" ||
-    toolName === "edit" ||
-    toolName === "multi_edit"
-  );
+): toolName is "write_file" | "apply_patch" {
+  return toolName === "write_file" || toolName === "apply_patch";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

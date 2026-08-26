@@ -18,31 +18,6 @@ export type ReadResult =
   | { kind: "binary"; size: number; mtime: number }
   | { kind: "toolarge"; size: number; limit: number; mtime: number };
 
-export type FileVersion = {
-  revision: string;
-  size: number;
-  mtime: number;
-};
-
-export type FileWriteCondition =
-  | { type: "match"; version: FileVersion }
-  | { type: "missing" };
-
-export type CheckedWriteResult =
-  | { status: "written"; revision: string; size: number; mtime: number }
-  | {
-      status: "conflict";
-      current: { size: number; mtime: number } | null;
-    };
-
-export type DirEntry = {
-  name: string;
-  kind: "file" | "dir" | "symlink";
-  size: number;
-  mtime: number;
-  gitignored: boolean;
-};
-
 export type CommandOutput = {
   stdout: string;
   stderr: string;
@@ -95,8 +70,92 @@ export type ShellProcessInfo = {
   unread_output: boolean;
 };
 
-export type GlobHit = { path: string; rel: string };
-export type GlobResponse = { hits: GlobHit[]; truncated: boolean };
+export type AgentReadResponse = {
+  path: string;
+  content: string;
+  size: number;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextLine: number | null;
+  truncated: boolean;
+  lineTruncated: boolean;
+  unchanged: boolean;
+};
+
+export type AgentFindResponse = {
+  root: string;
+  entries: Array<{
+    path: string;
+    rel: string;
+    kind: "file" | "directory" | "symlink";
+    size: number;
+  }>;
+  nextOffset: number | null;
+  truncated: boolean;
+};
+
+export type AgentGrepResponse = {
+  root: string;
+  output: "content" | "files" | "count";
+  hits: Array<{
+    path: string;
+    rel: string;
+    line: number;
+    text: string;
+    before: Array<{ line: number; text: string }>;
+    after: Array<{ line: number; text: string }>;
+  }>;
+  files: string[];
+  counts: Array<{ path: string; count: number }>;
+  filesScanned: number;
+  nextOffset: number | null;
+  truncated: boolean;
+};
+
+export type AgentMutationInput =
+  | {
+      kind: "write";
+      path: string;
+      content: string;
+      mode: "create" | "rewrite";
+    }
+  | {
+      kind: "patch";
+      files: Array<{
+        path: string;
+        edits: Array<{
+          old_text: string;
+          new_text: string;
+          replace_all?: boolean;
+        }>;
+      }>;
+    };
+
+export type AgentMutationPreview = {
+  files: Array<{
+    path: string;
+    before: string;
+    after: string;
+    isNewFile: boolean;
+    replacements: number;
+  }>;
+};
+
+export type AgentMutationResult = {
+  files: Array<{
+    path: string;
+    bytesWritten: number;
+    replacements: number;
+  }>;
+};
+
+export type AgentFileOperationResponse = {
+  operation: "move" | "copy" | "delete" | "create_directory";
+  path: string;
+  destination: string | null;
+  ok: boolean;
+};
 
 export type GitRepoInfo = {
   repoRoot: string;
@@ -210,41 +269,79 @@ export const native = {
       path,
       workspace: currentWorkspaceEnv(),
     }),
-  writeFileChecked: (
-    path: string,
-    content: string,
-    condition: FileWriteCondition,
-  ) =>
-    invoke<CheckedWriteResult>("fs_write_file_checked", {
-      path,
-      content,
-      condition,
-      workspace: currentWorkspaceEnv(),
-      source: "ai",
-    }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
       workspace: currentWorkspaceEnv(),
     }),
-  createFile: (path: string) =>
-    invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
-  createDir: (path: string) =>
-    invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
-  // AI tooling never sees dot-prefixed entries regardless of the user's
-  // explorer preference — keeps .git / .env / .ssh out of agent context.
-  readDir: (path: string) =>
-    invoke<DirEntry[]>("fs_read_dir", {
-      path,
-      showHidden: false,
-      workspace: currentWorkspaceEnv(),
+  agentFileRead: (params: {
+    ownerSessionId: string;
+    root: string;
+    path: string;
+    startLine?: number;
+    lineCount?: number;
+    force?: boolean;
+  }) =>
+    invoke<AgentReadResponse>("agent_file_read", {
+      request: { ...params, workspace: currentWorkspaceEnv() },
     }),
-  glob: (params: { pattern: string; root: string; maxResults?: number }) =>
-    invoke<GlobResponse>("fs_glob", {
-      pattern: params.pattern,
-      root: params.root,
-      maxResults: params.maxResults ?? null,
-      workspace: currentWorkspaceEnv(),
+  agentFileFind: (params: {
+    ownerSessionId: string;
+    root: string;
+    path?: string;
+    glob?: string;
+    recursive?: boolean;
+    includeDirectories?: boolean;
+    includeHidden?: boolean;
+    offset?: number;
+    limit?: number;
+  }) =>
+    invoke<AgentFindResponse>("agent_file_find", {
+      request: { ...params, workspace: currentWorkspaceEnv() },
+    }),
+  agentFileGrep: (params: {
+    ownerSessionId: string;
+    root: string;
+    path?: string;
+    pattern: string;
+    syntax?: "literal" | "regex";
+    caseInsensitive?: boolean;
+    include?: string[];
+    output?: "content" | "files" | "count";
+    contextLines?: number;
+    offset?: number;
+    limit?: number;
+  }) =>
+    invoke<AgentGrepResponse>("agent_file_grep", {
+      request: { ...params, workspace: currentWorkspaceEnv() },
+    }),
+  agentPrepareMutation: (params: {
+    ownerSessionId: string;
+    toolCallId: string;
+    root: string;
+    mutation: AgentMutationInput;
+  }) =>
+    invoke<AgentMutationPreview>("agent_file_prepare_mutation", {
+      request: { ...params, workspace: currentWorkspaceEnv() },
+    }),
+  agentCommitMutation: (ownerSessionId: string, toolCallId: string) =>
+    invoke<AgentMutationResult>("agent_file_commit_mutation", {
+      request: { ownerSessionId, toolCallId },
+    }),
+  agentClearMutation: (ownerSessionId: string, toolCallId: string) =>
+    invoke<void>("agent_file_clear_mutation", {
+      request: { ownerSessionId, toolCallId },
+    }),
+  agentFileOperation: (params: {
+    ownerSessionId: string;
+    root: string;
+    operation: "move" | "copy" | "delete" | "create_directory";
+    path: string;
+    destination?: string;
+    recursive?: boolean;
+  }) =>
+    invoke<AgentFileOperationResponse>("agent_file_operation", {
+      request: { ...params, workspace: currentWorkspaceEnv() },
     }),
   runCommand: (command: string, cwd?: string | null, timeoutSecs?: number) =>
     invoke<CommandOutput>("shell_run_command", {

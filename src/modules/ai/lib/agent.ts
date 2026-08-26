@@ -38,13 +38,13 @@ const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
     read_file: (i) => `Reading ${shortPath(i.path)}`,
-    list_directory: (i) => `Listing ${shortPath(i.path)}`,
+    find_files: (i) => `Finding ${shortPath(i.path ?? ".")}`,
     grep: (i) => `Grepping ${ellipsize(String(i.pattern ?? ""), 40)}`,
-    glob: (i) => `Globbing ${ellipsize(String(i.pattern ?? ""), 40)}`,
-    edit: (i) => `Editing ${shortPath(i.path)}`,
-    multi_edit: (i) => `Editing ${shortPath(i.path)}`,
+    apply_patch: (i) =>
+      `Editing ${Array.isArray(i.files) ? i.files.length : 0} file(s)`,
     write_file: (i) => `Writing ${shortPath(i.path)}`,
-    create_directory: (i) => `Creating ${shortPath(i.path)}`,
+    file_operation: (i) =>
+      `${String(i.operation ?? "Managing")} ${shortPath(i.path)}`,
     shell_exec: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
     shell_process: (i) => `${String(i.action ?? "Polling")} shell process`,
     shell_list: () => `Listing shell processes`,

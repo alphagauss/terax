@@ -1,3 +1,8 @@
+/**
+ * 本文件登记内置只读子 Agent 的类型、工具白名单和专用提示词。
+ * 子 Agent 不能调用修改工具或递归创建其他子 Agent。
+ */
+
 export type SubagentType = "explore" | "code-review" | "security" | "general";
 
 export type SubagentDef = {
@@ -13,7 +18,7 @@ export type SubagentDef = {
   systemPrompt: string;
 };
 
-const READ_ONLY_TOOLS = ["read_file", "list_directory", "grep", "glob"];
+const READ_ONLY_TOOLS = ["read_file", "find_files", "grep"];
 
 export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
   explore: {
@@ -22,7 +27,7 @@ export const SUBAGENTS: Record<SubagentType, SubagentDef> = {
     description:
       "Read-only codebase explorer. Locates files, traces references, summarizes architecture.",
     tools: READ_ONLY_TOOLS,
-    systemPrompt: `You are an exploration subagent. Your job is to answer the spawn question by READING the codebase only — no edits, no commands. Use grep/glob/list_directory/read_file. Be terse. Return a concise summary suitable for the main agent to act on (file paths, key findings, line numbers). Stop as soon as you can answer.`,
+    systemPrompt: `You are an exploration subagent. Your job is to answer the spawn question by READING the codebase only. Do not edit files or run commands. Use grep/find_files/read_file. Be terse. Return a concise summary suitable for the main agent to act on, including file paths, key findings, and line numbers. Stop as soon as you can answer.`,
   },
   "code-review": {
     id: "code-review",

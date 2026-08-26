@@ -8,9 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
   Edit02Icon,
-  FileEditIcon,
   FilePlusIcon,
-  FolderAddIcon,
   TerminalIcon,
   Tick02Icon,
   ToolsIcon,
@@ -41,12 +39,8 @@ const TOOL_META: Record<
   { labelKey: string; icon: typeof FilePlusIcon }
 > = {
   write_file: { labelKey: "toolApproval.writeFile", icon: FilePlusIcon },
-  edit: { labelKey: "toolApproval.editFile", icon: FileEditIcon },
-  multi_edit: { labelKey: "toolApproval.editFileBatch", icon: Edit02Icon },
-  create_directory: {
-    labelKey: "toolApproval.createDirectory",
-    icon: FolderAddIcon,
-  },
+  apply_patch: { labelKey: "toolApproval.editFileBatch", icon: Edit02Icon },
+  file_operation: { labelKey: "toolApproval.fileOperation", icon: ToolsIcon },
   shell_exec: {
     labelKey: "toolApproval.runShellCommand",
     icon: TerminalIcon,
@@ -55,6 +49,13 @@ const TOOL_META: Record<
     labelKey: "toolApproval.writeShellInput",
     icon: TerminalIcon,
   },
+};
+
+const FILE_OPERATION_LABELS: Record<string, string> = {
+  move: "toolApproval.fileOperations.move",
+  copy: "toolApproval.fileOperations.copy",
+  delete: "toolApproval.fileOperations.delete",
+  create_directory: "toolApproval.fileOperations.createDirectory",
 };
 
 /** 将审批 store 中的每个请求同步为不可超时的稳定 toast。 */
@@ -129,14 +130,16 @@ function ApprovalToast({
   const review = () => {
     const preview = request.preview;
     if (!preview) return;
-    openDiff({
-      requestKey: request.key,
-      sessionId: request.sessionId,
-      path: preview.path,
-      originalContent: preview.before,
-      proposedContent: preview.after,
-      isNewFile: preview.isNewFile,
-    });
+    for (const file of preview.files) {
+      openDiff({
+        requestKey: request.key,
+        sessionId: request.sessionId,
+        path: file.path,
+        originalContent: file.before,
+        proposedContent: file.after,
+        isNewFile: file.isNewFile,
+      });
+    }
   };
 
   return (
@@ -231,7 +234,11 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
     return (
       <div className="space-y-1">
         <div className="truncate font-mono text-[11px] text-muted-foreground">
-          {request.preview.path}
+          {request.preview.files.length === 1
+            ? request.preview.files[0].path
+            : t("toolApproval.fileCount", {
+                count: request.preview.files.length,
+              })}
         </div>
         <div className="text-[10.5px] text-muted-foreground">
           {t("toolApproval.openDiffHint")}
@@ -243,6 +250,33 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
     return (
       <div className="text-[10.5px] text-muted-foreground">
         {t("toolApproval.preparingPreview")}
+      </div>
+    );
+  }
+  if (request.toolName === "file_operation") {
+    const operation = String(request.input.operation ?? "");
+    const destination =
+      typeof request.input.destination === "string"
+        ? request.input.destination
+        : null;
+    return (
+      <div className="space-y-1">
+        <div className="text-[10.5px] font-medium text-foreground">
+          {t(FILE_OPERATION_LABELS[operation] ?? "toolApproval.fileOperation")}
+        </div>
+        <div className="font-mono text-[11px] text-muted-foreground">
+          {String(request.input.path ?? "")}
+        </div>
+        {destination ? (
+          <div className="font-mono text-[11px] text-muted-foreground">
+            {t("toolApproval.destination")}: {destination}
+          </div>
+        ) : null}
+        {request.input.recursive === true ? (
+          <div className="text-[10.5px] text-muted-foreground">
+            {t("toolApproval.recursiveDelete")}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -283,9 +317,5 @@ function ApprovalSummary({ request }: { request: ApprovalRequest }) {
 }
 
 function isFileTool(toolName: string): boolean {
-  return (
-    toolName === "write_file" ||
-    toolName === "edit" ||
-    toolName === "multi_edit"
-  );
+  return toolName === "write_file" || toolName === "apply_patch";
 }

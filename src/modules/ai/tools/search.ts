@@ -1,148 +1,78 @@
 /**
- * 本文件实现基于会话固定目录的 grep 与 glob 搜索工具。
- * 搜索结果仍经过秘密路径拒绝规则过滤。
+ * 本文件定义 AI 的路径发现与正文搜索工具。
+ * Rust Agent 文件后端统一 Local、WSL、SSH 的 ignore、安全过滤、聚合和分页语义。
  */
 
 import { tool } from "ai";
 import { z } from "zod";
-import { searchContent } from "@/modules/workspace-search/api";
 import { native } from "../lib/native";
-import { checkReadable, checkReadableCanonical } from "../lib/security";
-import { resolvePath, type ToolContext } from "./context";
+import type { ToolContext } from "./context";
 
-function resolveRoot(
-  rawRoot: string | undefined,
-  ctx: ToolContext,
-): { ok: true; path: string } | { ok: false; error: string } {
-  if (rawRoot && rawRoot.trim().length > 0) {
-    try {
-      return { ok: true, path: resolvePath(rawRoot, ctx.getCwd()) };
-    } catch (e) {
-      return { ok: false, error: String(e) };
-    }
-  }
-  return { ok: true, path: ctx.getCwd() };
-}
-
-const MAX_LINE_LEN = 160;
-
-function clipLine(s: string): string {
-  if (s.length <= MAX_LINE_LEN) return s;
-  return `${s.slice(0, MAX_LINE_LEN)}…[+${s.length - MAX_LINE_LEN}]`;
-}
-
-function pathForSafety(path: string, root: string): string {
-  if (path.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(path)) return path;
-  const sep = root.includes("\\") && !root.includes("/") ? "\\" : "/";
-  return root.endsWith(sep) ? `${root}${path}` : `${root}${sep}${path}`;
-}
-
-function isReadableSearchHit(path: string, root: string): boolean {
-  return checkReadable(pathForSafety(path, root)).ok;
-}
-
+/** 创建路径发现和文本内容搜索工具。 */
 export function buildSearchTools(ctx: ToolContext) {
   return {
-    grep: tool({
+    find_files: tool({
       description:
-        "Search file contents in the workspace using a regular expression. Honors .gitignore. Returns up to `max_results` (default 30, max 500) `{path, line, text}` hits, with a `truncated` flag when more existed. Long match lines are clipped to 160 chars. Use this for code navigation — do NOT brute-force read_file across the tree. Narrow with `glob` when you can; raise `max_results` only if the first batch truly isn't enough.",
+        "Discover files and directories by path. Without recursive it lists immediate children; with recursive=true it walks the tree and honors ignore files. glob matches relative paths, for example '**/*.ts'. Results are paged with offset/limit. Use grep to search file contents.",
       inputSchema: z.object({
-        pattern: z
-          .string()
-          .describe(
-            "Regex pattern (Rust ripgrep dialect). Anchor and escape literal characters as needed.",
-          ),
-        root: z
-          .string()
-          .optional()
-          .describe(
-            "Root to search under. Defaults to the session working directory.",
-          ),
-        glob: z
-          .array(z.string())
-          .optional()
-          .describe(
-            "Optional include-globs over relative paths, e.g. ['**/*.ts', 'src/**/*.tsx'].",
-          ),
-        case_insensitive: z.boolean().optional(),
-        max_results: z.number().int().min(1).max(500).optional(),
+        path: z.string().min(1).optional(),
+        glob: z.string().min(1).optional(),
+        recursive: z.boolean().optional(),
+        include_directories: z.boolean().optional(),
+        include_hidden: z.boolean().optional(),
+        offset: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(2_000).optional(),
       }),
-      execute: async ({
-        pattern,
-        root,
-        glob,
-        case_insensitive,
-        max_results,
-      }) => {
-        const r = resolveRoot(root, ctx);
-        if (!r.ok) return { error: r.error };
-        const safety = await checkReadableCanonical(
-          r.path,
-          native.canonicalize,
-        );
-        if (!safety.ok) return { error: safety.reason, root: r.path };
-        r.path = safety.canonical;
-        const cap = Math.min(max_results ?? 30, 500);
+      execute: async (input) => {
         try {
-          const res = await searchContent({
-            pattern,
-            root: r.path,
-            syntax: "regex",
-            caseMode: case_insensitive ? "insensitive" : "sensitive",
-            wholeWord: false,
-            includes: glob,
-            maxResults: cap,
+          return await native.agentFileFind({
+            ownerSessionId: ctx.getSessionId(),
+            root: ctx.getCwd(),
+            path: input.path,
+            glob: input.glob,
+            recursive: input.recursive,
+            includeDirectories: input.include_directories,
+            includeHidden: input.include_hidden,
+            offset: input.offset,
+            limit: input.limit,
           });
-          const hits = res.hits.filter((h) =>
-            isReadableSearchHit(h.path, r.path),
-          );
-          return {
-            root: r.path,
-            hits: hits.map((h) => ({
-              path: h.path,
-              rel: h.rel,
-              line: h.line,
-              text: clipLine(h.text),
-            })),
-            truncated: res.truncated,
-            files_scanned: res.filesScanned,
-          };
-        } catch (e) {
-          return { error: String(e), root: r.path };
+        } catch (error) {
+          return { error: String(error), path: input.path ?? "." };
         }
       },
     }),
 
-    glob: tool({
+    grep: tool({
       description:
-        "Find files by path pattern (gitignore-aware). Use over `list_directory` when you want all matches recursively. Patterns use globset syntax: `**/*.ts`, `src/**/test_*.py`. Returns up to `max_results` matches.",
+        "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Honors ignore files and refuses sensitive paths. Prefer this over shell grep.",
       inputSchema: z.object({
-        pattern: z.string().describe("Glob pattern over relative paths."),
-        root: z.string().optional(),
-        max_results: z.number().int().min(1).max(2000).optional(),
+        pattern: z.string().min(1),
+        path: z.string().min(1).optional(),
+        syntax: z.enum(["literal", "regex"]).optional(),
+        case_insensitive: z.boolean().optional(),
+        include: z.array(z.string().min(1)).max(32).optional(),
+        output: z.enum(["content", "files", "count"]).optional(),
+        context_lines: z.number().int().min(0).max(20).optional(),
+        offset: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(500).optional(),
       }),
-      execute: async ({ pattern, root, max_results }) => {
-        const r = resolveRoot(root, ctx);
-        if (!r.ok) return { error: r.error };
-        const safety = await checkReadableCanonical(
-          r.path,
-          native.canonicalize,
-        );
-        if (!safety.ok) return { error: safety.reason, root: r.path };
-        r.path = safety.canonical;
+      execute: async (input) => {
         try {
-          const res = await native.glob({
-            pattern,
-            root: r.path,
-            maxResults: max_results,
+          return await native.agentFileGrep({
+            ownerSessionId: ctx.getSessionId(),
+            root: ctx.getCwd(),
+            path: input.path,
+            pattern: input.pattern,
+            syntax: input.syntax,
+            caseInsensitive: input.case_insensitive,
+            include: input.include,
+            output: input.output,
+            contextLines: input.context_lines,
+            offset: input.offset,
+            limit: input.limit,
           });
-          return {
-            root: r.path,
-            hits: res.hits.filter((h) => isReadableSearchHit(h.path, r.path)),
-            truncated: res.truncated,
-          };
-        } catch (e) {
-          return { error: String(e), root: r.path };
+        } catch (error) {
+          return { error: String(error), path: input.path ?? "." };
         }
       },
     }),

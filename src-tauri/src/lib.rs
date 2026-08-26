@@ -158,6 +158,7 @@ pub fn run() {
         .manage(markdown_images::MarkdownImageState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage(fs::search::PathSearchState::default())
+        .manage(fs::agent::AgentFileState::default())
         .manage({
             let registry = workspace::WorkspaceRegistry::default();
             workspace::bootstrap_registry(&registry);
@@ -245,6 +246,14 @@ pub fn run() {
             fs::search::fs_list_files,
             fs::grep::fs_content_search,
             fs::grep::fs_glob,
+            fs::agent::agent_file_read,
+            fs::agent::agent_file_find,
+            fs::agent::agent_file_grep,
+            fs::agent::agent_file_prepare_mutation,
+            fs::agent::agent_file_commit_mutation,
+            fs::agent::agent_file_clear_mutation,
+            fs::agent::agent_file_clear_owner,
+            fs::agent::agent_file_operation,
             git::commands::git_resolve_repo,
             git::commands::git_panel_snapshot,
             git::commands::git_status,

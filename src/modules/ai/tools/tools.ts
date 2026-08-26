@@ -4,8 +4,8 @@
  */
 
 import { buildManagedAgentTools } from "./agent";
-import { buildEditTools } from "./edit";
 import { buildFsTools } from "./fs";
+import { buildPatchTools } from "./patch";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
@@ -24,7 +24,7 @@ export { resolvePath, type ToolContext } from "./context";
 export function buildTools(ctx: import("./context").ToolContext) {
   return {
     ...buildFsTools(ctx),
-    ...buildEditTools(ctx),
+    ...buildPatchTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
     ...buildSubagentTools(ctx),

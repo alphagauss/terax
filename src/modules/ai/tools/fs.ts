@@ -1,225 +1,120 @@
 /**
- * 本文件定义 AI 的受控文件读取、写入和目录创建工具。
- * 所有路径都经过秘密路径和规范化检查，权限模式只控制逐次批准。
+ * 本文件定义 AI 的文本读取、全文写入和文件树操作工具。
+ * 所有文件系统语义由 Rust Agent 文件后端执行，前端只声明 schema 与审批规则。
  */
 
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import {
-  checkReadableCanonical,
-  checkWritableCanonical,
-} from "../lib/security";
 import { useChatStore } from "../store/chatStore";
-import { resolvePath, type ToolContext } from "./context";
+import type { ToolContext } from "./context";
 import {
   clearPreparedFileMutation,
   commitPreparedFileMutation,
-  getPreparedFileMutation,
   prepareFileMutation,
 } from "./fileMutation";
 
-const READ_BYTE_CAP = 25 * 1024;
-const READ_LINE_CAP = 2000;
+const needsMutationApproval = () =>
+  useChatStore.getState().permissionMode === "ask";
 
-function djb2(s: string): number {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  return h >>> 0;
-}
-
-/** 创建文件系统工具，并为写操作动态应用当前权限模式。 */
+/** 创建已知文件读取、完整文件写入和结构化路径操作工具。 */
 export function buildFsTools(ctx: ToolContext) {
   return {
     read_file: tool({
       description:
-          "Read a UTF-8 text file. Defaults to the first 2000 lines (capped at 25KB). Pass `offset`/`limit` for line-based windowing of large files. Refuses binary, oversized, or sensitive files (.env, keys, credentials). If you call this on the same path twice in a session without edits in between, the second call returns `unchanged: true` instead of re-emitting the content. Re-read the prior tool result.",
+        "Read a known UTF-8 text file with 1-based line numbers. Defaults to 2000 lines and returns next_line when more content exists. Use start_line to continue. Repeating the same unchanged range returns unchanged=true unless force=true. Binary, oversized, sensitive, special-device, and out-of-workspace paths are refused.",
       inputSchema: z.object({
-        path: z
-          .string()
-          .describe(
-            "Absolute path, or relative to the session working directory.",
-          ),
-        offset: z
-          .number()
-          .int()
-          .min(0)
-          .optional()
-          .describe("0-based start line. Default 0."),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(10000)
-          .optional()
-          .describe("Max lines to return. Default 2000."),
+        path: z.string().min(1),
+        start_line: z.number().int().min(1).optional(),
+        line_count: z.number().int().min(1).max(10_000).optional(),
+        force: z.boolean().optional(),
       }),
-      execute: async ({ path, offset, limit }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(
-          reqPath,
-          native.canonicalize,
-        );
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
+      execute: async ({ path, start_line, line_count, force }) => {
         try {
-          const r = await native.readFile(abs);
-          if (r.kind === "binary")
-            return { error: "binary file refused", path: abs, size: r.size };
-          if (r.kind === "toolarge")
-            return {
-              error: `file too large (${r.size} bytes, limit ${r.limit})`,
-              path: abs,
-            };
-
-          const hash = djb2(r.content);
-          const isFullRead = offset === undefined && limit === undefined;
-          const prior = ctx.readCache.get(abs);
-          if (
-            isFullRead &&
-            prior &&
-            prior.size === r.size &&
-            prior.hash === hash
-          ) {
-            return { path: abs, unchanged: true, size: r.size };
-          }
-          ctx.readCache.set(abs, { size: r.size, hash });
-
-          if (isFullRead) {
-            const lines = r.content.split("\n");
-            const sliceEnd = Math.min(lines.length, READ_LINE_CAP);
-            let content = lines.slice(0, sliceEnd).join("\n");
-            let truncated = sliceEnd < lines.length;
-            if (content.length > READ_BYTE_CAP) {
-              content = content.slice(0, READ_BYTE_CAP);
-              truncated = true;
-            }
-            return {
-              path: abs,
-              content,
-              size: r.size,
-              total_lines: lines.length,
-              ...(truncated
-                ? {
-                    truncated: true,
-                    hint: "call read_file with offset to continue",
-                  }
-                : {}),
-            };
-          }
-
-          const lines = r.content.split("\n");
-          const start = offset ?? 0;
-          const requested = limit ?? READ_LINE_CAP;
-          const end = Math.min(lines.length, start + requested);
-          let content = lines.slice(start, end).join("\n");
-          let truncated = end < lines.length;
-          if (content.length > READ_BYTE_CAP) {
-            content = content.slice(0, READ_BYTE_CAP);
-            truncated = true;
-          }
-          return {
-            path: abs,
-            content,
-            size: r.size,
-            total_lines: lines.length,
-            start_line: start,
-            end_line: end,
-            ...(truncated ? { truncated: true } : {}),
-          };
-        } catch (e) {
-          return { error: String(e), path: abs };
-        }
-      },
-    }),
-
-    list_directory: tool({
-      description:
-        "List immediate entries (files + directories) in a directory. Hidden entries are omitted.",
-      inputSchema: z.object({
-        path: z
-          .string()
-          .describe(
-            "Absolute path, or relative to the session working directory.",
-          ),
-      }),
-      execute: async ({ path }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkReadableCanonical(
-          reqPath,
-          native.canonicalize,
-        );
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
-        try {
-          const entries = await native.readDir(abs);
-          return {
-            path: abs,
-            entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
-          };
-        } catch (e) {
-          return { error: String(e), path: abs };
+          return await native.agentFileRead({
+            ownerSessionId: ctx.getSessionId(),
+            root: ctx.getCwd(),
+            path,
+            startLine: start_line,
+            lineCount: line_count,
+            force,
+          });
+        } catch (error) {
+          return { error: String(error), path };
         }
       },
     }),
 
     write_file: tool({
       description:
-        "Create or overwrite a file with the given content. Follows the current approval mode. Prefer `edit` / `multi_edit` for in-place changes; only use `write_file` for creating a brand-new file or fully replacing a tiny one.",
+        "Create one complete UTF-8 text file, or intentionally rewrite one complete file. Missing parent directories are created automatically. mode defaults to create and refuses an existing target; rewrite requires read_file on the current version first. Use apply_patch for targeted changes. Follows the current approval mode.",
       inputSchema: z.object({
-        path: z.string(),
+        path: z.string().min(1),
         content: z.string(),
+        mode: z.enum(["create", "rewrite"]).optional(),
       }),
-      needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ path, content }, { toolCallId }) => {
+      needsApproval: needsMutationApproval,
+      execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         try {
-          const prepared =
-            getPreparedFileMutation(sessionId, toolCallId) ??
-            (await prepareFileMutation({
-              sessionId,
-              toolCallId,
-              toolName: "write_file",
-              input: { path, content },
-              cwd: ctx.getCwd(),
-            }));
-          await commitPreparedFileMutation(prepared);
-          ctx.readCache.set(prepared.path, {
-            size: prepared.after.length,
-            hash: djb2(prepared.after),
+          await prepareFileMutation({
+            sessionId,
+            toolCallId,
+            toolName: "write_file",
+            input,
+            cwd: ctx.getCwd(),
           });
-          return {
-            path: prepared.path,
-            bytesWritten: prepared.after.length,
-            ok: true,
-          };
-        } catch (e) {
+          return await commitPreparedFileMutation(sessionId, toolCallId);
+        } catch (error) {
           clearPreparedFileMutation(sessionId, toolCallId);
-          return { error: String(e), path: resolvePath(path, ctx.getCwd()) };
+          return { error: String(error), path: input.path };
         }
       },
     }),
 
-    create_directory: tool({
+    file_operation: tool({
       description:
-        "Create a directory (and any missing parents). Follows the current approval mode.",
-      inputSchema: z.object({
-        path: z.string(),
-      }),
-      needsApproval: () => useChatStore.getState().permissionMode === "ask",
-      execute: async ({ path }) => {
-        const reqPath = resolvePath(path, ctx.getCwd());
-        const safety = await checkWritableCanonical(
-          reqPath,
-          native.canonicalize,
-        );
-        if (!safety.ok) return { error: safety.reason, path: reqPath };
-        const abs = safety.canonical;
+        "Perform one structural filesystem operation: move, copy, delete, or create_directory. move/copy require destination and never overwrite it. copy supports files only. Deleting a directory requires recursive=true. Ordinary file creation should use write_file, which creates parents automatically. Follows the current approval mode.",
+      inputSchema: z
+        .object({
+          operation: z.enum(["move", "copy", "delete", "create_directory"]),
+          path: z.string().min(1),
+          destination: z.string().min(1).optional(),
+          recursive: z.boolean().optional(),
+        })
+        .superRefine((input, refinement) => {
+          const needsDestination =
+            input.operation === "move" || input.operation === "copy";
+          if (needsDestination !== Boolean(input.destination)) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["destination"],
+              message: needsDestination
+                ? "destination is required for move or copy"
+                : "destination is only valid for move or copy",
+            });
+          }
+          if (input.operation !== "delete" && input.recursive !== undefined) {
+            refinement.addIssue({
+              code: "custom",
+              path: ["recursive"],
+              message: "recursive is only valid for delete",
+            });
+          }
+        }),
+      needsApproval: needsMutationApproval,
+      execute: async ({ operation, path, destination, recursive }) => {
         try {
-          await native.createDir(abs);
-          return { path: abs, ok: true };
-        } catch (e) {
-          return { error: String(e), path: abs };
+          return await native.agentFileOperation({
+            ownerSessionId: ctx.getSessionId(),
+            root: ctx.getCwd(),
+            operation,
+            path,
+            destination,
+            recursive,
+          });
+        } catch (error) {
+          return { error: String(error), operation, path };
         }
       },
     }),

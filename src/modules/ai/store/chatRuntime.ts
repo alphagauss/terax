@@ -25,7 +25,6 @@ import {
 } from "./chatStore";
 
 function makeChat(sessionId: string): Chat<UIMessage> {
-  const readCache = new Map<string, { size: number; hash: number }>();
   /** 返回发送前已经冻结的会话 cwd，缺失表示运行时不变量被破坏。 */
   const getSessionCwd = () => {
     const cwd = useChatStore
@@ -68,7 +67,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         .live.spawnManagedAgent(prompt, sessionId, getSessionCwd()),
     readAgentOutput: (tabId) =>
       useChatStore.getState().live.readTerminalBuffer(tabId),
-    readCache,
     getSessionId: () => sessionId,
   };
 
