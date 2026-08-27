@@ -66,10 +66,13 @@ Terax Space / Workbench
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，主题和图表类型切换只应用 options，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。工具栏、OHLC/成交量/成交额信息栏、加载、空数据、错误、最早数据和历史重试状态已经接入中英文文案。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - Panel Registry 已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
-- `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。当前尚未注册正式业务面板，也尚未接入工作台页面和 24 列交互网格。
+- `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。
+- Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
+- 工作台首批只注册复用现有 `MarketChartScene` 的 Chart Panel，内置单图和双图模板每次生成新的布局与 panel ID。Panel Chrome 统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
+- `AlphaWorkstationState` 把主标的、锁定和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
 - `/bars` 同时支持 `start + end` 范围查询和基于排他 `before` 游标的有界历史查询。历史查询从最新分片向前执行倒序 `LIMIT`，返回升序数据、`has_more_before`、下一游标和实际范围；不同页面共享完整覆盖范围的复权锚点。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入周期、复权切换或实时增量。
-- 当前 Alpha 页面包括数据、回测和设置，尚没有独立行情页、综合工作台、策略页、回测复盘页和模拟交易页。
+- 当前 Alpha 页面包括综合工作台、数据、回测和设置，尚没有独立行情页、策略页、回测复盘页和模拟交易页。
 - Terax Workbench 已有递归分割树、稳定 tab ID 和 `WorkbenchViewPool`。移动、分割和隐藏页面不应重挂载其运行时实例。
 - 迁移时保留 `alphaBusinessDay()` 的时区不变量和测试，将其下沉到行情归一化模块。不要继续把新能力堆入现有临时组件。
 
@@ -336,7 +339,7 @@ type AlphaSymbolBinding =
 
 3. 当前工作台状态
 
-   布局、工作台主标的和布局锁定统一保存在 `~/.terax/shared/terax-alpha.json` 的独立键中，不依附当前 Space。Alpha 当前只在 Local 环境开放，持久化状态由主 Workspace 窗口写入，临时窗口共享读取但不写回。
+   布局、工作台主标的和布局锁定统一保存在 `~/.terax/shared/terax-alpha.json` 的独立键中，不依附当前 Space。Alpha 当前只在 Local 环境开放，所有窗口共享读取和写入同一份持久化状态。
 
 4. 命名模板和全局偏好
 

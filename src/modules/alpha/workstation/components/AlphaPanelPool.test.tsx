@@ -88,12 +88,14 @@ describe("AlphaPanelPool", () => {
       visible?: boolean;
       hostKey?: string;
       showHosts?: boolean;
+      mainSymbol?: string;
     } = {},
   ) {
     root?.render(
       <AlphaPanelPool
         panels={panels}
         registry={registry}
+        mainSymbol={options.mainSymbol ?? "000001.SZSE"}
         visible={options.visible ?? true}
       >
         {options.showHosts !== false &&
@@ -131,6 +133,13 @@ describe("AlphaPanelPool", () => {
     const panelElement = container.querySelector("[data-testid='test-panel']");
     expect(firstHost?.contains(panelContainer)).toBe(true);
     expect(load).toHaveBeenCalledTimes(1);
+    expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 });
+    expect(seenProps[seenProps.length - 1]?.vtSymbol).toBe("000001.SZSE");
+
+    await act(async () =>
+      renderPool(panels, registry, { mainSymbol: "600000.SSE" }),
+    );
+    expect(seenProps[seenProps.length - 1]?.vtSymbol).toBe("600000.SSE");
     expect(lifecycle).toEqual({ mounts: 1, unmounts: 0 });
 
     await act(async () =>
@@ -194,7 +203,12 @@ describe("AlphaPanelPool", () => {
 
     await act(async () =>
       root?.render(
-        <AlphaPanelPool panels={[]} registry={registry} visible>
+        <AlphaPanelPool
+          panels={[]}
+          registry={registry}
+          mainSymbol="000001.SZSE"
+          visible
+        >
           <AlphaPanelHost
             ref={hostRef}
             panelId="panel-1"

@@ -5,6 +5,7 @@
 
 import { cn } from "@/lib/utils";
 import type { AlphaPanelInstance } from "@/modules/alpha/workstation/model";
+import { resolveAlphaPanelSymbol } from "@/modules/alpha/workstation/state";
 import type { AlphaPanelRegistry } from "@/modules/alpha/workstation/registry";
 import {
   Component,
@@ -35,6 +36,7 @@ const AlphaPanelMountContext = createContext<MountRegistry | null>(null);
 type AlphaPanelPoolProps = {
   panels: readonly AlphaPanelInstance[];
   registry: AlphaPanelRegistry;
+  mainSymbol: string;
   visible: boolean;
   children: ReactNode;
 };
@@ -100,10 +102,16 @@ function AlphaPanelStatus({ state, panelType }: PanelStatusProps) {
 type PooledPanelProps = {
   panel: AlphaPanelInstance;
   registry: AlphaPanelRegistry;
+  mainSymbol: string;
   visible: boolean;
 };
 
-function PooledPanel({ panel, registry, visible }: PooledPanelProps) {
+function PooledPanel({
+  panel,
+  registry,
+  mainSymbol,
+  visible,
+}: PooledPanelProps) {
   const mounts = useContext(AlphaPanelMountContext);
   if (!mounts) {
     throw new Error("PooledPanel must be rendered inside AlphaPanelPool");
@@ -115,6 +123,7 @@ function PooledPanel({ panel, registry, visible }: PooledPanelProps) {
     return element;
   });
   const descriptor = registry.get(panel.type);
+  const vtSymbol = resolveAlphaPanelSymbol(panel.binding, mainSymbol);
 
   useLayoutEffect(() => {
     mounts.registerContainer(panel.id, container);
@@ -134,13 +143,13 @@ function PooledPanel({ panel, registry, visible }: PooledPanelProps) {
   return createPortal(
     descriptor ? (
       <AlphaPanelErrorBoundary
-        resetToken={JSON.stringify([panel.type, panel.binding, panel.config])}
+        resetToken={JSON.stringify([panel.type, vtSymbol, panel.config])}
         fallback={<AlphaPanelStatus state="failed" />}
       >
         <Suspense fallback={<AlphaPanelStatus state="loading" />}>
           <descriptor.Component
             panelId={panel.id}
-            binding={panel.binding}
+            vtSymbol={vtSymbol}
             config={panel.config}
             visible={visible}
           />
@@ -161,6 +170,7 @@ function PooledPanel({ panel, registry, visible }: PooledPanelProps) {
 export function AlphaPanelPool({
   panels,
   registry,
+  mainSymbol,
   visible,
   children,
 }: AlphaPanelPoolProps) {
@@ -201,6 +211,7 @@ export function AlphaPanelPool({
           key={panel.id}
           panel={panel}
           registry={registry}
+          mainSymbol={mainSymbol}
           visible={visible}
         />
       ))}

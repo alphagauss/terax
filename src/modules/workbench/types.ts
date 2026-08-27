@@ -86,6 +86,10 @@ export type AlphaSettingsTab = TabBase & {
   kind: "alpha-settings";
 };
 
+type AlphaWorkstationTab = TabBase & {
+  kind: "alpha-workstation";
+};
+
 type AlphaDataTab = TabBase & {
   kind: "alpha-data";
 };
@@ -105,6 +109,7 @@ export type Tab =
   | GitCommitFileDiffTab
   | AlphaDataTab
   | AlphaBacktestsTab
+  | AlphaWorkstationTab
   | AlphaSettingsTab;
 
 export type TabPatch = Partial<{

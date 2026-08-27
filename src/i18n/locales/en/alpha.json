@@ -1,6 +1,7 @@
 {
   "sidebar": {
     "title": "Alpha",
+    "workstation": "Workstation",
     "data": "Data",
     "backtests": "Backtests",
     "settings": "Settings"
@@ -12,10 +13,33 @@
     "unavailable": "Unavailable"
   },
   "workstation": {
+    "mainSymbol": "Main symbol",
+    "invalidSymbol": "Use SYMBOL.EXCHANGE",
+    "lock": "Lock layout",
+    "unlock": "Unlock layout",
+    "templates": {
+      "action": "Layout templates",
+      "singleChart": {
+        "title": "Single chart",
+        "description": "One full-width chart following the main symbol"
+      },
+      "comparison": {
+        "title": "Chart comparison",
+        "description": "Main-symbol chart beside a pinned chart"
+      }
+    },
+    "panels": {
+      "chart": "Chart"
+    },
     "panel": {
       "loading": "Loading panel...",
       "unknown": "Unavailable panel type: {{type}}",
-      "failed": "This panel could not be loaded."
+      "failed": "This panel could not be loaded.",
+      "follow": "Follow",
+      "pinned": "Pinned",
+      "pinCurrent": "Pin to {{symbol}}",
+      "restoreFollow": "Resume following the main symbol",
+      "remove": "Remove panel"
     }
   },
   "data": {

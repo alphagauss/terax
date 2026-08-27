@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
 import { AlphaDataPage } from "@/modules/alpha/pages/AlphaDataPageLazy";
 import { AlphaSettingsPage } from "@/modules/alpha/pages/AlphaSettingsPageLazy";
+import { AlphaWorkstationPage } from "@/modules/alpha/pages/AlphaWorkstationPageLazy";
 import {
   AiDiffView,
   type EditorPaneHandle,
@@ -110,6 +111,7 @@ export function WorkbenchRegisteredView({
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
         tab.kind !== "terminal" &&
           tab.kind !== "git-history" &&
+          tab.kind !== "alpha-workstation" &&
           tab.kind !== "alpha-data" &&
           tab.kind !== "alpha-backtests" &&
           tab.kind !== "alpha-settings" &&
@@ -172,6 +174,9 @@ export function WorkbenchRegisteredView({
           onOpenCommitFile={services.onOpenCommitFile}
           onFindHandle={services.onGitHistoryFindHandle}
         />
+      )}
+      {tab.kind === "alpha-workstation" && (
+        <AlphaWorkstationPage visible={visible} />
       )}
       {tab.kind === "alpha-data" && <AlphaDataPage visible={visible} />}
       {tab.kind === "alpha-backtests" && (

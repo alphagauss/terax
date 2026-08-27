@@ -11,10 +11,7 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import {
-  canConsumeLaunchFiles,
-  consumeLaunchFiles,
-} from "@/lib/launchDir";
+import { canConsumeLaunchFiles, consumeLaunchFiles } from "@/lib/launchDir";
 import { flushSharedStoreWrites } from "@/lib/sharedStore";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -39,6 +36,7 @@ import { useApprovalStore } from "@/modules/ai/store/approvalStore";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 import { AlphaSidebar } from "@/modules/alpha/components/AlphaSidebar";
 import { useAlphaShowInRemote } from "@/modules/alpha/preferences";
+import { flushAlphaWorkstationWrites } from "@/modules/alpha/workstation/store";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
@@ -206,6 +204,7 @@ export default function App() {
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,
+    openAlphaWorkstationTab,
     openAlphaDataTab,
     openAlphaBacktestsTab,
     openAlphaSettingsTab,
@@ -526,6 +525,7 @@ export default function App() {
     const stateResults = await Promise.allSettled([
       flushSpacePersistence(),
       flushCompletedSessionRuns(),
+      flushAlphaWorkstationWrites(),
     ]);
     const storeResults = await Promise.allSettled([
       flushSharedStoreWrites(),
@@ -563,6 +563,7 @@ export default function App() {
     if (alphaAvailable) return;
     for (const tab of tabsRef.current) {
       if (
+        tab.kind === "alpha-workstation" ||
         tab.kind === "alpha-data" ||
         tab.kind === "alpha-backtests" ||
         tab.kind === "alpha-settings"
@@ -1828,6 +1829,7 @@ export default function App() {
             id: "alpha" as const,
             content: (
               <AlphaSidebar
+                onOpenWorkstation={openAlphaWorkstationTab}
                 onOpenData={openAlphaDataTab}
                 onOpenBacktests={openAlphaBacktestsTab}
                 onOpenSettings={openAlphaSettingsTab}

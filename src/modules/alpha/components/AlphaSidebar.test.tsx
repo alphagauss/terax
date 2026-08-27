@@ -25,6 +25,7 @@ describe("AlphaSidebar", () => {
   });
 
   it("opens each Alpha page without forwarding the click event", async () => {
+    const onOpenWorkstation = vi.fn();
     const onOpenData = vi.fn();
     const onOpenBacktests = vi.fn();
     const onOpenSettings = vi.fn();
@@ -34,6 +35,7 @@ describe("AlphaSidebar", () => {
     await act(async () => {
       root?.render(
         createElement(AlphaSidebar, {
+          onOpenWorkstation,
           onOpenData,
           onOpenBacktests,
           onOpenSettings,
@@ -42,11 +44,12 @@ describe("AlphaSidebar", () => {
     });
 
     const buttons = container.querySelectorAll("button");
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(4);
     buttons.forEach((button) => {
       button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
+    expect(onOpenWorkstation).toHaveBeenCalledWith();
     expect(onOpenData).toHaveBeenCalledWith();
     expect(onOpenBacktests).toHaveBeenCalledWith();
     expect(onOpenSettings).toHaveBeenCalledWith();

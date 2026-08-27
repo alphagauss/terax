@@ -4,6 +4,7 @@
  */
 
 export const ALPHA_WORKSTATION_SCHEMA_VERSION = 1;
+export const ALPHA_WORKSTATION_STATE_SCHEMA_VERSION = 1;
 export const ALPHA_WORKSTATION_GRID_COLUMNS = 24;
 
 export type AlphaJsonValue =
@@ -51,6 +52,13 @@ export type AlphaWorkstationLayout = {
   grid: AlphaGridItem[];
 };
 
+export type AlphaWorkstationState = {
+  schemaVersion: typeof ALPHA_WORKSTATION_STATE_SCHEMA_VERSION;
+  mainSymbol: string;
+  locked: boolean;
+  layout: AlphaWorkstationLayout;
+};
+
 export type AlphaPanelSize = {
   w: number;
   h: number;
@@ -60,7 +68,13 @@ export type AlphaPanelSize = {
 
 export type AlphaPanelProps = {
   panelId: string;
-  binding: AlphaSymbolBinding;
+  vtSymbol: string;
   config: AlphaPanelConfig;
   visible: boolean;
 };
+
+/** 归一化并校验 Alpha 内部的 `代码.交易所` 标的格式。 */
+export function normalizeAlphaVtSymbol(value: string): string | null {
+  const normalized = value.trim().toUpperCase();
+  return /^[^.\s]+\.[^.\s]+$/.test(normalized) ? normalized : null;
+}

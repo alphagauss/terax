@@ -52,6 +52,7 @@ import {
   GitBranchIcon,
   GitCompareIcon,
   Globe02Icon,
+  GridIcon,
   IncognitoIcon,
   PencilEdit02Icon,
   PlusSignIcon,
@@ -868,6 +869,16 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={Database01Icon}
+        size={14}
+        strokeWidth={2}
+        className="shrink-0"
+      />
+    );
+  }
+  if (tab.kind === "alpha-workstation") {
+    return (
+      <HugeiconsIcon
+        icon={GridIcon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

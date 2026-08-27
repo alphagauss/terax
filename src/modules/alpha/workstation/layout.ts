@@ -6,6 +6,7 @@
 import {
   ALPHA_WORKSTATION_GRID_COLUMNS,
   ALPHA_WORKSTATION_SCHEMA_VERSION,
+  normalizeAlphaVtSymbol,
   type AlphaGridItem,
   type AlphaPanelInstance,
   type AlphaWorkstationLayout,
@@ -18,7 +19,10 @@ const symbolBindingSchema = z.discriminatedUnion("mode", [
   z
     .object({
       mode: z.literal("pinned"),
-      vtSymbol: z.string().trim().min(1),
+      vtSymbol: z
+        .string()
+        .transform((value) => normalizeAlphaVtSymbol(value))
+        .pipe(z.string()),
     })
     .strict(),
 ]);

@@ -681,6 +681,30 @@ html *::-webkit-scrollbar {
   transition: none;
 }
 
+/* Alpha 网格承载 Canvas 等昂贵子树，坐标变化不做几何过渡。 */
+.alpha-workstation-grid.react-grid-layout,
+.alpha-workstation-grid .react-grid-item {
+  transition: none;
+}
+
+.alpha-workstation-grid .react-grid-placeholder {
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  opacity: 1;
+}
+
+.alpha-workstation-grid .react-grid-item.react-draggable-dragging,
+.alpha-workstation-grid .react-grid-item.resizing {
+  z-index: 30;
+  opacity: 0.94;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 32%);
+}
+
+.alpha-workstation-grid .react-resizable-handle::after {
+  border-color: var(--muted-foreground);
+}
+
 /* Text shimmer loop (replaces motion background-position animation). Driven by
  * --shimmer-duration / --shimmer-spread set inline per instance. */
 @keyframes terax-shimmer {

@@ -1,6 +1,7 @@
 {
   "sidebar": {
     "title": "Alpha",
+    "workstation": "工作台",
     "data": "数据管理",
     "backtests": "回测",
     "settings": "设置"
@@ -12,10 +13,33 @@
     "unavailable": "暂无"
   },
   "workstation": {
+    "mainSymbol": "主标的",
+    "invalidSymbol": "请输入代码.交易所",
+    "lock": "锁定布局",
+    "unlock": "解锁布局",
+    "templates": {
+      "action": "布局模板",
+      "singleChart": {
+        "title": "单图分析",
+        "description": "一个跟随主标的的全宽行情图"
+      },
+      "comparison": {
+        "title": "双图对照",
+        "description": "主标的图与固定标的图并排"
+      }
+    },
+    "panels": {
+      "chart": "K 线图"
+    },
     "panel": {
       "loading": "正在加载面板...",
       "unknown": "不可用的面板类型：{{type}}",
-      "failed": "无法加载该面板。"
+      "failed": "无法加载该面板。",
+      "follow": "跟随",
+      "pinned": "固定",
+      "pinCurrent": "固定为 {{symbol}}",
+      "restoreFollow": "恢复跟随主标的",
+      "remove": "移除面板"
     }
   },
   "data": {

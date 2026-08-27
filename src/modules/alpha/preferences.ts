@@ -23,7 +23,7 @@ export function alphaShowInRemoteFromValues(
 }
 
 async function refreshCachedPreference(): Promise<void> {
-  const values = await readSharedStore("settings");
+  const values = await readSharedStore("alpha");
   cachedShowInRemoteEnvironments = alphaShowInRemoteFromValues(values);
   for (const listener of listeners) {
     listener(cachedShowInRemoteEnvironments);
@@ -46,7 +46,7 @@ export function getInitialAlphaShowInRemote(): boolean {
 
 /** 保存 Alpha 是否在 WSL 和 SSH 等非本地环境显示。 */
 export async function setAlphaShowInRemote(enabled: boolean): Promise<void> {
-  await setSharedStoreKey("settings", REMOTE_VISIBILITY_KEY, enabled);
+  await setSharedStoreKey("alpha", REMOTE_VISIBILITY_KEY, enabled);
   cachedShowInRemoteEnvironments = enabled;
   for (const listener of listeners) listener(enabled);
 }
@@ -59,7 +59,7 @@ export function useAlphaShowInRemote(): boolean {
     listeners.add(setEnabled);
     let dispose: (() => void) | undefined;
     let cancelled = false;
-    void onSharedStoreChange("settings", refreshCachedPreference).then(
+    void onSharedStoreChange("alpha", refreshCachedPreference).then(
       (unlisten) => {
         if (cancelled) unlisten();
         else dispose = unlisten;

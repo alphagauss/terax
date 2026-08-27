@@ -164,7 +164,7 @@ describe("Workbench Space serialization", () => {
     ]);
   });
 
-  it("persists Alpha data and backtest pages as runtime locators", () => {
+  it("persists Alpha workstation, data and backtest pages as runtime locators", () => {
     const current: WorkbenchState = {
       tabs: {
         1: {
@@ -179,14 +179,20 @@ describe("Workbench Space serialization", () => {
           spaceId: "default",
           title: "Alpha Backtests",
         },
+        3: {
+          id: 3,
+          kind: "alpha-workstation",
+          spaceId: "default",
+          title: "Alpha Workstation",
+        },
       },
       spaces: {
         default: {
-          root: { kind: "group", id: 3, groupId: 4 },
+          root: { kind: "group", id: 4, groupId: 5 },
           groups: {
-            4: { id: 4, tabIds: [1, 2], activeTabId: 2 },
+            5: { id: 5, tabIds: [1, 2, 3], activeTabId: 3 },
           },
-          activeGroupId: 4,
+          activeGroupId: 5,
         },
       },
     };
@@ -194,8 +200,12 @@ describe("Workbench Space serialization", () => {
     const serialized = serializeSpaceWorkbench(current, "default");
     expect(serialized).toEqual({
       kind: "group",
-      tabs: [{ kind: "alpha-data" }, { kind: "alpha-backtests" }],
-      activeTabIndex: 1,
+      tabs: [
+        { kind: "alpha-data" },
+        { kind: "alpha-backtests" },
+        { kind: "alpha-workstation" },
+      ],
+      activeTabIndex: 2,
       active: true,
     });
 
@@ -205,6 +215,7 @@ describe("Workbench Space serialization", () => {
     expect(restored?.tabs.map((tab) => tab.kind)).toEqual([
       "alpha-data",
       "alpha-backtests",
+      "alpha-workstation",
     ]);
   });
 
@@ -212,6 +223,7 @@ describe("Workbench Space serialization", () => {
     const serialized: SerializedWorkbenchNode = {
       kind: "group",
       tabs: [
+        { kind: "alpha-workstation" },
         { kind: "alpha-data" },
         { kind: "alpha-backtests" },
         { kind: "alpha-settings" },

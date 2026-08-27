@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SharedStoreName =
   | "settings"
+  | "alpha"
   | "ssh-profiles"
   | "custom-themes"
   | "ai-agents"
