@@ -1,6 +1,6 @@
 /**
  * 本文件实现工作区与历史提交的 Git diff 预览。
- * 两类资源使用独立生命周期，工作区 diff 跟随控制器 revision，提交 diff 仅按不可变资源身份加载。
+ * 两类资源使用独立生命周期，工作区 diff 按 revision 后台刷新并保留旧内容，提交 diff 仅按不可变资源身份加载。
  */
 
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,7 +12,7 @@ import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContex
 import { unifiedMergeView } from "@codemirror/merge";
 import type { Extension } from "@codemirror/state";
 import CodeMirror from "@uiw/react-codemirror";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
@@ -39,8 +39,9 @@ type LoadState =
       fallbackPatch: string;
       /** 需在 MergeView 挂载前解析，避免删除块部件缺少语法高亮。 */
       langExt: Extension | null;
+      sourceKey?: string;
     }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; sourceKey?: string };
 
 type CommitDiffResource = {
   repoRoot: string;
@@ -55,7 +56,12 @@ function errorMessage(error: unknown): string {
     : String(error);
 }
 
-/** 可见时读取最新工作区差异，隐藏期间只接收最新 revision。 */
+/** 生成工作区 diff 的稳定资源身份，不把仓库刷新次数混入资源本身。 */
+function workingSourceKey(source: GitDiffResource): string {
+  return `${source.repoRoot}\0${source.path}\0${source.side}\0${source.originalPath ?? ""}`;
+}
+
+/** 可见时按 revision 去重并后台刷新工作区差异，隐藏期间不发起读取。 */
 export function WorkingGitDiffPane({
   source,
   active,
@@ -68,18 +74,32 @@ export function WorkingGitDiffPane({
   const revision =
     repository.repo?.repoRoot === repoRoot ? repository.revision : 0;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const loadedRef = useRef<{ sourceKey: string; revision: number } | null>(
+    null,
+  );
+  const sourceKey = workingSourceKey(source);
 
   useEffect(() => {
-    void revision;
     if (!active) return;
+    if (
+      loadedRef.current?.sourceKey === sourceKey &&
+      loadedRef.current.revision === revision
+    ) {
+      return;
+    }
     let cancelled = false;
-    setState({ kind: "loading" });
+    const hasCurrentContent = loadedRef.current?.sourceKey === sourceKey;
+    if (!hasCurrentContent) {
+      loadedRef.current = null;
+      setState({ kind: "loading" });
+    }
     Promise.all([
       native.gitDiffContent(repoRoot, path, side, originalPath),
       resolveLanguage(path).catch(() => null),
     ])
       .then(([result, language]) => {
         if (cancelled) return;
+        loadedRef.current = { sourceKey, revision };
         setState({
           kind: "loaded",
           originalContent: result.originalContent,
@@ -87,18 +107,30 @@ export function WorkingGitDiffPane({
           isBinary: result.isBinary,
           fallbackPatch: result.fallbackPatch,
           langExt: language?.ext ?? null,
+          sourceKey,
         });
       })
       .catch((error) => {
-        if (!cancelled)
-          setState({ kind: "error", message: errorMessage(error) });
+        if (!cancelled && !hasCurrentContent) {
+          setState({
+            kind: "error",
+            message: errorMessage(error),
+            sourceKey,
+          });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [active, originalPath, path, repoRoot, revision, side]);
+  }, [active, originalPath, path, repoRoot, revision, side, sourceKey]);
 
-  return <DiffContent path={path} state={state} />;
+  const visibleState =
+    state.kind === "loaded" || state.kind === "error"
+      ? state.sourceKey === sourceKey
+        ? state
+        : { kind: "loading" as const }
+      : state;
+  return <DiffContent path={path} state={visibleState} />;
 }
 
 /** 按不可变提交资源身份读取一次历史差异。 */
