@@ -13,12 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  getAlphaBars,
   getAlphaDataOverview,
   getAlphaSecurities,
   type AlphaSecurity,
 } from "@/modules/alpha/api";
-import { AlphaFinancialChart } from "@/modules/alpha/components/AlphaFinancialChart";
+import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
 import {
   AlphaEmptyText,
   AlphaLoading,
@@ -99,12 +98,6 @@ function AlphaDataPageContent({ visible }: Props) {
     queryFn: () => getAlphaSecurities(securityQuery),
     enabled: visible,
   });
-  const bars = useQuery({
-    queryKey: ["alpha", "bars", selectedSymbol, "d", "forward"],
-    queryFn: () => getAlphaBars(selectedSymbol ?? ""),
-    enabled: visible && selectedSymbol !== null,
-  });
-
   useEffect(() => {
     if (
       selectedSymbol &&
@@ -140,7 +133,7 @@ function AlphaDataPageContent({ visible }: Props) {
       queryClient.setQueryData(alphaQueryKeys.dataOverview, freshOverview);
       await Promise.all([
         securities.refetch(),
-        selectedSymbol ? bars.refetch() : Promise.resolve(),
+        queryClient.invalidateQueries({ queryKey: alphaQueryKeys.bars }),
       ]);
     } catch (error) {
       setRefreshError(error);
@@ -305,19 +298,7 @@ function AlphaDataPageContent({ visible }: Props) {
             description={t("data.chart.description")}
           />
           <div className="mt-3 h-96">
-            {bars.isPending && selectedSymbol ? (
-              <AlphaLoading label={t("common.loading")} />
-            ) : bars.error ? (
-              <AlphaEmptyText>{String(bars.error)}</AlphaEmptyText>
-            ) : bars.data?.items.length ? (
-              <AlphaFinancialChart
-                bars={bars.data.items}
-                visible={visible}
-                ariaLabel={t("data.chart.aria", { symbol: selectedSymbol })}
-              />
-            ) : (
-              <AlphaEmptyText>{t("data.chart.empty")}</AlphaEmptyText>
-            )}
+            <MarketChartScene vtSymbol={selectedSymbol} visible={visible} />
           </div>
         </section>
       </div>

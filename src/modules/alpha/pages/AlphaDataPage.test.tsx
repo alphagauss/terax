@@ -14,13 +14,11 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 };
 
 const mocks = vi.hoisted(() => ({
-  getAlphaBars: vi.fn(),
   getAlphaDataOverview: vi.fn(),
   getAlphaSecurities: vi.fn(),
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
-  getAlphaBars: mocks.getAlphaBars,
   getAlphaDataOverview: mocks.getAlphaDataOverview,
   getAlphaSecurities: mocks.getAlphaSecurities,
 }));
@@ -30,8 +28,9 @@ vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
     children,
 }));
 
-vi.mock("@/modules/alpha/components/AlphaFinancialChart", () => ({
-  AlphaFinancialChart: () => createElement("div", null, "chart"),
+vi.mock("@/modules/alpha/chart/scenes/MarketChartScene", () => ({
+  MarketChartScene: ({ vtSymbol }: { vtSymbol: string | null }) =>
+    createElement("div", { "data-chart-symbol": vtSymbol ?? "" }, "chart"),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -94,7 +93,6 @@ describe("AlphaDataPage", () => {
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     clearAlphaQueryCache();
-    mocks.getAlphaBars.mockReset().mockResolvedValue({ items: [] });
     mocks.getAlphaDataOverview.mockReset().mockResolvedValue(overview);
     mocks.getAlphaSecurities.mockReset().mockResolvedValue({
       items: [security],
@@ -110,7 +108,7 @@ describe("AlphaDataPage", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  it("打开页面不读取行情，选择证券后才请求 K 线", async () => {
+  it("打开页面不选择行情，选择证券后把标的交给公共图表 scene", async () => {
     const container = document.createElement("div");
     root = createRoot(container);
 
@@ -125,7 +123,7 @@ describe("AlphaDataPage", () => {
     );
     expect(container.querySelector("select")).toBeNull();
     expect(container.querySelectorAll('[role="combobox"]')).toHaveLength(4);
-    expect(mocks.getAlphaBars).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-chart-symbol='']")).not.toBeNull();
 
     const symbolButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent === "000001.SZSE",
@@ -136,7 +134,9 @@ describe("AlphaDataPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(mocks.getAlphaBars).toHaveBeenCalledWith("000001.SZSE");
+    expect(
+      container.querySelector("[data-chart-symbol='000001.SZSE']"),
+    ).not.toBeNull();
   });
 
   it("搜索使用防抖服务端查询，手动刷新强制绕过概览缓存", async () => {

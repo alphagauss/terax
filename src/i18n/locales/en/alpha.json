@@ -59,9 +59,32 @@
     },
     "chart": {
       "title": "Daily bars",
-      "description": "Forward-adjusted daily candles and volume, up to 500 bars.",
+      "description": "Forward-adjusted daily candles and volume. Scroll left to load earlier history.",
       "aria": "Daily candlestick chart for {{symbol}}",
-      "empty": "Select a security with available daily bars."
+      "empty": "Select a security with available daily bars.",
+      "error": "Could not load market data.",
+      "retry": "Retry",
+      "loadingHistory": "Loading earlier history...",
+      "earliest": "Earliest data reached",
+      "historyRetry": "Retry earlier history",
+      "types": {
+        "candlestick": "Candles",
+        "ohlc": "OHLC",
+        "line": "Close line"
+      },
+      "legend": {
+        "open": "O",
+        "high": "H",
+        "low": "L",
+        "close": "C",
+        "change": "Change",
+        "volume": "Vol",
+        "amount": "Amt"
+      },
+      "status": {
+        "loading": "Loading market data...",
+        "empty": "No daily bars are available for this security."
+      }
     }
   },
   "backtests": {

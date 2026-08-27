@@ -1,4 +1,45 @@
-# Third-party notices for Remote SSH and file transfers
+# Third-party notices
+
+## OpenTerminalUI
+
+- Project: OpenTerminalUI, https://github.com/Hitheshkaranth/OpenTerminalUI
+- Reviewed revision: `fc16fd6`
+- Copyright: Copyright (c) 2026 OpenTerminalUI Contributors
+- License: MIT
+- Used as the main code reference for Alpha financial-chart series payloads,
+  guarded tail updates, and animation-frame batching.
+- Relevant Terax files: `src/modules/alpha/chart/lightweight/data.ts`,
+  `rafBatcher.ts`, and the public financial-chart controller and tests.
+- Modifications: replaced OpenTerminalUI market and store models with Terax
+  `MarketBar`, removed realtime, indicators, footprint, extended-session and
+  portfolio features, and separated the chart runtime from Alpha queries.
+
+MIT License
+
+Copyright (c) 2026 OpenTerminalUI Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+The shioaji-pro-app project was reviewed only for public behavior and
+architecture. No AGPL source was copied into Terax.
+
+## Remote SSH and file transfers
 
 The Remote SSH implementation in Terax was produced from the three reference
 projects listed below. The code was reorganized, reduced, and modified to fit

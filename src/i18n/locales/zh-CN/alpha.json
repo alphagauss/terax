@@ -59,9 +59,32 @@
     },
     "chart": {
       "title": "日 K 线",
-      "description": "前复权日 K 线与成交量，最多显示 500 根。",
+      "description": "前复权日 K 线与成交量，向左滚动可加载更早历史。",
       "aria": "{{symbol}} 的日 K 线图",
-      "empty": "请选择具有日线数据的证券。"
+      "empty": "请选择具有日线数据的证券。",
+      "error": "无法加载行情数据。",
+      "retry": "重试",
+      "loadingHistory": "正在加载更早历史...",
+      "earliest": "已到达最早数据",
+      "historyRetry": "重试加载更早历史",
+      "types": {
+        "candlestick": "蜡烛图",
+        "ohlc": "OHLC",
+        "line": "收盘线"
+      },
+      "legend": {
+        "open": "开",
+        "high": "高",
+        "low": "低",
+        "close": "收",
+        "change": "涨跌",
+        "volume": "量",
+        "amount": "额"
+      },
+      "status": {
+        "loading": "正在加载行情数据...",
+        "empty": "该证券没有可用的日线数据。"
+      }
     }
   },
   "backtests": {

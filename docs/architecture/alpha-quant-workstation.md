@@ -61,10 +61,11 @@ Terax Space / Workbench
 - 数据目录已经支持证券资料与行情覆盖的联合查询、服务端搜索与 Facet 过滤、分页、覆盖区间和全局摘要，数据页复用这些接口展示当前数据状态。
 - 后端已有证券、指数成分和日线同步任务，以及重叠区校验和异常报告基础；当前业务 API 只提供同步任务列表，尚未形成启动、重试、质量查看和失败恢复闭环。
 - 前端行情模型和归一化位于 `src/modules/alpha/market/`，明确区分无时区交易日和带时区绝对时间，并统一处理 OHLC 校验、顺序、去重和跨页合并。
-- 临时 K 线位于 [`AlphaFinancialChart.tsx`](../../src/modules/alpha/components/AlphaFinancialChart.tsx)，目前只在 [`AlphaDataPage.tsx`](../../src/modules/alpha/pages/AlphaDataPage.tsx) 的固定高度区域内使用。
-- 现有图表实例只在挂载时创建，日线使用 `BusinessDay`，成交量使用独立 pane，主题切换通过 `applyOptions()` 完成，页面隐藏时保留 Canvas。
+- 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、rAF 尺寸更新、十字线和 viewport 命令；React 外壳不拥有查询。
+- `MarketChartScene` 使用现有排他 `before` 游标执行左侧历史分页，仅在用户操作时间轴后请求；React Query 保持请求单飞和标的查询键隔离，停滞游标终止分页，跨页数据线性合并并补偿逻辑范围。数据页已经直接复用该公共图表，旧 `AlphaFinancialChart` 和兼容包装已删除。
+- 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，主题和图表类型切换只应用 options，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。工具栏、OHLC/成交量/成交额信息栏、加载、空数据、错误、最早数据和历史重试状态已经接入中英文文案。
 - `/bars` 同时支持 `start + end` 范围查询和基于排他 `before` 游标的有界历史查询。历史查询从最新分片向前执行倒序 `LIMIT`，返回升序数据、`has_more_before`、下一游标和实际范围；不同页面共享完整覆盖范围的复权锚点。
-- [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据，数据页仍只使用默认的日线、前复权和最近 500 根。图表当前只有整体 `setData()`，尚未接入左侧 viewport 加载、周期切换或实时增量。
+- [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入周期、复权切换或实时增量。
 - 当前 Alpha 页面包括数据、回测和设置，尚没有独立行情页、综合工作台、策略页、回测复盘页和模拟交易页。
 - Terax Workbench 已有递归分割树、稳定 tab ID 和 `WorkbenchViewPool`。移动、分割和隐藏页面不应重挂载其运行时实例。
 - 迁移时保留 `alphaBusinessDay()` 的时区不变量和测试，将其下沉到行情归一化模块。不要继续把新能力堆入现有临时组件。
@@ -362,7 +363,7 @@ Page or Panel
 
 典型用法：
 
-- 数据管理页使用紧凑 `FinancialChart`，显示选中证券的覆盖数据，不创建实时订阅。
+- 数据管理页通过 `MarketChartScene` 使用带基础工具栏和状态反馈的 `FinancialChartFrame`，显示选中证券的历史覆盖数据，不创建实时订阅。
 - 独立行情页使用完整 `FinancialChartFrame`，支持历史分页、周期、复权、导出和多 pane。
 - 回测复盘 scene 向相同图表注入成交标记、持仓区间和回放命令。
 - 模拟交易 scene 连接行情快照与增量，并注入虚拟订单、成交和持仓状态。
