@@ -11,6 +11,13 @@
     "loading": "Loading...",
     "unavailable": "Unavailable"
   },
+  "workstation": {
+    "panel": {
+      "loading": "Loading panel...",
+      "unknown": "Unavailable panel type: {{type}}",
+      "failed": "This panel could not be loaded."
+    }
+  },
   "data": {
     "title": "Data",
     "description": "Search local security profiles and market-data coverage, then preview daily bars on demand.",

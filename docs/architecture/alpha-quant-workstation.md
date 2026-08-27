@@ -64,6 +64,9 @@ Terax Space / Workbench
 - 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、rAF 尺寸更新、十字线和 viewport 命令；React 外壳不拥有查询。
 - `MarketChartScene` 使用现有排他 `before` 游标执行左侧历史分页，仅在用户操作时间轴后请求；React Query 保持请求单飞和标的查询键隔离，停滞游标终止分页，跨页数据线性合并并补偿逻辑范围。数据页已经直接复用该公共图表，旧 `AlphaFinancialChart` 和兼容包装已删除。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，主题和图表类型切换只应用 options，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。工具栏、OHLC/成交量/成交额信息栏、加载、空数据、错误、最早数据和历史重试状态已经接入中英文文案。
+- 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
+- Panel Registry 已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
+- `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。当前尚未注册正式业务面板，也尚未接入工作台页面和 24 列交互网格。
 - `/bars` 同时支持 `start + end` 范围查询和基于排他 `before` 游标的有界历史查询。历史查询从最新分片向前执行倒序 `LIMIT`，返回升序数据、`has_more_before`、下一游标和实际范围；不同页面共享完整覆盖范围的复权锚点。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入周期、复权切换或实时增量。
 - 当前 Alpha 页面包括数据、回测和设置，尚没有独立行情页、综合工作台、策略页、回测复盘页和模拟交易页。
@@ -221,7 +224,7 @@ src/modules/alpha/
 - `scenes/` 把公共图表连接到行情查询、回测结果或实时事件。
 - `panels/` 把 scene 放入工作台面板外壳，不反向污染公共组件。
 - `AlphaPanelGrid` 只处理逻辑网格和拖动结果，不认识具体行情或交易模型。
-- `AlphaPanelPool` 或等价的稳定挂载层保持昂贵面板实例。移动、缩放、自动重排和临时隐藏不得重建图表、查询或订阅；是否需要独立 Pool 由实施验证决定。
+- `AlphaPanelPool` 使用固定 DOM 容器和 portal 保持昂贵面板实例，`AlphaPanelHost` 只提供当前网格宿主。移动、缩放、自动重排、宿主替换和临时隐藏不得重建图表、查询或订阅。
 - 所有场景共享同一个行情归一化入口，不分别实现时间、精度和颜色转换。
 
 不要设计第二种渲染引擎接口。Controller 内部可以使用 Lightweight Charts 类型，业务模型、scene 和公共组件 props 不暴露这些类型即可。这里的隔离目标是保持业务边界清晰，不是支持运行时切换引擎。
@@ -233,9 +236,9 @@ src/modules/alpha/
 ```ts
 type AlphaPanelInstance = {
   id: string;
-  type: AlphaPanelType;
+  type: string;
   binding: AlphaSymbolBinding;
-  config: Record<string, unknown>;
+  config: AlphaPanelConfig;
 };
 
 type AlphaGridItem = {
@@ -259,7 +262,7 @@ type AlphaWorkstationLayout = {
 
 工作台加载时必须校验：
 
-- `schemaVersion` 可识别并可迁移。
+- `schemaVersion` 必须是当前可识别版本；首版拒绝未知版本，出现真实旧版本后再增加对应迁移。
 - panel ID 唯一，grid 与 panel 一一对应。
 - 类型存在于 registry，未知类型以可恢复占位面板显示或安全移除。
 - 坐标、尺寸和最小尺寸有限，横向范围位于 24 列内，面板互不重叠。
@@ -269,16 +272,16 @@ type AlphaWorkstationLayout = {
 ### Panel Registry
 
 ```ts
-type AlphaPanelDescriptor<TConfig> = {
+type AlphaPanelDescriptor = {
   type: string;
   titleKey: string;
   category: "market" | "research" | "backtest" | "trading" | "risk" | "tools";
   singleton: boolean;
   pinnable: boolean;
   defaultSize: { w: number; h: number; minW: number; minH: number };
-  createDefaultConfig(): TConfig;
-  validateConfig(value: unknown): TConfig;
-  load(): Promise<{ default: React.ComponentType<AlphaPanelProps<TConfig>> }>;
+  createDefaultConfig(): AlphaPanelConfig;
+  validateConfig(value: unknown): AlphaPanelConfig;
+  load(): Promise<{ default: React.ComponentType<AlphaPanelProps> }>;
 };
 ```
 
@@ -719,8 +722,8 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 - 拆分 `FinancialChartController`、公共组件、专业外壳和 scene。
 - 完成历史分页、viewport、状态、主题和导出。
-- 先用轻量占位面板完成 registry、Panel Chrome、PanelPool 和布局 schema。
-- 隔离验证 24 列 Alpha 内部网格，确认禁止重叠、碰撞重排、横向滚动、拖动结束持久化、隐藏恢复和 WebView 行为。
+- 先完成布局 schema、registry、PanelPool 和局部加载失败状态，不为验证基础设施注册虚构业务面板。
+- 接入 Panel Chrome 并隔离验证 24 列 Alpha 内部网格，确认禁止重叠、碰撞重排、横向滚动、拖动结束持久化、隐藏恢复和 WebView 行为。
 - 完成面板库、布局模板、默认可编辑与布局锁定、工作台主标的和 follow/pinned。
 - 数据管理页、独立行情页和工作台 Chart Panel 复用同一个公共图表。
 

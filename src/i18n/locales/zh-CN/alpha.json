@@ -11,6 +11,13 @@
     "loading": "加载中...",
     "unavailable": "暂无"
   },
+  "workstation": {
+    "panel": {
+      "loading": "正在加载面板...",
+      "unknown": "不可用的面板类型：{{type}}",
+      "failed": "无法加载该面板。"
+    }
+  },
   "data": {
     "title": "数据管理",
     "description": "搜索本地证券资料与行情覆盖，并按需预览日 K 线。",

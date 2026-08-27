@@ -5,21 +5,21 @@
 ## 当前状态
 
 - 当前阶段：阶段一，公共图表和工作台内核。
-- 当前任务：从 OpenTerminalUI 移植并裁剪成熟的 Lightweight Charts 图表内核，结合 shioaji-pro-app 的生命周期实践，替换 Terax 当前临时 K 线组件。已完成。
-- 下一任务：建立工作台布局协议、Panel Registry 和稳定面板挂载层。
+- 当前任务：建立工作台布局协议、Panel Registry 和稳定面板挂载层。已完成。
+- 下一任务：完成 24 列网格、Panel Chrome、布局模板和主标的 follow/pinned。
 - 阻塞：无。
 
 ## 当前任务
 
-目标是把成熟的参考实现转换为由 Terax 自己拥有的公共图表内核，为数据管理、工作台、回测复盘和模拟交易提供稳定基础。
+目标是先建立与具体网格和业务面板解耦的工作台内核，让后续面板在拖动、缩放、重排和页面隐藏时保持稳定身份与运行时实例。
 
-- 定向检索 OpenTerminalUI 和 shioaji-pro-app 的图表生命周期、历史回填、状态展示和测试，独立选择适合 Terax 的实践。
-- 移植并裁剪 OpenTerminalUI 的核心渲染、更新保护和 rAF 批处理，删除其市场、数据源、Store 和高级图表功能依赖。
-- 使用 `FinancialChartController` 管理 Lightweight Charts 实例和命令，公共组件不暴露 Alpha API response 或 Lightweight Charts 类型。
-- 接入左侧历史分页和 viewport prepend 补偿，保持主题切换、页面隐藏和标的切换时的实例与可见范围不变量。
-- 直接替换数据管理页的临时 `AlphaFinancialChart`，不保留兼容包装或冗余实现，并通过纯函数、Controller 和 React 测试锁定关键行为。
+- 定向检索 OpenTerminalUI Launchpad 与 shioaji-pro-app Workspace 的面板协议、registry、实例身份和布局校验实践。
+- 建立 `AlphaPanelInstance`、`AlphaGridItem` 和 `AlphaWorkstationLayout` 的版本化纯 JSON 协议，分离业务实例与网格几何。
+- 建立 descriptor 驱动的 Panel Registry，集中面板元数据、默认配置、配置校验和懒加载入口，不使用中央 JSX `switch`。
+- 复用 `WorkbenchViewPool` 的稳定容器与 portal 思路建立 Alpha 面板挂载层，宿主替换、重排和隐藏恢复不得重挂载面板。
+- 使用测试 descriptor 和宿主验证基础设施，不提前注册没有真实业务协议的面板，也不创建临时工作台 UI。
 
-完成标准：数据管理页使用新的公共图表内核；历史向左加载不改变用户正在观察的内容；主题、标的和页面可见性变化不会无故重建图表；旧临时组件被删除；后续工作台 Chart Panel 可以直接复用该组件。
+完成标准：布局输入能够锁定版本、ID、panel/grid 对应、24 列边界、尺寸、重叠、singleton 和配置不变量；registry 枚举不加载实现且同一类型复用稳定懒加载组件；宿主移动、替换、隐藏和恢复只移动面板 DOM 容器，只有删除面板才卸载实例。
 
 ## 当前任务方案
 
@@ -27,35 +27,35 @@
 
 ### 目标与范围
 
-- 以 OpenTerminalUI 的 MIT 图表实现为主要代码参考，移植适合 Terax 行情模型的渲染、更新和调度逻辑。
-- 以 shioaji-pro-app 的图表行为为补充参考，独立实现请求隔离、历史分页、viewport 保持和标的切换保护。
-- 首期覆盖蜡烛图、OHLC Bar、收盘线、成交量 pane、十字线信息、主题、尺寸、历史分页和完整状态展示。
-- 不实现实时行情、指标、绘图、多图同步、Footprint、下单或工作台网格。
-- Alpha 尚处开发阶段，不保留旧组件兼容层、迁移分支或无调用方的扩展抽象。
+- 以 shioaji-pro-app 的 `blocks + layout` 分离和集中 metadata 为产品结构参考，以 OpenTerminalUI 的懒加载 registry 与测试边界为补充参考。
+- 建立 Terax 自有的 `schemaVersion: 1` 布局协议，只保存可序列化面板状态和 24 列逻辑坐标，不保存 React、DOM、Controller、Query 或连接实例。
+- 未知面板类型保留为可恢复占位状态；首版拒绝无法识别的 schema 版本，不提前建立没有真实旧版本的迁移流水线。
+- 稳定挂载层只拥有面板 React 生命周期和宿主连接，不认识行情查询、工作台持久化或具体网格实现。
+- 不实现 24 列拖拽、Panel Chrome、面板库、模板、持久化、标的联动、独立行情页或正式工作台业务面板。
 
 ### 实施步骤
 
-1. 提取 Terax 行情到 Lightweight Charts series 数据的纯转换与尾部更新判断，并移植相关 rAF 批处理实践。
-2. 建立 `FinancialChartController` 和公共 `FinancialChart`，管理单实例生命周期、series、主题、尺寸、十字线和 viewport 命令。
-3. 建立数据页行情 scene，使用现有排他游标 API 执行左侧历史单飞加载、跨页合并和旧请求隔离。
-4. 用公共图表直接替换 `AlphaFinancialChart`，补齐工具栏、信息栏、状态覆盖层和中英文文案。
-5. 删除旧临时组件及其冗余测试，更新长期架构中的当前 Terax 基线。
+1. 定义面板实例、标的绑定、网格项、布局和 JSON 配置模型。
+2. 实现布局结构与语义校验，覆盖 panel/grid 一一对应、边界、最小尺寸、重叠、singleton、未知类型和 descriptor 配置校验。
+3. 实现 descriptor 注册和查找，创建并缓存每种面板的懒加载组件身份。
+4. 实现稳定面板池，通过固定 DOM 容器和 portal 连接网格宿主，提供局部 loading、未知类型和加载失败状态。
+5. 使用测试面板验证懒加载、配置传递、宿主移动、宿主替换、隐藏恢复和显式删除的生命周期。
 
 ### 验证标准
 
-- 纯函数测试覆盖时间转换、series 数据、尾部判断和 viewport prepend 补偿。
-- Controller 测试覆盖单实例、主题更新、尺寸批处理、历史 prepend 和销毁清理。
-- React 测试覆盖数据页按需加载、左侧分页、状态展示和旧请求隔离。
+- 纯函数测试覆盖有效布局和各类结构、几何、singleton 与配置错误。
+- Registry 测试覆盖重复类型拒绝、元数据枚举不加载实现和懒加载组件身份稳定。
+- React 测试覆盖未知类型、面板级错误隔离和宿主移动、替换、隐藏、恢复、删除时的挂载不变量。
 - 运行 `pnpm lint`、`pnpm check-types` 和相关 `pnpm test`。
-- 在真实 Tauri WebView 中使用同一组测量复验 Canvas、ResizeObserver、左侧加载和 viewport 保持。
+- 本任务不接入真实网格、Canvas、ResizeObserver 或 Pointer Events，静态检查和 React DOM 生命周期测试足以验证当前边界；真实 Tauri WebView 验证留到下一项 24 列网格任务。
 
 ### 执行结果
 
-- 公共图表已经支持蜡烛图、OHLC Bar、收盘线、成交量 pane、十字线信息、主题、rAF 尺寸更新、国际化状态反馈和初次加载重试。
-- 数据页已经通过 `MarketChartScene` 使用排他游标加载更早历史，仅在用户操作时间轴后发起请求；跨页合并为线性复杂度，停滞游标会终止分页，旧查询按标的键隔离，历史 prepend 通过逻辑索引补偿保持 viewport。
-- 旧 `AlphaFinancialChart` 及其测试已删除，没有保留兼容层；OpenTerminalUI 的 MIT 归属已写入 `THIRD_PARTY_NOTICES.md`。
-- `pnpm lint`、`pnpm check-types` 和完整 `pnpm test` 通过，共 210 个测试文件、1,070 项测试。
-- 真实 Tauri WebView 使用本机 Alpha 数据完成复验：新标的静置时保持 500 根，首次拖动后加载到 1,000 根，继续拖动后加载到 1,500 根；类型切换、页面隐藏和恢复、历史加载时 Canvas 身份保持不变，十字线离开后恢复最新行情，CDP 未捕获运行时异常。
+- 已新增 `src/modules/alpha/workstation/`，布局协议固定分离 panel 状态和 24 列 grid 几何，配置只接受纯 JSON；未知 schema 版本直接拒绝，未建立空迁移框架。
+- 布局解析已覆盖 ID 唯一、panel/grid 一一对应、边界、descriptor 最小尺寸、重叠、singleton、标的绑定和配置校验；未知 panel type 保留给挂载层显示占位状态。
+- Panel Registry 在注册时缓存每种类型的 `React.lazy` 组件身份，读取面板 metadata 不执行 loader；descriptor 标识符存在首尾空白时直接拒绝，避免与布局归一化后的类型不一致；没有提前注册虚构业务面板。
+- `AlphaPanelPool` 和 `AlphaPanelHost` 通过固定 DOM 容器、portal 和 ref 注册保持实例，宿主替换、暂时消失、排序、隐藏和恢复均不重挂载；显式删除清理容器，单个 loader 失败不会影响其他面板。宿主会向后续网格转发 DOM ref、样式、类名和指针事件。
+- 新增 3 个测试文件、16 项测试；`pnpm lint`、`pnpm check-types` 和完整 `pnpm test` 通过，完整测试为 213 个测试文件、1,086 项测试。lint 保留 25 个既有 warning 和 2 个既有 info，本次文件没有诊断。
 
 ## 外部参考规则
 
@@ -73,7 +73,7 @@
 ### 阶段一：公共图表和工作台内核
 
 - [x] 移植并裁剪公共金融图表内核，替换临时 K 线组件。
-- [ ] 建立工作台布局协议、Panel Registry 和稳定面板挂载层。
+- [x] 建立工作台布局协议、Panel Registry 和稳定面板挂载层。
 - [ ] 完成 24 列网格、Panel Chrome、布局模板和主标的 follow/pinned。
 - [ ] 让数据页、独立行情页和工作台 Chart Panel 复用同一个公共图表。
 
