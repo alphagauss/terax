@@ -29,7 +29,7 @@ Terax Space / Workbench
   Alpha 综合工作台
     工作台工具栏
     布局模板与面板库
-    Alpha Panel Grid
+    Alpha 面板网格（Panel Grid）
       证券列表
       K 线图
       行情快照
@@ -46,14 +46,52 @@ Terax Space / Workbench
 - Terax 自己拥有行情数据协议、React 组件 API、工作台协议、工具栏、主题、状态、持久化和场景适配层。
 - 同一个公共 K 线组件用于数据管理、独立行情、多图、回测复盘和模拟交易页面，不为每个页面复制图表实现。
 - 公共图表组件不直接请求 Alpha API，不认识回测 ID、模拟账户、工作台面板或 Workbench 标签。
-- 页面和工作台面板通过薄场景适配层连接查询、回测标记、实时订阅和模拟交易状态。
+- 普通页面和工作台面板通过业务场景组件（Scene）连接查询、回测标记、实时订阅和模拟交易状态。
 - Terax 顶层 SplitView 继续只使用 `react-resizable-panels`。Alpha 页面内部的自由面板网格是不同层级的布局能力，不替换顶层 SplitView。
-- Alpha Panel Grid 固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
+- Alpha 面板网格（Panel Grid）固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
 - 首期标的联动只提供工作台主标的跟随和单面板固定。多联动组、时间范围同步和十字线同步按真实多图需求渐进增加。
 - Alpha 不自行实现原生窗口框架。轻量业务视图复用通用辅助窗口，完整工作页的复制复用 Workspace 跨窗口能力。
 - 工作台、图表、绘图和指标状态都使用可版本化 JSON 表达，不持久化 React、Canvas、Controller、Query 或连接实例。
 - Alpha FastAPI 是量化领域和权威数据边界。Rust 只负责生命周期、凭据注入和通用代理，不复制行情、策略、订单或风险领域模型。
 - 当前实施顺序优先建设 Terax 自有的公共金融图表和工作台内核，再补齐数据同步恢复与后续领域协议，不一次引入所有面板、指标和绘图工具。
+
+## 复用层次与术语
+
+本节既用于统一文档表述，也是 Codex 和开发者新增 Alpha 页面、工作台面板或图表能力前必须检查的复用约束。目标是让同一业务内容只有一份实现，避免普通页面和工作台各自维护请求、状态、数据转换或图表代码。
+
+| 代码术语 | 统一中文名称 | 职责 |
+| --- | --- | --- |
+| `Controller` | 控制器 | 管理 Lightweight Charts 实例和命令，不请求业务数据。 |
+| 公共 React 组件 | 公共内容组件 | 渲染可复用的图表、表格或其他业务内容，不认识具体页面和工作台布局。 |
+| `Scene` | 业务场景组件 | 把公共内容组件连接到行情、回测、实时事件或模拟交易数据，可被普通页面和工作台面板共同使用。 |
+| `Panel` | 工作台面板 | 对业务场景组件进行薄包装，补充标的绑定、可见性和面板配置，使其能够进入工作台。 |
+| `Panel Chrome` | 面板控制栏 | 提供标题、拖动、跟随或固定、删除等工作台操作，不包含业务内容。 |
+| `Panel Grid` | 面板网格 | 使用 24 列坐标摆放、移动和缩放工作台面板，不认识行情、回测或交易模型。 |
+
+图表当前和后续应保持以下复用关系：
+
+```text
+公共图表组件
+  ↓ 连接具体业务数据
+业务场景组件（Scene）
+  ├─ 普通页面直接使用
+  └─ 工作台面板（Panel）薄包装
+       ↓
+     24 列面板网格（Panel Grid）
+```
+
+例如，`MarketChartScene` 是行情图表场景组件。数据页和独立行情页直接使用它；`AlphaChartPanel` 只负责把它包装成工作台图表面板，再交给 `AlphaPanelGrid` 摆放。三处共用同一套图表和行情查询逻辑，但各自拥有适合自身尺寸和交互的运行中图表实例，不跨页面搬运同一个 DOM 或 Canvas。
+
+新增或修改 Alpha 功能前必须遵守以下检查顺序：
+
+1. 先检查现有 `chart/`、`scenes/`、业务组件和工作台面板注册表，确认是否已经存在可复用实现。
+2. 普通页面需要已有业务内容时直接复用业务场景组件，不为页面复制请求、缓存、归一化或渲染逻辑。
+3. 工作台需要已有业务内容时新增或复用薄面板包装，不在面板中建立第二套业务实现。
+4. 只有内容确实需要进入可拖拽工作台时才使用工作台面板；普通页面不依赖面板控制栏、面板网格、工作台模板或工作台持久状态。
+5. 第二个独立页面需要可拖拽布局时可以复用面板网格和稳定挂载能力，但必须拥有自己的模板和持久状态键，不能误用综合工作台的布局状态。
+6. 如果没有第二个真实使用方，也没有长期架构明确要求复用，则不为了假设中的需求提前增加公共抽象。
+
+轻量辅助窗口也可以复用业务场景组件，但辅助窗口拥有独立的 WebView 和 React 根。它应通过封闭注册的辅助页面薄包装重新创建自己的业务内容实例，复用同一个 Alpha 后端和共享磁盘配置，但不与主窗口共享内存查询缓存、DOM、Canvas 或 Controller。面板控制栏、面板网格和综合工作台持久状态不得成为轻量辅助窗口的默认依赖；完整工作台需要进入另一个窗口时使用完整 Workspace 窗口能力。
 
 ## 当前 Terax 基线
 
@@ -62,13 +100,13 @@ Terax Space / Workbench
 - 后端已有证券、指数成分和日线同步任务，以及重叠区校验和异常报告基础；当前业务 API 只提供同步任务列表，尚未形成启动、重试、质量查看和失败恢复闭环。
 - 前端行情模型和归一化位于 `src/modules/alpha/market/`，明确区分无时区交易日和带时区绝对时间，并统一处理 OHLC 校验、顺序、去重和跨页合并。
 - 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、rAF 尺寸更新、十字线和 viewport 命令；React 外壳不拥有查询。
-- `MarketChartScene` 使用现有排他 `before` 游标执行左侧历史分页，仅在用户操作时间轴后请求；React Query 保持请求单飞和标的查询键隔离，停滞游标终止分页，跨页数据线性合并并补偿逻辑范围。数据页已经直接复用该公共图表，旧 `AlphaFinancialChart` 和兼容包装已删除。
+- 行情图表场景组件 `MarketChartScene` 使用现有排他 `before` 游标执行左侧历史分页，仅在用户操作时间轴后请求；React Query 保持请求单飞和标的查询键隔离，停滞游标终止分页，跨页数据线性合并并补偿逻辑范围。数据页已经直接复用该业务场景组件和公共图表，旧 `AlphaFinancialChart` 和兼容包装已删除。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，主题和图表类型切换只应用 options，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。工具栏、OHLC/成交量/成交额信息栏、加载、空数据、错误、最早数据和历史重试状态已经接入中英文文案。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
-- Panel Registry 已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
+- 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。
 - Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
-- 工作台首批只注册复用现有 `MarketChartScene` 的 Chart Panel，内置单图和双图模板每次生成新的布局与 panel ID。Panel Chrome 统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
+- 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），内置单图和双图模板每次生成新的布局与 panel ID。面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
 - `AlphaWorkstationState` 把主标的、锁定和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
 - `/bars` 同时支持 `start + end` 范围查询和基于排他 `before` 游标的有界历史查询。历史查询从最新分片向前执行倒序 `LIMIT`，返回升序数据、`has_more_before`、下一游标和实际范围；不同页面共享完整覆盖范围的复权锚点。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入周期、复权切换或实时增量。
@@ -94,7 +132,7 @@ Terax 使用 Apache-2.0。`shioaji-pro-app` 是 AGPL-3.0-only，在没有额外�
 | 能力 | 首选参考 | 补充参考 | Terax 的采用方式 |
 | --- | --- | --- | --- |
 | 综合面板工作台 | OpenTerminalUI Launchpad | shioaji-pro-app Workspace | 自有版本化面板协议、懒加载 registry、网格布局和稳定 PanelPool |
-| 终端密度与交互 | shioaji-pro-app | OpenTerminalUI | 吸收 24 列网格、Panel Chrome、布局模板、主标的跟随和固定交互 |
+| 终端密度与交互 | shioaji-pro-app | OpenTerminalUI | 吸收 24 列网格、面板控制栏、布局模板、主标的跟随和固定交互 |
 | 专业 K 线生命周期 | shioaji-pro-app | OpenTerminalUI | Lightweight Charts Controller 与 React 外壳分离 |
 | 标的联动 | shioaji-pro-app | OpenTerminalUI | 首期使用工作台主标的与 per-panel pin，多联动组按需扩展 |
 | 多图同步 | OpenTerminalUI | shioaji-pro-app | 时间范围和十字线使用独立开关与轻量运行时事件，不与标的绑定混合 |
@@ -224,13 +262,13 @@ src/modules/alpha/
 - `FinancialChartController` 拥有图表实例和命令，不拥有 HTTP、WebSocket 或模拟账户连接。
 - `FinancialChart` 只负责 Canvas 宿主、生命周期和受控输入。
 - `FinancialChartFrame` 负责专业工具栏、legend 和状态覆盖层。
-- `scenes/` 把公共图表连接到行情查询、回测结果或实时事件。
-- `panels/` 把 scene 放入工作台面板外壳，不反向污染公共组件。
+- `scenes/` 存放业务场景组件，把公共图表连接到行情查询、回测结果或实时事件。
+- `panels/` 存放工作台面板，把业务场景组件放入工作台薄外壳，不反向污染公共组件。
 - `AlphaPanelGrid` 只处理逻辑网格和拖动结果，不认识具体行情或交易模型。
 - `AlphaPanelPool` 使用固定 DOM 容器和 portal 保持昂贵面板实例，`AlphaPanelHost` 只提供当前网格宿主。移动、缩放、自动重排、宿主替换和临时隐藏不得重建图表、查询或订阅。
 - 所有场景共享同一个行情归一化入口，不分别实现时间、精度和颜色转换。
 
-不要设计第二种渲染引擎接口。Controller 内部可以使用 Lightweight Charts 类型，业务模型、scene 和公共组件 props 不暴露这些类型即可。这里的隔离目标是保持业务边界清晰，不是支持运行时切换引擎。
+不要设计第二种渲染引擎接口。Controller 内部可以使用 Lightweight Charts 类型，业务模型、业务场景组件和公共组件 props 不暴露这些类型即可。这里的隔离目标是保持业务边界清晰，不是支持运行时切换引擎。
 
 ## 工作台公共协议
 
@@ -360,10 +398,10 @@ FinancialChart
 FinancialChartFrame
   工具栏、legend、状态和扩展插槽
 
-Scene Adapter
-  Market / Backtest / Paper Trading 的查询和事件连接
+业务场景组件（Scene）
+  行情 / 回测 / 模拟交易的查询和事件连接
 
-Page or Panel
+普通页面或工作台面板（Panel）
   页面导航、工作台绑定和周边组件
 ```
 
@@ -371,9 +409,9 @@ Page or Panel
 
 - 数据管理页通过 `MarketChartScene` 使用带基础工具栏和状态反馈的 `FinancialChartFrame`，显示选中证券的历史覆盖数据，不创建实时订阅。
 - 独立行情页使用完整 `FinancialChartFrame`，支持历史分页、周期、复权、导出和多 pane。
-- 回测复盘 scene 向相同图表注入成交标记、持仓区间和回放命令。
-- 模拟交易 scene 连接行情快照与增量，并注入虚拟订单、成交和持仓状态。
-- 工作台 Chart Panel 只负责 binding、尺寸和 Panel Chrome，内部仍复用对应 scene。
+- 回测复盘场景组件向相同图表注入成交标记、持仓区间和回放命令。
+- 模拟交易场景组件连接行情快照与增量，并注入虚拟订单、成交和持仓状态。
+- 工作台图表面板只负责标的绑定、尺寸和面板控制栏，内部仍复用对应业务场景组件。
 
 公共组件 props 不暴露 Alpha API response、回测 ID、订单 SDK 或 Lightweight Charts 类型。
 
@@ -643,15 +681,15 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### 工作台
 
-- Panel Grid 固定使用 24 列逻辑坐标，禁止重叠，碰撞时自动重排并纵向紧凑排列。
+- 面板网格固定使用 24 列逻辑坐标，禁止重叠，碰撞时自动重排并纵向紧凑排列。
 - 窄窗口通过横向滚动保留逻辑布局，不因容器宽度变化改写持久化坐标。
 - 布局默认可编辑；工作台级布局锁定只影响移动和缩放，不影响标的跟随或固定。
 - 面板 ID 在移动、缩放和模板内保持稳定。
 - 拖动和缩放过程不更新业务 React 状态，不写 store。
-- Panel Grid 不直接拥有行情查询或订阅。
+- 面板网格不直接拥有行情查询或订阅。
 - 同一数据键的查询、实时连接和计算结果尽量复用。
 - 面板离屏或页面隐藏时暂停 resize、轮询和非必要绘制，恢复后只同步最终尺寸；可见性优化不得销毁 Controller 或绕过共享订阅引用计数。
-- Panel Library 的预览默认使用静态缩略图，只允许白名单面板按需挂载一个真实预览。
+- 面板库的预览默认使用静态缩略图，只允许白名单面板按需挂载一个真实预览。
 - Alpha 工作台未打开时，不加载网格、绘图、指标或模拟交易模块。
 - 标的联动首期只使用工作台主标的与 follow/pinned，不加载多联动组基础设施。
 - 多图十字线和时间范围同步只在用户分别启用时传播轻量运行时事件，不共享图表实例。
@@ -701,9 +739,9 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### React 测试
 
-- 页面、scene 和工作台面板使用同一个公共图表。
+- 普通页面和工作台面板复用同一个业务场景组件和公共图表，不复制业务实现。
 - 面板 registry 懒加载、错误边界和 capability fallback。
-- 工具栏命令、布局锁定、标的跟随/固定和 Panel Chrome。
+- 工具栏命令、布局锁定、标的跟随/固定和面板控制栏。
 - loading、empty、error、delayed、stale、reconnecting 和 disconnected 状态。
 - OHLC 信息栏在十字线离开时恢复最新 bar。
 - 可访问性文本和所有用户可见文案国际化。
@@ -723,12 +761,12 @@ Alpha HTTP 权威快照 + WebSocket 增量
 
 ### 阶段一：公共图表和工作台内核
 
-- 拆分 `FinancialChartController`、公共组件、专业外壳和 scene。
+- 拆分 `FinancialChartController`、公共组件、专业外壳和业务场景组件。
 - 完成历史分页、viewport、状态、主题和导出。
 - 先完成布局 schema、registry、PanelPool 和局部加载失败状态，不为验证基础设施注册虚构业务面板。
-- 接入 Panel Chrome 并隔离验证 24 列 Alpha 内部网格，确认禁止重叠、碰撞重排、横向滚动、拖动结束持久化、隐藏恢复和 WebView 行为。
+- 接入面板控制栏并隔离验证 24 列 Alpha 内部网格，确认禁止重叠、碰撞重排、横向滚动、拖动结束持久化、隐藏恢复和 WebView 行为。
 - 完成面板库、布局模板、默认可编辑与布局锁定、工作台主标的和 follow/pinned。
-- 数据管理页、独立行情页和工作台 Chart Panel 复用同一个公共图表。
+- 数据管理页、独立行情页和工作台图表面板复用同一个业务场景组件和公共图表。
 
 ### 阶段二：数据管理闭环和领域协议
 
