@@ -334,13 +334,13 @@ type AlphaSymbolBinding =
 
    标的绑定、周期、复权、图表类型、筛选条件和显示选项，随布局保存。
 
-3. 当前 Space 布局
+3. 当前工作台状态
 
-   属于当前 Terax Workspace 进程和 Space，不改变进程环境。
+   布局、工作台主标的和布局锁定统一保存在 `~/.terax/shared/terax-alpha.json` 的独立键中，不依附当前 Space。Alpha 当前只在 Local 环境开放，持久化状态由主 Workspace 窗口写入，临时窗口共享读取但不写回。
 
 4. 命名模板和全局偏好
 
-   通过 Terax 白名单共享 store 执行加锁、读取最新值、最小变更和原子替换。不得使用 `localStorage` 或整表覆盖共享状态。
+   与当前工作台状态共用 Terax 的 Alpha 白名单共享 store，通过文件锁读取最新值、执行最小键变更并原子替换。不得写入 `~/.terax/alpha/config.json`、Workspace store、`localStorage`，也不得整表覆盖共享状态。
 
 布局拖动期间不写 React 业务状态或持久化存储。只在交互结束后读取和提交最终坐标；连续结束事件使用短暂合并，且必须可取消。
 

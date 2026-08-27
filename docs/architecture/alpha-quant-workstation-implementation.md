@@ -5,21 +5,22 @@
 ## 当前状态
 
 - 当前阶段：阶段一，公共图表和工作台内核。
-- 当前任务：建立工作台布局协议、Panel Registry 和稳定面板挂载层。已完成。
-- 下一任务：完成 24 列网格、Panel Chrome、布局模板和主标的 follow/pinned。
+- 当前任务：完成 24 列网格、Panel Chrome、布局模板和主标的 follow/pinned。进行中。
+- 下一任务：完成独立行情页，并统一数据页、独立页和工作台 Chart Panel 的 scene 接入。
 - 阻塞：无。
 
 ## 当前任务
 
-目标是先建立与具体网格和业务面板解耦的工作台内核，让后续面板在拖动、缩放、重排和页面隐藏时保持稳定身份与运行时实例。
+目标是把已经完成的布局协议、Panel Registry 和稳定挂载层接入首个可操作的 Alpha 工作台，在固定 24 列坐标中完成面板拖动、缩放、模板实例化和主标的跟随，并把前端状态跨窗口持久化到 Terax Alpha 共享配置。
 
-- 定向检索 OpenTerminalUI Launchpad 与 shioaji-pro-app Workspace 的面板协议、registry、实例身份和布局校验实践。
-- 建立 `AlphaPanelInstance`、`AlphaGridItem` 和 `AlphaWorkstationLayout` 的版本化纯 JSON 协议，分离业务实例与网格几何。
-- 建立 descriptor 驱动的 Panel Registry，集中面板元数据、默认配置、配置校验和懒加载入口，不使用中央 JSX `switch`。
-- 复用 `WorkbenchViewPool` 的稳定容器与 portal 思路建立 Alpha 面板挂载层，宿主替换、重排和隐藏恢复不得重挂载面板。
-- 使用测试 descriptor 和宿主验证基础设施，不提前注册没有真实业务协议的面板，也不创建临时工作台 UI。
+- 定向复核 OpenTerminalUI Launchpad 与 shioaji-pro-app Workspace 的网格、Panel Chrome、模板、布局锁定、主标的和持久化实践。
+- 建立 Alpha 工作台页面和固定 24 列网格，禁止重叠并采用纵向紧凑排列；窄窗口保留逻辑坐标并横向滚动。
+- Panel Chrome 统一承载标题、拖动手柄、follow/pinned、删除和缩放交互，业务面板不认识网格坐标。
+- 内置模板只作为不可变的初始布局定义，实例化时生成新的面板和布局 ID，不建立用户模板管理功能。
+- 工作台布局、主标的和锁定状态统一保存在 `~/.terax/shared/terax-alpha.json`；多个窗口共享读取，只有主 Workspace 窗口写回，临时窗口不持久化。
+- 网格宿主继续使用 `AlphaPanelPool` 的稳定容器，移动、缩放、自动重排和隐藏恢复不得重挂载图表或面板实例。
 
-完成标准：布局输入能够锁定版本、ID、panel/grid 对应、24 列边界、尺寸、重叠、singleton 和配置不变量；registry 枚举不加载实现且同一类型复用稳定懒加载组件；宿主移动、替换、隐藏和恢复只移动面板 DOM 容器，只有删除面板才卸载实例。
+完成标准：用户能够从 Alpha 入口打开工作台、应用内置模板、拖动和缩放面板、锁定布局、切换主标的并在 follow/pinned 间切换；只在交互结束后提交最终坐标；重启后从共享 Alpha 配置恢复有效状态；临时窗口不写回；真实 Tauri WebView 中 Canvas 身份在拖动、缩放和隐藏恢复后保持稳定。
 
 ## 当前任务方案
 
@@ -27,35 +28,32 @@
 
 ### 目标与范围
 
-- 以 shioaji-pro-app 的 `blocks + layout` 分离和集中 metadata 为产品结构参考，以 OpenTerminalUI 的懒加载 registry 与测试边界为补充参考。
-- 建立 Terax 自有的 `schemaVersion: 1` 布局协议，只保存可序列化面板状态和 24 列逻辑坐标，不保存 React、DOM、Controller、Query 或连接实例。
-- 未知面板类型保留为可恢复占位状态；首版拒绝无法识别的 schema 版本，不提前建立没有真实旧版本的迁移流水线。
-- 稳定挂载层只拥有面板 React 生命周期和宿主连接，不认识行情查询、工作台持久化或具体网格实现。
-- 不实现 24 列拖拽、Panel Chrome、面板库、模板、持久化、标的联动、独立行情页或正式工作台业务面板。
+- 以 shioaji-pro-app 的 24 列 Workspace、Panel Chrome 和主标的交互为产品参考，以 OpenTerminalUI 的模板、持久化测试和边界场景为补充参考。
+- 复用现有 `AlphaWorkstationLayout`、Panel Registry 和 `AlphaPanelPool`，不建立第二套布局协议、面板生命周期或中央 JSX `switch`。
+- 新增版本化工作台持久状态，原子保存主标的、布局锁定和布局；无效或未知版本回退到默认模板，不持久化 Controller、查询、DOM 或 Canvas。
+- 使用固定 24 列 `react-grid-layout`，拖动和缩放过程中只更新网格视觉状态，只在 stop 事件提交最终坐标并合并持久化写入。
+- 首批只注册能验证真实工作台链路的现有图表能力，不创建虚构行情、订单、持仓或风险面板。
+- 不实现用户模板管理、多联动组、时间范围同步、十字线同步、浮动面板或服务端模板协议。
 
 ### 实施步骤
 
-1. 定义面板实例、标的绑定、网格项、布局和 JSON 配置模型。
-2. 实现布局结构与语义校验，覆盖 panel/grid 一一对应、边界、最小尺寸、重叠、singleton、未知类型和 descriptor 配置校验。
-3. 实现 descriptor 注册和查找，创建并缓存每种面板的懒加载组件身份。
-4. 实现稳定面板池，通过固定 DOM 容器和 portal 连接网格宿主，提供局部 loading、未知类型和加载失败状态。
-5. 使用测试面板验证懒加载、配置传递、宿主移动、宿主替换、隐藏恢复和显式删除的生命周期。
+1. 定义并校验工作台持久状态、默认主标的和内置模板，确保模板实例化不修改源定义且生成不冲突 ID。
+2. 为 `terax-alpha.json` 建立 Alpha 专用前端持久化入口，完成初始加载、跨窗口刷新、主窗口写入、防抖和关闭前 flush。
+3. 建立 Alpha 工作台页面、工具栏、固定 24 列网格和 Panel Chrome，接入锁定、删除、follow/pinned、拖动与缩放结束提交。
+4. 注册并接入首个真实 Chart Panel，通过 `AlphaPanelHost` 与 `AlphaPanelPool` 保持图表实例稳定。
+5. 把工作台加入 Alpha 导航和 Workbench 可恢复页面，临时窗口只恢复或读取共享状态，不成为持久化所有者。
 
 ### 验证标准
 
-- 纯函数测试覆盖有效布局和各类结构、几何、singleton 与配置错误。
-- Registry 测试覆盖重复类型拒绝、元数据枚举不加载实现和懒加载组件身份稳定。
-- React 测试覆盖未知类型、面板级错误隔离和宿主移动、替换、隐藏、恢复、删除时的挂载不变量。
-- 运行 `pnpm lint`、`pnpm check-types` 和相关 `pnpm test`。
-- 本任务不接入真实网格、Canvas、ResizeObserver 或 Pointer Events，静态检查和 React DOM 生命周期测试足以验证当前边界；真实 Tauri WebView 验证留到下一项 24 列网格任务。
+- 纯函数测试覆盖模板实例化、24 列坐标归一化、主标的解析、follow、pin、恢复跟随和无效持久状态回退。
+- 持久化测试覆盖共享 store 读取、主窗口写入、临时窗口只读、连续提交合并和关闭前 flush。
+- React 测试覆盖 Panel Chrome、布局锁定、删除、模板切换以及拖动和缩放只在结束时提交。
+- 运行 `pnpm lint`、`pnpm check-types` 和相关 `pnpm test`；公共基础设施或接入范围扩大时运行完整前端测试。
+- 按 `docs/contributing/ui-runtime-debugging.md` 在真实 Tauri WebView 中复验拖动、缩放、碰撞重排、窄窗口横向滚动、页面隐藏恢复和 Canvas 实例稳定性。
 
 ### 执行结果
 
-- 已新增 `src/modules/alpha/workstation/`，布局协议固定分离 panel 状态和 24 列 grid 几何，配置只接受纯 JSON；未知 schema 版本直接拒绝，未建立空迁移框架。
-- 布局解析已覆盖 ID 唯一、panel/grid 一一对应、边界、descriptor 最小尺寸、重叠、singleton、标的绑定和配置校验；未知 panel type 保留给挂载层显示占位状态。
-- Panel Registry 在注册时缓存每种类型的 `React.lazy` 组件身份，读取面板 metadata 不执行 loader；descriptor 标识符存在首尾空白时直接拒绝，避免与布局归一化后的类型不一致；没有提前注册虚构业务面板。
-- `AlphaPanelPool` 和 `AlphaPanelHost` 通过固定 DOM 容器、portal 和 ref 注册保持实例，宿主替换、暂时消失、排序、隐藏和恢复均不重挂载；显式删除清理容器，单个 loader 失败不会影响其他面板。宿主会向后续网格转发 DOM ref、样式、类名和指针事件。
-- 新增 3 个测试文件、16 项测试；`pnpm lint`、`pnpm check-types` 和完整 `pnpm test` 通过，完整测试为 213 个测试文件、1,086 项测试。lint 保留 25 个既有 warning 和 2 个既有 info，本次文件没有诊断。
+任务进行中，完成后覆盖本节。
 
 ## 外部参考规则
 
