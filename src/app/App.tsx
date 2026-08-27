@@ -201,7 +201,6 @@ export default function App() {
     pinTab,
     newWebPreviewTab,
     newMarkdownTab,
-    setOverrideLanguage,
     openAiDiffTab,
     setAiDiffStatus,
     openGitDiffTab,
@@ -940,9 +939,6 @@ export default function App() {
           await authorize(page.explorerRoot, parentDirectory(page.path));
           const id = openFileTab(page.path, true, page.explorerRoot);
           if (id === null) throw new Error("Editor page could not be opened");
-          if (page.overrideLanguage) {
-            setOverrideLanguage(id, page.overrideLanguage);
-          }
           return;
         }
         case "markdown":
@@ -967,7 +963,6 @@ export default function App() {
       newWebPreviewTab,
       openFileTab,
       openTerminalPage,
-      setOverrideLanguage,
       updateTab,
     ],
   );
@@ -1656,7 +1651,6 @@ export default function App() {
       dropTab: handleDropTab,
       splitTab: (tabId, direction, move) =>
         void splitTab(tabId, direction, move),
-      overrideLanguage: setOverrideLanguage,
       resizeSplit,
       ...(workspacePageHandoff && { pageHandoff: workspacePageHandoff }),
     }),
@@ -1675,7 +1669,6 @@ export default function App() {
       pythonRunner.runTab,
       setActiveGroup,
       setActiveId,
-      setOverrideLanguage,
       splitTab,
       workspacePageHandoff,
     ],

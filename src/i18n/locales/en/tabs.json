@@ -1,8 +1,4 @@
 {
-  "autoDetect": "Auto Detect",
-  "mode": "Mode: {{name}}",
-  "fewerLanguages": "↑ Fewer languages",
-  "allLanguages": "↓ All languages",
   "unsavedChanges": "Unsaved changes",
   "sshDisconnected": "SSH connection closed",
   "unsavedAndSshDisconnected": "Unsaved changes; SSH connection closed",

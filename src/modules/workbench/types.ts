@@ -31,7 +31,6 @@ export type EditorTab = TabBase & {
   dirty: boolean;
   preview: boolean;
   explorerRoot?: string;
-  overrideLanguage?: string | null;
 };
 
 export type WebPreviewTab = TabBase & {
@@ -116,7 +115,6 @@ export type TabPatch = Partial<{
   preview: boolean;
   url: string;
   customTitle: string;
-  overrideLanguage: string | null;
   explorerRoot: string;
   originalPath: string | null;
   shortSha: string;

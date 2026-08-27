@@ -1,3 +1,8 @@
+/**
+ * 本文件根据文件名解析编辑器语言定义并按需加载对应扩展。
+ * 解析结果按语言键缓存，未知文件保持无语言模式。
+ */
+
 import type { Extension } from "@codemirror/state";
 import {
   extensionMap,
@@ -53,14 +58,6 @@ function match(base: string): {
   }
 
   return { key: ext ? `ext:${ext}` : `name:${base}`, def: undefined };
-}
-
-export function resolveDisplayName(filename: string | null): string {
-  if (!filename) return "Plain Text";
-  const base = basenameOf(filename);
-  const { def } = match(base);
-  if (def) return def.name;
-  return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
 export function resolveLanguageSync(filename: string): LanguageResult | null {

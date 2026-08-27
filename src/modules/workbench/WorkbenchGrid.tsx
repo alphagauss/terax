@@ -45,7 +45,6 @@ export type WorkbenchChromeActions = {
     direction: WorkbenchDirection,
     move: boolean,
   ) => void;
-  overrideLanguage: (tabId: number, language: string | null) => void;
   resizeSplit: (splitId: number, sizes: number[]) => void;
   pageHandoff?: WorkspacePageHandoffMenuActions;
 };
@@ -149,7 +148,6 @@ function WorkbenchGroup({
             onDropTab={actions.dropTab}
             onSplitTab={actions.splitTab}
             canClose={tabCount > 0}
-            onOverrideLanguage={actions.overrideLanguage}
             pageHandoff={actions.pageHandoff}
             compact
           />

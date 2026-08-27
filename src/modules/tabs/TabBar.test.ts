@@ -1,6 +1,6 @@
 /**
  * 本文件测试标签栏关闭控件和新建入口的结构约束。
- * 重点锁定关闭交互，以及标签溢出时新建入口仍固定可见。
+ * 重点锁定关闭交互、标签溢出行为，以及已移除的语言选择入口不会回归。
  */
 
 import { readFileSync } from "node:fs";
@@ -39,6 +39,14 @@ describe("TabBar interaction colors", () => {
     expect(source).toContain("bg-interactive-active shadow-sm");
     expect(source).toContain('"text-muted-foreground hover:text-foreground"');
     expect(source).not.toContain("hover:text-foreground/80");
+  });
+});
+
+describe("TabBar editor icon", () => {
+  it("keeps the file icon passive and does not restore language overrides", () => {
+    expect(source).toContain("<TabIcon tab={t} />");
+    expect(source).not.toContain("onOverrideLanguage");
+    expect(source).not.toContain("showAllLanguages");
   });
 });
 

@@ -27,7 +27,6 @@ export type WorkspacePage =
       kind: "editor";
       path: string;
       explorerRoot?: string;
-      overrideLanguage?: string;
     }
   | { kind: "markdown"; path: string; explorerRoot?: string }
   | { kind: "web-preview"; url: string };
@@ -75,10 +74,6 @@ export function workspacePageFromTab(
         ...(tab.explorerRoot !== undefined && {
           explorerRoot: tab.explorerRoot,
         }),
-        ...(tab.overrideLanguage !== undefined &&
-          tab.overrideLanguage !== null && {
-            overrideLanguage: tab.overrideLanguage,
-          }),
       };
     case "markdown":
       if (tab.dirty) return "dirty";

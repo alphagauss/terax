@@ -51,10 +51,6 @@ export function patchTab(
       ...(patch.title !== undefined && { title: patch.title }),
       ...(patch.path !== undefined && { path: patch.path }),
       ...(patch.dirty !== undefined && { dirty: patch.dirty }),
-      ...(tab.kind === "editor" &&
-        patch.overrideLanguage !== undefined && {
-          overrideLanguage: patch.overrideLanguage,
-        }),
       ...(patch.explorerRoot !== undefined && {
         explorerRoot: patch.explorerRoot,
       }),

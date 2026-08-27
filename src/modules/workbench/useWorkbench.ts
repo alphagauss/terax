@@ -750,12 +750,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [commit],
   );
 
-  const setOverrideLanguage = useCallback(
-    (id: number, language: string | null) =>
-      updateTab(id, { overrideLanguage: language }),
-    [updateTab],
-  );
-
   const setTerminalCwd = useCallback(
     (tabId: number, cwd: string) =>
       commit((current) => {
@@ -979,7 +973,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     closeTab,
     updateTab,
     setDocumentDirty,
-    setOverrideLanguage,
     setTerminalCwd,
     selectByIndex,
     selectAdjacentTab,
