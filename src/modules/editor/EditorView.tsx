@@ -45,7 +45,6 @@ export function EditorView({
         path={tab.path}
         document={document}
         lspEnabled={focused}
-        overrideLanguage={tab.overrideLanguage}
         onClose={handleClose}
       />
     </div>

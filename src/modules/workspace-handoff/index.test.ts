@@ -19,13 +19,11 @@ describe("Workspace page handoff", () => {
         dirty: false,
         preview: false,
         explorerRoot: "C:/repo",
-        overrideLanguage: "tsx",
       }),
     ).toEqual({
       kind: "editor",
       path: "C:/repo/main.ts",
       explorerRoot: "C:/repo",
-      overrideLanguage: "tsx",
     });
   });
 

@@ -17,17 +17,11 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import {
-  ALL_LANGUAGES,
-  EXPOSED_LANGUAGES,
-} from "@/modules/editor/lib/languageDefinitions";
-import { resolveDisplayName } from "@/modules/editor/lib/languageResolver";
 import {
   copyToClipboard,
   relativePath,
@@ -44,11 +38,7 @@ import {
   useWorkbenchDragSnapshot,
   type WorkbenchDropTarget,
 } from "@/modules/workbench/dragSession";
-import type {
-  EditorTab,
-  Tab,
-  WorkbenchDirection,
-} from "@/modules/workbench/types";
+import type { Tab, WorkbenchDirection } from "@/modules/workbench/types";
 import type { WorkspacePageHandoffMenuActions } from "@/modules/workspace-handoff";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
@@ -62,7 +52,6 @@ import {
   IncognitoIcon,
   PencilEdit02Icon,
   PlusSignIcon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -75,8 +64,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { filePathFor, labelFor } from "./lib/tabLabel";
-
-const LANGUAGE_MENU_ENABLED = false;
 
 type Props = {
   groupId: number;
@@ -104,7 +91,6 @@ type Props = {
     move: boolean,
   ) => void;
   canClose: boolean;
-  onOverrideLanguage?: (id: number, lang: string | null) => void;
   pageHandoff?: WorkspacePageHandoffMenuActions;
   compact?: boolean;
 };
@@ -135,7 +121,6 @@ export function TabBar({
   onDropTab,
   onSplitTab,
   canClose,
-  onOverrideLanguage,
   pageHandoff,
   compact,
 }: Props) {
@@ -158,7 +143,6 @@ export function TabBar({
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draggingId, setDraggingId] = useState<number | null>(null);
-  const [showAllLanguages, setShowAllLanguages] = useState(false);
   const dragSnapshot = useWorkbenchDragSnapshot();
   const dropGap =
     dragSnapshot.target?.kind === "tabs" &&
@@ -452,106 +436,7 @@ export function TabBar({
                       compact ? "max-w-48" : "max-w-80",
                     )}
                   >
-                    {LANGUAGE_MENU_ENABLED && t.kind === "editor" ? (
-                      <DropdownMenu
-                        onOpenChange={(open) => {
-                          if (!open) setShowAllLanguages(false);
-                        }}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          {/* span, not button: a button nested in the TabsTrigger button is invalid DOM and breaks WebKit focus. */}
-                          {/* biome-ignore lint/a11y/useSemanticElements: The dropdown trigger cannot be a nested button. */}
-                          <span
-                            role="button"
-                            tabIndex={-1}
-                            data-no-drag
-                            className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm p-1 -m-1 transition-[color,background-color,box-shadow] hover:bg-accent hover:text-accent-foreground hover:ring-1 hover:ring-primary/30 hover:shadow-[0_0_4px_var(--color-popover-foreground)]"
-                          >
-                            <TabIcon tab={t} />
-                          </span>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="start"
-                          side="bottom"
-                          sideOffset={6}
-                          alignOffset={-4}
-                          className="max-h-75 w-48 overflow-y-auto rounded-xl border border-border/40 bg-popover/90 p-1 backdrop-blur-md shadow-lg"
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onPointerUp={(e) => e.stopPropagation()}
-                        >
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              onOverrideLanguage?.(t.id, null);
-                            }}
-                            className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-default focus:bg-accent focus:text-accent-foreground"
-                          >
-                            <img
-                              src={fileIconUrl(t.title)}
-                              className="size-3.5 shrink-0 object-contain"
-                              alt=""
-                            />
-                            <div className="flex flex-1 flex-col">
-                              <span>{tr("autoDetect")}</span>
-                              <span className="text-[10px] text-muted-foreground italic">
-                                {tr("mode", {
-                                  name: resolveDisplayName(t.title),
-                                })}
-                              </span>
-                            </div>
-                            {!(t as EditorTab).overrideLanguage && (
-                              <HugeiconsIcon
-                                icon={Tick02Icon}
-                                className="size-3.5 text-primary"
-                              />
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={(e) => {
-                              e.preventDefault();
-                              setShowAllLanguages((v) => !v);
-                            }}
-                            className="w-full rounded-lg px-2.5 py-1.5 text-left text-xs text-primary transition-colors hover:bg-accent"
-                          >
-                            {showAllLanguages
-                              ? tr("fewerLanguages")
-                              : tr("allLanguages")}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator className="my-1 border-t border-border/30" />
-                          {(showAllLanguages
-                            ? ALL_LANGUAGES
-                            : EXPOSED_LANGUAGES
-                          ).map((lang) => {
-                            const isSelected =
-                              (t as EditorTab).overrideLanguage === lang.ext;
-                            return (
-                              <DropdownMenuItem
-                                key={lang.ext}
-                                onSelect={() =>
-                                  onOverrideLanguage?.(t.id, lang.ext)
-                                }
-                                className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-default focus:bg-accent focus:text-accent-foreground"
-                              >
-                                <img
-                                  src={fileIconUrl(`dummy.${lang.ext}`)}
-                                  className="size-3.5 shrink-0 object-contain"
-                                  alt=""
-                                />
-                                <span className="flex-1">{lang.name}</span>
-                                {isSelected && (
-                                  <HugeiconsIcon
-                                    icon={Tick02Icon}
-                                    className="size-3.5 text-primary"
-                                  />
-                                )}
-                              </DropdownMenuItem>
-                            );
-                          })}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : (
-                      <TabIcon tab={t} />
-                    )}
+                    <TabIcon tab={t} />
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
                     <span
@@ -911,10 +796,7 @@ function DropIndicator() {
 
 export function TabIcon({ tab }: { tab: Tab }) {
   if (tab.kind === "editor" || tab.kind === "markdown") {
-    const url =
-      tab.kind === "editor" && tab.overrideLanguage
-        ? fileIconUrl(`dummy.${tab.overrideLanguage}`)
-        : fileIconUrl(tab.title);
+    const url = fileIconUrl(tab.title);
     return url ? (
       <img
         src={url}

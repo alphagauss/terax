@@ -102,7 +102,6 @@ export type EditorPaneHandle = FindHandle & {
 export type EditorPaneProps = {
   path: string;
   remotePollingActive?: boolean;
-  overrideLanguage?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
@@ -193,7 +192,6 @@ export const EditorCore = memo(
     const diagnosticsOwnerId = useId();
     const {
       path,
-      overrideLanguage,
       onSaved,
       onClose,
       lspEnabled = true,
@@ -649,8 +647,7 @@ export const EditorCore = memo(
     const documentSize = doc.status === "ready" ? doc.size : null;
 
     useEffect(() => {
-      const ext =
-        overrideLanguage || (path.split(".").pop()?.toLowerCase() ?? null);
+      const ext = path.split(".").pop()?.toLowerCase() ?? null;
       languageRef.current = ext;
       if (doc.status !== "ready") return;
       if (documentSize !== null && documentSize > SYNTAX_MAX_BYTES) {
@@ -661,11 +658,8 @@ export const EditorCore = memo(
       }
       let cancelled = false;
       const resolve = async (): Promise<LanguageResult> => {
-        const resolvePath = overrideLanguage
-          ? `dummy.${overrideLanguage}`
-          : path;
         return (
-          (await resolveLanguage(resolvePath)) ?? {
+          (await resolveLanguage(path)) ?? {
             ext: [],
             name: "",
             id: "",
@@ -695,7 +689,7 @@ export const EditorCore = memo(
         cancelled = true;
         cancelAnimationFrame(frame);
       };
-    }, [path, doc.status, overrideLanguage, documentSize]);
+    }, [path, doc.status, documentSize]);
 
     useImperativeHandle(
       ref,

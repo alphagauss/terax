@@ -469,10 +469,6 @@ export const LANGUAGES: LanguageDefinition[] = [
   },
 ];
 
-export const ALL_LANGUAGES = [...LANGUAGES]
-  .sort((a, b) => a.name.localeCompare(b.name))
-  .map((l) => ({ name: l.name, ext: l.extensions[0] }));
-
 export const EXPOSED_LANGUAGES = LANGUAGES.filter((l) => l.userSelectable).map(
   (l) => ({ name: l.name, ext: l.extensions[0] }),
 );
