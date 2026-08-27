@@ -102,6 +102,7 @@ Terax Space / Workbench
 - 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、rAF 尺寸更新、十字线和 viewport 命令；React 外壳不拥有查询。
 - 行情图表场景组件 `MarketChartScene` 使用现有排他 `before` 游标执行左侧历史分页，仅在用户操作时间轴后请求；React Query 保持请求单飞和标的查询键隔离，停滞游标终止分页，跨页数据线性合并并补偿逻辑范围。数据页已经直接复用该业务场景组件和公共图表，旧 `AlphaFinancialChart` 和兼容包装已删除。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，主题和图表类型切换只应用 options，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。工具栏、OHLC/成交量/成交额信息栏、加载、空数据、错误、最早数据和历史重试状态已经接入中英文文案；用户平移越过数据两端时保留少量 K 线，重置视图恢复价格自动缩放和全量时间范围。图内 TradingView 标识已经替换为设置页中的用户可见署名链接。
+- 公共金融图表的后续范围已经确认拆为三批八个独立任务，依次完成完整行情页与受控配置、专业价格与 pane 语义、导出与可访问性、服务端指标协议、指标 pane、多图同步、对比标的和实时尾部。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。
