@@ -1,5 +1,17 @@
 # Third-party notices
 
+## TradingView Lightweight Charts
+
+- Project: TradingView Lightweight Charts™, https://github.com/tradingview/lightweight-charts
+- Version: 5.2.0
+- Copyright: Copyright (c) 2025 TradingView, Inc. https://www.tradingview.com/
+- License: Apache License 2.0
+- Used as the Alpha financial-chart rendering engine.
+
+The Apache License 2.0 text is included in the root `LICENSE` file. Terax also
+provides the attribution notice and a user-visible TradingView link in
+Settings > About.
+
 ## OpenTerminalUI
 
 - Project: OpenTerminalUI, https://github.com/Hitheshkaranth/OpenTerminalUI

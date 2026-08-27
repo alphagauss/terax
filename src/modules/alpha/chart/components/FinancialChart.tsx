@@ -19,6 +19,7 @@ type Props = {
   visible: boolean;
   hasMoreBefore: boolean;
   loadingMore: boolean;
+  resetRevision: number;
   ariaLabel: string;
   onCrosshairChange: (bar: MarketBar | null) => void;
   onRequestMore: () => void;
@@ -48,6 +49,7 @@ export function FinancialChart({
   visible,
   hasMoreBefore,
   loadingMore,
+  resetRevision,
   ariaLabel,
   onCrosshairChange,
   onRequestMore,
@@ -87,6 +89,10 @@ export function FinancialChart({
   }, [hasMoreBefore, loadingMore]);
 
   useEffect(() => {
+    if (resetRevision > 0) controllerRef.current?.resetView();
+  }, [resetRevision]);
+
+  useEffect(() => {
     controllerRef.current?.setVisible(visible);
     if (!visible) return;
     const frame = window.requestAnimationFrame(() => {
@@ -124,7 +130,7 @@ export function FinancialChart({
   return (
     <div
       ref={containerRef}
-      className="h-full min-h-72 w-full"
+      className="h-full min-h-0 w-full"
       role="img"
       aria-label={ariaLabel}
       data-alpha-financial-chart="true"

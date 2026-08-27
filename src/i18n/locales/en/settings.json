@@ -556,6 +556,8 @@
     "build": "Build",
     "bundleId": "Bundle ID",
     "license": "License",
+    "chartEngine": "Chart engine",
+    "tradingViewAttribution": "TradingView Lightweight Charts™ Copyright (c) 2025 TradingView, Inc.",
     "sourceCode": "Source code",
     "website": "Website",
     "viewOnGitHub": "View on GitHub",

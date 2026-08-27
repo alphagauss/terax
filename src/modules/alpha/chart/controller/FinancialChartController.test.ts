@@ -1,6 +1,6 @@
 /**
  * 本文件测试公共金融图表 Controller 的生命周期和命令。
- * 重点锁定单实例、历史 prepend 补偿、尾部更新与左侧请求单飞。
+ * 重点锁定单实例、署名配置、历史加载、平移边界和视图重置不变量。
  */
 
 import type { FinancialChartPalette } from "@/modules/alpha/chart/model";
@@ -8,12 +8,16 @@ import type { MarketBar } from "@/modules/alpha/market/model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const makeSeries = () => ({
-    setData: vi.fn(),
-    update: vi.fn(),
-    applyOptions: vi.fn(),
-    priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
-  });
+  const makeSeries = () => {
+    const priceScaleApi = { applyOptions: vi.fn() };
+    return {
+      setData: vi.fn(),
+      update: vi.fn(),
+      applyOptions: vi.fn(),
+      priceScale: vi.fn(() => priceScaleApi),
+      priceScaleApi,
+    };
+  };
   const series = [makeSeries(), makeSeries(), makeSeries(), makeSeries()];
   const timeScale = {
     getVisibleLogicalRange: vi.fn(),
@@ -104,6 +108,12 @@ describe("FinancialChartController", () => {
     controller.destroy();
 
     expect(mocks.createChart).toHaveBeenCalledOnce();
+    expect(mocks.createChart).toHaveBeenCalledWith(
+      host,
+      expect.objectContaining({
+        layout: expect.objectContaining({ attributionLogo: false }),
+      }),
+    );
     expect(mocks.chart.applyOptions).toHaveBeenCalled();
     expect(mocks.chart.unsubscribeCrosshairMove).toHaveBeenCalledOnce();
     expect(
@@ -251,5 +261,50 @@ describe("FinancialChartController", () => {
     handler({ from: 6, to: 16 });
 
     expect(requestMore).toHaveBeenCalledOnce();
+  });
+
+  it("用户平移越过数据两端时保留八根可见 K 线", () => {
+    const host = chartHost();
+    const controller = new FinancialChartController(host);
+    controller.setBars(
+      "000001.SZSE|d|forward",
+      Array.from({ length: 20 }, (_, index) =>
+        bar(`2026-07-${String(index + 1).padStart(2, "0")}`, index + 1),
+      ),
+    );
+    const pointerHandler = vi
+      .mocked(host.addEventListener)
+      .mock.calls.find(
+        ([type]) => type === "pointerdown",
+      )?.[1] as EventListener;
+    const rangeHandler = mocks.timeScale.subscribeVisibleLogicalRangeChange.mock
+      .calls[0][0] as (range: { from: number; to: number }) => void;
+    pointerHandler(new Event("pointerdown"));
+
+    rangeHandler({ from: 30, to: 40 });
+    expect(mocks.timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({
+      from: 12,
+      to: 22,
+    });
+
+    rangeHandler({ from: -20, to: -10 });
+    expect(mocks.timeScale.setVisibleLogicalRange).toHaveBeenLastCalledWith({
+      from: -3,
+      to: 7,
+    });
+  });
+
+  it("重置视图恢复价格自动缩放并适配全部内容", () => {
+    const controller = new FinancialChartController(chartHost());
+    controller.setBars("000001.SZSE|d|forward", [bar("2026-07-30", 12)]);
+    mocks.series[0].priceScaleApi.applyOptions.mockClear();
+    mocks.timeScale.fitContent.mockClear();
+
+    controller.resetView();
+
+    expect(mocks.series[0].priceScaleApi.applyOptions).toHaveBeenCalledWith({
+      autoScale: true,
+    });
+    expect(mocks.timeScale.fitContent).toHaveBeenCalledOnce();
   });
 });

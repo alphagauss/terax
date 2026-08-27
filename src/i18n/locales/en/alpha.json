@@ -98,6 +98,7 @@
       "loadingHistory": "Loading earlier history...",
       "earliest": "Earliest data reached",
       "historyRetry": "Retry earlier history",
+      "resetView": "Reset chart view",
       "types": {
         "candlestick": "Candles",
         "ohlc": "OHLC",

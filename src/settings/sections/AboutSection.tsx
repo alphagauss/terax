@@ -1,4 +1,10 @@
+/**
+ * 本文件实现设置窗口的关于页面。
+ * 页面展示应用版本、项目入口和用户可见的第三方图表引擎署名。
+ */
+
 import { Button } from "@/components/ui/button";
+import { SectionHeader } from "@/settings/components/SectionHeader";
 import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
@@ -6,10 +12,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SectionHeader } from "../components/SectionHeader";
 
 const REPO_URL = "https://github.com/crynta/terax-ai";
 const WEBSITE = "https://terax.app";
+const TRADINGVIEW_URL = "https://www.tradingview.com/";
 
 const PLATFORM_LABEL: Record<string, string> = {
   macos: "macOS",
@@ -20,6 +26,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   freebsd: "FreeBSD",
 };
 
+/** 展示 Terax 构建信息、项目链接和必要的第三方署名。 */
 export function AboutSection() {
   const { t } = useTranslation();
   const [version, setVersion] = useState("");
@@ -53,7 +60,7 @@ export function AboutSection() {
             {t("about.tagline")}
           </span>
           <span className="mt-1 font-mono text-[11px] text-muted-foreground">
-            v{version || "—"}
+            v{version || "-"}
           </span>
         </div>
       </div>
@@ -69,6 +76,18 @@ export function AboutSection() {
 
         <dt className="text-muted-foreground">{t("about.license")}</dt>
         <dd>Apache 2.0</dd>
+
+        <dt className="text-muted-foreground">{t("about.chartEngine")}</dt>
+        <dd>
+          <button
+            type="button"
+            onClick={() => void openUrl(TRADINGVIEW_URL)}
+            className="inline-flex items-center gap-1.5 rounded-md text-[12px] underline-offset-2 hover:text-foreground hover:underline"
+          >
+            <HugeiconsIcon icon={Globe02Icon} size={12} strokeWidth={1.75} />
+            {t("about.tradingViewAttribution")}
+          </button>
+        </dd>
 
         <dt className="text-muted-foreground">{t("about.sourceCode")}</dt>
         <dd>
@@ -95,22 +114,22 @@ export function AboutSection() {
       </dl>
 
       <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void openUrl(REPO_URL)}
-            className="gap-1.5"
-          >
-            <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
-            View on GitHub
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
-          >
-            Report an issue
-          </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void openUrl(REPO_URL)}
+          className="gap-1.5"
+        >
+          <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
+          {t("about.viewOnGitHub")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
+        >
+          {t("about.reportIssue")}
+        </Button>
       </div>
     </div>
   );

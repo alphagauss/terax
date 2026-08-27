@@ -556,6 +556,8 @@
     "build": "构建",
     "bundleId": "Bundle ID",
     "license": "许可证",
+    "chartEngine": "图表引擎",
+    "tradingViewAttribution": "TradingView Lightweight Charts™ Copyright (c) 2025 TradingView, Inc.",
     "sourceCode": "源代码",
     "website": "网站",
     "viewOnGitHub": "在 GitHub 上查看",

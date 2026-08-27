@@ -3,16 +3,16 @@
  * Controller 独占实例、series、监听器和 viewport 命令，不执行查询或持久化。
  */
 
-import type {
-  FinancialChartPalette,
-  FinancialChartType,
-} from "@/modules/alpha/chart/model";
 import {
   buildFinancialSeriesData,
   countPrependedBars,
   financialChartTime,
   financialTailUpdateMode,
 } from "@/modules/alpha/chart/lightweight/data";
+import type {
+  FinancialChartPalette,
+  FinancialChartType,
+} from "@/modules/alpha/chart/model";
 import { createRafBatcher } from "@/modules/alpha/chart/rafBatcher";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import {
@@ -21,9 +21,9 @@ import {
   ColorType,
   createChart,
   HistogramSeries,
-  LineSeries,
   type IChartApi,
   type ISeriesApi,
+  LineSeries,
   type Logical,
   type LogicalRange,
   type MouseEventParams,
@@ -31,6 +31,7 @@ import {
 } from "lightweight-charts";
 
 const HISTORY_LOAD_THRESHOLD = 20;
+const MIN_VISIBLE_BARS_AFTER_PAN = 8;
 
 type ChartCallbacks = {
   onCrosshairChange?: (bar: MarketBar | null) => void;
@@ -88,7 +89,7 @@ export class FinancialChartController {
       height: Math.max(1, host.clientHeight),
       layout: {
         background: { type: ColorType.Solid, color: "transparent" },
-        attributionLogo: true,
+        attributionLogo: false,
       },
       timeScale: { borderVisible: false },
       rightPriceScale: { borderVisible: false },
@@ -141,7 +142,6 @@ export class FinancialChartController {
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
           textColor: palette.text,
-          attributionLogo: true,
         },
         grid: {
           vertLines: { color: palette.grid },
@@ -261,6 +261,16 @@ export class FinancialChartController {
     this.resizeBatcher.schedule({ width, height });
   }
 
+  /** 恢复价格自动缩放并让时间轴重新适配全部已加载数据。 */
+  resetView(): void {
+    if (this.bars.length === 0) return;
+    this.historyInteractionArmed = false;
+    this.runChartMutation(() => {
+      this.candles.priceScale().applyOptions({ autoScale: true });
+      this.chart.timeScale().fitContent();
+    });
+  }
+
   /** 释放图表实例和全部监听器。 */
   destroy(): void {
     this.resizeBatcher.cancel();
@@ -291,6 +301,14 @@ export class FinancialChartController {
     range: LogicalRange | null,
   ): void => {
     if (
+      this.visible &&
+      this.historyInteractionArmed &&
+      !this.chartMutationInProgress &&
+      range
+    ) {
+      this.keepBarsVisibleAfterPan(range);
+    }
+    if (
       !this.visible ||
       !this.historyInteractionArmed ||
       this.chartMutationInProgress ||
@@ -306,6 +324,38 @@ export class FinancialChartController {
     this.requestPending = true;
     this.callbacks.onRequestMore();
   };
+
+  /** 平移越过数据两端时保留少量 K 线，避免图表看起来完全空白。 */
+  private keepBarsVisibleAfterPan(range: LogicalRange): void {
+    const width = range.to - range.from;
+    if (this.bars.length === 0 || width <= 0) return;
+
+    const requiredBars = Math.min(
+      MIN_VISIBLE_BARS_AFTER_PAN,
+      this.bars.length,
+      Math.max(1, Math.floor(width)),
+    );
+    const lastIndex = this.bars.length - 1;
+    let from: number = range.from;
+    let to: number = range.to;
+
+    if (to < requiredBars - 1) {
+      to = requiredBars - 1;
+      from = to - width;
+    } else if (from > lastIndex - requiredBars + 1) {
+      from = lastIndex - requiredBars + 1;
+      to = from + width;
+    } else {
+      return;
+    }
+
+    this.runChartMutation(() => {
+      this.chart.timeScale().setVisibleLogicalRange({
+        from: from as Logical,
+        to: to as Logical,
+      });
+    });
+  }
 
   /** 标记用户已操作时间轴，避免初始化和尺寸事件自动预取历史。 */
   private readonly handleHistoryInteraction = (): void => {

@@ -3,15 +3,18 @@
  * 外壳负责图表类型、OHLC 信息、状态覆盖层和历史加载反馈，不拥有行情查询。
  */
 
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 import { FinancialChart } from "@/modules/alpha/chart/components/FinancialChart";
 import type {
   FinancialChartStatus,
   FinancialChartType,
 } from "@/modules/alpha/chart/model";
-import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 import type { MarketBar } from "@/modules/alpha/market/model";
+import { marketTimeKey } from "@/modules/alpha/market/normalize";
+import { FitToScreenIcon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -52,8 +55,22 @@ export function FinancialChartFrame({
     dataKey: string;
     bar: MarketBar;
   } | null>(null);
+  const [resetRevision, setResetRevision] = useState(0);
   const latestBar = bars[bars.length - 1] ?? null;
   const displayBar = crosshair?.dataKey === dataKey ? crosshair.bar : latestBar;
+  const previousCloseByTime = useMemo(
+    () =>
+      new Map(
+        bars.map((bar, index) => [
+          marketTimeKey(bar.time),
+          index > 0 ? bars[index - 1]?.close : null,
+        ]),
+      ),
+    [bars],
+  );
+  const previousClose = displayBar
+    ? (previousCloseByTime.get(marketTimeKey(displayBar.time)) ?? null)
+    : null;
   const number = useMemo(
     () =>
       new Intl.NumberFormat(i18n.language, {
@@ -70,8 +87,8 @@ export function FinancialChartFrame({
     [i18n.language],
   );
   const changePercent =
-    displayBar && displayBar.open !== 0
-      ? ((displayBar.close - displayBar.open) / displayBar.open) * 100
+    displayBar && previousClose !== null && previousClose !== 0
+      ? ((displayBar.close - previousClose) / previousClose) * 100
       : null;
 
   const handleCrosshairChange = useCallback(
@@ -97,6 +114,17 @@ export function FinancialChartFrame({
               {t(`data.chart.types.${type}`)}
             </Button>
           ))}
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-7"
+            title={t("data.chart.resetView")}
+            aria-label={t("data.chart.resetView")}
+            onClick={() => setResetRevision((revision) => revision + 1)}
+          >
+            <HugeiconsIcon icon={FitToScreenIcon} size={13} strokeWidth={1.8} />
+          </Button>
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
           {symbol ?? t("data.chart.title")}
@@ -153,6 +181,7 @@ export function FinancialChartFrame({
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}
+          resetRevision={resetRevision}
           ariaLabel={t("data.chart.aria", {
             symbol: symbol ?? t("data.chart.title"),
           })}

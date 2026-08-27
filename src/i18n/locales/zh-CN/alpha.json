@@ -98,6 +98,7 @@
       "loadingHistory": "正在加载更早历史...",
       "earliest": "已到达最早数据",
       "historyRetry": "重试加载更早历史",
+      "resetView": "重置图表视图",
       "types": {
         "candlestick": "蜡烛图",
         "ohlc": "OHLC",
