@@ -1,11 +1,11 @@
 /**
  * 本文件测试 Alpha 工作台持久状态、模板实例化和主标的绑定。
- * 重点锁定模板不可变、当前版本校验、同步配置边界以及 follow/pinned 的解析结果。
+ * 重点锁定模板不可变、当前版本校验、同步与图表配置边界以及 follow/pinned 的解析结果。
  */
 
 import {
-  normalizeAlphaVtSymbol,
   type AlphaWorkstationState,
+  normalizeAlphaVtSymbol,
 } from "@/modules/alpha/workstation/model";
 import { alphaPanelRegistry } from "@/modules/alpha/workstation/panelRegistry";
 import {
@@ -68,7 +68,7 @@ describe("Alpha workstation state", () => {
     });
   });
 
-  it("把旧图表空配置归一化为受控默认值", () => {
+  it("把缺失可选字段的图表配置归一化为当前默认值", () => {
     const state = createDefaultAlphaWorkstationState();
     state.layout.panels[0].config = {};
 
@@ -81,6 +81,21 @@ describe("Alpha workstation state", () => {
       showVolume: true,
       paneRatios: { main: 8, volume: 2 },
       studies: [],
+      comparisons: [],
+    });
+  });
+
+  it("解析并保留 Chart Panel 的对比标的配置", () => {
+    const state = createDefaultAlphaWorkstationState();
+    state.layout.panels[0].config = {
+      ...state.layout.panels[0].config,
+      comparisons: [{ vtSymbol: "600000.sse", color: "#d9a441" }],
+    };
+
+    const parsed = parseAlphaWorkstationState(state, alphaPanelRegistry);
+
+    expect(parsed?.layout.panels[0].config).toMatchObject({
+      comparisons: [{ vtSymbol: "600000.SSE", color: "#d9a441" }],
     });
   });
 

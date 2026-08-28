@@ -99,7 +99,7 @@ Terax Space / Workbench
 - 数据目录已经支持证券资料与行情覆盖的联合查询、服务端搜索与 Facet 过滤、分页、覆盖区间和全局摘要，数据页复用这些接口展示当前数据状态。
 - 数据页已经可以读取证券、指数成分和日线覆盖，并形成最小日线同步闭环：启动增量同步、展示运行与质量摘要、按 Python 返回的异常标的定向重试。Python 在 provider 批次上执行一次线性校验，写完后只读取一次主库 `bar_overview`，最近质量快照有界持久化。更完整的数据质量面板和其他领域协议仍属于阶段二后续。Python 当前能力与存储基线见 [Alpha 后端架构](../../alpha/docs/architecture.md) 和 [行情数据与存储](../../alpha/docs/market-data.md)。
 - 前端行情模型和归一化位于 `src/modules/alpha/market/`，明确区分无时区交易日和带时区绝对时间，并统一定义周期、复权以及 OHLC 校验、顺序、去重和跨页合并。市场元数据纯函数把后端证券详情转换为价格精度、IANA 时区、成交量单位和市场涨跌色，不根据 WebView 环境猜测交易所语义。
-- 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量与动态指标 pane、增量 study registry、主题、价格精度、时区格式、参考线、rAF 尺寸与统一十字线快照、viewport 和截图命令；React 外壳不拥有查询或持久化。
+- 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量与动态指标 pane、增量 study 和对比 line registry、主题、价格精度、时区格式、参考线、rAF 尺寸与统一十字线快照、viewport 和截图命令；React 外壳不拥有查询或持久化。
 - 行情图表场景组件 `MarketChartScene` 已接收受控周期、复权、图表类型、成交量、pane 比例和使用密度，使用完整 `vtSymbol + interval + adjust` 查询键和 `dataKey`。数据页与工作台面板都复用证券详情查询获取权威图表元数据；工作台只展示权威声明且排除 `tick` 的 K 线周期，紧凑数据页保持固定日线和前复权。排他 `before` 历史分页、请求单飞、停滞游标终止、跨页线性合并和 viewport 补偿继续复用同一实现。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，盘中刻度按后端 IANA 时区格式化。周期、复权、主题、标的、元数据和图表类型切换只更新同一个 React 宿主与 Controller，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。价格轴、legend、昨收和最新价使用一致精度，蜡烛、OHLC、成交量和最新价线遵循市场涨跌色。工作台面板可控制成交量并在 pointerup 后保存语义 pane 比例；隐藏成交量不保留空 pane，过矮面板临时恢复主图优先的 8:2。工具栏、信息栏和全部状态已经接入中英文文案；TradingView 署名位于设置页。
 - `FinancialChart` 通过稳定 handle 暴露重置和不含十字线的截图，不向 Frame 暴露图表实例。工作台 Chart Panel 使用紧凑菜单导出当前主题铺底的 PNG 和固定八列 CSV；CSV 在构造字符串前执行 50,000 根硬上限。数据页不显示导出入口。所有图表密度都提供随选中 bar 更新的 `aria-live` 摘要，以及最近 20 根 OHLCV 的可聚焦数据表。
@@ -107,12 +107,14 @@ Terax Space / Workbench
 - 工作台 Chart Panel 保存稳定 instance ID、顺序、参数、显隐、颜色、线宽和语义 pane 比例。overlay 固定在主图；可见成交量之后每个 RSI 或 MACD 独占一个 pane，最多 4 个，成交量隐藏时连续前移。Controller 对 output 做 diff，未变化 series 复用；pane 重排前后按 instance ID 捕获并恢复比例，不重建 chart 或主价格 series。MACD histogram 使用实例正负色或主题语义色，RSI 30/70 与 MACD 0 使用无轴标签的低强调水平线。
 - 指标 Dialog 使用动态 import，首次打开前不进入 eager graph，也不查询 definition。紧凑数据页不显示入口、不保存指标；工作台 legend 从唯一十字线订阅的同一 rAF 快照读取全部 series 值，十字线离开后恢复最新值。指标请求失败只显示局部状态，主行情状态保持可用。
 - 工作台级 `ChartSyncProvider` 已提供相互独立的范围与十字线同步。两类事件不写入 React 状态，分别按动画帧保留末值，并按来源 panel、固定组、周期和复权过滤。范围使用实际 `MarketTime`；十字线接收方只用本地精确同时间 bar 的 close 定位，缺失时清除。Controller 使用 mutation guard 防回传，pointer 活跃时本地十字线优先；关闭同步时不订阅实际时间范围，也不保留 pointer 监听或待派发帧。
-- 公共金融图表的后续范围已经确认拆为三批八个独立任务，前六项已经完成；下一项是对比标的叠加，之后是实时行情尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
+- Chart Panel 已支持最多 3 个对比标的。Scene 以主图实际起止范围执行独立 `start + end` 查询，每个请求和结果最多 5,000 根，主图 prepend 后按新范围复用 React Query 缓存；单个 loading、error、empty、零基准和局部覆盖状态不会阻断主行情或其他标的。纯函数过滤非法 close、排序去重并以所有有效序列首时间的最大值为共同起点，不填补缺失交易日。
+- 主标的和对比标的只提供相对收益模式，共用独立左侧百分比轴，右侧绝对价格轴不变。Controller 按 `vtSymbol` diff 复用 line series；主线使用主题强调色，对比线颜色进入面板配置。对比值与行情、指标复用唯一十字线订阅和同一个 rAF 快照，缺少精确同时间点时显示空值。管理 Dialog 按需加载并复用证券目录搜索；紧凑数据页不显示入口，未配置对比时不查询、不归一化、不创建 series。
+- 公共金融图表的后续范围已经确认拆为三批八个独立任务，前七项已经完成；下一项是实时行情尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序、配置更新和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。面板配置更新按 ID 回传，写入前再次经过 descriptor 归一化。
 - Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
-- 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），其严格配置保存周期、复权、图表类型、成交量显隐、指标 instances 和语义 pane 比例，旧 `{}` 自动补齐默认日线、前复权、蜡烛图、成交量、空指标和 8:2。内置单图和双图模板每次生成新的布局与 panel ID；面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
+- 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），其严格配置保存周期、复权、图表类型、成交量显隐、指标 instances、对比标的与语义 pane 比例；当前 schema 的缺失可选字段使用日线、前复权、蜡烛图、成交量、空指标、空对比和 8:2 默认值，不增加版本迁移分支。内置单图和双图模板每次生成新的布局与 panel ID；面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
 - `AlphaWorkstationState` 版本 2 把主标的、锁定、图表同步配置和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。当前开发阶段只接受版本 2，旧版本直接失效并回退默认状态，不保留迁移代码。持久化只保存固定组 ID 和两个开关，不保存范围、十字线时间或来源 ID。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
 - `/bars` 为前端提供 `start + end` 范围查询和排他 `before` 历史分页，并显式返回 `has_more_before`、下一游标、实际范围、`reference_close` 和 `reference_time`。Python 如何跨分片读取、应用复权和计算参考价统一见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 与 [行情数据和存储](../../alpha/docs/market-data.md)。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载，工作台图表面板可以切换受支持的周期和复权。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入实时增量。

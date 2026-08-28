@@ -20,6 +20,25 @@ export const alphaQueryKeys = {
   securities: ["alpha", "securities"] as const,
   security: (vtSymbol: string) => ["alpha", "security", vtSymbol] as const,
   bars: ["alpha", "bars"] as const,
+  comparisonBars: (
+    vtSymbol: string,
+    interval: string,
+    adjust: string,
+    start: string | null,
+    end: string | null,
+    limit: number,
+  ) =>
+    [
+      "alpha",
+      "bars",
+      "comparison",
+      vtSymbol,
+      interval,
+      adjust,
+      start,
+      end,
+      limit,
+    ] as const,
   studyDefinitions: ["alpha", "study-definitions"] as const,
   studyCalculation: (
     dataKey: string,

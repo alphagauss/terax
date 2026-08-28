@@ -124,6 +124,35 @@
       "historyRetry": "Retry earlier history",
       "resetView": "Reset chart view",
       "previousClose": "Prev close",
+      "actions": {
+        "menu": "More chart actions"
+      },
+      "comparisons": {
+        "label": "Compare",
+        "open": "Manage comparisons",
+        "actions": {
+          "manage": "Manage comparisons",
+          "remove": "Remove comparison",
+          "retry": "Retry comparison",
+          "close": "Close"
+        },
+        "status": {
+          "loading": "Loading...",
+          "error": "Unavailable",
+          "empty": "No data",
+          "zero-base": "Invalid zero base",
+          "partial": "Recent range only"
+        },
+        "dialog": {
+          "title": "Chart comparisons",
+          "description": "Compare relative returns for up to {{limit}} securities from a shared starting point.",
+          "noneSelected": "No comparison securities selected.",
+          "search": "Search securities",
+          "color": "Color for {{symbol}}",
+          "loadError": "Could not search the security catalog.",
+          "noResults": "No available securities match this search."
+        }
+      },
       "studies": {
         "label": "Indicators",
         "open": "Manage indicators",

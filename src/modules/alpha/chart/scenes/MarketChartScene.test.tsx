@@ -6,6 +6,7 @@
 // @vitest-environment happy-dom
 
 import type {
+  ChartComparisonConfig,
   MarketChartDensity,
   MarketChartOptions,
 } from "@/modules/alpha/chart/model";
@@ -136,6 +137,7 @@ describe("MarketChartScene", () => {
     density: MarketChartDensity = "panel",
     studies: readonly ChartStudyInstance[] = [],
     visible = true,
+    comparisons: readonly ChartComparisonConfig[] = [],
   ) {
     root?.render(
       createElement(
@@ -148,6 +150,7 @@ describe("MarketChartScene", () => {
           density,
           onOptionsChange,
           studies,
+          comparisons,
         }),
       ),
     );
@@ -392,5 +395,183 @@ describe("MarketChartScene", () => {
 
     expect(mocks.getAlphaBars).toHaveBeenCalledTimes(2);
     expect(mocks.frameProps?.status).toBe("ready");
+  });
+
+  it("未配置对比时不发起范围查询，配置后按主图实际范围读取并归一化", async () => {
+    mocks.getAlphaBars.mockImplementation(
+      (symbol: string, query: { start?: string; end?: string }) => {
+        if (symbol === "600000.SSE") {
+          return Promise.resolve({
+            ...page(["2026-07-29", "2026-07-30"], false, null),
+            items: [
+              { ...page(["2026-07-29"], false, null).items[0], close: 100 },
+              { ...page(["2026-07-30"], false, null).items[0], close: 110 },
+            ],
+            actualStart: query.start ?? null,
+            actualEnd: query.end ?? null,
+          });
+        }
+        return Promise.resolve(page(["2026-07-29", "2026-07-30"], false, null));
+      },
+    );
+
+    await act(async () => render("000001.SZSE"));
+    await flush();
+    expect(mocks.getAlphaBars).toHaveBeenCalledOnce();
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [], true, [
+        { vtSymbol: "600000.SSE", color: "#d9a441" },
+      ]),
+    );
+    await flush();
+
+    expect(mocks.getAlphaBars).toHaveBeenCalledWith("600000.SSE", {
+      interval: "d",
+      adjust: "forward",
+      start: "2026-07-29",
+      end: "2026-07-30",
+      limit: 2,
+    });
+    expect(mocks.frameProps?.comparisonStates).toEqual([
+      expect.objectContaining({
+        vtSymbol: "600000.SSE",
+        status: "ready",
+        partial: false,
+      }),
+    ]);
+    const series = mocks.frameProps?.comparisonSeries as Array<{
+      vtSymbol: string;
+      points: Array<{ value: number }>;
+    }>;
+    expect(series.map((item) => item.vtSymbol)).toEqual([
+      "000001.SZSE",
+      "600000.SSE",
+    ]);
+    expect(series[1].points[1].value).toBeCloseTo(10);
+
+    const callsBeforeSameRange = mocks.getAlphaBars.mock.calls.length;
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [], true, [
+        { vtSymbol: "600000.SSE", color: "#d9a441" },
+      ]),
+    );
+    await flush();
+    expect(mocks.getAlphaBars).toHaveBeenCalledTimes(callsBeforeSameRange);
+  });
+
+  it("排除主标的并让单个对比失败保持局部状态", async () => {
+    mocks.getAlphaBars.mockImplementation((symbol: string) =>
+      symbol === "600000.SSE"
+        ? Promise.reject(new Error("comparison failed"))
+        : Promise.resolve(page(["2026-07-29", "2026-07-30"], false, null)),
+    );
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [], true, [
+        { vtSymbol: "000001.SZSE", color: "#4daafc" },
+        { vtSymbol: "600000.SSE", color: "#d9a441" },
+      ]),
+    );
+    await flush();
+
+    const mainRangeCalls = mocks.getAlphaBars.mock.calls.filter(
+      ([symbol, query]) => symbol === "000001.SZSE" && query?.start,
+    );
+    expect(mainRangeCalls).toHaveLength(0);
+    expect(mocks.frameProps?.comparisons).toEqual([
+      { vtSymbol: "600000.SSE", color: "#d9a441" },
+    ]);
+    expect(mocks.frameProps?.comparisonStates).toEqual([
+      expect.objectContaining({
+        vtSymbol: "600000.SSE",
+        status: "error",
+      }),
+    ]);
+    expect(mocks.frameProps?.status).toBe("ready");
+  });
+
+  it("历史 prepend 后扩展对比查询范围", async () => {
+    let mainCalls = 0;
+    mocks.getAlphaBars.mockImplementation(
+      (symbol: string, query: { start?: string }) => {
+        if (symbol === "600000.SSE") {
+          return Promise.resolve({
+            ...page(
+              query.start === "2026-07-27"
+                ? ["2026-07-27", "2026-07-28", "2026-07-29", "2026-07-30"]
+                : ["2026-07-29", "2026-07-30"],
+              false,
+              null,
+            ),
+            actualStart: query.start ?? null,
+          });
+        }
+        mainCalls += 1;
+        return Promise.resolve(
+          mainCalls === 1
+            ? page(["2026-07-29", "2026-07-30"], true, "2026-07-29")
+            : page(["2026-07-27", "2026-07-28"], false, null),
+        );
+      },
+    );
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [], true, [
+        { vtSymbol: "600000.SSE", color: "#d9a441" },
+      ]),
+    );
+    await flush();
+    await act(async () => {
+      (mocks.frameProps?.onRequestMore as (() => void) | undefined)?.();
+    });
+    await flush();
+
+    expect(mocks.getAlphaBars).toHaveBeenCalledWith(
+      "600000.SSE",
+      expect.objectContaining({ start: "2026-07-27", limit: 4 }),
+    );
+  });
+
+  it("主图超过五千根时保持查询有界并标记局部覆盖", async () => {
+    const longItems = Array.from({ length: 5_001 }, (_, index) => ({
+      time: { kind: "instant" as const, epochSeconds: index + 1 },
+      open: 10,
+      high: 12,
+      low: 9,
+      close: 11 + index / 10_000,
+      volume: 100,
+      amount: 1_000,
+      openInterest: null,
+    }));
+    mocks.getAlphaBars.mockImplementation((symbol: string) =>
+      Promise.resolve({
+        ...page([], false, null),
+        items: symbol === "600000.SSE" ? longItems.slice(-5_000) : longItems,
+        actualStart: symbol === "600000.SSE" ? "2020-01-02" : "2020-01-01",
+        actualEnd: "2026-07-30",
+      }),
+    );
+
+    await act(async () =>
+      render(
+        "000001.SZSE",
+        { ...DEFAULT_OPTIONS, interval: "1h" },
+        vi.fn(),
+        "panel",
+        [],
+        true,
+        [{ vtSymbol: "600000.SSE", color: "#d9a441" }],
+      ),
+    );
+    await flush();
+
+    expect(mocks.getAlphaBars).toHaveBeenCalledWith(
+      "600000.SSE",
+      expect.objectContaining({ limit: 5_000 }),
+    );
+    expect(mocks.frameProps?.comparisonStates).toEqual([
+      expect.objectContaining({ status: "ready", partial: true }),
+    ]);
   });
 });

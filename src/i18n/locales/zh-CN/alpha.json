@@ -124,6 +124,35 @@
       "historyRetry": "重试加载更早历史",
       "resetView": "重置图表视图",
       "previousClose": "昨收",
+      "actions": {
+        "menu": "更多图表操作"
+      },
+      "comparisons": {
+        "label": "对比",
+        "open": "管理对比标的",
+        "actions": {
+          "manage": "管理对比标的",
+          "remove": "移除对比标的",
+          "retry": "重试对比标的",
+          "close": "关闭"
+        },
+        "status": {
+          "loading": "加载中...",
+          "error": "不可用",
+          "empty": "无数据",
+          "zero-base": "基准价为零",
+          "partial": "仅覆盖近期"
+        },
+        "dialog": {
+          "title": "图表对比",
+          "description": "以共同起点比较最多 {{limit}} 个证券的相对收益。",
+          "noneSelected": "尚未选择对比标的。",
+          "search": "搜索证券",
+          "color": "{{symbol}} 的颜色",
+          "loadError": "无法搜索证券目录。",
+          "noResults": "没有可添加的匹配证券。"
+        }
+      },
       "studies": {
         "label": "指标",
         "open": "管理指标",

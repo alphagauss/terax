@@ -1,6 +1,6 @@
 /**
  * 本文件封装 Alpha 公共金融图表的 Lightweight Charts 运行时。
- * Controller 独占实例、价格与指标 series、动态 pane、监听器、同步命令、viewport 和截图命令，不执行查询或持久化。
+ * Controller 独占实例、价格、指标与对比 series、动态 pane、监听器、同步命令、viewport 和截图命令，不执行查询或持久化。
  */
 
 import {
@@ -11,10 +11,12 @@ import {
 } from "@/modules/alpha/chart/lightweight/data";
 import {
   buildChartStudySeriesData,
-  routeChartStudies,
   type RoutedChartStudy,
+  routeChartStudies,
 } from "@/modules/alpha/chart/lightweight/studies";
 import type {
+  ChartComparisonLegendValues,
+  ChartComparisonSeries,
   ChartMarketMetadata,
   ChartPriceReference,
   FinancialChartPalette,
@@ -22,14 +24,14 @@ import type {
   PaneRatios,
 } from "@/modules/alpha/chart/model";
 import { createRafBatcher } from "@/modules/alpha/chart/rafBatcher";
-import type { ChartTimeRange } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import type {
   ChartStudyInstance,
   ChartStudyResult,
   ChartStudySeriesKind,
 } from "@/modules/alpha/chart/studies/model";
-import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
+import type { ChartTimeRange } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
+import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import {
   BarSeries,
@@ -38,16 +40,16 @@ import {
   createChart,
   HistogramSeries,
   type IChartApi,
-  type IRange,
   type IPriceLine,
+  type IRange,
   type ISeriesApi,
-  LineStyle,
   LineSeries,
+  LineStyle,
   type Logical,
   type LogicalRange,
   type MouseEventParams,
-  type Time,
   TickMarkType,
+  type Time,
 } from "lightweight-charts";
 
 const HISTORY_LOAD_THRESHOLD = 20;
@@ -59,6 +61,7 @@ type ChartCallbacks = {
   onCrosshairChange?: (
     bar: MarketBar | null,
     studyValues: ChartStudyLegendValues,
+    comparisonValues: ChartComparisonLegendValues,
   ) => void;
   onVisibleTimeRangeChange?: (range: ChartTimeRange) => void;
   onCrosshairTimeChange?: (time: MarketTime | null) => void;
@@ -83,6 +86,12 @@ type StudyRuntime = {
 type CrosshairSnapshot = {
   bar: MarketBar | null;
   studyValues: ChartStudyLegendValues;
+  comparisonValues: ChartComparisonLegendValues;
+};
+
+type ComparisonRuntime = {
+  item: ChartComparisonSeries;
+  series: ISeriesApi<"Line">;
 };
 
 const DEFAULT_PALETTE: FinancialChartPalette = {
@@ -176,6 +185,11 @@ export class FinancialChartController {
     { instanceId: string; outputId: string }
   >();
   private crosshairStudyValues: ChartStudyLegendValues = {};
+  private mainComparisonVtSymbol: string | null = null;
+  private comparisonSeries: readonly ChartComparisonSeries[] = [];
+  private comparisonRuntimes = new Map<string, ComparisonRuntime>();
+  private comparisonSeriesMetadata = new Map<ISeriesApi<"Line">, string>();
+  private crosshairComparisonValues: ChartComparisonLegendValues = {};
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -188,6 +202,7 @@ export class FinancialChartController {
         attributionLogo: false,
       },
       timeScale: { borderVisible: false },
+      leftPriceScale: { visible: false, borderVisible: false },
       rightPriceScale: { borderVisible: false },
     });
     this.candles = this.chart.addSeries(CandlestickSeries, {}, 0);
@@ -209,7 +224,11 @@ export class FinancialChartController {
       }
     });
     this.crosshairBatcher = createRafBatcher((snapshot) => {
-      this.callbacks.onCrosshairChange?.(snapshot.bar, snapshot.studyValues);
+      this.callbacks.onCrosshairChange?.(
+        snapshot.bar,
+        snapshot.studyValues,
+        snapshot.comparisonValues,
+      );
     });
     this.chart.subscribeCrosshairMove(this.handleCrosshairMove);
     this.chart
@@ -420,6 +439,92 @@ export class FinancialChartController {
     this.crosshairStudyValues = {};
   }
 
+  /**
+   * 按证券身份增量维护相对收益线，并让全部线共用独立左侧百分比轴。
+   */
+  setComparisons(
+    mainVtSymbol: string | null,
+    series: readonly ChartComparisonSeries[],
+  ): void {
+    if (series.length === 0 && this.comparisonRuntimes.size === 0) {
+      this.mainComparisonVtSymbol = null;
+      this.comparisonSeries = series;
+      this.crosshairComparisonValues = {};
+      return;
+    }
+    this.mainComparisonVtSymbol = mainVtSymbol;
+    this.comparisonSeries = series;
+    const desiredSymbols = new Set(series.map((item) => item.vtSymbol));
+
+    this.runChartMutation(() => {
+      for (const [vtSymbol, runtime] of this.comparisonRuntimes) {
+        if (desiredSymbols.has(vtSymbol)) continue;
+        this.comparisonSeriesMetadata.delete(runtime.series);
+        this.chart.removeSeries(runtime.series);
+        this.comparisonRuntimes.delete(vtSymbol);
+      }
+
+      for (const item of series) {
+        let runtime = this.comparisonRuntimes.get(item.vtSymbol);
+        if (!runtime) {
+          const line = this.chart.addSeries(
+            LineSeries,
+            {
+              priceScaleId: "left",
+              lineWidth: 2,
+              priceLineVisible: false,
+              lastValueVisible: false,
+              crosshairMarkerVisible: false,
+              priceFormat: {
+                type: "custom",
+                minMove: 0.01,
+                formatter: (value: number) => `${value.toFixed(2)}%`,
+              },
+            },
+            0,
+          );
+          runtime = { item, series: line };
+          this.comparisonRuntimes.set(item.vtSymbol, runtime);
+          this.comparisonSeriesMetadata.set(line, item.vtSymbol);
+        }
+        runtime.item = item;
+        runtime.series.applyOptions({
+          color:
+            item.vtSymbol === mainVtSymbol ? this.palette.line : item.color,
+        });
+        runtime.series.setData(
+          item.points.map((point) => ({
+            time: financialChartTime(point.time),
+            value: point.value,
+          })),
+        );
+      }
+
+      this.chart.applyOptions({
+        leftPriceScale: {
+          visible: series.length > 0,
+          borderVisible: series.length > 0,
+          borderColor: this.palette.border,
+        },
+      });
+    });
+
+    const crosshairBar =
+      this.crosshairTimeKey === null
+        ? null
+        : (this.barsByTime.get(this.crosshairTimeKey) ?? null);
+    this.crosshairComparisonValues = crosshairBar
+      ? this.comparisonValuesAtTime(crosshairBar.time)
+      : {};
+    if (this.crosshairTimeKey !== null) {
+      this.crosshairBatcher.schedule({
+        bar: crosshairBar,
+        studyValues: this.crosshairStudyValues,
+        comparisonValues: this.crosshairComparisonValues,
+      });
+    }
+  }
+
   /** 应用 Terax 主题色，不改变用户 viewport。 */
   applyTheme(palette: FinancialChartPalette): void {
     this.palette = palette;
@@ -443,6 +548,11 @@ export class FinancialChartController {
             labelBackgroundColor: palette.border,
           },
         },
+        leftPriceScale: {
+          visible: this.comparisonRuntimes.size > 0,
+          borderVisible: this.comparisonRuntimes.size > 0,
+          borderColor: palette.border,
+        },
         rightPriceScale: { borderColor: palette.border },
         timeScale: { borderColor: palette.border },
       });
@@ -456,6 +566,14 @@ export class FinancialChartController {
       });
       this.ohlc.applyOptions({ upColor: palette.up, downColor: palette.down });
       this.line.applyOptions({ color: palette.line, lineWidth: 2 });
+      for (const [vtSymbol, runtime] of this.comparisonRuntimes) {
+        runtime.series.applyOptions({
+          color:
+            vtSymbol === this.mainComparisonVtSymbol
+              ? palette.line
+              : runtime.item.color,
+        });
+      }
       if (this.bars.length > 0) {
         this.volume.setData(
           buildFinancialSeriesData(this.bars, palette).volume,
@@ -539,6 +657,7 @@ export class FinancialChartController {
       this.crosshairBatcher.schedule({
         bar: this.barsByTime.get(this.crosshairTimeKey) ?? null,
         studyValues: this.crosshairStudyValues,
+        comparisonValues: this.crosshairComparisonValues,
       });
     }
   }
@@ -658,7 +777,20 @@ export class FinancialChartController {
       studyValues[metadata.instanceId][metadata.outputId] = value;
     }
     this.crosshairStudyValues = studyValues;
-    this.crosshairBatcher.schedule({ bar, studyValues });
+    const comparisonValues: ChartComparisonLegendValues = {};
+    for (const [series, vtSymbol] of this.comparisonSeriesMetadata) {
+      const data = params.seriesData.get(series);
+      comparisonValues[vtSymbol] =
+        data && "value" in data && Number.isFinite(data.value)
+          ? data.value
+          : null;
+    }
+    this.crosshairComparisonValues = comparisonValues;
+    this.crosshairBatcher.schedule({
+      bar,
+      studyValues,
+      comparisonValues,
+    });
     if (
       this.localCrosshairActive &&
       !this.chartMutationInProgress &&
@@ -800,9 +932,12 @@ export class FinancialChartController {
       time && localBar ? chartTimeKey(financialChartTime(localBar.time)) : null;
     this.crosshairStudyValues =
       time && localBar ? this.studyValuesAtTime(localBar.time) : {};
+    this.crosshairComparisonValues =
+      time && localBar ? this.comparisonValuesAtTime(localBar.time) : {};
     this.crosshairBatcher.schedule({
       bar: time && localBar ? localBar : null,
       studyValues: this.crosshairStudyValues,
+      comparisonValues: this.crosshairComparisonValues,
     });
   }
 
@@ -830,6 +965,32 @@ export class FinancialChartController {
         outputs[output.id] = value;
       }
       values[result.instanceId] = outputs;
+    }
+    return values;
+  }
+
+  /** 精确提取同步时间的相对收益值，不把停牌前旧点延伸到当前时间。 */
+  private comparisonValuesAtTime(
+    time: MarketTime,
+  ): ChartComparisonLegendValues {
+    const target = marketTimeKey(time);
+    const values: ChartComparisonLegendValues = {};
+    for (const item of this.comparisonSeries) {
+      let low = 0;
+      let high = item.points.length - 1;
+      let value: number | null = null;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const point = item.points[middle];
+        const key = marketTimeKey(point.time);
+        if (key === target) {
+          value = point.value;
+          break;
+        }
+        if (key < target) low = middle + 1;
+        else high = middle - 1;
+      }
+      values[item.vtSymbol] = value;
     }
     return values;
   }

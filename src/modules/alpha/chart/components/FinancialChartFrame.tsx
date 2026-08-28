@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责受控图表选项、价格与指标 legend、可选同步桥、懒加载管理入口、导出和状态反馈，不拥有查询。
+ * 外壳负责受控图表选项、价格、指标与对比 legend、可选同步桥、懒加载管理入口、导出和状态反馈，不拥有查询。
  */
 
 import {
@@ -20,6 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ChartAccessibilityLayer } from "@/modules/alpha/chart/accessibility/ChartAccessibilityLayer";
+import { ComparisonLegend } from "@/modules/alpha/chart/comparison/ComparisonLegend";
+import { latestChartComparisonValues } from "@/modules/alpha/chart/comparison/normalize";
 import {
   FinancialChart,
   type FinancialChartHandle,
@@ -34,6 +36,10 @@ import {
 } from "@/modules/alpha/chart/export/chartExport";
 import { latestChartStudyValues } from "@/modules/alpha/chart/lightweight/studies";
 import type {
+  ChartComparisonConfig,
+  ChartComparisonLegendValues,
+  ChartComparisonSeries,
+  ChartComparisonState,
   ChartMarketMetadata,
   ChartPriceReference,
   FinancialChartStatus,
@@ -48,14 +54,15 @@ import type {
 } from "@/modules/alpha/chart/studies/model";
 import { StudyLegend } from "@/modules/alpha/chart/studies/StudyLegend";
 import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
-import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import {
+  ChartLineData01Icon,
+  ChartRelationshipIcon,
   Download01Icon,
   FitToScreenIcon,
-  ChartLineData01Icon,
   MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -81,17 +88,28 @@ type Props = {
   studyResults?: readonly ChartStudyResult[];
   studyLoading?: boolean;
   studyError?: boolean;
+  comparisons?: readonly ChartComparisonConfig[];
+  comparisonStates?: readonly ChartComparisonState[];
+  comparisonSeries?: readonly ChartComparisonSeries[];
   syncRuntime?: FinancialChartSyncRuntime | null;
   onOptionsChange: (options: MarketChartOptions) => void;
   onStudiesChange?: (studies: ChartStudyInstance[]) => void;
+  onComparisonsChange?: (comparisons: ChartComparisonConfig[]) => void;
+  onRetryComparison?: (vtSymbol: string) => void;
   onRequestMore: () => void;
   onRetry: () => void;
 };
 
 const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
 const EMPTY_STUDY_RESULTS: readonly ChartStudyResult[] = [];
+const EMPTY_COMPARISONS: readonly ChartComparisonConfig[] = [];
+const EMPTY_COMPARISON_STATES: readonly ChartComparisonState[] = [];
+const EMPTY_COMPARISON_SERIES: readonly ChartComparisonSeries[] = [];
 const IndicatorDialog = lazy(
   () => import("@/modules/alpha/chart/studies/IndicatorDialog"),
+);
+const ComparisonDialog = lazy(
+  () => import("@/modules/alpha/chart/comparison/ComparisonDialog"),
 );
 
 /** 根据使用密度渲染受控工具栏、信息栏和状态反馈。 */
@@ -113,9 +131,14 @@ export function FinancialChartFrame({
   studyResults = EMPTY_STUDY_RESULTS,
   studyLoading = false,
   studyError = false,
+  comparisons = EMPTY_COMPARISONS,
+  comparisonStates = EMPTY_COMPARISON_STATES,
+  comparisonSeries = EMPTY_COMPARISON_SERIES,
   syncRuntime = null,
   onOptionsChange,
   onStudiesChange,
+  onComparisonsChange,
+  onRetryComparison,
   onRequestMore,
   onRetry,
 }: Props) {
@@ -124,9 +147,11 @@ export function FinancialChartFrame({
     dataKey: string;
     bar: MarketBar;
     studyValues: ChartStudyLegendValues;
+    comparisonValues: ChartComparisonLegendValues;
   } | null>(null);
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
+  const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
   const chartRef = useRef<FinancialChartHandle>(null);
   const latestBar = bars[bars.length - 1] ?? null;
   const displayBar = crosshair?.dataKey === dataKey ? crosshair.bar : latestBar;
@@ -221,10 +246,24 @@ export function FinancialChartFrame({
   );
   const displayedStudyValues =
     crosshair?.dataKey === dataKey ? crosshair.studyValues : latestStudyValues;
+  const latestComparisonValues = useMemo(
+    () => latestChartComparisonValues(comparisonSeries),
+    [comparisonSeries],
+  );
+  const displayedComparisonValues =
+    crosshair?.dataKey === dataKey
+      ? crosshair.comparisonValues
+      : latestComparisonValues;
 
   const handleCrosshairChange = useCallback(
-    (bar: MarketBar | null, studyValues: ChartStudyLegendValues) => {
-      setCrosshair(bar ? { dataKey, bar, studyValues } : null);
+    (
+      bar: MarketBar | null,
+      studyValues: ChartStudyLegendValues,
+      comparisonValues: ChartComparisonLegendValues,
+    ) => {
+      setCrosshair(
+        bar ? { dataKey, bar, studyValues, comparisonValues } : null,
+      );
     },
     [dataKey],
   );
@@ -460,8 +499,8 @@ export function FinancialChartFrame({
                   size="icon"
                   variant="ghost"
                   className="size-7"
-                  title={t("data.chart.export.menu")}
-                  aria-label={t("data.chart.export.menu")}
+                  title={t("data.chart.actions.menu")}
+                  aria-label={t("data.chart.actions.menu")}
                 >
                   <HugeiconsIcon
                     icon={MoreHorizontalIcon}
@@ -471,6 +510,19 @@ export function FinancialChartFrame({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
+                {onComparisonsChange ? (
+                  <DropdownMenuItem
+                    onSelect={() => setComparisonDialogOpen(true)}
+                  >
+                    <HugeiconsIcon
+                      icon={ChartRelationshipIcon}
+                      size={13}
+                      strokeWidth={1.8}
+                    />
+                    {t("data.chart.comparisons.open")}
+                    {comparisons.length > 0 ? ` (${comparisons.length})` : ""}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   disabled={bars.length === 0}
                   onSelect={handlePngExport}
@@ -556,11 +608,28 @@ export function FinancialChartFrame({
         />
       ) : null}
 
+      {onComparisonsChange ? (
+        <ComparisonLegend
+          mainSymbol={symbol}
+          mainName={metadata?.name ?? null}
+          comparisons={comparisonStates}
+          values={displayedComparisonValues}
+          onManage={() => setComparisonDialogOpen(true)}
+          onRemove={(vtSymbol) =>
+            onComparisonsChange(
+              comparisons.filter((item) => item.vtSymbol !== vtSymbol),
+            )
+          }
+          onRetry={(vtSymbol) => onRetryComparison?.(vtSymbol)}
+        />
+      ) : null}
+
       <div className="relative min-h-0 flex-1">
         <FinancialChart
           ref={chartRef}
           bars={bars}
           dataKey={dataKey}
+          mainVtSymbol={symbol}
           chartType={options.chartType}
           metadata={metadata}
           priceReference={priceReference}
@@ -570,6 +639,7 @@ export function FinancialChartFrame({
           paneRatios={options.paneRatios}
           studies={studies}
           studyResults={studyResults}
+          comparisonSeries={comparisonSeries}
           syncRuntime={syncRuntime}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
@@ -628,6 +698,18 @@ export function FinancialChartFrame({
               if (!open) setEditingStudyId(null);
             }}
             onChange={onStudiesChange}
+          />
+        </Suspense>
+      ) : null}
+      {comparisonDialogOpen && onComparisonsChange ? (
+        <Suspense fallback={null}>
+          <ComparisonDialog
+            open={comparisonDialogOpen}
+            mainSymbol={symbol}
+            interval={options.interval}
+            comparisons={comparisons}
+            onOpenChange={setComparisonDialogOpen}
+            onChange={onComparisonsChange}
           />
         </Suspense>
       ) : null}

@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 公共金融图表外壳的基础交互。
- * 重点锁定重置与导出、指标懒加载与 legend，以及涨跌幅使用上一根收盘价计算。
+ * 重点锁定重置与导出、指标和对比懒加载入口，以及涨跌幅使用上一根收盘价计算。
  */
 
 // @vitest-environment happy-dom
@@ -197,7 +197,7 @@ describe("FinancialChartFrame", () => {
 
     expect(container.textContent).toContain("10.00%");
     expect(
-      container.querySelector('[aria-label="data.chart.export.menu"]'),
+      container.querySelector('[aria-label="data.chart.actions.menu"]'),
     ).toBeNull();
 
     const lineButton = Array.from(container.querySelectorAll("button")).find(
@@ -291,7 +291,7 @@ describe("FinancialChartFrame", () => {
       paneRatios: { main: 7, volume: 3 },
     });
     expect(
-      container.querySelector('[aria-label="data.chart.export.menu"]'),
+      container.querySelector('[aria-label="data.chart.actions.menu"]'),
     ).not.toBeNull();
   });
 
@@ -455,6 +455,112 @@ describe("FinancialChartFrame", () => {
     expect(onStudiesChange).toHaveBeenCalledWith([
       expect.objectContaining({ instanceId: "sma-1", visible: false }),
     ]);
+  });
+
+  it("对比 legend 复用统一十字线快照并保持失败状态局部可恢复", () => {
+    const onComparisonsChange = vi.fn();
+    const onRetryComparison = vi.fn();
+    const bars = [marketBar("2026-07-30", 10, 11)];
+    const comparisons = [
+      { vtSymbol: "600000.SSE", color: "#d9a441" },
+      { vtSymbol: "000300.SSE", color: "#a56de2" },
+    ];
+    const comparisonSeries = [
+      {
+        vtSymbol: "000001.SZSE",
+        name: "平安银行",
+        color: "#000000",
+        points: [
+          {
+            time: { kind: "trading-day" as const, date: "2026-07-30" },
+            value: 1,
+          },
+        ],
+      },
+      {
+        vtSymbol: "600000.SSE",
+        name: "浦发银行",
+        color: "#d9a441",
+        points: [
+          {
+            time: { kind: "trading-day" as const, date: "2026-07-30" },
+            value: 2,
+          },
+        ],
+      },
+    ];
+    act(() => {
+      root?.render(
+        createElement(FinancialChartFrame, {
+          bars,
+          dataKey: "000001.SZSE|d|forward",
+          symbol: "000001.SZSE",
+          options: {
+            interval: "d",
+            adjust: "forward",
+            chartType: "candlestick",
+            showVolume: true,
+            paneRatios: { main: 8, volume: 2 },
+          },
+          metadata: null,
+          priceReference: { previousClose: 10, referenceTime: null },
+          availableIntervals: ["d"],
+          density: "panel",
+          status: "ready",
+          historyError: false,
+          hasMoreBefore: false,
+          loadingMore: false,
+          visible: true,
+          comparisons,
+          comparisonSeries,
+          comparisonStates: [
+            {
+              ...comparisonSeries[1],
+              status: "ready",
+              partial: false,
+            },
+            {
+              vtSymbol: "000300.SSE",
+              name: "沪深300",
+              color: "#a56de2",
+              points: [],
+              status: "error",
+              partial: false,
+            },
+          ],
+          onOptionsChange: vi.fn(),
+          onComparisonsChange,
+          onRetryComparison,
+          onRequestMore: vi.fn(),
+          onRetry: vi.fn(),
+        }),
+      );
+    });
+
+    expect(container.textContent).toContain("1.00%");
+    expect(container.textContent).toContain("2.00%");
+    const crosshair = mocks.chartProps?.onCrosshairChange as (
+      bar: MarketBar,
+      studies: Record<string, never>,
+      values: Record<string, number | null>,
+    ) => void;
+    act(() => crosshair(bars[0], {}, { "000001.SZSE": 3, "600000.SSE": -4 }));
+    expect(container.textContent).toContain("3.00%");
+    expect(container.textContent).toContain("-4.00%");
+
+    const retry = container.querySelector<HTMLButtonElement>(
+      '[aria-label="data.chart.comparisons.actions.retry"]',
+    );
+    act(() => retry?.click());
+    expect(onRetryComparison).toHaveBeenCalledWith("000300.SSE");
+    const remove = container.querySelector<HTMLButtonElement>(
+      '[data-alpha-comparison="600000.SSE"] [aria-label="data.chart.comparisons.actions.remove"]',
+    );
+    act(() => remove?.click());
+    expect(onComparisonsChange).toHaveBeenCalledWith([
+      { vtSymbol: "000300.SSE", color: "#a56de2" },
+    ]);
+    expect(mocks.chartProps?.comparisonSeries).toBe(comparisonSeries);
   });
 
   it("超过上限时在构造 CSV 前显示本地化错误", () => {

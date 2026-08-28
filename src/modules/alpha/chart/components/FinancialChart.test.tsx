@@ -1,12 +1,12 @@
 /**
  * 本文件测试公共金融图表 React 宿主的实例生命周期。
- * 重点锁定受控类型、数据键、指标和可选同步桥只更新同一个 Controller，不重建图表实例。
+ * 重点锁定受控类型、数据键、指标、对比和可选同步桥只更新同一个 Controller，不重建图表实例。
  */
 
 // @vitest-environment happy-dom
 
-import type { MarketBar } from "@/modules/alpha/market/model";
 import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
+import type { MarketBar } from "@/modules/alpha/market/model";
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     setShowVolume: vi.fn(),
     setBars: vi.fn(),
     setStudies: vi.fn(),
+    setComparisons: vi.fn(),
     setHistoryState: vi.fn(),
     setVisibleTimeRangeFromSync: vi.fn(),
     setCrosshairFromSync: vi.fn(),
@@ -151,6 +152,20 @@ describe("FinancialChart", () => {
           {...common}
           dataKey="000001.SZSE|1h|none"
           chartType="line"
+          mainVtSymbol="000001.SZSE"
+          comparisonSeries={[
+            {
+              vtSymbol: "000001.SZSE",
+              name: "平安银行",
+              color: "#000000",
+              points: [
+                {
+                  time: { kind: "trading-day", date: "2026-07-30" },
+                  value: 0,
+                },
+              ],
+            },
+          ]}
         />,
       ),
     );
@@ -168,6 +183,10 @@ describe("FinancialChart", () => {
     expect(mocks.controller.setPriceReference).toHaveBeenLastCalledWith(
       common.priceReference,
       "昨收",
+    );
+    expect(mocks.controller.setComparisons).toHaveBeenLastCalledWith(
+      "000001.SZSE",
+      [expect.objectContaining({ vtSymbol: "000001.SZSE" })],
     );
   });
 

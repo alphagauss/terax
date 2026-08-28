@@ -4,6 +4,7 @@
  */
 
 import type {
+  ChartComparisonSeries,
   ChartMarketMetadata,
   FinancialChartPalette,
 } from "@/modules/alpha/chart/model";
@@ -125,6 +126,22 @@ function bar(date: string, close: number): MarketBar {
   };
 }
 
+function comparison(
+  vtSymbol: string,
+  color: string,
+  values: Array<[date: string, value: number]>,
+): ChartComparisonSeries {
+  return {
+    vtSymbol,
+    name: vtSymbol,
+    color,
+    points: values.map(([date, value]) => ({
+      time: { kind: "trading-day", date },
+      value,
+    })),
+  };
+}
+
 function studyInstance(
   instanceId: string,
   type: "sma" | "rsi" | "macd",
@@ -226,6 +243,68 @@ describe("FinancialChartController", () => {
     expect(mocks.chart.addSeries).toHaveBeenCalledTimes(4);
     expect(mocks.chart.removePane).not.toHaveBeenCalled();
     expect(mocks.series[3].moveToPane).not.toHaveBeenCalled();
+  });
+
+  it("没有对比配置时不创建 series 或重复应用图表选项", () => {
+    const controller = new FinancialChartController(chartHost());
+    const optionCalls = mocks.chart.applyOptions.mock.calls.length;
+
+    controller.setComparisons(null, []);
+
+    expect(mocks.chart.addSeries).toHaveBeenCalledTimes(4);
+    expect(mocks.chart.applyOptions).toHaveBeenCalledTimes(optionCalls);
+  });
+
+  it("按标的复用对比线、保持右价格轴并在清空后隐藏左轴", () => {
+    const controller = new FinancialChartController(chartHost());
+    const main = comparison("MAIN.SSE", "#000000", [
+      ["2026-07-29", 0],
+      ["2026-07-30", 10],
+    ]);
+    const peer = comparison("PEER.SSE", "#d9a441", [
+      ["2026-07-29", 0],
+      ["2026-07-30", -5],
+    ]);
+
+    controller.applyTheme(palette);
+    controller.setComparisons("MAIN.SSE", [main, peer]);
+    const createdCount = mocks.chart.addSeries.mock.calls.length;
+    const mainLine = mocks.studySeries[0];
+    const peerLine = mocks.studySeries[1];
+
+    expect(mainLine.applyOptions).toHaveBeenLastCalledWith({
+      color: palette.line,
+    });
+    expect(peerLine.applyOptions).toHaveBeenLastCalledWith({
+      color: "#d9a441",
+    });
+    expect(mocks.chart.applyOptions).toHaveBeenLastCalledWith({
+      leftPriceScale: {
+        visible: true,
+        borderVisible: true,
+        borderColor: palette.border,
+      },
+    });
+
+    controller.setComparisons("MAIN.SSE", [
+      main,
+      { ...peer, color: "#a56de2" },
+    ]);
+    expect(mocks.chart.addSeries).toHaveBeenCalledTimes(createdCount);
+    expect(peerLine.applyOptions).toHaveBeenLastCalledWith({
+      color: "#a56de2",
+    });
+
+    controller.setComparisons(null, []);
+    expect(mocks.chart.removeSeries).toHaveBeenCalledWith(mainLine);
+    expect(mocks.chart.removeSeries).toHaveBeenCalledWith(peerLine);
+    expect(mocks.chart.applyOptions).toHaveBeenLastCalledWith({
+      leftPriceScale: {
+        visible: false,
+        borderVisible: false,
+        borderColor: palette.border,
+      },
+    });
   });
 
   it("应用价格精度和交易所时区时不重建 series", () => {
@@ -592,9 +671,13 @@ describe("FinancialChartController", () => {
       );
       expect(onCrosshairTimeChange).toHaveBeenCalledTimes(2);
       vi.runAllTimers();
-      expect(onCrosshairChange).toHaveBeenLastCalledWith(second, {
-        "sma-1": { line: 1 },
-      });
+      expect(onCrosshairChange).toHaveBeenLastCalledWith(
+        second,
+        {
+          "sma-1": { line: 1 },
+        },
+        {},
+      );
 
       controller.setCrosshairFromSync(
         { kind: "trading-day", date: "2026-07-31" },
@@ -603,7 +686,7 @@ describe("FinancialChartController", () => {
       expect(mocks.chart.clearCrosshairPosition).toHaveBeenCalledOnce();
       expect(mocks.chart.subscribeCrosshairMove).toHaveBeenCalledOnce();
       vi.runAllTimers();
-      expect(onCrosshairChange).toHaveBeenLastCalledWith(null, {});
+      expect(onCrosshairChange).toHaveBeenLastCalledWith(null, {}, {});
       controller.destroy();
     } finally {
       vi.useRealTimers();
@@ -634,6 +717,7 @@ describe("FinancialChartController", () => {
       expect(onCrosshairChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ close: 12 }),
         {},
+        {},
       );
 
       controller.setBars("000001.SZSE|d|forward", [
@@ -644,6 +728,7 @@ describe("FinancialChartController", () => {
 
       expect(onCrosshairChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ close: 13 }),
+        {},
         {},
       );
       controller.destroy();
@@ -661,6 +746,10 @@ describe("FinancialChartController", () => {
       controller.setBars("000001.SZSE|d|forward", [bar("2026-07-30", 12)]);
       const sma = studyInstance("sma-1", "sma");
       controller.setStudies([studyResult("sma-1", "main", ["line"])], [sma]);
+      controller.setComparisons("000001.SZSE", [
+        comparison("000001.SZSE", "#000000", [["2026-07-30", 4]]),
+        comparison("600000.SSE", "#d9a441", [["2026-07-30", -2]]),
+      ]);
       const handler = mocks.chart.subscribeCrosshairMove.mock
         .calls[0][0] as (params: {
         time?: { year: number; month: number; day: number };
@@ -669,11 +758,19 @@ describe("FinancialChartController", () => {
 
       handler({
         time: { year: 2026, month: 7, day: 30 },
-        seriesData: new Map([[mocks.studySeries[0], { value: 21.5 }]]),
+        seriesData: new Map([
+          [mocks.studySeries[0], { value: 21.5 }],
+          [mocks.studySeries[1], { value: 4 }],
+          [mocks.studySeries[2], { value: -2 }],
+        ]),
       });
       handler({
         time: { year: 2026, month: 7, day: 30 },
-        seriesData: new Map([[mocks.studySeries[0], { value: 22 }]]),
+        seriesData: new Map([
+          [mocks.studySeries[0], { value: 22 }],
+          [mocks.studySeries[1], { value: 4.5 }],
+          [mocks.studySeries[2], { value: -1.5 }],
+        ]),
       });
       vi.runAllTimers();
 
@@ -682,6 +779,7 @@ describe("FinancialChartController", () => {
       expect(onCrosshairChange).toHaveBeenCalledWith(
         expect.objectContaining({ close: 12 }),
         { "sma-1": { line: 22 } },
+        { "000001.SZSE": 4.5, "600000.SSE": -1.5 },
       );
     } finally {
       vi.useRealTimers();

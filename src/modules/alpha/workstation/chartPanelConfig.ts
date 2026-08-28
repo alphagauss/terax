@@ -1,26 +1,51 @@
 /**
  * 本文件定义工作台图表面板的可持久化配置边界。
- * 配置包含公共行情图表选项和有界指标实例，并为旧对象补齐默认字段。
+ * 配置包含公共行情图表选项、有界指标实例和最多三个对比标的，并为缺失字段补默认值。
  */
 
 import {
-  chartStudyInstanceSchema,
-  MAX_CHART_STUDIES,
-  MAX_SEPARATE_CHART_STUDIES,
-  type ChartStudyInstance,
-} from "@/modules/alpha/chart/studies/model";
-import {
+  type ChartComparisonConfig,
   DEFAULT_MARKET_CHART_OPTIONS,
   FINANCIAL_CHART_TYPES,
   MARKET_CHART_INTERVALS,
+  MAX_CHART_COMPARISONS,
   type MarketChartOptions,
 } from "@/modules/alpha/chart/model";
+import {
+  type ChartStudyInstance,
+  chartStudyInstanceSchema,
+  MAX_CHART_STUDIES,
+  MAX_SEPARATE_CHART_STUDIES,
+} from "@/modules/alpha/chart/studies/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
+import { normalizeAlphaVtSymbol } from "@/modules/alpha/workstation/model";
 import { z } from "zod";
 
 export type AlphaChartPanelConfig = MarketChartOptions & {
   studies: ChartStudyInstance[];
+  comparisons: ChartComparisonConfig[];
 };
+
+const chartComparisonsSchema = z
+  .array(
+    z
+      .object({
+        vtSymbol: z
+          .string()
+          .transform((value) => normalizeAlphaVtSymbol(value))
+          .pipe(z.string()),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+      })
+      .strict(),
+  )
+  .max(MAX_CHART_COMPARISONS)
+  .default([])
+  .superRefine((comparisons, context) => {
+    const symbols = comparisons.map((comparison) => comparison.vtSymbol);
+    if (new Set(symbols).size !== symbols.length) {
+      context.addIssue({ code: "custom", message: "对比标的重复" });
+    }
+  });
 
 const chartStudiesSchema = z
   .array(chartStudyInstanceSchema)
@@ -53,6 +78,7 @@ const alphaChartPanelConfigSchema = z
       .catchall(z.number().positive())
       .default({ main: 8, volume: 2 }),
     studies: chartStudiesSchema,
+    comparisons: chartComparisonsSchema,
   })
   .strict();
 
@@ -62,10 +88,11 @@ export function createDefaultAlphaChartPanelConfig(): AlphaChartPanelConfig {
     ...DEFAULT_MARKET_CHART_OPTIONS,
     paneRatios: { ...DEFAULT_MARKET_CHART_OPTIONS.paneRatios },
     studies: [],
+    comparisons: [],
   };
 }
 
-/** 解析持久化或面板属性中的图表配置，并补齐旧版本缺失字段。 */
+/** 解析当前持久化或面板属性中的图表配置，并补齐可选字段默认值。 */
 export function parseAlphaChartPanelConfig(
   value: unknown,
 ): AlphaChartPanelConfig {
@@ -80,5 +107,6 @@ export function parseAlphaChartPanelConfig(
         Object.entries(study.styles).map(([key, style]) => [key, { ...style }]),
       ),
     })),
+    comparisons: parsed.comparisons.map((comparison) => ({ ...comparison })),
   };
 }

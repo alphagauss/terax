@@ -4,24 +4,26 @@
  */
 
 import {
-  FinancialChartController,
   type ChartStudyLegendValues,
+  FinancialChartController,
 } from "@/modules/alpha/chart/controller/FinancialChartController";
 import { addChartScreenshotBackground } from "@/modules/alpha/chart/export/chartExport";
 import type {
+  ChartComparisonLegendValues,
+  ChartComparisonSeries,
   ChartMarketMetadata,
   ChartPriceReference,
   FinancialChartPalette,
   FinancialChartType,
   PaneRatios,
 } from "@/modules/alpha/chart/model";
-import type { MarketBar } from "@/modules/alpha/market/model";
 import type {
   ChartStudyInstance,
   ChartStudyResult,
 } from "@/modules/alpha/chart/studies/model";
 import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { marketDirectionColors } from "@/modules/alpha/market/metadata";
+import type { MarketBar } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import { useTheme } from "@/modules/theme";
 import {
@@ -35,6 +37,7 @@ import {
 type Props = {
   bars: readonly MarketBar[];
   dataKey: string;
+  mainVtSymbol?: string | null;
   chartType: FinancialChartType;
   metadata: ChartMarketMetadata | null;
   priceReference: ChartPriceReference;
@@ -44,6 +47,7 @@ type Props = {
   paneRatios: PaneRatios;
   studies?: readonly ChartStudyInstance[];
   studyResults?: readonly ChartStudyResult[];
+  comparisonSeries?: readonly ChartComparisonSeries[];
   syncRuntime?: FinancialChartSyncRuntime | null;
   visible: boolean;
   hasMoreBefore: boolean;
@@ -52,6 +56,7 @@ type Props = {
   onCrosshairChange: (
     bar: MarketBar | null,
     studyValues: ChartStudyLegendValues,
+    comparisonValues: ChartComparisonLegendValues,
   ) => void;
   onRequestMore: () => void;
   onPaneRatiosChange?: (ratios: PaneRatios) => void;
@@ -59,6 +64,7 @@ type Props = {
 
 const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
 const EMPTY_STUDY_RESULTS: readonly ChartStudyResult[] = [];
+const EMPTY_COMPARISON_SERIES: readonly ChartComparisonSeries[] = [];
 
 /** 提供不暴露 Lightweight Charts 实例的稳定图表命令。 */
 export type FinancialChartHandle = {
@@ -95,6 +101,7 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     {
       bars,
       dataKey,
+      mainVtSymbol = null,
       chartType,
       metadata,
       priceReference,
@@ -104,6 +111,7 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
       paneRatios,
       studies = EMPTY_STUDIES,
       studyResults = EMPTY_STUDY_RESULTS,
+      comparisonSeries = EMPTY_COMPARISON_SERIES,
       syncRuntime = null,
       visible,
       hasMoreBefore,
@@ -215,6 +223,13 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     useEffect(() => {
       controllerRef.current?.setStudies(studyResults, studies);
     }, [studies, studyResults]);
+
+    useEffect(() => {
+      controllerRef.current?.setComparisons(
+        comparisonSeries.length > 0 ? mainVtSymbol : null,
+        comparisonSeries,
+      );
+    }, [comparisonSeries, mainVtSymbol]);
 
     useEffect(() => {
       controllerRef.current?.setHistoryState(hasMoreBefore, loadingMore);

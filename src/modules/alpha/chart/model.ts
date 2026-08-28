@@ -11,6 +11,43 @@ import type {
 
 export type FinancialChartType = "candlestick" | "ohlc" | "line";
 
+export const MAX_CHART_COMPARISONS = 3;
+
+export const CHART_COMPARISON_COLORS = [
+  "#4daafc",
+  "#d9a441",
+  "#a56de2",
+] as const;
+
+export type ChartComparisonConfig = {
+  vtSymbol: string;
+  color: string;
+};
+
+export type ChartComparisonPoint = {
+  time: MarketTime;
+  value: number;
+};
+
+export type ChartComparisonSeries = ChartComparisonConfig & {
+  name: string;
+  points: ChartComparisonPoint[];
+};
+
+export type ChartComparisonStatus =
+  | "loading"
+  | "ready"
+  | "error"
+  | "empty"
+  | "zero-base";
+
+export type ChartComparisonState = ChartComparisonSeries & {
+  status: ChartComparisonStatus;
+  partial: boolean;
+};
+
+export type ChartComparisonLegendValues = Record<string, number | null>;
+
 export const FINANCIAL_CHART_TYPES = [
   "candlestick",
   "ohlc",

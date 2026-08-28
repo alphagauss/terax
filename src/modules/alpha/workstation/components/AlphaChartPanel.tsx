@@ -1,6 +1,6 @@
 /**
  * 本文件把现有公共行情 Scene 接入 Alpha 工作台面板协议。
- * 面板只拆分行情选项与指标配置、连接可选同步桥并回传更新，不拥有网格、绑定或持久化状态。
+ * 面板只拆分行情选项、指标与对比配置，连接可选同步桥并回传更新，不拥有网格、绑定或持久化状态。
  */
 
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
@@ -36,8 +36,12 @@ export default function AlphaChartPanel({
   const syncRuntime = useChartSyncPanel(panelId, syncCompatibility);
   const changeOptions = useCallback(
     (next: typeof marketOptions) =>
-      onConfigChange({ ...next, studies: options.studies }),
-    [onConfigChange, options.studies],
+      onConfigChange({
+        ...next,
+        studies: options.studies,
+        comparisons: options.comparisons,
+      }),
+    [onConfigChange, options.comparisons, options.studies],
   );
   const changeStudies = useCallback(
     (studies: typeof options.studies) => {
@@ -47,9 +51,24 @@ export default function AlphaChartPanel({
           ([key]) => key === "main" || key === "volume" || liveIds.has(key),
         ),
       );
-      onConfigChange({ ...marketOptions, paneRatios, studies });
+      onConfigChange({
+        ...marketOptions,
+        paneRatios,
+        studies,
+        comparisons: options.comparisons,
+      });
     },
-    [marketOptions, onConfigChange, options.paneRatios],
+    [marketOptions, onConfigChange, options.comparisons, options.paneRatios],
+  );
+  const changeComparisons = useCallback(
+    (comparisons: typeof options.comparisons) => {
+      onConfigChange({
+        ...marketOptions,
+        studies: options.studies,
+        comparisons,
+      });
+    },
+    [marketOptions, onConfigChange, options.studies],
   );
   return (
     <AlphaServiceBoundary visible={visible}>
@@ -59,10 +78,12 @@ export default function AlphaChartPanel({
           visible={visible}
           options={marketOptions}
           studies={options.studies}
+          comparisons={options.comparisons}
           density="panel"
           syncRuntime={syncRuntime}
           onOptionsChange={changeOptions}
           onStudiesChange={changeStudies}
+          onComparisonsChange={changeComparisons}
         />
       </div>
     </AlphaServiceBoundary>

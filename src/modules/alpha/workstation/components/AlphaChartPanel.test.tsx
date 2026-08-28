@@ -1,6 +1,6 @@
 /**
  * 本文件测试工作台图表面板对公共行情 Scene 的薄包装。
- * 重点锁定行情与指标配置解析、可选同步桥、panel 密度和更新回传，不允许面板复制查询逻辑。
+ * 重点锁定行情、指标与对比配置解析、可选同步桥、panel 密度和更新回传，不允许面板复制查询逻辑。
  */
 
 // @vitest-environment happy-dom
@@ -60,6 +60,7 @@ describe("AlphaChartPanel", () => {
         showVolume: false,
         paneRatios: { main: 7, volume: 3 },
         studies: [],
+        comparisons: [],
       },
       onConfigChange,
     };
@@ -79,6 +80,7 @@ describe("AlphaChartPanel", () => {
         paneRatios: { main: 7, volume: 3 },
       },
       studies: [],
+      comparisons: [],
     });
     act(() => {
       const change = mocks.sceneProps?.onOptionsChange as (
@@ -99,6 +101,7 @@ describe("AlphaChartPanel", () => {
       showVolume: true,
       paneRatios: { main: 8, volume: 2 },
       studies: [],
+      comparisons: [],
     });
 
     act(() => {
@@ -122,6 +125,23 @@ describe("AlphaChartPanel", () => {
       showVolume: false,
       paneRatios: { main: 7, volume: 3 },
       studies: [expect.objectContaining({ instanceId: "rsi-1" })],
+      comparisons: [],
+    });
+
+    act(() => {
+      const change = mocks.sceneProps?.onComparisonsChange as (
+        value: Array<Record<string, unknown>>,
+      ) => void;
+      change([{ vtSymbol: "600000.SSE", color: "#d9a441" }]);
+    });
+    expect(onConfigChange).toHaveBeenLastCalledWith({
+      interval: "1h",
+      adjust: "none",
+      chartType: "line",
+      showVolume: false,
+      paneRatios: { main: 7, volume: 3 },
+      studies: [],
+      comparisons: [{ vtSymbol: "600000.SSE", color: "#d9a441" }],
     });
   });
 });
