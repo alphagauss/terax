@@ -1,10 +1,11 @@
 /**
- * 本文件管理按会话隔离的 AI 运行状态、会话切换和两阶段持久化。
- * 用户消息在模型请求前落盘，后台运行的完整 Assistant 与工具记录在终态追加。
+ * 本文件管理按会话隔离的 AI 运行状态、窗口级会话恢复和两阶段持久化。
+ * 主窗口只恢复其明确记录的历史会话，临时窗口及失效选择统一进入内存草稿。
  */
 
 import {
   currentWorkspaceBootstrap,
+  deleteWorkspaceValue,
   getWorkspaceValue,
   setWorkspaceValue,
 } from "@/modules/workspace-process";
@@ -184,6 +185,19 @@ const cancelledRuns = new Set<string>();
 const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
+let activeSessionPersistence = Promise.resolve();
+
+/** 串行保存主窗口的活动会话选择，空值表示下次启动进入新草稿。 */
+function persistActiveSession(id: string | null): Promise<void> {
+  if (!currentWorkspaceBootstrap().isPrimary) return Promise.resolve();
+  const operation = activeSessionPersistence.then(() =>
+    id === null
+      ? deleteWorkspaceValue("ai:activeSessionId")
+      : setWorkspaceValue("ai:activeSessionId", id),
+  );
+  activeSessionPersistence = operation.catch(() => undefined);
+  return operation;
+}
 
 /** 读取本轮最终结果，取消优先于 AI SDK 暴露的错误状态。 */
 function sessionRunOutcome(id: string): SessionRunOutcome {
@@ -350,20 +364,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
   runLockSessionIds: {},
   sessionSyncError: null,
 
-  /** 加载已持久化会话；没有历史记录时只创建内存草稿。 */
+  /** 加载会话列表；主窗口只恢复有效记录，其他情况创建内存草稿。 */
   hydrateSessions: async () => {
     if (get().sessionsHydrated) return;
     try {
       const sessions = await listSessions();
-      const savedActive = getWorkspaceValue<string>("ai:activeSessionId");
-      const restored =
-        sessions.find((session) => session.id === savedActive) ??
-        sessions[0] ??
-        null;
+      const primary = currentWorkspaceBootstrap().isPrimary;
+      const savedActive = primary
+        ? getWorkspaceValue<string>("ai:activeSessionId")
+        : undefined;
+      const restored = savedActive
+        ? (sessions.find((session) => session.id === savedActive) ?? null)
+        : null;
       const draftId = restored ? null : newSessionId();
       const activeId = restored?.id ?? draftId;
       if (restored) await seedSession(restored.id);
-      if (restored) await setWorkspaceValue("ai:activeSessionId", restored.id);
+      if (primary && savedActive && !restored) await persistActiveSession(null);
       set({
         sessions,
         draftSessionId: draftId,
@@ -426,13 +442,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
         !activeId ||
         !next.some((session) => session.id === activeId)
       ) {
-        nextActive = next[0].id;
+        if (!nextDraftId) nextDraftId = newSessionId();
+        nextActive = nextDraftId;
       }
 
       if (nextActive && nextActive !== activeId) {
         const nextMeta = next.find((session) => session.id === nextActive);
         if (nextMeta?.fingerprint) await seedSession(nextActive);
-        if (nextMeta) await setWorkspaceValue("ai:activeSessionId", nextActive);
+        await persistActiveSession(nextMeta ? nextActive : null);
         activeChanged = true;
       }
       set({
@@ -475,6 +492,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const draftId = get().draftSessionId;
     if (draftId) {
       set({ activeSessionId: draftId });
+      void persistActiveSession(null);
       return draftId;
     }
     const id = newSessionId();
@@ -482,6 +500,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       draftSessionId: id,
       activeSessionId: id,
     });
+    void persistActiveSession(null);
     return id;
   },
 
@@ -504,7 +523,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       draftSessionId: get().draftSessionId === id ? null : get().draftSessionId,
     });
     if (get().activeSessionId === id) {
-      void setWorkspaceValue("ai:activeSessionId", id);
+      void persistActiveSession(id);
     }
   },
 
@@ -578,7 +597,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const flip = () => {
       if (requestSequence !== sessionSwitchSequence) return;
       set({ activeSessionId: id, draftSessionId: null });
-      void setWorkspaceValue("ai:activeSessionId", id);
+      void persistActiveSession(id);
     };
     if (chats.has(id) || seedMessages.has(id)) {
       flip();
@@ -593,7 +612,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
   },
 
-  /** 删除一条历史会话，并在需要时回退到另一条历史或空白草稿。 */
+  /** 删除一条历史会话；活动项被删除时统一回退到空白草稿。 */
   deleteSession: (id) => {
     if (get().runLockSessionIds[id]) return;
     sessionSwitchSequence++;
@@ -632,30 +651,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
             activeSessionId: draftId,
             agentMetaBySession,
           });
+          if (wasActive) await persistActiveSession(null);
           return;
         }
-        const nextActive = wasActive ? remaining[0].id : get().activeSessionId;
-        const nextMeta = remaining.find((session) => session.id === nextActive);
-        if (
-          wasActive &&
-          nextMeta?.fingerprint &&
-          !chats.has(nextMeta.id) &&
-          !seedMessages.has(nextMeta.id)
-        ) {
-          try {
-            await seedSession(nextMeta.id);
-          } catch (error) {
-            set({ sessionSyncError: String(error) });
-          }
-        }
+        const draftId = wasActive
+          ? (activeDraftId ?? newSessionId())
+          : activeDraftId;
+        const nextActive = wasActive ? draftId : get().activeSessionId;
         set({
           sessions: remaining,
-          draftSessionId: activeDraftId === nextActive ? activeDraftId : null,
+          draftSessionId: draftId,
           activeSessionId: nextActive,
           agentMetaBySession,
         });
-        if (wasActive)
-          await setWorkspaceValue("ai:activeSessionId", nextActive);
+        if (wasActive) await persistActiveSession(null);
       } catch (error) {
         set({ sessionSyncError: String(error) });
       }
