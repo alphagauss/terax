@@ -25,11 +25,7 @@ import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
 import { alphaQueryKeys } from "@/modules/alpha/query";
-import {
-  keepPreviousData,
-  useInfiniteQuery,
-  useQuery,
-} from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 type Props = {
@@ -39,6 +35,7 @@ type Props = {
   density: MarketChartDensity;
   onOptionsChange: (options: MarketChartOptions) => void;
   studies?: readonly ChartStudyInstance[];
+  onStudiesChange?: (studies: ChartStudyInstance[]) => void;
 };
 
 const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
@@ -72,6 +69,7 @@ export function MarketChartScene({
   density,
   onOptionsChange,
   studies = EMPTY_STUDIES,
+  onStudiesChange,
 }: Props) {
   const securityQuery = useQuery({
     queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
@@ -133,7 +131,7 @@ export function MarketChartScene({
     () => studyCalculationSignature(visibleStudies),
     [visibleStudies],
   );
-  useQuery({
+  const studyQuery = useQuery({
     queryKey: alphaQueryKeys.studyCalculation(
       dataKey,
       actualStart,
@@ -155,7 +153,8 @@ export function MarketChartScene({
       visibleStudies.length > 0 &&
       actualStart !== null &&
       actualEnd !== null,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === dataKey ? previous : undefined,
   });
   const priceReference = useMemo(
     () => ({
@@ -194,7 +193,12 @@ export function MarketChartScene({
       hasMoreBefore={Boolean(query.hasNextPage)}
       loadingMore={query.isFetchingNextPage}
       visible={visible}
+      studies={studies}
+      studyResults={studyQuery.data?.items ?? []}
+      studyLoading={studyQuery.isFetching && visibleStudies.length > 0}
+      studyError={studyQuery.isError}
       onOptionsChange={onOptionsChange}
+      onStudiesChange={onStudiesChange}
       onRequestMore={requestMore}
       onRetry={retry}
     />

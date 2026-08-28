@@ -120,6 +120,74 @@
       "historyRetry": "Retry earlier history",
       "resetView": "Reset chart view",
       "previousClose": "Prev close",
+      "studies": {
+        "label": "Indicators",
+        "open": "Manage indicators",
+        "types": {
+          "sma": "SMA",
+          "ema": "EMA",
+          "boll": "Bollinger Bands",
+          "rsi": "RSI",
+          "macd": "MACD"
+        },
+        "panes": {
+          "main": "Main chart overlay",
+          "separate": "Separate pane"
+        },
+        "params": {
+          "period": "Period",
+          "mult": "Deviation multiplier",
+          "fast": "Fast period",
+          "slow": "Slow period",
+          "signal": "Signal period"
+        },
+        "outputs": {
+          "sma": { "line": "SMA" },
+          "ema": { "line": "EMA" },
+          "boll": {
+            "mid": "Middle band",
+            "upper": "Upper band",
+            "lower": "Lower band"
+          },
+          "rsi": { "line": "RSI" },
+          "macd": {
+            "macd": "MACD",
+            "signal": "Signal",
+            "hist": "Histogram"
+          }
+        },
+        "styles": {
+          "color": "Color",
+          "width": "Line width",
+          "positive": "Positive color",
+          "negative": "Negative color"
+        },
+        "actions": {
+          "add": "Add indicator",
+          "save": "Save changes",
+          "cancel": "Cancel",
+          "show": "Show indicator",
+          "hide": "Hide indicator",
+          "edit": "Edit indicator",
+          "remove": "Remove indicator",
+          "moveUp": "Move indicator up",
+          "moveDown": "Move indicator down"
+        },
+        "status": {
+          "loading": "Updating indicators...",
+          "error": "Indicators could not be updated. The price chart is still available."
+        },
+        "dialog": {
+          "title": "Chart indicators",
+          "description": "Add or edit server-computed indicators for this workstation panel.",
+          "search": "Search indicators",
+          "select": "Select an indicator to configure.",
+          "loadError": "Could not load the indicator catalog.",
+          "invalidParams": "Check the indicator parameter ranges.",
+          "paneLimit": "A chart can have at most 4 separate indicator panes.",
+          "totalLimit": "A chart can have at most 8 indicators."
+        }
+      },
       "export": {
         "menu": "Export chart",
         "png": "Download PNG",

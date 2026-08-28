@@ -1,6 +1,6 @@
 /**
  * 本文件封装 Alpha 公共金融图表的 Lightweight Charts 运行时。
- * Controller 独占实例、series、监听器、viewport 和截图命令，不执行查询或持久化。
+ * Controller 独占实例、价格与指标 series、动态 pane、监听器、viewport 和截图命令，不执行查询或持久化。
  */
 
 import {
@@ -9,6 +9,11 @@ import {
   financialChartTime,
   financialTailUpdateMode,
 } from "@/modules/alpha/chart/lightweight/data";
+import {
+  buildChartStudySeriesData,
+  routeChartStudies,
+  type RoutedChartStudy,
+} from "@/modules/alpha/chart/lightweight/studies";
 import type {
   ChartMarketMetadata,
   ChartPriceReference,
@@ -17,6 +22,11 @@ import type {
   PaneRatios,
 } from "@/modules/alpha/chart/model";
 import { createRafBatcher } from "@/modules/alpha/chart/rafBatcher";
+import type {
+  ChartStudyInstance,
+  ChartStudyResult,
+  ChartStudySeriesKind,
+} from "@/modules/alpha/chart/studies/model";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import {
@@ -43,8 +53,31 @@ const DEFAULT_PANE_RATIOS: PaneRatios = { main: 8, volume: 2 };
 const MIN_CUSTOM_PANE_HEIGHT = 240;
 
 type ChartCallbacks = {
-  onCrosshairChange?: (bar: MarketBar | null) => void;
+  onCrosshairChange?: (
+    bar: MarketBar | null,
+    studyValues: ChartStudyLegendValues,
+  ) => void;
   onRequestMore?: () => void;
+};
+
+export type ChartStudyLegendValues = Record<
+  string,
+  Record<string, number | null>
+>;
+
+type StudySeriesApi = ISeriesApi<"Line" | "Histogram">;
+
+type StudyRuntime = {
+  instanceId: string;
+  pane: "main" | "separate";
+  paneIndex: number;
+  outputs: Map<string, { kind: ChartStudySeriesKind; series: StudySeriesApi }>;
+  levelLines: Array<{ line: IPriceLine; series: StudySeriesApi }>;
+};
+
+type CrosshairSnapshot = {
+  bar: MarketBar | null;
+  studyValues: ChartStudyLegendValues;
 };
 
 const DEFAULT_PALETTE: FinancialChartPalette = {
@@ -76,7 +109,7 @@ export class FinancialChartController {
     typeof createRafBatcher<{ width: number; height: number }>
   >;
   private readonly crosshairBatcher: ReturnType<
-    typeof createRafBatcher<MarketBar | null>
+    typeof createRafBatcher<CrosshairSnapshot>
   >;
   private callbacks: ChartCallbacks = {};
   private palette = DEFAULT_PALETTE;
@@ -103,6 +136,15 @@ export class FinancialChartController {
   private chartMutationInProgress = false;
   private crosshairTimeKey: string | null = null;
   private historyInteractionArmed = false;
+  private studyInstances: readonly ChartStudyInstance[] = [];
+  private studyResults: readonly ChartStudyResult[] = [];
+  private studyPaneSignature = "";
+  private studyRuntimes = new Map<string, StudyRuntime>();
+  private studySeriesMetadata = new Map<
+    StudySeriesApi,
+    { instanceId: string; outputId: string }
+  >();
+  private crosshairStudyValues: ChartStudyLegendValues = {};
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -135,8 +177,8 @@ export class FinancialChartController {
         this.applyPaneRatios();
       }
     });
-    this.crosshairBatcher = createRafBatcher((bar) => {
-      this.callbacks.onCrosshairChange?.(bar);
+    this.crosshairBatcher = createRafBatcher((snapshot) => {
+      this.callbacks.onCrosshairChange?.(snapshot.bar, snapshot.studyValues);
     });
     this.chart.subscribeCrosshairMove(this.handleCrosshairMove);
     this.chart
@@ -233,30 +275,77 @@ export class FinancialChartController {
       this.applyPaneRatios();
       return { ...this.paneRatios };
     }
-    if (this.showVolume) {
-      const panes = this.chart.panes();
-      const main = panes[0]?.getStretchFactor();
-      const volume = panes[1]?.getStretchFactor();
-      if (main && volume) {
-        this.paneRatios = { ...this.paneRatios, main, volume };
-      }
-    }
+    this.capturePaneRatios();
     return { ...this.paneRatios };
   }
 
   /** 隐藏成交量时移除空 pane，恢复时重新创建并应用用户比例。 */
   setShowVolume(showVolume: boolean): void {
+    if (this.showVolume === showVolume) return;
+    this.capturePaneRatios();
     this.showVolume = showVolume;
+    const routed = routeChartStudies(
+      this.studyResults,
+      this.studyInstances,
+      showVolume,
+    );
     this.runChartMutation(() => {
-      if (showVolume) {
-        this.volume.moveToPane(1);
-        this.volume.applyOptions({ visible: true });
-        this.applyPaneRatios();
+      this.rebuildStudyPanes(routed);
+    });
+    this.studyPaneSignature = `${showVolume ? "volume" : "no-volume"}|${routed
+      .filter((study) => study.result.pane === "separate")
+      .map((study) => study.instance.instanceId)
+      .join("|")}`;
+  }
+
+  /**
+   * 增量同步服务端指标结果，复用未变化 series，并按 instance 顺序维护 pane。
+   */
+  setStudies(
+    results: readonly ChartStudyResult[],
+    instances: readonly ChartStudyInstance[],
+  ): void {
+    this.studyResults = results;
+    this.studyInstances = instances;
+    const routed = routeChartStudies(results, instances, this.showVolume);
+    const signature = `${this.showVolume ? "volume" : "no-volume"}|${routed
+      .filter((study) => study.result.pane === "separate")
+      .map((study) => study.instance.instanceId)
+      .join("|")}`;
+    if (routed.length === 0 && this.studyRuntimes.size === 0) {
+      this.studyPaneSignature = signature;
+      this.crosshairStudyValues = {};
+      return;
+    }
+    const desiredIds = new Set(
+      routed.map((study) => study.instance.instanceId),
+    );
+
+    this.runChartMutation(() => {
+      for (const [instanceId, runtime] of this.studyRuntimes) {
+        if (!desiredIds.has(instanceId)) {
+          this.removeStudyRuntime(runtime);
+          this.studyRuntimes.delete(instanceId);
+        }
+      }
+
+      for (const study of routed) {
+        this.updateStudyRuntime(study);
+      }
+
+      if (signature !== this.studyPaneSignature) {
+        this.capturePaneRatios();
+        this.rebuildStudyPanes(routed);
+        this.studyPaneSignature = signature;
       } else {
-        this.volume.applyOptions({ visible: false });
-        this.volume.moveToPane(0);
+        for (const study of routed) {
+          const runtime = this.studyRuntimes.get(study.instance.instanceId);
+          if (runtime) runtime.paneIndex = study.paneIndex;
+        }
+        this.applyPaneRatios();
       }
     });
+    this.crosshairStudyValues = {};
   }
 
   /** 应用 Terax 主题色，不改变用户 viewport。 */
@@ -303,6 +392,9 @@ export class FinancialChartController {
       this.refreshPreviousCloseLine();
       this.refreshLatestPriceLine();
     });
+    if (this.studyRuntimes.size > 0) {
+      this.setStudies(this.studyResults, this.studyInstances);
+    }
   }
 
   /**
@@ -372,9 +464,10 @@ export class FinancialChartController {
     this.refreshLatestPriceLine();
 
     if (this.crosshairTimeKey !== null) {
-      this.crosshairBatcher.schedule(
-        this.barsByTime.get(this.crosshairTimeKey) ?? null,
-      );
+      this.crosshairBatcher.schedule({
+        bar: this.barsByTime.get(this.crosshairTimeKey) ?? null,
+        studyValues: this.crosshairStudyValues,
+      });
     }
   }
 
@@ -433,7 +526,18 @@ export class FinancialChartController {
       this.crosshairTimeKey === null
         ? null
         : (this.barsByTime.get(this.crosshairTimeKey) ?? null);
-    this.crosshairBatcher.schedule(bar);
+    const studyValues: ChartStudyLegendValues = {};
+    for (const [series, metadata] of this.studySeriesMetadata) {
+      const data = params.seriesData.get(series);
+      const value =
+        data && "value" in data && Number.isFinite(data.value)
+          ? data.value
+          : null;
+      studyValues[metadata.instanceId] ??= {};
+      studyValues[metadata.instanceId][metadata.outputId] = value;
+    }
+    this.crosshairStudyValues = studyValues;
+    this.crosshairBatcher.schedule({ bar, studyValues });
   };
 
   /** 响应用户触发的左边界变化，并保证同一历史边界只请求一次。 */
@@ -568,6 +672,169 @@ export class FinancialChartController {
     if (this.showVolume) {
       panes[1]?.setStretchFactor(ratios.volume);
     }
+    for (const runtime of this.studyRuntimes.values()) {
+      if (runtime.pane !== "separate" || runtime.paneIndex <= 0) continue;
+      panes[runtime.paneIndex]?.setStretchFactor(
+        this.validPaneRatio(ratios[runtime.instanceId], 2),
+      );
+    }
+  }
+
+  /** 在 pane 结构变化前读取当前语义比例，避免依赖易变化的数字索引。 */
+  private capturePaneRatios(): void {
+    if (this.chartHeight < MIN_CUSTOM_PANE_HEIGHT) return;
+    const panes = this.chart.panes();
+    const main = panes[0]?.getStretchFactor();
+    const volume = this.showVolume ? panes[1]?.getStretchFactor() : null;
+    if (main && Number.isFinite(main)) this.paneRatios.main = main;
+    if (volume && Number.isFinite(volume)) this.paneRatios.volume = volume;
+    for (const runtime of this.studyRuntimes.values()) {
+      if (runtime.pane !== "separate" || runtime.paneIndex <= 0) continue;
+      const ratio = panes[runtime.paneIndex]?.getStretchFactor();
+      if (ratio && Number.isFinite(ratio)) {
+        this.paneRatios[runtime.instanceId] = ratio;
+      }
+    }
+  }
+
+  /** 创建一种指标 series，初始放入主 pane，结构稳定后再统一路由。 */
+  private createStudySeries(kind: ChartStudySeriesKind): StudySeriesApi {
+    if (kind === "histogram") {
+      return this.chart.addSeries(
+        HistogramSeries,
+        { priceLineVisible: false, lastValueVisible: false },
+        0,
+      );
+    }
+    return this.chart.addSeries(
+      LineSeries,
+      {
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      },
+      0,
+    );
+  }
+
+  /** 对单个 instance 做 output 级 diff，并更新数据、样式与参考水平线。 */
+  private updateStudyRuntime(study: RoutedChartStudy): void {
+    const { instance, result } = study;
+    let runtime = this.studyRuntimes.get(instance.instanceId);
+    if (!runtime) {
+      runtime = {
+        instanceId: instance.instanceId,
+        pane: result.pane,
+        paneIndex: 0,
+        outputs: new Map(),
+        levelLines: [],
+      };
+      this.studyRuntimes.set(instance.instanceId, runtime);
+    }
+    runtime.pane = result.pane;
+    const incoming = new Map(
+      result.outputs.map((output) => [output.id, output]),
+    );
+
+    for (const [outputId, outputRuntime] of runtime.outputs) {
+      const next = incoming.get(outputId);
+      if (!next || next.kind !== outputRuntime.kind) {
+        this.studySeriesMetadata.delete(outputRuntime.series);
+        this.chart.removeSeries(outputRuntime.series);
+        runtime.outputs.delete(outputId);
+      }
+    }
+
+    for (const output of result.outputs) {
+      const style = instance.styles[output.id] ?? {
+        color: this.palette.line,
+        lineWidth: 2 as const,
+      };
+      let outputRuntime = runtime.outputs.get(output.id);
+      if (!outputRuntime) {
+        outputRuntime = {
+          kind: output.kind,
+          series: this.createStudySeries(output.kind),
+        };
+        runtime.outputs.set(output.id, outputRuntime);
+      }
+      const series = outputRuntime.series;
+      series.applyOptions(
+        output.kind === "line"
+          ? { color: style.color, lineWidth: style.lineWidth }
+          : { color: style.color },
+      );
+      series.setData(
+        buildChartStudySeriesData(output, style, this.palette) as never,
+      );
+      this.studySeriesMetadata.set(series, {
+        instanceId: instance.instanceId,
+        outputId: output.id,
+      });
+    }
+
+    for (const level of runtime.levelLines) {
+      level.series.removePriceLine(level.line);
+    }
+    runtime.levelLines = [];
+    const firstSeries = runtime.outputs.values().next().value?.series;
+    if (firstSeries && result.pane === "separate") {
+      runtime.levelLines = result.levels.map((price) => ({
+        series: firstSeries,
+        line: firstSeries.createPriceLine({
+          price,
+          color: this.palette.grid,
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: false,
+          title: "",
+        }),
+      }));
+    }
+  }
+
+  /** 移除一个实例的全部 series 和价格线，主价格 series 不受影响。 */
+  private removeStudyRuntime(runtime: StudyRuntime): void {
+    for (const level of runtime.levelLines) {
+      level.series.removePriceLine(level.line);
+    }
+    for (const output of runtime.outputs.values()) {
+      this.studySeriesMetadata.delete(output.series);
+      this.chart.removeSeries(output.series);
+    }
+  }
+
+  /**
+   * 复用 series 重建辅助 pane 顺序，并在同步 mutation 内恢复语义比例。
+   */
+  private rebuildStudyPanes(routed: readonly RoutedChartStudy[]): void {
+    for (const runtime of this.studyRuntimes.values()) {
+      if (runtime.pane !== "separate") continue;
+      for (const output of runtime.outputs.values())
+        output.series.moveToPane(0);
+      runtime.paneIndex = 0;
+    }
+    this.volume.moveToPane(0);
+    for (let index = this.chart.panes().length - 1; index >= 1; index -= 1) {
+      this.chart.removePane(index);
+    }
+    if (this.showVolume) {
+      this.volume.moveToPane(1);
+      this.volume.applyOptions({ visible: true });
+    } else {
+      this.volume.applyOptions({ visible: false });
+    }
+    for (const study of routed) {
+      const runtime = this.studyRuntimes.get(study.instance.instanceId);
+      if (!runtime) continue;
+      runtime.paneIndex = study.paneIndex;
+      if (study.result.pane === "separate") {
+        for (const output of runtime.outputs.values()) {
+          output.series.moveToPane(study.paneIndex);
+        }
+      }
+    }
+    this.applyPaneRatios();
   }
 
   /** 执行可能同步改变可见范围的图表命令，避免内部事件误触发历史请求。 */

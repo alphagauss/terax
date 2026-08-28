@@ -4,10 +4,13 @@
  */
 
 import {
+  countSeparateChartStudies,
+  createChartStudyInstance,
   normalizeChartStudyCalculation,
   normalizeChartStudyDefinitions,
   normalizeVisibleStudyInstances,
   studyCalculationSignature,
+  validateChartStudyParams,
   type ChartStudyInstance,
 } from "@/modules/alpha/chart/studies/model";
 import { describe, expect, it } from "vitest";
@@ -174,5 +177,48 @@ describe("chart study model", () => {
     expect(studyCalculationSignature(first)).toBe(
       studyCalculationSignature(second),
     );
+  });
+
+  it("从 definition 创建稳定默认实例并校验参数边界", () => {
+    const definition = normalizeChartStudyDefinitions([
+      {
+        type: "macd",
+        pane: "separate",
+        params: [
+          { key: "fast", default_value: 12, min: 1, max: 100, step: 1 },
+          { key: "slow", default_value: 26, min: 2, max: 200, step: 1 },
+          { key: "signal", default_value: 9, min: 1, max: 100, step: 1 },
+        ],
+        outputs: [
+          { id: "macd", kind: "line" },
+          { id: "signal", kind: "line" },
+          { id: "hist", kind: "histogram" },
+        ],
+        levels: [0],
+      },
+    ])[0];
+
+    const created = createChartStudyInstance(definition, "study-macd-1");
+
+    expect(created).toMatchObject({
+      instanceId: "study-macd-1",
+      type: "macd",
+      params: { fast: 12, slow: 26, signal: 9 },
+      visible: true,
+      styles: {
+        macd: { color: "#3d8bff", lineWidth: 2 },
+        signal: { color: "#e0a43c", lineWidth: 2 },
+        hist: { color: "#8b94a7", lineWidth: 2 },
+      },
+    });
+    expect(validateChartStudyParams(definition, created.params)).toBe(true);
+    expect(
+      validateChartStudyParams(definition, {
+        fast: 26,
+        slow: 12,
+        signal: 9,
+      }),
+    ).toBe(false);
+    expect(countSeparateChartStudies([created])).toBe(1);
   });
 });

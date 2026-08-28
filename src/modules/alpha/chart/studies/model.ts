@@ -11,6 +11,8 @@ import {
 import { z } from "zod";
 
 export const CHART_STUDY_TYPES = ["sma", "ema", "boll", "rsi", "macd"] as const;
+export const MAX_CHART_STUDIES = 8;
+export const MAX_SEPARATE_CHART_STUDIES = 4;
 
 const studyTypeSchema = z.enum(CHART_STUDY_TYPES);
 const studyPaneSchema = z.enum(["main", "separate"]);
@@ -20,6 +22,26 @@ const studyInstanceIdSchema = z
   .min(1)
   .max(64)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+const studyLineWidthSchema = z.union([
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+  z.literal(4),
+]);
+const studyStyleSchema = z
+  .object({
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    lineWidth: studyLineWidthSchema,
+    positiveColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .optional(),
+    negativeColor: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/)
+      .optional(),
+  })
+  .strict();
 
 const studyParamWireSchema = z
   .object({
@@ -134,21 +156,26 @@ export type ChartStudyDefinition = {
   levels: number[];
 };
 
-export type ChartStudyInstance = {
-  instanceId: string;
-  type: ChartStudyType;
-  params: Record<string, number>;
-  visible: boolean;
-  styles: Record<
-    string,
-    {
-      color: string;
-      lineWidth: 1 | 2 | 3 | 4;
-      positiveColor?: string;
-      negativeColor?: string;
+export const chartStudyInstanceSchema = z
+  .object({
+    instanceId: studyInstanceIdSchema,
+    type: studyTypeSchema,
+    params: z.record(z.string().min(1).max(32), z.number().finite()),
+    visible: z.boolean(),
+    styles: z.record(z.string().min(1).max(32), studyStyleSchema),
+  })
+  .strict()
+  .superRefine((instance, context) => {
+    if (Object.keys(instance.params).length > 8) {
+      context.addIssue({ code: "custom", message: "指标参数数量超限" });
     }
-  >;
-};
+    if (Object.keys(instance.styles).length > 8) {
+      context.addIssue({ code: "custom", message: "指标样式数量超限" });
+    }
+  });
+
+export type ChartStudyInstance = z.infer<typeof chartStudyInstanceSchema>;
+export type ChartStudyStyle = z.infer<typeof studyStyleSchema>;
 
 export type ChartStudyCalculationInstance = Pick<
   ChartStudyInstance,
@@ -171,6 +198,73 @@ export type ChartStudyCalculation = {
   actualEnd: string | null;
   items: ChartStudyResult[];
 };
+
+const DEFAULT_STUDY_COLORS: Record<ChartStudyType, Record<string, string>> = {
+  sma: { line: "#e0a43c" },
+  ema: { line: "#19b6c9" },
+  boll: { mid: "#8b94a7", upper: "#5a89c9", lower: "#5a89c9" },
+  rsi: { line: "#b06fff" },
+  macd: { macd: "#3d8bff", signal: "#e0a43c", hist: "#8b94a7" },
+};
+
+/** 根据服务端 definition 创建可直接持久化的默认指标实例。 */
+export function createChartStudyInstance(
+  definition: ChartStudyDefinition,
+  instanceId: string,
+): ChartStudyInstance {
+  return chartStudyInstanceSchema.parse({
+    instanceId,
+    type: definition.type,
+    params: Object.fromEntries(
+      definition.params.map((param) => [param.key, param.defaultValue]),
+    ),
+    visible: true,
+    styles: Object.fromEntries(
+      definition.outputs.map((output) => [
+        output.id,
+        {
+          color: DEFAULT_STUDY_COLORS[definition.type][output.id] ?? "#8b94a7",
+          lineWidth: 2,
+        },
+      ]),
+    ),
+  });
+}
+
+/** 使用 definition 在前端快速校验参数，服务端仍保留权威校验。 */
+export function validateChartStudyParams(
+  definition: ChartStudyDefinition,
+  params: Record<string, number>,
+): boolean {
+  if (
+    Object.keys(params).length !== definition.params.length ||
+    definition.params.some((param) => {
+      const value = params[param.key];
+      if (!Number.isFinite(value) || value < param.min || value > param.max) {
+        return true;
+      }
+      const steps = (value - param.min) / param.step;
+      return Math.abs(steps - Math.round(steps)) > 1e-9;
+    })
+  ) {
+    return false;
+  }
+  return (
+    definition.type !== "macd" ||
+    (params.fast !== undefined &&
+      params.slow !== undefined &&
+      params.fast < params.slow)
+  );
+}
+
+/** 返回当前配置中独立 pane 指标的数量。 */
+export function countSeparateChartStudies(
+  instances: readonly ChartStudyInstance[],
+): number {
+  return instances.filter(
+    (instance) => instance.type === "rsi" || instance.type === "macd",
+  ).length;
+}
 
 /** 把服务端 definition 字段转换为前端稳定的 camelCase 模型。 */
 export function normalizeChartStudyDefinitions(

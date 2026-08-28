@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 公共金融图表外壳的基础交互。
- * 重点锁定重置与导出命令、密度入口，以及涨跌幅必须使用上一根 K 线收盘价计算。
+ * 重点锁定重置与导出、指标懒加载与 legend，以及涨跌幅使用上一根收盘价计算。
  */
 
 // @vitest-environment happy-dom
@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   downloadChartBlob: vi.fn(),
   downloadChartPng: vi.fn(() => Promise.resolve()),
   toastError: vi.fn(),
+  dialogProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/modules/alpha/chart/components/FinancialChart", () => ({
@@ -87,6 +88,13 @@ vi.mock("sonner", () => ({
   toast: { error: mocks.toastError },
 }));
 
+vi.mock("@/modules/alpha/chart/studies/IndicatorDialog", () => ({
+  default: (props: Record<string, unknown>) => {
+    mocks.dialogProps = props;
+    return createElement("div", { "data-testid": "indicator-dialog" });
+  },
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) =>
@@ -124,6 +132,7 @@ describe("FinancialChartFrame", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     vi.clearAllMocks();
     mocks.chartProps = null;
+    mocks.dialogProps = null;
     mocks.takeScreenshot.mockReturnValue(document.createElement("canvas"));
     container = document.createElement("div");
     root = createRoot(container);
@@ -351,6 +360,101 @@ describe("FinancialChartFrame", () => {
     expect(mocks.toastError).toHaveBeenCalledWith(
       "data.chart.export.csvFailed",
     );
+  });
+
+  it("工作台按需加载指标管理并让统一十字线快照更新 legend", async () => {
+    const onStudiesChange = vi.fn();
+    const study = {
+      instanceId: "sma-1",
+      type: "sma" as const,
+      params: { period: 20 },
+      visible: true,
+      styles: { line: { color: "#e0a43c", lineWidth: 2 as const } },
+    };
+    act(() => {
+      root?.render(
+        createElement(FinancialChartFrame, {
+          bars: [marketBar("2026-07-30", 10, 11)],
+          dataKey: "000001.SZSE|d|forward",
+          symbol: "000001.SZSE",
+          options: {
+            interval: "d",
+            adjust: "forward",
+            chartType: "candlestick",
+            showVolume: true,
+            paneRatios: { main: 8, volume: 2 },
+          },
+          metadata: null,
+          priceReference: { previousClose: 10, referenceTime: null },
+          availableIntervals: ["d"],
+          density: "panel",
+          status: "ready",
+          historyError: false,
+          hasMoreBefore: false,
+          loadingMore: false,
+          visible: true,
+          studies: [study],
+          studyResults: [
+            {
+              instanceId: "sma-1",
+              pane: "main",
+              outputs: [
+                {
+                  id: "line",
+                  kind: "line",
+                  points: [
+                    {
+                      time: { kind: "trading-day", date: "2026-07-30" },
+                      value: 10.5,
+                    },
+                  ],
+                },
+              ],
+              levels: [],
+            },
+          ],
+          studyLoading: false,
+          studyError: false,
+          onOptionsChange: vi.fn(),
+          onStudiesChange,
+          onRequestMore: vi.fn(),
+          onRetry: vi.fn(),
+        }),
+      );
+    });
+
+    expect(mocks.dialogProps).toBeNull();
+    expect(container.textContent).toContain("10.5");
+    const crosshair = mocks.chartProps?.onCrosshairChange as (
+      bar: MarketBar | null,
+      values: Record<string, Record<string, number | null>>,
+    ) => void;
+    act(() =>
+      crosshair(marketBar("2026-07-30", 10, 11), {
+        "sma-1": { line: 21.25 },
+      }),
+    );
+    expect(container.textContent).toContain("21.25");
+
+    const manage = container.querySelector<HTMLButtonElement>(
+      '[aria-label="data.chart.studies.open"]',
+    );
+    await act(async () => {
+      manage?.click();
+      await Promise.resolve();
+    });
+    expect(mocks.dialogProps).toMatchObject({
+      open: true,
+      instances: [expect.objectContaining({ instanceId: "sma-1" })],
+    });
+
+    const hide = container.querySelector<HTMLButtonElement>(
+      '[aria-label="data.chart.studies.actions.hide"]',
+    );
+    act(() => hide?.click());
+    expect(onStudiesChange).toHaveBeenCalledWith([
+      expect.objectContaining({ instanceId: "sma-1", visible: false }),
+    ]);
   });
 
   it("超过上限时在构造 CSV 前显示本地化错误", () => {

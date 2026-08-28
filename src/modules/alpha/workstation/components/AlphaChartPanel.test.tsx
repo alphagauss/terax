@@ -1,6 +1,6 @@
 /**
  * 本文件测试工作台图表面板对公共行情 Scene 的薄包装。
- * 重点锁定持久化配置解析、panel 密度和配置更新回传，不允许面板复制查询逻辑。
+ * 重点锁定行情与指标配置解析、panel 密度和更新回传，不允许面板复制查询逻辑。
  */
 
 // @vitest-environment happy-dom
@@ -59,6 +59,7 @@ describe("AlphaChartPanel", () => {
         chartType: "line",
         showVolume: false,
         paneRatios: { main: 7, volume: 3 },
+        studies: [],
       },
       onConfigChange,
     };
@@ -76,6 +77,7 @@ describe("AlphaChartPanel", () => {
         showVolume: false,
         paneRatios: { main: 7, volume: 3 },
       },
+      studies: [],
     });
     act(() => {
       const change = mocks.sceneProps?.onOptionsChange as (
@@ -95,6 +97,30 @@ describe("AlphaChartPanel", () => {
       chartType: "ohlc",
       showVolume: true,
       paneRatios: { main: 8, volume: 2 },
+      studies: [],
+    });
+
+    act(() => {
+      const change = mocks.sceneProps?.onStudiesChange as (
+        value: Array<Record<string, unknown>>,
+      ) => void;
+      change([
+        {
+          instanceId: "rsi-1",
+          type: "rsi",
+          params: { period: 14 },
+          visible: true,
+          styles: { line: { color: "#b06fff", lineWidth: 2 } },
+        },
+      ]);
+    });
+    expect(onConfigChange).toHaveBeenLastCalledWith({
+      interval: "1h",
+      adjust: "none",
+      chartType: "line",
+      showVolume: false,
+      paneRatios: { main: 7, volume: 3 },
+      studies: [expect.objectContaining({ instanceId: "rsi-1" })],
     });
   });
 });

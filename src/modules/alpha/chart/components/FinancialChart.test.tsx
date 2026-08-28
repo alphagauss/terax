@@ -1,6 +1,6 @@
 /**
  * 本文件测试公共金融图表 React 宿主的实例生命周期。
- * 重点锁定受控类型和数据键切换只更新同一个 Controller，不重建图表实例。
+ * 重点锁定受控类型、数据键和指标切换只更新同一个 Controller，不重建图表实例。
  */
 
 // @vitest-environment happy-dom
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
     getPaneRatios: vi.fn(() => ({ main: 8, volume: 2 })),
     setShowVolume: vi.fn(),
     setBars: vi.fn(),
+    setStudies: vi.fn(),
     setHistoryState: vi.fn(),
     takeScreenshot: vi.fn(),
     resetView: vi.fn(),

@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责受控图表选项、权威价格 legend、导出、可访问数据和状态反馈，不拥有查询。
+ * 外壳负责受控图表选项、价格与指标 legend、懒加载管理入口、导出和状态反馈，不拥有查询。
  */
 
 import {
@@ -24,6 +24,7 @@ import {
   FinancialChart,
   type FinancialChartHandle,
 } from "@/modules/alpha/chart/components/FinancialChart";
+import type { ChartStudyLegendValues } from "@/modules/alpha/chart/controller/FinancialChartController";
 import {
   buildChartExportFilename,
   buildMarketBarsCsv,
@@ -31,6 +32,7 @@ import {
   downloadChartPng,
   MAX_CHART_EXPORT_BARS,
 } from "@/modules/alpha/chart/export/chartExport";
+import { latestChartStudyValues } from "@/modules/alpha/chart/lightweight/studies";
 import type {
   ChartMarketMetadata,
   ChartPriceReference,
@@ -40,6 +42,11 @@ import type {
   MarketChartOptions,
 } from "@/modules/alpha/chart/model";
 import { FINANCIAL_CHART_TYPES } from "@/modules/alpha/chart/model";
+import type {
+  ChartStudyInstance,
+  ChartStudyResult,
+} from "@/modules/alpha/chart/studies/model";
+import { StudyLegend } from "@/modules/alpha/chart/studies/StudyLegend";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
@@ -47,10 +54,11 @@ import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import {
   Download01Icon,
   FitToScreenIcon,
+  ChartLineData01Icon,
   MoreHorizontalIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -68,10 +76,21 @@ type Props = {
   hasMoreBefore: boolean;
   loadingMore: boolean;
   visible: boolean;
+  studies?: readonly ChartStudyInstance[];
+  studyResults?: readonly ChartStudyResult[];
+  studyLoading?: boolean;
+  studyError?: boolean;
   onOptionsChange: (options: MarketChartOptions) => void;
+  onStudiesChange?: (studies: ChartStudyInstance[]) => void;
   onRequestMore: () => void;
   onRetry: () => void;
 };
+
+const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
+const EMPTY_STUDY_RESULTS: readonly ChartStudyResult[] = [];
+const IndicatorDialog = lazy(
+  () => import("@/modules/alpha/chart/studies/IndicatorDialog"),
+);
 
 /** 根据使用密度渲染受控工具栏、信息栏和状态反馈。 */
 export function FinancialChartFrame({
@@ -88,7 +107,12 @@ export function FinancialChartFrame({
   hasMoreBefore,
   loadingMore,
   visible,
+  studies = EMPTY_STUDIES,
+  studyResults = EMPTY_STUDY_RESULTS,
+  studyLoading = false,
+  studyError = false,
   onOptionsChange,
+  onStudiesChange,
   onRequestMore,
   onRetry,
 }: Props) {
@@ -96,7 +120,10 @@ export function FinancialChartFrame({
   const [crosshair, setCrosshair] = useState<{
     dataKey: string;
     bar: MarketBar;
+    studyValues: ChartStudyLegendValues;
   } | null>(null);
+  const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
+  const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
   const chartRef = useRef<FinancialChartHandle>(null);
   const latestBar = bars[bars.length - 1] ?? null;
   const displayBar = crosshair?.dataKey === dataKey ? crosshair.bar : latestBar;
@@ -185,10 +212,16 @@ export function FinancialChartFrame({
     : t("data.chart.accessibility.noData", {
         symbol: symbol ?? t("data.chart.title"),
       });
+  const latestStudyValues = useMemo(
+    () => latestChartStudyValues(studyResults),
+    [studyResults],
+  );
+  const displayedStudyValues =
+    crosshair?.dataKey === dataKey ? crosshair.studyValues : latestStudyValues;
 
   const handleCrosshairChange = useCallback(
-    (bar: MarketBar | null) => {
-      setCrosshair(bar ? { dataKey, bar } : null);
+    (bar: MarketBar | null, studyValues: ChartStudyLegendValues) => {
+      setCrosshair(bar ? { dataKey, bar, studyValues } : null);
     },
     [dataKey],
   );
@@ -225,6 +258,44 @@ export function FinancialChartFrame({
       toast.error(t("data.chart.export.csvFailed"));
     }
   }, [bars, i18n.language, options.interval, symbol, t]);
+
+  const toggleStudy = useCallback(
+    (instanceId: string) => {
+      onStudiesChange?.(
+        studies.map((study) =>
+          study.instanceId === instanceId
+            ? { ...study, visible: !study.visible }
+            : study,
+        ),
+      );
+    },
+    [onStudiesChange, studies],
+  );
+  const removeStudy = useCallback(
+    (instanceId: string) => {
+      onStudiesChange?.(
+        studies.filter((study) => study.instanceId !== instanceId),
+      );
+    },
+    [onStudiesChange, studies],
+  );
+  const moveStudy = useCallback(
+    (instanceId: string, direction: -1 | 1) => {
+      const index = studies.findIndex(
+        (study) => study.instanceId === instanceId,
+      );
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= studies.length) return;
+      const next = [...studies];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      onStudiesChange?.(next);
+    },
+    [onStudiesChange, studies],
+  );
+  const editStudy = useCallback((instanceId: string) => {
+    setEditingStudyId(instanceId);
+    setIndicatorDialogOpen(true);
+  }, []);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-background/40">
@@ -330,6 +401,28 @@ export function FinancialChartFrame({
               >
                 {t("data.chart.legend.volume")}
               </Button>
+              {onStudiesChange ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={studies.length > 0 ? "secondary" : "ghost"}
+                  className="h-7 gap-1 px-2 text-[11px]"
+                  title={t("data.chart.studies.open")}
+                  aria-label={t("data.chart.studies.open")}
+                  onClick={() => {
+                    setEditingStudyId(null);
+                    setIndicatorDialogOpen(true);
+                  }}
+                >
+                  <HugeiconsIcon
+                    icon={ChartLineData01Icon}
+                    size={12}
+                    strokeWidth={1.8}
+                  />
+                  {t("data.chart.studies.label")}
+                  {studies.length > 0 ? ` ${studies.length}` : ""}
+                </Button>
+              ) : null}
             </>
           ) : (
             FINANCIAL_CHART_TYPES.map((type) => (
@@ -447,6 +540,19 @@ export function FinancialChartFrame({
         />
       </div>
 
+      {onStudiesChange ? (
+        <StudyLegend
+          instances={studies}
+          values={displayedStudyValues}
+          loading={studyLoading}
+          error={studyError}
+          onToggle={toggleStudy}
+          onEdit={editStudy}
+          onRemove={removeStudy}
+          onMove={moveStudy}
+        />
+      ) : null}
+
       <div className="relative min-h-0 flex-1">
         <FinancialChart
           ref={chartRef}
@@ -459,6 +565,8 @@ export function FinancialChartFrame({
           locale={i18n.language}
           showVolume={options.showVolume}
           paneRatios={options.paneRatios}
+          studies={studies}
+          studyResults={studyResults}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}
@@ -505,6 +613,20 @@ export function FinancialChartFrame({
           </Button>
         ) : null}
       </div>
+      {indicatorDialogOpen && onStudiesChange ? (
+        <Suspense fallback={null}>
+          <IndicatorDialog
+            open={indicatorDialogOpen}
+            editingInstanceId={editingStudyId}
+            instances={studies}
+            onOpenChange={(open) => {
+              setIndicatorDialogOpen(open);
+              if (!open) setEditingStudyId(null);
+            }}
+            onChange={onStudiesChange}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

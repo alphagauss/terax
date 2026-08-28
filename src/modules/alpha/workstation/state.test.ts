@@ -80,6 +80,7 @@ describe("Alpha workstation state", () => {
       chartType: "candlestick",
       showVolume: true,
       paneRatios: { main: 8, volume: 2 },
+      studies: [],
     });
   });
 

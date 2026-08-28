@@ -1,9 +1,12 @@
 /**
  * 本文件提供 Alpha 公共金融图表的 React 宿主。
- * 组件桥接受控元数据、pane 配置、主题、可见性和 DOM 尺寸，并通过稳定 handle 暴露命令。
+ * 组件桥接受控元数据、指标、pane 配置、主题、可见性和 DOM 尺寸，并通过稳定 handle 暴露命令。
  */
 
-import { FinancialChartController } from "@/modules/alpha/chart/controller/FinancialChartController";
+import {
+  FinancialChartController,
+  type ChartStudyLegendValues,
+} from "@/modules/alpha/chart/controller/FinancialChartController";
 import { addChartScreenshotBackground } from "@/modules/alpha/chart/export/chartExport";
 import type {
   ChartMarketMetadata,
@@ -13,6 +16,10 @@ import type {
   PaneRatios,
 } from "@/modules/alpha/chart/model";
 import type { MarketBar } from "@/modules/alpha/market/model";
+import type {
+  ChartStudyInstance,
+  ChartStudyResult,
+} from "@/modules/alpha/chart/studies/model";
 import { marketDirectionColors } from "@/modules/alpha/market/metadata";
 import { useTheme } from "@/modules/theme";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
@@ -27,14 +34,22 @@ type Props = {
   locale: string;
   showVolume: boolean;
   paneRatios: PaneRatios;
+  studies?: readonly ChartStudyInstance[];
+  studyResults?: readonly ChartStudyResult[];
   visible: boolean;
   hasMoreBefore: boolean;
   loadingMore: boolean;
   ariaLabel: string;
-  onCrosshairChange: (bar: MarketBar | null) => void;
+  onCrosshairChange: (
+    bar: MarketBar | null,
+    studyValues: ChartStudyLegendValues,
+  ) => void;
   onRequestMore: () => void;
   onPaneRatiosChange?: (ratios: PaneRatios) => void;
 };
+
+const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
+const EMPTY_STUDY_RESULTS: readonly ChartStudyResult[] = [];
 
 /** 提供不暴露 Lightweight Charts 实例的稳定图表命令。 */
 export type FinancialChartHandle = {
@@ -78,6 +93,8 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
       locale,
       showVolume,
       paneRatios,
+      studies = EMPTY_STUDIES,
+      studyResults = EMPTY_STUDY_RESULTS,
       visible,
       hasMoreBefore,
       loadingMore,
@@ -152,6 +169,10 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     useEffect(() => {
       controllerRef.current?.setBars(dataKey, bars);
     }, [bars, dataKey]);
+
+    useEffect(() => {
+      controllerRef.current?.setStudies(studyResults, studies);
+    }, [studies, studyResults]);
 
     useEffect(() => {
       controllerRef.current?.setHistoryState(hasMoreBefore, loadingMore);

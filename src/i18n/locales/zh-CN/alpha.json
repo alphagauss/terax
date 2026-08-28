@@ -120,6 +120,74 @@
       "historyRetry": "重试加载更早历史",
       "resetView": "重置图表视图",
       "previousClose": "昨收",
+      "studies": {
+        "label": "指标",
+        "open": "管理指标",
+        "types": {
+          "sma": "简单移动平均",
+          "ema": "指数移动平均",
+          "boll": "布林带",
+          "rsi": "相对强弱指标",
+          "macd": "指数平滑异同移动平均"
+        },
+        "panes": {
+          "main": "主图叠加",
+          "separate": "独立窗格"
+        },
+        "params": {
+          "period": "周期",
+          "mult": "标准差倍数",
+          "fast": "快线周期",
+          "slow": "慢线周期",
+          "signal": "信号周期"
+        },
+        "outputs": {
+          "sma": { "line": "均线" },
+          "ema": { "line": "指数均线" },
+          "boll": {
+            "mid": "中轨",
+            "upper": "上轨",
+            "lower": "下轨"
+          },
+          "rsi": { "line": "RSI" },
+          "macd": {
+            "macd": "快线",
+            "signal": "信号线",
+            "hist": "柱状图"
+          }
+        },
+        "styles": {
+          "color": "颜色",
+          "width": "线宽",
+          "positive": "正值颜色",
+          "negative": "负值颜色"
+        },
+        "actions": {
+          "add": "添加指标",
+          "save": "保存修改",
+          "cancel": "取消",
+          "show": "显示指标",
+          "hide": "隐藏指标",
+          "edit": "编辑指标",
+          "remove": "删除指标",
+          "moveUp": "上移指标",
+          "moveDown": "下移指标"
+        },
+        "status": {
+          "loading": "正在更新指标...",
+          "error": "无法更新指标，主行情图仍可使用。"
+        },
+        "dialog": {
+          "title": "图表指标",
+          "description": "为当前工作台面板添加或编辑由服务端计算的指标。",
+          "search": "搜索指标",
+          "select": "请选择一个指标进行配置。",
+          "loadError": "无法加载指标目录。",
+          "invalidParams": "请检查指标参数范围。",
+          "paneLimit": "每张图最多支持 4 个独立指标窗格。",
+          "totalLimit": "每张图最多支持 8 个指标。"
+        }
+      },
       "export": {
         "menu": "导出图表",
         "png": "下载 PNG",

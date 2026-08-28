@@ -1,12 +1,16 @@
 /**
  * 本文件测试公共金融图表 Controller 的生命周期和命令。
- * 重点锁定单实例、署名配置、历史加载、平移边界、视图重置和截图不变量。
+ * 重点锁定单实例、指标 series/pane、统一十字线、历史加载、视图和截图不变量。
  */
 
 import type {
   ChartMarketMetadata,
   FinancialChartPalette,
 } from "@/modules/alpha/chart/model";
+import type {
+  ChartStudyInstance,
+  ChartStudyResult,
+} from "@/modules/alpha/chart/studies/model";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -27,6 +31,7 @@ const mocks = vi.hoisted(() => {
     };
   };
   const series = [makeSeries(), makeSeries(), makeSeries(), makeSeries()];
+  const studySeries: ReturnType<typeof makeSeries>[] = [];
   const timeScale = {
     getVisibleLogicalRange: vi.fn(),
     setVisibleLogicalRange: vi.fn(),
@@ -34,12 +39,14 @@ const mocks = vi.hoisted(() => {
     subscribeVisibleLogicalRangeChange: vi.fn(),
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
   };
-  const panes = [
-    { setStretchFactor: vi.fn(), getStretchFactor: vi.fn(() => 8) },
-    { setStretchFactor: vi.fn(), getStretchFactor: vi.fn(() => 2) },
-  ];
+  const panes = Array.from({ length: 8 }, (_, index) => ({
+    setStretchFactor: vi.fn(),
+    getStretchFactor: vi.fn((): number => (index === 0 ? 8 : 2)),
+  }));
   const chart = {
     addSeries: vi.fn(),
+    removeSeries: vi.fn(),
+    removePane: vi.fn(),
     panes: vi.fn(() => panes),
     timeScale: vi.fn(() => timeScale),
     subscribeCrosshairMove: vi.fn(),
@@ -50,6 +57,8 @@ const mocks = vi.hoisted(() => {
   };
   return {
     series,
+    studySeries,
+    makeSeries,
     timeScale,
     panes,
     chart,
@@ -111,6 +120,46 @@ function bar(date: string, close: number): MarketBar {
   };
 }
 
+function studyInstance(
+  instanceId: string,
+  type: "sma" | "rsi" | "macd",
+): ChartStudyInstance {
+  const outputIds = type === "macd" ? ["macd", "signal", "hist"] : ["line"];
+  return {
+    instanceId,
+    type,
+    params:
+      type === "macd" ? { fast: 12, slow: 26, signal: 9 } : { period: 14 },
+    visible: true,
+    styles: Object.fromEntries(
+      outputIds.map((outputId) => [
+        outputId,
+        { color: "#abcdef", lineWidth: 2 as const },
+      ]),
+    ),
+  };
+}
+
+function studyResult(
+  instanceId: string,
+  pane: "main" | "separate",
+  outputIds: string[],
+): ChartStudyResult {
+  return {
+    instanceId,
+    pane,
+    outputs: outputIds.map((outputId) => ({
+      id: outputId,
+      kind: outputId === "hist" ? "histogram" : "line",
+      points: [
+        { time: { kind: "trading-day", date: "2026-07-29" }, value: -1 },
+        { time: { kind: "trading-day", date: "2026-07-30" }, value: 1 },
+      ],
+    })),
+    levels: pane === "separate" ? [0] : [],
+  };
+}
+
 function chartHost(): HTMLElement {
   return {
     clientWidth: 800,
@@ -123,8 +172,17 @@ function chartHost(): HTMLElement {
 describe("FinancialChartController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.studySeries.length = 0;
     let seriesIndex = 0;
-    mocks.chart.addSeries.mockImplementation(() => mocks.series[seriesIndex++]);
+    mocks.chart.addSeries.mockImplementation(() => {
+      if (seriesIndex < mocks.series.length) return mocks.series[seriesIndex++];
+      const created = mocks.makeSeries();
+      mocks.studySeries.push(created);
+      return created;
+    });
+    mocks.panes.forEach((pane, index) => {
+      pane.getStretchFactor.mockReturnValue(index === 0 ? 8 : 2);
+    });
     mocks.timeScale.getVisibleLogicalRange.mockReturnValue({
       from: 10,
       to: 20,
@@ -153,6 +211,16 @@ describe("FinancialChartController", () => {
     ).toHaveBeenCalledOnce();
     expect(host.removeEventListener).toHaveBeenCalledTimes(2);
     expect(mocks.chart.remove).toHaveBeenCalledOnce();
+  });
+
+  it("没有指标时不创建 series，也不重排既有 pane", () => {
+    const controller = new FinancialChartController(chartHost());
+
+    controller.setStudies([], []);
+
+    expect(mocks.chart.addSeries).toHaveBeenCalledTimes(4);
+    expect(mocks.chart.removePane).not.toHaveBeenCalled();
+    expect(mocks.series[3].moveToPane).not.toHaveBeenCalled();
   });
 
   it("应用价格精度和交易所时区时不重建 series", () => {
@@ -209,6 +277,8 @@ describe("FinancialChartController", () => {
     const controller = new FinancialChartController(chartHost());
 
     controller.setPaneRatios({ main: 7, volume: 3 });
+    mocks.panes[0].getStretchFactor.mockReturnValue(7);
+    mocks.panes[1].getStretchFactor.mockReturnValue(3);
     controller.setShowVolume(false);
     expect(mocks.series[3].applyOptions).toHaveBeenLastCalledWith({
       visible: false,
@@ -222,7 +292,81 @@ describe("FinancialChartController", () => {
     });
     expect(mocks.panes[0].setStretchFactor).toHaveBeenLastCalledWith(7);
     expect(mocks.panes[1].setStretchFactor).toHaveBeenLastCalledWith(3);
-    expect(controller.getPaneRatios()).toEqual({ main: 8, volume: 2 });
+    expect(controller.getPaneRatios()).toEqual({ main: 7, volume: 3 });
+  });
+
+  it("增量复用 study series 并按成交量、指标顺序重建 pane", () => {
+    const controller = new FinancialChartController(chartHost());
+    const instances = [
+      studyInstance("sma-1", "sma"),
+      studyInstance("rsi-1", "rsi"),
+      studyInstance("macd-1", "macd"),
+    ];
+    const results = [
+      studyResult("sma-1", "main", ["line"]),
+      studyResult("rsi-1", "separate", ["line"]),
+      studyResult("macd-1", "separate", ["macd", "signal", "hist"]),
+    ];
+
+    controller.setStudies(results, instances);
+    const createdCount = mocks.chart.addSeries.mock.calls.length;
+
+    expect(mocks.studySeries).toHaveLength(5);
+    expect(mocks.studySeries[0].moveToPane).not.toHaveBeenCalled();
+    expect(mocks.studySeries[1].moveToPane).toHaveBeenLastCalledWith(2);
+    for (const series of mocks.studySeries.slice(2)) {
+      expect(series.moveToPane).toHaveBeenLastCalledWith(3);
+    }
+
+    controller.setStudies(results, [instances[2], instances[1], instances[0]]);
+
+    expect(mocks.chart.addSeries).toHaveBeenCalledTimes(createdCount);
+    for (const series of mocks.studySeries.slice(2)) {
+      expect(series.moveToPane).toHaveBeenLastCalledWith(2);
+    }
+    expect(mocks.studySeries[1].moveToPane).toHaveBeenLastCalledWith(3);
+  });
+
+  it("隐藏指标移除 series，成交量隐藏后独立 pane 自动前移", () => {
+    const controller = new FinancialChartController(chartHost());
+    const rsi = studyInstance("rsi-1", "rsi");
+    const macd = studyInstance("macd-1", "macd");
+    const results = [
+      studyResult("rsi-1", "separate", ["line"]),
+      studyResult("macd-1", "separate", ["macd", "signal", "hist"]),
+    ];
+    controller.setStudies(results, [rsi, macd]);
+
+    controller.setStudies([results[1]], [{ ...rsi, visible: false }, macd]);
+    expect(mocks.chart.removeSeries).toHaveBeenCalledWith(mocks.studySeries[0]);
+
+    controller.setShowVolume(false);
+    for (const series of mocks.studySeries.slice(1)) {
+      expect(series.moveToPane).toHaveBeenLastCalledWith(1);
+    }
+  });
+
+  it("为独立指标创建低强调水平线并按正负值着色 histogram", () => {
+    const controller = new FinancialChartController(chartHost());
+    controller.applyTheme(palette);
+    const macd = studyInstance("macd-1", "macd");
+
+    controller.setStudies(
+      [studyResult("macd-1", "separate", ["macd", "signal", "hist"])],
+      [macd],
+    );
+
+    expect(mocks.studySeries[0].createPriceLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        price: 0,
+        color: palette.grid,
+        axisLabelVisible: false,
+      }),
+    );
+    expect(mocks.studySeries[2].setData).toHaveBeenCalledWith([
+      expect.objectContaining({ value: -1, color: palette.down }),
+      expect.objectContaining({ value: 1, color: palette.up }),
+    ]);
   });
 
   it("图表过矮时临时使用主 pane 优先比例且不覆盖用户配置", () => {
@@ -337,12 +481,17 @@ describe("FinancialChartController", () => {
       const handler = mocks.chart.subscribeCrosshairMove.mock
         .calls[0][0] as (params: {
         time?: { year: number; month: number; day: number };
+        seriesData: Map<unknown, { value: number }>;
       }) => void;
 
-      handler({ time: { year: 2026, month: 7, day: 30 } });
+      handler({
+        time: { year: 2026, month: 7, day: 30 },
+        seriesData: new Map(),
+      });
       vi.runAllTimers();
       expect(onCrosshairChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ close: 12 }),
+        {},
       );
 
       controller.setBars("000001.SZSE|d|forward", [
@@ -353,8 +502,45 @@ describe("FinancialChartController", () => {
 
       expect(onCrosshairChange).toHaveBeenLastCalledWith(
         expect.objectContaining({ close: 13 }),
+        {},
       );
       controller.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("单个十字线订阅在同一帧提交行情和全部指标值", () => {
+    vi.useFakeTimers();
+    try {
+      const onCrosshairChange = vi.fn();
+      const controller = new FinancialChartController(chartHost());
+      controller.setCallbacks({ onCrosshairChange });
+      controller.setBars("000001.SZSE|d|forward", [bar("2026-07-30", 12)]);
+      const sma = studyInstance("sma-1", "sma");
+      controller.setStudies([studyResult("sma-1", "main", ["line"])], [sma]);
+      const handler = mocks.chart.subscribeCrosshairMove.mock
+        .calls[0][0] as (params: {
+        time?: { year: number; month: number; day: number };
+        seriesData: Map<unknown, { value: number }>;
+      }) => void;
+
+      handler({
+        time: { year: 2026, month: 7, day: 30 },
+        seriesData: new Map([[mocks.studySeries[0], { value: 21.5 }]]),
+      });
+      handler({
+        time: { year: 2026, month: 7, day: 30 },
+        seriesData: new Map([[mocks.studySeries[0], { value: 22 }]]),
+      });
+      vi.runAllTimers();
+
+      expect(mocks.chart.subscribeCrosshairMove).toHaveBeenCalledOnce();
+      expect(onCrosshairChange).toHaveBeenCalledOnce();
+      expect(onCrosshairChange).toHaveBeenCalledWith(
+        expect.objectContaining({ close: 12 }),
+        { "sma-1": { line: 22 } },
+      );
     } finally {
       vi.useRealTimers();
     }
