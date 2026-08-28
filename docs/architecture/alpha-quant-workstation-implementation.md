@@ -1,6 +1,6 @@
 # Alpha 综合量化工作站实施进度
 
-本文临时记录 [Alpha 综合量化工作站](./alpha-quant-workstation.md) 的当前阶段和下一项任务，不重复长期架构和具体实现设计。完成任务时同步更新长期架构中的“当前 Terax 基线”；全部阶段完成后删除本文并移除相关入口。
+本文临时记录 [Alpha 综合量化工作站](./alpha-quant-workstation.md) 的当前阶段和下一项跨层任务，不重复长期架构和具体实现设计。Rust 与前端细节记录在 `docs/architecture/`，Python 实现基线记录在 [`alpha/docs/`](../../alpha/docs/README.md)。完成任务时同步更新对应长期文档；全部阶段完成后删除本文并移除相关入口。
 
 ## 当前状态
 
@@ -54,8 +54,7 @@
 
 ### 执行结果
 
-- 新增集中式交易所市场元数据映射，证券详情显式返回 IANA 时区、涨跌颜色约定和成交量单位；前端详情 schema 保留 `price_tick` 并转换为有界价格精度。
-- `/bars` 已返回独立的 `reference_close` 和 `reference_time`。日线和周线读取当前锚点前一根 K 线，盘中周期读取当前交易时段之前最近的已完成日线；历史分页忽略页游标并保持同一参考锚点，不同复权方式使用各自查询语义。
+- Alpha 已提供图表消费所需的市场元数据、`reference_close` 和 `reference_time`；具体 Python 协议与存储语义见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 和 [行情数据与存储](../../alpha/docs/market-data.md)。前端详情 schema 把 `price_tick` 转换为有界价格精度。
 - `FinancialChartController` 已在原实例上应用 `priceFormat`、交易所时区格式、市场 palette、昨收线和显式最新价线。蜡烛、OHLC、成交量和最新价线使用一致方向色，主题、标的、复权和图表类型切换不重建宿主。
 - Chart Panel 严格配置已增加 `showVolume` 和语义 `paneRatios`，旧 `{}` 补齐成交量与 8:2。隐藏成交量时先隐藏 series 再迁入主 pane，恢复时创建辅助 pane 并还原用户比例；过矮宿主临时使用主图优先的 8:2，但不覆盖用户在正常高度保存的比例。
 - pane 拖动只改变 Lightweight Charts DOM。真实 WebView 中拖动期间 Canvas 比例已经变化而共享配置仍保持旧值，pointerup 后才提交一次最终比例；隐藏、显示、最小 `minH=8`、主题、标的和复权切换均通过同一宿主复验。当前真实数据只声明日线，因此没有制造临时行情数据验证周期切换；完整查询键、时区和单实例路径由自动化测试覆盖。

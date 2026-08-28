@@ -19,8 +19,12 @@
 - [通用辅助窗口](architecture/auxiliary-windows.md) - 为简单业务视图提供统一原生窗口外壳、主题和生命周期。
 - [Workspace 工作页跨窗口复制](architecture/workspace-page-handoff.md) - 基于现有多进程窗口模型复制可重建的 Workbench 页面。
 - [文件传输](architecture/file-transfers.md) - Direct 与 Archive 任务生命周期、staging、no-replace commit、重试、资源上限和真实环境验证。
-- [Alpha 集成](architecture/alpha-integration.md) - FastAPI 量化后端、轻量 Rust proxy、Terax UI 集成和可选的 PyO3 计算边界。
+- [Alpha 集成](architecture/alpha-integration.md) - Terax Rust 生命周期、通用代理、React 集成和可选 PyO3 的跨进程边界。
 - [Alpha 综合量化工作站](architecture/alpha-quant-workstation.md) - 公共金融图表、面板工作台、数据管理、回测、模拟交易、参考项目和分阶段实施指南。
+
+## 子项目文档
+
+- [Alpha Python 后端](../alpha/docs/README.md) - FastAPI 业务协议、领域架构、行情存储、复权和同步不变量。
 
 ## 贡献指南
 

@@ -156,8 +156,9 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - Rust 只负责 Alpha 生命周期、探活、凭据注入及通用 GET、POST、WebSocket 转发，不复制或解释 Alpha 领域模型。
 - Alpha 页面属于 `src/modules/alpha/`，复用 Terax 的 Workbench、组件、国际化、通知和设置。Agent 工具复用同一套 Alpha API 调用链。
 - `alpha-native/` 用于可选的 PyO3 原生计算模块。原生实现不得改变 FastAPI 协议和上层调用方式。
-- 详细职责和代码归属见 `docs/architecture/alpha-integration.md`，工作站长期架构见 `docs/architecture/alpha-quant-workstation.md`。
-- 工作站当前阶段和下一项任务见临时文档 `docs/architecture/alpha-quant-workstation-implementation.md`。完成任务时同步更新长期架构中的当前基线和临时进度；全部阶段完成后删除临时文档并移除相关入口。
+- Rust、前端和跨进程职责见 `docs/architecture/alpha-integration.md`，工作站长期架构见 `docs/architecture/alpha-quant-workstation.md`。
+- Python 服务内部架构、API 和行情存储文档统一位于 `alpha/docs/`，入口为 `alpha/docs/README.md`。不要在 `docs/architecture/` 复制 Python 内部实现。
+- 工作站当前阶段和下一项任务见临时文档 `docs/architecture/alpha-quant-workstation-implementation.md`。完成任务时同步更新 Rust/前端长期基线、Python 对应文档和临时进度；全部阶段完成后删除临时文档并移除相关入口。
 
 ### PTY 与 Shell 集成
 
@@ -275,6 +276,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/two-process-model.md`：IPC 边界和命令参考
 - `docs/architecture/alpha-integration.md`：Alpha FastAPI、Rust 代理、前端和 PyO3 边界
 - `docs/architecture/alpha-quant-workstation.md`：Alpha 综合量化工作站、公共金融图表、面板布局、外部参考项目和分阶段实施建议
+- `alpha/docs/README.md`：Alpha Python 后端架构、API、行情存储和代码地图入口
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider

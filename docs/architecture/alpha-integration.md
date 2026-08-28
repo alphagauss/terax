@@ -1,6 +1,6 @@
 # Alpha 集成架构
 
-本文定义 Alpha 量化后端、Alpha 原生计算模块和 Terax 各层之间的长期职责边界。具体文件索引见 [`alpha/docs/code-map.md`](../../alpha/docs/code-map.md)，综合量化工作站、公共金融图表、面板布局和实施顺序见 [Alpha 综合量化工作站设计与参考项目指南](./alpha-quant-workstation.md)。
+本文只定义 Terax Rust、React、Alpha Python 服务和可选原生计算模块之间的长期职责边界。Python 服务内部架构、API 与行情存储语义见 [Alpha 后端文档](../../alpha/docs/README.md)；综合量化工作站、公共金融图表、面板布局和实施顺序见 [Alpha 综合量化工作站设计与参考项目指南](./alpha-quant-workstation.md)。
 
 ## 架构定位
 
@@ -31,7 +31,7 @@ alpha-native Rust 计算模块
 
 | 模块 | 职责 | 边界 |
 | --- | --- | --- |
-| `alpha/` | FastAPI 接口、领域模型、行情、存储、策略、回测、同步、任务和事件 | 不维护 Terax 前端、AI Agent、工作区或第二套用户界面 |
+| `alpha/` | 提供 FastAPI 量化业务协议，内部设计由 `alpha/docs/` 记录 | 不维护 Terax 前端、AI Agent、工作区或第二套用户界面 |
 | `alpha-native/` | 适合 Rust 实现的量化计算和性能热点，通过 PyO3 供 Alpha 调用 | 不承载 FastAPI、进程生命周期或 Terax UI |
 | `src-tauri/build_support/alpha.rs` | 构建时筛选 Alpha 运行源码、生成确定性压缩归档和 Release revision | 不包含 Python 解释器、第三方依赖、数据、测试或开发工具 |
 | `src-tauri/src/modules/alpha/` | Alpha 启停、探活、凭据注入及通用 GET、POST、WebSocket 转发 | 不复制 Alpha 领域模型，不解释或重组业务响应 |
@@ -69,9 +69,9 @@ alpha-native Rust 计算模块
 ### FastAPI 是业务边界
 
 - Alpha 对 Terax 暴露的接口统一位于 `/api/alpha`。
-- FastAPI 负责参数校验、业务错误、任务状态、数据访问和权限判断。
-- 重型回测、同步和优化不得阻塞 API 事件循环，应由 Alpha 任务运行时执行。
-- HTTP 查询结果是权威状态。当前 WebSocket 只提供受认证的双向 JSON 通路和 ping/pong，不订阅内部 EventEngine；后续由 FastAPI 定义公共事件类型，并由客户端按需订阅进度、日志和状态变化。
+- Rust 和 React 只消费公共 HTTP/WS 协议，不依赖 Python 内部 Repository、任务对象或 provider 模型。
+- HTTP 查询结果是前端恢复时的权威状态；WebSocket 只承载 Alpha 已显式定义的公共事件。
+- 认证、错误、时间、复权、分页、任务和当前 WebSocket 基线见 [Alpha API 协议](../../alpha/docs/api-contracts.md)。
 - Rust 不自动重连 WebSocket。前端按页面生命周期决定是否重连，并在连接恢复后重新查询 HTTP 权威状态。
 
 ### Rust 代理保持通用
@@ -106,8 +106,7 @@ alpha-native Rust 计算模块
 | 变更类型 | 放置位置 |
 | --- | --- |
 | Alpha 源码筛选、压缩、内嵌归档与 Release revision | `src-tauri/build_support/alpha.rs` |
-| 行情、策略、回测、同步、存储和任务行为 | `alpha/` 对应领域模块 |
-| HTTP 路由、请求模型、业务校验和事件协议 | `alpha/api/` |
+| Python 业务协议、领域、存储和任务行为 | `alpha/`，设计入口见 `alpha/docs/README.md` |
 | 量化计算热点和 PyO3 接口 | `alpha-native/` |
 | Python 进程管理、HTTP/WS 转发和凭据注入 | `src-tauri/src/modules/alpha/` |
 | 页面、图表、交互和 Alpha API 客户端 | `src/modules/alpha/` |

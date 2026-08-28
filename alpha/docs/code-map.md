@@ -1,6 +1,6 @@
 # `alpha` 代码地图
 
-本文用于快速定位 `alpha/` 源码。按任务找到入口后，应以源码、测试和 API 模型为准。Alpha 与 Terax、Rust 代理及 `alpha-native` 的职责边界见 [Alpha 集成架构](../../docs/architecture/alpha-integration.md)。
+本文用于快速定位 `alpha/` 源码。按任务找到入口后，应以源码、测试和 API 模型为准。后端依赖方向见 [后端架构](./architecture.md)，公共协议见 [API 协议](./api-contracts.md)，存储不变量见 [行情数据与存储](./market-data.md)。Alpha 与 Terax、Rust 代理及 `alpha-native` 的职责边界见 [Alpha 集成架构](../../docs/architecture/alpha-integration.md)。
 
 ## 按任务定位
 

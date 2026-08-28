@@ -2,7 +2,7 @@
 
 ## 文档定位
 
-本文是 Alpha 公共金融图表后续工作的可执行计划，覆盖此前根目录中已经完成的 AI 文件工具重构计划。长期架构、不变量和模块边界仍以 [`AGENTS.md`](./AGENTS.md)、[Alpha 综合量化工作站](./docs/architecture/alpha-quant-workstation.md) 和 [Alpha 集成架构](./docs/architecture/alpha-integration.md) 为准。
+本文是 Alpha 公共金融图表后续工作的跨层可执行计划，覆盖此前根目录中已经完成的 AI 文件工具重构计划。Rust、前端和跨进程边界以 [`AGENTS.md`](./AGENTS.md)、[Alpha 综合量化工作站](./docs/architecture/alpha-quant-workstation.md) 和 [Alpha 集成架构](./docs/architecture/alpha-integration.md) 为准；Python 已实现基线以 [Alpha 后端文档](./alpha/docs/README.md) 为准。本文中的 Python 文件清单只表示未来任务的实施范围，不代替后端架构文档。
 
 计划已经确认采用三批八个任务：
 
@@ -500,7 +500,7 @@ src/modules/alpha/
 
 ### 必须阅读的参考
 
-Terax：
+仓库内：
 
 - `src/modules/alpha/chart/scenes/MarketChartScene.tsx`
 - `src/modules/alpha/chart/components/FinancialChartFrame.tsx`
@@ -578,7 +578,7 @@ Terax：
 
 ### 必须阅读的参考
 
-Terax：
+仓库内：
 
 - `alpha/api/models.py` 的 `SecurityCatalogDetail`
 - `alpha/api/routes/securities.py`
@@ -738,8 +738,10 @@ type FinancialChartHandle = {
 
 ### 必须阅读的参考
 
-Terax：
+仓库内：
 
+- `alpha/docs/architecture.md`
+- `alpha/docs/api-contracts.md`
 - `alpha/backtest/indicator.py`
 - `alpha/tests/unit_tests/test_indicator.py`
 - `alpha/api/routes/bars.py`
@@ -1093,6 +1095,7 @@ type AlphaChartSyncConfig = {
 - OpenTerminalUI `frontend/src/__tests__/useRealtimeChartAggregation.test.ts`
 - OpenTerminalUI `frontend/src/__tests__/TradingChart.realtime.test.tsx`
 - Terax `docs/architecture/alpha-quant-workstation.md` 的 `MarketDataHub` 边界。
+- Alpha `alpha/docs/api-contracts.md` 的当前 WebSocket 基线；开始实现前先把新公共事件协议同步回该文档。
 
 ### MarketDataHub 设计
 
