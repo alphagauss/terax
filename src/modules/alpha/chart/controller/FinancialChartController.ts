@@ -1,6 +1,6 @@
 /**
  * 本文件封装 Alpha 公共金融图表的 Lightweight Charts 运行时。
- * Controller 独占实例、series、监听器和 viewport 命令，不执行查询或持久化。
+ * Controller 独占实例、series、监听器、viewport 和截图命令，不执行查询或持久化。
  */
 
 import {
@@ -394,6 +394,11 @@ export class FinancialChartController {
   resize(width: number, height: number): void {
     if (!this.visible || width <= 0 || height <= 0) return;
     this.resizeBatcher.schedule({ width, height });
+  }
+
+  /** 截取当前图表且排除十字线，不改变 viewport 或 pane 比例。 */
+  takeScreenshot(): HTMLCanvasElement {
+    return this.chart.takeScreenshot(false, false);
   }
 
   /** 恢复价格自动缩放并让时间轴重新适配全部已加载数据。 */

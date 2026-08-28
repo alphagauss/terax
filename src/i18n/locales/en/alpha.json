@@ -100,6 +100,21 @@
       "historyRetry": "Retry earlier history",
       "resetView": "Reset chart view",
       "previousClose": "Prev close",
+      "export": {
+        "menu": "Export chart",
+        "png": "Download PNG",
+        "csv": "Download CSV",
+        "pngFailed": "Could not export the chart image.",
+        "csvFailed": "Could not export the chart data.",
+        "tooManyBars": "CSV export is limited to {{limit}} loaded bars."
+      },
+      "accessibility": {
+        "openTable": "Chart data table",
+        "tableCaption": "Recent chart bars",
+        "time": "Time",
+        "summary": "{{symbol}}, {{time}}. Open {{open}}, high {{high}}, low {{low}}, close {{close}}, volume {{volume}}.",
+        "noData": "{{symbol}} has no chart data."
+      },
       "types": {
         "candlestick": "Candles",
         "ohlc": "OHLC",

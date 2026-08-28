@@ -100,6 +100,21 @@
       "historyRetry": "重试加载更早历史",
       "resetView": "重置图表视图",
       "previousClose": "昨收",
+      "export": {
+        "menu": "导出图表",
+        "png": "下载 PNG",
+        "csv": "下载 CSV",
+        "pngFailed": "无法导出图表图片。",
+        "csvFailed": "无法导出图表数据。",
+        "tooManyBars": "CSV 导出最多支持 {{limit}} 根已加载 K 线。"
+      },
+      "accessibility": {
+        "openTable": "图表数据表",
+        "tableCaption": "最近的图表 K 线",
+        "time": "时间",
+        "summary": "{{symbol}}，{{time}}。开盘 {{open}}，最高 {{high}}，最低 {{low}}，收盘 {{close}}，成交量 {{volume}}。",
+        "noData": "{{symbol}} 暂无图表数据。"
+      },
       "types": {
         "candlestick": "蜡烛图",
         "ohlc": "OHLC",

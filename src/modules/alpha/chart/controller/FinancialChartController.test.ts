@@ -1,6 +1,6 @@
 /**
  * 本文件测试公共金融图表 Controller 的生命周期和命令。
- * 重点锁定单实例、署名配置、历史加载、平移边界和视图重置不变量。
+ * 重点锁定单实例、署名配置、历史加载、平移边界、视图重置和截图不变量。
  */
 
 import type {
@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => {
     subscribeCrosshairMove: vi.fn(),
     unsubscribeCrosshairMove: vi.fn(),
     applyOptions: vi.fn(),
+    takeScreenshot: vi.fn(() => ({ width: 800, height: 400 })),
     remove: vi.fn(),
   };
   return {
@@ -449,5 +450,13 @@ describe("FinancialChartController", () => {
       autoScale: true,
     });
     expect(mocks.timeScale.fitContent).toHaveBeenCalledOnce();
+  });
+
+  it("截图明确排除顶层和十字线", () => {
+    const controller = new FinancialChartController(chartHost());
+
+    expect(controller.takeScreenshot()).toEqual({ width: 800, height: 400 });
+    expect(mocks.chart.takeScreenshot).toHaveBeenCalledOnce();
+    expect(mocks.chart.takeScreenshot).toHaveBeenCalledWith(false, false);
   });
 });

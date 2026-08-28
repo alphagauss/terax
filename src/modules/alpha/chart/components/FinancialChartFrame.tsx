@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责受控图表选项、权威价格 legend、成交量入口和状态反馈，不拥有查询。
+ * 外壳负责受控图表选项、权威价格 legend、导出、可访问数据和状态反馈，不拥有查询。
  */
 
 import {
@@ -10,10 +10,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { FinancialChart } from "@/modules/alpha/chart/components/FinancialChart";
+import { ChartAccessibilityLayer } from "@/modules/alpha/chart/accessibility/ChartAccessibilityLayer";
+import {
+  FinancialChart,
+  type FinancialChartHandle,
+} from "@/modules/alpha/chart/components/FinancialChart";
+import {
+  buildChartExportFilename,
+  buildMarketBarsCsv,
+  downloadChartBlob,
+  downloadChartPng,
+  MAX_CHART_EXPORT_BARS,
+} from "@/modules/alpha/chart/export/chartExport";
 import type {
   ChartMarketMetadata,
   ChartPriceReference,
@@ -23,13 +40,19 @@ import type {
   MarketChartOptions,
 } from "@/modules/alpha/chart/model";
 import { FINANCIAL_CHART_TYPES } from "@/modules/alpha/chart/model";
-import type { MarketBar } from "@/modules/alpha/market/model";
+import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
+import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
-import { FitToScreenIcon } from "@hugeicons/core-free-icons";
+import {
+  Download01Icon,
+  FitToScreenIcon,
+  MoreHorizontalIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 type Props = {
   bars: readonly MarketBar[];
@@ -74,7 +97,7 @@ export function FinancialChartFrame({
     dataKey: string;
     bar: MarketBar;
   } | null>(null);
-  const [resetRevision, setResetRevision] = useState(0);
+  const chartRef = useRef<FinancialChartHandle>(null);
   const latestBar = bars[bars.length - 1] ?? null;
   const displayBar = crosshair?.dataKey === dataKey ? crosshair.bar : latestBar;
   const previousCloseByTime = useMemo(
@@ -128,6 +151,40 @@ export function FinancialChartFrame({
     metadata?.volumeUnit === "share"
       ? t("data.chart.units.share")
       : metadata?.volumeUnit;
+  const formatTime = useCallback(
+    (time: MarketTime) =>
+      time.kind === "trading-day"
+        ? time.date
+        : formatMarketTimestamp(
+            time.epochSeconds,
+            metadata?.timezone ?? "UTC",
+            i18n.language,
+            "full",
+          ),
+    [i18n.language, metadata?.timezone],
+  );
+  const formatPrice = useCallback(
+    (value: number) => number.format(value),
+    [number],
+  );
+  const formatVolume = useCallback(
+    (value: number | null) =>
+      value === null ? "-" : compactNumber.format(value),
+    [compactNumber],
+  );
+  const accessibilitySummary = displayBar
+    ? t("data.chart.accessibility.summary", {
+        symbol: symbol ?? t("data.chart.title"),
+        time: formatTime(displayBar.time),
+        open: formatPrice(displayBar.open),
+        high: formatPrice(displayBar.high),
+        low: formatPrice(displayBar.low),
+        close: formatPrice(displayBar.close),
+        volume: formatVolume(displayBar.volume),
+      })
+    : t("data.chart.accessibility.noData", {
+        symbol: symbol ?? t("data.chart.title"),
+      });
 
   const handleCrosshairChange = useCallback(
     (bar: MarketBar | null) => {
@@ -135,6 +192,39 @@ export function FinancialChartFrame({
     },
     [dataKey],
   );
+
+  const handlePngExport = useCallback(() => {
+    try {
+      const screenshot = chartRef.current?.takeScreenshot();
+      if (!screenshot) throw new Error("chart-screenshot-unavailable");
+      void downloadChartPng(
+        screenshot,
+        buildChartExportFilename(symbol, options.interval, "png"),
+      ).catch(() => toast.error(t("data.chart.export.pngFailed")));
+    } catch {
+      toast.error(t("data.chart.export.pngFailed"));
+    }
+  }, [options.interval, symbol, t]);
+
+  const handleCsvExport = useCallback(() => {
+    if (bars.length > MAX_CHART_EXPORT_BARS) {
+      toast.error(
+        t("data.chart.export.tooManyBars", {
+          limit: MAX_CHART_EXPORT_BARS.toLocaleString(i18n.language),
+        }),
+      );
+      return;
+    }
+    try {
+      const csv = buildMarketBarsCsv(bars);
+      downloadChartBlob(
+        new Blob([csv], { type: "text/csv;charset=utf-8" }),
+        buildChartExportFilename(symbol, options.interval, "csv"),
+      );
+    } catch {
+      toast.error(t("data.chart.export.csvFailed"));
+    }
+  }, [bars, i18n.language, options.interval, symbol, t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-background/40">
@@ -262,10 +352,54 @@ export function FinancialChartFrame({
             className="size-7"
             title={t("data.chart.resetView")}
             aria-label={t("data.chart.resetView")}
-            onClick={() => setResetRevision((revision) => revision + 1)}
+            onClick={() => chartRef.current?.resetView()}
           >
             <HugeiconsIcon icon={FitToScreenIcon} size={13} strokeWidth={1.8} />
           </Button>
+          {density === "panel" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="size-7"
+                  title={t("data.chart.export.menu")}
+                  aria-label={t("data.chart.export.menu")}
+                >
+                  <HugeiconsIcon
+                    icon={MoreHorizontalIcon}
+                    size={13}
+                    strokeWidth={1.8}
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem
+                  disabled={bars.length === 0}
+                  onSelect={handlePngExport}
+                >
+                  <HugeiconsIcon
+                    icon={Download01Icon}
+                    size={13}
+                    strokeWidth={1.8}
+                  />
+                  {t("data.chart.export.png")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={bars.length === 0}
+                  onSelect={handleCsvExport}
+                >
+                  <HugeiconsIcon
+                    icon={Download01Icon}
+                    size={13}
+                    strokeWidth={1.8}
+                  />
+                  {t("data.chart.export.csv")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
           {symbol ?? t("data.chart.title")}
@@ -315,6 +449,7 @@ export function FinancialChartFrame({
 
       <div className="relative min-h-0 flex-1">
         <FinancialChart
+          ref={chartRef}
           bars={bars}
           dataKey={dataKey}
           chartType={options.chartType}
@@ -327,7 +462,6 @@ export function FinancialChartFrame({
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}
-          resetRevision={resetRevision}
           ariaLabel={t("data.chart.aria", {
             symbol: symbol ?? t("data.chart.title"),
           })}
@@ -338,6 +472,13 @@ export function FinancialChartFrame({
               ? (paneRatios) => onOptionsChange({ ...options, paneRatios })
               : undefined
           }
+        />
+        <ChartAccessibilityLayer
+          summary={accessibilitySummary}
+          rows={bars}
+          formatTime={formatTime}
+          formatPrice={formatPrice}
+          formatVolume={formatVolume}
         />
         {status !== "ready" ? (
           <ChartStatusOverlay status={status} onRetry={onRetry} />

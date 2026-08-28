@@ -6,12 +6,13 @@
 // @vitest-environment happy-dom
 
 import type { MarketBar } from "@/modules/alpha/market/model";
-import { act } from "react";
+import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createController: vi.fn(),
+  screenshot: { width: 800, height: 400 },
   controller: {
     setCallbacks: vi.fn(),
     setChartType: vi.fn(),
@@ -22,12 +23,17 @@ const mocks = vi.hoisted(() => ({
     setShowVolume: vi.fn(),
     setBars: vi.fn(),
     setHistoryState: vi.fn(),
+    takeScreenshot: vi.fn(),
     resetView: vi.fn(),
     setVisible: vi.fn(),
     resize: vi.fn(),
     applyTheme: vi.fn(),
     destroy: vi.fn(),
   },
+}));
+
+vi.mock("@/modules/alpha/chart/export/chartExport", () => ({
+  addChartScreenshotBackground: (canvas: HTMLCanvasElement) => canvas,
 }));
 
 vi.mock("@/modules/alpha/chart/controller/FinancialChartController", () => {
@@ -45,7 +51,10 @@ vi.mock("@/modules/theme", () => ({
   useTheme: () => ({ resolvedMode: "dark", themeId: "modern" }),
 }));
 
-import { FinancialChart } from "@/modules/alpha/chart/components/FinancialChart";
+import {
+  FinancialChart,
+  type FinancialChartHandle,
+} from "@/modules/alpha/chart/components/FinancialChart";
 
 const reactTestEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -69,6 +78,9 @@ describe("FinancialChart", () => {
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     vi.clearAllMocks();
+    mocks.controller.takeScreenshot.mockReturnValue(
+      mocks.screenshot as unknown as HTMLCanvasElement,
+    );
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -95,7 +107,6 @@ describe("FinancialChart", () => {
       visible: true,
       hasMoreBefore: false,
       loadingMore: false,
-      resetRevision: 0,
       ariaLabel: "chart",
       locale: "zh-CN",
       metadata: {
@@ -156,6 +167,37 @@ describe("FinancialChart", () => {
     );
   });
 
+  it("通过稳定 handle 转发重置和主题铺底截图命令", () => {
+    const ref = createRef<FinancialChartHandle>();
+    act(() =>
+      root?.render(
+        <FinancialChart
+          ref={ref}
+          bars={[bar]}
+          dataKey="000001.SZSE|d|forward"
+          chartType="candlestick"
+          visible={true}
+          hasMoreBefore={false}
+          loadingMore={false}
+          ariaLabel="chart"
+          locale="zh-CN"
+          metadata={null}
+          priceReference={{ previousClose: null, referenceTime: null }}
+          previousCloseLabel="昨收"
+          showVolume={true}
+          paneRatios={{ main: 8, volume: 2 }}
+          onCrosshairChange={vi.fn()}
+          onRequestMore={vi.fn()}
+        />,
+      ),
+    );
+
+    act(() => ref.current?.resetView());
+    expect(mocks.controller.resetView).toHaveBeenCalledOnce();
+    expect(ref.current?.takeScreenshot()).toBe(mocks.screenshot);
+    expect(mocks.controller.takeScreenshot).toHaveBeenCalledOnce();
+  });
+
   it("只在 pointerup 后提交一次变化的语义 pane 比例", () => {
     const onPaneRatiosChange = vi.fn();
     const common = {
@@ -165,7 +207,6 @@ describe("FinancialChart", () => {
       visible: true,
       hasMoreBefore: false,
       loadingMore: false,
-      resetRevision: 0,
       ariaLabel: "chart",
       locale: "zh-CN",
       metadata: null,

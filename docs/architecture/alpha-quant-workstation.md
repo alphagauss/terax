@@ -99,10 +99,11 @@ Terax Space / Workbench
 - 数据目录已经支持证券资料与行情覆盖的联合查询、服务端搜索与 Facet 过滤、分页、覆盖区间和全局摘要，数据页复用这些接口展示当前数据状态。
 - 前端已经可以读取证券、指数成分、日线覆盖和同步任务摘要，但尚未形成启动、重试、质量查看和失败恢复 UI 闭环。Python 当前能力与存储基线见 [Alpha 后端架构](../../alpha/docs/architecture.md) 和 [行情数据与存储](../../alpha/docs/market-data.md)。
 - 前端行情模型和归一化位于 `src/modules/alpha/market/`，明确区分无时区交易日和带时区绝对时间，并统一定义周期、复权以及 OHLC 校验、顺序、去重和跨页合并。市场元数据纯函数把后端证券详情转换为价格精度、IANA 时区、成交量单位和市场涨跌色，不根据 WebView 环境猜测交易所语义。
-- 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、价格精度、时区格式、昨收与最新价线、rAF 尺寸更新、十字线和 viewport 命令；React 外壳不拥有查询或持久化。
+- 公共金融图表已经拆分到 `src/modules/alpha/chart/`。`FinancialChartController` 管理单个 Lightweight Charts 实例、蜡烛图、OHLC Bar、收盘线、成交量 pane、主题、价格精度、时区格式、昨收与最新价线、rAF 尺寸更新、十字线、viewport 和截图命令；React 外壳不拥有查询或持久化。
 - 行情图表场景组件 `MarketChartScene` 已接收受控周期、复权、图表类型、成交量、pane 比例和使用密度，使用完整 `vtSymbol + interval + adjust` 查询键和 `dataKey`。数据页与工作台面板都复用证券详情查询获取权威图表元数据；工作台只展示权威声明且排除 `tick` 的 K 线周期，紧凑数据页保持固定日线和前复权。排他 `before` 历史分页、请求单飞、停滞游标终止、跨页线性合并和 viewport 补偿继续复用同一实现。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，盘中刻度按后端 IANA 时区格式化。周期、复权、主题、标的、元数据和图表类型切换只更新同一个 React 宿主与 Controller，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。价格轴、legend、昨收和最新价使用一致精度，蜡烛、OHLC、成交量和最新价线遵循市场涨跌色。工作台面板可控制成交量并在 pointerup 后保存语义 pane 比例；隐藏成交量不保留空 pane，过矮面板临时恢复主图优先的 8:2。工具栏、信息栏和全部状态已经接入中英文文案；TradingView 署名位于设置页。
-- 公共金融图表的后续范围已经确认拆为三批八个独立任务，依次完成受控公共图表配置、专业价格与 pane 语义、导出与可访问性、服务端指标协议、指标 pane、多图同步、对比标的和实时尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
+- `FinancialChart` 通过稳定 handle 暴露重置和不含十字线的截图，不向 Frame 暴露图表实例。工作台 Chart Panel 使用紧凑菜单导出当前主题铺底的 PNG 和固定八列 CSV；CSV 在构造字符串前执行 50,000 根硬上限。数据页不显示导出入口。所有图表密度都提供随选中 bar 更新的 `aria-live` 摘要，以及最近 20 根 OHLCV 的可聚焦数据表。
+- 公共金融图表的后续范围已经确认拆为三批八个独立任务，受控公共图表配置、专业价格与 pane 语义、导出与可访问性已经完成；后续依次为服务端指标协议、指标 pane、多图同步、对比标的和实时尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序、配置更新和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。面板配置更新按 ID 回传，写入前再次经过 descriptor 归一化。
@@ -214,6 +215,8 @@ src/modules/alpha/
     MarketDataHub.ts
     realtime.ts
   chart/
+    accessibility/
+      ChartAccessibilityLayer.tsx
     model.ts
     controller/
       FinancialChartController.ts
@@ -230,6 +233,8 @@ src/modules/alpha/
       ChartToolbar.tsx
       ChartLegend.tsx
       ChartStatusOverlay.tsx
+    export/
+      chartExport.ts
     scenes/
       MarketChartScene.tsx
       BacktestChartScene.tsx
