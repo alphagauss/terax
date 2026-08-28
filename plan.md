@@ -952,7 +952,7 @@ type AlphaChartSyncConfig = {
 };
 ```
 
-4. 若工作台状态 schema 发生字段变化，提升 state schema version 并提供从旧版本的纯迁移，不能依赖 Zod 默认值掩盖版本变化。
+4. 工作台 state schema version 提升为 2 并显式包含同步配置。项目发布前只接受当前版本，旧开发数据失效后回退默认状态，不保留迁移代码，也不依赖 Zod 默认值掩盖版本变化。
 5. Controller 新增命令和回调：
    - `onVisibleTimeRangeChange(range)`。
    - `setVisibleTimeRangeFromSync(range)`。
@@ -982,7 +982,7 @@ type AlphaChartSyncConfig = {
 - 不兼容周期或复权不消费事件。
 - 同步命令不形成循环。
 - panel 删除后没有残留监听器。
-- 工作台状态迁移和持久化只保存配置，不保存事件。
+- 工作台状态版本校验和持久化只保存配置，不保存事件。
 
 ### 运行时验证
 

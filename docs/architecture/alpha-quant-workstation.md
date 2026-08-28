@@ -113,7 +113,7 @@ Terax Space / Workbench
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序、配置更新和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。面板配置更新按 ID 回传，写入前再次经过 descriptor 归一化。
 - Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
 - 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），其严格配置保存周期、复权、图表类型、成交量显隐、指标 instances 和语义 pane 比例，旧 `{}` 自动补齐默认日线、前复权、蜡烛图、成交量、空指标和 8:2。内置单图和双图模板每次生成新的布局与 panel ID；面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
-- `AlphaWorkstationState` 版本 2 把主标的、锁定、图表同步配置和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存；版本 1 通过纯迁移补入关闭的默认同步配置。持久化只保存固定组 ID 和两个开关，不保存范围、十字线时间或来源 ID。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
+- `AlphaWorkstationState` 版本 2 把主标的、锁定、图表同步配置和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。当前开发阶段只接受版本 2，旧版本直接失效并回退默认状态，不保留迁移代码。持久化只保存固定组 ID 和两个开关，不保存范围、十字线时间或来源 ID。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
 - `/bars` 为前端提供 `start + end` 范围查询和排他 `before` 历史分页，并显式返回 `has_more_before`、下一游标、实际范围、`reference_close` 和 `reference_time`。Python 如何跨分片读取、应用复权和计算参考价统一见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 与 [行情数据和存储](../../alpha/docs/market-data.md)。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载，工作台图表面板可以切换受支持的周期和复权。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入实时增量。
 - 当前 Alpha 页面包括综合工作台、数据、回测和设置，尚没有独立行情页、策略页、回测复盘页和模拟交易页。
