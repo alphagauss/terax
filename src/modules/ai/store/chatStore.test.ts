@@ -1,6 +1,6 @@
 /**
- * 本文件验证 AI 会话在多进程场景下的运行锁、缓存失效和两阶段发布。
- * 测试锁定用户消息先行落盘、终态追加、重试和发布失败时的锁语义。
+ * 本文件验证 AI 会话的窗口级恢复、多进程同步、运行锁和两阶段发布。
+ * 测试锁定临时窗口与失效选择回退草稿，以及运行和持久化的关键顺序。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +15,8 @@ const io = vi.hoisted(() => ({
   clearProcesses: vi.fn(),
   workspaceGet: vi.fn(),
   workspaceSet: vi.fn(),
+  workspaceDelete: vi.fn(),
+  isPrimary: true,
 }));
 
 vi.mock("../lib/sessions", async (importOriginal) => ({
@@ -29,9 +31,13 @@ vi.mock("../lib/sessions", async (importOriginal) => ({
 }));
 
 vi.mock("@/modules/workspace-process", () => ({
-  currentWorkspaceBootstrap: () => ({ environmentKey: "local" }),
+  currentWorkspaceBootstrap: () => ({
+    environmentKey: "local",
+    isPrimary: io.isPrimary,
+  }),
   getWorkspaceValue: io.workspaceGet,
   setWorkspaceValue: io.workspaceSet,
+  deleteWorkspaceValue: io.workspaceDelete,
 }));
 
 vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
@@ -125,6 +131,8 @@ describe("chat store multi-process lifecycle", () => {
     io.clearProcesses.mockResolvedValue(undefined);
     io.workspaceGet.mockReturnValue(undefined);
     io.workspaceSet.mockResolvedValue(undefined);
+    io.workspaceDelete.mockResolvedValue(undefined);
+    io.isPrimary = true;
     useChatStore.setState({
       sessionsHydrated: false,
       draftSessionId: null,
@@ -157,17 +165,53 @@ describe("chat store multi-process lifecycle", () => {
     );
   });
 
-  it("restores the most recent session and persists it when no active id exists", async () => {
+  it("restores only the session recorded by the primary window", async () => {
+    io.list.mockResolvedValue([first, second]);
+    io.workspaceGet.mockReturnValue(second.id);
+
+    await useChatStore.getState().hydrateSessions();
+
+    expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    expect(io.read).toHaveBeenCalledWith(second.id);
+    expect(io.workspaceSet).not.toHaveBeenCalled();
+  });
+
+  it("opens a draft when the primary window has no recorded session", async () => {
     io.list.mockResolvedValue([first, second]);
 
     await useChatStore.getState().hydrateSessions();
 
-    expect(useChatStore.getState().activeSessionId).toBe(first.id);
-    expect(io.read).toHaveBeenCalledWith(first.id);
-    expect(io.workspaceSet).toHaveBeenCalledWith(
-      "ai:activeSessionId",
-      first.id,
+    expect(useChatStore.getState().activeSessionId).toBe(
+      useChatStore.getState().draftSessionId,
     );
+    expect(io.read).not.toHaveBeenCalled();
+  });
+
+  it("clears a missing primary selection and opens a draft", async () => {
+    io.list.mockResolvedValue([first]);
+    io.workspaceGet.mockReturnValue(second.id);
+
+    await useChatStore.getState().hydrateSessions();
+
+    expect(useChatStore.getState().activeSessionId).toBe(
+      useChatStore.getState().draftSessionId,
+    );
+    expect(io.workspaceDelete).toHaveBeenCalledOnce();
+  });
+
+  it("always opens a draft in a temporary window", async () => {
+    io.isPrimary = false;
+    io.list.mockResolvedValue([first, second]);
+    io.workspaceGet.mockReturnValue(first.id);
+
+    await useChatStore.getState().hydrateSessions();
+
+    expect(useChatStore.getState().sessions).toEqual([first, second]);
+    expect(useChatStore.getState().activeSessionId).toBe(
+      useChatStore.getState().draftSessionId,
+    );
+    expect(io.workspaceGet).not.toHaveBeenCalled();
+    expect(io.read).not.toHaveBeenCalled();
   });
 
   it("opens an unlisted draft when no persisted session exists", async () => {
@@ -201,7 +245,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(io.remove).not.toHaveBeenCalled();
   });
 
-  it("keeps a new session as one unlisted draft until a user message is sent", () => {
+  it("keeps a new session as one unlisted draft until a user message is sent", async () => {
     useChatStore.setState({ sessions: [first], activeSessionId: first.id });
 
     const draftId = useChatStore.getState().newSession();
@@ -230,6 +274,20 @@ describe("chat store multi-process lifecycle", () => {
       title: "hello",
       cwd: "D:/workspace/draft",
     });
+    await vi.waitFor(() =>
+      expect(io.workspaceSet).toHaveBeenLastCalledWith(
+        "ai:activeSessionId",
+        draftId,
+      ),
+    );
+  });
+
+  it("clears the persisted selection when creating a new session", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+
+    useChatStore.getState().newSession();
+
+    await vi.waitFor(() => expect(io.workspaceDelete).toHaveBeenCalledOnce());
   });
 
   it("persists the user message and system prompt before the assistant response", async () => {
@@ -466,7 +524,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(chats.has(second.id)).toBe(false);
   });
 
-  it("seeds the fallback session before deleting the active session", async () => {
+  it("opens a draft after deleting the active session", async () => {
     useChatStore.setState({
       sessions: [first, second],
       activeSessionId: first.id,
@@ -475,10 +533,31 @@ describe("chat store multi-process lifecycle", () => {
 
     useChatStore.getState().deleteSession(first.id);
     await vi.waitFor(() => {
-      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+      expect(useChatStore.getState().activeSessionId).toBe(
+        useChatStore.getState().draftSessionId,
+      );
     });
 
-    expect(io.read).toHaveBeenCalledWith(second.id);
-    expect(seedMessages.has(second.id)).toBe(true);
+    expect(useChatStore.getState().sessions).toEqual([second]);
+    expect(io.read).not.toHaveBeenCalledWith(second.id);
+    expect(io.workspaceDelete).toHaveBeenCalledOnce();
+  });
+
+  it("opens a draft when refresh observes the active session was deleted", async () => {
+    useChatStore.setState({
+      sessions: [first, second],
+      activeSessionId: first.id,
+      draftSessionId: null,
+      runLockSessionIds: {},
+    });
+    io.list.mockResolvedValue([second]);
+
+    await useChatStore.getState().refreshSessions();
+
+    expect(useChatStore.getState().sessions).toEqual([second]);
+    expect(useChatStore.getState().activeSessionId).toBe(
+      useChatStore.getState().draftSessionId,
+    );
+    expect(io.workspaceDelete).toHaveBeenCalledOnce();
   });
 });

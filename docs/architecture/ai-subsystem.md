@@ -71,7 +71,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 
 streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和当前 prompt。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
 
-其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime。active session ID 存储在 UUID 对应的 Workspace 文件中，恢复顺序依次为已保存 ID、最近的 session 文件、全新 session。
+其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
 ## Composer
 
