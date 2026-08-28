@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import numpy as np
 import pytest
 
 from alpha.api.cache import AsyncTtlCache
 from alpha.api.router import router
 from alpha.api.routes.bars import _market_local_datetime
+from alpha.chart import studies as chart_studies
 from alpha.config import AlphaConfig
 
 
@@ -596,6 +598,225 @@ def test_alpha_bar_router_rejects_mixed_range_and_cursor_queries() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_alpha_study_router_lists_definitions_and_calculates_with_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """指标接口只读取一次含 warmup 的行情，并裁剪回用户区间。"""
+    client = _client()
+    calls: list[object] = []
+
+    class FakeIndicators:
+        """路由测试使用的确定性指标替身。"""
+
+        @staticmethod
+        def sma(close: np.ndarray, n: int, array: bool = True) -> np.ndarray:
+            assert array is True
+            return close + n
+
+    async def load_bar_history(query: object) -> dict[str, object]:
+        """返回一根 warmup 和两根显示区间行情。"""
+        calls.append(query)
+        rows = [
+            {
+                "datetime": "2025-01-01 00:00:00",
+                "close": 9.0,
+            },
+            {
+                "datetime": "2025-01-02 00:00:00",
+                "close": 10.0,
+            },
+            {
+                "datetime": "2025-01-03 00:00:00",
+                "close": 11.0,
+            },
+        ]
+        return {
+            "items": rows,
+            "has_more_before": False,
+            "next_before": None,
+            "actual_start": rows[0]["datetime"],
+            "actual_end": rows[-1]["datetime"],
+        }
+
+    monkeypatch.setattr(chart_studies, "_indicator_class", lambda: FakeIndicators)
+    client.app.state.alpha_services.database.load_bar_history = load_bar_history
+
+    definitions = client.get("/api/alpha/studies")
+    result = client.post(
+        "/api/alpha/studies/calculate",
+        json={
+            "vt_symbol": "000001.SZSE",
+            "interval": "d",
+            "adjust": "forward",
+            "start": "2025-01-02",
+            "end": "2025-01-03",
+            "studies": [
+                {"instance_id": "sma-1", "type": "sma", "params": {}}
+            ],
+        },
+    )
+
+    assert definitions.status_code == 200
+    assert [item["type"] for item in definitions.json()] == [
+        "sma",
+        "ema",
+        "boll",
+        "rsi",
+        "macd",
+    ]
+    assert result.status_code == 200
+    assert result.json() == {
+        "actual_start": "2025-01-02",
+        "actual_end": "2025-01-03",
+        "items": [
+            {
+                "instance_id": "sma-1",
+                "pane": "main",
+                "outputs": [
+                    {
+                        "id": "line",
+                        "kind": "line",
+                        "points": [
+                            {"time": "2025-01-02", "value": 30.0},
+                            {"time": "2025-01-03", "value": 31.0},
+                        ],
+                    }
+                ],
+                "levels": [],
+            }
+        ],
+    }
+    assert len(calls) == 1
+    assert getattr(calls[0], "limit") == 4020
+    assert getattr(calls[0], "adjust") == "pre"
+
+
+def test_alpha_study_router_rejects_invalid_batch_before_reading_bars() -> None:
+    """重复实例、非法参数和前端原始 bars 不能触发行情读取。"""
+    client = _client()
+    duplicate = {
+        "vt_symbol": "000001.SZSE",
+        "interval": "d",
+        "adjust": "none",
+        "start": "2025-01-01",
+        "end": "2025-01-03",
+        "studies": [
+            {"instance_id": "same", "type": "sma", "params": {}},
+            {"instance_id": "same", "type": "ema", "params": {}},
+        ],
+    }
+    invalid_macd = {
+        **duplicate,
+        "studies": [
+            {
+                "instance_id": "macd-1",
+                "type": "macd",
+                "params": {"fast": 30, "slow": 20, "signal": 9},
+            }
+        ],
+    }
+
+    duplicate_response = client.post(
+        "/api/alpha/studies/calculate",
+        json=duplicate,
+    )
+    macd_response = client.post(
+        "/api/alpha/studies/calculate",
+        json=invalid_macd,
+    )
+    valid_sma = {
+        **duplicate,
+        "studies": [
+            {"instance_id": "sma-1", "type": "sma", "params": {}}
+        ],
+    }
+    bars_response = client.post(
+        "/api/alpha/studies/calculate",
+        json={**valid_sma, "bars": [{"close": 1}]},
+    )
+
+    assert duplicate_response.status_code == 422
+    assert macd_response.status_code == 422
+    assert macd_response.json()["detail"]["code"] == "invalid_study"
+    assert bars_response.status_code == 422
+
+
+def test_alpha_study_router_enforces_bar_limit_before_calculation() -> None:
+    """显示区间超过 4,000 根时拒绝计算，避免无界 CPU 和响应。"""
+    client = _client()
+
+    async def load_bar_history(query: object) -> dict[str, object]:
+        """返回超过指标显示上限的分钟行情。"""
+        start = datetime(2025, 1, 1)
+        rows = [
+            {
+                "datetime": (start + timedelta(minutes=index)).isoformat(),
+                "close": 10.0,
+            }
+            for index in range(4001)
+        ]
+        return {
+            "items": rows,
+            "has_more_before": True,
+            "next_before": rows[0]["datetime"],
+            "actual_start": rows[0]["datetime"],
+            "actual_end": rows[-1]["datetime"],
+        }
+
+    client.app.state.alpha_services.database.load_bar_history = load_bar_history
+    response = client.post(
+        "/api/alpha/studies/calculate",
+        json={
+            "vt_symbol": "000001.SZSE",
+            "interval": "1m",
+            "adjust": "none",
+            "start": "2025-01-01T00:00:00+08:00",
+            "end": "2025-01-04T00:00:00+08:00",
+            "studies": [
+                {"instance_id": "sma-1", "type": "sma", "params": {}}
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "study_bar_limit_exceeded",
+        "limit": 4000,
+    }
+
+
+def test_alpha_study_router_returns_structured_computation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """指标依赖异常只返回稳定业务错误，不泄漏内部异常或部分结果。"""
+    client = _client()
+
+    class BrokenIndicators:
+        """模拟 TA-Lib 计算失败。"""
+
+        @staticmethod
+        def sma(close: np.ndarray, n: int, array: bool = True) -> np.ndarray:
+            raise RuntimeError("internal dependency detail")
+
+    monkeypatch.setattr(chart_studies, "_indicator_class", lambda: BrokenIndicators)
+    response = client.post(
+        "/api/alpha/studies/calculate",
+        json={
+            "vt_symbol": "000001.SZSE",
+            "interval": "d",
+            "adjust": "none",
+            "start": "2025-01-01",
+            "end": "2025-01-03",
+            "studies": [
+                {"instance_id": "sma-1", "type": "sma", "params": {}}
+            ],
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {"code": "study_calculation_failed"}
 
 
 def test_alpha_bar_reference_is_stable_across_pages_and_adjustments() -> None:

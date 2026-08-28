@@ -103,7 +103,8 @@ Terax Space / Workbench
 - 行情图表场景组件 `MarketChartScene` 已接收受控周期、复权、图表类型、成交量、pane 比例和使用密度，使用完整 `vtSymbol + interval + adjust` 查询键和 `dataKey`。数据页与工作台面板都复用证券详情查询获取权威图表元数据；工作台只展示权威声明且排除 `tick` 的 K 线周期，紧凑数据页保持固定日线和前复权。排他 `before` 历史分页、请求单飞、停滞游标终止、跨页线性合并和 viewport 补偿继续复用同一实现。
 - 图表实例只在宿主挂载时创建，日线使用 `BusinessDay`，盘中刻度按后端 IANA 时区格式化。周期、复权、主题、标的、元数据和图表类型切换只更新同一个 React 宿主与 Controller，页面隐藏、尺寸变化和历史 prepend 不重建 Canvas。价格轴、legend、昨收和最新价使用一致精度，蜡烛、OHLC、成交量和最新价线遵循市场涨跌色。工作台面板可控制成交量并在 pointerup 后保存语义 pane 比例；隐藏成交量不保留空 pane，过矮面板临时恢复主图优先的 8:2。工具栏、信息栏和全部状态已经接入中英文文案；TradingView 署名位于设置页。
 - `FinancialChart` 通过稳定 handle 暴露重置和不含十字线的截图，不向 Frame 暴露图表实例。工作台 Chart Panel 使用紧凑菜单导出当前主题铺底的 PNG 和固定八列 CSV；CSV 在构造字符串前执行 50,000 根硬上限。数据页不显示导出入口。所有图表密度都提供随选中 bar 更新的 `aria-live` 摘要，以及最近 20 根 OHLCV 的可聚焦数据表。
-- 公共金融图表的后续范围已经确认拆为三批八个独立任务，受控公共图表配置、专业价格与 pane 语义、导出与可访问性已经完成；后续依次为服务端指标协议、指标 pane、多图同步、对比标的和实时尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
+- 首批 SMA、EMA、BOLL、RSI 和 MACD 已建立 Alpha 权威 definition 与批量计算协议。回测和图表共用中立的 TA-Lib 数组内核，前端只提交数据键、实际显示区间和指标参数，不回传原始 bars。指标 wire time 复用行情归一化；Scene 在页面可见且存在 visible 实例时才请求，并在历史 prepend 后按新实际起点刷新完整覆盖。K4 尚不创建 Lightweight Charts series 或 pane。
+- 公共金融图表的后续范围已经确认拆为三批八个独立任务，受控公共图表配置、专业价格与 pane 语义、导出与可访问性、服务端指标协议已经完成；下一项连续实施指标 pane、legend 与管理界面，之后依次为多图同步、对比标的和实时尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序、配置更新和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。面板配置更新按 ID 回传，写入前再次经过 descriptor 归一化。
@@ -453,21 +454,49 @@ type MarketBar = {
 
 不要根据当前 500 根数据猜测精度、时区或市场颜色约定。
 
-指标协议先保持渲染引擎无关：
+指标协议保持服务端权威且与渲染引擎无关：
 
 ```ts
-type ChartStudy = {
-  id: string;
-  name: string;
+type ChartStudyDefinition = {
+  type: "sma" | "ema" | "boll" | "rsi" | "macd";
   pane: "main" | "separate";
-  series: Array<{
+  params: Array<{
+    key: string;
+    defaultValue: number;
+    min: number;
+    max: number;
+    step: number;
+  }>;
+  outputs: Array<{
     id: string;
-    name: string;
-    type: "line" | "histogram" | "band";
+    kind: "line" | "histogram";
+  }>;
+  levels: number[];
+};
+
+type ChartStudyInstance = {
+  instanceId: string;
+  type: ChartStudyDefinition["type"];
+  params: Record<string, number>;
+  visible: boolean;
+  styles: Record<string, unknown>;
+};
+
+type ChartStudyResult = {
+  instanceId: string;
+  pane: "main" | "separate";
+  outputs: Array<{
+    id: string;
+    kind: "line" | "histogram";
     points: Array<{ time: MarketTime; value: number | null }>;
   }>;
+  levels: number[];
 };
 ```
+
+- Alpha 的 `GET /studies` 提供 definition，`POST /studies/calculate` 按最多 8 个实例批量计算首批五类指标。前端不上传原始 bars，只提交证券、周期、复权、实际显示区间和参数。
+- Python 从自身存储一次读取显示区间与最大 lookback warmup。回测和图表共用 `alpha/analytics/indicator.py` 的 TA-Lib 数组内核；图表领域只增加 definition、参数校验和 output 映射，API 外壳负责时间点和 `null` 转换。
+- 计算显示区间最多 4,000 根。Scene 只在页面可见且至少一个指标 visible 时请求；查询键包含数据键、实际起止时间及稳定排序后的实例和参数，不包含颜色、线宽或 pane 尺寸。
 
 ## 行情共享与实时边界
 

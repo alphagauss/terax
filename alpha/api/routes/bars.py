@@ -43,7 +43,7 @@ def _market_local_datetime(
     return parsed.astimezone(_exchange_timezone(vt_symbol)).replace(tzinfo=None)
 
 
-def _bar_time(row: dict[str, object], interval: str, vt_symbol: str) -> str:
+def bar_time(row: dict[str, object], interval: str, vt_symbol: str) -> str:
     """把存储时间转换为公共行情协议要求的时间文本。
 
     日线和周线保留无时区交易日；盘中数据按证券所属交易所解释存储中的
@@ -80,7 +80,7 @@ def _bar_item(
     """
 
     return {
-        "time": _bar_time(row, interval, vt_symbol),
+        "time": bar_time(row, interval, vt_symbol),
         "open": first_number(row, ("open",)) or 0,
         "high": first_number(row, ("high",)) or 0,
         "low": first_number(row, ("low",)) or 0,
@@ -141,7 +141,7 @@ async def _load_price_reference(
         if len(rows) < 2:
             return None, None
         row = rows[-2]
-        return first_number(row, ("close",)), _bar_time(row, interval, vt_symbol)
+        return first_number(row, ("close",)), bar_time(row, interval, vt_symbol)
 
     anchor_page = await services.database.load_bar_history(
         BarHistoryQuery(
@@ -172,7 +172,7 @@ async def _load_price_reference(
     if not daily_page["items"]:
         return None, None
     row = daily_page["items"][-1]
-    return first_number(row, ("close",)), _bar_time(row, "d", vt_symbol)
+    return first_number(row, ("close",)), bar_time(row, "d", vt_symbol)
 
 
 @router.get("/bars", response_model=dict[str, object])

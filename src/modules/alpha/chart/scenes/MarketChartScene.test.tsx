@@ -1,6 +1,6 @@
 /**
  * 本文件测试行情 scene 的排他游标分页和查询键隔离。
- * 重点锁定更早页面的时间顺序，以及标的切换后旧请求不能覆盖当前图表。
+ * 重点锁定历史时间顺序、旧请求隔离和指标只按可见实际区间启用。
  */
 
 // @vitest-environment happy-dom
@@ -9,6 +9,7 @@ import type {
   MarketChartDensity,
   MarketChartOptions,
 } from "@/modules/alpha/chart/model";
+import type { ChartStudyInstance } from "@/modules/alpha/chart/studies/model";
 import type { MarketBarPage } from "@/modules/alpha/market/model";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -16,12 +17,14 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  calculateAlphaStudies: vi.fn(),
   getAlphaBars: vi.fn(),
   getAlphaSecurity: vi.fn(),
   frameProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
+  calculateAlphaStudies: mocks.calculateAlphaStudies,
   getAlphaBars: mocks.getAlphaBars,
   getAlphaSecurity: mocks.getAlphaSecurity,
 }));
@@ -45,6 +48,14 @@ const DEFAULT_OPTIONS: MarketChartOptions = {
   chartType: "candlestick",
   showVolume: true,
   paneRatios: { main: 8, volume: 2 },
+};
+
+const SMA_STUDY: ChartStudyInstance = {
+  instanceId: "sma-1",
+  type: "sma",
+  params: { period: 20 },
+  visible: true,
+  styles: { line: { color: "#fff", lineWidth: 1 } },
 };
 
 function page(
@@ -87,6 +98,11 @@ describe("MarketChartScene", () => {
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     mocks.getAlphaBars.mockReset();
+    mocks.calculateAlphaStudies.mockReset().mockResolvedValue({
+      actualStart: "2026-07-29",
+      actualEnd: "2026-07-30",
+      items: [],
+    });
     mocks.getAlphaSecurity.mockReset().mockResolvedValue({
       vt_symbol: "000001.SZSE",
       symbol: "000001",
@@ -118,6 +134,8 @@ describe("MarketChartScene", () => {
     options: MarketChartOptions = DEFAULT_OPTIONS,
     onOptionsChange = vi.fn(),
     density: MarketChartDensity = "panel",
+    studies: readonly ChartStudyInstance[] = [],
+    visible = true,
   ) {
     root?.render(
       createElement(
@@ -125,10 +143,11 @@ describe("MarketChartScene", () => {
         { client: queryClient },
         createElement(MarketChartScene, {
           vtSymbol: symbol,
-          visible: true,
+          visible,
           options,
           density,
           onOptionsChange,
+          studies,
         }),
       ),
     );
@@ -183,6 +202,68 @@ describe("MarketChartScene", () => {
     expect(mocks.frameProps?.hasMoreBefore).toBe(false);
     (mocks.frameProps?.onRequestMore as (() => void) | undefined)?.();
     expect(mocks.getAlphaBars).toHaveBeenCalledTimes(2);
+  });
+
+  it("只在页面可见且存在可见指标时按实际行情区间请求计算", async () => {
+    mocks.getAlphaBars.mockResolvedValue(
+      page(["2026-07-29", "2026-07-30"], false, null),
+    );
+
+    await act(async () => render("000001.SZSE"));
+    await flush();
+    expect(mocks.calculateAlphaStudies).not.toHaveBeenCalled();
+
+    await act(async () =>
+      render(
+        "000001.SZSE",
+        DEFAULT_OPTIONS,
+        vi.fn(),
+        "panel",
+        [SMA_STUDY],
+        false,
+      ),
+    );
+    await flush();
+    expect(mocks.calculateAlphaStudies).not.toHaveBeenCalled();
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [SMA_STUDY]),
+    );
+    await flush();
+
+    expect(mocks.calculateAlphaStudies).toHaveBeenCalledWith({
+      vtSymbol: "000001.SZSE",
+      interval: "d",
+      adjust: "forward",
+      start: "2026-07-29",
+      end: "2026-07-30",
+      studies: [{ instanceId: "sma-1", type: "sma", params: { period: 20 } }],
+    });
+  });
+
+  it("历史 prepend 改变实际起点后重新请求完整指标覆盖", async () => {
+    mocks.getAlphaBars
+      .mockResolvedValueOnce(
+        page(["2026-07-29", "2026-07-30"], true, "2026-07-29"),
+      )
+      .mockResolvedValueOnce(page(["2026-07-27", "2026-07-28"], false, null));
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "panel", [SMA_STUDY]),
+    );
+    await flush();
+    await act(async () => {
+      (mocks.frameProps?.onRequestMore as (() => void) | undefined)?.();
+    });
+    await flush();
+
+    expect(mocks.calculateAlphaStudies).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        start: "2026-07-27",
+        end: "2026-07-30",
+      }),
+    );
   });
 
   it("标的切换后忽略旧查询完成结果", async () => {

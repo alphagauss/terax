@@ -9,6 +9,15 @@ import type {
   MarketInterval,
 } from "@/modules/alpha/market/model";
 import {
+  normalizeChartStudyCalculation,
+  normalizeChartStudyDefinitions,
+  studyCalculationWireSchema,
+  studyDefinitionsWireSchema,
+  type ChartStudyCalculation,
+  type ChartStudyCalculationInstance,
+  type ChartStudyDefinition,
+} from "@/modules/alpha/chart/studies/model";
+import {
   normalizeMarketBars,
   normalizeMarketTime,
 } from "@/modules/alpha/market/normalize";
@@ -229,6 +238,15 @@ export type AlphaBarQuery = {
   limit?: number;
 };
 
+export type AlphaStudyCalculationQuery = {
+  vtSymbol: string;
+  interval: Exclude<MarketInterval, "tick">;
+  adjust: MarketAdjust;
+  start: string;
+  end: string;
+  studies: readonly ChartStudyCalculationInstance[];
+};
+
 function alphaError(status: number, body: unknown): Error {
   const detail =
     body && typeof body === "object" && "detail" in body
@@ -389,6 +407,48 @@ export async function getAlphaBars(
         )
       : null,
   };
+}
+
+/** 查询服务端权威且不含用户文案和主题样式的指标目录。 */
+export async function getAlphaStudyDefinitions(): Promise<
+  ChartStudyDefinition[]
+> {
+  const response = await alphaGet(
+    "/api/alpha/studies",
+    studyDefinitionsWireSchema,
+  );
+  return normalizeChartStudyDefinitions(response);
+}
+
+/**
+ * 仅发送数据键、显示区间和指标参数，由 Alpha 从存储读取行情并完成计算。
+ */
+export async function calculateAlphaStudies(
+  query: AlphaStudyCalculationQuery,
+): Promise<ChartStudyCalculation> {
+  const response = await requestAlpha({
+    method: "POST",
+    path: "/api/alpha/studies/calculate",
+    body: {
+      vt_symbol: query.vtSymbol,
+      interval: query.interval,
+      adjust: query.adjust,
+      start: query.start,
+      end: query.end,
+      studies: query.studies.map((study) => ({
+        instance_id: study.instanceId,
+        type: study.type,
+        params: study.params,
+      })),
+    },
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw alphaError(response.status, response.body);
+  }
+  return normalizeChartStudyCalculation(
+    studyCalculationWireSchema.parse(response.body),
+    query.interval,
+  );
 }
 
 /** 查询最近回测和运行中任务。 */

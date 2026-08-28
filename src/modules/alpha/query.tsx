@@ -20,6 +20,21 @@ export const alphaQueryKeys = {
   securities: ["alpha", "securities"] as const,
   security: (vtSymbol: string) => ["alpha", "security", vtSymbol] as const,
   bars: ["alpha", "bars"] as const,
+  studyDefinitions: ["alpha", "study-definitions"] as const,
+  studyCalculation: (
+    dataKey: string,
+    actualStart: string | null,
+    actualEnd: string | null,
+    calculationSignature: string,
+  ) =>
+    [
+      "alpha",
+      "study-calculation",
+      dataKey,
+      actualStart,
+      actualEnd,
+      calculationSignature,
+    ] as const,
 };
 
 const alphaQueryClient = new QueryClient({

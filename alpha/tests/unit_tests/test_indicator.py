@@ -8,14 +8,14 @@ import numpy as np
 def _load_indicator_with_fake_talib(monkeypatch):
     fake_talib = types.SimpleNamespace()
     monkeypatch.setitem(sys.modules, "talib", fake_talib)
-    sys.modules.pop("alpha.backtest.indicator", None)
-    import alpha.backtest.indicator as indicator_module
+    sys.modules.pop("alpha.analytics.indicator", None)
+    import alpha.analytics.indicator as indicator_module
 
     return importlib.reload(indicator_module), fake_talib
 
 
 def test_pick_and_pick_tuple():
-    from alpha.backtest.indicator import Indicators
+    from alpha.analytics.indicator import Indicators
 
     arr_a = np.array([1.0, 2.0, 3.0])
     arr_b = np.array([4.0, 5.0, 6.0])
@@ -25,6 +25,14 @@ def test_pick_and_pick_tuple():
 
     assert Indicators._pick_tuple(arr_a, arr_b, array=True) == (arr_a, arr_b)
     assert Indicators._pick_tuple(arr_a, arr_b, array=False) == (3.0, 6.0)
+
+
+def test_backtest_indicator_path_keeps_compatibility():
+    """既有回测和用户策略导入路径继续指向同一个公共计算内核。"""
+    from alpha.analytics.indicator import Indicators as AnalyticsIndicators
+    from alpha.backtest.indicator import Indicators as BacktestIndicators
+
+    assert BacktestIndicators is AnalyticsIndicators
 
 
 def test_sma_passes_args_and_respects_array_flag(monkeypatch):
@@ -76,10 +84,12 @@ def test_boll_computes_up_down_from_sma_and_stddev(monkeypatch):
     close = np.array([1.0, 2.0])
     up, down = indicator_module.Indicators.boll(close, 2, 2.0, array=True)
     up_last, down_last = indicator_module.Indicators.boll(close, 2, 2.0, array=False)
+    full = indicator_module.Indicators.boll_full(close, 2, 2.0, array=True)
 
     assert np.array_equal(up, np.array([12.0, 24.0]))
     assert np.array_equal(down, np.array([8.0, 16.0]))
     assert (up_last, down_last) == (24.0, 16.0)
+    assert np.array_equal(full[1], np.array([10.0, 20.0]))
 
 
 def test_aroon_returns_up_then_down(monkeypatch):

@@ -1,9 +1,10 @@
 /**
  * 本文件测试 Alpha 前端业务 API 封装。
- * 锁定 Rust 代理请求参数、同步质量响应、行情校验和回测分片聚合，不访问真实服务。
+ * 锁定 Rust 代理请求参数、同步质量响应、行情与指标边界和回测分片聚合，不访问真实服务。
  */
 
 import {
+  calculateAlphaStudies,
   getAlphaBacktestSeries,
   getAlphaBars,
   getAlphaDataOverview,
@@ -11,6 +12,7 @@ import {
   getAlphaSecurities,
   getAlphaSettings,
   getAlphaSyncOverview,
+  getAlphaStudyDefinitions,
   startAlphaBarSync,
   updateAlphaSettings,
 } from "@/modules/alpha/api";
@@ -346,6 +348,98 @@ describe("Alpha API client", () => {
         { name: "before", value: "2026-07-30T00:00:00" },
       ],
     });
+  });
+
+  it("loads definitions and calculates studies without sending raw bars", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: [
+          {
+            type: "sma",
+            pane: "main",
+            params: [
+              {
+                key: "period",
+                default_value: 20,
+                min: 1,
+                max: 500,
+                step: 1,
+              },
+            ],
+            outputs: [{ id: "line", kind: "line" }],
+            levels: [],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: {
+          actual_start: "2026-07-01",
+          actual_end: "2026-07-30",
+          items: [
+            {
+              instance_id: "sma-1",
+              pane: "main",
+              outputs: [
+                {
+                  id: "line",
+                  kind: "line",
+                  points: [{ time: "2026-07-30", value: 10.5 }],
+                },
+              ],
+              levels: [],
+            },
+          ],
+        },
+      });
+
+    await expect(getAlphaStudyDefinitions()).resolves.toMatchObject([
+      { type: "sma", params: [{ defaultValue: 20 }] },
+    ]);
+    await expect(
+      calculateAlphaStudies({
+        vtSymbol: "000001.SZSE",
+        interval: "d",
+        adjust: "forward",
+        start: "2026-07-01",
+        end: "2026-07-30",
+        studies: [{ instanceId: "sma-1", type: "sma", params: { period: 20 } }],
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          instanceId: "sma-1",
+          outputs: [
+            {
+              points: [
+                {
+                  time: { kind: "trading-day", date: "2026-07-30" },
+                  value: 10.5,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(requestMock).toHaveBeenLastCalledWith({
+      method: "POST",
+      path: "/api/alpha/studies/calculate",
+      body: {
+        vt_symbol: "000001.SZSE",
+        interval: "d",
+        adjust: "forward",
+        start: "2026-07-01",
+        end: "2026-07-30",
+        studies: [
+          { instance_id: "sma-1", type: "sma", params: { period: 20 } },
+        ],
+      },
+    });
+    expect(requestMock.mock.calls[1][0].body).not.toHaveProperty("bars");
   });
 
   it("rejects malformed bar dates before they reach the financial chart", async () => {

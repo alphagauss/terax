@@ -14,6 +14,7 @@
 | 修改数据同步 | `alpha/sync_tasks/tasks/` | `alpha/sync_tasks/planners.py`、`alpha/sync_tasks/writers.py`、`alpha/sync_tasks/validators.py` |
 | 修改策略加载或生命周期 | `alpha/strategy/manager.py` | `alpha/strategy/loader.py`、`alpha/strategy/engine.py`、`alpha/strategy/models.py` |
 | 修改回测或优化 | `alpha/backtest/backtesting.py` | `alpha/backtest/runner.py`、`alpha/backtest/analysis.py`、`alpha/backtest/optimize.py` |
+| 修改技术指标公式或图表指标协议 | `alpha/analytics/indicator.py`、`alpha/chart/studies.py` | `alpha/api/routes/studies.py`、指标单元与路由测试 |
 | 修改后台任务或事件 | `alpha/runtime/processes.py`、`alpha/runtime/event.py` | `alpha/api/routes/tasks.py`、`alpha/api/routes/sync.py`、`alpha/api/routes/events.py` |
 | 修改存储格式或复权数据 | `alpha/storage/` | `alpha/common/schema_market.py`、相关仓储测试 |
 | 维护 SQLite 数据库 | `alpha/scripts/vacuum_sqlite_dbs.py` | `alpha/tests/unit_tests/test_vacuum_sqlite_dbs.py` |
@@ -29,6 +30,8 @@
 | `alpha/storage/` | SQLite、CSV 存储门面、领域仓储和数据转换。 |
 | `alpha/strategy/` | 策略加载、运行时接口和任务生命周期管理。 |
 | `alpha/backtest/` | 回测数据准备、撮合、组合管理、统计分析和参数优化。 |
+| `alpha/analytics/` | 回测与图表共用的数值分析和技术指标数组计算。 |
+| `alpha/chart/` | 图表 definition、参数校验和服务端指标结果编排。 |
 | `alpha/sync_tasks/` | 同步计划、归一化、校验、写入及证券、指数成分、K 线同步任务。 |
 | `alpha/live/`、`alpha/paper/` | 实盘和模拟盘的预留运行入口，当前没有完整实现。 |
 | `alpha/scripts/` | 显式执行的离线维护工具。 |
@@ -52,6 +55,8 @@
 - `alpha/strategy/manager.py`：策略装载、任务启动、状态查询和结果读取的总控。
 - `alpha/backtest/backtesting.py`：回测主引擎。
 - `alpha/backtest/runner.py`：回测和优化任务的进程执行入口。
+- `alpha/analytics/indicator.py`：回测与图表共用的 TA-Lib 指标数组计算内核。
+- `alpha/chart/studies.py`：首批图表指标 definition、参数规则和 output 映射。
 - `alpha/runtime/processes.py`：子进程任务的启动、停止、状态刷新和清理。
 - `alpha/runtime/event.py`：进程内事件队列、订阅和异步分发。
 - `alpha/sync_tasks/tasks/`：证券、指数成分和 K 线同步任务实现。

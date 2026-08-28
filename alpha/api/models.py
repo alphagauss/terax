@@ -5,7 +5,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from alpha.common.schema_core import split_vt_symbol
 
@@ -213,3 +221,119 @@ class SyncOverviewResponse(BaseModel):
 
     tasks: list[SyncTaskSummary] = Field(default_factory=list)
     latest: SyncQualitySnapshot | None = None
+
+
+class StudyParamResponse(BaseModel):
+    """指标数值参数的权威范围。"""
+
+    key: str
+    default_value: int | float
+    min: int | float
+    max: int | float
+    step: int | float
+
+
+class StudyOutputResponse(BaseModel):
+    """指标稳定输出的渲染无关定义。"""
+
+    id: str
+    kind: Literal["line", "histogram"]
+
+
+class StudyDefinitionResponse(BaseModel):
+    """不包含用户文案与主题样式的指标 definition。"""
+
+    type: Literal["sma", "ema", "boll", "rsi", "macd"]
+    pane: Literal["main", "separate"]
+    params: list[StudyParamResponse]
+    outputs: list[StudyOutputResponse]
+    levels: list[float]
+
+
+class StudyInstanceRequest(BaseModel):
+    """单个指标计算实例。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instance_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$",
+    )
+    type: str = Field(min_length=1, max_length=16)
+    params: dict[str, StrictInt | StrictFloat] = Field(
+        default_factory=dict,
+        max_length=8,
+    )
+
+    @field_validator("instance_id", "type", mode="before")
+    @classmethod
+    def strip_study_text(cls, value: object) -> object:
+        """去除协议标识两端空白，并拒绝纯空白字符串。"""
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("指标标识不能为空")
+        return normalized
+
+
+class StudyCalculationRequest(BaseModel):
+    """有界批量指标计算请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vt_symbol: str = Field(min_length=3, max_length=64)
+    interval: Literal["1m", "1h", "d", "w"]
+    adjust: Literal["none", "forward", "backward"] = "none"
+    start: str = Field(min_length=1, max_length=64)
+    end: str = Field(min_length=1, max_length=64)
+    studies: list[StudyInstanceRequest] = Field(min_length=1, max_length=8)
+
+    @field_validator("vt_symbol")
+    @classmethod
+    def normalize_study_vt_symbol(cls, value: str) -> str:
+        """规范化并校验指标查询证券代码。"""
+        normalized = value.strip().upper()
+        split_vt_symbol(normalized)
+        return normalized
+
+    @model_validator(mode="after")
+    def reject_duplicate_study_ids(self) -> "StudyCalculationRequest":
+        """在读取行情前拒绝重复 instance ID。"""
+        instance_ids = [study.instance_id for study in self.studies]
+        if len(instance_ids) != len(set(instance_ids)):
+            raise ValueError("指标 instance_id 不能重复")
+        return self
+
+
+class StudyPointResponse(BaseModel):
+    """与一根可见行情对齐的指标点。"""
+
+    time: str
+    value: float | None
+
+
+class StudySeriesResponse(BaseModel):
+    """一个指标输出序列。"""
+
+    id: str
+    kind: Literal["line", "histogram"]
+    points: list[StudyPointResponse]
+
+
+class StudyResultResponse(BaseModel):
+    """保留 instance 身份的指标计算结果。"""
+
+    instance_id: str
+    pane: Literal["main", "separate"]
+    outputs: list[StudySeriesResponse]
+    levels: list[float]
+
+
+class StudyCalculationResponse(BaseModel):
+    """裁剪到用户显示区间的批量指标响应。"""
+
+    actual_start: str | None
+    actual_end: str | None
+    items: list[StudyResultResponse]

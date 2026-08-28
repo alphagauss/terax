@@ -50,6 +50,15 @@
 
 存储和复权实现见 [行情数据与存储](./market-data.md)。
 
+## 图表指标
+
+- `GET /studies` 返回服务端权威 definition，只包含稳定 type、参数 key 与范围、output ID、pane、series kind 和参考水平，不返回名称、颜色或图表引擎类型。
+- `POST /studies/calculate` 首批支持 SMA、EMA、BOLL、RSI 和 MACD，单次最多 8 个实例、4,000 根显示区间行情。参数缺失使用 definition 默认值，未知参数、越界、错误步进、重复 instance ID 和 `MACD fast >= slow` 会在读取行情前拒绝。
+- 前端只提交 `vt_symbol + interval + adjust + start/end + studies`。请求模型禁止上传原始 bars，Alpha 根据全部实例的最大 lookback 从自身存储一次读取显示区间和 warmup，响应只保留显示区间。
+- 回测和图表共用 `alpha/analytics/indicator.py` 的 TA-Lib 数组计算内核。`alpha/chart/studies.py` 只增加图表 definition、参数规则与 output 映射，API 外壳独自处理数据库查询和 wire time，公式不在前端或路由中复制。
+- 日线和周线点使用交易日字符串，盘中点使用带偏移 ISO 时间，与 `/bars` 相同。每个 output 与显示区间 bars 一一对应并严格升序，未形成的 warmup 值为 `null`；NaN 和 Infinity 不进入 wire format。
+- TA-Lib 异常、非有限输入或输出长度错位会让整次请求返回结构化 `study_calculation_failed`，不能返回部分实例或部分 output。
+
 ## 任务协议
 
 - 启动长任务后立即返回稳定任务 ID，不等待回测、优化或同步完成。

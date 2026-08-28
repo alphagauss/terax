@@ -1,9 +1,13 @@
 /**
  * 本文件把 Alpha 有界历史查询连接到公共金融图表。
- * Scene 负责权威证券元数据、参考价、排他游标、跨页合并和查询键隔离。
+ * Scene 负责权威证券元数据、参考价、排他游标、跨页合并及按需指标查询。
  */
 
-import { getAlphaBars, getAlphaSecurity } from "@/modules/alpha/api";
+import {
+  calculateAlphaStudies,
+  getAlphaBars,
+  getAlphaSecurity,
+} from "@/modules/alpha/api";
 import { FinancialChartFrame } from "@/modules/alpha/chart/components/FinancialChartFrame";
 import type {
   FinancialChartStatus,
@@ -12,11 +16,20 @@ import type {
   MarketChartOptions,
 } from "@/modules/alpha/chart/model";
 import { MARKET_CHART_INTERVALS } from "@/modules/alpha/chart/model";
+import {
+  normalizeVisibleStudyInstances,
+  studyCalculationSignature,
+  type ChartStudyInstance,
+} from "@/modules/alpha/chart/studies/model";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
 import { alphaQueryKeys } from "@/modules/alpha/query";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 
 type Props = {
@@ -25,7 +38,10 @@ type Props = {
   options: MarketChartOptions;
   density: MarketChartDensity;
   onOptionsChange: (options: MarketChartOptions) => void;
+  studies?: readonly ChartStudyInstance[];
 };
+
+const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
 
 /** 把按“最新到更早”存放的查询页合并成时间升序行情。 */
 export function mergeHistoricalPages(
@@ -46,13 +62,16 @@ export function supportedChartIntervals(
   return MARKET_CHART_INTERVALS.filter((interval) => declared.has(interval));
 }
 
-/** 为单证券和受控配置提供权威周期、有界历史分页及公共图表状态。 */
+/**
+ * 为单证券和受控配置提供权威周期、有界历史分页及按可见性启用的指标查询。
+ */
 export function MarketChartScene({
   vtSymbol,
   visible,
   options,
   density,
   onOptionsChange,
+  studies = EMPTY_STUDIES,
 }: Props) {
   const securityQuery = useQuery({
     queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
@@ -100,6 +119,44 @@ export function MarketChartScene({
     [query.data?.pages],
   );
   const firstPage = query.data?.pages[0];
+  const oldestPage = query.data?.pages[query.data.pages.length - 1];
+  const actualStart = oldestPage?.actualStart ?? null;
+  const actualEnd = firstPage?.actualEnd ?? null;
+  const dataKey = vtSymbol
+    ? `${vtSymbol}|${options.interval}|${options.adjust}`
+    : "empty";
+  const visibleStudies = useMemo(
+    () => normalizeVisibleStudyInstances(studies),
+    [studies],
+  );
+  const calculationSignature = useMemo(
+    () => studyCalculationSignature(visibleStudies),
+    [visibleStudies],
+  );
+  useQuery({
+    queryKey: alphaQueryKeys.studyCalculation(
+      dataKey,
+      actualStart,
+      actualEnd,
+      calculationSignature,
+    ),
+    queryFn: () =>
+      calculateAlphaStudies({
+        vtSymbol: vtSymbol ?? "",
+        interval: options.interval,
+        adjust: options.adjust,
+        start: actualStart ?? "",
+        end: actualEnd ?? "",
+        studies: visibleStudies,
+      }),
+    enabled:
+      visible &&
+      vtSymbol !== null &&
+      visibleStudies.length > 0 &&
+      actualStart !== null &&
+      actualEnd !== null,
+    placeholderData: keepPreviousData,
+  });
   const priceReference = useMemo(
     () => ({
       previousClose: firstPage?.referenceClose ?? null,
@@ -125,9 +182,7 @@ export function MarketChartScene({
   return (
     <FinancialChartFrame
       bars={bars}
-      dataKey={
-        vtSymbol ? `${vtSymbol}|${options.interval}|${options.adjust}` : "empty"
-      }
+      dataKey={dataKey}
       symbol={vtSymbol}
       options={options}
       metadata={metadata}

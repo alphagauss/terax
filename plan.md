@@ -20,10 +20,10 @@
 ## 当前状态
 
 - 计划基线：Terax `e2fca03`，`fix(alpha): harden financial chart viewport`。
-- 当前阶段：阶段二，最小数据管理闭环。
-- 当前任务：日线入库校验、轻量覆盖核对、结构化质量结果和定向重试。已完成。
-- 下一任务：重新确认是否连续实施任务 4 和任务 5。
-- 启动状态：阶段一公共 K 线内核的前三项任务和阶段二最小日线数据闭环已经完成，独立行情页继续暂缓。
+- 当前阶段：批次二，指标与多图分析。
+- 当前任务：任务 4，指标领域协议与首批服务端计算。已完成。
+- 下一任务：任务 5，指标 pane、legend 与管理界面。任务 4 完成后连续实施。
+- 启动状态：批次一前三项任务和阶段二最小日线数据闭环已经完成，独立行情页继续暂缓。
 - 当前阻塞：无。
 - 本计划不改变已经确认的阶段二数据闭环、阶段三回测复盘和阶段四实时模拟交易边界。
 
@@ -55,7 +55,7 @@
 | 成交量显示与 pane 比例 | 固定显示，比例只设初始 8:2 | 任务 2 |
 | PNG、CSV 导出 | 工作台可导出主题 PNG 和最多 50,000 根已加载 bars 的八列 CSV | 已完成，任务 3 |
 | Canvas 外可访问数据 | 所有密度提供 `aria-live` 摘要和最近 20 根 OHLCV 表格 | 已完成，任务 3 |
-| 指标协议与服务端计算 | 后端有指标函数，但无图表指标 API | 任务 4 |
+| 指标协议与服务端计算 | 五类服务端 definition、批量计算和前端按需查询边界已完成 | 已完成，任务 4 |
 | 指标 series 与 pane 管理 | 未实现 | 任务 5 |
 | 多图范围与十字线同步 | 未实现 | 任务 6 |
 | 对比标的 | 未实现 | 任务 7 |
@@ -742,7 +742,7 @@ type FinancialChartHandle = {
 
 - `alpha/docs/architecture.md`
 - `alpha/docs/api-contracts.md`
-- `alpha/backtest/indicator.py`
+- `alpha/analytics/indicator.py` 及 `alpha/backtest/indicator.py` 兼容导出
 - `alpha/tests/unit_tests/test_indicator.py`
 - `alpha/api/routes/bars.py`
 - `alpha/api/container.py`
@@ -796,6 +796,7 @@ type FinancialChartHandle = {
 ### 预计修改文件
 
 - 新增 `alpha/chart/__init__.py` 和 `alpha/chart/studies.py`
+- 将通用 `Indicators` 提升到 `alpha/analytics/indicator.py`，保留既有回测导入兼容
 - 新增 `alpha/api/routes/studies.py`
 - 修改 `alpha/api/models.py`、`alpha/api/router.py` 和相关容器边界
 - 新增 `alpha/tests/unit_tests/test_chart_studies.py`
@@ -1303,7 +1304,7 @@ Python 修改运行 Alpha 已有格式、静态检查和相关 pytest。若任�
 
 ### 批次二
 
-- [ ] 任务 4：指标领域协议与首批服务端计算。
+- [x] 任务 4：指标领域协议与首批服务端计算。
 - [ ] 任务 5：指标 pane、legend 与管理界面。
 - [ ] 任务 6：多图时间范围与十字线同步。
 - [ ] 任务 7：对比标的叠加。
