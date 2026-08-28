@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 数据目录页的按需加载和手动刷新流程。
- * 重点锁定统一筛选控件、按需行情、服务端搜索，以及刷新强制绕过概览缓存。
+ * 重点锁定筛选、按需行情、同步与异常重试，以及刷新强制绕过概览缓存。
  */
 
 // @vitest-environment happy-dom
@@ -16,12 +16,16 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 const mocks = vi.hoisted(() => ({
   getAlphaDataOverview: vi.fn(),
   getAlphaSecurities: vi.fn(),
+  getAlphaSyncOverview: vi.fn(),
+  startAlphaBarSync: vi.fn(),
   sceneProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
   getAlphaDataOverview: mocks.getAlphaDataOverview,
   getAlphaSecurities: mocks.getAlphaSecurities,
+  getAlphaSyncOverview: mocks.getAlphaSyncOverview,
+  startAlphaBarSync: mocks.startAlphaBarSync,
 }));
 
 vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
@@ -106,6 +110,29 @@ describe("AlphaDataPage", () => {
       total: 1,
       limit: 50,
       offset: 0,
+    });
+    mocks.getAlphaSyncOverview.mockReset().mockResolvedValue({
+      tasks: [],
+      latest: {
+        schema_version: 1,
+        status: "issues",
+        started_at: "2026-08-28 09:00:00",
+        finished_at: "2026-08-28 09:01:00",
+        latest_trade_date: "2026-08-27",
+        planned_symbol_count: 1,
+        fetched_rows: 10,
+        saved_rows: 9,
+        failed_batch_count: 0,
+        validation_issue_count: 1,
+        failed_vt_symbols: ["000001.SZSE"],
+        failed_vt_symbol_count: 1,
+        issues: [],
+        message: null,
+      },
+    });
+    mocks.startAlphaBarSync.mockReset().mockResolvedValue({
+      task_id: "sync-2",
+      status: "running",
     });
     mocks.sceneProps = null;
   });
@@ -193,5 +220,34 @@ describe("AlphaDataPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(mocks.getAlphaDataOverview).toHaveBeenLastCalledWith(true);
+  });
+
+  it("启动日线同步并只重试后端返回的异常标的", async () => {
+    const container = document.createElement("div");
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(createElement(AlphaDataPage, { visible: true }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const buttons = Array.from(container.querySelectorAll("button"));
+    const start = buttons.find(
+      (button) => button.textContent === "data.sync.start",
+    );
+    const retry = buttons.find(
+      (button) => button.textContent === "data.sync.retryFailed",
+    );
+
+    await act(async () => {
+      start?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(mocks.startAlphaBarSync).toHaveBeenCalledWith(undefined);
+
+    await act(async () => {
+      retry?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(mocks.startAlphaBarSync).toHaveBeenLastCalledWith(["000001.SZSE"]);
+    expect(container.textContent).toContain("000001.SZSE");
   });
 });

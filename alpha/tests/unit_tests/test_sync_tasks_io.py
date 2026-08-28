@@ -7,8 +7,18 @@ import pandas as pd
 
 from alpha.sync_tasks import gm_async
 from alpha.sync_tasks.gm_async import GmAsyncProvider
+from alpha.sync_tasks.models import ValidationIssue, YearPlan
 from alpha.sync_tasks.planners import build_bar_sync_plans, split_bar_sync_plans_by_year
-from alpha.sync_tasks.validators import validate_overlap_rows
+from alpha.sync_tasks.reporting import (
+    build_quality_snapshot,
+    load_quality_snapshot,
+    write_quality_snapshot,
+)
+from alpha.sync_tasks.validators import (
+    validate_bar_batch,
+    validate_overlap_rows,
+    validate_overview_coverage,
+)
 from alpha.sync_tasks.writers import flush_security_sync_buffers, flush_year_buffer
 from conftest import FakeBarDb, FakeSecurityDb, sample_security
 
@@ -73,7 +83,7 @@ def test_validate_overlap_rows_detects_differences() -> None:
         ),
         [date(2005, 1, 4), date(2025, 1, 2), date(2025, 1, 3)],
     )[0]
-    issues = asyncio.run(
+    result = asyncio.run(
         validate_overlap_rows(
             fake_db,
             plan,
@@ -91,7 +101,143 @@ def test_validate_overlap_rows_detects_differences() -> None:
             ],
         )
     )
-    assert len(issues) == 1
+    assert result.issue_count == 1
+    assert result.issues[0].kind == "overlap_mismatch"
+
+
+def _bar_plan(expected_rows: int = 1) -> YearPlan:
+    return YearPlan(
+        year=2025,
+        asset_type="stock",
+        gm_symbol="SHSE.600000",
+        vt_symbol="600000.SSE",
+        sec_id="600000",
+        db_exchange="SSE",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 3),
+        expected_rows=expected_rows,
+        existing_start=None,
+        existing_end=None,
+        overlap_start=None,
+    )
+
+
+def _bar_row(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "vt_symbol": "600000.SSE",
+        "datetime": "2025-01-02 00:00:00",
+        "interval": "d",
+        "adjust": "non",
+        "open": 10.0,
+        "high": 11.0,
+        "low": 9.0,
+        "close": 10.5,
+        "volume": 100.0,
+        "turnover": 1_000.0,
+        "open_interest": 0.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_validate_bar_batch_accepts_valid_rows_and_reports_coverage_gap() -> None:
+    result = validate_bar_batch([_bar_row()], [_bar_plan(expected_rows=2)])
+
+    assert result.can_write is True
+    assert result.issue_count == 1
+    assert result.issues[0].kind == "coverage_gap"
+    assert result.coverage["600000.SSE"].rows == 1
+
+
+def test_validate_bar_batch_rejects_invalid_ohlc_numbers_and_duplicates() -> None:
+    invalid_rows = [
+        _bar_row(high=9.5),
+        _bar_row(datetime="2025-01-03 00:00:00", volume=float("nan")),
+        _bar_row(datetime="2025-01-03 00:00:00", volume=-1),
+    ]
+
+    result = validate_bar_batch(invalid_rows, [_bar_plan(expected_rows=2)])
+
+    assert result.can_write is False
+    assert result.issue_count == 3
+    assert {issue.kind for issue in result.issues} == {
+        "duplicate_key",
+        "invalid_number",
+        "invalid_ohlc",
+    }
+
+    negative = validate_bar_batch(
+        [_bar_row(volume=-1)],
+        [_bar_plan()],
+    )
+    assert negative.can_write is False
+    assert negative.issues[0].kind == "negative_quantity"
+
+    invalid_time = validate_bar_batch(
+        [_bar_row(datetime="2025-01-02 15:00:00")],
+        [_bar_plan()],
+    )
+    assert invalid_time.can_write is False
+    assert invalid_time.issues[0].kind == "invalid_datetime"
+
+
+def test_validate_overview_coverage_uses_only_compact_overview_rows() -> None:
+    batch = validate_bar_batch([_bar_row()], [_bar_plan()])
+
+    valid = validate_overview_coverage(
+        [
+            {
+                "vt_symbol": "600000.SSE",
+                "interval": "d",
+                "start": "2024-01-01 00:00:00",
+                "end": "2025-01-03 00:00:00",
+                "count": 100,
+            }
+        ],
+        batch.coverage,
+    )
+    invalid = validate_overview_coverage([], batch.coverage)
+
+    assert valid.issue_count == 0
+    assert invalid.issue_count == 1
+    assert invalid.issues[0].kind == "overview_mismatch"
+
+
+def test_quality_snapshot_bounds_details_and_survives_restart(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("TERAX_ALPHA_HOME", str(tmp_path / "alpha-home"))
+    issues = [
+        ValidationIssue(
+            vt_symbol=f"{index:06d}.SZSE",
+            trade_date="2025-01-02",
+            field="ohlc",
+            kind="invalid_ohlc",
+            message="bad",
+        )
+        for index in range(105)
+    ]
+    failed_symbols = {f"{index:06d}.SZSE" for index in range(505)}
+    snapshot = build_quality_snapshot(
+        {
+            "started_at": "2025-01-02 09:00:00",
+            "finished_at": "2025-01-02 09:01:00",
+            "failed_batch_count": 1,
+        },
+        issues,
+        105,
+        failed_symbols,
+    )
+
+    write_quality_snapshot(snapshot)
+
+    loaded = load_quality_snapshot()
+    assert loaded is not None
+    assert loaded["validation_issue_count"] == 105
+    assert len(loaded["issues"]) == 100
+    assert loaded["failed_vt_symbol_count"] == 505
+    assert len(loaded["failed_vt_symbols"]) == 500
 
 
 def test_gm_async_provider_calls_underlying_module(monkeypatch) -> None:
@@ -188,9 +334,17 @@ def test_gm_async_provider_calls_underlying_module(monkeypatch) -> None:
     provider = GmAsyncProvider()
     monkeypatch.setattr(gm_async, "_get_gm", lambda: FakeGmModule())
 
-    history_df = asyncio.run(provider.fetch_history(["SHSE.600000"], date(2025, 1, 2), date(2025, 1, 2), "symbol"))
-    history_symbol_df = asyncio.run(provider.fetch_history_symbol("SHSE.600000", date(2025, 1, 2), date(2025, 1, 2)))
-    snapshot_df = asyncio.run(provider.fetch_symbols_snapshot("stock", date(2025, 1, 2)))
+    history_df = asyncio.run(
+        provider.fetch_history(
+            ["SHSE.600000"], date(2025, 1, 2), date(2025, 1, 2), "symbol"
+        )
+    )
+    history_symbol_df = asyncio.run(
+        provider.fetch_history_symbol("SHSE.600000", date(2025, 1, 2), date(2025, 1, 2))
+    )
+    snapshot_df = asyncio.run(
+        provider.fetch_symbols_snapshot("stock", date(2025, 1, 2))
+    )
     asyncio.run(provider.fetch_index_constituents("SHSE.000001", date(2025, 1, 2)))
     symbol_infos_df = asyncio.run(provider.fetch_symbol_infos("stock"))
 

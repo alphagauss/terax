@@ -132,6 +132,24 @@ class FakeBarDb:
         self.overlap_rows: dict[str, list[dict[str, object]]] = {}
 
     async def get_bar_overview(self) -> list[dict[str, object]]:
+        if self.saved_rows:
+            dates = sorted(
+                {
+                    str(row["datetime"])
+                    for row in self.saved_rows
+                    if row.get("vt_symbol") == "600000.SSE"
+                }
+            )
+            return [
+                {
+                    "vt_symbol": "600000.SSE",
+                    "interval": "d",
+                    "start": dates[0],
+                    "end": dates[-1],
+                    "count": len(dates),
+                    "updated_at": dates[-1],
+                }
+            ]
         return [
             {
                 "vt_symbol": "600000.SSE",

@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 前端业务 API 封装。
- * 锁定 Rust 代理请求参数、响应校验和回测分片聚合，不访问真实服务。
+ * 锁定 Rust 代理请求参数、同步质量响应、行情校验和回测分片聚合，不访问真实服务。
  */
 
 import {
@@ -10,6 +10,8 @@ import {
   getAlphaSecurity,
   getAlphaSecurities,
   getAlphaSettings,
+  getAlphaSyncOverview,
+  startAlphaBarSync,
   updateAlphaSettings,
 } from "@/modules/alpha/api";
 import { requestAlpha } from "@/modules/alpha/native";
@@ -153,6 +155,69 @@ describe("Alpha API client", () => {
     expect(requestMock.mock.calls.map(([request]) => request.query)).toEqual([
       [],
       [{ name: "force_refresh", value: "true" }],
+    ]);
+  });
+
+  it("queries sync quality and starts a targeted retry", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: {
+          tasks: [
+            {
+              task_id: "sync-1",
+              status: "running",
+              created_at: null,
+              finished_at: null,
+              message: null,
+            },
+          ],
+          latest: {
+            schema_version: 1,
+            status: "issues",
+            started_at: "2026-08-28 09:00:00",
+            finished_at: "2026-08-28 09:01:00",
+            latest_trade_date: "2026-08-27",
+            planned_symbol_count: 1,
+            fetched_rows: 10,
+            saved_rows: 9,
+            failed_batch_count: 0,
+            validation_issue_count: 1,
+            failed_vt_symbols: ["000001.SZSE"],
+            failed_vt_symbol_count: 1,
+            issues: [],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        headers: {},
+        body: { task_id: "sync-2", status: "running" },
+      });
+
+    await expect(getAlphaSyncOverview()).resolves.toMatchObject({
+      tasks: [{ task_id: "sync-1", status: "running" }],
+      latest: { failed_vt_symbols: ["000001.SZSE"] },
+    });
+    await expect(startAlphaBarSync(["000001.SZSE"])).resolves.toMatchObject({
+      task_id: "sync-2",
+    });
+    expect(requestMock.mock.calls).toEqual([
+      [
+        {
+          method: "GET",
+          path: "/api/alpha/sync/overview",
+          query: [],
+        },
+      ],
+      [
+        {
+          method: "POST",
+          path: "/api/alpha/sync/bars",
+          body: { vt_symbols: ["000001.SZSE"] },
+        },
+      ],
     ]);
   });
 

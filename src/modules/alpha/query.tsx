@@ -16,6 +16,7 @@ export const alphaQueryKeys = {
   settings: ["alpha", "settings"] as const,
   overview: ["alpha", "overview"] as const,
   dataOverview: ["alpha", "data-overview"] as const,
+  syncOverview: ["alpha", "sync-overview"] as const,
   securities: ["alpha", "securities"] as const,
   security: (vtSymbol: string) => ["alpha", "security", vtSymbol] as const,
   bars: ["alpha", "bars"] as const,

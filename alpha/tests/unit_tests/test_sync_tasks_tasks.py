@@ -5,6 +5,7 @@ from datetime import date
 
 import pandas as pd
 
+from alpha.sync_tasks.jobs import run_bar_sync_job
 from alpha.sync_tasks.models import SecurityInfo
 from alpha.sync_tasks.tasks.bar_sync import BarSyncTask
 from alpha.sync_tasks.tasks.index_constituent_sync import IndexConstituentSyncTask
@@ -554,8 +555,137 @@ def test_bar_sync_task_runs() -> None:
     result = asyncio.run(task.run_incremental(overlap_validation_days=0))
     assert result["planned_symbol_count"] == 1
     assert result["fetched_rows"] == 2
+    assert result["quality"]["status"] == "healthy"
     assert "report_json_path" not in result
     assert "report_csv_path" not in result
+
+
+def test_bar_sync_task_rejects_invalid_batch_before_write(monkeypatch) -> None:
+    class InvalidProvider(FakeProvider):
+        async def fetch_history(
+            self,
+            symbols: list[str],
+            start_date: date,
+            end_date: date,
+            fields: str,
+        ) -> pd.DataFrame:
+            frame = await super().fetch_history(
+                symbols,
+                start_date,
+                end_date,
+                fields,
+            )
+            frame.loc[:, "high"] = 9.0
+            return frame
+
+    monkeypatch.setattr(
+        "alpha.sync_tasks.tasks.bar_sync.write_update_report",
+        lambda *_args, **_kwargs: ("report.json", "report.csv"),
+    )
+    fake_db = FakeBarDb()
+    task = BarSyncTask(
+        InvalidProvider(),
+        db_factory=lambda: fake_db,
+        trade_dates_loader=lambda: [date(2005, 1, 4), date(2025, 1, 2)],
+        universe_loader=lambda: [sample_security()],
+        progress_factory=DummyProgress,
+    )
+
+    result = asyncio.run(task.run_incremental(overlap_validation_days=0))
+
+    assert fake_db.saved_rows == []
+    assert result["failed_batch_count"] == 2
+    assert result["quality"]["validation_issue_count"] == 2
+    assert result["quality"]["failed_vt_symbols"] == ["600000.SSE"]
+
+
+def test_bar_sync_task_filters_targeted_retry_symbols() -> None:
+    requested: list[list[str]] = []
+
+    class RecordingProvider(FakeProvider):
+        async def fetch_history(
+            self,
+            symbols: list[str],
+            start_date: date,
+            end_date: date,
+            fields: str,
+        ) -> pd.DataFrame:
+            requested.append(list(symbols))
+            return await super().fetch_history(
+                symbols,
+                start_date,
+                end_date,
+                fields,
+            )
+
+    second = SecurityInfo(
+        "stock",
+        "SZSE.000001",
+        "SZSE",
+        "000001",
+        "SZSE",
+        "000001.SZSE",
+        date(1991, 4, 3),
+        None,
+    )
+    task = BarSyncTask(
+        RecordingProvider(),
+        db_factory=FakeBarDb,
+        trade_dates_loader=lambda: [date(2005, 1, 4), date(2025, 1, 2)],
+        universe_loader=lambda: [sample_security(), second],
+        progress_factory=DummyProgress,
+    )
+
+    result = asyncio.run(
+        task.run_incremental(
+            overlap_validation_days=0,
+            vt_symbols=["600000.SSE"],
+        )
+    )
+
+    assert result["planned_symbol_count"] == 1
+    assert requested == [["SHSE.600000"], ["SHSE.600000"]]
+
+
+def test_bar_sync_job_persists_compact_quality_snapshot(monkeypatch) -> None:
+    quality = {
+        "schema_version": 1,
+        "status": "healthy",
+        "failed_vt_symbols": [],
+        "failed_vt_symbol_count": 0,
+        "issues": [],
+    }
+    saved: list[dict[str, object]] = []
+
+    class FakeJobTask:
+        def __init__(self, _provider: object) -> None:
+            pass
+
+        async def run_incremental(
+            self,
+            *,
+            vt_symbols: list[str] | None,
+        ) -> dict[str, object]:
+            assert vt_symbols == ["600000.SSE"]
+            return {"quality": quality}
+
+    monkeypatch.setattr(
+        "alpha.sync_tasks.gm_async.GmAsyncProvider",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "alpha.sync_tasks.tasks.bar_sync.BarSyncTask",
+        FakeJobTask,
+    )
+    monkeypatch.setattr(
+        "alpha.sync_tasks.jobs.write_quality_snapshot",
+        lambda snapshot: saved.append(snapshot),
+    )
+
+    result = run_bar_sync_job(["600000.SSE"])
+
+    assert result == {"quality": quality}
+    assert saved == [quality]
 
 
 def test_bar_sync_task_persists_report_when_batch_failed(monkeypatch) -> None:
@@ -570,6 +700,7 @@ def test_bar_sync_task_persists_report_when_batch_failed(monkeypatch) -> None:
         summary: dict[str, object],
         batch_results,
         validation_issues,
+        **_kwargs,
     ):
         recorded_calls.append((report_name, dict(summary), len(batch_results), len(validation_issues)))
         return "report.json", "report.csv"

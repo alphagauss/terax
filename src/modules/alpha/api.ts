@@ -115,6 +115,51 @@ const barsSchema = z.object({
   reference_time: z.string().nullable(),
 });
 
+const syncTaskSchema = z.object({
+  task_id: z.string().min(1),
+  status: z.string(),
+  created_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  message: z.string().nullable(),
+});
+
+const syncQualityIssueSchema = z.object({
+  vt_symbol: z.string(),
+  trade_date: z.string(),
+  field: z.string(),
+  kind: z.string(),
+  message: z.string(),
+  db_value: z.number().nullable(),
+  fetched_value: z.number().nullable(),
+});
+
+const syncQualitySchema = z.object({
+  schema_version: z.literal(1),
+  status: z.enum(["healthy", "issues", "failed"]),
+  started_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  latest_trade_date: z.string().nullable(),
+  planned_symbol_count: z.number(),
+  fetched_rows: z.number(),
+  saved_rows: z.number(),
+  failed_batch_count: z.number(),
+  validation_issue_count: z.number(),
+  failed_vt_symbols: z.array(z.string()).max(500),
+  failed_vt_symbol_count: z.number(),
+  issues: z.array(syncQualityIssueSchema).max(100),
+  message: z.string().nullable().optional().default(null),
+});
+
+const syncOverviewSchema = z.object({
+  tasks: z.array(syncTaskSchema),
+  latest: syncQualitySchema.nullable(),
+});
+
+const syncStartSchema = z.object({
+  task_id: z.string().min(1),
+  status: z.string(),
+});
+
 const backtestSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -154,6 +199,7 @@ type AlphaStatusOverview = z.infer<typeof statusSchema>;
 export type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
 export type AlphaSecurity = z.infer<typeof securitySchema>;
 export type AlphaSecurityDetail = z.infer<typeof securityDetailSchema>;
+export type AlphaSyncOverview = z.infer<typeof syncOverviewSchema>;
 export type AlphaBacktest = z.infer<typeof backtestSchema>;
 type AlphaBacktestSeries = {
   equity: z.infer<typeof equitySchema>["items"];
@@ -248,6 +294,26 @@ export function getAlphaDataOverview(
     dataOverviewSchema,
     forceRefresh ? [{ name: "force_refresh", value: "true" }] : [],
   );
+}
+
+/** 查询运行中的日线同步和最近一次结构化质量结果。 */
+export function getAlphaSyncOverview(): Promise<AlphaSyncOverview> {
+  return alphaGet("/api/alpha/sync/overview", syncOverviewSchema);
+}
+
+/** 启动全量增量同步，传入标的时只重试该有界集合。 */
+export async function startAlphaBarSync(
+  vtSymbols?: readonly string[],
+): Promise<z.infer<typeof syncStartSchema>> {
+  const response = await requestAlpha({
+    method: "POST",
+    path: "/api/alpha/sync/bars",
+    body: vtSymbols ? { vt_symbols: [...vtSymbols] } : {},
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw alphaError(response.status, response.body);
+  }
+  return syncStartSchema.parse(response.body);
 }
 
 /** 按搜索和 Facet 条件查询证券数据目录分页。 */

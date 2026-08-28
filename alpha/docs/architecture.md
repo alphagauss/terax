@@ -46,6 +46,7 @@ AlphaServiceContainer
 - Repository 按领域拆分查询和写入，底层连接、文件级写锁和分片命名由 `SQLiteStorageBase` 统一管理。
 - 跨模块公共 schema 放在 `alpha/common/`，不能依赖 FastAPI、React 或 Lightweight Charts。
 - 外部数据先经过适配、归一化和校验，再进入 writer 和存储，不把 provider 原始对象扩散到 API。
+- 日线质量检查属于 `alpha/sync_tasks/`。它在 provider 批次上执行线性校验，并通过一次主库 overview 读取确认写入覆盖；不得在 API 请求或前端轮询时扫描行情分片。
 - `alpha-native` 只能作为可替换计算实现，不改变 Python 公开接口和 FastAPI wire format。
 
 ## 长任务模型
@@ -61,6 +62,7 @@ AlphaServiceContainer
 - Alpha 主目录默认是 `~/.terax/alpha/`，测试可通过 `TERAX_ALPHA_HOME` 指向隔离目录。
 - Python 持久配置只包含 Alpha 自身字段，当前为绝对 `data_dir`，保存在 `config.json` 并原子替换。
 - 可同步业务数据位于 `data_dir`；轻量运行状态位于 Alpha 主目录的 `state/`。
+- 最近一次日线同步质量快照位于 `state/data-quality/latest.json`，只保存有界异常摘要和定向重试标的，不复制行情正文。
 - Python 不读取或写入 Terax 的 `terax-alpha.json`。工作台布局、前端偏好和解释器选择属于 Terax。
 - 服务凭据只从显式参数或 `TERAX_ALPHA_TOKEN` 取得，不写入 Alpha 配置或业务数据。
 

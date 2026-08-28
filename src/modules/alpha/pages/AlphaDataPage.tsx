@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 数据目录页面。
- * 页面按需查询 union 证券目录、全局 Facets 和单证券 K 线，不在浏览器中执行全量搜索。
+ * 页面按需查询证券目录、同步质量和单证券 K 线，不在浏览器中执行全量搜索或质量计算。
  */
 
 import {
@@ -15,6 +15,8 @@ import { Input } from "@/components/ui/input";
 import {
   getAlphaDataOverview,
   getAlphaSecurities,
+  getAlphaSyncOverview,
+  startAlphaBarSync,
   type AlphaSecurity,
 } from "@/modules/alpha/api";
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
@@ -53,7 +55,7 @@ export function AlphaDataPage(props: Props) {
   );
 }
 
-/** 连接数据目录、Facets、分页和按需行情查询。 */
+/** 连接数据目录、日线同步质量、Facets、分页和按需行情查询。 */
 function AlphaDataPageContent({ visible }: Props) {
   const { t, i18n } = useTranslation("alpha");
   const queryClient = useQueryClient();
@@ -73,6 +75,8 @@ function AlphaDataPageContent({ visible }: Props) {
   }));
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<unknown>(null);
+  const [syncActionPending, setSyncActionPending] = useState(false);
+  const [syncActionError, setSyncActionError] = useState<unknown>(null);
   const changeChartOptions = useCallback((next: MarketChartOptions) => {
     setChartOptions((current) => ({
       ...current,
@@ -111,6 +115,13 @@ function AlphaDataPageContent({ visible }: Props) {
     queryKey: [...alphaQueryKeys.securities, securityQuery],
     queryFn: () => getAlphaSecurities(securityQuery),
     enabled: visible,
+  });
+  const syncOverview = useQuery({
+    queryKey: alphaQueryKeys.syncOverview,
+    queryFn: getAlphaSyncOverview,
+    enabled: visible,
+    refetchInterval: visible ? 3_000 : false,
+    staleTime: 0,
   });
   useEffect(() => {
     if (
@@ -156,7 +167,29 @@ function AlphaDataPageContent({ visible }: Props) {
     }
   };
   const error = refreshError ?? overview.error ?? securities.error;
+  const syncError = syncActionError ?? syncOverview.error;
   const summary = overview.data?.summary;
+  const latestQuality = syncOverview.data?.latest;
+  const syncRunning = Boolean(
+    syncOverview.data?.tasks.some((task) => task.status === "running"),
+  );
+  const qualityStatus = syncRunning
+    ? "running"
+    : (latestQuality?.status ?? "idle");
+  const qualityMessage = latestQuality?.message;
+
+  const startSync = async (vtSymbols?: readonly string[]) => {
+    setSyncActionPending(true);
+    setSyncActionError(null);
+    try {
+      await startAlphaBarSync(vtSymbols);
+      await syncOverview.refetch();
+    } catch (error) {
+      setSyncActionError(error);
+    } finally {
+      setSyncActionPending(false);
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -202,6 +235,72 @@ function AlphaDataPageContent({ visible }: Props) {
             value={summary?.data_end?.slice(0, 10) ?? t("common.unavailable")}
           />
         </div>
+
+        <section className="rounded-xl border border-border/70 bg-card p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <AlphaSectionTitle
+              title={t("data.sync.title")}
+              description={t("data.sync.description")}
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={syncRunning || syncActionPending}
+                onClick={() => void startSync()}
+              >
+                {t("data.sync.start")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  syncRunning ||
+                  syncActionPending ||
+                  !latestQuality?.failed_vt_symbols.length
+                }
+                onClick={() => void startSync(latestQuality?.failed_vt_symbols)}
+              >
+                {t("data.sync.retryFailed")}
+              </Button>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <AlphaMetric
+              label={t("data.sync.status")}
+              value={t(`data.sync.statuses.${qualityStatus}`)}
+            />
+            <AlphaMetric
+              label={t("data.sync.savedRows")}
+              value={number.format(latestQuality?.saved_rows ?? 0)}
+            />
+            <AlphaMetric
+              label={t("data.sync.issues")}
+              value={number.format(latestQuality?.validation_issue_count ?? 0)}
+            />
+            <AlphaMetric
+              label={t("data.sync.failedSymbols")}
+              value={number.format(latestQuality?.failed_vt_symbol_count ?? 0)}
+            />
+          </div>
+          {latestQuality?.failed_vt_symbols.length ? (
+            <p className="mt-3 break-all text-xs text-muted-foreground">
+              {t("data.sync.failedPreview", {
+                symbols: latestQuality.failed_vt_symbols.slice(0, 5).join(", "),
+              })}
+            </p>
+          ) : null}
+          {qualityMessage ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {t("data.sync.message", { message: qualityMessage })}
+            </p>
+          ) : null}
+          {syncError ? (
+            <p className="mt-3 text-xs text-destructive">
+              {t("data.sync.actionFailed", { error: String(syncError) })}
+            </p>
+          ) : null}
+        </section>
 
         <section className="min-w-0 rounded-xl border border-border/70 bg-card p-4">
           <AlphaSectionTitle

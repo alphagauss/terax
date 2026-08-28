@@ -51,6 +51,26 @@
       "rows": "Bar rows",
       "latest": "Latest trade date"
     },
+    "sync": {
+      "title": "Daily data sync",
+      "description": "Validate incoming daily bars, confirm written coverage, and retry only affected securities.",
+      "start": "Sync daily bars",
+      "retryFailed": "Retry affected",
+      "status": "Status",
+      "savedRows": "Saved rows",
+      "issues": "Quality issues",
+      "failedSymbols": "Affected securities",
+      "failedPreview": "Affected: {{symbols}}",
+      "message": "Details: {{message}}",
+      "actionFailed": "Could not start data sync: {{error}}",
+      "statuses": {
+        "idle": "Not run",
+        "running": "Running",
+        "healthy": "Healthy",
+        "issues": "Needs attention",
+        "failed": "Failed"
+      }
+    },
     "securities": {
       "title": "Security data catalog",
       "description": "{{count}} securities match the current query.",

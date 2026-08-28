@@ -40,8 +40,10 @@ data_dir/
 
 - K 线入库只接受未复权原始价格，复权视图在读取时计算。
 - 同一批写入要求主键和字段形态一致；主行情 upsert 与日线限价补写是不同写入模式。
-- provider 数据先经过归一化、OHLC 和字段校验，再交给 writer 和 `DataBase`。
+- provider 数据先经过归一化和一次线性校验，再交给 writer 和 `DataBase`。日线校验覆盖计划标的与日期范围、有限数值、OHLC 高低价关系、非负数量字段和批内重复主键。
+- 非法日线批次整体拒绝写入；合法但少于同步计划预期行数的批次保存已有数据，同时把标的加入有界重试集合。
 - 正常写入同步更新 `bar_overview`；批量导入可以延后，并在结束后显式重建 overview。
+- 日线任务写完后只读取一次主库 `bar_overview`，核对本次合法数据的起止时间和最小行数，不逐证券回扫行情分片。
 - union 证券目录由资料和行情覆盖共同构成，允许 `profile_only`、`bars_only` 和完整状态，不读取所有分片后再在 Python 中分页。
 
 ## 历史读取与游标
@@ -84,9 +86,11 @@ planner -> provider/adapter -> normalizer -> validator -> writer -> report
 
 - planner 根据覆盖、交易日历和同步游标决定请求范围。
 - provider 适配外部接口，不能把供应商对象直接写入存储。
-- normalizer 生成 Alpha schema，validator 锁定时间、字段和重叠区不变量。
+- normalizer 生成 Alpha schema，validator 在同一次字典遍历中完成字段校验、按标的分组和覆盖计数，并继续检查重叠区差异。
 - writer 通过 `DataBase` 保存数据并推进成功游标。
 - report 记录失败和异常，不能把部分成功伪装为完整覆盖。
+
+最近一次 API 日线同步的质量快照保存在 Alpha 状态目录的 `data-quality/latest.json`，服务重启后仍可读取。快照最多保留 100 条异常明细和 500 个定向重试标的，同时保留完整异常计数；它不是行情数据或 Terax 前端配置。重叠区差异用于报告供应商修订，当前仍允许合法新数据通过既有 upsert 更新。
 
 证券资料、指数成分、K 线和状态同步各自拥有任务入口，但共享上述边界。长任务由进程任务管理器执行，API 路由不直接运行无界同步循环。
 

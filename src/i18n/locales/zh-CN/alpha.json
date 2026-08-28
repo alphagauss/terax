@@ -51,6 +51,26 @@
       "rows": "K 线行数",
       "latest": "最新交易日"
     },
+    "sync": {
+      "title": "日线数据同步",
+      "description": "校验待入库日线、确认写入覆盖，并只重试受影响的证券。",
+      "start": "同步日线",
+      "retryFailed": "重试异常标的",
+      "status": "状态",
+      "savedRows": "入库行数",
+      "issues": "质量异常",
+      "failedSymbols": "异常标的",
+      "failedPreview": "受影响标的：{{symbols}}",
+      "message": "详情：{{message}}",
+      "actionFailed": "无法启动数据同步：{{error}}",
+      "statuses": {
+        "idle": "尚未运行",
+        "running": "运行中",
+        "healthy": "正常",
+        "issues": "需要处理",
+        "failed": "失败"
+      }
+    },
     "securities": {
       "title": "证券数据目录",
       "description": "当前条件下共有 {{count}} 个证券。",

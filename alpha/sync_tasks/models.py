@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from time import perf_counter
 
@@ -56,13 +56,45 @@ class BarSyncPlan:
 
 @dataclass(slots=True)
 class ValidationIssue:
-    """重叠区校验异常。"""
+    """日线同步质量异常。"""
 
     vt_symbol: str
     trade_date: str
     field: str
-    db_value: float
-    fetched_value: float
+    kind: str = "overlap_mismatch"
+    message: str = ""
+    db_value: float | None = None
+    fetched_value: float | None = None
+
+
+@dataclass(slots=True)
+class ValidationResult:
+    """有界质量异常集合及其完整计数。"""
+
+    issue_count: int = 0
+    issues: list[ValidationIssue] = field(default_factory=list)
+    affected_vt_symbols: set[str] = field(default_factory=set)
+
+
+@dataclass(slots=True)
+class BarWriteCoverage:
+    """单个标的在本次任务中准备写入的时间覆盖。"""
+
+    start: date
+    end: date
+    rows: int
+
+
+@dataclass(slots=True)
+class BarBatchValidation:
+    """单批日线校验结果。"""
+
+    can_write: bool
+    issue_count: int
+    issues: list[ValidationIssue]
+    coverage: dict[str, BarWriteCoverage]
+    rows_by_symbol: dict[str, list[dict[str, object]]]
+    retry_vt_symbols: set[str]
 
 
 @dataclass(slots=True)

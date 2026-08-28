@@ -352,6 +352,9 @@ class FakeStrategyManager:
 class FakeProcessManager:
     """测试用进程任务管理器。"""
 
+    def __init__(self) -> None:
+        self.started: list[dict[str, object]] = []
+
     def list_snapshots(self) -> list[dict[str, object]]:
         """返回混合任务快照。
 
@@ -365,7 +368,28 @@ class FakeProcessManager:
         return [
             {"task_id": "sync-1", "status": "succeeded", "task_type": "sync-bars"},
             {"task_id": "bt-1", "status": "running", "task_type": "backtest"},
+            *self.started,
         ]
+
+    def start(
+        self,
+        task_id: str,
+        task_type: str,
+        target: object,
+        args: tuple[object, ...] = (),
+        **kwargs: object,
+    ) -> object:
+        """记录同步任务启动参数。"""
+        snapshot = {
+            "task_id": task_id,
+            "task_type": task_type,
+            "status": "running",
+            "target": target,
+            "args": args,
+            "metadata": kwargs.get("metadata"),
+        }
+        self.started.append(snapshot)
+        return SimpleNamespace(snapshot=lambda: snapshot)
 
     def stop(self, task_id: str) -> object | None:
         """返回固定取消后任务。
@@ -751,6 +775,54 @@ def test_alpha_router_filters_sync_tasks() -> None:
     assert response.json() == [
         {"task_id": "sync-1", "status": "succeeded", "task_type": "sync-bars"}
     ]
+
+
+def test_alpha_router_starts_targeted_bar_sync_and_rejects_concurrency() -> None:
+    """验证日线同步启动时归一化标的并拒绝并发任务。"""
+    client = _client()
+
+    started = client.post(
+        "/api/alpha/sync/bars",
+        json={"vt_symbols": [" 000001.szse ", "000001.SZSE"]},
+    )
+    concurrent = client.post("/api/alpha/sync/bars", json={})
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "running"
+    manager = client.app.state.alpha_services.process_manager
+    assert manager.started[0]["args"] == (["000001.SZSE"],)
+    assert concurrent.status_code == 409
+
+
+def test_alpha_router_returns_sync_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证同步概览只返回轻量任务字段和有界质量快照。"""
+    monkeypatch.setattr(
+        "alpha.api.routes.sync.load_quality_snapshot",
+        lambda: {
+            "schema_version": 1,
+            "status": "issues",
+            "validation_issue_count": 2,
+            "failed_vt_symbols": ["000001.SZSE"],
+            "failed_vt_symbol_count": 1,
+            "issues": [],
+        },
+    )
+
+    response = _client().get("/api/alpha/sync/overview")
+
+    assert response.status_code == 200
+    assert response.json()["tasks"] == [
+        {
+            "task_id": "sync-1",
+            "status": "completed",
+            "created_at": None,
+            "finished_at": None,
+            "message": None,
+        }
+    ]
+    assert response.json()["latest"]["failed_vt_symbols"] == ["000001.SZSE"]
 
 
 def test_alpha_router_reads_and_updates_settings(
