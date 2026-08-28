@@ -35,33 +35,24 @@ const waitOptions = {
   wait_timeout_ms: z.number().int().min(0).max(120_000).optional(),
 };
 
-const processInputSchema = z.discriminatedUnion("action", [
-  z.object({
+const processInputSchema = z
+  .object({
     process_id: z.string().uuid(),
-    action: z.literal("poll"),
-    ...outputOptions,
-    ...waitOptions,
-  }),
-  z.object({
-    process_id: z.string().uuid(),
-    action: z.literal("write"),
-    input: z.string().max(256 * 1024),
+    action: z.enum(["poll", "write", "close_stdin", "terminate"]),
+    input: z.string().max(256 * 1024).optional(),
     close_stdin: z.boolean().optional(),
     ...outputOptions,
     ...waitOptions,
-  }),
-  z.object({
-    process_id: z.string().uuid(),
-    action: z.literal("close_stdin"),
-    ...outputOptions,
-    yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-  }),
-  z.object({
-    process_id: z.string().uuid(),
-    action: z.literal("terminate"),
-    ...outputOptions,
-  }),
-]);
+  })
+  .superRefine((input, ctx) => {
+    if (input.action === "write" && input.input === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["input"],
+        message: "input is required when action is write",
+      });
+    }
+  });
 
 /** 创建统一 Shell 工具，并在每次有副作用的调用前读取最新权限模式。 */
 export function buildShellTools(ctx: ToolContext) {
