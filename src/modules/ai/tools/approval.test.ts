@@ -1,9 +1,9 @@
 /**
- * 本文件验证 AI 权限模式的动态审批与执行期安全边界。
- * 测试锁定完全访问只省略批准，不削弱 Shell 命令拒绝规则。
+ * 本文件验证 AI Shell 工具的输入约束、动态审批与执行期安全边界。
+ * 测试锁定进程写入参数，并确保完全访问只省略批准而不削弱拒绝规则。
  */
 
-import type { ToolExecutionOptions } from "ai";
+import { asSchema, type ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
@@ -96,6 +96,25 @@ describe("AI tool approval mode", () => {
         toolOptions,
       ),
     ).toBe(true);
+  });
+
+  it("requires input when writing to a process", async () => {
+    const inputSchema = buildShellTools(context).shell_process.inputSchema;
+    const schema = asSchema(inputSchema);
+    if (!schema.validate) throw new Error("shell_process validator missing");
+
+    expect(
+      await schema.validate({
+        process_id: "00000000-0000-4000-8000-000000000002",
+        action: "write",
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      await schema.validate({
+        process_id: "00000000-0000-4000-8000-000000000002",
+        action: "poll",
+      }),
+    ).toMatchObject({ success: true });
   });
 
   it("scopes process control and discovery to the active chat", async () => {
