@@ -284,6 +284,7 @@ pub fn run() {
             workspace::wsl_default_distro,
             workspace::wsl_home,
             workspace::workspace_authorize,
+            workspace::workspace_prepare_default_root,
             workspace::workspace_current_dir,
             workspace_process::get_workspace_bootstrap,
             workspace_process::spawn_workspace_process,

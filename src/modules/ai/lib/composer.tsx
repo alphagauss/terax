@@ -134,12 +134,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const workingDirectory = useChatStore((s) => {
     const id = s.activeSessionId;
     if (!id) return null;
-    return resolveSessionCwd(
-      id,
-      s.draftSessionId,
-      s.sessions,
-      s.live.explorerRoot,
-    );
+    return resolveSessionCwd(id, s.draftSessionId, s.sessions, s.live.draftCwd);
   });
   const canRevealWorkingDirectory = useChatStore((s) => {
     return canRevealSessionCwd(

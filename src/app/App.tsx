@@ -1559,6 +1559,8 @@ export default function App() {
     activeSpaceId,
     tabs,
     explorerRoot,
+    environmentHome: home,
+    visible: sidebar.isVisible("ai"),
     setActiveId,
     newTab,
     ensureWorkspaceReady,
