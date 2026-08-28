@@ -69,19 +69,26 @@ describe("FinancialChartFrame", () => {
       marketBar("2026-07-29", 9, 10),
       marketBar("2026-07-30", 20, 11),
     ];
+    const onOptionsChange = vi.fn();
     act(() => {
       root?.render(
         createElement(FinancialChartFrame, {
           bars,
           dataKey: "000001.SZSE|d|forward",
           symbol: "000001.SZSE",
-          chartType: "candlestick",
+          options: {
+            interval: "d",
+            adjust: "forward",
+            chartType: "candlestick",
+          },
+          availableIntervals: ["d"],
+          density: "compact",
           status: "ready",
           historyError: false,
           hasMoreBefore: false,
           loadingMore: false,
           visible: true,
-          onChartTypeChange: vi.fn(),
+          onOptionsChange,
           onRequestMore: vi.fn(),
           onRetry: vi.fn(),
         }),
@@ -90,6 +97,16 @@ describe("FinancialChartFrame", () => {
 
     expect(container.textContent).toContain("10.00%");
     expect(mocks.chartProps?.resetRevision).toBe(0);
+
+    const lineButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "data.chart.types.line",
+    );
+    act(() => lineButton?.click());
+    expect(onOptionsChange).toHaveBeenCalledWith({
+      interval: "d",
+      adjust: "forward",
+      chartType: "line",
+    });
 
     act(() => {
       const onCrosshairChange = mocks.chartProps?.onCrosshairChange as (

@@ -3,7 +3,13 @@
  * 模型不依赖 API 响应、React 或具体图表引擎，供页面、场景和面板共同消费。
  */
 
-export type MarketInterval = "1m" | "1h" | "d" | "w" | "tick";
+export const MARKET_INTERVALS = ["1m", "1h", "d", "w", "tick"] as const;
+
+export type MarketInterval = (typeof MARKET_INTERVALS)[number];
+
+export const MARKET_ADJUSTMENTS = ["none", "forward", "backward"] as const;
+
+export type MarketAdjust = (typeof MARKET_ADJUSTMENTS)[number];
 
 export type MarketTime =
   | { kind: "trading-day"; date: string }

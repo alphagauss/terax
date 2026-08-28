@@ -5,6 +5,10 @@
 
 // @vitest-environment happy-dom
 
+import type {
+  MarketChartDensity,
+  MarketChartOptions,
+} from "@/modules/alpha/chart/model";
 import type { MarketBarPage } from "@/modules/alpha/market/model";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, createElement } from "react";
@@ -13,11 +17,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAlphaBars: vi.fn(),
+  getAlphaSecurity: vi.fn(),
   frameProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
   getAlphaBars: mocks.getAlphaBars,
+  getAlphaSecurity: mocks.getAlphaSecurity,
 }));
 
 vi.mock("@/modules/alpha/chart/components/FinancialChartFrame", () => ({
@@ -31,6 +37,12 @@ import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene"
 
 const reactTestEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT: boolean;
+};
+
+const DEFAULT_OPTIONS: MarketChartOptions = {
+  interval: "d",
+  adjust: "forward",
+  chartType: "candlestick",
 };
 
 function page(
@@ -59,6 +71,7 @@ function page(
 async function flush(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -70,6 +83,9 @@ describe("MarketChartScene", () => {
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     mocks.getAlphaBars.mockReset();
+    mocks.getAlphaSecurity.mockReset().mockResolvedValue({
+      intervals: ["1m", "1h", "d", "w", "tick", "future"],
+    });
     mocks.frameProps = null;
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -85,12 +101,23 @@ describe("MarketChartScene", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
 
-  function render(symbol: string) {
+  function render(
+    symbol: string,
+    options: MarketChartOptions = DEFAULT_OPTIONS,
+    onOptionsChange = vi.fn(),
+    density: MarketChartDensity = "panel",
+  ) {
     root?.render(
       createElement(
         QueryClientProvider,
         { client: queryClient },
-        createElement(MarketChartScene, { vtSymbol: symbol, visible: true }),
+        createElement(MarketChartScene, {
+          vtSymbol: symbol,
+          visible: true,
+          options,
+          density,
+          onOptionsChange,
+        }),
       ),
     );
   }
@@ -172,6 +199,64 @@ describe("MarketChartScene", () => {
       | Array<{ time: { date: string } }>
       | undefined;
     expect(bars?.[0]?.time.date).toBe("2026-07-30");
+  });
+
+  it("按受控周期和复权隔离查询并只暴露权威 K 线周期", async () => {
+    mocks.getAlphaBars.mockResolvedValue(page(["2026-07-30"], false, null));
+
+    await act(async () => render("000001.SZSE"));
+    await flush();
+    expect(mocks.frameProps?.availableIntervals).toEqual([
+      "1m",
+      "1h",
+      "d",
+      "w",
+    ]);
+
+    await act(async () =>
+      render("000001.SZSE", {
+        interval: "1h",
+        adjust: "none",
+        chartType: "line",
+      }),
+    );
+    await flush();
+
+    expect(mocks.getAlphaBars).toHaveBeenLastCalledWith(
+      "000001.SZSE",
+      expect.objectContaining({ interval: "1h", adjust: "none" }),
+    );
+    expect(mocks.frameProps?.dataKey).toBe("000001.SZSE|1h|none");
+    expect(mocks.frameProps?.options).toEqual({
+      interval: "1h",
+      adjust: "none",
+      chartType: "line",
+    });
+  });
+
+  it("紧凑数据预览不请求未使用的证券详情", async () => {
+    mocks.getAlphaBars.mockResolvedValue(page(["2026-07-30"], false, null));
+
+    await act(async () =>
+      render("000001.SZSE", DEFAULT_OPTIONS, vi.fn(), "compact"),
+    );
+    await flush();
+
+    expect(mocks.getAlphaSecurity).not.toHaveBeenCalled();
+    expect(mocks.getAlphaBars).toHaveBeenCalledWith(
+      "000001.SZSE",
+      expect.objectContaining({ interval: "d", adjust: "forward" }),
+    );
+  });
+
+  it("证券详情没有可用 K 线周期时只保留当前配置", async () => {
+    mocks.getAlphaSecurity.mockResolvedValue({ intervals: ["tick", "future"] });
+    mocks.getAlphaBars.mockResolvedValue(page([], false, null));
+
+    await act(async () => render("000001.SZSE"));
+    await flush();
+
+    expect(mocks.frameProps?.availableIntervals).toEqual(["d"]);
   });
 
   it("初次加载失败后可以在图表内重试", async () => {

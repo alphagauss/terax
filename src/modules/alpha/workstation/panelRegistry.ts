@@ -3,10 +3,11 @@
  * 首期只注册公共金融图表，后续面板必须在具备真实领域协议后再加入。
  */
 
+import {
+  createDefaultAlphaChartPanelConfig,
+  parseAlphaChartPanelConfig,
+} from "@/modules/alpha/workstation/chartPanelConfig";
 import { createAlphaPanelRegistry } from "@/modules/alpha/workstation/registry";
-import { z } from "zod";
-
-const emptyConfigSchema = z.object({}).strict();
 
 export const alphaPanelRegistry = createAlphaPanelRegistry([
   {
@@ -16,8 +17,8 @@ export const alphaPanelRegistry = createAlphaPanelRegistry([
     singleton: false,
     pinnable: true,
     defaultSize: { w: 16, h: 12, minW: 6, minH: 8 },
-    createDefaultConfig: () => ({}),
-    validateConfig: (value) => emptyConfigSchema.parse(value),
+    createDefaultConfig: createDefaultAlphaChartPanelConfig,
+    validateConfig: parseAlphaChartPanelConfig,
     load: () =>
       import("@/modules/alpha/workstation/components/AlphaChartPanel"),
   },

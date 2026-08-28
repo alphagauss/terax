@@ -18,8 +18,10 @@ import { AlphaPanelPool } from "@/modules/alpha/workstation/components/AlphaPane
 import {
   normalizeAlphaVtSymbol,
   type AlphaGridItem,
+  type AlphaPanelConfig,
   type AlphaSymbolBinding,
 } from "@/modules/alpha/workstation/model";
+import { updateAlphaPanelConfig } from "@/modules/alpha/workstation/layout";
 import { alphaPanelRegistry } from "@/modules/alpha/workstation/panelRegistry";
 import {
   updateAlphaWorkstationState,
@@ -107,6 +109,21 @@ function AlphaWorkstationPageContent({ visible }: Props) {
       },
     }));
   }, []);
+
+  const changePanelConfig = useCallback(
+    (panelId: string, config: AlphaPanelConfig) => {
+      updateAlphaWorkstationState((current) => {
+        const layout = updateAlphaPanelConfig(
+          current.layout,
+          panelId,
+          config,
+          alphaPanelRegistry,
+        );
+        return layout === current.layout ? current : { ...current, layout };
+      });
+    },
+    [],
+  );
 
   if (!snapshot.hydrated || !state) {
     return <AlphaLoading label={t("common.loading")} />;
@@ -198,6 +215,7 @@ function AlphaWorkstationPageContent({ visible }: Props) {
         registry={alphaPanelRegistry}
         mainSymbol={state.mainSymbol}
         visible={visible}
+        onPanelConfigChange={changePanelConfig}
       >
         <AlphaPanelGrid
           state={state}

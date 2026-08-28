@@ -3,6 +3,7 @@
  * 模板只描述初始面板与 24 列坐标，每次应用都会生成新的布局和面板身份。
  */
 
+import { createDefaultAlphaChartPanelConfig } from "@/modules/alpha/workstation/chartPanelConfig";
 import {
   ALPHA_WORKSTATION_SCHEMA_VERSION,
   ALPHA_WORKSTATION_STATE_SCHEMA_VERSION,
@@ -36,7 +37,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
         panel: {
           type: "chart",
           binding: { mode: "follow" },
-          config: {},
+          config: createDefaultAlphaChartPanelConfig(),
         },
         grid: { x: 0, y: 0, w: 24, h: 16 },
       },
@@ -51,7 +52,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
         panel: {
           type: "chart",
           binding: { mode: "follow" },
-          config: {},
+          config: createDefaultAlphaChartPanelConfig(),
         },
         grid: { x: 0, y: 0, w: 12, h: 16 },
       },
@@ -59,7 +60,7 @@ export const ALPHA_WORKSTATION_TEMPLATES = [
         panel: {
           type: "chart",
           binding: { mode: "pinned", vtSymbol: "600000.SSE" },
-          config: {},
+          config: createDefaultAlphaChartPanelConfig(),
         },
         grid: { x: 12, y: 0, w: 12, h: 16 },
       },

@@ -7,6 +7,7 @@ import {
   getAlphaBacktestSeries,
   getAlphaBars,
   getAlphaDataOverview,
+  getAlphaSecurity,
   getAlphaSecurities,
   getAlphaSettings,
   updateAlphaSettings,
@@ -77,6 +78,42 @@ describe("Alpha API client", () => {
         { name: "limit", value: "25" },
         { name: "offset", value: "50" },
       ],
+    });
+  });
+
+  it("queries one security through the existing detail endpoint", async () => {
+    requestMock.mockResolvedValue({
+      status: 200,
+      headers: {},
+      body: {
+        vt_symbol: "000001.SZSE",
+        symbol: "000001",
+        exchange: "SZSE",
+        name: "Ping An Bank",
+        asset_type: "stock",
+        board: null,
+        listed_date: "1991-04-03",
+        delisted_date: null,
+        status: "active",
+        data_state: "complete",
+        total_bar_count: 10,
+        data_start: "2026-07-01 00:00:00",
+        data_end: "2026-07-30 00:00:00",
+        latest_updated_at: "2026-07-30 16:00:00",
+        intervals: ["d", "1m", "tick"],
+        coverage: {},
+        price_tick: 0.01,
+      },
+    });
+
+    await expect(getAlphaSecurity("000001.SZSE")).resolves.toMatchObject({
+      vt_symbol: "000001.SZSE",
+      intervals: ["d", "1m", "tick"],
+    });
+    expect(requestMock).toHaveBeenCalledWith({
+      method: "GET",
+      path: "/api/alpha/securities/000001.SZSE",
+      query: [],
     });
   });
 

@@ -89,6 +89,10 @@ describe("AlphaPanelPool", () => {
       hostKey?: string;
       showHosts?: boolean;
       mainSymbol?: string;
+      onPanelConfigChange?: (
+        panelId: string,
+        config: AlphaPanelInstance["config"],
+      ) => void;
     } = {},
   ) {
     root?.render(
@@ -97,6 +101,7 @@ describe("AlphaPanelPool", () => {
         registry={registry}
         mainSymbol={options.mainSymbol ?? "000001.SZSE"}
         visible={options.visible ?? true}
+        onPanelConfigChange={options.onPanelConfigChange ?? vi.fn()}
       >
         {options.showHosts !== false &&
           panels.map((item) => (
@@ -208,6 +213,7 @@ describe("AlphaPanelPool", () => {
           registry={registry}
           mainSymbol="000001.SZSE"
           visible
+          onPanelConfigChange={vi.fn()}
         >
           <AlphaPanelHost
             ref={hostRef}
@@ -269,6 +275,28 @@ describe("AlphaPanelPool", () => {
       ]),
     );
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("把面板配置更新绑定到稳定面板 ID", async () => {
+    const onPanelConfigChange = vi.fn();
+    let latestProps: AlphaPanelProps | null = null;
+    function TestPanel(props: AlphaPanelProps) {
+      latestProps = props;
+      return null;
+    }
+    const registry = createAlphaPanelRegistry([
+      descriptor("chart", async () => ({ default: TestPanel })),
+    ]);
+
+    await act(async () =>
+      renderPool([panel("panel-1")], registry, { onPanelConfigChange }),
+    );
+    await flush();
+    act(() => latestProps?.onConfigChange({ interval: "1h" }));
+
+    expect(onPanelConfigChange).toHaveBeenCalledWith("panel-1", {
+      interval: "1h",
+    });
   });
 
   it("单个面板加载失败时不影响其他面板", async () => {

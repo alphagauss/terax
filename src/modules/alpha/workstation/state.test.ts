@@ -68,6 +68,19 @@ describe("Alpha workstation state", () => {
     });
   });
 
+  it("把旧图表空配置归一化为受控默认值", () => {
+    const state = createDefaultAlphaWorkstationState();
+    state.layout.panels[0].config = {};
+
+    const parsed = parseAlphaWorkstationState(state, alphaPanelRegistry);
+
+    expect(parsed?.layout.panels[0].config).toEqual({
+      interval: "d",
+      adjust: "forward",
+      chartType: "candlestick",
+    });
+  });
+
   it("拒绝未知状态版本、非法标的和非法布局", () => {
     const state = createDefaultAlphaWorkstationState();
 

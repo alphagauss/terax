@@ -91,7 +91,7 @@
     "chart": {
       "title": "日 K 线",
       "description": "前复权日 K 线与成交量，向左滚动可加载更早历史。",
-      "aria": "{{symbol}} 的日 K 线图",
+      "aria": "{{symbol}} 的金融行情图",
       "empty": "请选择具有日线数据的证券。",
       "error": "无法加载行情数据。",
       "retry": "重试",
@@ -103,6 +103,22 @@
         "candlestick": "蜡烛图",
         "ohlc": "OHLC",
         "line": "收盘线"
+      },
+      "controls": {
+        "interval": "K 线周期",
+        "adjust": "复权方式",
+        "chartType": "图表类型"
+      },
+      "intervals": {
+        "1m": "1 分钟",
+        "1h": "1 小时",
+        "d": "日线",
+        "w": "周线"
+      },
+      "adjustments": {
+        "none": "不复权",
+        "forward": "前复权",
+        "backward": "后复权"
       },
       "legend": {
         "open": "开",

@@ -6,7 +6,7 @@
 
 计划已经确认采用三批八个任务：
 
-1. 完整行情页与受控图表配置。
+1. 受控公共图表配置。
 2. 专业价格、时间与 pane 语义。
 3. 图表导出与可访问性。
 4. 指标领域协议与首批服务端计算。
@@ -21,8 +21,9 @@
 
 - 计划基线：Terax `e2fca03`，`fix(alpha): harden financial chart viewport`。
 - 当前阶段：阶段一，公共图表和工作台内核。
-- 本计划第一任务：任务 1，完整行情页与受控图表配置。
-- 启动状态：未开始。先按 `docs/architecture/alpha-quant-workstation-implementation.md` 完成上一阶段任务收口，再把任务 1 设为唯一当前任务。
+- 当前任务：任务 1，受控公共图表配置。已完成。
+- 下一任务：任务 2，专业价格、时间与 pane 语义。
+- 启动状态：任务 2 尚未开始。独立行情页继续暂缓，当前优先补齐公共 K 线内核。
 - 当前阻塞：无。
 - 本计划不改变已经确认的阶段二数据闭环、阶段三回测复盘和阶段四实时模拟交易边界。
 
@@ -46,9 +47,9 @@
 
 | 能力 | 当前状态 | 本计划任务 |
 | --- | --- | --- |
-| 独立行情页 | 尚未注册 `alpha-market` 页面 | 任务 1 |
-| 周期与复权切换 | Scene 固定为 `d + forward` | 任务 1 |
-| 工作台图表配置 | Chart Panel 配置仍为空对象 | 任务 1 |
+| 独立行情页 | 尚未注册 `alpha-market` 页面 | 当前计划外，公共图表稳定后重新安排 |
+| 周期与复权切换 | Chart Panel 已使用受控周期和复权；数据页保持固定 `d + forward` | 已完成，任务 1 |
+| 工作台图表配置 | 已严格保存周期、复权和图表类型，旧 `{}` 自动迁移 | 已完成，任务 1 |
 | 证券精度、时区和市场颜色 | 图表仍使用通用格式与主题颜色 | 任务 2 |
 | 昨收线、明确最新价线 | 未建模 | 任务 2 |
 | 成交量显示与 pane 比例 | 固定显示，比例只设初始 8:2 | 任务 2 |
@@ -73,6 +74,7 @@
 - 使用 `localStorage` 保存 Alpha 图表、指标、pane 或同步状态。
 - 新闻、财经日历、基本面覆盖层、公司行动覆盖层和社交分享。
 - 在当前数据协议没有 session 元数据前实现盘前、盘后和夜盘阴影。
+- 独立 `alpha-market` Workbench 页面及其标签、导航和恢复状态。公共图表能力稳定后再单独安排，不阻塞当前 K 线内核和工作台面板。
 
 阶段三需要的交易标记、持仓区间和回放值得吸收，但在完成本计划前不混入公共行情图任务。届时应分别建立“回测标记”和“回放控制”任务。复杂绘图继续等前四个 Alpha 阶段形成稳定闭环后再规划。
 
@@ -123,7 +125,7 @@ Alpha API / MarketDataHub
 - 工作台配置继续经过 Panel Registry descriptor 校验和共享 store 的合并写入。
 - 旧的 `{}` Chart Panel 配置必须通过默认值迁移，不允许导致现有工作台整体回退为默认布局。
 - 图表同步只持久化开关和组配置，运行时范围、十字线坐标和来源 ID 不落盘。
-- 独立行情页首版只保留当前挂载期间的页面选择，不为单页状态新增第二套全局 store。若后续要求跨进程恢复，再单独扩展版本化页面状态。
+- 独立行情页暂缓期间不新增页面状态或第二套全局 store。后续恢复该任务时，首版只保留当前挂载期间的页面选择；若要求跨进程恢复，再单独扩展版本化页面状态。
 
 ### UI、性能和可访问性
 
@@ -223,18 +225,17 @@ type MarketChartOptions = {
   interval: MarketChartInterval;
   adjust: MarketAdjust;
   chartType: FinancialChartType;
-  showVolume: boolean;
 };
 
-type MarketChartDensity = "compact" | "full" | "panel";
+type MarketChartDensity = "compact" | "panel";
 ```
 
 - `interval` 与 `adjust` 决定查询键和 `dataKey`。
-- `chartType` 与 `showVolume` 只改变 Controller options，不发起不必要的行情请求。
+- `chartType` 只改变 Controller options，不发起不必要的行情请求。
 - `density` 只决定工具栏密度和功能入口可见性，不改变数据语义。
 - 数据页使用固定 `d + forward` 和 `compact`。
-- 独立行情页使用 `full` 并由页面拥有选项状态。
 - 工作台图表面板使用 `panel`，选项来自 panel config。
+- 独立行情页恢复实施后再增加 `full` density，并由页面拥有选项状态，不改变公共配置协议。
 
 建议的 Chart Panel 配置：
 
@@ -250,7 +251,7 @@ type AlphaChartPanelConfig = {
 };
 ```
 
-任务 1 只写入前四项，任务 2 增加 `paneRatios`，任务 5 和任务 7 再通过 descriptor 默认值补充后两项。每次扩展都必须保证旧配置缺失字段时使用默认值。`tick` 是行情事件粒度，不是当前公共 K 线可选择周期；图表只接受 `1m`、`1h`、`d` 和 `w`。
+任务 1 只写入 `interval`、`adjust` 和 `chartType`。任务 2 增加 `showVolume` 和 `paneRatios`，任务 5 和任务 7 再通过 descriptor 默认值补充后两项。每次扩展都必须保证旧配置缺失字段时使用默认值。`tick` 是行情事件粒度，不是当前公共 K 线可选择周期；图表只接受 `1m`、`1h`、`d` 和 `w`。
 
 ### 证券图表元数据
 
@@ -482,9 +483,6 @@ src/modules/alpha/
     metadata.ts
     model.ts
     normalize.ts
-  pages/
-    AlphaMarketPage.tsx
-    AlphaMarketPageLazy.tsx
   realtime/
     MarketDataHub.ts
     aggregation.ts
@@ -494,11 +492,11 @@ src/modules/alpha/
 
 ## 批次一：历史行情图闭环
 
-## 任务 1：完整行情页与受控图表配置
+## 任务 1：受控公共图表配置
 
 ### 目标
 
-完成独立 `alpha-market` Workbench 页面，并让数据页、独立行情页和工作台图表面板通过同一个可配置 `MarketChartScene` 使用公共图表。周期、复权、图表类型和成交量显示成为显式配置，不再硬编码在 Scene 内。
+在不新增独立行情页的前提下，让现有数据页和工作台图表面板通过同一个可配置 `MarketChartScene` 使用公共图表。周期、复权和图表类型成为显式配置，不再硬编码在 Scene 内；成交量显隐与 pane 比例留到任务 2 一次正确完成。
 
 ### 必须阅读的参考
 
@@ -510,11 +508,8 @@ Terax：
 - `src/modules/alpha/workstation/components/AlphaChartPanel.tsx`
 - `src/modules/alpha/workstation/panelRegistry.ts`
 - `src/modules/alpha/workstation/store.ts`
-- `src/modules/workbench/types.ts`
-- `src/modules/workbench/useWorkbench.ts`
-- `src/modules/workbench/viewRegistry.tsx`
-- `src/modules/spaces/lib/serialize.ts`
-- `src/modules/alpha/components/AlphaSidebar.tsx`
+- `src/modules/alpha/workstation/components/AlphaPanelPool.tsx`
+- `alpha/api/routes/securities.py` 的现有详情接口
 
 外部参考：
 
@@ -524,61 +519,55 @@ Terax：
 
 ### 设计
 
-1. 在 `market/model.ts` 增加 `MarketAdjust`，在 `chart/model.ts` 增加 `MarketChartOptions` 和 density 类型。
+1. 在 `market/model.ts` 增加 `MarketAdjust`，在 `chart/model.ts` 增加 `MarketChartOptions` 和 density 类型。当前 options 只包含周期、复权和图表类型。
 2. `MarketChartScene` 改为接收受控 `options`、`onOptionsChange` 和 `density`，不在内部单独保存 `chartType`。
 3. 查询键和 `dataKey` 固定包含 `vtSymbol + interval + adjust`。任何一项变化都切换到独立 React Query cache。
 4. `getAlphaBars()` 继续使用现有 API，不新增周期聚合。
-5. 周期选择只展示证券目录声明的 `intervals` 与前端 `MarketChartInterval` 交集，明确排除 `tick`。无元数据时只展示当前有效周期，不猜测其他周期存在。
-6. 数据页保持紧凑模式和 `d + forward`，不增加完整证券选择器或对比入口。
-7. 新增 `AlphaMarketPage`：
-   - 使用 `AlphaServiceBoundary`。
-   - 使用现有 `getAlphaSecurities()` 构建有界搜索选择器，搜索结果上限 20。
-   - 页面本地拥有选中标的和选项。
-   - 页面隐藏时保留图表实例，但暂停查询和 resize 响应。
-8. 新增 `alpha-market` tab kind，并同步 Workbench、Space 序列化、TabBar、标签文案、Alpha Sidebar 和相关测试。
-9. Chart Panel descriptor 使用带默认值的严格配置 schema。旧 `{}` 自动归一化为：
+5. 前端增加最小 `getAlphaSecurity(vtSymbol)` 和查询键，复用现有 `/securities/{vt_symbol}`。本任务只消费详情中的既有目录字段和 `intervals`，任务 2 再扩展价格元数据。
+6. 周期选择只展示证券详情声明的 `intervals` 与前端 `MarketChartInterval` 交集，明确排除 `tick`。无详情时只展示当前有效周期，不猜测其他周期存在。
+7. 数据页保持紧凑模式和 `d + forward`，由页面拥有图表类型状态，不增加周期、复权、完整证券选择器或对比入口。
+8. Chart Panel descriptor 使用带默认值的严格配置 schema。旧 `{}` 自动归一化为：
 
 ```json
 {
   "interval": "d",
   "adjust": "forward",
-  "chartType": "candlestick",
-  "showVolume": true
+  "chartType": "candlestick"
 }
 ```
 
-10. `AlphaPanelProps` 增加受控 `onConfigChange`，PanelPool 将其绑定到按 panel ID 更新配置的纯函数。配置更新只替换目标 panel，不修改 grid、binding 或其他 panel。
-11. 周期或复权变化时，清除只属于旧 dataKey 的十字线展示，不清除其他查询缓存。
+9. `AlphaPanelProps` 增加受控 `onConfigChange`，PanelPool 将其绑定到按 panel ID 更新配置的纯函数。配置更新只替换目标 panel，不修改 grid、binding 或其他 panel。
+10. 周期或复权变化时，清除只属于旧 dataKey 的十字线展示，不清除其他查询缓存。
 
 ### 预计修改文件
 
-- 新增 `src/modules/alpha/pages/AlphaMarketPage.tsx`
-- 新增 `src/modules/alpha/pages/AlphaMarketPageLazy.tsx`
-- 新增对应页面和选择器测试
 - 修改 `src/modules/alpha/chart/model.ts`
 - 修改 `src/modules/alpha/market/model.ts`
 - 修改 `src/modules/alpha/chart/scenes/MarketChartScene.tsx`
 - 修改 `src/modules/alpha/chart/components/FinancialChartFrame.tsx`
+- 修改 `src/modules/alpha/api.ts` 和 `src/modules/alpha/query.tsx`
+- 修改 `src/modules/alpha/pages/AlphaDataPage.tsx`
 - 修改 `src/modules/alpha/workstation/components/AlphaChartPanel.tsx`
+- 修改 `src/modules/alpha/workstation/components/AlphaPanelPool.tsx`
 - 修改 `src/modules/alpha/workstation/panelRegistry.ts`
 - 修改 `src/modules/alpha/workstation/model.ts`、`layout.ts`、`store.ts` 和测试
-- 修改 Workbench、Space、TabBar、Alpha Sidebar 和中英文资源
+- 修改 Alpha 中英文资源和相关组件测试
 
 ### 测试
 
 - Scene 查询键包含标的、周期和复权。
 - 旧请求晚返回时不会覆盖新 dataKey。
+- 支持周期只来自证券详情，未知值和 `tick` 不进入选择器。
 - 无效 panel config 被 descriptor 拒绝，旧 `{}` 使用默认值恢复。
 - 更新一个 panel config 不改变其他 panel 或网格坐标。
-- 数据页、独立行情页和 Chart Panel 都渲染同一个 `MarketChartScene`。
-- 新 `alpha-market` tab 能打开、复用、切换、序列化和恢复。
+- 数据页和 Chart Panel 都渲染同一个 `MarketChartScene`。
 - 所有控件文案、title、aria-label 有中英文翻译。
 
 ### 完成标准
 
-- 独立行情页可以选择标的、周期、复权、图表类型和成交量显示。
-- 三个入口没有复制 bars 查询、分页合并或 Controller 代码。
-- 工作台保存并恢复每个图表面板的四项配置。
+- 工作台图表面板可以选择周期、复权和图表类型。
+- 数据页和工作台面板没有复制 bars 查询、分页合并或 Controller 代码。
+- 工作台保存并恢复每个图表面板的三项配置。
 - 切换配置不会重建 Lightweight Charts 实例。
 
 ## 任务 2：专业价格、时间与 pane 语义
@@ -629,7 +618,7 @@ Terax：
     - 用户拖动过程中不写 React 状态。
     - host 的 pointerup 结束后读取最终比例，只有变化时通知外壳。
     - 比例使用 `main`、`volume` 和未来 study instanceId 等语义键保存，不依赖会随显隐变化的 pane 数字索引。
-    - Chart Panel 把比例保存到 `config.paneRatios`，独立行情页只保存在页面本地。
+    - Chart Panel 把比例保存到 `config.paneRatios`；独立行情页恢复实施后只保存在页面本地。
     - 指标任务加入额外 pane 后继续使用同一比例模型。
 13. 页面或面板太矮时，保持主价格 pane 优先，成交量 pane 不低于 Lightweight Charts 支持的最小高度，不允许把主图压成不可读区域。
 
@@ -675,7 +664,7 @@ Terax：
 
 ### 目标
 
-为完整行情页提供 PNG 和 CSV 导出，并为 Canvas 图表提供有限、可操作的文本摘要与 OHLC 表格。紧凑数据页和小工作台面板默认隐藏重型入口。
+为工作台图表面板提供 PNG 和 CSV 导出，并为所有 Canvas 图表提供有限、可操作的文本摘要与 OHLC 表格。紧凑数据页默认隐藏导出入口，工作台小面板通过菜单承载操作。
 
 ### 必须阅读的参考
 
@@ -712,7 +701,7 @@ type FinancialChartHandle = {
    - 提供可聚焦的“图表数据表”入口。
    - 表格最多包含最近 20 根或当前可见范围中的 20 根，不渲染完整历史。
    - 表格包含 time、OHLC、volume，格式与视觉 legend 一致。
-10. `FinancialChartFrame` 的 full density 显示导出按钮。panel density 由尺寸决定只保留菜单入口，compact 默认隐藏。
+10. `FinancialChartFrame` 的 panel density 通过紧凑菜单显示导出入口，compact 默认隐藏导出操作；可访问性摘要和有界数据表不因密度关闭。
 
 ### 预计修改文件
 
@@ -734,7 +723,7 @@ type FinancialChartHandle = {
 
 ### 完成标准
 
-- 完整行情页可导出当前主题下的 PNG，以及不超过 50,000 根上限的全部已加载 bars CSV。
+- 工作台图表面板可导出当前主题下的 PNG，以及不超过 50,000 根上限的全部已加载 bars CSV。
 - 导出不改变 viewport、crosshair 或用户 pane 比例。
 - 键盘和屏幕阅读器用户可以访问图表摘要和有限数据表。
 - 未显示导出或表格入口的紧凑场景不增加额外 Canvas 或大量 DOM。
@@ -882,7 +871,7 @@ type StudyRuntime = {
 
 ### UI 设计
 
-1. 指标入口只在 full 和 panel density 显示，compact 数据页默认关闭。
+1. 指标入口只在 panel density 显示，compact 数据页默认关闭；独立行情页恢复后再接入 full density。
 2. IndicatorDialog 懒加载，第一次打开前不进入 eager bundle。
 3. 选择器只展示五类服务端 definitions，支持名称搜索和 main/separate 分类。
 4. legend 显示 instance 名、参数和当前值，提供：
@@ -892,7 +881,7 @@ type StudyRuntime = {
    - 上移/下移。
 5. 参数编辑使用 definition 的 min/max/step，提交前在前端快速校验，服务端仍做权威校验。
 6. 样式首版只允许颜色和线宽，不实现 plot style、模板、收藏和显示周期规则。
-7. 工作台 panel 将 instances 保存到 config；独立行情页保存在页面本地；数据页不保存指标。
+7. 工作台 panel 将 instances 保存到 config；数据页不保存指标。独立行情页恢复实施后再增加页面本地配置。
 
 ### 预计修改文件
 
@@ -1009,7 +998,7 @@ type AlphaChartSyncConfig = {
 
 ### 目标
 
-允许完整行情页和 Chart Panel 为主标的添加最多 3 个对比标的，以相对收益线在独立百分比轴上展示，并在 legend 中显示当前对比值。
+允许 Chart Panel 为主标的添加最多 3 个对比标的，以相对收益线在独立百分比轴上展示，并在 legend 中显示当前对比值。独立行情页恢复后复用同一入口。
 
 ### 必须阅读的参考
 
@@ -1039,7 +1028,7 @@ type AlphaChartSyncConfig = {
 2. 对比 series 使用独立 `comparison-scale` 左轴，单位为 `%`，不改变主 K 线右侧绝对价格轴。
 3. 主标的相对收益线使用主题主强调色，对比颜色来自有界调色板或配置，不能与涨跌色产生语义冲突。
 4. 对比选择器复用证券搜索，排除主标的和已选标的。
-5. full density 显示完整管理入口；panel density 使用紧凑菜单；compact 数据页不显示。
+5. panel density 使用紧凑菜单；compact 数据页不显示。独立行情页恢复后再提供 full density 的完整管理入口。
 6. Chart Panel config 保存 `comparisons`，旧配置默认空数组。
 7. 对比 legend 与指标 legend 使用同一个 crosshair snapshot，不能增加第二个 crosshair 订阅。
 
@@ -1305,7 +1294,7 @@ Python 修改运行 Alpha 已有格式、静态检查和相关 pytest。若任�
 
 ### 批次一
 
-- [ ] 任务 1：完整行情页与受控图表配置。
+- [x] 任务 1：受控公共图表配置。
 - [ ] 任务 2：专业价格、时间与 pane 语义。
 - [ ] 任务 3：图表导出与可访问性。
 
@@ -1322,7 +1311,7 @@ Python 修改运行 Alpha 已有格式、静态检查和相关 pytest。若任�
 
 ## 全部计划完成标准
 
-- 数据页、独立行情页和工作台 Chart Panel 复用同一公共图表与 Scene。
+- 数据页和工作台 Chart Panel 复用同一公共图表与 Scene，独立行情页已经明确暂缓并可在后续作为薄页面接入。
 - 图表具备受控周期、复权、类型、成交量、精度、时区、昨收和最新价语义。
 - PNG、CSV 和可访问性形成完整用户入口。
 - 首批五类指标由 Alpha 服务端计算，并支持 overlay、独立 pane、legend 和版本化配置。

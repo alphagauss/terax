@@ -4,7 +4,10 @@
  */
 
 import type { AlphaWorkstationLayout } from "@/modules/alpha/workstation/model";
-import { parseAlphaWorkstationLayout } from "@/modules/alpha/workstation/layout";
+import {
+  parseAlphaWorkstationLayout,
+  updateAlphaPanelConfig,
+} from "@/modules/alpha/workstation/layout";
 import {
   createAlphaPanelRegistry,
   type AlphaPanelDescriptor,
@@ -165,5 +168,28 @@ describe("Alpha workstation layout", () => {
       type: "future-panel",
       config: { source: "saved-layout" },
     });
+  });
+
+  it("只更新目标面板的已归一化配置", () => {
+    const layout = validLayout();
+    const untouchedPanel = layout.panels[1];
+    const next = updateAlphaPanelConfig(
+      layout,
+      "panel-chart",
+      { interval: " 1h " },
+      registry,
+    );
+
+    expect(next).not.toBe(layout);
+    expect(next.grid).toBe(layout.grid);
+    expect(next.panels[0]).toMatchObject({
+      id: "panel-chart",
+      binding: { mode: "follow" },
+      config: { interval: "1h" },
+    });
+    expect(next.panels[1]).toBe(untouchedPanel);
+    expect(
+      updateAlphaPanelConfig(layout, "panel-chart", { interval: 1 }, registry),
+    ).toBe(layout);
   });
 });

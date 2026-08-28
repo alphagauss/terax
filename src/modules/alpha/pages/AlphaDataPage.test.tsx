@@ -16,6 +16,7 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 const mocks = vi.hoisted(() => ({
   getAlphaDataOverview: vi.fn(),
   getAlphaSecurities: vi.fn(),
+  sceneProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
@@ -29,8 +30,14 @@ vi.mock("@/modules/alpha/components/AlphaServiceBoundary", () => ({
 }));
 
 vi.mock("@/modules/alpha/chart/scenes/MarketChartScene", () => ({
-  MarketChartScene: ({ vtSymbol }: { vtSymbol: string | null }) =>
-    createElement("div", { "data-chart-symbol": vtSymbol ?? "" }, "chart"),
+  MarketChartScene: (props: Record<string, unknown>) => {
+    mocks.sceneProps = props;
+    return createElement(
+      "div",
+      { "data-chart-symbol": props.vtSymbol ?? "" },
+      "chart",
+    );
+  },
 }));
 
 vi.mock("react-i18next", () => ({
@@ -100,6 +107,7 @@ describe("AlphaDataPage", () => {
       limit: 50,
       offset: 0,
     });
+    mocks.sceneProps = null;
   });
 
   afterEach(() => {
@@ -124,6 +132,14 @@ describe("AlphaDataPage", () => {
     expect(container.querySelector("select")).toBeNull();
     expect(container.querySelectorAll('[role="combobox"]')).toHaveLength(4);
     expect(container.querySelector("[data-chart-symbol='']")).not.toBeNull();
+    expect(mocks.sceneProps).toMatchObject({
+      density: "compact",
+      options: {
+        interval: "d",
+        adjust: "forward",
+        chartType: "candlestick",
+      },
+    });
 
     const symbolButton = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent === "000001.SZSE",
@@ -134,9 +150,11 @@ describe("AlphaDataPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(
-      container.querySelector("[data-chart-symbol='000001.SZSE']"),
-    ).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(
+        container.querySelector("[data-chart-symbol='000001.SZSE']"),
+      ).not.toBeNull();
+    });
   });
 
   it("搜索使用防抖服务端查询，手动刷新强制绕过概览缓存", async () => {

@@ -1,17 +1,28 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责图表类型、OHLC 信息、状态覆盖层和历史加载反馈，不拥有行情查询。
+ * 外壳负责受控周期、复权、图表类型、OHLC 信息和状态反馈，不拥有行情查询。
  */
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/controls/select";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { FinancialChart } from "@/modules/alpha/chart/components/FinancialChart";
 import type {
   FinancialChartStatus,
-  FinancialChartType,
+  MarketChartDensity,
+  MarketChartInterval,
+  MarketChartOptions,
 } from "@/modules/alpha/chart/model";
+import { FINANCIAL_CHART_TYPES } from "@/modules/alpha/chart/model";
 import type { MarketBar } from "@/modules/alpha/market/model";
+import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import { FitToScreenIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -22,31 +33,33 @@ type Props = {
   bars: readonly MarketBar[];
   dataKey: string;
   symbol: string | null;
-  chartType: FinancialChartType;
+  options: MarketChartOptions;
+  availableIntervals: readonly MarketChartInterval[];
+  density: MarketChartDensity;
   status: FinancialChartStatus;
   historyError: boolean;
   hasMoreBefore: boolean;
   loadingMore: boolean;
   visible: boolean;
-  onChartTypeChange: (type: FinancialChartType) => void;
+  onOptionsChange: (options: MarketChartOptions) => void;
   onRequestMore: () => void;
   onRetry: () => void;
 };
 
-const CHART_TYPES: FinancialChartType[] = ["candlestick", "ohlc", "line"];
-
-/** 渲染带工具栏、信息栏和状态反馈的公共金融图表。 */
+/** 根据使用密度渲染受控工具栏、信息栏和状态反馈。 */
 export function FinancialChartFrame({
   bars,
   dataKey,
   symbol,
-  chartType,
+  options,
+  availableIntervals,
+  density,
   status,
   historyError,
   hasMoreBefore,
   loadingMore,
   visible,
-  onChartTypeChange,
+  onOptionsChange,
   onRequestMore,
   onRetry,
 }: Props) {
@@ -102,18 +115,104 @@ export function FinancialChartFrame({
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border/60 bg-background/40">
       <div className="flex min-h-9 items-center justify-between gap-3 border-b border-border/60 px-2">
         <div className="flex min-w-0 items-center gap-1">
-          {CHART_TYPES.map((type) => (
-            <Button
-              key={type}
-              size="sm"
-              variant={chartType === type ? "secondary" : "ghost"}
-              className="h-7 px-2 text-[11px]"
-              aria-pressed={chartType === type}
-              onClick={() => onChartTypeChange(type)}
-            >
-              {t(`data.chart.types.${type}`)}
-            </Button>
-          ))}
+          {density === "panel" ? (
+            <>
+              <Select
+                value={options.interval}
+                onValueChange={(value) => {
+                  const interval = availableIntervals.find(
+                    (candidate) => candidate === value,
+                  );
+                  if (interval) onOptionsChange({ ...options, interval });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 min-w-14 rounded-md px-2 text-[11px]"
+                  title={t("data.chart.controls.interval")}
+                  aria-label={t("data.chart.controls.interval")}
+                >
+                  <SelectValue>
+                    {t(`data.chart.intervals.${options.interval}`)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {availableIntervals.map((interval) => (
+                    <SelectItem key={interval} value={interval}>
+                      {t(`data.chart.intervals.${interval}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={options.adjust}
+                onValueChange={(value) => {
+                  const adjust = MARKET_ADJUSTMENTS.find(
+                    (candidate) => candidate === value,
+                  );
+                  if (adjust) onOptionsChange({ ...options, adjust });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 min-w-16 rounded-md px-2 text-[11px]"
+                  title={t("data.chart.controls.adjust")}
+                  aria-label={t("data.chart.controls.adjust")}
+                >
+                  <SelectValue>
+                    {t(`data.chart.adjustments.${options.adjust}`)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {MARKET_ADJUSTMENTS.map((adjust) => (
+                    <SelectItem key={adjust} value={adjust}>
+                      {t(`data.chart.adjustments.${adjust}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={options.chartType}
+                onValueChange={(value) => {
+                  const chartType = FINANCIAL_CHART_TYPES.find(
+                    (candidate) => candidate === value,
+                  );
+                  if (chartType) onOptionsChange({ ...options, chartType });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-7 min-w-18 rounded-md px-2 text-[11px]"
+                  title={t("data.chart.controls.chartType")}
+                  aria-label={t("data.chart.controls.chartType")}
+                >
+                  <SelectValue>
+                    {t(`data.chart.types.${options.chartType}`)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {FINANCIAL_CHART_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {t(`data.chart.types.${type}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </>
+          ) : (
+            FINANCIAL_CHART_TYPES.map((type) => (
+              <Button
+                key={type}
+                size="sm"
+                variant={options.chartType === type ? "secondary" : "ghost"}
+                className="h-7 px-2 text-[11px]"
+                aria-pressed={options.chartType === type}
+                onClick={() => onOptionsChange({ ...options, chartType: type })}
+              >
+                {t(`data.chart.types.${type}`)}
+              </Button>
+            ))
+          )}
           <Button
             type="button"
             size="icon"
@@ -177,7 +276,7 @@ export function FinancialChartFrame({
         <FinancialChart
           bars={bars}
           dataKey={dataKey}
-          chartType={chartType}
+          chartType={options.chartType}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}

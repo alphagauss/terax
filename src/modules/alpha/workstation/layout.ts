@@ -7,6 +7,7 @@ import {
   ALPHA_WORKSTATION_GRID_COLUMNS,
   ALPHA_WORKSTATION_SCHEMA_VERSION,
   normalizeAlphaVtSymbol,
+  type AlphaPanelConfig,
   type AlphaGridItem,
   type AlphaPanelInstance,
   type AlphaWorkstationLayout,
@@ -79,6 +80,34 @@ export type AlphaWorkstationLayoutIssue = {
 export type AlphaWorkstationLayoutResult =
   | { ok: true; layout: AlphaWorkstationLayout }
   | { ok: false; issues: AlphaWorkstationLayoutIssue[] };
+
+/**
+ * 更新一个已注册面板的配置。
+ *
+ * descriptor 在写入前完成面板专用归一化；无效配置、未知面板或未变化的值保持原布局引用。
+ */
+export function updateAlphaPanelConfig(
+  layout: AlphaWorkstationLayout,
+  panelId: string,
+  value: AlphaPanelConfig,
+  registry: AlphaPanelRegistry,
+): AlphaWorkstationLayout {
+  const index = layout.panels.findIndex((panel) => panel.id === panelId);
+  if (index < 0) return layout;
+  const panel = layout.panels[index];
+  const descriptor = registry.get(panel.type);
+  if (!descriptor) return layout;
+
+  try {
+    const config = panelConfigSchema.parse(descriptor.validateConfig(value));
+    if (JSON.stringify(config) === JSON.stringify(panel.config)) return layout;
+    const panels = [...layout.panels];
+    panels[index] = { ...panel, config };
+    return { ...layout, panels };
+  } catch {
+    return layout;
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

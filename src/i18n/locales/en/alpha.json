@@ -91,7 +91,7 @@
     "chart": {
       "title": "Daily bars",
       "description": "Forward-adjusted daily candles and volume. Scroll left to load earlier history.",
-      "aria": "Daily candlestick chart for {{symbol}}",
+      "aria": "Financial chart for {{symbol}}",
       "empty": "Select a security with available daily bars.",
       "error": "Could not load market data.",
       "retry": "Retry",
@@ -103,6 +103,22 @@
         "candlestick": "Candles",
         "ohlc": "OHLC",
         "line": "Close line"
+      },
+      "controls": {
+        "interval": "Bar interval",
+        "adjust": "Price adjustment",
+        "chartType": "Chart type"
+      },
+      "intervals": {
+        "1m": "1m",
+        "1h": "1h",
+        "d": "1D",
+        "w": "1W"
+      },
+      "adjustments": {
+        "none": "Unadjusted",
+        "forward": "Forward adjusted",
+        "backward": "Backward adjusted"
       },
       "legend": {
         "open": "O",

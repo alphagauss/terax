@@ -4,7 +4,10 @@
  */
 
 import { cn } from "@/lib/utils";
-import type { AlphaPanelInstance } from "@/modules/alpha/workstation/model";
+import type {
+  AlphaPanelConfig,
+  AlphaPanelInstance,
+} from "@/modules/alpha/workstation/model";
 import { resolveAlphaPanelSymbol } from "@/modules/alpha/workstation/state";
 import type { AlphaPanelRegistry } from "@/modules/alpha/workstation/registry";
 import {
@@ -38,6 +41,7 @@ type AlphaPanelPoolProps = {
   registry: AlphaPanelRegistry;
   mainSymbol: string;
   visible: boolean;
+  onPanelConfigChange: (panelId: string, config: AlphaPanelConfig) => void;
   children: ReactNode;
 };
 
@@ -104,6 +108,7 @@ type PooledPanelProps = {
   registry: AlphaPanelRegistry;
   mainSymbol: string;
   visible: boolean;
+  onPanelConfigChange: (panelId: string, config: AlphaPanelConfig) => void;
 };
 
 function PooledPanel({
@@ -111,6 +116,7 @@ function PooledPanel({
   registry,
   mainSymbol,
   visible,
+  onPanelConfigChange,
 }: PooledPanelProps) {
   const mounts = useContext(AlphaPanelMountContext);
   if (!mounts) {
@@ -124,6 +130,10 @@ function PooledPanel({
   });
   const descriptor = registry.get(panel.type);
   const vtSymbol = resolveAlphaPanelSymbol(panel.binding, mainSymbol);
+  const changeConfig = useCallback(
+    (config: AlphaPanelConfig) => onPanelConfigChange(panel.id, config),
+    [onPanelConfigChange, panel.id],
+  );
 
   useLayoutEffect(() => {
     mounts.registerContainer(panel.id, container);
@@ -152,6 +162,7 @@ function PooledPanel({
             vtSymbol={vtSymbol}
             config={panel.config}
             visible={visible}
+            onConfigChange={changeConfig}
           />
         </Suspense>
       </AlphaPanelErrorBoundary>
@@ -172,6 +183,7 @@ export function AlphaPanelPool({
   registry,
   mainSymbol,
   visible,
+  onPanelConfigChange,
   children,
 }: AlphaPanelPoolProps) {
   const depotRef = useRef<HTMLDivElement>(null);
@@ -213,6 +225,7 @@ export function AlphaPanelPool({
           registry={registry}
           mainSymbol={mainSymbol}
           visible={visible}
+          onPanelConfigChange={onPanelConfigChange}
         />
       ))}
     </AlphaPanelMountContext.Provider>

@@ -4,6 +4,7 @@
  */
 
 import type {
+  MarketAdjust,
   MarketBarPage,
   MarketInterval,
 } from "@/modules/alpha/market/model";
@@ -162,7 +163,7 @@ export type AlphaSecurityQuery = {
 
 export type AlphaBarQuery = {
   interval?: MarketInterval;
-  adjust?: "none" | "forward" | "backward";
+  adjust?: MarketAdjust;
   start?: string;
   end?: string;
   before?: string;
@@ -257,6 +258,14 @@ export function getAlphaSecurities(query: AlphaSecurityQuery = {}): Promise<{
   append("limit", query.limit ?? 50);
   append("offset", query.offset ?? 0);
   return alphaGet("/api/alpha/securities", securitiesSchema, params);
+}
+
+/** 读取单个证券的权威目录详情，当前只消费公共目录字段。 */
+export function getAlphaSecurity(vtSymbol: string): Promise<AlphaSecurity> {
+  return alphaGet(
+    `/api/alpha/securities/${encodeURIComponent(vtSymbol)}`,
+    securitySchema,
+  );
 }
 
 /** 查询单证券 K 线，并在 API 边界归一化为图表引擎无关模型。 */

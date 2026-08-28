@@ -19,6 +19,10 @@ import {
 } from "@/modules/alpha/api";
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
 import {
+  DEFAULT_MARKET_CHART_OPTIONS,
+  type MarketChartOptions,
+} from "@/modules/alpha/chart/model";
+import {
   AlphaEmptyText,
   AlphaLoading,
   AlphaMetric,
@@ -63,8 +67,17 @@ function AlphaDataPageContent({ visible }: Props) {
   const [interval, setInterval] = useState("");
   const [offset, setOffset] = useState(0);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [chartOptions, setChartOptions] = useState<MarketChartOptions>(() => ({
+    ...DEFAULT_MARKET_CHART_OPTIONS,
+  }));
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<unknown>(null);
+  const changeChartOptions = useCallback((next: MarketChartOptions) => {
+    setChartOptions((current) => ({
+      ...current,
+      chartType: next.chartType,
+    }));
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -298,7 +311,13 @@ function AlphaDataPageContent({ visible }: Props) {
             description={t("data.chart.description")}
           />
           <div className="mt-3 h-96">
-            <MarketChartScene vtSymbol={selectedSymbol} visible={visible} />
+            <MarketChartScene
+              vtSymbol={selectedSymbol}
+              visible={visible}
+              options={chartOptions}
+              density="compact"
+              onOptionsChange={changeChartOptions}
+            />
           </div>
         </section>
       </div>

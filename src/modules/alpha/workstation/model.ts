@@ -71,6 +71,7 @@ export type AlphaPanelProps = {
   vtSymbol: string;
   config: AlphaPanelConfig;
   visible: boolean;
+  onConfigChange: (config: AlphaPanelConfig) => void;
 };
 
 /** 归一化并校验 Alpha 内部的 `代码.交易所` 标的格式。 */

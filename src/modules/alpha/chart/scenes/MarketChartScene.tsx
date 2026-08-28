@@ -1,23 +1,29 @@
 /**
  * 本文件把 Alpha 有界历史查询连接到公共金融图表。
- * Scene 负责排他游标、跨页合并、请求单飞和查询键隔离，不接触图表实例。
+ * Scene 负责权威周期、排他游标、跨页合并和查询键隔离，不接触图表实例。
  */
 
-import { getAlphaBars } from "@/modules/alpha/api";
+import { getAlphaBars, getAlphaSecurity } from "@/modules/alpha/api";
 import { FinancialChartFrame } from "@/modules/alpha/chart/components/FinancialChartFrame";
 import type {
   FinancialChartStatus,
-  FinancialChartType,
+  MarketChartDensity,
+  MarketChartInterval,
+  MarketChartOptions,
 } from "@/modules/alpha/chart/model";
+import { MARKET_CHART_INTERVALS } from "@/modules/alpha/chart/model";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
 import { alphaQueryKeys } from "@/modules/alpha/query";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
 
 type Props = {
   vtSymbol: string | null;
   visible: boolean;
+  options: MarketChartOptions;
+  density: MarketChartDensity;
+  onOptionsChange: (options: MarketChartOptions) => void;
 };
 
 /** 把按“最新到更早”存放的查询页合并成时间升序行情。 */
@@ -31,15 +37,45 @@ export function mergeHistoricalPages(
   return mergeMarketBarPages([], chronological);
 }
 
-/** 为单证券提供有界历史分页和公共图表状态。 */
-export function MarketChartScene({ vtSymbol, visible }: Props) {
-  const [chartType, setChartType] = useState<FinancialChartType>("candlestick");
+/** 过滤证券详情声明的周期，K 线图不接受 tick 或未知值。 */
+export function supportedChartIntervals(
+  intervals: readonly string[],
+): MarketChartInterval[] {
+  const declared = new Set(intervals);
+  return MARKET_CHART_INTERVALS.filter((interval) => declared.has(interval));
+}
+
+/** 为单证券和受控配置提供权威周期、有界历史分页及公共图表状态。 */
+export function MarketChartScene({
+  vtSymbol,
+  visible,
+  options,
+  density,
+  onOptionsChange,
+}: Props) {
+  const securityQuery = useQuery({
+    queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
+    queryFn: () => getAlphaSecurity(vtSymbol ?? ""),
+    enabled: density === "panel" && visible && vtSymbol !== null,
+  });
+  const declaredIntervals = useMemo(
+    () => supportedChartIntervals(securityQuery.data?.intervals ?? []),
+    [securityQuery.data?.intervals],
+  );
+  const availableIntervals =
+    declaredIntervals.length > 0 ? declaredIntervals : [options.interval];
+
   const query = useInfiniteQuery({
-    queryKey: [...alphaQueryKeys.bars, vtSymbol, "d", "forward"],
+    queryKey: [
+      ...alphaQueryKeys.bars,
+      vtSymbol,
+      options.interval,
+      options.adjust,
+    ],
     queryFn: ({ pageParam }) =>
       getAlphaBars(vtSymbol ?? "", {
-        interval: "d",
-        adjust: "forward",
+        interval: options.interval,
+        adjust: options.adjust,
         before: pageParam ?? undefined,
       }),
     initialPageParam: null as string | null,
@@ -73,15 +109,19 @@ export function MarketChartScene({ vtSymbol, visible }: Props) {
   return (
     <FinancialChartFrame
       bars={bars}
-      dataKey={vtSymbol ? `${vtSymbol}|d|forward` : "empty"}
+      dataKey={
+        vtSymbol ? `${vtSymbol}|${options.interval}|${options.adjust}` : "empty"
+      }
       symbol={vtSymbol}
-      chartType={chartType}
+      options={options}
+      availableIntervals={availableIntervals}
+      density={density}
       status={status}
       historyError={query.isFetchNextPageError}
       hasMoreBefore={Boolean(query.hasNextPage)}
       loadingMore={query.isFetchingNextPage}
       visible={visible}
-      onChartTypeChange={setChartType}
+      onOptionsChange={onOptionsChange}
       onRequestMore={requestMore}
       onRetry={retry}
     />
