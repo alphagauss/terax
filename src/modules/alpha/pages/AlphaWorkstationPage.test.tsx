@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 工作台页面对共享状态和多工作组挂载的连接。
- * 重点锁定页面操作统一提交到共享 store，多个页面实例不会产生重复表单标识。
+ * 重点锁定页面操作和独立同步开关统一提交到共享 store，多个页面实例不会产生重复表单标识。
  */
 
 // @vitest-environment happy-dom
@@ -70,9 +70,9 @@ describe("AlphaWorkstationPage", () => {
       root?.render(<AlphaWorkstationPage visible />);
     });
 
-    const lockButton = container.querySelector<HTMLButtonElement>(
-      "button[aria-pressed='false']",
-    );
+    const lockButton = [
+      ...container.querySelectorAll<HTMLButtonElement>("button"),
+    ].find((button) => button.textContent?.includes("workstation.lock"));
     act(() => lockButton?.click());
 
     expect(mocks.updateState).toHaveBeenCalledTimes(1);
@@ -80,6 +80,38 @@ describe("AlphaWorkstationPage", () => {
       (state: AlphaWorkstationState) => AlphaWorkstationState,
     ];
     expect(update(createDefaultAlphaWorkstationState()).locked).toBe(true);
+  });
+
+  it("分别切换范围和十字线同步配置", async () => {
+    await act(async () => {
+      root?.render(<AlphaWorkstationPage visible />);
+    });
+
+    const rangeButton = container.querySelector<HTMLButtonElement>(
+      "[data-alpha-chart-range-sync]",
+    );
+    const crosshairButton = container.querySelector<HTMLButtonElement>(
+      "[data-alpha-chart-crosshair-sync]",
+    );
+    act(() => rangeButton?.click());
+    act(() => crosshairButton?.click());
+
+    expect(mocks.updateState).toHaveBeenCalledTimes(2);
+    const initial = createDefaultAlphaWorkstationState();
+    const [rangeUpdate] = mocks.updateState.mock.calls[0] as [
+      (state: AlphaWorkstationState) => AlphaWorkstationState,
+    ];
+    const [crosshairUpdate] = mocks.updateState.mock.calls[1] as [
+      (state: AlphaWorkstationState) => AlphaWorkstationState,
+    ];
+    expect(rangeUpdate(initial).chartSync).toEqual({
+      ...initial.chartSync,
+      rangeEnabled: true,
+    });
+    expect(crosshairUpdate(initial).chartSync).toEqual({
+      ...initial.chartSync,
+      crosshairEnabled: true,
+    });
   });
 
   it("多个工作组同时挂载工作台时使用独立的表单标识", async () => {

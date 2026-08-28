@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责受控图表选项、价格与指标 legend、懒加载管理入口、导出和状态反馈，不拥有查询。
+ * 外壳负责受控图表选项、价格与指标 legend、可选同步桥、懒加载管理入口、导出和状态反馈，不拥有查询。
  */
 
 import {
@@ -47,6 +47,7 @@ import type {
   ChartStudyResult,
 } from "@/modules/alpha/chart/studies/model";
 import { StudyLegend } from "@/modules/alpha/chart/studies/StudyLegend";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
@@ -80,6 +81,7 @@ type Props = {
   studyResults?: readonly ChartStudyResult[];
   studyLoading?: boolean;
   studyError?: boolean;
+  syncRuntime?: FinancialChartSyncRuntime | null;
   onOptionsChange: (options: MarketChartOptions) => void;
   onStudiesChange?: (studies: ChartStudyInstance[]) => void;
   onRequestMore: () => void;
@@ -111,6 +113,7 @@ export function FinancialChartFrame({
   studyResults = EMPTY_STUDY_RESULTS,
   studyLoading = false,
   studyError = false,
+  syncRuntime = null,
   onOptionsChange,
   onStudiesChange,
   onRequestMore,
@@ -567,6 +570,7 @@ export function FinancialChartFrame({
           paneRatios={options.paneRatios}
           studies={studies}
           studyResults={studyResults}
+          syncRuntime={syncRuntime}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}

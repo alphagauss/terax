@@ -1,6 +1,6 @@
 /**
  * 本文件测试公共金融图表 Controller 的生命周期和命令。
- * 重点锁定单实例、指标 series/pane、统一十字线、历史加载、视图和截图不变量。
+ * 重点锁定单实例、指标 series/pane、同步防环、统一十字线、历史加载、视图和截图不变量。
  */
 
 import type {
@@ -35,7 +35,10 @@ const mocks = vi.hoisted(() => {
   const timeScale = {
     getVisibleLogicalRange: vi.fn(),
     setVisibleLogicalRange: vi.fn(),
+    setVisibleRange: vi.fn(),
     fitContent: vi.fn(),
+    subscribeVisibleTimeRangeChange: vi.fn(),
+    unsubscribeVisibleTimeRangeChange: vi.fn(),
     subscribeVisibleLogicalRangeChange: vi.fn(),
     unsubscribeVisibleLogicalRangeChange: vi.fn(),
   };
@@ -51,6 +54,8 @@ const mocks = vi.hoisted(() => {
     timeScale: vi.fn(() => timeScale),
     subscribeCrosshairMove: vi.fn(),
     unsubscribeCrosshairMove: vi.fn(),
+    setCrosshairPosition: vi.fn(),
+    clearCrosshairPosition: vi.fn(),
     applyOptions: vi.fn(),
     takeScreenshot: vi.fn(() => ({ width: 800, height: 400 })),
     remove: vi.fn(),
@@ -462,6 +467,143 @@ describe("FinancialChartController", () => {
       vi.runAllTimers();
 
       expect(mocks.chart.applyOptions).toHaveBeenCalledTimes(visibleCalls);
+      controller.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("只在启用范围同步时监听实际时间，并阻止同步命令回传和加载历史", () => {
+    vi.useFakeTimers();
+    try {
+      const onVisibleTimeRangeChange = vi.fn();
+      const onRequestMore = vi.fn();
+      const host = chartHost();
+      const controller = new FinancialChartController(host);
+      expect(
+        mocks.timeScale.subscribeVisibleTimeRangeChange,
+      ).not.toHaveBeenCalled();
+      controller.setCallbacks({ onVisibleTimeRangeChange, onRequestMore });
+      controller.setBars("000001.SZSE|d|forward", [
+        bar("2026-07-29", 11),
+        bar("2026-07-30", 12),
+      ]);
+      controller.setHistoryState(true, false);
+      const pointerHandler = vi
+        .mocked(host.addEventListener)
+        .mock.calls.find(
+          ([type]) => type === "pointerdown",
+        )?.[1] as EventListener;
+      pointerHandler(new Event("pointerdown"));
+      const timeHandler = mocks.timeScale.subscribeVisibleTimeRangeChange.mock
+        .calls[0][0] as (range: {
+        from: { year: number; month: number; day: number };
+        to: { year: number; month: number; day: number };
+      }) => void;
+      const logicalHandler = mocks.timeScale.subscribeVisibleLogicalRangeChange
+        .mock.calls[0][0] as (range: { from: number; to: number }) => void;
+
+      timeHandler({
+        from: { year: 2026, month: 7, day: 1 },
+        to: { year: 2026, month: 7, day: 30 },
+      });
+      expect(onVisibleTimeRangeChange).toHaveBeenCalledWith({
+        from: { kind: "trading-day", date: "2026-07-01" },
+        to: { kind: "trading-day", date: "2026-07-30" },
+      });
+
+      mocks.timeScale.setVisibleRange.mockImplementationOnce((range) => {
+        timeHandler(range);
+        logicalHandler({ from: 0, to: 10 });
+      });
+      controller.setVisibleTimeRangeFromSync({
+        from: { kind: "trading-day", date: "2026-07-29" },
+        to: { kind: "trading-day", date: "2026-07-30" },
+      });
+
+      expect(mocks.timeScale.setVisibleRange).toHaveBeenCalledWith({
+        from: { year: 2026, month: 7, day: 29 },
+        to: { year: 2026, month: 7, day: 30 },
+      });
+      expect(onVisibleTimeRangeChange).toHaveBeenCalledOnce();
+      expect(onRequestMore).not.toHaveBeenCalled();
+      vi.runAllTimers();
+
+      controller.setCallbacks({ onRequestMore });
+      expect(
+        mocks.timeScale.unsubscribeVisibleTimeRangeChange,
+      ).toHaveBeenCalledOnce();
+      controller.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("十字线同步复用现有订阅、精确使用本地价格并让本地 pointer 优先", () => {
+    vi.useFakeTimers();
+    try {
+      const onCrosshairTimeChange = vi.fn();
+      const onCrosshairChange = vi.fn();
+      const host = chartHost();
+      const controller = new FinancialChartController(host);
+      const first = bar("2026-07-29", 11);
+      const second = bar("2026-07-30", 12);
+      controller.setBars("000001.SZSE|d|forward", [first, second]);
+      const sma = studyInstance("sma-1", "sma");
+      controller.setStudies([studyResult("sma-1", "main", ["line"])], [sma]);
+      controller.setCallbacks({ onCrosshairChange, onCrosshairTimeChange });
+      const pointerEnter = vi
+        .mocked(host.addEventListener)
+        .mock.calls.find(
+          ([type]) => type === "pointerenter",
+        )?.[1] as EventListener;
+      const pointerLeave = vi
+        .mocked(host.addEventListener)
+        .mock.calls.find(
+          ([type]) => type === "pointerleave",
+        )?.[1] as EventListener;
+      const handler = mocks.chart.subscribeCrosshairMove.mock
+        .calls[0][0] as (params: {
+        time?: { year: number; month: number; day: number };
+        seriesData: Map<unknown, { value: number }>;
+      }) => void;
+      mocks.chart.setCrosshairPosition.mockImplementationOnce(
+        (_price, time) => {
+          handler({ time, seriesData: new Map() });
+        },
+      );
+
+      pointerEnter(new Event("pointerenter"));
+      handler({
+        time: { year: 2026, month: 7, day: 29 },
+        seriesData: new Map(),
+      });
+      expect(onCrosshairTimeChange).toHaveBeenLastCalledWith(first.time);
+
+      controller.setCrosshairFromSync(second.time, second);
+      expect(mocks.chart.setCrosshairPosition).not.toHaveBeenCalled();
+
+      pointerLeave(new Event("pointerleave"));
+      expect(onCrosshairTimeChange).toHaveBeenLastCalledWith(null);
+      expect(mocks.chart.setCrosshairPosition).toHaveBeenCalledWith(
+        12,
+        { year: 2026, month: 7, day: 30 },
+        mocks.series[0],
+      );
+      expect(onCrosshairTimeChange).toHaveBeenCalledTimes(2);
+      vi.runAllTimers();
+      expect(onCrosshairChange).toHaveBeenLastCalledWith(second, {
+        "sma-1": { line: 1 },
+      });
+
+      controller.setCrosshairFromSync(
+        { kind: "trading-day", date: "2026-07-31" },
+        null,
+      );
+      expect(mocks.chart.clearCrosshairPosition).toHaveBeenCalledOnce();
+      expect(mocks.chart.subscribeCrosshairMove).toHaveBeenCalledOnce();
+      vi.runAllTimers();
+      expect(onCrosshairChange).toHaveBeenLastCalledWith(null, {});
       controller.destroy();
     } finally {
       vi.useRealTimers();

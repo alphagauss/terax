@@ -5,67 +5,65 @@
 ## 当前状态
 
 - 当前阶段：公共图表批次二，指标与多图分析。
-- 当前任务：任务 5，指标 pane、legend 与管理界面。已完成。
-- 下一任务：任务 6，多图时间范围与十字线同步。
+- 当前任务：任务 6，多图时间范围与十字线同步。已完成。
+- 下一任务：任务 7，对比标的叠加。
 - 已暂缓：独立 `alpha-market` 行情页，待公共图表能力稳定后重新安排。
 - 阻塞：无。
 
 ## 当前任务
 
-目标是把任务 4 的五类服务端指标形成工作台内的完整交互闭环，包括添加、参数与样式修改、显隐、删除、排序、legend、overlay 和独立 pane，并保持图表实例、主价格 series、viewport 与语义 pane 比例稳定。
+目标是在当前 Alpha 工作台内为多张 Chart Panel 提供相互独立的时间范围与十字线同步。同步使用实际行情时间和当前面板本地价格，不共享图表实例，不改变主标的 follow/pinned，也不持久化运行时事件。
 
-- `FinancialChartController` 使用增量 study registry 管理 series、参考水平线和 pane，不重建 chart 或主价格 series。
-- 成交量可见时占第一个辅助 pane，其后每个 visible separate study 独占一个 pane；成交量隐藏时指标自动前移，最多 4 个独立指标 pane。
-- 十字线从现有单个订阅的 `seriesData` 一次提取 OHLC 与全部指标值，并通过同一个 rAF 快照提交 legend。
-- 指标入口只出现在 panel density。Dialog 首次打开时才懒加载并查询 definition；数据页 compact 场景不加载、不保存指标。
-- 工作台 Chart Panel 持久化完整 instance 顺序、参数、显隐和样式；删除实例同时清理其语义 pane 比例。
+- 工作台级 `ChartSyncProvider` 只管理当前页面的同步订阅，范围与十字线分别按动画帧合并，事件不会驱动工作台 React 子树逐次重渲染。
+- 工作台状态显式升级版本并保存同步组 ID 与两个开关；旧版本通过纯迁移补齐配置，范围、十字线和来源 ID 不进入共享配置。
+- 首版兼容性只比较 `interval + adjust`。不同标的可以同步，不同周期或复权的面板忽略事件。
+- Controller 只在范围同步启用时订阅实际时间范围；十字线复用现有单个订阅，接收方仅在本地存在完全相同时间的 bar 时定位。
+- 同步命令使用 mutation guard 防止回传循环；本地 pointer 十字线优先，离开后才允许远端同步位置生效。
 
-完成标准：五类指标可以选择、计算、渲染、编辑和恢复；局部指标失败不影响主 K 线；未启用指标时不加载 Dialog、不请求计算、不创建 study series 或 pane。
+完成标准：双图可以分别启停范围和十字线同步，无事件循环、无图表重建、无持久化运行时垃圾；关闭全部同步时不增加图表监听器或动画帧调度。
 
 ## 当前任务方案
 
 本节是覆盖式临时记录。每次开始新的 Alpha 任务前，必须先用新任务的目标、范围、实施步骤和验证标准完整替换本节，不保留已完成任务方案的历史副本。长期结论和已完成基线同步到长期架构，任务历史由 Git 保存。
 
-长期边界见 [Alpha 综合量化工作站](./alpha-quant-workstation.md) 的“图表状态和领域模型”。本节只记录任务 5 的前端、Controller、持久化和运行时验证范围；Python 协议继续使用任务 4 已完成的接口。
+长期边界见 [Alpha 综合量化工作站](./alpha-quant-workstation.md) 的“主标的联动与多图同步”。本节只记录任务 6 的前端运行时、Controller、工作台状态和真实 Tauri 验证范围；本任务不修改 Python、Rust 或行情 API。
 
 ### 目标与范围
 
-- 只渲染任务 4 的 line 与 histogram，不增加 area、band、用户脚本、收藏、模板或按周期显隐规则。
-- overlay 固定进入 pane 0；RSI 与 MACD 每个实例独占一个 pane，不支持手动合并或自定义 routing。
-- 样式首版只保存颜色、1 到 4 线宽及 histogram 正负颜色，不增加输出显隐、透明度或 plot style。
-- definitions 只在 Dialog 打开时查询；计算仍由 Scene 按 visible instances 和页面可见性启用。
-- 指标实例只属于工作台 Chart Panel 配置，compact 数据页继续传空实例且不显示入口。
+- 只同步当前工作台 Provider 内的 Chart Panel，不跨 Workspace 进程、不跨页面、不增加多组编辑 UI。
+- 只传播实际 `MarketTime` 范围和十字线时间，不传播 logical index、价格、bar 数组、pane 或 viewport 状态。
+- 接收十字线时使用本地完全同时间 bar 的 close；缺少精确时间就清除，不做最近点回退。
+- 两个开关放在工作台工具栏并独立持久化；同步组首版使用固定默认组，不开放命名和颜色。
+- 关闭同步时保留现有历史加载和指标 legend 路径，不建立实际时间范围监听或同步 rAF 调度。
 
 ### 实施步骤
 
-1. 增加 study routing、series payload、默认 instance 和配置 schema 测试，先锁定 pane 上限、稳定 ID 与序列化边界。
-2. 在 Controller 增加增量 study registry、动态 pane 重排、水平线、主题样式、语义比例和统一十字线快照。
-3. 把 Scene 的 definition、calculation result、loading 和局部 error 传入 Frame 与图表宿主，不改变主行情状态。
-4. 增加懒加载 IndicatorDialog、紧凑 legend 与添加、编辑、显隐、删除、排序操作，并补齐中英文文案。
-5. 扩展 Chart Panel 配置持久化和迁移测试，运行 10,000 点、4 指标转换性能检查及完整前端、Alpha 回归。
-6. 在真实 Tauri WebView 按同一复现约定验证添加删除、pane 比例、主题、最小高度、页面隐藏恢复和实例稳定性。
+1. 新增同步 Provider 与事件测试，锁定同帧末值、来源防环、兼容过滤、独立开关和订阅清理。
+2. 将工作台状态从版本 1 显式迁移到版本 2，新增有界同步配置并验证只持久化配置。
+3. 为 Controller 增加实际时间范围回调与命令，复用现有十字线订阅，加入同步 mutation guard 和本地 pointer 优先规则。
+4. 从 Chart Panel 经 Scene、Frame、FinancialChart 桥接可选同步运行时，关闭时保持公共图表快速路径。
+5. 在工作台工具栏增加两个独立的国际化开关，运行相关测试及完整前端 lint、类型和测试检查。
+6. 在真实 Tauri 双图模板按同一复现约定检查同步、兼容退出、快速十字线、实例身份和配置恢复。
 
 ### 验证标准
 
-- overlay 始终进入 pane 0；成交量和 separate studies 按可见顺序连续排列，不留下空 pane，Controller 对第 5 个 separate study 做保护。
-- 参数、显隐、排序、主题和样式更新复用已有 chart 与未变化 series；主价格 series 身份、viewport 和历史加载状态不改变。
-- RSI 30/70 与 MACD 0 使用低强调水平线，axis label 关闭；MACD histogram 按正负值使用独立颜色。
-- pane 比例用 `main`、`volume` 和 instance ID 保存；重排前读取、重排后恢复，删除实例移除其比例键。
-- 十字线每帧只提交一个包含 bar 与全部 study values 的快照，不增加订阅；离开十字线后 legend 恢复最新值。
-- Dialog bundle 与 definition 请求只在 panel 用户首次打开指标入口后发生；隐藏实例不请求计算且不创建 series。
-- 真实 Tauri 复现约定：给定工作台单图、Modern 主题和真实 Alpha 日线，连续添加 SMA、BOLL、RSI、MACD，拖动 pane 后修改参数、主题、显隐与顺序；预期主图不重建、比例保持、最多 4 个独立 pane、最小面板仍可操作，隐藏页面恢复后只同步最终尺寸。
+- Provider 的 range 与 crosshair 各自最多每帧派发一次；来源面板、不兼容面板和已删除面板不消费事件。
+- Controller 应用同步范围或十字线时不再次 publish，不触发远端历史加载；快速操作没有来回抖动。
+- 范围开关不影响十字线，十字线开关不影响范围；关闭全部开关后 Controller 取消新增范围监听。
+- 切换一个 panel 的周期或复权后，该 panel 忽略旧兼容事件，另一个 panel 的选项和标的绑定不改变。
+- 状态版本 1 可纯迁移到版本 2；共享 JSON 只出现 `groupId`、`rangeEnabled` 和 `crosshairEnabled`。
+- 真实 Tauri 复现约定：给定双图模板、Modern 主题、两张具有日线的不同标的图，分别启用范围与十字线同步；预期拖动和快速 pointer 移动稳定跟随，禁用对应开关立即停止对应同步，修改一图周期或复权后不再消费原兼容事件，chart DOM 与主价格 Canvas 保持身份。
 
 ### 执行结果
 
-- `FinancialChartController` 已增加 output 级增量 study registry。未变化 series 复用，隐藏或删除只移除对应 series；overlay 固定在 pane 0，成交量和最多 4 个 separate studies 按当前配置连续排列，不留下空 pane，也不重建 chart 或主价格 series。
-- pane 结构变化前会按 `main`、`volume` 和 instance ID 捕获 stretch factor，重建空辅助 pane 后恢复。成交量隐藏时指标前移，显隐和排序后比例继续跟随 instance；删除实例时 Chart Panel 同时清理对应持久比例键。
-- line 与 histogram payload 由纯函数构建。MACD 柱使用实例正负色，未配置时回退主题涨跌色；RSI 30/70 与 MACD 0 使用无轴标签的低强调 price line。10,000 点、4 指标的 payload 性能测试通过 120ms 预算。
-- Controller 继续只有一个 `subscribeCrosshairMove`。同一 `seriesData` 在一个 rAF 快照中提交行情和全部指标值；legend 在十字线离开后恢复服务端结果的最新有限值。
-- 工作台 toolbar 新增指标入口，IndicatorDialog 通过动态 import 懒加载，并在打开后才查询 definition。Dialog 支持五类指标搜索、参数、颜色、线宽和 MACD 正负色；legend 支持编辑、显隐、删除和排序。数据页 compact 场景不显示入口、不加载 Dialog、不保存实例。
-- Chart Panel 配置现在有界保存 instance ID、顺序、参数、显隐、样式和语义 pane 比例；旧配置自动补 `studies: []`。重复 ID、第 5 个独立指标和第 9 个总指标会在持久化边界或 UI 阻止。
-- 真实 Tauri WebView 使用本地 Alpha 日线复验通过。SMA 与 BOLL overlay、RSI 与 MACD pane、十字线值、成交量显隐、参数修改、主题切换、排序、显隐和比例恢复均正常；chart DOM 与主价格 Canvas 始终保持身份。达到 4 个独立 pane 时第 5 个在 Dialog 明确阻止；面板缩到约 282px 高时管理入口仍可操作，legend 内部滚动且面板无外层溢出；页面隐藏恢复后 chart 与 Canvas 保持挂载。
-- 完整前端测试为 228 个文件、1167 个测试，`pnpm check-types`、`pnpm lint` 和 eager graph 检查通过，lint 只保留仓库既有的 25 个 warning 和 2 个 info。指标 Python/API 回归为 50 个测试通过，唯一 warning 仍是环境缺少 `pytest-asyncio` 对既有配置项的提示。
-- 运行时新增的六个测试指标、成交量显隐、pane 拖动、面板缩放和主题变化均已通过 UI 恢复；随后关闭本次精确 debug 进程，并把共享工作台 JSON 恢复到测试前内容。端口 1420 和 9223 均已释放。
+- 新增工作台级 `ChartSyncProvider`。范围与十字线使用两个按需 rAF batcher，直接向订阅者派发末值，不把高频事件放入 React state；来源 panel、固定组、周期和复权不匹配时均不消费，panel 卸载会移除订阅。
+- 工作台状态显式升为版本 2，保存 `groupId`、`rangeEnabled` 与 `crosshairEnabled`。版本 1 通过纯迁移补入关闭配置；共享 JSON 验证只包含这三个同步配置字段，没有范围、十字线时间或来源 ID。
+- `FinancialChartController` 只在范围开关开启时订阅实际时间范围。同步范围命令在下一帧前保持 mutation guard，不回传事件，也不触发接收图的历史加载。关闭开关后解除新增监听并取消待提交帧。
+- 十字线继续复用唯一 `subscribeCrosshairMove`。同步启用时才增加宿主 `pointerenter/pointerleave` 监听，本地 pointer 优先；接收图只按精确时间查找本地 bar 并使用本地 close。远端 legend 通过现有 rAF snapshot 更新，指标值按输出点二分查找，不增加 series 订阅或常驻时间索引。
+- Chart Panel 以稳定 panel ID 和当前 `interval + adjust` 创建同步桥，经 Scene、Frame 传入 FinancialChart。两个开关位于工作台工具栏并有完整中英文文案；主标的 follow/pinned、面板配置和图表同步彼此独立。
+- 单元测试覆盖同帧末值、来源防环、独立开关、不兼容过滤、订阅清理、稳定 runtime、状态迁移、持久化边界、Controller mutation guard、本地 pointer 优先、精确价格与指标 legend。Alpha 相关测试为 32 个文件、156 个测试；完整前端为 229 个文件、1177 个测试，类型、eager graph 和 lint 通过，lint 仅保留仓库既有 25 个 warning 与 2 个 info。
+- 真实 Tauri WebView 使用双图模板和两个不同日线标的验证。范围关闭时只有来源图主绘制和时间轴变化，开启后两图同步变化；快速 pointer 移动后两图 legend 精确落在同一交易日，关闭十字线同步后接收图恢复最新值。把一图改为不复权后，另一张前复权图不再消费其范围或十字线事件。全过程 chart DOM 与主价格 Canvas 身份保持不变。
+- 调试期间的开关、复权和共享状态迁移已经通过 UI 恢复；本次 debug Terax、Vite 和 WebView2 进程已按精确 PID 停止，端口 1420、9223 已释放，`terax-alpha.json` 与设置文件均已逐字符恢复到测试前内容。
 
 ## 外部参考规则
 
@@ -91,6 +89,7 @@
 - [x] 完成图表导出与可访问性。
 - [x] 完成指标领域协议与首批服务端计算。
 - [x] 完成指标 pane、legend 与管理界面。
+- [x] 完成多图时间范围与十字线同步。
 - [ ] 在公共图表能力稳定后重新安排独立行情页。
 
 ### 后续阶段

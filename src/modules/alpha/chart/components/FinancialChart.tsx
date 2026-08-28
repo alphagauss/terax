@@ -1,6 +1,6 @@
 /**
  * 本文件提供 Alpha 公共金融图表的 React 宿主。
- * 组件桥接受控元数据、指标、pane 配置、主题、可见性和 DOM 尺寸，并通过稳定 handle 暴露命令。
+ * 组件桥接受控元数据、指标、pane、可选同步、主题、可见性和 DOM 尺寸，并通过稳定 handle 暴露命令。
  */
 
 import {
@@ -20,9 +20,17 @@ import type {
   ChartStudyInstance,
   ChartStudyResult,
 } from "@/modules/alpha/chart/studies/model";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { marketDirectionColors } from "@/modules/alpha/market/metadata";
+import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import { useTheme } from "@/modules/theme";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from "react";
 
 type Props = {
   bars: readonly MarketBar[];
@@ -36,6 +44,7 @@ type Props = {
   paneRatios: PaneRatios;
   studies?: readonly ChartStudyInstance[];
   studyResults?: readonly ChartStudyResult[];
+  syncRuntime?: FinancialChartSyncRuntime | null;
   visible: boolean;
   hasMoreBefore: boolean;
   loadingMore: boolean;
@@ -95,6 +104,7 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
       paneRatios,
       studies = EMPTY_STUDIES,
       studyResults = EMPTY_STUDY_RESULTS,
+      syncRuntime = null,
       visible,
       hasMoreBefore,
       loadingMore,
@@ -107,6 +117,12 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const controllerRef = useRef<FinancialChartController | null>(null);
+    const barsByTime = useMemo(
+      () => new Map(bars.map((bar) => [marketTimeKey(bar.time), bar] as const)),
+      [bars],
+    );
+    const barsByTimeRef = useRef(barsByTime);
+    barsByTimeRef.current = barsByTime;
     const { resolvedMode, themeId } = useTheme();
 
     useImperativeHandle(
@@ -139,9 +155,35 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     useEffect(() => {
       controllerRef.current?.setCallbacks({
         onCrosshairChange,
+        onVisibleTimeRangeChange: syncRuntime?.rangeEnabled
+          ? syncRuntime.publishRange
+          : undefined,
+        onCrosshairTimeChange: syncRuntime?.crosshairEnabled
+          ? syncRuntime.publishCrosshair
+          : undefined,
         onRequestMore,
       });
-    }, [onCrosshairChange, onRequestMore]);
+    }, [onCrosshairChange, onRequestMore, syncRuntime]);
+
+    useEffect(() => {
+      if (!syncRuntime) return;
+      const unsubscribe = syncRuntime.subscribe({
+        onRange: (range) =>
+          controllerRef.current?.setVisibleTimeRangeFromSync(range),
+        onCrosshair: (time) => {
+          const localBar = time
+            ? (barsByTimeRef.current.get(marketTimeKey(time)) ?? null)
+            : null;
+          controllerRef.current?.setCrosshairFromSync(time, localBar);
+        },
+      });
+      return () => {
+        unsubscribe();
+        if (syncRuntime.crosshairEnabled) {
+          controllerRef.current?.setCrosshairFromSync(null, null);
+        }
+      };
+    }, [syncRuntime]);
 
     useEffect(() => {
       controllerRef.current?.setChartType(chartType);

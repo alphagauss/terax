@@ -1,10 +1,10 @@
 /**
  * 本文件定义 Alpha 工作台的可序列化公共协议。
- * 布局只保存面板状态和 24 列逻辑坐标，不承载 React、DOM、查询或控制器实例。
+ * 布局保存面板和 24 列坐标，工作台状态只保存同步配置，不承载事件、React、DOM、查询或控制器实例。
  */
 
 export const ALPHA_WORKSTATION_SCHEMA_VERSION = 1;
-export const ALPHA_WORKSTATION_STATE_SCHEMA_VERSION = 1;
+export const ALPHA_WORKSTATION_STATE_SCHEMA_VERSION = 2;
 export const ALPHA_WORKSTATION_GRID_COLUMNS = 24;
 
 export type AlphaJsonValue =
@@ -52,10 +52,23 @@ export type AlphaWorkstationLayout = {
   grid: AlphaGridItem[];
 };
 
+export type AlphaChartSyncConfig = {
+  groupId: string;
+  rangeEnabled: boolean;
+  crosshairEnabled: boolean;
+};
+
+export const DEFAULT_ALPHA_CHART_SYNC_CONFIG = {
+  groupId: "primary",
+  rangeEnabled: false,
+  crosshairEnabled: false,
+} as const satisfies AlphaChartSyncConfig;
+
 export type AlphaWorkstationState = {
   schemaVersion: typeof ALPHA_WORKSTATION_STATE_SCHEMA_VERSION;
   mainSymbol: string;
   locked: boolean;
+  chartSync: AlphaChartSyncConfig;
   layout: AlphaWorkstationLayout;
 };
 

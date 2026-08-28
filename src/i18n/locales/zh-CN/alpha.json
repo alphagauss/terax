@@ -17,6 +17,10 @@
     "invalidSymbol": "请输入代码.交易所",
     "lock": "锁定布局",
     "unlock": "解锁布局",
+    "sync": {
+      "range": "同步范围",
+      "crosshair": "同步十字线"
+    },
     "templates": {
       "action": "布局模板",
       "singleChart": {

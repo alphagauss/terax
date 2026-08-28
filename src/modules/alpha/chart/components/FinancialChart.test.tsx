@@ -1,11 +1,12 @@
 /**
  * 本文件测试公共金融图表 React 宿主的实例生命周期。
- * 重点锁定受控类型、数据键和指标切换只更新同一个 Controller，不重建图表实例。
+ * 重点锁定受控类型、数据键、指标和可选同步桥只更新同一个 Controller，不重建图表实例。
  */
 
 // @vitest-environment happy-dom
 
 import type { MarketBar } from "@/modules/alpha/market/model";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { act, createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +25,8 @@ const mocks = vi.hoisted(() => ({
     setBars: vi.fn(),
     setStudies: vi.fn(),
     setHistoryState: vi.fn(),
+    setVisibleTimeRangeFromSync: vi.fn(),
+    setCrosshairFromSync: vi.fn(),
     takeScreenshot: vi.fn(),
     resetView: vi.fn(),
     setVisible: vi.fn(),
@@ -231,5 +234,79 @@ describe("FinancialChart", () => {
     act(() => host?.dispatchEvent(new PointerEvent("pointerup")));
     expect(onPaneRatiosChange).toHaveBeenCalledOnce();
     expect(onPaneRatiosChange).toHaveBeenCalledWith({ main: 7, volume: 3 });
+  });
+
+  it("桥接可选同步回调并只用精确时间的本地 bar 定位十字线", () => {
+    const unsubscribe = vi.fn();
+    let handlers:
+      | Parameters<FinancialChartSyncRuntime["subscribe"]>[0]
+      | undefined;
+    const syncRuntime: FinancialChartSyncRuntime = {
+      rangeEnabled: true,
+      crosshairEnabled: true,
+      publishRange: vi.fn(),
+      publishCrosshair: vi.fn(),
+      subscribe: (next) => {
+        handlers = next;
+        return unsubscribe;
+      },
+    };
+    const common = {
+      bars: [bar],
+      dataKey: "000001.SZSE|d|forward",
+      chartType: "candlestick" as const,
+      visible: true,
+      hasMoreBefore: false,
+      loadingMore: false,
+      ariaLabel: "chart",
+      locale: "zh-CN",
+      metadata: null,
+      priceReference: { previousClose: null, referenceTime: null },
+      previousCloseLabel: "昨收",
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
+      onCrosshairChange: vi.fn(),
+      onRequestMore: vi.fn(),
+    };
+
+    act(() =>
+      root?.render(<FinancialChart {...common} syncRuntime={syncRuntime} />),
+    );
+    const callbackCalls = mocks.controller.setCallbacks.mock.calls;
+    const callbacks = callbackCalls[callbackCalls.length - 1]?.[0];
+    expect(callbacks).toMatchObject({
+      onVisibleTimeRangeChange: syncRuntime.publishRange,
+      onCrosshairTimeChange: syncRuntime.publishCrosshair,
+    });
+
+    act(() => {
+      handlers?.onRange({
+        from: { kind: "trading-day", date: "2026-07-01" },
+        to: bar.time,
+      });
+      handlers?.onCrosshair(bar.time);
+      handlers?.onCrosshair({
+        kind: "trading-day",
+        date: "2026-07-31",
+      });
+    });
+    expect(mocks.controller.setVisibleTimeRangeFromSync).toHaveBeenCalledOnce();
+    expect(mocks.controller.setCrosshairFromSync).toHaveBeenNthCalledWith(
+      1,
+      bar.time,
+      bar,
+    );
+    expect(mocks.controller.setCrosshairFromSync).toHaveBeenNthCalledWith(
+      2,
+      { kind: "trading-day", date: "2026-07-31" },
+      null,
+    );
+
+    act(() => root?.render(<FinancialChart {...common} syncRuntime={null} />));
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(mocks.controller.setCrosshairFromSync).toHaveBeenLastCalledWith(
+      null,
+      null,
+    );
   });
 });

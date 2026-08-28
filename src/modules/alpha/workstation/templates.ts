@@ -7,6 +7,7 @@ import { createDefaultAlphaChartPanelConfig } from "@/modules/alpha/workstation/
 import {
   ALPHA_WORKSTATION_SCHEMA_VERSION,
   ALPHA_WORKSTATION_STATE_SCHEMA_VERSION,
+  DEFAULT_ALPHA_CHART_SYNC_CONFIG,
   type AlphaGridItem,
   type AlphaPanelInstance,
   type AlphaWorkstationLayout,
@@ -107,6 +108,7 @@ export function createDefaultAlphaWorkstationState(): AlphaWorkstationState {
     schemaVersion: ALPHA_WORKSTATION_STATE_SCHEMA_VERSION,
     mainSymbol: ALPHA_DEFAULT_MAIN_SYMBOL,
     locked: false,
+    chartSync: { ...DEFAULT_ALPHA_CHART_SYNC_CONFIG },
     layout: instantiateAlphaWorkstationTemplate("single-chart"),
   };
 }

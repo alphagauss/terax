@@ -1,6 +1,6 @@
 /**
  * 本文件测试工作台图表面板对公共行情 Scene 的薄包装。
- * 重点锁定行情与指标配置解析、panel 密度和更新回传，不允许面板复制查询逻辑。
+ * 重点锁定行情与指标配置解析、可选同步桥、panel 密度和更新回传，不允许面板复制查询逻辑。
  */
 
 // @vitest-environment happy-dom
@@ -70,6 +70,7 @@ describe("AlphaChartPanel", () => {
       vtSymbol: "000001.SZSE",
       visible: true,
       density: "panel",
+      syncRuntime: null,
       options: {
         interval: "1h",
         adjust: "none",

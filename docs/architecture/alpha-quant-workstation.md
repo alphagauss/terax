@@ -49,7 +49,7 @@ Terax Space / Workbench
 - 普通页面和工作台面板通过业务场景组件（Scene）连接查询、回测标记、实时订阅和模拟交易状态。
 - Terax 顶层 SplitView 继续只使用 `react-resizable-panels`。Alpha 页面内部的自由面板网格是不同层级的布局能力，不替换顶层 SplitView。
 - Alpha 面板网格（Panel Grid）固定使用 24 列逻辑网格，禁止重叠，碰撞时自动重排并采用纵向紧凑排列。窄窗口保持逻辑坐标并允许横向滚动，不维护另一套响应式持久化布局。
-- 首期标的联动只提供工作台主标的跟随和单面板固定。多联动组、时间范围同步和十字线同步按真实多图需求渐进增加。
+- 首期标的联动只提供工作台主标的跟随和单面板固定。时间范围与十字线同步已经作为独立工作台能力接入；多联动组仍按真实需求再增加。
 - Alpha 不自行实现原生窗口框架。轻量业务视图复用通用辅助窗口，完整工作页的复制复用 Workspace 跨窗口能力。
 - 工作台、图表、绘图和指标状态都使用可版本化 JSON 表达，不持久化 React、Canvas、Controller、Query 或连接实例。
 - Alpha FastAPI 是量化领域和权威数据边界。Rust 只负责生命周期、凭据注入和通用代理，不复制行情、策略、订单或风险领域模型。
@@ -106,13 +106,14 @@ Terax Space / Workbench
 - 首批 SMA、EMA、BOLL、RSI 和 MACD 已形成服务端 definition、批量计算、选择、渲染、编辑与持久化闭环。回测和图表共用中立的 TA-Lib 数组内核，前端只提交数据键、实际显示区间和指标参数，不回传原始 bars。Scene 在页面可见且存在 visible 实例时才请求，并在历史 prepend 后按新实际起点刷新完整覆盖。
 - 工作台 Chart Panel 保存稳定 instance ID、顺序、参数、显隐、颜色、线宽和语义 pane 比例。overlay 固定在主图；可见成交量之后每个 RSI 或 MACD 独占一个 pane，最多 4 个，成交量隐藏时连续前移。Controller 对 output 做 diff，未变化 series 复用；pane 重排前后按 instance ID 捕获并恢复比例，不重建 chart 或主价格 series。MACD histogram 使用实例正负色或主题语义色，RSI 30/70 与 MACD 0 使用无轴标签的低强调水平线。
 - 指标 Dialog 使用动态 import，首次打开前不进入 eager graph，也不查询 definition。紧凑数据页不显示入口、不保存指标；工作台 legend 从唯一十字线订阅的同一 rAF 快照读取全部 series 值，十字线离开后恢复最新值。指标请求失败只显示局部状态，主行情状态保持可用。
-- 公共金融图表的后续范围已经确认拆为三批八个独立任务，前五项已经完成；下一项是多图时间范围与十字线同步，之后依次为对比标的和实时尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
+- 工作台级 `ChartSyncProvider` 已提供相互独立的范围与十字线同步。两类事件不写入 React 状态，分别按动画帧保留末值，并按来源 panel、固定组、周期和复权过滤。范围使用实际 `MarketTime`；十字线接收方只用本地精确同时间 bar 的 close 定位，缺失时清除。Controller 使用 mutation guard 防回传，pointer 活跃时本地十字线优先；关闭同步时不订阅实际时间范围，也不保留 pointer 监听或待派发帧。
+- 公共金融图表的后续范围已经确认拆为三批八个独立任务，前六项已经完成；下一项是对比标的叠加，之后是实时行情尾部。独立行情页已经暂缓，待公共图表能力稳定后作为薄页面重新安排。具体类型、参考代码、实施步骤、测试和验收标准记录在根目录 [`plan.md`](../../plan.md)，当前任务状态仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
 - 面板注册表（Panel Registry）已经集中面板标题键、分类、singleton、pinnable、默认尺寸、默认配置、配置校验和懒加载入口。每种类型的 `React.lazy` 组件在注册时创建并缓存，枚举 metadata 不执行 loader，未知类型由挂载层局部显示可恢复状态。
 - `AlphaPanelPool` 为每个 panel ID 保持固定 DOM 容器，并通过 portal 连接 `AlphaPanelHost`。宿主替换、暂时消失、排序、配置更新和页面隐藏不会重挂载面板；显式删除才销毁实例，单个 loader 失败由面板级错误边界隔离。面板配置更新按 ID 回传，写入前再次经过 descriptor 归一化。
 - Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
 - 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），其严格配置保存周期、复权、图表类型、成交量显隐、指标 instances 和语义 pane 比例，旧 `{}` 自动补齐默认日线、前复权、蜡烛图、成交量、空指标和 8:2。内置单图和双图模板每次生成新的布局与 panel ID；面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
-- `AlphaWorkstationState` 把主标的、锁定和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
+- `AlphaWorkstationState` 版本 2 把主标的、锁定、图表同步配置和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存；版本 1 通过纯迁移补入关闭的默认同步配置。持久化只保存固定组 ID 和两个开关，不保存范围、十字线时间或来源 ID。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
 - `/bars` 为前端提供 `start + end` 范围查询和排他 `before` 历史分页，并显式返回 `has_more_before`、下一游标、实际范围、`reference_close` 和 `reference_time`。Python 如何跨分片读取、应用复权和计算参考价统一见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 与 [行情数据和存储](../../alpha/docs/market-data.md)。
 - [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载，工作台图表面板可以切换受支持的周期和复权。公共图表对稳定尾部使用 `update()`，对历史修订使用 `setData()`，尚未接入实时增量。
 - 当前 Alpha 页面包括综合工作台、数据、回测和设置，尚没有独立行情页、策略页、回测复盘页和模拟交易页。
@@ -365,11 +366,12 @@ type AlphaSymbolBinding =
 - pinned 面板恢复 follow 后立即采用当前主标的。
 - 发布事件携带来源 panel ID，防止循环回写；联动限定在当前 Workspace 应用进程。
 
-标的联动不隐式开启多图同步。时间范围和十字线属于独立、可分别开关的图表能力，只在对应多图任务中实现：
+标的联动不隐式开启多图同步。时间范围和十字线已经作为独立、可分别开关的工作台能力实现：
 
-- 时间范围和十字线只传播轻量运行时事件，不写入布局，不共享图表实例。
-- 十字线事件按动画帧限流。
-- 首期不为尚未启用的同步能力创建连接、监听器或持久化字段。
+- 时间范围和十字线只传播轻量运行时事件，不写入布局，不共享图表实例，也不进入 React 状态。
+- 两类事件分别按动画帧合并，并按来源 panel ID、固定组、周期和复权过滤。
+- 范围传播实际行情时间；十字线接收方只使用本地完全同时间的 bar 和 close，不做最近点跳转。
+- 未启用同步时不订阅实际时间范围，不增加十字线 pointer 监听，也不创建待派发动画帧。
 - 只有真实工作流需要两套以上独立标的联动时，才提升布局 `schemaVersion` 并增加多联动组；颜色只是一种候选 UI 表达，不是当前协议。
 
 ### 状态和持久化

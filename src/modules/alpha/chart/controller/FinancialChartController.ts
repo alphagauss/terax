@@ -1,6 +1,6 @@
 /**
  * 本文件封装 Alpha 公共金融图表的 Lightweight Charts 运行时。
- * Controller 独占实例、价格与指标 series、动态 pane、监听器、viewport 和截图命令，不执行查询或持久化。
+ * Controller 独占实例、价格与指标 series、动态 pane、监听器、同步命令、viewport 和截图命令，不执行查询或持久化。
  */
 
 import {
@@ -22,13 +22,15 @@ import type {
   PaneRatios,
 } from "@/modules/alpha/chart/model";
 import { createRafBatcher } from "@/modules/alpha/chart/rafBatcher";
+import type { ChartTimeRange } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import type {
   ChartStudyInstance,
   ChartStudyResult,
   ChartStudySeriesKind,
 } from "@/modules/alpha/chart/studies/model";
-import type { MarketBar } from "@/modules/alpha/market/model";
+import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
+import { marketTimeKey } from "@/modules/alpha/market/normalize";
 import {
   BarSeries,
   CandlestickSeries,
@@ -36,6 +38,7 @@ import {
   createChart,
   HistogramSeries,
   type IChartApi,
+  type IRange,
   type IPriceLine,
   type ISeriesApi,
   LineStyle,
@@ -57,6 +60,8 @@ type ChartCallbacks = {
     bar: MarketBar | null,
     studyValues: ChartStudyLegendValues,
   ) => void;
+  onVisibleTimeRangeChange?: (range: ChartTimeRange) => void;
+  onCrosshairTimeChange?: (time: MarketTime | null) => void;
   onRequestMore?: () => void;
 };
 
@@ -97,6 +102,20 @@ function chartTimeKey(time: Time): string {
   return String(time);
 }
 
+/** 将图表引擎时间还原为公共行情时间，拒绝本项目不会写入 series 的字符串时间。 */
+function marketTimeFromChartTime(time: Time): MarketTime | null {
+  if (typeof time === "number") {
+    return { kind: "instant", epochSeconds: time };
+  }
+  if (typeof time === "string") return null;
+  return {
+    kind: "trading-day",
+    date: `${time.year}-${String(time.month).padStart(2, "0")}-${String(
+      time.day,
+    ).padStart(2, "0")}`,
+  };
+}
+
 /** 管理单个公共金融图表实例及其命令。 */
 export class FinancialChartController {
   private readonly host: HTMLElement;
@@ -134,6 +153,18 @@ export class FinancialChartController {
   private loadingMore = false;
   private requestPending = false;
   private chartMutationInProgress = false;
+  private visibleTimeRangeSubscribed = false;
+  private syncRangeMutationInProgress = false;
+  private syncRangeReleaseBatcher: ReturnType<
+    typeof createRafBatcher<null>
+  > | null = null;
+  private syncCrosshairMutationInProgress = false;
+  private crosshairPointerSubscribed = false;
+  private localCrosshairActive = false;
+  private pendingCrosshairSync: {
+    time: MarketTime | null;
+    localBar: MarketBar | null;
+  } | null = null;
   private crosshairTimeKey: string | null = null;
   private historyInteractionArmed = false;
   private studyInstances: readonly ChartStudyInstance[] = [];
@@ -193,7 +224,48 @@ export class FinancialChartController {
 
   /** 更新由 React 外壳持有的事件回调。 */
   setCallbacks(callbacks: ChartCallbacks): void {
+    const shouldSubscribeRange = Boolean(callbacks.onVisibleTimeRangeChange);
+    const shouldSubscribeCrosshairPointer = Boolean(
+      callbacks.onCrosshairTimeChange,
+    );
     this.callbacks = callbacks;
+    if (shouldSubscribeRange !== this.visibleTimeRangeSubscribed) {
+      this.visibleTimeRangeSubscribed = shouldSubscribeRange;
+      const timeScale = this.chart.timeScale();
+      if (shouldSubscribeRange) {
+        timeScale.subscribeVisibleTimeRangeChange(
+          this.handleVisibleTimeRangeChange,
+        );
+      } else {
+        timeScale.unsubscribeVisibleTimeRangeChange(
+          this.handleVisibleTimeRangeChange,
+        );
+      }
+    }
+    if (shouldSubscribeCrosshairPointer !== this.crosshairPointerSubscribed) {
+      this.crosshairPointerSubscribed = shouldSubscribeCrosshairPointer;
+      if (shouldSubscribeCrosshairPointer) {
+        this.host.addEventListener(
+          "pointerenter",
+          this.handleCrosshairPointerEnter,
+        );
+        this.host.addEventListener(
+          "pointerleave",
+          this.handleCrosshairPointerLeave,
+        );
+      } else {
+        this.host.removeEventListener(
+          "pointerenter",
+          this.handleCrosshairPointerEnter,
+        );
+        this.host.removeEventListener(
+          "pointerleave",
+          this.handleCrosshairPointerLeave,
+        );
+        this.localCrosshairActive = false;
+        this.pendingCrosshairSync = null;
+      }
+    }
   }
 
   /** 切换价格 series，不重建图表实例。 */
@@ -478,6 +550,39 @@ export class FinancialChartController {
     this.loadingMore = loadingMore;
   }
 
+  /** 应用来自同组兼容图表的实际时间范围，并在当前帧内阻止回传。 */
+  setVisibleTimeRangeFromSync(range: ChartTimeRange): void {
+    if (!this.visible || this.bars.length === 0) return;
+    this.syncRangeMutationInProgress = true;
+    this.runChartMutation(() => {
+      this.chart.timeScale().setVisibleRange({
+        from: financialChartTime(range.from),
+        to: financialChartTime(range.to),
+      });
+    });
+    // Lightweight Charts 可能在命令返回后才派发范围变化，保护保持到下一帧。
+    this.syncRangeReleaseBatcher ??= createRafBatcher(() => {
+      this.syncRangeMutationInProgress = false;
+    });
+    this.syncRangeReleaseBatcher.schedule(null);
+  }
+
+  /**
+   * 应用远端十字线时间。
+   *
+   * `localBar` 必须来自接收图表的精确时间匹配；本地 pointer 活跃时只暂存远端位置。
+   */
+  setCrosshairFromSync(
+    time: MarketTime | null,
+    localBar: MarketBar | null,
+  ): void {
+    if (this.localCrosshairActive) {
+      this.pendingCrosshairSync = { time, localBar };
+      return;
+    }
+    this.applyCrosshairFromSync(time, localBar);
+  }
+
   /** 页面隐藏时暂停尺寸和历史加载响应，但保留 Canvas 与 viewport。 */
   setVisible(visible: boolean): void {
     this.visible = visible;
@@ -508,7 +613,23 @@ export class FinancialChartController {
   destroy(): void {
     this.resizeBatcher.cancel();
     this.crosshairBatcher.cancel();
+    this.syncRangeReleaseBatcher?.cancel();
     this.chart.unsubscribeCrosshairMove(this.handleCrosshairMove);
+    if (this.visibleTimeRangeSubscribed) {
+      this.chart
+        .timeScale()
+        .unsubscribeVisibleTimeRangeChange(this.handleVisibleTimeRangeChange);
+    }
+    if (this.crosshairPointerSubscribed) {
+      this.host.removeEventListener(
+        "pointerenter",
+        this.handleCrosshairPointerEnter,
+      );
+      this.host.removeEventListener(
+        "pointerleave",
+        this.handleCrosshairPointerLeave,
+      );
+    }
     this.chart
       .timeScale()
       .unsubscribeVisibleLogicalRangeChange(this.handleVisibleRangeChange);
@@ -538,6 +659,47 @@ export class FinancialChartController {
     }
     this.crosshairStudyValues = studyValues;
     this.crosshairBatcher.schedule({ bar, studyValues });
+    if (
+      this.localCrosshairActive &&
+      !this.chartMutationInProgress &&
+      !this.syncCrosshairMutationInProgress
+    ) {
+      this.callbacks.onCrosshairTimeChange?.(bar?.time ?? null);
+    }
+  };
+
+  /** 标记本地 pointer 正在控制十字线，远端位置在此期间只暂存。 */
+  private readonly handleCrosshairPointerEnter = (): void => {
+    this.localCrosshairActive = true;
+  };
+
+  /** 本地 pointer 离开后发布清除事件，并恢复期间收到的最后远端位置。 */
+  private readonly handleCrosshairPointerLeave = (): void => {
+    if (!this.localCrosshairActive) return;
+    this.localCrosshairActive = false;
+    this.callbacks.onCrosshairTimeChange?.(null);
+    const pending = this.pendingCrosshairSync;
+    this.pendingCrosshairSync = null;
+    if (pending) this.applyCrosshairFromSync(pending.time, pending.localBar);
+  };
+
+  /** 只发布用户产生且能还原为公共行情时间的实际可见范围。 */
+  private readonly handleVisibleTimeRangeChange = (
+    range: IRange<Time> | null,
+  ): void => {
+    if (
+      !this.visible ||
+      !this.historyInteractionArmed ||
+      this.chartMutationInProgress ||
+      this.syncRangeMutationInProgress ||
+      !range ||
+      !this.callbacks.onVisibleTimeRangeChange
+    ) {
+      return;
+    }
+    const from = marketTimeFromChartTime(range.from);
+    const to = marketTimeFromChartTime(range.to);
+    if (from && to) this.callbacks.onVisibleTimeRangeChange({ from, to });
   };
 
   /** 响应用户触发的左边界变化，并保证同一历史边界只请求一次。 */
@@ -548,6 +710,7 @@ export class FinancialChartController {
       this.visible &&
       this.historyInteractionArmed &&
       !this.chartMutationInProgress &&
+      !this.syncRangeMutationInProgress &&
       range
     ) {
       this.keepBarsVisibleAfterPan(range);
@@ -556,6 +719,7 @@ export class FinancialChartController {
       !this.visible ||
       !this.historyInteractionArmed ||
       this.chartMutationInProgress ||
+      this.syncRangeMutationInProgress ||
       !range ||
       range.from >= HISTORY_LOAD_THRESHOLD ||
       !this.hasMoreBefore ||
@@ -611,6 +775,63 @@ export class FinancialChartController {
     if (this.chartType === "ohlc") return this.ohlc;
     if (this.chartType === "line") return this.line;
     return this.candles;
+  }
+
+  /** 执行十字线同步命令，缺少精确本地 bar 时显式清除位置。 */
+  private applyCrosshairFromSync(
+    time: MarketTime | null,
+    localBar: MarketBar | null,
+  ): void {
+    this.syncCrosshairMutationInProgress = true;
+    try {
+      if (time && localBar) {
+        this.chart.setCrosshairPosition(
+          localBar.close,
+          financialChartTime(localBar.time),
+          this.activePriceSeries(),
+        );
+      } else {
+        this.chart.clearCrosshairPosition();
+      }
+    } finally {
+      this.syncCrosshairMutationInProgress = false;
+    }
+    this.crosshairTimeKey =
+      time && localBar ? chartTimeKey(financialChartTime(localBar.time)) : null;
+    this.crosshairStudyValues =
+      time && localBar ? this.studyValuesAtTime(localBar.time) : {};
+    this.crosshairBatcher.schedule({
+      bar: time && localBar ? localBar : null,
+      studyValues: this.crosshairStudyValues,
+    });
+  }
+
+  /** 用二分查找提取同步时间的指标值，不增加 series 订阅或常驻时间索引。 */
+  private studyValuesAtTime(time: MarketTime): ChartStudyLegendValues {
+    const target = marketTimeKey(time);
+    const values: ChartStudyLegendValues = {};
+    for (const result of this.studyResults) {
+      const outputs: Record<string, number | null> = {};
+      for (const output of result.outputs) {
+        let low = 0;
+        let high = output.points.length - 1;
+        let value: number | null = null;
+        while (low <= high) {
+          const middle = Math.floor((low + high) / 2);
+          const point = output.points[middle];
+          const key = marketTimeKey(point.time);
+          if (key === target) {
+            value = point.value;
+            break;
+          }
+          if (key < target) low = middle + 1;
+          else high = middle - 1;
+        }
+        outputs[output.id] = value;
+      }
+      values[result.instanceId] = outputs;
+    }
+    return values;
   }
 
   /** 只在权威参考价存在时为当前可见价格 series 创建昨收线。 */

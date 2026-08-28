@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 工作台持久状态、模板实例化和主标的绑定。
- * 重点锁定模板不可变、新身份生成、版本校验以及 follow/pinned 的解析结果。
+ * 重点锁定模板不可变、显式版本迁移、同步配置边界以及 follow/pinned 的解析结果。
  */
 
 import {
@@ -84,12 +84,34 @@ describe("Alpha workstation state", () => {
     });
   });
 
+  it("把版本 1 状态纯迁移为关闭的默认同步配置", () => {
+    const current = createDefaultAlphaWorkstationState();
+    const legacy = {
+      schemaVersion: 1,
+      mainSymbol: current.mainSymbol,
+      locked: current.locked,
+      layout: current.layout,
+    };
+
+    const parsed = parseAlphaWorkstationState(legacy, alphaPanelRegistry);
+
+    expect(parsed).toMatchObject({
+      schemaVersion: 2,
+      chartSync: {
+        groupId: "primary",
+        rangeEnabled: false,
+        crosshairEnabled: false,
+      },
+    });
+    expect(legacy).not.toHaveProperty("chartSync");
+  });
+
   it("拒绝未知状态版本、非法标的和非法布局", () => {
     const state = createDefaultAlphaWorkstationState();
 
     expect(
       parseAlphaWorkstationState(
-        { ...state, schemaVersion: 2 },
+        { ...state, schemaVersion: 3 },
         alphaPanelRegistry,
       ),
     ).toBeNull();
@@ -102,6 +124,15 @@ describe("Alpha workstation state", () => {
     expect(
       parseAlphaWorkstationState(
         { ...state, layout: { ...state.layout, grid: [] } },
+        alphaPanelRegistry,
+      ),
+    ).toBeNull();
+    expect(
+      parseAlphaWorkstationState(
+        {
+          ...state,
+          chartSync: { ...state.chartSync, runtimeRange: { from: 1, to: 2 } },
+        },
         alphaPanelRegistry,
       ),
     ).toBeNull();

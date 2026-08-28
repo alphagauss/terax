@@ -17,6 +17,10 @@
     "invalidSymbol": "Use SYMBOL.EXCHANGE",
     "lock": "Lock layout",
     "unlock": "Unlock layout",
+    "sync": {
+      "range": "Sync range",
+      "crosshair": "Sync crosshair"
+    },
     "templates": {
       "action": "Layout templates",
       "singleChart": {

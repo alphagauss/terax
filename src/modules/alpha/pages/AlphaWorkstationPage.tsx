@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 综合工作台页面。
- * 页面组合共享状态、内置模板、24 列网格和稳定面板池，所有窗口读写同一份 Alpha 配置。
+ * 页面组合共享状态、同步开关、内置模板、24 列网格和稳定面板池，所有窗口读写同一份 Alpha 配置。
  */
 
 import {
@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AlphaLoading } from "@/modules/alpha/components/AlphaPagePrimitives";
+import { ChartSyncProvider } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
 import { AlphaPanelGrid } from "@/modules/alpha/workstation/components/AlphaPanelGrid";
 import { AlphaPanelPool } from "@/modules/alpha/workstation/components/AlphaPanelPool";
@@ -31,7 +32,12 @@ import {
   ALPHA_WORKSTATION_TEMPLATES,
   instantiateAlphaWorkstationTemplate,
 } from "@/modules/alpha/workstation/templates";
-import { GridIcon, LockIcon } from "@hugeicons/core-free-icons";
+import {
+  ChartRelationshipIcon,
+  Cursor02Icon,
+  GridIcon,
+  LockIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -194,6 +200,56 @@ function AlphaWorkstationPageContent({ visible }: Props) {
 
         <Button
           type="button"
+          variant={state.chartSync.rangeEnabled ? "secondary" : "outline"}
+          size="sm"
+          className="h-7 gap-1.5 text-[11px]"
+          title={t("workstation.sync.range")}
+          aria-label={t("workstation.sync.range")}
+          aria-pressed={state.chartSync.rangeEnabled}
+          data-alpha-chart-range-sync
+          onClick={() =>
+            updateAlphaWorkstationState((current) => ({
+              ...current,
+              chartSync: {
+                ...current.chartSync,
+                rangeEnabled: !current.chartSync.rangeEnabled,
+              },
+            }))
+          }
+        >
+          <HugeiconsIcon
+            icon={ChartRelationshipIcon}
+            size={12}
+            strokeWidth={1.8}
+          />
+          {t("workstation.sync.range")}
+        </Button>
+
+        <Button
+          type="button"
+          variant={state.chartSync.crosshairEnabled ? "secondary" : "outline"}
+          size="sm"
+          className="h-7 gap-1.5 text-[11px]"
+          title={t("workstation.sync.crosshair")}
+          aria-label={t("workstation.sync.crosshair")}
+          aria-pressed={state.chartSync.crosshairEnabled}
+          data-alpha-chart-crosshair-sync
+          onClick={() =>
+            updateAlphaWorkstationState((current) => ({
+              ...current,
+              chartSync: {
+                ...current.chartSync,
+                crosshairEnabled: !current.chartSync.crosshairEnabled,
+              },
+            }))
+          }
+        >
+          <HugeiconsIcon icon={Cursor02Icon} size={12} strokeWidth={1.8} />
+          {t("workstation.sync.crosshair")}
+        </Button>
+
+        <Button
+          type="button"
           variant={state.locked ? "secondary" : "outline"}
           size="sm"
           className="h-7 gap-1.5 text-[11px]"
@@ -210,21 +266,23 @@ function AlphaWorkstationPageContent({ visible }: Props) {
         </Button>
       </header>
 
-      <AlphaPanelPool
-        panels={state.layout.panels}
-        registry={alphaPanelRegistry}
-        mainSymbol={state.mainSymbol}
-        visible={visible}
-        onPanelConfigChange={changePanelConfig}
-      >
-        <AlphaPanelGrid
-          state={state}
+      <ChartSyncProvider config={state.chartSync}>
+        <AlphaPanelPool
+          panels={state.layout.panels}
           registry={alphaPanelRegistry}
-          onGridCommit={commitGrid}
-          onBindingChange={changeBinding}
-          onRemovePanel={removePanel}
-        />
-      </AlphaPanelPool>
+          mainSymbol={state.mainSymbol}
+          visible={visible}
+          onPanelConfigChange={changePanelConfig}
+        >
+          <AlphaPanelGrid
+            state={state}
+            registry={alphaPanelRegistry}
+            onGridCommit={commitGrid}
+            onBindingChange={changeBinding}
+            onRemovePanel={removePanel}
+          />
+        </AlphaPanelPool>
+      </ChartSyncProvider>
     </div>
   );
 }

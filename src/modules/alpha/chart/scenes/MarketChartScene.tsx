@@ -1,6 +1,6 @@
 /**
  * 本文件把 Alpha 有界历史查询连接到公共金融图表。
- * Scene 负责权威证券元数据、参考价、排他游标、跨页合并及按需指标查询。
+ * Scene 负责权威证券元数据、参考价、排他游标、跨页合并、按需指标查询及可选同步桥转发。
  */
 
 import {
@@ -21,6 +21,7 @@ import {
   studyCalculationSignature,
   type ChartStudyInstance,
 } from "@/modules/alpha/chart/studies/model";
+import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
@@ -36,6 +37,7 @@ type Props = {
   onOptionsChange: (options: MarketChartOptions) => void;
   studies?: readonly ChartStudyInstance[];
   onStudiesChange?: (studies: ChartStudyInstance[]) => void;
+  syncRuntime?: FinancialChartSyncRuntime | null;
 };
 
 const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
@@ -70,6 +72,7 @@ export function MarketChartScene({
   onOptionsChange,
   studies = EMPTY_STUDIES,
   onStudiesChange,
+  syncRuntime = null,
 }: Props) {
   const securityQuery = useQuery({
     queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
@@ -197,6 +200,7 @@ export function MarketChartScene({
       studyResults={studyQuery.data?.items ?? []}
       studyLoading={studyQuery.isFetching && visibleStudies.length > 0}
       studyError={studyQuery.isError}
+      syncRuntime={syncRuntime}
       onOptionsChange={onOptionsChange}
       onStudiesChange={onStudiesChange}
       onRequestMore={requestMore}

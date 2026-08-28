@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 工作台共享配置的加载、等价窗口写入和失败恢复。
- * 重点锁定监听失败不覆盖已读状态，且 `workstation` 单键只保存最新完整状态。
+ * 重点锁定监听失败不覆盖已读状态，且 `workstation` 单键只保存最新完整配置而不保存同步事件。
  */
 
 // @vitest-environment happy-dom
@@ -164,6 +164,39 @@ describe("Alpha workstation shared store", () => {
       "alpha",
       "workstation",
       expect.objectContaining({ mainSymbol: "600000.SSE", locked: true }),
+    );
+  });
+
+  it("只持久化图表同步配置而不产生运行时事件字段", async () => {
+    await act(async () => {
+      root?.render(<Probe onSnapshot={() => undefined} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      updateAlphaWorkstationState((state) => ({
+        ...state,
+        chartSync: {
+          ...state.chartSync,
+          rangeEnabled: true,
+          crosshairEnabled: true,
+        },
+      }));
+      vi.advanceTimersByTime(200);
+    });
+    await flushAlphaWorkstationWrites();
+
+    const written = mocks.setSharedStoreKey.mock.calls[0]?.[2];
+    expect(written).toMatchObject({
+      chartSync: {
+        groupId: "primary",
+        rangeEnabled: true,
+        crosshairEnabled: true,
+      },
+    });
+    expect(JSON.stringify(written)).not.toMatch(
+      /sourcePanelId|runtimeRange|crosshairTime/,
     );
   });
 
