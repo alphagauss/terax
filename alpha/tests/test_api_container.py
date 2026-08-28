@@ -64,6 +64,18 @@ class FakeTaskManager:
         self.closed = True
 
 
+class FakeMarketData:
+    """测试用实时行情服务。"""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def close(self) -> None:
+        """记录实时连接资源已经关闭。"""
+
+        self.closed = True
+
+
 def test_api_container_initializes_runtime_objects_lazily() -> None:
     """验证 API 容器只组装运行对象并延迟初始化策略管理器。"""
 
@@ -94,6 +106,7 @@ def test_api_container_initializes_runtime_objects_lazily() -> None:
         database_factory=FakeDatabase,
         event_engine_factory=EventEngine,
         task_manager_factory=FakeTaskManager,
+        market_data_factory=FakeMarketData,
         strategy_manager_factory=create_strategy_manager,
     )
 
@@ -112,16 +125,19 @@ async def test_api_container_closes_runtime_objects() -> None:
 
     database = FakeDatabase()
     task_manager = FakeTaskManager()
+    market_data = FakeMarketData()
 
     container = create_alpha_service_container(
         AlphaConfig(data_dir=Path.cwd()),
         database_factory=lambda _data_dir: database,
         event_engine_factory=EventEngine,
         task_manager_factory=lambda: task_manager,
+        market_data_factory=lambda: market_data,
         strategy_manager_factory=lambda _event_engine, _process_manager, _database_dir: FakeStrategyManager(),
     )
 
     await container.close()
 
     assert database.closed
+    assert market_data.closed
     assert task_manager.closed

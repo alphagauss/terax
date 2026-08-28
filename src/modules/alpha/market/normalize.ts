@@ -144,8 +144,8 @@ export function normalizeMarketBars(
 
 /** 合并更早页面与当前页面，并在游标边界再次去重和校验顺序。 */
 export function mergeMarketBarPages(
-  older: MarketBar[],
-  current: MarketBar[],
+  older: readonly MarketBar[],
+  current: readonly MarketBar[],
 ): MarketBar[] {
   const result: MarketBar[] = [];
   for (const page of [older, current]) {
@@ -167,4 +167,25 @@ export function mergeMarketBarPages(
     }
   }
   return result;
+}
+
+/**
+ * 把可能与 HTTP 快照重叠的实时尾部覆盖到稳定行情。
+ *
+ * 两侧各自仍须为同种时间语义，重复时间以实时尾部为准；该函数不用于历史分页。
+ */
+export function mergeMarketBarTail(
+  stable: readonly MarketBar[],
+  liveTail: readonly MarketBar[],
+): MarketBar[] {
+  const timeKinds = new Set(
+    [...stable, ...liveTail].map((bar) => bar.time.kind),
+  );
+  if (timeKinds.size > 1) throw new Error("实时尾部时间类型不一致");
+  const byTime = new Map<number, MarketBar>();
+  for (const bar of stable) byTime.set(marketTimeKey(bar.time), bar);
+  for (const bar of liveTail) byTime.set(marketTimeKey(bar.time), bar);
+  return [...byTime.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, bar]) => bar);
 }

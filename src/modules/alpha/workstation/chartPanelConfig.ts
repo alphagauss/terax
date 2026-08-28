@@ -1,6 +1,6 @@
 /**
  * 本文件定义工作台图表面板的可持久化配置边界。
- * 配置包含公共行情图表选项、有界指标实例和最多三个对比标的，并为缺失字段补默认值。
+ * 配置包含公共行情图表选项、实时开关、有界指标实例和最多三个对比标的，并为缺失字段补默认值。
  */
 
 import {
@@ -22,6 +22,7 @@ import { normalizeAlphaVtSymbol } from "@/modules/alpha/workstation/model";
 import { z } from "zod";
 
 export type AlphaChartPanelConfig = MarketChartOptions & {
+  realtime: boolean;
   studies: ChartStudyInstance[];
   comparisons: ChartComparisonConfig[];
 };
@@ -77,6 +78,7 @@ const alphaChartPanelConfigSchema = z
       })
       .catchall(z.number().positive())
       .default({ main: 8, volume: 2 }),
+    realtime: z.boolean().default(false),
     studies: chartStudiesSchema,
     comparisons: chartComparisonsSchema,
   })
@@ -87,6 +89,7 @@ export function createDefaultAlphaChartPanelConfig(): AlphaChartPanelConfig {
   return {
     ...DEFAULT_MARKET_CHART_OPTIONS,
     paneRatios: { ...DEFAULT_MARKET_CHART_OPTIONS.paneRatios },
+    realtime: false,
     studies: [],
     comparisons: [],
   };

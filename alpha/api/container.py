@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from alpha.api.cache import AsyncTtlCache
 from alpha.common.schema_backtest import BacktestReq
 from alpha.config import AlphaConfig
+from alpha.realtime.market_data import RealtimeMarketDataService
 from alpha.runtime.event import EventEngine
 from alpha.runtime.processes import ProcessTaskManager
 
@@ -26,10 +27,9 @@ class _LazyStrategyManager:
         event_engine: EventEngine,
         process_manager: ProcessTaskManager,
         database_dir: Path,
-        factory: Callable[
-            [EventEngine, ProcessTaskManager, Path], "StrategyManager"
-        ]
-        | None,
+        factory: (
+            Callable[[EventEngine, ProcessTaskManager, Path], "StrategyManager"] | None
+        ),
     ) -> None:
         """初始化懒加载代理。
 
@@ -165,6 +165,7 @@ class AlphaServiceContainer:
     strategy_manager: _LazyStrategyManager
     event_engine: EventEngine
     process_manager: ProcessTaskManager
+    market_data: RealtimeMarketDataService
     data_overview_cache: AsyncTtlCache[dict[str, object]]
 
     async def close(self) -> None:
@@ -177,6 +178,7 @@ class AlphaServiceContainer:
             无返回值。
         """
 
+        await self.market_data.close()
         await self.database.close()
         self.event_engine.stop()
         self.process_manager.close(stop_running=True)
@@ -197,11 +199,16 @@ def create_alpha_service_container(
     database_factory: Callable[[Path], "DataBase"] | None = None,
     event_engine_factory: Callable[[], EventEngine] = EventEngine,
     task_manager_factory: Callable[[], ProcessTaskManager] = ProcessTaskManager,
-    strategy_manager_factory: Callable[
-        [EventEngine, ProcessTaskManager, Path],
-        "StrategyManager",
-    ]
-    | None = None,
+    market_data_factory: Callable[
+        [], RealtimeMarketDataService
+    ] = RealtimeMarketDataService,
+    strategy_manager_factory: (
+        Callable[
+            [EventEngine, ProcessTaskManager, Path],
+            "StrategyManager",
+        ]
+        | None
+    ) = None,
 ) -> AlphaServiceContainer:
     """创建 Alpha API 运行对象容器。
 
@@ -210,6 +217,7 @@ def create_alpha_service_container(
         database_factory: 数据库门面工厂，测试可注入替身。
         event_engine_factory: 事件引擎工厂，测试可注入替身。
         task_manager_factory: 进程任务管理器工厂，测试可注入替身。
+        market_data_factory: 共享实时行情服务工厂，测试可注入替身。
         strategy_manager_factory: 策略管理器工厂，测试可注入替身。
 
     Returns:
@@ -225,6 +233,7 @@ def create_alpha_service_container(
 
     event_engine = event_engine_factory()
     process_manager = task_manager_factory()
+    market_data = market_data_factory()
 
     # 策略管理器访问策略/回测接口时再初始化，避免健康检查挂载时拉起重依赖。
     strategy_manager = _LazyStrategyManager(
@@ -240,5 +249,6 @@ def create_alpha_service_container(
         strategy_manager=strategy_manager,
         event_engine=event_engine,
         process_manager=process_manager,
+        market_data=market_data,
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
     )

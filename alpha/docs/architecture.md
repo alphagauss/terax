@@ -59,7 +59,7 @@ AlphaServiceContainer
 
 任务状态固定为 `running`、`succeeded`、`failed`、`cancelled` 或 `timeout`。停止时先 `terminate` 并有界等待，仍未退出才 `kill`。服务关闭时由容器决定是否停止仍在运行的任务，不能留下无所有者的子进程。
 
-当前 `/events` WebSocket 只提供受认证的 JSON ping/pong 基础协议，不转发全部内部 `EventEngine`。公共实时事件必须先定义独立协议，再选择性桥接。
+`alpha/realtime/` 提供与内部 `EventEngine` 隔离的公共实时 K 线服务。服务按完整数据键引用计数，首个消费者创建轻量上游任务，最后消费者释放时取消；每个键持有单调 sequence 和最多 512 根内存尾部。`/events` 只暴露这一封闭协议，不转发全部内部事件。默认东方财富源直到首个订阅才创建 HTTP 连接池，不导入 pandas。
 
 ## 配置与状态归属
 
@@ -78,6 +78,7 @@ AlphaServiceContainer
 - 指标 API 不接受前端上传的原始 bars；行情由 Alpha 存储权威读取，前端只提交数据键、显示区间和有界指标实例。
 - 存储写入先归一化和校验，读取结果在 API 边界转换为公共时间和字段语义。
 - HTTP 查询结果是权威状态，WebSocket 增量不能取代恢复所需的快照。
+- 实时 K 线只存在于当前服务内存，并按请求复权语义发布；数据库仍只持久化原始行情。sequence gap、稳定历史修订、重连和服务重启必须重新读取 `/bars`。
 - 当前未完成的 `live` 和 `paper` 入口不得被文档、API 或 UI 宣称为可用交易系统。
 
 ## 测试分层

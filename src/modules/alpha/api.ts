@@ -3,20 +3,20 @@
  * 所有响应在前端边界完成校验，并继续通过 Rust 通用代理访问本机服务。
  */
 
+import {
+  type ChartStudyCalculation,
+  type ChartStudyCalculationInstance,
+  type ChartStudyDefinition,
+  normalizeChartStudyCalculation,
+  normalizeChartStudyDefinitions,
+  studyCalculationWireSchema,
+  studyDefinitionsWireSchema,
+} from "@/modules/alpha/chart/studies/model";
 import type {
   MarketAdjust,
   MarketBarPage,
   MarketInterval,
 } from "@/modules/alpha/market/model";
-import {
-  normalizeChartStudyCalculation,
-  normalizeChartStudyDefinitions,
-  studyCalculationWireSchema,
-  studyDefinitionsWireSchema,
-  type ChartStudyCalculation,
-  type ChartStudyCalculationInstance,
-  type ChartStudyDefinition,
-} from "@/modules/alpha/chart/studies/model";
 import {
   normalizeMarketBars,
   normalizeMarketTime,
@@ -122,6 +122,7 @@ const barsSchema = z.object({
   actual_end: z.string().nullable(),
   reference_close: z.number().nullable(),
   reference_time: z.string().nullable(),
+  live_sequence: z.number().int().nonnegative(),
 });
 
 const syncTaskSchema = z.object({
@@ -406,6 +407,7 @@ export async function getAlphaBars(
           /^\d{4}-\d{2}-\d{2}$/.test(response.reference_time) ? "d" : interval,
         )
       : null,
+    liveSequence: response.live_sequence,
   };
 }
 

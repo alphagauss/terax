@@ -1,6 +1,6 @@
 /**
  * 本文件测试公共金融图表 Controller 的生命周期和命令。
- * 重点锁定单实例、指标 series/pane、同步防环、统一十字线、历史加载、视图和截图不变量。
+ * 重点锁定单实例、指标 series/pane、同步防环、统一十字线、实时尾部、历史加载、视图和截图不变量。
  */
 
 import type {
@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
     setVisibleLogicalRange: vi.fn(),
     setVisibleRange: vi.fn(),
     fitContent: vi.fn(),
+    scrollToRealTime: vi.fn(),
     subscribeVisibleTimeRangeChange: vi.fn(),
     unsubscribeVisibleTimeRangeChange: vi.fn(),
     subscribeVisibleLogicalRangeChange: vi.fn(),
@@ -876,6 +877,85 @@ describe("FinancialChartController", () => {
       autoScale: true,
     });
     expect(mocks.timeScale.fitContent).toHaveBeenCalledOnce();
+  });
+
+  it("实时同 bucket 只更新尾部，新 bucket 在跟随状态滚到最新", () => {
+    const latest = vi.fn();
+    const controller = new FinancialChartController(chartHost());
+    controller.setCallbacks({ onLatestBarChange: latest });
+    controller.setBars("000001.SZSE|d|forward", [bar("2026-07-30", 10)]);
+    mocks.series.forEach((series) => {
+      series.update.mockClear();
+    });
+    mocks.timeScale.scrollToRealTime.mockClear();
+
+    expect(
+      controller.updateLiveBar("000001.SZSE|d|forward", bar("2026-07-30", 11)),
+    ).toBe(true);
+    expect(mocks.series[0].update).toHaveBeenCalledOnce();
+    expect(mocks.timeScale.scrollToRealTime).not.toHaveBeenCalled();
+
+    expect(
+      controller.updateLiveBar("000001.SZSE|d|forward", bar("2026-07-31", 12)),
+    ).toBe(true);
+    expect(mocks.timeScale.scrollToRealTime).toHaveBeenCalledOnce();
+    expect(latest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ close: 12 }),
+    );
+    expect(
+      controller.updateLiveBar("OTHER.SSE|d|forward", bar("2026-08-01", 13)),
+    ).toBe(false);
+  });
+
+  it("HTTP 快照已包含实时尾部时允许重叠重校准", () => {
+    const controller = new FinancialChartController(chartHost());
+    const initial = [bar("2026-05-15", 10.99)];
+    const snapshot = [
+      ...initial,
+      bar("2026-08-27", 11.59),
+      bar("2026-08-28", 11.65),
+    ];
+    controller.setBars("000001.SZSE|d|forward", initial);
+    controller.setRealtimeSnapshot("000001.SZSE|d|forward", snapshot);
+
+    expect(() =>
+      controller.setBars("000001.SZSE|d|forward", snapshot),
+    ).not.toThrow();
+    expect(mocks.series[0].setData).toHaveBeenLastCalledWith(
+      expect.arrayContaining([expect.objectContaining({ close: 11.65 })]),
+    );
+  });
+
+  it("离开尾部后不抢 viewport，用户可主动回到最新", () => {
+    const following = vi.fn();
+    const host = chartHost();
+    const controller = new FinancialChartController(host);
+    controller.setCallbacks({ onFollowingLatestChange: following });
+    controller.setBars(
+      "000001.SZSE|d|forward",
+      Array.from({ length: 20 }, (_, index) =>
+        bar(`2026-07-${String(index + 1).padStart(2, "0")}`, index + 1),
+      ),
+    );
+    const pointerHandler = vi
+      .mocked(host.addEventListener)
+      .mock.calls.find(
+        ([type]) => type === "pointerdown",
+      )?.[1] as EventListener;
+    const rangeHandler = mocks.timeScale.subscribeVisibleLogicalRangeChange.mock
+      .calls[0][0] as (range: { from: number; to: number }) => void;
+    pointerHandler(new Event("pointerdown"));
+    rangeHandler({ from: 2, to: 10 });
+    expect(controller.isFollowingLatest()).toBe(false);
+    mocks.timeScale.scrollToRealTime.mockClear();
+
+    controller.updateLiveBar("000001.SZSE|d|forward", bar("2026-08-01", 21));
+    expect(mocks.timeScale.scrollToRealTime).not.toHaveBeenCalled();
+
+    controller.returnToLatest();
+    expect(controller.isFollowingLatest()).toBe(true);
+    expect(mocks.timeScale.scrollToRealTime).toHaveBeenCalledOnce();
+    expect(following.mock.calls.map(([value]) => value)).toEqual([false, true]);
   });
 
   it("截图明确排除顶层和十字线", () => {

@@ -56,6 +56,14 @@ data_dir/
 - 跨年、跨月和跨日分片不能产生重复边界记录。
 - API 把存储本地时间转换为公共行情时间，前端只消费响应游标。
 
+## 实时尾部
+
+- 实时服务只在存在订阅时按完整证券、周期和复权键读取最近两根上游 K 线；同一服务进程内多个 WebSocket 共享唯一键的上游任务。
+- 当前上游返回完整 K 线，volume 和 amount 固定使用累计值。新时间确认上一根 final；稳定历史发生修订时要求客户端重新读取快照，不把修订伪装为普通尾部更新。
+- 每个键最多保留 512 根内存尾部，不写 SQLite。最新 `/bars` 把尾部按时间替换或追加到数据库结果，并原子返回 `live_sequence`；排他 `before` 历史页不拼接实时尾部。
+- 实时源按请求直接返回 `none`、`forward` 或 `backward` 口径，前端不接收也不应用复权因子。服务重启、最后订阅释放或 sequence gap 后必须重新建立 HTTP 权威快照。
+- 当前 `live` 表示上游读取链路健康，不等同于交易所开市；连续读取失败依次降级为 `delayed` 和 `disconnected`。
+
 ## 复权语义
 
 Alpha 只存原始 K 线和稀疏累计复权因子：
@@ -99,4 +107,5 @@ planner -> provider/adapter -> normalizer -> validator -> writer -> report
 - 存储和复权：`alpha/tests/unit_tests/test_database.py`、`test_adjustment.py`。
 - 同步计划与写入：`test_sync_tasks_planners.py`、`test_sync_tasks_io.py`、`test_sync_tasks_tasks.py`。
 - 行情 API：`alpha/tests/test_router.py`。
+- 实时行情源与订阅：`test_realtime_eastmoney.py`、`test_realtime_market_data.py`。
 - 数据库 VACUUM 实现与约束：`alpha/scripts/vacuum_sqlite_dbs.py` 和对应单元测试。当前没有独立 CLI 入口，不能把导入模块写成维护命令。

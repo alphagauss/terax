@@ -32,7 +32,10 @@ import type {
 import type { ChartTimeRange } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
-import { marketTimeKey } from "@/modules/alpha/market/normalize";
+import {
+  marketTimeKey,
+  mergeMarketBarTail,
+} from "@/modules/alpha/market/normalize";
 import {
   BarSeries,
   CandlestickSeries,
@@ -66,6 +69,8 @@ type ChartCallbacks = {
   onVisibleTimeRangeChange?: (range: ChartTimeRange) => void;
   onCrosshairTimeChange?: (time: MarketTime | null) => void;
   onRequestMore?: () => void;
+  onLatestBarChange?: (bar: MarketBar) => void;
+  onFollowingLatestChange?: (following: boolean) => void;
 };
 
 export type ChartStudyLegendValues = Record<
@@ -155,6 +160,8 @@ export class FinancialChartController {
   private paneRatios: PaneRatios = { ...DEFAULT_PANE_RATIOS };
   private chartHeight: number;
   private bars: readonly MarketBar[] = [];
+  private stableBars: readonly MarketBar[] = [];
+  private liveTail: MarketBar[] = [];
   private barsByTime = new Map<string, MarketBar>();
   private dataKey = "";
   private visible = true;
@@ -176,6 +183,7 @@ export class FinancialChartController {
   } | null = null;
   private crosshairTimeKey: string | null = null;
   private historyInteractionArmed = false;
+  private followingLatest = true;
   private studyInstances: readonly ChartStudyInstance[] = [];
   private studyResults: readonly ChartStudyResult[] = [];
   private studyPaneSignature = "";
@@ -594,6 +602,108 @@ export class FinancialChartController {
    */
   setBars(dataKey: string, bars: readonly MarketBar[]): void {
     const keyChanged = dataKey !== this.dataKey;
+    if (keyChanged) this.liveTail = [];
+    this.stableBars = bars;
+    const merged = mergeMarketBarTail(bars, this.liveTail);
+    this.applyBars(dataKey, merged, keyChanged);
+  }
+
+  /** 用 HTTP 权威快照重校准实时尾部，不把快照写回 React 查询状态。 */
+  setRealtimeSnapshot(dataKey: string, bars: readonly MarketBar[]): void {
+    if (dataKey !== this.dataKey) return;
+    const stableEnd = this.stableBars[this.stableBars.length - 1];
+    const stableEndKey = stableEnd ? marketTimeKey(stableEnd.time) : -Infinity;
+    this.liveTail = bars
+      .filter((bar) => marketTimeKey(bar.time) >= stableEndKey)
+      .slice(-512);
+    this.applyBars(
+      dataKey,
+      mergeMarketBarTail(this.stableBars, this.liveTail),
+      false,
+    );
+  }
+
+  /** 停用实时订阅时移除内存尾部并恢复最近 HTTP 稳定快照。 */
+  clearRealtime(dataKey: string): void {
+    if (dataKey !== this.dataKey || this.liveTail.length === 0) return;
+    this.liveTail = [];
+    this.applyBars(dataKey, this.stableBars, false);
+  }
+
+  /**
+   * 直接更新当前实时尾部。
+   *
+   * 同 bucket 不复制历史数组，新 bucket 只追加一次；旧数据键和迟到 bar 被拒绝。
+   */
+  updateLiveBar(dataKey: string, incoming: MarketBar): boolean {
+    if (dataKey !== this.dataKey) return false;
+    const lastKnown = this.bars[this.bars.length - 1] ?? null;
+    const previous =
+      this.liveTail[this.liveTail.length - 1] ??
+      (lastKnown
+        ? (this.barsByTime.get(
+            chartTimeKey(financialChartTime(lastKnown.time)),
+          ) ?? lastKnown)
+        : null);
+    const previousTime = previous ? marketTimeKey(previous.time) : -Infinity;
+    const incomingTime = marketTimeKey(incoming.time);
+    if (incomingTime < previousTime) return false;
+    const mode = incomingTime === previousTime ? "replace" : "append";
+    const bar = incoming;
+    const timeKey = chartTimeKey(financialChartTime(bar.time));
+    const data = buildFinancialSeriesData(
+      [bar],
+      this.palette,
+      this.previousCloseForLiveBar(bar),
+    );
+    if (mode === "replace") {
+      if (
+        this.liveTail.length > 0 &&
+        marketTimeKey(this.liveTail[this.liveTail.length - 1].time) ===
+          marketTimeKey(bar.time)
+      ) {
+        this.liveTail[this.liveTail.length - 1] = bar;
+      } else {
+        this.liveTail = [bar];
+      }
+    } else {
+      this.liveTail.push(bar);
+      if (this.liveTail.length > 512) this.liveTail.shift();
+      this.bars = [...this.bars, bar];
+    }
+    this.barsByTime.set(timeKey, bar);
+    this.runChartMutation(() => {
+      this.candles.update(data.candles[0]);
+      this.ohlc.update(data.ohlc[0]);
+      this.line.update(data.line[0]);
+      this.volume.update(data.volume[0]);
+      if (mode === "append" && this.followingLatest) {
+        this.chart.timeScale().scrollToRealTime();
+      }
+    });
+    this.refreshLatestPriceLine();
+    this.callbacks.onLatestBarChange?.(bar);
+    return true;
+  }
+
+  /** 返回用户当前是否允许新 bar 保持在实时尾部。 */
+  isFollowingLatest(): boolean {
+    return this.followingLatest;
+  }
+
+  /** 主动滚回实时尾部并恢复自动跟随，不执行 fitContent。 */
+  returnToLatest(): void {
+    if (this.bars.length === 0 && this.liveTail.length === 0) return;
+    this.historyInteractionArmed = false;
+    this.setFollowingLatest(true);
+    this.runChartMutation(() => this.chart.timeScale().scrollToRealTime());
+  }
+
+  private applyBars(
+    dataKey: string,
+    bars: readonly MarketBar[],
+    keyChanged: boolean,
+  ): void {
     const previous = keyChanged ? [] : this.bars;
     const tailMode = financialTailUpdateMode(previous, bars);
 
@@ -632,6 +742,7 @@ export class FinancialChartController {
       if (keyChanged) {
         this.requestPending = false;
         this.historyInteractionArmed = false;
+        this.setFollowingLatest(true);
       }
       this.runChartMutation(() => {
         this.candles.setData(data.candles);
@@ -650,6 +761,9 @@ export class FinancialChartController {
         }
       });
     }
+
+    const latest = bars[bars.length - 1];
+    if (latest) this.callbacks.onLatestBarChange?.(latest);
 
     this.refreshLatestPriceLine();
 
@@ -722,6 +836,7 @@ export class FinancialChartController {
   resetView(): void {
     if (this.bars.length === 0) return;
     this.historyInteractionArmed = false;
+    this.setFollowingLatest(true);
     this.runChartMutation(() => {
       this.candles.priceScale().applyOptions({ autoScale: true });
       this.chart.timeScale().fitContent();
@@ -846,6 +961,7 @@ export class FinancialChartController {
       range
     ) {
       this.keepBarsVisibleAfterPan(range);
+      this.setFollowingLatest(range.to >= this.bars.length - 1.5);
     }
     if (
       !this.visible ||
@@ -901,6 +1017,26 @@ export class FinancialChartController {
   private readonly handleHistoryInteraction = (): void => {
     this.historyInteractionArmed = true;
   };
+
+  /** 只在状态实际变化时通知 React 外壳。 */
+  private setFollowingLatest(following: boolean): void {
+    if (this.followingLatest === following) return;
+    this.followingLatest = following;
+    this.callbacks.onFollowingLatestChange?.(following);
+  }
+
+  /** 返回实时 bar 着色所需的精确前一收盘。 */
+  private previousCloseForLiveBar(bar: MarketBar): number | null {
+    const target = marketTimeKey(bar.time);
+    let previous: MarketBar | null = null;
+    for (const candidate of this.barsByTime.values()) {
+      const key = marketTimeKey(candidate.time);
+      if (key < target && (!previous || key > marketTimeKey(previous.time))) {
+        previous = candidate;
+      }
+    }
+    return previous?.close ?? null;
+  }
 
   /** 返回当前可见的主价格 series。 */
   private activePriceSeries(): ISeriesApi<"Candlestick" | "Bar" | "Line"> {
@@ -1018,7 +1154,9 @@ export class FinancialChartController {
 
   /** 显式配置最新价线，并按最新收盘价相对权威昨收选择方向色。 */
   private refreshLatestPriceLine(): void {
-    const latest = this.bars[this.bars.length - 1];
+    const latest =
+      this.liveTail[this.liveTail.length - 1] ??
+      this.bars[this.bars.length - 1];
     const previousClose = this.priceReference.previousClose;
     const color = latest
       ? latest.close >= (previousClose ?? latest.open)

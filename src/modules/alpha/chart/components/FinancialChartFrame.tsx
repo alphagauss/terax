@@ -58,6 +58,10 @@ import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketTime } from "@/modules/alpha/market/model";
 import { MARKET_ADJUSTMENTS } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
+import type {
+  MarketDataRuntime,
+  MarketRealtimeState,
+} from "@/modules/alpha/realtime/model";
 import {
   ChartLineData01Icon,
   ChartRelationshipIcon,
@@ -92,10 +96,14 @@ type Props = {
   comparisonStates?: readonly ChartComparisonState[];
   comparisonSeries?: readonly ChartComparisonSeries[];
   syncRuntime?: FinancialChartSyncRuntime | null;
+  realtimeRuntime?: MarketDataRuntime | null;
+  realtimeState?: MarketRealtimeState | null;
+  realtimeEnabled?: boolean;
   onOptionsChange: (options: MarketChartOptions) => void;
   onStudiesChange?: (studies: ChartStudyInstance[]) => void;
   onComparisonsChange?: (comparisons: ChartComparisonConfig[]) => void;
   onRetryComparison?: (vtSymbol: string) => void;
+  onRealtimeEnabledChange?: (enabled: boolean) => void;
   onRequestMore: () => void;
   onRetry: () => void;
 };
@@ -135,10 +143,14 @@ export function FinancialChartFrame({
   comparisonStates = EMPTY_COMPARISON_STATES,
   comparisonSeries = EMPTY_COMPARISON_SERIES,
   syncRuntime = null,
+  realtimeRuntime = null,
+  realtimeState = null,
+  realtimeEnabled = false,
   onOptionsChange,
   onStudiesChange,
   onComparisonsChange,
   onRetryComparison,
+  onRealtimeEnabledChange,
   onRequestMore,
   onRetry,
 }: Props) {
@@ -152,8 +164,19 @@ export function FinancialChartFrame({
   const [indicatorDialogOpen, setIndicatorDialogOpen] = useState(false);
   const [editingStudyId, setEditingStudyId] = useState<string | null>(null);
   const [comparisonDialogOpen, setComparisonDialogOpen] = useState(false);
+  const [liveBar, setLiveBar] = useState<{
+    dataKey: string;
+    bar: MarketBar;
+  } | null>(null);
+  const [followingLatest, setFollowingLatest] = useState<{
+    dataKey: string;
+    value: boolean;
+  } | null>(null);
   const chartRef = useRef<FinancialChartHandle>(null);
-  const latestBar = bars[bars.length - 1] ?? null;
+  const latestBar =
+    liveBar?.dataKey === dataKey
+      ? liveBar.bar
+      : (bars[bars.length - 1] ?? null);
   const displayBar = crosshair?.dataKey === dataKey ? crosshair.bar : latestBar;
   const previousCloseByTime = useMemo(
     () =>
@@ -523,6 +546,15 @@ export function FinancialChartFrame({
                     {comparisons.length > 0 ? ` (${comparisons.length})` : ""}
                   </DropdownMenuItem>
                 ) : null}
+                {onRealtimeEnabledChange ? (
+                  <DropdownMenuItem
+                    onSelect={() => onRealtimeEnabledChange(!realtimeEnabled)}
+                  >
+                    {realtimeEnabled
+                      ? t("data.chart.realtime.disable")
+                      : t("data.chart.realtime.enable")}
+                  </DropdownMenuItem>
+                ) : null}
                 <DropdownMenuItem
                   disabled={bars.length === 0}
                   onSelect={handlePngExport}
@@ -550,7 +582,28 @@ export function FinancialChartFrame({
           ) : null}
         </div>
         <div className="truncate text-[11px] text-muted-foreground">
-          {symbol ?? t("data.chart.title")}
+          <span>{symbol ?? t("data.chart.title")}</span>
+          {realtimeEnabled ? (
+            <span
+              className="ml-2 inline-flex items-center gap-1"
+              aria-live="polite"
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  realtimeState?.status === "live"
+                    ? "bg-success"
+                    : realtimeState?.status === "delayed" ||
+                        realtimeState?.status === "stale"
+                      ? "bg-warning"
+                      : "bg-destructive",
+                )}
+              />
+              {t(
+                `data.chart.realtime.status.${realtimeState?.status ?? "connecting"}`,
+              )}
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -641,6 +694,7 @@ export function FinancialChartFrame({
           studyResults={studyResults}
           comparisonSeries={comparisonSeries}
           syncRuntime={syncRuntime}
+          realtimeRuntime={realtimeRuntime}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}
@@ -649,6 +703,10 @@ export function FinancialChartFrame({
           })}
           onCrosshairChange={handleCrosshairChange}
           onRequestMore={onRequestMore}
+          onLatestBarChange={(bar) => setLiveBar({ dataKey, bar })}
+          onFollowingLatestChange={(value) =>
+            setFollowingLatest({ dataKey, value })
+          }
           onPaneRatiosChange={
             density === "panel"
               ? (paneRatios) => onOptionsChange({ ...options, paneRatios })
@@ -684,6 +742,18 @@ export function FinancialChartFrame({
             onClick={onRequestMore}
           >
             {t("data.chart.historyRetry")}
+          </Button>
+        ) : null}
+        {realtimeEnabled &&
+        followingLatest?.dataKey === dataKey &&
+        !followingLatest.value ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="absolute bottom-2 right-2 h-7 bg-background/90 text-[10px]"
+            onClick={() => chartRef.current?.returnToLatest()}
+          >
+            {t("data.chart.realtime.returnToLatest")}
           </Button>
         ) : null}
       </div>

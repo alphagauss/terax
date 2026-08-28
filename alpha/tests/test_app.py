@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,10 +21,33 @@ class FakeContainer:
 
     closed: bool = False
 
+    def __post_init__(self) -> None:
+        """为 WebSocket 协议提供最小共享行情服务。"""
+
+        self.market_data = FakeMarketData()
+
     async def close(self) -> None:
         """记录应用生命周期已经关闭容器。"""
 
         self.closed = True
+
+
+class FakeMarketData:
+    """记录 WebSocket 订阅与释放的实时行情服务替身。"""
+
+    def __init__(self) -> None:
+        self.subscriptions: set[object] = set()
+
+    async def subscribe(self, key: object, _queue: object) -> int:
+        """记录订阅并返回固定快照 sequence。"""
+
+        self.subscriptions.add(key)
+        return 7
+
+    async def unsubscribe(self, key: object, _queue: object) -> None:
+        """记录最后消费者释放。"""
+
+        self.subscriptions.discard(key)
 
 
 def _stub_container(
@@ -162,3 +186,29 @@ def test_websocket_requires_token_and_supports_bidirectional_json(
         ) as websocket:
             websocket.send_json({"type": "ping"})
             assert websocket.receive_json() == {"type": "pong"}
+            key: dict[str, Any] = {
+                "vt_symbol": "000001.SZSE",
+                "interval": "d",
+                "adjust": "forward",
+            }
+            websocket.send_json({"type": "subscribe", "version": 1, "key": key})
+            assert websocket.receive_json() == {
+                "type": "subscribed",
+                "version": 1,
+                "key": key,
+                "sequence": 7,
+            }
+            websocket.send_json({"type": "unsubscribe", "version": 1, "key": key})
+            assert websocket.receive_json() == {
+                "type": "unsubscribed",
+                "version": 1,
+                "key": key,
+            }
+            websocket.send_json(
+                {
+                    "type": "subscribe",
+                    "version": 1,
+                    "key": {**key, "adjust": "invalid"},
+                }
+            )
+            assert websocket.receive_json()["code"] == "invalid_message"

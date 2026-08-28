@@ -25,6 +25,7 @@ import type { FinancialChartSyncRuntime } from "@/modules/alpha/chart/sync/Chart
 import { marketDirectionColors } from "@/modules/alpha/market/metadata";
 import type { MarketBar } from "@/modules/alpha/market/model";
 import { marketTimeKey } from "@/modules/alpha/market/normalize";
+import type { MarketDataRuntime } from "@/modules/alpha/realtime/model";
 import { useTheme } from "@/modules/theme";
 import {
   forwardRef,
@@ -49,6 +50,7 @@ type Props = {
   studyResults?: readonly ChartStudyResult[];
   comparisonSeries?: readonly ChartComparisonSeries[];
   syncRuntime?: FinancialChartSyncRuntime | null;
+  realtimeRuntime?: MarketDataRuntime | null;
   visible: boolean;
   hasMoreBefore: boolean;
   loadingMore: boolean;
@@ -59,6 +61,8 @@ type Props = {
     comparisonValues: ChartComparisonLegendValues,
   ) => void;
   onRequestMore: () => void;
+  onLatestBarChange?: (bar: MarketBar) => void;
+  onFollowingLatestChange?: (following: boolean) => void;
   onPaneRatiosChange?: (ratios: PaneRatios) => void;
 };
 
@@ -69,6 +73,7 @@ const EMPTY_COMPARISON_SERIES: readonly ChartComparisonSeries[] = [];
 /** 提供不暴露 Lightweight Charts 实例的稳定图表命令。 */
 export type FinancialChartHandle = {
   resetView(): void;
+  returnToLatest(): void;
   takeScreenshot(): HTMLCanvasElement | null;
 };
 
@@ -113,12 +118,15 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
       studyResults = EMPTY_STUDY_RESULTS,
       comparisonSeries = EMPTY_COMPARISON_SERIES,
       syncRuntime = null,
+      realtimeRuntime = null,
       visible,
       hasMoreBefore,
       loadingMore,
       ariaLabel,
       onCrosshairChange,
       onRequestMore,
+      onLatestBarChange,
+      onFollowingLatestChange,
       onPaneRatiosChange,
     },
     ref,
@@ -137,6 +145,7 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
       ref,
       () => ({
         resetView: () => controllerRef.current?.resetView(),
+        returnToLatest: () => controllerRef.current?.returnToLatest(),
         takeScreenshot: () => {
           const container = containerRef.current;
           const controller = controllerRef.current;
@@ -170,8 +179,16 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
           ? syncRuntime.publishCrosshair
           : undefined,
         onRequestMore,
+        onLatestBarChange,
+        onFollowingLatestChange,
       });
-    }, [onCrosshairChange, onRequestMore, syncRuntime]);
+    }, [
+      onCrosshairChange,
+      onFollowingLatestChange,
+      onLatestBarChange,
+      onRequestMore,
+      syncRuntime,
+    ]);
 
     useEffect(() => {
       if (!syncRuntime) return;
@@ -219,6 +236,21 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     useEffect(() => {
       controllerRef.current?.setBars(dataKey, bars);
     }, [bars, dataKey]);
+
+    useEffect(() => {
+      if (!realtimeRuntime || realtimeRuntime.dataKey !== dataKey) return;
+      const unsubscribe = realtimeRuntime.subscribeData((event) => {
+        if (event.type === "snapshot") {
+          controllerRef.current?.setRealtimeSnapshot(dataKey, event.bars);
+        } else {
+          controllerRef.current?.updateLiveBar(dataKey, event.bar);
+        }
+      });
+      return () => {
+        unsubscribe();
+        controllerRef.current?.clearRealtime(dataKey);
+      };
+    }, [dataKey, realtimeRuntime]);
 
     useEffect(() => {
       controllerRef.current?.setStudies(studyResults, studies);

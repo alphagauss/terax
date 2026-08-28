@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 公共金融图表外壳的基础交互。
- * 重点锁定重置与导出、指标和对比懒加载入口，以及涨跌幅使用上一根收盘价计算。
+ * 重点锁定重置与导出、指标、对比和实时入口，以及涨跌幅使用上一根收盘价计算。
  */
 
 // @vitest-environment happy-dom
@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   chartProps: null as Record<string, unknown> | null,
   resetView: vi.fn(),
+  returnToLatest: vi.fn(),
   takeScreenshot: vi.fn(),
   buildMarketBarsCsv: vi.fn(() => "csv"),
   downloadChartBlob: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/modules/alpha/chart/components/FinancialChart", () => ({
     props: Record<string, unknown> & {
       ref?: Ref<{
         resetView(): void;
+        returnToLatest(): void;
         takeScreenshot(): HTMLCanvasElement | null;
       }>;
     },
@@ -41,6 +43,7 @@ vi.mock("@/modules/alpha/chart/components/FinancialChart", () => ({
       ref,
       () => ({
         resetView: mocks.resetView,
+        returnToLatest: mocks.returnToLatest,
         takeScreenshot: mocks.takeScreenshot,
       }),
       [],
@@ -608,5 +611,60 @@ describe("FinancialChartFrame", () => {
     expect(mocks.toastError).toHaveBeenCalledWith(
       "data.chart.export.tooManyBars",
     );
+  });
+
+  it("展示实时状态、切换入口并允许用户回到最新", () => {
+    const onRealtimeEnabledChange = vi.fn();
+    act(() => {
+      root?.render(
+        createElement(FinancialChartFrame, {
+          bars: [marketBar("2026-07-30", 10, 11)],
+          dataKey: "000001.SZSE|d|forward",
+          symbol: "000001.SZSE",
+          options: {
+            interval: "d",
+            adjust: "forward",
+            chartType: "candlestick",
+            showVolume: true,
+            paneRatios: { main: 8, volume: 2 },
+          },
+          metadata: null,
+          priceReference: { previousClose: 10, referenceTime: null },
+          availableIntervals: ["d"],
+          density: "panel",
+          status: "ready",
+          historyError: false,
+          hasMoreBefore: false,
+          loadingMore: false,
+          visible: true,
+          realtimeEnabled: true,
+          realtimeState: { status: "live" },
+          onRealtimeEnabledChange,
+          onOptionsChange: vi.fn(),
+          onRequestMore: vi.fn(),
+          onRetry: vi.fn(),
+        }),
+      );
+    });
+    expect(container.textContent).toContain("data.chart.realtime.status.live");
+    const disable = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "data.chart.realtime.disable",
+    );
+    act(() => disable?.click());
+    expect(onRealtimeEnabledChange).toHaveBeenCalledWith(false);
+
+    act(() => {
+      const callback = mocks.chartProps?.onFollowingLatestChange as (
+        following: boolean,
+      ) => void;
+      callback(false);
+    });
+    const returnToLatest = Array.from(
+      container.querySelectorAll("button"),
+    ).find(
+      (button) => button.textContent === "data.chart.realtime.returnToLatest",
+    );
+    act(() => returnToLatest?.click());
+    expect(mocks.returnToLatest).toHaveBeenCalledOnce();
   });
 });

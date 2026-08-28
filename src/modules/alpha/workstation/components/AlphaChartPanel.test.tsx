@@ -100,6 +100,7 @@ describe("AlphaChartPanel", () => {
       chartType: "ohlc",
       showVolume: true,
       paneRatios: { main: 8, volume: 2 },
+      realtime: false,
       studies: [],
       comparisons: [],
     });
@@ -124,6 +125,7 @@ describe("AlphaChartPanel", () => {
       chartType: "line",
       showVolume: false,
       paneRatios: { main: 7, volume: 3 },
+      realtime: false,
       studies: [expect.objectContaining({ instanceId: "rsi-1" })],
       comparisons: [],
     });
@@ -140,8 +142,26 @@ describe("AlphaChartPanel", () => {
       chartType: "line",
       showVolume: false,
       paneRatios: { main: 7, volume: 3 },
+      realtime: false,
       studies: [],
       comparisons: [{ vtSymbol: "600000.SSE", color: "#d9a441" }],
+    });
+
+    act(() => {
+      const change = mocks.sceneProps?.onRealtimeEnabledChange as (
+        enabled: boolean,
+      ) => void;
+      change(true);
+    });
+    expect(onConfigChange).toHaveBeenLastCalledWith({
+      interval: "1h",
+      adjust: "none",
+      chartType: "line",
+      showVolume: false,
+      paneRatios: { main: 7, volume: 3 },
+      realtime: true,
+      studies: [],
+      comparisons: [],
     });
   });
 });

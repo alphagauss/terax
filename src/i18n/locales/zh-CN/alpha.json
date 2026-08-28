@@ -127,6 +127,19 @@
       "actions": {
         "menu": "更多图表操作"
       },
+      "realtime": {
+        "enable": "启用实时行情",
+        "disable": "停用实时行情",
+        "returnToLatest": "回到最新",
+        "status": {
+          "connecting": "连接中",
+          "live": "实时",
+          "delayed": "延迟",
+          "stale": "数据陈旧",
+          "reconnecting": "重连中",
+          "disconnected": "已断开"
+        }
+      },
       "comparisons": {
         "label": "对比",
         "open": "管理对比标的",

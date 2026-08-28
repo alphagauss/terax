@@ -29,8 +29,12 @@ import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
 import { alphaQueryKeys } from "@/modules/alpha/query";
+import type {
+  MarketDataBinding,
+  MarketRealtimeState,
+} from "@/modules/alpha/realtime/model";
 import { useInfiniteQuery, useQueries, useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Props = {
   vtSymbol: string | null;
@@ -43,6 +47,8 @@ type Props = {
   comparisons?: readonly ChartComparisonConfig[];
   onComparisonsChange?: (comparisons: ChartComparisonConfig[]) => void;
   syncRuntime?: FinancialChartSyncRuntime | null;
+  realtimeEnabled?: boolean;
+  onRealtimeEnabledChange?: (enabled: boolean) => void;
 };
 
 const EMPTY_STUDIES: readonly ChartStudyInstance[] = [];
@@ -82,7 +88,13 @@ export function MarketChartScene({
   comparisons = EMPTY_COMPARISONS,
   onComparisonsChange,
   syncRuntime = null,
+  realtimeEnabled = false,
+  onRealtimeEnabledChange,
 }: Props) {
+  const [realtimeBinding, setRealtimeBinding] =
+    useState<MarketDataBinding | null>(null);
+  const [realtimeState, setRealtimeState] =
+    useState<MarketRealtimeState | null>(null);
   const securityQuery = useQuery({
     queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
     queryFn: () => getAlphaSecurity(vtSymbol ?? ""),
@@ -267,6 +279,36 @@ export function MarketChartScene({
   const dataKey = vtSymbol
     ? `${vtSymbol}|${options.interval}|${options.adjust}`
     : "empty";
+  useEffect(() => {
+    if (!visible || !realtimeEnabled || !vtSymbol) {
+      setRealtimeBinding(null);
+      setRealtimeState(null);
+      return;
+    }
+    let cancelled = false;
+    let binding: MarketDataBinding | null = null;
+    let unsubscribeState: (() => void) | null = null;
+    void import("@/modules/alpha/realtime/MarketDataHub").then(
+      ({ marketDataHub }) => {
+        if (cancelled) return;
+        binding = marketDataHub.acquire({
+          vtSymbol,
+          interval: options.interval,
+          adjust: options.adjust,
+        });
+        unsubscribeState = binding.subscribeState(setRealtimeState);
+        setRealtimeBinding(binding);
+      },
+      () => {
+        if (!cancelled) setRealtimeState({ status: "disconnected" });
+      },
+    );
+    return () => {
+      cancelled = true;
+      unsubscribeState?.();
+      binding?.release();
+    };
+  }, [options.adjust, options.interval, realtimeEnabled, visible, vtSymbol]);
   const visibleStudies = useMemo(
     () => normalizeVisibleStudyInstances(studies),
     [studies],
@@ -300,6 +342,24 @@ export function MarketChartScene({
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === dataKey ? previous : undefined,
   });
+  useEffect(() => {
+    if (!realtimeBinding) return;
+    return realtimeBinding.subscribeData((event) => {
+      if (event.type === "snapshot") {
+        if (visibleStudies.length > 0) void studyQuery.refetch();
+        return;
+      }
+      if (event.isFinal || event.previousFinal) {
+        void query.refetch();
+        if (visibleStudies.length > 0) void studyQuery.refetch();
+      }
+    });
+  }, [
+    query.refetch,
+    realtimeBinding,
+    studyQuery.refetch,
+    visibleStudies.length,
+  ]);
   const priceReference = useMemo(
     () => ({
       previousClose: firstPage?.referenceClose ?? null,
@@ -345,9 +405,13 @@ export function MarketChartScene({
       comparisonStates={comparisonStates}
       comparisonSeries={comparisonNormalization.series}
       syncRuntime={syncRuntime}
+      realtimeRuntime={realtimeBinding}
+      realtimeState={realtimeState}
+      realtimeEnabled={realtimeEnabled}
       onOptionsChange={onOptionsChange}
       onStudiesChange={onStudiesChange}
       onComparisonsChange={onComparisonsChange}
+      onRealtimeEnabledChange={onRealtimeEnabledChange}
       onRetryComparison={retryComparison}
       onRequestMore={requestMore}
       onRetry={retry}

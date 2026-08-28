@@ -73,6 +73,7 @@ alpha-native Rust 计算模块
 - HTTP 查询结果是前端恢复时的权威状态；WebSocket 只承载 Alpha 已显式定义的公共事件。
 - 认证、错误、时间、复权、分页、任务和当前 WebSocket 基线见 [Alpha API 协议](../../alpha/docs/api-contracts.md)。
 - Rust 不自动重连 WebSocket。前端按页面生命周期决定是否重连，并在连接恢复后重新查询 HTTP 权威状态。
+- 当前前端 `MarketDataHub` 在单个 WebView 内复用一条 `/events` 连接，按完整行情键引用计数并负责重连；Rust 仍只报告 message、error 和 closed，不解释 sequence、bar 或 freshness。
 
 ### Rust 代理保持通用
 

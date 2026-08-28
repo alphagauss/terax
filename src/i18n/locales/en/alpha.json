@@ -127,6 +127,19 @@
       "actions": {
         "menu": "More chart actions"
       },
+      "realtime": {
+        "enable": "Enable realtime data",
+        "disable": "Disable realtime data",
+        "returnToLatest": "Return to latest",
+        "status": {
+          "connecting": "Connecting",
+          "live": "Live",
+          "delayed": "Delayed",
+          "stale": "Stale",
+          "reconnecting": "Reconnecting",
+          "disconnected": "Disconnected"
+        }
+      },
       "comparisons": {
         "label": "Compare",
         "open": "Manage comparisons",

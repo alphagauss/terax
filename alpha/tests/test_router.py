@@ -16,6 +16,7 @@ from alpha.api.router import router
 from alpha.api.routes.bars import _market_local_datetime
 from alpha.chart import studies as chart_studies
 from alpha.config import AlphaConfig
+from alpha.realtime.model import RealtimeBar
 
 
 class FakeDatabase:
@@ -439,11 +440,21 @@ def _client() -> TestClient:
     """
 
     app = FastAPI()
+
+    class FakeMarketData:
+        """路由测试默认不提供实时尾部。"""
+
+        async def snapshot(self, _key: object) -> tuple[int, list[object]]:
+            """返回空实时快照。"""
+
+            return 0, []
+
     app.state.alpha_services = SimpleNamespace(
         config=AlphaConfig(data_dir=Path.cwd()),
         database=FakeDatabase(),
         strategy_manager=FakeStrategyManager(),
         process_manager=FakeProcessManager(),
+        market_data=FakeMarketData(),
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
         has_running_tasks=lambda: False,
     )
@@ -583,6 +594,34 @@ def test_alpha_bar_router_adds_exchange_timezone_to_intraday_bars() -> None:
     assert response.json()["actual_start"] == "2025-01-02T00:00:00+08:00"
 
 
+def test_alpha_bar_router_merges_realtime_tail_with_snapshot_sequence() -> None:
+    """最新行情快照拼接内存尾部，并用最早返回点维持排他游标。"""
+
+    client = _client()
+
+    async def snapshot(_key: object) -> tuple[int, list[RealtimeBar]]:
+        """返回替换当前日和追加下一日的实时尾部。"""
+
+        return 4, [
+            RealtimeBar("2025-01-03", 11, 12, 10, 11.5, 120, 1_380),
+            RealtimeBar("2025-01-06", 12, 13, 11, 12.5, 20, 250),
+        ]
+
+    client.app.state.alpha_services.market_data.snapshot = snapshot
+    response = client.get("/api/alpha/bars?vt_symbol=000001.SZSE&interval=d&limit=2")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["live_sequence"] == 4
+    assert [item["time"] for item in body["items"]] == [
+        "2025-01-03",
+        "2025-01-06",
+    ]
+    assert body["items"][0]["close"] == 11.5
+    assert body["has_more_before"] is True
+    assert body["next_before"] == "2025-01-03"
+
+
 def test_alpha_bar_router_converts_absolute_cursor_to_exchange_time() -> None:
     """带时区游标必须先转换为交易所本地时间，再与存储时间比较。"""
     assert _market_local_datetime(
@@ -652,9 +691,7 @@ def test_alpha_study_router_lists_definitions_and_calculates_with_warmup(
             "adjust": "forward",
             "start": "2025-01-02",
             "end": "2025-01-03",
-            "studies": [
-                {"instance_id": "sma-1", "type": "sma", "params": {}}
-            ],
+            "studies": [{"instance_id": "sma-1", "type": "sma", "params": {}}],
         },
     )
 
@@ -728,9 +765,7 @@ def test_alpha_study_router_rejects_invalid_batch_before_reading_bars() -> None:
     )
     valid_sma = {
         **duplicate,
-        "studies": [
-            {"instance_id": "sma-1", "type": "sma", "params": {}}
-        ],
+        "studies": [{"instance_id": "sma-1", "type": "sma", "params": {}}],
     }
     bars_response = client.post(
         "/api/alpha/studies/calculate",
@@ -774,9 +809,7 @@ def test_alpha_study_router_enforces_bar_limit_before_calculation() -> None:
             "adjust": "none",
             "start": "2025-01-01T00:00:00+08:00",
             "end": "2025-01-04T00:00:00+08:00",
-            "studies": [
-                {"instance_id": "sma-1", "type": "sma", "params": {}}
-            ],
+            "studies": [{"instance_id": "sma-1", "type": "sma", "params": {}}],
         },
     )
 
@@ -809,9 +842,7 @@ def test_alpha_study_router_returns_structured_computation_error(
             "adjust": "none",
             "start": "2025-01-01",
             "end": "2025-01-03",
-            "studies": [
-                {"instance_id": "sma-1", "type": "sma", "params": {}}
-            ],
+            "studies": [{"instance_id": "sma-1", "type": "sma", "params": {}}],
         },
     )
 

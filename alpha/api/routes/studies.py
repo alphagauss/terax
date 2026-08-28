@@ -30,6 +30,7 @@ from alpha.chart.studies import (
     study_definition_payloads,
 )
 from alpha.common.schema_market import BarHistoryQuery
+from alpha.realtime.model import MarketDataKey
 
 router = APIRouter()
 MAX_STUDY_BARS = 4000
@@ -91,6 +92,26 @@ async def calculate_chart_studies(
         )
     )
     rows = page["items"]
+    _, live_bars = await services.market_data.snapshot(
+        MarketDataKey(
+            vt_symbol=request.vt_symbol,
+            interval=request.interval,
+            adjust=request.adjust,
+        )
+    )
+    if live_bars:
+        rows_by_time = {_row_datetime(row): row for row in rows}
+        for live_bar in live_bars:
+            live_datetime = _market_local_datetime(
+                live_bar.time,
+                request.vt_symbol,
+            )
+            if live_datetime is not None and live_datetime <= query_end:
+                rows_by_time[live_datetime] = {
+                    "datetime": live_datetime.isoformat(sep=" "),
+                    "close": live_bar.close,
+                }
+        rows = [rows_by_time[key] for key in sorted(rows_by_time)]
     try:
         row_datetimes = [_row_datetime(row) for row in rows]
     except StudyComputationError as exc:

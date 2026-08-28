@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => ({
   getAlphaBars: vi.fn(),
   getAlphaSecurity: vi.fn(),
   frameProps: null as Record<string, unknown> | null,
+  acquireRealtime: vi.fn(),
+  releaseRealtime: vi.fn(),
 }));
 
 vi.mock("@/modules/alpha/api", () => ({
@@ -34,6 +36,12 @@ vi.mock("@/modules/alpha/chart/components/FinancialChartFrame", () => ({
   FinancialChartFrame: (props: Record<string, unknown>) => {
     mocks.frameProps = props;
     return null;
+  },
+}));
+
+vi.mock("@/modules/alpha/realtime/MarketDataHub", () => ({
+  marketDataHub: {
+    acquire: mocks.acquireRealtime,
   },
 }));
 
@@ -81,6 +89,7 @@ function page(
     actualEnd: dates[dates.length - 1] ?? null,
     referenceClose: 10,
     referenceTime: { kind: "trading-day", date: "2026-07-26" },
+    liveSequence: 0,
   };
 }
 
@@ -116,6 +125,17 @@ describe("MarketChartScene", () => {
       price_tick: 0.01,
     });
     mocks.frameProps = null;
+    mocks.releaseRealtime.mockReset();
+    mocks.acquireRealtime.mockReset().mockReturnValue({
+      dataKey: "000001.SZSE|d|forward",
+      getState: () => ({ status: "live" }),
+      subscribeState: (listener: (state: { status: string }) => void) => {
+        listener({ status: "live" });
+        return vi.fn();
+      },
+      subscribeData: () => vi.fn(),
+      release: mocks.releaseRealtime,
+    });
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -138,6 +158,7 @@ describe("MarketChartScene", () => {
     studies: readonly ChartStudyInstance[] = [],
     visible = true,
     comparisons: readonly ChartComparisonConfig[] = [],
+    realtimeEnabled = false,
   ) {
     root?.render(
       createElement(
@@ -151,6 +172,8 @@ describe("MarketChartScene", () => {
           onOptionsChange,
           studies,
           comparisons,
+          realtimeEnabled,
+          onRealtimeEnabledChange: vi.fn(),
         }),
       ),
     );
@@ -573,5 +596,60 @@ describe("MarketChartScene", () => {
     expect(mocks.frameProps?.comparisonStates).toEqual([
       expect.objectContaining({ status: "ready", partial: true }),
     ]);
+  });
+
+  it("只在显式启用且页面可见时加载共享实时 Hub", async () => {
+    mocks.getAlphaBars.mockResolvedValue(
+      page(["2026-07-29", "2026-07-30"], false, null),
+    );
+    await act(async () =>
+      render(
+        "000001.SZSE",
+        DEFAULT_OPTIONS,
+        vi.fn(),
+        "panel",
+        [],
+        true,
+        [],
+        false,
+      ),
+    );
+    await flush();
+    expect(mocks.acquireRealtime).not.toHaveBeenCalled();
+
+    await act(async () =>
+      render(
+        "000001.SZSE",
+        DEFAULT_OPTIONS,
+        vi.fn(),
+        "panel",
+        [],
+        true,
+        [],
+        true,
+      ),
+    );
+    await flush();
+    expect(mocks.acquireRealtime).toHaveBeenCalledWith({
+      vtSymbol: "000001.SZSE",
+      interval: "d",
+      adjust: "forward",
+    });
+    expect(mocks.frameProps?.realtimeState).toEqual({ status: "live" });
+
+    await act(async () =>
+      render(
+        "000001.SZSE",
+        DEFAULT_OPTIONS,
+        vi.fn(),
+        "panel",
+        [],
+        false,
+        [],
+        true,
+      ),
+    );
+    await flush();
+    expect(mocks.releaseRealtime).toHaveBeenCalledOnce();
   });
 });

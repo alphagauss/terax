@@ -8,11 +8,11 @@ import {
   getAlphaBacktestSeries,
   getAlphaBars,
   getAlphaDataOverview,
-  getAlphaSecurity,
   getAlphaSecurities,
+  getAlphaSecurity,
   getAlphaSettings,
-  getAlphaSyncOverview,
   getAlphaStudyDefinitions,
+  getAlphaSyncOverview,
   startAlphaBarSync,
   updateAlphaSettings,
 } from "@/modules/alpha/api";
@@ -237,6 +237,7 @@ describe("Alpha API client", () => {
         actual_end: "2026-07-30T00:00:00",
         reference_close: 10,
         reference_time: "2026-07-29T00:00:00",
+        live_sequence: 0,
         items: [
           {
             time: "2026-07-30T00:00:00",
@@ -288,6 +289,7 @@ describe("Alpha API client", () => {
         actual_end: "2026-07-30 09:30:00",
         reference_close: 10,
         reference_time: "2026-07-29",
+        live_sequence: 0,
         items: [
           {
             time: "2026-07-30T09:30:00+08:00",
@@ -329,6 +331,7 @@ describe("Alpha API client", () => {
         actual_end: null,
         reference_close: null,
         reference_time: null,
+        live_sequence: 0,
       },
     });
 
@@ -454,6 +457,9 @@ describe("Alpha API client", () => {
         next_before: null,
         actual_start: null,
         actual_end: null,
+        reference_close: null,
+        reference_time: null,
+        live_sequence: 0,
         items: [
           {
             time: "invalid",
