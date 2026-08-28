@@ -69,6 +69,7 @@ function AlphaDataPageContent({ visible }: Props) {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [chartOptions, setChartOptions] = useState<MarketChartOptions>(() => ({
     ...DEFAULT_MARKET_CHART_OPTIONS,
+    paneRatios: { ...DEFAULT_MARKET_CHART_OPTIONS.paneRatios },
   }));
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<unknown>(null);

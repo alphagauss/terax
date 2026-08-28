@@ -1,6 +1,6 @@
 /**
  * 本文件把 Terax 行情模型转换为 Lightweight Charts series 数据。
- * 同时提供从 OpenTerminalUI 更新保护实践裁剪出的纯判断，避免非法尾部更新。
+ * 同时统一按前收盘价着色，并提供尾部更新保护判断，避免非法增量更新。
  */
 
 import type { FinancialChartPalette } from "@/modules/alpha/chart/model";
@@ -39,14 +39,18 @@ export function financialChartTime(time: MarketTime): Time {
 export function buildFinancialSeriesData(
   bars: readonly MarketBar[],
   palette: FinancialChartPalette,
+  initialPreviousClose: number | null = null,
 ): FinancialSeriesData {
   const candles: CandlestickData<Time>[] = [];
   const ohlc: BarData<Time>[] = [];
   const line: LineData<Time>[] = [];
   const volume: HistogramData<Time>[] = [];
 
+  let previousClose = initialPreviousClose;
   for (const bar of bars) {
     const time = financialChartTime(bar.time);
+    const color =
+      bar.close >= (previousClose ?? bar.open) ? palette.up : palette.down;
     const price = {
       time,
       open: bar.open,
@@ -54,14 +58,20 @@ export function buildFinancialSeriesData(
       low: bar.low,
       close: bar.close,
     };
-    candles.push(price);
-    ohlc.push(price);
+    candles.push({
+      ...price,
+      color,
+      borderColor: color,
+      wickColor: color,
+    });
+    ohlc.push({ ...price, color });
     line.push({ time, value: bar.close });
     volume.push({
       time,
       value: bar.volume ?? 0,
-      color: bar.close >= bar.open ? palette.up : palette.down,
+      color,
     });
+    previousClose = bar.close;
   }
 
   return { candles, ohlc, line, volume };

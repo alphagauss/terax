@@ -11,6 +11,7 @@ from alpha.api.container import AlphaServiceContainer
 from alpha.api.deps import get_alpha_services
 from alpha.api.models import SecurityCatalogDetail, SecurityCatalogPage
 from alpha.api.routes._utils import clamp_limit, clamp_offset
+from alpha.common.market_metadata import get_market_metadata
 from alpha.common.schema_market import SecurityCatalogQuery
 
 router = APIRouter()
@@ -63,8 +64,12 @@ async def get_security(
         date(1900, 1, 1),
         date.today(),
     )
+    market_metadata = get_market_metadata(vt_symbol)
     return {
         **item,
+        "timezone": market_metadata.timezone.key,
+        "price_color_convention": market_metadata.price_color_convention,
+        "volume_unit": market_metadata.volume_unit,
         "latest_daily_info": latest_daily_info or {},
         "share_capital": list(share_capital)[-50:],
     }

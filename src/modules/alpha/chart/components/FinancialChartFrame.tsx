@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 公共金融图表的专业外壳。
- * 外壳负责受控周期、复权、图表类型、OHLC 信息和状态反馈，不拥有行情查询。
+ * 外壳负责受控图表选项、权威价格 legend、成交量入口和状态反馈，不拥有查询。
  */
 
 import {
@@ -15,6 +15,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { FinancialChart } from "@/modules/alpha/chart/components/FinancialChart";
 import type {
+  ChartMarketMetadata,
+  ChartPriceReference,
   FinancialChartStatus,
   MarketChartDensity,
   MarketChartInterval,
@@ -34,6 +36,8 @@ type Props = {
   dataKey: string;
   symbol: string | null;
   options: MarketChartOptions;
+  metadata: ChartMarketMetadata | null;
+  priceReference: ChartPriceReference;
   availableIntervals: readonly MarketChartInterval[];
   density: MarketChartDensity;
   status: FinancialChartStatus;
@@ -52,6 +56,8 @@ export function FinancialChartFrame({
   dataKey,
   symbol,
   options,
+  metadata,
+  priceReference,
   availableIntervals,
   density,
   status,
@@ -82,14 +88,19 @@ export function FinancialChartFrame({
     [bars],
   );
   const previousClose = displayBar
-    ? (previousCloseByTime.get(marketTimeKey(displayBar.time)) ?? null)
+    ? marketTimeKey(displayBar.time) ===
+      (latestBar ? marketTimeKey(latestBar.time) : null)
+      ? priceReference.previousClose
+      : (previousCloseByTime.get(marketTimeKey(displayBar.time)) ?? null)
     : null;
+  const pricePrecision = metadata?.pricePrecision ?? 2;
   const number = useMemo(
     () =>
       new Intl.NumberFormat(i18n.language, {
-        maximumFractionDigits: 4,
+        minimumFractionDigits: pricePrecision,
+        maximumFractionDigits: pricePrecision,
       }),
-    [i18n.language],
+    [i18n.language, pricePrecision],
   );
   const compactNumber = useMemo(
     () =>
@@ -103,6 +114,20 @@ export function FinancialChartFrame({
     displayBar && previousClose !== null && previousClose !== 0
       ? ((displayBar.close - previousClose) / previousClose) * 100
       : null;
+  const changeClass =
+    changePercent === null
+      ? undefined
+      : metadata?.priceColorConvention === "up-red"
+        ? changePercent < 0
+          ? "text-success"
+          : "text-destructive"
+        : changePercent < 0
+          ? "text-destructive"
+          : "text-success";
+  const volumeUnit =
+    metadata?.volumeUnit === "share"
+      ? t("data.chart.units.share")
+      : metadata?.volumeUnit;
 
   const handleCrosshairChange = useCallback(
     (bar: MarketBar | null) => {
@@ -198,6 +223,23 @@ export function FinancialChartFrame({
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                size="sm"
+                variant={options.showVolume ? "secondary" : "ghost"}
+                className="h-7 px-2 text-[11px]"
+                title={t("data.chart.controls.volume")}
+                aria-label={t("data.chart.controls.volume")}
+                aria-pressed={options.showVolume}
+                onClick={() =>
+                  onOptionsChange({
+                    ...options,
+                    showVolume: !options.showVolume,
+                  })
+                }
+              >
+                {t("data.chart.legend.volume")}
+              </Button>
             </>
           ) : (
             FINANCIAL_CHART_TYPES.map((type) => (
@@ -251,17 +293,16 @@ export function FinancialChartFrame({
           value={displayBar?.close}
           formatter={number}
         />
-        <span
-          className={cn(
-            changePercent !== null &&
-              (changePercent < 0 ? "text-destructive" : "text-success"),
-          )}
-        >
+        <span className={cn(changeClass)}>
           {t("data.chart.legend.change")}{" "}
           {changePercent === null ? "-" : `${changePercent.toFixed(2)}%`}
         </span>
         <ChartValue
-          label={t("data.chart.legend.volume")}
+          label={
+            volumeUnit
+              ? t("data.chart.legend.volumeWithUnit", { unit: volumeUnit })
+              : t("data.chart.legend.volume")
+          }
           value={displayBar?.volume}
           formatter={compactNumber}
         />
@@ -277,6 +318,12 @@ export function FinancialChartFrame({
           bars={bars}
           dataKey={dataKey}
           chartType={options.chartType}
+          metadata={metadata}
+          priceReference={priceReference}
+          previousCloseLabel={t("data.chart.previousClose")}
+          locale={i18n.language}
+          showVolume={options.showVolume}
+          paneRatios={options.paneRatios}
           visible={visible}
           hasMoreBefore={hasMoreBefore}
           loadingMore={loadingMore}
@@ -286,6 +333,11 @@ export function FinancialChartFrame({
           })}
           onCrosshairChange={handleCrosshairChange}
           onRequestMore={onRequestMore}
+          onPaneRatiosChange={
+            density === "panel"
+              ? (paneRatios) => onOptionsChange({ ...options, paneRatios })
+              : undefined
+          }
         />
         {status !== "ready" ? (
           <ChartStatusOverlay status={status} onRetry={onRetry} />

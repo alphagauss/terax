@@ -1,6 +1,6 @@
 /**
  * 本文件把 Alpha 有界历史查询连接到公共金融图表。
- * Scene 负责权威周期、排他游标、跨页合并和查询键隔离，不接触图表实例。
+ * Scene 负责权威证券元数据、参考价、排他游标、跨页合并和查询键隔离。
  */
 
 import { getAlphaBars, getAlphaSecurity } from "@/modules/alpha/api";
@@ -13,6 +13,7 @@ import type {
 } from "@/modules/alpha/chart/model";
 import { MARKET_CHART_INTERVALS } from "@/modules/alpha/chart/model";
 import type { MarketBar, MarketBarPage } from "@/modules/alpha/market/model";
+import { createChartMarketMetadata } from "@/modules/alpha/market/metadata";
 import { mergeMarketBarPages } from "@/modules/alpha/market/normalize";
 import { alphaQueryKeys } from "@/modules/alpha/query";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -56,7 +57,7 @@ export function MarketChartScene({
   const securityQuery = useQuery({
     queryKey: alphaQueryKeys.security(vtSymbol ?? ""),
     queryFn: () => getAlphaSecurity(vtSymbol ?? ""),
-    enabled: density === "panel" && visible && vtSymbol !== null,
+    enabled: visible && vtSymbol !== null,
   });
   const declaredIntervals = useMemo(
     () => supportedChartIntervals(securityQuery.data?.intervals ?? []),
@@ -64,6 +65,13 @@ export function MarketChartScene({
   );
   const availableIntervals =
     declaredIntervals.length > 0 ? declaredIntervals : [options.interval];
+  const metadata = useMemo(
+    () =>
+      securityQuery.data
+        ? createChartMarketMetadata(securityQuery.data, declaredIntervals)
+        : null,
+    [declaredIntervals, securityQuery.data],
+  );
 
   const query = useInfiniteQuery({
     queryKey: [
@@ -91,6 +99,14 @@ export function MarketChartScene({
     () => mergeHistoricalPages(query.data?.pages ?? []),
     [query.data?.pages],
   );
+  const firstPage = query.data?.pages[0];
+  const priceReference = useMemo(
+    () => ({
+      previousClose: firstPage?.referenceClose ?? null,
+      referenceTime: firstPage?.referenceTime ?? null,
+    }),
+    [firstPage],
+  );
   const requestMore = useCallback(() => {
     if (query.hasNextPage && !query.isFetchingNextPage) {
       void query.fetchNextPage();
@@ -114,6 +130,8 @@ export function MarketChartScene({
       }
       symbol={vtSymbol}
       options={options}
+      metadata={metadata}
+      priceReference={priceReference}
       availableIntervals={availableIntervals}
       density={density}
       status={status}

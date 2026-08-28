@@ -53,7 +53,13 @@ describe("AlphaChartPanel", () => {
       panelId: "panel-1",
       vtSymbol: "000001.SZSE",
       visible: true,
-      config: { interval: "1h", adjust: "none", chartType: "line" },
+      config: {
+        interval: "1h",
+        adjust: "none",
+        chartType: "line",
+        showVolume: false,
+        paneRatios: { main: 7, volume: 3 },
+      },
       onConfigChange,
     };
 
@@ -63,18 +69,32 @@ describe("AlphaChartPanel", () => {
       vtSymbol: "000001.SZSE",
       visible: true,
       density: "panel",
-      options: { interval: "1h", adjust: "none", chartType: "line" },
+      options: {
+        interval: "1h",
+        adjust: "none",
+        chartType: "line",
+        showVolume: false,
+        paneRatios: { main: 7, volume: 3 },
+      },
     });
     act(() => {
       const change = mocks.sceneProps?.onOptionsChange as (
-        value: Record<string, string>,
+        value: Record<string, unknown>,
       ) => void;
-      change({ interval: "d", adjust: "forward", chartType: "ohlc" });
+      change({
+        interval: "d",
+        adjust: "forward",
+        chartType: "ohlc",
+        showVolume: true,
+        paneRatios: { main: 8, volume: 2 },
+      });
     });
     expect(onConfigChange).toHaveBeenCalledWith({
       interval: "d",
       adjust: "forward",
       chartType: "ohlc",
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
     });
   });
 });

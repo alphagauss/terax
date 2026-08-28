@@ -8,7 +8,10 @@ import type {
   MarketBarPage,
   MarketInterval,
 } from "@/modules/alpha/market/model";
-import { normalizeMarketBars } from "@/modules/alpha/market/normalize";
+import {
+  normalizeMarketBars,
+  normalizeMarketTime,
+} from "@/modules/alpha/market/normalize";
 import { type AlphaQueryParam, requestAlpha } from "@/modules/alpha/native";
 import { z } from "zod";
 
@@ -84,6 +87,13 @@ const securitiesSchema = z.object({
   offset: z.number(),
 });
 
+const securityDetailSchema = securitySchema.extend({
+  timezone: z.string().min(1),
+  price_color_convention: z.enum(["up-red", "up-green"]),
+  volume_unit: z.string().nullable(),
+  price_tick: z.number().nullable(),
+});
+
 const barSchema = z.object({
   time: z.string().regex(/^\d{4}-\d{2}-\d{2}/),
   open: z.number(),
@@ -101,6 +111,8 @@ const barsSchema = z.object({
   next_before: z.string().nullable(),
   actual_start: z.string().nullable(),
   actual_end: z.string().nullable(),
+  reference_close: z.number().nullable(),
+  reference_time: z.string().nullable(),
 });
 
 const backtestSchema = z.object({
@@ -141,6 +153,7 @@ const drawdownSchema = z.object({
 type AlphaStatusOverview = z.infer<typeof statusSchema>;
 export type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
 export type AlphaSecurity = z.infer<typeof securitySchema>;
+export type AlphaSecurityDetail = z.infer<typeof securityDetailSchema>;
 export type AlphaBacktest = z.infer<typeof backtestSchema>;
 type AlphaBacktestSeries = {
   equity: z.infer<typeof equitySchema>["items"];
@@ -260,11 +273,13 @@ export function getAlphaSecurities(query: AlphaSecurityQuery = {}): Promise<{
   return alphaGet("/api/alpha/securities", securitiesSchema, params);
 }
 
-/** 读取单个证券的权威目录详情，当前只消费公共目录字段。 */
-export function getAlphaSecurity(vtSymbol: string): Promise<AlphaSecurity> {
+/** 读取单个证券的权威目录和图表市场元数据。 */
+export function getAlphaSecurity(
+  vtSymbol: string,
+): Promise<AlphaSecurityDetail> {
   return alphaGet(
     `/api/alpha/securities/${encodeURIComponent(vtSymbol)}`,
-    securitySchema,
+    securityDetailSchema,
   );
 }
 
@@ -300,6 +315,13 @@ export async function getAlphaBars(
     nextBefore: response.next_before,
     actualStart: response.actual_start,
     actualEnd: response.actual_end,
+    referenceClose: response.reference_close,
+    referenceTime: response.reference_time
+      ? normalizeMarketTime(
+          response.reference_time,
+          /^\d{4}-\d{2}-\d{2}$/.test(response.reference_time) ? "d" : interval,
+        )
+      : null,
   };
 }
 

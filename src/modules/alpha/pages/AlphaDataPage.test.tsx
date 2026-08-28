@@ -138,6 +138,8 @@ describe("AlphaDataPage", () => {
         interval: "d",
         adjust: "forward",
         chartType: "candlestick",
+        showVolume: true,
+        paneRatios: { main: 8, volume: 2 },
       },
     });
 

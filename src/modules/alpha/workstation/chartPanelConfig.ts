@@ -1,6 +1,6 @@
 /**
  * 本文件定义工作台图表面板的可持久化配置边界。
- * 配置只包含公共行情图表选项，并为旧空对象提供显式默认值。
+ * 配置只包含公共行情图表选项，并为旧对象补齐成交量和语义 pane 比例。
  */
 
 import {
@@ -17,12 +17,23 @@ const alphaChartPanelConfigSchema = z
     interval: z.enum(MARKET_CHART_INTERVALS).default("d"),
     adjust: z.enum(MARKET_ADJUSTMENTS).default("forward"),
     chartType: z.enum(FINANCIAL_CHART_TYPES).default("candlestick"),
+    showVolume: z.boolean().default(true),
+    paneRatios: z
+      .object({
+        main: z.number().positive().default(8),
+        volume: z.number().positive().default(2),
+      })
+      .catchall(z.number().positive())
+      .default({ main: 8, volume: 2 }),
   })
   .strict();
 
 /** 创建新图表面板使用的独立默认配置。 */
 export function createDefaultAlphaChartPanelConfig(): MarketChartOptions {
-  return { ...DEFAULT_MARKET_CHART_OPTIONS };
+  return {
+    ...DEFAULT_MARKET_CHART_OPTIONS,
+    paneRatios: { ...DEFAULT_MARKET_CHART_OPTIONS.paneRatios },
+  };
 }
 
 /** 解析持久化或面板属性中的图表配置，并补齐旧版本缺失字段。 */

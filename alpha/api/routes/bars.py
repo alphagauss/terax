@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Annotated, Literal, cast
 from zoneinfo import ZoneInfo
 
@@ -19,23 +19,15 @@ from alpha.api.routes._utils import (
     normalize_interval,
     parse_datetime,
 )
-from alpha.common.schema_core import split_vt_symbol
+from alpha.common.market_metadata import get_market_metadata
 from alpha.common.schema_market import BarDataQuery, BarHistoryQuery
 
 router = APIRouter()
 
-_EXCHANGE_TIMEZONES = {
-    "SSE": ZoneInfo("Asia/Shanghai"),
-    "SZSE": ZoneInfo("Asia/Shanghai"),
-    "BSE": ZoneInfo("Asia/Shanghai"),
-    "HKEX": ZoneInfo("Asia/Hong_Kong"),
-}
-
 
 def _exchange_timezone(vt_symbol: str) -> ZoneInfo:
     """返回证券所属交易所时区。"""
-    _, exchange = split_vt_symbol(vt_symbol)
-    return _EXCHANGE_TIMEZONES[exchange]
+    return get_market_metadata(vt_symbol).timezone
 
 
 def _market_local_datetime(
@@ -112,6 +104,77 @@ def _overview_window(
     return start, end
 
 
+def _exclusive_after(value: datetime | None) -> datetime | None:
+    """把闭区间锚点转换为历史查询可消费的排他上界。"""
+    return value + timedelta(microseconds=1) if value is not None else None
+
+
+async def _load_price_reference(
+    services: AlphaServiceContainer,
+    *,
+    vt_symbol: str,
+    interval: str,
+    adjust: Literal["pre", "post", "non"],
+    anchor: datetime | None,
+) -> tuple[float | None, str | None]:
+    """读取与当前周期、复权和查询锚点一致的参考收盘价。
+
+    历史分页不把页游标作为锚点，调用方传入 ``None`` 时始终以完整覆盖范围
+    的最新数据为准。盘中周期先定位最新交易时段，再读取该时段之前最近的
+    已完成日线收盘价。
+    """
+    normalized_interval = cast(
+        Literal["1m", "1h", "d", "w", "tick"],
+        interval,
+    )
+    if interval in {"d", "w"}:
+        page = await services.database.load_bar_history(
+            BarHistoryQuery(
+                vt_symbol=vt_symbol,
+                interval=normalized_interval,
+                adjust=adjust,
+                before=_exclusive_after(anchor),
+                limit=2,
+            )
+        )
+        rows = page["items"]
+        if len(rows) < 2:
+            return None, None
+        row = rows[-2]
+        return first_number(row, ("close",)), _bar_time(row, interval, vt_symbol)
+
+    anchor_page = await services.database.load_bar_history(
+        BarHistoryQuery(
+            vt_symbol=vt_symbol,
+            interval=normalized_interval,
+            adjust=adjust,
+            before=_exclusive_after(anchor),
+            limit=1,
+        )
+    )
+    if not anchor_page["items"]:
+        return None, None
+    anchor_text = date_text(anchor_page["items"][-1].get("datetime"))
+    if not anchor_text:
+        return None, None
+    session_start = datetime.combine(
+        datetime.fromisoformat(anchor_text).date(), time.min
+    )
+    daily_page = await services.database.load_bar_history(
+        BarHistoryQuery(
+            vt_symbol=vt_symbol,
+            interval="d",
+            adjust=adjust,
+            before=session_start,
+            limit=1,
+        )
+    )
+    if not daily_page["items"]:
+        return None, None
+    row = daily_page["items"][-1]
+    return first_number(row, ("close",)), _bar_time(row, "d", vt_symbol)
+
+
 @router.get("/bars", response_model=dict[str, object])
 async def get_bars(
     services: Annotated[AlphaServiceContainer, Depends(get_alpha_services)],
@@ -166,6 +229,13 @@ async def get_bars(
             _bar_item(row, interval=normalized_interval, vt_symbol=vt_symbol)
             for row in page["items"]
         ]
+        reference_close, reference_time = await _load_price_reference(
+            services,
+            vt_symbol=vt_symbol,
+            interval=normalized_interval,
+            adjust=normalized_adjust,
+            anchor=None,
+        )
         return {
             "vt_symbol": vt_symbol,
             "interval": normalized_interval,
@@ -174,6 +244,8 @@ async def get_bars(
             "items": items,
             "actual_start": items[0]["time"] if items else None,
             "actual_end": items[-1]["time"] if items else None,
+            "reference_close": reference_close,
+            "reference_time": reference_time,
         }
 
     overview = await services.database.get_bar_overview_item(
@@ -209,6 +281,18 @@ async def get_bars(
         _bar_item(row, interval=normalized_interval, vt_symbol=vt_symbol)
         for row in selected_rows
     ]
+    reference_anchor = None
+    if selected_rows:
+        anchor_text = date_text(selected_rows[-1].get("datetime"))
+        if anchor_text:
+            reference_anchor = datetime.fromisoformat(anchor_text)
+    reference_close, reference_time = await _load_price_reference(
+        services,
+        vt_symbol=vt_symbol,
+        interval=normalized_interval,
+        adjust=normalized_adjust,
+        anchor=reference_anchor,
+    )
     return {
         "vt_symbol": vt_symbol,
         "interval": normalized_interval,
@@ -218,4 +302,6 @@ async def get_bars(
         "next_before": None,
         "actual_start": items[0]["time"] if items else None,
         "actual_end": items[-1]["time"] if items else None,
+        "reference_close": reference_close,
+        "reference_time": reference_time,
     }

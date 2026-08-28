@@ -103,12 +103,19 @@ describe("Alpha API client", () => {
         intervals: ["d", "1m", "tick"],
         coverage: {},
         price_tick: 0.01,
+        timezone: "Asia/Shanghai",
+        price_color_convention: "up-red",
+        volume_unit: "share",
       },
     });
 
     await expect(getAlphaSecurity("000001.SZSE")).resolves.toMatchObject({
       vt_symbol: "000001.SZSE",
       intervals: ["d", "1m", "tick"],
+      price_tick: 0.01,
+      timezone: "Asia/Shanghai",
+      price_color_convention: "up-red",
+      volume_unit: "share",
     });
     expect(requestMock).toHaveBeenCalledWith({
       method: "GET",
@@ -161,6 +168,8 @@ describe("Alpha API client", () => {
         next_before: null,
         actual_start: "2026-07-30T00:00:00",
         actual_end: "2026-07-30T00:00:00",
+        reference_close: 10,
+        reference_time: "2026-07-29T00:00:00",
         items: [
           {
             time: "2026-07-30T00:00:00",
@@ -186,6 +195,8 @@ describe("Alpha API client", () => {
       ],
       hasMoreBefore: false,
       nextBefore: null,
+      referenceClose: 10,
+      referenceTime: { kind: "trading-day", date: "2026-07-29" },
     });
     expect(requestMock).toHaveBeenCalledWith({
       method: "GET",
@@ -208,6 +219,8 @@ describe("Alpha API client", () => {
         next_before: null,
         actual_start: "2026-07-30 09:30:00",
         actual_end: "2026-07-30 09:30:00",
+        reference_close: 10,
+        reference_time: "2026-07-29",
         items: [
           {
             time: "2026-07-30T09:30:00+08:00",
@@ -232,6 +245,8 @@ describe("Alpha API client", () => {
           openInterest: 20,
         },
       ],
+      referenceClose: 10,
+      referenceTime: { kind: "trading-day", date: "2026-07-29" },
     });
   });
 
@@ -245,6 +260,8 @@ describe("Alpha API client", () => {
         next_before: null,
         actual_start: null,
         actual_end: null,
+        reference_close: null,
+        reference_time: null,
       },
     });
 

@@ -1,6 +1,6 @@
 /**
  * 本文件测试 Alpha 行情到 Lightweight Charts 的纯转换。
- * 重点锁定交易日、尾部更新保护和历史 prepend 计数。
+ * 重点锁定交易日、前收盘方向色、尾部更新保护和历史 prepend 计数。
  */
 
 import {
@@ -52,13 +52,14 @@ describe("financial chart data", () => {
 
   it("一次构建价格、收盘线和带方向色的成交量数据", () => {
     const result = buildFinancialSeriesData(
-      [bar("2026-07-29", 11), bar("2026-07-30", 8)],
+      [bar("2026-07-29", 11), bar("2026-07-30", 10.5)],
       palette,
     );
 
     expect(result.candles).toHaveLength(2);
-    expect(result.ohlc).toEqual(result.candles);
-    expect(result.line.map((item) => item.value)).toEqual([11, 8]);
+    expect(result.candles.map((item) => item.color)).toEqual(["#0f0", "#f00"]);
+    expect(result.ohlc.map((item) => item.color)).toEqual(["#0f0", "#f00"]);
+    expect(result.line.map((item) => item.value)).toEqual([11, 10.5]);
     expect(result.volume.map((item) => item.color)).toEqual(["#0f0", "#f00"]);
   });
 

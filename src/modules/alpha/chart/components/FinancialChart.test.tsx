@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   controller: {
     setCallbacks: vi.fn(),
     setChartType: vi.fn(),
+    setMarketMetadata: vi.fn(),
+    setPriceReference: vi.fn(),
+    setPaneRatios: vi.fn(),
+    getPaneRatios: vi.fn(() => ({ main: 8, volume: 2 })),
+    setShowVolume: vi.fn(),
     setBars: vi.fn(),
     setHistoryState: vi.fn(),
     resetView: vi.fn(),
@@ -59,6 +64,7 @@ const bar: MarketBar = {
 
 describe("FinancialChart", () => {
   let root: ReturnType<typeof createRoot> | null;
+  let container: HTMLDivElement;
 
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
@@ -70,12 +76,15 @@ describe("FinancialChart", () => {
         disconnect() {}
       },
     );
-    root = createRoot(document.createElement("div"));
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
   });
 
   afterEach(() => {
     act(() => root?.unmount());
     root = null;
+    container.remove();
     vi.unstubAllGlobals();
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
   });
@@ -88,6 +97,26 @@ describe("FinancialChart", () => {
       loadingMore: false,
       resetRevision: 0,
       ariaLabel: "chart",
+      locale: "zh-CN",
+      metadata: {
+        vtSymbol: "000001.SZSE",
+        name: "平安银行",
+        exchange: "SZSE",
+        timezone: "Asia/Shanghai",
+        minMove: 0.01,
+        pricePrecision: 2,
+        volumeUnit: "share",
+        priceColorConvention: "up-red" as const,
+        intervals: ["d" as const],
+      },
+      priceReference: {
+        previousClose: 10,
+        referenceTime: { kind: "trading-day" as const, date: "2026-07-29" },
+      },
+      previousCloseLabel: "昨收",
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
+      onPaneRatiosChange: vi.fn(),
       onCrosshairChange: vi.fn(),
       onRequestMore: vi.fn(),
     };
@@ -117,5 +146,48 @@ describe("FinancialChart", () => {
       "000001.SZSE|1h|none",
       [bar],
     );
+    expect(mocks.controller.setMarketMetadata).toHaveBeenLastCalledWith(
+      common.metadata,
+      "zh-CN",
+    );
+    expect(mocks.controller.setPriceReference).toHaveBeenLastCalledWith(
+      common.priceReference,
+      "昨收",
+    );
+  });
+
+  it("只在 pointerup 后提交一次变化的语义 pane 比例", () => {
+    const onPaneRatiosChange = vi.fn();
+    const common = {
+      bars: [bar],
+      dataKey: "000001.SZSE|d|forward",
+      chartType: "candlestick" as const,
+      visible: true,
+      hasMoreBefore: false,
+      loadingMore: false,
+      resetRevision: 0,
+      ariaLabel: "chart",
+      locale: "zh-CN",
+      metadata: null,
+      priceReference: { previousClose: null, referenceTime: null },
+      previousCloseLabel: "昨收",
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
+      onCrosshairChange: vi.fn(),
+      onRequestMore: vi.fn(),
+      onPaneRatiosChange,
+    };
+    act(() => root?.render(<FinancialChart {...common} />));
+    const host = container.querySelector<HTMLElement>(
+      "[data-alpha-financial-chart]",
+    );
+
+    act(() => host?.dispatchEvent(new PointerEvent("pointerup")));
+    expect(onPaneRatiosChange).not.toHaveBeenCalled();
+
+    mocks.controller.getPaneRatios.mockReturnValue({ main: 7, volume: 3 });
+    act(() => host?.dispatchEvent(new PointerEvent("pointerup")));
+    expect(onPaneRatiosChange).toHaveBeenCalledOnce();
+    expect(onPaneRatiosChange).toHaveBeenCalledWith({ main: 7, volume: 3 });
   });
 });

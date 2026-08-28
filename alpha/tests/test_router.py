@@ -421,9 +421,7 @@ def _client() -> TestClient:
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
         has_running_tasks=lambda: False,
     )
-    app.state.alpha_started_at = datetime(
-        2026, 8, 13, 9, 20, 31, tzinfo=timezone.utc
-    )
+    app.state.alpha_started_at = datetime(2026, 8, 13, 9, 20, 31, tzinfo=timezone.utc)
     app.include_router(router, prefix="/api/alpha")
     return TestClient(app)
 
@@ -539,17 +537,20 @@ def test_alpha_router_exposes_security_and_bar_apis() -> None:
     assert list_response.json()["items"][0]["data_state"] == "complete"
     assert detail_response.status_code == 200
     assert detail_response.json()["coverage"]["d"]["rows"] == 3
+    assert detail_response.json()["timezone"] == "Asia/Shanghai"
+    assert detail_response.json()["price_color_convention"] == "up-red"
+    assert detail_response.json()["volume_unit"] == "share"
     assert bars_response.status_code == 200
     assert bars_response.json()["items"][0]["close"] == 10.5
     assert bars_response.json()["has_more_before"] is False
     assert bars_response.json()["next_before"] is None
+    assert "reference_close" in bars_response.json()
+    assert "reference_time" in bars_response.json()
 
 
 def test_alpha_bar_router_adds_exchange_timezone_to_intraday_bars() -> None:
     """盘中行情必须返回可解析为绝对时刻的交易所时区偏移。"""
-    response = _client().get(
-        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=1m"
-    )
+    response = _client().get("/api/alpha/bars?vt_symbol=000001.SZSE&interval=1m")
 
     assert response.status_code == 200
     assert response.json()["items"][0]["time"] == "2025-01-02T00:00:00+08:00"
@@ -571,6 +572,137 @@ def test_alpha_bar_router_rejects_mixed_range_and_cursor_queries() -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_alpha_bar_reference_is_stable_across_pages_and_adjustments() -> None:
+    """历史分页共享最新锚点，且不同复权方式必须返回各自的参考价。"""
+    client = _client()
+    calls: list[object] = []
+
+    async def load_bar_history(query: object) -> dict[str, object]:
+        """按测试查询返回页面或权威参考窗口。"""
+        calls.append(query)
+        adjust = getattr(query, "adjust")
+        limit = getattr(query, "limit")
+        before = getattr(query, "before")
+        if limit == 2:
+            reference_close = 10.0 if adjust == "pre" else 20.0
+            rows = [
+                {
+                    "datetime": "2025-01-01 00:00:00",
+                    "open": reference_close,
+                    "high": reference_close,
+                    "low": reference_close,
+                    "close": reference_close,
+                    "volume": 100,
+                },
+                {
+                    "datetime": "2025-01-02 00:00:00",
+                    "open": 11.0,
+                    "high": 11.0,
+                    "low": 11.0,
+                    "close": 11.0,
+                    "volume": 100,
+                },
+            ]
+        else:
+            day = "2024-12-31" if before is not None else "2025-01-02"
+            rows = [
+                {
+                    "datetime": f"{day} 00:00:00",
+                    "open": 11.0,
+                    "high": 11.0,
+                    "low": 11.0,
+                    "close": 11.0,
+                    "volume": 100,
+                }
+            ]
+        return {
+            "items": rows,
+            "has_more_before": False,
+            "next_before": None,
+            "actual_start": rows[0]["datetime"],
+            "actual_end": rows[-1]["datetime"],
+        }
+
+    client.app.state.alpha_services.database.load_bar_history = load_bar_history
+
+    latest = client.get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=d&adjust=forward"
+    ).json()
+    older = client.get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=d&adjust=forward"
+        "&before=2025-01-02"
+    ).json()
+    backward = client.get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=d&adjust=backward"
+    ).json()
+
+    assert latest["reference_close"] == 10.0
+    assert older["reference_close"] == 10.0
+    assert latest["reference_time"] == older["reference_time"] == "2025-01-01"
+    assert backward["reference_close"] == 20.0
+    reference_queries = [query for query in calls if getattr(query, "limit") == 2]
+    assert all(getattr(query, "before") is None for query in reference_queries)
+    assert [getattr(query, "adjust") for query in reference_queries] == [
+        "pre",
+        "pre",
+        "post",
+    ]
+
+
+def test_alpha_intraday_reference_uses_previous_completed_daily_close() -> None:
+    """盘中行情参考价来自当前交易时段之前最近的已完成日线。"""
+    client = _client()
+    calls: list[object] = []
+
+    async def load_bar_history(query: object) -> dict[str, object]:
+        """分别返回盘中页面、时段锚点和前一交易日日线。"""
+        calls.append(query)
+        interval = getattr(query, "interval")
+        limit = getattr(query, "limit")
+        if interval == "d":
+            rows = [
+                {
+                    "datetime": "2025-01-01 00:00:00",
+                    "open": 9.8,
+                    "high": 9.8,
+                    "low": 9.8,
+                    "close": 9.8,
+                    "volume": 100,
+                }
+            ]
+        else:
+            rows = [
+                {
+                    "datetime": "2025-01-02 09:30:00",
+                    "open": 10.0,
+                    "high": 10.1,
+                    "low": 9.9,
+                    "close": 10.0,
+                    "volume": 100,
+                }
+            ]
+        return {
+            "items": rows,
+            "has_more_before": False,
+            "next_before": None,
+            "actual_start": rows[0]["datetime"],
+            "actual_end": rows[-1]["datetime"],
+        }
+
+    client.app.state.alpha_services.database.load_bar_history = load_bar_history
+
+    response = client.get(
+        "/api/alpha/bars?vt_symbol=000001.SZSE&interval=1m&adjust=forward"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reference_close"] == 9.8
+    assert response.json()["reference_time"] == "2025-01-01"
+    daily_query = next(query for query in calls if getattr(query, "interval") == "d")
+    assert getattr(daily_query, "before") == datetime(2025, 1, 2)
+    assert getattr(daily_query, "limit") == 1
 
 
 def test_alpha_router_exposes_backtest_result_slices() -> None:

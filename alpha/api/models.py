@@ -110,6 +110,9 @@ class SecurityCatalogPage(BaseModel):
 class SecurityCatalogDetail(SecurityCatalogItem):
     """证券数据目录详情响应。"""
 
+    timezone: str
+    price_color_convention: Literal["up-red", "up-green"]
+    volume_unit: str | None = None
     sec_name: str | None = None
     sec_abbr: str | None = None
     price_tick: float | None = None

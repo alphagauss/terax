@@ -99,6 +99,7 @@
       "earliest": "Earliest data reached",
       "historyRetry": "Retry earlier history",
       "resetView": "Reset chart view",
+      "previousClose": "Prev close",
       "types": {
         "candlestick": "Candles",
         "ohlc": "OHLC",
@@ -107,7 +108,8 @@
       "controls": {
         "interval": "Bar interval",
         "adjust": "Price adjustment",
-        "chartType": "Chart type"
+        "chartType": "Chart type",
+        "volume": "Show volume pane"
       },
       "intervals": {
         "1m": "1m",
@@ -127,7 +129,11 @@
         "close": "C",
         "change": "Change",
         "volume": "Vol",
+        "volumeWithUnit": "Vol ({{unit}})",
         "amount": "Amt"
+      },
+      "units": {
+        "share": "shares"
       },
       "status": {
         "loading": "Loading market data...",

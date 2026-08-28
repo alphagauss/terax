@@ -43,6 +43,8 @@ const DEFAULT_OPTIONS: MarketChartOptions = {
   interval: "d",
   adjust: "forward",
   chartType: "candlestick",
+  showVolume: true,
+  paneRatios: { main: 8, volume: 2 },
 };
 
 function page(
@@ -65,6 +67,8 @@ function page(
     nextBefore,
     actualStart: dates[0] ?? null,
     actualEnd: dates[dates.length - 1] ?? null,
+    referenceClose: 10,
+    referenceTime: { kind: "trading-day", date: "2026-07-26" },
   };
 }
 
@@ -84,7 +88,15 @@ describe("MarketChartScene", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     mocks.getAlphaBars.mockReset();
     mocks.getAlphaSecurity.mockReset().mockResolvedValue({
+      vt_symbol: "000001.SZSE",
+      symbol: "000001",
+      exchange: "SZSE",
+      name: "平安银行",
       intervals: ["1m", "1h", "d", "w", "tick", "future"],
+      timezone: "Asia/Shanghai",
+      price_color_convention: "up-red",
+      volume_unit: "share",
+      price_tick: 0.01,
     });
     mocks.frameProps = null;
     queryClient = new QueryClient({
@@ -218,6 +230,8 @@ describe("MarketChartScene", () => {
         interval: "1h",
         adjust: "none",
         chartType: "line",
+        showVolume: false,
+        paneRatios: { main: 7, volume: 3 },
       }),
     );
     await flush();
@@ -231,10 +245,22 @@ describe("MarketChartScene", () => {
       interval: "1h",
       adjust: "none",
       chartType: "line",
+      showVolume: false,
+      paneRatios: { main: 7, volume: 3 },
+    });
+    expect(mocks.frameProps?.metadata).toMatchObject({
+      timezone: "Asia/Shanghai",
+      minMove: 0.01,
+      pricePrecision: 2,
+      priceColorConvention: "up-red",
+    });
+    expect(mocks.frameProps?.priceReference).toEqual({
+      previousClose: 10,
+      referenceTime: { kind: "trading-day", date: "2026-07-26" },
     });
   });
 
-  it("紧凑数据预览不请求未使用的证券详情", async () => {
+  it("紧凑数据预览复用证券详情提供权威价格和时间语义", async () => {
     mocks.getAlphaBars.mockResolvedValue(page(["2026-07-30"], false, null));
 
     await act(async () =>
@@ -242,7 +268,7 @@ describe("MarketChartScene", () => {
     );
     await flush();
 
-    expect(mocks.getAlphaSecurity).not.toHaveBeenCalled();
+    expect(mocks.getAlphaSecurity).toHaveBeenCalledWith("000001.SZSE");
     expect(mocks.getAlphaBars).toHaveBeenCalledWith(
       "000001.SZSE",
       expect.objectContaining({ interval: "d", adjust: "forward" }),
@@ -250,7 +276,17 @@ describe("MarketChartScene", () => {
   });
 
   it("证券详情没有可用 K 线周期时只保留当前配置", async () => {
-    mocks.getAlphaSecurity.mockResolvedValue({ intervals: ["tick", "future"] });
+    mocks.getAlphaSecurity.mockResolvedValue({
+      vt_symbol: "000001.SZSE",
+      symbol: "000001",
+      exchange: "SZSE",
+      name: "平安银行",
+      intervals: ["tick", "future"],
+      timezone: "Asia/Shanghai",
+      price_color_convention: "up-red",
+      volume_unit: "share",
+      price_tick: 0.01,
+    });
     mocks.getAlphaBars.mockResolvedValue(page([], false, null));
 
     await act(async () => render("000001.SZSE"));

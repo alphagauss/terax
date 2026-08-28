@@ -10,11 +10,15 @@ import {
   financialTailUpdateMode,
 } from "@/modules/alpha/chart/lightweight/data";
 import type {
+  ChartMarketMetadata,
+  ChartPriceReference,
   FinancialChartPalette,
   FinancialChartType,
+  PaneRatios,
 } from "@/modules/alpha/chart/model";
 import { createRafBatcher } from "@/modules/alpha/chart/rafBatcher";
 import type { MarketBar } from "@/modules/alpha/market/model";
+import { formatMarketTimestamp } from "@/modules/alpha/market/metadata";
 import {
   BarSeries,
   CandlestickSeries,
@@ -22,16 +26,21 @@ import {
   createChart,
   HistogramSeries,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
+  LineStyle,
   LineSeries,
   type Logical,
   type LogicalRange,
   type MouseEventParams,
   type Time,
+  TickMarkType,
 } from "lightweight-charts";
 
 const HISTORY_LOAD_THRESHOLD = 20;
 const MIN_VISIBLE_BARS_AFTER_PAN = 8;
+const DEFAULT_PANE_RATIOS: PaneRatios = { main: 8, volume: 2 };
+const MIN_CUSTOM_PANE_HEIGHT = 240;
 
 type ChartCallbacks = {
   onCrosshairChange?: (bar: MarketBar | null) => void;
@@ -71,6 +80,19 @@ export class FinancialChartController {
   >;
   private callbacks: ChartCallbacks = {};
   private palette = DEFAULT_PALETTE;
+  private chartType: FinancialChartType = "candlestick";
+  private priceReference: ChartPriceReference = {
+    previousClose: null,
+    referenceTime: null,
+  };
+  private previousCloseTitle = "";
+  private previousCloseLine: IPriceLine | null = null;
+  private previousCloseSeries: ISeriesApi<
+    "Candlestick" | "Bar" | "Line"
+  > | null = null;
+  private showVolume = true;
+  private paneRatios: PaneRatios = { ...DEFAULT_PANE_RATIOS };
+  private chartHeight: number;
   private bars: readonly MarketBar[] = [];
   private barsByTime = new Map<string, MarketBar>();
   private dataKey = "";
@@ -84,6 +106,7 @@ export class FinancialChartController {
 
   constructor(host: HTMLElement) {
     this.host = host;
+    this.chartHeight = Math.max(1, host.clientHeight);
     this.chart = createChart(host, {
       width: Math.max(1, host.clientWidth),
       height: Math.max(1, host.clientHeight),
@@ -106,7 +129,11 @@ export class FinancialChartController {
     this.chart.panes()[1]?.setStretchFactor(2);
 
     this.resizeBatcher = createRafBatcher(({ width, height }) => {
-      if (this.visible) this.chart.applyOptions({ width, height });
+      if (this.visible) {
+        this.chartHeight = height;
+        this.chart.applyOptions({ width, height });
+        this.applyPaneRatios();
+      }
     });
     this.crosshairBatcher = createRafBatcher((bar) => {
       this.callbacks.onCrosshairChange?.(bar);
@@ -129,9 +156,107 @@ export class FinancialChartController {
 
   /** 切换价格 series，不重建图表实例。 */
   setChartType(type: FinancialChartType): void {
+    this.chartType = type;
     this.candles.applyOptions({ visible: type === "candlestick" });
     this.ohlc.applyOptions({ visible: type === "ohlc" });
     this.line.applyOptions({ visible: type === "line" });
+    this.refreshPreviousCloseLine();
+  }
+
+  /** 应用价格精度、最小跳动和交易所时区格式，不改变 series 身份。 */
+  setMarketMetadata(
+    metadata: ChartMarketMetadata | null,
+    locale: string,
+  ): void {
+    const precision = metadata?.pricePrecision ?? 2;
+    const minMove = metadata?.minMove ?? 0.01;
+    const timezone = metadata?.timezone ?? "UTC";
+    const priceFormat = { type: "price" as const, precision, minMove };
+    for (const series of [this.candles, this.ohlc, this.line]) {
+      series.applyOptions({ priceFormat });
+    }
+    this.chart.applyOptions({
+      localization: {
+        locale,
+        timeFormatter: (time: Time) =>
+          typeof time === "number"
+            ? formatMarketTimestamp(time, timezone, locale, "full")
+            : typeof time === "string"
+              ? time
+              : `${time.year}-${String(time.month).padStart(2, "0")}-${String(
+                  time.day,
+                ).padStart(2, "0")}`,
+      },
+      timeScale: {
+        tickMarkFormatter: (time: Time, type: TickMarkType) => {
+          if (typeof time !== "number") return null;
+          const style =
+            type === TickMarkType.Year
+              ? "year"
+              : type === TickMarkType.Month
+                ? "month"
+                : type === TickMarkType.DayOfMonth
+                  ? "day"
+                  : type === TickMarkType.TimeWithSeconds
+                    ? "time-seconds"
+                    : "time";
+          return formatMarketTimestamp(time, timezone, locale, style);
+        },
+      },
+    });
+  }
+
+  /** 更新权威昨收与其本地化标题，并同步刷新最新价线方向。 */
+  setPriceReference(
+    reference: ChartPriceReference,
+    previousCloseTitle: string,
+  ): void {
+    this.priceReference = reference;
+    this.previousCloseTitle = previousCloseTitle;
+    this.refreshPreviousCloseLine();
+    this.refreshLatestPriceLine();
+  }
+
+  /** 应用语义 pane 比例，未知键保留给后续指标 pane 使用。 */
+  setPaneRatios(ratios: PaneRatios): void {
+    this.paneRatios = {
+      ...ratios,
+      main: this.validPaneRatio(ratios.main, DEFAULT_PANE_RATIOS.main),
+      volume: this.validPaneRatio(ratios.volume, DEFAULT_PANE_RATIOS.volume),
+    };
+    this.applyPaneRatios();
+  }
+
+  /** 读取当前 pane 的最终比例，成交量隐藏时返回上次有效配置。 */
+  getPaneRatios(): PaneRatios {
+    if (this.chartHeight < MIN_CUSTOM_PANE_HEIGHT) {
+      this.applyPaneRatios();
+      return { ...this.paneRatios };
+    }
+    if (this.showVolume) {
+      const panes = this.chart.panes();
+      const main = panes[0]?.getStretchFactor();
+      const volume = panes[1]?.getStretchFactor();
+      if (main && volume) {
+        this.paneRatios = { ...this.paneRatios, main, volume };
+      }
+    }
+    return { ...this.paneRatios };
+  }
+
+  /** 隐藏成交量时移除空 pane，恢复时重新创建并应用用户比例。 */
+  setShowVolume(showVolume: boolean): void {
+    this.showVolume = showVolume;
+    this.runChartMutation(() => {
+      if (showVolume) {
+        this.volume.moveToPane(1);
+        this.volume.applyOptions({ visible: true });
+        this.applyPaneRatios();
+      } else {
+        this.volume.applyOptions({ visible: false });
+        this.volume.moveToPane(0);
+      }
+    });
   }
 
   /** 应用 Terax 主题色，不改变用户 viewport。 */
@@ -175,6 +300,8 @@ export class FinancialChartController {
           buildFinancialSeriesData(this.bars, palette).volume,
         );
       }
+      this.refreshPreviousCloseLine();
+      this.refreshLatestPriceLine();
     });
   }
 
@@ -192,7 +319,13 @@ export class FinancialChartController {
 
     if (!keyChanged && (tailMode === "replace" || tailMode === "append")) {
       const last = bars[bars.length - 1];
-      const data = buildFinancialSeriesData([last], this.palette);
+      const previousClose =
+        bars.length > 1 ? (bars[bars.length - 2]?.close ?? null) : null;
+      const data = buildFinancialSeriesData(
+        [last],
+        this.palette,
+        previousClose,
+      );
       this.dataKey = dataKey;
       this.bars = bars;
       this.barsByTime.set(chartTimeKey(financialChartTime(last.time)), last);
@@ -235,6 +368,8 @@ export class FinancialChartController {
         }
       });
     }
+
+    this.refreshLatestPriceLine();
 
     if (this.crosshairTimeKey !== null) {
       this.crosshairBatcher.schedule(
@@ -361,6 +496,74 @@ export class FinancialChartController {
   private readonly handleHistoryInteraction = (): void => {
     this.historyInteractionArmed = true;
   };
+
+  /** 返回当前可见的主价格 series。 */
+  private activePriceSeries(): ISeriesApi<"Candlestick" | "Bar" | "Line"> {
+    if (this.chartType === "ohlc") return this.ohlc;
+    if (this.chartType === "line") return this.line;
+    return this.candles;
+  }
+
+  /** 只在权威参考价存在时为当前可见价格 series 创建昨收线。 */
+  private refreshPreviousCloseLine(): void {
+    if (this.previousCloseLine && this.previousCloseSeries) {
+      this.previousCloseSeries.removePriceLine(this.previousCloseLine);
+    }
+    this.previousCloseLine = null;
+    this.previousCloseSeries = null;
+    const previousClose = this.priceReference.previousClose;
+    if (previousClose === null || !Number.isFinite(previousClose)) return;
+    const series = this.activePriceSeries();
+    this.previousCloseLine = series.createPriceLine({
+      price: previousClose,
+      color: this.palette.crosshair,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: this.previousCloseTitle,
+    });
+    this.previousCloseSeries = series;
+  }
+
+  /** 显式配置最新价线，并按最新收盘价相对权威昨收选择方向色。 */
+  private refreshLatestPriceLine(): void {
+    const latest = this.bars[this.bars.length - 1];
+    const previousClose = this.priceReference.previousClose;
+    const color = latest
+      ? latest.close >= (previousClose ?? latest.open)
+        ? this.palette.up
+        : this.palette.down
+      : this.palette.line;
+    for (const series of [this.candles, this.ohlc, this.line]) {
+      series.applyOptions({
+        priceLineVisible: true,
+        lastValueVisible: true,
+        priceLineColor: color,
+        priceLineWidth: 1,
+        priceLineStyle: LineStyle.Dotted,
+      });
+    }
+  }
+
+  /** 把非正数和非有限比例降级为当前版本默认值。 */
+  private validPaneRatio(value: number | undefined, fallback: number): number {
+    return value !== undefined && Number.isFinite(value) && value > 0
+      ? value
+      : fallback;
+  }
+
+  /** 将语义比例应用到当前存在的价格和成交量 pane。 */
+  private applyPaneRatios(): void {
+    const panes = this.chart.panes();
+    const ratios =
+      this.chartHeight < MIN_CUSTOM_PANE_HEIGHT
+        ? DEFAULT_PANE_RATIOS
+        : this.paneRatios;
+    panes[0]?.setStretchFactor(ratios.main);
+    if (this.showVolume) {
+      panes[1]?.setStretchFactor(ratios.volume);
+    }
+  }
 
   /** 执行可能同步改变可见范围的图表命令，避免内部事件误触发历史请求。 */
   private runChartMutation(action: () => void): void {

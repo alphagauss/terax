@@ -32,6 +32,8 @@ export type MarketBarPage = {
   nextBefore: string | null;
   actualStart: string | null;
   actualEnd: string | null;
+  referenceClose: number | null;
+  referenceTime: MarketTime | null;
 };
 
 export type MarketBarInput = {

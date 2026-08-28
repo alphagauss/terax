@@ -80,6 +80,26 @@ describe("FinancialChartFrame", () => {
             interval: "d",
             adjust: "forward",
             chartType: "candlestick",
+            showVolume: true,
+            paneRatios: { main: 8, volume: 2 },
+          },
+          metadata: {
+            vtSymbol: "000001.SZSE",
+            name: "平安银行",
+            exchange: "SZSE",
+            timezone: "Asia/Shanghai",
+            minMove: 0.01,
+            pricePrecision: 2,
+            volumeUnit: "share",
+            priceColorConvention: "up-red",
+            intervals: ["d"],
+          },
+          priceReference: {
+            previousClose: 10,
+            referenceTime: {
+              kind: "trading-day",
+              date: "2026-07-29",
+            },
           },
           availableIntervals: ["d"],
           density: "compact",
@@ -106,6 +126,8 @@ describe("FinancialChartFrame", () => {
       interval: "d",
       adjust: "forward",
       chartType: "line",
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
     });
 
     act(() => {
@@ -122,5 +144,64 @@ describe("FinancialChartFrame", () => {
     act(() => reset?.click());
 
     expect(mocks.chartProps?.resetRevision).toBe(1);
+    expect(mocks.chartProps).toMatchObject({
+      metadata: expect.objectContaining({ timezone: "Asia/Shanghai" }),
+      priceReference: expect.objectContaining({ previousClose: 10 }),
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
+    });
+  });
+
+  it("工作台密度切换成交量并回传 pane 比例", () => {
+    const onOptionsChange = vi.fn();
+    const options = {
+      interval: "d" as const,
+      adjust: "forward" as const,
+      chartType: "candlestick" as const,
+      showVolume: true,
+      paneRatios: { main: 8, volume: 2 },
+    };
+    act(() => {
+      root?.render(
+        createElement(FinancialChartFrame, {
+          bars: [marketBar("2026-07-30", 10, 11)],
+          dataKey: "000001.SZSE|d|forward",
+          symbol: "000001.SZSE",
+          options,
+          metadata: null,
+          priceReference: { previousClose: 10, referenceTime: null },
+          availableIntervals: ["d"],
+          density: "panel",
+          status: "ready",
+          historyError: false,
+          hasMoreBefore: false,
+          loadingMore: false,
+          visible: true,
+          onOptionsChange,
+          onRequestMore: vi.fn(),
+          onRetry: vi.fn(),
+        }),
+      );
+    });
+
+    const volume = container.querySelector<HTMLButtonElement>(
+      '[aria-label="data.chart.controls.volume"]',
+    );
+    act(() => volume?.click());
+    expect(onOptionsChange).toHaveBeenCalledWith({
+      ...options,
+      showVolume: false,
+    });
+
+    act(() => {
+      const change = mocks.chartProps?.onPaneRatiosChange as (
+        ratios: Record<string, number>,
+      ) => void;
+      change({ main: 7, volume: 3 });
+    });
+    expect(onOptionsChange).toHaveBeenLastCalledWith({
+      ...options,
+      paneRatios: { main: 7, volume: 3 },
+    });
   });
 });

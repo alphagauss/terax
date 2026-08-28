@@ -99,6 +99,7 @@
       "earliest": "已到达最早数据",
       "historyRetry": "重试加载更早历史",
       "resetView": "重置图表视图",
+      "previousClose": "昨收",
       "types": {
         "candlestick": "蜡烛图",
         "ohlc": "OHLC",
@@ -107,7 +108,8 @@
       "controls": {
         "interval": "K 线周期",
         "adjust": "复权方式",
-        "chartType": "图表类型"
+        "chartType": "图表类型",
+        "volume": "显示成交量窗格"
       },
       "intervals": {
         "1m": "1 分钟",
@@ -127,7 +129,11 @@
         "close": "收",
         "change": "涨跌",
         "volume": "量",
+        "volumeWithUnit": "量（{{unit}}）",
         "amount": "额"
+      },
+      "units": {
+        "share": "股"
       },
       "status": {
         "loading": "正在加载行情数据...",
