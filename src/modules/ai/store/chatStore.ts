@@ -53,7 +53,7 @@ import {
 } from "./sessionAttentionStore";
 
 export type Live = {
-  explorerRoot: string | null;
+  draftCwd: string | null;
   revealWorkingDirectory: (cwd: string) => Promise<void>;
   getTerminalContext: () => string | null;
   isActiveTerminalPrivate: () => boolean;
@@ -173,7 +173,7 @@ type StoreState = {
 };
 
 const NOOP_LIVE: Live = {
-  explorerRoot: null,
+  draftCwd: null,
   revealWorkingDirectory: async () => {},
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,

@@ -11,10 +11,13 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::modules::workspace_process::WorkspaceProcessState;
+
 // Short TTL keeps the auth-check TOCTOU window tight while still coalescing the
 // burst of canonicalize calls within a single panel refresh (~100ms).
 const CANONICAL_TTL: Duration = Duration::from_secs(1);
 const CANONICAL_CACHE_CAP: usize = 256;
+const DEFAULT_WORKSPACE_DIRECTORY: &str = "workspace";
 
 struct CanonicalEntry {
     canonical: PathBuf,
@@ -174,6 +177,62 @@ pub async fn workspace_authorize(
     let resolved = resolve_path(&path, &workspace);
     let canonical = registry.authorize(&resolved).map_err(|e| e.to_string())?;
     Ok(crate::modules::fs::to_canon(&canonical))
+}
+
+/// 幂等创建并授权本机可访问的默认工作目录。
+///
+/// 返回物理规范路径，确保后续 Agent owner 只能绑定到这个精确根目录。
+fn prepare_host_default_root(path: &Path, registry: &WorkspaceRegistry) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(path).map_err(|error| {
+        format!(
+            "create default Workspace directory {}: {error}",
+            path.display()
+        )
+    })?;
+    registry.authorize(path).map_err(|error| error.to_string())
+}
+
+/// 返回 WSL 用户目录内的默认工作目录规范路径。
+fn wsl_default_workspace_path(home: &str) -> Result<String, String> {
+    let home = home.trim().trim_end_matches('/');
+    if home.is_empty() || !home.starts_with('/') {
+        return Err("WSL home directory is invalid".into());
+    }
+    Ok(format!("{home}/.terax/{DEFAULT_WORKSPACE_DIRECTORY}"))
+}
+
+/// 准备当前不可变环境的默认 Agent 工作目录。
+///
+/// Local 与 WSL 延迟创建各自用户目录下的 `~/.terax/workspace` 并登记授权；SSH
+/// 必须继续使用连接时验证的 profile Workspace root，不能在前端扩大远端根边界。
+#[tauri::command]
+pub async fn workspace_prepare_default_root(
+    process: tauri::State<'_, WorkspaceProcessState>,
+    registry: tauri::State<'_, WorkspaceRegistry>,
+) -> Result<String, String> {
+    let workspace = &process.bootstrap().env;
+    match workspace {
+        WorkspaceEnv::Local => {
+            let path = crate::modules::app_data::directory(
+                crate::modules::app_data::Directory::Workspace,
+            )?;
+            let canonical = prepare_host_default_root(&path, &registry)?;
+            Ok(crate::modules::fs::to_canon(&canonical))
+        }
+        WorkspaceEnv::Wsl { distro } => {
+            let path = wsl_default_workspace_path(&wsl_home(distro.clone())?)?;
+            let host_path = resolve_path(&path, workspace);
+            prepare_host_default_root(&host_path, &registry)?;
+            Ok(path)
+        }
+        WorkspaceEnv::Ssh { profile_id } => {
+            let root = crate::modules::remote::manager::global_manager()?
+                .home(profile_id)
+                .await?;
+            crate::modules::remote::session::validate_remote_path(&root)?;
+            Ok(root.replace('\\', "/"))
+        }
+    }
 }
 
 #[tauri::command]
@@ -857,6 +916,29 @@ mod auth_tests {
         p.push(format!("terax-auth-{label}-{nanos}-{}", std::process::id()));
         fs::create_dir_all(&p).expect("create tempdir");
         fs::canonicalize(&p).expect("canonicalize tempdir")
+    }
+
+    #[test]
+    fn default_root_creation_is_idempotent_and_registers_the_exact_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        let path = parent.path().join("default");
+        let registry = WorkspaceRegistry::default();
+
+        let first = prepare_host_default_root(&path, &registry).unwrap();
+        let second = prepare_host_default_root(&path, &registry).unwrap();
+
+        assert_eq!(first, second);
+        assert!(first.is_dir());
+        assert!(registry.is_authorized_root(&first));
+    }
+
+    #[test]
+    fn wsl_default_root_stays_below_the_login_home() {
+        assert_eq!(
+            wsl_default_workspace_path("/home/alice/").unwrap(),
+            "/home/alice/.terax/workspace"
+        );
+        assert!(wsl_default_workspace_path("relative").is_err());
     }
 
     #[test]

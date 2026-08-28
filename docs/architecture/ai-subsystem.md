@@ -79,7 +79,7 @@ streaming state 保留在所属进程中。发送操作首先获取 session run 
 
 composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isBusy`，因此它可以在 session hydrate 前安全挂载，同时其他 session 继续在后台运行。
 
-draft 会显示并跟随当前 Explorer root。第一条被接受的 user message 会将其提升为 persisted session，并将该 root 冻结为 `cwd`。persisted session 始终显示并使用已存储的 `cwd`。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
+draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。第一条被接受的 user message 会将 draft 提升为 persisted session，并将实际目录冻结为 `cwd`。persisted session 始终显示并使用已存储的 `cwd`。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
 每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 system prompt 的准确内容。approval continuation 只覆盖 prompt，不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
 
@@ -102,7 +102,7 @@ draft 会显示并跟随当前 Explorer root。第一条被接受的 user messag
 
 ## 实时上下文桥接
 
-`App.tsx` 发布当前 Explorer root 供未发送 draft 使用，并提供 lazy terminal-buffer reader。draft 发送后，session 存储的 `cwd` 成为相对 tool path 的唯一基准。终端输出保持 live，仅在模型明确调用终端工具时读取。
+`App.tsx` 发布当前 Explorer root 和 AI 面板可见性，`useAiLiveBridge` 在需要时准备默认目录并单独发布 `draftCwd`，不伪造 Explorer 状态。draft 发送后，session 存储的 `cwd` 成为相对 tool path 的唯一基准。终端输出保持 live，仅在模型明确调用终端工具时读取。
 
 ## 不变量
 

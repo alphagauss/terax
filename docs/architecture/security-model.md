@@ -32,6 +32,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 `WorkspaceRegistry`（`src-tauri/src/modules/workspace.rs:20`）跟踪允许 PTY spawn、Git command 和 AI 工具操作的目录。
 
 - `workspace_authorize` 添加目录。
+- `workspace_prepare_default_root` 不接受路径参数，只按当前不可变环境准备默认 Agent 根。Local 与 WSL 创建并授权各自的 `~/.terax/workspace`，SSH 只能返回连接时验证的 profile Workspace root。
 - `authorize_spawn_cwd` 拒绝在已授权 root 之外使用 spawn cwd。
 - `authorize_user_spawn_cwd` 将用户选择的 cwd 注册为新 root，而不是拒绝它。
 - Agent 文件工具要求会话 cwd 与一个已登记 root 精确相等，并将聊天 owner 绑定到该 canonical root 和不可变 Workspace 环境。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和审批快照。

@@ -142,7 +142,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `git::commands::*`：状态、diff、暂存、提交、同步和历史；所有操作都经过工作区授权。
 - `shell::shell_run_command`：编辑器格式化等非 AI 功能使用的有界一次性子 Shell。
 - `shell::shell_exec`、`shell::shell_process`、`shell::shell_list`：按聊天 owner 隔离的统一 Agent 进程启动、stdin/EOF/增量输出/终止和发现；`shell_clear_owner` 在聊天删除时回收所属进程。
-- `workspace::*`：工作区授权、当前目录和 WSL 桥接。
+- `workspace::*`：工作区授权、当前目录、WSL 桥接，以及无 Explorer 根时延迟准备默认 Agent 工作目录。
 - `lsp::*`：语言服务器进程及 JSON-RPC 管道；协议智能位于前端。
 - `net::*`：带 SSRF 防护的 AI HTTP 代理。
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
@@ -239,7 +239,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 用户消息和本轮系统提示词必须在模型请求前写入会话；`AgentRunBridge` 在 idle、error 或 stop 后只追加完整的 Assistant 和工具记录，流式半成品保留在所属进程。
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
-- 草稿会话的 cwd 跟随 Explorer 根目录，首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
+- 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
 - `read_file`、`find_files`、`grep` 自动执行；`write_file`、`apply_patch`、`file_operation`、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
 - AI 文件路径只能位于会话冻结 cwd 对应的已授权 Workspace 根内。读取和写入共享 Rust 敏感路径与 canonical 检查；`lib/security.ts` 只保留 Shell 审批前快速拒绝。
 - `write_file` 和 `apply_patch` 通过一个或多个 `ai-diff` 标签页审阅，并按整个 tool call 批准或拒绝；批准前不得实际写入。

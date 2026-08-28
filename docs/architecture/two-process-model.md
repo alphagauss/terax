@@ -133,6 +133,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 ### Workspace（`src-tauri/src/modules/workspace.rs`）
 
 - `workspace_authorize` / `workspace_current_dir` - spawn/Git/AI cwd 授权 registry
+- `workspace_prepare_default_root` - 无 Explorer 根时延迟创建并授权 Local/WSL 默认 Agent 目录；SSH 返回连接时验证的 profile Workspace root
 - `wsl_list_distros` / `wsl_default_distro` / `wsl_home` - WSL bridge
 
 ### Workspace 进程（`src-tauri/src/modules/workspace_process.rs`）

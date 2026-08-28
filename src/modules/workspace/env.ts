@@ -27,6 +27,7 @@ type State = {
 };
 
 export const LOCAL_WORKSPACE: WorkspaceEnv = { kind: "local" };
+let defaultWorkspaceRootTask: Promise<string> | null = null;
 
 export const useWorkspaceEnvStore = create<State>((set) => ({
   env: LOCAL_WORKSPACE,
@@ -73,4 +74,17 @@ export function currentWorkspaceScopeKey(): string {
 
 export async function getWslHome(distro: string): Promise<string> {
   return invoke<string>("wsl_home", { distro });
+}
+
+/** 延迟准备当前进程环境的默认 Agent 工作目录，并合并严格模式下的重复请求。 */
+export function prepareDefaultWorkspaceRoot(): Promise<string> {
+  if (defaultWorkspaceRootTask) return defaultWorkspaceRootTask;
+  const task = invoke<string>("workspace_prepare_default_root").catch(
+    (error) => {
+      if (defaultWorkspaceRootTask === task) defaultWorkspaceRootTask = null;
+      throw error;
+    },
+  );
+  defaultWorkspaceRootTask = task;
+  return task;
 }

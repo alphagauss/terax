@@ -9,6 +9,7 @@ export {
   getWslHome,
   LOCAL_WORKSPACE,
   parseWorkspaceScopeKey,
+  prepareDefaultWorkspaceRoot,
   useWorkspaceEnvStore,
   workspaceScopeKey,
   type WorkspaceEnv,

@@ -1,13 +1,18 @@
 /**
- * 本文件把当前 Workbench 的实时上下文和导航能力桥接到 AI 会话。
- * 历史会话目录导航复用现有标签，并在新建终端前校验和授权目录。
+ * 本文件把当前 Workbench 的实时上下文、默认草稿目录和导航能力桥接到 AI 会话。
+ * 默认目录只在 AI 可见且没有 Explorer 根时准备，历史目录导航仍复用现有标签。
  */
 
-import { currentWorkspaceEnv } from "@/modules/workspace";
+import {
+  currentWorkspaceEnv,
+  prepareDefaultWorkspaceRoot,
+} from "@/modules/workspace";
 import type { TerminalPaneHandle } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench";
 import { invoke } from "@tauri-apps/api/core";
-import { type RefObject, useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { Live } from "../store/chatStore";
 import { native } from "./native";
 import { redactSensitive } from "./redact";
@@ -19,6 +24,8 @@ type Params = {
   activeSpaceId: string | null;
   tabs: Tab[];
   explorerRoot: string | null;
+  environmentHome: string | null;
+  visible: boolean;
   setActiveId: (tabId: number) => void;
   newTab: (cwd?: string) => number;
   ensureWorkspaceReady: () => Promise<string | null>;
@@ -26,17 +33,56 @@ type Params = {
 };
 
 /**
- * 将 Explorer 根目录、目录导航和终端缓冲区发布到聊天运行时。
- * 终端 getter 通过 ref 读取最新状态，避免终端更新反复重建桥接对象。
+ * 将草稿 cwd、目录导航和终端缓冲区发布到聊天运行时。
+ * Explorer 根优先于延迟创建的默认目录；终端 getter 通过 ref 读取最新状态。
  */
 export function useAiLiveBridge(params: Params) {
+  const { t } = useTranslation("ai");
   const { setLive, terminalRefs } = params;
+  const [defaultRoot, setDefaultRoot] = useState<string | null>(null);
   const ref = useRef(params);
   ref.current = params;
 
   useEffect(() => {
+    const waitingForSsh =
+      currentWorkspaceEnv().kind === "ssh" && !params.environmentHome;
+    if (
+      !params.visible ||
+      params.explorerRoot ||
+      defaultRoot ||
+      waitingForSsh
+    ) {
+      return;
+    }
+    let active = true;
+    void prepareDefaultWorkspaceRoot()
+      .then((root) => {
+        if (active) setDefaultRoot(root);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error(
+          "[terax] default AI workspace preparation failed:",
+          error,
+        );
+        toast.error(t("composer.workingDirectoryUnavailable"), {
+          description: String(error),
+        });
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    defaultRoot,
+    params.environmentHome,
+    params.explorerRoot,
+    params.visible,
+    t,
+  ]);
+
+  useEffect(() => {
     setLive({
-      explorerRoot: params.explorerRoot,
+      draftCwd: params.explorerRoot ?? defaultRoot,
       revealWorkingDirectory: async (cwd: string) => {
         const decide = (path: string) => {
           const current = ref.current;
@@ -86,5 +132,5 @@ export function useAiLiveBridge(params: Params) {
         return t?.kind === "terminal" && t.private === true;
       },
     });
-  }, [params.explorerRoot, setLive, terminalRefs]);
+  }, [defaultRoot, params.explorerRoot, setLive, terminalRefs]);
 }

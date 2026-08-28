@@ -170,7 +170,7 @@ async function startChatMessage(
     sessionId,
     state.draftSessionId,
     state.sessions,
-    state.live.explorerRoot,
+    state.live.draftCwd,
   );
   if (!cwd?.trim()) return false;
   if (
