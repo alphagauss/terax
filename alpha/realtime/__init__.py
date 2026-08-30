@@ -1,5 +1,5 @@
-"""Alpha 公共实时行情模块。"""
+"""Alpha 公共实时行情领域。"""
 
-from alpha.realtime.market_data import RealtimeMarketDataService
+from alpha.realtime.feed import MarketFeed
 
-__all__ = ["RealtimeMarketDataService"]
+__all__ = ["MarketFeed"]

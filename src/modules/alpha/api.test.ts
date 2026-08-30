@@ -170,6 +170,10 @@ describe("Alpha API client", () => {
             {
               task_id: "sync-1",
               status: "running",
+              stage: "fetching",
+              progress: { completed: 1, total: 2, unit: "batches" },
+              metrics: {},
+              revision: 2,
               created_at: null,
               finished_at: null,
               message: null,
@@ -237,7 +241,6 @@ describe("Alpha API client", () => {
         actual_end: "2026-07-30T00:00:00",
         reference_close: 10,
         reference_time: "2026-07-29T00:00:00",
-        live_sequence: 0,
         items: [
           {
             time: "2026-07-30T00:00:00",
@@ -289,7 +292,6 @@ describe("Alpha API client", () => {
         actual_end: "2026-07-30 09:30:00",
         reference_close: 10,
         reference_time: "2026-07-29",
-        live_sequence: 0,
         items: [
           {
             time: "2026-07-30T09:30:00+08:00",
@@ -331,7 +333,6 @@ describe("Alpha API client", () => {
         actual_end: null,
         reference_close: null,
         reference_time: null,
-        live_sequence: 0,
       },
     });
 
@@ -459,7 +460,6 @@ describe("Alpha API client", () => {
         actual_end: null,
         reference_close: null,
         reference_time: null,
-        live_sequence: 0,
         items: [
           {
             time: "invalid",

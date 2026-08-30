@@ -24,7 +24,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     ready: bool
     service: Literal["terax-alpha"] = "terax-alpha"
-    protocol_version: Literal[2] = 2
+    protocol_version: Literal[3] = 3
     runtime_revision: str
     started_at: datetime
 
@@ -176,10 +176,14 @@ class SyncStartResponse(BaseModel):
 
 
 class SyncTaskSummary(BaseModel):
-    """数据页轮询所需的轻量同步任务状态。"""
+    """数据页展示的同步任务实时快照摘要。"""
 
     task_id: str
     status: str
+    stage: str | None = None
+    progress: dict[str, object] | None = None
+    metrics: dict[str, object] = Field(default_factory=dict)
+    revision: int = 0
     created_at: str | None = None
     finished_at: str | None = None
     message: str | None = None

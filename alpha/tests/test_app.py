@@ -5,14 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import alpha.api.app as app_module
+from alpha.api.events import WebSocketEventGateway
 from alpha.config import AlphaConfig
+from alpha.runtime.event import Event, EventEngine
 
 
 @dataclass
@@ -22,32 +23,46 @@ class FakeContainer:
     closed: bool = False
 
     def __post_init__(self) -> None:
-        """为 WebSocket 协议提供最小共享行情服务。"""
+        """为应用生命周期构造真实事件总线和最小行情租约替身。"""
 
-        self.market_data = FakeMarketData()
+        self.event_engine = EventEngine(interval=60)
+        self.market_feed = FakeMarketFeed()
+        self.event_gateway = WebSocketEventGateway(
+            self.event_engine,
+            self.market_feed,  # type: ignore[arg-type]
+        )
+
+    async def start(self) -> None:
+        """启动测试事件运行时。"""
+
+        import asyncio
+
+        self.event_engine.start()
+        self.event_gateway.start(asyncio.get_running_loop())
 
     async def close(self) -> None:
         """记录应用生命周期已经关闭容器。"""
 
+        await self.event_gateway.close()
+        self.event_engine.stop()
         self.closed = True
 
 
-class FakeMarketData:
-    """记录 WebSocket 订阅与释放的实时行情服务替身。"""
+class FakeMarketFeed:
+    """记录 WebSocket selector 对应行情租约的替身。"""
 
     def __init__(self) -> None:
         self.subscriptions: set[object] = set()
 
-    async def subscribe(self, key: object, _queue: object) -> int:
-        """记录订阅并返回固定快照 sequence。"""
+    async def acquire(self, key: object, owner: str) -> None:
+        """记录行情租约。"""
 
-        self.subscriptions.add(key)
-        return 7
+        self.subscriptions.add((key, owner))
 
-    async def unsubscribe(self, key: object, _queue: object) -> None:
-        """记录最后消费者释放。"""
+    async def release(self, key: object, owner: str) -> None:
+        """释放行情租约。"""
 
-        self.subscriptions.discard(key)
+        self.subscriptions.discard((key, owner))
 
 
 def _stub_container(
@@ -111,7 +126,7 @@ def test_app_mounts_router_and_closes_container(
         "status": "ok",
         "ready": True,
         "service": "terax-alpha",
-        "protocol_version": 2,
+        "protocol_version": 3,
         "runtime_revision": "dev:unmanaged",
     }
     parsed_started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
@@ -184,31 +199,68 @@ def test_websocket_requires_token_and_supports_bidirectional_json(
             "/api/alpha/events",
             headers={"Authorization": "Bearer test-token"},
         ) as websocket:
-            websocket.send_json({"type": "ping"})
-            assert websocket.receive_json() == {"type": "pong"}
-            key: dict[str, Any] = {
-                "vt_symbol": "000001.SZSE",
-                "interval": "d",
-                "adjust": "forward",
-            }
-            websocket.send_json({"type": "subscribe", "version": 1, "key": key})
+            websocket.send_json({"op": "ping"})
+            assert websocket.receive_json() == {"op": "pong"}
+            key = "000001.SZSE|d|forward"
+            websocket.send_json(
+                {
+                    "op": "subscribe",
+                    "version": 1,
+                    "event": "market.bar",
+                    "key": key,
+                }
+            )
             assert websocket.receive_json() == {
-                "type": "subscribed",
+                "op": "subscribed",
                 "version": 1,
+                "event": "market.bar",
                 "key": key,
-                "sequence": 7,
             }
-            websocket.send_json({"type": "unsubscribe", "version": 1, "key": key})
+            container.event_engine.put(
+                Event(
+                    type="market.bar",
+                    key=key,
+                    data={"bar": {"time": "2026-08-30"}},
+                )
+            )
+            event = websocket.receive_json()
+            assert event["op"] == "event"
+            assert event["event"] == "market.bar"
+            assert event["key"] == key
+            websocket.send_json(
+                {
+                    "op": "unsubscribe",
+                    "version": 1,
+                    "event": "market.bar",
+                    "key": key,
+                }
+            )
             assert websocket.receive_json() == {
-                "type": "unsubscribed",
+                "op": "unsubscribed",
                 "version": 1,
+                "event": "market.bar",
                 "key": key,
             }
             websocket.send_json(
                 {
-                    "type": "subscribe",
+                    "op": "subscribe",
                     "version": 1,
-                    "key": {**key, "adjust": "invalid"},
+                    "event": "market.bar",
+                    "key": "000001.szse|d|forward",
+                }
+            )
+            assert websocket.receive_json() == {
+                "op": "subscribed",
+                "version": 1,
+                "event": "market.bar",
+                "key": key,
+            }
+            websocket.send_json(
+                {
+                    "op": "subscribe",
+                    "version": 1,
+                    "event": "market.bar",
+                    "key": "invalid",
                 }
             )
             assert websocket.receive_json()["code"] == "invalid_message"

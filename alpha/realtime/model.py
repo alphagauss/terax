@@ -1,13 +1,13 @@
 """公共实时行情的领域键和 K 线模型。
 
-模型不依赖 FastAPI 或具体行情源，供订阅服务、HTTP 快照和协议路由共用。
+模型不依赖 FastAPI 或具体行情源，供 MarketFeed 和事件协议共用。
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from alpha.common.schema_core import split_vt_symbol
 
@@ -40,6 +40,25 @@ class MarketDataKey:
             "interval": self.interval,
             "adjust": self.adjust,
         }
+
+    def identifier(self) -> str:
+        """返回 EventEngine 和远程 selector 共用的稳定业务键。"""
+
+        return f"{self.vt_symbol}|{self.interval}|{self.adjust}"
+
+    @classmethod
+    def from_identifier(cls, value: str) -> "MarketDataKey":
+        """从公共业务键恢复并校验完整行情订阅。"""
+
+        parts = value.split("|")
+        if len(parts) != 3:
+            raise ValueError("实时行情订阅键格式非法")
+        vt_symbol, interval, adjust = parts
+        return cls(
+            vt_symbol.strip().upper(),
+            cast(MarketInterval, interval),
+            cast(MarketAdjust, adjust),
+        )
 
 
 @dataclass(frozen=True, slots=True)

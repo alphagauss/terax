@@ -1,7 +1,8 @@
-"""Alpha API 容器组装和资源关闭不变量测试。"""
+"""测试 Alpha API 容器的统一运行对象组装和关闭顺序。"""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from alpha.api.container import create_alpha_service_container
@@ -10,93 +11,100 @@ from alpha.runtime.event import EventEngine
 
 
 class FakeDatabase:
-    """测试用数据库门面。"""
+    """记录数据库关闭动作。"""
 
-    def __init__(self, _data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        _data_dir: Path | None = None,
+        close_order: list[str] | None = None,
+    ) -> None:
         self.closed = False
+        self.close_order = close_order
 
     async def close(self) -> None:
-        """记录关闭动作。
-
-        Args:
-            无。
-
-        Returns:
-            无返回值。
-        """
+        """关闭测试数据库。"""
 
         self.closed = True
+        if self.close_order is not None:
+            self.close_order.append("database")
 
 
 class FakeStrategyManager:
-    """测试用策略管理器。"""
+    """延迟初始化策略管理器替身。"""
 
     def get_strategy_class(self) -> dict[str, dict[str, object]]:
-        """返回固定策略元数据。
-
-        Args:
-            无。
-
-        Returns:
-            固定策略映射。
-        """
+        """返回固定策略元数据。"""
 
         return {"DemoStrategy": {"class_name": "DemoStrategy"}}
 
 
 class FakeTaskManager:
-    """测试用任务管理器。"""
+    """记录统一 TaskManager 的关闭动作。"""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        _event_engine: EventEngine,
+        close_order: list[str] | None = None,
+    ) -> None:
         self.closed = False
+        self.close_order = close_order
+
+    def list_snapshots(self) -> list[dict[str, object]]:
+        """返回空任务列表。"""
+
+        return []
 
     def close(self, stop_running: bool = False) -> None:
-        """记录关闭动作。
-
-        Args:
-            stop_running: 是否停止运行中的任务。
-
-        Returns:
-            无返回值。
-        """
+        """记录关闭参数。"""
 
         assert stop_running is True
         self.closed = True
+        if self.close_order is not None:
+            self.close_order.append("tasks")
 
 
-class FakeMarketData:
-    """测试用实时行情服务。"""
+class FakeMarketFeed:
+    """记录行情 Provider 关闭动作。"""
 
-    def __init__(self) -> None:
+    def __init__(self, _event_engine: EventEngine) -> None:
         self.closed = False
 
     async def close(self) -> None:
-        """记录实时连接资源已经关闭。"""
+        """关闭测试行情引擎。"""
 
         self.closed = True
 
 
-def test_api_container_initializes_runtime_objects_lazily() -> None:
-    """验证 API 容器只组装运行对象并延迟初始化策略管理器。"""
+class FakeEventGateway:
+    """记录 EventEngine loop 绑定和关闭动作。"""
+
+    def __init__(
+        self, _event_engine: EventEngine, _market_feed: FakeMarketFeed
+    ) -> None:
+        self.started = False
+        self.closed = False
+
+    def start(self, _loop: asyncio.AbstractEventLoop) -> None:
+        """记录启动。"""
+
+        self.started = True
+
+    async def close(self) -> None:
+        """记录关闭。"""
+
+        self.closed = True
+
+
+def test_api_container_initializes_strategy_manager_lazily() -> None:
+    """容器立即组装核心运行对象，但访问策略能力前不扫描策略。"""
 
     created_managers: list[FakeStrategyManager] = []
 
     def create_strategy_manager(
-        event_engine: EventEngine,
-        process_manager: FakeTaskManager,
+        _event_engine: EventEngine,
+        _task_manager: FakeTaskManager,
         _database_dir: Path,
     ) -> FakeStrategyManager:
-        """创建测试策略管理器。
-
-        Args:
-            event_engine: Alpha 事件引擎。
-            process_manager: 测试任务管理器。
-            _database_dir: 测试不使用的数据库目录。
-
-        Returns:
-            测试策略管理器。
-        """
-
         manager = FakeStrategyManager()
         created_managers.append(manager)
         return manager
@@ -104,40 +112,51 @@ def test_api_container_initializes_runtime_objects_lazily() -> None:
     container = create_alpha_service_container(
         AlphaConfig(data_dir=Path.cwd()),
         database_factory=FakeDatabase,
-        event_engine_factory=EventEngine,
-        task_manager_factory=FakeTaskManager,
-        market_data_factory=FakeMarketData,
-        strategy_manager_factory=create_strategy_manager,
+        task_manager_factory=FakeTaskManager,  # type: ignore[arg-type]
+        market_feed_factory=FakeMarketFeed,  # type: ignore[arg-type]
+        event_gateway_factory=FakeEventGateway,  # type: ignore[arg-type]
+        strategy_manager_factory=create_strategy_manager,  # type: ignore[arg-type]
     )
 
     assert isinstance(container.database, FakeDatabase)
-    assert isinstance(container.process_manager, FakeTaskManager)
+    assert isinstance(container.task_manager, FakeTaskManager)
     assert created_managers == []
-
     assert container.strategy_manager.get_strategy_class() == {
         "DemoStrategy": {"class_name": "DemoStrategy"}
     }
     assert len(created_managers) == 1
 
 
-async def test_api_container_closes_runtime_objects() -> None:
-    """验证 API 容器能关闭持有的运行对象。"""
+def test_api_container_starts_and_closes_runtime_objects() -> None:
+    """lifespan 启停同一 EventEngine、Gateway、MarketFeed 和 TaskManager。"""
 
-    database = FakeDatabase()
-    task_manager = FakeTaskManager()
-    market_data = FakeMarketData()
+    async def scenario() -> None:
+        close_order: list[str] = []
+        database = FakeDatabase(close_order=close_order)
+        container = create_alpha_service_container(
+            AlphaConfig(data_dir=Path.cwd()),
+            database_factory=lambda _data_dir: database,
+            task_manager_factory=lambda event_engine: FakeTaskManager(
+                event_engine,
+                close_order,
+            ),
+            market_feed_factory=FakeMarketFeed,  # type: ignore[arg-type]
+            event_gateway_factory=FakeEventGateway,  # type: ignore[arg-type]
+            strategy_manager_factory=(
+                lambda _event_engine, _task_manager, _database_dir: FakeStrategyManager()
+            ),
+        )
 
-    container = create_alpha_service_container(
-        AlphaConfig(data_dir=Path.cwd()),
-        database_factory=lambda _data_dir: database,
-        event_engine_factory=EventEngine,
-        task_manager_factory=lambda: task_manager,
-        market_data_factory=lambda: market_data,
-        strategy_manager_factory=lambda _event_engine, _process_manager, _database_dir: FakeStrategyManager(),
-    )
+        await container.start()
+        assert container.event_engine.active
+        assert container.event_gateway.started  # type: ignore[attr-defined]
+        await container.close()
 
-    await container.close()
+        assert database.closed
+        assert container.market_feed.closed  # type: ignore[attr-defined]
+        assert container.task_manager.closed  # type: ignore[attr-defined]
+        assert container.event_gateway.closed  # type: ignore[attr-defined]
+        assert not container.event_engine.active
+        assert close_order == ["tasks", "database"]
 
-    assert database.closed
-    assert market_data.closed
-    assert task_manager.closed
+    asyncio.run(scenario())

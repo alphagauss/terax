@@ -12,6 +12,18 @@
     "loading": "加载中...",
     "unavailable": "暂无"
   },
+  "taskStages": {
+    "starting": "正在启动",
+    "planning": "正在规划",
+    "loading_data": "正在加载数据",
+    "initializing": "正在初始化策略",
+    "simulating": "正在逐 Bar 回放",
+    "fetching": "正在获取数据",
+    "rebuilding_overview": "正在重建概览",
+    "saving_report": "正在保存报告",
+    "finalizing": "正在完成",
+    "finished": "已结束"
+  },
   "workstation": {
     "mainSymbol": "主标的",
     "invalidSymbol": "请输入代码.交易所",

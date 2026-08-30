@@ -16,7 +16,6 @@ from alpha.api.router import router
 from alpha.api.routes.bars import _market_local_datetime
 from alpha.chart import studies as chart_studies
 from alpha.config import AlphaConfig
-from alpha.realtime.model import RealtimeBar
 
 
 class FakeDatabase:
@@ -269,7 +268,18 @@ class FakeStrategyManager:
             固定回测任务映射。
         """
 
-        return {"bt-1": {"task_id": "bt-1", "status": "running"}}
+        return {
+            "bt-1": {
+                "task_id": "bt-1",
+                "kind": "backtest",
+                "status": "running",
+            },
+            "opt-1": {
+                "task_id": "opt-1",
+                "kind": "optimization",
+                "status": "running",
+            },
+        }
 
     def start_backtesting(self, request: object) -> str:
         """记录回测请求并返回任务标识。
@@ -352,8 +362,8 @@ class FakeStrategyManager:
         }
 
 
-class FakeProcessManager:
-    """测试用进程任务管理器。"""
+class FakeTaskManager:
+    """测试用统一任务管理器。"""
 
     def __init__(self) -> None:
         self.started: list[dict[str, object]] = []
@@ -369,15 +379,25 @@ class FakeProcessManager:
         """
 
         return [
-            {"task_id": "sync-1", "status": "succeeded", "task_type": "sync-bars"},
-            {"task_id": "bt-1", "status": "running", "task_type": "backtest"},
+            {
+                "id": "sync-1",
+                "task_id": "sync-1",
+                "status": "succeeded",
+                "kind": "sync-bars",
+            },
+            {
+                "id": "bt-1",
+                "task_id": "bt-1",
+                "status": "running",
+                "kind": "backtest",
+            },
             *self.started,
         ]
 
     def start(
         self,
         task_id: str,
-        task_type: str,
+        kind: str,
         target: object,
         args: tuple[object, ...] = (),
         **kwargs: object,
@@ -385,7 +405,8 @@ class FakeProcessManager:
         """记录同步任务启动参数。"""
         snapshot = {
             "task_id": task_id,
-            "task_type": task_type,
+            "id": task_id,
+            "kind": kind,
             "status": "running",
             "target": target,
             "args": args,
@@ -393,6 +414,15 @@ class FakeProcessManager:
         }
         self.started.append(snapshot)
         return SimpleNamespace(snapshot=lambda: snapshot)
+
+    def get(self, task_id: str) -> object | None:
+        """按 ID 返回带 snapshot 方法的任务替身。"""
+
+        snapshot = next(
+            (item for item in self.list_snapshots() if item["task_id"] == task_id),
+            None,
+        )
+        return None if snapshot is None else SimpleNamespace(snapshot=lambda: snapshot)
 
     def stop(self, task_id: str) -> object | None:
         """返回固定取消后任务。
@@ -421,9 +451,10 @@ class FakeProcessManager:
                 """
 
                 return {
+                    "id": "bt-1",
                     "task_id": "bt-1",
                     "status": "cancelled",
-                    "task_type": "backtest",
+                    "kind": "backtest",
                 }
 
         return StoppedTask()
@@ -441,20 +472,11 @@ def _client() -> TestClient:
 
     app = FastAPI()
 
-    class FakeMarketData:
-        """路由测试默认不提供实时尾部。"""
-
-        async def snapshot(self, _key: object) -> tuple[int, list[object]]:
-            """返回空实时快照。"""
-
-            return 0, []
-
     app.state.alpha_services = SimpleNamespace(
         config=AlphaConfig(data_dir=Path.cwd()),
         database=FakeDatabase(),
         strategy_manager=FakeStrategyManager(),
-        process_manager=FakeProcessManager(),
-        market_data=FakeMarketData(),
+        task_manager=FakeTaskManager(),
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
         has_running_tasks=lambda: False,
     )
@@ -473,7 +495,7 @@ def test_alpha_router_exposes_business_health() -> None:
         "status": "ok",
         "ready": True,
         "service": "terax-alpha",
-        "protocol_version": 2,
+        "protocol_version": 3,
         "runtime_revision": "dev:unmanaged",
         "started_at": "2026-08-13T09:20:31Z",
     }
@@ -560,6 +582,34 @@ def test_alpha_router_uses_strategy_manager_for_backtests() -> None:
     assert create_response.json()["backtest_id"].endswith(".json")
 
 
+def test_alpha_router_merges_persisted_result_with_completed_runtime() -> None:
+    """持久化结果与同 ID 成功任务合并，优化任务不混入回测列表。"""
+
+    client = _client()
+    client.app.state.alpha_services.strategy_manager.get_status_dict = lambda: {
+        "bt-done.json": {
+            "task_id": "bt-done.json",
+            "kind": "backtest",
+            "status": "succeeded",
+            "stage": "finished",
+            "progress": {"completed": 10, "total": 10, "unit": "bars"},
+            "revision": 7,
+        },
+        "opt-1": {
+            "task_id": "opt-1",
+            "kind": "optimization",
+            "status": "succeeded",
+        },
+    }
+
+    response = client.get("/api/alpha/backtests")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["revision"] == 7
+    assert response.json()["items"][0]["total_return"] == 0.125
+
+
 def test_alpha_router_exposes_security_and_bar_apis() -> None:
     """验证证券搜索、详情和 K 线接口。"""
 
@@ -592,34 +642,6 @@ def test_alpha_bar_router_adds_exchange_timezone_to_intraday_bars() -> None:
     assert response.status_code == 200
     assert response.json()["items"][0]["time"] == "2025-01-02T00:00:00+08:00"
     assert response.json()["actual_start"] == "2025-01-02T00:00:00+08:00"
-
-
-def test_alpha_bar_router_merges_realtime_tail_with_snapshot_sequence() -> None:
-    """最新行情快照拼接内存尾部，并用最早返回点维持排他游标。"""
-
-    client = _client()
-
-    async def snapshot(_key: object) -> tuple[int, list[RealtimeBar]]:
-        """返回替换当前日和追加下一日的实时尾部。"""
-
-        return 4, [
-            RealtimeBar("2025-01-03", 11, 12, 10, 11.5, 120, 1_380),
-            RealtimeBar("2025-01-06", 12, 13, 11, 12.5, 20, 250),
-        ]
-
-    client.app.state.alpha_services.market_data.snapshot = snapshot
-    response = client.get("/api/alpha/bars?vt_symbol=000001.SZSE&interval=d&limit=2")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["live_sequence"] == 4
-    assert [item["time"] for item in body["items"]] == [
-        "2025-01-03",
-        "2025-01-06",
-    ]
-    assert body["items"][0]["close"] == 11.5
-    assert body["has_more_before"] is True
-    assert body["next_before"] == "2025-01-03"
 
 
 def test_alpha_bar_router_converts_absolute_cursor_to_exchange_time() -> None:
@@ -1025,7 +1047,12 @@ def test_alpha_router_filters_sync_tasks() -> None:
 
     assert response.status_code == 200
     assert response.json() == [
-        {"task_id": "sync-1", "status": "succeeded", "task_type": "sync-bars"}
+        {
+            "id": "sync-1",
+            "task_id": "sync-1",
+            "status": "succeeded",
+            "kind": "sync-bars",
+        }
     ]
 
 
@@ -1041,7 +1068,7 @@ def test_alpha_router_starts_targeted_bar_sync_and_rejects_concurrency() -> None
 
     assert started.status_code == 200
     assert started.json()["status"] == "running"
-    manager = client.app.state.alpha_services.process_manager
+    manager = client.app.state.alpha_services.task_manager
     assert manager.started[0]["args"] == (["000001.SZSE"],)
     assert concurrent.status_code == 409
 
@@ -1069,6 +1096,10 @@ def test_alpha_router_returns_sync_overview(
         {
             "task_id": "sync-1",
             "status": "completed",
+            "stage": None,
+            "progress": None,
+            "metrics": {},
+            "revision": 0,
             "created_at": None,
             "finished_at": None,
             "message": None,

@@ -608,21 +608,6 @@ export class FinancialChartController {
     this.applyBars(dataKey, merged, keyChanged);
   }
 
-  /** 用 HTTP 权威快照重校准实时尾部，不把快照写回 React 查询状态。 */
-  setRealtimeSnapshot(dataKey: string, bars: readonly MarketBar[]): void {
-    if (dataKey !== this.dataKey) return;
-    const stableEnd = this.stableBars[this.stableBars.length - 1];
-    const stableEndKey = stableEnd ? marketTimeKey(stableEnd.time) : -Infinity;
-    this.liveTail = bars
-      .filter((bar) => marketTimeKey(bar.time) >= stableEndKey)
-      .slice(-512);
-    this.applyBars(
-      dataKey,
-      mergeMarketBarTail(this.stableBars, this.liveTail),
-      false,
-    );
-  }
-
   /** 停用实时订阅时移除内存尾部并恢复最近 HTTP 稳定快照。 */
   clearRealtime(dataKey: string): void {
     if (dataKey !== this.dataKey || this.liveTail.length === 0) return;

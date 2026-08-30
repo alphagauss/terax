@@ -34,7 +34,6 @@ export type MarketBarPage = {
   actualEnd: string | null;
   referenceClose: number | null;
   referenceTime: MarketTime | null;
-  liveSequence: number;
 };
 
 export type MarketBarInput = {

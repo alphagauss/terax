@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alpha.api.cache import AsyncTtlCache
+from alpha.api.events import WebSocketEventGateway
 from alpha.common.schema_backtest import BacktestReq
 from alpha.config import AlphaConfig
-from alpha.realtime.market_data import RealtimeMarketDataService
+from alpha.realtime.feed import MarketFeed
 from alpha.runtime.event import EventEngine
-from alpha.runtime.processes import ProcessTaskManager
+from alpha.runtime.processes import TaskManager
 
 if TYPE_CHECKING:
     from alpha.storage.database import DataBase
@@ -25,23 +27,21 @@ class _LazyStrategyManager:
     def __init__(
         self,
         event_engine: EventEngine,
-        process_manager: ProcessTaskManager,
+        task_manager: TaskManager,
         database_dir: Path,
-        factory: (
-            Callable[[EventEngine, ProcessTaskManager, Path], "StrategyManager"] | None
-        ),
+        factory: Callable[[EventEngine, TaskManager, Path], "StrategyManager"] | None,
     ) -> None:
         """初始化懒加载代理。
 
         Args:
             event_engine: Alpha 事件引擎。
-            process_manager: Alpha 进程任务管理器。
+            task_manager: Alpha 有限任务管理器。
             database_dir: 回测任务读取的数据库目录。
             factory: 可选策略管理器工厂。
         """
 
         self._event_engine = event_engine
-        self._process_manager = process_manager
+        self._task_manager = task_manager
         self._database_dir = database_dir
         self._factory = factory
         self._manager: StrategyManager | None = None
@@ -63,12 +63,12 @@ class _LazyStrategyManager:
                 self._manager = StrategyManager(
                     self._event_engine,
                     self._database_dir,
-                    task_manager=self._process_manager,
+                    task_manager=self._task_manager,
                 )
             else:
                 self._manager = self._factory(
                     self._event_engine,
-                    self._process_manager,
+                    self._task_manager,
                     self._database_dir,
                 )
         return self._manager
@@ -145,16 +145,6 @@ class _LazyStrategyManager:
 
         return self._get_manager().get_strategy_result(hash_name)
 
-    def has_running_tasks(self) -> bool:
-        """返回已初始化策略管理器中是否存在运行任务。"""
-
-        if self._manager is None:
-            return False
-        return any(
-            snapshot.get("status") == "running"
-            for snapshot in self._manager.get_status_dict().values()
-        )
-
 
 @dataclass
 class AlphaServiceContainer:
@@ -164,9 +154,16 @@ class AlphaServiceContainer:
     database: "DataBase"
     strategy_manager: _LazyStrategyManager
     event_engine: EventEngine
-    process_manager: ProcessTaskManager
-    market_data: RealtimeMarketDataService
+    task_manager: TaskManager
+    market_feed: MarketFeed
+    event_gateway: WebSocketEventGateway
     data_overview_cache: AsyncTtlCache[dict[str, object]]
+
+    async def start(self) -> None:
+        """启动事件总线并把 WebSocket Gateway 绑定到当前 FastAPI loop。"""
+
+        self.event_gateway.start(asyncio.get_running_loop())
+        self.event_engine.start()
 
     async def close(self) -> None:
         """关闭容器持有的运行对象。
@@ -178,19 +175,20 @@ class AlphaServiceContainer:
             无返回值。
         """
 
-        await self.market_data.close()
+        await self.event_gateway.close()
+        self.task_manager.close(stop_running=True)
+        await self.market_feed.close()
         await self.database.close()
         self.event_engine.stop()
-        self.process_manager.close(stop_running=True)
 
     def has_running_tasks(self) -> bool:
         """返回当前容器是否仍有运行中的任务。"""
 
         process_running = any(
             snapshot.get("status") == "running"
-            for snapshot in self.process_manager.list_snapshots()
+            for snapshot in self.task_manager.list_snapshots()
         )
-        return process_running or self.strategy_manager.has_running_tasks()
+        return process_running
 
 
 def create_alpha_service_container(
@@ -198,13 +196,14 @@ def create_alpha_service_container(
     *,
     database_factory: Callable[[Path], "DataBase"] | None = None,
     event_engine_factory: Callable[[], EventEngine] = EventEngine,
-    task_manager_factory: Callable[[], ProcessTaskManager] = ProcessTaskManager,
-    market_data_factory: Callable[
-        [], RealtimeMarketDataService
-    ] = RealtimeMarketDataService,
+    task_manager_factory: Callable[[EventEngine], TaskManager] = TaskManager,
+    market_feed_factory: Callable[[EventEngine], MarketFeed] = MarketFeed,
+    event_gateway_factory: Callable[
+        [EventEngine, MarketFeed], WebSocketEventGateway
+    ] = WebSocketEventGateway,
     strategy_manager_factory: (
         Callable[
-            [EventEngine, ProcessTaskManager, Path],
+            [EventEngine, TaskManager, Path],
             "StrategyManager",
         ]
         | None
@@ -216,8 +215,9 @@ def create_alpha_service_container(
         config: 当前进程使用的 Alpha 配置。
         database_factory: 数据库门面工厂，测试可注入替身。
         event_engine_factory: 事件引擎工厂，测试可注入替身。
-        task_manager_factory: 进程任务管理器工厂，测试可注入替身。
-        market_data_factory: 共享实时行情服务工厂，测试可注入替身。
+        task_manager_factory: 有限任务管理器工厂，测试可注入替身。
+        market_feed_factory: 行情租约引擎工厂，测试可注入替身。
+        event_gateway_factory: 公共事件 WebSocket Gateway 工厂。
         strategy_manager_factory: 策略管理器工厂，测试可注入替身。
 
     Returns:
@@ -232,13 +232,14 @@ def create_alpha_service_container(
         database = database_factory(config.database_dir)
 
     event_engine = event_engine_factory()
-    process_manager = task_manager_factory()
-    market_data = market_data_factory()
+    task_manager = task_manager_factory(event_engine)
+    market_feed = market_feed_factory(event_engine)
+    event_gateway = event_gateway_factory(event_engine, market_feed)
 
     # 策略管理器访问策略/回测接口时再初始化，避免健康检查挂载时拉起重依赖。
     strategy_manager = _LazyStrategyManager(
         event_engine,
-        process_manager,
+        task_manager,
         config.database_dir,
         strategy_manager_factory,
     )
@@ -248,7 +249,8 @@ def create_alpha_service_container(
         database=database,
         strategy_manager=strategy_manager,
         event_engine=event_engine,
-        process_manager=process_manager,
-        market_data=market_data,
+        task_manager=task_manager,
+        market_feed=market_feed,
+        event_gateway=event_gateway,
         data_overview_cache=AsyncTtlCache(ttl_seconds=60),
     )

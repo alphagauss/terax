@@ -24,7 +24,7 @@ const ALPHA_PORT: u16 = 11123;
 const SETTINGS_STORE: &str = "alpha";
 const PYTHON_PATH_KEY: &str = "pythonPath";
 const AUTO_START_KEY: &str = "autoStart";
-const SERVICE_PROTOCOL_VERSION: u32 = 2;
+const SERVICE_PROTOCOL_VERSION: u32 = 3;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(20);
 const LOCK_TIMEOUT: Duration = Duration::from_secs(40);
 
@@ -703,7 +703,7 @@ mod tests {
             "status": "ok",
             "ready": true,
             "service": "terax-alpha",
-            "protocol_version": 2,
+            "protocol_version": 3,
             "runtime_revision": "release:current",
             "started_at": "2026-08-13T09:20:31Z"
         }))
@@ -719,7 +719,7 @@ mod tests {
             "status": "ok",
             "ready": true,
             "service": "terax-alpha",
-            "protocol_version": 2,
+            "protocol_version": 3,
             "runtime_revision": "release:previous"
         }))
         .unwrap();

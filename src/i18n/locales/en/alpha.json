@@ -12,6 +12,18 @@
     "loading": "Loading...",
     "unavailable": "Unavailable"
   },
+  "taskStages": {
+    "starting": "Starting",
+    "planning": "Planning",
+    "loading_data": "Loading data",
+    "initializing": "Initializing strategy",
+    "simulating": "Replaying bars",
+    "fetching": "Fetching data",
+    "rebuilding_overview": "Rebuilding overview",
+    "saving_report": "Saving report",
+    "finalizing": "Finalizing",
+    "finished": "Finished"
+  },
   "workstation": {
     "mainSymbol": "Main symbol",
     "invalidSymbol": "Use SYMBOL.EXCHANGE",

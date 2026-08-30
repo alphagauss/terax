@@ -39,10 +39,8 @@ vi.mock("@/modules/alpha/chart/components/FinancialChartFrame", () => ({
   },
 }));
 
-vi.mock("@/modules/alpha/realtime/MarketDataHub", () => ({
-  marketDataHub: {
-    acquire: mocks.acquireRealtime,
-  },
+vi.mock("@/modules/alpha/realtime/MarketDataFeed", () => ({
+  acquireMarketData: mocks.acquireRealtime,
 }));
 
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
@@ -89,7 +87,6 @@ function page(
     actualEnd: dates[dates.length - 1] ?? null,
     referenceClose: 10,
     referenceTime: { kind: "trading-day", date: "2026-07-26" },
-    liveSequence: 0,
   };
 }
 

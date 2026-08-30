@@ -1,6 +1,6 @@
 /**
  * 本文件把 Alpha 有界历史查询连接到公共金融图表。
- * Scene 负责权威证券元数据、参考价、排他游标、跨页合并、按需指标与对比查询及可选同步桥转发。
+ * Scene 负责权威证券元数据、参考价、排他游标、跨页合并、实时事件、按需指标与对比查询及可选同步桥转发。
  */
 
 import {
@@ -288,10 +288,10 @@ export function MarketChartScene({
     let cancelled = false;
     let binding: MarketDataBinding | null = null;
     let unsubscribeState: (() => void) | null = null;
-    void import("@/modules/alpha/realtime/MarketDataHub").then(
-      ({ marketDataHub }) => {
+    void import("@/modules/alpha/realtime/MarketDataFeed").then(
+      ({ acquireMarketData }) => {
         if (cancelled) return;
-        binding = marketDataHub.acquire({
+        binding = acquireMarketData({
           vtSymbol,
           interval: options.interval,
           adjust: options.adjust,
@@ -345,10 +345,6 @@ export function MarketChartScene({
   useEffect(() => {
     if (!realtimeBinding) return;
     return realtimeBinding.subscribeData((event) => {
-      if (event.type === "snapshot") {
-        if (visibleStudies.length > 0) void studyQuery.refetch();
-        return;
-      }
       if (event.isFinal || event.previousFinal) {
         void query.refetch();
         if (visibleStudies.length > 0) void studyQuery.refetch();

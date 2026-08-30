@@ -85,7 +85,7 @@ describe("Alpha Tauri 命令封装", () => {
       "/api/alpha/events",
       vi.fn(),
     );
-    await connection.send({ type: "ping" });
+    await connection.send({ op: "ping" });
     await connection.close();
     await connection.close();
 
@@ -98,7 +98,7 @@ describe("Alpha Tauri 命令封装", () => {
           onEvent: expect.anything(),
         },
       ],
-      ["alpha_ws_send", { id: 7, message: { type: "ping" } }],
+      ["alpha_ws_send", { id: 7, message: { op: "ping" } }],
       ["alpha_ws_close", { id: 7 }],
     ]);
   });

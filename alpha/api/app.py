@@ -54,6 +54,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     container = create_alpha_service_container(load_config())
     app.state.alpha_services = container
     app.state.alpha_started_at = datetime.now(timezone.utc)
+    await container.start()
     try:
         yield
     finally:

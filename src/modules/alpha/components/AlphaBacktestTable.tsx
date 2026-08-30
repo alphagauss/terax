@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 回测页的回测结果表格。
- * 表格只呈现当前接口页并选择结果，不复制任务或回测业务状态。
+ * 表格呈现当前接口页、统一任务进度并选择结果，不在组件内维护任务状态。
  */
 
 import type { AlphaBacktest } from "@/modules/alpha/api";
@@ -60,10 +60,23 @@ export function AlphaBacktestTable({ rows, selectedId, onSelect }: Props) {
       {
         accessorKey: "status",
         header: t("backtests.columns.status"),
-        cell: ({ getValue }) =>
-          t(`backtests.status.${getValue<string>()}`, {
-            defaultValue: getValue<string>(),
-          }),
+        cell: ({ getValue, row }) => {
+          const status = getValue<string>();
+          const statusText = t(`backtests.status.${status}`, {
+            defaultValue: status,
+          });
+          const progress = row.original.progress;
+          const progressText =
+            progress?.completed != null && progress.total != null
+              ? `${progress.completed}/${progress.total}`
+              : null;
+          const stage = row.original.stage
+            ? t(`taskStages.${row.original.stage}`, {
+                defaultValue: row.original.stage,
+              })
+            : null;
+          return [statusText, stage, progressText].filter(Boolean).join(" · ");
+        },
       },
       {
         accessorKey: "total_return",

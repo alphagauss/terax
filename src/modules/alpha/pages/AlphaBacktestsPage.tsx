@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 回测结果页面。
- * 页面连接回测列表、净值和回撤接口，不在前端重新计算回测指标。
+ * 页面连接回测列表、统一任务事件、净值和回撤接口，不在前端重新计算回测指标。
  */
 
 import { Button } from "@/components/ui/button";
@@ -17,8 +17,13 @@ import {
   AlphaSectionTitle,
 } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
+import {
+  subscribeAlphaEventConnection,
+  subscribeAlphaTasks,
+  taskDisplayStatus,
+} from "@/modules/alpha/events/tasks";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,6 +31,8 @@ import { useTranslation } from "react-i18next";
 type Props = {
   visible: boolean;
 };
+
+const BACKTEST_QUERY_KEY = ["alpha", "backtests", 50] as const;
 
 /** 为回测页接入 Alpha 共享查询缓存。 */
 export function AlphaBacktestsPage(props: Props) {
@@ -41,12 +48,12 @@ export function AlphaBacktestsPage(props: Props) {
 /** 连接回测 API 并渲染结果表格和曲线。 */
 function AlphaBacktestsPageContent({ visible }: Props) {
   const { t, i18n } = useTranslation("alpha");
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const backtests = useQuery({
-    queryKey: ["alpha", "backtests", 50],
+    queryKey: BACKTEST_QUERY_KEY,
     queryFn: () => getAlphaBacktests(50),
     enabled: visible,
-    refetchInterval: visible ? 5_000 : false,
   });
   const selected = backtests.data?.items.find((item) => item.id === selectedId);
   const series = useQuery({
@@ -54,6 +61,45 @@ function AlphaBacktestsPageContent({ visible }: Props) {
     queryFn: () => getAlphaBacktestSeries(selectedId ?? ""),
     enabled: visible && selectedId !== null && selected?.status === "completed",
   });
+  useEffect(() => {
+    if (!visible) return;
+    const releaseTasks = subscribeAlphaTasks((task) => {
+      if (task.kind !== "backtest") return;
+      let found = false;
+      queryClient.setQueryData<Awaited<ReturnType<typeof getAlphaBacktests>>>(
+        BACKTEST_QUERY_KEY,
+        (current) => {
+          if (!current) return current;
+          const items = current.items.map((item) => {
+            if (item.id !== task.id) return item;
+            found = true;
+            if (item.revision > task.revision) return item;
+            return {
+              ...item,
+              status: taskDisplayStatus(task.status),
+              stage: task.stage,
+              progress: task.progress,
+              metrics: task.metrics,
+              revision: task.revision,
+            };
+          });
+          return { ...current, items };
+        },
+      );
+      if (!found || task.status !== "running") {
+        void queryClient.invalidateQueries({ queryKey: BACKTEST_QUERY_KEY });
+      }
+    });
+    const releaseConnection = subscribeAlphaEventConnection((connected) => {
+      if (connected) {
+        void queryClient.invalidateQueries({ queryKey: BACKTEST_QUERY_KEY });
+      }
+    });
+    return () => {
+      releaseTasks();
+      releaseConnection();
+    };
+  }, [queryClient, visible]);
 
   useEffect(() => {
     if (!backtests.data) return;

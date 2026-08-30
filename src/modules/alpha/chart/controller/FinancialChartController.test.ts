@@ -907,7 +907,7 @@ describe("FinancialChartController", () => {
     ).toBe(false);
   });
 
-  it("HTTP 快照已包含实时尾部时允许重叠重校准", () => {
+  it("HTTP 快照与已收到的实时尾部重叠时保持幂等", () => {
     const controller = new FinancialChartController(chartHost());
     const initial = [bar("2026-05-15", 10.99)];
     const snapshot = [
@@ -916,7 +916,10 @@ describe("FinancialChartController", () => {
       bar("2026-08-28", 11.65),
     ];
     controller.setBars("000001.SZSE|d|forward", initial);
-    controller.setRealtimeSnapshot("000001.SZSE|d|forward", snapshot);
+    controller.updateLiveBar(
+      "000001.SZSE|d|forward",
+      bar("2026-08-28", 11.65),
+    );
 
     expect(() =>
       controller.setBars("000001.SZSE|d|forward", snapshot),

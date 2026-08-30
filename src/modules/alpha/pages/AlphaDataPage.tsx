@@ -1,6 +1,6 @@
 /**
  * 本文件实现 Alpha 数据目录页面。
- * 页面按需查询证券目录、同步质量和单证券 K 线，不在浏览器中执行全量搜索或质量计算。
+ * 页面按需查询证券目录、订阅同步任务进度并展示单证券 K 线，不在浏览器中执行全量搜索或质量计算。
  */
 
 import {
@@ -18,6 +18,7 @@ import {
   getAlphaSyncOverview,
   startAlphaBarSync,
   type AlphaSecurity,
+  type AlphaSyncOverview,
 } from "@/modules/alpha/api";
 import { MarketChartScene } from "@/modules/alpha/chart/scenes/MarketChartScene";
 import {
@@ -32,6 +33,11 @@ import {
 } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { AlphaSecurityTable } from "@/modules/alpha/components/AlphaSecurityTable";
 import { AlphaServiceBoundary } from "@/modules/alpha/components/AlphaServiceBoundary";
+import {
+  subscribeAlphaEventConnection,
+  subscribeAlphaTasks,
+  taskDisplayStatus,
+} from "@/modules/alpha/events/tasks";
 import { alphaQueryKeys, AlphaQueryProvider } from "@/modules/alpha/query";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -120,9 +126,63 @@ function AlphaDataPageContent({ visible }: Props) {
     queryKey: alphaQueryKeys.syncOverview,
     queryFn: getAlphaSyncOverview,
     enabled: visible,
-    refetchInterval: visible ? 3_000 : false,
     staleTime: 0,
   });
+  useEffect(() => {
+    if (!visible) return;
+    const releaseTasks = subscribeAlphaTasks((task) => {
+      if (!task.kind.startsWith("sync")) return;
+      queryClient.setQueryData<AlphaSyncOverview>(
+        alphaQueryKeys.syncOverview,
+        (current) => {
+          if (!current) return current;
+          const summary = {
+            task_id: task.id,
+            status: taskDisplayStatus(task.status),
+            stage: task.stage,
+            progress: task.progress,
+            metrics: task.metrics,
+            revision: task.revision,
+            created_at: task.created_at,
+            finished_at: task.finished_at,
+            message: task.message,
+          };
+          const exists = current.tasks.some(
+            (item) => item.task_id === task.id,
+          );
+          return {
+            ...current,
+            tasks: exists
+              ? current.tasks.map((item) =>
+                  item.task_id === task.id && item.revision <= task.revision
+                    ? summary
+                    : item,
+                )
+              : [summary, ...current.tasks],
+          };
+        },
+      );
+      if (task.status !== "running") {
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.syncOverview }),
+          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.dataOverview }),
+          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.securities }),
+          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.bars }),
+        ]);
+      }
+    });
+    const releaseConnection = subscribeAlphaEventConnection((connected) => {
+      if (connected) {
+        void queryClient.invalidateQueries({
+          queryKey: alphaQueryKeys.syncOverview,
+        });
+      }
+    });
+    return () => {
+      releaseTasks();
+      releaseConnection();
+    };
+  }, [queryClient, visible]);
   useEffect(() => {
     if (
       selectedSymbol &&
@@ -170,6 +230,9 @@ function AlphaDataPageContent({ visible }: Props) {
   const syncError = syncActionError ?? syncOverview.error;
   const summary = overview.data?.summary;
   const latestQuality = syncOverview.data?.latest;
+  const activeSyncTask = syncOverview.data?.tasks.find(
+    (task) => task.status === "running",
+  );
   const syncRunning = Boolean(
     syncOverview.data?.tasks.some((task) => task.status === "running"),
   );
@@ -177,6 +240,22 @@ function AlphaDataPageContent({ visible }: Props) {
     ? "running"
     : (latestQuality?.status ?? "idle");
   const qualityMessage = latestQuality?.message;
+  const syncStatusText = activeSyncTask
+    ? [
+        t("data.sync.statuses.running"),
+        activeSyncTask.stage
+          ? t(`taskStages.${activeSyncTask.stage}`, {
+              defaultValue: activeSyncTask.stage,
+            })
+          : null,
+        activeSyncTask.progress?.completed != null &&
+        activeSyncTask.progress.total != null
+          ? `${activeSyncTask.progress.completed}/${activeSyncTask.progress.total}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : t(`data.sync.statuses.${qualityStatus}`);
 
   const startSync = async (vtSymbols?: readonly string[]) => {
     setSyncActionPending(true);
@@ -268,11 +347,17 @@ function AlphaDataPageContent({ visible }: Props) {
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <AlphaMetric
               label={t("data.sync.status")}
-              value={t(`data.sync.statuses.${qualityStatus}`)}
+              value={syncStatusText}
             />
             <AlphaMetric
               label={t("data.sync.savedRows")}
-              value={number.format(latestQuality?.saved_rows ?? 0)}
+              value={number.format(
+                Number(
+                  activeSyncTask?.metrics.saved_rows ??
+                    latestQuality?.saved_rows ??
+                    0,
+                ),
+              )}
             />
             <AlphaMetric
               label={t("data.sync.issues")}

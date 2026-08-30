@@ -240,11 +240,7 @@ export const FinancialChart = forwardRef<FinancialChartHandle, Props>(
     useEffect(() => {
       if (!realtimeRuntime || realtimeRuntime.dataKey !== dataKey) return;
       const unsubscribe = realtimeRuntime.subscribeData((event) => {
-        if (event.type === "snapshot") {
-          controllerRef.current?.setRealtimeSnapshot(dataKey, event.bars);
-        } else {
-          controllerRef.current?.updateLiveBar(dataKey, event.bar);
-        }
+        controllerRef.current?.updateLiveBar(dataKey, event.bar);
       });
       return () => {
         unsubscribe();

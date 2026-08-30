@@ -122,12 +122,21 @@ const barsSchema = z.object({
   actual_end: z.string().nullable(),
   reference_close: z.number().nullable(),
   reference_time: z.string().nullable(),
-  live_sequence: z.number().int().nonnegative(),
 });
 
 const syncTaskSchema = z.object({
   task_id: z.string().min(1),
   status: z.string(),
+  stage: z.string().nullable(),
+  progress: z
+    .object({
+      completed: z.number().nullable(),
+      total: z.number().nullable(),
+      unit: z.string().nullable(),
+    })
+    .nullable(),
+  metrics: z.record(z.string(), z.unknown()),
+  revision: z.number().int().nonnegative(),
   created_at: z.string().nullable(),
   finished_at: z.string().nullable(),
   message: z.string().nullable(),
@@ -180,6 +189,16 @@ const backtestSchema = z.object({
   sharpe: z.number().nullable(),
   trade_count: z.number().nullable(),
   created_at: z.string().nullable(),
+  stage: z.string().nullable(),
+  progress: z
+    .object({
+      completed: z.number().nullable(),
+      total: z.number().nullable(),
+      unit: z.string().nullable(),
+    })
+    .nullable(),
+  metrics: z.record(z.string(), z.unknown()),
+  revision: z.number().int().nonnegative(),
 });
 
 const backtestsSchema = z.object({
@@ -207,9 +226,9 @@ const drawdownSchema = z.object({
 
 type AlphaStatusOverview = z.infer<typeof statusSchema>;
 export type AlphaDataOverview = z.infer<typeof dataOverviewSchema>;
+export type AlphaSyncOverview = z.infer<typeof syncOverviewSchema>;
 export type AlphaSecurity = z.infer<typeof securitySchema>;
 export type AlphaSecurityDetail = z.infer<typeof securityDetailSchema>;
-export type AlphaSyncOverview = z.infer<typeof syncOverviewSchema>;
 export type AlphaBacktest = z.infer<typeof backtestSchema>;
 type AlphaBacktestSeries = {
   equity: z.infer<typeof equitySchema>["items"];
@@ -407,7 +426,6 @@ export async function getAlphaBars(
           /^\d{4}-\d{2}-\d{2}$/.test(response.reference_time) ? "d" : interval,
         )
       : null,
-    liveSequence: response.live_sequence,
   };
 }
 

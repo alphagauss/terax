@@ -21,7 +21,6 @@ from alpha.api.routes._utils import (
 )
 from alpha.common.market_metadata import get_market_metadata
 from alpha.common.schema_market import BarDataQuery, BarHistoryQuery
-from alpha.realtime.model import MarketDataKey, RealtimeBar
 
 router = APIRouter()
 
@@ -108,25 +107,6 @@ def _overview_window(
 def _exclusive_after(value: datetime | None) -> datetime | None:
     """把闭区间锚点转换为历史查询可消费的排他上界。"""
     return value + timedelta(microseconds=1) if value is not None else None
-
-
-def _merge_realtime_tail(
-    items: list[dict[str, object]],
-    live_bars: list[RealtimeBar],
-    *,
-    limit: int,
-    has_more_before: bool,
-) -> tuple[list[dict[str, object]], bool, str | None]:
-    """把内存实时尾部拼接到 HTTP 权威快照并维持排他游标语义。"""
-
-    by_time = {str(item["time"]): item for item in items}
-    by_time.update({bar.time: bar.wire() for bar in live_bars})
-    merged = [by_time[key] for key in sorted(by_time)]
-    trimmed = len(merged) > limit
-    selected = merged[-limit:]
-    has_more = has_more_before or trimmed
-    next_before = str(selected[0]["time"]) if selected and has_more else None
-    return selected, has_more, next_before
 
 
 async def _load_price_reference(
@@ -233,22 +213,6 @@ async def get_bars(
         )
 
     if start is None and end is None:
-        live_sequence, live_bars = (
-            await services.market_data.snapshot(
-                MarketDataKey(
-                    vt_symbol=vt_symbol,
-                    interval=cast(Literal["1m", "1h", "d", "w"], normalized_interval),
-                    adjust=cast(
-                        Literal["none", "forward", "backward"],
-                        {"non": "none", "pre": "forward", "post": "backward"}[
-                            normalized_adjust
-                        ],
-                    ),
-                )
-            )
-            if normalized_interval != "tick"
-            else (0, [])
-        )
         page = await services.database.load_bar_history(
             BarHistoryQuery(
                 vt_symbol=vt_symbol,
@@ -265,16 +229,8 @@ async def get_bars(
             _bar_item(row, interval=normalized_interval, vt_symbol=vt_symbol)
             for row in page["items"]
         ]
-        if before is None:
-            items, has_more_before, next_before = _merge_realtime_tail(
-                items,
-                live_bars,
-                limit=normalized_limit,
-                has_more_before=bool(page["has_more_before"]),
-            )
-        else:
-            has_more_before = bool(page["has_more_before"])
-            next_before = page["next_before"]
+        has_more_before = bool(page["has_more_before"])
+        next_before = page["next_before"]
         reference_close, reference_time = await _load_price_reference(
             services,
             vt_symbol=vt_symbol,
@@ -297,7 +253,6 @@ async def get_bars(
             "actual_end": items[-1]["time"] if items else None,
             "reference_close": reference_close,
             "reference_time": reference_time,
-            "live_sequence": live_sequence,
         }
 
     overview = await services.database.get_bar_overview_item(
@@ -356,5 +311,4 @@ async def get_bars(
         "actual_end": items[-1]["time"] if items else None,
         "reference_close": reference_close,
         "reference_time": reference_time,
-        "live_sequence": 0,
     }
