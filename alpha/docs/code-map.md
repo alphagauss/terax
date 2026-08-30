@@ -28,7 +28,8 @@
 | `alpha/common/` | 跨模块共享的枚举、事件常量和市场、交易、回测数据模型。 |
 | `alpha/runtime/` | 事件分发和子进程任务生命周期管理。 |
 | `alpha/market/` | 东方财富和 GM 等外部行情源适配。 |
-| `alpha/realtime/` | 按活跃数据键共享的轻量实时 K 线源、sequence、内存尾部和引用计数。 |
+| `alpha/realtime/` | 按活跃数据键共享的 MarketFeed、Provider 和完整实时 K 线模型。 |
+| `alpha/runtime/` | 同步 EventEngine、公共事件目录和有限 TaskManager。 |
 | `alpha/storage/` | SQLite、CSV 存储门面、领域仓储和数据转换。 |
 | `alpha/strategy/` | 策略加载、运行时接口和任务生命周期管理。 |
 | `alpha/backtest/` | 回测数据准备、撮合、组合管理、统计分析和参数优化。 |
@@ -59,7 +60,10 @@
 - `alpha/backtest/runner.py`：回测和优化任务的进程执行入口。
 - `alpha/analytics/indicator.py`：回测与图表共用的 TA-Lib 指标数组计算内核。
 - `alpha/chart/studies.py`：首批图表指标 definition、参数规则和 output 映射。
-- `alpha/realtime/market_data.py`：实时行情引用计数、sequence、状态与有界尾部。
+- `alpha/realtime/feed.py`：行情 Provider 租约、引用计数、重复抑制和事件发布。
+- `alpha/runtime/event.py`：按类型和业务键顺序分发的同步事件总线。
+- `alpha/runtime/processes.py`：子进程任务、节流进度、结果提交和 `task.updated`。
+- `alpha/api/events.py`：公共 selector 到 EventEngine callback 的 WebSocket Gateway。
 - `alpha/realtime/eastmoney.py`：不依赖 pandas 的最近两根实时 K 线源。
 - `alpha/runtime/processes.py`：子进程任务的启动、停止、状态刷新和清理。
 - `alpha/runtime/event.py`：进程内事件队列、订阅和异步分发。

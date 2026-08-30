@@ -109,8 +109,8 @@ Terax Space / Workbench
 - 工作台级 `ChartSyncProvider` 已提供相互独立的范围与十字线同步。两类事件不写入 React 状态，分别按动画帧保留末值，并按来源 panel、固定组、周期和复权过滤。范围使用实际 `MarketTime`；十字线接收方只用本地精确同时间 bar 的 close 定位，缺失时清除。Controller 使用 mutation guard 防回传，pointer 活跃时本地十字线优先；关闭同步时不订阅实际时间范围，也不保留 pointer 监听或待派发帧。
 - Chart Panel 已支持最多 3 个对比标的。Scene 以主图实际起止范围执行独立 `start + end` 查询，每个请求和结果最多 5,000 根，主图 prepend 后按新范围复用 React Query 缓存；单个 loading、error、empty、零基准和局部覆盖状态不会阻断主行情或其他标的。纯函数过滤非法 close、排序去重并以所有有效序列首时间的最大值为共同起点，不填补缺失交易日。
 - 主标的和对比标的只提供相对收益模式，共用独立左侧百分比轴，右侧绝对价格轴不变。Controller 按 `vtSymbol` diff 复用 line series；主线使用主题强调色，对比线颜色进入面板配置。对比值与行情、指标复用唯一十字线订阅和同一个 rAF 快照，缺少精确同时间点时显示空值。管理 Dialog 按需加载并复用证券目录搜索；紧凑数据页不显示入口，未配置对比时不查询、不归一化、不创建 series。
-- 实时行情已经形成 HTTP 快照与 WebSocket 增量闭环。`src/modules/alpha/realtime/MarketDataHub.ts` 只在工作台 Chart Panel 显式启用实时开关且页面可见时动态加载；当前 WebView 内所有消费者复用一条 Rust 通用代理连接，同一完整数据键只向 Alpha 订阅一次，最后消费者释放后取消。数据页没有入口，也不会加载 Hub 或建立订阅。
-- Hub 在首次订阅、重连、sequence gap、服务端 reset 和慢消费者重校准要求后重新读取 `/bars`，以 `liveSequence` 丢弃重复增量并按序应用缓冲消息。快照之后已应用的 delta 最多保留 512 条，后来消费者先接收快照再顺序重放，避免复制完整 bars 或停在旧快照。连接和 freshness 分为 `connecting`、`live`、`delayed`、`stale`、`reconnecting`、`disconnected`；WebSocket 恢复不依赖持久化连接对象。
+- 实时行情已经接入统一 EventEngine。`src/modules/alpha/events/EventClient.ts` 在当前 WebView 复用一条 Rust 通用代理连接，把公共 selector 转换为 callback；`MarketDataFeed.ts` 只在工作台 Chart Panel 显式启用实时开关且页面可见时动态加载。相同 selector 只向 Alpha 订阅一次，最后 callback 释放后取消。
+- Python MarketFeed 只管理完整行情键的 Provider 租约、重复抑制和状态事件，不保存历史尾部或 sequence。前端先读取 `/bars` 数据库历史，再按时间替换或追加完整实时 bar；断线后 EventClient 重放 selector，Provider 重新发布最新值。慢连接关闭后通过 HTTP 权威状态恢复。
 - `FinancialChartController` 直接消费 rAF 批次后的完整实时 bar，同 bucket 只调用 series `update()`，新 bucket 只追加一次，不为当前 bar 更新复制完整历史数组。数据键 guard 拒绝旧订阅尾部；HTTP 重校准和历史 prepend 会重新拼接有界 live tail。用户平移离开右边界后不再自动滚回，Frame 显示“回到最新”，主动返回只调用 `scrollToRealTime()`，不执行 `fitContent()`。
 - 公共金融图表三批八项任务已经全部完成。独立行情页继续暂缓，后续若恢复只作为复用 `MarketChartScene` 的薄页面接入；当前阶段和下一项跨层工作仍以临时实施进度文档为准。
 - 工作台公共协议已经位于 `src/modules/alpha/workstation/`。`schemaVersion: 1` 布局分别保存面板实例和 24 列网格坐标，只接受纯 JSON 配置；解析边界校验版本、ID、panel/grid 一一对应、横向范围、最小尺寸、重叠、singleton 和 descriptor 配置。
@@ -119,8 +119,8 @@ Terax Space / Workbench
 - Alpha 综合工作台已经作为可恢复 Workbench 页面接入导航。页面使用固定 24 列 `react-grid-layout`、纵向紧凑排列、碰撞重排和 1,200 px 最小逻辑宽度；拖动和缩放期间不提交业务状态，只在 stop 事件保存最终坐标。布局锁定同时关闭移动和缩放。
 - 工作台首批只注册复用现有 `MarketChartScene` 的图表面板（Chart Panel），其严格配置保存周期、复权、图表类型、成交量显隐、实时开关、指标 instances、对比标的与语义 pane 比例；当前 schema 的缺失可选字段使用日线、前复权、蜡烛图、成交量、关闭实时、空指标、空对比和 8:2 默认值，不增加版本迁移分支。内置单图和双图模板每次生成新的布局与 panel ID；面板控制栏（Panel Chrome）统一提供标题、拖动、删除和 follow/pinned，工作台主标的变化只影响 follow 面板。
 - `AlphaWorkstationState` 版本 2 把主标的、锁定、图表同步配置和布局作为 `terax-alpha.json` 的单个 `workstation` 键原子保存。当前开发阶段只接受版本 2，旧版本直接失效并回退默认状态，不保留迁移代码。持久化只保存固定组 ID 和两个开关，不保存范围、十字线时间或来源 ID。所有窗口都可以合并写入并在应用关闭前 flush，也通过共享 store 变更通知刷新，不建立窗口级持久化所有权。
-- `/bars` 为前端提供 `start + end` 范围查询和排他 `before` 历史分页，并显式返回 `has_more_before`、下一游标、实际范围、`reference_close`、`reference_time` 和 `live_sequence`。最新页可以拼接 Alpha 服务当前键的有界实时尾部，历史页不拼接。Python 如何跨分片读取、应用复权、计算参考价和管理实时尾部统一见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 与 [行情数据和存储](../../alpha/docs/market-data.md)。
-- [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化、分页元数据和实时 sequence；数据页使用日线、前复权和每页 500 根的左侧历史加载，工作台图表面板可以切换受支持的周期、复权和实时开关。公共图表对稳定尾部使用 `update()`，对 HTTP 重校准、历史修订和 prepend 使用 `setData()`。
+- `/bars` 为前端提供 `start + end` 范围查询和排他 `before` 历史分页，并显式返回 `has_more_before`、下一游标、实际范围、`reference_close` 和 `reference_time`。它不读取 EventEngine 的瞬时值。Python 如何跨分片读取、应用复权和计算参考价见 [Alpha API 协议](../../alpha/docs/api-contracts.md) 与 [行情数据和存储](../../alpha/docs/market-data.md)。
+- [`getAlphaBars()`](../../src/modules/alpha/api.ts) 已接入统一行情归一化和分页元数据；数据页使用日线、前复权和每页 500 根的左侧历史加载，工作台图表面板可以切换受支持的周期、复权和实时开关。公共图表对实时当前 bar 使用 `update()`，对 HTTP 历史修订和 prepend 使用 `setData()`。
 - 当前 Alpha 页面包括综合工作台、数据、回测和设置，尚没有独立行情页、策略页、回测复盘页和模拟交易页。
 - Terax Workbench 已有递归分割树、稳定 tab ID 和 `WorkbenchViewPool`。移动、分割和隐藏页面不应重挂载其运行时实例。
 - 迁移时保留 `alphaBusinessDay()` 的时区不变量和测试，将其下沉到行情归一化模块。不要继续把新能力堆入现有临时组件。
@@ -221,7 +221,8 @@ src/modules/alpha/
   market/
     model.ts
     normalize.ts
-    MarketDataHub.ts
+    events/EventClient.ts
+    realtime/MarketDataFeed.ts
     realtime.ts
   chart/
     accessibility/
@@ -509,30 +510,29 @@ type ChartStudyResult = {
 
 ## 行情共享与实时边界
 
-多个面板不得各自建立重复连接和轮询。当前图表已经使用进程内 `MarketDataHub`，深度、逐笔和信号仍是未来消费者：
+多个面板不得各自建立重复连接和轮询。当前图表通过统一 `EventClient` 和薄 `MarketDataFeed` 接入，深度、逐笔、任务和交易事件复用同一连接：
 
 ```text
-Alpha HTTP 权威快照 + WebSocket 增量
+Alpha HTTP 权威状态 + EventEngine 公共事件
   Rust 通用代理
-    MarketDataHub
-      查询缓存与请求单飞
-      标的/频道订阅引用计数
-      freshness 和重连状态
-      快照重新校准
-      rAF 批处理
+    EventClient
+      selector 引用计数
+      callback 和连接重放
+    MarketDataFeed
+      行情协议验证和状态映射
         Chart Controller
         Depth Panel
         Tape Panel
         Signal Panel
 ```
 
-- 初次进入、sequence gap、服务端 reset 或断线恢复后查询权威快照。
-- WebSocket 只提供增量，不被当作永久事实存储。
+- 初次进入和断线恢复后查询 HTTP 权威状态，瞬时行情由 Provider 重新发布最新值。
+- WebSocket 只提供事件通知，不被当作永久事实存储。
 - 多个消费者订阅同一数据键时复用底层订阅。
 - 最后一个消费者离开后才解除订阅。
 - 页面隐藏时保留实例，但释放或暂停非必要的可见性相关工作。
 - `connecting`、`live`、`delayed`、`stale`、`reconnecting` 和 `disconnected` 是显式状态。`live` 表示上游链路健康，不表示交易所开市。
-- 当前 Alpha 上游按活跃数据键读取最近两根完整 K 线，固定发布累计成交量。Hub 的纯合并函数仍支持显式增量成交量，任何新增上游必须在协议中声明模式。
+- 当前 Alpha 上游按活跃数据键读取最近两根完整 K 线，固定发布累计成交量。前端行情适配器的纯合并函数仍支持显式增量成交量，任何新增上游必须在协议中声明模式。
 - 模拟账户和订单状态独立于行情连接状态，不能用行情的 `live` 状态代替交易状态。
 
 ## 两个参考项目的定向审查
@@ -824,7 +824,7 @@ Python 行情 API、跨分片分页、复权锚点和参考价计算统一见 [A
 
 ### 阶段四：实时行情和模拟交易
 
-- 建立 MarketDataHub、HTTP 快照、WebSocket 增量和订阅引用计数。
+- 建立统一 EventEngine、EventClient、MarketFeed 和公共 selector 引用计数。
 - 完成五档、逐笔、信号、账户、持仓、订单和事件面板。
 - 完成虚拟账户、撮合、订单生命周期、持仓、费用、滑点和模拟风控。
 - 验证服务恢复、命令幂等、风险拒绝和未知状态。

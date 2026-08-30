@@ -16,9 +16,9 @@ AlphaServiceContainer
         |
         +--> StrategyManager --> Backtest / Optimize
         |
-        +--> ProcessTaskManager --> spawn 子进程任务
+        +--> TaskManager --> spawn 子进程任务和 task.updated
         |
-        +--> EventEngine
+        +--> MarketFeed --> EventEngine --> WebSocketEventGateway
 ```
 
 `alpha/api/app.py` 在应用 lifespan 中创建一个 `AlphaServiceContainer`，全部业务路由共享该容器。应用退出时统一关闭数据库、任务管理器和事件运行对象。
@@ -55,11 +55,13 @@ AlphaServiceContainer
 
 ## 长任务模型
 
-回测、优化和同步等重型工作使用 `ProcessTaskManager` 的 `spawn` 子进程执行。任务 ID 在管理器内唯一，子进程通过受控队列上报日志、结果或错误，API 只返回快照并提供查询和取消入口。
+回测、优化和同步等有限工作使用唯一 `TaskManager` 的 `spawn` 子进程执行。任务 ID 在管理器内唯一，子进程通过 `TaskMessagePublisher` 上报日志、节流进度、结果或错误。TaskManager 先更新带单调 revision 的完整快照，再发布 `task.updated`；领域 result handler 提交成功前不能发布成功终态。
 
 任务状态固定为 `running`、`succeeded`、`failed`、`cancelled` 或 `timeout`。停止时先 `terminate` 并有界等待，仍未退出才 `kill`。服务关闭时由容器决定是否停止仍在运行的任务，不能留下无所有者的子进程。
 
-`alpha/realtime/` 提供与内部 `EventEngine` 隔离的公共实时 K 线服务。服务按完整数据键引用计数，首个消费者创建轻量上游任务，最后消费者释放时取消；每个键持有单调 sequence 和最多 512 根内存尾部。`/events` 只暴露这一封闭协议，不转发全部内部事件。默认东方财富源直到首个订阅才创建 HTTP 连接池，不导入 pandas。
+`alpha/realtime/` 提供接入统一 `EventEngine` 的轻量 MarketFeed。它按完整数据键引用计数，首个 owner 创建上游任务，最后 owner 释放时取消；每个键只保留最新 bar 用于重复抑制，不保存历史尾部。`/events` 通过公共白名单转发行情、任务和未来交易事件，不暴露全部内部事件。默认东方财富源直到首个订阅才创建 HTTP 连接池，不导入 pandas。
+
+EventEngine、任务进度、公共 selector 和恢复规则见 [统一事件运行时](./event-runtime.md)。
 
 ## 配置与状态归属
 
@@ -77,8 +79,8 @@ AlphaServiceContainer
 - 重型计算不得阻塞 API 事件循环。
 - 指标 API 不接受前端上传的原始 bars；行情由 Alpha 存储权威读取，前端只提交数据键、显示区间和有界指标实例。
 - 存储写入先归一化和校验，读取结果在 API 边界转换为公共时间和字段语义。
-- HTTP 查询结果是权威状态，WebSocket 增量不能取代恢复所需的快照。
-- 实时 K 线只存在于当前服务内存，并按请求复权语义发布；数据库仍只持久化原始行情。sequence gap、稳定历史修订、重连和服务重启必须重新读取 `/bars`。
+- HTTP 查询和 Repository 是权威状态，WebSocket 事件不能取代恢复所需的快照。
+- 实时 K 线按请求复权语义发布，数据库仍只持久化原始行情。服务重启或重新订阅由 MarketFeed 重新发布最新值，稳定历史修订继续通过 `/bars` 获取。
 - 当前未完成的 `live` 和 `paper` 入口不得被文档、API 或 UI 宣称为可用交易系统。
 
 ## 测试分层
