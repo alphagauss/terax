@@ -4,28 +4,6 @@ from datetime import datetime as _datetime, timedelta
 
 from alpha.common.enums import Exchange, Interval
 
-
-EVENT_TIMER = "eTimer"
-EVENT_TICK = "eTick."
-EVENT_TRADE = "eTrade."
-EVENT_ORDER = "eOrder."
-EVENT_POSITION = "ePosition."
-EVENT_ACCOUNT = "eAccount."
-EVENT_QUOTE = "eQuote."
-EVENT_CONTRACT = "eContract."
-EVENT_LOG = "eLog"
-
-EVENT_CTA_LOG = "eCtaLog"
-EVENT_CTA_STRATEGY = "eCtaStrategy"
-EVENT_CTA_STOPORDER = "eCtaStopOrder"
-
-EVENT_NOVA_LOG = "eNovaLog"
-EVENT_NOVA_STRATEGY = "eNovaStrategy"
-
-EVENT_BACKTESTER_LOG = "eBacktesterLog"
-EVENT_BACKTESTER_BACKTESTING_FINISHED = "eBacktesterBacktestingFinished"
-EVENT_BACKTESTER_OPTIMIZATION_FINISHED = "eBacktesterOptimizationFinished"
-
 STOPORDER_PREFIX = "STOP"
 
 INTERVAL_DELTA_MAP: dict[Interval, timedelta] = {

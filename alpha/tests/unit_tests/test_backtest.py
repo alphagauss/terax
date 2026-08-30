@@ -20,7 +20,7 @@ from alpha.backtest.data import (
     build_security_states_by_date,
     load_backtest_input,
 )
-from alpha.backtest.backtesting import BackTesting
+from alpha.backtest.backtesting import BacktestProgress, BackTesting
 from alpha.backtest.runner import (
     BacktestJobSpec,
     build_common_task_metadata,
@@ -32,7 +32,8 @@ from alpha.backtest.optimize import OptimizationSetting
 from alpha.backtest.template import StrategyTemplate
 from alpha.common.schema import Interval, Offset, Product
 from alpha.common.schema_trade import ContractData
-from alpha.runtime.processes import ProcessTaskManager, TaskStatus
+from alpha.runtime.event import EventEngine
+from alpha.runtime.processes import TaskManager, TaskStatus
 from alpha.strategy.models import (
     SecurityDailyStateData,
     SecurityProfileData,
@@ -71,9 +72,7 @@ class MemoryBacktestDatabase:
         """返回测试证券静态资料。"""
         requested = set(query.vt_symbols or [])
         return [
-            row
-            for row in self._profile_rows
-            if str(row.get("vt_symbol")) in requested
+            row for row in self._profile_rows if str(row.get("vt_symbol")) in requested
         ]
 
     async def load_security_daily_info(self, query: Any) -> list[dict[str, object]]:
@@ -185,9 +184,36 @@ class SecurityContextStrategy(StrategyTemplate):
 def _make_trending_bars() -> list[dict[str, Any]]:
     """构造可触发双均线开平仓的日线数据。"""
     closes = [
-        10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
-        10, 10, 10, 10, 10, 11, 12, 13, 14, 15,
-        16, 17, 16, 15, 14, 13, 12, 11, 10, 9,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        16,
+        15,
+        14,
+        13,
+        12,
+        11,
+        10,
+        9,
     ]
     bars: list[dict[str, Any]] = []
     for index, close in enumerate(closes, start=1):
@@ -388,14 +414,18 @@ def security_context_engine() -> BackTesting:
     return engine
 
 
-def test_backtesting_should_run_without_import_side_effects(backtest_engine: BackTesting) -> None:
+def test_backtesting_should_run_without_import_side_effects(
+    backtest_engine: BackTesting,
+) -> None:
     """验证测试文件本身为纯pytest用例且回测可正常执行。"""
     assert backtest_engine.strategy.inited is True
     assert backtest_engine.strategy.trading is False
     assert backtest_engine.datetime == datetime(2024, 1, 30)
 
 
-def test_backtesting_should_generate_daily_results_and_trades(backtest_engine: BackTesting) -> None:
+def test_backtesting_should_generate_daily_results_and_trades(
+    backtest_engine: BackTesting,
+) -> None:
     """验证最小回测样本可产生日级结果与成交记录。"""
     daily_results = backtest_engine.get_daily_result()
     trades = backtest_engine.get_all_trades()
@@ -407,9 +437,13 @@ def test_backtesting_should_generate_daily_results_and_trades(backtest_engine: B
     assert any(trade.offset == Offset.CLOSE for trade in trades)
 
 
-def test_analysis_should_work_with_backtesting_daily_results(backtest_engine: BackTesting) -> None:
+def test_analysis_should_work_with_backtesting_daily_results(
+    backtest_engine: BackTesting,
+) -> None:
     """验证回测结果可以直接进入分析流程。"""
-    analysis = Analysis(backtest_engine.get_daily_result(), capital=backtest_engine.capital)
+    analysis = Analysis(
+        backtest_engine.get_daily_result(), capital=backtest_engine.capital
+    )
 
     daily_df = analysis.calculate_dalily(returns=True)
     statistics = analysis.calculate_statistics()
@@ -460,7 +494,9 @@ def test_order_should_be_rejected_when_price_exceeds_upper_limit() -> None:
     assert engine.get_all_trades() == []
 
 
-def test_run_backtesting_should_not_replay_last_bar_when_init_consumes_all_data() -> None:
+def test_run_backtesting_should_not_replay_last_bar_when_init_consumes_all_data() -> (
+    None
+):
     """验证初始化阶段覆盖全量数据时不会重复回放最后一根bar。"""
     bars = _make_trending_bars()[:3]
     engine = BackTesting()
@@ -510,13 +546,29 @@ def test_load_backtest_input_should_build_engine_input() -> None:
 
     assert "000001.SZSE" in backtest_input.contracts
     assert datetime(2024, 1, 1) in backtest_input.history_data
-    assert backtest_input.history_data[datetime(2024, 1, 1)]["000001.SZSE"]["close"] == pytest.approx(10.2)
+    assert backtest_input.history_data[datetime(2024, 1, 1)]["000001.SZSE"][
+        "close"
+    ] == pytest.approx(10.2)
     assert backtest_input.contracts["000001.SZSE"].pricetick == pytest.approx(0.02)
-    assert backtest_input.security_profiles["000001.SZSE"].pricetick == pytest.approx(0.02)
-    assert backtest_input.security_profiles["000001.SZSE"].listed_date == date(1991, 4, 3)
-    assert backtest_input.security_states_by_date[date(2024, 1, 1)]["000001.SZSE"].upper_limit == pytest.approx(11.0)
-    assert backtest_input.security_states_by_date[date(2024, 1, 2)]["000001.SZSE"].is_st is True
-    assert backtest_input.security_states_by_date[date(2024, 1, 2)]["000001.SZSE"].is_suspended is True
+    assert backtest_input.security_profiles["000001.SZSE"].pricetick == pytest.approx(
+        0.02
+    )
+    assert backtest_input.security_profiles["000001.SZSE"].listed_date == date(
+        1991, 4, 3
+    )
+    assert backtest_input.security_states_by_date[date(2024, 1, 1)][
+        "000001.SZSE"
+    ].upper_limit == pytest.approx(11.0)
+    assert (
+        backtest_input.security_states_by_date[date(2024, 1, 2)]["000001.SZSE"].is_st
+        is True
+    )
+    assert (
+        backtest_input.security_states_by_date[date(2024, 1, 2)][
+            "000001.SZSE"
+        ].is_suspended
+        is True
+    )
     assert backtest_input.universe_by_date[date(2024, 1, 1)] == {"000001.SZSE"}
 
 
@@ -540,10 +592,16 @@ def test_build_security_profiles_should_map_pricetick_and_dates() -> None:
 def test_build_security_states_by_date_should_merge_daily_info_and_limits() -> None:
     """验证逐日证券状态会合并日状态与涨跌停价。"""
     history_data = build_history_data(_make_bars_with_limits())
-    states_by_date = build_security_states_by_date(history_data, _make_daily_info_rows())
+    states_by_date = build_security_states_by_date(
+        history_data, _make_daily_info_rows()
+    )
 
-    first_day_state: SecurityDailyStateData = states_by_date[date(2024, 1, 1)]["000001.SZSE"]
-    second_day_state: SecurityDailyStateData = states_by_date[date(2024, 1, 2)]["000001.SZSE"]
+    first_day_state: SecurityDailyStateData = states_by_date[date(2024, 1, 1)][
+        "000001.SZSE"
+    ]
+    second_day_state: SecurityDailyStateData = states_by_date[date(2024, 1, 2)][
+        "000001.SZSE"
+    ]
 
     assert first_day_state.trade_date == date(2024, 1, 1)
     assert first_day_state.is_st is False
@@ -562,7 +620,9 @@ def test_backtesting_should_expose_security_context_queries(
     """验证回测引擎会暴露证券资料、逐日状态和快照查询。"""
     profile = security_context_engine.get_security_profile("000001.SZSE")
     state = security_context_engine.get_security_state("000001.SZSE", date(2024, 1, 1))
-    snapshot = security_context_engine.get_security_snapshot("000001.SZSE", date(2024, 1, 1))
+    snapshot = security_context_engine.get_security_snapshot(
+        "000001.SZSE", date(2024, 1, 1)
+    )
 
     assert profile is not None
     assert profile.sec_name == "平安银行"
@@ -576,8 +636,12 @@ def test_backtesting_should_expose_security_context_queries(
     assert snapshot.daily_state == state
     assert snapshot.in_universe is True
     assert security_context_engine.is_st("000001.SZSE", date(2024, 1, 1)) is False
-    assert security_context_engine.is_suspended("000001.SZSE", date(2024, 1, 1)) is False
-    assert security_context_engine.get_price_limits("000001.SZSE", date(2024, 1, 2)) == pytest.approx((11.2, 9.2))
+    assert (
+        security_context_engine.is_suspended("000001.SZSE", date(2024, 1, 1)) is False
+    )
+    assert security_context_engine.get_price_limits(
+        "000001.SZSE", date(2024, 1, 2)
+    ) == pytest.approx((11.2, 9.2))
     assert security_context_engine.in_universe("000001.SZSE", date(2024, 1, 1)) is True
 
 
@@ -614,18 +678,22 @@ def test_runner_should_execute_backtest_from_loaded_input() -> None:
     end = datetime(2024, 1, 30)
     spec = _make_spec(start, end)
     backtest_input = _make_backtest_input(_make_trending_bars())
+    progress: list[BacktestProgress] = []
 
-    result = run_backtest_with_input(spec, backtest_input, {})
+    result = run_backtest_with_input(spec, backtest_input, {}, progress=progress.append)
 
     assert result["param_settings"] == {}
     assert result["trades"]
     assert "total_return" in result["statistics"]
+    assert progress[-1].stage == "simulating"
+    assert progress[-1].completed == progress[-1].total
+    assert progress[-1].current_time is not None
 
 
-def test_runner_process_should_register_process_task_manager() -> None:
-    """验证 runner 子进程回测会登记进程任务状态。"""
+def test_runner_process_should_register_task_manager() -> None:
+    """验证 runner 子进程回测会登记统一任务状态。"""
     task_id = f"runner-process-{uuid4().hex}"
-    task_manager = ProcessTaskManager()
+    task_manager = TaskManager(EventEngine())
     spec = _make_spec(datetime(2024, 1, 1), datetime(2024, 1, 30))
     backtest_input = _make_backtest_input(_make_trending_bars())
 
@@ -647,19 +715,19 @@ def test_runner_process_should_register_process_task_manager() -> None:
     assert result["trades"]
     assert task is not None
     assert task.status == TaskStatus.SUCCEEDED
-    assert task.task_type == "backtest"
+    assert task.kind == "backtest"
     assert task.metadata["strategy_name"] == "SimpleTradeStrategy"
     task_manager.close()
 
 
-def test_runner_optimization_process_should_register_process_task_manager() -> None:
-    """验证 runner 子进程优化会登记外层优化任务状态。"""
+def test_runner_optimization_process_should_register_task_manager() -> None:
+    """验证 runner 子进程优化会登记统一优化任务状态。"""
     optimization_setting = OptimizationSetting()
     optimization_setting.add_parameter("unused", 1)
     optimization_setting.set_target("total_return")
 
     task_id = f"runner-optimization-{uuid4().hex}"
-    task_manager = ProcessTaskManager()
+    task_manager = TaskManager(EventEngine())
     spec = _make_spec(datetime(2024, 1, 1), datetime(2024, 1, 30))
     backtest_input = _make_backtest_input(_make_trending_bars())
 
@@ -687,12 +755,14 @@ def test_runner_optimization_process_should_register_process_task_manager() -> N
     assert len(results) == 1
     assert task is not None
     assert task.status == TaskStatus.SUCCEEDED
-    assert task.task_type == "optimization"
+    assert task.kind == "optimization"
     assert task.metadata["settings_count"] == 1
     task_manager.close()
 
 
-def test_build_contracts_should_create_default_setting_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_contracts_should_create_default_setting_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """验证缺少合约配置时数据边界能够落默认值。"""
     saved: dict[str, float] = {}
 

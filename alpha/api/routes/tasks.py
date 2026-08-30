@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Annotated
 
@@ -9,13 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from alpha.api.container import AlphaServiceContainer
 from alpha.api.deps import get_alpha_services
-from alpha.api.routes._utils import clamp_limit, clamp_offset, date_text, task_status
+from alpha.api.routes._utils import clamp_limit, clamp_offset
 
 router = APIRouter()
 
 
 def _task_response(snapshot: dict[str, object]) -> dict[str, object]:
-    """构造任务状态响应。
+    """返回 EventEngine 和 HTTP 共用的完整任务快照。
 
     Args:
         snapshot: 任务快照。
@@ -24,25 +25,7 @@ def _task_response(snapshot: dict[str, object]) -> dict[str, object]:
         前端任务状态。
     """
 
-    metadata = snapshot.get("metadata")
-    if not isinstance(metadata, dict):
-        metadata = {}
-    raw_logs = snapshot.get("logs")
-    logs = raw_logs if isinstance(raw_logs, list) else []
-    task_id = str(snapshot.get("task_id") or "")
-    return {
-        "id": task_id,
-        "task_id": task_id,
-        "status": task_status(snapshot.get("status")),
-        "progress": metadata.get("progress"),
-        "stage": metadata.get("stage") or snapshot.get("task_type"),
-        "message": snapshot.get("error") or (logs[-1] if logs else None),
-        "created_at": date_text(snapshot.get("created_at")),
-        "started_at": date_text(snapshot.get("created_at")),
-        "finished_at": date_text(snapshot.get("finished_at")),
-        "backtest_id": metadata.get("instance_name") or task_id,
-        "metadata": metadata,
-    }
+    return dict(snapshot)
 
 
 def _find_task(
@@ -62,10 +45,10 @@ def _find_task(
         HTTPException: 任务不存在。
     """
 
-    snapshot = services.strategy_manager.get_status_dict().get(task_id)
-    if snapshot is None:
+    task = services.task_manager.get(task_id)
+    if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "任务不存在")
-    return snapshot
+    return task.snapshot()
 
 
 @router.get("/tasks/{task_id}", response_model=dict[str, object])
@@ -145,7 +128,8 @@ async def cancel_task(
     """
 
     _find_task(services, task_id)
-    stopped = services.process_manager.stop(task_id)
+    # 进程终止可能等待数秒，不能阻塞 FastAPI 事件循环和其他事件订阅。
+    stopped = await asyncio.to_thread(services.task_manager.stop, task_id)
     if stopped is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "当前任务无法通过进程管理器取消")
     return _task_response(stopped.snapshot())

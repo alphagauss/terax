@@ -4,7 +4,6 @@ from typing import NotRequired, get_origin, get_type_hints
 from alpha.common import schema
 from alpha.common.schema_backtest import AccountData, BacktestReq, HoldData
 from alpha.common.schema_core import (
-    EVENT_TIMER,
     build_vt_symbol,
     datetime_to_timestr,
     normalize_exchange_text,
@@ -43,7 +42,6 @@ def test_schema_compat_exports_keep_existing_symbols() -> None:
     assert schema.BacktestReq is BacktestReq
     assert schema.AccountData is AccountData
     assert schema.HoldData is HoldData
-    assert schema.EVENT_TIMER == EVENT_TIMER
     assert schema.build_vt_symbol is build_vt_symbol
     assert schema.split_vt_symbol is split_vt_symbol
     assert schema.normalize_exchange_text is normalize_exchange_text
@@ -75,9 +73,18 @@ def test_market_schema_typed_dicts_keep_required_and_optional_fields() -> None:
         "upper_limit",
         "lower_limit",
     } == bar_optional_fields
-    assert AdjustFactorPayload.__required_keys__ == frozenset({"vt_symbol", "trade_date", "adj_factor"})
+    assert AdjustFactorPayload.__required_keys__ == frozenset(
+        {"vt_symbol", "trade_date", "adj_factor"}
+    )
     assert ShareCapitalPayload.__required_keys__ == frozenset(
-        {"vt_symbol", "trade_date", "total_share", "float_share", "free_share", "updated_at"}
+        {
+            "vt_symbol",
+            "trade_date",
+            "total_share",
+            "float_share",
+            "free_share",
+            "updated_at",
+        }
     )
     assert SecurityProfilePayload.__required_keys__ == frozenset()
     assert {
@@ -91,7 +98,9 @@ def test_market_schema_typed_dicts_keep_required_and_optional_fields() -> None:
         "listed_date",
         "delisted_date",
     } == SecurityProfilePayload.__optional_keys__
-    assert SecurityStatusEventPayload.__required_keys__ == frozenset({"vt_symbol", "trade_date"})
+    assert SecurityStatusEventPayload.__required_keys__ == frozenset(
+        {"vt_symbol", "trade_date"}
+    )
     assert {
         "vt_symbol",
         "latest_checked_trade_date",

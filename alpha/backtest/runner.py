@@ -11,7 +11,7 @@ from typing import Callable, Literal
 from pandas import DataFrame
 
 from alpha.backtest.analysis import Analysis
-from alpha.backtest.backtesting import BackTesting
+from alpha.backtest.backtesting import BacktestProgress, BackTesting
 from alpha.backtest.data import BacktestDataScope, BacktestInput, load_backtest_input
 from alpha.backtest.optimize import (
     OptimizationSetting,
@@ -20,9 +20,8 @@ from alpha.backtest.optimize import (
 )
 from alpha.backtest.template import StrategyTemplate
 from alpha.common.schema_trade import OrderData, TradeData
-from alpha.runtime.processes import ProcessMessagePublisher
+from alpha.runtime.processes import TaskMessagePublisher
 from alpha.storage.database import DataBase
-
 
 OUTPUT_FUNC = Callable[[object], None]
 
@@ -72,6 +71,7 @@ def run_backtest_with_input(
     backtest_input: BacktestInput,
     param_setting: dict[str, object],
     output: OUTPUT_FUNC | None = None,
+    progress: Callable[[BacktestProgress], None] | None = None,
 ) -> dict[str, object]:
     """使用已加载输入同步执行一次回测。
 
@@ -80,6 +80,7 @@ def run_backtest_with_input(
         backtest_input: 已归一化的回测输入。
         param_setting: 策略参数。
         output: 日志输出函数。
+        progress: 逐时间切片进度回调。
 
     Returns:
         包含参数、成交、订单、每日结果和统计指标的回测结果。
@@ -104,7 +105,7 @@ def run_backtest_with_input(
     engine.load_input(backtest_input)
     engine.add_strategy(spec.strategy_class, spec.instance_name)
 
-    engine.run_backtesting(param_setting)
+    engine.run_backtesting(param_setting, on_progress=progress)
     if engine.failed:
         raise RuntimeError(engine.error or "回测执行失败")
 
@@ -241,7 +242,7 @@ def run_optimization_job(
 def run_backtest_task(
     spec: BacktestJobSpec,
     param_setting: dict[str, object],
-    publisher: ProcessMessagePublisher | None = None,
+    publisher: TaskMessagePublisher | None = None,
 ) -> dict[str, object]:
     """进程任务入口：执行单次回测。
 
@@ -255,7 +256,40 @@ def run_backtest_task(
     """
 
     output = publisher.log if publisher else None
-    return run_backtest_job(spec, param_setting, output=output)
+    if publisher is not None:
+        publisher.stage("loading_data")
+    backtest_input = asyncio.run(load_backtest_input_for_job(spec))
+
+    def publish_progress(progress: BacktestProgress) -> None:
+        """把逐 bar 回放状态转换为通用任务进度。"""
+
+        if publisher is None:
+            return
+        publisher.progress(
+            progress.stage,
+            completed=progress.completed,
+            total=progress.total,
+            unit="bars",
+            metrics={
+                "current_time": (
+                    progress.current_time.isoformat()
+                    if progress.current_time is not None
+                    else None
+                ),
+                "trade_count": progress.trade_count,
+            },
+        )
+
+    result = run_backtest_with_input(
+        spec,
+        backtest_input,
+        param_setting,
+        output=output,
+        progress=publish_progress,
+    )
+    if publisher is not None:
+        publisher.stage("finalizing")
+    return result
 
 
 def run_optimization_task(
@@ -265,7 +299,7 @@ def run_optimization_task(
     max_workers: int | None = None,
     population_size: int = 100,
     ngen_size: int = 30,
-    publisher: ProcessMessagePublisher | None = None,
+    publisher: TaskMessagePublisher | None = None,
 ) -> list[dict[str, object]]:
     """进程任务入口：执行参数优化。
 
@@ -283,7 +317,9 @@ def run_optimization_task(
     """
 
     output = publisher.log if publisher else None
-    return run_optimization_job(
+    if publisher is not None:
+        publisher.stage("loading_data")
+    result = run_optimization_job(
         spec,
         optimization_setting,
         optimization_mode,
@@ -292,6 +328,9 @@ def run_optimization_task(
         ngen_size=ngen_size,
         output=output,
     )
+    if publisher is not None:
+        publisher.stage("finalizing")
+    return result
 
 
 def build_common_task_metadata(spec: BacktestJobSpec) -> dict[str, object]:

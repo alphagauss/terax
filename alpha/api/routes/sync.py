@@ -35,8 +35,8 @@ def _filter_sync_task_snapshots(
 
     tasks: list[dict[str, object]] = []
     for snapshot in snapshots:
-        task_type = snapshot.get("task_type")
-        if isinstance(task_type, str) and task_type.startswith("sync"):
+        kind = snapshot.get("kind")
+        if isinstance(kind, str) and kind.startswith("sync"):
             tasks.append(snapshot)
     return tasks
 
@@ -54,7 +54,7 @@ async def list_sync_tasks(
         同步任务快照列表。
     """
 
-    return _filter_sync_task_snapshots(services.process_manager.list_snapshots())
+    return _filter_sync_task_snapshots(services.task_manager.list_snapshots())
 
 
 def _sync_task_summary(snapshot: dict[str, object]) -> dict[str, object]:
@@ -62,9 +62,13 @@ def _sync_task_summary(snapshot: dict[str, object]) -> dict[str, object]:
     return {
         "task_id": str(snapshot.get("task_id") or ""),
         "status": task_status(snapshot.get("status")),
+        "stage": snapshot.get("stage"),
+        "progress": snapshot.get("progress"),
+        "metrics": snapshot.get("metrics") or {},
+        "revision": snapshot.get("revision", 0),
         "created_at": snapshot.get("created_at"),
         "finished_at": snapshot.get("finished_at"),
-        "message": snapshot.get("error"),
+        "message": snapshot.get("message"),
     }
 
 
@@ -73,7 +77,7 @@ async def sync_overview(
     services: Annotated[AlphaServiceContainer, Depends(get_alpha_services)],
 ) -> dict[str, object]:
     """返回轻量同步状态和最近一次持久化质量快照。"""
-    snapshots = _filter_sync_task_snapshots(services.process_manager.list_snapshots())
+    snapshots = _filter_sync_task_snapshots(services.task_manager.list_snapshots())
     return {
         "tasks": [_sync_task_summary(snapshot) for snapshot in snapshots],
         "latest": load_quality_snapshot(),
@@ -87,8 +91,8 @@ async def start_bar_sync(
 ) -> dict[str, object]:
     """启动一个全量增量或定向异常标的日线同步任务。"""
     running = any(
-        snapshot.get("task_type") == "sync-bars" and snapshot.get("status") == "running"
-        for snapshot in services.process_manager.list_snapshots()
+        snapshot.get("kind") == "sync-bars" and snapshot.get("status") == "running"
+        for snapshot in services.task_manager.list_snapshots()
     )
     if running:
         raise HTTPException(
@@ -98,7 +102,7 @@ async def start_bar_sync(
 
     task_id = f"sync-bars-{uuid4()}"
     try:
-        services.process_manager.start(
+        services.task_manager.start(
             task_id,
             "sync-bars",
             run_bar_sync_job,

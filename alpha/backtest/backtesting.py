@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Callable, Literal
 import traceback
@@ -18,6 +19,17 @@ from alpha.backtest.portfolio import PortfolioManager
 from alpha.common.enums import Direction, Interval, Offset, OrderType, Status
 from alpha.common.schema_backtest import AccountData
 from alpha.common.schema_trade import ContractData, OrderData, OrderRequest, TradeData
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestProgress:
+    """回测内核在逐 bar 回放时产生的传输无关进度。"""
+
+    stage: str
+    completed: int
+    total: int
+    current_time: datetime | None
+    trade_count: int
 
 
 class BackTesting(StrategyEngine):
@@ -51,7 +63,9 @@ class BackTesting(StrategyEngine):
         self.security_profiles: dict[str, SecurityProfileData] = {}
         self.security_states_by_date: dict[date, dict[str, SecurityDailyStateData]] = {}
         self.universe_by_date: dict[date, set[str]] = {}
-        self.bars: dict[str, dict[str, object]] = defaultdict(dict)  # 最新K线数据 {vt_symbol: dict}
+        self.bars: dict[str, dict[str, object]] = defaultdict(
+            dict
+        )  # 最新K线数据 {vt_symbol: dict}
         self.tested_days: list[date] = []  # 已回测的日期
         self.daily_close_bars: dict[date, dict[str, dict[str, object]]] = defaultdict(
             dict
@@ -151,8 +165,9 @@ class BackTesting(StrategyEngine):
     def run_backtesting(
         self,
         param_setting: dict,
+        on_progress: Callable[[BacktestProgress], None] | None = None,
     ) -> None:
-        """开始运行回测"""
+        """开始运行回测，并可在每个时间切片完成后报告精确进度。"""
         if self.start >= self.end:
             raise Exception("起始日期必须小于结束日期")
         if not self.history_data:
@@ -201,6 +216,16 @@ class BackTesting(StrategyEngine):
                         break
                 try:
                     self._new_bars(dt)
+                    if on_progress is not None:
+                        on_progress(
+                            BacktestProgress(
+                                stage="initializing",
+                                completed=ix + 1,
+                                total=len(dts),
+                                current_time=dt,
+                                trade_count=self.trade_count,
+                            )
+                        )
                 except Exception:
                     self.failed = True
                     self.error = traceback.format_exc()
@@ -216,9 +241,19 @@ class BackTesting(StrategyEngine):
         self.write_strategy_logs("开始回放历史数据进行交易模拟。")
 
         # 使用剩余的数据进行回放和交易
-        for dt in dts[replay_start_ix:]:
+        for ix, dt in enumerate(dts[replay_start_ix:], start=replay_start_ix):
             try:
                 self._new_bars(dt)
+                if on_progress is not None:
+                    on_progress(
+                        BacktestProgress(
+                            stage="simulating",
+                            completed=ix + 1,
+                            total=len(dts),
+                            current_time=dt,
+                            trade_count=self.trade_count,
+                        )
+                    )
             except Exception:
                 self.failed = True
                 self.error = traceback.format_exc()
@@ -262,12 +297,13 @@ class BackTesting(StrategyEngine):
                 self.strategy.update_order(order)
 
             upper_limit, lower_limit = self.get_price_limits(order.vt_symbol)
-            if (
-                (upper_limit is not None and order.price > upper_limit)
-                or (lower_limit is not None and order.price < lower_limit)
+            if (upper_limit is not None and order.price > upper_limit) or (
+                lower_limit is not None and order.price < lower_limit
             ):
                 order.status = Status.REJECTED
-                self.write_log(f"{order.vt_symbol} 委托价格超出当日涨跌停范围，委托拒绝")
+                self.write_log(
+                    f"{order.vt_symbol} 委托价格超出当日涨跌停范围，委托拒绝"
+                )
                 self.strategy.update_order(order)
                 self.active_limit_orders.pop(order.vt_orderid, None)
                 continue
@@ -340,7 +376,9 @@ class BackTesting(StrategyEngine):
             self.strategy.update_trade(trade)
             self.update_position(trade)
 
-    def load_bars(self, strategy: StrategyTemplate, days: int, interval: Interval) -> None:
+    def load_bars(
+        self, strategy: StrategyTemplate, days: int, interval: Interval
+    ) -> None:
         """策略调用，初始化数据"""
         self.days = days
 
@@ -354,7 +392,9 @@ class BackTesting(StrategyEngine):
     def _update_account(self, bars: dict[str, dict], dt: datetime) -> None:
         """逐bar更新账户持仓价值"""
         day: date = dt.date()
-        pre_day: date | None = self.tested_days[-2] if len(self.tested_days) > 1 else None
+        pre_day: date | None = (
+            self.tested_days[-2] if len(self.tested_days) > 1 else None
+        )
         self.portfolio.update_account(bars, day, pre_day)
 
     def get_daily_result(self) -> list[dict]:
@@ -443,7 +483,11 @@ class BackTesting(StrategyEngine):
             证券状态快照。
         """
         resolved_date = self._resolve_query_date(query_dt)
-        in_universe = None if resolved_date is None else self.in_universe(vt_symbol, resolved_date)
+        in_universe = (
+            None
+            if resolved_date is None
+            else self.in_universe(vt_symbol, resolved_date)
+        )
         return SecuritySnapshotData(
             profile=self.get_security_profile(vt_symbol),
             daily_state=self.get_security_state(vt_symbol, resolved_date),
@@ -542,7 +586,9 @@ class BackTesting(StrategyEngine):
             and current_date is not None
             and resolved_date > current_date
         ):
-            raise ValueError(f"回测上下文不允许查询未来交易日: {resolved_date.isoformat()}")
+            raise ValueError(
+                f"回测上下文不允许查询未来交易日: {resolved_date.isoformat()}"
+            )
 
         return resolved_date
 

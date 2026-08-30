@@ -7,12 +7,13 @@ from datetime import datetime
 
 from alpha.sync_tasks.constants import MAX_QUALITY_RETRY_SYMBOLS
 from alpha.sync_tasks.reporting import write_quality_snapshot
+from alpha.runtime.processes import TaskMessagePublisher
 
 
 def run_bar_sync_job(
     vt_symbols: list[str] | None = None,
     *,
-    publisher: object | None = None,
+    publisher: TaskMessagePublisher | None = None,
 ) -> dict[str, object]:
     """在子进程执行日线增量同步并持久化最近质量快照。"""
     started_at = datetime.now()
@@ -24,13 +25,17 @@ def run_bar_sync_job(
         if publisher is not None:
             publisher.log("开始日线增量同步")
         result = asyncio.run(
-            BarSyncTask(GmAsyncProvider()).run_incremental(vt_symbols=vt_symbols)
+            BarSyncTask(
+                GmAsyncProvider(),
+                progress=publisher.progress if publisher is not None else None,
+            ).run_incremental(vt_symbols=vt_symbols)
         )
         quality = result.get("quality")
         if not isinstance(quality, dict):
             raise RuntimeError("日线同步没有返回质量快照")
         write_quality_snapshot(quality)
         if publisher is not None:
+            publisher.stage("finalizing")
             publisher.log("日线增量同步完成")
         return {"quality": quality}
     except Exception as exc:

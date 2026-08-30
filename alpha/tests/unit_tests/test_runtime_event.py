@@ -1,76 +1,65 @@
+"""测试统一同步 EventEngine 的顺序、业务键过滤和订阅释放。"""
+
 from __future__ import annotations
 
-import asyncio
-from threading import Event as ThreadingEvent
+from threading import Event as ThreadEvent
 
 from alpha.runtime.event import Event, EventEngine
-from alpha.utils import SingletonMeta
 
 
-def _fresh_event_engine() -> EventEngine:
-    """创建不受单例缓存影响的事件引擎。"""
+def test_event_engine_dispatches_generic_keyed_and_general_handlers_in_order() -> None:
+    """同一事件依次到达类型、精确键和全局处理器。"""
 
-    SingletonMeta._instances.pop(EventEngine, None)
-    return EventEngine(interval=1)
+    engine = EventEngine(interval=60)
+    received = ThreadEvent()
+    values: list[str] = []
 
+    def generic(_event: Event) -> None:
+        values.append("generic")
 
-def test_event_engine_should_dispatch_async_handler_on_bound_loop() -> None:
-    """验证事件引擎可以把异步处理器调度到指定事件循环。"""
+    def keyed(_event: Event) -> None:
+        values.append("keyed")
 
-    async def scenario() -> None:
-        engine = _fresh_event_engine()
-        received = asyncio.Event()
-        values: list[str] = []
-
-        async def handler(event: Event) -> None:
-            values.append(str(event.data))
-            received.set()
-
-        engine.sub("test", handler)
-        engine.start(asyncio.get_running_loop())
-        try:
-            engine.put(Event(type="test", data="ok"))
-            await asyncio.wait_for(received.wait(), timeout=1.0)
-        finally:
-            engine.stop()
-
-        assert values == ["ok"]
-
-    asyncio.run(scenario())
-
-
-def test_event_engine_should_deduplicate_and_unsubscribe_handlers() -> None:
-    """验证普通订阅会去重，取消订阅后仍保留全局处理器。"""
-
-    engine = _fresh_event_engine()
-    received = ThreadingEvent()
-    values: list[tuple[str, str]] = []
-
-    def typed_handler(event: Event) -> None:
-        values.append(("typed", str(event.data)))
-
-    def general_handler(event: Event) -> None:
-        values.append(("general", str(event.data)))
+    def general(_event: Event) -> None:
+        values.append("general")
         received.set()
 
-    engine.sub("test", typed_handler)
-    engine.sub("test", typed_handler)
-    engine.sub_general(general_handler)
+    engine.sub("task.updated", generic)
+    engine.sub("task.updated", keyed, key="bt-1")
+    engine.sub_general(general)
     engine.start()
     try:
-        engine.put(Event(type="test", data="one"))
-        assert received.wait(timeout=1.0) is True
-        assert values == [("typed", "one"), ("general", "one")]
-
-        received.clear()
-        engine.unsub("test", typed_handler)
-        engine.put(Event(type="test", data="two"))
-
-        assert received.wait(timeout=1.0) is True
-        assert values == [
-            ("typed", "one"),
-            ("general", "one"),
-            ("general", "two"),
-        ]
+        engine.put(Event(type="task.updated", key="bt-1", data={"status": "running"}))
+        assert received.wait(timeout=1)
     finally:
         engine.stop()
+
+    assert values == ["generic", "keyed", "general"]
+
+
+def test_event_engine_deduplicates_and_unsubscribes_exact_selector() -> None:
+    """重复 callback 不重复调用，取消精确 selector 不影响通用订阅。"""
+
+    engine = EventEngine(interval=60)
+    received = ThreadEvent()
+    values: list[str] = []
+
+    def keyed(_event: Event) -> None:
+        values.append("keyed")
+
+    def generic(_event: Event) -> None:
+        values.append("generic")
+        received.set()
+
+    engine.sub("market.bar", keyed, key="000001.SZSE|d|forward")
+    engine.sub("market.bar", keyed, key="000001.SZSE|d|forward")
+    engine.sub("market.bar", generic)
+    engine.unsub("market.bar", keyed, key="000001.SZSE|d|forward")
+    engine.start()
+    try:
+        engine.put(Event(type="market.bar", key="000001.SZSE|d|forward"))
+        assert received.wait(timeout=1)
+    finally:
+        engine.stop()
+
+    assert values == ["generic"]

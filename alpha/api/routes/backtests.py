@@ -114,9 +114,13 @@ def _build_backtest_req(data: dict[str, object]) -> BacktestReq:
     start = parse_datetime(str(data.get("start") or ""))
     end = parse_datetime(str(data.get("end") or ""), end_of_day=True)
     if start is None or end is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "开始和结束日期不能为空")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "开始和结束日期不能为空"
+        )
     if start > end:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "开始日期不能晚于结束日期")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "开始日期不能晚于结束日期"
+        )
 
     capital = _numeric_value(data, "capital", default=1_000_000)
     commission = _numeric_value(data, "commission", default=0)
@@ -124,7 +128,9 @@ def _build_backtest_req(data: dict[str, object]) -> BacktestReq:
     if capital <= 0:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "初始资金必须大于 0")
     if commission < 0 or slippage < 0:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "手续费和滑点不能为负")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "手续费和滑点不能为负"
+        )
 
     interval = normalize_interval(str(data.get("interval") or "d"))
     adjust = normalize_adjust(str(data.get("adjust") or "forward"))
@@ -243,7 +249,9 @@ def _summary_from_statistics(statistics: dict[str, object]) -> dict[str, object]
     }
 
 
-def _backtest_item(backtest_id: str, request: dict[str, object], result: dict[str, object]) -> dict[str, object]:
+def _backtest_item(
+    backtest_id: str, request: dict[str, object], result: dict[str, object]
+) -> dict[str, object]:
     """构造回测列表项。
 
     Args:
@@ -270,6 +278,10 @@ def _backtest_item(backtest_id: str, request: dict[str, object], result: dict[st
         "sharpe": summary["sharpe"],
         "trade_count": summary["trade_count"],
         "created_at": date_text(request.get("req_date")),
+        "stage": None,
+        "progress": None,
+        "metrics": {},
+        "revision": 0,
     }
 
 
@@ -392,41 +404,54 @@ async def list_backtests(
         回测摘要分页响应。
     """
 
-    items: list[dict[str, object]] = []
+    items_by_id: dict[str, dict[str, object]] = {}
     for backtest_id, request in _saved_results(services).items():
         result = services.strategy_manager.get_strategy_result(backtest_id)
-        item = _backtest_item(backtest_id, request, result)
-        if status_filter and item["status"] != status_filter:
-            continue
-        if strategy_id and item["strategy_name"] != strategy_id:
-            continue
-        items.append(item)
+        items_by_id[backtest_id] = _backtest_item(backtest_id, request, result)
 
     for snapshot in services.strategy_manager.get_status_dict().values():
+        if snapshot.get("kind") != "backtest":
+            continue
         metadata = snapshot.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
         current_status = task_status(snapshot.get("status"))
-        if status_filter and current_status != status_filter:
+        backtest_id = str(snapshot.get("task_id") or "")
+        if current_status == "completed" and backtest_id in items_by_id:
+            items_by_id[backtest_id].update(
+                {
+                    "stage": snapshot.get("stage"),
+                    "progress": snapshot.get("progress"),
+                    "metrics": snapshot.get("metrics") or {},
+                    "revision": snapshot.get("revision") or 0,
+                }
+            )
             continue
-        if strategy_id and metadata.get("strategy_name") != strategy_id:
-            continue
-        items.append(
-            {
-                "id": str(snapshot.get("task_id") or ""),
-                "name": str(snapshot.get("name") or snapshot.get("task_id") or ""),
-                "strategy_name": str(metadata.get("strategy_name") or ""),
-                "status": current_status,
-                "start": date_text(metadata.get("start")),
-                "end": date_text(metadata.get("end")),
-                "total_return": None,
-                "annual_return": None,
-                "max_drawdown": None,
-                "sharpe": None,
-                "trade_count": None,
-                "created_at": date_text(snapshot.get("created_at")),
-            }
-        )
+        items_by_id[backtest_id] = {
+            "id": backtest_id,
+            "name": str(snapshot.get("name") or snapshot.get("task_id") or ""),
+            "strategy_name": str(metadata.get("strategy_name") or ""),
+            "status": current_status,
+            "start": date_text(metadata.get("start")),
+            "end": date_text(metadata.get("end")),
+            "total_return": None,
+            "annual_return": None,
+            "max_drawdown": None,
+            "sharpe": None,
+            "trade_count": None,
+            "created_at": date_text(snapshot.get("created_at")),
+            "stage": snapshot.get("stage"),
+            "progress": snapshot.get("progress"),
+            "metrics": snapshot.get("metrics") or {},
+            "revision": snapshot.get("revision") or 0,
+        }
+
+    items = [
+        item
+        for item in items_by_id.values()
+        if (not status_filter or item["status"] == status_filter)
+        and (not strategy_id or item["strategy_name"] == strategy_id)
+    ]
 
     normalized_limit = clamp_limit(limit, default=50)
     normalized_offset = clamp_offset(offset)
@@ -584,7 +609,8 @@ async def get_backtest_trades(
     items = [
         _trade_item(index, row)
         for index, row in enumerate(trades)
-        if isinstance(row, dict) and (not vt_symbol or row.get("vt_symbol") == vt_symbol)
+        if isinstance(row, dict)
+        and (not vt_symbol or row.get("vt_symbol") == vt_symbol)
     ]
     normalized_limit = clamp_limit(limit, default=50)
     normalized_offset = clamp_offset(offset)

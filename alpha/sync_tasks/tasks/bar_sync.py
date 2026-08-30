@@ -59,6 +59,7 @@ class BarSyncTask:
             [], list[SecurityInfo]
         ] = load_symbol_universe_from_csv,
         progress_factory=tqdm,
+        progress: Callable[..., None] | None = None,
         logger_instance=logger,
     ) -> None:
         self.provider = provider
@@ -66,6 +67,7 @@ class BarSyncTask:
         self.trade_dates_loader = trade_dates_loader
         self.universe_loader = universe_loader
         self.progress_factory = progress_factory
+        self.progress = progress
         self.logger = logger_instance
 
     async def run_incremental(
@@ -80,6 +82,7 @@ class BarSyncTask:
             raise ValueError("overlap_validation_days 不能小于 0")
 
         started_at = datetime.now()
+        self._report_progress("planning", force=True)
         trade_dates = self.trade_dates_loader()
         latest_trade_date = get_latest_target_trade_date(trade_dates, started_at)
         securities = self.universe_loader()
@@ -115,6 +118,14 @@ class BarSyncTask:
             year_plans = split_bar_sync_plans_by_year(plans, trade_dates)
             batches_by_year = chunk_year_plans(year_plans)
             total_batch_count = sum(len(item) for item in batches_by_year.values())
+            self._report_progress(
+                "fetching",
+                completed=0,
+                total=total_batch_count,
+                unit="batches",
+                metrics={"planned_symbols": len(plans)},
+                force=True,
+            )
 
             print(
                 f"开始增量更新日线行情：计划标的 {len(plans)} 个，"
@@ -323,6 +334,17 @@ class BarSyncTask:
                                     )
                                 finally:
                                     batch_pbar.update(1)
+                                    self._report_progress(
+                                        "fetching",
+                                        completed=global_batch_index,
+                                        total=total_batch_count,
+                                        unit="batches",
+                                        metrics={
+                                            "fetched_rows": total_fetched_rows,
+                                            "saved_rows": total_saved_rows,
+                                            "failed_batches": failed_batch_count,
+                                        },
+                                    )
 
                         flush_started_at = perf_counter()
                         try:
@@ -361,6 +383,7 @@ class BarSyncTask:
                 self.logger.enable("alpha")
 
             if total_saved_rows > 0:
+                self._report_progress("rebuilding_overview", force=True)
                 self.progress_factory.write("开始重建 bar_overview ...")
                 rebuild_started_at = perf_counter()
                 await db.rebuild_bar_overview()
@@ -380,6 +403,7 @@ class BarSyncTask:
                 failed_vt_symbols.update(overview_validation.affected_vt_symbols)
 
             finished_at = datetime.now()
+            self._report_progress("saving_report", force=True)
             report_name = (
                 f"es_gm_daily_update_{finished_at.strftime('%Y-%m-%d_%H%M%S')}"
             )
@@ -440,3 +464,26 @@ class BarSyncTask:
             return result
         finally:
             await db.close()
+
+    def _report_progress(
+        self,
+        stage: str,
+        *,
+        completed: int | None = None,
+        total: int | None = None,
+        unit: str | None = None,
+        metrics: dict[str, object] | None = None,
+        force: bool = False,
+    ) -> None:
+        """把同步领域计数交给可选的通用任务进度适配器。"""
+
+        if self.progress is None:
+            return
+        self.progress(
+            stage,
+            completed=completed,
+            total=total,
+            unit=unit,
+            metrics=metrics,
+            force=force,
+        )

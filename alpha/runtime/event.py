@@ -1,260 +1,183 @@
-"""多线程事件驱动引擎。"""
+"""Alpha 进程内同步事件总线。
+
+事件引擎只负责按类型和可选业务键顺序分发不可变事件，不管理行情连接、
+任务状态、持久化或 WebSocket。所有处理器必须快速返回，异步和跨进程边界
+由各自适配器转换为普通同步回调。
+"""
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 from collections import defaultdict
-from concurrent.futures import Future
-from queue import Empty, Queue
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from queue import Queue
+from threading import Event as ThreadEvent
 from threading import RLock, Thread, current_thread
-from time import sleep
-from typing import Any, Awaitable, Callable, TypeAlias
+from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel
 
-from alpha.common.schema_core import EVENT_TIMER
-from alpha.utils import SingletonMeta
+from alpha.runtime.event_types import EVENT_TIMER
 
 
-class Event(BaseModel):
-    """
-    使用BaseModel的目的是方便数据序列json
+@dataclass(frozen=True, slots=True)
+class Event:
+    """一条不可变领域事件。
+
+    ``type`` 定义稳定事件族，``key`` 用于路由到具体任务、行情键或账户；
+    ``revision`` 只在具有权威快照的事件中使用。
     """
 
     type: str
     data: Any = None
+    key: str | None = None
+    revision: int | None = None
+    occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-HandlerType: TypeAlias = Callable[[Event], Awaitable[None] | None]
+HandlerType = Callable[[Event], None]
 
 
-class EventEngine(metaclass=SingletonMeta):
-    """
-    Event engine distributes event object based on its type to those handlers
-    registered. It also generates timer event by every interval seconds, which
-    can be used for timing purpose.
+class EventEngine:
+    """在单独线程中按入队顺序分发事件。"""
 
-    事件监听函数必须定义为输入参数仅为一个 event 对象。处理器可以是同步函数，
-    也可以是异步函数；异步函数会被调度到绑定的 asyncio 事件循环执行。
-    """
+    def __init__(self, interval: float = 1.0) -> None:
+        """创建尚未启动的事件引擎。"""
 
-    def __init__(self, interval: int = 1) -> None:
-        """初始化事件引擎。
-
-        Args:
-            interval: 定时器事件投递间隔，单位为秒。
-        """
-
-        self._interval: int = interval
-        self._queue: Queue[Event] = Queue()
-        self.active: bool = False
+        if interval <= 0:
+            raise ValueError("事件定时器间隔必须大于零")
+        self._interval = interval
+        self._queue: Queue[Event | None] = Queue()
+        self._handlers: defaultdict[tuple[str, str | None], list[HandlerType]] = (
+            defaultdict(list)
+        )
+        self._general_handlers: list[HandlerType] = []
+        self._lock = RLock()
+        self._stop_signal = ThreadEvent()
         self._thread: Thread | None = None
         self._timer: Thread | None = None
-        self._handlers: defaultdict[str, list[HandlerType]] = defaultdict(list)
-        self._general_handlers: list[HandlerType] = []
-        self._async_loop: asyncio.AbstractEventLoop | None = None
-        self._lock = RLock()
+        self.active = False
 
-    def bind_async_loop(self, loop: asyncio.AbstractEventLoop) -> None:
-        """绑定异步处理器使用的事件循环。
-
-        Args:
-            loop: FastAPI、WebSocket 或其他 asyncio 服务所在事件循环。
-        """
-
-        self._async_loop = loop
-
-    def _run(self) -> None:
-        """持续处理事件队列中的事件。"""
-        while self.active:
-            try:
-                event: Event = self._queue.get(block=True, timeout=1)
-                self._process(event)
-            except Empty:
-                pass
-
-    def _process(self, event: Event) -> None:
-        """分发单个事件到已注册处理器。"""
-        with self._lock:
-            handlers = [
-                *self._handlers.get(event.type, []),
-                *self._general_handlers,
-            ]
-
-        for handler in handlers:
-            try:
-                result = handler(event)
-                if inspect.isawaitable(result):
-                    self._dispatch_awaitable(result, event, handler)
-            except Exception as exc:
-                logger.exception(
-                    f"Error processing event {event.type} with handler {handler}: {exc}"
-                )
-
-    def _dispatch_awaitable(
-        self,
-        awaitable: Awaitable[None],
-        event: Event,
-        handler: HandlerType,
-    ) -> None:
-        """调度异步事件处理器。
-
-        Args:
-            awaitable: 事件处理器返回的可等待对象。
-            event: 当前正在分发的事件。
-            handler: 当前事件处理器，用于异常日志定位。
-        """
-
-        loop = self._async_loop
-        if loop is not None and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                self._await_result(awaitable),
-                loop,
-            )
-            future.add_done_callback(
-                lambda done: self._log_async_exception(done, event, handler)
-            )
-            return
-
-        try:
-            asyncio.run(self._await_result(awaitable))
-        except Exception as exc:
-            logger.exception(
-                f"Error processing async event {event.type} with handler {handler}: {exc}"
-            )
-
-    @staticmethod
-    async def _await_result(awaitable: Awaitable[None]) -> None:
-        """等待异步处理器执行完成。
-
-        Args:
-            awaitable: 事件处理器返回的可等待对象。
-        """
-
-        await awaitable
-
-    def _log_async_exception(
-        self,
-        future: Future[None],
-        event: Event,
-        handler: HandlerType,
-    ) -> None:
-        """记录异步处理器异常。
-
-        Args:
-            future: asyncio 调度返回的线程安全 Future。
-            event: 当前正在分发的事件。
-            handler: 当前事件处理器，用于异常日志定位。
-        """
-
-        try:
-            future.result()
-        except Exception as exc:
-            logger.exception(
-                f"Error processing async event {event.type} with handler {handler}: {exc}"
-            )
-
-    def _run_timer(self) -> None:
-        """按固定间隔投递计时器事件。"""
-        while self.active:
-            sleep(self._interval)
-            event: Event = Event(type=EVENT_TIMER)
-            self.put(event)
-
-    def start(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
-        """启动事件引擎。
-
-        Args:
-            loop: 可选的 asyncio 事件循环，用于执行异步事件处理器。
-        """
-
-        if loop is not None:
-            self.bind_async_loop(loop)
+    def start(self) -> None:
+        """启动分发线程和 timer 线程，重复调用保持幂等。"""
 
         with self._lock:
             if self.active:
                 return
-
             self.active = True
-            self._thread = Thread(target=self._run, daemon=True)
-            self._timer = Thread(target=self._run_timer, daemon=True)
+            self._stop_signal.clear()
+            self._thread = Thread(target=self._run, name="alpha-events", daemon=True)
+            self._timer = Thread(
+                target=self._run_timer,
+                name="alpha-events-timer",
+                daemon=True,
+            )
             self._thread.start()
             self._timer.start()
 
     def stop(self) -> None:
-        """停止事件引擎。"""
+        """停止事件分发，不等待完整 timer 间隔。"""
+
         with self._lock:
             if not self.active:
                 return
-
             self.active = False
-            timer = self._timer
             thread = self._thread
+            timer = self._timer
+            self._thread = None
+            self._timer = None
+            self._stop_signal.set()
+            self._queue.put(None)
 
         if timer is not None and timer.is_alive() and current_thread() is not timer:
             timer.join()
         if thread is not None and thread.is_alive() and current_thread() is not thread:
             thread.join()
-        logger.info("事件引擎关闭")
 
     def put(self, event: Event) -> None:
-        """向队列投递事件。
-
-        Args:
-            event: 待分发事件。
-        """
+        """把事件放入顺序分发队列。"""
 
         self._queue.put(event)
 
-    def sub(self, type: str, handler: HandlerType) -> None:
-        """订阅指定类型事件。
-
-        Args:
-            type: 事件类型。
-            handler: 事件处理器。
-        """
-
-        with self._lock:
-            handler_list = self._handlers[type]
-            if handler not in handler_list:
-                handler_list.append(handler)
-
-    def unsub(self, type: str, handler: HandlerType) -> None:
-        """取消订阅指定类型事件。
-
-        Args:
-            type: 事件类型。
-            handler: 事件处理器。
-        """
+    def sub(
+        self,
+        event_type: str,
+        handler: HandlerType,
+        *,
+        key: str | None = None,
+    ) -> None:
+        """订阅一种事件，可选限制到单个业务键。"""
 
         with self._lock:
-            handler_list = self._handlers[type]
-            if handler in handler_list:
-                handler_list.remove(handler)
+            handlers = self._handlers[(event_type, key)]
+            if handler not in handlers:
+                handlers.append(handler)
 
-            if not handler_list:
-                self._handlers.pop(type, None)
+    def unsub(
+        self,
+        event_type: str,
+        handler: HandlerType,
+        *,
+        key: str | None = None,
+    ) -> None:
+        """取消一个精确的类型和业务键订阅。"""
+
+        selector = (event_type, key)
+        with self._lock:
+            handlers = self._handlers.get(selector)
+            if not handlers:
+                return
+            if handler in handlers:
+                handlers.remove(handler)
+            if not handlers:
+                self._handlers.pop(selector, None)
 
     def sub_general(self, handler: HandlerType) -> None:
-        """订阅所有事件。
-
-        Args:
-            handler: 事件处理器。
-        """
+        """订阅全部内部事件，仅供进程内基础设施使用。"""
 
         with self._lock:
             if handler not in self._general_handlers:
                 self._general_handlers.append(handler)
 
     def unsub_general(self, handler: HandlerType) -> None:
-        """取消订阅所有事件。
-
-        Args:
-            handler: 事件处理器。
-        """
+        """取消全部事件订阅。"""
 
         with self._lock:
             if handler in self._general_handlers:
                 self._general_handlers.remove(handler)
+
+    def _run(self) -> None:
+        """持续消费队列，停止哨兵之后退出。"""
+
+        while True:
+            event = self._queue.get()
+            if event is None:
+                return
+            self._process(event)
+
+    def _process(self, event: Event) -> None:
+        """按通用类型、精确键和全局订阅的顺序调用处理器。"""
+
+        with self._lock:
+            handlers = list(self._handlers.get((event.type, None), []))
+            if event.key is not None:
+                handlers.extend(self._handlers.get((event.type, event.key), []))
+            handlers.extend(self._general_handlers)
+
+        for handler in handlers:
+            try:
+                handler(event)
+            except Exception:
+                logger.exception(
+                    "事件处理器异常 type={} key={} handler={}",
+                    event.type,
+                    event.key,
+                    handler,
+                )
+
+    def _run_timer(self) -> None:
+        """按固定间隔发布 timer 事件。"""
+
+        while not self._stop_signal.wait(self._interval):
+            self.put(Event(type=EVENT_TIMER))
