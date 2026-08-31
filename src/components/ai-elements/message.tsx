@@ -1,6 +1,6 @@
 /**
  * 本文件实现 AI 消息外壳、Markdown 正文、分支切换和消息操作区。
- * 流式正文通过渐进可见文本控制突发输出，稳定 Markdown 块仍由 Streamdown 管理。
+ * 流式正文保持原始 Markdown 完整性，并由 Streamdown 负责块级增量渲染。
  */
 
 "use client";
@@ -15,7 +15,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { ArrowLeft01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -334,8 +333,8 @@ const streamdownComponents = { code: MarkdownCode };
 /**
  * Markdown 消息正文。
  *
- * 流式时只把渐进追赶后的可见文本交给 Streamdown，避免网络突发内容一次性
- * 推高布局；完成态直接渲染最终文本并释放临时副本。
+ * 始终把模型原文直接交给解析器，避免字符级截断与不完整 Markdown 修复器
+ * 共同虚构标记；完成态切换到同步静态解析，确保最终 DOM 与消息源码一致。
  */
 export const MessageResponse = memo(
   function MessageResponse({
@@ -345,10 +344,9 @@ export const MessageResponse = memo(
     ...props
   }: MessageResponseProps) {
     const rawText = typeof children === "string" ? children : "";
-    const visibleText = useProgressiveText(rawText, streaming);
     const normalizedText = useMemo(
-      () => normalizeMathDelimiters(visibleText),
-      [visibleText],
+      () => normalizeMathDelimiters(rawText),
+      [rawText],
     );
 
     return (
@@ -358,20 +356,19 @@ export const MessageResponse = memo(
             "markdown-content size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
             className,
           )}
+          {...props}
+          animated={streaming}
           components={streamdownComponents}
           isAnimating={streaming}
+          mode={streaming ? "streaming" : "static"}
+          parseIncompleteMarkdown={false}
           plugins={streamdownPlugins}
-          {...props}
         >
           {normalizedText}
         </Streamdown>
       </ChatStreamingProvider>
     );
   },
-  (prevProps, nextProps) =>
-    prevProps.children === nextProps.children &&
-    prevProps.streaming === nextProps.streaming &&
-    nextProps.isAnimating === prevProps.isAnimating,
 );
 
 MessageResponse.displayName = "MessageResponse";
