@@ -371,6 +371,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .markdown-content [data-sd-animate],
+  .markdown-content [data-sd-animate-marker]::marker {
+    animation: none;
+  }
+
   .markdown-content :where(
     [data-markdown-code-block] > :first-child,
     [data-streamdown="table-wrapper"] > div:first-child:not(:last-child),
