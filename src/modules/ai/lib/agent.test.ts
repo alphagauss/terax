@@ -26,16 +26,13 @@ describe("agent preflight persistence", () => {
       runAgentStream({
         keys: EMPTY_PROVIDER_KEYS,
         modelId: "lmstudio-local",
-        cwd: "D:/workspace/project",
+        systemPrompt: "Stable prompt",
         toolContext: {} as never,
         uiMessages: messages,
         onSystemPrompt,
       }),
     ).rejects.toBe(failure);
 
-    expect(onSystemPrompt).toHaveBeenCalledWith(
-      expect.stringContaining("Working directory: D:/workspace/project"),
-      messages,
-    );
+    expect(onSystemPrompt).toHaveBeenCalledWith("Stable prompt", messages);
   });
 });

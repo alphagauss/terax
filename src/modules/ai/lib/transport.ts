@@ -1,6 +1,6 @@
 /**
  * 本文件连接聊天 UI 与 Agent 流式运行时。
- * 会话消息保持原样发送，项目指令和固定工作目录只进入系统提示词。
+ * 会话消息保持原样发送，完整系统提示词在 Chat runtime 内只构造一次。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -8,6 +8,10 @@ import type { CustomEndpoint } from "../config";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+import {
+  buildAgentSystemPrompt,
+  type AgentExecutionEnvironment,
+} from "./prompt";
 import { readAgentsMd } from "./projectInstructions";
 import type { ToolContext } from "../tools/tools";
 
@@ -18,6 +22,7 @@ type Deps = {
   getCustomInstructions: () => string;
   getAgentPersona: () => { name: string; instructions: string } | null;
   getCwd: () => string;
+  getEnvironment: () => AgentExecutionEnvironment;
   getLmstudioBaseURL?: () => string | undefined;
   getLmstudioModelId?: () => string | undefined;
   getMlxBaseURL?: () => string | undefined;
@@ -49,17 +54,37 @@ type SendOptions = {
 /**
  * 创建只从真实会话消息和固定会话环境构造请求的聊天传输层。
  *
- * 每次发送前从会话 cwd 读取 AGENTS.md，读取结果由底层短暂缓存。
+ * 首次发送时读取 AGENTS.md，并冻结 cwd、执行环境、人设和自定义指令。
+ * 后续发送复用同一个 Promise；Chat 被淘汰后自然丢弃并在下次创建时重建。
  */
 export function createSessionTransport(deps: Deps) {
-  const run = async (options: SendOptions) => {
+  let systemPromptTask: Promise<string> | null = null;
+
+  /** 首次调用构造系统提示，后续调用复用同一 Promise 和字符串。 */
+  const getSystemPrompt = () => {
+    if (systemPromptTask) return systemPromptTask;
     const cwd = deps.getCwd();
-    const projectInstructions = await readAgentsMd(cwd);
+    const environment = deps.getEnvironment();
+    const persona = deps.getAgentPersona();
+    const customInstructions = deps.getCustomInstructions();
+    systemPromptTask = readAgentsMd(cwd).then((projectInstructions) =>
+      buildAgentSystemPrompt({
+        cwd,
+        environment,
+        persona,
+        customInstructions,
+        projectInstructions,
+      }),
+    );
+    return systemPromptTask;
+  };
+
+  const run = async (options: SendOptions) => {
+    const systemPrompt = await getSystemPrompt();
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
-      customInstructions: deps.getCustomInstructions(),
-      agentPersona: deps.getAgentPersona(),
+      systemPrompt,
       toolContext: deps.toolContext,
       onStep: deps.onStep,
       onUsage: deps.onUsage,
@@ -78,8 +103,6 @@ export function createSessionTransport(deps: Deps) {
       openrouterModelId: deps.getOpenrouterModelId?.(),
       customEndpoints: deps.getCustomEndpoints?.(),
       customEndpointKeys: deps.getCustomEndpointKeys?.(),
-      cwd,
-      projectInstructions,
       uiMessages: options.messages,
       abortSignal: options.abortSignal,
     });

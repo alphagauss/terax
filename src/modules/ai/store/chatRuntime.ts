@@ -4,6 +4,8 @@
  */
 
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { HOST_PLATFORM } from "@/lib/platform";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
   type ChatTransport,
@@ -11,6 +13,7 @@ import {
 } from "ai";
 import { getModel, type ModelId, providerNeedsKey } from "../config";
 import { BUILTIN_AGENTS } from "../lib/agents";
+import { resolveAgentExecutionEnvironment } from "../lib/prompt";
 import { resolveSessionCwd } from "../lib/sessions";
 import { createSessionTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
@@ -64,6 +67,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       return { name: a.name, instructions: a.instructions };
     },
     getCwd: getSessionCwd,
+    getEnvironment: () =>
+      resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
     getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,

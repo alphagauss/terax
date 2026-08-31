@@ -33,13 +33,13 @@ key 绝不会持久化到操作系统 keychain / Linux secrets 文件之外。
 
 ## Agent 运行循环
 
-`runAgentStream`（`agent.ts:391`）会：
+一次主 Agent 请求会：
 
-1. 通过 `buildConfiguredLanguageModel` 解析模型。
-2. 根据 `selectSystemPrompt(modelId)`、session 工作目录、可选 persona、自定义指令和 `AGENTS.md` 项目指令构建稳定的 system prompt。联系模型前，准确的 prompt 和所有新 user message 都会 commit 到磁盘。
-3. 将 UI message 转换为 model message；如果模型不保留 reasoning content，则将其移除；context limit 超出时 compact 旧 message。
-4. 使用 `buildTools(ctx)` 提供的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输。
-5. 发出 step label、usage delta 和 finish metadata。
+1. `createSessionTransport` 在 Chat runtime 首次发送时读取 Workspace 根 `AGENTS.md`，并根据统一核心提示、执行环境、固定 cwd、Agent 人设和自定义指令构造 system prompt。该 Promise 和最终字符串由 transport 闭包持有，后续轮次不再读取或重建。
+2. `runAgentStream` 通过 `buildConfiguredLanguageModel` 解析当前模型。模型可以切换，但不改变已经冻结的 system prompt。
+3. 联系模型前，准确的 prompt 和所有新 user message 都会 commit 到磁盘。
+4. 将 UI message 转换为 model message；如果模型不保留 reasoning content，则将其移除；context limit 超出时 compact 旧 message。
+5. 使用 `buildTools(ctx)` 提供的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输，并发出 step label、usage delta 和 finish metadata。
 
 tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal`、`todo` 和 `managedAgent` builder 组装而成。
 
@@ -69,7 +69,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 
 `function.arguments` 始终为 JSON string。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
 
-streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和当前 prompt。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
+streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
 
 其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
@@ -81,7 +81,7 @@ composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isB
 
 draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。第一条被接受的 user message 会将 draft 提升为 persisted session，并将实际目录冻结为 `cwd`。persisted session 始终显示并使用已存储的 `cwd`。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
-每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 system prompt 的准确内容。approval continuation 只覆盖 prompt，不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
+每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
 
 ## 工具与审批
 
@@ -109,8 +109,10 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - 保持 Vercel AI SDK v6 chat 结构（`streamText`、tool、step limit），其余 UI 依赖该结构。
 - key 只能通过 `secrets_*` command 访问，绝不能写入磁盘、settings store 或 `localStorage`。
 - 新 provider 必须说明 bundle cost 和独特价值的合理性。
+- system prompt 在一个 Chat runtime 内逐字稳定。它只在首次发送时读取 `AGENTS.md`；Chat 被 LRU 淘汰、外部刷新替换或应用重启后，再次发送会从当前文件和设置重新构造。
+- 磁盘 metadata 中的 `systemPrompt` 是只写的检查快照，运行时不得读取或复用，也不增加 prompt version、revision 或迁移状态。
 - 修改型工具需要审批；只读工具仍必须通过 Rust Workspace 根、canonical path 和敏感路径检查。
-- 内存 message list、持久化 message record 和模型 input 保留相同的 message content。发送时不注入 active tab、cwd 或 environment block。
+- 内存 message list、持久化 message record 和模型 input 保留相同的 message content。cwd 和 execution environment 只进入 system prompt，不得注入 user message；active tab 不自动注入任何消息。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
 - `shell_exec` 未显式传 cwd 时延续该聊天最近同步完成的 Shell cwd；已经返回为长任务的进程不得在稍后退出时异步改变聊天 cwd。
 - 获取 persisted session run 时，从经过验证的 JSONL header 恢复已保存 cwd 的授权，但不改变 Explorer root。
