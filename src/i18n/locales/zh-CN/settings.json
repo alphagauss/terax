@@ -396,19 +396,19 @@
   "agents": {
     "header": {
       "title": "智能体",
-      "description": "AI 使用的角色人设与片段。可在输入栏切换智能体。"
+      "description": "创建具有专属指令和工具的会话级智能体。"
     },
     "customInstructions": {
-      "label": "自定义指令",
+      "label": "全局指令",
       "placeholder": "例如：始终用简洁的要点回复。优先使用 pnpm 而非 npm。我的机器是 M 系列 Mac。"
     },
     "list": {
       "label": "智能体",
       "newAgent": "新建智能体",
       "newAgentName": "新智能体",
-      "builtIn": "内置",
-      "active": "使用中",
-      "useAgent": "使用此智能体"
+      "main": "主智能体",
+      "allTools": "全部工具",
+      "toolCount": "{{count}} 个工具"
     },
     "snippets": {
       "label": "片段",
@@ -425,7 +425,45 @@
       "description": "描述",
       "descriptionPlaceholder": "一行说明，显示在智能体选择器中",
       "instructions": "指令",
-      "instructionsPlaceholder": "角色人设与规则。会追加到 Terax 的核心系统提示词之后。"
+      "instructionsPlaceholder": "专属行为和规则。Terax 的核心指令保持不变。",
+      "tools": "工具",
+      "toolsDescription": "这些工具会提供给智能体。需要审批的操作在执行前仍会请求确认。",
+      "newSessionsOnly": "指令和工具修改仅应用于新会话。"
+    },
+    "tools": {
+      "workspaceRead": {
+        "label": "读取工作区",
+        "description": "读取文件、查找路径并搜索内容。"
+      },
+      "workspaceWrite": {
+        "label": "修改工作区",
+        "description": "写入、补丁、移动、复制和删除文件，并自动包含读取能力。"
+      },
+      "shell": {
+        "label": "Shell",
+        "description": "运行命令并管理后台进程。"
+      },
+      "terminal": {
+        "label": "终端输出",
+        "description": "按需读取活动终端的回滚内容。"
+      },
+      "todos": {
+        "label": "任务列表",
+        "description": "创建并更新当前会话的任务列表。"
+      },
+      "subagents": {
+        "label": "子智能体",
+        "description": "委派边界明确的只读调查任务。"
+      }
+    },
+    "delete": {
+      "title": "删除自定义智能体？",
+      "description": "删除“{{name}}”将永久删除该智能体及其在所有工作区中的 {{count}} 个会话。此操作无法撤销。",
+      "confirm": "删除智能体",
+      "confirmWithSessions": "删除智能体和 {{count}} 个会话",
+      "running": "请先停止所有正在使用该智能体运行的会话。",
+      "failed": "无法删除该自定义智能体。",
+      "countFailed": "无法统计该智能体的会话。"
     },
     "snippetDialog": {
       "newTitle": "新建片段",

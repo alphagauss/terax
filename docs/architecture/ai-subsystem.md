@@ -31,17 +31,27 @@ AI 子系统采用 BYOK（bring your own key）模式。它通过 `@ai-sdk/*` �
 
 key 绝不会持久化到操作系统 keychain / Linux secrets 文件之外。
 
+## Agent 配置
+
+Terax 只有一个代码内定义的固定主 Agent。主 Agent 不进入共享存储，不可编辑或删除，并拥有完整内置工具集。Custom Agent 以独立记录保存在 `ai-agents` 共享存储中，只包含稳定 ID、名称、描述、专属指令、图标和工具白名单；旧定义缺失工具字段时按完整工具集读取，不保留旧版全局 active Agent 状态。
+
+Agent 只在未发送的 draft 中选择。第一条 user message 被接受时，当前定义会投影为 `metadata.agent` 会话快照；之后该会话不能切换 Agent。Agent 的指令和工具列表使用快照，后续编辑只影响新会话；显示名称和图标优先使用仍存在的当前定义。旧会话缺少 `metadata.agent` 时归入固定主 Agent。
+
+Custom Agent 的工具权限是实际 provider tool schema 白名单，不是 prompt 建议，也不改变审批策略。`agentTools.ts` 维护稳定工具 ID 和六个设置界面工具组；修改工作区依赖读取工作区。运行时按快照过滤 `buildTools` 的结果，未提供的工具不会发送给模型。
+
+Custom Agent ID 同时是会话归属。历史列表可按 Agent 筛选；删除 Custom Agent 会在 Rust 中取得共享 Agent 配置锁和全部关联 session lock，然后删除所有 Workspace 中的关联会话，最后删除定义。任一关联会话正在运行时整个操作被拒绝。通用 `shared_store_delete` 不允许绕过该级联入口。
+
 ## Agent 运行循环
 
 一次主 Agent 请求会：
 
-1. `createSessionTransport` 在 Chat runtime 首次发送时读取 Workspace 根 `AGENTS.md`，并根据统一核心提示、执行环境、固定 cwd、Agent 人设和自定义指令构造 system prompt。该 Promise 和最终字符串由 transport 闭包持有，后续轮次不再读取或重建。
+1. `createSessionTransport` 在 Chat runtime 首次发送时读取 Workspace 根 `AGENTS.md`，并根据统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令构造 system prompt。该 Promise、Agent 快照和最终字符串由 transport 闭包持有，后续轮次不再读取或重建。
 2. `runAgentStream` 通过 `buildConfiguredLanguageModel` 解析当前模型。模型可以切换，但不改变已经冻结的 system prompt。
 3. 联系模型前，准确的 prompt 和所有新 user message 都会 commit 到磁盘。
 4. 将 UI message 转换为 model message；如果模型不保留 reasoning content，则将其移除；context limit 超出时 compact 旧 message。
-5. 使用 `buildTools(ctx)` 提供的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输，并发出 step label、usage delta 和 finish metadata。
+5. 使用 `buildTools(ctx, agent.tools)` 过滤后的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输，并发出 step label、usage delta 和 finish metadata。
 
-tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal`、`todo` 和 `managedAgent` builder 组装而成。
+完整 tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal` 和 `todo` builder 组装而成。
 
 ## Sub-agent
 
@@ -54,10 +64,10 @@ tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`
 - `<uuid>.jsonl`：第一行是固定 metadata record，其余每行是一条 role message
 - `<uuid>.lock`：一个进程运行该 session 时使用的 OS lock
 - 不使用共享 session index；list 操作只读取第一行 metadata
-- `ai_sessions_list` 将每个 header 投影为显式的 lightweight summary，绝不返回 `systemPrompt` 等仅供检查的 metadata
+- `ai_sessions_list` 将每个 header 投影为包含 Agent 身份的显式 lightweight summary，绝不返回 `systemPrompt` 等仅供检查的 metadata
 
 ```json
-{"_type":"metadata","key":"<uuid>","createdAt":"2026-07-26T10:00:00.000Z","updatedAt":"2026-07-26T10:00:01.000Z","environmentKey":"local","cwd":"/workspace/project","metadata":{"title":"Session title","todos":[],"systemPrompt":"..."}}
+{"_type":"metadata","key":"<uuid>","createdAt":"2026-07-26T10:00:00.000Z","updatedAt":"2026-07-26T10:00:01.000Z","environmentKey":"local","cwd":"/workspace/project","metadata":{"title":"Session title","agent":{"id":"a-review","name":"Reviewer","icon":"reviewer","instructions":"...","tools":["read_file","grep"]},"todos":[],"systemPrompt":"..."}}
 ```
 
 JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant 文本使用直接的 `role` 和 `content` field，reasoning 使用 `reasoning_content`，tool result 使用 `role: "tool"`。tool call 刻意遵循 OpenAI-compatible envelope：
@@ -71,7 +81,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 
 streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
 
-其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
+其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 或 Agent 配置变化时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime；发现会话已被外部删除时，还会清理该进程中对应的 Shell 和文件工具 owner 状态。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
 ## Composer
 
@@ -79,7 +89,7 @@ streaming state 保留在所属进程中。发送操作首先获取 session run 
 
 composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isBusy`，因此它可以在 session hydrate 前安全挂载，同时其他 session 继续在后台运行。
 
-draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。第一条被接受的 user message 会将 draft 提升为 persisted session，并将实际目录冻结为 `cwd`。persisted session 始终显示并使用已存储的 `cwd`。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
+draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。draft 可以选择 Agent；第一条被接受的 user message 会将 draft 提升为 persisted session，并同时冻结实际目录和 Agent 快照。persisted session 始终显示已保存的 Agent，不能中途切换。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
 每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
 
@@ -111,6 +121,8 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - 新 provider 必须说明 bundle cost 和独特价值的合理性。
 - system prompt 在一个 Chat runtime 内逐字稳定。它只在首次发送时读取 `AGENTS.md`；Chat 被 LRU 淘汰、外部刷新替换或应用重启后，再次发送会从当前文件和设置重新构造。
 - 磁盘 metadata 中的 `systemPrompt` 是只写的检查快照，运行时不得读取或复用，也不增加 prompt version、revision 或迁移状态。
+- 会话 Agent ID、专属指令和工具白名单来自首次发送时保存的 `metadata.agent` 快照；Agent 不能在 persisted session 中更换。
+- Custom Agent 删除必须经过 `ai_agent_delete` 级联删除其全部会话；主 Agent 不进入共享存储且不可删除。
 - 修改型工具需要审批；只读工具仍必须通过 Rust Workspace 根、canonical path 和敏感路径检查。
 - 内存 message list、持久化 message record 和模型 input 保留相同的 message content。cwd 和 execution environment 只进入 system prompt，不得注入 user message；active tab 不自动注入任何消息。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。

@@ -396,19 +396,19 @@
   "agents": {
     "header": {
       "title": "Agents",
-      "description": "Personas and snippets the AI uses. Switch agents from the input bar."
+      "description": "Create session-specific agents with focused instructions and tools."
     },
     "customInstructions": {
-      "label": "Custom instructions",
+      "label": "Global instructions",
       "placeholder": "e.g. Always reply in concise bullet points. Prefer pnpm over npm. My machine is an M-series Mac."
     },
     "list": {
       "label": "Agents",
       "newAgent": "New agent",
       "newAgentName": "New agent",
-      "builtIn": "Built-in",
-      "active": "Active",
-      "useAgent": "Use agent"
+      "main": "Main",
+      "allTools": "All tools",
+      "toolCount": "{{count}} tools"
     },
     "snippets": {
       "label": "Snippets",
@@ -423,9 +423,47 @@
       "name": "Name",
       "namePlaceholder": "e.g. Test Engineer",
       "description": "Description",
-      "descriptionPlaceholder": "One line - shown in the agent picker",
+      "descriptionPlaceholder": "One line, shown in the agent picker",
       "instructions": "Instructions",
-      "instructionsPlaceholder": "Persona & rules. Appended to Terax's core system prompt."
+      "instructionsPlaceholder": "Focused behavior and rules. Terax keeps its core instructions.",
+      "tools": "Tools",
+      "toolsDescription": "These tools are visible to the agent. Operations that require approval still ask before running.",
+      "newSessionsOnly": "Instruction and tool changes apply to new conversations only."
+    },
+    "tools": {
+      "workspaceRead": {
+        "label": "Read workspace",
+        "description": "Read files, find paths, and search contents."
+      },
+      "workspaceWrite": {
+        "label": "Modify workspace",
+        "description": "Write, patch, move, copy, and delete files. Includes reading."
+      },
+      "shell": {
+        "label": "Shell",
+        "description": "Run commands and manage background processes."
+      },
+      "terminal": {
+        "label": "Terminal output",
+        "description": "Read the active terminal scrollback on demand."
+      },
+      "todos": {
+        "label": "Task list",
+        "description": "Create and update the session task list."
+      },
+      "subagents": {
+        "label": "Subagents",
+        "description": "Delegate bounded read-only investigations."
+      }
+    },
+    "delete": {
+      "title": "Delete custom agent?",
+      "description": "Deleting “{{name}}” permanently deletes the agent and its {{count}} conversations across all workspaces. This cannot be undone.",
+      "confirm": "Delete agent",
+      "confirmWithSessions": "Delete agent and {{count}} conversations",
+      "running": "Stop all conversations currently running with this agent before deleting it.",
+      "failed": "The custom agent could not be deleted.",
+      "countFailed": "The agent's conversations could not be counted."
     },
     "snippetDialog": {
       "newTitle": "New snippet",

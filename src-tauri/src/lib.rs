@@ -297,6 +297,7 @@ pub fn run() {
             ai_sessions::ai_session_read,
             ai_sessions::ai_session_commit,
             ai_sessions::ai_session_delete,
+            ai_sessions::ai_agent_delete,
             ai_sessions::ai_session_run_acquire,
             ai_sessions::ai_session_run_release,
             shared_store::shared_store_read,

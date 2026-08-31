@@ -1,6 +1,6 @@
 /**
  * 本文件负责创建语言模型并运行 AI Agent 的流式响应。
- * 它接收 Chat runtime 冻结的系统提示词，并组装工具和消息历史。
+ * 它接收 Chat runtime 冻结的系统提示词和工具白名单，并组装工具和消息历史。
  */
 
 import {
@@ -26,6 +26,7 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
+import type { AgentToolId } from "./agentTools";
 import { buildTools, type ToolContext } from "../tools/tools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -318,6 +319,7 @@ export type RunAgentOptions = {
   keys: ProviderKeys;
   modelId?: string;
   systemPrompt: string;
+  allowedTools: readonly AgentToolId[];
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
@@ -402,7 +404,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
     system: prompt.system,
     messages: prompt.messages,
     allowSystemInMessages: false,
-    tools: buildTools(opts.toolContext),
+    tools: buildTools(opts.toolContext, opts.allowedTools),
     stopWhen: stepCountIs(MAX_AGENT_STEPS),
     abortSignal: opts.abortSignal,
     onStepFinish: (step) => {

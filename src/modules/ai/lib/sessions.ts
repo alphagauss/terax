@@ -1,10 +1,11 @@
 /**
  * 本文件封装 AI 会话的 Tauri IPC，并隔离磁盘 JSONL 与前端运行时类型。
- * 外层环境归属由 Rust 校验，内层业务 metadata 由前端解释，消息记录不直接依赖 AI SDK。
+ * 外层环境与 Agent 归属由 Rust 投影，内层业务 metadata 由前端解释，消息记录不直接依赖 AI SDK。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeAgentIcon, type AgentIconId } from "./agents";
 import type { SessionMessage } from "./sessionMessages";
 import type { Todo } from "./todos";
 
@@ -19,6 +20,9 @@ export type SessionMeta = {
   updatedAt: number;
   environmentKey: string;
   cwd: string;
+  agentId: string;
+  agentName: string;
+  agentIcon: AgentIconId;
   modifiedAt?: number;
   size?: number;
   fingerprint?: string;
@@ -178,6 +182,12 @@ function fromIpcMeta(meta: IpcSessionMeta): SessionMeta {
     updatedAt: parseTimestamp(meta.updatedAt),
     environmentKey: meta.environmentKey,
     cwd: meta.cwd,
+    agentId: meta.agentId,
+    agentName: meta.agentName,
+    agentIcon: normalizeAgentIcon(
+      meta.agentIcon,
+      meta.agentId === "builtin:main" ? "coder" : "spark",
+    ),
     modifiedAt: meta.modifiedAt,
     size: meta.size,
     fingerprint: meta.fingerprint,

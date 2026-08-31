@@ -1,9 +1,11 @@
-//! AI 会话 JSONL 文件的读取、发布和跨进程运行锁管理。
+//! AI 会话 JSONL 文件、Agent 归属和跨进程运行锁管理。
 //!
 //! 每个会话使用一个文件，首行固定为 metadata，后续每行是一条 SDK 无关的消息记录。
 //! Rust 校验外层环境归属和不可变 cwd，列表只投影摘要，内层业务 metadata 保持不透明。
 //! 用户消息与终态记录分阶段原子追加，运行锁确保两个进程不能同时续写同一会话。
+//! Custom Agent 删除在共享配置锁内级联其全部会话，运行中会话会阻止整个操作。
 
+use crate::modules::shared_store;
 use crate::modules::storage::{write_atomic, FileLock};
 use crate::modules::workspace::{authorize_user_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
 use serde::{Deserialize, Serialize};
@@ -16,8 +18,12 @@ use std::sync::Mutex;
 #[cfg(test)]
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
+
+const MAIN_AGENT_ID: &str = "builtin:main";
+const MAIN_AGENT_NAME: &str = "Terax";
+const MAIN_AGENT_ICON: &str = "coder";
 
 /// 前端与 Rust 之间传递的会话文件内容。
 ///
@@ -44,6 +50,9 @@ pub struct SessionMetadata {
     pub updated_at: String,
     pub environment_key: String,
     pub cwd: String,
+    pub agent_id: String,
+    pub agent_name: String,
+    pub agent_icon: String,
     pub modified_at: u64,
     pub size: u64,
     pub fingerprint: String,
@@ -101,6 +110,7 @@ fn validate_session_file(session: &SessionFile) -> Result<Uuid, String> {
     if session.cwd.trim().is_empty() {
         return Err("session cwd must not be empty".to_string());
     }
+    validate_agent_metadata(&session.metadata)?;
     for (index, message) in session.messages.iter().enumerate() {
         if !message.is_object() {
             return Err(format!("message line {} must be a JSON object", index + 2));
@@ -124,7 +134,46 @@ fn validate_header(header: &SessionFileHeader, expected_id: Uuid) -> Result<(), 
     if header.cwd.trim().is_empty() {
         return Err("session cwd must not be empty".to_string());
     }
-    validate_timestamps(&header.created_at, &header.updated_at)
+    validate_timestamps(&header.created_at, &header.updated_at)?;
+    validate_agent_metadata(&header.metadata)
+}
+
+/// 校验可选 Agent 快照，缺失字段仅用于兼容归入主 Agent 的旧会话。
+fn validate_agent_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
+    let Some(value) = metadata.get("agent") else {
+        return Ok(());
+    };
+    let agent = value
+        .as_object()
+        .ok_or_else(|| "session agent must be an object".to_string())?;
+    for field in ["id", "name", "instructions", "icon"] {
+        if !agent.get(field).is_some_and(Value::is_string) {
+            return Err(format!("session agent {field} must be a string"));
+        }
+    }
+    if agent
+        .get("id")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+        || agent
+            .get("name")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || agent
+            .get("icon")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+    {
+        return Err("session agent identity must not be empty".to_string());
+    }
+    let tools = agent
+        .get("tools")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "session agent tools must be an array".to_string())?;
+    if !tools.iter().all(Value::is_string) {
+        return Err("session agent tools must contain strings".to_string());
+    }
+    Ok(())
 }
 
 /// 检查会话时间字段存在，具体时间格式由 IPC 适配层负责。
@@ -235,6 +284,9 @@ fn commit_session(
         if existing.cwd != update.cwd {
             return Err("session cwd must not change".to_string());
         }
+        if existing.metadata.get("agent") != update.metadata.get("agent") {
+            return Err("session agent snapshot must not change".to_string());
+        }
         existing.messages
     } else {
         Vec::new()
@@ -248,6 +300,51 @@ fn commit_session(
         },
     )?;
     metadata(root, id)
+}
+
+/// 从不透明业务 metadata 中读取稳定的 Agent 归属，旧会话归入主 Agent。
+fn session_agent_id(metadata: &Map<String, Value>) -> &str {
+    metadata
+        .get("agent")
+        .and_then(Value::as_object)
+        .and_then(|agent| agent.get("id"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(MAIN_AGENT_ID)
+}
+
+/// 将 Agent 快照投影为会话列表需要的轻量显示字段。
+fn session_agent_summary(metadata: &Map<String, Value>) -> (String, String, String) {
+    let Some(agent) = metadata.get("agent").and_then(Value::as_object) else {
+        return (
+            MAIN_AGENT_ID.to_string(),
+            MAIN_AGENT_NAME.to_string(),
+            MAIN_AGENT_ICON.to_string(),
+        );
+    };
+    let id = agent
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(MAIN_AGENT_ID);
+    if id == MAIN_AGENT_ID {
+        return (
+            MAIN_AGENT_ID.to_string(),
+            MAIN_AGENT_NAME.to_string(),
+            MAIN_AGENT_ICON.to_string(),
+        );
+    }
+    let name = agent
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(MAIN_AGENT_NAME);
+    let icon = agent
+        .get("icon")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(MAIN_AGENT_ICON);
+    (id.to_string(), name.to_string(), icon.to_string())
 }
 
 /// 从首行 metadata 和文件系统属性构造会话列表项。
@@ -268,6 +365,7 @@ fn metadata(root: &Path, id: Uuid) -> Result<SessionMetadata, String> {
         .and_then(Value::as_str)
         .unwrap_or("New chat")
         .to_string();
+    let (agent_id, agent_name, agent_icon) = session_agent_summary(&header.metadata);
     Ok(SessionMetadata {
         id: header.key,
         title,
@@ -275,6 +373,9 @@ fn metadata(root: &Path, id: Uuid) -> Result<SessionMetadata, String> {
         updated_at: header.updated_at,
         environment_key: header.environment_key,
         cwd: header.cwd,
+        agent_id,
+        agent_name,
+        agent_icon,
         modified_at,
         size,
         fingerprint: format!("{modified_at}:{size}"),
@@ -371,7 +472,13 @@ pub fn ai_session_commit(
             return Err("session cwd must not change".to_string());
         }
     }
-    commit_with_run_lock(&root, state.inner(), id, &session, &environment_key)
+    let agent_id = session_agent_id(&session.metadata).to_string();
+    if agent_id == MAIN_AGENT_ID {
+        return commit_with_run_lock(&root, state.inner(), id, &session, &environment_key);
+    }
+    shared_store::with_ai_agent(&agent_id, || {
+        commit_with_run_lock(&root, state.inner(), id, &session, &environment_key)
+    })
 }
 
 /// 删除指定会话文件，运行中的会话不可删除。
@@ -396,6 +503,63 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.to_string()),
     }
+}
+
+/// 删除指定 Custom Agent 拥有的全部会话。
+///
+/// 调用方必须先持有共享 Agent 配置锁。函数会先取得全部会话锁再删除任何文件，
+/// 检测到任一运行中会话时不产生部分删除。
+fn delete_sessions_by_agent(
+    root: &Path,
+    state: &AiSessionsState,
+    agent_id: &str,
+) -> Result<Vec<String>, String> {
+    let ids = list_sessions(root)?
+        .into_iter()
+        .filter(|session| session.agent_id == agent_id)
+        .map(|session| strict_uuid(&session.id))
+        .collect::<Result<Vec<_>, _>>()?;
+    let run_locks = state
+        .run_locks
+        .lock()
+        .map_err(|_| "AI session lock state is poisoned".to_string())?;
+    if ids.iter().any(|id| run_locks.contains_key(id)) {
+        return Err("CUSTOM_AGENT_SESSIONS_RUNNING".to_string());
+    }
+    drop(run_locks);
+
+    let mut file_locks = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let Some(lock) =
+            FileLock::try_acquire(&lock_path(root, *id)).map_err(|error| error.to_string())?
+        else {
+            return Err("CUSTOM_AGENT_SESSIONS_RUNNING".to_string());
+        };
+        file_locks.push(lock);
+    }
+
+    for id in &ids {
+        match fs::remove_file(session_path(root, *id)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    drop(file_locks);
+    Ok(ids.into_iter().map(|id| id.to_string()).collect())
+}
+
+/// 级联删除 Custom Agent 和其跨 Workspace 的全部会话。
+#[tauri::command]
+pub fn ai_agent_delete(
+    app: AppHandle,
+    state: State<'_, AiSessionsState>,
+    agent_id: String,
+) -> Result<Vec<String>, String> {
+    let root = sessions_dir()?;
+    shared_store::delete_ai_agent_with(&app, &agent_id, || {
+        delete_sessions_by_agent(&root, state.inner(), &agent_id)
+    })
 }
 
 /// 取得会话运行锁，并恢复历史会话固定 cwd 对应的 Workspace 授权。
@@ -507,6 +671,21 @@ mod tests {
         }
     }
 
+    fn custom_session(id: Uuid, title: &str, agent_id: &str) -> SessionFile {
+        let mut value = session(id, title);
+        value.metadata.insert(
+            "agent".to_string(),
+            json!({
+                "id": agent_id,
+                "name": "Reviewer",
+                "icon": "reviewer",
+                "instructions": "Review carefully.",
+                "tools": ["read_file", "grep"]
+            }),
+        );
+        value
+    }
+
     #[test]
     fn rejects_noncanonical_ids_and_path_traversal() {
         assert!(strict_uuid("../session").is_err());
@@ -613,6 +792,86 @@ mod tests {
     }
 
     #[test]
+    fn list_projects_agent_identity_and_legacy_sessions_as_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom_id = Uuid::new_v4();
+        let main_id = Uuid::new_v4();
+        commit_session(
+            dir.path(),
+            &custom_session(custom_id, "custom", "a-review"),
+            "local",
+        )
+        .unwrap();
+        commit_session(dir.path(), &session(main_id, "legacy"), "local").unwrap();
+
+        let sessions = list_sessions(dir.path()).unwrap();
+        let custom = sessions
+            .iter()
+            .find(|item| item.id == custom_id.to_string())
+            .unwrap();
+        let main = sessions
+            .iter()
+            .find(|item| item.id == main_id.to_string())
+            .unwrap();
+        assert_eq!(custom.agent_id, "a-review");
+        assert_eq!(custom.agent_name, "Reviewer");
+        assert_eq!(custom.agent_icon, "reviewer");
+        assert_eq!(main.agent_id, MAIN_AGENT_ID);
+        assert_eq!(main.agent_name, MAIN_AGENT_NAME);
+        assert_eq!(main.agent_icon, MAIN_AGENT_ICON);
+    }
+
+    #[test]
+    fn agent_deletion_removes_only_owned_sessions_and_rejects_running_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let main = Uuid::new_v4();
+        commit_session(
+            dir.path(),
+            &custom_session(first, "first", "a-review"),
+            "local",
+        )
+        .unwrap();
+        commit_session(
+            dir.path(),
+            &custom_session(second, "second", "a-review"),
+            "local",
+        )
+        .unwrap();
+        commit_session(dir.path(), &session(main, "main"), "local").unwrap();
+        let state = AiSessionsState::default();
+        let run_lock = FileLock::try_acquire(&lock_path(dir.path(), first))
+            .unwrap()
+            .unwrap();
+        state.run_locks.lock().unwrap().insert(first, run_lock);
+
+        assert_eq!(
+            delete_sessions_by_agent(dir.path(), &state, "a-review").unwrap_err(),
+            "CUSTOM_AGENT_SESSIONS_RUNNING"
+        );
+        assert!(session_path(dir.path(), second).exists());
+        state.run_locks.lock().unwrap().remove(&first);
+
+        let external_lock = FileLock::try_acquire(&lock_path(dir.path(), second))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            delete_sessions_by_agent(dir.path(), &state, "a-review").unwrap_err(),
+            "CUSTOM_AGENT_SESSIONS_RUNNING"
+        );
+        assert!(session_path(dir.path(), first).exists());
+        drop(external_lock);
+
+        let mut deleted = delete_sessions_by_agent(dir.path(), &state, "a-review").unwrap();
+        deleted.sort();
+        let mut expected = vec![first.to_string(), second.to_string()];
+        expected.sort();
+        assert_eq!(deleted, expected);
+        assert!(session_path(dir.path(), main).exists());
+    }
+
+    #[test]
     fn rejects_headers_without_environment_identity() {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
@@ -667,6 +926,32 @@ mod tests {
     }
 
     #[test]
+    fn refuses_to_change_a_session_agent_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        commit_session(
+            dir.path(),
+            &custom_session(id, "review", "a-review"),
+            "local",
+        )
+        .unwrap();
+
+        let mut changed = custom_session(id, "changed", "a-review");
+        changed.metadata["agent"]["instructions"] = json!("Different instructions.");
+        assert_eq!(
+            commit_session(dir.path(), &changed, "local").unwrap_err(),
+            "session agent snapshot must not change"
+        );
+
+        let stored = read_session(dir.path(), id).unwrap();
+        assert_eq!(stored.metadata["title"], "review");
+        assert_eq!(
+            stored.metadata["agent"]["instructions"],
+            "Review carefully."
+        );
+    }
+
+    #[test]
     fn acquiring_a_saved_session_restores_its_cwd_authorization() {
         let sessions = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
@@ -705,6 +990,17 @@ mod tests {
         assert!(validate_session_file(&value).is_ok());
         value.messages = vec![json!("not an object")];
         assert!(validate_session_file(&value).is_err());
+    }
+
+    #[test]
+    fn rejects_partial_agent_snapshots_but_accepts_legacy_sessions() {
+        let id = Uuid::new_v4();
+        assert!(validate_session_file(&session(id, "legacy")).is_ok());
+        let mut partial = session(id, "partial");
+        partial
+            .metadata
+            .insert("agent".to_string(), json!({"id": "a-review"}));
+        assert!(validate_session_file(&partial).is_err());
     }
 
     #[test]

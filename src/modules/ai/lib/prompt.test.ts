@@ -61,7 +61,7 @@ describe("agent system prompt", () => {
         workspace: "Local",
         defaultShell: "PowerShell",
       } as const,
-      persona: { name: "Builder", instructions: "  Build carefully.\r\n" },
+      agent: { name: "Builder", instructions: "  Build carefully.\r\n" },
       customInstructions: "  Be direct.\r\n",
       projectInstructions: "# Rules\r\n\r\nUse pnpm.\r\n",
     };
@@ -72,6 +72,9 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("Shell tool default: PowerShell");
     expect(prompt).toContain('Working directory: "D:/workspace/project"');
     expect(prompt).toContain("Terminal scrollback is not included automatically");
+    expect(prompt).toContain(
+      "## AGENT INSTRUCTIONS: Builder\nBuild carefully.",
+    );
     expect(prompt).toContain("# Rules\n\nUse pnpm.");
     expect(prompt).not.toContain("\r");
     expect(buildAgentSystemPrompt(options)).toBe(prompt);

@@ -1,6 +1,6 @@
 /**
  * 本文件管理按会话隔离的 AI 运行状态、窗口级会话恢复和两阶段持久化。
- * 主窗口只恢复其明确记录的历史会话，临时窗口及失效选择统一进入内存草稿。
+ * 主窗口只恢复其明确记录的历史会话，首次发送同时冻结 cwd 和 Agent 快照。
  */
 
 import {
@@ -21,6 +21,7 @@ import {
   providerNeedsKey,
 } from "../config";
 import type { AgentUsage } from "../lib/agent";
+import { snapshotAgent } from "../lib/agents";
 import {
   type CustomEndpointKeys,
   EMPTY_PROVIDER_KEYS,
@@ -42,15 +43,16 @@ import {
   newSessionId,
   readSession,
   releaseSessionRun,
-  sessionTodos,
   type SessionData,
   type SessionMeta,
+  sessionTodos,
 } from "../lib/sessions";
-import { useTodosStore } from "./todoStore";
+import { useAgentsStore } from "./agentsStore";
 import {
   type SessionRunOutcome,
   useSessionAttentionStore,
 } from "./sessionAttentionStore";
+import { useTodosStore } from "./todoStore";
 
 export type Live = {
   draftCwd: string | null;
@@ -139,6 +141,9 @@ type StoreState = {
   pendingFileAttachments: PendingFileAttachment[];
   attachFile: (path: string) => void;
   consumeFileAttachments: () => PendingFileAttachment[];
+
+  sessionAgentFilter: string | null;
+  setSessionAgentFilter: (agentId: string | null) => void;
 
   agentMetaBySession: Record<string, AgentMeta>;
   patchAgentMeta: (sessionId: string, patch: Partial<AgentMeta>) => void;
@@ -337,6 +342,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     return v;
   },
 
+  sessionAgentFilter: null,
+  setSessionAgentFilter: (sessionAgentFilter) => set({ sessionAgentFilter }),
+
   agentMetaBySession: {},
   patchAgentMeta: (sessionId, patch) =>
     set((state) => ({
@@ -402,11 +410,17 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const local = get().sessions;
       const diskById = new Map(disk.map((session) => [session.id, session]));
       const runLocks = new Set(Object.keys(get().runLockSessionIds));
+      const deletedSessionIds: string[] = [];
 
       for (const session of local) {
         if (!session.fingerprint || runLocks.has(session.id)) continue;
         const after = diskById.get(session.id);
         if (after?.fingerprint === session.fingerprint) continue;
+        if (!after) {
+          await clearSessionProcesses(session.id);
+          useSessionAttentionStore.getState().clearSession(session.id);
+          deletedSessionIds.push(session.id);
+        }
         await chats.get(session.id)?.stop();
         chats.delete(session.id);
         seedMessages.delete(session.id);
@@ -452,14 +466,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
         await persistActiveSession(nextMeta ? nextActive : null);
         activeChanged = true;
       }
-      set({
-        sessions: next,
-        draftSessionId: nextDraftId,
-        activeSessionId: nextActive,
-        activeSessionRevision: activeChanged
-          ? get().activeSessionRevision + 1
-          : get().activeSessionRevision,
-        sessionSyncError: null,
+      set((state) => {
+        const agentMetaBySession = { ...state.agentMetaBySession };
+        for (const id of deletedSessionIds) delete agentMetaBySession[id];
+        return {
+          sessions: next,
+          draftSessionId: nextDraftId,
+          activeSessionId: nextActive,
+          activeSessionRevision: activeChanged
+            ? state.activeSessionRevision + 1
+            : state.activeSessionRevision,
+          agentMetaBySession:
+            deletedSessionIds.length > 0
+              ? agentMetaBySession
+              : state.agentMetaBySession,
+          sessionSyncError: null,
+        };
       });
     } catch (error) {
       set({ sessionSyncError: String(error) });
@@ -496,6 +518,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return draftId;
     }
     const id = newSessionId();
+    useAgentsStore.getState().resetDraftAgent();
     set({
       draftSessionId: id,
       activeSessionId: id,
@@ -509,6 +532,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (get().sessions.some((session) => session.id === id)) return;
     const now = Date.now();
     const title = deriveTitle(messages);
+    const agent = snapshotAgent(useAgentsStore.getState().selectedDraftAgent());
     const meta: SessionMeta = {
       id,
       title,
@@ -516,8 +540,12 @@ export const useChatStore = create<StoreState>((set, get) => ({
       updatedAt: now,
       environmentKey: currentWorkspaceBootstrap().environmentKey,
       cwd,
+      agentId: agent.id,
+      agentName: agent.name,
+      agentIcon: agent.icon,
     };
-    sessionMetadata.set(id, { title, todos: [] });
+    sessionMetadata.set(id, { title, todos: [], agent });
+    useAgentsStore.getState().resetDraftAgent();
     set({
       sessions: [meta, ...get().sessions],
       draftSessionId: get().draftSessionId === id ? null : get().draftSessionId,

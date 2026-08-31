@@ -40,6 +40,11 @@
     "newSession": "新建会话",
     "closeAiSidebar": "关闭 AI 侧栏",
     "deleteSession": "删除会话",
+    "agentFilter": {
+      "label": "按智能体筛选",
+      "all": "全部智能体",
+      "empty": "该智能体还没有会话"
+    },
     "sessionStatus": {
       "background-running": "正在后台运行",
       "completed-unread": "已完成，尚未查看",

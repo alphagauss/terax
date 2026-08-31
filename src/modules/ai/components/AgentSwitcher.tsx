@@ -1,9 +1,8 @@
 /**
- * 本文件实现 AI Agent 人设选择菜单。
- * 负责切换内置或自定义 Agent，并提供进入 Agent 设置的入口。
+ * 本文件实现会话级 Agent 选择器。
+ * 空白草稿允许选择固定主 Agent 或 Custom Agent，首次发送后只展示冻结身份。
  */
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
@@ -25,13 +25,17 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type AgentIconId,
   agentDisplayDescription,
   agentDisplayName,
+  findAgent,
+  MAIN_AGENT,
 } from "../lib/agents";
 import { useAgentsStore } from "../store/agentsStore";
+import { useChatStore } from "../store/chatStore";
 
 const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   coder: CodeIcon,
@@ -42,134 +46,108 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   spark: SparklesIcon,
 };
 
-/** Agent 人设切换器，统一展示当前项和可用人设列表。 */
-export function AgentSwitcher({ isMiniWindow }: { isMiniWindow?: boolean }) {
+/** Agent 选择器；持久化会话只显示身份，避免中途改变提示词和工具集。 */
+export function AgentSwitcher() {
   const { t } = useTranslation("aiAgents");
-  // Subscribe to customAgents + activeId so the trigger updates live.
-  const customAgents = useAgentsStore((s) => s.customAgents);
-  const activeId = useAgentsStore((s) => s.activeId);
-  const setActiveId = useAgentsStore((s) => s.setActiveId);
-
-  const list = useAgentsStore.getState().all();
-  void customAgents; // keeps the store subscription alive
-
-  const active = list.find((a) => a.id === activeId) ?? list[0];
-  const builtIn = list.filter((a) => a.builtIn);
-  const custom = list.filter((a) => !a.builtIn);
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const session = useChatStore((state) =>
+    state.sessions.find((item) => item.id === state.activeSessionId),
+  );
+  const customAgents = useAgentsStore((state) => state.customAgents);
+  const draftAgentId = useAgentsStore((state) => state.draftAgentId);
+  const setDraftAgentId = useAgentsStore((state) => state.setDraftAgentId);
+  const draftAgent = findAgent(customAgents, draftAgentId);
+  const isDraft = activeSessionId !== null && session === undefined;
+  const sessionAgent = customAgents.find(
+    (agent) => agent.id === session?.agentId,
+  );
+  const active = isDraft
+    ? draftAgent
+    : {
+        id: session?.agentId ?? MAIN_AGENT.id,
+        name: sessionAgent?.name ?? session?.agentName ?? MAIN_AGENT.name,
+        icon: sessionAgent?.icon ?? session?.agentIcon ?? MAIN_AGENT.icon,
+      };
   const ActiveIcon = ICONS[active.icon] ?? SparklesIcon;
+  const triggerContent = (
+    <>
+      <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
+      <span className="max-w-[7rem] truncate">{agentDisplayName(active)}</span>
+      {isDraft ? (
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          size={10}
+          strokeWidth={2}
+          className="opacity-70"
+        />
+      ) : null}
+    </>
+  );
 
+  if (!isDraft) {
+    return (
+      <span
+        className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground"
+        title={t("trigger.locked", { name: active.name })}
+      >
+        {triggerContent}
+      </span>
+    );
+  }
+
+  const agents = [
+    { ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] },
+    ...customAgents,
+  ];
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           size="xs"
           variant="outline"
-          className={cn(
-            !isMiniWindow
-              ? "flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
-              : "text-xs mr-1",
-          )}
+          className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
           title={t("trigger.title", { name: agentDisplayName(active) })}
         >
-          <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
-          <span className="max-w-[7rem] truncate">
-            {agentDisplayName(active)}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={10}
-            strokeWidth={2}
-            className="opacity-70"
-          />
+          {triggerContent}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-60">
-        <div className="px-2 pt-1.5 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-          {t("group.builtIn")}
-        </div>
-        {builtIn.map((a) => {
-          const Icon = ICONS[a.icon] ?? SparklesIcon;
+        {agents.map((agent, index) => {
+          const Icon = ICONS[agent.icon] ?? SparklesIcon;
           return (
-            <DropdownMenuItem
-              key={a.id}
-              onSelect={() => setActiveId(a.id)}
-              className={cn(
-                "flex items-start gap-2 pr-2 text-[12px]",
-                a.id === activeId && "bg-interactive-active",
-              )}
-            >
-              <HugeiconsIcon
-                icon={Icon}
-                size={13}
-                strokeWidth={1.75}
+            <Fragment key={agent.id}>
+              {index === 1 ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem
+                onSelect={() => setDraftAgentId(agent.id)}
                 className={cn(
-                  "mt-0.5",
-                  a.id === activeId
-                    ? "text-foreground"
-                    : "text-muted-foreground",
+                  "flex items-start gap-2 pr-2 text-[12px]",
+                  agent.id === draftAgentId && "bg-interactive-active",
                 )}
-              />
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span>{agentDisplayName(a)}</span>
-                <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
-                  {agentDisplayDescription(a)}
-                </span>
-              </span>
-              {a.id === activeId ? (
+              >
                 <HugeiconsIcon
-                  icon={Tick02Icon}
-                  size={12}
-                  strokeWidth={2}
-                  className="mt-0.5 shrink-0 text-foreground"
+                  icon={Icon}
+                  size={13}
+                  strokeWidth={1.75}
+                  className="mt-0.5 text-muted-foreground"
                 />
-              ) : null}
-            </DropdownMenuItem>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span>{agentDisplayName(agent)}</span>
+                  <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
+                    {agentDisplayDescription(agent)}
+                  </span>
+                </span>
+                {agent.id === draftAgentId ? (
+                  <HugeiconsIcon
+                    icon={Tick02Icon}
+                    size={12}
+                    strokeWidth={2}
+                    className="mt-0.5 shrink-0 text-foreground"
+                  />
+                ) : null}
+              </DropdownMenuItem>
+            </Fragment>
           );
         })}
-        {custom.length > 0 ? (
-          <>
-            <DropdownMenuSeparator />
-            <div className="px-2 pt-1 pb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-              {t("group.custom")}
-            </div>
-            {custom.map((a) => {
-              const Icon = ICONS[a.icon] ?? SparklesIcon;
-              return (
-                <DropdownMenuItem
-                  key={a.id}
-                  onSelect={() => setActiveId(a.id)}
-                  className={cn(
-                    "flex items-start gap-2 text-[12px]",
-                    a.id === activeId && "bg-interactive-active",
-                  )}
-                >
-                  <HugeiconsIcon
-                    icon={Icon}
-                    size={13}
-                    strokeWidth={1.75}
-                    className="mt-0.5 text-muted-foreground"
-                  />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{agentDisplayName(a)}</span>
-                    {a.description ? (
-                      <span className="line-clamp-1 text-[10.5px] text-muted-foreground">
-                        {agentDisplayDescription(a)}
-                      </span>
-                    ) : null}
-                  </span>
-                  {a.id === activeId ? (
-                    <HugeiconsIcon
-                      icon={Tick02Icon}
-                      size={12}
-                      strokeWidth={2}
-                      className="mt-0.5 shrink-0 text-foreground"
-                    />
-                  ) : null}
-                </DropdownMenuItem>
-              );
-            })}
-          </>
-        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => void openSettingsWindow("agents")}

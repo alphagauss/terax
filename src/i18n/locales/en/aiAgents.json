@@ -1,24 +1,13 @@
 {
   "name": {
-    "coder": "Coder",
-    "architect": "Architect",
-    "reviewer": "Code Reviewer",
-    "security": "Security",
-    "designer": "Designer"
+    "main": "Terax"
   },
   "desc": {
-    "coder": "General-purpose coding assistant. Writes, edits, and runs.",
-    "architect": "Design and tradeoffs. Plans before code.",
-    "reviewer": "Reviews diffs for correctness, perf, security.",
-    "security": "Threat-models changes and flags vulns.",
-    "designer": "UI/UX critique and refinement."
+    "main": "Built-in engineering agent with the complete tool set."
   },
   "trigger": {
-    "title": "Agent: {{name}}"
-  },
-  "group": {
-    "builtIn": "Built-in",
-    "custom": "Custom"
+    "title": "Agent: {{name}}",
+    "locked": "{{name}} is fixed for this conversation"
   },
   "manageAgents": "Manage agents…"
 }
