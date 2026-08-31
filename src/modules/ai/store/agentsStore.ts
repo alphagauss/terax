@@ -1,11 +1,16 @@
+/**
+ * 本文件管理跨 Workspace 共享的 Custom Agent 定义和当前未发送草稿的选择。
+ * 草稿选择只存在于当前进程，首次发送后由会话快照接管。
+ */
+
 import { onSharedStoreChange } from "@/lib/sharedStore";
 import { create } from "zustand";
 import {
-  BUILTIN_AGENTS,
   deleteCustomAgent,
+  findAgent,
   loadAgents,
+  MAIN_AGENT_ID,
   newAgentId,
-  saveActiveAgentId,
   upsertCustomAgent,
   type Agent,
 } from "../lib/agents";
@@ -13,56 +18,70 @@ import {
 type AgentsState = {
   hydrated: boolean;
   customAgents: Agent[];
-  activeId: string;
-  /** All agents, builtin first. */
-  all: () => Agent[];
+  draftAgentId: string;
   hydrate: () => Promise<void>;
-  setActiveId: (id: string) => void;
+  setDraftAgentId: (id: string) => void;
+  resetDraftAgent: () => void;
+  selectedDraftAgent: () => Agent;
   upsert: (agent: Agent) => void;
-  remove: (id: string) => void;
+  remove: (id: string) => Promise<string[]>;
 };
 
 let initialized = false;
 
+/** Custom Agent 状态；固定主 Agent 不进入持久化列表。 */
 export const useAgentsStore = create<AgentsState>((set, get) => ({
   hydrated: false,
   customAgents: [],
-  activeId: BUILTIN_AGENTS[0].id,
-  all: () => [...BUILTIN_AGENTS, ...get().customAgents],
+  draftAgentId: MAIN_AGENT_ID,
   hydrate: async () => {
     if (initialized) return;
     initialized = true;
-    const { custom, activeId } = await loadAgents();
-    set({ customAgents: custom, activeId, hydrated: true });
+    const customAgents = await loadAgents();
+    set({ customAgents, hydrated: true });
 
     void onSharedStoreChange("ai-agents", async () => {
       const fresh = await loadAgents();
-      set({ customAgents: fresh.custom });
+      const draftAgentId = fresh.some(
+        (agent) => agent.id === get().draftAgentId,
+      )
+        ? get().draftAgentId
+        : MAIN_AGENT_ID;
+      set({ customAgents: fresh, draftAgentId });
+      const { useChatStore } = await import("./chatStore");
+      if (useChatStore.getState().sessionsHydrated) {
+        await useChatStore.getState().refreshSessions();
+      }
     });
   },
-  setActiveId: (id) => {
-    set({ activeId: id });
-    void saveActiveAgentId(id);
+  setDraftAgentId: (id) => {
+    set({ draftAgentId: findAgent(get().customAgents, id).id });
   },
+  resetDraftAgent: () => set({ draftAgentId: MAIN_AGENT_ID }),
+  selectedDraftAgent: () => findAgent(get().customAgents, get().draftAgentId),
   upsert: (agent) => {
-    if (agent.builtIn) return;
     const list = get().customAgents;
-    const idx = list.findIndex((a) => a.id === agent.id);
+    const index = list.findIndex((item) => item.id === agent.id);
     const next =
-      idx === -1 ? [...list, agent] : list.map((a) => (a.id === agent.id ? agent : a));
+      index === -1
+        ? [...list, agent]
+        : list.map((item) => (item.id === agent.id ? agent : item));
     set({ customAgents: next });
     void upsertCustomAgent(agent);
   },
-  remove: (id) => {
-    const list = get().customAgents.filter((a) => a.id !== id);
-    set({ customAgents: list });
-    let active = get().activeId;
-    if (active === id) {
-      active = BUILTIN_AGENTS[0].id;
-      set({ activeId: active });
-      void saveActiveAgentId(active);
+  remove: async (id) => {
+    const deletedSessionIds = await deleteCustomAgent(id);
+    const customAgents = get().customAgents.filter((agent) => agent.id !== id);
+    set({
+      customAgents,
+      draftAgentId:
+        get().draftAgentId === id ? MAIN_AGENT_ID : get().draftAgentId,
+    });
+    const { useChatStore } = await import("./chatStore");
+    if (useChatStore.getState().sessionsHydrated) {
+      await useChatStore.getState().refreshSessions();
     }
-    void deleteCustomAgent(id);
+    return deletedSessionIds;
   },
 }));
 

@@ -12,17 +12,17 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
 import { getModel, type ModelId, providerNeedsKey } from "../config";
-import { BUILTIN_AGENTS } from "../lib/agents";
+import { parseSessionAgent } from "../lib/agents";
 import { resolveAgentExecutionEnvironment } from "../lib/prompt";
 import { resolveSessionCwd } from "../lib/sessions";
 import { createSessionTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
-import { useAgentsStore } from "./agentsStore";
 import {
   chats,
   getAgentMetaForSession,
   getActiveProviderKey,
   seedMessages,
+  sessionMetadata,
   touchChat,
   useChatStore,
 } from "./chatStore";
@@ -60,12 +60,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getModelId: () => useChatStore.getState().selectedModelId,
     getCustomInstructions: () =>
       usePreferencesStore.getState().customInstructions,
-    getAgentPersona: () => {
-      const { activeId, customAgents } = useAgentsStore.getState();
-      const all = [...BUILTIN_AGENTS, ...customAgents];
-      const a = all.find((x) => x.id === activeId) ?? BUILTIN_AGENTS[0];
-      return { name: a.name, instructions: a.instructions };
-    },
+    getAgent: () => parseSessionAgent(sessionMetadata.get(sessionId)?.agent),
     getCwd: getSessionCwd,
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),

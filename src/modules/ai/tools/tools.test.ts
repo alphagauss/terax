@@ -68,4 +68,11 @@ describe("AI tool provider schemas", () => {
       }
     },
   );
+
+  it("only exposes tools allowed by the session Agent snapshot", () => {
+    expect(Object.keys(buildTools(context, ["read_file", "grep"]))).toEqual([
+      "read_file",
+      "grep",
+    ]);
+  });
 });

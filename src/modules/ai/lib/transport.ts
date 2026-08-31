@@ -1,10 +1,11 @@
 /**
  * 本文件连接聊天 UI 与 Agent 流式运行时。
- * 会话消息保持原样发送，完整系统提示词在 Chat runtime 内只构造一次。
+ * 会话消息保持原样发送，系统提示词和 Agent 工具白名单在 Chat runtime 内只冻结一次。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
 import type { CustomEndpoint } from "../config";
+import type { SessionAgentSnapshot } from "./agents";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
@@ -20,7 +21,7 @@ type Deps = {
   toolContext: ToolContext;
   getModelId: () => string;
   getCustomInstructions: () => string;
-  getAgentPersona: () => { name: string; instructions: string } | null;
+  getAgent: () => SessionAgentSnapshot;
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
   getLmstudioBaseURL?: () => string | undefined;
@@ -54,37 +55,42 @@ type SendOptions = {
 /**
  * 创建只从真实会话消息和固定会话环境构造请求的聊天传输层。
  *
- * 首次发送时读取 AGENTS.md，并冻结 cwd、执行环境、人设和自定义指令。
+ * 首次发送时读取 AGENTS.md，并冻结 cwd、执行环境、Agent 快照和自定义指令。
  * 后续发送复用同一个 Promise；Chat 被淘汰后自然丢弃并在下次创建时重建。
  */
 export function createSessionTransport(deps: Deps) {
-  let systemPromptTask: Promise<string> | null = null;
+  let runtimeTask: Promise<{
+    systemPrompt: string;
+    agent: SessionAgentSnapshot;
+  }> | null = null;
 
-  /** 首次调用构造系统提示，后续调用复用同一 Promise 和字符串。 */
-  const getSystemPrompt = () => {
-    if (systemPromptTask) return systemPromptTask;
+  /** 首次调用冻结 Agent 并构造系统提示，后续调用复用同一运行配置。 */
+  const getRuntime = () => {
+    if (runtimeTask) return runtimeTask;
     const cwd = deps.getCwd();
     const environment = deps.getEnvironment();
-    const persona = deps.getAgentPersona();
+    const agent = deps.getAgent();
     const customInstructions = deps.getCustomInstructions();
-    systemPromptTask = readAgentsMd(cwd).then((projectInstructions) =>
-      buildAgentSystemPrompt({
+    runtimeTask = readAgentsMd(cwd).then((projectInstructions) => ({
+      agent,
+      systemPrompt: buildAgentSystemPrompt({
         cwd,
         environment,
-        persona,
+        agent,
         customInstructions,
         projectInstructions,
       }),
-    );
-    return systemPromptTask;
+    }));
+    return runtimeTask;
   };
 
   const run = async (options: SendOptions) => {
-    const systemPrompt = await getSystemPrompt();
+    const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
       systemPrompt,
+      allowedTools: agent.tools,
       toolContext: deps.toolContext,
       onStep: deps.onStep,
       onUsage: deps.onUsage,

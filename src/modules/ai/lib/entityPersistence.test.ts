@@ -1,3 +1,8 @@
+/**
+ * 本文件测试 AI 自定义实体使用按记录持久化接口。
+ * Agent 删除必须进入 Rust 级联命令，片段仍直接修改共享存储记录。
+ */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const shared = vi.hoisted(() => ({
@@ -5,10 +10,7 @@ const shared = vi.hoisted(() => ({
   set: vi.fn(),
   remove: vi.fn(),
 }));
-const workspace = vi.hoisted(() => ({
-  get: vi.fn(),
-  set: vi.fn(),
-}));
+const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/sharedStore", () => ({
   readSharedStore: shared.read,
@@ -16,17 +18,9 @@ vi.mock("@/lib/sharedStore", () => ({
   deleteSharedStoreKey: shared.remove,
 }));
 
-vi.mock("@/modules/workspace-process", () => ({
-  getWorkspaceValue: workspace.get,
-  setWorkspaceValue: workspace.set,
-}));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import {
-  deleteCustomAgent,
-  saveActiveAgentId,
-  upsertCustomAgent,
-  type Agent,
-} from "./agents";
+import { deleteCustomAgent, upsertCustomAgent, type Agent } from "./agents";
 import { deleteSnippet, upsertSnippet, type Snippet } from "./snippets";
 
 describe("per-record AI entity persistence", () => {
@@ -34,7 +28,7 @@ describe("per-record AI entity persistence", () => {
     vi.clearAllMocks();
     shared.set.mockResolvedValue(undefined);
     shared.remove.mockResolvedValue(undefined);
-    workspace.set.mockResolvedValue(undefined);
+    invoke.mockResolvedValue([]);
   });
 
   it("upserts and deletes only the target agent record", async () => {
@@ -44,7 +38,7 @@ describe("per-record AI entity persistence", () => {
       description: "test",
       instructions: "test",
       icon: "coder",
-      builtIn: false,
+      tools: ["read_file"],
     };
 
     await upsertCustomAgent(agent);
@@ -55,10 +49,9 @@ describe("per-record AI entity persistence", () => {
       "agent:agent-one",
       agent,
     );
-    expect(shared.remove).toHaveBeenCalledWith(
-      "ai-agents",
-      "agent:agent-one",
-    );
+    expect(invoke).toHaveBeenCalledWith("ai_agent_delete", {
+      agentId: "agent-one",
+    });
     expect(shared.read).not.toHaveBeenCalled();
   });
 
@@ -84,15 +77,5 @@ describe("per-record AI entity persistence", () => {
       "snippet:snippet-one",
     );
     expect(shared.read).not.toHaveBeenCalled();
-  });
-
-  it("persists the active agent only in the current Workspace", async () => {
-    await saveActiveAgentId("agent-one");
-
-    expect(workspace.set).toHaveBeenCalledWith(
-      "ai:activeAgentId",
-      "agent-one",
-    );
-    expect(shared.set).not.toHaveBeenCalled();
   });
 });

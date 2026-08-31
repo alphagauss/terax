@@ -1,4 +1,20 @@
+/**
+ * 本文件呈现固定主 Agent、Custom Agent、工具权限及提示片段设置。
+ * Custom Agent 删除会级联删除其跨 Workspace 会话，运行中会话由后端拒绝删除。
+ */
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -15,8 +31,15 @@ import {
   type AgentIconId,
   agentDisplayDescription,
   agentDisplayName,
-  BUILTIN_AGENTS,
+  MAIN_AGENT,
 } from "@/modules/ai/lib/agents";
+import {
+  AGENT_TOOL_GROUPS,
+  AGENT_TOOL_IDS,
+  agentToolGroupEnabled,
+  setAgentToolGroupEnabled,
+} from "@/modules/ai/lib/agentTools";
+import { listSessions } from "@/modules/ai/lib/sessions";
 import {
   isValidHandle,
   normalizeHandle,
@@ -31,7 +54,6 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setCustomInstructions } from "@/modules/settings/store";
 import {
   Add01Icon,
-  CheckmarkCircle02Icon,
   Delete02Icon,
   Edit02Icon,
   SparklesIcon,
@@ -39,6 +61,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { SectionHeader } from "../components/SectionHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
@@ -50,13 +73,11 @@ const ICON_OPTIONS: AgentIconId[] = [
   "spark",
 ];
 
-/** 自定义 Agent 设置区域。 */
+/** 固定主 Agent、Custom Agent、工具权限及复用片段设置区域。 */
 export function AgentsSection() {
   const { t } = useTranslation();
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
   const customAgents = useAgentsStore((s) => s.customAgents);
-  const activeAgentId = useAgentsStore((s) => s.activeId);
-  const setActiveAgentId = useAgentsStore((s) => s.setActiveId);
   const upsertAgent = useAgentsStore((s) => s.upsert);
   const removeAgent = useAgentsStore((s) => s.remove);
   const hydrateAgents = useAgentsStore((s) => s.hydrate);
@@ -73,6 +94,41 @@ export function AgentsSection() {
 
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
+  const [deletingAgent, setDeletingAgent] = useState<{
+    agent: Agent;
+    sessionCount: number;
+  } | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const requestAgentDeletion = async (agent: Agent) => {
+    try {
+      const sessions = await listSessions();
+      setDeletingAgent({
+        agent,
+        sessionCount: sessions.filter((session) => session.agentId === agent.id)
+          .length,
+      });
+    } catch {
+      toast.error(t("agents.delete.countFailed"));
+    }
+  };
+
+  const confirmAgentDeletion = async () => {
+    if (!deletingAgent || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await removeAgent(deletingAgent.agent.id);
+      setDeletingAgent(null);
+    } catch (error) {
+      toast.error(
+        String(error).includes("CUSTOM_AGENT_SESSIONS_RUNNING")
+          ? t("agents.delete.running")
+          : t("agents.delete.failed"),
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-7">
@@ -97,7 +153,7 @@ export function AgentsSection() {
                 description: "",
                 instructions: "",
                 icon: "spark",
-                builtIn: false,
+                tools: [...AGENT_TOOL_IDS],
               })
             }
           >
@@ -106,14 +162,20 @@ export function AgentsSection() {
           </Button>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {[...BUILTIN_AGENTS, ...customAgents].map((a) => (
+          {[
+            { ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] },
+            ...customAgents,
+          ].map((a) => (
             <AgentCard
               key={a.id}
               agent={a}
-              active={a.id === activeAgentId}
-              onActivate={() => setActiveAgentId(a.id)}
-              onEdit={a.builtIn ? null : () => setEditingAgent(a)}
-              onDelete={a.builtIn ? null : () => removeAgent(a.id)}
+              main={a.id === MAIN_AGENT.id}
+              onEdit={a.id === MAIN_AGENT.id ? null : () => setEditingAgent(a)}
+              onDelete={
+                a.id === MAIN_AGENT.id
+                  ? null
+                  : () => void requestAgentDeletion(a)
+              }
             />
           ))}
         </div>
@@ -127,9 +189,7 @@ export function AgentsSection() {
               <Trans
                 i18nKey="agents.snippets.description"
                 components={{
-                  code: (
-                    <code className="rounded bg-muted/50 px-1 font-mono" />
-                  ),
+                  code: <code className="rounded bg-muted/50 px-1 font-mono" />,
                 }}
               />
             </span>
@@ -230,34 +290,64 @@ export function AgentsSection() {
           setEditingSnippet(null);
         }}
       />
+      <AlertDialog
+        open={deletingAgent !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteBusy) setDeletingAgent(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("agents.delete.title")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletingAgent
+                ? t("agents.delete.description", {
+                    name: deletingAgent.agent.name,
+                    count: deletingAgent.sessionCount,
+                  })
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>
+              {t("common.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteBusy}
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmAgentDeletion();
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAgent && deletingAgent.sessionCount > 0
+                ? t("agents.delete.confirmWithSessions", {
+                    count: deletingAgent.sessionCount,
+                  })
+                : t("agents.delete.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 function AgentCard({
   agent,
-  active,
-  onActivate,
+  main,
   onEdit,
   onDelete,
 }: {
   agent: Agent;
-  active: boolean;
-  onActivate: () => void;
+  main: boolean;
   onEdit: (() => void) | null;
   onDelete: (() => void) | null;
 }) {
   const { t } = useTranslation();
   const Icon = AGENT_ICONS[agent.icon] ?? SparklesIcon;
   return (
-    <div
-      className={cn(
-        "group relative flex flex-col gap-1.5 rounded-lg border bg-card/60 px-3 py-2.5 transition-colors",
-        active
-          ? "border-foreground/30 ring-1 ring-foreground/10"
-          : "border-border/60 hover:border-border",
-      )}
-    >
+    <div className="group relative flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5 transition-colors hover:border-border">
       <div className="flex items-start gap-2">
         <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/40">
           <HugeiconsIcon icon={Icon} size={14} strokeWidth={1.5} />
@@ -265,9 +355,9 @@ function AgentCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-center gap-1.5 text-[12.5px] font-medium">
             {agentDisplayName(agent)}
-            {agent.builtIn ? (
+            {main ? (
               <span className="rounded bg-muted/50 px-1 py-0.5 text-[9px] tracking-wide text-muted-foreground uppercase">
-                {t("agents.list.builtIn")}
+                {t("agents.list.main")}
               </span>
             ) : null}
           </span>
@@ -277,25 +367,11 @@ function AgentCard({
         </div>
       </div>
       <div className="mt-0.5 flex items-center justify-between gap-1">
-        <Button
-          size="sm"
-          variant={active ? "default" : "outline"}
-          onClick={onActivate}
-          className="h-6 gap-1 px-2 text-[10.5px]"
-        >
-          {active ? (
-            <>
-              <HugeiconsIcon
-                icon={CheckmarkCircle02Icon}
-                size={10}
-                strokeWidth={2}
-              />
-              {t("agents.list.active")}
-            </>
-          ) : (
-            t("agents.list.useAgent")
-          )}
-        </Button>
+        <span className="text-[10px] text-muted-foreground">
+          {main
+            ? t("agents.list.allTools")
+            : t("agents.list.toolCount", { count: agent.tools.length })}
+        </span>
         <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           {onEdit ? (
             <Button
@@ -413,16 +489,57 @@ function AgentEditorDialog({
               className="min-h-40 resize-y text-[12px] leading-relaxed"
             />
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label>{t("agents.agentDialog.tools")}</Label>
+            <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+              {t("agents.agentDialog.toolsDescription")}
+            </span>
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+              {AGENT_TOOL_GROUPS.map((group) => {
+                const checked = agentToolGroupEnabled(draft.tools, group.id);
+                return (
+                  <label
+                    key={group.id}
+                    htmlFor={`agent-tool-${group.id}`}
+                    className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/50 px-2.5 py-2"
+                  >
+                    <Checkbox
+                      id={`agent-tool-${group.id}`}
+                      checked={checked}
+                      onCheckedChange={(value) =>
+                        setDraft({
+                          ...draft,
+                          tools: setAgentToolGroupEnabled(
+                            draft.tools,
+                            group.id,
+                            value === true,
+                          ),
+                        })
+                      }
+                      className="mt-0.5"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-[11.5px] font-medium">
+                        {t(`agents.tools.${group.id}.label`)}
+                      </span>
+                      <span className="text-[10px] leading-relaxed text-muted-foreground">
+                        {t(`agents.tools.${group.id}.description`)}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <span className="text-[10px] text-muted-foreground">
+              {t("agents.agentDialog.newSessionsOnly")}
+            </span>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button
-            size="sm"
-            disabled={!canSave}
-            onClick={() => onSave({ ...draft, builtIn: false })}
-          >
+          <Button size="sm" disabled={!canSave} onClick={() => onSave(draft)}>
             {t("common.save")}
           </Button>
         </DialogFooter>
@@ -578,7 +695,3 @@ function Label({ children }: { children: React.ReactNode }) {
     </span>
   );
 }
-/**
- * 本文件呈现自定义 AI Agent 设置及编辑对话框。
- * 负责 Agent 列表、图标选择和配置输入，不改变运行时 Agent 调度逻辑。
- */

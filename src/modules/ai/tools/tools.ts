@@ -10,18 +10,26 @@ import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
 import { buildTodoTools } from "./todo";
+import {
+  AGENT_TOOL_IDS,
+  normalizeAgentTools,
+  type AgentToolId,
+} from "../lib/agentTools";
 
 export { resolvePath, type ToolContext } from "./context";
 
 /**
- * 构建当前会话的完整工具集合。
+ * 构建当前会话被 Agent 快照允许的工具集合。
  *
  * 只读工具经过秘密路径拦截后自动执行，写入与命令工具必须取得用户批准。
  * 编辑工具额外要求模型先读取目标文件。各工具取得的 `getCwd` 始终指向
  * 会话首次发送时冻结的目录，不受标签页或 Explorer 后续切换影响。
  */
-export function buildTools(ctx: import("./context").ToolContext) {
-  return {
+export function buildTools(
+  ctx: import("./context").ToolContext,
+  allowedTools: readonly AgentToolId[] = AGENT_TOOL_IDS,
+) {
+  const all = {
     ...buildFsTools(ctx),
     ...buildPatchTools(ctx),
     ...buildSearchTools(ctx),
@@ -30,6 +38,10 @@ export function buildTools(ctx: import("./context").ToolContext) {
     ...buildTerminalTools(ctx),
     ...buildTodoTools(ctx),
   } as const;
+  const allowed = new Set(normalizeAgentTools(allowedTools));
+  return Object.fromEntries(
+    AGENT_TOOL_IDS.filter((id) => allowed.has(id)).map((id) => [id, all[id]]),
+  ) as Partial<typeof all>;
 }
 
 export type ChatTools = ReturnType<typeof buildTools>;

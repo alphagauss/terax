@@ -1,7 +1,8 @@
 //! 跨 Terax 进程共享的白名单配置存储。
 //!
 //! 所有变更都在文件锁内读取最新值并原子替换文件。批量接口仅修改明确列出的键，
-//! 用于保持跨键业务不变量，不允许调用方整表覆盖。
+//! 用于保持跨键业务不变量，不允许调用方整表覆盖。Custom Agent 的新会话提交和
+//! 级联删除共享配置锁，通用删除接口不能绕过会话清理。
 
 use crate::modules::storage::{write_atomic, FileLock};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -105,6 +106,72 @@ fn mutate<T>(
     Ok(result)
 }
 
+/// 在 Custom Agent 配置锁内校验定义存在并执行会话操作。
+///
+/// 新会话首次提交和 Agent 级联删除共享同一把锁，避免删除期间产生孤儿会话。
+pub(crate) fn with_ai_agent<T>(
+    agent_id: &str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let root = store_dir()?;
+    with_ai_agent_at(&root, agent_id, operation)
+}
+
+fn with_ai_agent_at<T>(
+    root: &Path,
+    agent_id: &str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let _lock = FileLock::acquire(&lock_path(root, "ai-agents")?, Duration::from_secs(5))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "shared store ai-agents is busy".to_string())?;
+    let map = read_map(&store_path(root, "ai-agents")?)?;
+    if !map.contains_key(&format!("agent:{agent_id}")) {
+        return Err("CUSTOM_AGENT_NOT_FOUND".to_string());
+    }
+    operation()
+}
+
+/// 在 Custom Agent 配置锁内完成关联资源删除，再移除对应定义。
+///
+/// 关联操作失败时定义保持不变；成功后发出共享存储变更事件。
+pub(crate) fn delete_ai_agent_with<T>(
+    app: &AppHandle,
+    agent_id: &str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let root = store_dir()?;
+    let result = delete_ai_agent_at(&root, agent_id, operation)?;
+    emit_changed(app, &root, "ai-agents")?;
+    Ok(result)
+}
+
+fn delete_ai_agent_at<T>(
+    root: &Path,
+    agent_id: &str,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if agent_id.is_empty() || agent_id.starts_with("builtin:") {
+        return Err("CUSTOM_AGENT_ID_INVALID".to_string());
+    }
+    fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let _lock = FileLock::acquire(&lock_path(root, "ai-agents")?, Duration::from_secs(5))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "shared store ai-agents is busy".to_string())?;
+    let path = store_path(root, "ai-agents")?;
+    let mut map = read_map(&path)?;
+    let key = format!("agent:{agent_id}");
+    if !map.contains_key(&key) {
+        return Err("CUSTOM_AGENT_NOT_FOUND".to_string());
+    }
+    let result = operation()?;
+    map.remove(&key);
+    let bytes = serde_json::to_vec(&map).map_err(|error| error.to_string())?;
+    write_atomic(&path, &bytes).map_err(|error| error.to_string())?;
+    Ok(result)
+}
+
 /// 校验并应用一组精确的键变更。
 ///
 /// 调用方必须在 `mutate` 持有文件锁期间调用，避免其他进程观察到部分结果。
@@ -128,6 +195,14 @@ fn apply_mutations(
                 map.remove(&key);
             }
         }
+    }
+    Ok(())
+}
+
+/// 禁止通用共享存储接口绕过 Custom Agent 的会话级联删除。
+fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
+    if store == "ai-agents" && key.starts_with("agent:") {
+        return Err("CUSTOM_AGENT_DELETE_REQUIRES_CASCADE".to_string());
     }
     Ok(())
 }
@@ -222,6 +297,7 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
+    validate_record_delete(&store, &key)?;
     let root = store_dir()?;
     mutate(&root, &store, |map| {
         map.remove(&key);
@@ -237,6 +313,11 @@ pub fn shared_store_mutate(
 ) -> Result<(), String> {
     if mutations.is_empty() {
         return Ok(());
+    }
+    for mutation in &mutations {
+        if let SharedStoreMutation::Delete { key } = mutation {
+            validate_record_delete(&store, key)?;
+        }
     }
     let root = store_dir()?;
     mutate(&root, &store, |map| apply_mutations(map, mutations))??;
@@ -342,6 +423,41 @@ mod tests {
 
         assert!(result.is_err());
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn custom_agent_lock_validates_definition_and_deletes_it_last() {
+        let dir = tempfile::tempdir().unwrap();
+        mutate(dir.path(), "ai-agents", |map| {
+            map.insert("agent:a-review".to_string(), Value::Bool(true));
+        })
+        .unwrap();
+
+        assert_eq!(
+            with_ai_agent_at(dir.path(), "a-review", || Ok("ready")).unwrap(),
+            "ready"
+        );
+        assert_eq!(
+            delete_ai_agent_at(dir.path(), "a-review", || {
+                Err::<(), _>("session delete failed".to_string())
+            })
+            .unwrap_err(),
+            "session delete failed"
+        );
+        assert!(read_map(&store_path(dir.path(), "ai-agents").unwrap())
+            .unwrap()
+            .contains_key("agent:a-review"));
+
+        delete_ai_agent_at(dir.path(), "a-review", || Ok(())).unwrap();
+        assert!(!read_map(&store_path(dir.path(), "ai-agents").unwrap())
+            .unwrap()
+            .contains_key("agent:a-review"));
+        assert!(with_ai_agent_at(dir.path(), "a-review", || Ok(())).is_err());
+        assert_eq!(
+            validate_record_delete("ai-agents", "agent:a-review").unwrap_err(),
+            "CUSTOM_AGENT_DELETE_REQUIRES_CASCADE"
+        );
+        assert!(validate_record_delete("ai-snippets", "snippet:review").is_ok());
     }
 
     #[test]

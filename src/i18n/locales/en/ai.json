@@ -40,6 +40,11 @@
     "newSession": "New session",
     "closeAiSidebar": "Close AI sidebar",
     "deleteSession": "Delete session",
+    "agentFilter": {
+      "label": "Filter by agent",
+      "all": "All agents",
+      "empty": "No conversations for this agent"
+    },
     "sessionStatus": {
       "background-running": "Running in the background",
       "completed-unread": "Completed, not viewed",

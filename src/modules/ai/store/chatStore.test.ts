@@ -42,6 +42,9 @@ vi.mock("@/modules/workspace-process", () => ({
 
 vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
+import { MAIN_AGENT_ID } from "../lib/agents";
+import type { SessionMeta } from "../lib/sessions";
+import { useAgentsStore } from "./agentsStore";
 import {
   chats,
   flushCompletedSessionRuns,
@@ -51,7 +54,7 @@ import {
   sessionMetadata,
   useChatStore,
 } from "./chatStore";
-import type { SessionMeta } from "../lib/sessions";
+import { useSessionAttentionStore } from "./sessionAttentionStore";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
 const realCommitMessages = useChatStore.getState().commitMessages;
@@ -64,6 +67,9 @@ const first: SessionMeta = {
   updatedAt: 2,
   environmentKey: "local",
   cwd: "D:/workspace/first",
+  agentId: "builtin:main",
+  agentName: "Terax",
+  agentIcon: "coder",
   fingerprint: "disk:1",
 };
 const second: SessionMeta = {
@@ -73,6 +79,9 @@ const second: SessionMeta = {
   updatedAt: 1,
   environmentKey: "local",
   cwd: "D:/workspace/second",
+  agentId: "builtin:main",
+  agentName: "Terax",
+  agentIcon: "coder",
   fingerprint: "disk:2",
 };
 const third: SessionMeta = {
@@ -82,6 +91,9 @@ const third: SessionMeta = {
   updatedAt: 0,
   environmentKey: "local",
   cwd: "D:/workspace/third",
+  agentId: "builtin:main",
+  agentName: "Terax",
+  agentIcon: "coder",
   fingerprint: "disk:3",
 };
 
@@ -91,7 +103,17 @@ const sessionFile = (meta: SessionMeta) => ({
   updatedAt: meta.updatedAt,
   environmentKey: meta.environmentKey,
   cwd: meta.cwd,
-  metadata: { title: meta.title, todos: [] },
+  metadata: {
+    title: meta.title,
+    todos: [],
+    agent: {
+      id: meta.agentId,
+      name: meta.agentName,
+      icon: meta.agentIcon,
+      instructions: "",
+      tools: ["read_file"],
+    },
+  },
   messages: [],
 });
 
@@ -103,6 +125,15 @@ describe("chat store multi-process lifecycle", () => {
     persistedMessageCounts.clear();
     sessionMetadata.clear();
     pendingTurnIds.clear();
+    useAgentsStore.setState({
+      customAgents: [],
+      draftAgentId: MAIN_AGENT_ID,
+    });
+    useSessionAttentionStore.setState({
+      bySession: {},
+      revealLatestBySession: {},
+      pendingCompletions: [],
+    });
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
@@ -110,7 +141,10 @@ describe("chat store multi-process lifecycle", () => {
       async (session: {
         id: string;
         cwd: string;
-        metadata: { title: string };
+        metadata: {
+          title: string;
+          agent?: { id: string; name: string; icon: "coder" };
+        };
         updatedAt: number;
       }) => ({
         id: session.id,
@@ -119,6 +153,9 @@ describe("chat store multi-process lifecycle", () => {
         updatedAt: session.updatedAt,
         environmentKey: "local",
         cwd: session.cwd,
+        agentId: session.metadata.agent?.id ?? "builtin:main",
+        agentName: session.metadata.agent?.name ?? "Terax",
+        agentIcon: session.metadata.agent?.icon ?? "coder",
         modifiedAt: 10,
         size: 20,
         fingerprint: "disk:committed",
@@ -141,6 +178,7 @@ describe("chat store multi-process lifecycle", () => {
       activeSessionRevision: 0,
       runLockSessionIds: {},
       agentMetaBySession: {},
+      sessionAgentFilter: null,
       sessionSyncError: null,
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
@@ -288,6 +326,54 @@ describe("chat store multi-process lifecycle", () => {
     useChatStore.getState().newSession();
 
     await vi.waitFor(() => expect(io.workspaceDelete).toHaveBeenCalledOnce());
+  });
+
+  it("freezes the selected Custom Agent when a draft becomes a session", () => {
+    const draftId = "44444444-4444-4444-8444-444444444444";
+    useAgentsStore.setState({
+      customAgents: [
+        {
+          id: "a-review",
+          name: "Reviewer",
+          description: "Review code",
+          instructions: "Review carefully.",
+          icon: "reviewer",
+          tools: ["read_file", "grep"],
+        },
+      ],
+      draftAgentId: "a-review",
+    });
+    useChatStore.setState({
+      sessions: [],
+      draftSessionId: draftId,
+      activeSessionId: draftId,
+    });
+
+    useChatStore.getState().promoteSession(
+      draftId,
+      [
+        {
+          id: "m1",
+          role: "user",
+          parts: [{ type: "text", text: "review" }],
+        },
+      ],
+      "D:/workspace/draft",
+    );
+
+    expect(useChatStore.getState().sessions[0]).toMatchObject({
+      agentId: "a-review",
+      agentName: "Reviewer",
+      agentIcon: "reviewer",
+    });
+    expect(sessionMetadata.get(draftId)?.agent).toEqual({
+      id: "a-review",
+      name: "Reviewer",
+      instructions: "Review carefully.",
+      icon: "reviewer",
+      tools: ["read_file", "grep"],
+    });
+    expect(useAgentsStore.getState().draftAgentId).toBe(MAIN_AGENT_ID);
   });
 
   it("persists the user message and system prompt before the assistant response", async () => {
@@ -522,6 +608,7 @@ describe("chat store multi-process lifecycle", () => {
 
     expect(stop).toHaveBeenCalledOnce();
     expect(chats.has(second.id)).toBe(false);
+    expect(io.clearProcesses).not.toHaveBeenCalled();
   });
 
   it("opens a draft after deleting the active session", async () => {
@@ -550,6 +637,8 @@ describe("chat store multi-process lifecycle", () => {
       draftSessionId: null,
       runLockSessionIds: {},
     });
+    useChatStore.getState().patchAgentMeta(first.id, { step: "Reading" });
+    useSessionAttentionStore.getState().markBackgroundRunning(first.id);
     io.list.mockResolvedValue([second]);
 
     await useChatStore.getState().refreshSessions();
@@ -558,6 +647,13 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().activeSessionId).toBe(
       useChatStore.getState().draftSessionId,
     );
+    expect(io.clearProcesses).toHaveBeenCalledWith(first.id);
+    expect(
+      useChatStore.getState().agentMetaBySession[first.id],
+    ).toBeUndefined();
+    expect(
+      useSessionAttentionStore.getState().bySession[first.id],
+    ).toBeUndefined();
     expect(io.workspaceDelete).toHaveBeenCalledOnce();
   });
 });

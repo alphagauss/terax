@@ -1,39 +1,86 @@
 /**
- * 本文件测试内置与自定义 AI Agent 的解析规则。
- * 锁定内置标识唯一性和无效活动标识的安全回退。
+ * 本文件测试固定主 Agent、自定义定义迁移和会话快照解析。
+ * 锁定旧定义补齐工具、无效选择回退主 Agent以及会话快照独立复制。
  */
 
-import { describe, expect, it } from "vitest";
-import { type Agent, BUILTIN_AGENTS, findAgent } from "./agents";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const shared = vi.hoisted(() => ({ read: vi.fn() }));
+
+vi.mock("@/lib/sharedStore", () => ({
+  readSharedStore: shared.read,
+  setSharedStoreKey: vi.fn(),
+}));
+
+import {
+  type Agent,
+  findAgent,
+  loadAgents,
+  MAIN_AGENT,
+  parseSessionAgent,
+  snapshotAgent,
+} from "./agents";
+import { AGENT_TOOL_IDS } from "./agentTools";
 
 const custom: Agent = {
   id: "a-1",
   name: "Mine",
-  description: "",
-  instructions: "",
+  description: "Focused agent",
+  instructions: "Inspect carefully.",
   icon: "spark",
-  builtIn: false,
+  tools: ["read_file", "grep"],
 };
 
-const all = [...BUILTIN_AGENTS, custom];
+describe("agent definitions", () => {
+  beforeEach(() => vi.clearAllMocks());
 
-describe("BUILTIN_AGENTS", () => {
-  it("具有唯一标识并统一标记为内置 Agent", () => {
-    const ids = BUILTIN_AGENTS.map((agent) => agent.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(BUILTIN_AGENTS.every((agent) => agent.builtIn)).toBe(true);
-  });
-});
-
-describe("findAgent", () => {
-  it("返回标识匹配的 Agent", () => {
-    expect(findAgent(all, "a-1")).toBe(custom);
+  it("keeps one fixed main agent and falls back to it", () => {
+    expect(findAgent([custom], "a-1")).toBe(custom);
+    expect(findAgent([custom], "missing")).toMatchObject({
+      id: MAIN_AGENT.id,
+      name: "Terax",
+    });
   });
 
-  it.each(["does-not-exist", null, undefined, ""])(
-    "对无效标识 %s 回退到首个内置 Agent",
-    (id) => {
-      expect(findAgent(all, id)).toBe(BUILTIN_AGENTS[0]);
-    },
-  );
+  it("loads old custom agents with the complete tool set", async () => {
+    shared.read.mockResolvedValue({
+      "agent:a-1": {
+        id: "a-1",
+        name: "Mine",
+        description: "Focused agent",
+        instructions: "Inspect carefully.",
+        icon: "spark",
+        builtIn: false,
+      },
+      "agent:broken": { id: "builtin:legacy" },
+      "agent:mismatched": {
+        id: "a-other",
+        name: "Other",
+        description: "Wrong key",
+        instructions: "Should be ignored.",
+        icon: "spark",
+      },
+    });
+
+    await expect(loadAgents()).resolves.toEqual([
+      { ...custom, tools: [...AGENT_TOOL_IDS] },
+    ]);
+  });
+
+  it("copies snapshots and treats legacy session metadata as main", () => {
+    const snapshot = snapshotAgent(custom);
+    custom.tools.push("find_files");
+
+    expect(snapshot.tools).toEqual(["read_file", "grep"]);
+    expect(parseSessionAgent(undefined).id).toBe(MAIN_AGENT.id);
+    expect(
+      parseSessionAgent({
+        id: MAIN_AGENT.id,
+        name: "Modified main",
+        instructions: "Override the fixed main agent.",
+        icon: "security",
+        tools: [],
+      }),
+    ).toEqual(snapshotAgent(findAgent([], null)));
+  });
 });

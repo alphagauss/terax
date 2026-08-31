@@ -16,6 +16,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
@@ -34,7 +40,7 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   estimateCost,
@@ -46,15 +52,18 @@ import {
   estimateUiMessageTokens,
   STREAM_RENDER_INTERVAL_MS,
 } from "../lib/chatRendering";
+import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
 import { getOrCreateChat } from "../store/chatRuntime";
+import { useAgentsStore } from "../store/agentsStore";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import {
   type SessionAttention,
   useSessionAttentionStore,
 } from "../store/sessionAttentionStore";
 import { AiChatView } from "./AiChat";
+import { AGENT_ICONS } from "./AgentSwitcher";
 import { AiInputBarConnect } from "./AiInputBar";
 import { AiSidebarComposer } from "./AiSidebarComposer";
 import { TodoStrip } from "./TodoStrip";
@@ -384,12 +393,30 @@ function SessionPicker() {
   const attentionBySession = useSessionAttentionStore((s) => s.bySession);
   const switchSession = useChatStore((s) => s.switchSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
+  const agentFilter = useChatStore((state) => state.sessionAgentFilter);
+  const setAgentFilter = useChatStore((state) => state.setSessionAgentFilter);
+  const customAgents = useAgentsStore((state) => state.customAgents);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const isDraft = activeId != null && !active;
+  const agents = useMemo(
+    () => [{ ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] }, ...customAgents],
+    [customAgents],
+  );
+  useEffect(() => {
+    if (
+      agentFilter !== null &&
+      !agents.some((agent) => agent.id === agentFilter)
+    ) {
+      setAgentFilter(null);
+    }
+  }, [agentFilter, agents, setAgentFilter]);
+  const sorted = sessions
+    .filter(
+      (session) => agentFilter === null || session.agentId === agentFilter,
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt);
   if (!active && !isDraft) return null;
-
-  const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
 
   return (
     <DropdownMenu>
@@ -416,10 +443,61 @@ function SessionPicker() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger className="gap-2">
+            <HugeiconsIcon icon={FilterIcon} size={12} strokeWidth={1.75} />
+            <span className="flex-1">{t("miniWindow.agentFilter.label")}</span>
+            <span className="max-w-24 truncate text-[10px] text-muted-foreground">
+              {agentFilter === null
+                ? t("miniWindow.agentFilter.all")
+                : agents.find((agent) => agent.id === agentFilter)?.name}
+            </span>
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="min-w-52">
+            <DropdownMenuRadioGroup
+              value={agentFilter ?? "all"}
+              onValueChange={(value) =>
+                setAgentFilter(value === "all" ? null : value)
+              }
+            >
+              <DropdownMenuRadioItem value="all">
+                <span className="flex flex-1 justify-between gap-4">
+                  <span>{t("miniWindow.agentFilter.all")}</span>
+                  <span className="text-muted-foreground">
+                    {sessions.length}
+                  </span>
+                </span>
+              </DropdownMenuRadioItem>
+              {agents.map((agent) => (
+                <DropdownMenuRadioItem key={agent.id} value={agent.id}>
+                  <span className="flex flex-1 justify-between gap-4">
+                    <span className="truncate">{agentDisplayLabel(agent)}</span>
+                    <span className="text-muted-foreground">
+                      {
+                        sessions.filter(
+                          (session) => session.agentId === agent.id,
+                        ).length
+                      }
+                    </span>
+                  </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSeparator />
         {sorted.map((s) => (
           <SessionRow
             key={s.id}
             session={s}
+            agentName={
+              agents.find((agent) => agent.id === s.agentId)?.name ??
+              s.agentName
+            }
+            agentIcon={
+              agents.find((agent) => agent.id === s.agentId)?.icon ??
+              s.agentIcon
+            }
             active={s.id === activeId}
             attention={attentionBySession[s.id]}
             deleteDisabled={Boolean(runLocks[s.id])}
@@ -427,6 +505,11 @@ function SessionPicker() {
             onDelete={() => deleteSession(s.id)}
           />
         ))}
+        {sorted.length === 0 ? (
+          <DropdownMenuItem disabled>
+            {t("miniWindow.agentFilter.empty")}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -434,6 +517,8 @@ function SessionPicker() {
 
 function SessionRow({
   session,
+  agentName,
+  agentIcon,
   active,
   attention,
   deleteDisabled,
@@ -441,6 +526,8 @@ function SessionRow({
   onDelete,
 }: {
   session: SessionMeta;
+  agentName: string;
+  agentIcon: SessionMeta["agentIcon"];
   active: boolean;
   attention?: SessionAttention;
   deleteDisabled: boolean;
@@ -468,6 +555,15 @@ function SessionRow({
     >
       <span className="flex min-w-0 flex-1 items-center gap-1">
         <SessionAttentionIndicator attention={attention} />
+        {session.agentId !== MAIN_AGENT_ID ? (
+          <HugeiconsIcon
+            icon={AGENT_ICONS[agentIcon]}
+            size={11}
+            strokeWidth={1.75}
+            className="shrink-0 text-muted-foreground"
+            aria-label={agentName}
+          />
+        ) : null}
         <span className="min-w-0 flex-1 truncate">
           {session.title || t("miniWindow.newChat")}
         </span>
@@ -495,6 +591,11 @@ function SessionRow({
       </button>
     </DropdownMenuItem>
   );
+}
+
+/** 返回历史筛选器中的 Agent 名称，主 Agent 使用固定产品名称。 */
+function agentDisplayLabel(agent: { id: string; name: string }): string {
+  return agent.id === MAIN_AGENT_ID ? MAIN_AGENT.name : agent.name;
 }
 
 function SessionAttentionIndicator({

@@ -1,13 +1,16 @@
-import {
-  deleteSharedStoreKey,
-  readSharedStore,
-  setSharedStoreKey,
-} from "@/lib/sharedStore";
-import {
-  getWorkspaceValue,
-  setWorkspaceValue,
-} from "@/modules/workspace-process";
+/**
+ * 本文件定义固定主 Agent、自定义 Agent 及其会话快照。
+ * 自定义定义跨 Workspace 共享，会话只依赖首次发送时保存的运行快照。
+ */
+
 import i18n from "@/i18n";
+import { readSharedStore, setSharedStoreKey } from "@/lib/sharedStore";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  AGENT_TOOL_IDS,
+  type AgentToolId,
+  normalizeAgentTools,
+} from "./agentTools";
 
 export type AgentIconId =
   | "coder"
@@ -23,134 +26,161 @@ export type Agent = {
   description: string;
   instructions: string;
   icon: AgentIconId;
-  builtIn: boolean;
+  tools: AgentToolId[];
 };
 
-export const BUILTIN_AGENTS: readonly Agent[] = [
-  {
-    id: "builtin:coder",
-    name: "Coder",
-    description: "General-purpose coding assistant. Writes, edits, and runs.",
-    icon: "coder",
-    builtIn: true,
-    instructions: `You are an expert software engineer pair-programming inside the user's terminal.
-- Read files before editing them. Match existing patterns and naming.
-- Prefer the smallest correct change. Don't refactor adjacent code unprompted.
-- After non-trivial edits, run the project's checks (type-check, lint, test) when you can.
-- Keep responses tight: short prose, code blocks with language fences.`,
-  },
-  {
-    id: "builtin:architect",
-    name: "Architect",
-    description: "Design and tradeoffs. Plans before code.",
-    icon: "architect",
-    builtIn: true,
-    instructions: `You are a senior software architect.
-- Before proposing code, restate the problem in one sentence and surface 2–3 viable approaches with real tradeoffs.
-- Recommend one with reasoning. Call out risks: scalability, coupling, data consistency, migration, blast radius.
-- Reference the actual repo (read key files) before generalizing. No hand-wavy advice.
-- Output structure: Problem · Options · Recommendation · Risks · Next steps.`,
-  },
-  {
-    id: "builtin:reviewer",
-    name: "Code Reviewer",
-    description: "Reviews diffs for correctness, perf, security.",
-    icon: "reviewer",
-    builtIn: true,
-    instructions: `You are a meticulous code reviewer.
-- Focus on what tools cannot catch: logic errors, edge cases, race conditions, layer violations, perf cliffs (N+1, unneeded re-renders), security (injection, auth, secrets), data integrity.
-- Skip formatting / naming / inferred-type nits — linters handle those.
-- Output: \`[MUST/SHOULD/NIT] file:line — issue → fix\`. If nothing real, say "Looks good."
-- Verify each finding against the actual file before reporting it.`,
-  },
-  {
-    id: "builtin:security",
-    name: "Security",
-    description: "Threat-models changes and flags vulns.",
-    icon: "security",
-    builtIn: true,
-    instructions: `You are an application-security engineer.
-- Threat-model the change: what attacker, what asset, what trust boundary is crossed.
-- Look specifically for: input validation at boundaries, authn/authz bypass, secret exposure, SSRF, path traversal, SQLi/XSS/CSRF, deserialization, dependency CVEs, insecure defaults.
-- For each finding: severity, exploit sketch, concrete fix. Prefer fixes that close the class of bug, not the one report.
-- If the change is benign, say so explicitly — don't fabricate findings.`,
-  },
-  {
-    id: "builtin:designer",
-    name: "Designer",
-    description: "UI/UX critique and refinement.",
-    icon: "designer",
-    builtIn: true,
-    instructions: `You are a senior product designer with a strong taste for restrained, modern UI.
-- Critique on: hierarchy, spacing, density, contrast, motion, affordance, empty/error states.
-- Propose concrete changes, with Tailwind/CSS values when helpful. Keep consistent with the surrounding design system.
-- Avoid generic "make it pop" advice. Be specific about what's wrong and why.`,
-  },
-] as const;
+export type SessionAgentSnapshot = Pick<
+  Agent,
+  "id" | "name" | "instructions" | "icon" | "tools"
+>;
+
+export const MAIN_AGENT_ID = "builtin:main";
+
+export const MAIN_AGENT: Readonly<Agent> = {
+  id: MAIN_AGENT_ID,
+  name: "Terax",
+  description: "Built-in general-purpose engineering agent with all tools.",
+  instructions: "",
+  icon: "coder",
+  tools: [...AGENT_TOOL_IDS],
+};
+
+const AGENT_ICONS = new Set<AgentIconId>([
+  "coder",
+  "architect",
+  "reviewer",
+  "security",
+  "designer",
+  "spark",
+]);
 
 const agentKey = (id: string) => `agent:${id}`;
 
-export type LoadedAgents = {
-  custom: Agent[];
-  activeId: string;
-};
+/** 将不可信持久化值规范为已知 Agent 图标。 */
+export function normalizeAgentIcon(
+  value: unknown,
+  fallback: AgentIconId = "spark",
+): AgentIconId {
+  return AGENT_ICONS.has(value as AgentIconId)
+    ? (value as AgentIconId)
+    : fallback;
+}
 
-export async function loadAgents(): Promise<LoadedAgents> {
+/** 读取所有有效 Custom Agent，并在内存中迁移旧版缺失的工具列表。 */
+export async function loadAgents(): Promise<Agent[]> {
   const values = await readSharedStore("ai-agents");
-  const records = Object.entries(values)
+  return Object.entries(values)
     .filter(([key]) => key.startsWith("agent:"))
-    .map(([, value]) => value as Agent);
-  const custom = records;
-  const activeId = getWorkspaceValue<string>("ai:activeAgentId");
-  return {
-    custom,
-    activeId: activeId ?? BUILTIN_AGENTS[0].id,
-  };
+    .map(([key, value]) => parseCustomAgent(key, value))
+    .filter((agent): agent is Agent => agent !== null);
 }
 
+/** 保存单个 Custom Agent，工具列表在写入前规范为稳定顺序。 */
 export function upsertCustomAgent(agent: Agent): Promise<void> {
-  return setSharedStoreKey("ai-agents", agentKey(agent.id), agent);
+  const normalized = { ...agent, tools: normalizeAgentTools(agent.tools) };
+  return setSharedStoreKey("ai-agents", agentKey(agent.id), normalized);
 }
 
-export function deleteCustomAgent(id: string): Promise<void> {
-  return deleteSharedStoreKey("ai-agents", agentKey(id));
+/**
+ * 删除 Custom Agent 及其跨 Workspace 的全部会话。
+ *
+ * Rust 在共享 Agent 配置锁和关联会话锁内完成级联操作，并返回删除的会话 ID。
+ */
+export function deleteCustomAgent(id: string): Promise<string[]> {
+  return invoke<string[]>("ai_agent_delete", { agentId: id });
 }
 
-export async function saveActiveAgentId(id: string): Promise<void> {
-  await setWorkspaceValue("ai:activeAgentId", id);
-}
-
+/** 生成不与固定主 Agent 冲突的 Custom Agent 标识。 */
 export function newAgentId(): string {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** Strip the `builtin:` prefix to get the JSON key suffix (e.g. "coder"). */
-function builtInKey(id: string): string {
-  return id.startsWith("builtin:") ? id.slice("builtin:".length) : id;
+/** 解析 Agent 显示名称，固定主 Agent 支持运行时语言切换。 */
+export function agentDisplayName(agent: Pick<Agent, "id" | "name">): string {
+  return agent.id === MAIN_AGENT_ID
+    ? i18n.t("aiAgents:name.main", { defaultValue: agent.name })
+    : agent.name;
 }
 
-/**
- * Resolve an agent's display name. Built-in agents are translated at call time
- * (so language switches update live); custom agents keep their own value.
- * Falls back to the agent's original value if no translation key matches.
- */
-export function agentDisplayName(agent: Agent): string {
-  if (!agent.builtIn) return agent.name;
-  const key = builtInKey(agent.id);
-  return i18n.t(`aiAgents:name.${key}`, { defaultValue: agent.name });
+/** 解析 Agent 显示描述，Custom Agent 保留用户输入。 */
+export function agentDisplayDescription(
+  agent: Pick<Agent, "id" | "description">,
+): string {
+  return agent.id === MAIN_AGENT_ID
+    ? i18n.t("aiAgents:desc.main", { defaultValue: agent.description })
+    : agent.description;
 }
 
-/** Same as {@link agentDisplayName} but for the description. */
-export function agentDisplayDescription(agent: Agent): string {
-  if (!agent.builtIn) return agent.description;
-  const key = builtInKey(agent.id);
-  return i18n.t(`aiAgents:desc.${key}`, { defaultValue: agent.description });
-}
-
+/** 从 Custom Agent 列表解析指定定义，无效 ID 统一回退固定主 Agent。 */
 export function findAgent(
-  agents: readonly Agent[],
+  customAgents: readonly Agent[],
   id: string | null | undefined,
 ): Agent {
-  if (!id) return BUILTIN_AGENTS[0];
-  return agents.find((a) => a.id === id) ?? BUILTIN_AGENTS[0];
+  const main = () => ({ ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] });
+  if (!id || id === MAIN_AGENT_ID) return main();
+  return customAgents.find((agent) => agent.id === id) ?? main();
+}
+
+/** 创建与后续 Agent 编辑解耦的会话运行快照。 */
+export function snapshotAgent(agent: Agent): SessionAgentSnapshot {
+  return {
+    id: agent.id,
+    name: agent.name,
+    instructions: agent.instructions,
+    icon: agent.icon,
+    tools: normalizeAgentTools(agent.tools),
+  };
+}
+
+/** 从不透明会话 metadata 值恢复 Agent 快照，旧会话统一归入主 Agent。 */
+export function parseSessionAgent(value: unknown): SessionAgentSnapshot {
+  if (!value || typeof value !== "object")
+    return snapshotAgent(findAgent([], null));
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    typeof record.name !== "string" ||
+    typeof record.instructions !== "string"
+  ) {
+    return snapshotAgent(findAgent([], null));
+  }
+  if (record.id === MAIN_AGENT_ID) {
+    return snapshotAgent(findAgent([], null));
+  }
+  const icon = normalizeAgentIcon(record.icon);
+  return {
+    id: record.id,
+    name: record.name,
+    instructions: record.instructions,
+    icon,
+    tools: normalizeAgentTools(record.tools),
+  };
+}
+
+/** 严格解析共享存储中的 Custom Agent，忽略损坏记录和保留 ID。 */
+function parseCustomAgent(key: string, value: unknown): Agent | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id !== "string" ||
+    !record.id ||
+    record.id.startsWith("builtin:") ||
+    key !== agentKey(record.id) ||
+    typeof record.name !== "string" ||
+    !record.name.trim() ||
+    typeof record.description !== "string" ||
+    typeof record.instructions !== "string" ||
+    !record.instructions.trim()
+  ) {
+    return null;
+  }
+  const icon = normalizeAgentIcon(record.icon);
+  return {
+    id: record.id,
+    name: record.name,
+    description: record.description,
+    instructions: record.instructions,
+    icon,
+    tools: normalizeAgentTools(record.tools),
+  };
 }

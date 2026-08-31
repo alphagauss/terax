@@ -17,7 +17,7 @@ export type AgentExecutionEnvironment = {
 type BuildAgentSystemPromptOptions = {
   cwd: string;
   environment: AgentExecutionEnvironment;
-  persona: { name: string; instructions: string } | null;
+  agent: { name: string; instructions: string };
   customInstructions: string | undefined;
   projectInstructions: string | null;
 };
@@ -68,7 +68,7 @@ export function resolveAgentExecutionEnvironment(
 export function buildAgentSystemPrompt({
   cwd,
   environment,
-  persona,
+  agent,
   customInstructions,
   projectInstructions,
 }: BuildAgentSystemPromptOptions): string {
@@ -84,19 +84,18 @@ Shell tool default: ${environment.defaultShell}
 Working directory: ${JSON.stringify(cwd)}
 Relative paths passed to tools resolve from this directory. Use the default shell's syntax unless shell_exec explicitly selects another shell. Terminal scrollback is not included automatically; use get_terminal_output when it is relevant. This environment is fixed for the session.`;
   const normalizedProject = normalizeInstructions(projectInstructions);
-  const normalizedPersona = normalizeInstructions(persona?.instructions);
+  const normalizedAgent = normalizeInstructions(agent.instructions);
   const normalizedCustom = normalizeInstructions(customInstructions);
   const instructionsBlock = normalizedProject
     ? `\n\n## PROJECT INSTRUCTIONS: AGENTS.md\n${normalizedProject}`
     : "";
-  const personaBlock =
-    persona && normalizedPersona
-      ? `\n\n## ACTIVE AGENT: ${persona.name.replace(/[\r\n]+/g, " ").trim()}\n${normalizedPersona}`
-      : "";
+  const agentBlock = normalizedAgent
+    ? `\n\n## AGENT INSTRUCTIONS: ${agent.name.replace(/[\r\n]+/g, " ").trim()}\n${normalizedAgent}`
+    : "";
   const customBlock = normalizedCustom
     ? `\n\n## USER CUSTOM INSTRUCTIONS\nFollow these unless they conflict with higher-priority safety rules.\n${normalizedCustom}`
     : "";
-  return `${SYSTEM_PROMPT}\n\n${environmentBlock}${instructionsBlock}${personaBlock}${customBlock}`;
+  return `${SYSTEM_PROMPT}\n\n${environmentBlock}${instructionsBlock}${agentBlock}${customBlock}`;
 }
 
 /** 统一指令文本换行并忽略无语义的首尾空白，避免产生偶发的 prompt 差异。 */

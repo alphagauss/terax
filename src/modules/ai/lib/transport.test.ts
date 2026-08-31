@@ -18,6 +18,7 @@ vi.mock("./projectInstructions", () => ({
 }));
 
 import { createSessionTransport } from "./transport";
+import type { SessionAgentSnapshot } from "./agents";
 
 const environment = {
   platform: "Windows",
@@ -48,7 +49,13 @@ describe("session transport", () => {
       toolContext: {} as never,
       getModelId: () => "model",
       getCustomInstructions: () => "",
-      getAgentPersona: () => null,
+      getAgent: () => ({
+        id: "builtin:main",
+        name: "Terax",
+        instructions: "",
+        icon: "coder",
+        tools: ["read_file"],
+      }),
       getCwd: () => "D:/workspace/project",
       getEnvironment: () => environment,
     });
@@ -71,13 +78,19 @@ describe("session transport", () => {
   it("reuses one prompt when model and external instruction sources change", async () => {
     let modelId = "model-a";
     let customInstructions = "First preference";
-    let persona = { name: "Builder", instructions: "First persona" };
+    let agent: SessionAgentSnapshot = {
+      id: "agent-a",
+      name: "Builder",
+      instructions: "First agent",
+      icon: "spark",
+      tools: ["read_file"],
+    };
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
       toolContext: {} as never,
       getModelId: () => modelId,
       getCustomInstructions: () => customInstructions,
-      getAgentPersona: () => persona,
+      getAgent: () => agent,
       getCwd: () => "D:/workspace/project",
       getEnvironment: () => environment,
     });
@@ -92,7 +105,13 @@ describe("session transport", () => {
     await transport.sendMessages({ messages });
     modelId = "model-b";
     customInstructions = "Second preference";
-    persona = { name: "Reviewer", instructions: "Second persona" };
+    agent = {
+      id: "agent-b",
+      name: "Reviewer",
+      instructions: "Second agent",
+      icon: "reviewer",
+      tools: ["grep"],
+    };
     mocks.readAgentsMd.mockResolvedValue("Changed project instructions");
     await transport.sendMessages({ messages });
 
@@ -102,8 +121,14 @@ describe("session transport", () => {
     expect(secondPrompt).toBe(firstPrompt);
     expect(mocks.runAgentStream.mock.calls[1][0].modelId).toBe("model-b");
     expect(firstPrompt).toContain("Project instructions");
-    expect(firstPrompt).toContain("First persona");
+    expect(firstPrompt).toContain("First agent");
     expect(firstPrompt).toContain("First preference");
-    expect(firstPrompt).not.toContain("Second persona");
+    expect(firstPrompt).not.toContain("Second agent");
+    expect(mocks.runAgentStream.mock.calls[0][0].allowedTools).toEqual([
+      "read_file",
+    ]);
+    expect(mocks.runAgentStream.mock.calls[1][0].allowedTools).toEqual([
+      "read_file",
+    ]);
   });
 });
