@@ -14,7 +14,6 @@ export const AGENT_TOOL_IDS = [
   "shell_process",
   "shell_list",
   "get_terminal_output",
-  "todo_write",
   "run_subagent",
 ] as const;
 
@@ -36,10 +35,6 @@ export const AGENT_TOOL_GROUPS = [
   {
     id: "terminal",
     tools: ["get_terminal_output"],
-  },
-  {
-    id: "todos",
-    tools: ["todo_write"],
   },
   {
     id: "subagents",

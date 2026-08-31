@@ -659,8 +659,7 @@ mod tests {
             environment_key: "local".to_string(),
             cwd: "D:/workspace/project".to_string(),
             metadata: serde_json::from_value(json!({
-                "title": title,
-                "todos": [{"id": "todo", "title": "test", "status": "pending"}]
+                "title": title
             }))
             .unwrap(),
             messages: vec![json!({

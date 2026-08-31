@@ -168,9 +168,6 @@
     "scrollToLatest": "前往最新输出并恢复跟随",
     "userMessageFallback": "[附件或上下文]"
   },
-  "todos": {
-    "title": "待办"
-  },
   "filePicker": {
     "workspaceFiles": "工作区文件",
     "noWorkspace": "未打开工作区",

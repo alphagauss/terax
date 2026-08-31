@@ -66,7 +66,6 @@ import { AiChatView } from "./AiChat";
 import { AGENT_ICONS } from "./AgentSwitcher";
 import { AiInputBarConnect } from "./AiInputBar";
 import { AiSidebarComposer } from "./AiSidebarComposer";
-import { TodoStrip } from "./TodoStrip";
 
 const SUGGESTIONS = [
   {
@@ -172,8 +171,6 @@ function Body({
           </div>
         )}
       </div>
-
-      <TodoStrip sessionId={sessionId} />
     </>
   );
 }

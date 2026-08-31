@@ -168,9 +168,6 @@
     "scrollToLatest": "Go to the latest response and follow",
     "userMessageFallback": "[Attachment or context]"
   },
-  "todos": {
-    "title": "Todos"
-  },
   "filePicker": {
     "workspaceFiles": "Workspace files",
     "noWorkspace": "No workspace open",

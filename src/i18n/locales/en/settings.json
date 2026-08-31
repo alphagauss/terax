@@ -447,10 +447,6 @@
         "label": "Terminal output",
         "description": "Read the active terminal scrollback on demand."
       },
-      "todos": {
-        "label": "Task list",
-        "description": "Create and update the session task list."
-      },
       "subagents": {
         "label": "Subagents",
         "description": "Delegate bounded read-only investigations."

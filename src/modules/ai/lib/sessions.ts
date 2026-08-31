@@ -7,7 +7,6 @@ import type { UIMessage } from "@ai-sdk/react";
 import { invoke } from "@tauri-apps/api/core";
 import { normalizeAgentIcon, type AgentIconId } from "./agents";
 import type { SessionMessage } from "./sessionMessages";
-import type { Todo } from "./todos";
 
 /** Rust 不解释的会话业务 metadata，由前端按需扩展。 */
 export type SessionData = Record<string, unknown>;
@@ -63,11 +62,6 @@ export async function readSession(id: string): Promise<SessionFile> {
     createdAt: parseTimestamp(session.createdAt),
     updatedAt: parseTimestamp(session.updatedAt),
   };
-}
-
-/** 从不透明 metadata 中读取待办列表，异常值按空列表处理。 */
-export function sessionTodos(metadata: SessionData): Todo[] {
-  return Array.isArray(metadata.todos) ? (metadata.todos as Todo[]) : [];
 }
 
 /** 解析会话实际使用的固定工作目录，草稿尚未发送时跟随 Explorer 根目录。 */

@@ -45,14 +45,12 @@ import {
   releaseSessionRun,
   type SessionData,
   type SessionMeta,
-  sessionTodos,
 } from "../lib/sessions";
 import { useAgentsStore } from "./agentsStore";
 import {
   type SessionRunOutcome,
   useSessionAttentionStore,
 } from "./sessionAttentionStore";
-import { useTodosStore } from "./todoStore";
 
 export type Live = {
   draftCwd: string | null;
@@ -245,15 +243,13 @@ function newTurnId(): string {
   return `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-/** 读取磁盘记录，同时准备 UI 消息和待办事项的运行时种子。 */
+/** 读取磁盘记录，同时准备 UI 消息和完整会话 metadata。 */
 async function seedSession(id: string): Promise<void> {
   const session = await readSession(id);
   const messages = projectSessionMessages(id, session.messages);
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
-  const { seedTodos } = await import("./todoStore");
-  seedTodos(id, sessionTodos(session.metadata));
 }
 
 /** 判断持久化会话是否属于当前 Workspace 进程。 */
@@ -427,7 +423,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
         persistedMessageCounts.delete(session.id);
         sessionMetadata.delete(session.id);
         pendingTurnIds.delete(session.id);
-        await useTodosStore.getState().clearSession(session.id);
       }
 
       const merged = mergeSessionMetadata(local, disk, runLocks);
@@ -544,7 +539,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       agentName: agent.name,
       agentIcon: agent.icon,
     };
-    sessionMetadata.set(id, { title, todos: [], agent });
+    sessionMetadata.set(id, { title, agent });
     useAgentsStore.getState().resetDraftAgent();
     set({
       sessions: [meta, ...get().sessions],
@@ -590,7 +585,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const metadata: SessionData = {
       ...(sessionMetadata.get(id) ?? {}),
       title,
-      todos: useTodosStore.getState().bySession[id] ?? [],
       systemPrompt,
     };
     sessionMetadata.set(id, metadata);
@@ -648,7 +642,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
       try {
         await clearSessionProcesses(id);
         await deleteSessionFile(id);
-        await useTodosStore.getState().clearSession(id);
         const remaining = get().sessions.filter((session) => session.id !== id);
         await chats.get(id)?.stop();
         chats.delete(id);
@@ -743,7 +736,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
         metadata: {
           ...(sessionMetadata.get(id) ?? {}),
           title,
-          todos: useTodosStore.getState().bySession[id] ?? [],
         },
         messages: records,
       });

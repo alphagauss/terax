@@ -42,13 +42,15 @@ describe("AI tool provider schemas", () => {
     shell_list: [],
     run_subagent: ["type", "prompt"],
     get_terminal_output: [],
-    todo_write: ["todos"],
   } satisfies Record<keyof typeof tools, readonly string[]>;
-  const toolSchemas = Object.entries(tools).map(([name, definition]) => [
-    name,
-    definition.inputSchema as FlexibleSchema<unknown>,
-    requiredParameters[name as keyof typeof tools],
-  ] as const);
+  const toolSchemas = Object.entries(tools).map(
+    ([name, definition]) =>
+      [
+        name,
+        definition.inputSchema as FlexibleSchema<unknown>,
+        requiredParameters[name as keyof typeof tools],
+      ] as const,
+  );
 
   it.each(toolSchemas)(
     "%s uses a complete object parameter schema",
@@ -61,9 +63,7 @@ describe("AI tool provider schemas", () => {
       expect([...(jsonSchema.required ?? [])].sort()).toEqual(
         [...required].sort(),
       );
-      for (const propertySchema of Object.values(
-        jsonSchema.properties ?? {},
-      )) {
+      for (const propertySchema of Object.values(jsonSchema.properties ?? {})) {
         expect(hasDeclaredJsonType(propertySchema)).toBe(true);
       }
     },
