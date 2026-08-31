@@ -1,6 +1,6 @@
 /**
  * 本文件负责创建语言模型并运行 AI Agent 的流式响应。
- * 它组装系统提示词、项目指令、工具和消息历史，是 AI 调用的核心边界。
+ * 它接收 Chat runtime 冻结的系统提示词，并组装工具和消息历史。
  */
 
 import {
@@ -23,7 +23,6 @@ import {
   OLLAMA_DEFAULT_BASE_URL,
   providerNeedsKey,
   resolveModel,
-  selectSystemPrompt,
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
@@ -298,33 +297,6 @@ export function buildConfiguredLanguageModel(
   });
 }
 
-/**
- * 组装一次会话中可复用的系统提示词。
- *
- * 项目指令位于基础提示词之后，使 AGENTS.md 约束在每次模型调用时保持可见。
- */
-function buildStableSystem(
-  modelId: string,
-  cwd: string,
-  persona: { name: string; instructions: string } | null,
-  customInstructions: string | undefined,
-  projectInstructions: string | null,
-): string {
-  const base = selectSystemPrompt(modelId);
-  const environmentBlock = `\n\n## SESSION ENVIRONMENT\nWorking directory: ${cwd}\nResolve every relative tool path against this directory. The directory is fixed for the lifetime of this session.`;
-  const personaBlock = persona?.instructions.trim()
-      ? `\n\n## ACTIVE AGENT: ${persona.name}\n${persona.instructions.trim()}`
-    : "";
-  const customBlock = customInstructions?.trim()
-      ? `\n\n## USER CUSTOM INSTRUCTIONS: follow unless they conflict with safety rules above\n${customInstructions.trim()}`
-    : "";
-  const instructionsBlock =
-    projectInstructions && projectInstructions.trim().length > 0
-      ? `\n\n## PROJECT INSTRUCTIONS: AGENTS.md\n${projectInstructions.trim()}`
-      : "";
-  return `${base}${environmentBlock}${instructionsBlock}${personaBlock}${customBlock}`;
-}
-
 export type AgentUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -345,9 +317,7 @@ const EMPTY_USAGE: AgentUsage = {
 export type RunAgentOptions = {
   keys: ProviderKeys;
   modelId?: string;
-  cwd: string;
-  customInstructions?: string;
-  agentPersona?: { name: string; instructions: string } | null;
+  systemPrompt: string;
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
@@ -369,7 +339,6 @@ export type RunAgentOptions = {
   openrouterModelId?: string;
   customEndpoints?: readonly CustomEndpoint[];
   customEndpointKeys?: CustomEndpointKeys;
-  projectInstructions?: string | null;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -377,8 +346,8 @@ export type RunAgentOptions = {
 /**
  * 使用当前模型配置启动一次 Agent 流式响应。
  *
- * 项目指令在消息转换前进入稳定系统提示词。模型初始化前等待调用方持久化
- * 用户消息和完整提示词，确保磁盘成功后才开始远端请求。
+ * 系统提示词由会话传输层提前冻结。模型初始化前等待调用方持久化用户消息
+ * 和该提示词，确保磁盘成功后才开始远端请求。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
@@ -386,17 +355,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const info = resolveModel(modelId, endpoints);
   const provider = info.provider;
 
-  const stableSystem = buildStableSystem(
-    modelId,
-    opts.cwd,
-    opts.agentPersona ?? null,
-    opts.customInstructions,
-    opts.projectInstructions ?? null,
-  );
-  await opts.onSystemPrompt?.(
-    stableSystem,
-    opts.uiMessages,
-  );
+  await opts.onSystemPrompt?.(opts.systemPrompt, opts.uiMessages);
 
   const history = await convertToModelMessages(opts.uiMessages);
   const keepsReasoning = modelKeepsReasoning(info);
@@ -419,7 +378,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   }
 
   const prompt = prepareAgentPrompt(
-    stableSystem,
+    opts.systemPrompt,
     compactedHistory,
     provider,
   );

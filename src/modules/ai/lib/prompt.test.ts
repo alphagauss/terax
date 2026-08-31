@@ -1,17 +1,82 @@
 /**
- * 本文件测试 AI 系统提示与模型消息准备逻辑。
- * 测试确保提示构造不引入已删除的本地模式状态。
+ * 本文件测试稳定系统提示、执行环境映射与模型消息准备逻辑。
+ * 重点锁定跨平台 Shell 语义、确定性文本和 Anthropic 缓存标记。
  */
 
 import { streamText, type ModelMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { prepareAgentPrompt } from "./prompt";
+import {
+  buildAgentSystemPrompt,
+  prepareAgentPrompt,
+  resolveAgentExecutionEnvironment,
+} from "./prompt";
 
 const history: ModelMessage[] = [
   { role: "user", content: "Fix the issue" },
   { role: "assistant", content: "I will inspect it." },
 ];
+
+describe("agent system prompt", () => {
+  it.each([
+    [
+      { kind: "local" } as const,
+      "windows" as const,
+      { platform: "Windows", workspace: "Local", defaultShell: "PowerShell" },
+    ],
+    [
+      { kind: "local" } as const,
+      "macos" as const,
+      { platform: "macOS", workspace: "Local", defaultShell: "Bash" },
+    ],
+    [
+      { kind: "local" } as const,
+      "linux" as const,
+      { platform: "Linux", workspace: "Local", defaultShell: "Bash" },
+    ],
+    [
+      { kind: "wsl", distro: "Ubuntu" } as const,
+      "windows" as const,
+      { platform: "Linux", workspace: "WSL", defaultShell: "Bash" },
+    ],
+    [
+      { kind: "ssh", profileId: "server" } as const,
+      "windows" as const,
+      { platform: "Linux", workspace: "SSH", defaultShell: "Bash" },
+    ],
+  ])(
+    "maps %j on %s to its shell execution environment",
+    (workspace, host, expected) => {
+      expect(resolveAgentExecutionEnvironment(workspace, host)).toEqual(
+        expected,
+      );
+    },
+  );
+
+  it("builds deterministic normalized instructions with explicit shell context", () => {
+    const options = {
+      cwd: "D:/workspace/project",
+      environment: {
+        platform: "Windows",
+        workspace: "Local",
+        defaultShell: "PowerShell",
+      } as const,
+      persona: { name: "Builder", instructions: "  Build carefully.\r\n" },
+      customInstructions: "  Be direct.\r\n",
+      projectInstructions: "# Rules\r\n\r\nUse pnpm.\r\n",
+    };
+
+    const prompt = buildAgentSystemPrompt(options);
+
+    expect(prompt).toContain("Execution environment: Windows Local");
+    expect(prompt).toContain("Shell tool default: PowerShell");
+    expect(prompt).toContain('Working directory: "D:/workspace/project"');
+    expect(prompt).toContain("Terminal scrollback is not included automatically");
+    expect(prompt).toContain("# Rules\n\nUse pnpm.");
+    expect(prompt).not.toContain("\r");
+    expect(buildAgentSystemPrompt(options)).toBe(prompt);
+  });
+});
 
 describe("prepareAgentPrompt", () => {
   it("keeps trusted instructions outside conversation messages", () => {
@@ -76,7 +141,3 @@ describe("prepareAgentPrompt", () => {
     }
   });
 });
-/**
- * 本文件测试稳定系统提示与会话历史的模型输入边界。
- * 重点锁定系统指令不混入对话消息，并保留 Anthropic 缓存标记。
- */

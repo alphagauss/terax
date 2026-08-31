@@ -1,3 +1,8 @@
+/**
+ * 本文件集中暴露宿主平台信息和跨平台快捷键显示约定。
+ * 平台值在进程启动后保持不变；非 Tauri 测试环境统一标记为 unknown。
+ */
+
 import { platform } from "@tauri-apps/plugin-os";
 
 const PLATFORM = (() => {
@@ -8,9 +13,16 @@ const PLATFORM = (() => {
   }
 })();
 
-export const IS_MAC = PLATFORM === "macos";
-export const IS_LINUX = PLATFORM === "linux";
-export const IS_WINDOWS = PLATFORM === "windows";
+export type HostPlatform = "macos" | "windows" | "linux" | "unknown";
+
+export const HOST_PLATFORM: HostPlatform =
+  PLATFORM === "macos" || PLATFORM === "windows" || PLATFORM === "linux"
+    ? PLATFORM
+    : "unknown";
+
+export const IS_MAC = HOST_PLATFORM === "macos";
+export const IS_LINUX = HOST_PLATFORM === "linux";
+export const IS_WINDOWS = HOST_PLATFORM === "windows";
 
 /** Custom window controls (min/max/close) are rendered by us only on
  * non-macOS platforms — macOS keeps the native traffic lights via the

@@ -237,7 +237,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
 - `lib/agent.ts` 保持 `Agent` 和 `DirectChatTransport` 结构，其他模块依赖 AI SDK v6 chat 语义。
 - 会话以 `sessions/<uuid>.jsonl` 原子保存；首行固定为 metadata，后续每行是一条角色消息记录。单会话 OS 锁禁止两个进程同时继续同一会话。
-- 用户消息和本轮系统提示词必须在模型请求前写入会话；`AgentRunBridge` 在 idle、error 或 stop 后只追加完整的 Assistant 和工具记录，流式半成品保留在所属进程。
+- 每个 Chat runtime 在首次模型请求时读取 Workspace 根 `AGENTS.md`，并冻结统一核心提示、执行环境、固定 cwd、Agent 人设和自定义指令。后续轮次复用逐字相同的 system prompt；LRU 淘汰或进程重启后重新构造。磁盘 metadata 中的 `systemPrompt` 只用于检查，不得作为恢复输入。
+- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；`AgentRunBridge` 在 idle、error 或 stop 后只追加完整的 Assistant 和工具记录，流式半成品保留在所属进程。
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
