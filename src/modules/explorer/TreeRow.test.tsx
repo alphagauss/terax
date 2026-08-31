@@ -73,25 +73,48 @@ describe("EntryRow Git decorations", () => {
     act(() => root.unmount());
   });
 
-  it.each([
-    "M",
-    "U",
-  ] as const)("keeps the %s color and trailing marker when selected", (gitStatusCode) => {
-    const { container, root } = renderEntryRow({
-      gitStatusCode,
-      isSelected: true,
-    });
+  it.each(["M", "U"] as const)(
+    "keeps the %s color and trailing marker when selected",
+    (gitStatusCode) => {
+      const { container, root } = renderEntryRow({
+        gitStatusCode,
+        isSelected: true,
+      });
 
-    const decorations = container.querySelectorAll(
-      `.git-status-${gitStatusCode}`,
-    );
-    expect(decorations).toHaveLength(2);
-    expect(decorations[0]?.textContent).toBe("file.ts");
-    expect(decorations[0]?.classList.contains("truncate")).toBe(true);
-    expect(decorations[1]?.textContent).toBe(gitStatusCode);
-    expect(decorations[1]?.classList.contains("shrink-0")).toBe(true);
-    act(() => root.unmount());
-  });
+      const decorations = container.querySelectorAll(
+        `.git-status-${gitStatusCode}`,
+      );
+      expect(decorations).toHaveLength(2);
+      expect(decorations[0]?.textContent).toBe("file.ts");
+      expect(decorations[0]?.classList.contains("truncate")).toBe(true);
+      expect(decorations[1]?.textContent).toBe(gitStatusCode);
+      expect(decorations[1]?.classList.contains("shrink-0")).toBe(true);
+      act(() => root.unmount());
+    },
+  );
+
+  it.each([
+    ["selected", { isSelected: true }, "bg-primary/12"],
+    [
+      "the context-menu target",
+      { isContextTarget: true },
+      "bg-interactive-active",
+    ],
+  ] as const)(
+    "keeps ignored text muted when %s",
+    (_, state, backgroundClass) => {
+      const { container, root } = renderEntryRow({
+        gitignored: true,
+        ...state,
+      });
+
+      const button = container.querySelector("button");
+      expect(button?.classList.contains("text-muted-foreground")).toBe(true);
+      expect(button?.classList.contains("text-foreground")).toBe(false);
+      expect(button?.classList.contains(backgroundClass)).toBe(true);
+      act(() => root.unmount());
+    },
+  );
 
   it("does not add a trailing marker to directories", () => {
     const { container, root } = renderEntryRow({
@@ -142,6 +165,8 @@ describe("EntryRow deleting state", () => {
     const button = container.querySelector("button");
     expect(button?.disabled).toBe(true);
     expect(button?.getAttribute("aria-busy")).toBe("true");
+    expect(button?.classList.contains("text-muted-foreground")).toBe(true);
+    expect(button?.classList.contains("text-foreground")).toBe(false);
     expect(button?.textContent).not.toContain("删除中");
     expect(container.querySelector("[data-spinner]")).toBeNull();
 
