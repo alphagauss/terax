@@ -447,10 +447,6 @@
         "label": "终端输出",
         "description": "按需读取活动终端的回滚内容。"
       },
-      "todos": {
-        "label": "任务列表",
-        "description": "创建并更新当前会话的任务列表。"
-      },
       "subagents": {
         "label": "子智能体",
         "description": "委派边界明确的只读调查任务。"

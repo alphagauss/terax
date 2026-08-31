@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import {
-  CheckListIcon,
   Edit02Icon,
   File01Icon,
   FilePlusIcon,
@@ -40,7 +39,6 @@ const TOOL_META: Record<string, { label: string; icon: typeof File01Icon }> = {
   shell_list: { label: "Processes", icon: TerminalIcon },
   grep: { label: "Search", icon: GlobalSearchIcon },
   run_subagent: { label: "Subagent", icon: RobotIcon },
-  todo_write: { label: "Todos", icon: CheckListIcon },
 };
 
 const STATUS_DOT: Record<ToolPart["state"], string> = {
@@ -93,12 +91,6 @@ function deriveSummary(toolName: string, input: unknown): string | null {
       return str("pattern") ?? str("query");
     case "run_subagent":
       return str("agent") ?? str("task");
-    case "todo_write": {
-      const items = Array.isArray(i.todos) ? i.todos : null;
-      return items
-        ? `${items.length} item${items.length === 1 ? "" : "s"}`
-        : null;
-    }
     default:
       return null;
   }
@@ -113,7 +105,7 @@ export type ToolProps = ComponentProps<typeof Collapsible> & {
 };
 
 // Tools whose `input` carries large/streaming content (file bodies, sub-
-// agent prompts, todo lists). The AI diff tab is the canonical place to
+// agent prompts). The AI diff tab is the canonical place to
 // view file changes; for the rest, the header summary + final output is
 // enough. Re-rendering streamed input on every token both stalls the UI
 // and duplicates information.
@@ -121,7 +113,6 @@ const HEAVY_CONTENT_TOOLS = new Set([
   "write_file",
   "apply_patch",
   "run_subagent",
-  "todo_write",
 ]);
 
 const ToolImpl = ({

@@ -30,7 +30,6 @@ vi.mock("./AiChat", () => ({
 }));
 vi.mock("./AiSidebarComposer", () => ({ AiSidebarComposer: () => null }));
 vi.mock("./AiInputBar", () => ({ AiInputBarConnect: () => null }));
-vi.mock("./TodoStrip", () => ({ TodoStrip: () => null }));
 
 import { useChatStore } from "../store/chatStore";
 import { AiSidebarPanel } from "./AiSidebarPanel";

@@ -147,7 +147,7 @@ describe("session IPC timestamp boundary", () => {
         updatedAt: Date.parse("2026-07-26T10:00:01.000Z"),
         environmentKey: "local",
         cwd: "/workspace/session",
-        metadata: { title: "Session", todos: [] },
+        metadata: { title: "Session" },
         messages: [],
       }),
     ).resolves.toMatchObject({ fingerprint: "1:2" });
@@ -159,7 +159,7 @@ describe("session IPC timestamp boundary", () => {
         updatedAt: "2026-07-26T10:00:01.000Z",
         environmentKey: "local",
         cwd: "/workspace/session",
-        metadata: { title: "Session", todos: [] },
+        metadata: { title: "Session" },
         messages: [],
       },
     });

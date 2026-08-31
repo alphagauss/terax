@@ -9,7 +9,6 @@ import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
 import { buildSubagentTools } from "./subagent";
 import { buildTerminalTools } from "./terminal";
-import { buildTodoTools } from "./todo";
 import {
   AGENT_TOOL_IDS,
   normalizeAgentTools,
@@ -36,7 +35,6 @@ export function buildTools(
     ...buildShellTools(ctx),
     ...buildSubagentTools(ctx),
     ...buildTerminalTools(ctx),
-    ...buildTodoTools(ctx),
   } as const;
   const allowed = new Set(normalizeAgentTools(allowedTools));
   return Object.fromEntries(

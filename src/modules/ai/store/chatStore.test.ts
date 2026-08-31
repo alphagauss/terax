@@ -105,7 +105,6 @@ const sessionFile = (meta: SessionMeta) => ({
   cwd: meta.cwd,
   metadata: {
     title: meta.title,
-    todos: [],
     agent: {
       id: meta.agentId,
       name: meta.agentName,
