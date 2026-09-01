@@ -119,6 +119,7 @@ describe.sequential("Agent background subagents", () => {
       });
     });
     const checkpoint = vi.fn();
+    const onSubagentDisplay = vi.fn();
     const messages: UIMessage[] = [
       {
         id: "user-1",
@@ -144,6 +145,7 @@ describe.sequential("Agent background subagents", () => {
       uiMessages: messages,
       onSystemPrompt: vi.fn(),
       onCheckpoint: checkpoint,
+      onSubagentDisplay,
     });
 
     const chunks: unknown[] = [];
@@ -164,6 +166,19 @@ describe.sequential("Agent background subagents", () => {
     expect(checkpoint.mock.calls[0][1]).toEqual(
       expect.objectContaining({ event: "subagent_result" }),
     );
+    expect(onSubagentDisplay.mock.calls[0][0]).toMatchObject({
+      toolCallId: "spawn-1",
+      status: "running",
+      phase: "thinking",
+    });
+    expect(
+      onSubagentDisplay.mock.calls[
+        onSubagentDisplay.mock.calls.length - 1
+      ]?.[0],
+    ).toMatchObject({
+      status: "completed",
+      result: "Tests are healthy.",
+    });
     expect(chunks).toContainEqual(
       expect.objectContaining({ type: "data-subagent-result" }),
     );

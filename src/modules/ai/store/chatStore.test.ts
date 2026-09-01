@@ -178,6 +178,7 @@ describe("chat store multi-process lifecycle", () => {
       activeSessionRevision: 0,
       runLockSessionIds: {},
       agentMetaBySession: {},
+      subagentDisplaysBySession: {},
       sessionAgentFilter: null,
       sessionSyncError: null,
       refreshSessions: realRefreshSessions,
@@ -253,6 +254,90 @@ describe("chat store multi-process lifecycle", () => {
     );
     expect(io.release).not.toHaveBeenCalled();
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+  });
+
+  it("persists final subagent display snapshots once and materializes the active chat", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const messages = [
+      {
+        id: "user-1",
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "inspect" }],
+      },
+      {
+        id: "assistant-1",
+        role: "assistant" as const,
+        parts: [
+          {
+            type: "tool-run_subagent" as const,
+            toolCallId: "parent-call",
+            state: "output-available" as const,
+            input: { task: "inspect", wait: false },
+            output: { taskId: "task-1", status: "running" },
+          },
+        ],
+      },
+    ];
+    const chat = { status: "ready", messages } as never;
+    chats.set(first.id, chat);
+    persistedMessageCounts.set(first.id, 1);
+    pendingTurnIds.set(first.id, "turn-1");
+    useChatStore.setState({
+      sessions: [first],
+      runLockSessionIds: { [first.id]: true },
+      refreshSessions: refresh,
+      subagentDisplaysBySession: {
+        [first.id]: {
+          "parent-call": {
+            taskId: "task-1",
+            toolCallId: "parent-call",
+            label: "Inspector",
+            status: "completed",
+            phase: "thinking",
+            startedAt: 100,
+            durationMs: 900,
+            result: "done",
+            steps: [
+              {
+                id: "child-call",
+                toolName: "grep",
+                status: "completed",
+              },
+            ],
+          },
+        },
+      },
+    });
+
+    await useChatStore.getState().commitMessages(first.id, messages);
+
+    expect(io.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({ role: "assistant" }),
+          expect.objectContaining({ role: "tool", name: "run_subagent" }),
+          expect.objectContaining({
+            role: "display",
+            display_event: "subagent",
+            subagent_display: expect.objectContaining({
+              taskId: "task-1",
+              status: "completed",
+            }),
+          }),
+        ],
+      }),
+    );
+    const displayRecord = io.commit.mock.calls[0][0].messages.find(
+      (record: { role?: string }) => record.role === "display",
+    );
+    expect(displayRecord.subagent_display).not.toHaveProperty("task");
+    expect(displayRecord.subagent_display).not.toHaveProperty("result");
+    expect(
+      (chats.get(first.id)?.messages[1].parts ?? []).map((part) => part.type),
+    ).toEqual(["tool-run_subagent", "data-subagent-display"]);
+    expect(
+      useChatStore.getState().subagentDisplaysBySession[first.id],
+    ).toBeUndefined();
   });
 
   it("restores only the session recorded by the primary window", async () => {

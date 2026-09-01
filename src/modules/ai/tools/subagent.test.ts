@@ -44,6 +44,7 @@ describe("run_subagent", () => {
     expect(start).toHaveBeenCalledWith({
       task: "review it",
       label: "card",
+      toolCallId: "tool-call",
       wait: false,
       abortSignal: undefined,
     });

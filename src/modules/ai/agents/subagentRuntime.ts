@@ -1,7 +1,12 @@
 /**
  * 本文件管理单个聊天 turn 内的通用 Subagent 任务。
- * 负责并发拒绝、同步等待、后台结果队列和取消，不持有模型或 UI 状态。
+ * 负责并发拒绝、同步等待、后台结果队列、取消和结构化展示进度。
  */
+
+import type {
+  SubagentDisplayState,
+  SubagentDisplayStep,
+} from "./subagentDisplay";
 
 export type SubagentUsage = {
   inputTokens: number;
@@ -52,12 +57,28 @@ export type SubagentTaskRunner = (options: {
   task: string;
   label: string;
   abortSignal: AbortSignal;
+  onProgress: (event: SubagentProgressEvent) => void;
 }) => Promise<Omit<SubagentTaskResult, "taskId" | "label" | "durationMs">>;
+
+type SubagentProgressEvent =
+  | { type: "thinking" }
+  | {
+      type: "tool-start";
+      id: string;
+      toolName: string;
+      summary?: string;
+    }
+  | {
+      type: "tool-finish";
+      id: string;
+      status: "completed" | "failed";
+    };
 
 type RunningTask = {
   order: number;
   controller: AbortController;
   done: Promise<SubagentTaskResult>;
+  cancelDisplay: () => void;
 };
 
 const EMPTY_USAGE: SubagentUsage = {
@@ -130,10 +151,12 @@ export class SubagentTurnCoordinator {
   async start(options: {
     task: string;
     label?: string;
+    toolCallId: string;
     wait: boolean;
     limit: number;
     parentAbortSignal?: AbortSignal;
     run: SubagentTaskRunner;
+    onDisplay?: (state: SubagentDisplayState) => void;
   }): Promise<SubagentStartResult> {
     if (this.cancelled) {
       return {
@@ -158,34 +181,85 @@ export class SubagentTurnCoordinator {
     const order = this.order++;
     const detachAbort = relayAbort(options.parentAbortSignal, controller);
     const startedAt = Date.now();
+    let display: SubagentDisplayState = {
+      taskId,
+      toolCallId: options.toolCallId,
+      label,
+      status: "running",
+      phase: "thinking",
+      startedAt,
+      steps: [],
+    };
+    const publishDisplay = () => {
+      try {
+        options.onDisplay?.(display);
+      } catch {
+        // 展示回调不能改变 Subagent 的执行结果或取消语义。
+      }
+    };
+    const updateProgress = (event: SubagentProgressEvent) => {
+      if (display.status !== "running") return;
+      display = reduceDisplayProgress(display, event);
+      publishDisplay();
+    };
+    const finishDisplay = (
+      status: Exclude<SubagentDisplayState["status"], "running">,
+      details: Partial<Pick<SubagentDisplayState, "result" | "error">> = {},
+    ) => {
+      const now = Date.now();
+      if (display.status === "running") {
+        display = {
+          ...display,
+          ...details,
+          status,
+          durationMs: now - startedAt,
+          steps: closeRunningDisplaySteps(display.steps, status),
+        };
+        publishDisplay();
+      }
+      return now;
+    };
+    const cancelDisplay = () => finishDisplay("cancelled");
+    publishDisplay();
     const done = options
       .run({
         taskId,
         task: options.task,
         label,
         abortSignal: controller.signal,
+        onProgress: updateProgress,
       })
-      .then(
-        (result): SubagentTaskResult => ({
+      .then((result): SubagentTaskResult => {
+        const now = finishDisplay(result.status, {
+          ...(options.wait || result.result === undefined
+            ? {}
+            : { result: result.result }),
+          ...(result.error === undefined ? {} : { error: result.error }),
+        });
+        return {
           ...result,
           taskId,
           label,
-          durationMs: Date.now() - startedAt,
-        }),
-      )
-      .catch(
-        (error): SubagentTaskResult => ({
+          durationMs: now - startedAt,
+        };
+      })
+      .catch((error): SubagentTaskResult => {
+        const now = finishDisplay(
+          controller.signal.aborted ? "cancelled" : "failed",
+          { error: String(error) },
+        );
+        return {
           taskId,
           label,
           status: "failed",
           error: String(error),
-          durationMs: Date.now() - startedAt,
+          durationMs: now - startedAt,
           usage: EMPTY_USAGE,
-        }),
-      )
+        };
+      })
       .finally(detachAbort);
 
-    this.running.set(taskId, { order, controller, done });
+    this.running.set(taskId, { order, controller, done, cancelDisplay });
     void done.then((result) => {
       this.running.delete(taskId);
       if (!options.wait && !this.cancelled) {
@@ -233,7 +307,10 @@ export class SubagentTurnCoordinator {
     this.cancelled = true;
     this.pending.length = 0;
     const tasks = [...this.running.values()];
-    for (const task of tasks) task.controller.abort();
+    for (const task of tasks) {
+      task.cancelDisplay();
+      task.controller.abort();
+    }
     await Promise.all(tasks.map((task) => task.done));
     this.running.clear();
   }
@@ -244,6 +321,63 @@ export class SubagentTurnCoordinator {
     this.order = 0;
     this.cancelled = false;
   }
+}
+
+function reduceDisplayProgress(
+  state: SubagentDisplayState,
+  event: SubagentProgressEvent,
+): SubagentDisplayState {
+  if (event.type === "thinking") {
+    return { ...state, phase: "thinking" };
+  }
+  if (event.type === "tool-start") {
+    const step: SubagentDisplayStep = {
+      id: event.id,
+      toolName: event.toolName,
+      ...(event.summary ? { summary: event.summary } : {}),
+      status: "running",
+    };
+    const index = state.steps.findIndex((item) => item.id === event.id);
+    return {
+      ...state,
+      phase: "tool",
+      steps:
+        index < 0
+          ? [...state.steps, step]
+          : state.steps.map((item, itemIndex) =>
+              itemIndex === index ? step : item,
+            ),
+    };
+  }
+  const steps = state.steps.map((step) =>
+    step.id === event.id
+      ? {
+          ...step,
+          status: event.status,
+        }
+      : step,
+  );
+  return {
+    ...state,
+    phase: steps.some((step) => step.status === "running")
+      ? "tool"
+      : "thinking",
+    steps,
+  };
+}
+
+function closeRunningDisplaySteps(
+  steps: readonly SubagentDisplayStep[],
+  status: Exclude<SubagentDisplayStep["status"], "running">,
+): SubagentDisplayStep[] {
+  return steps.map((step) =>
+    step.status === "running"
+      ? {
+          ...step,
+          status,
+        }
+      : step,
+  );
 }
 
 /** 将内部结果转换为稳定、可持久化且 provider 通用的 user 消息正文。 */

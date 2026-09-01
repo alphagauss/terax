@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   projectSessionMessages,
   serializeSessionMessages,
+  serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
   type SessionMessage,
 } from "./sessionMessages";
@@ -286,6 +287,93 @@ describe("AI session message conversion", () => {
       role: "user",
       content: records[1].content,
     });
+  });
+
+  it("restores display-only subagent progress without changing provider messages", async () => {
+    const snapshot = {
+      version: 1 as const,
+      taskId: "task-1",
+      toolCallId: "call-1",
+      label: "Inspector",
+      status: "completed" as const,
+      durationMs: 900,
+      steps: [
+        {
+          id: "child-call-1",
+          toolName: "grep",
+          summary: "subagent_result",
+          status: "completed" as const,
+        },
+      ],
+    };
+    const records: SessionMessage[] = [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            id: "call-1",
+            type: "function",
+            function: {
+              name: "run_subagent",
+              arguments: '{"task":"inspect","wait":true}',
+            },
+          },
+        ],
+        timestamp,
+        turn_id: "turn-1",
+      },
+      {
+        role: "tool",
+        tool_call_id: "call-1",
+        name: "run_subagent",
+        content: {
+          taskId: "task-1",
+          label: "Inspector",
+          status: "completed",
+          result: "done",
+        },
+        timestamp,
+        turn_id: "turn-1",
+      },
+      ...serializeSubagentDisplaySnapshots([snapshot], {
+        timestamp,
+        turnId: "turn-1",
+      }),
+    ];
+
+    const messages = projectSessionMessages("session-1", records);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].parts.map((part) => part.type)).toEqual([
+      "step-start",
+      "tool-run_subagent",
+      "data-subagent-display",
+    ]);
+
+    const withoutDisplay: UIMessage[] = messages.map((message) => ({
+      ...message,
+      parts: message.parts.filter(
+        (part) => part.type !== "data-subagent-display",
+      ),
+    }));
+    expect(await convertToAgentModelMessages(messages)).toEqual(
+      await convertToAgentModelMessages(withoutDisplay),
+    );
+  });
+
+  it("ignores malformed display-only records instead of exposing them to the model", async () => {
+    const messages = projectSessionMessages("session-1", [
+      {
+        role: "display",
+        content: "must stay hidden",
+        timestamp,
+        display_event: "subagent",
+        subagent_display: { version: 1 } as never,
+      },
+    ]);
+
+    expect(messages).toEqual([]);
+    expect(await convertToAgentModelMessages(messages)).toEqual([]);
   });
 
   it("does not hide an internal event whose persisted content is inconsistent", () => {

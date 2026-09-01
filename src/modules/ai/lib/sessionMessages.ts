@@ -1,6 +1,6 @@
 /**
  * 本文件定义与具体 AI SDK 无关的会话消息记录，并负责与 UIMessage 双向转换。
- * 工具调用使用 OpenAI function envelope，内部 Subagent 事件保持 append-only 顺序。
+ * 工具调用使用 OpenAI function envelope，Subagent 结果和展示记录保持 append-only 顺序。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -10,6 +10,10 @@ import {
   isSubagentResultEvent,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
+import {
+  isSubagentDisplaySnapshot,
+  type SubagentDisplaySnapshot,
+} from "../agents/subagentDisplay";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -37,6 +41,8 @@ export type SessionMessage = {
   injected_event?: "subagent_result";
   subagent_task_ids?: string[];
   subagent_result?: SubagentResultEvent;
+  display_event?: "subagent";
+  subagent_display?: SubagentDisplaySnapshot;
   media?: SessionMedia[];
   reasoning_content?: string;
   tool_calls?: SessionToolCall[];
@@ -130,6 +136,45 @@ export function projectSessionMessages(
 
   records.forEach((record, index) => {
     const timestamp = parseRecordedTimestamp(record.timestamp);
+    if (record.role === "display") {
+      const display = record.subagent_display;
+      if (
+        record.display_event === "subagent" &&
+        isSubagentDisplaySnapshot(display)
+      ) {
+        if (
+          !assistantParts ||
+          (assistantTurnId &&
+            record.turn_id &&
+            assistantTurnId !== record.turn_id) ||
+          !assistantParts.some(
+            (part) =>
+              "toolCallId" in part &&
+              part.toolCallId === display.toolCallId &&
+              (part.type === "tool-run_subagent" ||
+                (part.type === "dynamic-tool" &&
+                  "toolName" in part &&
+                  part.toolName === "run_subagent")),
+          )
+        ) {
+          return;
+        }
+        const parts = assistantParts;
+        const existing = parts.findIndex(
+          (part) =>
+            part.type === "data-subagent-display" &&
+            (part as { data?: { snapshot?: { taskId?: unknown } } }).data
+              ?.snapshot?.taskId === display.taskId,
+        );
+        const displayPart = {
+          type: "data-subagent-display",
+          data: { snapshot: display },
+        } as UIMessage["parts"][number];
+        if (existing < 0) parts.push(displayPart);
+        else parts[existing] = displayPart;
+      }
+      return;
+    }
     if (
       record.role === "user" &&
       record.injected_event === "subagent_result" &&
@@ -326,6 +371,21 @@ export function serializeSubagentResultEvent(
     subagent_task_ids: event.results.map((result) => result.taskId),
     subagent_result: event,
   };
+}
+
+/** 将终态 Subagent 展示快照保存为永不进入 provider 的独立记录。 */
+export function serializeSubagentDisplaySnapshots(
+  snapshots: readonly SubagentDisplaySnapshot[],
+  options: AppendOptions,
+): SessionMessage[] {
+  return snapshots.map((snapshot) => ({
+    role: "display",
+    content: "",
+    timestamp: options.timestamp,
+    turn_id: options.turnId,
+    display_event: "subagent",
+    subagent_display: snapshot,
+  }));
 }
 
 /** 从 UI 消息元数据读取创建时间，缺失或非法时使用本次提交时间。 */
