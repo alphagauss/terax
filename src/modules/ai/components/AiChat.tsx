@@ -1,7 +1,7 @@
 /**
  * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
  * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
- * 内部结果和 Subagent 展示事件不参与普通分组，流式阶段只更新末尾活动分段。
+ * 内部结果、reasoning 耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
@@ -66,6 +66,7 @@ import {
 } from "../agents/subagentDisplay";
 import { isSubagentResultDataPart } from "../agents/subagentRuntime";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
+import { reasoningDurationFromPart } from "../lib/sessionMessages";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
@@ -563,7 +564,6 @@ const RenderedMessage = memo(function RenderedMessage({
     () => collectSubagentParts(message.parts as AnyPart[]),
     [message.parts],
   );
-
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -630,6 +630,9 @@ const RenderedMessage = memo(function RenderedMessage({
                   sessionId={sessionId}
                   part={g.part}
                   streaming={g.idx === streamingPartIdx}
+                  reasoningDurationMs={reasoningDurationFromPart(
+                    message.parts[g.idx + 1],
+                  )}
                   persistedSubagent={subagentParts.displaysByToolCallId.get(
                     toolCallIdFromPart(g.part),
                   )}
@@ -779,6 +782,10 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
     run = null;
   };
   parts.forEach((p, i) => {
+    if (reasoningDurationFromPart(p) !== undefined) {
+      flushRun();
+      return;
+    }
     if (
       partType(p) === "data-subagent-result" ||
       partType(p) === "data-subagent-display"
@@ -982,12 +989,14 @@ const RenderedPart = memo(function RenderedPart({
   sessionId,
   part,
   streaming,
+  reasoningDurationMs,
   persistedSubagent,
   subagentResult,
 }: {
   sessionId: string;
   part: AnyPart;
   streaming: boolean;
+  reasoningDurationMs?: number;
   persistedSubagent?: SubagentDisplaySnapshot;
   subagentResult?: SubagentResultView;
 }) {
@@ -1000,8 +1009,12 @@ const RenderedPart = memo(function RenderedPart({
   }
 
   if (part.type === "reasoning") {
+    const duration =
+      reasoningDurationMs === undefined
+        ? undefined
+        : Math.max(1, Math.ceil(reasoningDurationMs / 1000));
     return (
-      <Reasoning isStreaming={streaming}>
+      <Reasoning isStreaming={streaming} duration={duration}>
         <ReasoningTrigger className="text-[12px] leading-4" />
         <ReasoningContent className="[&_*]:text-[12px]!">
           {(part as unknown as { text: string }).text}

@@ -1,6 +1,6 @@
 /**
  * 本文件定义与具体 AI SDK 无关的会话消息记录，并负责与 UIMessage 双向转换。
- * 工具调用使用 OpenAI function envelope，Subagent 结果和展示记录保持 append-only 顺序。
+ * 工具调用使用 OpenAI function envelope，reasoning 耗时和展示记录保持可恢复。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -14,6 +14,17 @@ import {
   isSubagentDisplaySnapshot,
   type SubagentDisplaySnapshot,
 } from "../agents/subagentDisplay";
+
+export const REASONING_DURATION_PART_TYPE = "data-reasoning-duration" as const;
+
+/** 校验并读取 Terax reasoning 耗时 data part。 */
+export function reasoningDurationFromPart(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const part = value as { type?: unknown; data?: { durationMs?: unknown } };
+  return part.type === REASONING_DURATION_PART_TYPE
+    ? validReasoningDurationMs(part.data?.durationMs)
+    : undefined;
+}
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -45,6 +56,7 @@ export type SessionMessage = {
   subagent_display?: SubagentDisplaySnapshot;
   media?: SessionMedia[];
   reasoning_content?: string;
+  reasoning_duration_ms?: number;
   tool_calls?: SessionToolCall[];
   turn_status?: string;
   tool_call_id?: string;
@@ -77,6 +89,7 @@ type ToolPart = {
 type AssistantBlock = {
   content: string[];
   reasoning: string[];
+  reasoningDurationMs?: number;
   tools: ToolPart[];
 };
 
@@ -228,6 +241,15 @@ export function projectSessionMessages(
           text: record.reasoning_content,
           state: "done",
         });
+        const durationMs = validReasoningDurationMs(
+          record.reasoning_duration_ms,
+        );
+        if (durationMs !== undefined) {
+          parts.push({
+            type: REASONING_DURATION_PART_TYPE,
+            data: { durationMs },
+          } as UIMessage["parts"][number]);
+        }
       }
       for (const call of record.tool_calls ?? []) {
         parts.push({
@@ -421,16 +443,26 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
     ) {
       blocks.push(current);
     }
-    current = { content: [], reasoning: [], tools: [] };
+    current = {
+      content: [],
+      reasoning: [],
+      tools: [],
+    };
   };
 
   for (const part of message.parts) {
+    const reasoningDurationMs = reasoningDurationFromPart(part);
     if (part.type === "step-start") {
       flush();
     } else if (part.type === "text") {
       current.content.push(part.text);
     } else if (part.type === "reasoning") {
       current.reasoning.push(part.text);
+    } else if (
+      reasoningDurationMs !== undefined &&
+      current.reasoning.length > 0
+    ) {
+      current.reasoningDurationMs = reasoningDurationMs;
     } else if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
       current.tools.push(part as ToolPart);
     }
@@ -438,7 +470,13 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
   flush();
   return blocks.length > 0
     ? blocks
-    : [{ content: [""], reasoning: [], tools: [] }];
+    : [
+        {
+          content: [""],
+          reasoning: [],
+          tools: [],
+        },
+      ];
 }
 
 /** 将一个 assistant 步骤写成 assistant 记录及其紧随的 tool 结果记录。 */
@@ -461,6 +499,9 @@ function serializeAssistantBlock(
     ...(block.reasoning.length > 0
       ? { reasoning_content: block.reasoning.join("") }
       : {}),
+    ...(block.reasoningDurationMs === undefined
+      ? {}
+      : { reasoning_duration_ms: Math.round(block.reasoningDurationMs) }),
     timestamp: options.timestamp,
     turn_id: options.turnId,
   };
@@ -497,6 +538,13 @@ function serializeAssistantBlock(
     return [];
   });
   return [assistant, ...results];
+}
+
+/** 兼容旧会话并拒绝手工编辑产生的非法 reasoning 耗时。 */
+function validReasoningDurationMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 /** 从静态或动态工具 part 中取得稳定的工具名。 */

@@ -1,5 +1,5 @@
 /**
- * 本文件实现 AI 推理过程的流式状态、耗时标题和可卸载折叠区域。
+ * 本文件实现 AI 推理过程的流式状态、外部耗时标题和可卸载折叠区域。
  * 完成态默认关闭，内容仅在展开及退出动画期间挂载以控制长会话资源占用。
  */
 
@@ -54,7 +54,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
 };
 
 const AUTO_CLOSE_DELAY = 1000;
-const MS_IN_S = 1000;
 
 /**
  * 推理折叠容器。
@@ -82,27 +81,12 @@ export const Reasoning = memo(
       onChange: onOpenChange,
       prop: open,
     });
-    const [duration, setDuration] = useControllableState<number | undefined>({
-      defaultProp: undefined,
-      prop: durationProp,
-    });
-
     const hasEverStreamedRef = useRef(isStreaming);
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
-    const startTimeRef = useRef<number | null>(null);
 
-    // Track when streaming starts and compute duration
     useEffect(() => {
-      if (isStreaming) {
-        hasEverStreamedRef.current = true;
-        if (startTimeRef.current === null) {
-          startTimeRef.current = Date.now();
-        }
-      } else if (startTimeRef.current !== null) {
-        setDuration(Math.ceil((Date.now() - startTimeRef.current) / MS_IN_S));
-        startTimeRef.current = null;
-      }
-    }, [isStreaming, setDuration]);
+      if (isStreaming) hasEverStreamedRef.current = true;
+    }, [isStreaming]);
 
     // Auto-open when streaming starts (unless explicitly closed)
     useEffect(() => {
@@ -136,8 +120,8 @@ export const Reasoning = memo(
     );
 
     const contextValue = useMemo(
-      () => ({ duration, isOpen, isStreaming, setIsOpen }),
-      [duration, isOpen, isStreaming, setIsOpen],
+      () => ({ duration: durationProp, isOpen, isStreaming, setIsOpen }),
+      [durationProp, isOpen, isStreaming, setIsOpen],
     );
 
     return (
