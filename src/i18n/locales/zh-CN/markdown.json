@@ -1,6 +1,12 @@
 {
   "rendered": "渲染",
   "raw": "源码",
+  "toggle": {
+    "lockedLabel": "已锁定；切换到编辑模式",
+    "editingLabel": "正在编辑；切换到锁定模式",
+    "lockedTitle": "只读：编辑已禁用。点击进入编辑模式。",
+    "editingTitle": "正在编辑：点击锁定并查看渲染文档。"
+  },
   "saveToPreview": "保存后预览",
   "loading": "加载中…",
   "readFailed": "读取文件失败:{{message}}",
