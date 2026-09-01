@@ -706,33 +706,70 @@ html *::-webkit-scrollbar {
   border-color: var(--muted-foreground);
 }
 
-/* Text shimmer loop (replaces motion background-position animation). Driven by
- * --shimmer-duration / --shimmer-spread set inline per instance. */
+/* 文字流光只在字形内移动圆形前景聚光，时长与半径由实例变量控制。 */
 @keyframes terax-shimmer {
   from {
-    background-position: 100% center;
+    background-position:
+      calc(0px - var(--shimmer-spread) - var(--shimmer-spread)) center,
+      0 0;
   }
   to {
-    background-position: 0% center;
+    background-position:
+      calc(100% + var(--shimmer-spread) + var(--shimmer-spread)) center,
+      0 0;
   }
 }
+
+/* Reasoning 保持 1.2 秒扫动速度，剩余三分之一周期停在文字右侧。 */
+@keyframes terax-reasoning-shimmer {
+  0% {
+    background-position:
+      calc(0px - var(--shimmer-spread) - var(--shimmer-spread)) center,
+      0 0;
+  }
+  66.6667%,
+  100% {
+    background-position:
+      calc(100% + var(--shimmer-spread) + var(--shimmer-spread)) center,
+      0 0;
+  }
+}
+
 .terax-shimmer {
-  background-repeat: no-repeat, padding-box;
+  background-repeat: no-repeat;
   background-size:
-    250% 100%,
-    auto;
+    calc(var(--shimmer-spread) + var(--shimmer-spread))
+      calc(var(--shimmer-spread) + var(--shimmer-spread)),
+    100% 100%;
   background-image:
-    linear-gradient(
-      90deg,
-      transparent calc(50% - var(--shimmer-spread)),
-      var(--color-background),
-      transparent calc(50% + var(--shimmer-spread))
+    radial-gradient(
+      circle,
+      var(--shimmer-highlight-override, var(--color-foreground)) 0%,
+      color-mix(
+          in oklab,
+          var(--shimmer-highlight-override, var(--color-foreground)) 80%,
+          var(--color-muted-foreground)
+        )
+        54%,
+      transparent 70%
     ),
     linear-gradient(
       var(--color-muted-foreground),
       var(--color-muted-foreground)
     );
-  animation: terax-shimmer var(--shimmer-duration, 2s) linear infinite;
+  animation: var(--shimmer-animation, terax-shimmer)
+    var(--shimmer-duration-override, var(--shimmer-duration, 2s)) linear infinite;
+}
+
+/* 业务边界的继承变量保留 Shimmer 实例自身的通用时长配置。 */
+[data-ai-reasoning-trigger] {
+  --shimmer-animation: terax-reasoning-shimmer;
+  --shimmer-duration-override: 1.8s;
+  --shimmer-highlight-override: color-mix(
+    in oklab,
+    var(--color-foreground) 30%,
+    var(--color-primary-foreground)
+  );
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -759,6 +796,11 @@ html *::-webkit-scrollbar {
   }
   .terax-shimmer {
     animation: none;
-    background-position: 0% center;
+    background-image: linear-gradient(
+      var(--color-muted-foreground),
+      var(--color-muted-foreground)
+    );
+    background-position: 0 0;
+    background-size: 100% 100%;
   }
 }

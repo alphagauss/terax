@@ -59,12 +59,12 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
 import {
   isSubagentDisplayDataPart,
   type SubagentDisplaySnapshot,
 } from "../agents/subagentDisplay";
 import { isSubagentResultDataPart } from "../agents/subagentRuntime";
+import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import { reasoningDurationFromPart } from "../lib/sessionMessages";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
@@ -1015,7 +1015,10 @@ const RenderedPart = memo(function RenderedPart({
         : Math.max(1, Math.ceil(reasoningDurationMs / 1000));
     return (
       <Reasoning isStreaming={streaming} duration={duration}>
-        <ReasoningTrigger className="text-[12px] leading-4" />
+        <ReasoningTrigger
+          data-ai-reasoning-trigger
+          className="text-[12px] leading-4"
+        />
         <ReasoningContent className="[&_*]:text-[12px]!">
           {(part as unknown as { text: string }).text}
         </ReasoningContent>
