@@ -114,6 +114,13 @@ export function useSidebarLayout(
     void setWorkspaceValue(RUNTIME_STORAGE_KEY, next);
   }, []);
 
+  useEffect(() => {
+    if (!collapseOnInitialOpen) return;
+    if (getWorkspaceValue<unknown>(RUNTIME_STORAGE_KEY) !== undefined) return;
+    // 首次折叠需要落盘，避免临时窗口后续启动时重复覆盖自己的布局。
+    void setWorkspaceValue(RUNTIME_STORAGE_KEY, initialRuntime);
+  }, [collapseOnInitialOpen, initialRuntime]);
+
   const revealLocation = useCallback(
     (location: SidebarLocation, activeId?: SidebarContainerId) => {
       if (temporarilyHiddenRef.current) return;
