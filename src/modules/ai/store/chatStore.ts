@@ -1,5 +1,5 @@
 /**
- * 本文件管理按会话隔离的 AI 运行状态、窗口级恢复和增量持久化。
+ * 本文件管理按会话隔离的 AI 与 Subagent 展示状态、窗口级恢复和增量持久化。
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
@@ -25,6 +25,11 @@ import {
   clearSubagentCoordinator,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
+import {
+  materializeSubagentDisplayParts,
+  toSubagentDisplaySnapshot,
+  type SubagentDisplayState,
+} from "../agents/subagentDisplay";
 import { snapshotAgent } from "../lib/agents";
 import {
   type CustomEndpointKeys,
@@ -35,6 +40,7 @@ import { pushRecentModel } from "../lib/modelPrefs";
 import {
   projectSessionMessages,
   serializeSessionMessages,
+  serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
 } from "../lib/sessionMessages";
 import {
@@ -151,6 +157,14 @@ type StoreState = {
   agentMetaBySession: Record<string, AgentMeta>;
   patchAgentMeta: (sessionId: string, patch: Partial<AgentMeta>) => void;
   resetAgentMeta: (sessionId: string) => void;
+  subagentDisplaysBySession: Record<
+    string,
+    Record<string, SubagentDisplayState>
+  >;
+  upsertSubagentDisplay: (
+    sessionId: string,
+    display: SubagentDisplayState,
+  ) => void;
 
   // Sessions
   sessionsHydrated: boolean;
@@ -370,6 +384,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
       },
     })),
 
+  subagentDisplaysBySession: {},
+  upsertSubagentDisplay: (sessionId, display) =>
+    set((state) => ({
+      subagentDisplaysBySession: {
+        ...state.subagentDisplaysBySession,
+        [sessionId]: {
+          ...(state.subagentDisplaysBySession[sessionId] ?? {}),
+          [display.toolCallId]: display,
+        },
+      },
+    })),
+
   sessionsHydrated: false,
   draftSessionId: null,
   sessions: [],
@@ -474,7 +500,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
       }
       set((state) => {
         const agentMetaBySession = { ...state.agentMetaBySession };
+        const subagentDisplaysBySession = {
+          ...state.subagentDisplaysBySession,
+        };
         for (const id of deletedSessionIds) delete agentMetaBySession[id];
+        for (const id of deletedSessionIds) {
+          delete subagentDisplaysBySession[id];
+        }
         return {
           sessions: next,
           draftSessionId: nextDraftId,
@@ -486,6 +518,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
             deletedSessionIds.length > 0
               ? agentMetaBySession
               : state.agentMetaBySession,
+          subagentDisplaysBySession:
+            deletedSessionIds.length > 0
+              ? subagentDisplaysBySession
+              : state.subagentDisplaysBySession,
           sessionSyncError: null,
         };
       });
@@ -504,9 +540,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
     try {
       const acquired = await acquireSessionRun(id);
       if (!acquired) return false;
-      set({
-        runLockSessionIds: { ...get().runLockSessionIds, [id]: true },
-        sessionSyncError: null,
+      set((state) => {
+        const subagentDisplaysBySession = {
+          ...state.subagentDisplaysBySession,
+        };
+        delete subagentDisplaysBySession[id];
+        return {
+          runLockSessionIds: { ...state.runLockSessionIds, [id]: true },
+          subagentDisplaysBySession,
+          sessionSyncError: null,
+        };
       });
       return true;
     } finally {
@@ -704,6 +747,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
         useSessionAttentionStore.getState().clearSession(id);
         const agentMetaBySession = { ...get().agentMetaBySession };
         delete agentMetaBySession[id];
+        const subagentDisplaysBySession = {
+          ...get().subagentDisplaysBySession,
+        };
+        delete subagentDisplaysBySession[id];
         const wasActive = get().activeSessionId === id;
         const activeDraftId = get().draftSessionId;
         if (remaining.length === 0 && !wasActive && activeDraftId) {
@@ -713,6 +760,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
             draftSessionId: activeDraftId,
             activeSessionId: activeDraftId,
             agentMetaBySession,
+            subagentDisplaysBySession,
           });
           return;
         }
@@ -723,6 +771,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
             draftSessionId: draftId,
             activeSessionId: draftId,
             agentMetaBySession,
+            subagentDisplaysBySession,
           });
           if (wasActive) await persistActiveSession(null);
           return;
@@ -736,6 +785,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
           draftSessionId: draftId,
           activeSessionId: nextActive,
           agentMetaBySession,
+          subagentDisplaysBySession,
         });
         if (wasActive) await persistActiveSession(null);
       } catch (error) {
@@ -753,6 +803,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const meta = sessions.find((s) => s.id === id);
       if (!meta) return;
       const outcome = sessionRunOutcome(id);
+      const liveDisplays = Object.values(
+        get().subagentDisplaysBySession[id] ?? {},
+      );
       if (messages.length === 0 && meta.title === "New chat") {
         await releaseSessionRun(id);
         cancelledRuns.delete(id);
@@ -760,10 +813,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
         useSessionAttentionStore.getState().finalizeRun(id, outcome);
         const runLockSessionIds = { ...get().runLockSessionIds };
         delete runLockSessionIds[id];
-        set({ runLockSessionIds });
+        const subagentDisplaysBySession = {
+          ...get().subagentDisplaysBySession,
+        };
+        delete subagentDisplaysBySession[id];
+        set({ runLockSessionIds, subagentDisplaysBySession });
         return;
       }
       const updatedAt = Date.now();
+      const timestamp = new Date(updatedAt).toISOString();
+      const turnId = pendingTurnIds.get(id) ?? newTurnId();
       const title =
         !meta.title || meta.title === "New chat"
           ? deriveTitle(messages)
@@ -774,11 +833,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
           "The UI message history is shorter than the session file",
         );
       }
-      const records = serializeSessionMessages(messages.slice(persistedCount), {
-        timestamp: new Date(updatedAt).toISOString(),
-        turnId: pendingTurnIds.get(id) ?? newTurnId(),
-        turnStatus: outcome,
-      });
+      const snapshots = liveDisplays.map((display) =>
+        toSubagentDisplaySnapshot(
+          display,
+          outcome === "cancelled" ? "cancelled" : "failed",
+          updatedAt,
+        ),
+      );
+      const recordOptions = { timestamp, turnId, turnStatus: outcome };
+      const records = [
+        ...serializeSessionMessages(
+          messages.slice(persistedCount),
+          recordOptions,
+        ),
+        ...serializeSubagentDisplaySnapshots(snapshots, recordOptions),
+      ];
       const committedMeta = await commitSession({
         id,
         createdAt: meta.createdAt,
@@ -792,10 +861,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
         messages: records,
       });
       persistedMessageCounts.set(id, messages.length);
-      set({
-        sessions: get().sessions.map((session) =>
-          session.id === id ? committedMeta : session,
-        ),
+      const chat = chats.get(id);
+      if (chat && snapshots.length > 0) {
+        chat.messages = materializeSubagentDisplayParts(
+          chat.messages,
+          snapshots,
+        );
+      }
+      set((state) => {
+        const subagentDisplaysBySession = {
+          ...state.subagentDisplaysBySession,
+        };
+        delete subagentDisplaysBySession[id];
+        return {
+          sessions: state.sessions.map((session) =>
+            session.id === id ? committedMeta : session,
+          ),
+          subagentDisplaysBySession,
+        };
       });
       await get().refreshSessions();
       await releaseSessionRun(id);

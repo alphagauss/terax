@@ -37,6 +37,11 @@ import {
   type SubagentTaskRunner,
   type SubagentTurnCoordinator,
 } from "../agents/subagentRuntime";
+import {
+  isSubagentToolErrorOutput,
+  summarizeSubagentToolInput,
+  type SubagentDisplayState,
+} from "../agents/subagentDisplay";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
@@ -341,6 +346,7 @@ export type RunAgentOptions = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onSubagentDisplay?: (state: SubagentDisplayState) => void;
   onSystemPrompt?: (
     systemPrompt: string,
     messages: UIMessage[],
@@ -409,14 +415,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
   const rootTools = buildTools(
     opts.toolContext,
     opts.allowedTools,
-    ({ task, label, wait, abortSignal }) => {
+    ({ task, label, toolCallId, wait, abortSignal }) => {
       const permissionMode = opts.toolContext.getPermissionMode();
       return coordinator.start({
         task,
         label,
+        toolCallId,
         wait,
         limit: opts.maxConcurrentSubagents,
         parentAbortSignal: abortSignal,
+        onDisplay: opts.onSubagentDisplay,
         run: buildSubagentTaskRunner({
           opts,
           modelId: subagentModelId,
@@ -629,7 +637,7 @@ function buildSubagentTaskRunner({
     ...opts.toolContext,
     getPermissionMode: () => permissionMode,
   };
-  return async ({ task, abortSignal }) => {
+  return async ({ task, abortSignal, onProgress }) => {
     const childModel = await buildConfiguredLanguageModel(modelId, opts.keys, {
       lmstudioBaseURL: opts.lmstudioBaseURL,
       lmstudioModelId: opts.lmstudioModelId,
@@ -655,6 +663,32 @@ function buildSubagentTaskRunner({
       tools: buildTools(toolContext, allowedTools),
       stopWhen: stepCountIs(MAX_AGENT_STEPS),
       abortSignal,
+      experimental_onStepStart: () => {
+        onProgress({ type: "thinking" });
+      },
+      experimental_onToolCallStart: ({ toolCall }) => {
+        if (!toolCall) return;
+        onProgress({
+          type: "tool-start",
+          id: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          summary: summarizeSubagentToolInput(
+            toolCall.toolName,
+            toolCall.input,
+          ),
+        });
+      },
+      experimental_onToolCallFinish: ({ toolCall, success, output }) => {
+        if (!toolCall) return;
+        onProgress({
+          type: "tool-finish",
+          id: toolCall.toolCallId,
+          status:
+            success && !isSubagentToolErrorOutput(output)
+              ? "completed"
+              : "failed",
+        });
+      },
       onStepFinish: (step) => reportUsage(opts, step.usage),
     });
     const usage = result.totalUsage;

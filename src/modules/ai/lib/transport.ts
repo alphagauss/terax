@@ -1,6 +1,6 @@
 /**
  * 本文件连接聊天 UI 与 Agent 流式运行时。
- * 系统提示词和工具白名单在 Chat runtime 内冻结，并复用每聊天 Subagent 协调器。
+ * 系统提示词和工具白名单在 Chat runtime 内冻结，并转发每聊天 Subagent 展示状态。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -9,6 +9,7 @@ import {
   getSubagentCoordinator,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
+import type { SubagentDisplayState } from "../agents/subagentDisplay";
 import type { SessionAgentSnapshot } from "./agents";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
@@ -46,6 +47,7 @@ type Deps = {
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
+  onSubagentDisplay?: (state: SubagentDisplayState) => void;
   onSystemPrompt?: (
     systemPrompt: string,
     messages: UIMessage[],
@@ -111,6 +113,7 @@ export function createSessionTransport(deps: Deps) {
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
+      onSubagentDisplay: deps.onSubagentDisplay,
       onSystemPrompt: deps.onSystemPrompt,
       onCheckpoint: deps.onCheckpoint,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),

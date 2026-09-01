@@ -1,7 +1,7 @@
 /**
  * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
  * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
- * 内部结果事件不参与可见分组，流式阶段只更新末尾活动分段。
+ * 内部结果和 Subagent 展示事件不参与普通分组，流式阶段只更新末尾活动分段。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
@@ -60,12 +60,18 @@ import {
 import { useTranslation } from "react-i18next";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
+import {
+  isSubagentDisplayDataPart,
+  type SubagentDisplaySnapshot,
+} from "../agents/subagentDisplay";
+import { isSubagentResultDataPart } from "../agents/subagentRuntime";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 import { AiChatScrollControls } from "./AiChatScrollControls";
+import { SubagentCard, type SubagentResultView } from "./SubagentCard";
 
 type ConversationScrollPosition = {
   top: number;
@@ -438,6 +444,7 @@ export function AiChatView({
           {messages.map((m) => (
             <RenderedMessage
               key={m.id}
+              sessionId={sessionId}
               message={m}
               streaming={m.id === streamingMessageId}
             />
@@ -532,9 +539,11 @@ const ContinueRow = memo(function ContinueRow({
 });
 
 const RenderedMessage = memo(function RenderedMessage({
+  sessionId,
   message,
   streaming,
 }: {
+  sessionId: string;
   message: UIMessage;
   streaming: boolean;
 }) {
@@ -550,6 +559,10 @@ const RenderedMessage = memo(function RenderedMessage({
   );
   const timestamp = useMessageTimestamp(message);
   const copyText = useMemo(() => messageTextForCopy(message), [message]);
+  const subagentParts = useMemo(
+    () => collectSubagentParts(message.parts as AnyPart[]),
+    [message.parts],
+  );
 
   if (message.role === "user") {
     const rawText = message.parts
@@ -614,8 +627,16 @@ const RenderedMessage = memo(function RenderedMessage({
             return (
               <PartAppear key={`${message.id}-${g.key}`}>
                 <RenderedPart
+                  sessionId={sessionId}
                   part={g.part}
                   streaming={g.idx === streamingPartIdx}
+                  persistedSubagent={subagentParts.displaysByToolCallId.get(
+                    toolCallIdFromPart(g.part),
+                  )}
+                  subagentResult={subagentResultForPart(
+                    g.part,
+                    subagentParts.resultsByTaskId,
+                  )}
                 />
               </PartAppear>
             );
@@ -758,7 +779,10 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
     run = null;
   };
   parts.forEach((p, i) => {
-    if (partType(p) === "data-subagent-result") {
+    if (
+      partType(p) === "data-subagent-result" ||
+      partType(p) === "data-subagent-display"
+    ) {
       flushRun();
       return;
     }
@@ -772,6 +796,56 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   });
   flushRun();
   return out;
+}
+
+function collectSubagentParts(parts: readonly AnyPart[]): {
+  displaysByToolCallId: Map<string, SubagentDisplaySnapshot>;
+  resultsByTaskId: Map<string, SubagentResultView>;
+} {
+  const displaysByToolCallId = new Map<string, SubagentDisplaySnapshot>();
+  const resultsByTaskId = new Map<string, SubagentResultView>();
+  for (const part of parts) {
+    const value: unknown = part;
+    if (isSubagentDisplayDataPart(value)) {
+      displaysByToolCallId.set(
+        value.data.snapshot.toolCallId,
+        value.data.snapshot,
+      );
+      continue;
+    }
+    if (!isSubagentResultDataPart(value)) continue;
+    for (const result of value.data.event.results) {
+      resultsByTaskId.set(result.taskId, {
+        status: result.status,
+        ...(result.result === undefined ? {} : { result: result.result }),
+        ...(result.error === undefined ? {} : { error: result.error }),
+      });
+    }
+  }
+  return { displaysByToolCallId, resultsByTaskId };
+}
+
+function subagentResultForPart(
+  part: AnyPart,
+  resultsByTaskId: ReadonlyMap<string, SubagentResultView>,
+): SubagentResultView | undefined {
+  const taskId = objectStringValue(
+    "output" in part ? part.output : undefined,
+    "taskId",
+  );
+  return taskId ? resultsByTaskId.get(taskId) : undefined;
+}
+
+function toolCallIdFromPart(part: AnyPart): string {
+  return "toolCallId" in part && typeof part.toolCallId === "string"
+    ? part.toolCallId
+    : "";
+}
+
+function objectStringValue(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = (value as Record<string, unknown>)[key];
+  return typeof candidate === "string" ? candidate : undefined;
 }
 
 function readPathFromPart(p: AnyPart): string | null {
@@ -905,11 +979,17 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
 });
 
 const RenderedPart = memo(function RenderedPart({
+  sessionId,
   part,
   streaming,
+  persistedSubagent,
+  subagentResult,
 }: {
+  sessionId: string;
   part: AnyPart;
   streaming: boolean;
+  persistedSubagent?: SubagentDisplaySnapshot;
+  subagentResult?: SubagentResultView;
 }) {
   if (part.type === "text") {
     return (
@@ -934,10 +1014,48 @@ const RenderedPart = memo(function RenderedPart({
     part.type === "dynamic-tool" ||
     (typeof part.type === "string" && part.type.startsWith("tool-"))
   ) {
+    const toolPart = part as unknown as AnyToolPart;
+    const toolName =
+      toolPart.type === "dynamic-tool"
+        ? toolPart.toolName
+        : toolPart.type.replace(/^tool-/, "");
+    if (toolName === "run_subagent") {
+      return (
+        <LiveSubagentCard
+          sessionId={sessionId}
+          part={toolPart}
+          persistedDisplay={persistedSubagent}
+          backgroundResult={subagentResult}
+        />
+      );
+    }
     return <RenderedTool part={part as unknown as AnyToolPart} />;
   }
 
   return null;
+});
+
+const LiveSubagentCard = memo(function LiveSubagentCard({
+  sessionId,
+  part,
+  persistedDisplay,
+  backgroundResult,
+}: {
+  sessionId: string;
+  part: AnyToolPart;
+  persistedDisplay?: SubagentDisplaySnapshot;
+  backgroundResult?: SubagentResultView;
+}) {
+  const liveDisplay = useChatStore(
+    (state) => state.subagentDisplaysBySession[sessionId]?.[part.toolCallId],
+  );
+  return (
+    <SubagentCard
+      part={part}
+      display={liveDisplay ?? persistedDisplay}
+      backgroundResult={backgroundResult}
+    />
+  );
 });
 
 const RenderedTool = memo(function RenderedTool({
@@ -955,23 +1073,12 @@ const RenderedTool = memo(function RenderedTool({
       className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-1 [&>button]:leading-4"
       toolName={toolName}
       state={part.state}
-      input={toolDisplayInput(toolName, part.input)}
+      input={part.input}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
     />
   );
 });
-
-/** 让通用工具卡片优先显示 Subagent 的可选短标签，不改动真实工具输入。 */
-function toolDisplayInput(toolName: string, input: unknown): unknown {
-  if (toolName !== "run_subagent" || !input || typeof input !== "object") {
-    return input;
-  }
-  const label = (input as { label?: unknown }).label;
-  return typeof label === "string" && label.trim()
-    ? { ...input, task: label.trim() }
-    : input;
-}
 
 /** 将工具详情中的 Shift 加滚轮转换为横向滚动，监听器必须以 non-passive 注册。 */
 function handleToolDetailsWheel(event: WheelEvent) {

@@ -1,6 +1,6 @@
 /**
  * 本文件定义通用 Subagent 工具协议。
- * 工具只负责校验输入并委托会话级协调器，不持有模型、权限或后台状态。
+ * 工具只负责校验输入并携带父 tool call ID 委托协调器，不持有模型或后台状态。
  */
 
 import { tool } from "ai";
@@ -10,6 +10,7 @@ import type { SubagentStartResult } from "../agents/subagentRuntime";
 export type SubagentStarter = (options: {
   task: string;
   label?: string;
+  toolCallId: string;
   wait: boolean;
   abortSignal?: AbortSignal;
 }) => Promise<SubagentStartResult>;
@@ -48,11 +49,12 @@ export function buildSubagentTools(start?: SubagentStarter) {
             "Wait for the final result before the main agent continues. Defaults to false for background execution.",
           ),
       }),
-      execute: ({ task, label, wait }, { abortSignal }) =>
+      execute: ({ task, label, wait }, { abortSignal, toolCallId }) =>
         start
           ? start({
               task,
               label,
+              toolCallId,
               wait: wait ?? false,
               abortSignal,
             })

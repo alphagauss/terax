@@ -1,6 +1,6 @@
 /**
  * 本文件创建 AI SDK Chat 实例并衔接会话运行时。
- * 用户消息成功进入 Chat 后才将内存草稿提升为历史会话，空草稿不会出现在会话列表或磁盘中。
+ * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -97,6 +97,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore
         .getState()
         .patchAgentMeta(sessionId, { hitStepCap: info.hitStepCap });
+    },
+    onSubagentDisplay: (display) => {
+      useChatStore.getState().upsertSubagentDisplay(sessionId, display);
     },
     onSystemPrompt: (systemPrompt, messages) =>
       useChatStore

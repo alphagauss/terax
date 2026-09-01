@@ -1,6 +1,6 @@
 /**
  * 本文件把含内部 Subagent 事件的 UIMessage 历史转换为 provider 消息。
- * 事件在 UI 中属于隐藏 data part，在模型协议中投影为 append-only user 消息。
+ * 结果事件投影为 append-only user 消息，display-only 进度在边界处显式剔除。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -9,6 +9,7 @@ import {
   formatSubagentResultEvent,
   isSubagentResultDataPart,
 } from "../agents/subagentRuntime";
+import { isSubagentDisplayDataPart } from "../agents/subagentDisplay";
 
 /** 将 UI 历史按内部事件切开，保证磁盘记录与 provider 看到相同的消息顺序。 */
 export async function convertToAgentModelMessages(
@@ -16,11 +17,21 @@ export async function convertToAgentModelMessages(
 ): Promise<ModelMessage[]> {
   const converted: ModelMessage[] = [];
   for (const message of messages) {
+    const providerParts = message.parts.filter(
+      (part) => !isSubagentDisplayDataPart(part),
+    );
+    if (message.role === "assistant" && !hasModelContent(providerParts)) {
+      continue;
+    }
     if (
       message.role !== "assistant" ||
-      !message.parts.some(isSubagentResultDataPart)
+      !providerParts.some(isSubagentResultDataPart)
     ) {
-      converted.push(...(await convertToModelMessages([message])));
+      converted.push(
+        ...(await convertToModelMessages([
+          { ...message, parts: providerParts },
+        ])),
+      );
       continue;
     }
 
@@ -36,7 +47,7 @@ export async function convertToAgentModelMessages(
       segment = [];
     };
 
-    for (const part of message.parts) {
+    for (const part of providerParts) {
       if (!isSubagentResultDataPart(part)) {
         segment.push(part);
         continue;

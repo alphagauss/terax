@@ -9,6 +9,7 @@ import {
   SubagentTurnCoordinator,
   type SubagentTaskResult,
 } from "./subagentRuntime";
+import type { SubagentDisplayState } from "./subagentDisplay";
 
 const usage = {
   inputTokens: 1,
@@ -48,24 +49,28 @@ describe("SubagentTurnCoordinator", () => {
 
     const first = await coordinator.start({
       task: "first",
+      toolCallId: "call-first",
       wait: false,
       limit: 3,
       run,
     });
     const second = await coordinator.start({
       task: "second",
+      toolCallId: "call-second",
       wait: false,
       limit: 3,
       run,
     });
     const third = await coordinator.start({
       task: "third",
+      toolCallId: "call-third",
       wait: false,
       limit: 3,
       run,
     });
     const rejected = await coordinator.start({
       task: "fourth",
+      toolCallId: "call-fourth",
       wait: false,
       limit: 3,
       run,
@@ -95,6 +100,7 @@ describe("SubagentTurnCoordinator", () => {
     const result = await coordinator.start({
       task: "inspect",
       label: "Inspector",
+      toolCallId: "call-inspect",
       wait: true,
       limit: 3,
       run: async () => ({ status: "completed", result: "done", usage }),
@@ -110,8 +116,61 @@ describe("SubagentTurnCoordinator", () => {
     expect(coordinator.hasPendingResults).toBe(false);
   });
 
+  it("reports thinking, tool lifecycle and the final result as display state", async () => {
+    const coordinator = new SubagentTurnCoordinator();
+    const displays: SubagentDisplayState[] = [];
+
+    await coordinator.start({
+      task: "inspect",
+      label: "Inspector",
+      toolCallId: "parent-call",
+      wait: false,
+      limit: 3,
+      onDisplay: (display) => displays.push(display),
+      run: async ({ onProgress }) => {
+        onProgress({ type: "thinking" });
+        onProgress({
+          type: "tool-start",
+          id: "child-call",
+          toolName: "grep",
+          summary: "subagent_result",
+        });
+        onProgress({
+          type: "tool-finish",
+          id: "child-call",
+          status: "completed",
+        });
+        return { status: "completed", result: "done", usage };
+      },
+    });
+    await coordinator.waitForAll();
+
+    expect(displays[0]).toMatchObject({
+      toolCallId: "parent-call",
+      phase: "thinking",
+      status: "running",
+    });
+    expect(displays).toContainEqual(
+      expect.objectContaining({
+        phase: "tool",
+        steps: [
+          expect.objectContaining({
+            id: "child-call",
+            status: "running",
+          }),
+        ],
+      }),
+    );
+    expect(displays[displays.length - 1]).toMatchObject({
+      status: "completed",
+      result: "done",
+      steps: [expect.objectContaining({ status: "completed" })],
+    });
+  });
+
   it("cancels running tasks and discards their background notifications", async () => {
     const coordinator = new SubagentTurnCoordinator();
+    const displays: SubagentDisplayState[] = [];
     const run = vi.fn(async () => ({
       status: "completed" as const,
       result: "late",
@@ -119,8 +178,10 @@ describe("SubagentTurnCoordinator", () => {
     }));
     await coordinator.start({
       task: "long task",
+      toolCallId: "call-long",
       wait: false,
       limit: 3,
+      onDisplay: (display) => displays.push(display),
       run: ({ abortSignal }) =>
         new Promise((_, reject) => {
           abortSignal.addEventListener(
@@ -134,10 +195,12 @@ describe("SubagentTurnCoordinator", () => {
     await coordinator.cancelAll();
 
     expect(coordinator.runningCount).toBe(0);
+    expect(displays[displays.length - 1]?.status).toBe("cancelled");
     expect(coordinator.drainResultEvent()).toBeNull();
     await expect(
       coordinator.start({
         task: "late task",
+        toolCallId: "call-late",
         wait: false,
         limit: 3,
         run,
