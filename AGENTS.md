@@ -44,12 +44,15 @@ Terax 会读取工作区根目录的 `AGENTS.md` 作为项目指令。本文件�
 - **性能**：Terax 的目标是轻量和高性能。检查新增 RAM、IPC 往返、重复请求、额外渲染、无效计算和依赖体积。未启用的功能应当不消耗资源。
 - **安全性**：在 IPC、文件系统、网络和 AI 工具边界验证输入。秘密路径拒绝规则必须同时覆盖读取和写入，不得绕过。
 - **UI/UX**：所有状态和细节都要完整、专业。
-- **架构**：新增或修改的逻辑优先放入纯函数和低依赖模块；Tauri command 与 React 组件保持为薄的命令式外壳。
+- **架构**：可复用、复杂或需要独立验证的规则优先放入纯函数和低依赖模块；一次性且简单的逻辑保留在所属数据流附近，不得仅为方便单元测试创建通用抽象、包装层或独立模块。Tauri command 与 React 组件保持为薄的命令式外壳。
+- **状态归属**：派生状态由其真实生命周期所有者计算并保持单一事实来源，挂到最小对应语义单元；跨边界恢复所需的数据随该单元持久化，展示层只消费结果。内部展示数据不得污染外部协议或下游业务输入。
 - **变更范围**：只修改完成当前需求所必需的代码，不顺手重构无关内容。
 
 完成前必须根据变更范围和风险选择最小且充分的验证集：
 
 - 优先运行直接覆盖本次改动的格式、静态检查和相关测试，不为未涉及的技术栈运行无关检查。
+- **测试边界**：回归测试只锁定用户可观察的业务不变量和真实故障边界。一个不变量保留一个主要测试，不按层级、排列或输入组合重复验证同一事实；已有测试覆盖组合行为时，只补本次新增的数据或状态边界。
+- **避免恒等式**：不测试框架保证的透传、简单转发、常量拼装或实现细节。往返测试只有在经过两个独立转换边界，且任一方向丢失信息都会造成业务故障时才有价值，不能把同一实现与自身比较成恒等式。
 - 修改前端代码或前端配置时，按影响范围运行 `pnpm lint`、`pnpm check-types` 和相关 `pnpm test`；涉及公共基础设施、构建配置或大范围变更时运行完整前端检查。
 - 修改 Rust、Tauri 配置或原生依赖时，按影响范围运行 `cargo clippy --all-targets --locked -- -D warnings` 和相关测试；涉及公共基础设施或大范围变更时运行 `cargo nextest run --locked`，本地没有 nextest 时使用 `cargo test --locked`。
 - 修改其他语言或独立子项目时，运行该部分已有的格式、静态检查和相关测试。跨语言、跨进程或跨协议边界的变更必须验证受影响的各层。
@@ -241,8 +244,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - Terax 只有一个代码内定义、不可编辑或删除的主 Agent。Custom Agent 跨 Workspace 共享，只配置专属指令和内置工具白名单；Agent 仅能在未发送的 draft 中选择，首次发送后以 `metadata.agent` 快照绑定会话，persisted session 不得切换 Agent。
 - 每个 Chat runtime 在首次模型请求时读取 Workspace 根 `AGENTS.md`，并冻结统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令。后续轮次复用逐字相同的 system prompt 和工具集；LRU 淘汰或进程重启后从当前文件、设置和会话 Agent 快照重新构造。磁盘 metadata 中的 `systemPrompt` 只用于检查，不得作为恢复输入。
 - Custom Agent ID 是会话归属和历史筛选键。删除 Custom Agent 必须通过 Rust 级联删除所有 Workspace 中的关联会话，并在任一关联会话运行时拒绝整个操作；不得保留孤儿会话或通过通用共享存储删除绕过该入口。
-- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，`AgentRunBridge` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
-- AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
+- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，`AgentRunBridge` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤、恢复所需终态数据和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
+- AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续；长任务的状态收集和持久化不得依赖可卸载 UI。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
 - `read_file`、`find_files`、`grep` 自动执行；`write_file`、`apply_patch`、`file_operation`、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
