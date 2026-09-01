@@ -130,6 +130,7 @@ fn create_session() {}
 - 代码、注释、提交和文档中不使用 em dash 字符。
 - 不使用 emoji。
 - 包含 Alpha 功能、集成或 Alpha 专用基础设施的提交必须使用 Conventional Commit 的 `alpha` scope，例如 `feat(alpha): add strategy import`。Alpha 改动必须与公共功能拆分为独立提交，确保 `public` 分支可以排除 Alpha 提交而不丢失无关改动。
+- `main` 永久作为开发分支，`public` 仅用于低频公开发布。两者通过带 `Source-Main` trailer 的空检查点提交记录同步边界，不使用同步 tag，也不得把 `main` 直接 merge 到 `public`。固定流程见 `docs/contributing/public-release.md`。
 - 前端跨模块导入统一使用 `@/...`，不要使用相对路径。
 - 只使用 pnpm，不使用 npm、npx 或 yarn。
 
@@ -292,5 +293,6 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量
 - `docs/architecture/workspace-page-handoff.md`：主窗口向同环境临时 Workspace 复制可重建工作页
 - `docs/contributing/testing.md`：测试约定和核心子系统不变量
+- `docs/contributing/public-release.md`：public 低频发布、选择性重放和同步检查点流程
 - `docs/contributing/themes.md`：主题字段、Modern 基准、透明度规则和新增主题流程
 - `docs/contributing/ui-runtime-debugging.md`：复杂 UI 的运行时调试和回归验证

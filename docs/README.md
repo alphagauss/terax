@@ -29,4 +29,5 @@
 ## 贡献指南
 
 - [测试](contributing/testing.md) - 测试约定、检查运行方式，以及优秀核心子系统测试的标准。
+- [public 低频发布](contributing/public-release.md) - 从 main 选择性重放公共提交、处理混杂边界并记录同步检查点。
 - [主题开发](contributing/themes.md) - Modern 基准、完整字段、透明度规则、自定义主题和新增内置主题流程。
