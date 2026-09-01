@@ -1,0 +1,198 @@
+/**
+ * Markdown 锁定开关的完整视觉与反馈动画。
+ * 尺寸、光带轨迹和时序与上游控件保持一致，颜色映射到 Terax 语义令牌。
+ */
+
+.markdown-view-toggle {
+  --markdown-toggle-accent: var(--primary);
+  --markdown-toggle-accent-foreground: var(--primary-foreground);
+  --markdown-toggle-background: var(--secondary);
+  --markdown-toggle-background-hover: var(--interactive-hover);
+  --markdown-toggle-foreground: var(--secondary-foreground);
+  --markdown-toggle-border: var(--border);
+  --markdown-toggle-border-hover: color-mix(in oklab, var(--border), var(--foreground) 28%);
+  --markdown-toggle-shine-edge: rgba(255, 255, 255, 0.16);
+  --markdown-toggle-shine: #ffffff;
+  --markdown-toggle-shine-glow: rgba(255, 255, 255, 0.58);
+
+  position: absolute;
+  z-index: 20;
+  top: 16px;
+  right: 16px;
+  display: inline-grid;
+  grid-template-columns: repeat(2, 24px);
+  align-items: center;
+  justify-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  width: 58px;
+  height: 32px;
+  padding: 3px;
+  overflow: hidden;
+  direction: ltr;
+  appearance: none;
+  border: 1px solid var(--markdown-toggle-border);
+  border-radius: 999px;
+  background: var(--markdown-toggle-background);
+  color: var(--markdown-toggle-foreground);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.12),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.markdown-view-toggle::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: -8px;
+  bottom: -8px;
+  left: -30px;
+  width: 24px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--markdown-toggle-shine-edge) 24%,
+    var(--markdown-toggle-shine) 50%,
+    var(--markdown-toggle-shine-edge) 76%,
+    transparent
+  );
+  box-shadow: 0 0 8px 2px var(--markdown-toggle-shine-glow);
+  opacity: 0;
+  pointer-events: none;
+  transform: skewX(-20deg);
+}
+
+.markdown-view-toggle.shine::after {
+  animation: markdown-view-toggle-shine 2s linear;
+  will-change: transform, opacity;
+}
+
+@keyframes markdown-view-toggle-shine {
+  0% {
+    opacity: 0;
+    transform: translateX(0) skewX(-20deg);
+  }
+
+  12%,
+  88% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(122px) skewX(-20deg);
+  }
+}
+
+.markdown-view-toggle:hover {
+  border-color: var(--markdown-toggle-border-hover);
+  background: var(--markdown-toggle-background-hover);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.12),
+    0 6px 16px rgba(0, 0, 0, 0.1);
+}
+
+.markdown-view-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.markdown-view-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.markdown-view-toggle-indicator {
+  position: absolute;
+  top: 50%;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--markdown-toggle-accent);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.25);
+  transform: translate(26px, -50%);
+  transition:
+    background-color 0.12s ease,
+    transform 0.16s ease;
+}
+
+.markdown-view-toggle-icon {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 16px;
+  height: 16px;
+  color: var(--markdown-toggle-foreground);
+  opacity: 0.62;
+  pointer-events: none;
+  transition:
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.markdown-view-toggle:not([data-locked]) .markdown-view-toggle-icon-editing,
+.markdown-view-toggle[data-locked] .markdown-view-toggle-icon-locked {
+  color: var(--markdown-toggle-accent-foreground);
+  opacity: 1;
+}
+
+.markdown-view-toggle[data-locked] .markdown-view-toggle-indicator {
+  transform: translate(0, -50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-view-toggle,
+  .markdown-view-toggle-indicator,
+  .markdown-view-toggle-icon,
+  .markdown-view-toggle.shine::after {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .markdown-view-toggle {
+    forced-color-adjust: none;
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    box-shadow: none;
+  }
+
+  .markdown-view-toggle::after {
+    display: none;
+  }
+
+  .markdown-view-toggle:hover {
+    border-color: Highlight;
+    background: ButtonFace;
+    box-shadow: none;
+  }
+
+  .markdown-view-toggle:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .markdown-view-toggle-indicator {
+    background: Highlight;
+    box-shadow: none;
+  }
+
+  .markdown-view-toggle-icon {
+    color: ButtonText;
+    opacity: 1;
+  }
+
+  .markdown-view-toggle:not([data-locked]) .markdown-view-toggle-icon-editing,
+  .markdown-view-toggle[data-locked] .markdown-view-toggle-icon-locked {
+    color: HighlightText;
+  }
+}

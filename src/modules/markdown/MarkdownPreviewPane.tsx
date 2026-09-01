@@ -35,7 +35,10 @@ import { MarkdownOutlineToggle } from "@/modules/markdown/MarkdownOutlineToggle"
 import { MarkdownRawPane } from "@/modules/markdown/MarkdownRawPane";
 import { MarkdownRenderErrorBoundary } from "@/modules/markdown/MarkdownRenderErrorBoundary";
 import { MarkdownSplitLayout } from "@/modules/markdown/MarkdownSplitLayout";
-import { MarkdownViewToggle } from "@/modules/markdown/MarkdownViewToggle";
+import {
+  MarkdownViewToggle,
+  type MarkdownViewToggleHandle,
+} from "@/modules/markdown/MarkdownViewToggle";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -103,6 +106,7 @@ export function MarkdownPreviewPane({
   const contentRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MarkdownDocumentRendererHandle>(null);
   const editorRef = useRef<EditorPaneHandle>(null);
+  const viewToggleRef = useRef<MarkdownViewToggleHandle>(null);
   const navigationFrameRef = useRef(0);
   const pendingRawSourceLineRef = useRef<number | null>(null);
   const pendingSourceNavigationRef = useRef<{
@@ -435,6 +439,19 @@ export function MarkdownPreviewPane({
     setScrollContainer(node);
   }, []);
 
+  useEffect(() => {
+    if (!scrollContainer || viewMode !== "rendered") return;
+    // 这里只提示既有的模式开关，不赋予预览容器新的可操作语义。
+    const handleClick = (event: globalThis.MouseEvent) => {
+      if (event.button !== 0 || event.detail !== 1) return;
+      const selection = scrollContainer.ownerDocument.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      viewToggleRef.current?.showLockedEditingAttempt();
+    };
+    scrollContainer.addEventListener("click", handleClick);
+    return () => scrollContainer.removeEventListener("click", handleClick);
+  }, [scrollContainer, viewMode]);
+
   return (
     <div
       className={cn(
@@ -477,6 +494,7 @@ export function MarkdownPreviewPane({
             />
           )}
           <MarkdownViewToggle
+            ref={viewToggleRef}
             mode={viewMode}
             onChange={handleViewChange}
             renderedDisabled={dirty}

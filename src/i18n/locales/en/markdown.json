@@ -1,6 +1,12 @@
 {
   "rendered": "Rendered",
   "raw": "Raw",
+  "toggle": {
+    "lockedLabel": "Locked; switch to editing",
+    "editingLabel": "Editing; switch to locked mode",
+    "lockedTitle": "Read-only: editing disabled. Click to edit.",
+    "editingTitle": "Editing: click to lock and view the rendered document."
+  },
   "saveToPreview": "Save to preview",
   "loading": "Loading…",
   "readFailed": "Failed to read file: {{message}}",
