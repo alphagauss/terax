@@ -14,6 +14,8 @@ import {
   DEFAULT_AUTOCOMPLETE_MODEL,
   DEFAULT_MODEL_ID,
   DEFAULT_STT_PROVIDER,
+  endpointIdFromCompatModel,
+  isCompatModelId,
   isKnownModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MLX_DEFAULT_BASE_URL,
@@ -142,6 +144,8 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   defaultModelId: ModelId;
+  defaultSubagentModelId: string | null;
+  maxConcurrentSubagents: number;
   editorTheme: EditorThemePref;
   editorFontSize: number;
   customInstructions: string;
@@ -231,6 +235,8 @@ const KEY_BG_IMAGE_ID = "backgroundImageId";
 const KEY_BG_OPACITY = "backgroundOpacity";
 const KEY_BG_BLUR = "backgroundBlur";
 const KEY_DEFAULT_MODEL = "defaultModelId";
+const KEY_DEFAULT_SUBAGENT_MODEL = "defaultSubagentModelId";
+const KEY_MAX_CONCURRENT_SUBAGENTS = "maxConcurrentSubagents";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
@@ -309,6 +315,10 @@ export const TERMINAL_SCROLLBACK_PRESETS = [
   500, 1000, 2000, 5000, 10_000, 25_000,
 ] as const;
 
+export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;
+export const MAX_CONCURRENT_SUBAGENTS_MIN = 1;
+export const MAX_CONCURRENT_SUBAGENTS_MAX = 8;
+
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "dark",
   themeId: DEFAULT_THEME_ID,
@@ -318,6 +328,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundOpacity: 0.5,
   backgroundBlur: 0,
   defaultModelId: DEFAULT_MODEL_ID,
+  defaultSubagentModelId: null,
+  maxConcurrentSubagents: MAX_CONCURRENT_SUBAGENTS_DEFAULT,
   editorTheme: EDITOR_THEME_AUTO,
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
   customInstructions: "",
@@ -382,6 +394,7 @@ export async function loadPreferences(): Promise<Preferences> {
   // `plugin:store|get` per setting and is the dominant boot cost.
   const values = await readSharedStore("settings");
   const get = <T>(k: string): T | undefined => values[k] as T | undefined;
+  const customEndpoints = get<CustomEndpoint[]>(KEY_CUSTOM_ENDPOINTS) ?? [];
   return {
     theme: get<ThemePref>(KEY_THEME) ?? DEFAULT_PREFERENCES.theme,
     themeId: get<string>(KEY_THEME_ID) ?? DEFAULT_PREFERENCES.themeId,
@@ -403,6 +416,20 @@ export async function loadPreferences(): Promise<Preferences> {
         ? stored
         : DEFAULT_PREFERENCES.defaultModelId;
     })(),
+    defaultSubagentModelId: ((): string | null => {
+      const stored = get<string | null>(KEY_DEFAULT_SUBAGENT_MODEL);
+      const validCompat =
+        stored &&
+        isCompatModelId(stored) &&
+        customEndpoints.some(
+          (endpoint) => endpoint.id === endpointIdFromCompatModel(stored),
+        );
+      return stored && (isKnownModelId(stored) || validCompat) ? stored : null;
+    })(),
+    maxConcurrentSubagents: clampMaxConcurrentSubagents(
+      get<number>(KEY_MAX_CONCURRENT_SUBAGENTS) ??
+        DEFAULT_PREFERENCES.maxConcurrentSubagents,
+    ),
     editorTheme: ((): EditorThemePref => {
       const stored = get<string>(KEY_EDITOR_THEME);
       if (stored === EDITOR_THEME_AUTO || isEditorThemeId(stored))
@@ -454,7 +481,7 @@ export async function loadPreferences(): Promise<Preferences> {
     openaiCompatibleContextLimit:
       get<number>(KEY_OPENAI_COMPAT_CONTEXT_LIMIT) ??
       DEFAULT_PREFERENCES.openaiCompatibleContextLimit,
-    customEndpoints: get<CustomEndpoint[]>(KEY_CUSTOM_ENDPOINTS) ?? [],
+    customEndpoints,
     openrouterModelId:
       get<string>(KEY_OPENROUTER_MODEL_ID) ??
       DEFAULT_PREFERENCES.openrouterModelId,
@@ -619,6 +646,28 @@ export async function setBackgroundBlur(value: number): Promise<void> {
 
 export async function setDefaultModel(value: ModelId): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
+}
+
+export async function setDefaultSubagentModel(
+  value: string | null,
+): Promise<void> {
+  await writePref(KEY_DEFAULT_SUBAGENT_MODEL, value);
+}
+
+/** 将每聊天 Subagent 并发数约束到设置界面允许的安全范围。 */
+export function clampMaxConcurrentSubagents(value: number): number {
+  if (!Number.isFinite(value)) return MAX_CONCURRENT_SUBAGENTS_DEFAULT;
+  return Math.min(
+    MAX_CONCURRENT_SUBAGENTS_MAX,
+    Math.max(MAX_CONCURRENT_SUBAGENTS_MIN, Math.round(value)),
+  );
+}
+
+export async function setMaxConcurrentSubagents(value: number): Promise<void> {
+  await writePref(
+    KEY_MAX_CONCURRENT_SUBAGENTS,
+    clampMaxConcurrentSubagents(value),
+  );
 }
 
 export async function setEditorTheme(value: EditorThemePref): Promise<void> {
@@ -919,6 +968,8 @@ export async function onPreferencesChange(
     [KEY_BG_OPACITY]: "backgroundOpacity",
     [KEY_BG_BLUR]: "backgroundBlur",
     [KEY_DEFAULT_MODEL]: "defaultModelId",
+    [KEY_DEFAULT_SUBAGENT_MODEL]: "defaultSubagentModelId",
+    [KEY_MAX_CONCURRENT_SUBAGENTS]: "maxConcurrentSubagents",
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",

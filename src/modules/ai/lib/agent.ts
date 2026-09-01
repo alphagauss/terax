@@ -1,14 +1,16 @@
 /**
- * 本文件负责创建语言模型并运行 AI Agent 的流式响应。
- * 它接收 Chat runtime 冻结的系统提示词和工具白名单，并组装工具和消息历史。
+ * 本文件负责创建语言模型并运行主 Agent 与通用 Subagent。
+ * 它协调多段流、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
 import {
-  convertToModelMessages,
+  createUIMessageStream,
+  generateText,
   pruneMessages,
   stepCountIs,
   streamText,
   type LanguageModel,
+  type ModelMessage,
   type UIMessage,
 } from "ai";
 import {
@@ -26,12 +28,20 @@ import {
   type CustomEndpoint,
   type ProviderId,
 } from "../config";
-import type { AgentToolId } from "./agentTools";
+import { resolveSubagentTools, type AgentToolId } from "./agentTools";
 import { buildTools, type ToolContext } from "../tools/tools";
+import {
+  formatSubagentResultEvent,
+  releaseSubagentCoordinator,
+  type SubagentResultEvent,
+  type SubagentTaskRunner,
+  type SubagentTurnCoordinator,
+} from "../agents/subagentRuntime";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch } from "./proxyFetch";
+import { convertToAgentModelMessages } from "./subagentMessages";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
 
@@ -48,7 +58,7 @@ const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
     shell_exec: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
     shell_process: (i) => `${String(i.action ?? "Polling")} shell process`,
     shell_list: () => `Listing shell processes`,
-    run_subagent: (i) => `Spawning ${String(i.type ?? "subagent")} subagent`,
+    run_subagent: (i) => `Spawning ${String(i.label ?? i.task ?? "subagent")}`,
   };
 
 function shortPath(p: unknown): string {
@@ -121,8 +131,9 @@ export async function buildLanguageModel(
       break;
     }
     case "deepseek": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "deepseek",
         baseURL: "https://api.deepseek.com",
@@ -131,8 +142,9 @@ export async function buildLanguageModel(
       break;
     }
     case "mistral": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "mistral",
         baseURL: "https://api.mistral.ai/v1",
@@ -146,8 +158,9 @@ export async function buildLanguageModel(
       break;
     }
     case "openrouter": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "openrouter",
         baseURL: "https://openrouter.ai/api/v1",
@@ -165,8 +178,9 @@ export async function buildLanguageModel(
           "OpenAI-compatible provider has no base URL. Set it in Settings → Models.",
         );
       }
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "openai-compatible",
         baseURL: compatURL,
@@ -176,8 +190,9 @@ export async function buildLanguageModel(
       break;
     }
     case "lmstudio": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "lmstudio",
         baseURL: lmstudioURL,
@@ -186,8 +201,9 @@ export async function buildLanguageModel(
       break;
     }
     case "mlx": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "mlx",
         baseURL: mlxURL,
@@ -196,8 +212,9 @@ export async function buildLanguageModel(
       break;
     }
     case "ollama": {
-      const { createOpenAICompatible } =
-        await import("@ai-sdk/openai-compatible");
+      const { createOpenAICompatible } = await import(
+        "@ai-sdk/openai-compatible"
+      );
       built = createOpenAICompatible({
         name: "ollama",
         baseURL: ollamaURL,
@@ -238,9 +255,7 @@ export function buildConfiguredLanguageModel(
     const ep = local.customEndpoints?.find((e) => e.id === eid);
     if (!ep) throw new Error(`Custom endpoint not found: ${eid}`);
     if (!ep.modelId.trim()) {
-      throw new Error(
-        `${ep.name}: no model id set. Open Settings → Models.`,
-      );
+      throw new Error(`${ep.name}: no model id set. Open Settings → Models.`);
     }
     return buildLanguageModel(
       "openai-compatible",
@@ -318,6 +333,9 @@ export type RunAgentOptions = {
   modelId?: string;
   systemPrompt: string;
   allowedTools: readonly AgentToolId[];
+  defaultSubagentModelId?: string | null;
+  maxConcurrentSubagents: number;
+  subagentCoordinator: SubagentTurnCoordinator;
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
@@ -326,6 +344,10 @@ export type RunAgentOptions = {
   onSystemPrompt?: (
     systemPrompt: string,
     messages: UIMessage[],
+  ) => void | Promise<void>;
+  onCheckpoint: (
+    completedMessages: UIMessage[],
+    event: SubagentResultEvent,
   ) => void | Promise<void>;
   lmstudioBaseURL?: string;
   lmstudioModelId?: string;
@@ -344,10 +366,10 @@ export type RunAgentOptions = {
 };
 
 /**
- * 使用当前模型配置启动一次 Agent 流式响应。
+ * 使用冻结配置启动一次可跨多个 provider 请求的 Agent turn。
  *
  * 系统提示词由会话传输层提前冻结。模型初始化前等待调用方持久化用户消息
- * 和该提示词，确保磁盘成功后才开始远端请求。
+ * 和该提示词；后台 Subagent 结果也会在恢复模型循环前 checkpoint。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
@@ -357,7 +379,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
   await opts.onSystemPrompt?.(opts.systemPrompt, opts.uiMessages);
 
-  const history = await convertToModelMessages(opts.uiMessages);
+  const history = await convertToAgentModelMessages(opts.uiMessages);
   const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({
     messages: history,
@@ -368,20 +390,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     ? endpoints.find((e) => e.id === endpointIdFromCompatModel(modelId))
         ?.contextLimit
     : opts.openaiCompatibleContextLimit;
-  const compact = compactModelMessagesDetailed(
-    prunedHistory,
-    getModelContextLimit(modelId, compatCtxOverride),
-  );
-  const compactedHistory = compact.messages;
-  if (compact.compacted) {
-    opts.onCompact?.({ droppedCount: compact.droppedCount });
-  }
-
-  const prompt = prepareAgentPrompt(
-    opts.systemPrompt,
-    compactedHistory,
-    provider,
-  );
   const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
     lmstudioBaseURL: opts.lmstudioBaseURL,
     lmstudioModelId: opts.lmstudioModelId,
@@ -396,53 +404,338 @@ export async function runAgentStream(opts: RunAgentOptions) {
     customEndpointKeys: opts.customEndpointKeys,
   });
 
-  let stepsSeen = 0;
-  return streamText({
-    model,
-    system: prompt.system,
-    messages: prompt.messages,
-    allowSystemInMessages: false,
-    tools: buildTools(opts.toolContext, opts.allowedTools),
-    stopWhen: stepCountIs(MAX_AGENT_STEPS),
-    abortSignal: opts.abortSignal,
-    onStepFinish: (step) => {
-      stepsSeen++;
-      if (opts.onStep) {
-        const last = step.toolCalls?.[step.toolCalls.length - 1];
-        if (last) {
-          const label = TOOL_LABELS[last.toolName];
-          opts.onStep(
-            label
-              ? label((last.input ?? {}) as Record<string, unknown>)
-              : `Calling ${last.toolName}`,
-          );
-        } else if (step.text) {
-          opts.onStep("Writing");
-        }
-      }
-      if (opts.onUsage && step.usage) {
-        const u = step.usage;
-        const stepInput = u.inputTokens ?? 0;
-        const stepCached = u.inputTokenDetails?.cacheReadTokens ?? 0;
-        opts.onUsage({
-          inputTokens: stepInput,
-          outputTokens: u.outputTokens ?? 0,
-          cachedInputTokens: stepCached,
-          lastInputTokens: stepInput,
-          lastCachedTokens: stepCached,
-        });
-      }
-    },
-    onFinish: (result) => {
-      opts.onStep?.(null);
-      const finishReason =
-        (result as { finishReason?: string } | undefined)?.finishReason ?? "";
-      opts.onFinishMeta?.({
-        hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
-        finishReason,
+  const subagentModelId = opts.defaultSubagentModelId ?? modelId;
+  const coordinator = opts.subagentCoordinator;
+  const rootTools = buildTools(
+    opts.toolContext,
+    opts.allowedTools,
+    ({ task, label, wait, abortSignal }) => {
+      const permissionMode = opts.toolContext.getPermissionMode();
+      return coordinator.start({
+        task,
+        label,
+        wait,
+        limit: opts.maxConcurrentSubagents,
+        parentAbortSignal: abortSignal,
+        run: buildSubagentTaskRunner({
+          opts,
+          modelId: subagentModelId,
+          permissionMode,
+        }),
       });
     },
+  );
+
+  return {
+    toUIMessageStream({
+      originalMessages = opts.uiMessages,
+      onError = (error: unknown) => String(error),
+    }: {
+      originalMessages?: UIMessage[];
+      onError?: (error: unknown) => string;
+    } = {}) {
+      return createUIMessageStream<UIMessage>({
+        originalMessages,
+        onError,
+        execute: async ({ writer }) => {
+          const modelHistory: ModelMessage[] = [...prunedHistory];
+          let stepsSeen = 0;
+          let streamStarted = false;
+          let finishReason = "stop";
+          let approvalPending = false;
+          let finalizationOnly = false;
+          const abort = () => void coordinator.cancelAll();
+          opts.abortSignal?.addEventListener("abort", abort, { once: true });
+
+          const appendEvent = async (
+            completedMessages: UIMessage[],
+            event: SubagentResultEvent,
+          ) => {
+            await opts.onCheckpoint(completedMessages, event);
+            if (!streamStarted) {
+              writer.write({ type: "start" });
+              streamStarted = true;
+            }
+            writer.write({
+              type: "data-subagent-result",
+              data: { event },
+            });
+            modelHistory.push({
+              role: "user",
+              content: formatSubagentResultEvent(event),
+            });
+          };
+
+          /**
+           * 持续取出当前已经完成的后台结果，避免写盘期间新完成的任务越过
+           * 下一次 provider 请求边界。只有首个事件需要携带尚未 checkpoint 的步骤。
+           */
+          const appendPendingEvents = (
+            completedMessages: UIMessage[],
+          ): Promise<boolean> | null => {
+            const firstEvent = coordinator.drainResultEvent();
+            if (!firstEvent) return null;
+            return (async () => {
+              await appendEvent(completedMessages, firstEvent);
+              while (true) {
+                const event = coordinator.drainResultEvent();
+                if (!event) return true;
+                await appendEvent([], event);
+              }
+            })();
+          };
+
+          try {
+            const last = originalMessages[originalMessages.length - 1];
+            const initialAppend = appendPendingEvents(
+              last?.role === "assistant" ? [last] : [],
+            );
+            if (initialAppend) await initialAppend;
+
+            while (stepsSeen < MAX_AGENT_STEPS || finalizationOnly) {
+              // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
+              // 结果可能在微任务间隙越过本次 provider 请求边界。
+              while (true) {
+                const pendingAppend = appendPendingEvents([]);
+                if (!pendingAppend) break;
+                await pendingAppend;
+              }
+              const compact = compactModelMessagesDetailed(
+                modelHistory,
+                getModelContextLimit(modelId, compatCtxOverride),
+              );
+              if (compact.compacted) {
+                opts.onCompact?.({ droppedCount: compact.droppedCount });
+                modelHistory.splice(
+                  0,
+                  modelHistory.length,
+                  ...compact.messages,
+                );
+              }
+              const prompt = prepareAgentPrompt(
+                opts.systemPrompt,
+                compact.messages,
+                provider,
+              );
+              let cycleMessage: UIMessage | undefined;
+              let cycleSteps = 0;
+              const result = streamText({
+                model,
+                system: prompt.system,
+                messages: prompt.messages,
+                allowSystemInMessages: false,
+                tools: finalizationOnly ? undefined : rootTools,
+                stopWhen: finalizationOnly
+                  ? stepCountIs(1)
+                  : ({ steps }) =>
+                      stepsSeen + steps.length >= MAX_AGENT_STEPS ||
+                      coordinator.hasPendingResults,
+                abortSignal: opts.abortSignal,
+                onStepFinish: (step) => {
+                  cycleSteps++;
+                  reportAgentStep(opts, step);
+                },
+              });
+              const uiStream = result.toUIMessageStream<UIMessage>({
+                sendStart: !streamStarted,
+                sendFinish: false,
+                onError,
+                onFinish: ({ responseMessage }) => {
+                  cycleMessage = responseMessage;
+                },
+              });
+              for await (const chunk of uiStream) writer.write(chunk);
+              streamStarted = true;
+
+              const [response, resultFinishReason] = await Promise.all([
+                result.response,
+                result.finishReason,
+              ]);
+              modelHistory.push(...response.messages);
+              stepsSeen += cycleSteps;
+              finishReason = resultFinishReason;
+              approvalPending = hasApprovalRequest(cycleMessage);
+
+              const reachedCandidateEnd = resultFinishReason !== "tool-calls";
+              const mustDrainBackground =
+                !approvalPending &&
+                coordinator.runningCount > 0 &&
+                (reachedCandidateEnd || stepsSeen >= MAX_AGENT_STEPS);
+              if (mustDrainBackground) {
+                await coordinator.waitForAll();
+              }
+
+              let completed = false;
+              if (!approvalPending && coordinator.hasPendingResults) {
+                if (!cycleMessage) {
+                  throw new Error("Subagent checkpoint message is unavailable");
+                }
+                const pendingAppend = appendPendingEvents([cycleMessage]);
+                completed = pendingAppend ? await pendingAppend : false;
+              }
+
+              if (approvalPending) break;
+              if (completed) {
+                finalizationOnly = stepsSeen >= MAX_AGENT_STEPS;
+                continue;
+              }
+              break;
+            }
+
+            writer.write({
+              type: "finish",
+              finishReason: normalizeFinishReason(finishReason),
+            });
+            opts.onStep?.(null);
+            opts.onFinishMeta?.({
+              hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
+              finishReason,
+            });
+            if (!approvalPending) {
+              coordinator.reset();
+              releaseSubagentCoordinator(
+                opts.toolContext.getSessionId(),
+                coordinator,
+              );
+            }
+          } catch (error) {
+            await coordinator.cancelAll();
+            releaseSubagentCoordinator(
+              opts.toolContext.getSessionId(),
+              coordinator,
+            );
+            throw error;
+          } finally {
+            opts.abortSignal?.removeEventListener("abort", abort);
+          }
+        },
+      });
+    },
+  };
+}
+
+/** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
+function buildSubagentTaskRunner({
+  opts,
+  modelId,
+  permissionMode,
+}: {
+  opts: RunAgentOptions;
+  modelId: string;
+  permissionMode: "ask" | "full-access";
+}): SubagentTaskRunner {
+  const allowedTools = resolveSubagentTools(opts.allowedTools, permissionMode);
+  const toolContext: ToolContext = {
+    ...opts.toolContext,
+    getPermissionMode: () => permissionMode,
+  };
+  return async ({ task, abortSignal }) => {
+    const childModel = await buildConfiguredLanguageModel(modelId, opts.keys, {
+      lmstudioBaseURL: opts.lmstudioBaseURL,
+      lmstudioModelId: opts.lmstudioModelId,
+      mlxBaseURL: opts.mlxBaseURL,
+      mlxModelId: opts.mlxModelId,
+      ollamaBaseURL: opts.ollamaBaseURL,
+      ollamaModelId: opts.ollamaModelId,
+      openaiCompatibleBaseURL: opts.openaiCompatibleBaseURL,
+      openaiCompatibleModelId: opts.openaiCompatibleModelId,
+      openrouterModelId: opts.openrouterModelId,
+      customEndpoints: opts.customEndpoints,
+      customEndpointKeys: opts.customEndpointKeys,
+    });
+    const prompt = prepareAgentPrompt(
+      `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents.`,
+      [{ role: "user", content: task }],
+      resolveModel(modelId, opts.customEndpoints ?? []).provider,
+    );
+    const result = await generateText({
+      model: childModel,
+      system: prompt.system,
+      messages: prompt.messages,
+      tools: buildTools(toolContext, allowedTools),
+      stopWhen: stepCountIs(MAX_AGENT_STEPS),
+      abortSignal,
+      onStepFinish: (step) => reportUsage(opts, step.usage),
+    });
+    const usage = result.totalUsage;
+    return {
+      status: "completed",
+      result:
+        result.text || "Task completed but no final response was generated.",
+      usage: {
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+      },
+    };
+  };
+}
+
+function reportAgentStep(
+  opts: RunAgentOptions,
+  step: Parameters<
+    NonNullable<Parameters<typeof streamText>[0]["onStepFinish"]>
+  >[0],
+): void {
+  if (opts.onStep) {
+    const last = step.toolCalls?.[step.toolCalls.length - 1];
+    if (last) {
+      const label = TOOL_LABELS[last.toolName];
+      opts.onStep(
+        label
+          ? label((last.input ?? {}) as Record<string, unknown>)
+          : `Calling ${last.toolName}`,
+      );
+    } else if (step.text) {
+      opts.onStep("Writing");
+    }
+  }
+  reportUsage(opts, step.usage);
+}
+
+function reportUsage(
+  opts: RunAgentOptions,
+  usage:
+    | Parameters<
+        NonNullable<Parameters<typeof streamText>[0]["onStepFinish"]>
+      >[0]["usage"]
+    | undefined,
+): void {
+  if (!opts.onUsage || !usage) return;
+  const stepInput = usage.inputTokens ?? 0;
+  const stepCached = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+  opts.onUsage({
+    inputTokens: stepInput,
+    outputTokens: usage.outputTokens ?? 0,
+    cachedInputTokens: stepCached,
+    lastInputTokens: stepInput,
+    lastCachedTokens: stepCached,
   });
+}
+
+function hasApprovalRequest(message: UIMessage | undefined): boolean {
+  return Boolean(
+    message?.parts.some(
+      (part) =>
+        "state" in part &&
+        (part as { state?: string }).state === "approval-requested",
+    ),
+  );
+}
+
+function normalizeFinishReason(
+  value: string,
+): "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" {
+  if (
+    value === "stop" ||
+    value === "length" ||
+    value === "content-filter" ||
+    value === "tool-calls" ||
+    value === "error"
+  ) {
+    return value;
+  }
+  return "other";
 }
 
 export { EMPTY_USAGE };

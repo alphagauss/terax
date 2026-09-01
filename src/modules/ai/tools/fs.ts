@@ -6,7 +6,6 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
-import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import {
   clearPreparedFileMutation,
@@ -14,11 +13,9 @@ import {
   prepareFileMutation,
 } from "./fileMutation";
 
-const needsMutationApproval = () =>
-  useChatStore.getState().permissionMode === "ask";
-
 /** 创建已知文件读取、完整文件写入和结构化路径操作工具。 */
 export function buildFsTools(ctx: ToolContext) {
+  const needsMutationApproval = () => ctx.getPermissionMode() === "ask";
   return {
     read_file: tool({
       description:

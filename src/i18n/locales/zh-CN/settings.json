@@ -317,6 +317,9 @@
     "defaults": {
       "label": "默认设置",
       "chatModel": "对话模型",
+      "subagentModel": "Subagent 模型",
+      "followChatModel": "跟随对话模型",
+      "subagentConcurrency": "每个聊天并发 Subagent",
       "autocomplete": "自动补全",
       "notConnectedHint": "{{provider}} 尚未连接，请在下方添加。",
       "trigger": {
@@ -449,7 +452,7 @@
       },
       "subagents": {
         "label": "子智能体",
-        "description": "委派边界明确的只读调查任务。"
+        "description": "使用继承自当前智能体的权限委派聚焦任务。"
       }
     },
     "delete": {

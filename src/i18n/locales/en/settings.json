@@ -317,6 +317,9 @@
     "defaults": {
       "label": "Defaults",
       "chatModel": "Chat model",
+      "subagentModel": "Subagent model",
+      "followChatModel": "Follow chat model",
+      "subagentConcurrency": "Concurrent subagents per chat",
       "autocomplete": "Autocomplete",
       "notConnectedHint": "{{provider}} isn't connected - add it below.",
       "trigger": {
@@ -449,7 +452,7 @@
       },
       "subagents": {
         "label": "Subagents",
-        "description": "Delegate bounded read-only investigations."
+        "description": "Delegate focused tasks with permissions inherited from this agent."
       }
     },
     "delete": {

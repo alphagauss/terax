@@ -1,9 +1,15 @@
 /**
  * 本文件定义与具体 AI SDK 无关的会话消息记录，并负责与 UIMessage 双向转换。
- * 磁盘格式采用 nanobot 风格的角色记录，工具调用固定使用 OpenAI function envelope。
+ * 工具调用使用 OpenAI function envelope，内部 Subagent 事件保持 append-only 顺序。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
+import {
+  formatSubagentResultEvent,
+  isSubagentResultDataPart,
+  isSubagentResultEvent,
+  type SubagentResultEvent,
+} from "../agents/subagentRuntime";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -28,6 +34,9 @@ export type SessionMessage = {
   content: unknown;
   timestamp: string;
   turn_id?: string;
+  injected_event?: "subagent_result";
+  subagent_task_ids?: string[];
+  subagent_result?: SubagentResultEvent;
   media?: SessionMedia[];
   reasoning_content?: string;
   tool_calls?: SessionToolCall[];
@@ -121,6 +130,19 @@ export function projectSessionMessages(
 
   records.forEach((record, index) => {
     const timestamp = parseRecordedTimestamp(record.timestamp);
+    if (
+      record.role === "user" &&
+      record.injected_event === "subagent_result" &&
+      isSubagentResultEvent(record.subagent_result) &&
+      record.content === formatSubagentResultEvent(record.subagent_result)
+    ) {
+      const parts = ensureAssistant(index, record.turn_id, timestamp);
+      parts.push({
+        type: "data-subagent-result",
+        data: { event: record.subagent_result },
+      } as UIMessage["parts"][number]);
+      return;
+    }
     if (record.role === "user" || record.role === "system") {
       flushAssistant();
       const content =
@@ -261,10 +283,7 @@ function serializeUiMessage(
     ];
   }
 
-  const blocks = splitAssistantBlocks(message);
-  const records = blocks.flatMap((block) =>
-    serializeAssistantBlock(block, messageOptions),
-  );
+  const records = serializeAssistantMessage(message, messageOptions);
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index];
     if (record.role !== "assistant") continue;
@@ -272,6 +291,41 @@ function serializeUiMessage(
     break;
   }
   return records;
+}
+
+/** 跳过最后一个内部事件之前已经 checkpoint 的 Assistant 前缀。 */
+function serializeAssistantMessage(
+  message: UIMessage,
+  options: AppendOptions,
+): SessionMessage[] {
+  let lastCheckpoint = -1;
+  for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+    const part = message.parts[index];
+    if (isSubagentResultDataPart(part)) {
+      lastCheckpoint = index;
+      break;
+    }
+  }
+  return splitAssistantBlocks({
+    ...message,
+    parts: message.parts.slice(lastCheckpoint + 1),
+  }).flatMap((block) => serializeAssistantBlock(block, options));
+}
+
+/** 将内部 Subagent 事件保存为 provider 通用的隐藏 user 记录。 */
+export function serializeSubagentResultEvent(
+  event: SubagentResultEvent,
+  options: AppendOptions,
+): SessionMessage {
+  return {
+    role: "user",
+    content: formatSubagentResultEvent(event),
+    timestamp: options.timestamp,
+    turn_id: options.turnId,
+    injected_event: "subagent_result",
+    subagent_task_ids: event.results.map((result) => result.taskId),
+    subagent_result: event,
+  };
 }
 
 /** 从 UI 消息元数据读取创建时间，缺失或非法时使用本次提交时间。 */

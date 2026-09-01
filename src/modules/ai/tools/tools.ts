@@ -1,13 +1,13 @@
 /**
  * 本文件组合 AI 可调用的工具集合。
- * 所有文件与 Shell 相对路径由具体工具统一基于会话固定工作目录解析。
+ * 工具按会话白名单过滤，Subagent 协调能力只注入主 Agent 的运行请求。
  */
 
 import { buildFsTools } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
-import { buildSubagentTools } from "./subagent";
+import { buildSubagentTools, type SubagentStarter } from "./subagent";
 import { buildTerminalTools } from "./terminal";
 import {
   AGENT_TOOL_IDS,
@@ -27,13 +27,14 @@ export { resolvePath, type ToolContext } from "./context";
 export function buildTools(
   ctx: import("./context").ToolContext,
   allowedTools: readonly AgentToolId[] = AGENT_TOOL_IDS,
+  startSubagent?: SubagentStarter,
 ) {
   const all = {
     ...buildFsTools(ctx),
     ...buildPatchTools(ctx),
     ...buildSearchTools(ctx),
     ...buildShellTools(ctx),
-    ...buildSubagentTools(ctx),
+    ...buildSubagentTools(startSubagent),
     ...buildTerminalTools(ctx),
   } as const;
   const allowed = new Set(normalizeAgentTools(allowedTools));

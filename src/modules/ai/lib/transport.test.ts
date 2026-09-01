@@ -19,12 +19,27 @@ vi.mock("./projectInstructions", () => ({
 
 import { createSessionTransport } from "./transport";
 import type { SessionAgentSnapshot } from "./agents";
+import type { ToolContext } from "../tools/context";
 
 const environment = {
   platform: "Windows",
   workspace: "Local",
   defaultShell: "PowerShell",
 } as const;
+
+const toolContext: ToolContext = {
+  getCwd: () => "D:/workspace/project",
+  getTerminalContext: () => null,
+  isActiveTerminalPrivate: () => false,
+  getSessionId: () => "00000000-0000-4000-8000-000000000001",
+  getPermissionMode: () => "ask",
+};
+
+const subagentDeps = {
+  getDefaultSubagentModelId: () => null,
+  getMaxConcurrentSubagents: () => 3,
+  onCheckpoint: vi.fn(),
+};
 
 describe("session transport", () => {
   beforeEach(() => {
@@ -46,8 +61,9 @@ describe("session transport", () => {
     ];
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
-      toolContext: {} as never,
+      toolContext,
       getModelId: () => "model",
+      ...subagentDeps,
       getCustomInstructions: () => "",
       getAgent: () => ({
         id: "builtin:main",
@@ -87,8 +103,9 @@ describe("session transport", () => {
     };
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
-      toolContext: {} as never,
+      toolContext,
       getModelId: () => modelId,
+      ...subagentDeps,
       getCustomInstructions: () => customInstructions,
       getAgent: () => agent,
       getCwd: () => "D:/workspace/project",

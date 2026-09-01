@@ -1,6 +1,6 @@
 /**
- * 本文件管理按会话隔离的 AI 运行状态、窗口级会话恢复和两阶段持久化。
- * 主窗口只恢复其明确记录的历史会话，首次发送同时冻结 cwd 和 Agent 快照。
+ * 本文件管理按会话隔离的 AI 运行状态、窗口级恢复和增量持久化。
+ * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
 import {
@@ -21,6 +21,10 @@ import {
   providerNeedsKey,
 } from "../config";
 import type { AgentUsage } from "../lib/agent";
+import {
+  clearSubagentCoordinator,
+  type SubagentResultEvent,
+} from "../agents/subagentRuntime";
 import { snapshotAgent } from "../lib/agents";
 import {
   type CustomEndpointKeys,
@@ -31,6 +35,7 @@ import { pushRecentModel } from "../lib/modelPrefs";
 import {
   projectSessionMessages,
   serializeSessionMessages,
+  serializeSubagentResultEvent,
 } from "../lib/sessionMessages";
 import {
   acquireSessionRun,
@@ -169,6 +174,11 @@ type StoreState = {
     id: string,
     messages: UIMessage[],
     systemPrompt: string,
+  ) => Promise<void>;
+  persistTurnCheckpoint: (
+    id: string,
+    completedMessages: UIMessage[],
+    event: SubagentResultEvent,
   ) => Promise<void>;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
@@ -413,6 +423,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const after = diskById.get(session.id);
         if (after?.fingerprint === session.fingerprint) continue;
         if (!after) {
+          await clearSubagentCoordinator(session.id);
           await clearSessionProcesses(session.id);
           useSessionAttentionStore.getState().clearSession(session.id);
           deletedSessionIds.push(session.id);
@@ -609,6 +620,46 @@ export const useChatStore = create<StoreState>((set, get) => ({
     });
   },
 
+  /**
+   * 在同一 turn 的下一次 provider 请求前追加完整步骤和 Subagent 事件。
+   *
+   * checkpoint 不前移 UIMessage 数量游标，也不释放运行锁；最终提交会依据
+   * Assistant 内的 checkpoint data part 跳过已经落盘的前缀。
+   */
+  persistTurnCheckpoint: async (id, completedMessages, event) => {
+    const meta = get().sessions.find((session) => session.id === id);
+    if (!meta) throw new Error("AI session metadata is unavailable");
+    const updatedAt = Date.now();
+    const options = {
+      timestamp: new Date(updatedAt).toISOString(),
+      turnId: pendingTurnIds.get(id) ?? newTurnId(),
+      turnStatus: "running",
+    };
+    if (!pendingTurnIds.has(id)) pendingTurnIds.set(id, options.turnId);
+    const messages = [
+      ...serializeSessionMessages(completedMessages, options),
+      serializeSubagentResultEvent(event, options),
+    ];
+    const committedMeta = await commitSession({
+      id,
+      createdAt: meta.createdAt,
+      updatedAt,
+      environmentKey: currentWorkspaceBootstrap().environmentKey,
+      cwd: meta.cwd,
+      metadata: {
+        ...(sessionMetadata.get(id) ?? {}),
+        title: meta.title,
+      },
+      messages,
+    });
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === id ? committedMeta : session,
+      ),
+      sessionSyncError: null,
+    });
+  },
+
   /** 切换到已持久化会话，并放弃当前未发送草稿的会话身份。 */
   switchSession: (id) => {
     const requestSequence = ++sessionSwitchSequence;
@@ -640,6 +691,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
     sessionSwitchSequence++;
     void (async () => {
       try {
+        await clearSubagentCoordinator(id);
         await clearSessionProcesses(id);
         await deleteSessionFile(id);
         const remaining = get().sessions.filter((session) => session.id !== id);
@@ -837,5 +889,6 @@ export async function stopSession(sessionId: string): Promise<void> {
   const chat = chats.get(sessionId);
   if (!chat || !useChatStore.getState().runLockSessionIds[sessionId]) return;
   cancelledRuns.add(sessionId);
+  await clearSubagentCoordinator(sessionId);
   await chat.stop();
 }

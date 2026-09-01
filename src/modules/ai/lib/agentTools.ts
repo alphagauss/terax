@@ -50,6 +50,12 @@ export type AgentToolGroupId = (typeof AGENT_TOOL_GROUPS)[number]["id"];
 const TOOL_IDS = new Set<string>(AGENT_TOOL_IDS);
 const READ_TOOLS = AGENT_TOOL_GROUPS[0].tools;
 const WRITE_TOOLS = AGENT_TOOL_GROUPS[1].tools;
+const SUBAGENT_READ_ONLY_TOOLS = new Set<AgentToolId>([
+  "read_file",
+  "find_files",
+  "grep",
+  "get_terminal_output",
+]);
 
 /**
  * 将持久化工具列表规范为已知 ID 的稳定顺序。
@@ -104,4 +110,21 @@ export function setAgentToolGroupEnabled(
     for (const tool of WRITE_TOOLS) selected.delete(tool);
   }
   return normalizeAgentTools([...selected]);
+}
+
+/**
+ * 根据父 Agent 白名单和启动时权限快照计算 Subagent 工具。
+ *
+ * 请求批准模式进一步收窄到只读工具；完全访问模式保持父白名单。
+ * 两种模式都移除 `run_subagent`，从 schema 层禁止递归创建。
+ */
+export function resolveSubagentTools(
+  parentTools: readonly AgentToolId[],
+  permissionMode: "ask" | "full-access",
+): AgentToolId[] {
+  return normalizeAgentTools(parentTools).filter(
+    (tool) =>
+      tool !== "run_subagent" &&
+      (permissionMode === "full-access" || SUBAGENT_READ_ONLY_TOOLS.has(tool)),
+  );
 }

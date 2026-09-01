@@ -55,7 +55,15 @@ Custom Agent ID 同时是会话归属。历史列表可按 Agent 筛选；删除
 
 ## Sub-agent
 
-`src/modules/ai/agents/registry.ts` 定义只读 sub-agent：`explore`、`code-review`、`security` 和 `general`。每个 sub-agent 都有 tool whitelist 和自己的 system prompt。`run_subagent` 不能递归调用，因为 sub-agent tool set 不包含 `run_subagent` 本身。
+`run_subagent` 是通用委派工具，只接受自包含的 `task`、可选 `label` 和默认值为 `false` 的 `wait`。它不提供角色类型、temperature 或单次模型覆盖。Subagent 使用独立消息历史，并复用父聊天冻结的 system prompt、cwd、provider 配置和 Custom Agent 工具白名单。
+
+Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `defaultSubagentModelId` 单独指定。每个聊天最多并发 `maxConcurrentSubagents` 个任务，默认 3、允许 1 至 8；超过上限立即返回拒绝结果，不建立等待队列。
+
+权限在任务启动时冻结。主 Agent 为请求批准模式时，Subagent 工具进一步收窄到 `read_file`、`find_files`、`grep` 和 `get_terminal_output` 的父白名单交集；完全访问模式继承父白名单。两种模式都移除 `run_subagent`，所以 Subagent 不能递归创建 Subagent。
+
+`wait=true` 时，最终结果直接作为原工具调用的 tool result。`wait=false` 时，原工具调用立即返回 started，后台完成结果以 append-only 的内部 `subagent_result` user 消息进入同一 turn。该内部事件在 UI 中保存为隐藏 data part，在 JSONL 中保存稳定正文和 task ID metadata，发送给 provider 时投影为相同正文的标准 user 消息。它不改写既有 tool result 或历史前缀。
+
+主 Agent 在普通工具边界消费已经完成的后台结果。若模型到达候选终态但仍有后台任务，session run lock 保持占用，等待当前聊天全部后台任务完成，持久化尚未消费的结果后恢复完整 Agent 循环。恢复后的模型仍可继续调用普通工具或创建新的 Subagent，只有模型给出终态且没有运行中任务或待消费结果时才结束本轮。
 
 ## Session
 
@@ -79,7 +87,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 
 `function.arguments` 始终为 JSON string。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
 
-streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。`AgentRunBridge` 只在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后，追加完整的 Assistant 和 tool record。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message，但不会写入不完整的 Assistant stream。
+streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming 或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。普通运行由 `AgentRunBridge` 在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后追加完整记录；`wait=false` Subagent 恢复主循环前则通过 checkpoint 追加此前完整的 Assistant、tool 和内部结果事件，但继续持有同一 session run lock。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message 和已经 checkpoint 的完整步骤，不会写入未完成的流式 fragment。
 
 其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 或 Agent 配置变化时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime；发现会话已被外部删除时，还会清理该进程中对应的 Shell 和文件工具 owner 状态。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
@@ -91,7 +99,7 @@ composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isB
 
 draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。draft 可以选择 Agent；第一条被接受的 user message 会将 draft 提升为 persisted session，并同时冻结实际目录和 Agent 快照。persisted session 始终显示已保存的 Agent，不能中途切换。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
-每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。run 进入 idle、error 或 stopped 状态后，bridge 使用相同 turn ID 追加完整的 Assistant 和 tool record。streaming fragment 永远不会写入。
+每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。Subagent 内部事件恢复模型循环前，以相同 turn ID 追加完整步骤和稳定 user record；终态 bridge 只追加最后一个 checkpoint 之后的剩余 Assistant 和 tool record。streaming fragment 永远不会写入。
 
 ## 工具与审批
 

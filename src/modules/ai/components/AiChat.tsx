@@ -1,7 +1,8 @@
 /**
  * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
  * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
- * 流式阶段只更新末尾活动分段，历史消息和已完成工具保持稳定且默认折叠。
+ * 内部结果事件不参与可见分组，流式阶段只更新末尾活动分段。
+ * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
 import {
@@ -757,6 +758,10 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
     run = null;
   };
   parts.forEach((p, i) => {
+    if (partType(p) === "data-subagent-result") {
+      flushRun();
+      return;
+    }
     if (isReadFilePart(p)) {
       if (!run) run = { parts: [], startIdx: i };
       run.parts.push(p);
@@ -950,12 +955,23 @@ const RenderedTool = memo(function RenderedTool({
       className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-1 [&>button]:leading-4"
       toolName={toolName}
       state={part.state}
-      input={part.input}
+      input={toolDisplayInput(toolName, part.input)}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
     />
   );
 });
+
+/** 让通用工具卡片优先显示 Subagent 的可选短标签，不改动真实工具输入。 */
+function toolDisplayInput(toolName: string, input: unknown): unknown {
+  if (toolName !== "run_subagent" || !input || typeof input !== "object") {
+    return input;
+  }
+  const label = (input as { label?: unknown }).label;
+  return typeof label === "string" && label.trim()
+    ? { ...input, task: label.trim() }
+    : input;
+}
 
 /** 将工具详情中的 Shift 加滚轮转换为横向滚动，监听器必须以 non-passive 注册。 */
 function handleToolDetailsWheel(event: WheelEvent) {
