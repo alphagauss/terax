@@ -5,7 +5,6 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import {
   clearPreparedFileMutation,
@@ -39,7 +38,7 @@ export function buildPatchTools(ctx: ToolContext) {
           .min(1)
           .max(20),
       }),
-      needsApproval: () => useChatStore.getState().permissionMode === "ask",
+      needsApproval: () => ctx.getPermissionMode() === "ask",
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         try {

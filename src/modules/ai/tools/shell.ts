@@ -12,7 +12,6 @@ import {
 } from "../lib/native";
 import { redactSensitive } from "../lib/redact";
 import { checkShellCommand } from "../lib/security";
-import { useChatStore } from "../store/chatStore";
 import { resolvePath, type ToolContext } from "./context";
 
 const DEFAULT_TIMEOUT_SECS = 300;
@@ -39,7 +38,10 @@ const processInputSchema = z
   .object({
     process_id: z.string().uuid(),
     action: z.enum(["poll", "write", "close_stdin", "terminate"]),
-    input: z.string().max(256 * 1024).optional(),
+    input: z
+      .string()
+      .max(256 * 1024)
+      .optional(),
     close_stdin: z.boolean().optional(),
     ...outputOptions,
     ...waitOptions,
@@ -83,7 +85,7 @@ export function buildShellTools(ctx: ToolContext) {
           .optional(),
         login: z.boolean().optional(),
       }),
-      needsApproval: () => useChatStore.getState().permissionMode === "ask",
+      needsApproval: () => ctx.getPermissionMode() === "ask",
       execute: async (input) => {
         const safety = checkShellCommand(input.command);
         if (!safety.ok) return { error: safety.reason };
@@ -116,8 +118,7 @@ export function buildShellTools(ctx: ToolContext) {
         "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output.",
       inputSchema: processInputSchema,
       needsApproval: (input) =>
-        input.action === "write" &&
-        useChatStore.getState().permissionMode === "ask",
+        input.action === "write" && ctx.getPermissionMode() === "ask",
       execute: async (input) => {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };

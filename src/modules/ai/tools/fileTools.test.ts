@@ -32,6 +32,7 @@ const context: ToolContext = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
+  getPermissionMode: () => useChatStore.getState().permissionMode,
 };
 
 describe("AI file tools", () => {

@@ -13,6 +13,7 @@ const context: ToolContext = {
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
+  getPermissionMode: () => "ask",
 };
 
 /** 判断字段 schema 是否直接声明类型，或由完整的类型联合组成。 */
@@ -40,7 +41,7 @@ describe("AI tool provider schemas", () => {
     shell_exec: ["command"],
     shell_process: ["process_id", "action"],
     shell_list: [],
-    run_subagent: ["type", "prompt"],
+    run_subagent: ["task"],
     get_terminal_output: [],
   } satisfies Record<keyof typeof tools, readonly string[]>;
   const toolSchemas = Object.entries(tools).map(

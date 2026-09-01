@@ -1,6 +1,6 @@
 /**
- * 本文件定义 AI 工具可访问的固定会话目录与实时终端能力。
- * 路径基准来自会话，终端读取通过受控回调执行。
+ * 本文件定义 AI 工具可访问的固定会话目录、终端能力和权限来源。
+ * 主 Agent 可读取实时权限，Subagent 通过同一接口使用启动时快照。
  */
 
 export type ToolContext = {
@@ -12,6 +12,8 @@ export type ToolContext = {
   isActiveTerminalPrivate: () => boolean;
   /** 当前聊天会话 ID，供待办事项等按会话持久化的工具使用。 */
   getSessionId: () => string;
+  /** 读取本次工具运行应遵循的权限模式；Subagent 使用启动时冻结的值。 */
+  getPermissionMode: () => "ask" | "full-access";
 };
 
 export function resolvePath(rawPath: string, cwd: string): string {

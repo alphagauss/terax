@@ -1,5 +1,5 @@
 /**
- * 本文件呈现模型、提供商和语音输入设置。
+ * 本文件呈现主 Agent、Subagent、自动补全、提供商和语音输入设置。
  * 负责绑定已有偏好与密钥状态，固定界面文案从翻译资源读取，不改变连接或保存流程。
  */
 
@@ -54,16 +54,20 @@ import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type AutocompleteTrigger,
+  MAX_CONCURRENT_SUBAGENTS_MAX,
+  MAX_CONCURRENT_SUBAGENTS_MIN,
   setAutocompleteEnabled,
   setAutocompleteModelId,
   setAutocompleteProvider,
   setAutocompleteTrigger,
   setCustomEndpoints,
   setDefaultModel,
+  setDefaultSubagentModel,
   setFavoriteModelIds,
   setGroqSttModel,
   setLmstudioBaseURL,
   setLmstudioModelId,
+  setMaxConcurrentSubagents,
   setMlxBaseURL,
   setMlxModelId,
   setOllamaBaseURL,
@@ -165,7 +169,7 @@ const getLocalMeta = (t: TFn): Partial<Record<ProviderId, LocalMeta>> => ({
   },
 });
 
-/** 模型设置主区域，组合云端、本地和语音提供商配置。 */
+/** 模型设置主区域，组合 Agent 默认值、Subagent 并发及云端、本地和语音提供商配置。 */
 export function ModelsSection() {
   const { t } = useTranslation();
   const localMeta = getLocalMeta(t);
@@ -174,6 +178,12 @@ export function ModelsSection() {
   const [adding, setAdding] = useState<Set<ProviderId>>(new Set());
 
   const defaultModel = usePreferencesStore((s) => s.defaultModelId);
+  const defaultSubagentModel = usePreferencesStore(
+    (s) => s.defaultSubagentModelId,
+  );
+  const maxConcurrentSubagents = usePreferencesStore(
+    (s) => s.maxConcurrentSubagents,
+  );
   const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
   const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
   const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
@@ -247,7 +257,8 @@ export function ModelsSection() {
     // Drop the now-dead model id from favorites/recents before touching the
     // selection, so the recents push from a selection reset can't race it.
     const deadModelId = compatModelIdForEndpoint(id);
-    const { favoriteModelIds, recentModelIds } = usePreferencesStore.getState();
+    const { favoriteModelIds, recentModelIds, defaultSubagentModelId } =
+      usePreferencesStore.getState();
     if (favoriteModelIds.includes(deadModelId)) {
       await setFavoriteModelIds(
         favoriteModelIds.filter((m) => m !== deadModelId),
@@ -255,6 +266,9 @@ export function ModelsSection() {
     }
     if (recentModelIds.includes(deadModelId)) {
       await setRecentModelIds(recentModelIds.filter((m) => m !== deadModelId));
+    }
+    if (defaultSubagentModelId === deadModelId) {
+      await setDefaultSubagentModel(null);
     }
 
     // If the deleted endpoint was the active model, the selection would dangle
@@ -382,6 +396,8 @@ export function ModelsSection() {
 
       <DefaultsBlock
         defaultModel={defaultModel}
+        defaultSubagentModel={defaultSubagentModel}
+        maxConcurrentSubagents={maxConcurrentSubagents}
         configuredIds={configuredIds}
         keys={keys}
         customEndpoints={customEndpoints}
@@ -549,11 +565,15 @@ function ProviderMenuItem({
 
 function DefaultsBlock({
   defaultModel,
+  defaultSubagentModel,
+  maxConcurrentSubagents,
   configuredIds,
   keys,
   customEndpoints,
 }: {
   defaultModel: ModelId;
+  defaultSubagentModel: string | null;
+  maxConcurrentSubagents: number;
   configuredIds: Set<ProviderId>;
   keys: KeysMap;
   customEndpoints: readonly CustomEndpoint[];
@@ -565,9 +585,49 @@ function DefaultsBlock({
       <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
         <FieldRow label={t("models.defaults.chatModel")}>
           <DefaultModelPicker
-            defaultModel={defaultModel}
+            modelId={defaultModel}
             configuredIds={configuredIds}
+            customEndpoints={[]}
+            onSelect={(modelId) => {
+              if (modelId) void setDefaultModel(modelId as ModelId);
+            }}
           />
+        </FieldRow>
+        <FieldRow label={t("models.defaults.subagentModel")}>
+          <DefaultModelPicker
+            modelId={defaultSubagentModel}
+            configuredIds={configuredIds}
+            customEndpoints={customEndpoints}
+            inheritLabel={t("models.defaults.followChatModel")}
+            onSelect={(modelId) => void setDefaultSubagentModel(modelId)}
+          />
+        </FieldRow>
+        <FieldRow label={t("models.defaults.subagentConcurrency")}>
+          <Select
+            value={String(maxConcurrentSubagents)}
+            onValueChange={(value) =>
+              void setMaxConcurrentSubagents(Number(value))
+            }
+          >
+            <SelectTrigger className="h-8 w-full text-[11.5px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Array.from(
+                {
+                  length:
+                    MAX_CONCURRENT_SUBAGENTS_MAX -
+                    MAX_CONCURRENT_SUBAGENTS_MIN +
+                    1,
+                },
+                (_, index) => MAX_CONCURRENT_SUBAGENTS_MIN + index,
+              ).map((value) => (
+                <SelectItem key={value} value={String(value)}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </FieldRow>
         <AutocompleteRow
           keys={keys}
@@ -579,16 +639,38 @@ function DefaultsBlock({
   );
 }
 
+/** 渲染可选继承项的默认模型选择器，只列出已经配置的 provider。 */
 function DefaultModelPicker({
-  defaultModel,
+  modelId,
   configuredIds,
+  customEndpoints,
+  inheritLabel,
+  onSelect,
 }: {
-  defaultModel: ModelId;
+  modelId: string | null;
   configuredIds: Set<ProviderId>;
+  customEndpoints: readonly CustomEndpoint[];
+  inheritLabel?: string;
+  onSelect: (modelId: string | null) => void;
 }) {
   const { t } = useTranslation();
-  const m = getModel(defaultModel);
-  const hasAny = configuredIds.size > 0;
+  const m = modelId
+    ? isCompatModelId(modelId)
+      ? getCompatModelInfo(modelId, customEndpoints)
+      : getModel(modelId as ModelId)
+    : null;
+  const compatModels = customEndpoints
+    .filter((endpoint) => endpoint.baseURL.trim() && endpoint.modelId.trim())
+    .map((endpoint) =>
+      getCompatModelInfo(
+        compatModelIdForEndpoint(endpoint.id),
+        customEndpoints,
+      ),
+    );
+  const hasAny =
+    inheritLabel !== undefined ||
+    configuredIds.size > 0 ||
+    compatModels.length > 0;
 
   return (
     <DropdownMenu>
@@ -599,9 +681,11 @@ function DefaultModelPicker({
           className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
         >
           <span className="flex items-center gap-2 truncate">
-            <ProviderIcon provider={m.provider} size={13} />
-            <span className="truncate">{m.label}</span>
-            <span className="text-muted-foreground">· {modelHint(t, m)}</span>
+            {m ? <ProviderIcon provider={m.provider} size={13} /> : null}
+            <span className="truncate">{m?.label ?? inheritLabel}</span>
+            {m ? (
+              <span className="text-muted-foreground">· {modelHint(t, m)}</span>
+            ) : null}
           </span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
@@ -619,6 +703,17 @@ function DefaultModelPicker({
         className="min-w-70 p-1"
       >
         <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
+          {inheritLabel ? (
+            <DropdownMenuItem
+              onSelect={() => onSelect(null)}
+              className={cn(
+                "text-[12px]",
+                modelId === null && "bg-interactive-active",
+              )}
+            >
+              {inheritLabel}
+            </DropdownMenuItem>
+          ) : null}
           {PROVIDERS.filter((p) => configuredIds.has(p.id)).map((p) => {
             const models = MODELS.filter((x) => x.provider === p.id);
             if (models.length === 0) return null;
@@ -631,10 +726,10 @@ function DefaultModelPicker({
                 {models.map((mod) => (
                   <DropdownMenuItem
                     key={mod.id}
-                    onSelect={() => void setDefaultModel(mod.id as ModelId)}
+                    onSelect={() => onSelect(mod.id)}
                     className={cn(
                       "flex items-start gap-2 text-[12px]",
-                      mod.id === defaultModel && "bg-interactive-active",
+                      mod.id === modelId && "bg-interactive-active",
                     )}
                   >
                     <span className="flex flex-1 flex-col">
@@ -648,6 +743,31 @@ function DefaultModelPicker({
               </div>
             );
           })}
+          {compatModels.length > 0 ? (
+            <div className="px-1 pt-1.5">
+              <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                <ProviderIcon provider="openai-compatible" size={11} />
+                <span>{t("models.providers.openaiCompatible")}</span>
+              </div>
+              {compatModels.map((model) => (
+                <DropdownMenuItem
+                  key={model.id}
+                  onSelect={() => onSelect(model.id)}
+                  className={cn(
+                    "flex items-start gap-2 text-[12px]",
+                    model.id === modelId && "bg-interactive-active",
+                  )}
+                >
+                  <span className="flex flex-1 flex-col">
+                    <span>{model.label}</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {modelDesc(t, model)}
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </div>
+          ) : null}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

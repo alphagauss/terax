@@ -52,12 +52,17 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       );
     },
     getSessionId: () => sessionId,
+    getPermissionMode: () => useChatStore.getState().permissionMode,
   };
 
   const transport = createSessionTransport({
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
     getModelId: () => useChatStore.getState().selectedModelId,
+    getDefaultSubagentModelId: () =>
+      usePreferencesStore.getState().defaultSubagentModelId,
+    getMaxConcurrentSubagents: () =>
+      usePreferencesStore.getState().maxConcurrentSubagents,
     getCustomInstructions: () =>
       usePreferencesStore.getState().customInstructions,
     getAgent: () => parseSessionAgent(sessionMetadata.get(sessionId)?.agent),
@@ -97,6 +102,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore
         .getState()
         .persistSubmittedTurn(sessionId, messages, systemPrompt),
+    onCheckpoint: (messages, event) =>
+      useChatStore.getState().persistTurnCheckpoint(sessionId, messages, event),
     onUsage: (delta) => {
       const state = useChatStore.getState();
       const cur = getAgentMetaForSession(state, sessionId).tokens;

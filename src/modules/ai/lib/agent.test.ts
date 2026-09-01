@@ -6,6 +6,7 @@
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it, vi } from "vitest";
 import { runAgentStream } from "./agent";
+import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
 import { AGENT_TOOL_IDS } from "./agentTools";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
 
@@ -29,9 +30,14 @@ describe("agent preflight persistence", () => {
         modelId: "lmstudio-local",
         systemPrompt: "Stable prompt",
         allowedTools: AGENT_TOOL_IDS,
-        toolContext: {} as never,
+        maxConcurrentSubagents: 3,
+        subagentCoordinator: new SubagentTurnCoordinator(),
+        toolContext: {
+          getPermissionMode: () => "ask",
+        } as never,
         uiMessages: messages,
         onSystemPrompt,
+        onCheckpoint: vi.fn(),
       }),
     ).rejects.toBe(failure);
 

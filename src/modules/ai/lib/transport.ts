@@ -1,10 +1,14 @@
 /**
  * 本文件连接聊天 UI 与 Agent 流式运行时。
- * 会话消息保持原样发送，系统提示词和 Agent 工具白名单在 Chat runtime 内只冻结一次。
+ * 系统提示词和工具白名单在 Chat runtime 内冻结，并复用每聊天 Subagent 协调器。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
 import type { CustomEndpoint } from "../config";
+import {
+  getSubagentCoordinator,
+  type SubagentResultEvent,
+} from "../agents/subagentRuntime";
 import type { SessionAgentSnapshot } from "./agents";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
@@ -20,6 +24,8 @@ type Deps = {
   getKeys: () => ProviderKeys;
   toolContext: ToolContext;
   getModelId: () => string;
+  getDefaultSubagentModelId: () => string | null;
+  getMaxConcurrentSubagents: () => number;
   getCustomInstructions: () => string;
   getAgent: () => SessionAgentSnapshot;
   getCwd: () => string;
@@ -43,6 +49,10 @@ type Deps = {
   onSystemPrompt?: (
     systemPrompt: string,
     messages: UIMessage[],
+  ) => void | Promise<void>;
+  onCheckpoint: (
+    completedMessages: UIMessage[],
+    event: SubagentResultEvent,
   ) => void | Promise<void>;
 };
 
@@ -89,6 +99,11 @@ export function createSessionTransport(deps: Deps) {
     const result = await runAgentStream({
       keys: deps.getKeys(),
       modelId: deps.getModelId(),
+      defaultSubagentModelId: deps.getDefaultSubagentModelId(),
+      maxConcurrentSubagents: deps.getMaxConcurrentSubagents(),
+      subagentCoordinator: getSubagentCoordinator(
+        deps.toolContext.getSessionId(),
+      ),
       systemPrompt,
       allowedTools: agent.tools,
       toolContext: deps.toolContext,
@@ -97,6 +112,7 @@ export function createSessionTransport(deps: Deps) {
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
       onSystemPrompt: deps.onSystemPrompt,
+      onCheckpoint: deps.onCheckpoint,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
       lmstudioModelId: deps.getLmstudioModelId?.(),
       mlxBaseURL: deps.getMlxBaseURL?.(),

@@ -59,6 +59,7 @@ import { useSessionAttentionStore } from "./sessionAttentionStore";
 const realRefreshSessions = useChatStore.getState().refreshSessions;
 const realCommitMessages = useChatStore.getState().commitMessages;
 const realPersistSubmittedTurn = useChatStore.getState().persistSubmittedTurn;
+const realPersistTurnCheckpoint = useChatStore.getState().persistTurnCheckpoint;
 
 const first: SessionMeta = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -182,6 +183,7 @@ describe("chat store multi-process lifecycle", () => {
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
       persistSubmittedTurn: realPersistSubmittedTurn,
+      persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
   });
 
@@ -200,6 +202,57 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().sessionSyncError).toBe(
       "Error: session write failed",
     );
+  });
+
+  it("checkpoints completed steps and subagent results without releasing the turn", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      runLockSessionIds: { [first.id]: true },
+    });
+    sessionMetadata.set(first.id, { title: first.title });
+    pendingTurnIds.set(first.id, "turn-1");
+
+    await useChatStore.getState().persistTurnCheckpoint(
+      first.id,
+      [
+        {
+          id: "assistant-cycle",
+          role: "assistant",
+          parts: [
+            { type: "step-start" },
+            { type: "text", text: "Candidate", state: "done" },
+          ],
+        },
+      ],
+      {
+        version: 1,
+        event: "subagent_result",
+        results: [
+          {
+            taskId: "task-1",
+            label: "Inspector",
+            status: "completed",
+            result: "done",
+          },
+        ],
+      },
+    );
+
+    expect(io.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: first.id,
+        messages: [
+          expect.objectContaining({ role: "assistant", content: "Candidate" }),
+          expect.objectContaining({
+            role: "user",
+            injected_event: "subagent_result",
+            subagent_task_ids: ["task-1"],
+          }),
+        ],
+      }),
+    );
+    expect(io.release).not.toHaveBeenCalled();
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
   });
 
   it("restores only the session recorded by the primary window", async () => {

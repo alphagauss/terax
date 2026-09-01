@@ -228,13 +228,14 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - Terax 只有一个代码内定义、不可编辑或删除的主 Agent。Custom Agent 跨 Workspace 共享，只配置专属指令和内置工具白名单；Agent 仅能在未发送的 draft 中选择，首次发送后以 `metadata.agent` 快照绑定会话，persisted session 不得切换 Agent。
 - 每个 Chat runtime 在首次模型请求时读取 Workspace 根 `AGENTS.md`，并冻结统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令。后续轮次复用逐字相同的 system prompt 和工具集；LRU 淘汰或进程重启后从当前文件、设置和会话 Agent 快照重新构造。磁盘 metadata 中的 `systemPrompt` 只用于检查，不得作为恢复输入。
 - Custom Agent ID 是会话归属和历史筛选键。删除 Custom Agent 必须通过 Rust 级联删除所有 Workspace 中的关联会话，并在任一关联会话运行时拒绝整个操作；不得保留孤儿会话或通过通用共享存储删除绕过该入口。
-- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；`AgentRunBridge` 在 idle、error 或 stop 后只追加完整的 Assistant 和工具记录，流式半成品保留在所属进程。
+- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，`AgentRunBridge` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
 - `read_file`、`find_files`、`grep` 自动执行；`write_file`、`apply_patch`、`file_operation`、`shell_exec` 和 `shell_process` 的 stdin 写入必须经过 UI 审批。进程轮询、列表、EOF 和终止只能作用于当前聊天已审批启动的登记进程，可以自动执行。
 - AI 文件路径只能位于会话冻结 cwd 对应的已授权 Workspace 根内。读取和写入共享 Rust 敏感路径与 canonical 检查；`lib/security.ts` 只保留 Shell 审批前快速拒绝。
 - `write_file` 和 `apply_patch` 通过一个或多个 `ai-diff` 标签页审阅，并按整个 tool call 批准或拒绝；批准前不得实际写入。
+- `run_subagent` 只接受通用任务、标签和 `wait`，每聊天默认最多并发 3 个，超过上限立即拒绝。请求批准模式下 Subagent 只能使用父 Agent 白名单中的只读工具；完全访问模式继承父白名单；两种模式都移除 `run_subagent`。`wait=false` 完成结果以标准 user 消息投影进入模型上下文，但在 UI 中保持隐藏，且不得改写既有 tool result 或消息前缀。
 
 ### UI 与路径约定
 

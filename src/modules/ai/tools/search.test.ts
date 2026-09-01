@@ -27,6 +27,7 @@ function makeContext(): ToolContext {
     getTerminalContext: () => null,
     isActiveTerminalPrivate: () => false,
     getSessionId: () => "session",
+    getPermissionMode: () => "ask",
   };
 }
 

@@ -8,8 +8,10 @@ import { describe, expect, it } from "vitest";
 import {
   projectSessionMessages,
   serializeSessionMessages,
+  serializeSubagentResultEvent,
   type SessionMessage,
 } from "./sessionMessages";
+import { convertToAgentModelMessages } from "./subagentMessages";
 
 const timestamp = "2026-07-26T10:00:00.000Z";
 
@@ -228,6 +230,121 @@ describe("AI session message conversion", () => {
     expect(records.map((record) => record.timestamp)).toEqual([
       "2026-07-26T09:00:00.000Z",
       "2026-07-26T09:00:01.000Z",
+    ]);
+  });
+
+  it("round-trips an internal subagent event without rendering a user message", async () => {
+    const event = {
+      version: 1 as const,
+      event: "subagent_result" as const,
+      results: [
+        {
+          taskId: "task-1",
+          label: "Inspect tests",
+          status: "completed" as const,
+          result: "All tests passed.",
+        },
+      ],
+    };
+    const records: SessionMessage[] = [
+      {
+        role: "assistant",
+        content: "Working.",
+        timestamp,
+        turn_id: "turn-1",
+      },
+      serializeSubagentResultEvent(event, {
+        timestamp,
+        turnId: "turn-1",
+      }),
+      {
+        role: "assistant",
+        content: "Done.",
+        timestamp,
+        turn_id: "turn-1",
+      },
+    ];
+
+    const messages = projectSessionMessages("session-1", records);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("assistant");
+    expect(messages[0].parts.map((part) => part.type)).toEqual([
+      "step-start",
+      "text",
+      "data-subagent-result",
+      "step-start",
+      "text",
+    ]);
+
+    const modelMessages = await convertToAgentModelMessages(messages);
+    expect(modelMessages.map((message) => message.role)).toEqual([
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(modelMessages[1]).toEqual({
+      role: "user",
+      content: records[1].content,
+    });
+  });
+
+  it("does not hide an internal event whose persisted content is inconsistent", () => {
+    const messages = projectSessionMessages("session-1", [
+      {
+        role: "user",
+        content: "tampered content",
+        timestamp,
+        injected_event: "subagent_result",
+        subagent_result: {
+          version: 1,
+          event: "subagent_result",
+          results: [],
+        },
+      },
+    ]);
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        parts: [{ type: "text", text: "tampered content" }],
+      }),
+    ]);
+  });
+
+  it("skips the persisted assistant prefix during the terminal append", () => {
+    const event = {
+      version: 1 as const,
+      event: "subagent_result" as const,
+      results: [],
+    };
+    const records = serializeSessionMessages(
+      [
+        {
+          id: "assistant-1",
+          role: "assistant",
+          parts: [
+            { type: "step-start" },
+            { type: "text", text: "Persisted prefix", state: "done" },
+            {
+              type: "data-subagent-result",
+              data: { event },
+            } as UIMessage["parts"][number],
+            { type: "step-start" },
+            { type: "text", text: "Terminal tail", state: "done" },
+          ],
+        },
+      ],
+      { timestamp, turnId: "turn-1" },
+    );
+
+    expect(records).toEqual([
+      {
+        role: "assistant",
+        content: "Terminal tail",
+        timestamp,
+        turn_id: "turn-1",
+        turn_status: "completed",
+      },
     ]);
   });
 });

@@ -8,6 +8,7 @@ import {
   AGENT_TOOL_IDS,
   agentToolGroupEnabled,
   normalizeAgentTools,
+  resolveSubagentTools,
   setAgentToolGroupEnabled,
 } from "./agentTools";
 
@@ -32,5 +33,23 @@ describe("agent tool selection", () => {
     const disabled = setAgentToolGroupEnabled(writable, "workspaceRead", false);
     expect(agentToolGroupEnabled(disabled, "workspaceRead")).toBe(false);
     expect(agentToolGroupEnabled(disabled, "workspaceWrite")).toBe(false);
+  });
+
+  it("narrows ask-mode subagents to the parent's read-only tools", () => {
+    expect(
+      resolveSubagentTools(
+        ["read_file", "grep", "write_file", "shell_exec", "run_subagent"],
+        "ask",
+      ),
+    ).toEqual(["read_file", "find_files", "grep"]);
+  });
+
+  it("inherits full access without exposing recursive subagents", () => {
+    expect(
+      resolveSubagentTools(
+        ["read_file", "write_file", "shell_exec", "run_subagent"],
+        "full-access",
+      ),
+    ).toEqual(["read_file", "find_files", "grep", "write_file", "shell_exec"]);
   });
 });
