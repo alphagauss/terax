@@ -62,6 +62,31 @@ describe("AI session message conversion", () => {
     ]);
   });
 
+  it("persists and restores reasoning duration", () => {
+    const assistant: UIMessage = {
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        { type: "reasoning", text: "推理内容", state: "done" },
+        {
+          type: "data-reasoning-duration",
+          data: { durationMs: 1250 },
+        } as UIMessage["parts"][number],
+      ],
+    };
+
+    const records = serializeSessionMessages([assistant], {
+      timestamp,
+      turnId: "turn-1",
+    });
+
+    expect(records[0].reasoning_duration_ms).toBe(1250);
+    expect(projectSessionMessages("session-1", records)[0].parts).toEqual(
+      assistant.parts,
+    );
+  });
+
   it("uses the OpenAI function envelope and string arguments for tools", () => {
     const messages: UIMessage[] = [
       {

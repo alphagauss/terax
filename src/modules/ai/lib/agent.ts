@@ -46,6 +46,7 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch } from "./proxyFetch";
+import { REASONING_DURATION_PART_TYPE } from "./sessionMessages";
 import { convertToAgentModelMessages } from "./subagentMessages";
 
 const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
@@ -526,6 +527,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 provider,
               );
               let cycleMessage: UIMessage | undefined;
+              let reasoningStartedAt: number | undefined;
+              const reasoningDurations: number[] = [];
               let cycleSteps = 0;
               const result = streamText({
                 model,
@@ -552,7 +555,44 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   cycleMessage = responseMessage;
                 },
               });
-              for await (const chunk of uiStream) writer.write(chunk);
+              for await (const chunk of uiStream) {
+                if (chunk.type === "reasoning-start") {
+                  reasoningStartedAt = performance.now();
+                }
+                writer.write(chunk);
+                if (
+                  chunk.type === "reasoning-end" &&
+                  reasoningStartedAt !== undefined
+                ) {
+                  const durationMs = Math.max(
+                    0,
+                    Math.round(performance.now() - reasoningStartedAt),
+                  );
+                  reasoningDurations.push(durationMs);
+                  writer.write({
+                    type: REASONING_DURATION_PART_TYPE,
+                    id: chunk.id,
+                    data: { durationMs },
+                  });
+                  reasoningStartedAt = undefined;
+                }
+              }
+              if (cycleMessage && reasoningDurations.length > 0) {
+                let durationIndex = 0;
+                const parts: UIMessage["parts"] = [];
+                for (const part of cycleMessage.parts) {
+                  parts.push(part);
+                  if (part.type !== "reasoning") continue;
+                  const durationMs = reasoningDurations[durationIndex++];
+                  if (durationMs !== undefined) {
+                    parts.push({
+                      type: REASONING_DURATION_PART_TYPE,
+                      data: { durationMs },
+                    } as UIMessage["parts"][number]);
+                  }
+                }
+                cycleMessage.parts = parts;
+              }
               streamStarted = true;
 
               const [response, resultFinishReason] = await Promise.all([
