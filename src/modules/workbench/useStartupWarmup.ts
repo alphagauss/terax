@@ -33,7 +33,7 @@ function kindPriority(tab: WarmableTab): number {
   return 2;
 }
 
-/** 收集启动时允许后台预热的冷标签，排除 Web Preview、Alpha 和临时页面。 */
+/** 收集启动时允许后台预热的冷标签，排除 Web Preview 和临时页面。 */
 export function collectStartupWarmupIds(state: WorkbenchState): Set<number> {
   return new Set(
     Object.values(state.tabs)

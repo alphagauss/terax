@@ -81,7 +81,6 @@ describe("startup warmup selection", () => {
         url: "http://localhost:3000",
         cold: true,
       },
-      { id: 5, kind: "alpha-data", spaceId: "a", title: "Alpha", cold: true },
       { id: 6, kind: "terminal", spaceId: "a", title: "warm" },
     ]);
 
