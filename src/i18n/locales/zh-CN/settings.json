@@ -330,6 +330,14 @@
         "shortcut": "快捷键"
       }
     },
+    "parameters": {
+      "label": "模型参数",
+      "model": "模型",
+      "contextWindow": "上下文",
+      "tokens": "tokens",
+      "selectPreset": "选择上下文窗口预设",
+      "description": "用于决定 Terax 何时压缩 Agent 历史以及如何计算上下文用量，不会限制模型输出。"
+    },
     "local": {
       "lmstudio": {
         "description": "通过 LM Studio 的 HTTP 服务器运行 GGUF 模型，请在开发者标签页中启用。"

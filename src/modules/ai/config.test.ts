@@ -6,6 +6,8 @@
 import { describe, expect, it } from "vitest";
 import {
   builtinProviderId,
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  getModelContextWindow,
   isModelRefAvailable,
   isProviderInstance,
   type ModelRef,
@@ -14,6 +16,7 @@ import {
   modelRefsEqual,
   modelRequiresCredential,
   normalizeConfiguredModels,
+  parseModelContextWindow,
   type ProviderInstance,
   type ProviderModels,
   resolveModel,
@@ -28,7 +31,11 @@ const customProvider: ProviderInstance = {
 };
 
 const configured = (providerId: string, ...ids: string[]): ProviderModels => ({
-  [providerId]: ids.map((id) => ({ id, source: "manual" })),
+  [providerId]: ids.map((id) => ({
+    id,
+    source: "manual",
+    contextWindow: DEFAULT_MODEL_CONTEXT_WINDOW,
+  })),
 });
 
 describe("model references", () => {
@@ -82,7 +89,40 @@ describe("model references", () => {
         { id: "bad\nmodel", source: "manual" },
         { id: "model-b", source: "unknown" },
       ]),
-    ).toEqual([{ id: "model-a", source: "manual" }]);
+    ).toEqual([
+      {
+        id: "model-a",
+        source: "manual",
+        contextWindow: DEFAULT_MODEL_CONTEXT_WINDOW,
+      },
+    ]);
+  });
+
+  it("normalizes and resolves per-model context windows", () => {
+    const providerId = builtinProviderId("openai");
+    const models = normalizeConfiguredModels([
+      { id: "default-window", source: "manual" },
+      { id: "large-window", source: "discovered", contextWindow: 500_000 },
+      { id: "invalid-window", source: "manual", contextWindow: -1 },
+    ]);
+    const providerModels = { [providerId]: models };
+
+    expect(
+      getModelContextWindow(
+        { providerId, modelId: "default-window" },
+        providerModels,
+      ),
+    ).toBe(DEFAULT_MODEL_CONTEXT_WINDOW);
+    expect(
+      getModelContextWindow(
+        { providerId, modelId: "large-window" },
+        providerModels,
+      ),
+    ).toBe(500_000);
+    expect(models[2].contextWindow).toBe(DEFAULT_MODEL_CONTEXT_WINDOW);
+    expect(parseModelContextWindow("250k")).toBe(250_000);
+    expect(parseModelContextWindow("1.5m")).toBe(1_500_000);
+    expect(parseModelContextWindow("999")).toBeNull();
   });
 });
 

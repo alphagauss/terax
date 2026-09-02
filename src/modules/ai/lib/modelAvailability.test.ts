@@ -4,7 +4,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { builtinProviderId, type ProviderInstance } from "../config";
+import {
+  builtinProviderId,
+  type ConfiguredModel,
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  type ProviderInstance,
+} from "../config";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
 import {
   getAvailableModelRefs,
@@ -17,6 +22,15 @@ const baseConfig = {
   providerBaseURLs: {},
   customProviders: [],
 };
+
+const configuredModel = (
+  id: string,
+  source: ConfiguredModel["source"],
+): ConfiguredModel => ({
+  id,
+  source,
+  contextWindow: DEFAULT_MODEL_CONTEXT_WINDOW,
+});
 
 describe("getAvailableModelRefs", () => {
   it("returns no models when no provider is configured", () => {
@@ -33,10 +47,10 @@ describe("getAvailableModelRefs", () => {
       },
       providerModels: {
         [builtinProviderId("anthropic")]: [
-          { id: "claude-current", source: "discovered" },
+          configuredModel("claude-current", "discovered"),
         ],
         [builtinProviderId("openrouter")]: [
-          { id: "openai/current", source: "manual" },
+          configuredModel("openai/current", "manual"),
         ],
       },
     });
@@ -59,8 +73,8 @@ describe("getAvailableModelRefs", () => {
       apiKeys: { ...EMPTY_PROVIDER_KEYS, openai: "configured" },
       providerModels: {
         [builtinProviderId("openai")]: [
-          { id: "model-a", source: "discovered" },
-          { id: "model-b", source: "manual" },
+          configuredModel("model-a", "discovered"),
+          configuredModel("model-b", "manual"),
         ],
       },
     });
@@ -83,9 +97,9 @@ describe("getAvailableModelRefs", () => {
       providerBaseURLs: { lmstudio: "" },
       providerModels: {
         [builtinProviderId("lmstudio")]: [
-          { id: "local-model", source: "manual" },
+          configuredModel("local-model", "manual"),
         ],
-        [customProvider.id]: [{ id: "custom-model", source: "discovered" }],
+        [customProvider.id]: [configuredModel("custom-model", "discovered")],
       },
       customProviders: [customProvider],
     });

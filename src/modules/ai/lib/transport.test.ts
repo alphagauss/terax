@@ -1,11 +1,15 @@
 /**
- * 本文件验证聊天传输层保持真实消息不变，并在 Chat runtime 内冻结系统提示。
- * 测试锁定项目指令只读取一次，后续发送不得受外部配置变化影响。
+ * 本文件验证聊天传输层保持真实消息不变，并转发模型配置与冻结的系统提示。
+ * 测试锁定项目指令只读取一次，后续发送不得受外部指令变化影响。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { modelRefForProvider } from "../config";
+import {
+  builtinProviderId,
+  modelRefForProvider,
+  type ProviderModels,
+} from "../config";
 
 const mocks = vi.hoisted(() => ({
   readAgentsMd: vi.fn(),
@@ -53,6 +57,11 @@ describe("session transport", () => {
   });
 
   it("passes the canonical messages unchanged and reads instructions from session cwd", async () => {
+    const providerModels: ProviderModels = {
+      [builtinProviderId("openai")]: [
+        { id: "model", source: "manual", contextWindow: 250_000 },
+      ],
+    };
     const messages: UIMessage[] = [
       {
         id: "user-1",
@@ -64,6 +73,7 @@ describe("session transport", () => {
       getKeys: () => ({}) as never,
       toolContext,
       getModel: () => modelRefForProvider("openai", "model"),
+      getProviderModels: () => providerModels,
       ...subagentDeps,
       getCustomInstructions: () => "",
       getAgent: () => ({
@@ -86,6 +96,7 @@ describe("session transport", () => {
           'Working directory: "D:/workspace/project"',
         ),
         uiMessages: messages,
+        providerModels,
       }),
     );
     expect(mocks.runAgentStream.mock.calls[0][0].uiMessages).toBe(messages);

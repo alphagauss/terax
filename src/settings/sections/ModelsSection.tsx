@@ -1,6 +1,6 @@
 /**
- * 本文件呈现主 Agent、Subagent、自动补全、提供商和语音输入设置。
- * 负责绑定偏好与密钥状态，并在 Provider 配置变化时同步关联模型引用。
+ * 本文件呈现主 Agent、Subagent、模型参数、提供商和语音输入设置。
+ * 负责绑定偏好与密钥状态，并在模型或 Provider 配置变化时同步关联引用。
  */
 
 import {
@@ -26,11 +26,13 @@ import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import {
   builtinProviderId,
   type ConfiguredModel,
+  DEFAULT_MODEL_CONTEXT_WINDOW,
   getProvider,
   type ModelRef,
   modelRefKey,
   modelRefsEqual,
   normalizeConfiguredModels,
+  parseModelContextWindow,
   PROVIDERS,
   type ProviderBaseURLs,
   type ProviderId,
@@ -111,6 +113,16 @@ const sttLabel = (t: TFn, p: SttProvider): string =>
     nsSeparator: false,
     defaultValue: STT_PROVIDER_LABELS[p],
   });
+
+const CONTEXT_WINDOW_PRESETS = [
+  10_000, 32_000, 64_000, 128_000, 200_000, 250_000, 500_000, 1_000_000,
+] as const;
+
+function formatContextWindow(value: number): string {
+  if (value % 1_000_000 === 0) return `${value / 1_000_000}m`;
+  if (value % 1_000 === 0) return `${value / 1_000}k`;
+  return String(value);
+}
 
 /** 模型设置主区域，组合 Agent 默认值、Subagent 并发及云端、本地和语音提供商配置。 */
 export function ModelsSection() {
@@ -265,6 +277,22 @@ export function ModelsSection() {
     }
   };
 
+  /** 更新单个已保存模型的上下文窗口，不改变它的身份、来源或关联引用。 */
+  const updateModelContextWindow = async (
+    ref: ModelRef,
+    contextWindow: number,
+  ) => {
+    const models =
+      usePreferencesStore.getState().providerModels[ref.providerId];
+    if (!models?.some((model) => model.id === ref.modelId)) return;
+    await updateProviderModels(
+      ref.providerId,
+      models.map((model) =>
+        model.id === ref.modelId ? { ...model, contextWindow } : model,
+      ),
+    );
+  };
+
   const updateCustomProvider = async (
     id: string,
     patch: ProviderInstanceUpdate,
@@ -411,6 +439,10 @@ export function ModelsSection() {
     providerBaseURLs,
     customProviders,
   });
+  const savedModels = Object.entries(providerModels).flatMap(
+    ([providerId, models]) =>
+      models.map((model) => ({ providerId, modelId: model.id })),
+  );
 
   const addProvider = (id: ProviderId) => {
     setAdding((prev) => new Set(prev).add(id));
@@ -430,6 +462,15 @@ export function ModelsSection() {
         models={availableModels}
         providerBaseURLs={providerBaseURLs}
         customProviders={customProviders}
+      />
+
+      <ModelParametersCard
+        models={savedModels}
+        providerModels={providerModels}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+        preferredModel={defaultModel}
+        onContextWindowChange={updateModelContextWindow}
       />
 
       <VoiceBlock />
@@ -644,7 +685,7 @@ function DefaultsBlock({
       <Label>{t("models.defaults.label")}</Label>
       <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
         <FieldRow label={t("models.defaults.chatModel")}>
-          <DefaultModelPicker
+          <ModelPicker
             model={defaultModel}
             models={models}
             providerBaseURLs={providerBaseURLs}
@@ -653,7 +694,7 @@ function DefaultsBlock({
           />
         </FieldRow>
         <FieldRow label={t("models.defaults.subagentModel")}>
-          <DefaultModelPicker
+          <ModelPicker
             model={defaultSubagentModel}
             models={models}
             providerBaseURLs={providerBaseURLs}
@@ -699,8 +740,8 @@ function DefaultsBlock({
   );
 }
 
-/** 渲染默认模型选择器，只列出用户已添加且连接可用的模型。 */
-function DefaultModelPicker({
+/** 渲染按 Provider 分组的模型选择器，候选集合由调用方决定。 */
+function ModelPicker({
   model,
   models,
   providerBaseURLs,
@@ -802,6 +843,147 @@ function DefaultModelPicker({
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** 编辑已保存模型的运行参数；当前只管理上下文窗口。 */
+function ModelParametersCard({
+  models,
+  providerModels,
+  providerBaseURLs,
+  customProviders,
+  preferredModel,
+  onContextWindowChange,
+}: {
+  models: readonly ModelRef[];
+  providerModels: Readonly<ProviderModels>;
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
+  customProviders: readonly ProviderInstance[];
+  preferredModel: ModelRef | null;
+  onContextWindowChange: (
+    model: ModelRef,
+    contextWindow: number,
+  ) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const initialModel =
+    preferredModel &&
+    models.some((model) => modelRefsEqual(model, preferredModel))
+      ? preferredModel
+      : (models[0] ?? null);
+  const [selectedModel, setSelectedModel] = useState<ModelRef | null>(
+    initialModel,
+  );
+  const configuredModel = selectedModel
+    ? providerModels[selectedModel.providerId]?.find(
+        (model) => model.id === selectedModel.modelId,
+      )
+    : undefined;
+  const contextWindow =
+    configuredModel?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW;
+  const [contextDraft, setContextDraft] = useState(
+    formatContextWindow(contextWindow),
+  );
+
+  useEffect(() => {
+    if (
+      selectedModel &&
+      models.some((model) => modelRefsEqual(model, selectedModel))
+    ) {
+      return;
+    }
+    setSelectedModel(models[0] ?? null);
+  }, [models, selectedModel]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 切换相同窗口值的模型时也必须重置未保存草稿。
+  useEffect(() => {
+    setContextDraft(formatContextWindow(contextWindow));
+  }, [contextWindow, selectedModel]);
+
+  const saveContextWindow = (value: string) => {
+    if (!selectedModel) return;
+    const parsed = parseModelContextWindow(value);
+    if (parsed === null) {
+      setContextDraft(formatContextWindow(contextWindow));
+      return;
+    }
+    setContextDraft(formatContextWindow(parsed));
+    if (parsed !== contextWindow) {
+      void onContextWindowChange(selectedModel, parsed);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Label>{t("models.parameters.label")}</Label>
+      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <FieldRow label={t("models.parameters.model")}>
+          <ModelPicker
+            model={selectedModel}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
+            customProviders={customProviders}
+            onSelect={setSelectedModel}
+          />
+        </FieldRow>
+        <FieldRow label={t("models.parameters.contextWindow")}>
+          <div className="flex flex-1 items-center gap-1.5">
+            <Input
+              value={contextDraft}
+              onChange={(event) => setContextDraft(event.target.value)}
+              onBlur={() => saveContextWindow(contextDraft)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.currentTarget.blur();
+              }}
+              disabled={!selectedModel}
+              placeholder={formatContextWindow(DEFAULT_MODEL_CONTEXT_WINDOW)}
+              inputMode="decimal"
+              spellCheck={false}
+              className="h-8 flex-1 font-mono text-[11.5px]"
+            />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  disabled={!selectedModel}
+                  title={t("models.parameters.selectPreset")}
+                  className="size-8 shrink-0"
+                >
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={11}
+                    strokeWidth={2}
+                  />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-28 p-1">
+                {CONTEXT_WINDOW_PRESETS.map((preset) => (
+                  <DropdownMenuItem
+                    key={preset}
+                    onSelect={() => saveContextWindow(String(preset))}
+                    className={cn(
+                      "font-mono text-[11.5px]",
+                      preset === contextWindow && "bg-interactive-active",
+                    )}
+                  >
+                    {formatContextWindow(preset)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <span className="text-[10.5px] text-muted-foreground">
+              {t("models.parameters.tokens")}
+            </span>
+          </div>
+        </FieldRow>
+        <p className="pl-19 text-[10.5px] leading-relaxed text-muted-foreground">
+          {t("models.parameters.description")}
+        </p>
+      </div>
+    </div>
   );
 }
 

@@ -12,7 +12,11 @@ import {
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { type ConfiguredModel, normalizeModelId } from "@/modules/ai/config";
+import {
+  type ConfiguredModel,
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  normalizeModelId,
+} from "@/modules/ai/config";
 import { ModelCatalogError, modelCatalog } from "@/modules/ai/lib/modelCatalog";
 import type { ResolvedProviderConnection } from "@/modules/ai/providerRegistry";
 import {
@@ -114,7 +118,10 @@ export function ProviderModelPicker({ connection, models, onChange }: Props) {
     setSaving(true);
     setSaveFailed(false);
     try {
-      await onChange([...models, { id: normalized, source }]);
+      await onChange([
+        ...models,
+        { id: normalized, source, contextWindow: DEFAULT_MODEL_CONTEXT_WINDOW },
+      ]);
       setQuery("");
     } catch {
       setSaveFailed(true);
