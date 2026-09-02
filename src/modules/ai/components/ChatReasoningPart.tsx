@@ -53,7 +53,6 @@ export function ChatReasoningPart({
   return (
     <Collapsible className="not-prose" open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger
-        data-ai-reasoning-trigger
         className="flex items-center gap-1.5 text-[12px] leading-4 italic text-muted-foreground transition-colors duration-control hover:text-foreground"
       >
         {isStreaming ? (
