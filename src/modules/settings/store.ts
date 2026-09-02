@@ -10,19 +10,16 @@ import {
   setSharedStoreKey,
 } from "@/lib/sharedStore";
 import {
-  builtinProviderId,
-  DEFAULT_AUTOCOMPLETE_MODEL_REF,
-  DEFAULT_MODEL_REF,
   DEFAULT_STT_PROVIDER,
-  isConfigurableProvider,
   isModelRef,
   isModelRefAvailable,
   isProviderInstance,
-  LMSTUDIO_DEFAULT_BASE_URL,
-  MLX_DEFAULT_BASE_URL,
   type ModelRef,
-  OLLAMA_DEFAULT_BASE_URL,
+  PROVIDERS,
+  type ProviderBaseURLs,
   type ProviderInstance,
+  type ProviderModels,
+  normalizeConfiguredModels,
   providerFromBuiltinId,
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
@@ -145,7 +142,7 @@ export type Preferences = {
   backgroundImageId: string | null;
   backgroundOpacity: number;
   backgroundBlur: number;
-  defaultModel: ModelRef;
+  defaultModel: ModelRef | null;
   defaultSubagentModel: ModelRef | null;
   maxConcurrentSubagents: number;
   editorTheme: EditorThemePref;
@@ -156,11 +153,9 @@ export type Preferences = {
   workspaceWindowMode: WorkspaceWindowMode;
   autocompleteEnabled: boolean;
   autocompleteTrigger: AutocompleteTrigger;
-  autocompleteModel: ModelRef;
-  providerModels: Record<string, string>;
-  lmstudioBaseURL: string;
-  mlxBaseURL: string;
-  ollamaBaseURL: string;
+  autocompleteModel: ModelRef | null;
+  providerModels: ProviderModels;
+  providerBaseURLs: ProviderBaseURLs;
   customProviders: ProviderInstance[];
   sttProvider: SttProvider;
   groqSttModel: string;
@@ -244,9 +239,7 @@ const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
 const KEY_AUTOCOMPLETE_TRIGGER = "autocompleteTrigger";
 const KEY_AUTOCOMPLETE_MODEL = "autocompleteModel";
 const KEY_PROVIDER_MODELS = "providerModels";
-const KEY_LMSTUDIO_BASE_URL = "lmstudioBaseURL";
-const KEY_MLX_BASE_URL = "mlxBaseURL";
-const KEY_OLLAMA_BASE_URL = "ollamaBaseURL";
+const KEY_PROVIDER_BASE_URLS = "providerBaseURLs";
 const KEY_CUSTOM_PROVIDERS = "customProviders";
 const KEY_STT_PROVIDER = "sttProvider";
 const KEY_GROQ_STT_MODEL = "groqSttModel";
@@ -315,7 +308,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundImageId: null,
   backgroundOpacity: 0.5,
   backgroundBlur: 0,
-  defaultModel: DEFAULT_MODEL_REF,
+  defaultModel: null,
   defaultSubagentModel: null,
   maxConcurrentSubagents: MAX_CONCURRENT_SUBAGENTS_DEFAULT,
   editorTheme: EDITOR_THEME_AUTO,
@@ -326,11 +319,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   workspaceWindowMode: "single",
   autocompleteEnabled: false,
   autocompleteTrigger: "auto",
-  autocompleteModel: DEFAULT_AUTOCOMPLETE_MODEL_REF,
+  autocompleteModel: null,
   providerModels: {},
-  lmstudioBaseURL: LMSTUDIO_DEFAULT_BASE_URL,
-  mlxBaseURL: MLX_DEFAULT_BASE_URL,
-  ollamaBaseURL: OLLAMA_DEFAULT_BASE_URL,
+  providerBaseURLs: {},
   customProviders: [],
   sttProvider: DEFAULT_STT_PROVIDER,
   groqSttModel: "whisper-large-v3-turbo",
@@ -377,9 +368,7 @@ export type ModelSettingsPatch = Partial<
     | "defaultSubagentModel"
     | "autocompleteModel"
     | "providerModels"
-    | "lmstudioBaseURL"
-    | "mlxBaseURL"
-    | "ollamaBaseURL"
+    | "providerBaseURLs"
     | "customProviders"
     | "favoriteModels"
     | "recentModels"
@@ -391,9 +380,7 @@ const MODEL_SETTING_KEYS: Record<keyof ModelSettingsPatch, string> = {
   defaultSubagentModel: KEY_DEFAULT_SUBAGENT_MODEL,
   autocompleteModel: KEY_AUTOCOMPLETE_MODEL,
   providerModels: KEY_PROVIDER_MODELS,
-  lmstudioBaseURL: KEY_LMSTUDIO_BASE_URL,
-  mlxBaseURL: KEY_MLX_BASE_URL,
-  ollamaBaseURL: KEY_OLLAMA_BASE_URL,
+  providerBaseURLs: KEY_PROVIDER_BASE_URLS,
   customProviders: KEY_CUSTOM_PROVIDERS,
   favoriteModels: KEY_FAVORITE_MODELS,
   recentModels: KEY_RECENT_MODELS,
@@ -426,15 +413,20 @@ export async function setModelSettings(
 function isAvailableModelRef(
   value: unknown,
   providers: readonly ProviderInstance[],
-  providerModels: Readonly<Record<string, string | undefined>>,
+  providerModels: Readonly<ProviderModels>,
+  providerBaseURLs: Readonly<ProviderBaseURLs>,
 ): value is ModelRef {
   return (
-    isModelRef(value) && isModelRefAvailable(value, providers, providerModels)
+    isModelRef(value) &&
+    isModelRefAvailable(value, providerModels, {
+      customProviders: providers,
+      providerBaseURLs,
+    })
   );
 }
 
 export async function loadPreferences(): Promise<Preferences> {
-  // Single IPC roundtrip — fetching keys individually fans out to one
+  // Single IPC roundtrip; fetching keys individually fans out to one
   // `plugin:store|get` per setting and is the dominant boot cost.
   const values = await readSharedStore("settings");
   const get = <T>(k: string): T | undefined => values[k] as T | undefined;
@@ -453,36 +445,34 @@ export async function loadPreferences(): Promise<Preferences> {
     customProviders.map((provider) => provider.id),
   );
   const storedProviderModels = get<unknown>(KEY_PROVIDER_MODELS);
-  const providerModels =
-    storedProviderModels && typeof storedProviderModels === "object"
-      ? Object.fromEntries(
-          Object.entries(storedProviderModels).filter(
-            ([providerId, modelId]) => {
-              const builtin = providerFromBuiltinId(providerId);
-              return (
-                typeof modelId === "string" &&
-                (customProviderIds.has(providerId) ||
-                  (builtin !== null && isConfigurableProvider(builtin)))
-              );
-            },
-          ),
-        )
-      : {};
-  const lmstudioBaseURL =
-    get<string>(KEY_LMSTUDIO_BASE_URL) ?? DEFAULT_PREFERENCES.lmstudioBaseURL;
-  const mlxBaseURL =
-    get<string>(KEY_MLX_BASE_URL) ?? DEFAULT_PREFERENCES.mlxBaseURL;
-  const ollamaBaseURL =
-    get<string>(KEY_OLLAMA_BASE_URL) ?? DEFAULT_PREFERENCES.ollamaBaseURL;
-  const availableProviderModels = { ...providerModels };
-  if (!lmstudioBaseURL.trim()) {
-    delete availableProviderModels[builtinProviderId("lmstudio")];
+  const providerModels: ProviderModels = {};
+  if (storedProviderModels && typeof storedProviderModels === "object") {
+    for (const [providerId, values] of Object.entries(storedProviderModels)) {
+      if (
+        !Array.isArray(values) ||
+        (!customProviderIds.has(providerId) &&
+          providerFromBuiltinId(providerId) === null)
+      ) {
+        continue;
+      }
+      const models = normalizeConfiguredModels(values);
+      if (models.length > 0) providerModels[providerId] = models;
+    }
   }
-  if (!mlxBaseURL.trim()) {
-    delete availableProviderModels[builtinProviderId("mlx")];
-  }
-  if (!ollamaBaseURL.trim()) {
-    delete availableProviderModels[builtinProviderId("ollama")];
+  const storedProviderBaseURLs = get<unknown>(KEY_PROVIDER_BASE_URLS);
+  const providerBaseURLs: ProviderBaseURLs = {};
+  if (
+    storedProviderBaseURLs &&
+    typeof storedProviderBaseURLs === "object" &&
+    !Array.isArray(storedProviderBaseURLs)
+  ) {
+    const values = storedProviderBaseURLs as Record<string, unknown>;
+    for (const provider of PROVIDERS) {
+      const value = values[provider.id];
+      if (provider.endpoint.kind === "editable" && typeof value === "string") {
+        providerBaseURLs[provider.id] = value.trim();
+      }
+    }
   }
   const storedFavoriteModels = get<unknown>(KEY_FAVORITE_MODELS);
   const favoriteModels = Array.isArray(storedFavoriteModels)
@@ -494,7 +484,12 @@ export async function loadPreferences(): Promise<Preferences> {
     : DEFAULT_PREFERENCES.recentModels;
   const readModelRef = (key: string): ModelRef | null => {
     const stored = get<unknown>(key);
-    return isAvailableModelRef(stored, customProviders, availableProviderModels)
+    return isAvailableModelRef(
+      stored,
+      customProviders,
+      providerModels,
+      providerBaseURLs,
+    )
       ? stored
       : null;
   };
@@ -513,8 +508,7 @@ export async function loadPreferences(): Promise<Preferences> {
     backgroundBlur: clampBlur(
       get<number>(KEY_BG_BLUR) ?? DEFAULT_PREFERENCES.backgroundBlur,
     ),
-    defaultModel:
-      readModelRef(KEY_DEFAULT_MODEL) ?? DEFAULT_PREFERENCES.defaultModel,
+    defaultModel: readModelRef(KEY_DEFAULT_MODEL),
     defaultSubagentModel: readModelRef(KEY_DEFAULT_SUBAGENT_MODEL),
     maxConcurrentSubagents: clampMaxConcurrentSubagents(
       get<number>(KEY_MAX_CONCURRENT_SUBAGENTS) ??
@@ -546,13 +540,9 @@ export async function loadPreferences(): Promise<Preferences> {
     autocompleteTrigger:
       get<AutocompleteTrigger>(KEY_AUTOCOMPLETE_TRIGGER) ??
       DEFAULT_PREFERENCES.autocompleteTrigger,
-    autocompleteModel:
-      readModelRef(KEY_AUTOCOMPLETE_MODEL) ??
-      DEFAULT_PREFERENCES.autocompleteModel,
+    autocompleteModel: readModelRef(KEY_AUTOCOMPLETE_MODEL),
     providerModels,
-    lmstudioBaseURL,
-    mlxBaseURL,
-    ollamaBaseURL,
+    providerBaseURLs,
     customProviders,
     sttProvider:
       get<SttProvider>(KEY_STT_PROVIDER) ?? DEFAULT_PREFERENCES.sttProvider,
@@ -562,10 +552,20 @@ export async function loadPreferences(): Promise<Preferences> {
       get<string>(KEY_WHISPERCPP_BASE_URL) ??
       DEFAULT_PREFERENCES.whispercppBaseURL,
     favoriteModels: favoriteModels.filter((value): value is ModelRef =>
-      isAvailableModelRef(value, customProviders, availableProviderModels),
+      isAvailableModelRef(
+        value,
+        customProviders,
+        providerModels,
+        providerBaseURLs,
+      ),
     ),
     recentModels: recentModels.filter((value): value is ModelRef =>
-      isAvailableModelRef(value, customProviders, availableProviderModels),
+      isAvailableModelRef(
+        value,
+        customProviders,
+        providerModels,
+        providerBaseURLs,
+      ),
     ),
     vimMode: get<boolean>(KEY_VIM_MODE) ?? DEFAULT_PREFERENCES.vimMode,
     editorWordWrap:
@@ -682,7 +682,7 @@ export async function setLanguage(value: Language): Promise<void> {
 }
 
 /** Slider stores 0..1. Actual rendered opacity is halved in SurfaceLayer
- *  so the image never exceeds 50% — keeps UI/terminal readable at any setting. */
+ *  so the image never exceeds 50%; keeps UI/terminal readable at any setting. */
 export const BG_OPACITY_RENDER_FACTOR = 0.5;
 
 function clampBgOpacity(v: number): number {
@@ -713,7 +713,7 @@ export async function setBackgroundBlur(value: number): Promise<void> {
   await writePref(KEY_BG_BLUR, clampBlur(value));
 }
 
-export async function setDefaultModel(value: ModelRef): Promise<void> {
+export async function setDefaultModel(value: ModelRef | null): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
 }
 
@@ -783,7 +783,9 @@ export async function setAutocompleteEnabled(value: boolean): Promise<void> {
   await writePref(KEY_AUTOCOMPLETE_ENABLED, value);
 }
 
-export async function setAutocompleteModel(value: ModelRef): Promise<void> {
+export async function setAutocompleteModel(
+  value: ModelRef | null,
+): Promise<void> {
   await writePref(KEY_AUTOCOMPLETE_MODEL, value);
 }
 
@@ -992,9 +994,7 @@ export async function onPreferencesChange(
     [KEY_AUTOCOMPLETE_TRIGGER]: "autocompleteTrigger",
     [KEY_AUTOCOMPLETE_MODEL]: "autocompleteModel",
     [KEY_PROVIDER_MODELS]: "providerModels",
-    [KEY_LMSTUDIO_BASE_URL]: "lmstudioBaseURL",
-    [KEY_MLX_BASE_URL]: "mlxBaseURL",
-    [KEY_OLLAMA_BASE_URL]: "ollamaBaseURL",
+    [KEY_PROVIDER_BASE_URLS]: "providerBaseURLs",
     [KEY_CUSTOM_PROVIDERS]: "customProviders",
     [KEY_STT_PROVIDER]: "sttProvider",
     [KEY_GROQ_STT_MODEL]: "groqSttModel",

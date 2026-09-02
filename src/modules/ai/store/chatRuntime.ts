@@ -3,15 +3,15 @@
  * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { HOST_PLATFORM } from "@/lib/platform";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { modelNeedsKey } from "../config";
+import { modelRequiresCredential } from "../config";
 import { parseSessionAgent } from "../lib/agents";
 import { resolveAgentExecutionEnvironment } from "../lib/prompt";
 import { resolveSessionCwd } from "../lib/sessions";
@@ -19,8 +19,8 @@ import { createSessionTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import {
   chats,
-  getAgentMetaForSession,
   getActiveProviderKey,
+  getAgentMetaForSession,
   seedMessages,
   sessionMetadata,
   touchChat,
@@ -58,7 +58,11 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const transport = createSessionTransport({
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
-    getModel: () => useChatStore.getState().selectedModel,
+    getModel: () => {
+      const model = useChatStore.getState().selectedModel;
+      if (!model) throw new Error("No AI model is selected");
+      return model;
+    },
     getDefaultSubagentModel: () =>
       usePreferencesStore.getState().defaultSubagentModel,
     getMaxConcurrentSubagents: () =>
@@ -69,9 +73,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getCwd: getSessionCwd,
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
-    getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
-    getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,
-    getOllamaBaseURL: () => usePreferencesStore.getState().ollamaBaseURL,
+    getProviderBaseURLs: () => usePreferencesStore.getState().providerBaseURLs,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
     getProviderInstanceKeys: () => useChatStore.getState().providerInstanceKeys,
     onStep: (step) => {
@@ -172,11 +174,11 @@ async function startChatMessage(
     state.live.draftCwd,
   );
   if (!cwd?.trim()) return false;
+  if (!state.selectedModel) return false;
   if (
-    modelNeedsKey(
-      state.selectedModel,
-      usePreferencesStore.getState().customProviders,
-    ) &&
+    modelRequiresCredential(state.selectedModel, {
+      customProviders: usePreferencesStore.getState().customProviders,
+    }) &&
     !getActiveProviderKey()
   ) {
     return false;

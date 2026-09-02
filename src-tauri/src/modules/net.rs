@@ -27,6 +27,8 @@ const HEADER_BLOCKLIST: &[&str] = &[
 ];
 const IMAGE_REDIRECT_LIMIT: usize = 5;
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const AI_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const AI_HTTP_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 /// 已通过公开地址校验和体积限制的网络图片。
 pub(crate) struct DownloadedImage {
@@ -206,33 +208,6 @@ fn sanitize_headers(headers: Option<HashMap<String, String>>) -> Result<HeaderMa
     Ok(map)
 }
 
-#[tauri::command]
-pub async fn lm_ping(base_url: String) -> Result<u16, String> {
-    let trimmed = base_url.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Err("empty base url".into());
-    }
-    let probe = format!("{trimmed}/models");
-    let parsed = validate_url(&probe)?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "missing host".to_string())?
-        .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, true).await?;
-
-    let mut builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none());
-    let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
-    builder = builder.resolve_to_addrs(&host, &addrs);
-    let client = builder.build().map_err(|e| e.to_string())?;
-    client
-        .get(parsed)
-        .send()
-        .await
-        .map(|r| r.status().as_u16())
-        .map_err(|e| e.to_string())
-}
 // AI HTTP proxy: bypasses webview CORS / Mixed-Content / PNA so local-network
 // model servers (LM Studio, Ollama, vLLM) work in the production bundle.
 
@@ -428,6 +403,7 @@ fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
     out
 }
 
+/// 执行受 SSRF 防护、总时限和响应体积限制的非流式 AI HTTP 请求。
 #[tauri::command]
 pub async fn ai_http_request(
     url: String,
@@ -436,27 +412,48 @@ pub async fn ai_http_request(
     body: Option<Vec<u8>>,
     allow_private_network: Option<bool>,
 ) -> Result<HttpResponse, String> {
-    let allow_private = allow_private_network.unwrap_or(false);
-    let parsed = validate_url(&url)?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "missing host".to_string())?
-        .to_string();
-    let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+    tokio::time::timeout(AI_HTTP_REQUEST_TIMEOUT, async move {
+        let allow_private = allow_private_network.unwrap_or(false);
+        let parsed = validate_url(&url)?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| "missing host".to_string())?
+            .to_string();
+        let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+        let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
+        let request = build_request(&client, &method, parsed, headers, body)?;
+        let response = request.send().await.map_err(|error| error.to_string())?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > AI_HTTP_RESPONSE_MAX_BYTES as u64)
+        {
+            return Err("AI HTTP response is too large".into());
+        }
 
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
-
-    let req = build_request(&client, &method, parsed, headers, body)?;
-    let resp = req.send().await.map_err(|e| e.to_string())?;
-
-    let status = resp.status().as_u16();
-    let headers = header_map_to_strings(resp.headers());
-    let body = resp.bytes().await.map_err(|e| e.to_string())?.to_vec();
-    Ok(HttpResponse {
-        status,
-        headers,
-        body,
+        let status = response.status().as_u16();
+        let headers = header_map_to_strings(response.headers());
+        let mut body = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            append_bounded_response(&mut body, &chunk.map_err(|error| error.to_string())?)?;
+        }
+        Ok(HttpResponse {
+            status,
+            headers,
+            body,
+        })
     })
+    .await
+    .map_err(|_| "AI HTTP request timed out".to_string())?
+}
+
+/// 追加非流式响应块，并在分配前拒绝超过固定上限的正文。
+fn append_bounded_response(body: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
+    if body.len().saturating_add(chunk.len()) > AI_HTTP_RESPONSE_MAX_BYTES {
+        return Err("AI HTTP response is too large".into());
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -676,5 +673,12 @@ mod tests {
                 "expected {hop} to be rejected"
             );
         }
+    }
+
+    #[test]
+    fn bounded_ai_response_rejects_oversized_chunks_before_append() {
+        let mut body = vec![0; AI_HTTP_RESPONSE_MAX_BYTES];
+        assert!(append_bounded_response(&mut body, &[1]).is_err());
+        assert_eq!(body.len(), AI_HTTP_RESPONSE_MAX_BYTES);
     }
 }

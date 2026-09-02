@@ -6,7 +6,7 @@
     "remove": "移除",
     "edit": "编辑",
     "delete": "删除",
-    "connected": "已连接",
+    "configured": "已配置",
     "loading": "加载中…"
   },
   "tabs": {
@@ -317,6 +317,7 @@
     "defaults": {
       "label": "默认设置",
       "chatModel": "对话模型",
+      "selectModel": "选择模型",
       "subagentModel": "Subagent 模型",
       "followChatModel": "跟随对话模型",
       "subagentConcurrency": "每个聊天并发 Subagent",
@@ -331,20 +332,13 @@
     },
     "local": {
       "lmstudio": {
-        "description": "通过 LM Studio 的 HTTP 服务器运行 GGUF 模型，请在开发者标签页中启用。",
-        "modelHint": "LM Studio 中已加载的模型 ID，可查看服务器的 /v1/models 页面。"
+        "description": "通过 LM Studio 的 HTTP 服务器运行 GGUF 模型，请在开发者标签页中启用。"
       },
       "mlx": {
-        "description": "通过 mlx_lm.server 在 Apple 芯片设备上推理，需要安装 mlx-lm。",
-        "modelHint": "启动 mlx_lm.server 时使用的 Hugging Face 仓库路径。"
+        "description": "通过 mlx_lm.server 在 Apple 芯片设备上推理，需要安装 mlx-lm。"
       },
       "ollama": {
-        "description": "通过 Ollama 内置的 OpenAI 兼容 API 使用本地模型。",
-        "modelHint": "ollama list 或 ollama pull 中显示的模型名称。"
-      },
-      "openrouter": {
-        "description": "OpenRouter 上的任意模型，请输入完整的提供商/模型 ID。",
-        "modelHint": "可在 openrouter.ai/models 浏览模型 ID。"
+        "description": "通过 Ollama 内置的 OpenAI 兼容 API 使用本地模型。"
       }
     },
     "voice": {
@@ -371,14 +365,7 @@
       "getKey": "获取密钥",
       "removeProvider": "移除提供商",
       "removeEndpoint": "移除端点",
-      "test": "测试",
-      "testing": "测试中…",
-      "reachable": "可访问，服务器已响应。",
-      "unreachable": "无法连接到服务器。",
       "baseUrl": "Base URL",
-      "modelId": "Model ID",
-      "context": "上下文",
-      "tokens": "tokens",
       "apiKey": "API key",
       "name": "名称",
       "namePlaceholder": "我的端点",
@@ -391,6 +378,36 @@
       "keyPrefixHint": "{{provider}} 的密钥以 \"{{prefix}}\" 开头。",
       "failedSave": "保存失败：{{error}}",
       "optionalKeyPlaceholder": "可选，无需鉴权的端点可留空"
+    },
+    "catalog": {
+      "models": "模型",
+      "addModels": "添加模型",
+      "configuredCount": "{{count}} 个模型",
+      "searchOrEnter": "搜索或输入模型 ID",
+      "refresh": "刷新模型",
+      "configured": "已添加",
+      "available": "提供商可用模型",
+      "configureFirst": "请先配置端点和 API key 以发现模型，也可以直接手动添加。",
+      "loading": "正在加载模型…",
+      "empty": "提供商没有返回匹配模型，可以手动添加模型 ID。",
+      "openToLoad": "展开后获取可用模型。",
+      "added": "已添加",
+      "refine": "找到 {{count}} 个模型，请缩小搜索范围以查看更多。",
+      "add": "添加 {{id}}",
+      "remove": "移除 {{id}}",
+      "addManual": "手动添加",
+      "source": {
+        "discovered": "服务端",
+        "manual": "手动"
+      },
+      "error": {
+        "auth": "提供商拒绝了 API key，仍可手动添加模型。",
+        "unsupported": "该端点没有提供模型列表，请手动添加模型。",
+        "http": "提供商返回错误，仍可手动添加模型。",
+        "invalid-response": "提供商返回了无效模型列表，请手动添加模型。",
+        "network": "无法连接提供商，仍可手动添加模型。",
+        "save": "无法保存模型配置。"
+      }
     }
   },
   "agents": {

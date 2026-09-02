@@ -14,9 +14,7 @@ import {
 const baseConfig = {
   apiKeys: EMPTY_PROVIDER_KEYS,
   providerModels: {},
-  lmstudioBaseURL: "http://127.0.0.1:1234/v1",
-  mlxBaseURL: "http://127.0.0.1:8080/v1",
-  ollamaBaseURL: "http://127.0.0.1:11434/v1",
+  providerBaseURLs: {},
   customProviders: [],
 };
 
@@ -34,7 +32,12 @@ describe("getAvailableModelRefs", () => {
         openrouter: "configured",
       },
       providerModels: {
-        [builtinProviderId("openrouter")]: "openai/gpt-oss-20b",
+        [builtinProviderId("anthropic")]: [
+          { id: "claude-current", source: "discovered" },
+        ],
+        [builtinProviderId("openrouter")]: [
+          { id: "openai/current", source: "manual" },
+        ],
       },
     });
 
@@ -46,8 +49,26 @@ describe("getAvailableModelRefs", () => {
     ).toBe(true);
     expect(refs).toContainEqual({
       providerId: builtinProviderId("openrouter"),
-      modelId: "openai/gpt-oss-20b",
+      modelId: "openai/current",
     });
+  });
+
+  it("returns every user-added model for a configured provider", () => {
+    const refs = getAvailableModelRefs({
+      ...baseConfig,
+      apiKeys: { ...EMPTY_PROVIDER_KEYS, openai: "configured" },
+      providerModels: {
+        [builtinProviderId("openai")]: [
+          { id: "model-a", source: "discovered" },
+          { id: "model-b", source: "manual" },
+        ],
+      },
+    });
+
+    expect(refs).toEqual([
+      { providerId: builtinProviderId("openai"), modelId: "model-a" },
+      { providerId: builtinProviderId("openai"), modelId: "model-b" },
+    ]);
   });
 
   it("requires both endpoint and model for local and custom providers", () => {
@@ -56,14 +77,15 @@ describe("getAvailableModelRefs", () => {
       protocol: "openai-compatible",
       name: "Custom",
       baseURL: "https://example.com/v1",
-      contextLimit: 128_000,
     };
     const refs = getAvailableModelRefs({
       ...baseConfig,
-      lmstudioBaseURL: "",
+      providerBaseURLs: { lmstudio: "" },
       providerModels: {
-        [builtinProviderId("lmstudio")]: "local-model",
-        [customProvider.id]: "custom-model",
+        [builtinProviderId("lmstudio")]: [
+          { id: "local-model", source: "manual" },
+        ],
+        [customProvider.id]: [{ id: "custom-model", source: "discovered" }],
       },
       customProviders: [customProvider],
     });

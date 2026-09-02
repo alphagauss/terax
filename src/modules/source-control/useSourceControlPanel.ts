@@ -3,11 +3,7 @@
  * 仓库数据只来自 Repository Controller，所有修改完成后重新读取真实 Git 状态。
  */
 
-import {
-  modelSupportsTemperature,
-  providerNeedsKey,
-  tryResolveModel,
-} from "@/modules/ai/config";
+import { resolveProviderInstance, tryResolveModel } from "@/modules/ai/config";
 import {
   type GitChangedFile,
   type GitDiscardEntry,
@@ -15,6 +11,7 @@ import {
   type GitStatusSnapshot,
   native,
 } from "@/modules/ai/lib/native";
+import { isProviderConnectionReady } from "@/modules/ai/providerRegistry";
 import {
   selectActiveAgentMeta,
   useChatStore,
@@ -247,8 +244,14 @@ export function useSourceControlPanel(
 ): SourceControlPanelState {
   const selectedModelRef = useChatStore((state) => state.selectedModel);
   const customProviders = usePreferencesStore((state) => state.customProviders);
+  const providerBaseURLs = usePreferencesStore(
+    (state) => state.providerBaseURLs,
+  );
   const agentStatus = useChatStore(selectActiveAgentMeta).status;
   const apiKeys = useChatStore((state) => state.apiKeys);
+  const providerInstanceKeys = useChatStore(
+    (state) => state.providerInstanceKeys,
+  );
   const repo = controller.repo;
   const status = controller.status;
   const panelState: PanelState = !isOpen
@@ -325,13 +328,19 @@ export function useSourceControlPanel(
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
   const canPush = !!status?.upstream && status.behind === 0;
-  const selectedModel = tryResolveModel(selectedModelRef, customProviders);
-  const hasApiKeyForSelected = selectedModel
-    ? !providerNeedsKey(selectedModel.provider) ||
-      !!apiKeys[selectedModel.provider]
-    : false;
-  const selectedModelSupportsTemperature = selectedModel
-    ? modelSupportsTemperature(selectedModel.provider, selectedModel.id)
+  const selectedModel = tryResolveModel(selectedModelRef, {
+    customProviders,
+    providerBaseURLs,
+  });
+  const providerReady = selectedModel
+    ? isProviderConnectionReady(
+        resolveProviderInstance(selectedModel.providerId, {
+          customProviders,
+          providerBaseURLs,
+          providerCredentials: apiKeys,
+          providerInstanceCredentials: providerInstanceKeys,
+        }),
+      )
     : false;
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy =
@@ -340,11 +349,11 @@ export function useSourceControlPanel(
     if (stagedEntries.length === 0) {
       return "Stage changes to generate a commit message";
     }
-    if (!selectedModel || !hasApiKeyForSelected) {
+    if (!selectedModel || !providerReady) {
       return "Connect an AI provider to generate commit messages";
     }
     return null;
-  }, [hasApiKeyForSelected, selectedModel, stagedEntries.length]);
+  }, [providerReady, selectedModel, stagedEntries.length]);
   const canGenerateCommitMessage =
     stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
   const generateCommitMessageHint = aiUnavailableReason
@@ -485,7 +494,7 @@ export function useSourceControlPanel(
   );
 
   const generateCommitMessage = useCallback(async () => {
-    if (!repo || stagedEntries.length === 0) return;
+    if (!repo || stagedEntries.length === 0 || !selectedModelRef) return;
     if (aiBusy) {
       setActionError("Wait for the current AI action to finish");
       return;
@@ -500,7 +509,7 @@ export function useSourceControlPanel(
     try {
       const [{ buildConfiguredLanguageModel }, { generateText }, diff] =
         await Promise.all([
-          import("@/modules/ai/lib/agent"),
+          import("@/modules/ai/lib/providerRuntime"),
           import("ai"),
           native.gitDiff(repo.repoRoot, null, "index"),
         ]);
@@ -511,9 +520,7 @@ export function useSourceControlPanel(
         selectedModelRef,
         chatState.apiKeys,
         {
-          lmstudioBaseURL: prefs.lmstudioBaseURL,
-          mlxBaseURL: prefs.mlxBaseURL,
-          ollamaBaseURL: prefs.ollamaBaseURL,
+          providerBaseURLs: prefs.providerBaseURLs,
           customProviders: prefs.customProviders,
           providerInstanceKeys: chatState.providerInstanceKeys,
         },
@@ -523,7 +530,6 @@ export function useSourceControlPanel(
         system: COMMIT_MESSAGE_SYSTEM_PROMPT,
         prompt: buildCommitMessagePrompt(stagedEntries, diffText, truncated),
         maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-        ...(selectedModelSupportsTemperature ? { temperature: 0.2 } : {}),
       });
       let message = cleanCommitMessage(result.text);
       if (!isValidCommitMessage(message)) {
@@ -532,7 +538,6 @@ export function useSourceControlPanel(
           system: COMMIT_MESSAGE_SYSTEM_PROMPT,
           prompt: buildRepairCommitMessagePrompt(message, stagedEntries),
           maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-          ...(selectedModelSupportsTemperature ? { temperature: 0 } : {}),
         });
         message = cleanCommitMessage(repair.text);
       }
@@ -548,14 +553,7 @@ export function useSourceControlPanel(
     } finally {
       setLocalActionBusy(null);
     }
-  }, [
-    aiUnavailableReason,
-    aiBusy,
-    repo,
-    selectedModelRef,
-    selectedModelSupportsTemperature,
-    stagedEntries,
-  ]);
+  }, [aiUnavailableReason, aiBusy, repo, selectedModelRef, stagedEntries]);
 
   const commit = useCallback(async () => {
     if (!repo || controller.busyAction) return;

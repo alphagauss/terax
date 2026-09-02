@@ -3,43 +3,30 @@
  * 负责输入、上下文标签、模型筛选和发送控制。
  */
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   Add01Icon,
   AiBookIcon,
-  AppleIcon,
   ArrowDown01Icon,
   ArrowUpIcon,
-  BrainIcon,
-  ChatGptIcon,
-  ClaudeIcon,
   Clock01Icon,
-  CoinsDollarIcon,
-  ComputerIcon,
-  CpuIcon,
-  DeepseekIcon,
   FavouriteIcon,
-  FlashIcon,
   Folder01Icon,
-  GlobeIcon,
-  GoogleGeminiIcon,
-  Grok02Icon,
   HandIcon,
   Mic01Icon,
-  MistralIcon,
   PlugIcon,
   Search01Icon,
   SecurityWarningIcon,
-  ServerStack01Icon,
   StarIcon,
   StopCircleIcon,
   Tick01Icon,
@@ -48,15 +35,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  DEFAULT_MODEL_REF,
   type ModelRef,
-  type ModelCapabilities,
-  type ModelInfo,
   modelRefKey,
   modelRefsEqual,
   PROVIDERS,
   type ProviderId,
   providerFromBuiltinId,
+  type ResolvedModel,
   resolveModel,
   STT_PROVIDER_LABELS,
   tryResolveModel,
@@ -67,22 +52,6 @@ import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { AiComposerInput } from "./AiComposerInput";
 import { ChipsRow } from "./ChipsRow";
-
-const PROVIDER_ICON = {
-  openai: ChatGptIcon,
-  anthropic: ClaudeIcon,
-  google: GoogleGeminiIcon,
-  xai: Grok02Icon,
-  cerebras: CpuIcon,
-  groq: FlashIcon,
-  deepseek: DeepseekIcon,
-  mistral: MistralIcon,
-  openrouter: GlobeIcon,
-  "openai-compatible": PlugIcon,
-  lmstudio: ComputerIcon,
-  mlx: AppleIcon,
-  ollama: ServerStack01Icon,
-} as const satisfies Record<ProviderId, typeof ChatGptIcon>;
 
 /**
  * AI 侧栏输入组件。
@@ -310,36 +279,28 @@ function ModelDropdown() {
   const favoriteModels = usePreferencesStore((s) => s.favoriteModels);
   const recentModels = usePreferencesStore((s) => s.recentModels);
   const customProviders = usePreferencesStore((s) => s.customProviders);
-  const customProviderIds = useMemo(
-    () => new Set(customProviders.map((provider) => provider.id)),
+  const customProviderById = useMemo(
+    () => new Map(customProviders.map((provider) => [provider.id, provider])),
     [customProviders],
   );
   const providerModels = usePreferencesStore((s) => s.providerModels);
-  const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
-  const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
-  const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
+  const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
-  type ModelOption = { ref: ModelRef; info: ModelInfo };
+  type ModelOption = { ref: ModelRef; info: ResolvedModel };
   const modelOptions = useMemo<ModelOption[]>(() => {
     return getAvailableModelRefs({
       apiKeys,
       providerModels,
-      lmstudioBaseURL,
-      mlxBaseURL,
-      ollamaBaseURL,
+      providerBaseURLs,
       customProviders,
-    }).map((ref) => ({ ref, info: resolveModel(ref, customProviders) }));
-  }, [
-    apiKeys,
-    customProviders,
-    lmstudioBaseURL,
-    mlxBaseURL,
-    ollamaBaseURL,
-    providerModels,
-  ]);
+    }).map((ref) => ({
+      ref,
+      info: resolveModel(ref, { customProviders, providerBaseURLs }),
+    }));
+  }, [apiKeys, customProviders, providerBaseURLs, providerModels]);
 
   const COMPAT_PROVIDER_ID = "__compat__";
   const availableProviderIds = useMemo(
@@ -353,7 +314,7 @@ function ModelDropdown() {
     [modelOptions],
   );
   const hasCustomModels = modelOptions.some(({ ref }) =>
-    customProviderIds.has(ref.providerId),
+    customProviderById.has(ref.providerId),
   );
   const effectiveActiveProvider =
     activeProvider === COMPAT_PROVIDER_ID
@@ -365,12 +326,15 @@ function ModelDropdown() {
         ? activeProvider
         : null;
   const currentRef =
-    modelOptions.find(({ ref }) => modelRefsEqual(ref, selected))?.ref ??
+    modelOptions.find(
+      ({ ref }) => selected !== null && modelRefsEqual(ref, selected),
+    )?.ref ??
     modelOptions[0]?.ref ??
-    DEFAULT_MODEL_REF;
-  const current =
-    tryResolveModel(currentRef, customProviders) ??
-    resolveModel(DEFAULT_MODEL_REF);
+    null;
+  const current = tryResolveModel(currentRef, {
+    customProviders,
+    providerBaseURLs,
+  });
   const availableFavoriteCount = modelOptions.filter(({ ref }) =>
     favoriteModels.some((favorite) => modelRefsEqual(favorite, ref)),
   ).length;
@@ -400,7 +364,7 @@ function ModelDropdown() {
     }
     if (effectiveActiveProvider === COMPAT_PROVIDER_ID) {
       pool = pool.filter((option) =>
-        customProviderIds.has(option.ref.providerId),
+        customProviderById.has(option.ref.providerId),
       );
     } else if (effectiveActiveProvider !== null) {
       pool = pool.filter(
@@ -409,17 +373,16 @@ function ModelDropdown() {
     }
     if (q) {
       pool = pool.filter(
-        ({ info: m }) =>
-          m.label.toLowerCase().includes(q) ||
-          m.hint.toLowerCase().includes(q) ||
-          m.description.toLowerCase().includes(q) ||
-          m.provider.includes(q) ||
-          (m.tags?.some((t) => t.includes(q)) ?? false),
+        ({ info: model }) =>
+          model.label.toLowerCase().includes(q) ||
+          (customProviderById.get(model.providerId)?.name ?? model.provider)
+            .toLowerCase()
+            .includes(q),
       );
     }
     return pool;
   }, [
-    customProviderIds,
+    customProviderById,
     effectiveActiveProvider,
     favoriteModels,
     modelOptions,
@@ -435,13 +398,18 @@ function ModelDropdown() {
           type="button"
           variant="ghost"
           size="sm"
+          disabled={!current}
           className={cn(
             "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground",
             "text-muted-foreground",
           )}
-          title={t("statusBar.modelTitle", { label: current.label })}
+          title={
+            current
+              ? t("statusBar.modelTitle", { label: current.label })
+              : t("statusBar.noModels")
+          }
         >
-          {current.label}
+          {current?.label ?? t("statusBar.noModels")}
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={11}
@@ -453,7 +421,7 @@ function ModelDropdown() {
 
       <DropdownMenuContent
         align="end"
-        className="w-[28rem] p-0 overflow-hidden rounded-xl border border-border/70 shadow-xl"
+        className="w-max min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border/70 p-0 shadow-xl"
         onFocusCapture={(e) => {
           if (e.target !== inputRef.current) inputRef.current?.focus();
         }}
@@ -500,7 +468,7 @@ function ModelDropdown() {
           />
         </div>
 
-        <div className="flex max-h-104 min-h-0">
+        <div className="flex min-h-0 max-h-[calc(var(--radix-dropdown-menu-content-available-height)-5rem)]">
           {/* 供应商列只展示至少包含一个当前可用模型的配置。 */}
           <div className="flex w-11 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/70 bg-muted/20 py-1.5">
             <ProviderPill
@@ -514,7 +482,7 @@ function ModelDropdown() {
             ).map((p) => (
               <ProviderPill
                 key={p.id}
-                icon={PROVIDER_ICON[p.id]}
+                provider={p.id}
                 title={p.label}
                 active={effectiveActiveProvider === p.id}
                 onClick={() => setActiveProvider(p.id)}
@@ -531,7 +499,7 @@ function ModelDropdown() {
           </div>
 
           {/* Models list */}
-          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+          <div className="min-h-0 min-w-52 max-w-96 flex-1 overflow-x-hidden overflow-y-auto py-1">
             {effectiveActiveProvider === COMPAT_PROVIDER_ID && (
               <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground">
                 <HugeiconsIcon icon={PlugIcon} size={13} strokeWidth={1.75} />
@@ -557,7 +525,9 @@ function ModelDropdown() {
                 <ModelRow
                   key={modelRefKey(ref)}
                   model={info}
-                  selected={modelRefsEqual(ref, currentRef)}
+                  selected={
+                    currentRef !== null && modelRefsEqual(ref, currentRef)
+                  }
                   favorite={favoriteModels.some((item) =>
                     modelRefsEqual(item, ref),
                   )}
@@ -614,12 +584,14 @@ function TabButton({
 
 function ProviderPill({
   icon,
+  provider,
   title,
   active,
   muted,
   onClick,
 }: {
-  icon: typeof AiBookIcon;
+  icon?: typeof AiBookIcon;
+  provider?: ProviderId;
   title: string;
   active: boolean;
   muted?: boolean;
@@ -639,7 +611,11 @@ function ProviderPill({
             : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
       )}
     >
-      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+      {provider ? (
+        <ProviderIcon provider={provider} size={16} />
+      ) : icon ? (
+        <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+      ) : null}
     </button>
   );
 }
@@ -649,7 +625,7 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
   if (!p) return null;
   return (
     <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground">
-      <HugeiconsIcon icon={PROVIDER_ICON[p.id]} size={13} strokeWidth={1.75} />
+      <ProviderIcon provider={p.id} size={13} />
       <span>{p.label}</span>
     </div>
   );
@@ -663,7 +639,7 @@ function ModelRow({
   onPick,
   onToggleFavorite,
 }: {
-  model: ModelInfo;
+  model: ResolvedModel;
   selected: boolean;
   favorite: boolean;
   showProviderIcon: boolean;
@@ -706,24 +682,16 @@ function ModelRow({
       </button>
 
       {showProviderIcon ? (
-        <HugeiconsIcon
-          icon={PROVIDER_ICON[model.provider]}
+        <ProviderIcon
+          provider={model.provider}
           size={13}
-          strokeWidth={1.5}
           className="shrink-0 text-muted-foreground"
         />
       ) : null}
 
-      <div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-        <span className="shrink-0 text-[12px] font-medium leading-none">
-          {model.label}
-        </span>
-        <span className="truncate text-[10.5px] leading-none text-muted-foreground">
-          {model.description}
-        </span>
-      </div>
-
-      <CapabilityBars caps={model.capabilities} />
+      <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[12px] font-medium leading-none">
+        {model.label}
+      </span>
 
       {selected ? (
         <HugeiconsIcon
@@ -734,65 +702,6 @@ function ModelRow({
         />
       ) : null}
     </DropdownMenuItem>
-  );
-}
-
-function CapabilityBars({ caps }: { caps: ModelCapabilities }) {
-  const { t } = useTranslation("ai");
-  return (
-    <div className="ml-auto flex items-center gap-1.5">
-      <CapBar
-        icon={BrainIcon}
-        value={caps.intelligence}
-        label={t("statusBar.intelligence")}
-      />
-      <CapBar
-        icon={FlashIcon}
-        value={caps.speed}
-        label={t("statusBar.speed")}
-      />
-      <CapBar
-        icon={CoinsDollarIcon}
-        value={caps.cost}
-        label={t("statusBar.affordability")}
-      />
-    </div>
-  );
-}
-
-function CapBar({
-  icon,
-  value,
-  label,
-}: {
-  icon: typeof AiBookIcon;
-  value: number;
-  label: string;
-}) {
-  const { t } = useTranslation("ai");
-  return (
-    <span
-      className="flex items-center gap-0.5"
-      title={t("statusBar.capBarTitle", { label, value })}
-    >
-      <HugeiconsIcon
-        icon={icon}
-        size={10}
-        strokeWidth={1.75}
-        className="text-muted-foreground"
-      />
-      <span className="flex items-center gap-px">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <span
-            key={i}
-            className={cn(
-              "h-2 w-[2px] rounded-full",
-              i <= value ? "bg-foreground/70" : "bg-foreground/15",
-            )}
-          />
-        ))}
-      </span>
-    </span>
   );
 }
 

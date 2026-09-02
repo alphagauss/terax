@@ -10,26 +10,51 @@ AI 子系统采用 BYOK（bring your own key）模式。它通过 `@ai-sdk/*` �
 
 ## Provider
 
-云 provider 定义在 `src/modules/ai/config.ts` 中：
+内置 provider 的稳定事实统一定义在 `src/modules/ai/providerRegistry.ts`：
 
 - OpenAI、Anthropic、Google、xAI、Cerebras、Groq、DeepSeek、Mistral、OpenRouter
 - 用于任意自定义 base URL 的 `openai-compatible`
 - 本地：LM Studio、MLX、Ollama
 
-`src/modules/ai/lib/agent.ts` 中的 `buildLanguageModel` 根据 `provider` 进入不同分支，以构建正确的 AI SDK provider instance。本地 provider 使用 `createOpenAICompatible`，并传入允许访问私有网络的 `localProxyFetch`；云 provider 则使用各自专用的 SDK constructor。
+每条 `ProviderDefinition` 在一起声明展示信息、固定或可编辑地址、私网策略、凭据策略、模型目录 adapter 和运行时 adapter。注册表不保存用户密钥、模型 ID、价格、上下文长度或模型能力。`ProviderId` 从注册表 key 推导，不维护第二份联合类型。
+
+`resolveProviderInstance` 把内置地址覆盖、自定义 Provider 和进程内凭据解析为统一 `ResolvedProviderConnection`。设置页、模型目录、聊天、Subagent、自动补全和 Git 提交只消费这个连接，不按供应商名称重新拼接地址或鉴权。
+
+`src/modules/ai/lib/providerRuntime.ts` 根据注册表引用的 runtime adapter 构造 AI SDK provider instance。OpenAI、Anthropic、Google、xAI、Cerebras 和 Groq 使用各自的延迟加载 SDK adapter；DeepSeek、Mistral、OpenRouter、本地服务和自定义 Provider 复用 `openai-compatible` adapter。是否允许私网访问由连接定义决定，不由组件传入。
 
 模型身份统一使用结构化的 `ModelRef { providerId, modelId }`。内置 Provider 实例 ID 固定为 `builtin:<provider>`；用户新增的 OpenAI-compatible Provider 在创建时生成 `custom:<uuid>`，名称、地址和模型名变化都不会改变该实例 ID。自定义 Provider 的密钥也只按这个稳定 ID 绑定。
 
-模型 metadata（context limit、cost、reasoning behavior）存储在 `config.ts` 的模型 registry 中。`resolveModel` 只根据完整 `ModelRef` 和 Provider 实例配置解析模型，禁止从模型名推断 Provider。自由模型的配置统一存放在 `providerModels[providerId]`，Provider 连接实例不再重复保存模型名。设置、当前选择、默认模型、Subagent 模型、自动补全、收藏和最近使用都保存完整引用。
+Terax 不维护静态模型目录。`modelCatalog.ts` 使用 `openai`、`anthropic`、`google` 和 `xai` 四种目录 adapter，从统一连接解析模型接口、分页和鉴权。成功结果进入五分钟、有界容量的进程内 LRU，同一连接的并发请求会合并；失败和刷新结果都不会直接改变用户配置。设置页最多同时渲染 100 个匹配项，避免大型目录产生无界 React 节点。
+
+用户从远端结果添加或手动输入的模型保存到 `providerModels[providerId]` 数组，只记录 ID 和 `discovered` 或 `manual` 来源。远端目录始终是建议数据，刷新不会自动增加、删除或禁用已配置模型。接口失败时仍可手动输入模型 ID。
+
+`resolveModel` 只根据完整 `ModelRef` 和 Provider 实例解析连接，禁止从模型名推断 Provider。模型接口没有统一的上下文长度字段，因此目录层不猜测或保存它，界面也不把内部历史清理预算显示为模型上下文长度。价格、营销说明和主观能力评分不进入配置。设置、当前选择、默认模型、Subagent 模型、自动补全、收藏和最近使用都使用完整引用；没有已添加模型时相关默认值为 `null`。
+
+可编辑内置地址统一保存在 `providerBaseURLs[provider]`，未覆盖时使用注册表默认值。自定义 Provider 继续保存稳定实例 ID、名称、协议和地址。所有密钥只进入 keyring，目录缓存和持久化设置都不包含密钥。
 
 ### 新增 provider
 
-1. 在 `src/modules/ai/config.ts` 的 `PROVIDERS` 中添加 `ProviderInfo` entry。
-2. 在同一文件的模型 registry 中添加 model ID 和 metadata。
-3. 在 `buildLanguageModel` 中添加构建 provider instance 的分支。对于 OpenAI-compatible API，通常可以复用 `createOpenAICompatible`。
-4. 如果 provider 需要 API key，更新 `config.ts` 中的 `providerNeedsKey` 和 keyring service mapping。
-5. 如果需要专用的 `@ai-sdk/*` package，将其添加到 `package.json`，并说明 bundle cost 的合理性（参见 `CONTRIBUTING.md`）。
-6. 新增 built-in 必须说明其相对于 `openai-compatible` 和 OpenRouter 的独特价值；`CONTRIBUTING.md` 对此有明确要求。
+先确认新 Provider 使用的三种协议：credential、catalog 和 runtime。不要根据品牌创建重复 adapter。
+
+使用现有协议的 Provider：
+
+1. 在 `providerRegistry.ts` 的 `PROVIDER_DEFINITIONS` 中增加一条定义。地址必须是 API base URL，模型路径放在 `catalog.path`，不得写入模型 ID。
+2. API key Provider 选择 `api-key` credential adapter，并声明是否必需、keyring account、输入提示前缀和目录鉴权方式。无凭据 Provider 使用 `none`。
+3. 模型目录选择已有的 `openai`、`anthropic`、`google` 或 `xai` adapter。OpenAI-compatible 服务通常选择 `openai`。
+4. 模型调用选择已有 runtime adapter。OpenAI-compatible 服务统一选择 `openai-compatible`，额外固定 header 放在该定义的 `runtime.headers`。
+5. 可编辑地址使用 `endpoint.kind = "editable"` 并声明默认地址和私网策略。固定云地址使用 `fixed`，不得允许私网。
+6. 可选地在 `ProviderIcon.tsx` 增加专属图标；未增加时自动使用通用图标。可编辑内置 Provider 还需为设置页说明补充英文和中文翻译。
+7. 为非标准地址、鉴权或响应补充一个可观察行为测试。已有 adapter 的普通数据项不重复测试。
+
+只有协议确实不兼容时才新增 adapter：
+
+- 新目录协议在 `modelCatalog.ts` 增加一个 `CatalogAdapterId` 和对应分页、响应解析规则。目录输出仍只能是模型 ID。
+- 新调用协议在 `providerRuntime.ts` 增加一个 `RuntimeAdapterId` 和延迟加载 factory。新增 `@ai-sdk/*` 依赖时必须说明 bundle cost。
+- 新凭据协议扩展 `ProviderCredentialDefinition`、凭据服务和设置页凭据控件。OAuth 登录、回调、刷新、退出和 token 存储属于 credential adapter，不进入 catalog 或 runtime adapter。
+
+OAuth 的 refresh token、PKCE verifier 和登录状态必须由 Rust 与 keyring 管理，不得写入 settings store 或 `localStorage`。运行时只消费 credential adapter 返回的短期凭据。完成首个 OAuth adapter 后，共享相同流程的 Provider 只需复用该 adapter。
+
+新增 built-in 必须说明其相对于 `openai-compatible` 和 OpenRouter 的独特价值；`CONTRIBUTING.md` 对此有明确要求。
 
 key 绝不会持久化到操作系统 keychain / Linux secrets 文件之外。
 
@@ -48,9 +73,9 @@ Custom Agent ID 同时是会话归属。历史列表可按 Agent 筛选；删除
 一次主 Agent 请求会：
 
 1. `createSessionTransport` 在 Chat runtime 首次发送时读取 Workspace 根 `AGENTS.md`，并根据统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令构造 system prompt。该 Promise、Agent 快照和最终字符串由 transport 闭包持有，后续轮次不再读取或重建。
-2. `runAgentStream` 通过 `buildConfiguredLanguageModel` 解析当前模型。模型可以切换，但不改变已经冻结的 system prompt。
+2. `runAgentStream` 通过 `providerRuntime.ts` 的 `buildConfiguredLanguageModel` 解析当前模型。模型可以切换，但不改变已经冻结的 system prompt。
 3. 联系模型前，准确的 prompt 和所有新 user message 都会 commit 到磁盘。
-4. 将 UI message 转换为 model message；如果模型不保留 reasoning content，则将其移除；context limit 超出时 compact 旧 message。
+4. 将 UI message 转换为 model message 并保留 reasoning content；超过内部历史清理预算时 compact 旧 message。
 5. 使用 `buildTools(ctx, agent.tools)` 过滤后的 tool set 和 `stopWhen: stepCountIs(MAX_AGENT_STEPS)`，通过 `streamText` 进行流式传输，并发出 step label、usage delta 和 finish metadata。
 
 完整 tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal` 和 `todo` builder 组装而成。

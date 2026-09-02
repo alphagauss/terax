@@ -1,33 +1,22 @@
 /**
- * 本文件负责创建语言模型并运行主 Agent 与通用 Subagent。
+ * 本文件负责运行主 Agent 与通用 Subagent。
  * 它协调多段流、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
 import {
   createUIMessageStream,
   generateText,
+  type ModelMessage,
   pruneMessages,
   stepCountIs,
   streamText,
-  type LanguageModel,
-  type ModelMessage,
   type UIMessage,
 } from "ai";
 import {
-  getModelContextLimit,
-  LMSTUDIO_DEFAULT_BASE_URL,
-  MAX_AGENT_STEPS,
-  MLX_DEFAULT_BASE_URL,
-  type ModelRef,
-  modelKeepsReasoning,
-  OLLAMA_DEFAULT_BASE_URL,
-  providerNeedsKey,
-  resolveModel,
-  type ProviderInstance,
-  type ProviderId,
-} from "../config";
-import { resolveSubagentTools, type AgentToolId } from "./agentTools";
-import { buildTools, type ToolContext } from "../tools/tools";
+  isSubagentToolErrorOutput,
+  type SubagentDisplayState,
+  summarizeSubagentToolInput,
+} from "../agents/subagentDisplay";
 import {
   formatSubagentResultEvent,
   releaseSubagentCoordinator,
@@ -36,18 +25,23 @@ import {
   type SubagentTurnCoordinator,
 } from "../agents/subagentRuntime";
 import {
-  isSubagentToolErrorOutput,
-  summarizeSubagentToolInput,
-  type SubagentDisplayState,
-} from "../agents/subagentDisplay";
+  MAX_AGENT_STEPS,
+  type ModelRef,
+  type ProviderBaseURLs,
+  type ProviderInstance,
+  resolveModel,
+} from "../config";
+import { buildTools, type ToolContext } from "../tools/tools";
+import { type AgentToolId, resolveSubagentTools } from "./agentTools";
 import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
-import { createProxyFetch } from "./proxyFetch";
+import { buildConfiguredLanguageModel } from "./providerRuntime";
 import { REASONING_DURATION_PART_TYPE } from "./sessionMessages";
 import { convertToAgentModelMessages } from "./subagentMessages";
 
-const localProxyFetch = createProxyFetch({ allowPrivateNetwork: true });
+// 该预算只决定何时清理旧工具结果，不代表任何模型的上下文长度。
+const AGENT_HISTORY_COMPACTION_BUDGET = 128_000;
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -73,194 +67,6 @@ function shortPath(p: unknown): string {
 
 function ellipsize(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
-export type BuildModelOptions = {
-  modelIdOverride?: string;
-  lmstudioBaseURL?: string;
-  mlxBaseURL?: string;
-  ollamaBaseURL?: string;
-  openaiCompatibleBaseURL?: string;
-};
-
-const modelCache = new Map<string, LanguageModel>();
-
-export async function buildLanguageModel(
-  provider: ProviderId,
-  keys: ProviderKeys,
-  resolvedModelId: string,
-  options: BuildModelOptions = {},
-  providerInstanceKey?: string | null,
-): Promise<LanguageModel> {
-  if (providerNeedsKey(provider) && !keys[provider]) {
-    throw new Error(
-      `No API key configured for ${provider}. Open Settings → AI to add one.`,
-    );
-  }
-  const key = keys[provider] ?? "";
-  const lmstudioURL = options.lmstudioBaseURL ?? LMSTUDIO_DEFAULT_BASE_URL;
-  const mlxURL = options.mlxBaseURL ?? MLX_DEFAULT_BASE_URL;
-  const ollamaURL = options.ollamaBaseURL ?? OLLAMA_DEFAULT_BASE_URL;
-  const compatURL = options.openaiCompatibleBaseURL ?? "";
-  const instanceKey = providerInstanceKey ?? "";
-  const cacheKey = `${provider} ${key} ${instanceKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL}`;
-  const hit = modelCache.get(cacheKey);
-  if (hit) return hit;
-
-  let built: LanguageModel;
-  switch (provider) {
-    case "openai": {
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      built = createOpenAI({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "anthropic": {
-      const { createAnthropic } = await import("@ai-sdk/anthropic");
-      built = createAnthropic({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "google": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      built = createGoogleGenerativeAI({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "xai": {
-      const { createXai } = await import("@ai-sdk/xai");
-      built = createXai({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "cerebras": {
-      const { createCerebras } = await import("@ai-sdk/cerebras");
-      built = createCerebras({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "deepseek": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "deepseek",
-        baseURL: "https://api.deepseek.com",
-        apiKey: key,
-      })(resolvedModelId);
-      break;
-    }
-    case "mistral": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "mistral",
-        baseURL: "https://api.mistral.ai/v1",
-        apiKey: key,
-      })(resolvedModelId);
-      break;
-    }
-    case "groq": {
-      const { createGroq } = await import("@ai-sdk/groq");
-      built = createGroq({ apiKey: key })(resolvedModelId);
-      break;
-    }
-    case "openrouter": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "openrouter",
-        baseURL: "https://openrouter.ai/api/v1",
-        apiKey: key,
-        headers: {
-          "HTTP-Referer": "https://terax.ai",
-          "X-Title": "Terax",
-        },
-      })(resolvedModelId);
-      break;
-    }
-    case "openai-compatible": {
-      if (!compatURL) {
-        throw new Error(
-          "OpenAI-compatible provider has no base URL. Set it in Settings → Models.",
-        );
-      }
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "openai-compatible",
-        baseURL: compatURL,
-        apiKey: instanceKey || key || undefined,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "lmstudio": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "lmstudio",
-        baseURL: lmstudioURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "mlx": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "mlx",
-        baseURL: mlxURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
-      break;
-    }
-    case "ollama": {
-      const { createOpenAICompatible } = await import(
-        "@ai-sdk/openai-compatible"
-      );
-      built = createOpenAICompatible({
-        name: "ollama",
-        baseURL: ollamaURL,
-        fetch: localProxyFetch,
-      })(resolvedModelId);
-      break;
-    }
-    default: {
-      const _exhaustive: never = provider;
-      throw new Error(`Unsupported provider: ${_exhaustive as ProviderId}`);
-    }
-  }
-  modelCache.set(cacheKey, built);
-  return built;
-}
-
-export type RuntimeProviderConfig = {
-  lmstudioBaseURL?: string;
-  mlxBaseURL?: string;
-  ollamaBaseURL?: string;
-  customProviders?: readonly ProviderInstance[];
-  providerInstanceKeys?: ProviderInstanceKeys;
-};
-
-export function buildConfiguredLanguageModel(
-  modelRef: ModelRef,
-  keys: ProviderKeys,
-  config: RuntimeProviderConfig = {},
-): Promise<LanguageModel> {
-  const resolved = resolveModel(modelRef, config.customProviders);
-  return buildLanguageModel(
-    resolved.provider,
-    keys,
-    resolved.id,
-    {
-      lmstudioBaseURL: config.lmstudioBaseURL,
-      mlxBaseURL: config.mlxBaseURL,
-      ollamaBaseURL: config.ollamaBaseURL,
-      openaiCompatibleBaseURL: resolved.baseURL,
-    },
-    config.providerInstanceKeys?.[resolved.providerId],
-  );
 }
 
 export type AgentUsage = {
@@ -302,9 +108,7 @@ export type RunAgentOptions = {
     completedMessages: UIMessage[],
     event: SubagentResultEvent,
   ) => void | Promise<void>;
-  lmstudioBaseURL?: string;
-  mlxBaseURL?: string;
-  ollamaBaseURL?: string;
+  providerBaseURLs?: Readonly<ProviderBaseURLs>;
   customProviders?: readonly ProviderInstance[];
   providerInstanceKeys?: ProviderInstanceKeys;
   uiMessages: UIMessage[];
@@ -319,22 +123,23 @@ export type RunAgentOptions = {
  */
 export async function runAgentStream(opts: RunAgentOptions) {
   const modelRef = opts.model;
-  const info = resolveModel(modelRef, opts.customProviders);
+  const providerConfig = {
+    customProviders: opts.customProviders,
+    providerBaseURLs: opts.providerBaseURLs,
+  };
+  const info = resolveModel(modelRef, providerConfig);
   const provider = info.provider;
 
   await opts.onSystemPrompt?.(opts.systemPrompt, opts.uiMessages);
 
   const history = await convertToAgentModelMessages(opts.uiMessages);
-  const keepsReasoning = modelKeepsReasoning(info);
   const prunedHistory = pruneMessages({
     messages: history,
-    reasoning: keepsReasoning ? "none" : "before-last-message",
+    reasoning: "none",
     emptyMessages: "remove",
   });
   const model = await buildConfiguredLanguageModel(modelRef, opts.keys, {
-    lmstudioBaseURL: opts.lmstudioBaseURL,
-    mlxBaseURL: opts.mlxBaseURL,
-    ollamaBaseURL: opts.ollamaBaseURL,
+    providerBaseURLs: opts.providerBaseURLs,
     customProviders: opts.customProviders,
     providerInstanceKeys: opts.providerInstanceKeys,
   });
@@ -439,7 +244,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               }
               const compact = compactModelMessagesDetailed(
                 modelHistory,
-                getModelContextLimit(info.id, info.contextLimit),
+                AGENT_HISTORY_COMPACTION_BUDGET,
               );
               if (compact.compacted) {
                 opts.onCompact?.({ droppedCount: compact.droppedCount });
@@ -607,16 +412,17 @@ function buildSubagentTaskRunner({
   };
   return async ({ task, abortSignal, onProgress }) => {
     const childModel = await buildConfiguredLanguageModel(model, opts.keys, {
-      lmstudioBaseURL: opts.lmstudioBaseURL,
-      mlxBaseURL: opts.mlxBaseURL,
-      ollamaBaseURL: opts.ollamaBaseURL,
+      providerBaseURLs: opts.providerBaseURLs,
       customProviders: opts.customProviders,
       providerInstanceKeys: opts.providerInstanceKeys,
     });
     const prompt = prepareAgentPrompt(
       `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents.`,
       [{ role: "user", content: task }],
-      resolveModel(model, opts.customProviders).provider,
+      resolveModel(model, {
+        customProviders: opts.customProviders,
+        providerBaseURLs: opts.providerBaseURLs,
+      }).provider,
     );
     const result = await generateText({
       model: childModel,

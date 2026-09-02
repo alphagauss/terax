@@ -6,7 +6,7 @@
     "remove": "Remove",
     "edit": "Edit",
     "delete": "Delete",
-    "connected": "Connected",
+    "configured": "Configured",
     "loading": "Loading…"
   },
   "tabs": {
@@ -317,6 +317,7 @@
     "defaults": {
       "label": "Defaults",
       "chatModel": "Chat model",
+      "selectModel": "Select a model",
       "subagentModel": "Subagent model",
       "followChatModel": "Follow chat model",
       "subagentConcurrency": "Concurrent subagents per chat",
@@ -331,20 +332,13 @@
     },
     "local": {
       "lmstudio": {
-        "description": "Run GGUF models via LM Studio's HTTP server (enable it from the Developer tab).",
-        "modelHint": "The model ID loaded in LM Studio. See the server's /v1/models page."
+        "description": "Run GGUF models via LM Studio's HTTP server (enable it from the Developer tab)."
       },
       "mlx": {
-        "description": "Apple silicon inference via mlx_lm.server (pip install mlx-lm).",
-        "modelHint": "The Hugging Face repository path used to launch mlx_lm.server."
+        "description": "Apple silicon inference via mlx_lm.server (pip install mlx-lm)."
       },
       "ollama": {
-        "description": "Local models via Ollama's built-in OpenAI-compatible API.",
-        "modelHint": "The model name from ollama list or ollama pull."
-      },
-      "openrouter": {
-        "description": "Any model on OpenRouter. Enter its full provider/model ID.",
-        "modelHint": "Browse IDs at openrouter.ai/models."
+        "description": "Local models via Ollama's built-in OpenAI-compatible API."
       }
     },
     "voice": {
@@ -371,14 +365,7 @@
       "getKey": "Get key",
       "removeProvider": "Remove provider",
       "removeEndpoint": "Remove endpoint",
-      "test": "Test",
-      "testing": "Testing…",
-      "reachable": "Reachable - server responded.",
-      "unreachable": "Could not reach the server.",
       "baseUrl": "Base URL",
-      "modelId": "Model ID",
-      "context": "Context",
-      "tokens": "tokens",
       "apiKey": "API key",
       "name": "Name",
       "namePlaceholder": "My endpoint",
@@ -391,6 +378,36 @@
       "keyPrefixHint": "{{provider}} keys start with \"{{prefix}}\".",
       "failedSave": "Failed to save: {{error}}",
       "optionalKeyPlaceholder": "Optional - leave empty for unauthenticated endpoints"
+    },
+    "catalog": {
+      "models": "Models",
+      "addModels": "Add models",
+      "configuredCount": "{{count}} models",
+      "searchOrEnter": "Search or enter a model ID",
+      "refresh": "Refresh models",
+      "configured": "Added",
+      "available": "Available from provider",
+      "configureFirst": "Configure the endpoint and API key to discover models. You can still add one manually.",
+      "loading": "Loading models…",
+      "empty": "No matching models returned. You can add an ID manually.",
+      "openToLoad": "Open the picker to discover models.",
+      "added": "Added",
+      "refine": "{{count}} matches. Refine your search to see more.",
+      "add": "Add {{id}}",
+      "remove": "Remove {{id}}",
+      "addManual": "Add manually",
+      "source": {
+        "discovered": "Provider",
+        "manual": "Manual"
+      },
+      "error": {
+        "auth": "The provider rejected the API key. You can still add a model manually.",
+        "unsupported": "This endpoint does not expose a model list. Add a model manually.",
+        "http": "The provider returned an error. You can still add a model manually.",
+        "invalid-response": "The provider returned an invalid model list. Add a model manually.",
+        "network": "Could not reach the provider. You can still add a model manually.",
+        "save": "Could not save the model configuration."
+      }
     }
   },
   "agents": {
