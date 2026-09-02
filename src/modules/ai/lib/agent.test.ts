@@ -9,6 +9,7 @@ import { runAgentStream } from "./agent";
 import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
 import { AGENT_TOOL_IDS } from "./agentTools";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
+import { modelRefForProvider } from "../config";
 
 describe("agent preflight persistence", () => {
   it("awaits the user message and system prompt commit before model setup", async () => {
@@ -27,7 +28,7 @@ describe("agent preflight persistence", () => {
     await expect(
       runAgentStream({
         keys: EMPTY_PROVIDER_KEYS,
-        modelId: "lmstudio-local",
+        model: modelRefForProvider("lmstudio", "mock-model"),
         systemPrompt: "Stable prompt",
         allowedTools: AGENT_TOOL_IDS,
         maxConcurrentSubagents: 3,

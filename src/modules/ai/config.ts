@@ -1,6 +1,6 @@
 /**
- * 本文件定义 AI Provider、模型能力、默认配置和基础系统提示词。
- * 运行时密钥与会话目录不在此持久化，固定 cwd 由会话层注入系统提示词。
+ * 本文件定义 AI Provider 实例、模型引用、模型能力、默认配置和基础系统提示词。
+ * 运行时统一从结构化引用解析连接，密钥与会话目录不在此持久化。
  */
 
 export const KEYRING_SERVICE = "terax-ai";
@@ -19,6 +19,26 @@ export type ProviderId =
   | "lmstudio"
   | "mlx"
   | "ollama";
+
+export type ConfigurableProviderId =
+  | "openrouter"
+  | "lmstudio"
+  | "mlx"
+  | "ollama";
+
+const CONFIGURABLE_PROVIDERS: ReadonlySet<ProviderId> = new Set([
+  "openrouter",
+  "lmstudio",
+  "mlx",
+  "ollama",
+]);
+
+/** 判断内置 Provider 是否使用用户配置的自由模型名。 */
+export function isConfigurableProvider(
+  provider: ProviderId,
+): provider is ConfigurableProviderId {
+  return CONFIGURABLE_PROVIDERS.has(provider);
+}
 
 export type ProviderInfo = {
   id: ProviderId;
@@ -126,28 +146,69 @@ export const PROVIDERS: readonly ProviderInfo[] = [
   },
 ] as const;
 
-export type CustomEndpoint = {
+/** 可持久化的自定义 Provider 连接实例，模型名由独立引用配置保存。 */
+export type ProviderInstance = {
   id: string;
+  protocol: "openai-compatible";
   name: string;
   baseURL: string;
-  modelId: string;
   contextLimit: number;
 };
 
-const COMPAT_MODEL_PREFIX = "compat-";
+const CUSTOM_PROVIDER_ID_PATTERN =
+  /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function compatModelIdForEndpoint(endpointId: string): string {
-  return `${COMPAT_MODEL_PREFIX}${endpointId}`;
+/** 统一引用一个 Provider 实例提供的真实模型。 */
+export type ModelRef = {
+  providerId: string;
+  modelId: string;
+};
+
+/** 返回内置 Provider 的稳定实例 ID。 */
+export function builtinProviderId(provider: ProviderId): string {
+  return `builtin:${provider}`;
 }
 
-export function isCompatModelId(modelId: string): boolean {
-  return modelId.startsWith(COMPAT_MODEL_PREFIX);
+/** 将内置实例 ID 还原为 Provider；自定义或未知实例返回 null。 */
+export function providerFromBuiltinId(providerId: string): ProviderId | null {
+  return (
+    PROVIDERS.find((provider) => builtinProviderId(provider.id) === providerId)
+      ?.id ?? null
+  );
 }
 
-export function endpointIdFromCompatModel(modelId: string): string {
-  return isCompatModelId(modelId)
-    ? modelId.slice(COMPAT_MODEL_PREFIX.length)
-    : "";
+/** 为内置模型构造统一引用。 */
+export function modelRefForProvider(
+  provider: ProviderId,
+  modelId: string,
+): ModelRef {
+  return { providerId: builtinProviderId(provider), modelId };
+}
+
+/** 判断两个模型引用是否指向同一 Provider 实例和模型。 */
+export function modelRefsEqual(a: ModelRef, b: ModelRef): boolean {
+  return a.providerId === b.providerId && a.modelId === b.modelId;
+}
+
+/** 为集合与 React key 生成无歧义的模型引用键。 */
+export function modelRefKey(ref: ModelRef): string {
+  return JSON.stringify([ref.providerId, ref.modelId]);
+}
+
+/** 判断持久化值是否为应用生成的自定义 Provider 实例。 */
+export function isProviderInstance(value: unknown): value is ProviderInstance {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProviderInstance>;
+  return (
+    typeof candidate.id === "string" &&
+    CUSTOM_PROVIDER_ID_PATTERN.test(candidate.id) &&
+    candidate.protocol === "openai-compatible" &&
+    typeof candidate.name === "string" &&
+    typeof candidate.baseURL === "string" &&
+    typeof candidate.contextLimit === "number" &&
+    Number.isInteger(candidate.contextLimit) &&
+    candidate.contextLimit >= 1_000
+  );
 }
 
 export function getProvider(id: ProviderId): ProviderInfo {
@@ -248,7 +309,7 @@ export const MODELS = [
     provider: "openai",
     label: "GPT-5.4 nano",
     hint: "Fastest",
-      description: "Tiny and instant, great for autocomplete.",
+    description: "Tiny and instant, great for autocomplete.",
     capabilities: { intelligence: 3, speed: 5, cost: 5 },
     tags: ["tools"],
     supportsTemperature: false,
@@ -584,16 +645,6 @@ export const MODELS = [
     capabilities: { intelligence: 3, speed: 3, cost: 3 },
   },
 
-  // ── Generic OpenAI-compatible (user-defined endpoint) ─────────────────────
-  {
-    id: "openai-compatible-custom",
-    provider: "openai-compatible",
-    label: "Custom endpoint",
-    hint: "Configurable",
-    description: "Any OpenAI-compatible endpoint.",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
-  },
-
   // ── LM Studio (local; model id is user-supplied at runtime) ───────────────
   {
     id: "lmstudio-local",
@@ -625,54 +676,140 @@ export const MODELS = [
   },
 ] as const satisfies readonly ModelInfo[];
 
-export type ModelId = (typeof MODELS)[number]["id"];
+export type ResolvedModel = ModelInfo & {
+  ref: ModelRef;
+  providerId: string;
+  catalogModel: boolean;
+  baseURL?: string;
+  contextLimit?: number;
+};
 
-export function getCompatModelInfo(
-  modelId: string,
-  endpoints: readonly CustomEndpoint[],
-): ModelInfo {
-  const eid = endpointIdFromCompatModel(modelId);
-  const ep = endpoints.find((e) => e.id === eid);
-  const name = ep?.name || "Custom endpoint";
+const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
+  ...CONFIGURABLE_PROVIDERS,
+  "openai-compatible",
+]);
+
+const FREEFORM_MODEL_TEMPLATES = new Map<ProviderId, ModelInfo>(
+  MODELS.filter((model) => FREEFORM_PROVIDERS.has(model.provider)).map(
+    (model) => [model.provider, model],
+  ),
+);
+
+/**
+ * 将统一模型引用解析为模型元数据和连接配置。
+ *
+ * 自定义 Provider 必须以稳定实例 ID 精确匹配，内置 Provider 则使用固定实例 ID；
+ * 所有运行时入口都应经过此函数，禁止从模型字符串推断 Provider。
+ */
+export function resolveModel(
+  ref: ModelRef,
+  providers: readonly ProviderInstance[] = [],
+): ResolvedModel {
+  const custom = providers.find((provider) => provider.id === ref.providerId);
+  if (custom) {
+    if (!custom.baseURL.trim() || !ref.modelId.trim()) {
+      throw new Error(
+        `Unknown model for provider ${custom.name}: ${ref.modelId}`,
+      );
+    }
+    return {
+      id: ref.modelId,
+      provider: custom.protocol,
+      providerId: custom.id,
+      ref,
+      catalogModel: false,
+      label: ref.modelId,
+      hint: custom.name || "Custom Provider",
+      description: `${custom.name || "Custom Provider"} - ${custom.baseURL}`,
+      capabilities: { intelligence: 3, speed: 3, cost: 3 },
+      baseURL: custom.baseURL,
+      contextLimit: custom.contextLimit,
+    };
+  }
+
+  const provider = providerFromBuiltinId(ref.providerId);
+  if (!provider)
+    throw new Error(`Unknown provider instance: ${ref.providerId}`);
+  const known = MODELS.find(
+    (model) => model.provider === provider && model.id === ref.modelId,
+  );
+  const template = known ?? FREEFORM_MODEL_TEMPLATES.get(provider);
+  if (!template || !ref.modelId.trim()) {
+    throw new Error(`Unknown model for provider ${provider}: ${ref.modelId}`);
+  }
   return {
-    id: modelId,
-    provider: "openai-compatible",
-    label: ep?.modelId || name,
-    hint: name,
-    description: ep
-              ? `${name} - ${ep.baseURL}`
-      : "Custom OpenAI-compatible endpoint",
-    capabilities: { intelligence: 3, speed: 3, cost: 3 },
+    ...template,
+    id: ref.modelId,
+    label: known?.label ?? ref.modelId,
+    providerId: ref.providerId,
+    ref,
+    catalogModel: !!known,
+    contextLimit: known ? undefined : MODEL_CONTEXT_LIMITS[template.id],
   };
 }
 
-export function resolveModel(
-  modelId: string,
-  endpoints: readonly CustomEndpoint[] = [],
-): ModelInfo {
-  if (isCompatModelId(modelId)) return getCompatModelInfo(modelId, endpoints);
-  const m = MODELS.find((x) => x.id === modelId);
-  if (!m) throw new Error(`Unknown model: ${modelId}`);
-  return m;
+/** 尝试解析模型引用，供可能经历跨窗口状态切换的展示层安全读取。 */
+export function tryResolveModel(
+  ref: ModelRef,
+  providers: readonly ProviderInstance[] = [],
+): ResolvedModel | null {
+  try {
+    return resolveModel(ref, providers);
+  } catch {
+    return null;
+  }
 }
 
-export function getModel(id: ModelId): ModelInfo {
-  const m = MODELS.find((x) => x.id === id);
-  if (!m) throw new Error(`Unknown model: ${id}`);
-  return m;
+/** 判断持久化值是否为当前统一模型引用。 */
+export function isModelRef(value: unknown): value is ModelRef {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ModelRef>;
+  return (
+    typeof candidate.providerId === "string" &&
+    candidate.providerId.length > 0 &&
+    typeof candidate.modelId === "string" &&
+    candidate.modelId.length > 0
+  );
 }
 
-export function isKnownModelId(id: string): id is ModelId {
-  return MODELS.some((x) => x.id === id);
+/**
+ * 判断模型引用是否仍对应当前可选择的 Provider 配置。
+ *
+ * 内置目录模型不依赖密钥状态；自由模型 Provider 和自定义 Provider
+ * 必须与当前保存的模型名一致，避免配置变更后恢复悬空引用。
+ */
+export function isModelRefAvailable(
+  ref: ModelRef,
+  providers: readonly ProviderInstance[] = [],
+  providerModels: Readonly<Record<string, string | undefined>> = {},
+): boolean {
+  const custom = providers.find((provider) => provider.id === ref.providerId);
+  if (custom) {
+    const configuredModel = providerModels[custom.id]?.trim();
+    return (
+      !!custom.baseURL.trim() &&
+      !!configuredModel &&
+      ref.modelId === configuredModel
+    );
+  }
+
+  const provider = providerFromBuiltinId(ref.providerId);
+  if (!provider || !ref.modelId.trim()) return false;
+  if (FREEFORM_PROVIDERS.has(provider)) {
+    return providerModels[ref.providerId]?.trim() === ref.modelId;
+  }
+  return MODELS.some(
+    (model) => model.provider === provider && model.id === ref.modelId,
+  );
 }
 
-const FREEFORM_PROVIDERS: ReadonlySet<ProviderId> = new Set([
-  "openrouter",
-  "openai-compatible",
-  "lmstudio",
-  "mlx",
-  "ollama",
-]);
+/** 根据统一模型引用判断发送前是否必须具备内置 Provider 密钥。 */
+export function modelNeedsKey(
+  ref: ModelRef,
+  providers: readonly ProviderInstance[] = [],
+): boolean {
+  return providerNeedsKey(resolveModel(ref, providers).provider);
+}
 
 // Reasoning models reject tool-call turns whose reasoning was stripped; keep it.
 export function modelKeepsReasoning(m: ModelInfo): boolean {
@@ -706,7 +843,10 @@ export function modelUsesReasoningTokens(
   );
 }
 
-export const DEFAULT_MODEL_ID: ModelId = "gpt-5.4-mini";
+export const DEFAULT_MODEL_REF: ModelRef = modelRefForProvider(
+  "openai",
+  "gpt-5.4-mini",
+);
 
 /**
  * 各模型的近似上下文窗口，用于 AI 侧栏的上下文用量指示器。
@@ -751,7 +891,6 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "llama-3.3-70b-versatile": 128_000,
   "deepseek-r1-distill-llama-70b": 128_000,
   "openrouter-custom": 256_000,
-  "openai-compatible-custom": 128_000,
   "lmstudio-local": 32_000,
   "mlx-local": 32_000,
   "ollama-local": 32_000,
@@ -762,12 +901,10 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 
 export function getModelContextLimit(
   modelId: string | undefined,
-  compatOverride?: number,
+  override?: number,
 ): number {
   if (!modelId) return 128_000;
-  if (isCompatModelId(modelId)) return compatOverride ?? 128_000;
-  if (modelId === "openai-compatible-custom" && compatOverride)
-    return compatOverride;
+  if (override) return override;
   return MODEL_CONTEXT_LIMITS[modelId] ?? 128_000;
 }
 
@@ -866,14 +1003,17 @@ export const DEFAULT_AUTOCOMPLETE_MODEL: Partial<Record<ProviderId, string>> = {
   xai: "grok-4.3",
   deepseek: "deepseek-v4-flash",
   openrouter: "openai/gpt-5.4-mini",
-  "openai-compatible": "",
 };
+
+/** 编辑器默认自动补全模型的完整引用。 */
+export const DEFAULT_AUTOCOMPLETE_MODEL_REF: ModelRef = modelRefForProvider(
+  "cerebras",
+  "gpt-oss-120b",
+);
 
 /** Curated list of fast models suitable for inline completion (speed ≥ 4). */
 export function getAutocompleteEligibleModels(): readonly ModelInfo[] {
-  return MODELS.filter(
-    (m) => m.capabilities.speed >= 4 && m.id !== "openai-compatible-custom",
-  );
+  return MODELS.filter((model) => model.capabilities.speed >= 4);
 }
 
 export type SttProvider = "openai" | "groq" | "whispercpp";
@@ -889,7 +1029,6 @@ export const WHISPERCPP_DEFAULT_BASE_URL = "http://127.0.0.1:8080";
 export const LMSTUDIO_DEFAULT_BASE_URL = "http://localhost:1234/v1";
 export const MLX_DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1";
 export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
-export const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "";
 export const MAX_AGENT_STEPS = 24;
 export const TERMINAL_BUFFER_LINES = 300;
 

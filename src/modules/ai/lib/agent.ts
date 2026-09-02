@@ -14,18 +14,16 @@ import {
   type UIMessage,
 } from "ai";
 import {
-  DEFAULT_MODEL_ID,
-  endpointIdFromCompatModel,
   getModelContextLimit,
-  isCompatModelId,
   LMSTUDIO_DEFAULT_BASE_URL,
   MAX_AGENT_STEPS,
   MLX_DEFAULT_BASE_URL,
+  type ModelRef,
   modelKeepsReasoning,
   OLLAMA_DEFAULT_BASE_URL,
   providerNeedsKey,
   resolveModel,
-  type CustomEndpoint,
+  type ProviderInstance,
   type ProviderId,
 } from "../config";
 import { resolveSubagentTools, type AgentToolId } from "./agentTools";
@@ -43,7 +41,7 @@ import {
   type SubagentDisplayState,
 } from "../agents/subagentDisplay";
 import { compactModelMessagesDetailed } from "./compact";
-import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { createProxyFetch } from "./proxyFetch";
 import { REASONING_DURATION_PART_TYPE } from "./sessionMessages";
@@ -92,7 +90,7 @@ export async function buildLanguageModel(
   keys: ProviderKeys,
   resolvedModelId: string,
   options: BuildModelOptions = {},
-  customEndpointKey?: string | null,
+  providerInstanceKey?: string | null,
 ): Promise<LanguageModel> {
   if (providerNeedsKey(provider) && !keys[provider]) {
     throw new Error(
@@ -104,8 +102,8 @@ export async function buildLanguageModel(
   const mlxURL = options.mlxBaseURL ?? MLX_DEFAULT_BASE_URL;
   const ollamaURL = options.ollamaBaseURL ?? OLLAMA_DEFAULT_BASE_URL;
   const compatURL = options.openaiCompatibleBaseURL ?? "";
-  const epKey = customEndpointKey ?? "";
-  const cacheKey = `${provider} ${key} ${epKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL}`;
+  const instanceKey = providerInstanceKey ?? "";
+  const cacheKey = `${provider} ${key} ${instanceKey} ${resolvedModelId} ${lmstudioURL} ${mlxURL} ${ollamaURL} ${compatURL}`;
   const hit = modelCache.get(cacheKey);
   if (hit) return hit;
 
@@ -190,7 +188,7 @@ export async function buildLanguageModel(
       built = createOpenAICompatible({
         name: "openai-compatible",
         baseURL: compatURL,
-        apiKey: epKey || key || undefined,
+        apiKey: instanceKey || key || undefined,
         fetch: localProxyFetch,
       })(resolvedModelId);
       break;
@@ -237,84 +235,32 @@ export async function buildLanguageModel(
   return built;
 }
 
-export type LocalProviderConfig = {
+export type RuntimeProviderConfig = {
   lmstudioBaseURL?: string;
-  lmstudioModelId?: string;
   mlxBaseURL?: string;
-  mlxModelId?: string;
   ollamaBaseURL?: string;
-  ollamaModelId?: string;
-  openaiCompatibleBaseURL?: string;
-  openaiCompatibleModelId?: string;
-  openrouterModelId?: string;
-  customEndpoints?: readonly CustomEndpoint[];
-  customEndpointKeys?: CustomEndpointKeys;
+  customProviders?: readonly ProviderInstance[];
+  providerInstanceKeys?: ProviderInstanceKeys;
 };
 
 export function buildConfiguredLanguageModel(
-  modelId: string,
+  modelRef: ModelRef,
   keys: ProviderKeys,
-  local: LocalProviderConfig = {},
+  config: RuntimeProviderConfig = {},
 ): Promise<LanguageModel> {
-  if (isCompatModelId(modelId)) {
-    const eid = endpointIdFromCompatModel(modelId);
-    const ep = local.customEndpoints?.find((e) => e.id === eid);
-    if (!ep) throw new Error(`Custom endpoint not found: ${eid}`);
-    if (!ep.modelId.trim()) {
-      throw new Error(`${ep.name}: no model id set. Open Settings → Models.`);
-    }
-    return buildLanguageModel(
-      "openai-compatible",
-      keys,
-      ep.modelId.trim(),
-      { openaiCompatibleBaseURL: ep.baseURL },
-      local.customEndpointKeys?.[eid],
-    );
-  }
-  const m = resolveModel(modelId);
-  let resolvedId: string = m.id;
-  if (m.id === "lmstudio-local") {
-    if (!local.lmstudioModelId?.trim()) {
-      throw new Error(
-        "LM Studio: no model id set. Open Settings → Models and enter the model id loaded in LM Studio.",
-      );
-    }
-    resolvedId = local.lmstudioModelId.trim();
-  } else if (m.id === "mlx-local") {
-    if (!local.mlxModelId?.trim()) {
-      throw new Error(
-        "MLX: no model id set. Open Settings → Models and enter the model id served by mlx_lm.server.",
-      );
-    }
-    resolvedId = local.mlxModelId.trim();
-  } else if (m.id === "ollama-local") {
-    if (!local.ollamaModelId?.trim()) {
-      throw new Error(
-        "Ollama: no model id set. Open Settings → Models and enter the model id (e.g. the name from `ollama list`).",
-      );
-    }
-    resolvedId = local.ollamaModelId.trim();
-  } else if (m.id === "openai-compatible-custom") {
-    if (!local.openaiCompatibleModelId?.trim()) {
-      throw new Error(
-        "OpenAI-compatible: no model id set. Open Settings → Models.",
-      );
-    }
-    resolvedId = local.openaiCompatibleModelId.trim();
-  } else if (m.id === "openrouter-custom") {
-    if (!local.openrouterModelId?.trim()) {
-      throw new Error(
-        "OpenRouter: no model id set. Open Settings → Models and enter an OpenRouter model id (e.g. anthropic/claude-sonnet-5).",
-      );
-    }
-    resolvedId = local.openrouterModelId.trim();
-  }
-  return buildLanguageModel(m.provider, keys, resolvedId, {
-    lmstudioBaseURL: local.lmstudioBaseURL,
-    mlxBaseURL: local.mlxBaseURL,
-    ollamaBaseURL: local.ollamaBaseURL,
-    openaiCompatibleBaseURL: local.openaiCompatibleBaseURL,
-  });
+  const resolved = resolveModel(modelRef, config.customProviders);
+  return buildLanguageModel(
+    resolved.provider,
+    keys,
+    resolved.id,
+    {
+      lmstudioBaseURL: config.lmstudioBaseURL,
+      mlxBaseURL: config.mlxBaseURL,
+      ollamaBaseURL: config.ollamaBaseURL,
+      openaiCompatibleBaseURL: resolved.baseURL,
+    },
+    config.providerInstanceKeys?.[resolved.providerId],
+  );
 }
 
 export type AgentUsage = {
@@ -336,10 +282,10 @@ const EMPTY_USAGE: AgentUsage = {
 
 export type RunAgentOptions = {
   keys: ProviderKeys;
-  modelId?: string;
+  model: ModelRef;
   systemPrompt: string;
   allowedTools: readonly AgentToolId[];
-  defaultSubagentModelId?: string | null;
+  defaultSubagentModel?: ModelRef | null;
   maxConcurrentSubagents: number;
   subagentCoordinator: SubagentTurnCoordinator;
   toolContext: ToolContext;
@@ -357,17 +303,10 @@ export type RunAgentOptions = {
     event: SubagentResultEvent,
   ) => void | Promise<void>;
   lmstudioBaseURL?: string;
-  lmstudioModelId?: string;
   mlxBaseURL?: string;
-  mlxModelId?: string;
   ollamaBaseURL?: string;
-  ollamaModelId?: string;
-  openaiCompatibleBaseURL?: string;
-  openaiCompatibleModelId?: string;
-  openaiCompatibleContextLimit?: number;
-  openrouterModelId?: string;
-  customEndpoints?: readonly CustomEndpoint[];
-  customEndpointKeys?: CustomEndpointKeys;
+  customProviders?: readonly ProviderInstance[];
+  providerInstanceKeys?: ProviderInstanceKeys;
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
@@ -379,9 +318,8 @@ export type RunAgentOptions = {
  * 和该提示词；后台 Subagent 结果也会在恢复模型循环前 checkpoint。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
-  const modelId = opts.modelId ?? DEFAULT_MODEL_ID;
-  const endpoints = opts.customEndpoints ?? [];
-  const info = resolveModel(modelId, endpoints);
+  const modelRef = opts.model;
+  const info = resolveModel(modelRef, opts.customProviders);
   const provider = info.provider;
 
   await opts.onSystemPrompt?.(opts.systemPrompt, opts.uiMessages);
@@ -393,25 +331,15 @@ export async function runAgentStream(opts: RunAgentOptions) {
     reasoning: keepsReasoning ? "none" : "before-last-message",
     emptyMessages: "remove",
   });
-  const compatCtxOverride = isCompatModelId(modelId)
-    ? endpoints.find((e) => e.id === endpointIdFromCompatModel(modelId))
-        ?.contextLimit
-    : opts.openaiCompatibleContextLimit;
-  const model = await buildConfiguredLanguageModel(modelId, opts.keys, {
+  const model = await buildConfiguredLanguageModel(modelRef, opts.keys, {
     lmstudioBaseURL: opts.lmstudioBaseURL,
-    lmstudioModelId: opts.lmstudioModelId,
     mlxBaseURL: opts.mlxBaseURL,
-    mlxModelId: opts.mlxModelId,
     ollamaBaseURL: opts.ollamaBaseURL,
-    ollamaModelId: opts.ollamaModelId,
-    openaiCompatibleBaseURL: opts.openaiCompatibleBaseURL,
-    openaiCompatibleModelId: opts.openaiCompatibleModelId,
-    openrouterModelId: opts.openrouterModelId,
-    customEndpoints: opts.customEndpoints,
-    customEndpointKeys: opts.customEndpointKeys,
+    customProviders: opts.customProviders,
+    providerInstanceKeys: opts.providerInstanceKeys,
   });
 
-  const subagentModelId = opts.defaultSubagentModelId ?? modelId;
+  const subagentModel = opts.defaultSubagentModel ?? modelRef;
   const coordinator = opts.subagentCoordinator;
   const rootTools = buildTools(
     opts.toolContext,
@@ -428,7 +356,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
         onDisplay: opts.onSubagentDisplay,
         run: buildSubagentTaskRunner({
           opts,
-          modelId: subagentModelId,
+          model: subagentModel,
           permissionMode,
         }),
       });
@@ -511,7 +439,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               }
               const compact = compactModelMessagesDetailed(
                 modelHistory,
-                getModelContextLimit(modelId, compatCtxOverride),
+                getModelContextLimit(info.id, info.contextLimit),
               );
               if (compact.compacted) {
                 opts.onCompact?.({ droppedCount: compact.droppedCount });
@@ -665,11 +593,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
 /** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
 function buildSubagentTaskRunner({
   opts,
-  modelId,
+  model,
   permissionMode,
 }: {
   opts: RunAgentOptions;
-  modelId: string;
+  model: ModelRef;
   permissionMode: "ask" | "full-access";
 }): SubagentTaskRunner {
   const allowedTools = resolveSubagentTools(opts.allowedTools, permissionMode);
@@ -678,23 +606,17 @@ function buildSubagentTaskRunner({
     getPermissionMode: () => permissionMode,
   };
   return async ({ task, abortSignal, onProgress }) => {
-    const childModel = await buildConfiguredLanguageModel(modelId, opts.keys, {
+    const childModel = await buildConfiguredLanguageModel(model, opts.keys, {
       lmstudioBaseURL: opts.lmstudioBaseURL,
-      lmstudioModelId: opts.lmstudioModelId,
       mlxBaseURL: opts.mlxBaseURL,
-      mlxModelId: opts.mlxModelId,
       ollamaBaseURL: opts.ollamaBaseURL,
-      ollamaModelId: opts.ollamaModelId,
-      openaiCompatibleBaseURL: opts.openaiCompatibleBaseURL,
-      openaiCompatibleModelId: opts.openaiCompatibleModelId,
-      openrouterModelId: opts.openrouterModelId,
-      customEndpoints: opts.customEndpoints,
-      customEndpointKeys: opts.customEndpointKeys,
+      customProviders: opts.customProviders,
+      providerInstanceKeys: opts.providerInstanceKeys,
     });
     const prompt = prepareAgentPrompt(
       `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents.`,
       [{ role: "user", content: task }],
-      resolveModel(modelId, opts.customEndpoints ?? []).provider,
+      resolveModel(model, opts.customProviders).provider,
     );
     const result = await generateText({
       model: childModel,

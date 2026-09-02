@@ -9,7 +9,12 @@ import { toast } from "sonner";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import {
-  getAllCustomEndpointKeys,
+  builtinProviderId,
+  DEFAULT_MODEL_REF,
+  isModelRefAvailable,
+} from "../config";
+import {
+  getAllProviderInstanceKeys,
   getAllKeys,
   hasAnyKey,
 } from "../lib/keyring";
@@ -27,34 +32,32 @@ export function useAiBootstrap(): {
 } {
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setApiKeys = useChatStore((s) => s.setApiKeys);
-  const setCustomEndpointKeys = useChatStore((s) => s.setCustomEndpointKeys);
-  const setSelectedModelId = useChatStore((s) => s.setSelectedModelId);
+  const setProviderInstanceKeys = useChatStore(
+    (s) => s.setProviderInstanceKeys,
+  );
+  const setSelectedModel = useChatStore((s) => s.setSelectedModel);
+  const selectedModel = useChatStore((s) => s.selectedModel);
   const hydrateSessions = useChatStore((s) => s.hydrateSessions);
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
 
-  const lmstudioModelId = usePreferencesStore((s) => s.lmstudioModelId);
+  const providerModels = usePreferencesStore((s) => s.providerModels);
   const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
-  const mlxModelId = usePreferencesStore((s) => s.mlxModelId);
   const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
-  const ollamaModelId = usePreferencesStore((s) => s.ollamaModelId);
   const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
-  const openaiCompatibleModelId = usePreferencesStore(
-    (s) => s.openaiCompatibleModelId,
-  );
-  const openaiCompatibleBaseURL = usePreferencesStore(
-    (s) => s.openaiCompatibleBaseURL,
-  );
-  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
+  const customProviders = usePreferencesStore((s) => s.customProviders);
   const hasLocalModel =
-    (lmstudioBaseURL.trim().length > 0 && lmstudioModelId.trim().length > 0) ||
-    (mlxBaseURL.trim().length > 0 && mlxModelId.trim().length > 0) ||
-    (ollamaBaseURL.trim().length > 0 && ollamaModelId.trim().length > 0) ||
-    (openaiCompatibleBaseURL.trim().length > 0 &&
-      openaiCompatibleModelId.trim().length > 0) ||
-    customEndpoints.some(
-      (e) => e.baseURL.trim().length > 0 && e.modelId.trim().length > 0,
+    (lmstudioBaseURL.trim().length > 0 &&
+      !!providerModels[builtinProviderId("lmstudio")]?.trim()) ||
+    (mlxBaseURL.trim().length > 0 &&
+      !!providerModels[builtinProviderId("mlx")]?.trim()) ||
+    (ollamaBaseURL.trim().length > 0 &&
+      !!providerModels[builtinProviderId("ollama")]?.trim()) ||
+    customProviders.some(
+      (provider) =>
+        provider.baseURL.trim().length > 0 &&
+        !!providerModels[provider.id]?.trim(),
     );
   const hasComposer = hasAnyKey(apiKeys) || hasLocalModel;
 
@@ -69,11 +72,11 @@ export function useAiBootstrap(): {
         setKeysLoaded(true);
       });
       if (!prefsHydrated) return;
-      void getAllCustomEndpointKeys(
-        usePreferencesStore.getState().customEndpoints,
-      ).then((epKeys) => {
+      void getAllProviderInstanceKeys(
+        usePreferencesStore.getState().customProviders,
+      ).then((instanceKeys) => {
         if (!alive) return;
-        setCustomEndpointKeys(epKeys);
+        setProviderInstanceKeys(instanceKeys);
       });
     };
     reload();
@@ -82,19 +85,67 @@ export function useAiBootstrap(): {
       alive = false;
       void unlistenP.then((fn) => fn());
     };
-  }, [setApiKeys, setCustomEndpointKeys, prefsHydrated]);
+  }, [setApiKeys, setProviderInstanceKeys, prefsHydrated]);
 
-  // Hydrate the cross-window preference store and mirror the default model
-  // into chatStore so the dropdown reflects what the user picked in Settings.
+  // 初始化跨窗口偏好，并让聊天下拉框反映设置页保存的默认模型。
   const initPrefs = usePreferencesStore((s) => s.init);
-  const prefDefaultModel = usePreferencesStore((s) => s.defaultModelId);
+  const prefDefaultModel = usePreferencesStore((s) => s.defaultModel);
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
   useEffect(() => {
     if (!prefsHydrated) return;
-    setSelectedModelId(prefDefaultModel);
-  }, [prefsHydrated, prefDefaultModel, setSelectedModelId]);
+    setSelectedModel(prefDefaultModel, false);
+  }, [prefsHydrated, prefDefaultModel, setSelectedModel]);
+
+  useEffect(() => {
+    if (!prefsHydrated) return;
+    const localBaseURL =
+      selectedModel.providerId === builtinProviderId("lmstudio")
+        ? lmstudioBaseURL
+        : selectedModel.providerId === builtinProviderId("mlx")
+          ? mlxBaseURL
+          : selectedModel.providerId === builtinProviderId("ollama")
+            ? ollamaBaseURL
+            : null;
+    const connectionAvailable = localBaseURL === null || !!localBaseURL.trim();
+    if (
+      connectionAvailable &&
+      isModelRefAvailable(selectedModel, customProviders, providerModels)
+    ) {
+      return;
+    }
+
+    const custom = customProviders.find(
+      (provider) => provider.id === selectedModel.providerId,
+    );
+    const configuredModelId = providerModels[selectedModel.providerId];
+    const configuredReplacement =
+      connectionAvailable &&
+      configuredModelId?.trim() &&
+      (!custom || custom.baseURL.trim())
+        ? {
+            providerId: selectedModel.providerId,
+            modelId: configuredModelId.trim(),
+          }
+        : null;
+    const replacement = configuredReplacement
+      ? configuredReplacement
+      : isModelRefAvailable(prefDefaultModel, customProviders, providerModels)
+        ? prefDefaultModel
+        : DEFAULT_MODEL_REF;
+    setSelectedModel(replacement, false);
+  }, [
+    customProviders,
+    lmstudioBaseURL,
+    mlxBaseURL,
+    ollamaBaseURL,
+    prefDefaultModel,
+    prefsHydrated,
+    providerModels,
+    selectedModel,
+    setSelectedModel,
+  ]);
 
   useEffect(() => {
     void hydrateSessions();

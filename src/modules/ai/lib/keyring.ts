@@ -1,15 +1,20 @@
+/**
+ * 本文件管理内置 Provider 与自定义 Provider 实例的系统密钥链凭据。
+ * 自定义凭据只按稳定实例 ID 绑定，不从名称、地址或模型名派生。
+ */
+
 import { invoke } from "@tauri-apps/api/core";
 import {
   getProvider,
   KEYRING_SERVICE,
   PROVIDERS,
   providerSupportsKey,
-  type CustomEndpoint,
+  type ProviderInstance,
   type ProviderId,
 } from "../config";
 
 export type ProviderKeys = Record<ProviderId, string | null>;
-export type CustomEndpointKeys = Record<string, string | null>;
+export type ProviderInstanceKeys = Record<string, string | null>;
 
 export const EMPTY_PROVIDER_KEYS: ProviderKeys = {
   openai: null,
@@ -91,17 +96,17 @@ export function hasAnyKey(keys: ProviderKeys): boolean {
   return PROVIDERS.some((p) => providerSupportsKey(p.id) && !!keys[p.id]);
 }
 
-function compatKeyringAccount(endpointId: string): string {
-  return `compat-${endpointId}-api-key`;
+function providerInstanceKeyringAccount(providerId: string): string {
+  return `provider-${providerId}-api-key`;
 }
 
-export async function getCustomEndpointKey(
-  endpointId: string,
+export async function getProviderInstanceKey(
+  providerId: string,
 ): Promise<string | null> {
   try {
     const v = await invoke<string | null>("secrets_get", {
       service: KEYRING_SERVICE,
-      account: compatKeyringAccount(endpointId),
+      account: providerInstanceKeyringAccount(providerId),
     });
     return v && v.length > 0 ? v : null;
   } catch {
@@ -109,48 +114,50 @@ export async function getCustomEndpointKey(
   }
 }
 
-export async function setCustomEndpointKey(
-  endpointId: string,
+export async function setProviderInstanceKey(
+  providerId: string,
   key: string,
 ): Promise<void> {
   const trimmed = key.trim();
   if (!trimmed) throw new Error("API key is empty");
   await invoke("secrets_set", {
     service: KEYRING_SERVICE,
-    account: compatKeyringAccount(endpointId),
+    account: providerInstanceKeyringAccount(providerId),
     password: trimmed,
   });
 }
 
-export async function clearCustomEndpointKey(
-  endpointId: string,
+export async function clearProviderInstanceKey(
+  providerId: string,
 ): Promise<void> {
   try {
     await invoke("secrets_delete", {
       service: KEYRING_SERVICE,
-      account: compatKeyringAccount(endpointId),
+      account: providerInstanceKeyringAccount(providerId),
     });
   } catch {}
 }
 
-export async function getAllCustomEndpointKeys(
-  endpoints: readonly CustomEndpoint[],
-): Promise<CustomEndpointKeys> {
-  if (endpoints.length === 0) return {};
-  const out: CustomEndpointKeys = {};
+export async function getAllProviderInstanceKeys(
+  providers: readonly ProviderInstance[],
+): Promise<ProviderInstanceKeys> {
+  if (providers.length === 0) return {};
+  const out: ProviderInstanceKeys = {};
   try {
-    const accounts = endpoints.map((e) => compatKeyringAccount(e.id));
+    const accounts = providers.map((provider) =>
+      providerInstanceKeyringAccount(provider.id),
+    );
     const results = await invoke<(string | null)[]>("secrets_get_all", {
       service: KEYRING_SERVICE,
       accounts,
     });
-    endpoints.forEach((e, i) => {
+    providers.forEach((provider, i) => {
       const v = results[i];
-      out[e.id] = v && v.length > 0 ? v : null;
+      out[provider.id] = v && v.length > 0 ? v : null;
     });
   } catch {
-    for (const e of endpoints) {
-      out[e.id] = await getCustomEndpointKey(e.id);
+    for (const provider of providers) {
+      out[provider.id] = await getProviderInstanceKey(provider.id);
     }
   }
   return out;

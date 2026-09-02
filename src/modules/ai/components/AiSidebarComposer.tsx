@@ -50,18 +50,22 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  compatModelIdForEndpoint,
-  getCompatModelInfo,
-  getModel,
-  isCompatModelId,
+  builtinProviderId,
+  DEFAULT_MODEL_REF,
+  isConfigurableProvider,
   MODELS,
+  type ModelRef,
   type ModelCapabilities,
-  type ModelId,
   type ModelInfo,
+  modelRefForProvider,
+  modelRefKey,
+  modelRefsEqual,
   PROVIDERS,
   type ProviderId,
   providerNeedsKey,
+  resolveModel,
   STT_PROVIDER_LABELS,
+  tryResolveModel,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
@@ -305,35 +309,74 @@ type Tab = "all" | "favorites" | "recent";
 
 function ModelDropdown() {
   const { t } = useTranslation("ai");
-  const selected = useChatStore((s) => s.selectedModelId);
+  const selected = useChatStore((s) => s.selectedModel);
   const apiKeys = useChatStore((s) => s.apiKeys);
-  const setSelected = useChatStore((s) => s.setSelectedModelId);
-  const favoriteIds = usePreferencesStore((s) => s.favoriteModelIds);
-  const recentIds = usePreferencesStore((s) => s.recentModelIds);
-  const customEndpoints = usePreferencesStore((s) => s.customEndpoints);
-  const current = isCompatModelId(selected)
-    ? getCompatModelInfo(selected, customEndpoints)
-    : getModel(selected as ModelId);
+  const setSelected = useChatStore((s) => s.setSelectedModel);
+  const favoriteModels = usePreferencesStore((s) => s.favoriteModels);
+  const recentModels = usePreferencesStore((s) => s.recentModels);
+  const customProviders = usePreferencesStore((s) => s.customProviders);
+  const customProviderIds = useMemo(
+    () => new Set(customProviders.map((provider) => provider.id)),
+    [customProviders],
+  );
+  const providerModels = usePreferencesStore((s) => s.providerModels);
+  const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
+  const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
+  const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
+  const current =
+    tryResolveModel(selected, customProviders) ??
+    resolveModel(DEFAULT_MODEL_REF);
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
-  const currentProviderHasKey = isCompatModelId(selected)
-    ? true
-    : providerNeedsKey(current.provider)
-      ? !!apiKeys[current.provider]
-      : true;
+  const currentProviderHasKey =
+    customProviderIds.has(current.providerId) ||
+    !providerNeedsKey(current.provider) ||
+    !!apiKeys[current.provider];
 
   const hasKeyFor = useCallback(
     (id: ProviderId) => (providerNeedsKey(id) ? !!apiKeys[id] : true),
     [apiKeys],
   );
 
-  const epModelInfos = useMemo(() => {
-    return customEndpoints.map((ep) =>
-      getCompatModelInfo(compatModelIdForEndpoint(ep.id), customEndpoints),
-    );
-  }, [customEndpoints]);
+  type ModelOption = { ref: ModelRef; info: ModelInfo };
+  const modelOptions = useMemo<ModelOption[]>(() => {
+    const configuredIds: Partial<Record<ProviderId, string>> = {
+      lmstudio: lmstudioBaseURL.trim()
+        ? providerModels[builtinProviderId("lmstudio")]?.trim()
+        : "",
+      mlx: mlxBaseURL.trim()
+        ? providerModels[builtinProviderId("mlx")]?.trim()
+        : "",
+      ollama: ollamaBaseURL.trim()
+        ? providerModels[builtinProviderId("ollama")]?.trim()
+        : "",
+      openrouter: providerModels[builtinProviderId("openrouter")]?.trim(),
+    };
+    const builtins = MODELS.flatMap((info): ModelOption[] => {
+      const configured = configuredIds[info.provider];
+      if (isConfigurableProvider(info.provider)) {
+        if (!configured) return [];
+        const ref = modelRefForProvider(info.provider, configured);
+        return [{ ref, info: resolveModel(ref) }];
+      }
+      return [{ ref: modelRefForProvider(info.provider, info.id), info }];
+    });
+    const custom = customProviders.flatMap((provider): ModelOption[] => {
+      const modelId = providerModels[provider.id]?.trim();
+      if (!provider.baseURL.trim() || !modelId) return [];
+      const ref = { providerId: provider.id, modelId };
+      return [{ ref, info: resolveModel(ref, customProviders) }];
+    });
+    return [...builtins, ...custom];
+  }, [
+    customProviders,
+    lmstudioBaseURL,
+    mlxBaseURL,
+    ollamaBaseURL,
+    providerModels,
+  ]);
 
   const sortedProviders = useMemo(() => {
     const configured: (typeof PROVIDERS)[number][] = [];
@@ -345,30 +388,38 @@ function ModelDropdown() {
     return { configured, unconfigured };
   }, [hasKeyFor]);
 
-  const allModels = useMemo(() => [...MODELS, ...epModelInfos], [epModelInfos]);
-
   const COMPAT_PROVIDER_ID = "__compat__";
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let pool: readonly ModelInfo[] = allModels;
+    let pool = modelOptions;
     if (tab === "favorites") {
-      pool = pool.filter((m) => favoriteIds.includes(m.id));
+      pool = pool.filter((option) =>
+        favoriteModels.some((ref) => modelRefsEqual(ref, option.ref)),
+      );
     } else if (tab === "recent") {
-      const order = new Map(recentIds.map((id, i) => [id, i]));
+      const order = new Map(
+        recentModels.map((ref, index) => [modelRefKey(ref), index]),
+      );
       pool = pool
-        .filter((m) => order.has(m.id))
+        .filter((option) => order.has(modelRefKey(option.ref)))
         .slice()
-        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+        .sort(
+          (a, b) =>
+            (order.get(modelRefKey(a.ref)) ?? 0) -
+            (order.get(modelRefKey(b.ref)) ?? 0),
+        );
     }
     if (activeProvider === COMPAT_PROVIDER_ID) {
-      pool = pool.filter((m) => isCompatModelId(m.id));
+      pool = pool.filter((option) =>
+        customProviderIds.has(option.ref.providerId),
+      );
     } else if (activeProvider !== null) {
-      pool = pool.filter((m) => m.provider === activeProvider);
+      pool = pool.filter((option) => option.info.provider === activeProvider);
     }
     if (q) {
       pool = pool.filter(
-        (m) =>
+        ({ info: m }) =>
           m.label.toLowerCase().includes(q) ||
           m.hint.toLowerCase().includes(q) ||
           m.description.toLowerCase().includes(q) ||
@@ -377,7 +428,15 @@ function ModelDropdown() {
       );
     }
     return pool;
-  }, [activeProvider, allModels, favoriteIds, recentIds, search, tab]);
+  }, [
+    activeProvider,
+    customProviderIds,
+    favoriteModels,
+    modelOptions,
+    recentModels,
+    search,
+    tab,
+  ]);
 
   return (
     <DropdownMenu>
@@ -446,14 +505,14 @@ function ModelDropdown() {
             icon={FavouriteIcon}
             active={tab === "favorites"}
             onClick={() => setTab("favorites")}
-            count={favoriteIds.length || undefined}
+            count={favoriteModels.length || undefined}
           />
           <TabButton
             label={t("statusBar.tabRecent")}
             icon={Clock01Icon}
             active={tab === "recent"}
             onClick={() => setTab("recent")}
-            count={recentIds.length || undefined}
+            count={recentModels.length || undefined}
           />
         </div>
 
@@ -483,7 +542,7 @@ function ModelDropdown() {
                 onClick={() => setActiveProvider(p.id)}
               />
             ))}
-            {customEndpoints.length > 0 && (
+            {customProviders.length > 0 && (
               <ProviderPill
                 icon={PlugIcon}
                 title={t("statusBar.openaiCompatible")}
@@ -519,22 +578,30 @@ function ModelDropdown() {
                     : t("statusBar.noMatch")}
               </div>
             ) : (
-              filtered.map((m) => (
+              filtered.map(({ ref, info }) => (
                 <ModelRow
-                  key={m.id}
-                  model={m}
-                  selected={m.id === selected}
-                  hasKey={isCompatModelId(m.id) || hasKeyFor(m.provider)}
-                  favorite={favoriteIds.includes(m.id)}
+                  key={modelRefKey(ref)}
+                  model={info}
+                  selected={modelRefsEqual(ref, selected)}
+                  hasKey={
+                    customProviderIds.has(ref.providerId) ||
+                    hasKeyFor(info.provider)
+                  }
+                  favorite={favoriteModels.some((item) =>
+                    modelRefsEqual(item, ref),
+                  )}
                   showProviderIcon={activeProvider === null}
                   onPick={() => {
-                    if (!isCompatModelId(m.id) && !hasKeyFor(m.provider)) {
+                    if (
+                      !customProviderIds.has(ref.providerId) &&
+                      !hasKeyFor(info.provider)
+                    ) {
                       void openSettingsWindow("models");
                       return;
                     }
-                    setSelected(m.id);
+                    setSelected(ref);
                   }}
-                  onToggleFavorite={() => void toggleFavoriteModel(m.id)}
+                  onToggleFavorite={() => void toggleFavoriteModel(ref)}
                 />
               ))
             )}

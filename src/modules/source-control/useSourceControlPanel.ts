@@ -6,7 +6,7 @@
 import {
   modelSupportsTemperature,
   providerNeedsKey,
-  resolveModel,
+  tryResolveModel,
 } from "@/modules/ai/config";
 import {
   type GitChangedFile,
@@ -245,24 +245,10 @@ export function useSourceControlPanel(
       }) => void)
     | null,
 ): SourceControlPanelState {
-  const selectedModelId = useChatStore((state) => state.selectedModelId);
+  const selectedModelRef = useChatStore((state) => state.selectedModel);
+  const customProviders = usePreferencesStore((state) => state.customProviders);
   const agentStatus = useChatStore(selectActiveAgentMeta).status;
-  const hasApiKeyForSelected = useChatStore((state) => {
-    const model = resolveModel(state.selectedModelId);
-    return !providerNeedsKey(model.provider) || !!state.apiKeys[model.provider];
-  });
-  const lmstudioModelId = usePreferencesStore((state) => state.lmstudioModelId);
-  const mlxModelId = usePreferencesStore((state) => state.mlxModelId);
-  const ollamaModelId = usePreferencesStore((state) => state.ollamaModelId);
-  const openaiCompatibleBaseURL = usePreferencesStore(
-    (state) => state.openaiCompatibleBaseURL,
-  );
-  const openaiCompatibleModelId = usePreferencesStore(
-    (state) => state.openaiCompatibleModelId,
-  );
-  const openrouterModelId = usePreferencesStore(
-    (state) => state.openrouterModelId,
-  );
+  const apiKeys = useChatStore((state) => state.apiKeys);
   const repo = controller.repo;
   const status = controller.status;
   const panelState: PanelState = !isOpen
@@ -339,11 +325,14 @@ export function useSourceControlPanel(
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
   const canPush = !!status?.upstream && status.behind === 0;
-  const selectedModel = resolveModel(selectedModelId);
-  const selectedModelSupportsTemperature = modelSupportsTemperature(
-    selectedModel.provider,
-    selectedModel.id,
-  );
+  const selectedModel = tryResolveModel(selectedModelRef, customProviders);
+  const hasApiKeyForSelected = selectedModel
+    ? !providerNeedsKey(selectedModel.provider) ||
+      !!apiKeys[selectedModel.provider]
+    : false;
+  const selectedModelSupportsTemperature = selectedModel
+    ? modelSupportsTemperature(selectedModel.provider, selectedModel.id)
+    : false;
   const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy =
     localActionBusy !== null || controller.busyAction !== null;
@@ -351,39 +340,11 @@ export function useSourceControlPanel(
     if (stagedEntries.length === 0) {
       return "Stage changes to generate a commit message";
     }
-    if (!hasApiKeyForSelected) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "lmstudio-local" && !lmstudioModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "mlx-local" && !mlxModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "ollama-local" && !ollamaModelId.trim()) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (
-      selectedModel.id === "openai-compatible-custom" &&
-      (!openaiCompatibleBaseURL.trim() || !openaiCompatibleModelId.trim())
-    ) {
-      return "Connect an AI provider to generate commit messages";
-    }
-    if (selectedModel.id === "openrouter-custom" && !openrouterModelId.trim()) {
+    if (!selectedModel || !hasApiKeyForSelected) {
       return "Connect an AI provider to generate commit messages";
     }
     return null;
-  }, [
-    hasApiKeyForSelected,
-    lmstudioModelId,
-    mlxModelId,
-    ollamaModelId,
-    openaiCompatibleBaseURL,
-    openaiCompatibleModelId,
-    openrouterModelId,
-    selectedModel,
-    stagedEntries.length,
-  ]);
+  }, [hasApiKeyForSelected, selectedModel, stagedEntries.length]);
   const canGenerateCommitMessage =
     stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
   const generateCommitMessageHint = aiUnavailableReason
@@ -547,18 +508,14 @@ export function useSourceControlPanel(
       const chatState = useChatStore.getState();
       const prefs = usePreferencesStore.getState();
       const model = await buildConfiguredLanguageModel(
-        selectedModelId,
+        selectedModelRef,
         chatState.apiKeys,
         {
           lmstudioBaseURL: prefs.lmstudioBaseURL,
-          lmstudioModelId,
           mlxBaseURL: prefs.mlxBaseURL,
-          mlxModelId,
           ollamaBaseURL: prefs.ollamaBaseURL,
-          ollamaModelId,
-          openaiCompatibleBaseURL,
-          openaiCompatibleModelId,
-          openrouterModelId,
+          customProviders: prefs.customProviders,
+          providerInstanceKeys: chatState.providerInstanceKeys,
         },
       );
       const result = await generateText({
@@ -594,14 +551,8 @@ export function useSourceControlPanel(
   }, [
     aiUnavailableReason,
     aiBusy,
-    lmstudioModelId,
-    mlxModelId,
-    ollamaModelId,
-    openaiCompatibleBaseURL,
-    openaiCompatibleModelId,
-    openrouterModelId,
     repo,
-    selectedModelId,
+    selectedModelRef,
     selectedModelSupportsTemperature,
     stagedEntries,
   ]);

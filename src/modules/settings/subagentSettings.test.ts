@@ -13,7 +13,7 @@ import {
 
 describe("Subagent settings", () => {
   it("defaults to following the chat model with three concurrent tasks", () => {
-    expect(DEFAULT_PREFERENCES.defaultSubagentModelId).toBeNull();
+    expect(DEFAULT_PREFERENCES.defaultSubagentModel).toBeNull();
     expect(DEFAULT_PREFERENCES.maxConcurrentSubagents).toBe(3);
   });
 

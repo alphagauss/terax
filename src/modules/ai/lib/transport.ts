@@ -4,7 +4,7 @@
  */
 
 import type { UIMessage } from "@ai-sdk/react";
-import type { CustomEndpoint } from "../config";
+import type { ModelRef, ProviderInstance } from "../config";
 import {
   getSubagentCoordinator,
   type SubagentResultEvent,
@@ -13,7 +13,7 @@ import type { SubagentDisplayState } from "../agents/subagentDisplay";
 import type { SessionAgentSnapshot } from "./agents";
 import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
-import type { ProviderKeys, CustomEndpointKeys } from "./keyring";
+import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
 import {
   buildAgentSystemPrompt,
   type AgentExecutionEnvironment,
@@ -24,25 +24,18 @@ import type { ToolContext } from "../tools/tools";
 type Deps = {
   getKeys: () => ProviderKeys;
   toolContext: ToolContext;
-  getModelId: () => string;
-  getDefaultSubagentModelId: () => string | null;
+  getModel: () => ModelRef;
+  getDefaultSubagentModel: () => ModelRef | null;
   getMaxConcurrentSubagents: () => number;
   getCustomInstructions: () => string;
   getAgent: () => SessionAgentSnapshot;
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
   getLmstudioBaseURL?: () => string | undefined;
-  getLmstudioModelId?: () => string | undefined;
   getMlxBaseURL?: () => string | undefined;
-  getMlxModelId?: () => string | undefined;
   getOllamaBaseURL?: () => string | undefined;
-  getOllamaModelId?: () => string | undefined;
-  getOpenaiCompatibleBaseURL?: () => string | undefined;
-  getOpenaiCompatibleModelId?: () => string | undefined;
-  getOpenaiCompatibleContextLimit?: () => number | undefined;
-  getOpenrouterModelId?: () => string | undefined;
-  getCustomEndpoints?: () => readonly CustomEndpoint[];
-  getCustomEndpointKeys?: () => CustomEndpointKeys;
+  getCustomProviders?: () => readonly ProviderInstance[];
+  getProviderInstanceKeys?: () => ProviderInstanceKeys;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
@@ -100,8 +93,8 @@ export function createSessionTransport(deps: Deps) {
     const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),
-      modelId: deps.getModelId(),
-      defaultSubagentModelId: deps.getDefaultSubagentModelId(),
+      model: deps.getModel(),
+      defaultSubagentModel: deps.getDefaultSubagentModel(),
       maxConcurrentSubagents: deps.getMaxConcurrentSubagents(),
       subagentCoordinator: getSubagentCoordinator(
         deps.toolContext.getSessionId(),
@@ -117,17 +110,10 @@ export function createSessionTransport(deps: Deps) {
       onSystemPrompt: deps.onSystemPrompt,
       onCheckpoint: deps.onCheckpoint,
       lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
-      lmstudioModelId: deps.getLmstudioModelId?.(),
       mlxBaseURL: deps.getMlxBaseURL?.(),
-      mlxModelId: deps.getMlxModelId?.(),
       ollamaBaseURL: deps.getOllamaBaseURL?.(),
-      ollamaModelId: deps.getOllamaModelId?.(),
-      openaiCompatibleBaseURL: deps.getOpenaiCompatibleBaseURL?.(),
-      openaiCompatibleModelId: deps.getOpenaiCompatibleModelId?.(),
-      openaiCompatibleContextLimit: deps.getOpenaiCompatibleContextLimit?.(),
-      openrouterModelId: deps.getOpenrouterModelId?.(),
-      customEndpoints: deps.getCustomEndpoints?.(),
-      customEndpointKeys: deps.getCustomEndpointKeys?.(),
+      customProviders: deps.getCustomProviders?.(),
+      providerInstanceKeys: deps.getProviderInstanceKeys?.(),
       uiMessages: options.messages,
       abortSignal: options.abortSignal,
     });

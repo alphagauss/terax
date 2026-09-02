@@ -11,7 +11,7 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { getModel, type ModelId, providerNeedsKey } from "../config";
+import { modelNeedsKey } from "../config";
 import { parseSessionAgent } from "../lib/agents";
 import { resolveAgentExecutionEnvironment } from "../lib/prompt";
 import { resolveSessionCwd } from "../lib/sessions";
@@ -58,9 +58,9 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   const transport = createSessionTransport({
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
-    getModelId: () => useChatStore.getState().selectedModelId,
-    getDefaultSubagentModelId: () =>
-      usePreferencesStore.getState().defaultSubagentModelId,
+    getModel: () => useChatStore.getState().selectedModel,
+    getDefaultSubagentModel: () =>
+      usePreferencesStore.getState().defaultSubagentModel,
     getMaxConcurrentSubagents: () =>
       usePreferencesStore.getState().maxConcurrentSubagents,
     getCustomInstructions: () =>
@@ -70,21 +70,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
     getLmstudioBaseURL: () => usePreferencesStore.getState().lmstudioBaseURL,
-    getLmstudioModelId: () => usePreferencesStore.getState().lmstudioModelId,
     getMlxBaseURL: () => usePreferencesStore.getState().mlxBaseURL,
-    getMlxModelId: () => usePreferencesStore.getState().mlxModelId,
     getOllamaBaseURL: () => usePreferencesStore.getState().ollamaBaseURL,
-    getOllamaModelId: () => usePreferencesStore.getState().ollamaModelId,
-    getOpenaiCompatibleBaseURL: () =>
-      usePreferencesStore.getState().openaiCompatibleBaseURL,
-    getOpenaiCompatibleModelId: () =>
-      usePreferencesStore.getState().openaiCompatibleModelId,
-    getOpenaiCompatibleContextLimit: () =>
-      usePreferencesStore.getState().openaiCompatibleContextLimit,
-    getOpenrouterModelId: () =>
-      usePreferencesStore.getState().openrouterModelId,
-    getCustomEndpoints: () => usePreferencesStore.getState().customEndpoints,
-    getCustomEndpointKeys: () => useChatStore.getState().customEndpointKeys,
+    getCustomProviders: () => usePreferencesStore.getState().customProviders,
+    getProviderInstanceKeys: () => useChatStore.getState().providerInstanceKeys,
     onStep: (step) => {
       useChatStore.getState().patchAgentMeta(sessionId, { step });
     },
@@ -184,7 +173,10 @@ async function startChatMessage(
   );
   if (!cwd?.trim()) return false;
   if (
-    providerNeedsKey(getModel(state.selectedModelId as ModelId).provider) &&
+    modelNeedsKey(
+      state.selectedModel,
+      usePreferencesStore.getState().customProviders,
+    ) &&
     !getActiveProviderKey()
   ) {
     return false;

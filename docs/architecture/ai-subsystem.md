@@ -16,15 +16,17 @@ AI 子系统采用 BYOK（bring your own key）模式。它通过 `@ai-sdk/*` �
 - 用于任意自定义 base URL 的 `openai-compatible`
 - 本地：LM Studio、MLX、Ollama
 
-`src/modules/ai/lib/agent.ts:76` 中的 `buildLanguageModel` 根据 `provider` 进入不同分支，以构建正确的 AI SDK provider instance。本地 provider 使用 `createOpenAICompatible`，并传入允许访问私有网络的 `localProxyFetch`；云 provider 则使用各自专用的 SDK constructor。
+`src/modules/ai/lib/agent.ts` 中的 `buildLanguageModel` 根据 `provider` 进入不同分支，以构建正确的 AI SDK provider instance。本地 provider 使用 `createOpenAICompatible`，并传入允许访问私有网络的 `localProxyFetch`；云 provider 则使用各自专用的 SDK constructor。
 
-模型 metadata（context limit、cost、reasoning behavior）存储在 `config.ts` 的模型 registry 中。`resolveModel` 将 model ID 映射到对应 provider 和默认值。
+模型身份统一使用结构化的 `ModelRef { providerId, modelId }`。内置 Provider 实例 ID 固定为 `builtin:<provider>`；用户新增的 OpenAI-compatible Provider 在创建时生成 `custom:<uuid>`，名称、地址和模型名变化都不会改变该实例 ID。自定义 Provider 的密钥也只按这个稳定 ID 绑定。
+
+模型 metadata（context limit、cost、reasoning behavior）存储在 `config.ts` 的模型 registry 中。`resolveModel` 只根据完整 `ModelRef` 和 Provider 实例配置解析模型，禁止从模型名推断 Provider。自由模型的配置统一存放在 `providerModels[providerId]`，Provider 连接实例不再重复保存模型名。设置、当前选择、默认模型、Subagent 模型、自动补全、收藏和最近使用都保存完整引用。
 
 ### 新增 provider
 
 1. 在 `src/modules/ai/config.ts` 的 `PROVIDERS` 中添加 `ProviderInfo` entry。
 2. 在同一文件的模型 registry 中添加 model ID 和 metadata。
-3. 在 `buildLanguageModel`（`src/modules/ai/lib/agent.ts:99`）中添加构建 provider instance 的分支。对于 OpenAI-compatible API，通常可以复用 `createOpenAICompatible`。
+3. 在 `buildLanguageModel` 中添加构建 provider instance 的分支。对于 OpenAI-compatible API，通常可以复用 `createOpenAICompatible`。
 4. 如果 provider 需要 API key，更新 `config.ts` 中的 `providerNeedsKey` 和 keyring service mapping。
 5. 如果需要专用的 `@ai-sdk/*` package，将其添加到 `package.json`，并说明 bundle cost 的合理性（参见 `CONTRIBUTING.md`）。
 6. 新增 built-in 必须说明其相对于 `openai-compatible` 和 OpenRouter 的独特价值；`CONTRIBUTING.md` 对此有明确要求。
@@ -57,7 +59,7 @@ Custom Agent ID 同时是会话归属。历史列表可按 Agent 筛选；删除
 
 `run_subagent` 是通用委派工具，只接受自包含的 `task`、可选 `label` 和默认值为 `false` 的 `wait`。它不提供角色类型、temperature 或单次模型覆盖。Subagent 使用独立消息历史，并复用父聊天冻结的 system prompt、cwd、provider 配置和 Custom Agent 工具白名单。
 
-Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `defaultSubagentModelId` 单独指定。每个聊天最多并发 `maxConcurrentSubagents` 个任务，默认 3、允许 1 至 8；超过上限立即返回拒绝结果，不建立等待队列。
+Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `defaultSubagentModel` 单独指定完整模型引用。每个聊天最多并发 `maxConcurrentSubagents` 个任务，默认 3、允许 1 至 8；超过上限立即返回拒绝结果，不建立等待队列。
 
 权限在任务启动时冻结。主 Agent 为请求批准模式时，Subagent 工具进一步收窄到 `read_file`、`find_files`、`grep` 和 `get_terminal_output` 的父白名单交集；完全访问模式继承父白名单。两种模式都移除 `run_subagent`，所以 Subagent 不能递归创建 Subagent。
 

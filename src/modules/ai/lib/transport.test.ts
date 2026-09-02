@@ -5,6 +5,7 @@
 
 import type { UIMessage } from "@ai-sdk/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { modelRefForProvider } from "../config";
 
 const mocks = vi.hoisted(() => ({
   readAgentsMd: vi.fn(),
@@ -36,7 +37,7 @@ const toolContext: ToolContext = {
 };
 
 const subagentDeps = {
-  getDefaultSubagentModelId: () => null,
+  getDefaultSubagentModel: () => null,
   getMaxConcurrentSubagents: () => 3,
   onCheckpoint: vi.fn(),
 };
@@ -62,7 +63,7 @@ describe("session transport", () => {
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
       toolContext,
-      getModelId: () => "model",
+      getModel: () => modelRefForProvider("openai", "model"),
       ...subagentDeps,
       getCustomInstructions: () => "",
       getAgent: () => ({
@@ -104,7 +105,7 @@ describe("session transport", () => {
     const transport = createSessionTransport({
       getKeys: () => ({}) as never,
       toolContext,
-      getModelId: () => modelId,
+      getModel: () => modelRefForProvider("openai", modelId),
       ...subagentDeps,
       getCustomInstructions: () => customInstructions,
       getAgent: () => agent,
@@ -136,7 +137,9 @@ describe("session transport", () => {
     const firstPrompt = mocks.runAgentStream.mock.calls[0][0].systemPrompt;
     const secondPrompt = mocks.runAgentStream.mock.calls[1][0].systemPrompt;
     expect(secondPrompt).toBe(firstPrompt);
-    expect(mocks.runAgentStream.mock.calls[1][0].modelId).toBe("model-b");
+    expect(mocks.runAgentStream.mock.calls[1][0].model).toEqual(
+      modelRefForProvider("openai", "model-b"),
+    );
     expect(firstPrompt).toContain("Project instructions");
     expect(firstPrompt).toContain("First agent");
     expect(firstPrompt).toContain("First preference");

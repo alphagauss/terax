@@ -17,13 +17,13 @@ export { LocalAgentNotificationsBridge } from "./components/LocalAgentNotificati
 export {
   EMPTY_PROVIDER_KEYS,
   getAllKeys,
-  getAllCustomEndpointKeys,
+  getAllProviderInstanceKeys,
   getKey,
   setKey,
   clearKey,
   hasAnyKey,
   type ProviderKeys,
-  type CustomEndpointKeys,
+  type ProviderInstanceKeys,
 } from "./lib/keyring";
 export {
   flushCompletedSessionRuns,
