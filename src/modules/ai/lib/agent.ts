@@ -304,7 +304,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   reasoningDurations.push(durationMs);
                   writer.write({
                     type: REASONING_DURATION_PART_TYPE,
-                    id: chunk.id,
                     data: { durationMs },
                   });
                   reasoningStartedAt = undefined;
