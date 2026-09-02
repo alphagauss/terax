@@ -11,12 +11,6 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import type {
-  SubagentDisplaySnapshot,
-  SubagentDisplayState,
-  SubagentDisplayStatus,
-  SubagentDisplayStep,
-} from "../agents/subagentDisplay";
 import {
   ArrowRight01Icon,
   Cancel01Icon,
@@ -28,6 +22,12 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type {
+  SubagentDisplaySnapshot,
+  SubagentDisplayState,
+  SubagentDisplayStatus,
+  SubagentDisplayStep,
+} from "../agents/subagentDisplay";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 type Display = SubagentDisplayState | SubagentDisplaySnapshot;
@@ -118,7 +118,7 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
           </span>
           <span className="mt-0.5 block min-w-0 truncate text-[11px] text-muted-foreground">
             {headline.kind === "running" ? (
-              <Shimmer as="span" duration={1}>
+              <Shimmer as="span" sweepDuration={1.2} pauseDuration={0.6}>
                 {runningActionLabel(headline.action, t)}
               </Shimmer>
             ) : (
