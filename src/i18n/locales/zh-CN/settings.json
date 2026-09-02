@@ -342,9 +342,6 @@
         "description": "通过 Ollama 内置的 OpenAI 兼容 API 使用本地模型。",
         "modelHint": "ollama list 或 ollama pull 中显示的模型名称。"
       },
-      "openaiCompatible": {
-        "description": "任意 OpenAI 兼容端点，包括 vLLM、Z.AI 和 Fireworks。"
-      },
       "openrouter": {
         "description": "OpenRouter 上的任意模型，请输入完整的提供商/模型 ID。",
         "modelHint": "可在 openrouter.ai/models 浏览模型 ID。"

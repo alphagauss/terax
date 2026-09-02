@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
 import { runAgentStream } from "./agent";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
+import { modelRefForProvider } from "../config";
 
 let activeModel: MockLanguageModelV3;
 
@@ -129,8 +130,7 @@ describe.sequential("Agent background subagents", () => {
     ];
     const result = await runAgentStream({
       keys: EMPTY_PROVIDER_KEYS,
-      modelId: "lmstudio-local",
-      lmstudioModelId: "mock-model-background",
+      model: modelRefForProvider("lmstudio", "mock-model-background"),
       systemPrompt: "Stable prompt",
       allowedTools: ["get_terminal_output", "run_subagent"],
       maxConcurrentSubagents: 3,
@@ -254,8 +254,7 @@ describe.sequential("Agent background subagents", () => {
     const coordinator = new SubagentTurnCoordinator();
     const result = await runAgentStream({
       keys: EMPTY_PROVIDER_KEYS,
-      modelId: "lmstudio-local",
-      lmstudioModelId: "mock-model-checkpoint",
+      model: modelRefForProvider("lmstudio", "mock-model-checkpoint"),
       systemPrompt: "Stable prompt",
       allowedTools: ["run_subagent"],
       maxConcurrentSubagents: 3,
@@ -327,8 +326,7 @@ describe.sequential("Agent background subagents", () => {
     ];
     const result = await runAgentStream({
       keys: EMPTY_PROVIDER_KEYS,
-      modelId: "lmstudio-local",
-      lmstudioModelId: "mock-model-approval",
+      model: modelRefForProvider("lmstudio", "mock-model-approval"),
       systemPrompt: "Stable prompt",
       allowedTools: ["shell_exec", "run_subagent"],
       maxConcurrentSubagents: 3,

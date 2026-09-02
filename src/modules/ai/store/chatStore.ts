@@ -12,11 +12,9 @@ import {
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 import {
-  DEFAULT_MODEL_ID,
-  endpointIdFromCompatModel,
-  getModel,
-  isCompatModelId,
-  type ModelId,
+  DEFAULT_MODEL_REF,
+  type ModelRef,
+  providerFromBuiltinId,
   type ProviderId,
   providerNeedsKey,
 } from "../config";
@@ -32,8 +30,8 @@ import {
 } from "../agents/subagentDisplay";
 import { snapshotAgent } from "../lib/agents";
 import {
-  type CustomEndpointKeys,
   EMPTY_PROVIDER_KEYS,
+  type ProviderInstanceKeys,
   type ProviderKeys,
 } from "../lib/keyring";
 import { pushRecentModel } from "../lib/modelPrefs";
@@ -130,11 +128,11 @@ type StoreState = {
   setApiKeys: (keys: ProviderKeys) => void;
   setApiKey: (provider: ProviderId, key: string | null) => void;
 
-  customEndpointKeys: CustomEndpointKeys;
-  setCustomEndpointKeys: (keys: CustomEndpointKeys) => void;
+  providerInstanceKeys: ProviderInstanceKeys;
+  setProviderInstanceKeys: (keys: ProviderInstanceKeys) => void;
 
-  selectedModelId: string;
-  setSelectedModelId: (id: string) => void;
+  selectedModel: ModelRef;
+  setSelectedModel: (model: ModelRef, recordRecent?: boolean) => void;
 
   permissionMode: AiPermissionMode;
   setPermissionMode: (mode: AiPermissionMode) => void;
@@ -297,13 +295,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set({ apiKeys: { ...get().apiKeys, [provider]: key } });
   },
 
-  customEndpointKeys: {},
-  setCustomEndpointKeys: (keys) => set({ customEndpointKeys: keys }),
+  providerInstanceKeys: {},
+  setProviderInstanceKeys: (keys) => set({ providerInstanceKeys: keys }),
 
-  selectedModelId: DEFAULT_MODEL_ID,
-  setSelectedModelId: (id) => {
-    set({ selectedModelId: id });
-    void pushRecentModel(id);
+  selectedModel: DEFAULT_MODEL_REF,
+  setSelectedModel: (model, recordRecent = true) => {
+    set({ selectedModel: model });
+    if (recordRecent) void pushRecentModel(model);
   },
 
   permissionMode: "ask",
@@ -943,21 +941,18 @@ export function selectActiveAgentMeta(state: StoreState): AgentMeta {
 }
 
 export function getActiveProviderKey(): string | null {
-  const { selectedModelId, apiKeys, customEndpointKeys } =
+  const { selectedModel, apiKeys, providerInstanceKeys } =
     useChatStore.getState();
-  if (isCompatModelId(selectedModelId)) {
-    const eid = endpointIdFromCompatModel(selectedModelId);
-    return customEndpointKeys[eid] ?? null;
-  }
-  return apiKeys[getModel(selectedModelId as ModelId).provider] ?? null;
+  const provider = providerFromBuiltinId(selectedModel.providerId);
+  return provider
+    ? (apiKeys[provider] ?? null)
+    : (providerInstanceKeys[selectedModel.providerId] ?? null);
 }
 
-export function hasKeyForModel(modelId: string): boolean {
+export function hasKeyForModel(model: ModelRef): boolean {
   const { apiKeys } = useChatStore.getState();
-  if (isCompatModelId(modelId)) {
-    return true;
-  }
-  const provider = getModel(modelId as ModelId).provider;
+  const provider = providerFromBuiltinId(model.providerId);
+  if (!provider) return true;
   return providerNeedsKey(provider) ? !!apiKeys[provider] : true;
 }
 

@@ -342,9 +342,6 @@
         "description": "Local models via Ollama's built-in OpenAI-compatible API.",
         "modelHint": "The model name from ollama list or ollama pull."
       },
-      "openaiCompatible": {
-        "description": "Any OpenAI-compatible endpoint, including vLLM, Z.AI, and Fireworks."
-      },
       "openrouter": {
         "description": "Any model on OpenRouter. Enter its full provider/model ID.",
         "modelHint": "Browse IDs at openrouter.ai/models."

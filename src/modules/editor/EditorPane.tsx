@@ -5,8 +5,13 @@
  */
 
 import i18n from "@/i18n";
-import { endpointIdFromCompatModel } from "@/modules/ai/config";
-import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
+import {
+  DEFAULT_MODEL_REF,
+  modelRefsEqual,
+  resolveModel,
+  tryResolveModel,
+} from "@/modules/ai/config";
+import { getKey, getProviderInstanceKey } from "@/modules/ai/lib/keyring";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -266,7 +271,12 @@ export const EditorCore = memo(
       let cancelled = false;
       const refresh = async () => {
         const s = usePreferencesStore.getState();
-        const provider = s.autocompleteProvider;
+        const model = tryResolveModel(s.autocompleteModel, s.customProviders);
+        if (!model) {
+          apiKeyRef.current = null;
+          return;
+        }
+        const provider = model.provider;
         if (
           provider === "lmstudio" ||
           provider === "mlx" ||
@@ -275,10 +285,12 @@ export const EditorCore = memo(
           apiKeyRef.current = null;
           return;
         }
-        // OpenAI-compatible keys live in a per-endpoint keyring slot.
-        if (provider === "openai-compatible") {
-          const eid = endpointIdFromCompatModel(s.autocompleteModelId);
-          const k = eid ? await getCustomEndpointKey(eid) : null;
+        if (
+          s.customProviders.some(
+            (providerInstance) => providerInstance.id === model.providerId,
+          )
+        ) {
+          const k = await getProviderInstanceKey(model.providerId);
           if (!cancelled) apiKeyRef.current = k;
           return;
         }
@@ -293,8 +305,8 @@ export const EditorCore = memo(
       });
       const unsubPrefs = usePreferencesStore.subscribe((state, prev) => {
         if (
-          state.autocompleteProvider !== prev.autocompleteProvider ||
-          state.autocompleteModelId !== prev.autocompleteModelId
+          !modelRefsEqual(state.autocompleteModel, prev.autocompleteModel) ||
+          state.customProviders !== prev.customProviders
         ) {
           void refresh();
         }
@@ -535,38 +547,21 @@ export const EditorCore = memo(
         inlineCompletion({
           getPrefs: () => {
             const s = usePreferencesStore.getState();
-            const p = s.autocompleteProvider;
-            // autocompleteModelId holds the compat- id of the chosen endpoint.
-            const compatEp =
-              p === "openai-compatible"
-                ? s.customEndpoints.find(
-                    (e) =>
-                      e.id === endpointIdFromCompatModel(s.autocompleteModelId),
-                  )
-                : undefined;
-            const modelId =
-              p === "lmstudio"
-                ? s.lmstudioModelId
-                : p === "mlx"
-                  ? s.mlxModelId
-                  : p === "ollama"
-                    ? s.ollamaModelId
-                    : p === "openai-compatible"
-                      ? (compatEp?.modelId ?? "")
-                      : p === "openrouter"
-                        ? s.openrouterModelId
-                        : s.autocompleteModelId;
+            const configuredModel = tryResolveModel(
+              s.autocompleteModel,
+              s.customProviders,
+            );
+            const model = configuredModel ?? resolveModel(DEFAULT_MODEL_REF);
             return {
-              enabled: s.autocompleteEnabled,
+              enabled: s.autocompleteEnabled && !!configuredModel,
               trigger: s.autocompleteTrigger,
-              provider: p,
-              modelId,
+              provider: model.provider,
+              modelId: model.id,
               apiKey: apiKeyRef.current,
               lmstudioBaseURL: s.lmstudioBaseURL,
               mlxBaseURL: s.mlxBaseURL,
               ollamaBaseURL: s.ollamaBaseURL,
-              openaiCompatibleBaseURL:
-                compatEp?.baseURL ?? s.openaiCompatibleBaseURL,
+              openaiCompatibleBaseURL: model.baseURL,
             };
           },
           getPath: () => pathRef.current,

@@ -43,10 +43,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  DEFAULT_MODEL_REF,
   estimateCost,
-  getModel,
   getModelContextLimit,
-  type ModelId,
+  resolveModel,
+  tryResolveModel,
 } from "../config";
 import {
   estimateUiMessageTokens,
@@ -265,7 +266,14 @@ function ContextIndicator({
   messages: UIMessage[];
 }) {
   const { t } = useTranslation("ai");
-  const modelId = useChatStore((s) => s.selectedModelId);
+  const model = useChatStore((s) => s.selectedModel);
+  const customProviders = usePreferencesStore((s) => s.customProviders);
+  const resolvedModel = useMemo(
+    () =>
+      tryResolveModel(model, customProviders) ??
+      resolveModel(DEFAULT_MODEL_REF),
+    [customProviders, model],
+  );
   const meta = useChatStore((state) =>
     getAgentMetaForSession(state, sessionId),
   );
@@ -286,18 +294,15 @@ function ContextIndicator({
   }, [messages, shouldEstimate]);
   const used = lastInput > 0 ? lastInput : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
-  const openaiCompatibleContextLimit = usePreferencesStore(
-    (s) => s.openaiCompatibleContextLimit,
+  const max = getModelContextLimit(
+    resolvedModel.id,
+    resolvedModel.contextLimit,
   );
-  const max = getModelContextLimit(modelId, openaiCompatibleContextLimit);
-  const modelLabel = useMemo(() => {
-    try {
-      return getModel(modelId as ModelId).label;
-    } catch {
-      return modelId;
-    }
-  }, [modelId]);
-  const cost = estimateCost(modelId, tokens);
+  const modelLabel = resolvedModel.label;
+  const cost = estimateCost(
+    resolvedModel.catalogModel ? resolvedModel.id : undefined,
+    tokens,
+  );
   const cacheRate =
     tokens.inputTokens > 0
       ? Math.round((tokens.cachedInputTokens / tokens.inputTokens) * 100)
