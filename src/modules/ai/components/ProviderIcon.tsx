@@ -1,3 +1,8 @@
+/**
+ * 本文件统一渲染 AI Provider 图标。
+ * 未配置专属图标的新 Provider 自动使用通用连接图标，不影响注册和运行。
+ */
+
 import type { ProviderId } from "@/modules/ai/config";
 import {
   AppleIcon,
@@ -16,7 +21,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
-const ICON_BY_PROVIDER = {
+const ICON_BY_PROVIDER: Partial<Record<ProviderId, typeof ChatGptIcon>> = {
   openai: ChatGptIcon,
   anthropic: ClaudeIcon,
   google: GoogleGeminiIcon,
@@ -30,18 +35,21 @@ const ICON_BY_PROVIDER = {
   lmstudio: ComputerIcon,
   mlx: AppleIcon,
   ollama: ServerStack01Icon,
-} as const satisfies Record<ProviderId, typeof ChatGptIcon>;
+};
 
-type Props = {
+/** 渲染 Provider 专属图标，未登记图标时使用通用连接图标。 */
+export function ProviderIcon({
+  provider,
+  size = 14,
+  className,
+}: {
   provider: ProviderId;
   size?: number;
   className?: string;
-};
-
-export function ProviderIcon({ provider, size = 14, className }: Props) {
+}) {
   return (
     <HugeiconsIcon
-      icon={ICON_BY_PROVIDER[provider]}
+      icon={ICON_BY_PROVIDER[provider] ?? PlugIcon}
       size={size}
       strokeWidth={1.75}
       className={className}

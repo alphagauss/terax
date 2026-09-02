@@ -10,13 +10,7 @@ import {
   setFavoriteModels,
   setRecentModels,
 } from "@/modules/settings/store";
-import {
-  DEFAULT_AUTOCOMPLETE_MODEL_REF,
-  DEFAULT_MODEL_REF,
-  type ModelRef,
-  modelRefKey,
-  modelRefsEqual,
-} from "../config";
+import { type ModelRef, modelRefKey, modelRefsEqual } from "../config";
 
 const RECENTS_MAX = 5;
 
@@ -29,33 +23,32 @@ type ModelReferenceState = Pick<
   | "recentModels"
 >;
 
-/** 生成模型身份变更所需的引用补丁，并保持收藏与最近列表无重复项。 */
+/** 生成模型移除所需的引用补丁，默认项回退但收藏和最近记录直接清理。 */
 export function buildModelReferencePatch(
   state: ModelReferenceState,
   matches: (model: ModelRef) => boolean,
   replacement: ModelRef | null,
 ): ModelSettingsPatch {
   const patch: ModelSettingsPatch = {};
-  if (matches(state.defaultModel)) {
-    patch.defaultModel = replacement ?? DEFAULT_MODEL_REF;
+  if (state.defaultModel && matches(state.defaultModel)) {
+    patch.defaultModel = replacement;
   }
   if (state.defaultSubagentModel && matches(state.defaultSubagentModel)) {
     patch.defaultSubagentModel = replacement;
   }
-  if (matches(state.autocompleteModel)) {
-    patch.autocompleteModel = replacement ?? DEFAULT_AUTOCOMPLETE_MODEL_REF;
+  if (state.autocompleteModel && matches(state.autocompleteModel)) {
+    patch.autocompleteModel = replacement;
   }
 
   const replaceList = (models: ModelRef[]): ModelRef[] => {
     const seen = new Set<string>();
     const next: ModelRef[] = [];
     for (const model of models) {
-      const candidate = matches(model) ? replacement : model;
-      if (!candidate) continue;
-      const key = modelRefKey(candidate);
+      if (matches(model)) continue;
+      const key = modelRefKey(model);
       if (seen.has(key)) continue;
       seen.add(key);
-      next.push(candidate);
+      next.push(model);
     }
     return next;
   };

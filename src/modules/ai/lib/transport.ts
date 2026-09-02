@@ -4,22 +4,22 @@
  */
 
 import type { UIMessage } from "@ai-sdk/react";
-import type { ModelRef, ProviderInstance } from "../config";
+import type { SubagentDisplayState } from "../agents/subagentDisplay";
 import {
   getSubagentCoordinator,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
-import type { SubagentDisplayState } from "../agents/subagentDisplay";
+import type { ModelRef, ProviderBaseURLs, ProviderInstance } from "../config";
+import type { ToolContext } from "../tools/tools";
+import { type AgentUsageDelta, runAgentStream } from "./agent";
 import type { SessionAgentSnapshot } from "./agents";
-import { runAgentStream, type AgentUsageDelta } from "./agent";
 import { formatAiError } from "./errors";
 import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
-import {
-  buildAgentSystemPrompt,
-  type AgentExecutionEnvironment,
-} from "./prompt";
 import { readAgentsMd } from "./projectInstructions";
-import type { ToolContext } from "../tools/tools";
+import {
+  type AgentExecutionEnvironment,
+  buildAgentSystemPrompt,
+} from "./prompt";
 
 type Deps = {
   getKeys: () => ProviderKeys;
@@ -31,9 +31,7 @@ type Deps = {
   getAgent: () => SessionAgentSnapshot;
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
-  getLmstudioBaseURL?: () => string | undefined;
-  getMlxBaseURL?: () => string | undefined;
-  getOllamaBaseURL?: () => string | undefined;
+  getProviderBaseURLs?: () => Readonly<ProviderBaseURLs>;
   getCustomProviders?: () => readonly ProviderInstance[];
   getProviderInstanceKeys?: () => ProviderInstanceKeys;
   onStep?: (step: string | null) => void;
@@ -109,9 +107,7 @@ export function createSessionTransport(deps: Deps) {
       onSubagentDisplay: deps.onSubagentDisplay,
       onSystemPrompt: deps.onSystemPrompt,
       onCheckpoint: deps.onCheckpoint,
-      lmstudioBaseURL: deps.getLmstudioBaseURL?.(),
-      mlxBaseURL: deps.getMlxBaseURL?.(),
-      ollamaBaseURL: deps.getOllamaBaseURL?.(),
+      providerBaseURLs: deps.getProviderBaseURLs?.(),
       customProviders: deps.getCustomProviders?.(),
       providerInstanceKeys: deps.getProviderInstanceKeys?.(),
       uiMessages: options.messages,

@@ -166,8 +166,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 
 ### 网络（`src-tauri/src/modules/net.rs`）
 
-- `ai_http_request` / `ai_http_stream` - 带 SSRF guard 的 AI HTTP proxy
-- `lm_ping` - 本地模型 ping
+- `ai_http_request` / `ai_http_stream` - 带 SSRF guard 的 AI HTTP proxy；非流式请求同时限制总时长和响应体积，模型目录通过该边界访问云端或用户明确配置的私网地址
 
 ### 秘密（`src-tauri/src/modules/secrets.rs`）
 

@@ -1,14 +1,10 @@
 /**
  * 本文件测试 AI 模型收藏、最近使用和模型身份替换规则。
- * 锁定去重、顺序、数量上限、默认回退及持久化失败传播。
+ * 锁定去重、顺序、数量上限、空模型回退及持久化失败传播。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  DEFAULT_AUTOCOMPLETE_MODEL_REF,
-  DEFAULT_MODEL_REF,
-  modelRefForProvider,
-} from "../config";
+import { modelRefForProvider } from "../config";
 
 const ref = (modelId: string) => modelRefForProvider("openai", modelId);
 
@@ -125,7 +121,7 @@ describe("buildModelReferencePatch", () => {
     recentModels: [oldModel, otherModel, newModel],
   };
 
-  it("替换所有关联引用并去除合并后的重复项", () => {
+  it("默认项切换到替代模型并清理列表中的失效引用", () => {
     expect(
       buildModelReferencePatch(
         state,
@@ -136,12 +132,12 @@ describe("buildModelReferencePatch", () => {
       defaultModel: newModel,
       defaultSubagentModel: newModel,
       autocompleteModel: newModel,
-      favoriteModels: [newModel, otherModel],
-      recentModels: [newModel, otherModel],
+      favoriteModels: [otherModel],
+      recentModels: [otherModel],
     });
   });
 
-  it("移除失效引用时恢复必要的默认值", () => {
+  it("移除失效引用时清空没有替代项的默认值", () => {
     expect(
       buildModelReferencePatch(
         state,
@@ -149,9 +145,9 @@ describe("buildModelReferencePatch", () => {
         null,
       ),
     ).toEqual({
-      defaultModel: DEFAULT_MODEL_REF,
+      defaultModel: null,
       defaultSubagentModel: null,
-      autocompleteModel: DEFAULT_AUTOCOMPLETE_MODEL_REF,
+      autocompleteModel: null,
       favoriteModels: [otherModel],
       recentModels: [otherModel],
     });

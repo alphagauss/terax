@@ -1,8 +1,14 @@
+/**
+ * 本文件渲染内置 Provider 配置卡片。
+ * 卡片按凭据类型显示密钥交互，并通过子内容组合地址和模型设置。
+ */
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import type { ProviderInfo } from "@/modules/ai/config";
 import {
   ArrowUpRight01Icon,
@@ -14,16 +20,17 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ProviderIcon } from "./ProviderIcon";
 
 type Props = {
   provider: ProviderInfo;
   currentKey: string | null;
+  configured: boolean;
   onSave: (key: string) => Promise<void>;
-  onClear: () => Promise<void>;
-  onRemove?: () => void;
+  onRemove: () => void;
+  children?: ReactNode;
 };
 
 function maskKey(key: string): string {
@@ -31,36 +38,42 @@ function maskKey(key: string): string {
   return `${key.slice(0, 4)}${"•".repeat(8)}${key.slice(-4)}`;
 }
 
-/** 提供商密钥配置卡片，保持密钥操作状态和辅助控件在明暗主题下清晰可辨。 */
+/** 内置 Provider 配置卡片，按凭据类型显示控件并承载地址和模型设置。 */
 export function ProviderKeyCard({
   provider,
   currentKey,
+  configured,
   onSave,
-  onClear,
   onRemove,
+  children,
 }: Props) {
   const { t } = useTranslation();
-  const [editing, setEditing] = useState(!currentKey);
+  const credential = provider.credential;
+  const usesApiKey = credential.adapter === "api-key";
+  const [editing, setEditing] = useState(usesApiKey && !currentKey);
   const [value, setValue] = useState("");
   const [reveal, setReveal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const keyPrefix =
+    credential.adapter === "api-key" ? credential.keyPrefix : null;
 
   useEffect(() => {
-    setEditing(!currentKey);
-  }, [currentKey]);
+    setEditing(usesApiKey && !currentKey);
+  }, [currentKey, usesApiKey]);
 
   const submit = async () => {
+    if (!usesApiKey) return;
     const trimmed = value.trim();
     if (!trimmed) {
       setError(t("models.card.enterKey"));
       return;
     }
-    if (provider.keyPrefix && !trimmed.startsWith(provider.keyPrefix)) {
+    if (keyPrefix && !trimmed.startsWith(keyPrefix)) {
       setError(
         t("models.card.keyPrefixHint", {
           provider: provider.label,
-          prefix: provider.keyPrefix,
+          prefix: keyPrefix,
         }),
       );
       return;
@@ -83,7 +96,7 @@ export function ProviderKeyCard({
       <div className="flex items-center gap-2">
         <ProviderIcon provider={provider.id} size={15} />
         <span className="text-[12.5px] font-medium">{provider.label}</span>
-        {currentKey ? (
+        {configured ? (
           <Badge
             variant="outline"
             className="ml-1 h-4 gap-1 border-border/60 bg-muted/40 px-1.5 text-[10px] font-normal text-muted-foreground"
@@ -93,7 +106,7 @@ export function ProviderKeyCard({
               size={9}
               strokeWidth={2}
             />
-            {t("common.connected")}
+            {t("common.configured")}
           </Badge>
         ) : null}
         <button
@@ -101,27 +114,25 @@ export function ProviderKeyCard({
           onClick={() => void openUrl(provider.consoleUrl)}
           className="ml-auto inline-flex items-center gap-0.5 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
         >
-          {t("models.card.getKey")}
+          {t(usesApiKey ? "models.card.getKey" : "models.card.docs")}
           <HugeiconsIcon
             icon={ArrowUpRight01Icon}
             size={11}
             strokeWidth={1.75}
           />
         </button>
-        {onRemove ? (
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onRemove}
-            title={t("models.card.removeProvider")}
-            className="size-7 text-muted-foreground hover:text-destructive"
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
-          </Button>
-        ) : null}
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={onRemove}
+          title={t("models.card.removeProvider")}
+          className="size-7 text-muted-foreground hover:text-destructive"
+        >
+          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
+        </Button>
       </div>
 
-      {editing ? (
+      {usesApiKey && editing ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1.5">
             <div className="relative flex-1">
@@ -130,9 +141,7 @@ export function ProviderKeyCard({
                 autoComplete="off"
                 spellCheck={false}
                 placeholder={
-                  provider.keyPrefix
-                    ? `${provider.keyPrefix}…`
-                    : t("models.card.pasteKey")
+                  keyPrefix ? `${keyPrefix}…` : t("models.card.pasteKey")
                 }
                 value={value}
                 disabled={saving}
@@ -183,7 +192,7 @@ export function ProviderKeyCard({
             <p className="text-[10.5px] text-destructive">{error}</p>
           ) : null}
         </div>
-      ) : (
+      ) : usesApiKey ? (
         <div className="flex items-center gap-1.5">
           <code
             className={cn(
@@ -201,23 +210,9 @@ export function ProviderKeyCard({
           >
             <HugeiconsIcon icon={Edit02Icon} size={12} strokeWidth={1.75} />
           </Button>
-          {!onRemove ? (
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => void onClear()}
-              title={t("common.remove")}
-              className="size-7 text-muted-foreground hover:text-destructive"
-            >
-              <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
-            </Button>
-          ) : null}
         </div>
-      )}
+      ) : null}
+      {children}
     </div>
   );
 }
-/**
- * 本文件渲染模型提供商密钥配置卡片。
- * 负责密钥输入、显示切换、验证和删除操作，不直接持久化其他模型设置。
- */

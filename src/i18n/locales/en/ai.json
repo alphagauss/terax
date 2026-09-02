@@ -29,8 +29,6 @@
       "sessionInput": "Session input",
       "sessionOutput": "Session output",
       "cacheHit": "Cache hit",
-      "sessionCost": "Session cost",
-      "window": "Window",
       "footerLastRequest": "Last request reflects current context size; session totals are cumulative.",
       "footerApprox": "Token count is approximate (chars / 4)."
     },
@@ -120,7 +118,7 @@
     "openConversation": "Open conversation",
     "stop": "Stop",
     "send": "Send (Enter)",
-    "searchPlaceholder": "Search models, providers, capabilities…",
+    "searchPlaceholder": "Search models and providers…",
     "tabAll": "All",
     "tabFavorites": "Favorites",
     "tabRecent": "Recent",
@@ -136,14 +134,11 @@
     "noFavorites": "No favorites yet - star a model to pin it here.",
     "noRecent": "No recently-used models.",
     "noMatch": "No models match.",
+    "noModels": "No model configured",
     "configureCta": "Configure {{label}} to use these models.",
     "open": "Open",
     "unfavorite": "Unfavorite",
-    "favorite": "Favorite",
-    "intelligence": "Intelligence",
-    "speed": "Speed",
-    "affordability": "Affordability",
-    "capBarTitle": "{{label}}: {{value}}/5"
+    "favorite": "Favorite"
   },
   "chat": {
     "editorSelection": "Editor selection",

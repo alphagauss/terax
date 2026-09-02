@@ -5,29 +5,29 @@
 
 import {
   builtinProviderId,
-  isConfigurableProvider,
-  MODELS,
   type ModelRef,
   modelRefForProvider,
   modelRefKey,
   modelRefsEqual,
-  providerNeedsKey,
+  PROVIDERS,
+  type ProviderBaseURLs,
   type ProviderId,
   type ProviderInstance,
+  type ProviderModels,
+  resolveProviderInstance,
 } from "../config";
+import { isProviderConnectionReady } from "../providerRegistry";
 
 export type ModelAvailabilityConfig = {
   apiKeys: Readonly<Partial<Record<ProviderId, string | null | undefined>>>;
-  providerModels: Readonly<Record<string, string | undefined>>;
-  lmstudioBaseURL: string;
-  mlxBaseURL: string;
-  ollamaBaseURL: string;
+  providerModels: Readonly<ProviderModels>;
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
   customProviders: readonly ProviderInstance[];
 };
 
 /**
- * 按模型目录和 Provider 配置顺序返回当前可选择的模型引用。
- * 自由模型需要模型 ID，本地 Provider 还需要服务地址；自定义兼容 Provider 的密钥可选。
+ * 按 Provider 配置顺序返回用户已添加且连接条件完整的模型引用。
+ * 本地 Provider 需要服务地址；自定义兼容 Provider 的密钥可选。
  */
 export function getAvailableModelRefs(
   config: ModelAvailabilityConfig,
@@ -41,38 +41,28 @@ export function getAvailableModelRefs(
     refs.push(ref);
   };
 
-  for (const model of MODELS) {
-    if (isConfigurableProvider(model.provider)) {
-      const providerId = builtinProviderId(model.provider);
-      const configuredModel = config.providerModels[providerId]?.trim();
-      if (!configuredModel) continue;
-
-      if (model.provider === "openrouter") {
-        if (!config.apiKeys.openrouter) continue;
-      } else {
-        const baseURL =
-          model.provider === "lmstudio"
-            ? config.lmstudioBaseURL
-            : model.provider === "mlx"
-              ? config.mlxBaseURL
-              : config.ollamaBaseURL;
-        if (!baseURL.trim()) continue;
-      }
-
-      add(modelRefForProvider(model.provider, configuredModel));
-      continue;
+  for (const provider of PROVIDERS) {
+    const providerId = builtinProviderId(provider.id);
+    const models = config.providerModels[providerId] ?? [];
+    if (models.length === 0) continue;
+    const connection = resolveProviderInstance(providerId, {
+      providerBaseURLs: config.providerBaseURLs,
+      providerCredentials: config.apiKeys,
+    });
+    if (!isProviderConnectionReady(connection)) continue;
+    for (const model of models) {
+      add(modelRefForProvider(provider.id, model.id));
     }
-
-    if (providerNeedsKey(model.provider) && !config.apiKeys[model.provider]) {
-      continue;
-    }
-    add(modelRefForProvider(model.provider, model.id));
   }
 
   for (const provider of config.customProviders) {
-    const modelId = config.providerModels[provider.id]?.trim();
-    if (!provider.baseURL.trim() || !modelId) continue;
-    add({ providerId: provider.id, modelId });
+    const connection = resolveProviderInstance(provider.id, {
+      customProviders: config.customProviders,
+    });
+    if (!isProviderConnectionReady(connection)) continue;
+    for (const model of config.providerModels[provider.id] ?? []) {
+      add({ providerId: provider.id, modelId: model.id });
+    }
   }
 
   return refs;
@@ -80,12 +70,17 @@ export function getAvailableModelRefs(
 
 /** 从可用集合中保留当前选择，或依次回退到默认模型和首个模型。 */
 export function selectAvailableModel(
-  current: ModelRef,
-  preferred: ModelRef,
+  current: ModelRef | null,
+  preferred: ModelRef | null,
   available: readonly ModelRef[],
 ): ModelRef | null {
-  if (available.some((model) => modelRefsEqual(model, current))) return current;
-  if (available.some((model) => modelRefsEqual(model, preferred))) {
+  if (current && available.some((model) => modelRefsEqual(model, current))) {
+    return current;
+  }
+  if (
+    preferred &&
+    available.some((model) => modelRefsEqual(model, preferred))
+  ) {
     return preferred;
   }
   return available[0] ?? null;

@@ -4,14 +4,10 @@
  */
 
 import {
-  Context,
   ContextContent,
   ContextContentBody,
   ContextContentFooter,
-  ContextContentHeader,
-  ContextTrigger,
 } from "@/components/ai-elements/context";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +20,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { HoverCard, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -42,29 +40,23 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  DEFAULT_MODEL_REF,
-  estimateCost,
-  getModelContextLimit,
-  resolveModel,
-  tryResolveModel,
-} from "../config";
+import { tryResolveModel } from "../config";
+import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
 import {
   estimateUiMessageTokens,
   STREAM_RENDER_INTERVAL_MS,
 } from "../lib/chatRendering";
-import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
-import { getOrCreateChat } from "../store/chatRuntime";
 import { useAgentsStore } from "../store/agentsStore";
+import { getOrCreateChat } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import {
   type SessionAttention,
   useSessionAttentionStore,
 } from "../store/sessionAttentionStore";
-import { AiChatView } from "./AiChat";
 import { AGENT_ICONS } from "./AgentSwitcher";
+import { AiChatView } from "./AiChat";
 import { AiInputBarConnect } from "./AiInputBar";
 import { AiSidebarComposer } from "./AiSidebarComposer";
 
@@ -268,11 +260,10 @@ function ContextIndicator({
   const { t } = useTranslation("ai");
   const model = useChatStore((s) => s.selectedModel);
   const customProviders = usePreferencesStore((s) => s.customProviders);
+  const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const resolvedModel = useMemo(
-    () =>
-      tryResolveModel(model, customProviders) ??
-      resolveModel(DEFAULT_MODEL_REF),
-    [customProviders, model],
+    () => tryResolveModel(model, { customProviders, providerBaseURLs }),
+    [customProviders, model, providerBaseURLs],
   );
   const meta = useChatStore((state) =>
     getAgentMetaForSession(state, sessionId),
@@ -294,25 +285,29 @@ function ContextIndicator({
   }, [messages, shouldEstimate]);
   const used = lastInput > 0 ? lastInput : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
-  const max = getModelContextLimit(
-    resolvedModel.id,
-    resolvedModel.contextLimit,
-  );
-  const modelLabel = resolvedModel.label;
-  const cost = estimateCost(
-    resolvedModel.catalogModel ? resolvedModel.id : undefined,
-    tokens,
-  );
+  const modelLabel = resolvedModel?.label ?? t("statusBar.noModels");
   const cacheRate =
     tokens.inputTokens > 0
       ? Math.round((tokens.cachedInputTokens / tokens.inputTokens) * 100)
       : 0;
 
   return (
-    <Context usedTokens={used} maxTokens={max}>
-      <ContextTrigger className="h-6 gap-1 px-0 text-[10.5px]" />
+    <HoverCard closeDelay={0} openDelay={0}>
+      <HoverCardTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-6 px-0 font-mono text-[10.5px] text-muted-foreground"
+          title={
+            lastInput > 0
+              ? t("miniWindow.context.lastRequest")
+              : t("miniWindow.context.estimatedContext")
+          }
+        >
+          {formatTokens(used)}
+        </Button>
+      </HoverCardTrigger>
       <ContextContent className="w-64 text-[11px]">
-        <ContextContentHeader />
         <ContextContentBody>
           <div className="flex items-center justify-between text-muted-foreground">
             <span>{t("miniWindow.context.model")}</span>
@@ -358,22 +353,8 @@ function ContextIndicator({
                   </span>
                 </div>
               )}
-              {cost != null && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>{t("miniWindow.context.sessionCost")}</span>
-                  <span className="font-mono text-foreground">
-                    ${cost.toFixed(cost < 0.01 ? 4 : cost < 1 ? 3 : 2)}
-                  </span>
-                </div>
-              )}
             </>
           )}
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>{t("miniWindow.context.window")}</span>
-            <span className="font-mono text-foreground">
-              {formatTokens(max)}
-            </span>
-          </div>
         </ContextContentBody>
         <ContextContentFooter>
           <span className="text-[10px] italic text-muted-foreground">
@@ -383,7 +364,7 @@ function ContextIndicator({
           </span>
         </ContextContentFooter>
       </ContextContent>
-    </Context>
+    </HoverCard>
   );
 }
 

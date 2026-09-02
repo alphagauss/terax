@@ -12,22 +12,21 @@ import {
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 import {
-  DEFAULT_MODEL_REF,
-  type ModelRef,
-  providerFromBuiltinId,
-  type ProviderId,
-  providerNeedsKey,
-} from "../config";
-import type { AgentUsage } from "../lib/agent";
+  materializeSubagentDisplayParts,
+  type SubagentDisplayState,
+  toSubagentDisplaySnapshot,
+} from "../agents/subagentDisplay";
 import {
   clearSubagentCoordinator,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
 import {
-  materializeSubagentDisplayParts,
-  toSubagentDisplaySnapshot,
-  type SubagentDisplayState,
-} from "../agents/subagentDisplay";
+  type ModelRef,
+  type ProviderId,
+  providerFromBuiltinId,
+  providerRequiresCredential,
+} from "../config";
+import type { AgentUsage } from "../lib/agent";
 import { snapshotAgent } from "../lib/agents";
 import {
   EMPTY_PROVIDER_KEYS,
@@ -131,8 +130,8 @@ type StoreState = {
   providerInstanceKeys: ProviderInstanceKeys;
   setProviderInstanceKeys: (keys: ProviderInstanceKeys) => void;
 
-  selectedModel: ModelRef;
-  setSelectedModel: (model: ModelRef, recordRecent?: boolean) => void;
+  selectedModel: ModelRef | null;
+  setSelectedModel: (model: ModelRef | null, recordRecent?: boolean) => void;
 
   permissionMode: AiPermissionMode;
   setPermissionMode: (mode: AiPermissionMode) => void;
@@ -298,10 +297,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
   providerInstanceKeys: {},
   setProviderInstanceKeys: (keys) => set({ providerInstanceKeys: keys }),
 
-  selectedModel: DEFAULT_MODEL_REF,
+  selectedModel: null,
   setSelectedModel: (model, recordRecent = true) => {
     set({ selectedModel: model });
-    if (recordRecent) void pushRecentModel(model);
+    if (model && recordRecent) void pushRecentModel(model);
   },
 
   permissionMode: "ask",
@@ -943,6 +942,7 @@ export function selectActiveAgentMeta(state: StoreState): AgentMeta {
 export function getActiveProviderKey(): string | null {
   const { selectedModel, apiKeys, providerInstanceKeys } =
     useChatStore.getState();
+  if (!selectedModel) return null;
   const provider = providerFromBuiltinId(selectedModel.providerId);
   return provider
     ? (apiKeys[provider] ?? null)
@@ -953,7 +953,7 @@ export function hasKeyForModel(model: ModelRef): boolean {
   const { apiKeys } = useChatStore.getState();
   const provider = providerFromBuiltinId(model.providerId);
   if (!provider) return true;
-  return providerNeedsKey(provider) ? !!apiKeys[provider] : true;
+  return providerRequiresCredential(provider) ? !!apiKeys[provider] : true;
 }
 
 export function getChat(sessionId?: string): Chat<UIMessage> | undefined {

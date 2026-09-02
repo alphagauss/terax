@@ -6,12 +6,12 @@
 
 import i18n from "@/i18n";
 import {
-  DEFAULT_MODEL_REF,
   modelRefsEqual,
-  resolveModel,
+  providerFromBuiltinId,
   tryResolveModel,
 } from "@/modules/ai/config";
 import { getKey, getProviderInstanceKey } from "@/modules/ai/lib/keyring";
+import { createProviderConnection } from "@/modules/ai/providerRegistry";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -271,30 +271,15 @@ export const EditorCore = memo(
       let cancelled = false;
       const refresh = async () => {
         const s = usePreferencesStore.getState();
-        const model = tryResolveModel(s.autocompleteModel, s.customProviders);
+        const model = s.autocompleteModel;
         if (!model) {
           apiKeyRef.current = null;
           return;
         }
-        const provider = model.provider;
-        if (
-          provider === "lmstudio" ||
-          provider === "mlx" ||
-          provider === "ollama"
-        ) {
-          apiKeyRef.current = null;
-          return;
-        }
-        if (
-          s.customProviders.some(
-            (providerInstance) => providerInstance.id === model.providerId,
-          )
-        ) {
-          const k = await getProviderInstanceKey(model.providerId);
-          if (!cancelled) apiKeyRef.current = k;
-          return;
-        }
-        const k = await getKey(provider);
+        const provider = providerFromBuiltinId(model.providerId);
+        const k = provider
+          ? await getKey(provider)
+          : await getProviderInstanceKey(model.providerId);
         if (!cancelled) apiKeyRef.current = k;
       };
       void refresh();
@@ -305,7 +290,11 @@ export const EditorCore = memo(
       });
       const unsubPrefs = usePreferencesStore.subscribe((state, prev) => {
         if (
-          !modelRefsEqual(state.autocompleteModel, prev.autocompleteModel) ||
+          (state.autocompleteModel === null) !==
+            (prev.autocompleteModel === null) ||
+          (state.autocompleteModel !== null &&
+            prev.autocompleteModel !== null &&
+            !modelRefsEqual(state.autocompleteModel, prev.autocompleteModel)) ||
           state.customProviders !== prev.customProviders
         ) {
           void refresh();
@@ -547,21 +536,22 @@ export const EditorCore = memo(
         inlineCompletion({
           getPrefs: () => {
             const s = usePreferencesStore.getState();
-            const configuredModel = tryResolveModel(
-              s.autocompleteModel,
-              s.customProviders,
-            );
-            const model = configuredModel ?? resolveModel(DEFAULT_MODEL_REF);
+            const configuredModel = tryResolveModel(s.autocompleteModel, {
+              customProviders: s.customProviders,
+              providerBaseURLs: s.providerBaseURLs,
+            });
             return {
               enabled: s.autocompleteEnabled && !!configuredModel,
               trigger: s.autocompleteTrigger,
-              provider: model.provider,
-              modelId: model.id,
-              apiKey: apiKeyRef.current,
-              lmstudioBaseURL: s.lmstudioBaseURL,
-              mlxBaseURL: s.mlxBaseURL,
-              ollamaBaseURL: s.ollamaBaseURL,
-              openaiCompatibleBaseURL: model.baseURL,
+              connection: configuredModel
+                ? createProviderConnection({
+                    instanceId: configuredModel.providerId,
+                    provider: configuredModel.provider,
+                    baseURL: configuredModel.baseURL,
+                    credentialValue: apiKeyRef.current,
+                  })
+                : null,
+              modelId: configuredModel?.id ?? "",
             };
           },
           getPath: () => pathRef.current,

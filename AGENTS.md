@@ -248,6 +248,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 ### AI 子系统
 
 - 云端 provider 通过 `@ai-sdk/*` 接入；本地 provider 包括 LM Studio、MLX、Ollama。
+- 内置 provider 的地址、凭据策略、模型目录和运行时 adapter 统一定义在 `src/modules/ai/providerRegistry.ts`。设置页和 Agent 只消费解析后的连接，不按供应商名称重复拼接协议。新增流程见 `docs/architecture/ai-subsystem.md`。
+- 远端模型目录只用于发现模型 ID；用户明确添加的模型才进入设置。不得重新加入静态模型清单、价格、上下文长度、营销说明或主观能力评分。
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
 - `lib/agent.ts` 保持 `Agent` 和 `DirectChatTransport` 结构，其他模块依赖 AI SDK v6 chat 语义。
 - 会话以 `sessions/<uuid>.jsonl` 原子保存；首行固定为 metadata，后续每行是一条角色消息记录。单会话 OS 锁禁止两个进程同时继续同一会话。

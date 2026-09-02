@@ -29,8 +29,6 @@
       "sessionInput": "会话输入",
       "sessionOutput": "会话输出",
       "cacheHit": "缓存命中",
-      "sessionCost": "会话费用",
-      "window": "窗口",
       "footerLastRequest": "上次请求反映当前上下文大小；会话合计为累计值。",
       "footerApprox": "Token 数量为近似值（字符数 / 4）。"
     },
@@ -120,7 +118,7 @@
     "openConversation": "打开对话",
     "stop": "停止",
     "send": "发送 (Enter)",
-    "searchPlaceholder": "搜索模型、提供方、能力…",
+    "searchPlaceholder": "搜索模型和提供方…",
     "tabAll": "全部",
     "tabFavorites": "收藏",
     "tabRecent": "最近",
@@ -136,14 +134,11 @@
     "noFavorites": "还没有收藏，给模型加星即可固定到这里。",
     "noRecent": "没有最近使用的模型。",
     "noMatch": "没有匹配的模型。",
+    "noModels": "尚未配置模型",
     "configureCta": "配置 {{label}} 以使用这些模型。",
     "open": "打开",
     "unfavorite": "取消收藏",
-    "favorite": "收藏",
-    "intelligence": "智能",
-    "speed": "速度",
-    "affordability": "性价比",
-    "capBarTitle": "{{label}}：{{value}}/5"
+    "favorite": "收藏"
   },
   "chat": {
     "editorSelection": "编辑器选区",

@@ -3,16 +3,6 @@
  * 负责绑定偏好与密钥状态，并在 Provider 配置变化时同步关联模型引用。
  */
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/menu/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -20,40 +10,60 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/menu/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import {
   builtinProviderId,
-  DEFAULT_MODEL_REF,
-  getAutocompleteEligibleModels,
+  type ConfiguredModel,
   getProvider,
-  MODELS,
-  type ModelInfo,
   type ModelRef,
-  modelRefForProvider,
   modelRefKey,
   modelRefsEqual,
+  normalizeConfiguredModels,
   PROVIDERS,
-  type ProviderInstance,
+  type ProviderBaseURLs,
   type ProviderId,
   type ProviderInfo,
-  providerNeedsKey,
+  type ProviderInstance,
+  type ProviderModels,
+  type ResolvedModel,
+  providerHasEditableBaseURL,
   resolveModel,
+  resolveProviderBaseURL,
+  resolveProviderInstance,
   STT_PROVIDER_LABELS,
   type SttProvider,
   tryResolveModel,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
 import {
-  clearProviderInstanceKey,
   clearKey,
-  getAllProviderInstanceKeys,
+  clearProviderInstanceKey,
   getAllKeys,
+  getAllProviderInstanceKeys,
   type ProviderInstanceKeys,
-  setProviderInstanceKey,
   setKey,
+  setProviderInstanceKey,
 } from "@/modules/ai/lib/keyring";
+import { getAvailableModelRefs } from "@/modules/ai/lib/modelAvailability";
+import { modelCatalog } from "@/modules/ai/lib/modelCatalog";
 import { buildModelReferencePatch } from "@/modules/ai/lib/modelPrefs";
+import {
+  createProviderConnection,
+  isProviderConnectionReady,
+  type ResolvedProviderConnection,
+} from "@/modules/ai/providerRegistry";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -76,42 +86,24 @@ import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import {
   Add01Icon,
   ArrowDown01Icon,
-  ArrowUpRight01Icon,
   Cancel01Icon,
   CheckmarkCircle02Icon,
   ChevronDown,
   Mic01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ProviderIcon } from "../components/ProviderIcon";
 import { ProviderKeyCard } from "../components/ProviderKeyCard";
+import { ProviderModelPicker } from "../components/ProviderModelPicker";
 import { SectionHeader } from "../components/SectionHeader";
 
 type KeysMap = Record<ProviderId, string | null>;
 type ProviderInstanceUpdate = Partial<
-  Pick<ProviderInstance, "name" | "baseURL" | "contextLimit">
+  Pick<ProviderInstance, "name" | "baseURL">
 >;
 
-// 模型文案按模型名存放；关闭分隔符解析后，动态模型可直接回退到原始文本。
 type TFn = ReturnType<typeof useTranslation>["t"];
-const modelHint = (t: TFn, m: { id: string; hint: string }): string =>
-  t(`modelHint.${m.id}`, {
-    ns: "aiModels",
-    keySeparator: false,
-    nsSeparator: false,
-    defaultValue: m.hint,
-  });
-const modelDesc = (t: TFn, m: { id: string; description: string }): string =>
-  t(`modelDesc.${m.id}`, {
-    ns: "aiModels",
-    keySeparator: false,
-    nsSeparator: false,
-    defaultValue: m.description,
-  });
 const sttLabel = (t: TFn, p: SttProvider): string =>
   t(`sttProvider.${p}`, {
     ns: "aiModels",
@@ -120,46 +112,9 @@ const sttLabel = (t: TFn, p: SttProvider): string =>
     defaultValue: STT_PROVIDER_LABELS[p],
   });
 
-const isLocalProvider = (id: ProviderId): boolean => !providerNeedsKey(id);
-
-type LocalMeta = {
-  urlPlaceholder: string;
-  modelPlaceholder: string;
-  description: string;
-  modelHint: React.ReactNode;
-};
-
-const getLocalMeta = (t: TFn): Partial<Record<ProviderId, LocalMeta>> => ({
-  lmstudio: {
-    urlPlaceholder: "http://localhost:1234/v1",
-    modelPlaceholder: "qwen2.5-coder-7b-instruct",
-    description: t("models.local.lmstudio.description"),
-    modelHint: t("models.local.lmstudio.modelHint"),
-  },
-  mlx: {
-    urlPlaceholder: "http://127.0.0.1:8080/v1",
-    modelPlaceholder: "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
-    description: t("models.local.mlx.description"),
-    modelHint: t("models.local.mlx.modelHint"),
-  },
-  ollama: {
-    urlPlaceholder: "http://localhost:11434/v1",
-    modelPlaceholder: "qwen2.5-coder:7b",
-    description: t("models.local.ollama.description"),
-    modelHint: t("models.local.ollama.modelHint"),
-  },
-  openrouter: {
-    urlPlaceholder: "",
-    modelPlaceholder: "anthropic/claude-sonnet-5, openai/gpt-5.6, …",
-    description: t("models.local.openrouter.description"),
-    modelHint: t("models.local.openrouter.modelHint"),
-  },
-});
-
 /** 模型设置主区域，组合 Agent 默认值、Subagent 并发及云端、本地和语音提供商配置。 */
 export function ModelsSection() {
   const { t } = useTranslation();
-  const localMeta = getLocalMeta(t);
   const [keys, setKeys] = useState<KeysMap | null>(null);
   const [customProviderKeys, setCustomProviderKeys] =
     useState<ProviderInstanceKeys>({});
@@ -173,9 +128,7 @@ export function ModelsSection() {
     (s) => s.maxConcurrentSubagents,
   );
   const providerModels = usePreferencesStore((s) => s.providerModels);
-  const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
-  const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
-  const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
+  const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const customProviders = usePreferencesStore((s) => s.customProviders);
 
   useEffect(() => {
@@ -195,21 +148,25 @@ export function ModelsSection() {
   const onSaveKey = async (provider: ProviderId, value: string) => {
     await setKey(provider, value);
     setKeys((prev) => (prev ? { ...prev, [provider]: value } : prev));
+    modelCatalog.invalidate(builtinProviderId(provider));
   };
 
   const onClearKey = async (provider: ProviderId) => {
     await clearKey(provider);
     setKeys((prev) => (prev ? { ...prev, [provider]: null } : prev));
+    modelCatalog.invalidate(builtinProviderId(provider));
   };
 
   const onSaveCustomProviderKey = async (providerId: string, value: string) => {
     await setProviderInstanceKey(providerId, value);
     setCustomProviderKeys((prev) => ({ ...prev, [providerId]: value }));
+    modelCatalog.invalidate(providerId);
   };
 
   const onClearCustomProviderKey = async (providerId: string) => {
     await clearProviderInstanceKey(providerId);
     setCustomProviderKeys((prev) => ({ ...prev, [providerId]: null }));
+    modelCatalog.invalidate(providerId);
   };
 
   const addCustomProvider = async () => {
@@ -218,28 +175,94 @@ export function ModelsSection() {
       protocol: "openai-compatible",
       name: "",
       baseURL: "",
-      contextLimit: 128_000,
     };
     await setModelSettings({
       customProviders: [...customProviders, provider],
     });
   };
 
-  /** 同步替换设置引用和当前聊天选择，自动切换不计入最近使用。 */
+  /** 计算持久化模型引用更新，不提前修改进程内聊天状态。 */
   const prepareReferenceUpdate = (
     matches: (model: ModelRef) => boolean,
     replacement: ModelRef | null,
   ): ModelSettingsPatch => {
     const prefs = usePreferencesStore.getState();
-    const patch = buildModelReferencePatch(prefs, matches, replacement);
+    return buildModelReferencePatch(prefs, matches, replacement);
+  };
+
+  /** 持久化成功后同步当前聊天选择，自动切换不计入最近使用。 */
+  const syncChatReference = (
+    matches: (model: ModelRef) => boolean,
+    replacement: ModelRef | null,
+  ) => {
     const chat = useChatStore.getState();
-    if (matches(chat.selectedModel)) {
-      const fallback = matches(prefs.defaultModel)
-        ? DEFAULT_MODEL_REF
-        : prefs.defaultModel;
-      chat.setSelectedModel(replacement ?? fallback, false);
+    if (chat.selectedModel && matches(chat.selectedModel)) {
+      chat.setSelectedModel(replacement, false);
     }
-    return patch;
+  };
+
+  const providerConnection = (
+    providerId: string,
+  ): ResolvedProviderConnection | null => {
+    const connection = resolveProviderInstance(providerId, {
+      customProviders,
+      providerBaseURLs,
+      providerCredentials: keys ?? undefined,
+      providerInstanceCredentials: customProviderKeys,
+    });
+    return isProviderConnectionReady(connection) ? connection : null;
+  };
+
+  const firstAvailableModel = (
+    models: ProviderModels,
+    providers = customProviders,
+  ): ModelRef | null => {
+    if (!keys) return null;
+    return (
+      getAvailableModelRefs({
+        apiKeys: keys,
+        providerModels: models,
+        providerBaseURLs,
+        customProviders: providers,
+      })[0] ?? null
+    );
+  };
+
+  /** 保存一个 Provider 的用户模型集合，并级联清理被移除模型的引用。 */
+  const updateProviderModels = async (
+    providerId: string,
+    models: ConfiguredModel[],
+  ) => {
+    const prefs = usePreferencesStore.getState();
+    const normalized = normalizeConfiguredModels(models);
+    const nextProviderModels = { ...prefs.providerModels };
+    if (normalized.length > 0) nextProviderModels[providerId] = normalized;
+    else delete nextProviderModels[providerId];
+    const nextIds = new Set(normalized.map((model) => model.id));
+    const removedIds = new Set(
+      (prefs.providerModels[providerId] ?? [])
+        .filter((model) => !nextIds.has(model.id))
+        .map((model) => model.id),
+    );
+    const replacement = firstAvailableModel(nextProviderModels);
+    const matchesRemoved = (model: ModelRef) =>
+      model.providerId === providerId && removedIds.has(model.modelId);
+    const referencePatch: ModelSettingsPatch =
+      removedIds.size > 0
+        ? prepareReferenceUpdate(matchesRemoved, replacement)
+        : {};
+    if (!prefs.defaultModel && replacement) {
+      referencePatch.defaultModel = replacement;
+    }
+    await setModelSettings({
+      ...referencePatch,
+      providerModels: nextProviderModels,
+    });
+    if (removedIds.size > 0) syncChatReference(matchesRemoved, replacement);
+    const chat = useChatStore.getState();
+    if (!chat.selectedModel && replacement) {
+      chat.setSelectedModel(replacement, false);
+    }
   };
 
   const updateCustomProvider = async (
@@ -252,147 +275,105 @@ export function ModelsSection() {
     const nextProviders = customProviders.map((provider) =>
       provider.id === id ? nextProvider : provider,
     );
-    const wasConfigured =
-      !!previous.baseURL.trim() && !!providerModels[id]?.trim();
-    const isConfigured =
-      !!nextProvider.baseURL.trim() && !!providerModels[id]?.trim();
-    const referencePatch =
-      wasConfigured && !isConfigured
-        ? prepareReferenceUpdate((model) => model.providerId === id, null)
-        : {};
+    modelCatalog.invalidate(id);
+    const matchesProvider = (model: ModelRef) => model.providerId === id;
+    const replacement = firstAvailableModel(providerModels, nextProviders);
+    const referencePatch = nextProvider.baseURL.trim()
+      ? {}
+      : prepareReferenceUpdate(matchesProvider, replacement);
     await setModelSettings({
       ...referencePatch,
       customProviders: nextProviders,
     });
+    if (!nextProvider.baseURL.trim()) {
+      syncChatReference(matchesProvider, replacement);
+    }
   };
 
   const removeCustomProvider = async (id: string) => {
-    const removed = customProviders.find((provider) => provider.id === id);
-    if (!removed) return;
     const remaining = customProviders.filter((provider) => provider.id !== id);
-    const referencePatch = prepareReferenceUpdate(
-      (model) => model.providerId === removed.id,
-      null,
-    );
     const nextProviderModels = { ...providerModels };
     delete nextProviderModels[id];
+    const matchesProvider = (model: ModelRef) => model.providerId === id;
+    const replacement = firstAvailableModel(nextProviderModels, remaining);
+    const referencePatch = prepareReferenceUpdate(matchesProvider, replacement);
     await setModelSettings({
       ...referencePatch,
       customProviders: remaining,
       providerModels: nextProviderModels,
     });
+    syncChatReference(matchesProvider, replacement);
+    modelCatalog.invalidate(id);
     await clearProviderInstanceKey(id);
-    setCustomProviderKeys((prev) => {
-      const next = { ...prev };
+    setCustomProviderKeys((previous) => {
+      const next = { ...previous };
       delete next[id];
       return next;
     });
   };
 
-  /** 更新自由模型 Provider 的模型名，并原子替换所有关联引用。 */
-  const updateConfiguredModel = async (providerId: string, value: string) => {
+  /** 更新可编辑 Provider 地址；地址为空时保留模型配置但停止提供运行候选。 */
+  const updateProviderBaseURL = async (provider: ProviderId, value: string) => {
     const prefs = usePreferencesStore.getState();
-    const previousModelId = prefs.providerModels[providerId] ?? "";
-    if (previousModelId === value) return;
-    const nextProviderModels = { ...prefs.providerModels };
-    if (value.trim()) nextProviderModels[providerId] = value;
-    else delete nextProviderModels[providerId];
-
-    let referencePatch: ModelSettingsPatch = {};
-    if (!value.trim()) {
-      referencePatch = prepareReferenceUpdate(
-        (model) => model.providerId === providerId,
-        null,
-      );
-    } else if (previousModelId.trim()) {
-      const previousModel = { providerId, modelId: previousModelId };
-      const nextModel = { providerId, modelId: value };
-      referencePatch = prepareReferenceUpdate(
-        (model) => modelRefsEqual(model, previousModel),
-        nextModel,
-      );
-    }
-    await setModelSettings({
-      ...referencePatch,
-      providerModels: nextProviderModels,
-    });
-  };
-
-  /** 更新本地 Provider 地址；清空地址时同步移除已不可用的模型引用。 */
-  const updateLocalBaseURL = async (
-    provider: "lmstudio" | "mlx" | "ollama",
-    value: string,
-  ) => {
-    const prefs = usePreferencesStore.getState();
-    const previousBaseURL =
-      provider === "lmstudio"
-        ? prefs.lmstudioBaseURL
-        : provider === "mlx"
-          ? prefs.mlxBaseURL
-          : prefs.ollamaBaseURL;
-    const baseURLPatch: ModelSettingsPatch =
-      provider === "lmstudio"
-        ? { lmstudioBaseURL: value }
-        : provider === "mlx"
-          ? { mlxBaseURL: value }
-          : { ollamaBaseURL: value };
+    const previousBaseURL = resolveProviderBaseURL(
+      provider,
+      prefs.providerBaseURLs[provider],
+    );
     if (previousBaseURL === value) return;
-
+    const nextProviderBaseURLs = {
+      ...prefs.providerBaseURLs,
+      [provider]: value,
+    };
+    modelCatalog.invalidate(builtinProviderId(provider));
+    const fallbackModels = { ...providerModels };
+    const providerId = builtinProviderId(provider);
+    delete fallbackModels[providerId];
+    const matchesProvider = (model: ModelRef) =>
+      model.providerId === providerId;
+    const replacement = firstAvailableModel(fallbackModels);
     const referencePatch = value.trim()
       ? {}
-      : prepareReferenceUpdate(
-          (model) => model.providerId === builtinProviderId(provider),
-          null,
-        );
-    await setModelSettings({ ...referencePatch, ...baseURLPatch });
-  };
-
-  const localConfig = (id: ProviderId): LocalConfig | null => {
-    switch (id) {
-      case "lmstudio":
-        return {
-          baseURL: lmstudioBaseURL,
-          modelId: providerModels[builtinProviderId(id)] ?? "",
-          setBaseURL: (value) => updateLocalBaseURL("lmstudio", value),
-          setModelId: (value) =>
-            updateConfiguredModel(builtinProviderId(id), value),
-        };
-      case "mlx":
-        return {
-          baseURL: mlxBaseURL,
-          modelId: providerModels[builtinProviderId(id)] ?? "",
-          setBaseURL: (value) => updateLocalBaseURL("mlx", value),
-          setModelId: (value) =>
-            updateConfiguredModel(builtinProviderId(id), value),
-        };
-      case "ollama":
-        return {
-          baseURL: ollamaBaseURL,
-          modelId: providerModels[builtinProviderId(id)] ?? "",
-          setBaseURL: (value) => updateLocalBaseURL("ollama", value),
-          setModelId: (value) =>
-            updateConfiguredModel(builtinProviderId(id), value),
-        };
-      case "openrouter":
-        return {
-          baseURL: "",
-          modelId: providerModels[builtinProviderId(id)] ?? "",
-          setBaseURL: async () => {},
-          setModelId: (value) =>
-            updateConfiguredModel(builtinProviderId(id), value),
-          noBaseURL: true,
-        };
-      default:
-        return null;
-    }
+      : prepareReferenceUpdate(matchesProvider, replacement);
+    await setModelSettings({
+      ...referencePatch,
+      providerBaseURLs: nextProviderBaseURLs,
+    });
+    if (!value.trim()) syncChatReference(matchesProvider, replacement);
   };
 
   const isConfigured = (id: ProviderId): boolean => {
-    const cfg = localConfig(id);
-    if (id === "openrouter") return !!keys?.[id] && !!cfg?.modelId.trim();
-    if (!isLocalProvider(id)) return !!keys?.[id];
-    if (!cfg) return false;
-    return !!cfg.baseURL.trim() && !!cfg.modelId.trim();
+    const models = providerModels[builtinProviderId(id)] ?? [];
+    if (models.length === 0) return false;
+    const connection = providerConnection(builtinProviderId(id));
+    return connection !== null;
+  };
+
+  const removeProvider = async (id: ProviderId) => {
+    const providerId = builtinProviderId(id);
+    const nextProviderModels = { ...providerModels };
+    delete nextProviderModels[providerId];
+    const matchesProvider = (model: ModelRef) =>
+      model.providerId === providerId;
+    const replacement = firstAvailableModel(nextProviderModels);
+    const referencePatch = prepareReferenceUpdate(matchesProvider, replacement);
+    const settingsPatch: ModelSettingsPatch = {
+      ...referencePatch,
+      providerModels: nextProviderModels,
+    };
+    if (providerHasEditableBaseURL(id)) {
+      const nextProviderBaseURLs = { ...providerBaseURLs };
+      delete nextProviderBaseURLs[id];
+      settingsPatch.providerBaseURLs = nextProviderBaseURLs;
+    }
+    await setModelSettings(settingsPatch);
+    syncChatReference(matchesProvider, replacement);
+    modelCatalog.invalidate(providerId);
+    if (keys?.[id]) await onClearKey(id);
+    setAdding((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
   };
 
   if (!keys) {
@@ -404,41 +385,32 @@ export function ModelsSection() {
   }
 
   const configuredIds = new Set(
-    PROVIDERS.filter((p) => isConfigured(p.id)).map((p) => p.id),
+    PROVIDERS.filter((provider) => isConfigured(provider.id)).map(
+      (provider) => provider.id,
+    ),
   );
-  const visibleIds = new Set<ProviderId>(configuredIds);
-  for (const id of adding) visibleIds.add(id);
-  const visibleProviders = PROVIDERS.filter(
-    (p) => p.id !== "openai-compatible" && visibleIds.has(p.id),
+  const visibleIds = new Set<ProviderId>(adding);
+  for (const provider of PROVIDERS) {
+    if (
+      keys[provider.id] ||
+      providerBaseURLs[provider.id] !== undefined ||
+      (providerModels[builtinProviderId(provider.id)]?.length ?? 0) > 0
+    ) {
+      visibleIds.add(provider.id);
+    }
+  }
+  const visibleProviders = PROVIDERS.filter((provider) =>
+    visibleIds.has(provider.id),
   );
   const addableProviders = PROVIDERS.filter(
-    (p) => p.id !== "openai-compatible" && !visibleIds.has(p.id),
+    (provider) => !visibleIds.has(provider.id),
   );
-
-  const removeProvider = async (id: ProviderId) => {
-    if (id === "openrouter") {
-      await updateConfiguredModel(builtinProviderId(id), "");
-      await onClearKey(id);
-    } else if (isLocalProvider(id)) {
-      const cfg = localConfig(id);
-      if (cfg) {
-        await cfg.setModelId("");
-      }
-    } else {
-      const providerId = builtinProviderId(id);
-      const referencePatch = prepareReferenceUpdate(
-        (model) => model.providerId === providerId,
-        null,
-      );
-      await setModelSettings(referencePatch);
-      await onClearKey(id);
-    }
-    setAdding((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
+  const availableModels = getAvailableModelRefs({
+    apiKeys: keys,
+    providerModels,
+    providerBaseURLs,
+    customProviders,
+  });
 
   const addProvider = (id: ProviderId) => {
     setAdding((prev) => new Set(prev).add(id));
@@ -455,8 +427,8 @@ export function ModelsSection() {
         defaultModel={defaultModel}
         defaultSubagentModel={defaultSubagentModel}
         maxConcurrentSubagents={maxConcurrentSubagents}
-        configuredIds={configuredIds}
-        keys={keys}
+        models={availableModels}
+        providerBaseURLs={providerBaseURLs}
         customProviders={customProviders}
       />
 
@@ -484,51 +456,47 @@ export function ModelsSection() {
         ) : (
           <div className="flex flex-col gap-2">
             {visibleProviders.map((provider) => {
-              if (
-                provider.id === "openrouter" ||
-                isLocalProvider(provider.id)
-              ) {
-                const config = localConfig(provider.id);
-                const meta = localMeta[provider.id];
-                if (!config || !meta) return null;
-                return (
-                  <LocalProviderCard
-                    key={provider.id}
-                    provider={provider}
-                    configured={configuredIds.has(provider.id)}
-                    config={config}
-                    meta={meta}
-                    providerKey={keys[provider.id]}
-                    onSaveKey={(value) => onSaveKey(provider.id, value)}
-                    onClearKey={() => onClearKey(provider.id)}
-                    onRemove={() => void removeProvider(provider.id)}
-                  />
-                );
-              }
+              const providerId = builtinProviderId(provider.id);
               return (
                 <ProviderKeyCard
                   key={provider.id}
                   provider={provider}
                   currentKey={keys[provider.id]}
+                  configured={configuredIds.has(provider.id)}
                   onSave={(value) => onSaveKey(provider.id, value)}
-                  onClear={() => onClearKey(provider.id)}
                   onRemove={() => void removeProvider(provider.id)}
-                />
+                >
+                  <BuiltinProviderFields
+                    provider={provider}
+                    credentialValue={keys[provider.id]}
+                    baseURL={resolveProviderBaseURL(
+                      provider.id,
+                      providerBaseURLs[provider.id],
+                    )}
+                    models={providerModels[providerId] ?? []}
+                    onBaseURLChange={(value) =>
+                      updateProviderBaseURL(provider.id, value)
+                    }
+                    onModelsChange={(models) =>
+                      updateProviderModels(providerId, models)
+                    }
+                  />
+                </ProviderKeyCard>
               );
             })}
             {customProviders.map((provider) => (
               <CustomProviderCard
                 key={provider.id}
                 provider={provider}
-                modelId={providerModels[provider.id] ?? ""}
+                models={providerModels[provider.id] ?? []}
                 providerKey={customProviderKeys[provider.id] ?? null}
                 onSaveKey={(value) =>
                   onSaveCustomProviderKey(provider.id, value)
                 }
                 onClearKey={() => onClearCustomProviderKey(provider.id)}
                 onUpdate={(patch) => updateCustomProvider(provider.id, patch)}
-                onUpdateModel={(value) =>
-                  updateConfiguredModel(provider.id, value)
+                onUpdateModels={(models) =>
+                  updateProviderModels(provider.id, models)
                 }
                 onRemove={() => removeCustomProvider(provider.id)}
               />
@@ -540,14 +508,6 @@ export function ModelsSection() {
   );
 }
 
-type LocalConfig = {
-  baseURL: string;
-  modelId: string;
-  setBaseURL: (v: string) => Promise<void>;
-  setModelId: (v: string) => Promise<void>;
-  noBaseURL?: boolean;
-};
-
 function AddProviderMenu({
   providers,
   onAdd,
@@ -558,9 +518,11 @@ function AddProviderMenu({
   onAddCustom: () => void;
 }) {
   const { t } = useTranslation();
-  const cloud = providers.filter((p) => !isLocalProvider(p.id));
-  const local = providers.filter(
-    (p) => isLocalProvider(p.id) && p.id !== "openai-compatible",
+  const cloud = providers.filter(
+    (provider) => !providerHasEditableBaseURL(provider.id),
+  );
+  const local = providers.filter((provider) =>
+    providerHasEditableBaseURL(provider.id),
   );
 
   return (
@@ -622,19 +584,58 @@ function ProviderMenuItem({
   );
 }
 
+type ModelOption = { ref: ModelRef; info: ResolvedModel };
+type ModelOptionGroup = {
+  id: string;
+  label: string;
+  provider: ProviderId;
+  options: ModelOption[];
+};
+
+/** 按 Provider 实例分组模型，避免多个自定义端点因共享协议而合并。 */
+function resolveModelOptionGroups(
+  models: readonly ModelRef[],
+  providerBaseURLs: Readonly<ProviderBaseURLs>,
+  customProviders: readonly ProviderInstance[],
+  customFallbackLabel: string,
+): ModelOptionGroup[] {
+  const customById = new Map(
+    customProviders.map((provider) => [provider.id, provider]),
+  );
+  const groups = new Map<string, ModelOptionGroup>();
+  for (const ref of models) {
+    const info = resolveModel(ref, { customProviders, providerBaseURLs });
+    let group = groups.get(ref.providerId);
+    if (!group) {
+      const custom = customById.get(ref.providerId);
+      group = {
+        id: ref.providerId,
+        label: custom
+          ? custom.name.trim() || customFallbackLabel
+          : getProvider(info.provider).label,
+        provider: info.provider,
+        options: [],
+      };
+      groups.set(ref.providerId, group);
+    }
+    group.options.push({ ref, info });
+  }
+  return [...groups.values()];
+}
+
 function DefaultsBlock({
   defaultModel,
   defaultSubagentModel,
   maxConcurrentSubagents,
-  configuredIds,
-  keys,
+  models,
+  providerBaseURLs,
   customProviders,
 }: {
-  defaultModel: ModelRef;
+  defaultModel: ModelRef | null;
   defaultSubagentModel: ModelRef | null;
   maxConcurrentSubagents: number;
-  configuredIds: Set<ProviderId>;
-  keys: KeysMap;
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
   customProviders: readonly ProviderInstance[];
 }) {
   const { t } = useTranslation();
@@ -645,17 +646,17 @@ function DefaultsBlock({
         <FieldRow label={t("models.defaults.chatModel")}>
           <DefaultModelPicker
             model={defaultModel}
-            configuredIds={configuredIds}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
             customProviders={customProviders}
-            onSelect={(model) => {
-              if (model) void setDefaultModel(model);
-            }}
+            onSelect={(model) => void setDefaultModel(model)}
           />
         </FieldRow>
         <FieldRow label={t("models.defaults.subagentModel")}>
           <DefaultModelPicker
             model={defaultSubagentModel}
-            configuredIds={configuredIds}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
             customProviders={customProviders}
             inheritLabel={t("models.defaults.followChatModel")}
             onSelect={(model) => void setDefaultSubagentModel(model)}
@@ -689,8 +690,8 @@ function DefaultsBlock({
           </Select>
         </FieldRow>
         <AutocompleteRow
-          keys={keys}
-          configuredIds={configuredIds}
+          models={models}
+          providerBaseURLs={providerBaseURLs}
           customProviders={customProviders}
         />
       </div>
@@ -698,48 +699,38 @@ function DefaultsBlock({
   );
 }
 
-/** 渲染可选继承项的默认模型选择器，只列出已经配置的 provider。 */
+/** 渲染默认模型选择器，只列出用户已添加且连接可用的模型。 */
 function DefaultModelPicker({
   model,
-  configuredIds,
+  models,
+  providerBaseURLs,
   customProviders,
   inheritLabel,
   onSelect,
 }: {
   model: ModelRef | null;
-  configuredIds: Set<ProviderId>;
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
   customProviders: readonly ProviderInstance[];
   inheritLabel?: string;
   onSelect: (model: ModelRef | null) => void;
 }) {
   const { t } = useTranslation();
-  const providerModels = usePreferencesStore((s) => s.providerModels);
-  const modelOptions: { ref: ModelRef; info: ModelInfo }[] = PROVIDERS.filter(
-    (provider) => configuredIds.has(provider.id),
-  ).flatMap<{ ref: ModelRef; info: ModelInfo }>((provider) => {
-    const configured = providerModels[builtinProviderId(provider.id)]?.trim();
-    if (configured) {
-      const ref = modelRefForProvider(provider.id, configured);
-      return [{ ref, info: resolveModel(ref) }];
-    }
-    return MODELS.filter((item) => item.provider === provider.id).map(
-      (info) => ({
-        ref: modelRefForProvider(provider.id, info.id),
-        info,
-      }),
-    );
+  const groups = useMemo(
+    () =>
+      resolveModelOptionGroups(
+        models,
+        providerBaseURLs,
+        customProviders,
+        t("models.providers.openaiCompatible"),
+      ),
+    [customProviders, models, providerBaseURLs, t],
+  );
+  const current = tryResolveModel(model, {
+    customProviders,
+    providerBaseURLs,
   });
-  const customModels = customProviders.flatMap((provider) => {
-    const modelId = providerModels[provider.id]?.trim();
-    if (!provider.baseURL.trim() || !modelId) return [];
-    const ref = { providerId: provider.id, modelId };
-    return [{ ref, info: resolveModel(ref, customProviders) }];
-  });
-  const current = model ? tryResolveModel(model, customProviders) : null;
-  const hasAny =
-    inheritLabel !== undefined ||
-    modelOptions.length > 0 ||
-    customModels.length > 0;
+  const hasAny = inheritLabel !== undefined || groups.length > 0;
 
   return (
     <DropdownMenu>
@@ -753,12 +744,11 @@ function DefaultModelPicker({
             {current ? (
               <ProviderIcon provider={current.provider} size={13} />
             ) : null}
-            <span className="truncate">{current?.label ?? inheritLabel}</span>
-            {current ? (
-              <span className="text-muted-foreground">
-                · {modelHint(t, current)}
-              </span>
-            ) : null}
+            <span className="truncate">
+              {current?.label ??
+                inheritLabel ??
+                t("models.defaults.selectModel")}
+            </span>
           </span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
@@ -787,66 +777,28 @@ function DefaultModelPicker({
               {inheritLabel}
             </DropdownMenuItem>
           ) : null}
-          {PROVIDERS.map((p) => {
-            const models = modelOptions.filter(
-              (option) => option.info.provider === p.id,
-            );
-            if (models.length === 0) return null;
-            return (
-              <div key={p.id} className="px-1 pt-1.5 first:pt-1">
-                <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  <ProviderIcon provider={p.id} size={11} />
-                  <span>{p.label}</span>
-                </div>
-                {models.map(({ ref, info }) => (
-                  <DropdownMenuItem
-                    key={modelRefKey(ref)}
-                    onSelect={() => onSelect(ref)}
-                    className={cn(
-                      "flex items-start gap-2 text-[12px]",
-                      model &&
-                        modelRefsEqual(ref, model) &&
-                        "bg-interactive-active",
-                    )}
-                  >
-                    <span className="flex flex-1 flex-col">
-                      <span>{info.label}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {modelDesc(t, info)}
-                      </span>
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </div>
-            );
-          })}
-          {customModels.length > 0 ? (
-            <div className="px-1 pt-1.5">
+          {groups.map((group) => (
+            <div key={group.id} className="px-1 pt-1.5 first:pt-1">
               <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                <ProviderIcon provider="openai-compatible" size={11} />
-                <span>{t("models.providers.openaiCompatible")}</span>
+                <ProviderIcon provider={group.provider} size={11} />
+                <span>{group.label}</span>
               </div>
-              {customModels.map(({ ref, info }) => (
+              {group.options.map(({ ref, info }) => (
                 <DropdownMenuItem
                   key={modelRefKey(ref)}
                   onSelect={() => onSelect(ref)}
                   className={cn(
-                    "flex items-start gap-2 text-[12px]",
+                    "text-[12px]",
                     model &&
                       modelRefsEqual(ref, model) &&
                       "bg-interactive-active",
                   )}
                 >
-                  <span className="flex flex-1 flex-col">
-                    <span>{info.label}</span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {modelDesc(t, info)}
-                    </span>
-                  </span>
+                  <span>{info.label}</span>
                 </DropdownMenuItem>
               ))}
             </div>
-          ) : null}
+          ))}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -854,99 +806,75 @@ function DefaultModelPicker({
 }
 
 function AutocompleteRow({
-  keys,
-  configuredIds,
+  models,
+  providerBaseURLs,
   customProviders,
 }: {
-  keys: KeysMap;
-  configuredIds: Set<ProviderId>;
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
   customProviders: readonly ProviderInstance[];
 }) {
   const { t } = useTranslation();
-  const enabled = usePreferencesStore((s) => s.autocompleteEnabled);
-  const trigger = usePreferencesStore((s) => s.autocompleteTrigger);
-  const model = usePreferencesStore((s) => s.autocompleteModel);
-  const providerModels = usePreferencesStore((s) => s.providerModels);
-  const eligible = useMemo(() => getAutocompleteEligibleModels(), []);
-  const userShortcuts = usePreferencesStore((s) => s.shortcuts);
+  const enabled = usePreferencesStore((state) => state.autocompleteEnabled);
+  const trigger = usePreferencesStore((state) => state.autocompleteTrigger);
+  const model = usePreferencesStore((state) => state.autocompleteModel);
+  const userShortcuts = usePreferencesStore((state) => state.shortcuts);
+  const groups = useMemo(
+    () =>
+      resolveModelOptionGroups(
+        models,
+        providerBaseURLs,
+        customProviders,
+        t("models.providers.openaiCompatible"),
+      ),
+    [customProviders, models, providerBaseURLs, t],
+  );
+  const items = useMemo(
+    () => groups.flatMap((group) => group.options),
+    [groups],
+  );
+  const currentModel = tryResolveModel(model, {
+    customProviders,
+    providerBaseURLs,
+  });
   const aiCompleteShortcut = useMemo(() => {
-    const s = SHORTCUTS.find((x) => x.id === "editor.aiComplete");
-    const bindings = userShortcuts["editor.aiComplete"] || s?.defaultBindings;
+    const shortcut = SHORTCUTS.find((item) => item.id === "editor.aiComplete");
+    const bindings =
+      userShortcuts["editor.aiComplete"] || shortcut?.defaultBindings;
     if (!bindings || bindings.length === 0) return "";
     return getBindingTokens(bindings[0]).join("");
   }, [userShortcuts]);
-
-  // 快速云模型、已配置本地模型和自定义 Provider 共用结构化引用。
-  const items = useMemo(() => {
-    const local = PROVIDERS.filter(
-      (p) =>
-        isLocalProvider(p.id) &&
-        p.id !== "openai-compatible" &&
-        configuredIds.has(p.id),
-    ).flatMap((p) => {
-      const modelId = providerModels[builtinProviderId(p.id)]?.trim();
-      if (!modelId) return [];
-      const ref = modelRefForProvider(p.id, modelId);
-      return [{ ref, info: resolveModel(ref) }];
-    });
-    const cloud = eligible.map((info) => ({
-      ref: modelRefForProvider(info.provider, info.id),
-      info,
-    }));
-    const custom = customProviders.flatMap((provider) => {
-      const modelId = providerModels[provider.id]?.trim();
-      if (!provider.baseURL.trim() || !modelId) return [];
-      const ref = { providerId: provider.id, modelId };
-      return [{ ref, info: resolveModel(ref, customProviders) }];
-    });
-    return [...cloud, ...local, ...custom];
-  }, [configuredIds, customProviders, eligible, providerModels]);
-
-  const currentModel = useMemo(
-    () =>
-      tryResolveModel(model, customProviders) ??
-      resolveModel(DEFAULT_MODEL_REF),
-    [customProviders, model],
-  );
-
-  const setModel = (ref: ModelRef) => {
-    void setAutocompleteModel(ref);
-  };
-
-  const grouped = useMemo(() => {
-    const map = new Map<ProviderId, (typeof items)[number][]>();
-    for (const item of items) {
-      const arr = map.get(item.info.provider) ?? [];
-      arr.push(item);
-      map.set(item.info.provider, arr);
+  const toggleEnabled = async (next: boolean) => {
+    if (next && !model) {
+      const first = items[0]?.ref;
+      if (!first) return;
+      await setAutocompleteModel(first);
     }
-    return map;
-  }, [items]);
-
-  const hasKey = providerNeedsKey(currentModel.provider)
-    ? !!keys[currentModel.provider]
-    : true;
+    await setAutocompleteEnabled(next);
+  };
 
   return (
     <>
       <FieldRow label={t("models.defaults.autocomplete")}>
         <div className="flex flex-1 items-center gap-2">
           <Switch
-            checked={enabled}
-            onCheckedChange={(v) => void setAutocompleteEnabled(v)}
+            checked={enabled && currentModel !== null}
+            disabled={items.length === 0}
+            onCheckedChange={(value) => void toggleEnabled(value)}
           />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
-                disabled={!enabled}
+                disabled={!enabled || items.length === 0}
                 className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
               >
                 <span className="flex items-center gap-2 truncate">
-                  <ProviderIcon provider={currentModel.provider} size={12} />
-                  <span className="truncate">{currentModel.label}</span>
-                  <span className="text-muted-foreground">
-                    · {modelHint(t, currentModel)}
+                  {currentModel ? (
+                    <ProviderIcon provider={currentModel.provider} size={12} />
+                  ) : null}
+                  <span className="truncate">
+                    {currentModel?.label ?? t("models.defaults.selectModel")}
                   </span>
                 </span>
                 <HugeiconsIcon
@@ -962,53 +890,38 @@ function AutocompleteRow({
               collisionPadding={12}
               className="max-h-72 min-w-70 overflow-y-auto"
             >
-              {PROVIDERS.map((p) => {
-                const list = grouped.get(p.id);
-                if (!list || list.length === 0) return null;
-                const pConfigured =
-                  p.id === "openai-compatible" || configuredIds.has(p.id);
-                return (
-                  <div key={p.id} className="px-1 pt-1.5 first:pt-1">
-                    <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                      <ProviderIcon provider={p.id} size={11} />
-                      <span>{p.label}</span>
-                      {!pConfigured ? (
-                        <span className="ml-auto text-[9.5px] normal-case tracking-normal text-muted-foreground">
-                          {t("models.providers.notConnected")}
-                        </span>
-                      ) : null}
-                    </div>
-                    {list.map(({ ref, info }) => (
-                      <DropdownMenuItem
-                        key={modelRefKey(ref)}
-                        disabled={!pConfigured}
-                        onSelect={() => pConfigured && setModel(ref)}
-                        className={cn(
-                          "text-[11.5px]",
-                          modelRefsEqual(ref, model) && "bg-interactive-active",
-                        )}
-                      >
-                        <span className="flex flex-col">
-                          <span>{info.label}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {modelDesc(t, info)}
-                          </span>
-                        </span>
-                      </DropdownMenuItem>
-                    ))}
+              {groups.map((group) => (
+                <div key={group.id} className="px-1 pt-1.5 first:pt-1">
+                  <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                    <ProviderIcon provider={group.provider} size={11} />
+                    <span>{group.label}</span>
                   </div>
-                );
-              })}
+                  {group.options.map(({ ref, info }) => (
+                    <DropdownMenuItem
+                      key={modelRefKey(ref)}
+                      onSelect={() => void setAutocompleteModel(ref)}
+                      className={cn(
+                        "text-[11.5px]",
+                        model &&
+                          modelRefsEqual(ref, model) &&
+                          "bg-interactive-active",
+                      )}
+                    >
+                      <span>{info.label}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </div>
+              ))}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </FieldRow>
-      {enabled ? (
+      {enabled && currentModel ? (
         <FieldRow label={t("models.defaults.trigger.label")}>
           <Select
             value={trigger}
-            onValueChange={(v) =>
-              void setAutocompleteTrigger(v as AutocompleteTrigger)
+            onValueChange={(value) =>
+              void setAutocompleteTrigger(value as AutocompleteTrigger)
             }
           >
             <SelectTrigger className="h-8 w-full text-[11.5px]">
@@ -1028,261 +941,109 @@ function AutocompleteRow({
           </Select>
         </FieldRow>
       ) : null}
-      {enabled && !hasKey ? (
-        <p className="pl-19 text-[10.5px] text-muted-foreground">
-          {t("models.defaults.notConnectedHint", {
-            provider: getProvider(currentModel.provider).label,
-          })}
-        </p>
-      ) : null}
     </>
   );
 }
-
-function LocalProviderCard({
+function BuiltinProviderFields({
   provider,
-  configured,
-  config,
-  meta,
-  providerKey,
-  onSaveKey,
-  onClearKey,
-  onRemove,
+  credentialValue,
+  baseURL,
+  models,
+  onBaseURLChange,
+  onModelsChange,
 }: {
   provider: ProviderInfo;
-  configured: boolean;
-  config: LocalConfig;
-  meta: LocalMeta;
-  providerKey?: string | null;
-  onSaveKey: (v: string) => Promise<void>;
-  onClearKey: () => Promise<void>;
-  onRemove: () => void;
+  credentialValue: string | null;
+  baseURL: string;
+  models: readonly ConfiguredModel[];
+  onBaseURLChange: (value: string) => Promise<void>;
+  onModelsChange: (models: ConfiguredModel[]) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const { baseURL, modelId, setBaseURL, setModelId, noBaseURL } = config;
-  const [urlDraft, setUrlDraft] = useState(baseURL);
-  const [modelDraft, setModelDraft] = useState(modelId);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
+  const [baseURLDraft, setBaseURLDraft] = useState(baseURL);
 
-  useEffect(() => setUrlDraft(baseURL), [baseURL]);
-  useEffect(() => setModelDraft(modelId), [modelId]);
+  useEffect(() => setBaseURLDraft(baseURL), [baseURL]);
 
-  const supportsKey = provider.id === "openrouter";
-
-  const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
-  };
+  const resolvedConnection = createProviderConnection({
+    instanceId: builtinProviderId(provider.id),
+    provider: provider.id,
+    baseURL: baseURLDraft,
+    credentialValue,
+  });
+  const connection = isProviderConnectionReady(resolvedConnection)
+    ? resolvedConnection
+    : null;
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <ProviderIcon provider={provider.id} size={15} />
-        <span className="text-[12.5px] font-medium">{provider.label}</span>
-        {configured ? (
-          <Badge
-            variant="outline"
-            className="ml-1 h-4 gap-1 border-border/60 bg-muted/40 px-1.5 text-[10px] font-normal text-muted-foreground"
-          >
-            <HugeiconsIcon
-              icon={CheckmarkCircle02Icon}
-              size={9}
-              strokeWidth={2}
-            />
-            {t("common.connected")}
-          </Badge>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => void openUrl(provider.consoleUrl)}
-          className="ml-auto inline-flex items-center gap-0.5 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
-        >
-          {t("models.card.docs")}
-          <HugeiconsIcon
-            icon={ArrowUpRight01Icon}
-            size={11}
-            strokeWidth={1.75}
-          />
-        </button>
-        <Button
-          size="icon"
-          variant="ghost"
-          onClick={onRemove}
-          title={t("models.card.removeProvider")}
-          className="size-7 text-muted-foreground hover:text-destructive"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
-        </Button>
-      </div>
-
-      <span className="text-[10.5px] leading-relaxed text-muted-foreground">
-        {meta.description}
-      </span>
-
-      <div className="mt-0.5 flex flex-col gap-2.5">
-        {noBaseURL ? null : (
+    <>
+      {provider.endpoint.kind === "editable" ? (
+        <>
+          <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+            {t(`models.local.${provider.id}.description`)}
+          </span>
           <FieldRow label={t("models.card.baseUrl")}>
-            <div className="flex flex-1 gap-1.5">
-              <Input
-                value={urlDraft}
-                onChange={(e) => setUrlDraft(e.target.value)}
-                onBlur={() => {
-                  const v = urlDraft.trim();
-                  if (v !== baseURL) void setBaseURL(v);
-                }}
-                placeholder={meta.urlPlaceholder}
-                spellCheck={false}
-                className="h-8 flex-1 font-mono text-[11.5px]"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void test()}
-                disabled={!urlDraft.trim()}
-                className="h-8 px-3 text-[11px]"
-              >
-                {t("models.card.test")}
-              </Button>
-            </div>
+            <Input
+              value={baseURLDraft}
+              onChange={(event) => setBaseURLDraft(event.target.value)}
+              onBlur={() => {
+                const next = baseURLDraft.trim();
+                if (next !== baseURL) void onBaseURLChange(next);
+              }}
+              placeholder={provider.endpoint.defaultBaseURL}
+              spellCheck={false}
+              className="h-8 flex-1 font-mono text-[11.5px]"
+            />
           </FieldRow>
-        )}
-
-        <FieldRow label={t("models.card.modelId")}>
-          <Input
-            value={modelDraft}
-            onChange={(e) => setModelDraft(e.target.value)}
-            onBlur={() => {
-              const v = modelDraft.trim();
-              if (v !== modelId) void setModelId(v);
-            }}
-            placeholder={meta.modelPlaceholder}
-            spellCheck={false}
-            className="h-8 font-mono text-[11.5px]"
-          />
-        </FieldRow>
-
-        {supportsKey ? (
-          <FieldRow label={t("models.card.apiKey")}>
-            {providerKey ? (
-              <div className="flex flex-1 items-center gap-1.5">
-                <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                  {`${providerKey.slice(0, 4)}${"•".repeat(8)}${providerKey.slice(-4)}`}
-                </code>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  onClick={() => void onClearKey()}
-                  title={t("models.card.removeKey")}
-                  className="size-7 text-muted-foreground hover:text-destructive"
-                >
-                  <HugeiconsIcon
-                    icon={Cancel01Icon}
-                    size={12}
-                    strokeWidth={1.75}
-                  />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-1 gap-1.5">
-                <Input
-                  type="password"
-                  value={keyDraft}
-                  onChange={(e) => setKeyDraft(e.target.value)}
-                  placeholder={t("models.card.optionalKeyPlaceholder")}
-                  spellCheck={false}
-                  className="h-8 flex-1 font-mono text-[11.5px]"
-                />
-                <Button
-                  size="sm"
-                  onClick={async () => {
-                    const v = keyDraft.trim();
-                    if (!v) return;
-                    await onSaveKey(v);
-                    setKeyDraft("");
-                  }}
-                  disabled={!keyDraft.trim()}
-                  className="h-8 px-3 text-[11px]"
-                >
-                  {t("common.save")}
-                </Button>
-              </div>
-            )}
-          </FieldRow>
-        ) : null}
-
-        <StatusLine status={testStatus} />
-
-        {!modelId.trim() && meta.modelHint ? (
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-            {meta.modelHint}
-          </p>
-        ) : null}
-      </div>
-    </div>
+        </>
+      ) : null}
+      <FieldRow label={t("models.catalog.models")}>
+        <ProviderModelPicker
+          connection={connection}
+          models={models}
+          onChange={onModelsChange}
+        />
+      </FieldRow>
+    </>
   );
 }
 
 function CustomProviderCard({
   provider,
-  modelId,
+  models,
   providerKey,
   onSaveKey,
   onClearKey,
   onUpdate,
-  onUpdateModel,
+  onUpdateModels,
   onRemove,
 }: {
   provider: ProviderInstance;
-  modelId: string;
+  models: readonly ConfiguredModel[];
   providerKey: string | null;
   onSaveKey: (v: string) => Promise<void>;
   onClearKey: () => Promise<void>;
   onUpdate: (patch: ProviderInstanceUpdate) => Promise<void>;
-  onUpdateModel: (modelId: string) => Promise<void>;
+  onUpdateModels: (models: ConfiguredModel[]) => Promise<void>;
   onRemove: () => void;
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(
-    !provider.baseURL.trim() || !modelId.trim(),
+    !provider.baseURL.trim() || models.length === 0,
   );
   const [nameDraft, setNameDraft] = useState(provider.name);
   const [urlDraft, setUrlDraft] = useState(provider.baseURL);
-  const [modelDraft, setModelDraft] = useState(modelId);
-  const [contextDraft, setContextDraft] = useState(
-    String(provider.contextLimit),
-  );
   const [keyDraft, setKeyDraft] = useState("");
-  const [testStatus, setTestStatus] = useState<
-    "idle" | "testing" | "ok" | "fail"
-  >("idle");
 
   useEffect(() => setNameDraft(provider.name), [provider.name]);
   useEffect(() => setUrlDraft(provider.baseURL), [provider.baseURL]);
-  useEffect(() => setModelDraft(modelId), [modelId]);
-  useEffect(
-    () => setContextDraft(String(provider.contextLimit)),
-    [provider.contextLimit],
-  );
 
-  const configured = !!provider.baseURL.trim() && !!modelId.trim();
-
-  const test = async () => {
-    setTestStatus("testing");
-    try {
-      const status = await invoke<number>("lm_ping", { baseUrl: urlDraft });
-      setTestStatus(status > 0 ? "ok" : "fail");
-    } catch {
-      setTestStatus("fail");
-    }
-  };
+  const configured = !!provider.baseURL.trim() && models.length > 0;
+  const resolvedConnection = createProviderConnection({
+    instanceId: provider.id,
+    provider: provider.protocol,
+    baseURL: urlDraft,
+    credentialValue: providerKey,
+  });
 
   return (
     <div className="flex flex-col rounded-lg border border-border/60 bg-card/60">
@@ -1304,9 +1065,9 @@ function CustomProviderCard({
         <span className="text-[12.5px] font-medium truncate">
           {provider.name || t("models.providers.openaiCompatible")}
         </span>
-        {modelId.trim() && (
+        {models.length > 0 && (
           <span className="text-[10.5px] text-muted-foreground truncate font-mono">
-            {modelId}
+            {t("models.catalog.configuredCount", { count: models.length })}
           </span>
         )}
         {configured ? (
@@ -1319,7 +1080,7 @@ function CustomProviderCard({
               size={9}
               strokeWidth={2}
             />
-            {t("common.connected")}
+            {t("common.configured")}
           </Badge>
         ) : null}
         <Button
@@ -1353,70 +1114,38 @@ function CustomProviderCard({
           </FieldRow>
 
           <FieldRow label={t("models.card.baseUrl")}>
-            <div className="flex flex-1 gap-1.5">
-              <Input
-                value={urlDraft}
-                onChange={(e) => setUrlDraft(e.target.value)}
-                onBlur={() => {
-                  const v = urlDraft.trim();
-                  if (v !== provider.baseURL) void onUpdate({ baseURL: v });
-                }}
-                placeholder="https://api.example.com/v1"
-                spellCheck={false}
-                className="h-8 flex-1 font-mono text-[11.5px]"
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void test()}
-                disabled={!urlDraft.trim()}
-                className="h-8 px-3 text-[11px]"
-              >
-                {t("models.card.test")}
-              </Button>
-            </div>
-          </FieldRow>
-
-          <FieldRow label={t("models.card.modelId")}>
             <Input
-              value={modelDraft}
-              onChange={(e) => setModelDraft(e.target.value)}
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.target.value)}
               onBlur={() => {
-                const v = modelDraft.trim();
-                if (v !== modelId) void onUpdateModel(v);
+                const v = urlDraft.trim();
+                if (v !== provider.baseURL) void onUpdate({ baseURL: v });
               }}
-              placeholder="gpt-4o, qwen3-max, glm-4.6, …"
+              placeholder="https://api.example.com/v1"
               spellCheck={false}
-              className="h-8 font-mono text-[11.5px]"
+              className="h-8 flex-1 font-mono text-[11.5px]"
             />
           </FieldRow>
 
-          <FieldRow label={t("models.card.context")}>
-            <div className="flex flex-1 items-center gap-1.5">
-              <Input
-                value={contextDraft}
-                onChange={(e) => setContextDraft(e.target.value)}
-                onBlur={() => {
-                  const v = parseInt(contextDraft, 10);
-                  if (Number.isFinite(v) && v >= 1000)
-                    void onUpdate({ contextLimit: v });
-                  else setContextDraft(String(provider.contextLimit));
-                }}
-                placeholder="128000"
-                spellCheck={false}
-                className="h-8 w-28 font-mono text-[11.5px]"
-              />
-              <span className="text-[10.5px] text-muted-foreground">
-                {t("models.card.tokens")}
-              </span>
-            </div>
+          <FieldRow label={t("models.catalog.models")}>
+            <ProviderModelPicker
+              connection={
+                isProviderConnectionReady(resolvedConnection)
+                  ? resolvedConnection
+                  : null
+              }
+              models={models}
+              onChange={onUpdateModels}
+            />
           </FieldRow>
 
           <FieldRow label={t("models.card.apiKey")}>
             {providerKey ? (
               <div className="flex flex-1 items-center gap-1.5">
                 <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                  {`${providerKey.slice(0, 4)}${"•".repeat(8)}${providerKey.slice(-4)}`}
+                  {providerKey.length <= 8
+                    ? "•".repeat(providerKey.length)
+                    : `${providerKey.slice(0, 4)}${"•".repeat(8)}${providerKey.slice(-4)}`}
                 </code>
                 <Button
                   size="icon"
@@ -1458,8 +1187,6 @@ function CustomProviderCard({
               </div>
             )}
           </FieldRow>
-
-          <StatusLine status={testStatus} />
         </div>
       )}
     </div>
@@ -1480,35 +1207,6 @@ function FieldRow({
       </span>
       <div className="flex flex-1 items-center">{children}</div>
     </div>
-  );
-}
-
-function StatusLine({
-  status,
-}: {
-  status: "idle" | "testing" | "ok" | "fail";
-}) {
-  const { t } = useTranslation();
-  if (status === "idle") return null;
-  if (status === "testing") {
-    return (
-      <span className="text-[10.5px] text-muted-foreground">
-        {t("models.card.testing")}
-      </span>
-    );
-  }
-  if (status === "ok") {
-    return (
-      <span className="flex items-center gap-1 text-[10.5px] text-muted-foreground">
-        <HugeiconsIcon icon={CheckmarkCircle02Icon} size={11} strokeWidth={2} />
-        {t("models.card.reachable")}
-      </span>
-    );
-  }
-  return (
-    <span className="text-[10.5px] text-destructive">
-      {t("models.card.unreachable")}
-    </span>
   );
 }
 

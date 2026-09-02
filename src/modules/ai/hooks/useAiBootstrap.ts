@@ -4,12 +4,12 @@
  * 后台同步失败交由会话状态提示，避免未处理的 Promise 拒绝中断刷新周期。
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
-import { DEFAULT_MODEL_REF, modelRefsEqual } from "../config";
-import { getAllProviderInstanceKeys, getAllKeys } from "../lib/keyring";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { modelRefsEqual } from "../config";
+import { getAllKeys, getAllProviderInstanceKeys } from "../lib/keyring";
 import {
   getAvailableModelRefs,
   selectAvailableModel,
@@ -39,28 +39,17 @@ export function useAiBootstrap(): {
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
 
   const providerModels = usePreferencesStore((s) => s.providerModels);
-  const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
-  const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
-  const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
+  const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const customProviders = usePreferencesStore((s) => s.customProviders);
   const availableModels = useMemo(
     () =>
       getAvailableModelRefs({
         apiKeys,
         providerModels,
-        lmstudioBaseURL,
-        mlxBaseURL,
-        ollamaBaseURL,
+        providerBaseURLs,
         customProviders,
       }),
-    [
-      apiKeys,
-      customProviders,
-      lmstudioBaseURL,
-      mlxBaseURL,
-      ollamaBaseURL,
-      providerModels,
-    ],
+    [apiKeys, customProviders, providerBaseURLs, providerModels],
   );
   const hasComposer = availableModels.length > 0;
 
@@ -103,10 +92,19 @@ export function useAiBootstrap(): {
 
   useEffect(() => {
     if (!prefsHydrated || !keysLoaded) return;
-    const replacement =
-      selectAvailableModel(selectedModel, prefDefaultModel, availableModels) ??
-      DEFAULT_MODEL_REF;
-    if (modelRefsEqual(replacement, selectedModel)) return;
+    const replacement = selectAvailableModel(
+      selectedModel,
+      prefDefaultModel,
+      availableModels,
+    );
+    if (
+      replacement === selectedModel ||
+      (replacement &&
+        selectedModel &&
+        modelRefsEqual(replacement, selectedModel))
+    ) {
+      return;
+    }
     setSelectedModel(replacement, false);
   }, [
     availableModels,
