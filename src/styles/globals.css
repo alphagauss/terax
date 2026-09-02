@@ -706,15 +706,14 @@ html *::-webkit-scrollbar {
   border-color: var(--muted-foreground);
 }
 
-/* 文字流光在字形内移动圆形前景聚光，扫动 1.2 秒后停顿 0.6 秒。 */
+/* 文字流光在字形内移动圆形前景聚光，每轮由实例分别控制扫光和末尾停顿时长。 */
 @keyframes terax-shimmer {
-  0% {
+  from {
     background-position:
       calc(0px - var(--shimmer-spread) - var(--shimmer-spread)) center,
       0 0;
   }
-  66.6667%,
-  100% {
+  to {
     background-position:
       calc(100% + var(--shimmer-spread) + var(--shimmer-spread)) center,
       0 0;
@@ -748,7 +747,14 @@ html *::-webkit-scrollbar {
       var(--color-muted-foreground),
       var(--color-muted-foreground)
     );
-  animation: terax-shimmer 1.8s linear infinite;
+  animation-name: terax-shimmer;
+  animation-duration: var(--shimmer-cycle-duration, 1.8s);
+  animation-timing-function: linear(
+    0,
+    1 var(--shimmer-sweep-end, 66.6667%),
+    1
+  );
+  animation-iteration-count: infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
