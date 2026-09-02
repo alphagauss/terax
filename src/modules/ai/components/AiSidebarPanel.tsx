@@ -4,9 +4,12 @@
  */
 
 import {
+  Context,
   ContextContent,
   ContextContentBody,
   ContextContentFooter,
+  ContextContentHeader,
+  ContextTrigger,
 } from "@/components/ai-elements/context";
 import {
   DropdownMenu,
@@ -21,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { HoverCard, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -40,7 +42,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { tryResolveModel } from "../config";
+import { getModelContextWindow, tryResolveModel } from "../config";
 import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
 import {
   estimateUiMessageTokens,
@@ -261,6 +263,7 @@ function ContextIndicator({
   const model = useChatStore((s) => s.selectedModel);
   const customProviders = usePreferencesStore((s) => s.customProviders);
   const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
+  const providerModels = usePreferencesStore((s) => s.providerModels);
   const resolvedModel = useMemo(
     () => tryResolveModel(model, { customProviders, providerBaseURLs }),
     [customProviders, model, providerBaseURLs],
@@ -285,6 +288,7 @@ function ContextIndicator({
   }, [messages, shouldEstimate]);
   const used = lastInput > 0 ? lastInput : estimated;
   const reported = tokens.inputTokens + tokens.outputTokens;
+  const contextWindow = getModelContextWindow(model, providerModels);
   const modelLabel = resolvedModel?.label ?? t("statusBar.noModels");
   const cacheRate =
     tokens.inputTokens > 0
@@ -292,22 +296,17 @@ function ContextIndicator({
       : 0;
 
   return (
-    <HoverCard closeDelay={0} openDelay={0}>
-      <HoverCardTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="h-6 px-0 font-mono text-[10.5px] text-muted-foreground"
-          title={
-            lastInput > 0
-              ? t("miniWindow.context.lastRequest")
-              : t("miniWindow.context.estimatedContext")
-          }
-        >
-          {formatTokens(used)}
-        </Button>
-      </HoverCardTrigger>
+    <Context usedTokens={used} maxTokens={contextWindow}>
+      <ContextTrigger
+        className="h-6 gap-1 px-0 text-[10.5px]"
+        title={
+          lastInput > 0
+            ? t("miniWindow.context.lastRequest")
+            : t("miniWindow.context.estimatedContext")
+        }
+      />
       <ContextContent className="w-64 text-[11px]">
+        <ContextContentHeader />
         <ContextContentBody>
           <div className="flex items-center justify-between text-muted-foreground">
             <span>{t("miniWindow.context.model")}</span>
@@ -364,7 +363,7 @@ function ContextIndicator({
           </span>
         </ContextContentFooter>
       </ContextContent>
-    </HoverCard>
+    </Context>
   );
 }
 

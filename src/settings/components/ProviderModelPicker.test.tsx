@@ -97,7 +97,7 @@ afterEach(() => {
 
 async function renderPicker(
   onChange: (models: ConfiguredModel[]) => Promise<void>,
-  models: Array<{ id: string; source: "discovered" | "manual" }> = [],
+  models: ConfiguredModel[] = [],
 ) {
   mocks.list.mockResolvedValue(["remote-model"]);
   container = document.createElement("div");
@@ -139,6 +139,7 @@ describe("ProviderModelPicker", () => {
       {
         id: "remote-model",
         source: "discovered",
+        contextWindow: 128_000,
       },
     ]);
 
@@ -157,7 +158,7 @@ describe("ProviderModelPicker", () => {
       );
     });
     expect(onChange).toHaveBeenLastCalledWith([
-      { id: "manual-model", source: "manual" },
+      { id: "manual-model", source: "manual", contextWindow: 128_000 },
     ]);
   });
 
@@ -165,7 +166,9 @@ describe("ProviderModelPicker", () => {
     const onChange = vi
       .fn<(models: ConfiguredModel[]) => Promise<void>>()
       .mockResolvedValue(undefined);
-    await renderPicker(onChange, [{ id: "manual-model", source: "manual" }]);
+    await renderPicker(onChange, [
+      { id: "manual-model", source: "manual", contextWindow: 128_000 },
+    ]);
     expect(container?.textContent).toContain("models.catalog.source.manual");
 
     const remove = container?.querySelector<HTMLButtonElement>(

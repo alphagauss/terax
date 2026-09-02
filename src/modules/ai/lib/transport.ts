@@ -9,7 +9,12 @@ import {
   getSubagentCoordinator,
   type SubagentResultEvent,
 } from "../agents/subagentRuntime";
-import type { ModelRef, ProviderBaseURLs, ProviderInstance } from "../config";
+import type {
+  ModelRef,
+  ProviderBaseURLs,
+  ProviderInstance,
+  ProviderModels,
+} from "../config";
 import type { ToolContext } from "../tools/tools";
 import { type AgentUsageDelta, runAgentStream } from "./agent";
 import type { SessionAgentSnapshot } from "./agents";
@@ -32,6 +37,7 @@ type Deps = {
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
   getProviderBaseURLs?: () => Readonly<ProviderBaseURLs>;
+  getProviderModels?: () => Readonly<ProviderModels>;
   getCustomProviders?: () => readonly ProviderInstance[];
   getProviderInstanceKeys?: () => ProviderInstanceKeys;
   onStep?: (step: string | null) => void;
@@ -108,6 +114,7 @@ export function createSessionTransport(deps: Deps) {
       onSystemPrompt: deps.onSystemPrompt,
       onCheckpoint: deps.onCheckpoint,
       providerBaseURLs: deps.getProviderBaseURLs?.(),
+      providerModels: deps.getProviderModels?.(),
       customProviders: deps.getCustomProviders?.(),
       providerInstanceKeys: deps.getProviderInstanceKeys?.(),
       uiMessages: options.messages,

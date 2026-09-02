@@ -46,11 +46,14 @@ export type ModelRef = {
 export type ConfiguredModel = {
   id: string;
   source: "discovered" | "manual";
+  contextWindow: number;
 };
 
 export type ProviderModels = Record<string, ConfiguredModel[]>;
 
 const MAX_MODEL_ID_LENGTH = 512;
+export const DEFAULT_MODEL_CONTEXT_WINDOW = 128_000;
+export const MIN_MODEL_CONTEXT_WINDOW = 1_000;
 
 /** 归一化外部或用户提供的模型 ID，并拒绝控制字符和异常长度。 */
 export function normalizeModelId(value: unknown): string | null {
@@ -63,13 +66,42 @@ export function normalizeModelId(value: unknown): string | null {
     : null;
 }
 
-function isConfiguredModel(value: unknown): value is ConfiguredModel {
+function isConfiguredModel(
+  value: unknown,
+): value is Pick<ConfiguredModel, "id" | "source"> &
+  Partial<Pick<ConfiguredModel, "contextWindow">> {
   if (!value || typeof value !== "object") return false;
   const model = value as Partial<ConfiguredModel>;
   return (
     normalizeModelId(model.id) !== null &&
     (model.source === "discovered" || model.source === "manual")
   );
+}
+
+/** 校验模型上下文窗口；缺失或损坏的持久化值回到统一默认值。 */
+export function normalizeModelContextWindow(value: unknown): number {
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= MIN_MODEL_CONTEXT_WINDOW
+    ? value
+    : DEFAULT_MODEL_CONTEXT_WINDOW;
+}
+
+/** 解析设置页中的 token 数量，支持整数以及 k、m 简写。 */
+export function parseModelContextWindow(value: string): number | null {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([km])?$/i);
+  if (!match) return null;
+  const multiplier =
+    match[2]?.toLowerCase() === "m"
+      ? 1_000_000
+      : match[2]?.toLowerCase() === "k"
+        ? 1_000
+        : 1;
+  const parsed = Number(match[1]) * multiplier;
+  if (!Number.isSafeInteger(parsed) || parsed < MIN_MODEL_CONTEXT_WINDOW) {
+    return null;
+  }
+  return parsed;
 }
 
 /** 校验、归一化并去重外部或待保存的模型配置。 */
@@ -83,7 +115,11 @@ export function normalizeConfiguredModels(
     const id = normalizeModelId(value.id);
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    models.push({ id, source: value.source });
+    models.push({
+      id,
+      source: value.source,
+      contextWindow: normalizeModelContextWindow(value.contextWindow),
+    });
   }
   return models;
 }
@@ -94,6 +130,18 @@ function findConfiguredModel(
   ref: ModelRef,
 ): ConfiguredModel | undefined {
   return models[ref.providerId]?.find((model) => model.id === ref.modelId);
+}
+
+/** 返回模型保存的上下文窗口；不可用引用使用统一默认值。 */
+export function getModelContextWindow(
+  ref: ModelRef | null,
+  models: Readonly<ProviderModels>,
+): number {
+  if (!ref) return DEFAULT_MODEL_CONTEXT_WINDOW;
+  return (
+    findConfiguredModel(models, ref)?.contextWindow ??
+    DEFAULT_MODEL_CONTEXT_WINDOW
+  );
 }
 
 /** 返回内置 Provider 的稳定实例 ID。 */

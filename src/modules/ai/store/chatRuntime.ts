@@ -74,6 +74,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
     getProviderBaseURLs: () => usePreferencesStore.getState().providerBaseURLs,
+    getProviderModels: () => usePreferencesStore.getState().providerModels,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
     getProviderInstanceKeys: () => useChatStore.getState().providerInstanceKeys,
     onStep: (step) => {

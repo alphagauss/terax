@@ -330,6 +330,14 @@
         "shortcut": "shortcut"
       }
     },
+    "parameters": {
+      "label": "Model parameters",
+      "model": "Model",
+      "contextWindow": "Context",
+      "tokens": "tokens",
+      "selectPreset": "Select a context window preset",
+      "description": "Controls when Terax compacts Agent history and how context usage is calculated. It does not limit model output."
+    },
     "local": {
       "lmstudio": {
         "description": "Run GGUF models via LM Studio's HTTP server (enable it from the Developer tab)."

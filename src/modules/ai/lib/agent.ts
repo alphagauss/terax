@@ -25,10 +25,12 @@ import {
   type SubagentTurnCoordinator,
 } from "../agents/subagentRuntime";
 import {
+  getModelContextWindow,
   MAX_AGENT_STEPS,
   type ModelRef,
   type ProviderBaseURLs,
   type ProviderInstance,
+  type ProviderModels,
   resolveModel,
 } from "../config";
 import { buildTools, type ToolContext } from "../tools/tools";
@@ -39,9 +41,6 @@ import { prepareAgentPrompt } from "./prompt";
 import { buildConfiguredLanguageModel } from "./providerRuntime";
 import { REASONING_DURATION_PART_TYPE } from "./sessionMessages";
 import { convertToAgentModelMessages } from "./subagentMessages";
-
-// 该预算只决定何时清理旧工具结果，不代表任何模型的上下文长度。
-const AGENT_HISTORY_COMPACTION_BUDGET = 128_000;
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -109,6 +108,7 @@ export type RunAgentOptions = {
     event: SubagentResultEvent,
   ) => void | Promise<void>;
   providerBaseURLs?: Readonly<ProviderBaseURLs>;
+  providerModels?: Readonly<ProviderModels>;
   customProviders?: readonly ProviderInstance[];
   providerInstanceKeys?: ProviderInstanceKeys;
   uiMessages: UIMessage[];
@@ -244,7 +244,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               }
               const compact = compactModelMessagesDetailed(
                 modelHistory,
-                AGENT_HISTORY_COMPACTION_BUDGET,
+                getModelContextWindow(modelRef, opts.providerModels ?? {}),
               );
               if (compact.compacted) {
                 opts.onCompact?.({ droppedCount: compact.droppedCount });
