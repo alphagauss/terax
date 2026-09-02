@@ -12,7 +12,6 @@ import {
 } from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
-import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   Add01Icon,
@@ -41,33 +40,29 @@ import {
   Search01Icon,
   SecurityWarningIcon,
   ServerStack01Icon,
-  Settings01Icon,
   StarIcon,
   StopCircleIcon,
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  builtinProviderId,
   DEFAULT_MODEL_REF,
-  isConfigurableProvider,
-  MODELS,
   type ModelRef,
   type ModelCapabilities,
   type ModelInfo,
-  modelRefForProvider,
   modelRefKey,
   modelRefsEqual,
   PROVIDERS,
   type ProviderId,
-  providerNeedsKey,
+  providerFromBuiltinId,
   resolveModel,
   STT_PROVIDER_LABELS,
   tryResolveModel,
 } from "../config";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
+import { getAvailableModelRefs } from "../lib/modelAvailability";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { AiComposerInput } from "./AiComposerInput";
@@ -323,54 +318,22 @@ function ModelDropdown() {
   const lmstudioBaseURL = usePreferencesStore((s) => s.lmstudioBaseURL);
   const mlxBaseURL = usePreferencesStore((s) => s.mlxBaseURL);
   const ollamaBaseURL = usePreferencesStore((s) => s.ollamaBaseURL);
-  const current =
-    tryResolveModel(selected, customProviders) ??
-    resolveModel(DEFAULT_MODEL_REF);
   const [search, setSearch] = useState("");
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("all");
   const inputRef = useRef<HTMLInputElement>(null);
-  const currentProviderHasKey =
-    customProviderIds.has(current.providerId) ||
-    !providerNeedsKey(current.provider) ||
-    !!apiKeys[current.provider];
-
-  const hasKeyFor = useCallback(
-    (id: ProviderId) => (providerNeedsKey(id) ? !!apiKeys[id] : true),
-    [apiKeys],
-  );
-
   type ModelOption = { ref: ModelRef; info: ModelInfo };
   const modelOptions = useMemo<ModelOption[]>(() => {
-    const configuredIds: Partial<Record<ProviderId, string>> = {
-      lmstudio: lmstudioBaseURL.trim()
-        ? providerModels[builtinProviderId("lmstudio")]?.trim()
-        : "",
-      mlx: mlxBaseURL.trim()
-        ? providerModels[builtinProviderId("mlx")]?.trim()
-        : "",
-      ollama: ollamaBaseURL.trim()
-        ? providerModels[builtinProviderId("ollama")]?.trim()
-        : "",
-      openrouter: providerModels[builtinProviderId("openrouter")]?.trim(),
-    };
-    const builtins = MODELS.flatMap((info): ModelOption[] => {
-      const configured = configuredIds[info.provider];
-      if (isConfigurableProvider(info.provider)) {
-        if (!configured) return [];
-        const ref = modelRefForProvider(info.provider, configured);
-        return [{ ref, info: resolveModel(ref) }];
-      }
-      return [{ ref: modelRefForProvider(info.provider, info.id), info }];
-    });
-    const custom = customProviders.flatMap((provider): ModelOption[] => {
-      const modelId = providerModels[provider.id]?.trim();
-      if (!provider.baseURL.trim() || !modelId) return [];
-      const ref = { providerId: provider.id, modelId };
-      return [{ ref, info: resolveModel(ref, customProviders) }];
-    });
-    return [...builtins, ...custom];
+    return getAvailableModelRefs({
+      apiKeys,
+      providerModels,
+      lmstudioBaseURL,
+      mlxBaseURL,
+      ollamaBaseURL,
+      customProviders,
+    }).map((ref) => ({ ref, info: resolveModel(ref, customProviders) }));
   }, [
+    apiKeys,
     customProviders,
     lmstudioBaseURL,
     mlxBaseURL,
@@ -378,17 +341,42 @@ function ModelDropdown() {
     providerModels,
   ]);
 
-  const sortedProviders = useMemo(() => {
-    const configured: (typeof PROVIDERS)[number][] = [];
-    const unconfigured: (typeof PROVIDERS)[number][] = [];
-    for (const p of PROVIDERS) {
-      if (p.id === "openai-compatible") continue;
-      (hasKeyFor(p.id) ? configured : unconfigured).push(p);
-    }
-    return { configured, unconfigured };
-  }, [hasKeyFor]);
-
   const COMPAT_PROVIDER_ID = "__compat__";
+  const availableProviderIds = useMemo(
+    () =>
+      new Set(
+        modelOptions.flatMap(({ ref }) => {
+          const provider = providerFromBuiltinId(ref.providerId);
+          return provider ? [provider] : [];
+        }),
+      ),
+    [modelOptions],
+  );
+  const hasCustomModels = modelOptions.some(({ ref }) =>
+    customProviderIds.has(ref.providerId),
+  );
+  const effectiveActiveProvider =
+    activeProvider === COMPAT_PROVIDER_ID
+      ? hasCustomModels
+        ? activeProvider
+        : null
+      : activeProvider === null ||
+          availableProviderIds.has(activeProvider as ProviderId)
+        ? activeProvider
+        : null;
+  const currentRef =
+    modelOptions.find(({ ref }) => modelRefsEqual(ref, selected))?.ref ??
+    modelOptions[0]?.ref ??
+    DEFAULT_MODEL_REF;
+  const current =
+    tryResolveModel(currentRef, customProviders) ??
+    resolveModel(DEFAULT_MODEL_REF);
+  const availableFavoriteCount = modelOptions.filter(({ ref }) =>
+    favoriteModels.some((favorite) => modelRefsEqual(favorite, ref)),
+  ).length;
+  const availableRecentCount = modelOptions.filter(({ ref }) =>
+    recentModels.some((recent) => modelRefsEqual(recent, ref)),
+  ).length;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -410,12 +398,14 @@ function ModelDropdown() {
             (order.get(modelRefKey(b.ref)) ?? 0),
         );
     }
-    if (activeProvider === COMPAT_PROVIDER_ID) {
+    if (effectiveActiveProvider === COMPAT_PROVIDER_ID) {
       pool = pool.filter((option) =>
         customProviderIds.has(option.ref.providerId),
       );
-    } else if (activeProvider !== null) {
-      pool = pool.filter((option) => option.info.provider === activeProvider);
+    } else if (effectiveActiveProvider !== null) {
+      pool = pool.filter(
+        (option) => option.info.provider === effectiveActiveProvider,
+      );
     }
     if (q) {
       pool = pool.filter(
@@ -429,8 +419,8 @@ function ModelDropdown() {
     }
     return pool;
   }, [
-    activeProvider,
     customProviderIds,
+    effectiveActiveProvider,
     favoriteModels,
     modelOptions,
     recentModels,
@@ -447,15 +437,9 @@ function ModelDropdown() {
           size="sm"
           className={cn(
             "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground",
-            currentProviderHasKey
-              ? "text-muted-foreground"
-              : "text-amber-600 dark:text-amber-400",
+            "text-muted-foreground",
           )}
-          title={
-            currentProviderHasKey
-              ? t("statusBar.modelTitle", { label: current.label })
-              : t("statusBar.modelNoKey", { label: current.label })
-          }
+          title={t("statusBar.modelTitle", { label: current.label })}
         >
           {current.label}
           <HugeiconsIcon
@@ -505,48 +489,42 @@ function ModelDropdown() {
             icon={FavouriteIcon}
             active={tab === "favorites"}
             onClick={() => setTab("favorites")}
-            count={favoriteModels.length || undefined}
+            count={availableFavoriteCount || undefined}
           />
           <TabButton
             label={t("statusBar.tabRecent")}
             icon={Clock01Icon}
             active={tab === "recent"}
             onClick={() => setTab("recent")}
-            count={recentModels.length || undefined}
+            count={availableRecentCount || undefined}
           />
         </div>
 
         <div className="flex max-h-104 min-h-0">
-          {/* 已配置的提供方优先，未配置项弱化显示。 */}
+          {/* 供应商列只展示至少包含一个当前可用模型的配置。 */}
           <div className="flex w-11 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border/70 bg-muted/20 py-1.5">
             <ProviderPill
               icon={AiBookIcon}
               title={t("statusBar.allProviders")}
-              active={activeProvider === null}
+              active={effectiveActiveProvider === null}
               onClick={() => setActiveProvider(null)}
             />
-            {[
-              ...sortedProviders.configured,
-              ...sortedProviders.unconfigured,
-            ].map((p) => (
+            {PROVIDERS.filter((provider) =>
+              availableProviderIds.has(provider.id),
+            ).map((p) => (
               <ProviderPill
                 key={p.id}
                 icon={PROVIDER_ICON[p.id]}
-                title={
-                  hasKeyFor(p.id)
-                    ? p.label
-                    : t("statusBar.notConfigured", { label: p.label })
-                }
-                active={activeProvider === p.id}
-                muted={!hasKeyFor(p.id)}
+                title={p.label}
+                active={effectiveActiveProvider === p.id}
                 onClick={() => setActiveProvider(p.id)}
               />
             ))}
-            {customProviders.length > 0 && (
+            {hasCustomModels && (
               <ProviderPill
                 icon={PlugIcon}
                 title={t("statusBar.openaiCompatible")}
-                active={activeProvider === COMPAT_PROVIDER_ID}
+                active={effectiveActiveProvider === COMPAT_PROVIDER_ID}
                 onClick={() => setActiveProvider(COMPAT_PROVIDER_ID)}
               />
             )}
@@ -554,20 +532,17 @@ function ModelDropdown() {
 
           {/* Models list */}
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
-            {activeProvider === COMPAT_PROVIDER_ID && (
+            {effectiveActiveProvider === COMPAT_PROVIDER_ID && (
               <div className="flex items-center gap-1.5 px-3 pt-1 pb-1.5 text-[11px] font-medium tracking-tight text-muted-foreground">
                 <HugeiconsIcon icon={PlugIcon} size={13} strokeWidth={1.75} />
                 <span>{t("statusBar.openaiCompatible")}</span>
               </div>
             )}
-            {activeProvider !== null &&
-            activeProvider !== COMPAT_PROVIDER_ID ? (
-              <ProviderHeader providerId={activeProvider as ProviderId} />
-            ) : null}
-            {activeProvider !== null &&
-            activeProvider !== COMPAT_PROVIDER_ID &&
-            !hasKeyFor(activeProvider as ProviderId) ? (
-              <ProviderConfigureCTA providerId={activeProvider as ProviderId} />
+            {effectiveActiveProvider !== null &&
+            effectiveActiveProvider !== COMPAT_PROVIDER_ID ? (
+              <ProviderHeader
+                providerId={effectiveActiveProvider as ProviderId}
+              />
             ) : null}
             {filtered.length === 0 ? (
               <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground">
@@ -582,23 +557,12 @@ function ModelDropdown() {
                 <ModelRow
                   key={modelRefKey(ref)}
                   model={info}
-                  selected={modelRefsEqual(ref, selected)}
-                  hasKey={
-                    customProviderIds.has(ref.providerId) ||
-                    hasKeyFor(info.provider)
-                  }
+                  selected={modelRefsEqual(ref, currentRef)}
                   favorite={favoriteModels.some((item) =>
                     modelRefsEqual(item, ref),
                   )}
-                  showProviderIcon={activeProvider === null}
+                  showProviderIcon={effectiveActiveProvider === null}
                   onPick={() => {
-                    if (
-                      !customProviderIds.has(ref.providerId) &&
-                      !hasKeyFor(info.provider)
-                    ) {
-                      void openSettingsWindow("models");
-                      return;
-                    }
                     setSelected(ref);
                   }}
                   onToggleFavorite={() => void toggleFavoriteModel(ref)}
@@ -691,31 +655,9 @@ function ProviderHeader({ providerId }: { providerId: ProviderId }) {
   );
 }
 
-function ProviderConfigureCTA({ providerId }: { providerId: ProviderId }) {
-  const { t } = useTranslation("ai");
-  const p = PROVIDERS.find((x) => x.id === providerId);
-  if (!p) return null;
-  return (
-    <button
-      type="button"
-      onClick={() => void openSettingsWindow("models")}
-      className="group mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-left text-[11px] text-muted-foreground transition-colors hover:border-border hover:bg-interactive-hover hover:text-foreground"
-    >
-      <HugeiconsIcon icon={Settings01Icon} size={13} strokeWidth={1.75} />
-      <span className="flex-1 truncate">
-        {t("statusBar.configureCta", { label: p.label })}
-      </span>
-      <span className="shrink-0 text-[10px] underline-offset-2 group-hover:underline">
-        {t("statusBar.open")}
-      </span>
-    </button>
-  );
-}
-
 function ModelRow({
   model,
   selected,
-  hasKey,
   favorite,
   showProviderIcon,
   onPick,
@@ -723,7 +665,6 @@ function ModelRow({
 }: {
   model: ModelInfo;
   selected: boolean;
-  hasKey: boolean;
   favorite: boolean;
   showProviderIcon: boolean;
   onPick: () => void;
@@ -739,7 +680,6 @@ function ModelRow({
       className={cn(
         "group mx-1 my-0.5 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
         selected ? "bg-interactive-active text-foreground" : "text-foreground",
-        !hasKey && "opacity-60",
       )}
     >
       <button
