@@ -17,11 +17,6 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
 import { Tool } from "@/components/ai-elements/tool";
 import {
   Collapsible,
@@ -72,6 +67,7 @@ import { sendMessage } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 import { AiChatScrollControls } from "./AiChatScrollControls";
+import { ChatReasoningPart } from "./ChatReasoningPart";
 import { SubagentCard, type SubagentResultView } from "./SubagentCard";
 
 type ConversationScrollPosition = {
@@ -630,6 +626,16 @@ const RenderedMessage = memo(function RenderedMessage({
                   sessionId={sessionId}
                   part={g.part}
                   streaming={g.idx === streamingPartIdx}
+                  reasoningStreaming={
+                    g.part.type === "reasoning" &&
+                    (g.part as { state?: string }).state === "streaming"
+                  }
+                  autoCollapseReasoning={
+                    g.part.type === "reasoning" &&
+                    (g.part as { state?: string }).state === "done" &&
+                    (hasVisiblePartAfter(message.parts as AnyPart[], g.idx) ||
+                      !streaming)
+                  }
                   reasoningDurationMs={reasoningDurationFromPart(
                     message.parts[g.idx + 1],
                   )}
@@ -803,6 +809,24 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   });
   flushRun();
   return out;
+}
+
+/** 判断推理分段之后是否已经出现正文、工具或下一段推理。 */
+function hasVisiblePartAfter(
+  parts: readonly AnyPart[],
+  index: number,
+): boolean {
+  for (let nextIndex = index + 1; nextIndex < parts.length; nextIndex += 1) {
+    const part = parts[nextIndex];
+    const type = partType(part);
+    if (type === "reasoning") return true;
+    if (type === "text") {
+      if (((part as { text?: string }).text?.length ?? 0) > 0) return true;
+      continue;
+    }
+    if (type === "dynamic-tool" || type.startsWith("tool-")) return true;
+  }
+  return false;
 }
 
 function collectSubagentParts(parts: readonly AnyPart[]): {
@@ -989,6 +1013,8 @@ const RenderedPart = memo(function RenderedPart({
   sessionId,
   part,
   streaming,
+  reasoningStreaming,
+  autoCollapseReasoning,
   reasoningDurationMs,
   persistedSubagent,
   subagentResult,
@@ -996,6 +1022,8 @@ const RenderedPart = memo(function RenderedPart({
   sessionId: string;
   part: AnyPart;
   streaming: boolean;
+  reasoningStreaming: boolean;
+  autoCollapseReasoning: boolean;
   reasoningDurationMs?: number;
   persistedSubagent?: SubagentDisplaySnapshot;
   subagentResult?: SubagentResultView;
@@ -1009,20 +1037,13 @@ const RenderedPart = memo(function RenderedPart({
   }
 
   if (part.type === "reasoning") {
-    const duration =
-      reasoningDurationMs === undefined
-        ? undefined
-        : Math.max(1, Math.ceil(reasoningDurationMs / 1000));
     return (
-      <Reasoning isStreaming={streaming} duration={duration}>
-        <ReasoningTrigger
-          data-ai-reasoning-trigger
-          className="text-[12px] leading-4"
-        />
-        <ReasoningContent className="[&_*]:text-[12px]!">
-          {(part as unknown as { text: string }).text}
-        </ReasoningContent>
-      </Reasoning>
+      <ChatReasoningPart
+        text={(part as unknown as { text: string }).text}
+        durationMs={reasoningDurationMs}
+        isStreaming={reasoningStreaming}
+        autoCollapse={autoCollapseReasoning}
+      />
     );
   }
 

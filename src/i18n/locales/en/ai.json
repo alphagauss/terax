@@ -146,6 +146,11 @@
     "emptyTitle": "Ask Terax anything",
     "emptyDescription": "Explain command output, fix errors, generate snippets, or run a task.",
     "thinking": "Thinking…",
+    "reasoning": {
+      "thinking": "Thinking",
+      "completed": "Reasoned",
+      "completedWithDuration": "Reasoned for {{duration}}s"
+    },
     "continuePrompt": "Continue from where you stopped. Don't recap - just keep going.",
     "somethingWentWrong": "Something went wrong.",
     "dismiss": "Dismiss",
