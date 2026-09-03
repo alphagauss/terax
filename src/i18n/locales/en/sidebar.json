@@ -7,6 +7,8 @@
   "moveToPrimary": "Move to Primary Sidebar",
   "moveToSecondary": "Move to Secondary Sidebar",
   "resetLocation": "Reset Location",
+  "maximizeSecondary": "Maximize Secondary Sidebar",
+  "restoreSecondary": "Restore Secondary Sidebar",
   "closeSecondary": "Close Secondary Sidebar",
   "hideContainer": "Hide {{name}}",
   "showContainer": "Show {{name}}",

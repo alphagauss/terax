@@ -46,6 +46,7 @@ export type SidebarRuntimeState = {
   version: 1;
   primary: SidebarLocationRuntime;
   secondary: SidebarLocationRuntime;
+  secondaryMaximized: boolean;
 };
 
 export type SidebarPlacementState = {

@@ -48,6 +48,7 @@ export const DEFAULT_SIDEBAR_RUNTIME_STATE: SidebarRuntimeState = {
     collapsed: true,
     width: SECONDARY_SIDEBAR_DEFAULT_WIDTH,
   },
+  secondaryMaximized: false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -202,15 +203,18 @@ export function normalizeSidebarRuntimeState(
 ): SidebarRuntimeState {
   const record = isRecord(value) && value.version === 1 ? value : {};
   const hidden = new Set(hiddenContainerIds);
+  const secondary = readRuntimeLocation(
+    record.secondary,
+    "secondary",
+    placements,
+    hidden,
+  );
   return {
     version: 1,
     primary: readRuntimeLocation(record.primary, "primary", placements, hidden),
-    secondary: readRuntimeLocation(
-      record.secondary,
-      "secondary",
-      placements,
-      hidden,
-    ),
+    secondary,
+    secondaryMaximized:
+      record.secondaryMaximized === true && !secondary.collapsed,
   };
 }
 

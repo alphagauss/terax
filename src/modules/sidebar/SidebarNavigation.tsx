@@ -23,7 +23,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import {
+  Cancel01Icon,
+  MaximizeScreenIcon,
+  MinimizeScreenIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type PointerEvent, type ReactNode, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -652,12 +656,18 @@ export function SidebarActivityBar({
   );
 }
 
-/** 渲染与 Activity Bar 位置联动的副侧边栏容器导航。 */
+/** 渲染与 Activity Bar 位置联动的副侧边栏导航及最大化、关闭操作。 */
 export function SecondarySidebarTabs({
   onClose,
+  onToggleMaximized,
+  maximized,
   activityBar,
   ...props
-}: SharedNavigationProps & { onClose: () => void }) {
+}: SharedNavigationProps & {
+  onClose: () => void;
+  onToggleMaximized: () => void;
+  maximized: boolean;
+}) {
   const { t } = useTranslation("sidebar");
   if (activityBar.position === "hidden") return null;
   const bottom = activityBar.position === "bottom";
@@ -685,6 +695,30 @@ export function SecondarySidebarTabs({
           barPosition={activityBar.position}
         />
       </NavigationViewport>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onToggleMaximized}
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-control hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
+            aria-label={t(maximized ? "restoreSecondary" : "maximizeSecondary")}
+            aria-pressed={maximized}
+          >
+            <HugeiconsIcon
+              icon={maximized ? MinimizeScreenIcon : MaximizeScreenIcon}
+              size={14}
+              strokeWidth={1.8}
+            />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          side={bottom ? "top" : "bottom"}
+          sideOffset={5}
+          className="rounded-md border border-border/60 bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-lg"
+        >
+          {t(maximized ? "restoreSecondary" : "maximizeSecondary")}
+        </TooltipContent>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
           <button

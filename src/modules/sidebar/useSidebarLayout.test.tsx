@@ -1,13 +1,16 @@
 /**
- * 本文件测试侧边栏布局 Hook 的临时隐藏和窗口初始折叠行为。
- * 重点锁定禅模式状态恢复，并确保新建临时窗口默认关闭两侧面板。
+ * 本文件测试侧边栏布局 Hook 的临时隐藏、副侧栏最大化和窗口初始折叠行为。
+ * 重点锁定呈现模式恢复，并确保新建临时窗口默认关闭两侧面板。
  */
 
 // @vitest-environment happy-dom
 
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+import type {
+  GroupImperativeHandle,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSidebarLayout } from "./useSidebarLayout";
 
@@ -111,6 +114,10 @@ describe("useSidebarLayout temporary hiding", () => {
     expect(workspaceStorage.set).not.toHaveBeenCalled();
 
     await render(false);
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
     expect(primary.resize).toHaveBeenLastCalledWith(
       `${current().runtime.primary.width}px`,
     );
@@ -148,5 +155,116 @@ describe("useSidebarLayout temporary hiding", () => {
         secondary: expect.objectContaining({ collapsed: true }),
       }),
     );
+  });
+
+  it("maximizes the secondary sidebar without losing the previous layout", async () => {
+    workspaceStorage.get.mockReturnValue(undefined);
+    workspaceStorage.set.mockResolvedValue();
+    const root = createRoot(document.createElement("div"));
+    roots.push(root);
+    let controls: Controls | undefined;
+
+    await act(async () => {
+      root.render(
+        createElement(Harness, {
+          temporarilyHidden: false,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      );
+    });
+    const current = () => {
+      if (!controls) throw new Error("sidebar controls are unavailable");
+      return controls;
+    };
+    const primaryResize = vi.fn();
+    const secondaryResize = vi.fn();
+    const setLayout = vi.fn((layout) => layout);
+    const previousLayout = {
+      "primary-sidebar": 20,
+      workspace: 50,
+      "secondary-sidebar": 30,
+    };
+    const primary = {
+      collapse: vi.fn(),
+      resize: primaryResize,
+      getSize: vi.fn(() => ({ inPixels: 280 })),
+    } as unknown as PanelImperativeHandle;
+    const secondary = {
+      collapse: vi.fn(),
+      resize: secondaryResize,
+      getSize: vi.fn(() => ({ inPixels: 360 })),
+    } as unknown as PanelImperativeHandle;
+    const group = {
+      getLayout: vi.fn(() => previousLayout),
+      setLayout,
+    } as unknown as GroupImperativeHandle;
+    current().panelRefs.primary.current = primary;
+    current().panelRefs.secondary.current = secondary;
+    current().workbenchGroupRef.current = group;
+
+    await act(async () => current().openContainer("ai"));
+    secondaryResize.mockClear();
+    await act(async () => current().toggleSecondaryMaximized());
+
+    expect(current().runtime.secondaryMaximized).toBe(true);
+    expect(current().runtime.primary.width).toBe(280);
+    expect(current().runtime.secondary.width).toBe(360);
+    expect(current().isVisible("explorer")).toBe(false);
+    expect(current().isVisible("ai")).toBe(true);
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 0,
+      workspace: 0,
+      "secondary-sidebar": 100,
+    });
+
+    setLayout.mockClear();
+    await act(async () => current().toggleSecondaryMaximized());
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.secondaryMaximized).toBe(false);
+    expect(setLayout).toHaveBeenCalledOnce();
+    expect(setLayout).toHaveBeenCalledWith(previousLayout);
+
+    await act(async () => current().toggleSecondaryMaximized());
+    setLayout.mockClear();
+    await act(async () => {
+      current().toggleSecondaryMaximized();
+      root.render(
+        createElement(Harness, {
+          temporarilyHidden: true,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+    });
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 0,
+      workspace: 100,
+      "secondary-sidebar": 0,
+    });
+
+    await act(async () => {
+      root.render(
+        createElement(Harness, {
+          temporarilyHidden: false,
+          onReady: (next) => {
+            controls = next;
+          },
+        }),
+      );
+    });
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(setLayout).toHaveBeenLastCalledWith(previousLayout);
   });
 });

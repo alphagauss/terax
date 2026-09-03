@@ -15,7 +15,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+import type {
+  GroupImperativeHandle,
+  Layout,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import { getSidebarContainer, SIDEBAR_CONTAINERS } from "./containers";
 import {
   clampPanelWidth,
@@ -48,6 +52,7 @@ type RuntimeUpdater = (current: SidebarRuntimeState) => SidebarRuntimeState;
 
 /**
  * 控制容器激活、位置移动、区域折叠和最终尺寸持久化。
+ * 副侧边栏最大化只改变三栏呈现比例，不覆盖用户保存的侧边栏宽度和折叠状态。
  * 临时隐藏期间拒绝可见性操作且不改写持久状态，退出后按原状态恢复布局。
  * 新建临时窗口可在尚无运行时状态时折叠两侧，之后仍遵循窗口自身的持久状态。
  */
@@ -83,13 +88,19 @@ export function useSidebarLayout(
     };
   });
   const [runtime, setRuntime] = useState(initialRuntime);
+  const workbenchGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const preMaximizedLayoutRef = useRef<Layout | null>(null);
+  const pendingRestoreLayoutRef = useRef<Layout | null>(null);
   const primaryPanelRef = useRef<PanelImperativeHandle | null>(null);
   const secondaryPanelRef = useRef<PanelImperativeHandle | null>(null);
   const placementsRef = useRef(placementState.placements);
   const placementStateRef = useRef(placementState);
   const runtimeRef = useRef(runtime);
   const temporarilyHiddenRef = useRef(temporarilyHidden);
-  const previousTemporarilyHiddenRef = useRef(false);
+  const previousPresentationRef = useRef({
+    temporarilyHidden: false,
+    secondaryMaximized: false,
+  });
   placementsRef.current = placementState.placements;
   placementStateRef.current = placementState;
   runtimeRef.current = runtime;
@@ -132,13 +143,41 @@ export function useSidebarLayout(
     [panelRefs],
   );
 
+  /** 按运行时记录恢复两侧宽度，工作区自动占据剩余空间。 */
+  const restoreRuntimeLayout = useCallback(
+    (nextRuntime: SidebarRuntimeState) => {
+      for (const location of ["secondary", "primary"] as const) {
+        if (nextRuntime[location].collapsed) {
+          panelRefs[location].current?.collapse();
+        } else {
+          panelRefs[location].current?.resize(
+            `${nextRuntime[location].width}px`,
+          );
+        }
+      }
+    },
+    [panelRefs],
+  );
+
+  /** 让副侧边栏独占可调整面板组，外层活动栏不受影响。 */
+  const maximizeSecondaryLayout = useCallback(() => {
+    workbenchGroupRef.current?.setLayout({
+      "primary-sidebar": 0,
+      workspace: 0,
+      "secondary-sidebar": 100,
+    });
+  }, []);
+
   const closeLocation = useCallback(
     (location: SidebarLocation) => {
       if (temporarilyHiddenRef.current) return false;
+      if (location === "secondary") pendingRestoreLayoutRef.current = null;
       panelRefs[location].current?.collapse();
       replaceRuntime((current) => ({
         ...current,
         [location]: { ...current[location], collapsed: true },
+        secondaryMaximized:
+          location === "secondary" ? false : current.secondaryMaximized,
       }));
       return true;
     },
@@ -149,6 +188,7 @@ export function useSidebarLayout(
     (id: SidebarContainerId) => {
       if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
+      if (location === "primary") pendingRestoreLayoutRef.current = null;
       replaceRuntime((current) => ({
         ...current,
         [location]: {
@@ -156,6 +196,8 @@ export function useSidebarLayout(
           activeId: id,
           collapsed: false,
         },
+        secondaryMaximized:
+          location === "primary" ? false : current.secondaryMaximized,
       }));
       revealLocation(location, id);
       return true;
@@ -168,6 +210,9 @@ export function useSidebarLayout(
       if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       const current = runtimeRef.current[location];
+      if (location === "primary" && runtimeRef.current.secondaryMaximized) {
+        return openContainer(id);
+      }
       if (current.activeId === id && !current.collapsed) {
         return closeLocation(location);
       }
@@ -180,6 +225,11 @@ export function useSidebarLayout(
     (location: SidebarLocation) => {
       if (temporarilyHiddenRef.current) return false;
       const current = runtimeRef.current[location];
+      if (location === "primary" && runtimeRef.current.secondaryMaximized) {
+        const activeId =
+          current.activeId ?? placementsRef.current.primary[0] ?? null;
+        return activeId ? openContainer(activeId) : false;
+      }
       if (!current.collapsed) {
         return closeLocation(location);
       }
@@ -189,6 +239,43 @@ export function useSidebarLayout(
     },
     [closeLocation, openContainer],
   );
+
+  /** 捕获完整三栏比例，并在副侧边栏独占主区域和原布局之间切换。 */
+  const toggleSecondaryMaximized = useCallback(() => {
+    if (temporarilyHiddenRef.current) return false;
+    const current = runtimeRef.current;
+    if (current.secondary.collapsed) return false;
+    const maximizing = !current.secondaryMaximized;
+    if (maximizing) {
+      const layout = workbenchGroupRef.current?.getLayout();
+      preMaximizedLayoutRef.current = layout ? { ...layout } : null;
+      pendingRestoreLayoutRef.current = null;
+    } else {
+      pendingRestoreLayoutRef.current = preMaximizedLayoutRef.current;
+    }
+    replaceRuntime((previous) => {
+      if (!maximizing) {
+        return { ...previous, secondaryMaximized: false };
+      }
+      const next: SidebarRuntimeState = {
+        ...previous,
+        primary: { ...previous.primary },
+        secondary: { ...previous.secondary },
+        secondaryMaximized: true,
+      };
+      for (const location of ["primary", "secondary"] as const) {
+        const size = panelRefs[location].current?.getSize().inPixels ?? 0;
+        if (size <= 0) continue;
+        const baseMin =
+          location === "primary"
+            ? PRIMARY_SIDEBAR_MIN_WIDTH
+            : SECONDARY_SIDEBAR_MIN_WIDTH;
+        next[location].width = clampPanelWidth(size, baseMin);
+      }
+      return next;
+    });
+    return true;
+  }, [panelRefs, replaceRuntime]);
 
   const commitPlacementState = useCallback((next: SidebarPlacementState) => {
     placementStateRef.current = next;
@@ -223,7 +310,8 @@ export function useSidebarLayout(
       });
 
       if (sourceLocation === targetLocation) return;
-      const nextRuntime = runtimeAfterSidebarContainerMove(
+      pendingRestoreLayoutRef.current = null;
+      const movedRuntime = runtimeAfterSidebarContainerMove(
         runtimeRef.current,
         currentPlacements,
         nextPlacements,
@@ -231,6 +319,9 @@ export function useSidebarLayout(
         targetLocation,
         placementStateRef.current.activityBar.hiddenContainerIds,
       );
+      const nextRuntime = movedRuntime.secondaryMaximized
+        ? { ...movedRuntime, secondaryMaximized: false }
+        : movedRuntime;
       replaceRuntime(() => nextRuntime);
 
       if (nextRuntime[sourceLocation].collapsed) {
@@ -322,7 +413,9 @@ export function useSidebarLayout(
   );
 
   const commitLayout = useCallback(() => {
-    if (temporarilyHiddenRef.current) return;
+    if (temporarilyHiddenRef.current || runtimeRef.current.secondaryMaximized) {
+      return;
+    }
     replaceRuntime((current) => {
       const next: SidebarRuntimeState = {
         ...current,
@@ -365,25 +458,81 @@ export function useSidebarLayout(
         placementState.placements,
         id,
       );
-      return runtime[location].activeId === id && !runtime[location].collapsed;
+      return (
+        (!runtime.secondaryMaximized || location === "secondary") &&
+        runtime[location].activeId === id &&
+        !runtime[location].collapsed
+      );
     },
     [placementState.placements, runtime, temporarilyHidden],
   );
 
   useLayoutEffect(() => {
-    if (previousTemporarilyHiddenRef.current === temporarilyHidden) return;
-    previousTemporarilyHiddenRef.current = temporarilyHidden;
-    for (const location of ["primary", "secondary"] as const) {
-      if (temporarilyHidden || runtimeRef.current[location].collapsed) {
-        panelRefs[location].current?.collapse();
-      } else {
-        revealLocation(
-          location,
-          runtimeRef.current[location].activeId ?? undefined,
-        );
-      }
+    const nextPresentation = {
+      temporarilyHidden,
+      secondaryMaximized: runtime.secondaryMaximized,
+    };
+    const previous = previousPresentationRef.current;
+    if (
+      previous.temporarilyHidden === nextPresentation.temporarilyHidden &&
+      previous.secondaryMaximized === nextPresentation.secondaryMaximized
+    ) {
+      return;
     }
-  }, [panelRefs, revealLocation, temporarilyHidden]);
+    previousPresentationRef.current = nextPresentation;
+    if (temporarilyHidden) {
+      if (previous.secondaryMaximized) {
+        // 与解除最大化同批进入禅模式时，等待动态约束更新后再让工作区独占布局。
+        const frame = requestAnimationFrame(() => {
+          workbenchGroupRef.current?.setLayout({
+            "primary-sidebar": 0,
+            workspace: 100,
+            "secondary-sidebar": 0,
+          });
+        });
+        return () => cancelAnimationFrame(frame);
+      }
+      panelRefs.primary.current?.collapse();
+      panelRefs.secondary.current?.collapse();
+    } else if (runtime.secondaryMaximized) {
+      maximizeSecondaryLayout();
+    } else {
+      const capturedLayout = pendingRestoreLayoutRef.current;
+      pendingRestoreLayoutRef.current = null;
+      preMaximizedLayoutRef.current = null;
+      const restore = () => {
+        if (capturedLayout) {
+          workbenchGroupRef.current?.setLayout(capturedLayout);
+        } else {
+          restoreRuntimeLayout(runtimeRef.current);
+        }
+      };
+      if (
+        !previous.temporarilyHidden &&
+        !previous.secondaryMaximized &&
+        !capturedLayout
+      ) {
+        restore();
+        return;
+      }
+
+      // 等待动态约束和原生全屏 resize 都稳定后，再按完整比例恢复三栏。
+      let restoreFrame = 0;
+      const settleFrame = requestAnimationFrame(() => {
+        restoreFrame = requestAnimationFrame(restore);
+      });
+      return () => {
+        cancelAnimationFrame(settleFrame);
+        cancelAnimationFrame(restoreFrame);
+      };
+    }
+  }, [
+    panelRefs,
+    maximizeSecondaryLayout,
+    restoreRuntimeLayout,
+    runtime.secondaryMaximized,
+    temporarilyHidden,
+  ]);
 
   useEffect(() => {
     let dispose: (() => void) | undefined;
@@ -400,15 +549,11 @@ export function useSidebarLayout(
       );
       replaceRuntime(() => nextRuntime);
       requestAnimationFrame(() => {
-        for (const location of ["primary", "secondary"] as const) {
-          if (nextRuntime[location].collapsed) {
-            panelRefs[location].current?.collapse();
-          } else {
-            revealLocation(
-              location,
-              nextRuntime[location].activeId ?? undefined,
-            );
-          }
+        if (temporarilyHiddenRef.current) return;
+        if (nextRuntime.secondaryMaximized) {
+          maximizeSecondaryLayout();
+        } else {
+          restoreRuntimeLayout(nextRuntime);
         }
       });
     }).then((unlisten) => {
@@ -419,7 +564,12 @@ export function useSidebarLayout(
       cancelled = true;
       dispose?.();
     };
-  }, [effectiveHiddenIds, panelRefs, replaceRuntime, revealLocation]);
+  }, [
+    effectiveHiddenIds,
+    maximizeSecondaryLayout,
+    replaceRuntime,
+    restoreRuntimeLayout,
+  ]);
 
   useEffect(() => {
     const nextRuntime = normalizeSidebarRuntimeState(
@@ -455,10 +605,12 @@ export function useSidebarLayout(
     activityBar: placementState.activityBar,
     runtime,
     initialRuntime,
+    workbenchGroupRef,
     panelRefs,
     openContainer,
     toggleContainer,
     toggleLocation,
+    toggleSecondaryMaximized,
     closeLocation,
     moveContainer,
     resetContainerLocation,

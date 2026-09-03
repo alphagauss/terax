@@ -303,7 +303,7 @@ export default function App() {
     },
     [t],
   );
-  const { enabled: zenMode, toggle: toggleZenMode } = useZenMode({
+  const { enabled: zenMode, toggle: toggleZenModeState } = useZenMode({
     onFullscreenError: handleZenFullscreenError,
     focusWorkbench: focusActiveWorkbench,
   });
@@ -401,6 +401,18 @@ export default function App() {
     zenMode,
     !currentWorkspaceBootstrap().isPrimary,
   );
+  /** 禅模式独占工作区，进入前先结束与其冲突的副侧边栏最大化。 */
+  const toggleZenMode = useCallback(() => {
+    if (!zenMode && sidebar.runtime.secondaryMaximized) {
+      sidebar.toggleSecondaryMaximized();
+    }
+    toggleZenModeState();
+  }, [
+    sidebar.runtime.secondaryMaximized,
+    sidebar.toggleSecondaryMaximized,
+    toggleZenModeState,
+    zenMode,
+  ]);
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
@@ -1884,6 +1896,7 @@ export default function App() {
             ) : null}
             <ResizablePanelGroup
               orientation="horizontal"
+              groupRef={sidebar.workbenchGroupRef}
               className="min-h-0 min-w-0 flex-1"
               onLayoutChanged={commitWorkbenchLayout}
             >
@@ -1892,20 +1905,31 @@ export default function App() {
                 panelRef={sidebar.panelRefs.primary}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
+                  sidebar.initialRuntime.secondaryMaximized ||
                   sidebar.initialRuntime.primary.collapsed
                     ? "0px"
                     : `${sidebar.initialRuntime.primary.width}px`
                 }
-                minSize={`${sidebar.minimumWidth("primary")}px`}
+                minSize={
+                  sidebar.runtime.secondaryMaximized
+                    ? "0px"
+                    : `${sidebar.minimumWidth("primary")}px`
+                }
+                maxSize={
+                  sidebar.runtime.secondaryMaximized ? "0px" : undefined
+                }
                 collapsible
                 collapsedSize={0}
               >
                 <div
                   data-sidebar-drop-zone="primary"
-                  inert={zenMode}
-                  aria-hidden={zenMode || undefined}
+                  inert={zenMode || sidebar.runtime.secondaryMaximized}
+                  aria-hidden={
+                    zenMode || sidebar.runtime.secondaryMaximized || undefined
+                  }
                   className={cn(
                     "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
+                    sidebar.runtime.secondaryMaximized && "invisible",
                     sidebar.runtime.primary.collapsed
                       ? "pointer-events-none -translate-x-1.5 opacity-0"
                       : "translate-x-0 opacity-100",
@@ -1941,15 +1965,39 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle
                 withHandle
-                className={cn(zenMode && "hidden")}
-                disabled={zenMode || sidebar.runtime.primary.collapsed}
+                className={cn(
+                  (zenMode || sidebar.runtime.secondaryMaximized) && "hidden",
+                )}
+                disabled={
+                  zenMode ||
+                  sidebar.runtime.secondaryMaximized ||
+                  sidebar.runtime.primary.collapsed
+                }
               />
               <ResizablePanel
                 id="workspace"
-                defaultSize="78%"
-                minSize={`${WORKSPACE_MIN_WIDTH}px`}
+                defaultSize={
+                  sidebar.initialRuntime.secondaryMaximized ? "0px" : "78%"
+                }
+                minSize={
+                  sidebar.runtime.secondaryMaximized
+                    ? "0px"
+                    : `${WORKSPACE_MIN_WIDTH}px`
+                }
+                maxSize={
+                  sidebar.runtime.secondaryMaximized ? "0px" : undefined
+                }
+                collapsible={sidebar.runtime.secondaryMaximized}
+                collapsedSize={0}
               >
-                <div className="flex h-full min-h-0 flex-col">
+                <div
+                  inert={sidebar.runtime.secondaryMaximized}
+                  aria-hidden={sidebar.runtime.secondaryMaximized || undefined}
+                  className={cn(
+                    "flex h-full min-h-0 flex-col",
+                    sidebar.runtime.secondaryMaximized && "invisible",
+                  )}
+                >
                   {workspaceBootPending ? (
                     <WorkspaceConnectionPlaceholder
                       kind={workspaceEnv.kind === "wsl" ? "wsl" : "ssh"}
@@ -1979,17 +2027,25 @@ export default function App() {
               </ResizablePanel>
               <ResizableHandle
                 withHandle
-                className={cn(zenMode && "hidden")}
-                disabled={zenMode || sidebar.runtime.secondary.collapsed}
+                className={cn(
+                  (zenMode || sidebar.runtime.secondaryMaximized) && "hidden",
+                )}
+                disabled={
+                  zenMode ||
+                  sidebar.runtime.secondaryMaximized ||
+                  sidebar.runtime.secondary.collapsed
+                }
               />
               <ResizablePanel
                 id="secondary-sidebar"
                 panelRef={sidebar.panelRefs.secondary}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
-                  sidebar.initialRuntime.secondary.collapsed
-                    ? "0px"
-                    : `${sidebar.initialRuntime.secondary.width}px`
+                  sidebar.initialRuntime.secondaryMaximized
+                    ? "100%"
+                    : sidebar.initialRuntime.secondary.collapsed
+                      ? "0px"
+                      : `${sidebar.initialRuntime.secondary.width}px`
                 }
                 minSize={`${sidebar.minimumWidth("secondary")}px`}
                 collapsible
@@ -2018,6 +2074,8 @@ export default function App() {
                         onActivate={sidebar.openContainer}
                         onMove={sidebar.moveContainer}
                         onReset={sidebar.resetContainerLocation}
+                        maximized={sidebar.runtime.secondaryMaximized}
+                        onToggleMaximized={sidebar.toggleSecondaryMaximized}
                         onClose={() => sidebar.closeLocation("secondary")}
                       />
                     ) : null}
@@ -2034,6 +2092,8 @@ export default function App() {
                         onActivate={sidebar.openContainer}
                         onMove={sidebar.moveContainer}
                         onReset={sidebar.resetContainerLocation}
+                        maximized={sidebar.runtime.secondaryMaximized}
+                        onToggleMaximized={sidebar.toggleSecondaryMaximized}
                         onClose={() => sidebar.closeLocation("secondary")}
                       />
                     ) : null}

@@ -151,6 +151,7 @@ describe("normalizeSidebarRuntimeState", () => {
         collapsed: false,
         width: 280,
       },
+      secondaryMaximized: false,
     });
   });
 
@@ -165,6 +166,30 @@ describe("normalizeSidebarRuntimeState", () => {
       primary: { activeId: "search", collapsed: false },
       secondary: { activeId: null, collapsed: true },
     });
+  });
+
+  it("keeps maximization only while the secondary sidebar is open", () => {
+    const open = normalizeSidebarRuntimeState(
+      {
+        ...DEFAULT_SIDEBAR_RUNTIME_STATE,
+        secondary: {
+          ...DEFAULT_SIDEBAR_RUNTIME_STATE.secondary,
+          collapsed: false,
+        },
+        secondaryMaximized: true,
+      },
+      DEFAULT_SIDEBAR_PLACEMENT_STATE.placements,
+    );
+    expect(open.secondaryMaximized).toBe(true);
+    expect(
+      normalizeSidebarRuntimeState(
+        {
+          ...DEFAULT_SIDEBAR_RUNTIME_STATE,
+          secondaryMaximized: true,
+        },
+        DEFAULT_SIDEBAR_PLACEMENT_STATE.placements,
+      ).secondaryMaximized,
+    ).toBe(false);
   });
 });
 
@@ -216,6 +241,7 @@ describe("runtimeAfterSidebarContainerMove", () => {
         collapsed: false,
         width: 360,
       },
+      secondaryMaximized: false,
     });
   });
 });
