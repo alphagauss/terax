@@ -1,0 +1,11 @@
+/* Composer 工具栏按自身可用宽度收敛控件，避免侧栏位置影响响应式行为。 */
+.terax-ai-composer-toolbar {
+  container-type: inline-size;
+}
+
+@container (max-width: 280px) {
+  .terax-ai-permission-label,
+  .terax-ai-permission-chevron {
+    display: none;
+  }
+}

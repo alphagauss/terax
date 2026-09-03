@@ -18,7 +18,7 @@ import {
   Add01Icon,
   AiBookIcon,
   ArrowDown01Icon,
-  ArrowUpIcon,
+  ArrowUp02Icon,
   Clock01Icon,
   FavouriteIcon,
   Folder01Icon,
@@ -28,7 +28,6 @@ import {
   Search01Icon,
   SecurityWarningIcon,
   StarIcon,
-  StopCircleIcon,
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -51,6 +50,7 @@ import { getAvailableModelRefs } from "../lib/modelAvailability";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
 import { useChatStore } from "../store/chatStore";
 import { AiComposerInput } from "./AiComposerInput";
+import "./ai-sidebar-composer.css";
 import { ChipsRow } from "./ChipsRow";
 
 /**
@@ -75,7 +75,7 @@ export function AiSidebarComposer() {
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
-      <div className="flex flex-col gap-2 rounded-2xl border border-border/60 bg-accent/80 p-2.5 shadow-lg shadow-background/60">
+      <div className="flex flex-col gap-2 rounded-2xl border border-border/70 bg-background/95 p-2.5 shadow-sm">
         <input
           ref={fileInputRef}
           type="file"
@@ -108,7 +108,7 @@ export function AiSidebarComposer() {
 
         <AiComposerInput />
 
-        <div className="flex min-w-0 items-center gap-0.5">
+        <div className="terax-ai-composer-toolbar flex min-w-0 items-center gap-0.5">
           <IconBtn
             title={t("statusBar.attachFileOrImage")}
             onClick={() => fileInputRef.current?.click()}
@@ -157,35 +157,21 @@ export function AiSidebarComposer() {
           <ModelDropdown />
           <span className="min-w-1 flex-1" />
 
-          {c.isBusy ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              onClick={c.stop}
-              className="size-7"
-              aria-label={t("statusBar.stop")}
-              title={t("statusBar.stop")}
-            >
-              <HugeiconsIcon
-                icon={StopCircleIcon}
-                size={14}
-                strokeWidth={1.75}
-              />
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="icon"
-              onClick={c.submit}
-              disabled={!c.canSend}
-              className="size-7 rounded-full"
-              aria-label={t("statusBar.send")}
-              title={t("statusBar.send")}
-            >
-              <HugeiconsIcon icon={ArrowUpIcon} size={14} strokeWidth={1.75} />
-            </Button>
-          )}
+          <Button
+            type="button"
+            size="icon"
+            onClick={c.isBusy ? c.stop : c.submit}
+            disabled={!c.isBusy && !c.canSend}
+            className="size-7 rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-100 hover:bg-foreground/85"
+            aria-label={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
+            title={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
+          >
+            {c.isBusy ? (
+              <span className="size-2 rounded-[2px] bg-current" />
+            ) : (
+              <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />
+            )}
+          </Button>
         </div>
 
         {c.workingDirectory ? (
@@ -243,10 +229,18 @@ function PermissionModeDropdown() {
               : "text-foreground!",
           )}
           title={t(`statusBar.permissionMode.${mode}`)}
+          aria-label={t(`statusBar.permissionMode.${mode}`)}
         >
           <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
-          <span>{t(`statusBar.permissionMode.${mode}`)}</span>
-          <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
+          <span className="terax-ai-permission-label">
+            {t(`statusBar.permissionMode.${mode}`)}
+          </span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={11}
+            strokeWidth={2}
+            className="terax-ai-permission-chevron"
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
@@ -400,7 +394,7 @@ function ModelDropdown() {
           size="sm"
           disabled={!current}
           className={cn(
-            "h-5.5 gap-1 rounded-md px-1.5 my-1 text-xs hover:bg-accent hover:text-foreground",
+            "my-1 h-5.5 min-w-0 shrink gap-1 rounded-md px-1.5 text-xs hover:bg-accent hover:text-foreground",
             "text-muted-foreground",
           )}
           title={
@@ -409,7 +403,9 @@ function ModelDropdown() {
               : t("statusBar.noModels")
           }
         >
-          {current?.label ?? t("statusBar.noModels")}
+          <span className="truncate">
+            {current?.label ?? t("statusBar.noModels")}
+          </span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
             size={11}
