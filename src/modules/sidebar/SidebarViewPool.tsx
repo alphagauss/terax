@@ -48,6 +48,7 @@ export function SidebarViewPool({
         const location = findSidebarContainerLocation(placements, view.id);
         const visible =
           !temporarilyHidden &&
+          (!runtime.secondaryMaximized || location === "secondary") &&
           runtime[location].activeId === view.id &&
           !runtime[location].collapsed;
         if (visible) activatedRef.current.add(view.id);

@@ -87,8 +87,9 @@ export function useZenMode({
         changedFullscreenRef.current = false;
         requestAnimationFrame(() => {
           const returnFocus = returnFocusRef.current;
-          if (returnFocus?.isConnected) returnFocus.focus();
-          else if (movedFocusRef.current) focusWorkbench();
+          // 已隐藏外壳中的旧控件不再代表用户当前上下文，避免 F10 退出后产生悬空焦点环。
+          if (movedFocusRef.current) focusWorkbench();
+          else if (returnFocus?.isConnected) returnFocus.focus();
           movedFocusRef.current = false;
         });
       }

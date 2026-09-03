@@ -169,25 +169,28 @@ describe("useZenMode", () => {
     ]);
   });
 
-  it("moves focus out of hidden chrome and uses the workbench as a fallback", async () => {
+  it("keeps focus in the workbench after hiding focused chrome", async () => {
     nativeWindow.isFullscreen.mockResolvedValue(true);
     const sidebar = document.createElement("div");
     sidebar.dataset.sidebarDropZone = "primary";
     const button = document.createElement("button");
     sidebar.append(button);
     document.body.append(sidebar);
+    const workbench = document.createElement("button");
+    document.body.append(workbench);
     button.focus();
-    const focusWorkbench = vi.fn();
+    const focusWorkbench = vi.fn(() => workbench.focus());
     const controls = await renderHarness({ focusWorkbench });
 
     await act(async () => controls().toggle());
     await flushAnimationFrame();
     expect(focusWorkbench).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(workbench);
 
-    button.remove();
     await act(async () => controls().toggle());
     await flushAnimationFrame();
     expect(focusWorkbench).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(workbench);
   });
 
   it("reports resize listener registration failures", async () => {
