@@ -1,6 +1,6 @@
 /**
  * 本文件验证主 Agent 多步骤推理与活动耗时的流式关联。
- * 测试锁定复用 reasoning ID 时的分段耗时，以及普通工具不会提前结束活动块。
+ * 测试锁定复用 reasoning ID 时的分段耗时、空正文事件和无 reasoning 工具的活动边界。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -27,40 +27,57 @@ const usage = {
   outputTokens: { total: 5, text: 3, reasoning: 2 },
 };
 
-function reasoningStream(options: { toolCall: boolean }) {
+function activityStream(options: {
+  reasoning: boolean;
+  blankText?: boolean;
+  text?: string;
+  toolCallId?: string;
+}) {
   return {
     stream: new ReadableStream({
       start(controller) {
         controller.enqueue({ type: "stream-start", warnings: [] });
-        controller.enqueue({ type: "reasoning-start", id: "reasoning" });
-        controller.enqueue({
-          type: "reasoning-delta",
-          id: "reasoning",
-          delta: options.toolCall ? "先读取终端。" : "现在总结。",
-        });
-        controller.enqueue({ type: "reasoning-end", id: "reasoning" });
-        if (options.toolCall) {
+        if (options.reasoning) {
+          controller.enqueue({ type: "reasoning-start", id: "reasoning" });
           controller.enqueue({
-            type: "tool-call",
-            toolCallId: "terminal-1",
-            toolName: "get_terminal_output",
-            input: "{}",
+            type: "reasoning-delta",
+            id: "reasoning",
+            delta: "检查终端。",
           });
-        } else {
+          controller.enqueue({ type: "reasoning-end", id: "reasoning" });
+        }
+        if (options.blankText) {
+          controller.enqueue({ type: "text-start", id: "empty-text" });
+          controller.enqueue({
+            type: "text-delta",
+            id: "empty-text",
+            delta: "\n\n",
+          });
+          controller.enqueue({ type: "text-end", id: "empty-text" });
+        }
+        if (options.text) {
           controller.enqueue({ type: "text-start", id: "text" });
           controller.enqueue({
             type: "text-delta",
             id: "text",
-            delta: "完成。",
+            delta: options.text,
           });
           controller.enqueue({ type: "text-end", id: "text" });
+        }
+        if (options.toolCallId) {
+          controller.enqueue({
+            type: "tool-call",
+            toolCallId: options.toolCallId,
+            toolName: "get_terminal_output",
+            input: "{}",
+          });
         }
         controller.enqueue({
           type: "finish",
           usage,
           finishReason: {
-            unified: options.toolCall ? "tool-calls" : "stop",
-            raw: options.toolCall ? "tool_calls" : "stop",
+            unified: options.toolCallId ? "tool-calls" : "stop",
+            raw: options.toolCallId ? "tool_calls" : "stop",
           },
         });
         controller.close();
@@ -70,10 +87,26 @@ function reasoningStream(options: { toolCall: boolean }) {
 }
 
 describe("Agent reasoning duration", () => {
-  it("keeps one duration beside each reasoning part when IDs repeat", async () => {
+  it("keeps activity boundaries stable across blank text and direct tools", async () => {
     activeModel = new MockLanguageModelV3({
-      doStream: () =>
-        reasoningStream({ toolCall: activeModel.doStreamCalls.length === 1 }),
+      doStream: () => {
+        const call = activeModel.doStreamCalls.length;
+        if (call === 1) {
+          return activityStream({
+            reasoning: true,
+            blankText: true,
+            toolCallId: "terminal-1",
+          });
+        }
+        if (call === 2) {
+          return activityStream({
+            reasoning: true,
+            text: "阶段正文。",
+            toolCallId: "terminal-2",
+          });
+        }
+        return activityStream({ reasoning: false, text: "完成。" });
+      },
     });
     const messages: UIMessage[] = [
       {
@@ -115,13 +148,25 @@ describe("Agent reasoning duration", () => {
         reasoningDurationFromPart(finalMessage?.parts[index + 1]),
       ).toBeTypeOf("number");
     }
-    const activityIndex = finalMessage?.parts.findIndex(
-      (part) => activityDurationFromPart(part) !== undefined,
-    );
-    const textIndex = finalMessage?.parts.findIndex(
-      (part) => part.type === "text",
-    );
-    expect(activityIndex).toBeGreaterThanOrEqual(0);
-    expect(activityIndex).toBeLessThan(textIndex ?? -1);
+    const activityIndexes =
+      finalMessage?.parts.flatMap((part, index) =>
+        activityDurationFromPart(part) !== undefined ? [index] : [],
+      ) ?? [];
+    const terminalIndexes =
+      finalMessage?.parts.flatMap((part, index) =>
+        part.type === "tool-get_terminal_output" ? [index] : [],
+      ) ?? [];
+    const textIndexes =
+      finalMessage?.parts.flatMap((part, index) =>
+        part.type === "text" && part.text.trim().length > 0 ? [index] : [],
+      ) ?? [];
+    expect(activityIndexes).toHaveLength(2);
+    expect(terminalIndexes).toHaveLength(2);
+    expect(textIndexes).toHaveLength(2);
+    expect(terminalIndexes[0]).toBeLessThan(activityIndexes[0]);
+    expect(textIndexes[0]).toBeLessThan(activityIndexes[0]);
+    expect(activityIndexes[0]).toBeLessThan(terminalIndexes[1]);
+    expect(terminalIndexes[1]).toBeLessThan(activityIndexes[1]);
+    expect(textIndexes[1]).toBeLessThan(activityIndexes[1]);
   });
 });

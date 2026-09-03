@@ -314,15 +314,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   reasoningStartedAt = performance.now();
                   activityStartedAt ??= performance.now();
                 }
+                const toolName =
+                  chunk.type === "tool-input-start" ||
+                  chunk.type === "tool-input-available" ||
+                  chunk.type === "tool-input-error"
+                    ? chunk.toolName
+                    : null;
+                // Provider 可能只发送空白 text block，首个非空 delta 才是正文边界。
                 if (
-                  chunk.type === "text-start" ||
-                  ((chunk.type === "tool-input-start" ||
-                    chunk.type === "tool-input-available") &&
-                    chunk.toolName === "run_subagent")
+                  (chunk.type === "text-delta" &&
+                    chunk.delta.trim().length > 0) ||
+                  toolName === "run_subagent"
                 ) {
                   const durationMs = finishActivity();
                   if (durationMs !== undefined)
                     activityDurations.push(durationMs);
+                } else if (toolName !== null) {
+                  activityStartedAt ??= performance.now();
                 }
                 writer.write(chunk);
                 if (
@@ -435,7 +443,7 @@ function insertDisplayDurations(
   let reasoningIndex = 0;
   const parts: UIMessage["parts"] = [];
   for (const part of message.parts) {
-    if (part.type === "reasoning") activityActive = true;
+    if (isActivityContentPart(part)) activityActive = true;
     if (activityActive && isActivityBoundaryPart(part)) {
       const durationMs = activityDurations[activityIndex++];
       if (durationMs !== undefined) {
@@ -460,9 +468,17 @@ function insertDisplayDurations(
   message.parts = parts;
 }
 
+function isActivityContentPart(part: UIMessage["parts"][number]): boolean {
+  return (
+    part.type === "reasoning" ||
+    ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
+      !isActivityBoundaryPart(part))
+  );
+}
+
 function isActivityBoundaryPart(part: UIMessage["parts"][number]): boolean {
   return (
-    part.type === "text" ||
+    (part.type === "text" && part.text.trim().length > 0) ||
     part.type === "tool-run_subagent" ||
     (part.type === "dynamic-tool" && part.toolName === "run_subagent")
   );
