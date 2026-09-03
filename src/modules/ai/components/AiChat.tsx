@@ -1,5 +1,5 @@
 /**
- * 本文件实现 AI 会话消息列表、滚动记忆以及正文、活动块和 Subagent 分段渲染。
+ * 本文件实现 AI 会话消息列表、等待反馈、滚动记忆以及正文、活动块和 Subagent 分段渲染。
  * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
  * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
@@ -23,7 +23,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Spinner } from "@/components/ui/spinner";
 import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -391,7 +390,15 @@ export function AiChatView({
   const scrollMemory = useConversationScrollMemory(sessionId, visible);
   const isBusy = status === "submitted" || status === "streaming";
   const lastMessage = messages[messages.length - 1];
-  const showSpinner = isBusy && lastMessage?.role === "user";
+  const showPendingResponse =
+    isBusy &&
+    (lastMessage?.role === "user" ||
+      (lastMessage?.role === "assistant" &&
+        !hasVisibleAssistantOutput(lastMessage.parts as AnyPart[])));
+  const pendingAssistantMessageId =
+    showPendingResponse && lastMessage?.role === "assistant"
+      ? lastMessage.id
+      : null;
   const streamingMessageId =
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
@@ -399,7 +406,7 @@ export function AiChatView({
   const meta = useChatStore((state) =>
     getAgentMetaForSession(state, sessionId),
   );
-  const { step, hitStepCap, compactionNotice } = meta;
+  const { hitStepCap, compactionNotice } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
@@ -445,14 +452,16 @@ export function AiChatView({
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
       >
         <div ref={setToolDetailsWheelScope} className="contents">
-          {messages.map((m) => (
-            <RenderedMessage
-              key={m.id}
-              sessionId={sessionId}
-              message={m}
-              streaming={m.id === streamingMessageId}
-            />
-          ))}
+          {messages.map((m) =>
+            m.id === pendingAssistantMessageId ? null : (
+              <RenderedMessage
+                key={m.id}
+                sessionId={sessionId}
+                message={m}
+                streaming={m.id === streamingMessageId}
+              />
+            ),
+          )}
         </div>
         {compactionNotice && (
           <CompactionNotice
@@ -462,12 +471,17 @@ export function AiChatView({
             }
           />
         )}
-        {showSpinner && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Spinner />
-            <span className="truncate">{step ?? t("chat.thinking")}</span>
+        {showPendingResponse ? (
+          <div
+            className="flex h-[22px] items-center gap-1 text-muted-foreground"
+            role="status"
+            aria-label={t("chat.thinking")}
+          >
+            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:0ms]" />
+            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:150ms]" />
+            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:300ms]" />
           </div>
-        )}
+        ) : null}
         {showContinue && (
           <ContinueRow
             onContinue={() => {
@@ -839,12 +853,17 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-/** 将从 reasoning 开始、到正文或 Subagent 为止的内容归入独立活动块。 */
+/** 将正文和 Subagent 之间的其余可展示内容归入独立活动块。 */
 export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
   let plain: { parts: AnyPart[]; startIndex: number } | undefined;
   let activity:
-    | { parts: AnyPart[]; startIndex: number; headlinePart: AnyPart }
+    | {
+        parts: AnyPart[];
+        startIndex: number;
+        headlinePart: AnyPart;
+        durationMs?: number;
+      }
     | undefined;
 
   const flushPlain = () => {
@@ -852,7 +871,7 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
     groups.push(...buildPartGroups(plain.parts, plain.startIndex));
     plain = undefined;
   };
-  const flushActivity = (durationMs?: number, completed = true) => {
+  const flushActivity = (completed = true) => {
     if (!activity) return;
     groups.push({
       kind: "activity",
@@ -862,7 +881,7 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
       )}`,
       groups: buildPartGroups(activity.parts, activity.startIndex),
       headlinePart: activity.headlinePart,
-      durationMs,
+      durationMs: activity.durationMs,
       completed,
     });
     activity = undefined;
@@ -875,9 +894,16 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
   for (let index = 0; index < parts.length; index++) {
     const part = parts[index];
     const durationMs = activityDurationFromPart(part);
-    if (durationMs !== undefined && activity) {
-      activity.parts.push(part);
-      flushActivity(durationMs);
+    if (durationMs !== undefined) {
+      if (activity) {
+        activity.durationMs = (activity.durationMs ?? 0) + durationMs;
+      } else {
+        // 实时耗时可能紧跟 text part，恢复后的同一标记则位于正文前。
+        const previous = groups[groups.length - 1];
+        if (previous?.kind === "activity") {
+          previous.durationMs = (previous.durationMs ?? 0) + durationMs;
+        }
+      }
       continue;
     }
     if (isActivityBoundary(part)) {
@@ -885,9 +911,14 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
       appendPlain(part, index);
       continue;
     }
-    if (!activity && partType(part) === "reasoning") {
+
+    if (!activity && isVisibleActivityPart(part)) {
       flushPlain();
-      activity = { parts: [], startIndex: index, headlinePart: part };
+      activity = {
+        parts: [],
+        startIndex: index,
+        headlinePart: part,
+      };
     }
     if (activity) {
       activity.parts.push(part);
@@ -899,7 +930,7 @@ export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
     }
   }
 
-  flushActivity(undefined, false);
+  flushActivity(false);
   flushPlain();
   return groups;
 }
@@ -934,6 +965,10 @@ function buildPartGroups(parts: AnyPart[], offset = 0): LeafGroup[] {
       flushRun();
       return;
     }
+    if (partType(p) === "text" && !isBodyTextPart(p)) {
+      flushRun();
+      return;
+    }
     if (
       partType(p) === "data-subagent-result" ||
       partType(p) === "data-subagent-display"
@@ -953,6 +988,12 @@ function buildPartGroups(parts: AnyPart[], offset = 0): LeafGroup[] {
   return out;
 }
 
+function hasVisibleAssistantOutput(parts: readonly AnyPart[]): boolean {
+  return parts.some(
+    (part) => isVisibleActivityPart(part) || isActivityBoundary(part),
+  );
+}
+
 function isToolPart(part: AnyPart): boolean {
   const type = partType(part);
   return type === "dynamic-tool" || type.startsWith("tool-");
@@ -967,24 +1008,32 @@ function isSubagentToolPart(part: AnyPart): boolean {
   );
 }
 
-function isActivityBoundary(part: AnyPart): boolean {
+function isBodyTextPart(part: AnyPart): boolean {
   return (
-    (partType(part) === "text" &&
-      ((part as { text?: string }).text?.length ?? 0) > 0) ||
-    isSubagentToolPart(part)
+    partType(part) === "text" &&
+    ((part as { text?: string }).text?.trim().length ?? 0) > 0
   );
 }
 
+function isVisibleActivityPart(part: AnyPart): boolean {
+  return partType(part) === "reasoning" || isToolPart(part);
+}
+
+function isActivityBoundary(part: AnyPart): boolean {
+  return isBodyTextPart(part) || isSubagentToolPart(part);
+}
+
 const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
-  read_file: () => i18n.t("ai:chat.subagent.tools.read"),
-  find_files: () => i18n.t("ai:chat.subagent.tools.find"),
-  write_file: () => i18n.t("ai:chat.subagent.tools.write"),
-  apply_patch: () => i18n.t("ai:chat.subagent.tools.edit"),
-  file_operation: () => i18n.t("ai:chat.subagent.tools.manage"),
-  shell_exec: () => i18n.t("ai:chat.subagent.tools.run"),
-  shell_process: () => i18n.t("ai:chat.subagent.tools.process"),
-  shell_list: () => i18n.t("ai:chat.subagent.tools.processes"),
-  grep: () => i18n.t("ai:chat.subagent.tools.search"),
+  read_file: () => i18n.t("ai:chat.subagent.actions.read"),
+  find_files: () => i18n.t("ai:chat.subagent.actions.find"),
+  write_file: () => i18n.t("ai:chat.subagent.actions.write"),
+  apply_patch: () => i18n.t("ai:chat.subagent.actions.edit"),
+  file_operation: () => i18n.t("ai:chat.subagent.actions.manage"),
+  shell_exec: () => i18n.t("ai:chat.subagent.actions.run"),
+  shell_process: () => i18n.t("ai:chat.subagent.actions.process"),
+  shell_list: () => i18n.t("ai:chat.subagent.actions.listProcesses"),
+  grep: () => i18n.t("ai:chat.subagent.actions.search"),
+  get_terminal_output: () => i18n.t("ai:chat.subagent.actions.terminal"),
 };
 
 /** 复用当前工具行的名称和参数摘要生成活动标题，不额外处理参数内容。 */
@@ -1054,7 +1103,7 @@ function hasVisiblePartAfter(
     const type = partType(part);
     if (type === "reasoning") return true;
     if (type === "text") {
-      if (((part as { text?: string }).text?.length ?? 0) > 0) return true;
+      if (isBodyTextPart(part)) return true;
       continue;
     }
     if (type === "dynamic-tool" || type.startsWith("tool-")) return true;
