@@ -1,6 +1,6 @@
 /**
  * 本文件验证 AI 会话记录与 AI SDK UIMessage 之间的转换。
- * 测试锁定 nanobot 风格工具调用、工具结果顺序和 turn 分组等不变量。
+ * 测试锁定 nanobot 风格工具调用、展示耗时、工具结果顺序和 turn 分组等不变量。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -62,7 +62,7 @@ describe("AI session message conversion", () => {
     ]);
   });
 
-  it("persists and restores reasoning duration", () => {
+  it("persists and restores display durations without exposing activity timing", async () => {
     const assistant: UIMessage = {
       id: "assistant-1",
       role: "assistant",
@@ -73,6 +73,10 @@ describe("AI session message conversion", () => {
           type: "data-reasoning-duration",
           data: { durationMs: 1250 },
         } as UIMessage["parts"][number],
+        {
+          type: "data-activity-duration",
+          data: { durationMs: 2400 },
+        } as UIMessage["parts"][number],
       ],
     };
 
@@ -82,8 +86,18 @@ describe("AI session message conversion", () => {
     });
 
     expect(records[0].reasoning_duration_ms).toBe(1250);
-    expect(projectSessionMessages("session-1", records)[0].parts).toEqual(
-      assistant.parts,
+    expect(records[0].activity_duration_ms).toBe(2400);
+    const restored = projectSessionMessages("session-1", records)[0];
+    expect(restored.parts).toEqual(assistant.parts);
+    expect(await convertToAgentModelMessages([restored])).toEqual(
+      await convertToAgentModelMessages([
+        {
+          ...restored,
+          parts: restored.parts.filter(
+            (part) => part.type !== "data-activity-duration",
+          ),
+        },
+      ]),
     );
   });
 

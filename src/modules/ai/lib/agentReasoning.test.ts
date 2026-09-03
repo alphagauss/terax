@@ -1,6 +1,6 @@
 /**
- * 本文件验证主 Agent 多步骤推理耗时的流式关联。
- * 测试锁定 provider 在不同工具步骤复用 reasoning ID 时，每段推理仍保留独立耗时。
+ * 本文件验证主 Agent 多步骤推理与活动耗时的流式关联。
+ * 测试锁定复用 reasoning ID 时的分段耗时，以及普通工具不会提前结束活动块。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -11,7 +11,10 @@ import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
 import { modelRefForProvider } from "../config";
 import { runAgentStream } from "./agent";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
-import { reasoningDurationFromPart } from "./sessionMessages";
+import {
+  activityDurationFromPart,
+  reasoningDurationFromPart,
+} from "./sessionMessages";
 
 let activeModel: MockLanguageModelV3;
 
@@ -112,5 +115,13 @@ describe("Agent reasoning duration", () => {
         reasoningDurationFromPart(finalMessage?.parts[index + 1]),
       ).toBeTypeOf("number");
     }
+    const activityIndex = finalMessage?.parts.findIndex(
+      (part) => activityDurationFromPart(part) !== undefined,
+    );
+    const textIndex = finalMessage?.parts.findIndex(
+      (part) => part.type === "text",
+    );
+    expect(activityIndex).toBeGreaterThanOrEqual(0);
+    expect(activityIndex).toBeLessThan(textIndex ?? -1);
   });
 });

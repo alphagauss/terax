@@ -151,6 +151,11 @@
       "completed": "Reasoned",
       "completedWithDuration": "Reasoned for {{duration}}s"
     },
+    "activity": {
+      "thinking": "Thinking",
+      "completed": "Processed",
+      "completedWithDuration": "Processed for {{duration}}s"
+    },
     "continuePrompt": "Continue from where you stopped. Don't recap - just keep going.",
     "somethingWentWrong": "Something went wrong.",
     "dismiss": "Dismiss",

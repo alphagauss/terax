@@ -1,7 +1,7 @@
 /**
- * 本文件实现 AI 会话消息列表、滚动记忆以及正文、推理和工具分段渲染。
+ * 本文件实现 AI 会话消息列表、滚动记忆以及正文、活动块和 Subagent 分段渲染。
  * 工具详情在会话层统一提供可见滚动条和 Shift 加滚轮的横向滚动。
- * 内部结果、reasoning 耗时和 Subagent 展示事件不参与普通分组。
+ * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
@@ -61,12 +61,19 @@ import {
 import { isSubagentResultDataPart } from "../agents/subagentRuntime";
 import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
 import { formatMessageTimestamp } from "../lib/messageTimestamp";
-import { reasoningDurationFromPart } from "../lib/sessionMessages";
+import {
+  activityDurationFromPart,
+  reasoningDurationFromPart,
+} from "../lib/sessionMessages";
 import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
 import { sendMessage } from "../store/chatRuntime";
 import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
 import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 import { AiChatScrollControls } from "./AiChatScrollControls";
+import {
+  ChatActivityBlock,
+  type ChatActivityHeadline,
+} from "./ChatActivityBlock";
 import { ChatReasoningPart } from "./ChatReasoningPart";
 import { SubagentCard, type SubagentResultView } from "./SubagentCard";
 
@@ -544,6 +551,7 @@ const RenderedMessage = memo(function RenderedMessage({
   message: UIMessage;
   streaming: boolean;
 }) {
+  const { t } = useTranslation("ai");
   // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
   // 不应因后续工具调用继续显示流式状态。
   const streamingPartIdx = streaming ? message.parts.length - 1 : -1;
@@ -551,7 +559,7 @@ const RenderedMessage = memo(function RenderedMessage({
     () =>
       message.role === "user"
         ? []
-        : buildPartGroups(message.parts as AnyPart[]),
+        : buildMessageGroups(message.parts as AnyPart[]),
     [message.parts, message.role],
   );
   const timestamp = useMessageTimestamp(message);
@@ -600,60 +608,113 @@ const RenderedMessage = memo(function RenderedMessage({
       className="group/message"
     >
       <MessageContent>
-        <div className="flex flex-col gap-0.5 [&>div:has(.ai-reasoning-part)+div:has(.markdown-content)]:mt-4">
+        <div className="flex flex-col gap-0.5 [&>div:has(.ai-activity-block)+div:has(.markdown-content)]:mt-4">
           {groups.map((g) => {
-            if (g.kind === "reads") {
+            if (g.kind === "activity") {
               return (
                 <PartAppear key={`${message.id}-${g.key}`}>
-                  <ReadGroup parts={g.parts} />
-                </PartAppear>
-              );
-            }
-            const isReadSingle =
-              partType(g.part) === "tool-read_file" &&
-              ((g.part as { state?: string }).state ?? "") !==
-                "approval-requested";
-            if (isReadSingle) {
-              return (
-                <PartAppear key={`${message.id}-${g.key}`}>
-                  <ReadRow part={g.part} />
+                  <ChatActivityBlock
+                    durationMs={g.durationMs}
+                    headline={activityHeadline(
+                      g.headlinePart,
+                      t("chat.activity.thinking"),
+                    )}
+                    running={streaming && !g.completed}
+                  >
+                    {g.groups.map((group) => (
+                      <RenderedLeafGroup
+                        key={`${message.id}-${group.key}`}
+                        group={group}
+                        message={message}
+                        sessionId={sessionId}
+                        streaming={streaming}
+                        streamingPartIdx={streamingPartIdx}
+                        subagentParts={subagentParts}
+                      />
+                    ))}
+                  </ChatActivityBlock>
                 </PartAppear>
               );
             }
             return (
-              <PartAppear key={`${message.id}-${g.key}`}>
-                <RenderedPart
-                  sessionId={sessionId}
-                  part={g.part}
-                  streaming={g.idx === streamingPartIdx}
-                  reasoningStreaming={
-                    g.part.type === "reasoning" &&
-                    (g.part as { state?: string }).state === "streaming"
-                  }
-                  autoCollapseReasoning={
-                    g.part.type === "reasoning" &&
-                    (g.part as { state?: string }).state === "done" &&
-                    (hasVisiblePartAfter(message.parts as AnyPart[], g.idx) ||
-                      !streaming)
-                  }
-                  reasoningDurationMs={reasoningDurationFromPart(
-                    message.parts[g.idx + 1],
-                  )}
-                  persistedSubagent={subagentParts.displaysByToolCallId.get(
-                    toolCallIdFromPart(g.part),
-                  )}
-                  subagentResult={subagentResultForPart(
-                    g.part,
-                    subagentParts.resultsByTaskId,
-                  )}
-                />
-              </PartAppear>
+              <RenderedLeafGroup
+                key={`${message.id}-${g.key}`}
+                group={g}
+                message={message}
+                sessionId={sessionId}
+                streaming={streaming}
+                streamingPartIdx={streamingPartIdx}
+                subagentParts={subagentParts}
+              />
             );
           })}
         </div>
       </MessageContent>
       <MessageMeta timestamp={timestamp} copyText={copyText} />
     </Message>
+  );
+});
+
+const RenderedLeafGroup = memo(function RenderedLeafGroup({
+  group,
+  message,
+  sessionId,
+  streaming,
+  streamingPartIdx,
+  subagentParts,
+}: {
+  group: LeafGroup;
+  message: UIMessage;
+  sessionId: string;
+  streaming: boolean;
+  streamingPartIdx: number;
+  subagentParts: CollectedSubagentParts;
+}) {
+  if (group.kind === "reads") {
+    return (
+      <PartAppear>
+        <ReadGroup parts={group.parts} />
+      </PartAppear>
+    );
+  }
+  const isReadSingle =
+    partType(group.part) === "tool-read_file" &&
+    ((group.part as { state?: string }).state ?? "") !== "approval-requested";
+  if (isReadSingle) {
+    return (
+      <PartAppear>
+        <ReadRow part={group.part} />
+      </PartAppear>
+    );
+  }
+  return (
+    <PartAppear>
+      <RenderedPart
+        sessionId={sessionId}
+        part={group.part}
+        streaming={group.idx === streamingPartIdx}
+        reasoningStreaming={
+          group.part.type === "reasoning" &&
+          (group.part as { state?: string }).state === "streaming"
+        }
+        autoCollapseReasoning={
+          group.part.type === "reasoning" &&
+          (group.part as { state?: string }).state === "done" &&
+          (hasVisiblePartAfter(message.parts as AnyPart[], group.idx) ||
+            !streaming)
+        }
+        reasoningDurationMs={reasoningDurationFromPart(
+          message.parts[group.idx + 1],
+        )}
+        persistedSubagent={subagentParts.displaysByToolCallId.get(
+          toolCallIdFromPart(group.part),
+        )}
+        subagentResult={subagentResultForPart(
+          group.part,
+          subagentParts.resultsByTaskId,
+        )}
+      />
+    </PartAppear>
   );
 });
 
@@ -745,9 +806,20 @@ const MessageMeta = memo(function MessageMeta({
   );
 });
 
-type Group =
+type LeafGroup =
   | { kind: "single"; part: AnyPart; idx: number; key: string }
   | { kind: "reads"; parts: AnyPart[]; key: string };
+
+type ActivityGroup = {
+  kind: "activity";
+  key: string;
+  groups: LeafGroup[];
+  headlinePart: AnyPart;
+  durationMs?: number;
+  completed: boolean;
+};
+
+type MessageGroup = LeafGroup | ActivityGroup;
 
 function partType(p: AnyPart): string {
   return (p as { type?: string }).type ?? "";
@@ -767,8 +839,73 @@ function partKey(p: AnyPart, idx: number): string {
   return `i-${idx}`;
 }
 
-function buildPartGroups(parts: AnyPart[]): Group[] {
-  const out: Group[] = [];
+/** 将从 reasoning 开始、到正文或 Subagent 为止的内容归入独立活动块。 */
+export function buildMessageGroups(parts: AnyPart[]): MessageGroup[] {
+  const groups: MessageGroup[] = [];
+  let plain: { parts: AnyPart[]; startIndex: number } | undefined;
+  let activity:
+    | { parts: AnyPart[]; startIndex: number; headlinePart: AnyPart }
+    | undefined;
+
+  const flushPlain = () => {
+    if (!plain) return;
+    groups.push(...buildPartGroups(plain.parts, plain.startIndex));
+    plain = undefined;
+  };
+  const flushActivity = (durationMs?: number, completed = true) => {
+    if (!activity) return;
+    groups.push({
+      kind: "activity",
+      key: `activity-${partKey(
+        parts[activity.startIndex],
+        activity.startIndex,
+      )}`,
+      groups: buildPartGroups(activity.parts, activity.startIndex),
+      headlinePart: activity.headlinePart,
+      durationMs,
+      completed,
+    });
+    activity = undefined;
+  };
+  const appendPlain = (part: AnyPart, index: number) => {
+    plain ??= { parts: [], startIndex: index };
+    plain.parts.push(part);
+  };
+
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    const durationMs = activityDurationFromPart(part);
+    if (durationMs !== undefined && activity) {
+      activity.parts.push(part);
+      flushActivity(durationMs);
+      continue;
+    }
+    if (isActivityBoundary(part)) {
+      flushActivity();
+      appendPlain(part, index);
+      continue;
+    }
+    if (!activity && partType(part) === "reasoning") {
+      flushPlain();
+      activity = { parts: [], startIndex: index, headlinePart: part };
+    }
+    if (activity) {
+      activity.parts.push(part);
+      if (partType(part) === "reasoning" || isToolPart(part)) {
+        activity.headlinePart = part;
+      }
+    } else {
+      appendPlain(part, index);
+    }
+  }
+
+  flushActivity(undefined, false);
+  flushPlain();
+  return groups;
+}
+
+function buildPartGroups(parts: AnyPart[], offset = 0): LeafGroup[] {
+  const out: LeafGroup[] = [];
   let run: { parts: AnyPart[]; startIdx: number } | null = null;
   const flushRun = () => {
     if (!run) return;
@@ -787,8 +924,13 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
     }
     run = null;
   };
-  parts.forEach((p, i) => {
-    if (reasoningDurationFromPart(p) !== undefined) {
+  parts.forEach((p, localIndex) => {
+    const i = localIndex + offset;
+    if (
+      reasoningDurationFromPart(p) !== undefined ||
+      activityDurationFromPart(p) !== undefined ||
+      partType(p) === "step-start"
+    ) {
       flushRun();
       return;
     }
@@ -811,6 +953,97 @@ function buildPartGroups(parts: AnyPart[]): Group[] {
   return out;
 }
 
+function isToolPart(part: AnyPart): boolean {
+  const type = partType(part);
+  return type === "dynamic-tool" || type.startsWith("tool-");
+}
+
+function isSubagentToolPart(part: AnyPart): boolean {
+  if (!isToolPart(part)) return false;
+  return (
+    partType(part) === "tool-run_subagent" ||
+    (partType(part) === "dynamic-tool" &&
+      (part as { toolName?: string }).toolName === "run_subagent")
+  );
+}
+
+function isActivityBoundary(part: AnyPart): boolean {
+  return (
+    (partType(part) === "text" &&
+      ((part as { text?: string }).text?.length ?? 0) > 0) ||
+    isSubagentToolPart(part)
+  );
+}
+
+const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
+  read_file: () => i18n.t("ai:chat.subagent.tools.read"),
+  find_files: () => i18n.t("ai:chat.subagent.tools.find"),
+  write_file: () => i18n.t("ai:chat.subagent.tools.write"),
+  apply_patch: () => i18n.t("ai:chat.subagent.tools.edit"),
+  file_operation: () => i18n.t("ai:chat.subagent.tools.manage"),
+  shell_exec: () => i18n.t("ai:chat.subagent.tools.run"),
+  shell_process: () => i18n.t("ai:chat.subagent.tools.process"),
+  shell_list: () => i18n.t("ai:chat.subagent.tools.processes"),
+  grep: () => i18n.t("ai:chat.subagent.tools.search"),
+};
+
+/** 复用当前工具行的名称和参数摘要生成活动标题，不额外处理参数内容。 */
+function activityHeadline(
+  part: AnyPart,
+  thinkingText: string,
+): ChatActivityHeadline {
+  if (partType(part) === "reasoning") {
+    return { kind: "thinking", key: "thinking", text: thinkingText };
+  }
+  const toolName =
+    partType(part) === "dynamic-tool"
+      ? ((part as { toolName?: string }).toolName ?? "tool")
+      : partType(part).replace(/^tool-/, "");
+  const label = ACTIVITY_TOOL_LABELS[toolName]?.() ?? toolName;
+  const summary = activityToolSummary(
+    toolName,
+    (part as { input?: unknown }).input,
+  );
+  return {
+    kind: "tool",
+    key: toolCallIdFromPart(part) || toolName,
+    text: summary ? `${label} ${summary}` : label,
+  };
+}
+
+function activityToolSummary(toolName: string, input: unknown): string | null {
+  if (!input || typeof input !== "object") return null;
+  const value = input as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof value[key] === "string" ? (value[key] as string) : null;
+
+  switch (toolName) {
+    case "read_file":
+    case "write_file":
+      return text("path");
+    case "file_operation": {
+      const operation = text("operation") ?? "manage";
+      const path = text("path") ?? "";
+      const destination = text("destination");
+      return `${operation} ${path}${destination ? ` → ${destination}` : ""}`;
+    }
+    case "find_files":
+      return text("path") ?? ".";
+    case "apply_patch": {
+      const files = Array.isArray(value.files) ? value.files : [];
+      return `${files.length} file${files.length === 1 ? "" : "s"}`;
+    }
+    case "shell_exec":
+      return text("command");
+    case "shell_process":
+      return text("process_id");
+    case "grep":
+      return text("pattern") ?? text("query");
+    default:
+      return null;
+  }
+}
+
 /** 判断推理分段之后是否已经出现正文、工具或下一段推理。 */
 function hasVisiblePartAfter(
   parts: readonly AnyPart[],
@@ -829,10 +1062,14 @@ function hasVisiblePartAfter(
   return false;
 }
 
-function collectSubagentParts(parts: readonly AnyPart[]): {
+type CollectedSubagentParts = {
   displaysByToolCallId: Map<string, SubagentDisplaySnapshot>;
   resultsByTaskId: Map<string, SubagentResultView>;
-} {
+};
+
+function collectSubagentParts(
+  parts: readonly AnyPart[],
+): CollectedSubagentParts {
   const displaysByToolCallId = new Map<string, SubagentDisplaySnapshot>();
   const resultsByTaskId = new Map<string, SubagentResultView>();
   for (const part of parts) {

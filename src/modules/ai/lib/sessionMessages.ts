@@ -1,6 +1,6 @@
 /**
  * 本文件定义与具体 AI SDK 无关的会话消息记录，并负责与 UIMessage 双向转换。
- * 工具调用使用 OpenAI function envelope，reasoning 耗时和展示记录保持可恢复。
+ * 工具调用使用 OpenAI function envelope，reasoning、活动耗时和展示记录保持可恢复。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -16,13 +16,22 @@ import {
 } from "../agents/subagentDisplay";
 
 export const REASONING_DURATION_PART_TYPE = "data-reasoning-duration" as const;
+export const ACTIVITY_DURATION_PART_TYPE = "data-activity-duration" as const;
 
 /** 校验并读取 Terax reasoning 耗时 data part。 */
 export function reasoningDurationFromPart(value: unknown): number | undefined {
   if (!value || typeof value !== "object") return undefined;
   const part = value as { type?: unknown; data?: { durationMs?: unknown } };
   return part.type === REASONING_DURATION_PART_TYPE
-    ? validReasoningDurationMs(part.data?.durationMs)
+    ? validDurationMs(part.data?.durationMs)
+    : undefined;
+}
+
+/** 校验并读取一次聊天活动块的完整处理耗时。 */
+export function activityDurationFromPart(value: unknown): number | undefined {
+  const part = value as { type?: unknown; data?: { durationMs?: unknown } };
+  return part?.type === ACTIVITY_DURATION_PART_TYPE
+    ? validDurationMs(part.data?.durationMs)
     : undefined;
 }
 
@@ -57,6 +66,7 @@ export type SessionMessage = {
   media?: SessionMedia[];
   reasoning_content?: string;
   reasoning_duration_ms?: number;
+  activity_duration_ms?: number;
   tool_calls?: SessionToolCall[];
   turn_status?: string;
   tool_call_id?: string;
@@ -90,6 +100,7 @@ type AssistantBlock = {
   content: string[];
   reasoning: string[];
   reasoningDurationMs?: number;
+  activityDurationMs?: number;
   tools: ToolPart[];
 };
 
@@ -241,9 +252,7 @@ export function projectSessionMessages(
           text: record.reasoning_content,
           state: "done",
         });
-        const durationMs = validReasoningDurationMs(
-          record.reasoning_duration_ms,
-        );
+        const durationMs = validDurationMs(record.reasoning_duration_ms);
         if (durationMs !== undefined) {
           parts.push({
             type: REASONING_DURATION_PART_TYPE,
@@ -251,13 +260,33 @@ export function projectSessionMessages(
           } as UIMessage["parts"][number]);
         }
       }
+      const activityDurationMs = validDurationMs(record.activity_duration_ms);
+      const activityDurationPart =
+        activityDurationMs === undefined
+          ? null
+          : ({
+              type: ACTIVITY_DURATION_PART_TYPE,
+              data: { durationMs: activityDurationMs },
+            } as UIMessage["parts"][number]);
+      let activityDurationInserted = false;
       for (const call of record.tool_calls ?? []) {
+        if (
+          activityDurationPart &&
+          !activityDurationInserted &&
+          call.function.name === "run_subagent"
+        ) {
+          parts.push(activityDurationPart);
+          activityDurationInserted = true;
+        }
         parts.push({
           type: `tool-${call.function.name}`,
           toolCallId: call.id,
           state: "input-available",
           input: parseToolArguments(call.function.arguments),
         } as UIMessage["parts"][number]);
+      }
+      if (activityDurationPart && !activityDurationInserted) {
+        parts.push(activityDurationPart);
       }
       if (typeof record.content === "string" && record.content) {
         parts.push({ type: "text", text: record.content, state: "done" });
@@ -452,6 +481,7 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
 
   for (const part of message.parts) {
     const reasoningDurationMs = reasoningDurationFromPart(part);
+    const activityDurationMs = activityDurationFromPart(part);
     if (part.type === "step-start") {
       flush();
     } else if (part.type === "text") {
@@ -463,6 +493,8 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
       current.reasoning.length > 0
     ) {
       current.reasoningDurationMs = reasoningDurationMs;
+    } else if (activityDurationMs !== undefined) {
+      current.activityDurationMs = activityDurationMs;
     } else if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
       current.tools.push(part as ToolPart);
     }
@@ -502,6 +534,9 @@ function serializeAssistantBlock(
     ...(block.reasoningDurationMs === undefined
       ? {}
       : { reasoning_duration_ms: Math.round(block.reasoningDurationMs) }),
+    ...(block.activityDurationMs === undefined
+      ? {}
+      : { activity_duration_ms: Math.round(block.activityDurationMs) }),
     timestamp: options.timestamp,
     turn_id: options.turnId,
   };
@@ -540,8 +575,8 @@ function serializeAssistantBlock(
   return [assistant, ...results];
 }
 
-/** 兼容旧会话并拒绝手工编辑产生的非法 reasoning 耗时。 */
-function validReasoningDurationMs(value: unknown): number | undefined {
+/** 拒绝手工编辑或异常流产生的非法展示耗时。 */
+function validDurationMs(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
