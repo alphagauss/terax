@@ -434,7 +434,7 @@ export function AiChatView({
       {...CHAT_SCROLL_SPRING}
     >
       <ConversationContent
-        className="gap-5 p-3"
+        className="gap-4 p-3"
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
       >
         <div ref={setToolDetailsWheelScope} className="contents">
@@ -600,7 +600,7 @@ const RenderedMessage = memo(function RenderedMessage({
       className="group/message"
     >
       <MessageContent>
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-0.5 [&>div:has(.ai-reasoning-part)+div:has(.markdown-content)]:mt-4">
           {groups.map((g) => {
             if (g.kind === "reads") {
               return (
@@ -911,7 +911,7 @@ const ReadGroup = memo(function ReadGroup({ parts }: { parts: AnyPart[] }) {
     <Collapsible className="group/read overflow-hidden rounded-md border border-border/50 bg-card/50">
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] leading-4",
+          "flex w-full items-center gap-2 px-2 py-[3px] text-left text-[12px] leading-4",
           "transition-colors hover:bg-interactive-hover",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
@@ -984,7 +984,7 @@ const ReadRow = memo(function ReadRow({ part }: { part: AnyPart }) {
   const state = (part as { state?: string }).state ?? "";
   const isError = state === "output-error";
   return (
-    <div className="flex items-center gap-2 rounded-md px-2 py-1 text-[12px] leading-4">
+    <div className="flex items-center gap-2 rounded-md px-2 py-[3px] text-[12px] leading-4">
       <span
         className={cn(
           "size-1.5 shrink-0 rounded-full",
@@ -1107,7 +1107,7 @@ const RenderedTool = memo(function RenderedTool({
 
   return (
     <Tool
-      className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-1 [&>button]:leading-4"
+      className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
       toolName={toolName}
       state={part.state}
       input={part.input}

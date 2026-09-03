@@ -51,7 +51,11 @@ export function ChatReasoningPart({
   }, [autoCollapse]);
 
   return (
-    <Collapsible className="not-prose" open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible
+      className="ai-reasoning-part not-prose"
+      open={isOpen}
+      onOpenChange={setIsOpen}
+    >
       <CollapsibleTrigger className="flex items-center gap-1.5 text-[12px] leading-4 italic text-muted-foreground transition-colors duration-control hover:text-foreground">
         {isStreaming ? (
           <Shimmer sweepDuration={1.2} pauseDuration={0.6}>
@@ -77,7 +81,7 @@ export function ChatReasoningPart({
         />
       </CollapsibleTrigger>
       <CollapsibleContent className="terax-collapsible-content outline-none [&_*]:text-[12px]!">
-        <div className="mt-2 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
+        <div className="mt-1 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
           {visibleText}
         </div>
       </CollapsibleContent>
