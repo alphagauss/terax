@@ -1,6 +1,6 @@
 /**
  * 本文件负责运行主 Agent 与通用 Subagent。
- * 它协调多段流、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
+ * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
 import {
@@ -39,7 +39,10 @@ import { compactModelMessagesDetailed } from "./compact";
 import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
 import { prepareAgentPrompt } from "./prompt";
 import { buildConfiguredLanguageModel } from "./providerRuntime";
-import { REASONING_DURATION_PART_TYPE } from "./sessionMessages";
+import {
+  ACTIVITY_DURATION_PART_TYPE,
+  REASONING_DURATION_PART_TYPE,
+} from "./sessionMessages";
 import { convertToAgentModelMessages } from "./subagentMessages";
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
@@ -186,8 +189,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
           let finishReason = "stop";
           let approvalPending = false;
           let finalizationOnly = false;
+          let activityStartedAt: number | undefined;
           const abort = () => void coordinator.cancelAll();
           opts.abortSignal?.addEventListener("abort", abort, { once: true });
+
+          const finishActivity = (): number | undefined => {
+            if (activityStartedAt === undefined) return undefined;
+            const durationMs = Math.max(
+              0,
+              Math.round(performance.now() - activityStartedAt),
+            );
+            activityStartedAt = undefined;
+            writer.write({
+              type: ACTIVITY_DURATION_PART_TYPE,
+              data: { durationMs },
+            });
+            return durationMs;
+          };
 
           const appendEvent = async (
             completedMessages: UIMessage[],
@@ -262,6 +280,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
               let cycleMessage: UIMessage | undefined;
               let reasoningStartedAt: number | undefined;
               const reasoningDurations: number[] = [];
+              const activityDurations: number[] = [];
+              const activityRunningAtCycleStart =
+                activityStartedAt !== undefined;
               let cycleSteps = 0;
               const result = streamText({
                 model,
@@ -291,6 +312,17 @@ export async function runAgentStream(opts: RunAgentOptions) {
               for await (const chunk of uiStream) {
                 if (chunk.type === "reasoning-start") {
                   reasoningStartedAt = performance.now();
+                  activityStartedAt ??= performance.now();
+                }
+                if (
+                  chunk.type === "text-start" ||
+                  ((chunk.type === "tool-input-start" ||
+                    chunk.type === "tool-input-available") &&
+                    chunk.toolName === "run_subagent")
+                ) {
+                  const durationMs = finishActivity();
+                  if (durationMs !== undefined)
+                    activityDurations.push(durationMs);
                 }
                 writer.write(chunk);
                 if (
@@ -309,21 +341,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   reasoningStartedAt = undefined;
                 }
               }
-              if (cycleMessage && reasoningDurations.length > 0) {
-                let durationIndex = 0;
-                const parts: UIMessage["parts"] = [];
-                for (const part of cycleMessage.parts) {
-                  parts.push(part);
-                  if (part.type !== "reasoning") continue;
-                  const durationMs = reasoningDurations[durationIndex++];
-                  if (durationMs !== undefined) {
-                    parts.push({
-                      type: REASONING_DURATION_PART_TYPE,
-                      data: { durationMs },
-                    } as UIMessage["parts"][number]);
-                  }
-                }
-                cycleMessage.parts = parts;
+              if (
+                cycleMessage &&
+                (activityDurations.length > 0 || reasoningDurations.length > 0)
+              ) {
+                insertDisplayDurations(
+                  cycleMessage,
+                  reasoningDurations,
+                  activityDurations,
+                  activityRunningAtCycleStart,
+                );
               }
               streamStarted = true;
 
@@ -362,6 +389,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               break;
             }
 
+            finishActivity();
             writer.write({
               type: "finish",
               finishReason: normalizeFinishReason(finishReason),
@@ -379,6 +407,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               );
             }
           } catch (error) {
+            finishActivity();
             await coordinator.cancelAll();
             releaseSubagentCoordinator(
               opts.toolContext.getSessionId(),
@@ -392,6 +421,51 @@ export async function runAgentStream(opts: RunAgentOptions) {
       });
     },
   };
+}
+
+/** 把实时写出的展示耗时同步放回 cycle message，确保 checkpoint 后仍可恢复。 */
+function insertDisplayDurations(
+  message: UIMessage,
+  reasoningDurations: readonly number[],
+  activityDurations: readonly number[],
+  activityActiveAtStart: boolean,
+): void {
+  let activityActive = activityActiveAtStart;
+  let activityIndex = 0;
+  let reasoningIndex = 0;
+  const parts: UIMessage["parts"] = [];
+  for (const part of message.parts) {
+    if (part.type === "reasoning") activityActive = true;
+    if (activityActive && isActivityBoundaryPart(part)) {
+      const durationMs = activityDurations[activityIndex++];
+      if (durationMs !== undefined) {
+        parts.push({
+          type: ACTIVITY_DURATION_PART_TYPE,
+          data: { durationMs },
+        } as UIMessage["parts"][number]);
+      }
+      activityActive = false;
+    }
+    parts.push(part);
+    if (part.type === "reasoning") {
+      const durationMs = reasoningDurations[reasoningIndex++];
+      if (durationMs !== undefined) {
+        parts.push({
+          type: REASONING_DURATION_PART_TYPE,
+          data: { durationMs },
+        } as UIMessage["parts"][number]);
+      }
+    }
+  }
+  message.parts = parts;
+}
+
+function isActivityBoundaryPart(part: UIMessage["parts"][number]): boolean {
+  return (
+    part.type === "text" ||
+    part.type === "tool-run_subagent" ||
+    (part.type === "dynamic-tool" && part.toolName === "run_subagent")
+  );
 }
 
 /** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */

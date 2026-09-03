@@ -151,6 +151,11 @@
       "completed": "已思考",
       "completedWithDuration": "已思考 {{duration}} 秒"
     },
+    "activity": {
+      "thinking": "正在思考",
+      "completed": "已处理",
+      "completedWithDuration": "已处理 {{duration}} 秒"
+    },
     "continuePrompt": "从你停下的地方继续。不要复述，直接接着做。",
     "somethingWentWrong": "出错了。",
     "dismiss": "忽略",

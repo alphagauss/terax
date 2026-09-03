@@ -1,6 +1,6 @@
 /**
  * 本文件验证 wait=false Subagent 会延长同一 turn，并在全部完成后恢复主 Agent 循环。
- * 测试锁定 append-only 事件在后续 provider 请求前 checkpoint，且最终模型仍可正常响应。
+ * 测试锁定活动在 Subagent 前结束、append-only 事件先 checkpoint，且最终模型正常响应。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -10,6 +10,7 @@ import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
 import { runAgentStream } from "./agent";
 import { EMPTY_PROVIDER_KEYS } from "./keyring";
 import { modelRefForProvider } from "../config";
+import { activityDurationFromPart } from "./sessionMessages";
 
 let activeModel: MockLanguageModelV3;
 
@@ -43,11 +44,21 @@ function textStream(text: string) {
 
 function toolCallsStream(
   calls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
+  reasoning?: string,
 ) {
   return {
     stream: new ReadableStream({
       start(controller) {
         controller.enqueue({ type: "stream-start", warnings: [] });
+        if (reasoning) {
+          controller.enqueue({ type: "reasoning-start", id: "reasoning" });
+          controller.enqueue({
+            type: "reasoning-delta",
+            id: "reasoning",
+            delta: reasoning,
+          });
+          controller.enqueue({ type: "reasoning-end", id: "reasoning" });
+        }
         for (const call of calls) {
           controller.enqueue({
             type: "tool-call",
@@ -68,13 +79,16 @@ function toolCallsStream(
 }
 
 function spawnStream() {
-  return toolCallsStream([
-    {
-      id: "spawn-1",
-      name: "run_subagent",
-      input: { task: "Inspect the tests", wait: false },
-    },
-  ]);
+  return toolCallsStream(
+    [
+      {
+        id: "spawn-1",
+        name: "run_subagent",
+        input: { task: "Inspect the tests", wait: false },
+      },
+    ],
+    "先委派检查。",
+  );
 }
 
 function terminalToolStream() {
@@ -163,6 +177,16 @@ describe.sequential("Agent background subagents", () => {
 
     expect(activeModel.doStreamCalls).toHaveLength(4);
     expect(checkpoint).toHaveBeenCalledTimes(1);
+    const checkpointParts = checkpoint.mock.calls[0][0][0]?.parts ?? [];
+    const activityIndex = checkpointParts.findIndex(
+      (part: UIMessage["parts"][number]) =>
+        activityDurationFromPart(part) !== undefined,
+    );
+    const subagentIndex = checkpointParts.findIndex(
+      (part: UIMessage["parts"][number]) => part.type === "tool-run_subagent",
+    );
+    expect(activityIndex).toBeGreaterThanOrEqual(0);
+    expect(activityIndex).toBeLessThan(subagentIndex);
     expect(checkpoint.mock.calls[0][1]).toEqual(
       expect.objectContaining({ event: "subagent_result" }),
     );
