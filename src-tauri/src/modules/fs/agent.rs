@@ -1,8 +1,8 @@
 //! AI Agent 文件工具的统一原生后端。
 //!
-//! 本模块负责固定工作区根目录、敏感路径、读取版本、修改快照和文件树操作，
-//! 并复用现有文件服务将同一契约路由到 Local、WSL 与 SSH。模型输入不能绕过
-//! 根目录授权；多文件提交逐文件原子发布，但不承诺跨文件系统事务。
+//! 本模块负责会话工作目录、权限模式、敏感路径、读取版本、修改快照和文件树操作，
+//! 并复用现有文件服务将同一契约路由到 Local、WSL 与 SSH。请求批准模式限制在
+//! 会话根内，完全访问模式允许系统用户可访问的路径；多文件提交不承诺跨文件系统事务。
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -79,8 +79,17 @@ struct PreparedWrite {
 struct PreparedMutation {
     owner_session_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     workspace: WorkspaceEnv,
     writes: Vec<PreparedWrite>,
+}
+
+/// AI 工具当前采用的路径授权模式。
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentPermissionMode {
+    Ask,
+    FullAccess,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +97,7 @@ struct PreparedMutation {
 pub struct AgentReadRequest {
     owner_session_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     path: String,
     start_line: Option<usize>,
     line_count: Option<usize>,
@@ -115,6 +125,7 @@ pub struct AgentReadResponse {
 pub struct AgentFindRequest {
     owner_session_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     path: Option<String>,
     glob: Option<String>,
     recursive: Option<bool>,
@@ -164,6 +175,7 @@ pub enum AgentGrepOutput {
 pub struct AgentGrepRequest {
     owner_session_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     path: Option<String>,
     pattern: String,
     syntax: Option<ContentSearchSyntax>,
@@ -254,6 +266,7 @@ pub struct AgentPrepareMutationRequest {
     owner_session_id: String,
     tool_call_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     mutation: AgentMutationInput,
     workspace: Option<WorkspaceEnv>,
 }
@@ -309,6 +322,7 @@ pub enum AgentFileOperation {
 pub struct AgentFileOperationRequest {
     owner_session_id: String,
     root: String,
+    permission_mode: AgentPermissionMode,
     operation: AgentFileOperation,
     path: String,
     destination: Option<String>,
@@ -333,6 +347,13 @@ struct AuthorizedPath {
     root_canonical: String,
 }
 
+#[derive(Clone, Copy)]
+struct AgentPathContext<'a> {
+    root: &'a str,
+    workspace: &'a WorkspaceEnv,
+    permission_mode: AgentPermissionMode,
+}
+
 /// 读取当前工作区内的普通 UTF-8 文件，并记录聊天级文件版本。
 #[tauri::command]
 pub async fn agent_file_read(
@@ -343,10 +364,16 @@ pub async fn agent_file_read(
 ) -> Result<AgentReadResponse, String> {
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
-    let authorized =
-        authorize_path(&registry, &request.root, &request.path, &workspace, true).await?;
+    let authorized = authorize_path(
+        &registry,
+        &request.root,
+        &request.path,
+        &workspace,
+        request.permission_mode,
+        true,
+    )
+    .await?;
     state.bind_scope(&request.owner_session_id, &authorized, &workspace)?;
-    ensure_safe_path(&authorized.canonical)?;
     ensure_regular_file(&authorized.io_path, &workspace).await?;
     let start_line = request.start_line.unwrap_or(1);
     let line_count = request
@@ -425,10 +452,16 @@ pub async fn agent_file_find(
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let requested_path = request.path.as_deref().unwrap_or(".");
-    let authorized =
-        authorize_path(&registry, &request.root, requested_path, &workspace, true).await?;
+    let authorized = authorize_path(
+        &registry,
+        &request.root,
+        requested_path,
+        &workspace,
+        request.permission_mode,
+        true,
+    )
+    .await?;
     state.bind_scope(&request.owner_session_id, &authorized, &workspace)?;
-    ensure_safe_path(&authorized.canonical)?;
     let matcher = request
         .glob
         .as_deref()
@@ -457,7 +490,9 @@ pub async fn agent_file_find(
         )
         .await?
     };
-    entries.retain(|entry| ensure_safe_path(&entry.path).is_ok());
+    if request.permission_mode == AgentPermissionMode::Ask {
+        entries.retain(|entry| ensure_safe_path(&entry.path).is_ok());
+    }
     entries.sort_by_key(|entry| entry.rel.to_lowercase());
     let offset = request.offset.unwrap_or(0);
     let limit = request
@@ -486,10 +521,16 @@ pub async fn agent_file_grep(
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let requested_path = request.path.as_deref().unwrap_or(".");
-    let authorized =
-        authorize_path(&registry, &request.root, requested_path, &workspace, true).await?;
+    let authorized = authorize_path(
+        &registry,
+        &request.root,
+        requested_path,
+        &workspace,
+        request.permission_mode,
+        true,
+    )
+    .await?;
     state.bind_scope(&request.owner_session_id, &authorized, &workspace)?;
-    ensure_safe_path(&authorized.canonical)?;
     let output = request.output.unwrap_or(AgentGrepOutput::Content);
     let offset = request.offset.unwrap_or(0);
     let limit = request
@@ -541,7 +582,8 @@ pub async fn agent_file_grep(
         .hits
         .into_iter()
         .filter(|hit| {
-            ensure_safe_path(&hit.path).is_ok()
+            (request.permission_mode == AgentPermissionMode::FullAccess
+                || ensure_safe_path(&hit.path).is_ok())
                 && explicit_file
                     .as_deref()
                     .is_none_or(|path| paths_equal(&hit.path, path, &workspace))
@@ -666,14 +708,18 @@ pub async fn agent_file_prepare_mutation(
         remote,
         &registry,
         &request.owner_session_id,
-        &request.root,
-        &workspace,
+        AgentPathContext {
+            root: &request.root,
+            workspace: &workspace,
+            permission_mode: request.permission_mode,
+        },
         request.mutation,
     )
     .await?;
     let mutation = PreparedMutation {
         owner_session_id: request.owner_session_id,
         root: request.root,
+        permission_mode: request.permission_mode,
         workspace,
         writes,
     };
@@ -827,12 +873,17 @@ pub async fn agent_file_operation(
         &request.root,
         &request.path,
         &workspace,
+        request.permission_mode,
         source_must_exist,
     )
     .await?;
     state.bind_scope(&request.owner_session_id, &source, &workspace)?;
-    ensure_safe_path(&source.canonical)?;
-    if paths_equal(&source.canonical, &source.root_canonical, &workspace) {
+    if is_filesystem_root(&source.actual, &source.io_path, &workspace) {
+        return Err("refusing to operate on the filesystem root".into());
+    }
+    if request.permission_mode == AgentPermissionMode::Ask
+        && paths_equal(&source.canonical, &source.root_canonical, &workspace)
+    {
         return Err("refusing to operate on the workspace root".into());
     }
     let destination = match request.operation {
@@ -841,8 +892,15 @@ pub async fn agent_file_operation(
                 .destination
                 .as_deref()
                 .ok_or_else(|| "destination is required".to_string())?;
-            let target = authorize_path(&registry, &request.root, raw, &workspace, false).await?;
-            ensure_safe_path(&target.canonical)?;
+            let target = authorize_path(
+                &registry,
+                &request.root,
+                raw,
+                &workspace,
+                request.permission_mode,
+                false,
+            )
+            .await?;
             if path_exists(&target.io_path, &workspace).await? {
                 return Err(format!("destination already exists: {}", target.actual));
             }
@@ -1015,6 +1073,14 @@ fn paths_equal(left: &str, right: &str, workspace: &WorkspaceEnv) -> bool {
         left.eq_ignore_ascii_case(right)
     } else {
         left == right
+    }
+}
+
+fn is_filesystem_root(actual: &str, io_path: &str, workspace: &WorkspaceEnv) -> bool {
+    if workspace.is_ssh() || workspace.is_wsl() {
+        actual.trim_matches('/').is_empty()
+    } else {
+        Path::new(io_path).parent().is_none()
     }
 }
 
@@ -1271,34 +1337,33 @@ fn clip_text(value: &str, max_chars: usize) -> String {
     }
 }
 
+/// 按当前权限模式解析并校验模型提供的路径。
+///
+/// 请求批准模式将会话 cwd 作为路径上界并拒绝敏感路径；完全访问模式仍以 cwd
+/// 解析相对路径，但绝对目标只受系统权限和后续文件类型、大小与写入条件约束。
 async fn authorize_path(
     registry: &WorkspaceRegistry,
     root: &str,
     path: &str,
     workspace: &WorkspaceEnv,
+    permission_mode: AgentPermissionMode,
     must_exist: bool,
 ) -> Result<AuthorizedPath, String> {
     validate_path_input(root)?;
     validate_path_input(path)?;
     let actual = join_workspace_path(root, path, workspace)?;
-    ensure_safe_path(&actual)?;
+    if permission_mode == AgentPermissionMode::Ask {
+        ensure_safe_path(&actual)?;
+    }
     if let Some(profile_id) = workspace.ssh_profile_id() {
         let manager = remote::manager::global_manager()?;
         let remote_workspace = manager.workspace(profile_id).await?;
         let root_canonical = remote::sftp::canonicalize(&remote_workspace, root).await?;
-        let workspace_root = remote_workspace.home().await;
-        if !paths_equal(
-            root_canonical.trim_end_matches('/'),
-            workspace_root.trim_end_matches('/'),
-            workspace,
-        ) {
-            return Err("root is not the active SSH workspace".into());
-        }
-        if root_canonical.trim_end_matches('/').is_empty() {
-            return Err("workspace root cannot be the filesystem root".into());
-        }
         let canonical = canonicalize_remote_nearest(&remote_workspace, &actual).await?;
-        ensure_within_remote(&root_canonical, &canonical)?;
+        if permission_mode == AgentPermissionMode::Ask {
+            ensure_safe_path(&canonical)?;
+            ensure_within_remote(&root_canonical, &canonical)?;
+        }
         if must_exist {
             remote::sftp::stat(&remote_workspace, &actual).await?;
         }
@@ -1316,16 +1381,17 @@ async fn authorize_path(
             root_host.display()
         )
     })?;
-    if !registry.is_authorized_root(&root_canonical) {
+    if permission_mode == AgentPermissionMode::Ask && !registry.is_authorized_root(&root_canonical)
+    {
         return Err("root is not an authorized workspace".into());
-    }
-    if root_canonical.parent().is_none() {
-        return Err("workspace root cannot be the filesystem root".into());
     }
     let target_host = resolve_path(&actual, workspace);
     let canonical = canonicalize_local_nearest(&target_host)?;
-    if !canonical.starts_with(&root_canonical) {
-        return Err("path is outside the session workspace".into());
+    if permission_mode == AgentPermissionMode::Ask {
+        ensure_safe_path(&canonical.to_string_lossy())?;
+        if !canonical.starts_with(&root_canonical) {
+            return Err("path is outside the session workspace".into());
+        }
     }
     if must_exist && std::fs::symlink_metadata(&target_host).is_err() {
         return Err(format!("path not found: {actual}"));
@@ -1334,7 +1400,17 @@ async fn authorize_path(
     if matches!(workspace, WorkspaceEnv::Local) {
         ensure_safe_windows_path(&actual)?;
     }
-    let io_path = stable_io_path(root, &root_canonical, &canonical, workspace)?;
+    let (io_root, io_root_canonical) =
+        if permission_mode == AgentPermissionMode::FullAccess && workspace.is_wsl() {
+            (
+                "/",
+                std::fs::canonicalize(resolve_path("/", workspace))
+                    .map_err(|error| format!("WSL filesystem root is not accessible: {error}"))?,
+            )
+        } else {
+            (root, root_canonical.clone())
+        };
+    let io_path = stable_io_path(io_root, &io_root_canonical, &canonical, workspace)?;
     Ok(AuthorizedPath {
         actual,
         io_path,
@@ -1785,10 +1861,14 @@ async fn prepare_writes(
     remote: State<'_, RemoteState>,
     registry: &WorkspaceRegistry,
     owner: &str,
-    root: &str,
-    workspace: &WorkspaceEnv,
+    path_context: AgentPathContext<'_>,
     input: AgentMutationInput,
 ) -> Result<Vec<PreparedWrite>, String> {
+    let AgentPathContext {
+        root,
+        workspace,
+        permission_mode,
+    } = path_context;
     match input {
         AgentMutationInput::Write {
             path,
@@ -1798,9 +1878,9 @@ async fn prepare_writes(
             if content.len() > MAX_MUTATION_BYTES {
                 return Err("file content exceeds mutation limit".into());
             }
-            let authorized = authorize_path(registry, root, &path, workspace, false).await?;
+            let authorized =
+                authorize_path(registry, root, &path, workspace, permission_mode, false).await?;
             state.bind_scope(owner, &authorized, workspace)?;
-            ensure_safe_path(&authorized.canonical)?;
             match mode {
                 AgentWriteMode::Create => {
                     if path_exists(&authorized.io_path, workspace).await? {
@@ -1853,9 +1933,9 @@ async fn prepare_writes(
                     ));
                 }
                 let authorized =
-                    authorize_path(registry, root, &file.path, workspace, true).await?;
+                    authorize_path(registry, root, &file.path, workspace, permission_mode, true)
+                        .await?;
                 state.bind_scope(owner, &authorized, workspace)?;
-                ensure_safe_path(&authorized.canonical)?;
                 if !seen.insert(authorized.canonical.clone()) {
                     return Err(format!("duplicate patch path: {}", authorized.actual));
                 }
@@ -2066,6 +2146,7 @@ async fn validate_prepared(
             &mutation.root,
             &write.path,
             &mutation.workspace,
+            mutation.permission_mode,
             false,
         )
         .await?;
@@ -2517,12 +2598,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_authorization_requires_registered_root_and_rejects_escape() {
+    async fn local_authorization_applies_the_selected_permission_mode() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("root");
         let sibling = temp.path().join("sibling.txt");
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("inside.txt"), b"ok").unwrap();
+        std::fs::write(root.join(".env"), b"SECRET=value").unwrap();
         std::fs::write(&sibling, b"no").unwrap();
         let registry = WorkspaceRegistry::default();
         registry.authorize(&root).unwrap();
@@ -2533,6 +2615,7 @@ mod tests {
             &root_text,
             "inside.txt",
             &WorkspaceEnv::Local,
+            AgentPermissionMode::Ask,
             true
         )
         .await
@@ -2542,9 +2625,42 @@ mod tests {
             &root_text,
             &sibling.to_string_lossy(),
             &WorkspaceEnv::Local,
+            AgentPermissionMode::Ask,
             true,
         )
         .await
         .is_err());
+
+        assert!(authorize_path(
+            &registry,
+            &root_text,
+            &sibling.to_string_lossy(),
+            &WorkspaceEnv::Local,
+            AgentPermissionMode::FullAccess,
+            true,
+        )
+        .await
+        .is_ok());
+
+        assert!(authorize_path(
+            &registry,
+            &root_text,
+            ".env",
+            &WorkspaceEnv::Local,
+            AgentPermissionMode::Ask,
+            true,
+        )
+        .await
+        .is_err());
+        assert!(authorize_path(
+            &registry,
+            &root_text,
+            ".env",
+            &WorkspaceEnv::Local,
+            AgentPermissionMode::FullAccess,
+            true,
+        )
+        .await
+        .is_ok());
     }
 }

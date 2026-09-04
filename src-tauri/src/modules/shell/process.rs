@@ -2,6 +2,7 @@
 //!
 //! 每个命令都进入同一个有界生命周期模型。Local 与 WSL 使用受管子进程，SSH
 //! 使用长生命周期 exec channel；三者共享 stdin、输出 offset、超时和终止语义。
+//! SSH Profile 目录只决定默认位置，不限制用户明确选择的 Agent 工作目录。
 
 use std::io::{Read, Write};
 use std::process::{ChildStdin, Command, Stdio};
@@ -302,21 +303,10 @@ impl AgentProcess {
         };
         let manager = remote::manager::global_manager()?;
         let workspace = manager.workspace(profile_id).await?;
-        let workspace_root = normalize_remote_root(&workspace.home().await)?;
-        if !remote_path_within(&cwd, &workspace_root) {
-            return Err("Agent process cwd is outside the SSH Workspace root".into());
-        }
         let marker = format!("__TERAX_AGENT_CWD_{id}__");
         let pid_file = format!("/tmp/terax-agent-{id}.pid");
-        let remote_command = build_remote_command(
-            &command,
-            &cwd,
-            &workspace_root,
-            shell,
-            login,
-            &marker,
-            &pid_file,
-        )?;
+        let remote_command =
+            build_remote_command(&command, &cwd, shell, login, &marker, &pid_file)?;
         let channel = workspace.open_exec_channel().await?;
         channel
             .exec(true, remote_command.into_bytes())
@@ -884,7 +874,6 @@ fn build_local_command(
 fn build_remote_command(
     command: &str,
     cwd: &str,
-    workspace_root: &str,
     shell: ShellKind,
     login: bool,
     marker: &str,
@@ -892,11 +881,7 @@ fn build_remote_command(
 ) -> Result<String, String> {
     let shell_program = posix_shell(shell)?;
     let payload = posix_payload(command, marker);
-    let command = format!(
-        "cd -- {} && __terax_cwd=$(pwd -P) && __terax_root={} && {{ [ \"$__terax_root\" = / ] || case \"$__terax_cwd/\" in \"$__terax_root/\"*) ;; *) exit 73 ;; esac; }} && {payload}",
-        remote::session::shell_quote(cwd),
-        remote::session::shell_quote(workspace_root),
-    );
+    let command = format!("cd -- {} && {payload}", remote::session::shell_quote(cwd),);
     let wrapper = posix_group_wrapper(&command, pid_file, shell_program, login);
     let trap = format!(
         "if read -r pid < {}; then kill -TERM -- -\"$pid\" 2>/dev/null || true; fi",
@@ -907,27 +892,6 @@ fn build_remote_command(
         remote::session::shell_quote(&trap),
         remote::session::shell_quote(&wrapper),
     ))
-}
-
-fn remote_path_within(path: &str, root: &str) -> bool {
-    root == "/"
-        || path == root
-        || path
-            .strip_prefix(root)
-            .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
-fn normalize_remote_root(root: &str) -> Result<String, String> {
-    let root = if root == "/" {
-        root.to_string()
-    } else {
-        root.trim_end_matches('/').to_string()
-    };
-    remote::session::validate_remote_path(&root)?;
-    if !root.starts_with('/') {
-        return Err("SSH Workspace root must be absolute".into());
-    }
-    Ok(root)
 }
 
 fn posix_group_wrapper(payload: &str, pid_file: &str, shell: &str, login: bool) -> String {
@@ -1067,7 +1031,6 @@ mod tests {
         let command = build_remote_command(
             "printf \"it's fine\"",
             "/srv/it's here",
-            "/srv",
             ShellKind::Bash,
             false,
             "marker",
@@ -1084,27 +1047,12 @@ mod tests {
         let result = build_remote_command(
             "echo ok",
             "/tmp",
-            "/",
             ShellKind::Powershell,
             false,
             "marker",
             "/tmp/pid",
         );
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn remote_workspace_boundary_requires_a_path_segment() {
-        assert!(remote_path_within("/srv/project", "/srv/project"));
-        assert!(remote_path_within("/srv/project/src", "/srv/project"));
-        assert!(!remote_path_within("/srv/project-copy", "/srv/project"));
-        assert!(remote_path_within("/anywhere", "/"));
-        assert_eq!(
-            normalize_remote_root("/srv/project/").unwrap(),
-            "/srv/project"
-        );
-        assert!(normalize_remote_root("").is_err());
-        assert!(normalize_remote_root("relative").is_err());
     }
 
     #[test]

@@ -16,7 +16,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 ## 秘密路径 deny-list
 
-`src-tauri/src/modules/fs/agent.rs` 会拒绝读取和修改明显包含秘密的路径。该规则同时适用于所有六个 Agent 文件工具，不能被前端参数或 full-access 模式绕过。
+请求批准模式下，`src-tauri/src/modules/fs/agent.rs` 会拒绝读取和修改明显包含秘密的路径。完全访问模式明确允许当前系统用户可访问的任意路径，因此会跳过该 deny-list；选择该模式表示用户接受秘密可能被发送给模型 provider 的风险。
 
 阻止的类别包括：
 
@@ -35,7 +35,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - `workspace_prepare_default_root` 不接受路径参数，只按当前不可变环境准备默认 Agent 根。Local 与 WSL 创建并授权各自的 `~/.terax/workspace`，SSH 只能返回连接时验证的 profile Workspace root。
 - `authorize_spawn_cwd` 拒绝在已授权 root 之外使用 spawn cwd。
 - `authorize_user_spawn_cwd` 将用户选择的 cwd 注册为新 root，而不是拒绝它。
-- Agent 文件工具要求会话 cwd 与一个已登记 root 精确相等，并将聊天 owner 绑定到该 canonical root 和不可变 Workspace 环境。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和审批快照。
+- Agent 文件工具将聊天 owner 绑定到 canonical cwd 和不可变 Workspace 环境。请求批准模式要求 Local 与 WSL cwd 是已登记 root，并将所有目标限制在该根内；SSH cwd 来自用户明确打开并在会话首次发送时冻结的可访问 Explorer 根，不与 profile 默认目录绑定。完全访问模式仍固定 cwd，但不将其作为路径上界。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和审批快照。
 - registry 在 bootstrap 时加入启动目录和用户 home 目录（`workspace.rs:135`）。
 
 这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
@@ -60,7 +60,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 在 `src/modules/ai/tools/tools.ts` 中：
 
-- 只读工具（`read_file`、`find_files`、`grep`）自动执行，但 Rust 会将聊天 owner 绑定到固定且已授权的 Workspace 根，并拒绝越界、敏感路径、非普通文件和不安全符号链接。
+- 只读工具（`read_file`、`find_files`、`grep`）自动执行。请求批准模式下 Rust 会将聊天 owner 绑定到固定 Workspace 根，并拒绝越界、敏感路径、非普通文件和不安全符号链接；完全访问模式解除路径上界与敏感路径过滤。
 - 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。AI SDK 会暂停需要审批的调用，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
 - Agent Shell 在前端审批前和 Rust IPC 边界分别检查不可审阅字符及灾难性命令。cwd 必须属于当前授权 Workspace，Local 子进程使用最小环境变量集合，避免把宿主 API key 和 token 继承到模型可读取的 stdout。
 - Agent 进程通过聊天 owner 和不可复用 UUID 登记，控制和列表 IPC 同时校验 owner 与 Workspace。每聊天与每应用都有原子执行的运行数量上限，聊天删除、超时、显式终止和应用退出都会回收 Local、WSL 或 SSH 完整进程树。Windows Local 进程在恢复执行前加入 Job Object，避免启动竞态使子进程逃逸。
@@ -102,7 +102,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 
 ## 不变量
 
-- `fs/agent.rs` 中的 Workspace 根、敏感路径、普通文件和 canonical 检查同时适用于读取与修改，绝不能由模型参数绕过。`security.ts` 只负责 Shell 审批前反馈。
+- `fs/agent.rs` 中的权限模式、普通文件和 canonical 检查同时适用于读取与修改。请求批准模式的 Workspace 根与敏感路径规则不能由模型参数绕过；完全访问模式只解除这两项限制。`security.ts` 只负责 Shell 审批前反馈。
 - Bash task 只能实现 Rust 枚举的封闭协议；通用执行方法只对 `remote/tasks/` 子模块可见，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。

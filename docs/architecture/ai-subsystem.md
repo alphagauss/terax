@@ -132,7 +132,7 @@ streaming state 保留在所属进程中。发送操作首先获取 session run 
 
 composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isBusy`，因此它可以在 session hydrate 前安全挂载，同时其他 session 继续在后台运行。
 
-draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。draft 可以选择 Agent；第一条被接受的 user message 会将 draft 提升为 persisted session，并同时冻结实际目录和 Agent 快照。persisted session 始终显示已保存的 Agent，不能中途切换。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
+draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。SSH profile root 只提供默认位置，用户明确打开的任意可访问远端目录都可以成为 Explorer root。draft 可以选择 Agent；第一条被接受的 user message 会将 draft 提升为 persisted session，并同时冻结实际目录和 Agent 快照。persisted session 始终显示已保存的 Agent，不能中途切换。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
 每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。Subagent 内部事件恢复模型循环前，以相同 turn ID 追加完整步骤和稳定 user record；终态 bridge 只追加最后一个 checkpoint 之后的剩余 Assistant 和 tool record。streaming fragment 永远不会写入。
 
@@ -141,7 +141,7 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 工具定义位于 `src/modules/ai/tools/`：
 
 - 只读工具是 `read_file`、`find_files`、`grep`。全文写入使用 `write_file`，已有文件精确编辑使用 `apply_patch`，移动、复制、删除和空目录创建使用 `file_operation`。
-- 六个模型文件工具全部进入 `src-tauri/src/modules/fs/agent.rs`。该后端将聊天 owner 绑定到固定 Workspace 根，在 Rust 中统一执行路径解析、敏感路径、普通文件、分页、读取版本、修改快照和 Local、WSL、SSH 路由；前端不再实现文件路径安全或正文变换。
+- 六个模型文件工具全部进入 `src-tauri/src/modules/fs/agent.rs`。该后端将聊天 owner 绑定到固定 cwd，在 Rust 中统一执行权限模式、路径解析、普通文件、分页、读取版本、修改快照和 Local、WSL、SSH 路由。请求批准模式将 cwd 作为路径上界并拒绝敏感路径；完全访问模式只用 cwd 解析相对路径，允许系统用户可访问的绝对路径。
 - `find_files` 同时覆盖直接目录列举和递归 glob。`grep` 复用 `fs_content_search` 匹配引擎，支持目录和显式单文件目标，并在 Agent 后端完成安全过滤、content/files/count 聚合、上下文和分页。
 - 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
 - Shell 工具只有 `shell_exec`、`shell_process`、`shell_list`。短命令和长任务共享按聊天 owner 隔离的原生进程表，stdin、EOF、增量 offset、固定文本等待、hard timeout 和完整进程树终止不通过前端模拟。POSIX 环境默认使用 Bash，Windows Local 默认使用 PowerShell。
@@ -166,7 +166,7 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - 磁盘 metadata 中的 `systemPrompt` 是只写的检查快照，运行时不得读取或复用，也不增加 prompt version、revision 或迁移状态。
 - 会话 Agent ID、专属指令和工具白名单来自首次发送时保存的 `metadata.agent` 快照；Agent 不能在 persisted session 中更换。
 - Custom Agent 删除必须经过 `ai_agent_delete` 级联删除其全部会话；主 Agent 不进入共享存储且不可删除。
-- 修改型工具需要审批；只读工具仍必须通过 Rust Workspace 根、canonical path 和敏感路径检查。
+- 请求批准模式下修改型工具需要审批，所有文件工具必须通过 Rust 会话根、canonical path 和敏感路径检查；完全访问模式免除审批和路径沙箱，但继续执行文件类型、大小、版本与灾难性操作保护。
 - 内存 message list、持久化 message record 和模型 input 保留相同的 message content。cwd 和 execution environment 只进入 system prompt，不得注入 user message；active tab 不自动注入任何消息。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
 - `shell_exec` 未显式传 cwd 时延续该聊天最近同步完成的 Shell cwd；已经返回为长任务的进程不得在稍后退出时异步改变聊天 cwd。

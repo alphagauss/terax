@@ -1,6 +1,6 @@
 /**
  * 本文件定义 AI 的文本读取、全文写入和文件树操作工具。
- * 所有文件系统语义由 Rust Agent 文件后端执行，前端只声明 schema 与审批规则。
+ * 所有文件系统语义由 Rust Agent 文件后端执行，前端只声明 schema、权限模式与审批规则。
  */
 
 import { tool } from "ai";
@@ -31,6 +31,7 @@ export function buildFsTools(ctx: ToolContext) {
           return await native.agentFileRead({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
             path,
             startLine: start_line,
             lineCount: line_count,
@@ -60,6 +61,7 @@ export function buildFsTools(ctx: ToolContext) {
             toolName: "write_file",
             input,
             cwd: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
           });
           return await commitPreparedFileMutation(sessionId, toolCallId);
         } catch (error) {
@@ -105,6 +107,7 @@ export function buildFsTools(ctx: ToolContext) {
           return await native.agentFileOperation({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
             operation,
             path,
             destination,

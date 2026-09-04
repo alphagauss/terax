@@ -48,6 +48,7 @@ export function buildPatchTools(ctx: ToolContext) {
             toolName: "apply_patch",
             input,
             cwd: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
           });
           return await commitPreparedFileMutation(sessionId, toolCallId);
         } catch (error) {
