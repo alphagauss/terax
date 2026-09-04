@@ -74,6 +74,7 @@ import {
   ChatActivityBlock,
   type ChatActivityHeadline,
 } from "./ChatActivityBlock";
+import { ChatCollapsibleScrollGuard } from "./ChatCollapsibleScrollGuard";
 import { ChatReasoningPart } from "./ChatReasoningPart";
 import { SubagentCard, type SubagentResultView } from "./SubagentCard";
 
@@ -448,6 +449,7 @@ export function AiChatView({
       resize={CHAT_SCROLL_SPRING}
       {...CHAT_SCROLL_SPRING}
     >
+      <ChatCollapsibleScrollGuard />
       <ConversationContent
         className="gap-4 p-3"
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
