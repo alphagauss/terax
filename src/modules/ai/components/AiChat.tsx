@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/collapsible";
 import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
+import { displayAgent } from "@/modules/agents/lib/format";
 import {
   ArrowRight01Icon,
   CodeIcon,
@@ -1048,6 +1049,17 @@ function activityHeadline(
     partType(part) === "dynamic-tool"
       ? ((part as { toolName?: string }).toolName ?? "tool")
       : partType(part).replace(/^tool-/, "");
+  const externalLabel = externalAgentActivityLabel(
+    toolName,
+    (part as { input?: unknown }).input,
+  );
+  if (externalLabel) {
+    return {
+      kind: "tool",
+      key: toolCallIdFromPart(part) || toolName,
+      text: externalLabel,
+    };
+  }
   const label = ACTIVITY_TOOL_LABELS[toolName]?.() ?? toolName;
   const summary = activityToolSummary(
     toolName,
@@ -1109,6 +1121,32 @@ function hasVisiblePartAfter(
     if (type === "dynamic-tool" || type.startsWith("tool-")) return true;
   }
   return false;
+}
+
+function externalAgentActivityLabel(
+  toolName: string,
+  input: unknown,
+): string | null {
+  if (!toolName.startsWith("external_agent_")) return null;
+  const agentId = objectStringValue(input, "agentId") ?? "Agent";
+  switch (toolName) {
+    case "external_agent_start":
+      return i18n.t("ai:chat.externalAgent.starting", {
+        agent: displayAgent(agentId),
+      });
+    case "external_agent_file_change":
+      return i18n.t("ai:chat.externalAgent.fileChange");
+    case "external_agent_thinking":
+      return i18n.t("ai:chat.externalAgent.thinking");
+    case "external_agent_web_search":
+      return i18n.t("ai:chat.externalAgent.webSearch");
+    case "external_agent_tool":
+      return i18n.t("ai:chat.externalAgent.tool", {
+        tool: objectStringValue(input, "tool") ?? "tool",
+      });
+    default:
+      return null;
+  }
 }
 
 type CollectedSubagentParts = {
@@ -1390,13 +1428,14 @@ const RenderedTool = memo(function RenderedTool({
     part.type === "dynamic-tool"
       ? part.toolName
       : part.type.replace(/^tool-/, "");
+  const externalLabel = externalAgentActivityLabel(toolName, part.input);
 
   return (
     <Tool
       className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
-      toolName={toolName}
+      toolName={externalLabel ?? toolName}
       state={part.state}
-      input={part.input}
+      input={externalLabel ? undefined : part.input}
       output={"output" in part ? part.output : undefined}
       errorText={"errorText" in part ? part.errorText : undefined}
     />

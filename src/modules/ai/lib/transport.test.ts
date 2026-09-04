@@ -14,17 +14,22 @@ import {
 const mocks = vi.hoisted(() => ({
   readAgentsMd: vi.fn(),
   runAgentStream: vi.fn(),
+  runExternalAgentStream: vi.fn(),
   toUIMessageStream: vi.fn(),
 }));
 
 vi.mock("./agent", () => ({ runAgentStream: mocks.runAgentStream }));
+vi.mock("../external-agents/runtime", async (importOriginal) => ({
+  ...(await importOriginal()),
+  runExternalAgentStream: mocks.runExternalAgentStream,
+}));
 vi.mock("./projectInstructions", () => ({
   readAgentsMd: mocks.readAgentsMd,
 }));
 
-import { createSessionTransport } from "./transport";
-import type { SessionAgentSnapshot } from "./agents";
 import type { ToolContext } from "../tools/context";
+import type { SessionAgentSnapshot } from "./agents";
+import { createSessionTransport } from "./transport";
 
 const environment = {
   platform: "Windows",
@@ -54,6 +59,7 @@ describe("session transport", () => {
     mocks.runAgentStream.mockResolvedValue({
       toUIMessageStream: mocks.toUIMessageStream,
     });
+    mocks.runExternalAgentStream.mockReturnValue("external-stream");
   });
 
   it("passes the canonical messages unchanged and reads instructions from session cwd", async () => {
@@ -161,5 +167,50 @@ describe("session transport", () => {
     expect(mocks.runAgentStream.mock.calls[1][0].allowedTools).toEqual([
       "read_file",
     ]);
+  });
+
+  it("routes External Agents before reading project instructions or building a model", async () => {
+    const persist = vi.fn();
+    const capture = vi.fn();
+    const messages: UIMessage[] = [
+      {
+        id: "user-1",
+        role: "user",
+        parts: [{ type: "text", text: "Inspect this" }],
+      },
+    ];
+    const transport = createSessionTransport({
+      getKeys: () => ({}) as never,
+      toolContext,
+      getModel: () => modelRefForProvider("openai", "unused"),
+      ...subagentDeps,
+      getCustomInstructions: () => "unused",
+      getAgent: () => ({
+        id: "builtin:main",
+        name: "Terax",
+        instructions: "",
+        icon: "coder",
+        tools: ["read_file"],
+      }),
+      getCwd: () => "D:/workspace/project",
+      getEnvironment: () => environment,
+      getExternalAgent: () => ({ agentId: "claude", sessionId: "session-1" }),
+      getPermissionMode: () => "ask",
+      onSystemPrompt: persist,
+      onExternalSession: capture,
+    });
+
+    expect(await transport.sendMessages({ messages })).toBe("external-stream");
+    expect(persist).toHaveBeenCalledWith("", messages);
+    expect(mocks.readAgentsMd).not.toHaveBeenCalled();
+    expect(mocks.runAgentStream).not.toHaveBeenCalled();
+    expect(mocks.runExternalAgentStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "claude",
+        externalSessionId: "session-1",
+        cwd: "D:/workspace/project",
+        messages,
+      }),
+    );
   });
 });

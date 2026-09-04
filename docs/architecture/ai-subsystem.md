@@ -70,6 +70,8 @@ Custom Agent ID 同时是会话归属。历史列表可按 Agent 筛选；删除
 
 ## Agent 运行循环
 
+Claude Code、Codex 等完整 CLI Agent 不进入本节的 Provider 与 `runAgentStream` 路径。它们在 Chat transport 层分流到统一 External Agent Runtime，复用当前 Workspace 的受管进程，并将结构化 CLI 输出转换为相同的 AI SDK 消息流。详细边界见 [External Agent Runtime](external-agent-runtime.md)。
+
 一次主 Agent 请求会：
 
 1. `createSessionTransport` 在 Chat runtime 首次发送时读取 Workspace 根 `AGENTS.md`，并根据统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令构造 system prompt。该 Promise、Agent 快照和最终字符串由 transport 闭包持有，后续轮次不再读取或重建。

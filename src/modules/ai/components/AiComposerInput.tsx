@@ -6,19 +6,20 @@
 
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 import { usePresence } from "@/lib/usePresence";
+import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { clipboardImageFiles } from "../lib/clipboardImages";
 import { useComposer } from "../lib/composer";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
-import { useChatStore } from "../store/chatStore";
+import { sessionMetadata, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { AgentSwitcher } from "./AgentSwitcher";
 import { FilePickerContent } from "./FilePicker";
-import { SnippetPickerContent, type PickerItem } from "./SnippetPicker";
+import { type PickerItem, SnippetPickerContent } from "./SnippetPicker";
 
 type SnippetTrigger = {
   start: number;
@@ -74,6 +75,16 @@ function detectFileTrigger(value: string, caret: number): FileTrigger | null {
 export function AiComposerInput() {
   const { t } = useTranslation("ai");
   const c = useComposer();
+  const activeSessionId = useChatStore((state) => state.activeSessionId);
+  const draftSessionId = useChatStore((state) => state.draftSessionId);
+  const draftExternalAgentId = useChatStore(
+    (state) => state.draftExternalAgentId,
+  );
+  const usesExternalAgent = Boolean(
+    parseExternalAgentBinding(
+      activeSessionId ? sessionMetadata.get(activeSessionId) : undefined,
+    ) ?? (activeSessionId === draftSessionId ? draftExternalAgentId : null),
+  );
   const focusSignal = useChatStore((s) => s.focusSignal);
   const snippets = useSnippetsStore((s) => s.snippets);
   const workspaceRoot = c.workingDirectory;
@@ -298,7 +309,7 @@ export function AiComposerInput() {
                 "disabled:cursor-not-allowed",
               )}
             />
-            <AgentSwitcher />
+            {usesExternalAgent ? null : <AgentSwitcher />}
           </div>
         </PopoverAnchor>
         {fileTrigger ? (

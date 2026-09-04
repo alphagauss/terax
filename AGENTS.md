@@ -234,6 +234,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 ### AI 子系统
 
 - 云端 provider 通过 `@ai-sdk/*` 接入；本地 provider 包括 LM Studio、MLX、Ollama。
+- Claude Code、Codex 等完整 CLI Agent 通过独立 External Agent Runtime 接入，不伪装成网络 Provider 或 AI SDK `LanguageModel`。CLI 必须安装并登录在当前 Local、WSL 或 SSH 环境中，运行、探测和恢复不得回退到宿主环境。
+- External Agent 复用统一 Agent 进程的 owner、Workspace 授权、stdin/EOF、有界输出和完整进程树清理；Rust 只接受封闭 Agent ID 并构造命令，前端 adapter 只解析结构化输出。直接聊天会话绑定 Agent 与外部 session ID，恢复数据随 Terax session metadata 持久化。
 - 内置 provider 的地址、凭据策略、模型目录和运行时 adapter 统一定义在 `src/modules/ai/providerRegistry.ts`。设置页和 Agent 只消费解析后的连接，不按供应商名称重复拼接协议。新增流程见 `docs/architecture/ai-subsystem.md`。
 - 远端模型目录只用于发现模型 ID；用户明确添加的模型才进入设置。不得重新加入静态模型清单、价格、上下文长度、营销说明或主观能力评分。
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
@@ -284,6 +286,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider
+- `docs/architecture/external-agent-runtime.md`：外部 CLI Agent 的进程、协议、会话和跨环境边界
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量
 - `docs/architecture/workspace-page-handoff.md`：主窗口向同环境临时 Workspace 复制可重建工作页
 - `docs/contributing/testing.md`：测试约定和核心子系统不变量

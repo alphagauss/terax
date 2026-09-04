@@ -15,6 +15,11 @@ import type {
   ProviderInstance,
   ProviderModels,
 } from "../config";
+import {
+  type ExternalAgentBinding,
+  type ExternalAgentId,
+  runExternalAgentStream,
+} from "../external-agents/runtime";
 import type { ToolContext } from "../tools/tools";
 import { type AgentUsageDelta, runAgentStream } from "./agent";
 import type { SessionAgentSnapshot } from "./agents";
@@ -36,6 +41,8 @@ type Deps = {
   getAgent: () => SessionAgentSnapshot;
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
+  getExternalAgent?: () => ExternalAgentBinding | null;
+  getPermissionMode?: () => "ask" | "full-access";
   getProviderBaseURLs?: () => Readonly<ProviderBaseURLs>;
   getProviderModels?: () => Readonly<ProviderModels>;
   getCustomProviders?: () => readonly ProviderInstance[];
@@ -52,6 +59,10 @@ type Deps = {
   onCheckpoint: (
     completedMessages: UIMessage[],
     event: SubagentResultEvent,
+  ) => void | Promise<void>;
+  onExternalSession?: (
+    agentId: ExternalAgentId,
+    sessionId: string,
   ) => void | Promise<void>;
 };
 
@@ -94,6 +105,29 @@ export function createSessionTransport(deps: Deps) {
   };
 
   const run = async (options: SendOptions) => {
+    const externalAgent = deps.getExternalAgent?.() ?? null;
+    if (externalAgent) {
+      await deps.onSystemPrompt?.("", options.messages);
+      return runExternalAgentStream({
+        agentId: externalAgent.agentId,
+        ownerSessionId: deps.toolContext.getSessionId(),
+        externalSessionId: externalAgent.sessionId,
+        cwd: deps.getCwd(),
+        permissionMode: deps.getPermissionMode?.() ?? "ask",
+        messages: options.messages,
+        abortSignal: options.abortSignal,
+        onSession: (sessionId) =>
+          deps.onExternalSession?.(externalAgent.agentId, sessionId),
+        onUsage: (usage) =>
+          deps.onUsage?.({
+            inputTokens: usage.input,
+            outputTokens: usage.output,
+            cachedInputTokens: usage.cached,
+            lastInputTokens: usage.input,
+            lastCachedTokens: usage.cached,
+          }),
+      });
+    }
     const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),

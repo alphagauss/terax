@@ -9,7 +9,12 @@ import { useWindowFocus } from "@/modules/agents/lib/useWindowFocus";
 import { useAgentStore } from "@/modules/agents/store/agentStore";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { useChatStore, type AgentRunStatus } from "../store/chatStore";
+import { parseExternalAgentBinding } from "../external-agents/runtime";
+import {
+  type AgentRunStatus,
+  sessionMetadata,
+  useChatStore,
+} from "../store/chatStore";
 import { useSessionAttentionStore } from "../store/sessionAttentionStore";
 
 const AGENT = "Terax";
@@ -28,6 +33,12 @@ function aggregateStatus(
   const statuses = Object.values(runs).map((run) => run.status);
   if (statuses.includes("awaiting-approval")) return "waiting";
   return statuses.some(isBusy) ? "working" : null;
+}
+
+function notificationAgent(sessionId: string): string {
+  return (
+    parseExternalAgentBinding(sessionMetadata.get(sessionId))?.agentId ?? AGENT
+  );
 }
 
 /** 监听每个会话的状态转换，并为后台会话生成可导航通知。 */
@@ -70,10 +81,15 @@ export function LocalAgentNotificationsBridge({
 
   useEffect(() => {
     const nextLiveStatus = aggregateStatus(runs);
+    const liveAgentIds = Object.entries(runs)
+      .filter(([, run]) => isBusy(run.status))
+      .map(([sessionId]) => notificationAgent(sessionId));
+    const liveAgent =
+      new Set(liveAgentIds).size === 1 ? (liveAgentIds[0] ?? AGENT) : AGENT;
     useAgentStore
       .getState()
       .setLocalAgent(
-        nextLiveStatus ? { agent: AGENT, status: nextLiveStatus } : null,
+        nextLiveStatus ? { agent: liveAgent, status: nextLiveStatus } : null,
       );
 
     for (const [sessionId, run] of Object.entries(runs)) {
@@ -85,7 +101,7 @@ export function LocalAgentNotificationsBridge({
           t("miniWindow.newChat");
         routeAgentNotification({
           source: "local",
-          agent: AGENT,
+          agent: notificationAgent(sessionId),
           kind: "attention",
           title: t("notifications.approvalTitle", { session: sessionTitle }),
           body: t("notifications.approvalBody"),
@@ -117,7 +133,7 @@ export function LocalAgentNotificationsBridge({
         useChatStore.getState().agentMetaBySession[completion.sessionId]?.error;
       routeAgentNotification({
         source: "local",
-        agent: AGENT,
+        agent: notificationAgent(completion.sessionId),
         kind: completion.outcome === "error" ? "error" : "finished",
         title:
           completion.outcome === "error"

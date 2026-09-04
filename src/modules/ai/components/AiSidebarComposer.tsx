@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { AgentIcon } from "@/modules/agents/lib/agentIcon";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
@@ -45,10 +46,14 @@ import {
   STT_PROVIDER_LABELS,
   tryResolveModel,
 } from "../config";
+import {
+  EXTERNAL_AGENTS,
+  parseExternalAgentBinding,
+} from "../external-agents/runtime";
 import { ACCEPTED_FILES, useComposer } from "../lib/composer";
 import { getAvailableModelRefs } from "../lib/modelAvailability";
 import { toggleFavoriteModel } from "../lib/modelPrefs";
-import { useChatStore } from "../store/chatStore";
+import { sessionMetadata, useChatStore } from "../store/chatStore";
 import { AiComposerInput } from "./AiComposerInput";
 import "./ai-sidebar-composer.css";
 import { ChipsRow } from "./ChipsRow";
@@ -268,6 +273,12 @@ type Tab = "all" | "favorites" | "recent";
 function ModelDropdown() {
   const { t } = useTranslation("ai");
   const selected = useChatStore((s) => s.selectedModel);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const draftSessionId = useChatStore((s) => s.draftSessionId);
+  const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
+  const setDraftExternalAgent = useChatStore((s) => s.setDraftExternalAgent);
+  const newSession = useChatStore((s) => s.newSession);
+  const externalAvailability = useChatStore((s) => s.externalAgentAvailability);
   const apiKeys = useChatStore((s) => s.apiKeys);
   const setSelected = useChatStore((s) => s.setSelectedModel);
   const favoriteModels = usePreferencesStore((s) => s.favoriteModels);
@@ -329,6 +340,25 @@ function ModelDropdown() {
     customProviders,
     providerBaseURLs,
   });
+  const persistedExternal = parseExternalAgentBinding(
+    activeSessionId ? sessionMetadata.get(activeSessionId) : undefined,
+  );
+  const currentExternalId =
+    persistedExternal?.agentId ??
+    (activeSessionId === draftSessionId ? draftExternalAgentId : null);
+  const currentExternal = EXTERNAL_AGENTS.find(
+    (agent) => agent.id === currentExternalId,
+  );
+  const availableExternalAgents = EXTERNAL_AGENTS.filter(
+    (agent) =>
+      externalAvailability?.some(
+        (available) => available.agentId === agent.id && available.installed,
+      ) &&
+      tab === "all" &&
+      activeProvider === null &&
+      (!search.trim() ||
+        agent.label.toLowerCase().includes(search.trim().toLowerCase())),
+  );
   const availableFavoriteCount = modelOptions.filter(({ ref }) =>
     favoriteModels.some((favorite) => modelRefsEqual(favorite, ref)),
   ).length;
@@ -392,19 +422,25 @@ function ModelDropdown() {
           type="button"
           variant="ghost"
           size="sm"
-          disabled={!current}
+          disabled={
+            !current && !currentExternal && availableExternalAgents.length === 0
+          }
           className={cn(
             "my-1 h-5.5 min-w-0 shrink gap-1 rounded-md px-1.5 text-xs hover:bg-accent hover:text-foreground",
             "text-muted-foreground",
           )}
           title={
-            current
-              ? t("statusBar.modelTitle", { label: current.label })
+            currentExternal || current
+              ? t("statusBar.modelTitle", {
+                  label: currentExternal?.label ?? current?.label,
+                })
               : t("statusBar.noModels")
           }
         >
           <span className="truncate">
-            {current?.label ?? t("statusBar.noModels")}
+            {currentExternal?.label ??
+              current?.label ??
+              t("statusBar.noModels")}
           </span>
           <HugeiconsIcon
             icon={ArrowDown01Icon}
@@ -508,7 +544,44 @@ function ModelDropdown() {
                 providerId={effectiveActiveProvider as ProviderId}
               />
             ) : null}
-            {filtered.length === 0 ? (
+            {availableExternalAgents.length > 0 ? (
+              <>
+                <div className="px-3 pt-1 pb-1.5 text-[11px] font-medium text-muted-foreground">
+                  {t("statusBar.externalAgents")}
+                </div>
+                {availableExternalAgents.map((agent) => (
+                  <DropdownMenuItem
+                    key={agent.id}
+                    className="mx-1 flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5"
+                    onSelect={() => {
+                      if (persistedExternal?.agentId === agent.id) return;
+                      if (
+                        activeSessionId &&
+                        activeSessionId !== draftSessionId
+                      ) {
+                        newSession();
+                      }
+                      setDraftExternalAgent(agent.id);
+                    }}
+                  >
+                    <AgentIcon agent={agent.id} size={15} />
+                    <span className="min-w-0 flex-1 truncate text-xs">
+                      {agent.label}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {t("statusBar.local")}
+                    </span>
+                    {currentExternalId === agent.id ? (
+                      <HugeiconsIcon icon={Tick01Icon} size={13} />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
+                {filtered.length > 0 ? (
+                  <div className="mx-2 my-1 h-px bg-border/50" />
+                ) : null}
+              </>
+            ) : null}
+            {filtered.length === 0 && availableExternalAgents.length === 0 ? (
               <div className="flex items-center justify-center px-4 py-10 text-xs text-muted-foreground">
                 {tab === "favorites"
                   ? t("statusBar.noFavorites")
@@ -522,13 +595,17 @@ function ModelDropdown() {
                   key={modelRefKey(ref)}
                   model={info}
                   selected={
-                    currentRef !== null && modelRefsEqual(ref, currentRef)
+                    !currentExternal &&
+                    currentRef !== null &&
+                    modelRefsEqual(ref, currentRef)
                   }
                   favorite={favoriteModels.some((item) =>
                     modelRefsEqual(item, ref),
                   )}
                   showProviderIcon={effectiveActiveProvider === null}
                   onPick={() => {
+                    if (persistedExternal) newSession();
+                    setDraftExternalAgent(null);
                     setSelected(ref);
                   }}
                   onToggleFavorite={() => void toggleFavoriteModel(ref)}

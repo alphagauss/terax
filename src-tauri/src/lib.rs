@@ -7,9 +7,9 @@ pub mod menu;
 pub mod modules;
 
 use modules::{
-    agent, ai_sessions, app_data, auxiliary_window, fs, git, history, lsp, markdown_images, net,
-    open_with, pty, python, remote, secrets, shared_store, shell, transfers, workspace,
-    workspace_process, workspace_runtime,
+    agent, ai_sessions, app_data, auxiliary_window, external_agent, fs, git, history, lsp,
+    markdown_images, net, open_with, pty, python, remote, secrets, shared_store, shell, transfers,
+    workspace, workspace_process, workspace_runtime,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -280,6 +280,9 @@ pub fn run() {
             shell::shell_process,
             shell::shell_list,
             shell::shell_clear_owner,
+            external_agent::external_agent_list,
+            external_agent::external_agent_run,
+            external_agent::external_agent_cancel,
             workspace::wsl_list_distros,
             workspace::wsl_default_distro,
             workspace::wsl_home,

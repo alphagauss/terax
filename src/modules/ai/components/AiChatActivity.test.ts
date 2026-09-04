@@ -78,4 +78,56 @@ describe("AI chat activity grouping", () => {
       part: { type: "text" },
     });
   });
+
+  it("groups External Agent tools and stops each activity block before text", () => {
+    const parts: UIMessage["parts"] = [
+      {
+        type: "dynamic-tool",
+        toolName: "external_agent_start",
+        toolCallId: "external-1",
+        state: "output-available",
+        input: { agentId: "codex" },
+        output: null,
+      },
+      {
+        type: "dynamic-tool",
+        toolName: "external_agent_thinking",
+        toolCallId: "external-2",
+        state: "output-available",
+        input: { agentId: "codex" },
+        output: null,
+      },
+      { type: "text", text: "先检查。", state: "done" },
+      {
+        type: "tool-shell_exec",
+        toolCallId: "external-3",
+        state: "output-available",
+        input: { command: "Get-Location" },
+        output: null,
+      },
+      { type: "text", text: "完成。", state: "done" },
+    ];
+
+    const groups = buildMessageGroups(parts as never);
+    expect(groups.map((group) => group.kind)).toEqual([
+      "activity",
+      "single",
+      "activity",
+      "single",
+    ]);
+    expect(groups[0]).toMatchObject({
+      kind: "activity",
+      completed: true,
+      groups: [
+        { kind: "single", part: { toolCallId: "external-1" } },
+        { kind: "single", part: { toolCallId: "external-2" } },
+      ],
+      headlinePart: { toolCallId: "external-2" },
+    });
+    expect(groups[2]).toMatchObject({
+      kind: "activity",
+      completed: true,
+      groups: [{ kind: "single", part: { toolCallId: "external-3" } }],
+    });
+  });
 });

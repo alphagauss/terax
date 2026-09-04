@@ -6,6 +6,7 @@ pub mod agent;
 pub mod ai_sessions;
 pub mod app_data;
 pub mod auxiliary_window;
+pub mod external_agent;
 pub mod fs;
 pub mod git;
 pub mod history;
