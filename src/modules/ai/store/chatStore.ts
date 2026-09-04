@@ -26,6 +26,11 @@ import {
   providerFromBuiltinId,
   providerRequiresCredential,
 } from "../config";
+import type {
+  ExternalAgentAvailability,
+  ExternalAgentId,
+} from "../external-agents/runtime";
+import { parseExternalAgentBinding } from "../external-agents/runtime";
 import type { AgentUsage } from "../lib/agent";
 import { snapshotAgent } from "../lib/agents";
 import {
@@ -132,6 +137,12 @@ type StoreState = {
 
   selectedModel: ModelRef | null;
   setSelectedModel: (model: ModelRef | null, recordRecent?: boolean) => void;
+  externalAgentAvailability: ExternalAgentAvailability[] | null;
+  setExternalAgentAvailability: (
+    availability: ExternalAgentAvailability[],
+  ) => void;
+  draftExternalAgentId: ExternalAgentId | null;
+  setDraftExternalAgent: (agentId: ExternalAgentId | null) => void;
 
   permissionMode: AiPermissionMode;
   setPermissionMode: (mode: AiPermissionMode) => void;
@@ -190,6 +201,11 @@ type StoreState = {
     id: string,
     completedMessages: UIMessage[],
     event: SubagentResultEvent,
+  ) => Promise<void>;
+  persistExternalAgentSession: (
+    id: string,
+    agentId: ExternalAgentId,
+    externalSessionId: string,
   ) => Promise<void>;
   switchSession: (id: string) => void;
   deleteSession: (id: string) => void;
@@ -301,6 +317,14 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setSelectedModel: (model, recordRecent = true) => {
     set({ selectedModel: model });
     if (model && recordRecent) void pushRecentModel(model);
+  },
+  externalAgentAvailability: null,
+  setExternalAgentAvailability: (externalAgentAvailability) =>
+    set({ externalAgentAvailability }),
+  draftExternalAgentId: null,
+  setDraftExternalAgent: (draftExternalAgentId) => {
+    if (draftExternalAgentId) useAgentsStore.getState().resetDraftAgent();
+    set({ draftExternalAgentId });
   },
 
   permissionMode: "ask",
@@ -590,11 +614,24 @@ export const useChatStore = create<StoreState>((set, get) => ({
       agentName: agent.name,
       agentIcon: agent.icon,
     };
-    sessionMetadata.set(id, { title, agent });
+    const externalAgentId = get().draftExternalAgentId;
+    sessionMetadata.set(id, {
+      title,
+      agent,
+      ...(externalAgentId
+        ? {
+            externalAgent: {
+              agentId: externalAgentId,
+              sessionId: null,
+            },
+          }
+        : {}),
+    });
     useAgentsStore.getState().resetDraftAgent();
     set({
       sessions: [meta, ...get().sessions],
       draftSessionId: get().draftSessionId === id ? null : get().draftSessionId,
+      draftExternalAgentId: null,
     });
     if (get().activeSessionId === id) {
       void persistActiveSession(id);
@@ -692,6 +729,42 @@ export const useChatStore = create<StoreState>((set, get) => ({
       },
       messages,
     });
+    set({
+      sessions: get().sessions.map((session) =>
+        session.id === id ? committedMeta : session,
+      ),
+      sessionSyncError: null,
+    });
+  },
+
+  /** 在持有会话运行锁时持久化 CLI 返回的稳定外部会话 ID。 */
+  persistExternalAgentSession: async (id, agentId, externalSessionId) => {
+    const meta = get().sessions.find((session) => session.id === id);
+    if (!meta) throw new Error("AI session metadata is unavailable");
+    const current = sessionMetadata.get(id) ?? {};
+    const binding = parseExternalAgentBinding(current);
+    if (!binding || binding.agentId !== agentId) {
+      throw new Error("External Agent binding does not match the chat session");
+    }
+    if (binding.sessionId === externalSessionId) return;
+    if (binding.sessionId) {
+      throw new Error("External Agent session id cannot change");
+    }
+    const updatedAt = Date.now();
+    const metadata: SessionData = {
+      ...current,
+      externalAgent: { agentId, sessionId: externalSessionId },
+    };
+    const committedMeta = await commitSession({
+      id,
+      createdAt: meta.createdAt,
+      updatedAt,
+      environmentKey: currentWorkspaceBootstrap().environmentKey,
+      cwd: meta.cwd,
+      metadata,
+      messages: [],
+    });
+    sessionMetadata.set(id, metadata);
     set({
       sessions: get().sessions.map((session) =>
         session.id === id ? committedMeta : session,

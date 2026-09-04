@@ -4,18 +4,27 @@
  * 后台同步失败交由会话状态提示，避免未处理的 Promise 拒绝中断刷新周期。
  */
 
+import { useRemoteRuntimeStore } from "@/modules/remote";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { modelRefsEqual } from "../config";
+import {
+  listExternalAgents,
+  parseExternalAgentBinding,
+} from "../external-agents/runtime";
 import { getAllKeys, getAllProviderInstanceKeys } from "../lib/keyring";
 import {
   getAvailableModelRefs,
   selectAvailableModel,
 } from "../lib/modelAvailability";
 import { useAgentsStore } from "../store/agentsStore";
-import { flushCompletedSessionRuns, useChatStore } from "../store/chatStore";
+import {
+  flushCompletedSessionRuns,
+  sessionMetadata,
+  useChatStore,
+} from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 
 /**
@@ -37,6 +46,17 @@ export function useAiBootstrap(): {
   const refreshSessions = useChatStore((s) => s.refreshSessions);
   const sessionsHydrated = useChatStore((s) => s.sessionsHydrated);
   const sessionSyncError = useChatStore((s) => s.sessionSyncError);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const sessions = useChatStore((s) => s.sessions);
+  const remoteRuntimeVersion = useRemoteRuntimeStore(
+    (state) => state.snapshot.version,
+  );
+  const externalAgentAvailability = useChatStore(
+    (s) => s.externalAgentAvailability,
+  );
+  const setExternalAgentAvailability = useChatStore(
+    (s) => s.setExternalAgentAvailability,
+  );
 
   const providerModels = usePreferencesStore((s) => s.providerModels);
   const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
@@ -51,7 +71,14 @@ export function useAiBootstrap(): {
       }),
     [apiKeys, customProviders, providerBaseURLs, providerModels],
   );
-  const hasComposer = availableModels.length > 0;
+  const hasComposer =
+    availableModels.length > 0 ||
+    externalAgentAvailability?.some((agent) => agent.installed) === true ||
+    Boolean(
+      activeSessionId &&
+        sessions.some((session) => session.id === activeSessionId) &&
+        parseExternalAgentBinding(sessionMetadata.get(activeSessionId)),
+    );
 
   const prefsHydrated = usePreferencesStore((s) => s.hydrated);
   const [keysLoaded, setKeysLoaded] = useState(false);
@@ -120,6 +147,21 @@ export function useAiBootstrap(): {
     void useAgentsStore.getState().hydrate();
     void useSnippetsStore.getState().hydrate();
   }, [hydrateSessions]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: SSH Runtime 重连后必须在新 epoch 的远端环境重新探测 CLI。
+  useEffect(() => {
+    let alive = true;
+    void listExternalAgents()
+      .then((availability) => {
+        if (alive) setExternalAgentAvailability(availability);
+      })
+      .catch(() => {
+        if (alive) setExternalAgentAvailability([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [remoteRuntimeVersion, setExternalAgentAvailability]);
 
   useEffect(() => {
     if (!sessionsHydrated) return;

@@ -22,7 +22,7 @@ use crate::modules::remote;
 use crate::modules::workspace::validate_wsl_distro_name;
 use crate::modules::workspace::{authorize_spawn_cwd, WorkspaceEnv, WorkspaceRegistry};
 
-use process::AgentProcess;
+pub(crate) use process::{AgentProcess, ProcessPurpose};
 pub use process::{ProcessInfo, ProcessResponse, ProcessStatus, ShellKind};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -182,6 +182,7 @@ pub async fn shell_exec(
             effective_cwd,
             shell,
             login,
+            ProcessPurpose::Shell,
         )
         .await?
     } else {
@@ -193,6 +194,7 @@ pub async fn shell_exec(
             effective_cwd,
             shell,
             login,
+            ProcessPurpose::Shell,
         )?
     };
     state.processes.write().unwrap().insert(id, process.clone());
@@ -318,7 +320,9 @@ pub fn shell_list(
         .unwrap()
         .values()
         .filter(|process| {
-            process.workspace == workspace && process.owner_session_id == owner_session_id
+            process.purpose == ProcessPurpose::Shell
+                && process.workspace == workspace
+                && process.owner_session_id == owner_session_id
         })
         .filter(|process| include_exited || process.is_running())
         .map(|process| process.info())
@@ -361,6 +365,82 @@ pub async fn shell_clear_owner(
 }
 
 impl ShellState {
+    /// 在当前 Workspace 中启动由封闭适配器构造的 External Agent 命令。
+    pub(crate) async fn spawn_external_agent(
+        &self,
+        registry: &WorkspaceRegistry,
+        owner_session_id: String,
+        command: String,
+        cwd: String,
+        workspace: WorkspaceEnv,
+    ) -> Result<Arc<AgentProcess>, String> {
+        validate_owner(&owner_session_id)?;
+        validate_agent_command(&command)?;
+        validate_cwd(&cwd)?;
+        let authorized = authorize_spawn_cwd(registry, Some(&cwd), &workspace)?
+            .ok_or_else(|| "External Agent cwd is required".to_string())?;
+        let cwd = if workspace.is_ssh() || workspace.is_wsl() {
+            cwd.replace('\\', "/")
+        } else {
+            crate::modules::fs::to_canon(authorized)
+        };
+
+        let spawn_guard = self.spawn_lock.lock().await;
+        self.cleanup();
+        self.enforce_limits(&owner_session_id)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let login = !cfg!(windows) || !matches!(workspace, WorkspaceEnv::Local);
+        let process = if workspace.is_ssh() {
+            AgentProcess::spawn_remote(
+                id.clone(),
+                owner_session_id,
+                workspace,
+                command,
+                cwd,
+                ShellKind::Default,
+                login,
+                ProcessPurpose::ExternalAgent,
+            )
+            .await?
+        } else {
+            AgentProcess::spawn_local(
+                id.clone(),
+                owner_session_id,
+                workspace,
+                command,
+                cwd,
+                ShellKind::Default,
+                login,
+                ProcessPurpose::ExternalAgent,
+            )?
+        };
+        self.processes.write().unwrap().insert(id, process.clone());
+        drop(spawn_guard);
+        Ok(process)
+    }
+
+    /// 只返回由 External Agent Runtime 创建且归当前聊天所有的进程。
+    pub(crate) fn owned_external_agent(
+        &self,
+        process_id: &str,
+        owner_session_id: &str,
+        workspace: &WorkspaceEnv,
+    ) -> Result<Arc<AgentProcess>, String> {
+        validate_owner(owner_session_id)?;
+        validate_process_id(process_id)?;
+        self.processes
+            .read()
+            .unwrap()
+            .get(process_id)
+            .filter(|process| {
+                process.purpose == ProcessPurpose::ExternalAgent
+                    && process.owner_session_id == owner_session_id
+                    && process.workspace == *workspace
+            })
+            .cloned()
+            .ok_or_else(|| "External Agent process not found".to_string())
+    }
+
     fn owned_process(
         &self,
         process_id: &str,
@@ -372,7 +452,9 @@ impl ShellState {
             .unwrap()
             .get(process_id)
             .filter(|process| {
-                process.owner_session_id == owner_session_id && process.workspace == *workspace
+                process.purpose == ProcessPurpose::Shell
+                    && process.owner_session_id == owner_session_id
+                    && process.workspace == *workspace
             })
             .cloned()
             .ok_or_else(|| "Agent process not found".to_string())
@@ -807,6 +889,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             ShellKind::Default,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
         let state = ShellState::default();
@@ -837,6 +920,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             ShellKind::Default,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
         let state = ShellState::default();
@@ -856,6 +940,40 @@ mod tests {
                 &WorkspaceEnv::Local,
             )
             .is_err());
+    }
+
+    #[test]
+    fn process_lookup_is_scoped_to_its_purpose() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = uuid::Uuid::new_v4().to_string();
+        #[cfg(windows)]
+        let command = "Start-Sleep -Seconds 30";
+        #[cfg(unix)]
+        let command = "sleep 30";
+        let process = AgentProcess::spawn_local(
+            uuid::Uuid::new_v4().to_string(),
+            owner.clone(),
+            WorkspaceEnv::Local,
+            command.into(),
+            directory.path().to_string_lossy().into_owned(),
+            ShellKind::Default,
+            false,
+            ProcessPurpose::ExternalAgent,
+        )
+        .unwrap();
+        let state = ShellState::default();
+        state
+            .processes
+            .write()
+            .unwrap()
+            .insert(process.id.clone(), process.clone());
+
+        assert!(state
+            .owned_process(&process.id, &owner, &WorkspaceEnv::Local)
+            .is_err());
+        assert!(state
+            .owned_external_agent(&process.id, &owner, &WorkspaceEnv::Local)
+            .is_ok());
     }
 
     #[cfg(unix)]

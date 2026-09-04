@@ -135,6 +135,8 @@
     "noRecent": "No recently-used models.",
     "noMatch": "No models match.",
     "noModels": "No model configured",
+    "externalAgents": "Local CLI agents",
+    "local": "Local",
     "configureCta": "Configure {{label}} to use these models.",
     "open": "Open",
     "unfavorite": "Unfavorite",
@@ -155,6 +157,13 @@
       "thinking": "Thinking",
       "completed": "Processed",
       "completedWithDuration": "Processed for {{duration}}s"
+    },
+    "externalAgent": {
+      "starting": "Starting {{agent}}",
+      "fileChange": "Editing files",
+      "thinking": "Thinking",
+      "webSearch": "Searching the web",
+      "tool": "Using {{tool}}"
     },
     "continuePrompt": "Continue from where you stopped. Don't recap - just keep going.",
     "somethingWentWrong": "Something went wrong.",

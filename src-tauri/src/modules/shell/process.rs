@@ -44,6 +44,12 @@ pub enum ProcessStatus {
     Terminated,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProcessPurpose {
+    Shell,
+    ExternalAgent,
+}
+
 struct RuntimeState {
     status: ProcessStatus,
     exit_code: Option<i32>,
@@ -139,6 +145,7 @@ pub struct AgentProcess {
     pub cwd: String,
     pub shell: ShellKind,
     pub started_at_ms: u64,
+    pub(crate) purpose: ProcessPurpose,
     started: Instant,
     last_access: Mutex<Instant>,
     last_read_offset: AtomicU64,
@@ -191,6 +198,7 @@ impl AgentProcess {
         cwd: String,
         shell: ShellKind,
         login: bool,
+        purpose: ProcessPurpose,
     ) -> Result<Arc<Self>, String> {
         let marker = format!("__TERAX_AGENT_CWD_{id}__");
         let (mut native, wsl_termination) =
@@ -247,6 +255,7 @@ impl AgentProcess {
             cwd,
             shell,
             started_at_ms: now_ms(),
+            purpose,
             started: Instant::now(),
             last_access: Mutex::new(Instant::now()),
             last_read_offset: AtomicU64::new(0),
@@ -286,6 +295,7 @@ impl AgentProcess {
         cwd: String,
         shell: ShellKind,
         login: bool,
+        purpose: ProcessPurpose,
     ) -> Result<Arc<Self>, String> {
         let WorkspaceEnv::Ssh { profile_id } = &workspace_env else {
             return Err("remote process requires an SSH workspace".into());
@@ -323,6 +333,7 @@ impl AgentProcess {
             cwd,
             shell,
             started_at_ms: now_ms(),
+            purpose,
             started: Instant::now(),
             last_access: Mutex::new(Instant::now()),
             last_read_offset: AtomicU64::new(0),
@@ -415,14 +426,19 @@ impl AgentProcess {
         }
         match &self.control {
             ProcessControl::Local(control) => {
-                let mut stdin = control.stdin.lock().unwrap();
-                let stdin = stdin
-                    .as_mut()
-                    .ok_or_else(|| "Agent process stdin is closed".to_string())?;
-                stdin
-                    .write_all(input.as_bytes())
-                    .and_then(|_| stdin.flush())
-                    .map_err(|error| format!("write Agent process stdin: {error}"))
+                let control = control.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    let mut stdin = control.stdin.lock().unwrap();
+                    let stdin = stdin
+                        .as_mut()
+                        .ok_or_else(|| "Agent process stdin is closed".to_string())?;
+                    stdin
+                        .write_all(input.as_bytes())
+                        .and_then(|_| stdin.flush())
+                        .map_err(|error| format!("write Agent process stdin: {error}"))
+                })
+                .await
+                .map_err(|error| error.to_string())?
             }
             ProcessControl::Remote(control) => {
                 let (reply, result) = oneshot::channel();
@@ -530,6 +546,24 @@ impl AgentProcess {
         let mut response = self.response(since, max_bytes);
         response.wait_for_matched = matched;
         response
+    }
+
+    /// 等待输出 offset 前移或进程进入终态，用于把受管进程桥接为推送事件。
+    pub fn wait_for_change(&self, since: u64, wait: Duration, max_bytes: usize) -> ProcessResponse {
+        self.touch();
+        let deadline = Instant::now() + wait;
+        let mut guard = self.shared.state.lock().unwrap();
+        loop {
+            let has_output = self.shared.output.lock().unwrap().next_offset() > since;
+            if has_output || guard.status != ProcessStatus::Running || Instant::now() >= deadline {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let (next, _) = self.shared.changed.wait_timeout(guard, remaining).unwrap();
+            guard = next;
+        }
+        drop(guard);
+        self.response(since, max_bytes)
     }
 
     pub fn response(&self, since: u64, max_bytes: usize) -> ProcessResponse {
@@ -1138,6 +1172,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             ShellKind::Default,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
 
@@ -1166,6 +1201,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             ShellKind::Default,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
 
@@ -1191,6 +1227,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             ShellKind::Default,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
 
@@ -1231,6 +1268,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             shell,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
 
@@ -1285,6 +1323,7 @@ mod tests {
             directory.path().to_string_lossy().into_owned(),
             shell,
             false,
+            ProcessPurpose::Shell,
         )
         .unwrap();
 

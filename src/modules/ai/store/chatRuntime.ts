@@ -12,6 +12,7 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
 import { modelRequiresCredential } from "../config";
+import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { parseSessionAgent } from "../lib/agents";
 import { resolveAgentExecutionEnvironment } from "../lib/prompt";
 import { resolveSessionCwd } from "../lib/sessions";
@@ -73,6 +74,16 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getCwd: getSessionCwd,
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),
+    getExternalAgent: () => {
+      const state = useChatStore.getState();
+      return (
+        parseExternalAgentBinding(sessionMetadata.get(sessionId)) ??
+        (state.draftSessionId === sessionId && state.draftExternalAgentId
+          ? { agentId: state.draftExternalAgentId, sessionId: null }
+          : null)
+      );
+    },
+    getPermissionMode: () => useChatStore.getState().permissionMode,
     getProviderBaseURLs: () => usePreferencesStore.getState().providerBaseURLs,
     getProviderModels: () => usePreferencesStore.getState().providerModels,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
@@ -99,6 +110,10 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         .persistSubmittedTurn(sessionId, messages, systemPrompt),
     onCheckpoint: (messages, event) =>
       useChatStore.getState().persistTurnCheckpoint(sessionId, messages, event),
+    onExternalSession: (agentId, externalSessionId) =>
+      useChatStore
+        .getState()
+        .persistExternalAgentSession(sessionId, agentId, externalSessionId),
     onUsage: (delta) => {
       const state = useChatStore.getState();
       const cur = getAgentMetaForSession(state, sessionId).tokens;
@@ -175,9 +190,17 @@ async function startChatMessage(
     state.live.draftCwd,
   );
   if (!cwd?.trim()) return false;
-  if (!state.selectedModel) return false;
+  const externalAgent =
+    parseExternalAgentBinding(sessionMetadata.get(sessionId)) ??
+    (state.draftSessionId === sessionId && state.draftExternalAgentId
+      ? { agentId: state.draftExternalAgentId, sessionId: null }
+      : null);
+  if (!externalAgent && !state.selectedModel) return false;
+  const selectedModel = state.selectedModel;
   if (
-    modelRequiresCredential(state.selectedModel, {
+    !externalAgent &&
+    selectedModel &&
+    modelRequiresCredential(selectedModel, {
       customProviders: usePreferencesStore.getState().customProviders,
     }) &&
     !getActiveProviderKey()

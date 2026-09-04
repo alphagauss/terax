@@ -111,6 +111,7 @@ fn validate_session_file(session: &SessionFile) -> Result<Uuid, String> {
         return Err("session cwd must not be empty".to_string());
     }
     validate_agent_metadata(&session.metadata)?;
+    validate_external_agent_metadata(&session.metadata)?;
     for (index, message) in session.messages.iter().enumerate() {
         if !message.is_object() {
             return Err(format!("message line {} must be a JSON object", index + 2));
@@ -135,7 +136,41 @@ fn validate_header(header: &SessionFileHeader, expected_id: Uuid) -> Result<(), 
         return Err("session cwd must not be empty".to_string());
     }
     validate_timestamps(&header.created_at, &header.updated_at)?;
-    validate_agent_metadata(&header.metadata)
+    validate_agent_metadata(&header.metadata)?;
+    validate_external_agent_metadata(&header.metadata)
+}
+
+/// 校验可选 External Agent 绑定，避免损坏或超长 session ID 进入启动参数。
+fn validate_external_agent_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
+    let Some(value) = metadata.get("externalAgent") else {
+        return Ok(());
+    };
+    let binding = value
+        .as_object()
+        .ok_or_else(|| "session externalAgent must be an object".to_string())?;
+    let agent_id = binding
+        .get("agentId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "session externalAgent agentId must be a string".to_string())?;
+    if !matches!(agent_id, "claude" | "codex") {
+        return Err("session externalAgent agentId is unknown".into());
+    }
+    if let Some(session_id) = binding.get("sessionId") {
+        if !session_id.is_null()
+            && session_id.as_str().is_none_or(|value| {
+                value.is_empty()
+                    || value.len() > 512
+                    || !value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+            })
+        {
+            return Err("session externalAgent sessionId is invalid".into());
+        }
+    } else {
+        return Err("session externalAgent sessionId is required".into());
+    }
+    Ok(())
 }
 
 /// 校验可选 Agent 快照，缺失字段仅用于兼容归入主 Agent 的旧会话。
@@ -286,6 +321,25 @@ fn commit_session(
         }
         if existing.metadata.get("agent") != update.metadata.get("agent") {
             return Err("session agent snapshot must not change".to_string());
+        }
+        match (
+            existing.metadata.get("externalAgent"),
+            update.metadata.get("externalAgent"),
+        ) {
+            (None, None) => {}
+            (Some(before), Some(after)) => {
+                let before = before.as_object().unwrap();
+                let after = after.as_object().unwrap();
+                if before.get("agentId") != after.get("agentId") {
+                    return Err("session External Agent must not change".into());
+                }
+                let previous_session = before.get("sessionId").and_then(Value::as_str);
+                let next_session = after.get("sessionId").and_then(Value::as_str);
+                if previous_session.is_some() && previous_session != next_session {
+                    return Err("session External Agent session id must not change".into());
+                }
+            }
+            _ => return Err("session External Agent binding must not change".into()),
         }
         existing.messages
     } else {
@@ -947,6 +1001,29 @@ mod tests {
         assert_eq!(
             stored.metadata["agent"]["instructions"],
             "Review carefully."
+        );
+    }
+
+    #[test]
+    fn external_agent_binding_only_accepts_the_first_session_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let mut initial = session(id, "external");
+        initial.metadata.insert(
+            "externalAgent".into(),
+            json!({ "agentId": "claude", "sessionId": null }),
+        );
+        commit_session(dir.path(), &initial, "local").unwrap();
+
+        let mut captured = initial.clone();
+        captured.metadata["externalAgent"]["sessionId"] = json!("session-1");
+        commit_session(dir.path(), &captured, "local").unwrap();
+
+        let mut changed = captured;
+        changed.metadata["externalAgent"]["sessionId"] = json!("session-2");
+        assert_eq!(
+            commit_session(dir.path(), &changed, "local").unwrap_err(),
+            "session External Agent session id must not change"
         );
     }
 

@@ -43,6 +43,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelContextWindow, tryResolveModel } from "../config";
+import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
 import {
   estimateUiMessageTokens,
@@ -52,7 +53,11 @@ import { formatMessageTimestamp } from "../lib/messageTimestamp";
 import type { SessionMeta } from "../lib/sessions";
 import { useAgentsStore } from "../store/agentsStore";
 import { getOrCreateChat } from "../store/chatRuntime";
-import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
+import {
+  getAgentMetaForSession,
+  sessionMetadata,
+  useChatStore,
+} from "../store/chatStore";
 import {
   type SessionAttention,
   useSessionAttentionStore,
@@ -140,13 +145,15 @@ function Body({
   });
   const isBusy =
     helpers.status === "submitted" || helpers.status === "streaming";
+  const showHeaderRunStatus =
+    isBusy && !parseExternalAgentBinding(sessionMetadata.get(sessionId));
 
   return (
     <>
       <Header
         sessionId={sessionId}
         step={step}
-        isBusy={isBusy}
+        isBusy={showHeaderRunStatus}
         messages={helpers.messages}
       />
 
@@ -261,6 +268,8 @@ function ContextIndicator({
 }) {
   const { t } = useTranslation("ai");
   const model = useChatStore((s) => s.selectedModel);
+  const draftSessionId = useChatStore((s) => s.draftSessionId);
+  const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
   const customProviders = usePreferencesStore((s) => s.customProviders);
   const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const providerModels = usePreferencesStore((s) => s.providerModels);
@@ -294,6 +303,14 @@ function ContextIndicator({
     tokens.inputTokens > 0
       ? Math.round((tokens.cachedInputTokens / tokens.inputTokens) * 100)
       : 0;
+  const externalAgent =
+    parseExternalAgentBinding(
+      sessionId ? sessionMetadata.get(sessionId) : undefined,
+    ) ??
+    (sessionId === draftSessionId && draftExternalAgentId
+      ? { agentId: draftExternalAgentId, sessionId: null }
+      : null);
+  if (externalAgent) return null;
 
   return (
     <Context usedTokens={used} maxTokens={contextWindow}>
