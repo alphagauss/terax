@@ -1,13 +1,28 @@
 /**
- * 本文件测试聊天消息中的活动分组边界。
- * 测试锁定正文和 Subagent 作为活动边界，其余可展示内容持续归入同一活动块。
+ * 本文件测试聊天消息中的活动分组和工具结果展示。
+ * 锁定正文与 Subagent 分组边界，并确保结构化业务错误不会显示为成功结果。
  */
 
 import type { UIMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { buildMessageGroups } from "./AiChat";
+import { buildMessageGroups, resolveToolDisplay } from "./AiChat";
 
 describe("AI chat activity grouping", () => {
+  it("shows structured tool failures as errors", () => {
+    expect(
+      resolveToolDisplay({
+        type: "tool-find_files",
+        toolCallId: "find-1",
+        state: "output-available",
+        input: { path: "/workspace" },
+        output: { error: "workspace unavailable" },
+      }),
+    ).toEqual({
+      state: "output-error",
+      errorText: "workspace unavailable",
+    });
+  });
+
   it("uses text and Subagent as the only visible activity boundaries", () => {
     const parts: UIMessage["parts"] = [
       { type: "reasoning", text: "先读取终端。", state: "done" },

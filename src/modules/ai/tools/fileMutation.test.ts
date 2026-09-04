@@ -35,12 +35,14 @@ describe("file mutation bridge", () => {
       toolName: "write_file",
       input: { path: "a.txt", content: "after", mode: "rewrite" },
       cwd: "/workspace",
+      permissionMode: "ask",
     });
 
     expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith({
       ownerSessionId: "session",
       toolCallId: "call",
       root: "/workspace",
+      permissionMode: "ask",
       mutation: {
         kind: "write",
         path: "a.txt",
@@ -70,6 +72,7 @@ describe("file mutation bridge", () => {
         ],
       },
       cwd: "/workspace",
+      permissionMode: "full-access",
     });
 
     expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith(

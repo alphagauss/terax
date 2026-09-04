@@ -15,6 +15,7 @@ type PrepareInput = {
   toolName: "write_file" | "apply_patch";
   input: Record<string, unknown>;
   cwd: string;
+  permissionMode: "ask" | "full-access";
 };
 
 /** 将模型工具输入转换为封闭的 Rust 修改请求并准备审批快照。 */
@@ -24,11 +25,13 @@ export function prepareFileMutation({
   toolName,
   input,
   cwd,
+  permissionMode,
 }: PrepareInput): Promise<PreparedFileMutation> {
   return native.agentPrepareMutation({
     ownerSessionId: sessionId,
     toolCallId,
     root: cwd,
+    permissionMode,
     mutation: mutationInput(toolName, input),
   });
 }

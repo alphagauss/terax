@@ -81,6 +81,7 @@ describe("AI file tools", () => {
     expect(nativeMock.agentFileRead).toHaveBeenCalledWith({
       ownerSessionId: context.getSessionId(),
       root: "/workspace",
+      permissionMode: "ask",
       path: "a.txt",
       startLine: 10,
       lineCount: 20,
@@ -104,6 +105,7 @@ describe("AI file tools", () => {
     await tool.execute({ path: "a.txt", content: "text" }, options);
     expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith(
       expect.objectContaining({
+        permissionMode: "full-access",
         mutation: {
           kind: "write",
           path: "a.txt",
@@ -157,6 +159,7 @@ describe("AI file tools", () => {
     expect(nativeMock.agentFileOperation).toHaveBeenCalledWith({
       ownerSessionId: context.getSessionId(),
       root: "/workspace",
+      permissionMode: "ask",
       operation: "move",
       path: "old.txt",
       destination: "nested/new.txt",

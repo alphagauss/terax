@@ -1,6 +1,6 @@
 /**
  * 本文件定义 AI 的路径发现与正文搜索工具。
- * Rust Agent 文件后端统一 Local、WSL、SSH 的 ignore、安全过滤、聚合和分页语义。
+ * Rust Agent 文件后端统一 Local、WSL、SSH 的权限、安全过滤、聚合和分页语义。
  */
 
 import { tool } from "ai";
@@ -28,6 +28,7 @@ export function buildSearchTools(ctx: ToolContext) {
           return await native.agentFileFind({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
             path: input.path,
             glob: input.glob,
             recursive: input.recursive,
@@ -61,6 +62,7 @@ export function buildSearchTools(ctx: ToolContext) {
           return await native.agentFileGrep({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
+            permissionMode: ctx.getPermissionMode(),
             path: input.path,
             pattern: input.pattern,
             syntax: input.syntax,

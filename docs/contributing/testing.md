@@ -68,9 +68,9 @@ ConPTY/Job Object 测试应放在 `#[cfg(windows)]` 后，Unix PTY 生命周期�
 修改 `src-tauri/src/modules/fs/agent.rs` 时，应覆盖：
 
 1. owner 不能切换 Workspace 环境或已绑定的根目录，进程内 owner scope 总数必须有界。
-2. 根目录必须是已经登记的 Workspace 根，目标 canonical path 不能越界。
-3. 不存在的目标向上解析最近存在祖先，已有符号链接不能绕过根目录或敏感路径。
-4. Windows Local 的 NTFS alternate data stream、DOS 设备名、末尾点号或空格、大小写变体和密钥文件名都被规范化拒绝；项目内普通 `etc`、`proc`、`sys` 目录不能误判为系统根。
+2. 请求批准模式要求根目录是已登记的 Workspace 根且目标 canonical path 不能越界；完全访问模式允许根外目标。
+3. 不存在的目标向上解析最近存在祖先；请求批准模式下已有符号链接不能绕过根目录或敏感路径，完全访问模式仍使用解析后的稳定物理路径。
+4. Windows Local 的 NTFS alternate data stream、DOS 设备名和末尾点号或空格始终被规范化拒绝；请求批准模式还拒绝密钥文件名及其大小写变体，项目内普通 `etc`、`proc`、`sys` 目录不能误判为系统根。
 5. `read_file` 去重同时匹配内容版本和读取范围，UTF-8 输出截断保持字符边界。
 6. rewrite 与 patch 要求当前 owner 已读取相同版本；CRLF 文件的跨行精确补丁保留原换行；create、审批后变化和目标占用必须拒绝覆盖。
 7. 多文件修改先校验全部基线，单文件原子发布；中途失败测试必须验证回滚和准确错误。

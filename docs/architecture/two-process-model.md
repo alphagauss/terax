@@ -79,7 +79,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 - `fs_content_search` - 用户搜索面板与 AI `grep` 共用的内容搜索，支持普通文本、正则、大小写、整词、包含和排除 glob；搜索面板请求可以取消上一轮扫描
 - `fs_glob` - glob 匹配
 
-内容搜索按需扫描并遵守 ignore 文件，不建立持久索引、文件 watcher 或搜索历史。Local 与 WSL 使用内嵌 Rust grep 实现；SSH 优先使用远端 `rg`，缺少 `rg` 的字面量搜索使用 GNU `find + grep` 服务端兼容路径，仍不可用时通过共享 tree service 回退有界 SFTP 扫描。GNU grep 只负责返回候选行，路径过滤和最终匹配区间仍由 Rust matcher 收敛。文件列表与 glob 共享同一 `rg --files` 主路径，缺失时依次使用 GNU find 树任务和 SFTP；Explorer 模糊搜索复用同一树服务。交互式新请求会取消并关闭旧远端 task channel。AI `grep` 复用匹配引擎，但通过 Agent 文件后端独立执行 Workspace 授权、敏感路径过滤、聚合和分页。
+内容搜索按需扫描并遵守 ignore 文件，不建立持久索引、文件 watcher 或搜索历史。Local 与 WSL 使用内嵌 Rust grep 实现；SSH 优先使用远端 `rg`，缺少 `rg` 的字面量搜索使用 GNU `find + grep` 服务端兼容路径，仍不可用时通过共享 tree service 回退有界 SFTP 扫描。GNU grep 只负责返回候选行，路径过滤和最终匹配区间仍由 Rust matcher 收敛。文件列表与 glob 共享同一 `rg --files` 主路径，缺失时依次使用 GNU find 树任务和 SFTP；Explorer 模糊搜索复用同一树服务。交互式新请求会取消并关闭旧远端 task channel。AI `grep` 复用匹配引擎，但通过 Agent 文件后端独立执行权限模式、聚合和分页；Workspace 根与敏感路径过滤只在请求批准模式启用。
 
 #### Agent 文件服务
 

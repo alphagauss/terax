@@ -157,6 +157,8 @@ export type AgentFileOperationResponse = {
   ok: boolean;
 };
 
+export type AgentPermissionMode = "ask" | "full-access";
+
 export type GitRepoInfo = {
   repoRoot: string;
   branch: string;
@@ -277,6 +279,7 @@ export const native = {
   agentFileRead: (params: {
     ownerSessionId: string;
     root: string;
+    permissionMode: AgentPermissionMode;
     path: string;
     startLine?: number;
     lineCount?: number;
@@ -288,6 +291,7 @@ export const native = {
   agentFileFind: (params: {
     ownerSessionId: string;
     root: string;
+    permissionMode: AgentPermissionMode;
     path?: string;
     glob?: string;
     recursive?: boolean;
@@ -302,6 +306,7 @@ export const native = {
   agentFileGrep: (params: {
     ownerSessionId: string;
     root: string;
+    permissionMode: AgentPermissionMode;
     path?: string;
     pattern: string;
     syntax?: "literal" | "regex";
@@ -319,6 +324,7 @@ export const native = {
     ownerSessionId: string;
     toolCallId: string;
     root: string;
+    permissionMode: AgentPermissionMode;
     mutation: AgentMutationInput;
   }) =>
     invoke<AgentMutationPreview>("agent_file_prepare_mutation", {
@@ -335,6 +341,7 @@ export const native = {
   agentFileOperation: (params: {
     ownerSessionId: string;
     root: string;
+    permissionMode: AgentPermissionMode;
     operation: "move" | "copy" | "delete" | "create_directory";
     path: string;
     destination?: string;

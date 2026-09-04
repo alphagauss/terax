@@ -57,6 +57,7 @@ describe("AI search tools", () => {
     expect(nativeMock.agentFileFind).toHaveBeenCalledWith({
       ownerSessionId: "session",
       root: "/workspace",
+      permissionMode: "ask",
       path: "src",
       glob: "**/*.ts",
       recursive: true,
@@ -88,6 +89,7 @@ describe("AI search tools", () => {
     expect(nativeMock.agentFileGrep).toHaveBeenCalledWith({
       ownerSessionId: "session",
       root: "/workspace",
+      permissionMode: "ask",
       path: "src",
       pattern: "literal text",
       syntax: "literal",

@@ -1421,6 +1421,28 @@ const LiveSubagentCard = memo(function LiveSubagentCard({
   );
 });
 
+/** 将工具返回的结构化业务错误投影为统一失败状态。 */
+export function resolveToolDisplay(part: AnyToolPart): {
+  state: AnyToolPart["state"];
+  errorText: string | undefined;
+} {
+  const output = "output" in part ? part.output : undefined;
+  const structuredError =
+    output && typeof output === "object"
+      ? (output as Record<string, unknown>).error
+      : undefined;
+  const errorText =
+    "errorText" in part && typeof part.errorText === "string"
+      ? part.errorText
+      : typeof structuredError === "string" && structuredError.length > 0
+        ? structuredError
+        : undefined;
+  return {
+    state: errorText ? "output-error" : part.state,
+    errorText,
+  };
+}
+
 const RenderedTool = memo(function RenderedTool({
   part,
 }: {
@@ -1431,15 +1453,16 @@ const RenderedTool = memo(function RenderedTool({
       ? part.toolName
       : part.type.replace(/^tool-/, "");
   const externalLabel = externalAgentActivityLabel(toolName, part.input);
+  const display = resolveToolDisplay(part);
 
   return (
     <Tool
       className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
       toolName={externalLabel ?? toolName}
-      state={part.state}
+      state={display.state}
       input={externalLabel ? undefined : part.input}
       output={"output" in part ? part.output : undefined}
-      errorText={"errorText" in part ? part.errorText : undefined}
+      errorText={display.errorText}
     />
   );
 });

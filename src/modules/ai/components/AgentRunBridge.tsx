@@ -90,6 +90,7 @@ function SessionRunBridge({ sessionId }: { sessionId: string }) {
         toolName: approval.toolName,
         input: approval.input,
         cwd,
+        permissionMode: "ask",
       })
         .then((preview) => {
           if (!cancelled) {
