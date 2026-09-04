@@ -54,6 +54,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     },
     getSessionId: () => sessionId,
     getPermissionMode: () => useChatStore.getState().permissionMode,
+    supportsApprovals: true,
   };
 
   const transport = createSessionTransport({

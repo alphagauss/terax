@@ -33,6 +33,7 @@ const context: ToolContext = {
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
   getPermissionMode: () => useChatStore.getState().permissionMode,
+  supportsApprovals: true,
 };
 
 describe("AI file tools", () => {
@@ -89,13 +90,16 @@ describe("AI file tools", () => {
     });
   });
 
-  it("uses create mode by default and dynamically follows permission mode", async () => {
+  it("runs workspace writes automatically and approves outside writes", async () => {
     const tool = buildFsTools(context).write_file;
     if (typeof tool.needsApproval !== "function" || !tool.execute) {
       throw new Error("write_file must support dynamic approval and execution");
     }
     expect(
       tool.needsApproval({ path: "a.txt", content: "text" }, options),
+    ).toBe(false);
+    expect(
+      tool.needsApproval({ path: "../outside.txt", content: "text" }, options),
     ).toBe(true);
     useChatStore.setState({ permissionMode: "full-access" });
     expect(
@@ -118,6 +122,53 @@ describe("AI file tools", () => {
       context.getSessionId(),
       options.toolCallId,
     );
+  });
+
+  it("uses one-call full access after approving an outside read", async () => {
+    const tool = buildFsTools(context).read_file;
+    if (typeof tool.needsApproval !== "function" || !tool.execute) {
+      throw new Error("read_file must support selective approval");
+    }
+    expect(tool.needsApproval({ path: "../secret.txt" }, options)).toBe(true);
+
+    await tool.execute({ path: "../secret.txt" }, options);
+
+    expect(nativeMock.agentFileRead).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "full-access" }),
+    );
+  });
+
+  it("returns restricted backend errors when a runner has no approval UI", async () => {
+    const tool = buildFsTools({
+      ...context,
+      supportsApprovals: false,
+    }).read_file;
+    if (typeof tool.needsApproval !== "function" || !tool.execute) {
+      throw new Error("read_file must support non-interactive runners");
+    }
+    expect(tool.needsApproval({ path: "../secret.txt" }, options)).toBe(false);
+
+    await tool.execute({ path: "../secret.txt" }, options);
+
+    expect(nativeMock.agentFileRead).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "ask" }),
+    );
+  });
+
+  it("requires approval before moving or deleting the session root", () => {
+    const tool = buildFsTools(context).file_operation;
+    if (typeof tool.needsApproval !== "function") {
+      throw new Error("file_operation approval gate must be dynamic");
+    }
+    expect(
+      tool.needsApproval(
+        { operation: "move", path: ".", destination: "archive" },
+        options,
+      ),
+    ).toBe(true);
+    expect(
+      tool.needsApproval({ operation: "delete", path: "." }, options),
+    ).toBe(true);
   });
 
   it("sends multi-file exact replacements as one prepared patch", async () => {

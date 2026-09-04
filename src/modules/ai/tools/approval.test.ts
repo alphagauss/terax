@@ -1,6 +1,6 @@
 /**
- * 本文件验证 AI Shell 工具的输入约束、动态审批与执行期安全边界。
- * 测试锁定进程写入参数，并确保完全访问只省略批准而不削弱拒绝规则。
+ * 本文件验证 AI Shell 工具的输入约束、选择性审批与执行期权限传递。
+ * 测试锁定工作区命令自动执行，越界和网络命令审批，以及聊天级进程隔离。
  */
 
 import { asSchema, type ToolExecutionOptions } from "ai";
@@ -28,6 +28,7 @@ const context: ToolContext = {
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
   getPermissionMode: () => useChatStore.getState().permissionMode,
+  supportsApprovals: true,
 };
 
 describe("AI tool approval mode", () => {
@@ -38,28 +39,47 @@ describe("AI tool approval mode", () => {
     useChatStore.setState({ permissionMode: "ask" });
   });
 
-  it("requires approval by default and updates without rebuilding tools", () => {
+  it("auto-runs workspace commands and approves external access", () => {
     const tools = buildShellTools(context);
     const needsApproval = tools.shell_exec.needsApproval;
     if (typeof needsApproval !== "function") {
       throw new Error("shell_exec approval gate must be dynamic");
     }
 
-    expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(true);
+    expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(false);
+    expect(
+      needsApproval({ command: "curl https://example.com" }, toolOptions),
+    ).toBe(true);
     useChatStore.setState({ permissionMode: "full-access" });
     expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(false);
+    expect(
+      needsApproval({ command: "curl https://example.com" }, toolOptions),
+    ).toBe(false);
   });
 
-  it("still rejects destructive shell commands in full access", async () => {
+  it("elevates only a shell call classified for approval", async () => {
+    nativeMock.shellExec.mockResolvedValue({ status: "exited", stdout: "" });
+    const execute = buildShellTools(context).shell_exec.execute;
+    if (!execute) throw new Error("shell_exec execute missing");
+
+    await execute({ command: "curl https://example.com" }, toolOptions);
+
+    expect(nativeMock.shellExec).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "full-access" }),
+    );
+  });
+
+  it("passes full access to the native Shell boundary", async () => {
     useChatStore.setState({ permissionMode: "full-access" });
+    nativeMock.shellExec.mockResolvedValue({ status: "exited", stdout: "" });
     const tools = buildShellTools(context);
     const execute = tools.shell_exec.execute;
     if (!execute) throw new Error("shell_exec execute missing");
 
-    const result = await execute({ command: "rm -rf /" }, toolOptions);
-    expect(result).toMatchObject({
-      error: expect.stringContaining("filesystem root"),
-    });
+    await execute({ command: "echo safe" }, toolOptions);
+    expect(nativeMock.shellExec).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "full-access" }),
+    );
   });
 
   it("resolves a process cwd against the fixed session directory", async () => {
@@ -76,6 +96,7 @@ describe("AI tool approval mode", () => {
       expect.objectContaining({
         command: "pnpm dev",
         cwd: "/workspace/apps/web",
+        permissionMode: "ask",
         timeoutSecs: 300,
         yieldTimeMs: 10_000,
       }),

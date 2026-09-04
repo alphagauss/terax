@@ -1,5 +1,5 @@
 /**
- * 本文件桥接 AI 文件修改的 Rust 审批快照。
+ * 本文件桥接 AI 文件修改的 Rust 预备快照。
  * 前端不计算正文或版本，只把模型输入交给统一后端准备、提交和清理。
  */
 
@@ -18,7 +18,7 @@ type PrepareInput = {
   permissionMode: "ask" | "full-access";
 };
 
-/** 将模型工具输入转换为封闭的 Rust 修改请求并准备审批快照。 */
+/** 将模型工具输入转换为封闭的 Rust 修改请求并准备条件提交快照。 */
 export function prepareFileMutation({
   sessionId,
   toolCallId,
@@ -44,7 +44,7 @@ export function commitPreparedFileMutation(
   return native.agentCommitMutation(sessionId, toolCallId);
 }
 
-/** 异步释放已经终结或拒绝的审批快照。 */
+/** 异步释放已经终结或拒绝的预备快照。 */
 export function clearPreparedFileMutation(
   sessionId: string,
   toolCallId: string,
@@ -52,7 +52,7 @@ export function clearPreparedFileMutation(
   void native.agentClearMutation(sessionId, toolCallId).catch(() => undefined);
 }
 
-/** 判断工具状态是否已经终结，可以释放原生审批快照。 */
+/** 判断工具状态是否已经终结，可以释放原生预备快照。 */
 export function isTerminalFileMutationState(
   state: string | undefined,
 ): boolean {

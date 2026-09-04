@@ -16,7 +16,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 ## 秘密路径 deny-list
 
-请求批准模式下，`src-tauri/src/modules/fs/agent.rs` 会拒绝读取和修改明显包含秘密的路径。完全访问模式明确允许当前系统用户可访问的任意路径，因此会跳过该 deny-list；选择该模式表示用户接受秘密可能被发送给模型 provider 的风险。
+请求批准模式下，显式访问明显包含秘密的路径会先请求一次性批准；未提升的 Rust 调用仍由 `src-tauri/src/modules/fs/agent.rs` 拒绝。目录发现和宽泛搜索不会主动暴露其中的敏感结果。完全访问模式明确允许当前系统用户可访问的任意路径，因此会跳过该 deny-list；选择或单次批准这种访问表示用户接受秘密可能被发送给模型 provider 的风险。
 
 阻止的类别包括：
 
@@ -35,10 +35,10 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 - `workspace_prepare_default_root` 不接受路径参数，只按当前不可变环境准备默认 Agent 根。Local 与 WSL 创建并授权各自的 `~/.terax/workspace`，SSH 只能返回连接时验证的 profile Workspace root。
 - `authorize_spawn_cwd` 拒绝在已授权 root 之外使用 spawn cwd。
 - `authorize_user_spawn_cwd` 将用户选择的 cwd 注册为新 root，而不是拒绝它。
-- Agent 文件工具将聊天 owner 绑定到 canonical cwd 和不可变 Workspace 环境。请求批准模式要求 Local 与 WSL cwd 是已登记 root，并将所有目标限制在该根内；SSH cwd 来自用户明确打开并在会话首次发送时冻结的可访问 Explorer 根，不与 profile 默认目录绑定。完全访问模式仍固定 cwd，但不将其作为路径上界。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和审批快照。
+- Agent 文件工具将聊天 owner 绑定到 canonical cwd 和不可变 Workspace 环境。未提升的请求批准调用要求 Local 与 WSL cwd 是已登记 root，并将目标限制在该根内；SSH cwd 来自用户明确打开并在会话首次发送时冻结的可访问 Explorer 根，不与 profile 默认目录绑定。相对路径先基于 cwd 解析 `..`，再执行 canonical 边界检查；单次批准和完全访问不将 cwd 作为路径上界，cwd 始终是相对路径基准。进程内最多保留 128 个 owner scope，聊天删除会同时释放读取版本和预备快照。
 - registry 在 bootstrap 时加入启动目录和用户 home 目录（`workspace.rs:135`）。
 
-这是文件系统边界的 allow side。任何需要在当前 Workspace 之外启动 Shell 或修改文件的新功能都必须与此 registry 交互。
+这是普通 Workspace 功能的 allow side。AI 工具只有在完全访问或用户批准的单次调用中可以越过 registry 上界，其他需要在当前 Workspace 之外启动 Shell 或修改文件的新功能仍必须与此 registry 交互。
 
 ## SSH 封闭 Bash 任务
 
@@ -60,11 +60,12 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 在 `src/modules/ai/tools/tools.ts` 中：
 
-- 只读工具（`read_file`、`find_files`、`grep`）自动执行。请求批准模式下 Rust 会将聊天 owner 绑定到固定 Workspace 根，并拒绝越界、敏感路径、非普通文件和不安全符号链接；完全访问模式解除路径上界与敏感路径过滤。
-- 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。AI SDK 会暂停需要审批的调用，前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
-- Agent Shell 在前端审批前和 Rust IPC 边界分别检查不可审阅字符及灾难性命令。cwd 必须属于当前授权 Workspace，Local 子进程使用最小环境变量集合，避免把宿主 API key 和 token 继承到模型可读取的 stdout。
+- 请求批准模式下，cwd 内且非敏感的六个文件工具自动执行；显式 cwd 外路径、敏感路径和递归删除设置动态 `needsApproval`。AI SDK 只在用户批准后执行同一 tool call，前端将该次调用映射为提升后的原生访问级别；未提升调用继续由 Rust 强制执行 Workspace 根、canonical path 和敏感路径边界。
+- `shell_exec` 对可明确分类为 cwd 内的普通命令自动执行；外部路径、网络访问和不透明解释器命令需要批准。`shell_process` 的 stdin 写入需要批准；poll、EOF、terminate 和 `shell_list` 只能操作当前聊天 owner 的已登记进程并自动执行。前端将每个请求路由到以 session 和 approval ID 为 key 的持久 toast。
+- 审批拒绝使用独立的 `output-denied` 终态和稳定 tool result，不伪装成执行失败。模型收到拒绝后只能说明情况或询问下一步，不能换用其他工具、路径或编码规避同一次授权决定。
+- Agent Shell 在 Rust IPC 边界始终检查不可审阅字符及灾难性命令。未提升调用的启动 cwd 必须位于冻结的会话 cwd；批准后的同一调用和完全访问允许任意存在且系统可访问的 cwd。命令字符串分类只提供 best-effort 纵深防御，不构成进程沙箱。Local 子进程使用最小环境变量集合，避免把宿主 API key 和 token 继承到模型可读取的 stdout。
 - Agent 进程通过聊天 owner 和不可复用 UUID 登记，控制和列表 IPC 同时校验 owner 与 Workspace。每聊天与每应用都有原子执行的运行数量上限，聊天删除、超时、显式终止和应用退出都会回收 Local、WSL 或 SSH 完整进程树。Windows Local 进程在恢复执行前加入 Job Object，避免启动竞态使子进程逃逸。
-- 文件修改在 Rust 中准备待 review 的逐文件内容和版本，批准后重新验证 Workspace 根、canonical path 和全部基线，再由原生条件写入匹配原版本或目标仍缺失的状态。diff 不依赖 Git。
+- 文件修改在 Rust 中准备待审阅的逐文件内容和版本，批准后重新验证 canonical path 和全部基线，再由原生条件写入匹配原版本或目标仍缺失的状态。未提升调用同时重新验证 Workspace 根，已批准调用保留当时预备的完全访问级别。diff 不依赖 Git。
 - `write_file` rewrite 和 `apply_patch` 强制执行 owner 隔离的 read-before-edit；create 要求目标缺失。`file_operation` 的目标默认不能覆盖，目录删除必须显式声明 recursive。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
@@ -102,7 +103,7 @@ Agent detector（`src-tauri/src/modules/pty/agent_detect.rs`）由 `OSC 133;C;<c
 
 ## 不变量
 
-- `fs/agent.rs` 中的权限模式、普通文件和 canonical 检查同时适用于读取与修改。请求批准模式的 Workspace 根与敏感路径规则不能由模型参数绕过；完全访问模式只解除这两项限制。`security.ts` 只负责 Shell 审批前反馈。
+- `fs/agent.rs` 中的权限模式、普通文件和 canonical 检查同时适用于读取与修改。请求批准模式的 Workspace 根与敏感路径规则不能由未批准的模型参数绕过；单次批准和完全访问只解除这两项限制。Shell 的前端分类位于 `tools/authorization.ts`，Rust 仍保留启动 cwd 和灾难性命令底线。
 - Bash task 只能实现 Rust 枚举的封闭协议；通用执行方法只对 `remote/tasks/` 子模块可见，不能演变为绕过 Shell 审批的命令执行入口。
 - 新增涉及文件系统的 command 必须遵守 Workspace 授权 registry。
 - 新增面向网络的 command 必须通过 `net.rs` proxy，或重新实现相同的分类和 DNS pinning。

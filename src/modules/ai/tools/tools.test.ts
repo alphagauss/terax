@@ -14,6 +14,7 @@ const context: ToolContext = {
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
   getPermissionMode: () => "ask",
+  supportsApprovals: true,
 };
 
 /** 判断字段 schema 是否直接声明类型，或由完整的类型联合组成。 */

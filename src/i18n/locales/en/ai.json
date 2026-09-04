@@ -54,6 +54,9 @@
     }
   },
   "toolApproval": {
+    "readFile": "Read external or sensitive file",
+    "findFiles": "Browse external or sensitive directory",
+    "searchFiles": "Search external or sensitive directory",
     "writeFile": "Write file",
     "editFileBatch": "Edit file (batch)",
     "fileOperation": "Manage file",
@@ -148,6 +151,7 @@
     "emptyTitle": "Ask Terax anything",
     "emptyDescription": "Explain command output, fix errors, generate snippets, or run a task.",
     "thinking": "Thinking…",
+    "toolDenied": "The user denied this action.",
     "reasoning": {
       "thinking": "Thinking",
       "completed": "Reasoned",

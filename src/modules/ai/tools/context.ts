@@ -14,10 +14,16 @@ export type ToolContext = {
   getSessionId: () => string;
   /** 读取本次工具运行应遵循的权限模式；Subagent 使用启动时冻结的值。 */
   getPermissionMode: () => "ask" | "full-access";
+  /** 当前 runner 是否能将需要提权的调用交给 UI 审批。 */
+  supportsApprovals: boolean;
 };
 
 export function resolvePath(rawPath: string, cwd: string): string {
-  if (rawPath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(rawPath))
+  if (
+    rawPath.startsWith("/") ||
+    rawPath.startsWith("\\") ||
+    /^[a-zA-Z]:[\\/]/.test(rawPath)
+  )
     return rawPath;
   const sep = cwd.includes("\\") && !cwd.includes("/") ? "\\" : "/";
   return cwd.endsWith(sep) ? `${cwd}${rawPath}` : `${cwd}${sep}${rawPath}`;

@@ -47,7 +47,6 @@ UI 渲染、主题、语法高亮表格以及类型检查器已经能够保证�
 - `src-tauri/src/modules/proc/job.rs` 的测试验证 Windows 进程在 Job Object 内恢复执行，且丢弃 Job Object 会终止分配给它的进程树。
 - `src-tauri/src/modules/pty/session.rs` 的测试验证丢弃 `Session` 会终止子进程。
 - `src-tauri/src/modules/pty/shell_init.rs` 的测试验证 Shell 分类和 WSL fish 启动规范。
-- `src/modules/ai/lib/security.ts` 由相关测试覆盖，这些测试断言特定路径会被拒绝，并验证 canonicalization 能捕获 symlink traversal。
 
 ## 跨平台 PTY 测试
 
@@ -68,16 +67,18 @@ ConPTY/Job Object 测试应放在 `#[cfg(windows)]` 后，Unix PTY 生命周期�
 修改 `src-tauri/src/modules/fs/agent.rs` 时，应覆盖：
 
 1. owner 不能切换 Workspace 环境或已绑定的根目录，进程内 owner scope 总数必须有界。
-2. 请求批准模式要求根目录是已登记的 Workspace 根且目标 canonical path 不能越界；完全访问模式允许根外目标。
-3. 不存在的目标向上解析最近存在祖先；请求批准模式下已有符号链接不能绕过根目录或敏感路径，完全访问模式仍使用解析后的稳定物理路径。
+2. 相对路径先基于 cwd 解析父级分量。请求批准模式下未提升调用要求根目录是已登记的 Workspace 根且目标 canonical path 不能越界；一次性批准和完全访问允许根外目标。
+3. 不存在的目标向上解析最近存在祖先；未提升调用下已有符号链接不能绕过根目录或敏感路径，提升调用仍使用解析后的稳定物理路径。
 4. Windows Local 的 NTFS alternate data stream、DOS 设备名和末尾点号或空格始终被规范化拒绝；请求批准模式还拒绝密钥文件名及其大小写变体，项目内普通 `etc`、`proc`、`sys` 目录不能误判为系统根。
 5. `read_file` 去重同时匹配内容版本和读取范围，UTF-8 输出截断保持字符边界。
 6. rewrite 与 patch 要求当前 owner 已读取相同版本；CRLF 文件的跨行精确补丁保留原换行；create、审批后变化和目标占用必须拒绝覆盖。
 7. 多文件修改先校验全部基线，单文件原子发布；中途失败测试必须验证回滚和准确错误。
-8. `file_operation` 拒绝 Workspace 根、隐式覆盖和未显式声明的目录递归删除；copy 使用 no-clobber 发布，远端存在性错误不能当作目标缺失。
+8. `file_operation` 始终拒绝文件系统根、隐式覆盖和未显式声明的目录递归删除；请求批准模式下操作 Workspace 根需要提升。copy 使用 no-clobber 发布，远端存在性错误不能当作目标缺失。
 9. Local Windows 路径比较可以忽略大小写，WSL 与 SSH 路径必须保持大小写敏感；显式单文件 `grep` 只搜索该文件。
 
-`src/modules/ai/lib/security.ts` 只保留 Shell 审批前快速拒绝，对应测试不再承载文件路径安全不变量。
+`src/modules/ai/tools/authorization.ts` 只负责决定是否请求批准。测试必须分别锁定 cwd 内自动执行、越界与敏感路径审批、Shell 网络与不透明命令审批；Rust 测试继续承载 canonical 路径、启动 cwd 和灾难性命令不变量。
+
+会话消息测试必须比较工具成功、结构化错误、执行错误和审批拒绝在实时与 JSONL 恢复后的最终 provider `ModelMessage`，包括 approval ID、决定、原因和签名；只比较 UI part 或磁盘字段不足以锁定 prompt cache 前缀。
 
 ## 文件传输测试
 

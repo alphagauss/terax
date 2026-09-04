@@ -88,7 +88,7 @@ Claude Code、Codex 等完整 CLI Agent 不进入本节的 Provider 与 `runAgen
 
 Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `defaultSubagentModel` 单独指定完整模型引用。每个聊天最多并发 `maxConcurrentSubagents` 个任务，默认 3、允许 1 至 8；超过上限立即返回拒绝结果，不建立等待队列。
 
-权限在任务启动时冻结。主 Agent 为请求批准模式时，Subagent 工具进一步收窄到 `read_file`、`find_files`、`grep` 和 `get_terminal_output` 的父白名单交集；完全访问模式继承父白名单。两种模式都移除 `run_subagent`，所以 Subagent 不能递归创建 Subagent。
+权限在任务启动时冻结。主 Agent 为请求批准模式时，Subagent 工具进一步收窄到 `read_file`、`find_files`、`grep` 和 `get_terminal_output` 的父白名单交集；Subagent 没有独立 UI 审批通道，越界或敏感读取继续以请求批准模式进入 Rust，并将明确拒绝返回模型。完全访问模式继承父白名单。两种模式都移除 `run_subagent`，所以 Subagent 不能递归创建 Subagent。
 
 `wait=true` 时，最终结果直接作为原工具调用的 tool result。`wait=false` 时，原工具调用立即返回 started，后台完成结果以 append-only 的内部 `subagent_result` user 消息进入同一 turn。该内部事件在 UI 中保存为隐藏 data part，在 JSONL 中保存稳定正文和 task ID metadata，发送给 provider 时投影为相同正文的标准 user 消息。它不改写既有 tool result 或历史前缀。
 
@@ -120,7 +120,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 {"role":"tool","tool_call_id":"call_1","name":"read_file","content":{"content":"..."},"timestamp":"2026-07-26T10:00:00.000Z"}
 ```
 
-`function.arguments` 始终为 JSON string。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
+`function.arguments` 始终为 JSON string。经过审批的 tool record 保存原始 approval ID、决定、原因和可选签名，保证批准、拒绝和执行失败在恢复后的 approval request/response 与实时 provider 前缀逐字一致。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
 
 streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming、Subagent 展示更新或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。普通运行由 `AgentRunBridge` 在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后追加完整记录和 Subagent display 快照；`wait=false` Subagent 恢复主循环前则通过 checkpoint 追加此前完整的 Assistant、tool 和内部结果事件，但不提交仅供展示的运行中过程。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message 和已经 checkpoint 的完整步骤，但不会写入未完成的流式 fragment 或 Subagent 详细过程。
 
@@ -141,17 +141,18 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 工具定义位于 `src/modules/ai/tools/`：
 
 - 只读工具是 `read_file`、`find_files`、`grep`。全文写入使用 `write_file`，已有文件精确编辑使用 `apply_patch`，移动、复制、删除和空目录创建使用 `file_operation`。
-- 六个模型文件工具全部进入 `src-tauri/src/modules/fs/agent.rs`。该后端将聊天 owner 绑定到固定 cwd，在 Rust 中统一执行权限模式、路径解析、普通文件、分页、读取版本、修改快照和 Local、WSL、SSH 路由。请求批准模式将 cwd 作为路径上界并拒绝敏感路径；完全访问模式只用 cwd 解析相对路径，允许系统用户可访问的绝对路径。
+- 六个模型文件工具全部进入 `src-tauri/src/modules/fs/agent.rs`。该后端将聊天 owner 绑定到固定 cwd，在 Rust 中统一执行权限模式、路径解析、普通文件、分页、读取版本、修改快照和 Local、WSL、SSH 路由。请求批准模式下，cwd 内非敏感操作自动执行，cwd 外、敏感路径和递归删除请求一次性批准；完全访问模式只用 cwd 解析相对路径，允许自动访问系统用户可访问的绝对路径。
 - `find_files` 同时覆盖直接目录列举和递归 glob。`grep` 复用 `fs_content_search` 匹配引擎，支持目录和显式单文件目标，并在 Agent 后端完成安全过滤、content/files/count 聚合、上下文和分页。
-- 修改型工具（`write_file`、`apply_patch`、`file_operation`、`shell_exec`）设置动态 `needsApproval`。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
-- Shell 工具只有 `shell_exec`、`shell_process`、`shell_list`。短命令和长任务共享按聊天 owner 隔离的原生进程表，stdin、EOF、增量 offset、固定文本等待、hard timeout 和完整进程树终止不通过前端模拟。POSIX 环境默认使用 Bash，Windows Local 默认使用 PowerShell。
+- 文件工具和 `shell_exec` 使用基于输入的动态 `needsApproval`。审批只提升原 tool call，不改变会话 cwd 或后续调用。`shell_process` 只有 `write` action 需要批准，poll、EOF、terminate 与 `shell_list` 自动执行。AI SDK 暂停后，无论当前显示哪个 chat，UI 都会为每个 request 渲染一个持久 approval toast。
+- 用户拒绝时工具不执行，并以 `output-denied` 和稳定原因结束。该拒绝作为 `status=denied` 的 tool record 持久化并返回模型，区别于批准后发生的 `output-error`；模型不得通过其他工具或等价命令绕过拒绝。
+- Shell 工具只有 `shell_exec`、`shell_process`、`shell_list`。请求批准模式自动运行可明确判断为 cwd 内的普通开发命令，外部路径、网络和无法可靠分类的命令请求批准；该静态分类不是进程沙箱。完全访问跳过分类并允许任意可访问 cwd。短命令和长任务共享按聊天 owner 隔离的原生进程表，stdin、EOF、增量 offset、固定文本等待、hard timeout 和完整进程树终止不通过前端模拟。
 - `write_file` 的 rewrite 模式和 `apply_patch` 强制执行 read-before-edit：模型必须在本 session 中提前读取相同版本。create 模式要求目标缺失并自动创建父目录。精确补丁按读取结果使用 LF 匹配，同时保留既有 CRLF 文件的换行风格。
 
 审批后的自动发送使用 `lastAssistantMessageIsCompleteWithApprovalResponses`。
 
 ## 编辑 diff
 
-文件修改审批由 Rust 准备不可变的逐文件 before/after snapshot 和原始文件版本，并显示 summary toast。用户可以为一个多文件调用打开多个只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。批准后后端重新验证 Workspace 根、canonical path 和全部文件版本，再逐文件条件写入。每个文件独立原子发布，多文件调用不承诺跨文件系统原子性，运行中失败会尽力回滚已发布文件。同一流程无需 Git 仓库也能工作。
+需要审批的文件修改由 Rust 准备不可变的逐文件 before/after snapshot 和原始文件版本，并显示 summary toast。用户可以为一个多文件调用打开多个只读 `ai-diff` tab，并从任一 surface 批准或拒绝整个 tool call。批准后后端重新验证 canonical path 和全部文件版本，再逐文件条件写入。cwd 内自动修改也经过相同 prepared mutation 和条件提交，只省略 UI 暂停。每个文件独立原子发布，多文件调用不承诺跨文件系统原子性，运行中失败会尽力回滚已发布文件。
 
 ## 实时上下文桥接
 
@@ -166,7 +167,7 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - 磁盘 metadata 中的 `systemPrompt` 是只写的检查快照，运行时不得读取或复用，也不增加 prompt version、revision 或迁移状态。
 - 会话 Agent ID、专属指令和工具白名单来自首次发送时保存的 `metadata.agent` 快照；Agent 不能在 persisted session 中更换。
 - Custom Agent 删除必须经过 `ai_agent_delete` 级联删除其全部会话；主 Agent 不进入共享存储且不可删除。
-- 请求批准模式下修改型工具需要审批，所有文件工具必须通过 Rust 会话根、canonical path 和敏感路径检查；完全访问模式免除审批和路径沙箱，但继续执行文件类型、大小、版本与灾难性操作保护。
+- 请求批准模式下 cwd 内非敏感操作自动执行，越界、敏感、网络、递归删除和无法可靠分类的 Shell 操作需要批准；完全访问模式免除这些审批和路径上界。两种模式继续执行文件类型、大小、版本、进程隔离与灾难性操作保护。
 - 内存 message list、持久化 message record 和模型 input 保留相同的 message content。cwd 和 execution environment 只进入 system prompt，不得注入 user message；active tab 不自动注入任何消息。
 - persisted session 的 `cwd` 不可变，每个相对 tool path 都基于它解析。
 - `shell_exec` 未显式传 cwd 时延续该聊天最近同步完成的 Shell cwd；已经返回为长任务的进程不得在稍后退出时异步改变聊天 cwd。

@@ -54,6 +54,9 @@
     }
   },
   "toolApproval": {
+    "readFile": "读取外部或敏感文件",
+    "findFiles": "浏览外部或敏感目录",
+    "searchFiles": "搜索外部或敏感目录",
     "writeFile": "写入文件",
     "editFileBatch": "编辑文件（批量）",
     "fileOperation": "管理文件",
@@ -148,6 +151,7 @@
     "emptyTitle": "向 Terax 提问",
     "emptyDescription": "解释命令输出、修复错误、生成片段或运行任务。",
     "thinking": "思考中…",
+    "toolDenied": "用户已拒绝此操作。",
     "reasoning": {
       "thinking": "正在思考",
       "completed": "已思考",

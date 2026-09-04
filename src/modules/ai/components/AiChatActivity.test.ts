@@ -1,6 +1,6 @@
 /**
  * 本文件测试聊天消息中的活动分组和工具结果展示。
- * 锁定正文与 Subagent 分组边界，并确保结构化业务错误不会显示为成功结果。
+ * 锁定正文与 Subagent 分组边界，并确保业务错误和用户拒绝得到准确展示。
  */
 
 import type { UIMessage } from "ai";
@@ -21,6 +21,18 @@ describe("AI chat activity grouping", () => {
       state: "output-error",
       errorText: "workspace unavailable",
     });
+  });
+
+  it("keeps approval denial distinct from execution errors", () => {
+    const display = resolveToolDisplay({
+      type: "tool-shell_exec",
+      toolCallId: "shell-1",
+      state: "output-denied",
+      input: { command: "curl https://example.com" },
+      approval: { id: "approval-1", approved: false },
+    });
+    expect(display.state).toBe("output-denied");
+    expect(display.errorText).toBeUndefined();
   });
 
   it("uses text and Subagent as the only visible activity boundaries", () => {
