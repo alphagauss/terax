@@ -585,6 +585,17 @@ html *::-webkit-scrollbar {
   }
 }
 
+@keyframes terax-chat-dot-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(2px);
+  }
+  30% {
+    transform: translateY(-3px);
+  }
+}
+
 .terax-collapsible-content {
   overflow: hidden;
 }

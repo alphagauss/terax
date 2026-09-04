@@ -30,14 +30,10 @@ export const CHAT_SCROLL_SPRING = {
 /**
  * 判断是否展示恢复跟随控件。
  *
- * 运行中只要用户逃离底部锁定或当前位置不在底部就显示跳动点；完成态则显示下箭头。
+ * 到达底部后必须立即隐藏；运行状态只决定控件内容，不改变可见性。
  */
-export function shouldShowChatScrollControls(
-  running: boolean,
-  isAtBottom: boolean,
-  escapedFromLock: boolean,
-): boolean {
-  return running ? escapedFromLock || !isAtBottom : !isAtBottom;
+export function shouldShowChatScrollControls(isAtBottom: boolean): boolean {
+  return !isAtBottom;
 }
 
 function userMessageText(message: UIMessage): string {
