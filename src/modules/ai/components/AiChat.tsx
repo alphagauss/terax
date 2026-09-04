@@ -620,7 +620,7 @@ const RenderedMessage = memo(function RenderedMessage({
     <Message
       from={message.role}
       data-conversation-message-id={message.id}
-      className="group/message"
+      className="group/message gap-1"
     >
       <MessageContent>
         <div className="flex flex-col gap-0.5 [&>div:has(.ai-activity-block)+div:has(.markdown-content)]:mt-4">
@@ -665,7 +665,9 @@ const RenderedMessage = memo(function RenderedMessage({
           })}
         </div>
       </MessageContent>
-      <MessageMeta timestamp={timestamp} copyText={copyText} />
+      {!streaming ? (
+        <MessageMeta timestamp={timestamp} copyText={copyText} />
+      ) : null}
     </Message>
   );
 });
@@ -1354,7 +1356,7 @@ const RenderedPart = memo(function RenderedPart({
 }) {
   if (part.type === "text") {
     return (
-      <MessageResponse streaming={streaming}>
+      <MessageResponse className="[&>*:last-child]:mb-0!" streaming={streaming}>
         {(part as unknown as { text: string }).text}
       </MessageResponse>
     );
