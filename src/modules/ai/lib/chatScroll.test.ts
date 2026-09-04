@@ -1,6 +1,6 @@
 /**
  * 本文件验证 AI 会话滚动控件的显示条件和用户消息导航投影。
- * 测试锁定运行中脱离跟随后的入口，以及摘要不会泄露大段上下文内容。
+ * 测试锁定恢复跟随入口只在离开底部时显示，以及摘要不会泄露大段上下文内容。
  */
 
 import type { UIMessage } from "ai";
@@ -11,11 +11,9 @@ import {
 } from "./chatScroll";
 
 describe("chat scroll controls", () => {
-  it("shows the running control only after leaving the bottom lock", () => {
-    expect(shouldShowChatScrollControls(true, true, false)).toBe(false);
-    expect(shouldShowChatScrollControls(true, false, false)).toBe(true);
-    expect(shouldShowChatScrollControls(true, true, true)).toBe(true);
-    expect(shouldShowChatScrollControls(false, false, false)).toBe(true);
+  it("hides the control whenever following reaches the bottom", () => {
+    expect(shouldShowChatScrollControls(true)).toBe(false);
+    expect(shouldShowChatScrollControls(false)).toBe(true);
   });
 
   it("builds ordered user anchors without embedded context blocks", () => {

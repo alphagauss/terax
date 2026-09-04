@@ -60,4 +60,39 @@ describe("ChatReasoningPart", () => {
       act(() => root.unmount());
     }
   });
+
+  it("stops the shimmer and thinking title when the run stops", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+
+    try {
+      act(() => {
+        root.render(
+          <ChatReasoningPart
+            text="检查上下文"
+            isStreaming
+            autoCollapse={false}
+          />,
+        );
+      });
+      expect(container.textContent).toContain("chat.reasoning.thinking");
+      expect(container.querySelector(".terax-shimmer")).not.toBeNull();
+
+      act(() => {
+        root.render(
+          <ChatReasoningPart
+            text="检查上下文"
+            isStreaming={false}
+            autoCollapse
+          />,
+        );
+      });
+
+      expect(container.textContent).toContain("chat.reasoning.completed");
+      expect(container.textContent).not.toContain("chat.reasoning.thinking");
+      expect(container.querySelector(".terax-shimmer")).toBeNull();
+    } finally {
+      act(() => root.unmount());
+    }
+  });
 });

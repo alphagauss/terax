@@ -76,6 +76,7 @@ import {
 } from "./ChatActivityBlock";
 import { ChatCollapsibleScrollGuard } from "./ChatCollapsibleScrollGuard";
 import { ChatReasoningPart } from "./ChatReasoningPart";
+import { ChatStatusDots } from "./ChatStatusDots";
 import { SubagentCard, type SubagentResultView } from "./SubagentCard";
 
 type ConversationScrollPosition = {
@@ -476,13 +477,11 @@ export function AiChatView({
         )}
         {showPendingResponse ? (
           <div
-            className="flex h-[22px] items-center gap-1 text-muted-foreground"
+            className="flex h-[22px] items-center text-foreground"
             role="status"
             aria-label={t("chat.thinking")}
           >
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:0ms]" />
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:150ms]" />
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:300ms]" />
+            <ChatStatusDots />
           </div>
         ) : null}
         {showContinue && (
@@ -713,6 +712,7 @@ const RenderedLeafGroup = memo(function RenderedLeafGroup({
         part={group.part}
         streaming={group.idx === streamingPartIdx}
         reasoningStreaming={
+          streaming &&
           group.part.type === "reasoning" &&
           (group.part as { state?: string }).state === "streaming"
         }

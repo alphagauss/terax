@@ -1,10 +1,10 @@
 /**
  * 本文件实现 AI 会话的恢复跟随按钮和用户消息快速导航菜单。
- * 控件仅在脱离底部时挂载，运行态使用轻量跳动点，菜单延迟展开并按需生成摘要。
+ * 控件仅在脱离底部时挂载，运行态使用共用波浪跳点，菜单延迟展开并按需生成摘要。
  */
 
 import { cn } from "@/lib/utils";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { ArrowDown02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { UIMessage } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import {
   shouldShowChatScrollControls,
   type UserMessageAnchor,
 } from "../lib/chatScroll";
+import { ChatStatusDots } from "./ChatStatusDots";
 
 const MENU_OPEN_DELAY_MS = 1000;
 const MENU_CLOSE_DELAY_MS = 400;
@@ -48,17 +49,13 @@ export function AiChatScrollControls({
   running: boolean;
 }) {
   const { t } = useTranslation("ai");
-  const { escapedFromLock, isAtBottom, scrollRef, scrollToBottom, stopScroll } =
+  const { isAtBottom, scrollRef, scrollToBottom, stopScroll } =
     useStickToBottomContext();
   const [panelOpen, setPanelOpen] = useState(false);
   const [userMessages, setUserMessages] = useState<UserMessageAnchor[]>([]);
   const openTimerRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
-  const visible = shouldShowChatScrollControls(
-    running,
-    isAtBottom,
-    escapedFromLock,
-  );
+  const visible = shouldShowChatScrollControls(isAtBottom);
 
   const clearTimers = useCallback(() => {
     if (openTimerRef.current !== null) {
@@ -196,19 +193,15 @@ export function AiChatScrollControls({
         onClick={handleJumpToBottom}
         className={cn(
           "flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/90 shadow-md backdrop-blur",
-          "text-muted-foreground transition-colors duration-control hover:bg-muted hover:text-foreground",
+          "text-foreground transition-colors duration-control hover:bg-muted",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
         aria-label={t("chat.scrollToLatest")}
       >
         {running ? (
-          <span className="flex items-center gap-1" aria-hidden="true">
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:0ms]" />
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:150ms]" />
-            <span className="size-1 motion-safe:animate-bounce rounded-full bg-current [animation-delay:300ms]" />
-          </span>
+          <ChatStatusDots />
         ) : (
-          <HugeiconsIcon icon={ArrowDown01Icon} size={13} strokeWidth={2} />
+          <HugeiconsIcon icon={ArrowDown02Icon} size={14} strokeWidth={2} />
         )}
       </button>
     </fieldset>
