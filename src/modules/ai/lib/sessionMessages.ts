@@ -17,6 +17,8 @@ import {
 
 export const REASONING_DURATION_PART_TYPE = "data-reasoning-duration" as const;
 export const ACTIVITY_DURATION_PART_TYPE = "data-activity-duration" as const;
+/** 审批被拒绝时写入模型上下文和会话记录的稳定原因。 */
+export const TOOL_APPROVAL_DENIED_REASON = "User denied this tool call.";
 
 /** 校验并读取 Terax reasoning 耗时 data part。 */
 export function reasoningDurationFromPart(value: unknown): number | undefined {
@@ -70,6 +72,10 @@ export type SessionMessage = {
   tool_calls?: SessionToolCall[];
   turn_status?: string;
   tool_call_id?: string;
+  approval_id?: string;
+  approval_approved?: boolean;
+  approval_reason?: string;
+  approval_signature?: string;
   name?: string;
   status?: string;
   [key: string]: unknown;
@@ -93,6 +99,7 @@ type ToolPart = {
     id: string;
     approved: boolean;
     reason?: string;
+    signature?: string;
   };
 };
 
@@ -304,13 +311,27 @@ export function projectSessionMessages(
       typeof record.content === "string"
         ? record.content
         : JSON.stringify(record.content);
+    const restoredApproval =
+      typeof record.approval_id === "string" &&
+      typeof record.approval_approved === "boolean"
+        ? {
+            id: record.approval_id,
+            approved: record.approval_approved,
+            ...(typeof record.approval_reason === "string"
+              ? { reason: record.approval_reason }
+              : {}),
+            ...(typeof record.approval_signature === "string"
+              ? { signature: record.approval_signature }
+              : {}),
+          }
+        : undefined;
     parts[toolIndex] = (
       record.status === "denied"
         ? {
             ...tool,
             state: "output-denied",
-            approval: {
-              id: `persisted:${record.tool_call_id}`,
+            approval: restoredApproval ?? {
+              id: record.tool_call_id,
               approved: false,
               reason: resultText,
             },
@@ -320,11 +341,13 @@ export function projectSessionMessages(
               ...tool,
               state: "output-error",
               errorText: resultText,
+              ...(restoredApproval ? { approval: restoredApproval } : {}),
             }
           : {
               ...tool,
               state: "output-available",
               output: record.content,
+              ...(restoredApproval ? { approval: restoredApproval } : {}),
             }
     ) as UIMessage["parts"][number];
   });
@@ -547,6 +570,7 @@ function serializeAssistantBlock(
         {
           role: "tool",
           tool_call_id: tool.toolCallId,
+          ...approvalRecord(tool),
           name,
           content: tool.output ?? null,
           timestamp: options.timestamp,
@@ -559,10 +583,11 @@ function serializeAssistantBlock(
         {
           role: "tool",
           tool_call_id: tool.toolCallId,
+          ...approvalRecord(tool),
           name,
           content:
             tool.state === "output-denied"
-              ? (tool.approval?.reason ?? "Tool execution denied.")
+              ? (tool.approval?.reason ?? TOOL_APPROVAL_DENIED_REASON)
               : (tool.errorText ?? "Tool execution failed."),
           status: tool.state === "output-denied" ? "denied" : "error",
           timestamp: options.timestamp,
@@ -573,6 +598,21 @@ function serializeAssistantBlock(
     return [];
   });
   return [assistant, ...results];
+}
+
+function approvalRecord(tool: ToolPart): Partial<SessionMessage> {
+  const approval = tool.approval;
+  if (!approval) return {};
+  return {
+    approval_id: approval.id,
+    approval_approved: approval.approved,
+    ...(approval.reason === undefined
+      ? {}
+      : { approval_reason: approval.reason }),
+    ...(approval.signature === undefined
+      ? {}
+      : { approval_signature: approval.signature }),
+  };
 }
 
 /** 拒绝手工编辑或异常流产生的非法展示耗时。 */

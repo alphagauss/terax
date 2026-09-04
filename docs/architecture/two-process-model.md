@@ -86,9 +86,9 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 - `agent_file_read` - owner 隔离的带行号文本读取和版本登记
 - `agent_file_find` - 直接目录列举与递归 glob 的统一路径发现
 - `agent_file_grep` - literal/regex 搜索及 content/files/count 聚合
-- `agent_file_prepare_mutation` / `agent_file_commit_mutation` / `agent_file_clear_mutation` - Rust 审批快照与条件提交生命周期
+- `agent_file_prepare_mutation` / `agent_file_commit_mutation` / `agent_file_clear_mutation` - Rust 预备快照与条件提交生命周期
 - `agent_file_operation` - move、copy、delete、create_directory 结构操作
-- `agent_file_clear_owner` - 聊天删除时清理读取版本、固定 scope 和审批快照
+- `agent_file_clear_owner` - 聊天删除时清理读取版本、固定 scope 和预备快照
 
 模型只看到 `read_file`、`find_files`、`grep`、`write_file`、`apply_patch`、`file_operation`。所有请求在 Rust 中把 owner 绑定到已授权 Workspace 根，再路由到 Local、WSL 或 SSH primitive。`write_file` 创建父目录并区分 create/rewrite；`apply_patch` 只对当前聊天已读取的现有 UTF-8 文件执行精确替换。多文件提交先验证全部基线，再逐文件原子发布，不提供跨文件系统事务保证。
 
@@ -125,7 +125,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 两个明确 surface：
 
 - `shell_run_command`：供编辑器格式化等非 AI 模块使用的一次性 subshell exec，输出和超时有界。
-- `shell_exec` / `shell_process` / `shell_list`：AI 短命令与长任务共享且按聊天 owner 隔离的 Agent 进程表。启动调用首次等待后返回统一 `process_id`；后续可以增量读取 stdout/stderr、等待固定文本、写 stdin、发送 EOF 或终止完整进程树。
+- `shell_exec` / `shell_process` / `shell_list`：AI 短命令与长任务共享且按聊天 owner 隔离的 Agent 进程表。`shell_exec` 同时接收冻结的会话 cwd 和本次调用的访问级别，未提升调用只能从会话根内启动，单次批准和完全访问允许任意可访问 cwd。启动调用首次等待后返回统一 `process_id`；后续可以增量读取 stdout/stderr、等待固定文本、写 stdin、发送 EOF 或终止完整进程树。
 - `shell_clear_owner`：聊天删除时终止并移除该 owner 的全部 Agent 进程和 cwd 状态。
 
 运行中的 Agent 进程保留 4 MiB 全局字节 offset 输出，流式解码和截断保持 UTF-8 字符边界；进入终态后压缩为最近 256 KiB，单次 IPC 最多返回 256 KiB。每聊天最多运行 4 个、每应用最多运行 16 个，容量检查与进程登记在同一 spawn 临界区完成；最近终态最多保留 50 条并在 30 分钟后回收。Local 使用 Unix process group 或 Windows Job Object，Windows 进程挂起启动并在恢复前加入 Job Object；WSL 与 SSH 使用 `setsid` 建立远端进程组。POSIX Agent 命令默认使用 Bash。SSH stdin/stdout/stderr 保持在长生命周期 exec channel 上，不写远端日志文件。

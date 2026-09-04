@@ -1421,11 +1421,17 @@ const LiveSubagentCard = memo(function LiveSubagentCard({
   );
 });
 
-/** 将工具返回的结构化业务错误投影为统一失败状态。 */
+/** 投影工具的结构化业务错误，并保留用户拒绝的独立状态。 */
 export function resolveToolDisplay(part: AnyToolPart): {
   state: AnyToolPart["state"];
   errorText: string | undefined;
 } {
+  if (part.state === "output-denied") {
+    return {
+      state: "output-denied",
+      errorText: undefined,
+    };
+  }
   const output = "output" in part ? part.output : undefined;
   const structuredError =
     output && typeof output === "object"
@@ -1443,6 +1449,7 @@ export function resolveToolDisplay(part: AnyToolPart): {
   };
 }
 
+/** 渲染工具摘要，并将拒绝原因作为非错误终态展示。 */
 const RenderedTool = memo(function RenderedTool({
   part,
 }: {
@@ -1454,8 +1461,8 @@ const RenderedTool = memo(function RenderedTool({
       : part.type.replace(/^tool-/, "");
   const externalLabel = externalAgentActivityLabel(toolName, part.input);
   const display = resolveToolDisplay(part);
-
-  return (
+  const denied = part.state === "output-denied";
+  const tool = (
     <Tool
       className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
       toolName={externalLabel ?? toolName}
@@ -1464,6 +1471,17 @@ const RenderedTool = memo(function RenderedTool({
       output={"output" in part ? part.output : undefined}
       errorText={display.errorText}
     />
+  );
+
+  if (!denied) return tool;
+
+  return (
+    <div className="space-y-0.5">
+      {tool}
+      <div className="pl-7 text-[11px] text-orange-600 dark:text-orange-400">
+        {i18n.t("ai:chat.toolDenied")}
+      </div>
+    </div>
   );
 });
 

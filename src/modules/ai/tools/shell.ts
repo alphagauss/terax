@@ -11,8 +11,8 @@ import {
   type ShellProcessResponse,
 } from "../lib/native";
 import { redactSensitive } from "../lib/redact";
-import { checkShellCommand } from "../lib/security";
 import { resolvePath, type ToolContext } from "./context";
+import { accessModeForCall, shellNeedsApproval } from "./authorization";
 
 const DEFAULT_TIMEOUT_SECS = 300;
 const DEFAULT_YIELD_MS = 10_000;
@@ -61,7 +61,7 @@ export function buildShellTools(ctx: ToolContext) {
   return {
     shell_exec: tool({
       description:
-        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. The call waits briefly and returns a process_id whether the command exits or keeps running. Bash is the default in POSIX environments and PowerShell is the default in Windows Local workspaces. Use timeout_secs=null for intentional long-running processes. Never start full-screen TTY programs such as vim, less, or top. Supports Local, WSL, and SSH workspaces. Follows the current approval mode.",
+        "Start a managed non-TTY shell process for tests, builds, package commands, dev servers, watchers, and other command execution. Workspace-local commands run automatically; outside paths, network access, and commands that cannot be classified safely require approval unless full access is enabled. The call waits briefly and returns a process_id whether the command exits or keeps running. Never start full-screen TTY programs such as vim, less, or top.",
       inputSchema: z.object({
         command: z
           .string()
@@ -85,10 +85,15 @@ export function buildShellTools(ctx: ToolContext) {
           .optional(),
         login: z.boolean().optional(),
       }),
-      needsApproval: () => ctx.getPermissionMode() === "ask",
+      needsApproval: (input) =>
+        ctx.supportsApprovals &&
+        ctx.getPermissionMode() === "ask" &&
+        shellNeedsApproval(input.command, input.cwd, ctx.getCwd()),
       execute: async (input) => {
-        const safety = checkShellCommand(input.command);
-        if (!safety.ok) return { error: safety.reason };
+        const approvalRequired =
+          ctx.supportsApprovals &&
+          ctx.getPermissionMode() === "ask" &&
+          shellNeedsApproval(input.command, input.cwd, ctx.getCwd());
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };
         try {
@@ -97,6 +102,10 @@ export function buildShellTools(ctx: ToolContext) {
             command: input.command,
             initialCwd: ctx.getCwd(),
             cwd: input.cwd ? resolvePath(input.cwd, ctx.getCwd()) : null,
+            permissionMode: accessModeForCall(
+              ctx.getPermissionMode(),
+              approvalRequired,
+            ),
             timeoutSecs:
               input.timeout_secs === null
                 ? 0
@@ -118,7 +127,9 @@ export function buildShellTools(ctx: ToolContext) {
         "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output.",
       inputSchema: processInputSchema,
       needsApproval: (input) =>
-        input.action === "write" && ctx.getPermissionMode() === "ask",
+        ctx.supportsApprovals &&
+        input.action === "write" &&
+        ctx.getPermissionMode() === "ask",
       execute: async (input) => {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };

@@ -814,7 +814,7 @@ pub async fn agent_file_commit_mutation(
     Ok(AgentMutationResult { files: results })
 }
 
-/// 丢弃单个审批快照。
+/// 丢弃单个预备快照。
 #[tauri::command]
 pub async fn agent_file_clear_mutation(
     state: State<'_, AgentFileState>,
@@ -829,7 +829,7 @@ pub async fn agent_file_clear_mutation(
     Ok(())
 }
 
-/// 清理聊天拥有的读取版本和审批快照。
+/// 清理聊天拥有的读取版本和预备快照。
 #[tauri::command]
 pub async fn agent_file_clear_owner(
     state: State<'_, AgentFileState>,
@@ -1351,7 +1351,7 @@ async fn authorize_path(
 ) -> Result<AuthorizedPath, String> {
     validate_path_input(root)?;
     validate_path_input(path)?;
-    let actual = join_workspace_path(root, path, workspace)?;
+    let actual = join_workspace_path(root, path, workspace);
     if permission_mode == AgentPermissionMode::Ask {
         ensure_safe_path(&actual)?;
     }
@@ -1435,11 +1435,15 @@ fn stable_io_path(
     if relative.is_empty() {
         Ok(root.to_string())
     } else {
-        normalize_posix_path(&format!("{}/{relative}", root.trim_end_matches('/')))
+        Ok(normalize_posix_path(&format!(
+            "{}/{relative}",
+            root.trim_end_matches('/')
+        )))
     }
 }
 
-fn join_workspace_path(root: &str, path: &str, workspace: &WorkspaceEnv) -> Result<String, String> {
+/// 以会话 cwd 为基准解析模型路径，但不在此决定是否允许越界。
+fn join_workspace_path(root: &str, path: &str, workspace: &WorkspaceEnv) -> String {
     if workspace.is_ssh() || workspace.is_wsl() {
         let path = path.replace('\\', "/");
         let joined = if path.starts_with('/') {
@@ -1455,37 +1459,43 @@ fn join_workspace_path(root: &str, path: &str, workspace: &WorkspaceEnv) -> Resu
     } else {
         Path::new(root).join(requested)
     };
-    normalize_local_path(&joined).map(|value| value.to_string_lossy().into_owned())
+    normalize_local_path(&joined).to_string_lossy().into_owned()
 }
 
-fn normalize_posix_path(path: &str) -> Result<String, String> {
+/// 对 SSH 和 WSL 路径执行不访问文件系统的词法归一化。
+fn normalize_posix_path(path: &str) -> String {
     let absolute = path.starts_with('/');
     let mut parts = Vec::new();
     for part in path.split('/') {
         match part {
             "" | "." => {}
-            ".." => return Err("parent traversal is not allowed".into()),
+            ".." => {
+                parts.pop();
+            }
             value => parts.push(value),
         }
     }
     let normalized = parts.join("/");
-    Ok(if absolute {
+    if absolute {
         format!("/{normalized}")
     } else {
         normalized
-    })
+    }
 }
 
-fn normalize_local_path(path: &Path) -> Result<PathBuf, String> {
+/// 按当前平台路径语义解析 `.` 和 `..`，后续再执行 canonical 授权。
+fn normalize_local_path(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
-            Component::ParentDir => return Err("parent traversal is not allowed".into()),
+            Component::ParentDir => {
+                normalized.pop();
+            }
             Component::CurDir => {}
             value => normalized.push(value.as_os_str()),
         }
     }
-    Ok(normalized)
+    normalized
 }
 
 fn canonicalize_local_nearest(path: &Path) -> Result<PathBuf, String> {
@@ -2326,9 +2336,12 @@ mod tests {
     }
 
     #[test]
-    fn path_normalization_rejects_parent_traversal() {
-        assert!(normalize_posix_path("/work/../secret").is_err());
-        assert!(normalize_local_path(Path::new(r"C:\work\..\secret")).is_err());
+    fn path_normalization_resolves_parent_components() {
+        assert_eq!(normalize_posix_path("/work/../secret"), "/secret");
+        assert_eq!(
+            normalize_local_path(&Path::new("work").join("..").join("secret")),
+            PathBuf::from("secret")
+        );
         assert_eq!(
             stable_io_path(
                 "/workspace",
@@ -2635,6 +2648,27 @@ mod tests {
             &registry,
             &root_text,
             &sibling.to_string_lossy(),
+            &WorkspaceEnv::Local,
+            AgentPermissionMode::FullAccess,
+            true,
+        )
+        .await
+        .is_ok());
+
+        assert!(authorize_path(
+            &registry,
+            &root_text,
+            "../sibling.txt",
+            &WorkspaceEnv::Local,
+            AgentPermissionMode::Ask,
+            true,
+        )
+        .await
+        .is_err());
+        assert!(authorize_path(
+            &registry,
+            &root_text,
+            "../sibling.txt",
             &WorkspaceEnv::Local,
             AgentPermissionMode::FullAccess,
             true,

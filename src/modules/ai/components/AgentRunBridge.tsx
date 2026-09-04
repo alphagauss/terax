@@ -7,6 +7,7 @@ import { type UIMessage, useChat } from "@ai-sdk/react";
 import type { UIMessagePart } from "ai";
 import { useEffect, useMemo, useRef } from "react";
 import { shouldCommitSession } from "../lib/sessionLifecycle";
+import { TOOL_APPROVAL_DENIED_REASON } from "../lib/sessionMessages";
 import { useApprovalStore } from "../store/approvalStore";
 import { getOrCreateChat } from "../store/chatRuntime";
 import { type AgentRunStatus, useChatStore } from "../store/chatStore";
@@ -42,6 +43,7 @@ export function AgentRunBridge() {
   );
 }
 
+/** 绑定单个运行中会话的审批、预览和终态持久化。 */
 function SessionRunBridge({ sessionId }: { sessionId: string }) {
   const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const { status, messages, addToolApprovalResponse } = useChat<UIMessage>({
@@ -62,7 +64,11 @@ function SessionRunBridge({ sessionId }: { sessionId: string }) {
     useApprovalStore
       .getState()
       .registerResponder(sessionId, (approvalId, approved) =>
-        addToolApprovalResponse({ id: approvalId, approved }),
+        addToolApprovalResponse({
+          id: approvalId,
+          approved,
+          ...(approved ? {} : { reason: TOOL_APPROVAL_DENIED_REASON }),
+        }),
       );
     return () => {
       useApprovalStore.getState().registerResponder(sessionId, null);
@@ -90,7 +96,8 @@ function SessionRunBridge({ sessionId }: { sessionId: string }) {
         toolName: approval.toolName,
         input: approval.input,
         cwd,
-        permissionMode: "ask",
+        // 只有越界或敏感修改会进入审批，预览按本次待批准权限解析目标。
+        permissionMode: "full-access",
       })
         .then((preview) => {
           if (!cancelled) {

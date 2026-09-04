@@ -28,6 +28,7 @@ function makeContext(): ToolContext {
     isActiveTerminalPrivate: () => false,
     getSessionId: () => "session",
     getPermissionMode: () => "ask",
+    supportsApprovals: true,
   };
 }
 

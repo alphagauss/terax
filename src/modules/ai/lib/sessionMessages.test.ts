@@ -1,6 +1,6 @@
 /**
  * 本文件验证 AI 会话记录与 AI SDK UIMessage 之间的转换。
- * 测试锁定 nanobot 风格工具调用、展示耗时、工具结果顺序和 turn 分组等不变量。
+ * 测试锁定工具调用、展示耗时、结果顺序、turn 分组及恢复后的 prompt cache 前缀。
  */
 
 import type { UIMessage } from "@ai-sdk/react";
@@ -10,11 +10,16 @@ import {
   serializeSessionMessages,
   serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
+  TOOL_APPROVAL_DENIED_REASON,
   type SessionMessage,
 } from "./sessionMessages";
 import { convertToAgentModelMessages } from "./subagentMessages";
 
 const timestamp = "2026-07-26T10:00:00.000Z";
+
+function jsonlRoundTrip(records: SessionMessage[]): SessionMessage[] {
+  return records.map((record) => JSON.parse(JSON.stringify(record)));
+}
 
 describe("AI session message conversion", () => {
   it("serializes a simple turn as readable role/content records", () => {
@@ -98,6 +103,106 @@ describe("AI session message conversion", () => {
           ),
         },
       ]),
+    );
+  });
+
+  it("keeps a denied approval identical in live and restored model input", async () => {
+    const live: UIMessage[] = [
+      {
+        id: "assistant-denied",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-shell_exec",
+            toolCallId: "shell-denied",
+            state: "output-denied",
+            input: { command: "curl https://example.com" },
+            approval: {
+              id: "approval-denied",
+              approved: false,
+              reason: TOOL_APPROVAL_DENIED_REASON,
+            },
+          },
+        ],
+      } as UIMessage,
+    ];
+    const records = serializeSessionMessages(live, {
+      timestamp,
+      turnId: "turn-denied",
+    });
+
+    expect(records[1]).toMatchObject({
+      role: "tool",
+      tool_call_id: "shell-denied",
+      approval_id: "approval-denied",
+      approval_approved: false,
+      approval_reason: TOOL_APPROVAL_DENIED_REASON,
+      status: "denied",
+      content: TOOL_APPROVAL_DENIED_REASON,
+    });
+    const restoredMessages = projectSessionMessages(
+      "session-1",
+      jsonlRoundTrip(records),
+    );
+    const restored = restoredMessages[0].parts.find(
+      (part) => "toolCallId" in part && part.toolCallId === "shell-denied",
+    );
+    expect(restored).toMatchObject({
+      state: "output-denied",
+      approval: {
+        approved: false,
+        reason: TOOL_APPROVAL_DENIED_REASON,
+      },
+    });
+    expect(await convertToAgentModelMessages(restoredMessages)).toEqual(
+      await convertToAgentModelMessages(live),
+    );
+  });
+
+  it("keeps structured and thrown tool errors identical after restoration", async () => {
+    const live: UIMessage[] = [
+      {
+        id: "assistant-errors",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-read_file",
+            toolCallId: "read-error",
+            state: "output-available",
+            input: { path: "missing.txt" },
+            output: { error: "path not found", path: "missing.txt" },
+            approval: {
+              id: "approval-read",
+              approved: true,
+              reason: "Approved once.",
+            },
+          },
+          {
+            type: "tool-shell_exec",
+            toolCallId: "shell-error",
+            state: "output-error",
+            input: { command: "false" },
+            errorText: "process could not start",
+            approval: {
+              id: "approval-shell",
+              approved: true,
+              signature: "stable-signature",
+            },
+          },
+        ],
+      } as UIMessage,
+    ];
+    const records = serializeSessionMessages(live, {
+      timestamp,
+      turnId: "turn-errors",
+    });
+    const restored = projectSessionMessages(
+      "session-1",
+      jsonlRoundTrip(records),
+    );
+
+    expect(await convertToAgentModelMessages(restored)).toEqual(
+      await convertToAgentModelMessages(live),
     );
   });
 

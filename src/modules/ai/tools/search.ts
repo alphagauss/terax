@@ -7,6 +7,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { native } from "../lib/native";
 import type { ToolContext } from "./context";
+import { accessModeForCall, pathNeedsApproval } from "./authorization";
 
 /** 创建路径发现和文本内容搜索工具。 */
 export function buildSearchTools(ctx: ToolContext) {
@@ -23,12 +24,23 @@ export function buildSearchTools(ctx: ToolContext) {
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(2_000).optional(),
       }),
+      needsApproval: (input) =>
+        ctx.supportsApprovals &&
+        ctx.getPermissionMode() === "ask" &&
+        pathNeedsApproval(input.path ?? ".", ctx.getCwd()),
       execute: async (input) => {
+        const approvalRequired =
+          ctx.supportsApprovals &&
+          ctx.getPermissionMode() === "ask" &&
+          pathNeedsApproval(input.path ?? ".", ctx.getCwd());
         try {
           return await native.agentFileFind({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
-            permissionMode: ctx.getPermissionMode(),
+            permissionMode: accessModeForCall(
+              ctx.getPermissionMode(),
+              approvalRequired,
+            ),
             path: input.path,
             glob: input.glob,
             recursive: input.recursive,
@@ -45,7 +57,7 @@ export function buildSearchTools(ctx: ToolContext) {
 
     grep: tool({
       description:
-        "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Honors ignore files and refuses sensitive paths. Prefer this over shell grep.",
+        "Search UTF-8 file contents in a file or directory. Supports literal or Rust-regex syntax, include globs, content/files/count output, bounded context, and offset/limit pagination. Outside-workspace and sensitive paths require approval unless full access is enabled. Prefer this over shell grep.",
       inputSchema: z.object({
         pattern: z.string().min(1),
         path: z.string().min(1).optional(),
@@ -57,12 +69,23 @@ export function buildSearchTools(ctx: ToolContext) {
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(500).optional(),
       }),
+      needsApproval: (input) =>
+        ctx.supportsApprovals &&
+        ctx.getPermissionMode() === "ask" &&
+        pathNeedsApproval(input.path ?? ".", ctx.getCwd()),
       execute: async (input) => {
+        const approvalRequired =
+          ctx.supportsApprovals &&
+          ctx.getPermissionMode() === "ask" &&
+          pathNeedsApproval(input.path ?? ".", ctx.getCwd());
         try {
           return await native.agentFileGrep({
             ownerSessionId: ctx.getSessionId(),
             root: ctx.getCwd(),
-            permissionMode: ctx.getPermissionMode(),
+            permissionMode: accessModeForCall(
+              ctx.getPermissionMode(),
+              approvalRequired,
+            ),
             path: input.path,
             pattern: input.pattern,
             syntax: input.syntax,

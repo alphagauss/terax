@@ -498,6 +498,8 @@ function buildSubagentTaskRunner({
   const toolContext: ToolContext = {
     ...opts.toolContext,
     getPermissionMode: () => permissionMode,
+    // Subagent 没有独立审批通道，越界调用应由原生边界返回明确错误。
+    supportsApprovals: false,
   };
   return async ({ task, abortSignal, onProgress }) => {
     const childModel = await buildConfiguredLanguageModel(model, opts.keys, {
@@ -506,7 +508,7 @@ function buildSubagentTaskRunner({
       providerInstanceKeys: opts.providerInstanceKeys,
     });
     const prompt = prepareAgentPrompt(
-      `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents.`,
+      `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents or request interactive tool approval. Report any restricted tool error to the main agent.`,
       [{ role: "user", content: task }],
       resolveModel(model, {
         customProviders: opts.customProviders,

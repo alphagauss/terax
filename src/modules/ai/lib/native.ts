@@ -1,6 +1,6 @@
 /**
  * 本文件定义前端与 Tauri 原生命令之间的类型化调用边界。
- * 负责注入当前工作区环境，并为文件工具暴露版本化条件写入，不包含业务状态或缓存。
+ * 负责注入当前工作区环境，并传递文件条件写入与 Shell 访问级别，不包含业务状态或缓存。
  */
 
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
@@ -363,6 +363,7 @@ export const native = {
     command: string;
     initialCwd: string;
     cwd?: string | null;
+    permissionMode: AgentPermissionMode;
     timeoutSecs: number;
     yieldTimeMs: number;
     maxOutputBytes: number;

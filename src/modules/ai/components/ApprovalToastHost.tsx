@@ -38,6 +38,9 @@ const TOOL_META: Record<
   string,
   { labelKey: string; icon: typeof FilePlusIcon }
 > = {
+  read_file: { labelKey: "toolApproval.readFile", icon: ToolsIcon },
+  find_files: { labelKey: "toolApproval.findFiles", icon: ToolsIcon },
+  grep: { labelKey: "toolApproval.searchFiles", icon: ToolsIcon },
   write_file: { labelKey: "toolApproval.writeFile", icon: FilePlusIcon },
   apply_patch: { labelKey: "toolApproval.editFileBatch", icon: Edit02Icon },
   file_operation: { labelKey: "toolApproval.fileOperation", icon: ToolsIcon },
