@@ -4,10 +4,18 @@
  */
 
 import {
-  getAgentTurnCoordinator,
   clearAgentTurnCoordinator,
+  getAgentTurnCoordinator,
 } from "@/modules/ai/agents/subagentRuntime";
+import {
+  conversationEventPart,
+  convertToAgentModelMessages,
+  projectSessionMessages,
+  type SessionMessage,
+  type TurnEvent,
+} from "@/modules/ai/lib/conversation";
 import { steerChatMessage } from "@/modules/ai/store/chatRuntime";
+import type { UIMessage } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
@@ -61,7 +69,7 @@ import {
   chats,
   flushCompletedSessionRuns,
   isSessionWritable,
-  pendingTurnIds,
+  pendingTurns,
   persistedMessageCounts,
   seedMessages,
   sessionMetadata,
@@ -137,7 +145,7 @@ describe("chat store multi-process lifecycle", () => {
     seedMessages.clear();
     persistedMessageCounts.clear();
     sessionMetadata.clear();
-    pendingTurnIds.clear();
+    pendingTurns.clear();
     useAgentsStore.setState({
       customAgents: [],
       draftAgentId: MAIN_AGENT_ID,
@@ -264,55 +272,102 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
   });
 
-  it("checkpoints completed steps and subagent results without releasing the turn", async () => {
+  it("commits multiple checkpoints and the terminal tail exactly once, advancing only after success", async () => {
     useChatStore.setState({
       sessions: [first],
       runLockSessionIds: { [first.id]: true },
     });
     sessionMetadata.set(first.id, { title: first.title });
-    pendingTurnIds.set(first.id, "turn-1");
-
-    await useChatStore.getState().persistTurnCheckpoint(
-      first.id,
-      [
+    persistedMessageCounts.set(first.id, 1);
+    const writes: SessionMessage[] = [];
+    io.commit.mockImplementation(async (file) => {
+      writes.push(...file.messages);
+      return first;
+    });
+    const initial: UIMessage = {
+      id: "user",
+      role: "user",
+      parts: [{ type: "text", text: "Question" }],
+    };
+    let completed: UIMessage = {
+      id: "assistant",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        { type: "text", text: "Candidate", state: "done" },
+      ],
+    };
+    const result: TurnEvent = {
+      version: 1,
+      event: "subagent_result",
+      results: [
         {
-          id: "assistant-cycle",
-          role: "assistant",
-          parts: [
-            { type: "step-start" },
-            { type: "text", text: "Candidate", state: "done" },
-          ],
+          taskId: "task-1",
+          label: "Inspector",
+          status: "completed",
+          result: "done",
         },
       ],
-      {
-        version: 1,
-        event: "subagent_result",
-        results: [
-          {
-            taskId: "task-1",
-            label: "Inspector",
-            status: "completed",
-            result: "done",
-          },
-        ],
-      },
-    );
-
-    expect(io.commit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: first.id,
-        messages: [
-          expect.objectContaining({ role: "assistant", content: "Candidate" }),
-          expect.objectContaining({
-            role: "user",
-            injected_event: "subagent_result",
-            subagent_task_ids: ["task-1"],
-          }),
-        ],
-      }),
-    );
+    };
+    const checkpoint = useChatStore.getState().persistTurnCheckpoint;
+    await checkpoint(first.id, [completed], result);
     expect(io.release).not.toHaveBeenCalled();
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+    completed = {
+      ...completed,
+      parts: [
+        ...completed.parts,
+        conversationEventPart(result),
+        { type: "step-start" },
+        { type: "text", text: "Following up", state: "done" },
+      ],
+    };
+    const guide: TurnEvent = {
+      event: "user_steering",
+      message: {
+        id: "guide",
+        role: "user",
+        parts: [{ type: "text", text: "Correction" }],
+      },
+    };
+    const cursor = pendingTurns.get(first.id)?.committedParts;
+    io.commit.mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(checkpoint(first.id, [completed], guide)).rejects.toThrow(
+      "disk unavailable",
+    );
+    expect(pendingTurns.get(first.id)?.committedParts).toBe(cursor);
+    await checkpoint(first.id, [completed], guide);
+    completed = {
+      ...completed,
+      parts: [
+        ...completed.parts,
+        conversationEventPart(guide),
+        { type: "step-start" },
+        { type: "text", text: "Final", state: "done" },
+      ],
+    };
+    io.release.mockRejectedValueOnce(new Error("unlock failed"));
+    await expect(
+      useChatStore.getState().commitMessages(first.id, [initial, completed]),
+    ).rejects.toThrow("unlock failed");
+    await useChatStore
+      .getState()
+      .commitMessages(first.id, [initial, completed]);
+    expect(writes.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: "assistant", content: "Candidate" },
+      { role: "event", content: result },
+      { role: "assistant", content: "Following up" },
+      { role: "user", content: "Correction" },
+      { role: "assistant", content: "Final" },
+    ]);
+    expect(writes[3]).toMatchObject({ guided: true, message_id: "guide" });
+    expect(pendingTurns.has(first.id)).toBe(false);
+    expect(io.release).toHaveBeenCalledTimes(2);
+    expect(
+      await convertToAgentModelMessages(
+        projectSessionMessages(first.id, writes),
+      ),
+    ).toEqual(await convertToAgentModelMessages([completed]));
   });
 
   it("persists final subagent display snapshots once and materializes the active chat", async () => {
@@ -340,7 +395,7 @@ describe("chat store multi-process lifecycle", () => {
     const chat = { status: "ready", messages } as never;
     chats.set(first.id, chat);
     persistedMessageCounts.set(first.id, 1);
-    pendingTurnIds.set(first.id, "turn-1");
+    pendingTurns.set(first.id, { id: "turn-1", committedParts: 0 });
     useChatStore.setState({
       sessions: [first],
       runLockSessionIds: { [first.id]: true },
@@ -377,8 +432,8 @@ describe("chat store multi-process lifecycle", () => {
           expect.objectContaining({ role: "tool", name: "run_subagent" }),
           expect.objectContaining({
             role: "display",
-            display_event: "subagent",
-            subagent_display: expect.objectContaining({
+
+            content: expect.objectContaining({
               taskId: "task-1",
               status: "completed",
             }),
@@ -389,8 +444,8 @@ describe("chat store multi-process lifecycle", () => {
     const displayRecord = io.commit.mock.calls[0][0].messages.find(
       (record: { role?: string }) => record.role === "display",
     );
-    expect(displayRecord.subagent_display).not.toHaveProperty("task");
-    expect(displayRecord.subagent_display).not.toHaveProperty("result");
+    expect(displayRecord.content).not.toHaveProperty("task");
+    expect(displayRecord.content).not.toHaveProperty("result");
     expect(
       (chats.get(first.id)?.messages[1].parts ?? []).map((part) => part.type),
     ).toEqual(["tool-run_subagent", "data-subagent-display"]);

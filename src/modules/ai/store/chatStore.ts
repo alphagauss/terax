@@ -3,19 +3,9 @@
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
-import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
 import i18n from "@/i18n";
 import { readSharedStore } from "@/lib/sharedStore";
 import {
-  currentWorkspaceBootstrap,
-  deleteWorkspaceValue,
-  getWorkspaceValue,
-  setWorkspaceValue,
-} from "@/modules/workspace-process";
-import type { Chat, UIMessage } from "@ai-sdk/react";
-import { create } from "zustand";
-import {
-  materializeSubagentDisplayParts,
   type SubagentDisplayState,
   toSubagentDisplaySnapshot,
 } from "@/modules/ai/agents/subagentDisplay";
@@ -34,17 +24,20 @@ import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime"
 import type { AgentUsage } from "@/modules/ai/lib/agent";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
+  conversationEventPart,
+  materializeSubagentDisplayParts,
+  projectSessionMessages,
+  serializeSessionMessages,
+  serializeSubagentDisplaySnapshots,
+  type TurnEvent,
+  uncommittedConversationMessages,
+} from "@/modules/ai/lib/conversation";
+import {
   EMPTY_PROVIDER_KEYS,
   type ProviderInstanceKeys,
   type ProviderKeys,
 } from "@/modules/ai/lib/keyring";
 import { pushRecentModel } from "@/modules/ai/lib/modelPrefs";
-import {
-  projectSessionMessages,
-  serializeSessionMessages,
-  serializeSubagentDisplaySnapshots,
-  serializeSubagentResultEvent,
-} from "@/modules/ai/lib/sessionMessages";
 import {
   acquireSessionRun,
   clearSessionProcesses,
@@ -64,6 +57,14 @@ import {
   type SessionRunOutcome,
   useSessionAttentionStore,
 } from "@/modules/ai/store/sessionAttentionStore";
+import {
+  currentWorkspaceBootstrap,
+  deleteWorkspaceValue,
+  getWorkspaceValue,
+  setWorkspaceValue,
+} from "@/modules/workspace-process";
+import type { Chat, UIMessage } from "@ai-sdk/react";
+import { create } from "zustand";
 
 export type Live = {
   draftCwd: string | null;
@@ -278,8 +279,21 @@ export const seedMessages = new Map<string, UIMessage[]>();
 export const persistedMessageCounts = new Map<string, number>();
 /** 缓存已实际读取会话的完整 metadata，列表轮询只维护轻量摘要。 */
 export const sessionMetadata = new Map<string, SessionData>();
-/** 保存当前未结束 turn 的稳定 ID，发送前的用户记录与结束后的响应共用它。 */
-export const pendingTurnIds = new Map<string, string>();
+/** 保存当前 turn 的稳定 ID 和已提交 part 位置，终态提交成功后一起释放。 */
+export const pendingTurns = new Map<
+  string,
+  { id: string; committedParts: number }
+>();
+
+/** 同一 turn 的提交游标只在原子写入成功后推进。 */
+function pendingTurn(id: string) {
+  let turn = pendingTurns.get(id);
+  if (!turn) {
+    turn = { id: newTurnId(), committedParts: 0 };
+    pendingTurns.set(id, turn);
+  }
+  return turn;
+}
 
 /** 创建不暴露存储格式细节的 turn ID。 */
 function newTurnId(): string {
@@ -487,7 +501,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         seedMessages.delete(session.id);
         persistedMessageCounts.delete(session.id);
         sessionMetadata.delete(session.id);
-        pendingTurnIds.delete(session.id);
+        pendingTurns.delete(session.id);
       }
 
       const merged = mergeSessionMetadata(local, disk, runLocks);
@@ -677,11 +691,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       submittedUsers.push(message);
     }
 
-    let turnId = pendingTurnIds.get(id);
-    if (!turnId) {
-      turnId = newTurnId();
-      pendingTurnIds.set(id, turnId);
-    }
+    const turnId = pendingTurn(id).id;
     const updatedAt = Date.now();
     const title =
       !meta.title || meta.title === "New chat"
@@ -717,36 +727,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
   /**
    * 在同一 turn 的下一次 provider 请求前追加完整步骤、用户引导或后台结果。
    *
-   * checkpoint 不前移 UIMessage 数量游标，也不释放运行锁；最终提交会依据
-   * Assistant 内的 checkpoint data part 跳过已经落盘的前缀。
+   * checkpoint 不前移 UIMessage 数量游标，也不释放运行锁；转换前先
+   * 由当前 turn 的流 part 游标选择增量，最终提交沿用同一游标。
    */
   persistTurnCheckpoint: async (id, completedMessages, event) => {
     const meta = get().sessions.find((session) => session.id === id);
     if (!meta) throw new Error("AI session metadata is unavailable");
     const updatedAt = Date.now();
+    const turn = pendingTurn(id);
     const options = {
       timestamp: new Date(updatedAt).toISOString(),
-      turnId: pendingTurnIds.get(id) ?? newTurnId(),
+      turnId: turn.id,
       turnStatus: "running",
     };
-    if (!pendingTurnIds.has(id)) pendingTurnIds.set(id, options.turnId);
-    const messages = [
-      ...serializeSessionMessages(completedMessages, options),
-      ...(event.event === "user_steering"
-        ? serializeSessionMessages(
-            [
-              {
-                ...event.message,
-                metadata: {
-                  ...(event.message.metadata as object),
-                  guided: true,
-                },
-              },
-            ],
-            options,
-          )
-        : [serializeSubagentResultEvent(event, options)]),
-    ];
+    const messages = serializeSessionMessages(
+      [
+        ...uncommittedConversationMessages(
+          completedMessages,
+          turn.committedParts,
+        ),
+        {
+          id: "event",
+          role: "assistant",
+          parts: [conversationEventPart(event)],
+        },
+      ],
+      options,
+    );
     const committedMeta = await commitSession({
       id,
       createdAt: meta.createdAt,
@@ -759,6 +766,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       },
       messages,
     });
+    turn.committedParts = (completedMessages[0]?.parts.length ?? 0) + 1;
     set({
       sessions: get().sessions.map((session) =>
         session.id === id ? committedMeta : session,
@@ -852,7 +860,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         seedMessages.delete(id);
         persistedMessageCounts.delete(id);
         sessionMetadata.delete(id);
-        pendingTurnIds.delete(id);
+        pendingTurns.delete(id);
         useSessionAttentionStore.getState().clearSession(id);
         const agentMetaBySession = { ...get().agentMetaBySession };
         delete agentMetaBySession[id];
@@ -921,7 +929,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       );
       if (messages.length === 0 && meta.title === "New chat") {
         await releaseSessionRun(id);
-        pendingTurnIds.delete(id);
+        pendingTurns.delete(id);
         useSessionAttentionStore.getState().finalizeRun(id, outcome);
         const runLockSessionIds = { ...get().runLockSessionIds };
         delete runLockSessionIds[id];
@@ -934,7 +942,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
       }
       const updatedAt = Date.now();
       const timestamp = new Date(updatedAt).toISOString();
-      const turnId = pendingTurnIds.get(id) ?? newTurnId();
+      const turn = pendingTurn(id);
+      const turnId = turn.id;
       const title =
         !meta.title || meta.title === "New chat"
           ? deriveTitle(messages)
@@ -955,7 +964,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
       const recordOptions = { timestamp, turnId, turnStatus: outcome };
       const records = [
         ...serializeSessionMessages(
-          messages.slice(persistedCount),
+          uncommittedConversationMessages(
+            messages.slice(persistedCount),
+            turn.committedParts,
+          ),
           recordOptions,
         ),
         ...serializeSubagentDisplaySnapshots(snapshots, recordOptions),
@@ -973,6 +985,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         messages: records,
       });
       persistedMessageCounts.set(id, messages.length);
+      // 终态记录已落盘；后续刷新或解锁失败重试时，不能再次截取已完成响应的 part。
+      turn.committedParts = 0;
       const chat = chats.get(id);
       if (chat && snapshots.length > 0) {
         chat.messages = materializeSubagentDisplayParts(
@@ -994,7 +1008,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       await get().refreshSessions();
       await releaseSessionRun(id);
-      pendingTurnIds.delete(id);
+      pendingTurns.delete(id);
       useSessionAttentionStore.getState().finalizeRun(id, outcome);
       const runLockSessionIds = { ...get().runLockSessionIds };
       delete runLockSessionIds[id];

@@ -3,15 +3,15 @@
  * 测试锁定敏感值不会进入摘要，展示 data part 只关联原始工具调用。
  */
 
+import { materializeSubagentDisplayParts } from "@/modules/ai/lib/conversation";
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it } from "vitest";
 import {
   isSubagentDisplaySnapshot,
   isSubagentToolErrorOutput,
-  materializeSubagentDisplayParts,
+  type SubagentDisplayState,
   summarizeSubagentToolInput,
   toSubagentDisplaySnapshot,
-  type SubagentDisplayState,
 } from "./subagentDisplay";
 
 const runningDisplay: SubagentDisplayState = {

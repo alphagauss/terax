@@ -3,18 +3,18 @@
  * 测试锁定复用 reasoning ID 时的分段耗时、空正文事件和无 reasoning 工具的活动边界。
  */
 
+import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
+import { modelRefForProvider } from "@/modules/ai/config";
+import { runAgentStream } from "@/modules/ai/lib/agent";
+import {
+  activityDurationFromPart,
+  reasoningDurationFromPart,
+} from "@/modules/ai/lib/conversation";
+import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
-import { modelRefForProvider } from "@/modules/ai/config";
-import { runAgentStream } from "@/modules/ai/lib/agent";
-import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
-import {
-  activityDurationFromPart,
-  reasoningDurationFromPart,
-} from "@/modules/ai/lib/sessionMessages";
 
 let activeModel: MockLanguageModelV3;
 

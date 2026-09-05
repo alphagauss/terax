@@ -3,17 +3,26 @@
  * 测试锁定工具调用、展示耗时、结果顺序、turn 分组及恢复后的 prompt cache 前缀。
  */
 
-import type { UIMessage } from "@ai-sdk/react";
-import { describe, expect, it } from "vitest";
 import {
+  convertToAgentModelMessages,
+  formatSubagentResultEvent,
+  messageMetadata,
+  projectConversationDisplay,
   projectSessionMessages,
+  type SessionMessage,
   serializeSessionMessages,
   serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
   TOOL_APPROVAL_DENIED_REASON,
-  type SessionMessage,
-} from "./sessionMessages";
-import { convertToAgentModelMessages } from "./subagentMessages";
+} from "@/modules/ai/lib/conversation";
+import type { UIMessage } from "@ai-sdk/react";
+import { describe, expect, it } from "vitest";
+
+const user = (id: string): UIMessage => ({
+  id,
+  role: "user",
+  parts: [{ type: "text", text: id }],
+});
 
 const timestamp = "2026-07-26T10:00:00.000Z";
 
@@ -90,8 +99,10 @@ describe("AI session message conversion", () => {
       turnId: "turn-1",
     });
 
-    expect(records[0].reasoning_duration_ms).toBe(1250);
-    expect(records[0].activity_duration_ms).toBe(2400);
+    expect(records[0]).toMatchObject({
+      reasoning_duration_ms: 1250,
+      activity_duration_ms: 2400,
+    });
     const restored = projectSessionMessages("session-1", records)[0];
     expect(restored.parts).toEqual(assistant.parts);
     expect(await convertToAgentModelMessages([restored])).toEqual(
@@ -429,7 +440,7 @@ describe("AI session message conversion", () => {
     ]);
     expect(modelMessages[1]).toEqual({
       role: "user",
-      content: records[1].content,
+      content: [{ type: "text", text: formatSubagentResultEvent(event) }],
     });
   });
 
@@ -494,6 +505,15 @@ describe("AI session message conversion", () => {
       "data-subagent-display",
     ]);
 
+    expect(
+      serializeSessionMessages(messages, { timestamp, turnId: "turn-1" }),
+    ).toContainEqual({
+      role: "display",
+      content: snapshot,
+      timestamp,
+      turn_id: "turn-1",
+    });
+
     const withoutDisplay: UIMessage[] = messages.map((message) => ({
       ...message,
       parts: message.parts.filter(
@@ -509,10 +529,8 @@ describe("AI session message conversion", () => {
     const messages = projectSessionMessages("session-1", [
       {
         role: "display",
-        content: "must stay hidden",
+        content: { version: 1 } as never,
         timestamp,
-        display_event: "subagent",
-        subagent_display: { version: 1 } as never,
       },
     ]);
 
@@ -520,30 +538,7 @@ describe("AI session message conversion", () => {
     expect(await convertToAgentModelMessages(messages)).toEqual([]);
   });
 
-  it("does not hide an internal event whose persisted content is inconsistent", () => {
-    const messages = projectSessionMessages("session-1", [
-      {
-        role: "user",
-        content: "tampered content",
-        timestamp,
-        injected_event: "subagent_result",
-        subagent_result: {
-          version: 1,
-          event: "subagent_result",
-          results: [],
-        },
-      },
-    ]);
-
-    expect(messages).toEqual([
-      expect.objectContaining({
-        role: "user",
-        parts: [{ type: "text", text: "tampered content" }],
-      }),
-    ]);
-  });
-
-  it("skips the persisted assistant prefix during the terminal append", () => {
+  it("serializes the entire ordered history without inferring a commit cursor", () => {
     const event = {
       version: 1 as const,
       event: "subagent_result" as const,
@@ -572,11 +567,154 @@ describe("AI session message conversion", () => {
     expect(records).toEqual([
       {
         role: "assistant",
+        content: "Persisted prefix",
+        timestamp,
+        turn_id: "turn-1",
+        turn_status: "completed",
+      },
+      { role: "event", content: event, timestamp, turn_id: "turn-1" },
+      {
+        role: "assistant",
         content: "Terminal tail",
         timestamp,
         turn_id: "turn-1",
         turn_status: "completed",
       },
     ]);
+  });
+  it("引导之后完成的后台结果仍归属于之前的 Subagent 卡片", () => {
+    const result: UIMessage["parts"][number] = {
+      type: "data-subagent-result",
+      data: {
+        event: {
+          version: 1,
+          event: "subagent_result",
+          results: [
+            {
+              taskId: "child",
+              label: "inspect",
+              status: "completed",
+              result: "found",
+            },
+          ],
+        },
+      },
+    };
+    const display: UIMessage["parts"][number] = {
+      type: "data-subagent-display",
+      data: {
+        snapshot: {
+          version: 1,
+          taskId: "child",
+          toolCallId: "spawn",
+          label: "inspect",
+          status: "completed",
+          durationMs: 20,
+          steps: [],
+        },
+      },
+    };
+    const messages = projectConversationDisplay([
+      {
+        id: "run",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-run_subagent",
+            toolCallId: "spawn",
+            state: "output-available",
+            input: {},
+            output: { taskId: "child", status: "running" },
+          },
+          {
+            type: "data-user-steering",
+            data: { event: "user_steering", message: user("guide") },
+          },
+          { type: "text", text: "done" },
+          result,
+          display,
+        ],
+      },
+    ]);
+    expect(
+      messageMetadata(messages[0]).subagents?.resultsByTaskId.get("child"),
+    ).toMatchObject({ result: "found" });
+    expect(
+      messageMetadata(messages[0]).subagents?.displaysByToolCallId.get("spawn"),
+    ).toMatchObject({ taskId: "child" });
+    expect(messages[2].parts).toEqual([{ type: "text", text: "done" }]);
+  });
+
+  it("恢复引导标记和活动顺序，模型只接收正文与引导说明", async () => {
+    const guided: UIMessage = {
+      ...user("correct the target"),
+      metadata: { guided: true, internalNote: "internal-only" },
+      parts: [
+        { type: "text", text: "correct the target" },
+        {
+          type: "file",
+          mediaType: "image/png",
+          url: "data:image/png;base64,AA==",
+          filename: "target.png",
+        },
+        { type: "data-private", data: { note: "internal-only" } },
+      ],
+    };
+    const before: UIMessage = {
+      id: "before",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        { type: "reasoning", text: "inspect" },
+        { type: "data-activity-duration", data: { durationMs: 12 } },
+      ],
+    };
+    const after: UIMessage = {
+      id: "after",
+      role: "assistant",
+      parts: [{ type: "step-start" }, { type: "text", text: "updated answer" }],
+    };
+    const records = serializeSessionMessages(
+      [user("initial"), before, guided, after],
+      { timestamp: "2026-09-05T00:00:00Z", turnId: "turn" },
+    );
+    expect(
+      records.find((record) => record.role === "user" && record.guided),
+    ).toMatchObject({
+      role: "user",
+      content: "correct the target",
+      message_id: guided.id,
+    });
+    const restored = projectSessionMessages("session", records);
+    const visible = projectConversationDisplay(restored);
+    expect(visible.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(visible[2]).toMatchObject({
+      id: guided.id,
+      metadata: { guided: true },
+    });
+    expect(visible[1].parts).toContainEqual({
+      type: "data-activity-duration",
+      data: { durationMs: 12 },
+    });
+    const model = await convertToAgentModelMessages(restored);
+    expect(model.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+    expect(JSON.stringify(model[2])).toContain("additional guidance");
+    expect(JSON.stringify(model)).not.toContain("data-user-steering");
+    expect(JSON.stringify(model)).not.toContain("guided");
+    expect(JSON.stringify(model)).not.toContain("internal-only");
+    expect(visible[2].parts).toContainEqual(guided.parts[1]);
+    expect(model[2].content).toContainEqual(
+      expect.objectContaining({ type: "file", mediaType: "image/png" }),
+    );
   });
 });

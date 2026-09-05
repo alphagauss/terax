@@ -256,6 +256,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
 - `lib/agent.ts` 保持 `Agent` 和 `DirectChatTransport` 结构，其他模块依赖 AI SDK v6 chat 语义。
 - 会话以 `sessions/<uuid>.jsonl` 原子保存；首行固定为 metadata，后续每行是一条角色消息记录。单会话 OS 锁禁止两个进程同时继续同一会话。
+- `ai/lib/conversation.ts` 统一会话记录、SDK 适配和模型、展示投影；每个会话只有一份 JSONL，不持久化模型或展示副本。后台结果以 `role=event`、展示快照以 `role=display` 保存原始 `content`，引导属性随 user 记录保存。运行时显式维护已提交 part 游标，只在原子写入成功后推进，序列化不得根据事件标记猜测提交进度。
 - Terax 只有一个代码内定义、不可编辑或删除的主 Agent。Custom Agent 跨 Workspace 共享，只配置专属指令和内置工具白名单；Agent 仅能在未发送的 draft 中选择，首次发送后以 `metadata.agent` 快照绑定会话，persisted session 不得切换 Agent。
 - 每个 Chat runtime 在首次模型请求时读取 Workspace 根 `AGENTS.md`，并冻结统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令。后续轮次复用逐字相同的 system prompt 和工具集；LRU 淘汰或进程重启后从当前文件、设置和会话 Agent 快照重新构造。磁盘 metadata 中的 `systemPrompt` 只用于检查，不得作为恢复输入。
 - Custom Agent ID 是会话归属和历史筛选键。删除 Custom Agent 必须通过 Rust 级联删除所有 Workspace 中的关联会话，并在任一关联会话运行时拒绝整个操作；不得保留孤儿会话或通过通用共享存储删除绕过该入口。

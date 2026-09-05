@@ -3,26 +3,15 @@
  * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
-import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
-import {
-  createUIMessageStream,
-  generateText,
-  type ModelMessage,
-  pruneMessages,
-  stepCountIs,
-  streamText,
-  type UIMessage,
-} from "ai";
 import {
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
   summarizeSubagentToolInput,
 } from "@/modules/ai/agents/subagentDisplay";
 import {
-  formatSubagentResultEvent,
+  type AgentTurnCoordinator,
   releaseAgentTurnCoordinator,
   type SubagentTaskRunner,
-  type AgentTurnCoordinator,
 } from "@/modules/ai/agents/subagentRuntime";
 import {
   getModelContextWindow,
@@ -33,23 +22,34 @@ import {
   type ProviderModels,
   resolveModel,
 } from "@/modules/ai/config";
-import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
 import {
   type AgentToolId,
   resolveSubagentTools,
 } from "@/modules/ai/lib/agentTools";
 import { compactModelMessagesDetailed } from "@/modules/ai/lib/compact";
+import {
+  ACTIVITY_DURATION_PART_TYPE,
+  conversationEventPart,
+  convertToAgentModelMessages,
+  REASONING_DURATION_PART_TYPE,
+  type TurnEvent,
+} from "@/modules/ai/lib/conversation";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
 import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
 import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
+import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
 import {
-  ACTIVITY_DURATION_PART_TYPE,
-  REASONING_DURATION_PART_TYPE,
-} from "@/modules/ai/lib/sessionMessages";
-import { convertToAgentModelMessages } from "@/modules/ai/lib/subagentMessages";
+  createUIMessageStream,
+  generateText,
+  type ModelMessage,
+  pruneMessages,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+} from "ai";
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -190,6 +190,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
         onError,
         execute: async ({ writer }) => {
           const modelHistory: ModelMessage[] = [...prunedHistory];
+          const last = originalMessages[originalMessages.length - 1];
+          // 仅保留当前响应的完整 part 前缀，使 checkpoint 与最终 SDK 消息共用显式游标。
+          let completedMessage = last?.role === "assistant" ? last : undefined;
           let stepsSeen = 0;
           let streamStarted = false;
           let finishReason = "stop";
@@ -223,38 +226,37 @@ export async function runAgentStream(opts: RunAgentOptions) {
               writer.write({ type: "start" });
               streamStarted = true;
             }
-            if (event.event === "user_steering") {
-              writer.write({ type: "data-user-steering", data: event });
-              modelHistory.push(
-                ...(await convertToAgentModelMessages([event.message])),
-              );
-            } else {
-              writer.write({ type: "data-subagent-result", data: { event } });
-              modelHistory.push({
-                role: "user",
-                content: formatSubagentResultEvent(event),
-              });
-            }
+            const part = conversationEventPart(event);
+            writer.write(part);
+            completedMessage = {
+              id: completedMessage?.id ?? "turn",
+              role: "assistant",
+              parts: [...(completedMessage?.parts ?? []), part],
+            };
+            modelHistory.push(
+              ...(await convertToAgentModelMessages([
+                { id: "event", role: "assistant", parts: [part] },
+              ])),
+            );
           };
 
           /** 接入与持久化串行执行，后到的用户引导优先于尚未消费的后台结果。 */
-          const appendPendingEvents = (
-            completedMessages: UIMessage[],
-          ): Promise<boolean> | null => {
+          const appendPendingEvents = (): Promise<boolean> | null => {
             const first = coordinator.inbox.take();
             if (!first) return null;
             return (async () => {
               let entry: typeof first | null = first;
-              let messages = completedMessages;
               while (entry) {
                 try {
-                  await appendEvent(messages, entry.event);
+                  await appendEvent(
+                    completedMessage ? [completedMessage] : [],
+                    entry.event,
+                  );
                   entry.settle("consumed");
                 } catch (error) {
                   entry.settle("cancelled");
                   throw error;
                 }
-                messages = [];
                 entry = coordinator.inbox.take();
               }
               return true;
@@ -264,7 +266,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
           try {
             opts.abortSignal?.throwIfAborted();
             coordinator.inbox.open();
-            const last = originalMessages[originalMessages.length - 1];
             // SDK 只从末尾 tool 消息收集审批响应；先插入引导会让批准或拒绝失效。
             let resolvingApprovals =
               last?.role === "assistant" &&
@@ -274,14 +275,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
               );
             const initialAppend = resolvingApprovals
               ? null
-              : appendPendingEvents(last?.role === "assistant" ? [last] : []);
+              : appendPendingEvents();
             if (initialAppend) await initialAppend;
 
             while (stepsSeen < MAX_AGENT_STEPS || finalizationOnly) {
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。
               while (!resolvingApprovals) {
-                const pendingAppend = appendPendingEvents([]);
+                const pendingAppend = appendPendingEvents();
                 if (!pendingAppend) break;
                 await pendingAppend;
               }
@@ -386,7 +387,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   reasoningDurations,
                   activityDurations,
                   activityRunningAtCycleStart,
+                  resolvingApprovals ? (last?.parts.length ?? 0) : 0,
                 );
+              }
+              if (cycleMessage) {
+                completedMessage =
+                  resolvingApprovals || !completedMessage
+                    ? cycleMessage
+                    : {
+                        ...cycleMessage,
+                        parts: [
+                          ...completedMessage.parts,
+                          ...cycleMessage.parts,
+                        ],
+                      };
               }
               streamStarted = true;
               resolvingApprovals = false;
@@ -411,16 +425,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
               let completed = false;
               if (!approvalPending && coordinator.inbox.hasPending) {
-                if (!cycleMessage) {
+                if (!completedMessage) {
                   throw new Error("Subagent checkpoint message is unavailable");
                 }
                 const durationMs = finishActivity();
                 if (durationMs !== undefined)
-                  cycleMessage.parts.push({
+                  completedMessage.parts.push({
                     type: ACTIVITY_DURATION_PART_TYPE,
                     data: { durationMs },
                   });
-                const pendingAppend = appendPendingEvents([cycleMessage]);
+                const pendingAppend = appendPendingEvents();
                 completed = pendingAppend ? await pendingAppend : false;
               }
 
@@ -467,18 +481,19 @@ export async function runAgentStream(opts: RunAgentOptions) {
   };
 }
 
-/** 把实时写出的展示耗时同步放回 cycle message，确保 checkpoint 后仍可恢复。 */
+/** 把实时耗时同步到本次新增片段，审批续传保留已有前缀，避免改写历史耗时。 */
 function insertDisplayDurations(
   message: UIMessage,
   reasoningDurations: readonly number[],
   activityDurations: readonly number[],
   activityActiveAtStart: boolean,
+  prefixLength: number,
 ): void {
   let activityActive = activityActiveAtStart;
   let activityIndex = 0;
   let reasoningIndex = 0;
-  const parts: UIMessage["parts"] = [];
-  for (const part of message.parts) {
+  const parts = message.parts.slice(0, prefixLength);
+  for (const part of message.parts.slice(prefixLength)) {
     if (isActivityContentPart(part)) activityActive = true;
     if (activityActive && isActivityBoundaryPart(part)) {
       const durationMs = activityDurations[activityIndex++];
