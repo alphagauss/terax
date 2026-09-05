@@ -126,6 +126,14 @@ streaming state 保留在所属进程中。发送操作首先获取 session run 
 
 其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 或 Agent 配置变化时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime；发现会话已被外部删除时，还会清理该进程中对应的 Shell 和文件工具 owner 状态。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
+## Channel 会话
+
+`src/modules/channels/agentSession.ts` 复用现有 Chat、transport 与终态 Bridge。每个连接绑定固定 session，目录为 Local 的 `~/.terax/workspace`，Agent 为主 Agent，模型跟随全局默认模型并在本轮内固定，权限固定为完全访问。它不会修改活动聊天、桌面模型或权限选择。
+
+会话 metadata 与轻量摘要中的 `channelId` 表示不可变来源。Composer 沿用跨环境输入禁用机制，人工不能续写 Channel 会话；入口本身通过匹配的连接身份取得运行锁。来源、历史与会话一起持久化，重启或从历史列表打开仍保持相同行为。连接仍绑定时，普通删除命令拒绝删除其会话。
+
+Channel 在运行锁释放后提取最后一步的 Assistant 可见文本，不投递 reasoning、工具或内部事件。详细职责、恢复限制和设置窗口通信见 [Channels](channels.md)。
+
 ## Composer
 
 `AiComposerProvider`（`src/modules/ai/lib/composer.tsx`）是 React context，为 docked input bar 和其他 surface 保存共享输入状态（文本、附件、语音）。附件可以是图片、文本文件或来自终端/编辑器的 `selection` chip。提交时，selection 会包装为 `<selection source="terminal|editor">…</selection>` block，而不会粘贴进 textarea。

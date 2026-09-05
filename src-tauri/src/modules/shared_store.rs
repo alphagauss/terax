@@ -1,7 +1,8 @@
 //! 跨 Terax 进程共享的白名单配置存储。
 //!
 //! 所有变更都在文件锁内读取最新值并原子替换文件。批量接口仅修改明确列出的键，
-//! 用于保持跨键业务不变量，不允许调用方整表覆盖。Custom Agent 的新会话提交和
+//! 用于保持跨键业务不变量，不允许调用方整表覆盖。配置目录与 UUID 状态记录均由原生白名单决定。
+//! Custom Agent 的新会话提交和
 //! 级联删除共享配置锁，通用删除接口不能绕过会话清理。
 
 use crate::modules::storage::{write_atomic, FileLock};
@@ -18,6 +19,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
 const STORES: &[(&str, &str)] = &[
+    ("channels", "config.json"),
     ("settings", "terax-settings.json"),
     ("ssh-profiles", "terax-ssh-profiles.json"),
     ("custom-themes", "terax-custom-themes.json"),
@@ -45,15 +47,39 @@ pub enum SharedStoreMutation {
     Delete { key: String },
 }
 
-fn filename(store: &str) -> Result<&'static str, String> {
+/// 动态记录仅允许规范 UUID，调用者不能提供目录或文件路径。
+fn state_id(store: &str) -> Result<Option<uuid::Uuid>, String> {
+    let Some(value) = store.strip_prefix("channels-state:") else {
+        return Ok(None);
+    };
+    let id = uuid::Uuid::parse_str(value).map_err(|_| "invalid state store ID".to_string())?;
+    if id.to_string() != value {
+        return Err("state store ID must be canonical".into());
+    }
+    Ok(Some(id))
+}
+
+fn filename(store: &str) -> Result<String, String> {
+    if let Some(id) = state_id(store)? {
+        return Ok(format!("{id}.json"));
+    }
     STORES
         .iter()
-        .find_map(|(name, file)| (*name == store).then_some(*file))
+        .find_map(|(name, file)| (*name == store).then(|| file.to_string()))
         .ok_or_else(|| format!("shared store is not allowed: {store}"))
 }
 
-fn store_dir() -> Result<PathBuf, String> {
-    crate::modules::app_data::directory(crate::modules::app_data::Directory::Shared)
+/// 所有目录由原生白名单决定，配置与状态复用同一套锁和原子提交。
+fn store_dir(store: &str) -> Result<PathBuf, String> {
+    use crate::modules::app_data::{directory, Directory};
+    filename(store)?;
+    if state_id(store)?.is_some() {
+        Ok(directory(Directory::Channels)?.join("state"))
+    } else if store == "channels" {
+        directory(Directory::Channels)
+    } else {
+        directory(Directory::Shared)
+    }
 }
 
 fn store_path(root: &Path, store: &str) -> Result<PathBuf, String> {
@@ -81,7 +107,7 @@ fn read_map(path: &Path) -> Result<Map<String, Value>, String> {
 ///
 /// 文件由原子替换保证完整性；缺失键返回 `None`，格式错误不会回退到旧值。
 pub(crate) fn read_value<T: DeserializeOwned>(store: &str, key: &str) -> Result<Option<T>, String> {
-    let path = store_path(&store_dir()?, store)?;
+    let path = store_path(&store_dir(store)?, store)?;
     read_map(&path)?
         .remove(key)
         .map(serde_json::from_value)
@@ -113,7 +139,7 @@ pub(crate) fn with_ai_agent<T>(
     agent_id: &str,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let root = store_dir()?;
+    let root = store_dir("ai-agents")?;
     with_ai_agent_at(&root, agent_id, operation)
 }
 
@@ -141,7 +167,7 @@ pub(crate) fn delete_ai_agent_with<T>(
     agent_id: &str,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
-    let root = store_dir()?;
+    let root = store_dir("ai-agents")?;
     let result = delete_ai_agent_at(&root, agent_id, operation)?;
     emit_changed(app, &root, "ai-agents")?;
     Ok(result)
@@ -208,7 +234,7 @@ fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
 }
 
 pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
-    let root = store_dir()?;
+    let root = store_dir("keys-epoch")?;
     mutate(&root, "keys-epoch", |map| {
         map.insert(
             "epoch".to_string(),
@@ -228,6 +254,9 @@ fn revision(path: &Path) -> String {
 }
 
 fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String> {
+    if state_id(store)?.is_some() {
+        return Ok(());
+    }
     app.emit(
         "terax://shared-store-changed",
         SharedStoreChanged {
@@ -239,11 +268,14 @@ fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String>
 }
 
 impl SharedStoreState {
+    /// 复用一个 watcher 观察两个低频配置目录；协议状态不参与跨窗口广播。
     pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let root = store_dir()?;
-        fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let roots = [store_dir("settings")?, store_dir("channels")?];
+        for root in &roots {
+            fs::create_dir_all(root).map_err(|error| error.to_string())?;
+        }
         let handle = app.clone();
-        let watched_root = root.clone();
+        let watched = roots.clone();
         let mut watcher =
             notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
                 let Ok(event) = result else {
@@ -253,28 +285,43 @@ impl SharedStoreState {
                     let Some(file) = path.file_name().and_then(|value| value.to_str()) else {
                         continue;
                     };
-                    let Some((store, _)) = STORES.iter().find(|(_, candidate)| *candidate == file)
-                    else {
-                        continue;
-                    };
-                    let _ = emit_changed(&handle, &watched_root, store);
+                    if let Some((store, _)) = STORES.iter().find(|(store, candidate)| {
+                        *candidate == file
+                            && path.parent()
+                                == Some(
+                                    if *store == "channels" {
+                                        &watched[1]
+                                    } else {
+                                        &watched[0]
+                                    }
+                                    .as_path(),
+                                )
+                    }) {
+                        if let Ok(root) = store_dir(store) {
+                            let _ = emit_changed(&handle, &root, store);
+                        }
+                    }
                 }
             })
             .map_err(|error| error.to_string())?;
-        watcher
-            .watch(&root, RecursiveMode::NonRecursive)
-            .map_err(|error| error.to_string())?;
+        for root in &roots {
+            watcher
+                .watch(root, RecursiveMode::NonRecursive)
+                .map_err(|error| error.to_string())?;
+        }
         Ok(Self {
             _watcher: Mutex::new(watcher),
         })
     }
 }
 
+/// 读取白名单配置或状态记录，不接受任意磁盘路径。
 #[tauri::command]
 pub fn shared_store_read(store: String) -> Result<Map<String, Value>, String> {
-    read_map(&store_path(&store_dir()?, &store)?)
+    read_map(&store_path(&store_dir(&store)?, &store)?)
 }
 
+/// 加锁更新一个配置键，保留其他进程已经提交的数据。
 #[tauri::command]
 pub fn shared_store_set(
     app: AppHandle,
@@ -285,26 +332,28 @@ pub fn shared_store_set(
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
-    let root = store_dir()?;
+    let root = store_dir(&store)?;
     mutate(&root, &store, |map| {
         map.insert(key, value);
     })?;
     emit_changed(&app, &root, &store)
 }
 
+/// 删除一个配置键，并保留业务所有者要求的级联边界。
 #[tauri::command]
 pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result<(), String> {
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
     validate_record_delete(&store, &key)?;
-    let root = store_dir()?;
+    let root = store_dir(&store)?;
     mutate(&root, &store, |map| {
         map.remove(&key);
     })?;
     emit_changed(&app, &root, &store)
 }
 
+/// 在一次锁内应用明确列出的键变更，不执行整表覆盖。
 #[tauri::command]
 pub fn shared_store_mutate(
     app: AppHandle,
@@ -319,14 +368,15 @@ pub fn shared_store_mutate(
             validate_record_delete(&store, key)?;
         }
     }
-    let root = store_dir()?;
+    let root = store_dir(&store)?;
     mutate(&root, &store, |map| apply_mutations(map, mutations))??;
     emit_changed(&app, &root, &store)
 }
 
+/// 返回配置修订指纹，供跨窗口事件合并后检查最新值。
 #[tauri::command]
 pub fn shared_store_revision(store: String) -> Result<String, String> {
-    Ok(revision(&store_path(&store_dir()?, &store)?))
+    Ok(revision(&store_path(&store_dir(&store)?, &store)?))
 }
 
 #[cfg(test)]
@@ -346,6 +396,31 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn scoped_state_stores_are_isolated_and_reject_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = format!("channels-state:{}", uuid::Uuid::new_v4());
+        let b = format!("channels-state:{}", uuid::Uuid::new_v4());
+        mutate(dir.path(), &a, |map| {
+            map.insert("cursor".into(), Value::from("a"));
+        })
+        .unwrap();
+        mutate(dir.path(), &b, |map| {
+            map.insert("cursor".into(), Value::from("b"));
+        })
+        .unwrap();
+        assert_eq!(
+            read_map(&store_path(dir.path(), &a).unwrap()).unwrap()["cursor"],
+            "a"
+        );
+        assert_eq!(
+            read_map(&store_path(dir.path(), &b).unwrap()).unwrap()["cursor"],
+            "b"
+        );
+        assert!(store_path(dir.path(), "channels-state:../../outside").is_err());
+        assert!(store_path(dir.path(), &a.to_uppercase()).is_err());
     }
 
     #[test]

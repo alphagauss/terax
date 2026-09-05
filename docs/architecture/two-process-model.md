@@ -157,6 +157,8 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 - `shared_store_read` / `shared_store_revision`
 - `shared_store_set` / `shared_store_delete` - 加锁、读取最新 object、修改一个 key，并原子替换文件
 
+白名单逻辑存储 `channels` 映射到 `~/.terax/channels/config.json`，`channels-state:<uuid>` 映射到独立协议状态文件。UUID 必须规范化，前端不能提供任意路径。协议检查点不广播高频配置事件。
+
 写入进程会立即收到 change event，其他进程则收到 file-watcher event。前端 listener 执行 trailing revision check，因此 event coalescing 不会永久隐藏最终写入。
 
 ### AI session（`src-tauri/src/modules/ai_sessions.rs`）
@@ -166,11 +168,11 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 
 ### 网络（`src-tauri/src/modules/net.rs`）
 
-- `ai_http_request` / `ai_http_stream` - 带 SSRF guard 的 AI HTTP proxy；非流式请求同时限制总时长和响应体积，模型目录通过该边界访问云端或用户明确配置的私网地址
+- `http_request` / `http_cancel` - 通用 HTTP 传输与按 WebView 隔离的取消。响应通过 started、headers、chunk、end 事件返回，配置有界总超时和响应大小，保留 SSRF guard。AI 私网请求、模型目录与 Channels 共用该边界。
 
 ### 秘密（`src-tauri/src/modules/secrets.rs`）
 
-- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - 操作系统 keychain 访问，service 为 `terax-ai`
+- `secrets_get` / `secrets_set` / `secrets_delete` / `secrets_get_all` - 操作系统 keychain 访问；AI 与 Channels 分别使用自己的 service，连接凭据以实例 UUID 隔离
 
 ### Agent hook（`src-tauri/src/modules/agent.rs`）
 

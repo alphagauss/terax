@@ -80,8 +80,13 @@ export function LocalAgentNotificationsBridge({
   }, [activeSessionId, runLockSessionIds, visible]);
 
   useEffect(() => {
-    const nextLiveStatus = aggregateStatus(runs);
-    const liveAgentIds = Object.entries(runs)
+    const interactiveRuns = Object.fromEntries(
+      Object.entries(runs).filter(
+        ([id]) => !sessions.find((session) => session.id === id)?.channelId,
+      ),
+    );
+    const nextLiveStatus = aggregateStatus(interactiveRuns);
+    const liveAgentIds = Object.entries(interactiveRuns)
       .filter(([, run]) => isBusy(run.status))
       .map(([sessionId]) => notificationAgent(sessionId));
     const liveAgent =

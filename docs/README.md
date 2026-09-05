@@ -15,6 +15,7 @@
 - [PTY Shell 集成](architecture/pty-shell-integration.md) - PTY session、Shell 初始化脚本、OSC 7 / 133、ConPTY、SPAWN_LOCK、Job Object 和 WSL。
 - [安全模型](architecture/security-model.md) - deny-list、SSRF 防护、Workspace 授权、AI 工具审批、IPC allowlist、OSC 信任机制和 keychain 处理。
 - [AI 子系统](architecture/ai-subsystem.md) - provider、Agent、sub-agent、session、composer、工具、编辑 diff 和实时上下文桥接。包含新增 provider 的完整操作说明。
+- [Channels](architecture/channels.md) - Local 主窗口的消息连接、固定 AI 会话、个人微信接入与恢复边界。
 - [External Agent Runtime](architecture/external-agent-runtime.md) - Claude Code、Codex 等本地 CLI Agent 的统一进程、协议、会话和 Local、WSL、SSH 边界。
 - [终端 renderer pool](architecture/terminal-renderer-pool.md) - slot pool、DormantRing，以及禁止在命令执行中序列化的不变量。
 - [通用辅助窗口](architecture/auxiliary-windows.md) - 为简单业务视图提供统一原生窗口外壳、主题和生命周期。

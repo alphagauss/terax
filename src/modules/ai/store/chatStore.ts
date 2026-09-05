@@ -3,6 +3,8 @@
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
+import i18n from "@/i18n";
+import { readSharedStore } from "@/lib/sharedStore";
 import {
   currentWorkspaceBootstrap,
   deleteWorkspaceValue,
@@ -84,6 +86,8 @@ export type AgentMeta = {
   step: string | null;
   approvalsPending: number;
   error: string | null;
+  /** 终态保存失败归属具体会话，后台调用方不能只等待运行锁释放。 */
+  commitError?: string;
   tokens: AgentUsage;
   lastInputTokens: number;
   lastCachedTokens: number;
@@ -189,7 +193,7 @@ type StoreState = {
   sessionSyncError: string | null;
   hydrateSessions: () => Promise<void>;
   refreshSessions: () => Promise<void>;
-  beginSessionRun: (id: string) => Promise<boolean>;
+  beginSessionRun: (id: string, channelId?: string) => Promise<boolean>;
   newSession: () => string;
   promoteSession: (id: string, messages: UIMessage[], cwd: string) => void;
   persistSubmittedTurn: (
@@ -281,7 +285,7 @@ function newTurnId(): string {
 }
 
 /** 读取磁盘记录，同时准备 UI 消息和完整会话 metadata。 */
-async function seedSession(id: string): Promise<void> {
+export async function seedSession(id: string): Promise<void> {
   const session = await readSession(id);
   const messages = projectSessionMessages(id, session.messages);
   persistedMessageCounts.set(id, messages.length);
@@ -296,7 +300,8 @@ export function isSessionWritable(id: string): boolean {
     .sessions.find((item) => item.id === id);
   return (
     !session ||
-    session.environmentKey === currentWorkspaceBootstrap().environmentKey
+    (!session.channelId &&
+      session.environmentKey === currentWorkspaceBootstrap().environmentKey)
   );
 }
 
@@ -552,8 +557,18 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   /** 为一次新运行取得独占权；本进程已有运行或正在取锁时同样拒绝。 */
-  beginSessionRun: async (id) => {
-    if (!isSessionWritable(id)) return false;
+  beginSessionRun: async (id, channelId) => {
+    const session = get().sessions.find((item) => item.id === id);
+    const bootstrap = currentWorkspaceBootstrap();
+    if (channelId) {
+      if (
+        !bootstrap.isPrimary ||
+        bootstrap.env.kind !== "local" ||
+        session?.channelId !== channelId ||
+        session.environmentKey !== bootstrap.environmentKey
+      )
+        return false;
+    } else if (!isSessionWritable(id)) return false;
     if (get().runLockSessionIds[id] || acquiringSessionRuns.has(id)) {
       return false;
     }
@@ -804,6 +819,15 @@ export const useChatStore = create<StoreState>((set, get) => ({
     sessionSwitchSequence++;
     void (async () => {
       try {
+        const channelId = get().sessions.find(
+          (session) => session.id === id,
+        )?.channelId;
+        if (
+          channelId &&
+          (await readSharedStore("channels"))[channelId] !== undefined
+        ) {
+          throw new Error(i18n.t("ai:composer.channelBound"));
+        }
         await clearSubagentCoordinator(id);
         await clearSessionProcesses(id);
         await deleteSessionFile(id);
@@ -864,9 +888,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
     })();
   },
 
+  /** 原子提交终态；失败保留运行锁和正文，并向该会话的等待方公开失败。 */
   commitMessages: async (id, messages) => {
     const pending = sessionCommits.get(id);
     if (pending) return pending;
+    if (get().agentMetaBySession[id]?.commitError) {
+      get().patchAgentMeta(id, { commitError: undefined });
+    }
 
     const commit = (async () => {
       const sessions = get().sessions;
@@ -963,6 +991,9 @@ export const useChatStore = create<StoreState>((set, get) => ({
     sessionCommits.set(id, commit);
     try {
       await commit;
+    } catch (error) {
+      get().patchAgentMeta(id, { commitError: String(error) });
+      throw error;
     } finally {
       if (sessionCommits.get(id) === commit) sessionCommits.delete(id);
     }

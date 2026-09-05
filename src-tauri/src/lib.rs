@@ -146,6 +146,7 @@ pub fn run() {
         .manage(workspace_process)
         .manage(auxiliary_window::AuxiliaryWindowState::default())
         .manage(ai_sessions::AiSessionsState::default())
+        .manage(net::HttpState::default())
         .manage(remote::RemoteState::default())
         .manage(shell::ShellState::default())
         .manage(transfers::TransferState::default())
@@ -321,8 +322,8 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
-            net::ai_http_request,
-            net::ai_http_stream,
+            net::http_request,
+            net::http_cancel,
             history::history_suggest,
             history::history_commands,
             history::history_record,
@@ -335,6 +336,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(move |app, event| {
             if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    app.state::<net::HttpState>().cancel_owner(label);
+                }
                 if label == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                     auxiliary_window::destroy_all_auxiliary_windows(app);
                 }

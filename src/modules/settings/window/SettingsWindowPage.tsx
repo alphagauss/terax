@@ -25,19 +25,26 @@ import {
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
+  PlugIcon,
   ServerStack03Icon,
   Settings01Icon,
   SourceCodeIcon,
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type JSX, useEffect, useState } from "react";
+import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+const ChannelsSection = lazy(() =>
+  import("@/modules/channels/components/ChannelsSection").then((module) => ({
+    default: module.ChannelsSection,
+  })),
+);
 
 const TABS: {
   id: SettingsTab;
   icon: typeof Settings01Icon;
-  component: () => JSX.Element;
+  component: ComponentType;
 }[] = [
   { id: "general", icon: Settings01Icon, component: GeneralSection },
   { id: "editor", icon: SourceCodeIcon, component: EditorSection },
@@ -45,6 +52,7 @@ const TABS: {
   { id: "shortcuts", icon: KeyboardIcon, component: ShortcutsSection },
   { id: "models", icon: AiScanIcon, component: ModelsSection },
   { id: "agents", icon: UserMultiple02Icon, component: AgentsSection },
+  { id: "channels", icon: PlugIcon, component: ChannelsSection },
   { id: "remote", icon: ServerStack03Icon, component: RemoteSection },
   { id: "about", icon: InformationCircleIcon, component: AboutSection },
 ];
@@ -112,7 +120,15 @@ export function SettingsWindowPage() {
         >
           {ActiveSection ? (
             <div key={active} className="terax-tab-in">
-              <ActiveSection />
+              <Suspense
+                fallback={
+                  <p className="text-sm text-muted-foreground">
+                    {t("channels:loading")}
+                  </p>
+                }
+              >
+                <ActiveSection />
+              </Suspense>
             </div>
           ) : null}
         </div>

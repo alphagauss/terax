@@ -12,6 +12,7 @@ export const SETTINGS_TABS = [
   "shortcuts",
   "models",
   "agents",
+  "channels",
   "remote",
   "about",
 ] as const;

@@ -17,6 +17,12 @@ const io = vi.hoisted(() => ({
   workspaceSet: vi.fn(),
   workspaceDelete: vi.fn(),
   isPrimary: true,
+  sharedRead: vi.fn(),
+}));
+
+vi.mock("@/lib/sharedStore", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sharedStore")>()),
+  readSharedStore: io.sharedRead,
 }));
 
 vi.mock("../lib/sessions", async (importOriginal) => ({
@@ -34,6 +40,7 @@ vi.mock("@/modules/workspace-process", () => ({
   currentWorkspaceBootstrap: () => ({
     environmentKey: "local",
     isPrimary: io.isPrimary,
+    env: { kind: "local" },
   }),
   getWorkspaceValue: io.workspaceGet,
   setWorkspaceValue: io.workspaceSet,
@@ -48,6 +55,7 @@ import { useAgentsStore } from "./agentsStore";
 import {
   chats,
   flushCompletedSessionRuns,
+  isSessionWritable,
   pendingTurnIds,
   persistedMessageCounts,
   seedMessages,
@@ -134,6 +142,7 @@ describe("chat store multi-process lifecycle", () => {
       revealLatestBySession: {},
       pendingCompletions: [],
     });
+    io.sharedRead.mockResolvedValue({});
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
@@ -203,6 +212,28 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().sessionSyncError).toBe(
       "Error: session write failed",
     );
+  });
+
+  it("reports a failed terminal commit to its session while retaining the run lock for retry", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      runLockSessionIds: { [first.id]: true },
+    });
+    sessionMetadata.set(first.id, { title: first.title });
+    io.commit.mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      useChatStore.getState().commitMessages(first.id, []),
+    ).rejects.toThrow("disk full");
+    expect(
+      useChatStore.getState().agentMetaBySession[first.id].commitError,
+    ).toContain("disk full");
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+    expect(io.release).not.toHaveBeenCalled();
+    await useChatStore.getState().commitMessages(first.id, []);
+    expect(
+      useChatStore.getState().agentMetaBySession[first.id]?.commitError,
+    ).toBeUndefined();
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
   });
 
   it("checkpoints completed steps and subagent results without releasing the turn", async () => {
@@ -644,6 +675,43 @@ describe("chat store multi-process lifecycle", () => {
     expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(true);
     expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
     expect(io.acquire).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses deletion of a bound Channel before cleaning up its processes", async () => {
+    const channelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    io.sharedRead.mockResolvedValue({ [channelId]: { sessionId: first.id } });
+    useChatStore.setState({ sessions: [{ ...first, channelId }] });
+    useChatStore.getState().deleteSession(first.id);
+    await vi.waitFor(() =>
+      expect(useChatStore.getState().sessionSyncError).not.toBeNull(),
+    );
+    expect(io.clearProcesses).not.toHaveBeenCalled();
+    expect(io.remove).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessions).toHaveLength(1);
+  });
+
+  it("only the bound Channel can submit its session in the permanent Local window", async () => {
+    const channelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    useChatStore.setState({
+      sessions: [{ ...first, channelId }],
+      activeSessionId: first.id,
+    });
+    expect(isSessionWritable(first.id)).toBe(false);
+    expect(await useChatStore.getState().beginSessionRun(first.id)).toBe(false);
+    expect(
+      await useChatStore
+        .getState()
+        .beginSessionRun(first.id, "another-channel"),
+    ).toBe(false);
+    io.isPrimary = false;
+    expect(
+      await useChatStore.getState().beginSessionRun(first.id, channelId),
+    ).toBe(false);
+    io.isPrimary = true;
+    expect(
+      await useChatStore.getState().beginSessionRun(first.id, channelId),
+    ).toBe(true);
+    expect(io.acquire).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a run owned by another workspace environment", async () => {

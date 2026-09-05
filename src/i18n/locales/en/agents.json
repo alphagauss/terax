@@ -20,8 +20,8 @@
     "enable": "Enable"
   },
   "bell": {
-    "title": "Agent notifications",
-    "heading": "Notifications",
+    "title": "Agents & Channels",
+    "heading": "Agents & Channels",
     "active": "{{count}} active",
     "clear": "Clear",
     "emptyLine1": "No agent activity yet.",

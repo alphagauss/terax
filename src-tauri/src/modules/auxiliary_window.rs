@@ -82,6 +82,8 @@ pub enum SettingsTab {
     Shortcuts,
     Models,
     Agents,
+    /// 个人消息连接管理页。
+    Channels,
     Remote,
     About,
 }
@@ -95,6 +97,7 @@ impl SettingsTab {
             Self::Shortcuts => "shortcuts",
             Self::Models => "models",
             Self::Agents => "agents",
+            Self::Channels => "channels",
             Self::Remote => "remote",
             Self::About => "about",
         }

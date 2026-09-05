@@ -22,6 +22,7 @@ export type SessionMeta = {
   agentId: string;
   agentName: string;
   agentIcon: AgentIconId;
+  channelId?: string;
   modifiedAt?: number;
   size?: number;
   fingerprint?: string;
@@ -174,6 +175,7 @@ function fromIpcMeta(meta: IpcSessionMeta): SessionMeta {
     title: meta.title,
     createdAt: parseTimestamp(meta.createdAt),
     updatedAt: parseTimestamp(meta.updatedAt),
+    channelId: meta.channelId,
     environmentKey: meta.environmentKey,
     cwd: meta.cwd,
     agentId: meta.agentId,

@@ -119,8 +119,7 @@ describe("ModelCatalog", () => {
     let now = 1;
     const request = vi.fn(async () => ({
       status: 200,
-      headers: {},
-      body: Array.from(new TextEncoder().encode('{"data":[{"id":"model-a"}]}')),
+      body: '{"data":[{"id":"model-a"}]}',
     }));
     const catalog = new ModelCatalog(request, () => now);
 
@@ -139,8 +138,7 @@ describe("ModelCatalog", () => {
   it("classifies authentication failures without caching them", async () => {
     const request = vi.fn(async () => ({
       status: 401,
-      headers: {},
-      body: [],
+      body: "",
     }));
     const catalog = new ModelCatalog(request);
 
@@ -154,15 +152,10 @@ describe("ModelCatalog", () => {
   });
 
   it("isolates an active request after credentials are invalidated", async () => {
-    let finishOld!: (value: {
-      status: number;
-      headers: Record<string, string>;
-      body: number[];
-    }) => void;
+    let finishOld!: (value: { status: number; body: string }) => void;
     const response = (id: string) => ({
       status: 200,
-      headers: {},
-      body: Array.from(new TextEncoder().encode(`{"data":[{"id":"${id}"}]}`)),
+      body: `{"data":[{"id":"${id}"}]}`,
     });
     const oldRequest = new Promise<ReturnType<typeof response>>((resolve) => {
       finishOld = resolve;

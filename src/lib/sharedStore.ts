@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SharedStoreName =
+  | "channels"
+  | `channels-state:${string}`
   | "settings"
   | "ssh-profiles"
   | "custom-themes"

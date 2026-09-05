@@ -127,10 +127,17 @@ export function AiComposerProvider({ children }: ProviderProps) {
       s.sessions.find((session) => session.id === s.activeSessionId)
         ?.environmentKey,
   );
-  const readOnly =
+  const channelId = useChatStore(
+    (state) =>
+      state.sessions.find((session) => session.id === state.activeSessionId)
+        ?.channelId,
+  );
+  const environmentMismatch =
     sessionEnvironmentKey !== undefined &&
     sessionEnvironmentKey !== currentWorkspaceBootstrap().environmentKey;
-  const readOnlyEnvironmentKey = readOnly ? sessionEnvironmentKey : null;
+  const readOnly = Boolean(channelId) || environmentMismatch;
+  const readOnlyEnvironmentKey =
+    !channelId && environmentMismatch ? sessionEnvironmentKey : null;
   const workingDirectory = useChatStore((s) => {
     const id = s.activeSessionId;
     if (!id) return null;
