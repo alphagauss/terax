@@ -3,6 +3,8 @@
  * 草稿、附件、语音与命令状态在侧边栏关闭时仍需保留，因此由根级 Provider 持有。
  */
 
+import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import { sessionMetadata } from "@/modules/ai/store/chatStore";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { invoke } from "@tauri-apps/api/core";
@@ -16,16 +18,22 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useWhisperRecording } from "../hooks/useWhisperRecording";
-import { expandSnippetTokens, type Snippet } from "../lib/snippets";
+import { useWhisperRecording } from "@/modules/ai/hooks/useWhisperRecording";
+import { expandSnippetTokens, type Snippet } from "@/modules/ai/lib/snippets";
 import {
   getAgentMetaForSession,
   stopSession,
   useChatStore,
-} from "../store/chatStore";
-import { useSnippetsStore } from "../store/snippetsStore";
-import { canRevealSessionCwd, resolveSessionCwd } from "./sessions";
-import { type SlashCommandMeta, tryRunSlashCommand } from "./slashCommands";
+} from "@/modules/ai/store/chatStore";
+import { useSnippetsStore } from "@/modules/ai/store/snippetsStore";
+import {
+  canRevealSessionCwd,
+  resolveSessionCwd,
+} from "@/modules/ai/lib/sessions";
+import {
+  type SlashCommandMeta,
+  tryRunSlashCommand,
+} from "@/modules/ai/lib/slashCommands";
 
 export type FileAttachment = {
   id: string;
@@ -83,6 +91,8 @@ type ComposerCtx = {
   addCommand: (c: SlashCommandMeta) => void;
   removeCommand: (name: string) => void;
   isBusy: boolean;
+  pendingSteering: number;
+  canSteer: boolean;
   readOnly: boolean;
   readOnlyEnvironmentKey: string | null;
   workingDirectory: string | null;
@@ -152,12 +162,19 @@ export function AiComposerProvider({ children }: ProviderProps) {
     );
   });
   const isBusy = runLocked || status === "thinking" || status === "streaming";
+  const canSteer = !parseExternalAgentBinding(
+    sessionId ? sessionMetadata.get(sessionId) : undefined,
+  );
+  const pendingSteering = useChatStore(
+    (state) => getAgentMetaForSession(state, sessionId).pendingSteering,
+  );
 
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
   const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const submittingRef = useRef(false);
   const revealingWorkingDirectoryRef = useRef(false);
   const [revealingWorkingDirectory, setRevealingWorkingDirectory] =
     useState(false);
@@ -366,8 +383,15 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeCommand = (name: string) =>
     setPickedCommands((prev) => prev.filter((c) => c.name !== name));
 
+  /** 空闲时发送新轮次，内置 Agent 运行中则提交引导；成功接收后才清理草稿。 */
   const submit = () => {
-    if (isBusy || readOnly || !workingDirectory) return;
+    if (
+      submittingRef.current ||
+      (isBusy && !canSteer) ||
+      readOnly ||
+      !workingDirectory
+    )
+      return;
     const trimmed = value.trim();
     if (
       !trimmed &&
@@ -464,28 +488,38 @@ export function AiComposerProvider({ children }: ProviderProps) {
       hitStepCap: false,
       compactionNotice: null,
     });
+    // 接入确认前禁止重复提交同一份草稿，运行中双击不能变成两条引导。
+    submittingRef.current = true;
     void (async () => {
-      const { sendChatMessage } = await import("../store/chatRuntime");
-      const sent = await sendChatMessage(sessionId, {
-        role: "user",
-        parts,
-        metadata: { createdAt: Date.now() },
-      });
-      if (!sent) {
-        toast.info(t("composer.sessionBusy"));
-        return;
+      try {
+        const { sendChatMessage } = await import(
+          "@/modules/ai/store/chatRuntime"
+        );
+        const sent = await sendChatMessage(sessionId, {
+          role: "user",
+          parts,
+          metadata: { createdAt: Date.now() },
+        });
+        if (!sent) {
+          toast.info(t("composer.sessionBusy"));
+          return;
+        }
+        setValue((current) => (current === submittedValue ? "" : current));
+        setFiles((current) =>
+          current.filter((file) => !submittedFileIds.has(file.id)),
+        );
+        setPickedSnippets((current) =>
+          current.filter((snippet) => !submittedSnippetIds.has(snippet.id)),
+        );
+        setPickedCommands((current) =>
+          current.filter((command) => !submittedCommandNames.has(command.name)),
+        );
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      } catch {
+        toast.error(t("composer.sendFailed"));
+      } finally {
+        submittingRef.current = false;
       }
-      setValue((current) => (current === submittedValue ? "" : current));
-      setFiles((current) =>
-        current.filter((file) => !submittedFileIds.has(file.id)),
-      );
-      setPickedSnippets((current) =>
-        current.filter((snippet) => !submittedSnippetIds.has(snippet.id)),
-      );
-      setPickedCommands((current) =>
-        current.filter((command) => !submittedCommandNames.has(command.name)),
-      );
-      requestAnimationFrame(() => textareaRef.current?.focus());
     })();
   };
 
@@ -495,7 +529,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   };
 
   const canSend =
-    !isBusy &&
+    (!isBusy || canSteer) &&
     !readOnly &&
     (value.trim().length > 0 ||
       files.length > 0 ||
@@ -518,6 +552,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     addCommand,
     removeCommand,
     isBusy,
+    canSteer,
+    pendingSteering,
     readOnly,
     readOnlyEnvironmentKey,
     workingDirectory,

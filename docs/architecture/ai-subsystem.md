@@ -82,6 +82,16 @@ Claude Code、Codex 等完整 CLI Agent 不进入本节的 Provider 与 `runAgen
 
 完整 tool set 在 `src/modules/ai/tools/tools.ts` 中，由 `fs`、`patch`、`search`、`shell`、`subagent`、`terminal` 和 `todo` builder 组装而成。
 
+## 运行中用户引导
+
+`AgentTurnCoordinator` 持有当前会话运行的 `TurnInbox` 和 Subagent 资源。用户引导与后台结果共用接入队列，用户引导优先，同类用户输入按发送顺序消费。前台工具和 `wait=true` Subagent 仍须执行完成；审批请求不会被新增输入绕过；恢复时先由 SDK 落实批准或拒绝对应的工具结果，再接入待处理消息，保持审批响应处于 SDK 要求的末尾位置。等待后台任务时，新引导可以唤醒主循环。
+
+桌面内置 Agent 运行时，输入为空显示中止，有可发送内容时显示引导按钮并保留次级中止入口。引导发送后仅显示待接入数量；安全边界消费时结束前一个活动块，先 checkpoint 完整步骤与用户消息，再在正文显示“已引导”和新的活动块。主循环已关闭接入但终态仍在提交时，桌面发送等待锁释放后作为下一轮处理。外部 CLI Agent 不使用此循环，尚不提供运行中引导，继续显示中止操作。
+
+引导用户记录使用 `guided: true` 与 `message_id` 保存显示身份，保持原始正文和媒体。Chat 流内用 `data-user-steering` 保持 append-only 前缀，历史恢复使用同一结构，展示层按该消息分段。provider 边界转换为标准 user 消息并添加补充说明，不透传展示标记或内部 data part。
+
+中止同步封闭接入并取消所有未消费输入，不恢复为草稿、不留到下一轮；已消费历史不回滚。消息接入、检查点提交和轮次结束由同一运行时裁决，完整轮次始终持有原 session run lock。
+
 ## Sub-agent
 
 `run_subagent` 是通用委派工具，只接受自包含的 `task`、可选 `label` 和默认值为 `false` 的 `wait`。它不提供角色类型、temperature 或单次模型覆盖。Subagent 使用独立消息历史，并复用父聊天冻结的 system prompt、cwd、provider 配置和 Custom Agent 工具白名单。
@@ -92,7 +102,7 @@ Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `
 
 `wait=true` 时，最终结果直接作为原工具调用的 tool result。`wait=false` 时，原工具调用立即返回 started，后台完成结果以 append-only 的内部 `subagent_result` user 消息进入同一 turn。该内部事件在 UI 中保存为隐藏 data part，在 JSONL 中保存稳定正文和 task ID metadata，发送给 provider 时投影为相同正文的标准 user 消息。它不改写既有 tool result 或历史前缀。
 
-主 Agent 在普通工具边界消费已经完成的后台结果。若模型到达候选终态但仍有后台任务，session run lock 保持占用，等待当前聊天全部后台任务完成，持久化尚未消费的结果后恢复完整 Agent 循环。恢复后的模型仍可继续调用普通工具或创建新的 Subagent，只有模型给出终态且没有运行中任务或待消费结果时才结束本轮。
+主 Agent 在普通工具边界消费已经完成的后台结果。若模型到达候选终态但仍有后台任务，session run lock 保持占用，等待后台结果或用户引导唤醒，持久化待消费消息后恢复完整 Agent 循环。恢复后的模型仍可继续调用普通工具或创建新的 Subagent，只有模型给出终态且没有运行中任务或待消费结果时才结束本轮。
 
 每个 `run_subagent` 在聊天中使用专用卡片。运行时只报告模型调用中、工具开始、工具完成和终态，不传输 Subagent 推理正文或中间回答。标题当前显示的工具动作至少保持一秒，期间的新状态合并为最新动作；该计时只属于 UI，不阻塞真实执行。展开卡片可查看原始 task、工具过程和最终结果，结果仍来自 wait=true 工具输出或 wait=false 内部结果事件。
 

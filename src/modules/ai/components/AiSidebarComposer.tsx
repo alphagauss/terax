@@ -45,26 +45,35 @@ import {
   resolveModel,
   STT_PROVIDER_LABELS,
   tryResolveModel,
-} from "../config";
+} from "@/modules/ai/config";
 import {
   EXTERNAL_AGENTS,
   parseExternalAgentBinding,
-} from "../external-agents/runtime";
-import { ACCEPTED_FILES, useComposer } from "../lib/composer";
-import { getAvailableModelRefs } from "../lib/modelAvailability";
-import { toggleFavoriteModel } from "../lib/modelPrefs";
-import { sessionMetadata, useChatStore } from "../store/chatStore";
-import { AiComposerInput } from "./AiComposerInput";
-import "./ai-sidebar-composer.css";
-import { ChipsRow } from "./ChipsRow";
+} from "@/modules/ai/external-agents/runtime";
+import { ACCEPTED_FILES, useComposer } from "@/modules/ai/lib/composer";
+import { getAvailableModelRefs } from "@/modules/ai/lib/modelAvailability";
+import { toggleFavoriteModel } from "@/modules/ai/lib/modelPrefs";
+import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
+import { AiComposerInput } from "@/modules/ai/components/AiComposerInput";
+import "@/modules/ai/components/ai-sidebar-composer.css";
+import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 
 /**
  * AI 侧栏输入组件。
- * 负责输入附件、模型和进程内权限模式选择，以及发送和停止操作。
+ * 负责附件、模型和权限选择；运行中有输入时提供引导，并始终保留中止入口。
  */
 export function AiSidebarComposer() {
   const { t } = useTranslation("ai");
   const c = useComposer();
+  const guiding = c.isBusy && c.canSend;
+  const stopping = c.isBusy && !guiding;
+  const submitLabel = t(
+    stopping
+      ? "statusBar.stop"
+      : guiding
+        ? "statusBar.steer"
+        : "statusBar.send",
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workingDirectoryContent = c.workingDirectory ? (
     <>
@@ -112,12 +121,17 @@ export function AiSidebarComposer() {
         />
 
         <AiComposerInput />
+        {c.pendingSteering > 0 ? (
+          <p role="status" className="px-1 text-xs text-muted-foreground">
+            {t("composer.pendingSteering", { count: c.pendingSteering })}
+          </p>
+        ) : null}
 
         <div className="terax-ai-composer-toolbar flex min-w-0 items-center gap-0.5">
           <IconBtn
             title={t("statusBar.attachFileOrImage")}
             onClick={() => fileInputRef.current?.click()}
-            disabled={c.isBusy || c.readOnly}
+            disabled={c.readOnly || (c.isBusy && !c.canSteer)}
           >
             <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
           </IconBtn>
@@ -162,16 +176,25 @@ export function AiSidebarComposer() {
           <ModelDropdown />
           <span className="min-w-1 flex-1" />
 
+          {guiding ? (
+            <IconBtn title={t("statusBar.stop")} onClick={c.stop}>
+              <span className="size-2 rounded-[2px] bg-current" />
+            </IconBtn>
+          ) : null}
           <Button
             type="button"
             size="icon"
-            onClick={c.isBusy ? c.stop : c.submit}
+            onClick={stopping ? c.stop : c.submit}
             disabled={c.readOnly || (!c.isBusy && !c.canSend)}
-            className="size-7 rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-100 hover:bg-foreground/85"
-            aria-label={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
-            title={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
+            className={cn(
+              "size-7 rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
+              guiding &&
+                "bg-primary text-primary-foreground hover:bg-primary/85",
+            )}
+            aria-label={submitLabel}
+            title={submitLabel}
           >
-            {c.isBusy ? (
+            {stopping ? (
               <span className="size-2 rounded-[2px] bg-current" />
             ) : (
               <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />

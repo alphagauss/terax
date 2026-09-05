@@ -16,8 +16,6 @@ import {
   connectionSchema,
 } from "@/modules/channels/types";
 
-export const MAX_CONNECTIONS = 8;
-
 /** 严格读取当前配置，拒绝重复会话绑定和损坏记录。 */
 export async function loadConnections(): Promise<ChannelConnection[]> {
   const values = await readSharedStore("channels");
@@ -33,7 +31,6 @@ export async function loadConnections(): Promise<ChannelConnection[]> {
     ids.add(result.data.sessionId);
     return result.data;
   });
-  if (connections.length > MAX_CONNECTIONS) throw new ChannelError("storage");
   return connections;
 }
 

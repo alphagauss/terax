@@ -262,6 +262,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，`AgentRunBridge` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤、恢复所需终态数据和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
 - AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续；长任务的状态收集和持久化不得依赖可卸载 UI。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
+- 内置 Agent 运行中允许用户引导，统一由会话运行协调器的接入队列管理，用户输入优先于未消费的后台 Subagent 结果且同类保持顺序。前台工具调用和审批仍是接入边界。消费前不显示正文；消费时先保存完整前缀和带 `guided` 标记的用户消息，再分段展示并请求模型。中止清空所有未消费输入，不自动重放。
 - 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。SSH profile root 只提供默认位置，用户明确打开的任意可访问 Explorer 根都可以成为会话 cwd。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
 - 请求批准模式下，cwd 内且非敏感的文件读取、搜索、写入、精确补丁和普通结构操作自动执行；cwd 外、敏感路径及递归删除按整个 tool call 请求一次性 UI 批准。批准只提升原调用，不改变会话 cwd 或后续调用。完全访问模式允许自动访问当前 Local、WSL 或 SSH 用户可访问的任意路径，并跳过敏感路径 deny-list。两种模式都保留普通文件、大小、条件写入、并发和灾难性操作保护。
 - 请求批准模式下，`shell_exec` 对明确位于 cwd 内的普通开发命令自动执行；外部路径、网络访问和无法可靠分类的命令请求一次性批准。Shell 字符串检查只是保守的应用层分类，不是进程沙箱。完全访问模式跳过该分类并允许任意可访问 cwd。`shell_process` 的 stdin 写入仍需批准；进程轮询、列表、EOF 和终止只能作用于当前聊天拥有的登记进程并自动执行。
@@ -272,7 +273,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 ### Channels
 
 - 仅 Local 永久 Workspace 主窗口启动 Channels。连接、协议、重连、消息队列和 Agent 接入均位于 TS；Rust 只提供通用 HTTP、秘密、存储和已有工具边界。
-- 每个连接实例绑定固定 session UUID，使用 Local 的 `~/.terax/workspace`、主 Agent、每轮冻结的全局默认模型和完全访问权限，不修改桌面聊天的全局选择。首版最多八个连接，连接独立在线，Agent 轮次全局串行。
+- 每个连接实例绑定固定 session UUID，使用 Local 的 `~/.terax/workspace`、主 Agent、每轮冻结的全局默认模型和完全访问权限，不修改桌面聊天的全局选择。不设置连接数量上限；连接独立在线和执行，同一连接按配置引导当前轮或等待本轮完成后顺序执行下一轮。
 - 会话 metadata 的 `channelId` 不可变并投影到摘要。人工输入沿用跨环境会话的禁用机制，保留输入框；只有匹配连接在 Local 永久窗口可以提交 Channel 会话。
 - 连接配置和有界协议状态位于 `~/.terax/channels`，正文继续保存在既有 `sessions`。状态存储不包含凭据或回复令牌，不进入 Workspace 恢复文件。
 - 入站身份先记录再执行，回复在会话终态提交后发送。发送失败不重跑 Agent，异常退出后的未完成请求不自动重放。设置是独立 WebView，通过定向消息管理唯一主窗口服务。

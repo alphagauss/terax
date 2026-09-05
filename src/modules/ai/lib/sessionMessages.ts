@@ -3,17 +3,18 @@
  * 工具调用使用 OpenAI function envelope，reasoning、活动耗时和展示记录保持可恢复。
  */
 
+import { isSteeringPart } from "@/modules/ai/lib/turnInbox";
 import type { UIMessage } from "@ai-sdk/react";
 import {
   formatSubagentResultEvent,
   isSubagentResultDataPart,
   isSubagentResultEvent,
   type SubagentResultEvent,
-} from "../agents/subagentRuntime";
+} from "@/modules/ai/agents/subagentRuntime";
 import {
   isSubagentDisplaySnapshot,
   type SubagentDisplaySnapshot,
-} from "../agents/subagentDisplay";
+} from "@/modules/ai/agents/subagentDisplay";
 
 export const REASONING_DURATION_PART_TYPE = "data-reasoning-duration" as const;
 export const ACTIVITY_DURATION_PART_TYPE = "data-activity-duration" as const;
@@ -60,6 +61,8 @@ export type SessionMessage = {
   content: unknown;
   timestamp: string;
   turn_id?: string;
+  guided?: boolean;
+  message_id?: string;
   injected_event?: "subagent_result";
   subagent_task_ids?: string[];
   subagent_result?: SubagentResultEvent;
@@ -220,7 +223,7 @@ export function projectSessionMessages(
       return;
     }
     if (record.role === "user" || record.role === "system") {
-      flushAssistant();
+      if (!record.guided) flushAssistant();
       const content =
         typeof record.content === "string"
           ? record.content
@@ -236,14 +239,26 @@ export function projectSessionMessages(
           filename: media.filename,
         });
       }
-      messages.push({
-        id: `${sessionId}:${record.role}:${index}`,
+      const projected: UIMessage = {
+        id: record.message_id ?? `${sessionId}:${record.role}:${index}`,
         role: record.role,
         parts,
         ...(timestamp === undefined
           ? {}
           : { metadata: { createdAt: timestamp } }),
-      });
+      };
+      if (record.role === "user" && record.guided) {
+        projected.metadata = {
+          ...(projected.metadata as object),
+          guided: true,
+        };
+        ensureAssistant(index, record.turn_id, timestamp).push({
+          type: "data-user-steering",
+          data: { event: "user_steering", message: projected },
+        });
+      } else {
+        messages.push(projected);
+      }
       return;
     }
 
@@ -394,6 +409,9 @@ function serializeUiMessage(
     return [
       {
         role: message.role,
+        ...((message.metadata as { guided?: boolean })?.guided
+          ? { guided: true, message_id: message.id }
+          : {}),
         content,
         timestamp: messageOptions.timestamp,
         turn_id: messageOptions.turnId,
@@ -420,7 +438,7 @@ function serializeAssistantMessage(
   let lastCheckpoint = -1;
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
     const part = message.parts[index];
-    if (isSubagentResultDataPart(part)) {
+    if (isSubagentResultDataPart(part) || isSteeringPart(part)) {
       lastCheckpoint = index;
       break;
     }

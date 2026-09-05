@@ -13,6 +13,7 @@ export const connectionSchema = z
     sessionId: z.uuid().refine((value) => value === value.toLowerCase()),
     enabled: z.boolean(),
     accountId: z.string().max(256).nullable(),
+    busyMessageMode: z.enum(["steer", "queue"]),
   })
   .strict();
 
@@ -35,8 +36,7 @@ export type ChannelIssue =
   | "interrupted"
   | "delivery"
   | "account-mismatch"
-  | "duplicate-account"
-  | "limit";
+  | "duplicate-account";
 
 /** 可向界面投影的稳定错误类别，不携带 token 或平台原始响应。 */
 export class ChannelError extends Error {

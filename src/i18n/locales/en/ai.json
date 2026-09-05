@@ -108,7 +108,9 @@
     "unsupportedFile": "{{name}} is not a supported text or image file.",
     "attachFailed": "Could not attach the file: {{error}}",
     "channelReadOnly": "This session receives messages from its Channel.",
-    "channelBound": "This conversation is bound to a Channel. Remove its connection in Settings before deleting the conversation."
+    "channelBound": "This conversation is bound to a Channel. Remove its connection in Settings before deleting the conversation.",
+    "pendingSteering": "Awaiting guidance: {{count}}",
+    "sendFailed": "The message could not be sent. Please try again."
   },
   "statusBar": {
     "openAiAgent": "Open AI agent",
@@ -145,7 +147,8 @@
     "configureCta": "Configure {{label}} to use these models.",
     "open": "Open",
     "unfavorite": "Unfavorite",
-    "favorite": "Favorite"
+    "favorite": "Favorite",
+    "steer": "Guide the current task"
   },
   "chat": {
     "editorSelection": "Editor selection",
@@ -231,7 +234,8 @@
     "recentUserMessages": "Recent user messages",
     "scrollNavigation": "Conversation navigation",
     "scrollToLatest": "Go to the latest response and follow",
-    "userMessageFallback": "[Attachment or context]"
+    "userMessageFallback": "[Attachment or context]",
+    "guided": "Guided"
   },
   "filePicker": {
     "workspaceFiles": "Workspace files",

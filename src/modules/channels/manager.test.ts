@@ -3,6 +3,7 @@
  * 重连不重跑已接受消息，停止一个连接不会取消另一个连接的接收。
  */
 
+import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 import { ChannelManager } from "@/modules/channels/manager";
 import type {
   ChannelCheckpoint,
@@ -20,6 +21,7 @@ const connection = (id: string): ChannelConnection => ({
   name: id,
   enabled: true,
   accountId: id,
+  busyMessageMode: "queue",
 });
 const message = (id: string): ChannelInbound => ({
   id,
@@ -30,6 +32,8 @@ const message = (id: string): ChannelInbound => ({
 });
 
 function harness() {
+  let cancelled = false;
+  const inboxes = new Map<string, TurnInbox>();
   const receivers = new Map<string, ReceiveContext>();
   const disk = new Map<string, ChannelCheckpoint>();
   const gates: Array<() => void> = [];
@@ -63,13 +67,33 @@ function harness() {
         },
       ),
     save,
-    run: async (connection, input, signal) => {
+    run: async (connection, input, signal, ready) => {
+      const inbox = new TurnInbox();
+      inbox.open();
+      inboxes.set(connection.id, inbox);
+      ready((message) =>
+        inbox.steer({
+          id: message.id,
+          role: "user",
+          parts: [{ type: "text", text: message.text }],
+        }),
+      );
       calls.push(`${connection.id}:${input.id}`);
       await new Promise<void>((resolve) => {
         gates.push(resolve);
         signal.addEventListener("abort", () => resolve(), { once: true });
       });
       signal.throwIfAborted();
+      inbox.close();
+      if (cancelled) {
+        inbox.cancel();
+        return null;
+      }
+      let entry = inbox.take();
+      while (entry) {
+        entry.settle("consumed");
+        entry = inbox.take();
+      }
       return input.text;
     },
     failureText: () => "Failed",
@@ -79,6 +103,10 @@ function harness() {
   });
   return {
     manager,
+    inboxes,
+    cancel: () => {
+      cancelled = true;
+    },
     receivers,
     disk,
     gates,
@@ -90,18 +118,78 @@ function harness() {
 }
 
 describe("ChannelManager", () => {
-  it("keeps both connections receiving while serializing turns and deduplicating restarts", async () => {
+  it("引导模式归并补充并只发送一次回复", async () => {
+    const h = harness();
+    await h.manager.configure([
+      { ...connection("a"), busyMessageMode: "steer" },
+    ]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    await h.receivers.get("a")?.receive(message("first"));
+    await h.receivers.get("a")?.receive(message("supplement"));
+    expect(h.calls).toEqual(["a:first"]);
+    expect(h.inboxes.get("a")?.pendingUsers).toBe(1);
+    expect(h.disk.get("a")?.pendingIds).toEqual(["first", "supplement"]);
+    h.gates[0]();
+    await vi.waitFor(() => expect(h.disk.get("a")?.pendingIds).toEqual([]));
+    expect(h.send).toHaveBeenCalledTimes(1);
+    await h.manager.dispose();
+  });
+
+  it("中止当前轮清空待执行消息且重连不重放", async () => {
+    const h = harness();
+    await h.manager.configure([connection("a")]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    await h.receivers.get("a")?.receive(message("first"));
+    await h.receivers.get("a")?.receive(message("queued"));
+    for (let index = 0; index < 13; index++)
+      await h.receivers.get("a")?.receive(message(`queued-${index}`));
+    let releaseAdmission!: () => void;
+    h.save.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        releaseAdmission = resolve;
+      });
+    });
+    const admitting = h.receivers.get("a")?.receive(message("admitting"));
+    await vi.waitFor(() => expect(releaseAdmission).toBeDefined());
+    const waiting = h.receivers
+      .get("a")
+      ?.receive(message("waiting-for-capacity"));
+    expect(h.snapshots()[0].issue).toBe("queue-full");
+    h.cancel();
+    h.gates[0]();
+    await vi.waitFor(() => expect(h.snapshots()[0].queued).toBe(0));
+    releaseAdmission();
+    await Promise.all([admitting, waiting]);
+    await vi.waitFor(() => expect(h.disk.get("a")?.pendingIds).toEqual([]));
+    expect(h.calls).toEqual(["a:first"]);
+    expect(h.send).not.toHaveBeenCalled();
+    await h.manager.restart("a");
+    await vi.waitFor(() =>
+      expect(h.receivers.get("a")?.signal.aborted).toBe(false),
+    );
+    await h.receivers.get("a")?.receive(message("queued"));
+    await h.receivers.get("a")?.receive(message("admitting"));
+    await h.receivers.get("a")?.receive(message("waiting-for-capacity"));
+    expect(h.calls).toEqual(["a:first"]);
+    await h.manager.dispose();
+  });
+
+  it("runs connections independently while keeping each connection ordered and deduplicating restarts", async () => {
     const h = harness();
     await h.manager.configure([connection("a"), connection("b")]);
     await vi.waitFor(() => expect(h.receivers.size).toBe(2));
     await h.receivers.get("a")?.receive(message("first"));
+    await h.receivers.get("a")?.receive(message("next"));
     await h.receivers.get("b")?.receive(message("second"));
-    expect(h.calls).toEqual(["a:first"]);
+    expect(h.calls).toEqual(["a:first", "b:second"]);
     expect(h.disk.get("b")?.pendingIds).toEqual(["second"]);
     h.gates[0]();
-    await vi.waitFor(() => expect(h.calls).toEqual(["a:first", "b:second"]));
+    await vi.waitFor(() =>
+      expect(h.calls).toEqual(["a:first", "b:second", "a:next"]),
+    );
+    h.gates[2]();
     h.gates[1]();
-    await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(3));
     await h.manager.restart("a");
     await vi.waitFor(() =>
       expect(
@@ -109,7 +197,7 @@ describe("ChannelManager", () => {
       ).toBe("online"),
     );
     await h.receivers.get("a")?.receive(message("first"));
-    expect(h.calls).toHaveLength(2);
+    expect(h.calls).toHaveLength(3);
     expect(h.receivers.get("b")?.signal.aborted).toBe(false);
     await h.manager.dispose();
   });

@@ -1,8 +1,9 @@
 /**
  * 本文件管理多连接的独立接收任务与有界消息队列。
- * 首版 Agent 全局串行，连接轮转取消息；接收身份先落盘，异常退出不重放有副作用的任务。
+ * 连接独立执行、连接内串行或引导当前轮；接收身份先落盘，异常退出不重放有副作用的任务。
  */
 
+import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import {
   type ChannelAdapter,
   type ChannelCheckpoint,
@@ -18,7 +19,8 @@ type Dependencies = {
     connection: ChannelConnection,
     message: ChannelInbound,
     signal: AbortSignal,
-  ) => Promise<string>;
+    ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
+  ) => Promise<string | null>;
   load: (id: string) => Promise<ChannelCheckpoint>;
   save: (id: string, checkpoint: ChannelCheckpoint) => Promise<void>;
   failureText: () => string;
@@ -35,13 +37,14 @@ type Runtime = {
   active: Promise<void> | null;
   adapter: ChannelAdapter | null;
   wake: (() => void) | null;
+  steer: ((message: ChannelInbound) => SteeringReceipt | null) | null;
+  groupedIds: string[];
+  generation: number;
 };
 
 /** 管理实例生命周期，不依赖 React、窗口可见性或具体平台协议。 */
 export class ChannelManager {
   private readonly runtimes = new Map<string, Runtime>();
-  private pumping = false;
-  private lastServed: string | null = null;
 
   constructor(private readonly deps: Dependencies) {}
 
@@ -49,13 +52,20 @@ export class ChannelManager {
   async configure(connections: readonly ChannelConnection[]): Promise<void> {
     for (const [id, runtime] of this.runtimes) {
       const next = connections.find((connection) => connection.id === id);
+      const current = runtime.snapshot.connection;
       if (
-        !next ||
-        JSON.stringify(next) !== JSON.stringify(runtime.snapshot.connection)
+        next &&
+        next.sessionId === current.sessionId &&
+        next.kind === current.kind &&
+        next.name === current.name &&
+        next.enabled === current.enabled &&
+        next.accountId === current.accountId
       ) {
-        await this.stop(runtime);
-        this.runtimes.delete(id);
+        runtime.snapshot.connection = next;
+        continue;
       }
+      await this.stop(runtime);
+      this.runtimes.delete(id);
     }
     for (const connection of connections) {
       if (this.runtimes.has(connection.id)) continue;
@@ -80,6 +90,9 @@ export class ChannelManager {
         active: null,
         adapter: null,
         wake: null,
+        steer: null,
+        groupedIds: [],
+        generation: 0,
       };
       this.runtimes.set(connection.id, runtime);
       if (connection.enabled) runtime.receiver = this.receive(runtime);
@@ -186,6 +199,7 @@ export class ChannelManager {
         receive: async (message) => {
           signal.throwIfAborted();
           if (runtime.checkpoint.recentIds.includes(message.id)) return;
+          const generation = runtime.generation;
           while (runtime.checkpoint.pendingIds.length >= 16) {
             runtime.snapshot.issue = "queue-full";
             this.publish();
@@ -195,16 +209,26 @@ export class ChannelManager {
             runtime.wake = null;
             signal.throwIfAborted();
           }
+          if (runtime.snapshot.issue === "queue-full")
+            runtime.snapshot.issue = null;
           runtime.checkpoint.recentIds = [
             ...runtime.checkpoint.recentIds,
             message.id,
           ].slice(-256);
+          // 等待队列空位期间的消息也属于被中止的轮次，只记录去重身份。
+          if (generation !== runtime.generation) {
+            await this.persist(runtime);
+            return;
+          }
           runtime.checkpoint.pendingIds.push(message.id);
           await this.persist(runtime);
           signal.throwIfAborted();
+          // 中止还覆盖已经登记身份、但仍在等待写盘的入站消息。
+          if (generation !== runtime.generation) return;
           runtime.queue.push(message);
           this.publish();
-          void this.pump();
+          this.guide(runtime);
+          void this.pump(runtime);
         },
       });
     } catch (error) {
@@ -219,41 +243,45 @@ export class ChannelManager {
     }
   }
 
-  /** 连接轮转而非一个连接排空，后续提高并发只需改变此处调度。 */
-  private async pump(): Promise<void> {
-    if (this.pumping) return;
-    this.pumping = true;
+  /** 各连接拥有自己的执行循环，同一连接的回复发送也保持有序。 */
+  private async pump(runtime: Runtime): Promise<void> {
+    if (runtime.snapshot.busy) return;
+    runtime.snapshot.busy = true;
     try {
-      while (true) {
-        const runtimes = [...this.runtimes.values()];
-        const previous = runtimes.findIndex(
-          (runtime) => runtime.snapshot.connection.id === this.lastServed,
-        );
-        const ordered = [
-          ...runtimes.slice(previous + 1),
-          ...runtimes.slice(0, previous + 1),
-        ];
-        const runtime = ordered.find(
-          (candidate) =>
-            !candidate.abort.signal.aborted &&
-            candidate.adapter &&
-            candidate.queue.length,
-        );
-        if (!runtime) break;
+      while (
+        !runtime.abort.signal.aborted &&
+        runtime.adapter &&
+        runtime.queue.length
+      ) {
         const message = runtime.queue.shift();
-        if (!message) continue;
-        this.lastServed = runtime.snapshot.connection.id;
-        runtime.snapshot.busy = true;
+        if (!message) break;
+        runtime.groupedIds = [message.id];
         this.publish();
         runtime.active = this.execute(runtime, message);
         await runtime.active;
         runtime.active = null;
-        runtime.snapshot.busy = false;
-        this.publish();
       }
     } finally {
-      this.pumping = false;
+      runtime.snapshot.busy = false;
+      this.publish();
     }
+  }
+
+  /** 只把已被会话接纳的补充移出传输队列，它们与本轮共用一次最终回复。 */
+  private guide(runtime: Runtime): void {
+    if (
+      runtime.snapshot.connection.busyMessageMode !== "steer" ||
+      !runtime.steer
+    )
+      return;
+    while (runtime.queue.length) {
+      const message = runtime.queue[0];
+      const receipt = runtime.steer(message);
+      if (!receipt) break;
+      runtime.queue.shift();
+      runtime.groupedIds.push(message.id);
+    }
+    this.publish();
   }
 
   private async execute(
@@ -267,8 +295,20 @@ export class ChannelManager {
         runtime.snapshot.connection,
         message,
         signal,
+        (steer) => {
+          runtime.steer = steer;
+          this.guide(runtime);
+        },
       );
+      runtime.steer = null;
       signal.throwIfAborted();
+      if (text === null) {
+        runtime.generation++;
+        runtime.groupedIds.push(...runtime.checkpoint.pendingIds);
+        runtime.queue = [];
+        this.publish();
+        return;
+      }
       delivering = true;
       await runtime.adapter?.send(message, text, signal);
       runtime.snapshot.issue = null;
@@ -293,9 +333,10 @@ export class ChannelManager {
         }
       }
     } finally {
+      runtime.steer = null;
       if (!signal.aborted) {
         runtime.checkpoint.pendingIds = runtime.checkpoint.pendingIds.filter(
-          (id) => id !== message.id,
+          (id) => !runtime.groupedIds.includes(id),
         );
         runtime.wake?.();
         await this.persist(runtime).catch(() => undefined);
