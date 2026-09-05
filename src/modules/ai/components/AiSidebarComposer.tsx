@@ -166,7 +166,7 @@ export function AiSidebarComposer() {
             type="button"
             size="icon"
             onClick={c.isBusy ? c.stop : c.submit}
-            disabled={!c.isBusy && !c.canSend}
+            disabled={c.readOnly || (!c.isBusy && !c.canSend)}
             className="size-7 rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-100 hover:bg-foreground/85"
             aria-label={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
             title={c.isBusy ? t("statusBar.stop") : t("statusBar.send")}
@@ -216,7 +216,12 @@ const PERMISSION_MODES = [
 /** 选择当前 Workspace 进程内的 AI 工具审批模式。 */
 function PermissionModeDropdown() {
   const { t } = useTranslation("ai");
-  const mode = useChatStore((s) => s.permissionMode);
+  const { readOnly } = useComposer();
+  const mode = useChatStore((s) =>
+    s.sessions.find((session) => session.id === s.activeSessionId)?.channelId
+      ? "full-access"
+      : s.permissionMode,
+  );
   const setMode = useChatStore((s) => s.setPermissionMode);
   const activeIcon = mode === "ask" ? HandIcon : SecurityWarningIcon;
 
@@ -225,6 +230,7 @@ function PermissionModeDropdown() {
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
+          disabled={readOnly}
           variant="ghost"
           size="sm"
           className={cn(
@@ -270,9 +276,17 @@ function PermissionModeDropdown() {
 
 type Tab = "all" | "favorites" | "recent";
 
+/** 展示会话使用的模型，外部消息会话沿用输入禁用规则。 */
 function ModelDropdown() {
   const { t } = useTranslation("ai");
-  const selected = useChatStore((s) => s.selectedModel);
+  const { readOnly } = useComposer();
+  const channelId = useChatStore(
+    (s) =>
+      s.sessions.find((session) => session.id === s.activeSessionId)?.channelId,
+  );
+  const selectedUiModel = useChatStore((s) => s.selectedModel);
+  const defaultModel = usePreferencesStore((s) => s.defaultModel);
+  const selected = channelId ? defaultModel : selectedUiModel;
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const draftSessionId = useChatStore((s) => s.draftSessionId);
   const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
@@ -423,7 +437,10 @@ function ModelDropdown() {
           variant="ghost"
           size="sm"
           disabled={
-            !current && !currentExternal && availableExternalAgents.length === 0
+            readOnly ||
+            (!current &&
+              !currentExternal &&
+              availableExternalAgents.length === 0)
           }
           className={cn(
             "my-1 h-5.5 min-w-0 shrink gap-1 rounded-md px-1.5 text-xs hover:bg-accent hover:text-foreground",

@@ -9,6 +9,7 @@
     "core:app:allow-name",
     "core:app:allow-version",
     "core:event:allow-emit",
+    "core:event:allow-emit-to",
     "core:path:allow-join",
     "core:path:allow-resolve-directory",
     "autostart:default",

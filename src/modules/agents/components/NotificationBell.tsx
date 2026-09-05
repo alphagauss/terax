@@ -1,8 +1,10 @@
 /**
- * 本文件渲染 Agent 通知入口、未读通知和活动会话列表。
+ * 本文件渲染 Agent 与 Channel 状态入口、未读通知和活动会话列表。
  * 终端 Agent 通过唯一标签 ID 激活，内置 Agent 使用独立入口。
  */
 
+import { ChannelStatusRows } from "@/modules/channels/components/ChannelStatusRows";
+import { useChannelsView } from "@/modules/channels/client";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -178,12 +180,13 @@ function NotificationRow({
   );
 }
 
-/** 展示 Agent 通知并把用户导航到对应标签或本地 Agent。 */
+/** 展示 Agent 与 Channel 状态，并把用户导航到对应标签或固定 AI 会话。 */
 export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const { t } = useTranslation("agents");
   const [open, setOpen] = useState(false);
   const [hooks, setHooks] = useState<Record<string, boolean>>({});
   const [installing, setInstalling] = useState<string | null>(null);
+  const channels = useChannelsView((state) => state.snapshots);
   const sessions = useAgentStore((s) => s.sessions);
   const localAgent = useAgentStore((s) => s.localAgent);
   const notifications = useAgentStore((s) => s.notifications);
@@ -200,7 +203,12 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const unreadDone = notifications.filter(
     (n) => !n.read && n.kind !== "attention",
   ).length;
-  const badge = waitingCount + unreadDone;
+  const badge =
+    waitingCount +
+    unreadDone +
+    channels.filter(
+      (channel) => channel.issue || channel.status === "login-required",
+    ).length;
 
   const refreshHooks = () => {
     for (const id of HOOK_AGENTS) {
@@ -245,7 +253,8 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
     else activate(n.tabId);
   };
 
-  const empty = activeCount === 0 && notifications.length === 0;
+  const empty =
+    activeCount === 0 && notifications.length === 0 && channels.length === 0;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -303,6 +312,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
           </div>
         ) : (
           <div className="max-h-80 overflow-y-auto border-t border-border/60 p-1">
+            <ChannelStatusRows onActivate={() => setOpen(false)} />
             {localAgent ? (
               <StatusRow
                 agent={localAgent.agent}

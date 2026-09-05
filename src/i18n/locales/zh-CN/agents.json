@@ -20,8 +20,8 @@
     "enable": "启用"
   },
   "bell": {
-    "title": "Agent 通知",
-    "heading": "通知",
+    "title": "Agent 与 Channels",
+    "heading": "Agent 与 Channels",
     "active": "{{count}} 个进行中",
     "clear": "清除",
     "emptyLine1": "暂无 Agent 活动。",

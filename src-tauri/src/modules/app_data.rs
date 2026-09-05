@@ -8,6 +8,8 @@ use std::path::PathBuf;
 ///
 /// 新增持久化数据必须从这里取路径，不能自行约定模块目录。
 pub enum Directory {
+    /// 消息连接的配置与协议恢复数据。
+    Channels,
     Shared,
     Sessions,
     Workspace,
@@ -32,6 +34,7 @@ pub fn root() -> Result<PathBuf, String> {
 /// 返回指定类别的稳定数据目录路径，不主动创建目录。
 pub fn directory(directory: Directory) -> Result<PathBuf, String> {
     let name = match directory {
+        Directory::Channels => "channels",
         Directory::Shared => "shared",
         Directory::Sessions => "sessions",
         Directory::Workspace => "workspace",

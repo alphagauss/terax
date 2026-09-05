@@ -157,7 +157,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `shell::shell_exec`、`shell::shell_process`、`shell::shell_list`：按聊天 owner 隔离的统一 Agent 进程启动、stdin/EOF/增量输出/终止和发现；`shell_clear_owner` 在聊天删除时回收所属进程。
 - `workspace::*`：工作区授权、当前目录、WSL 桥接，以及无 Explorer 根时延迟准备默认 Agent 工作目录。
 - `lsp::*`：语言服务器进程及 JSON-RPC 管道；协议智能位于前端。
-- `net::*`：带 SSRF 防护的 AI HTTP 代理。
+- `net::http_request`、`net::http_cancel`：带 SSRF 防护、响应上限和按 WebView 隔离取消的通用 HTTP 传输，供 AI 与 Channels 复用。
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
 - `ai_sessions::*`：保存、列出和锁定 JSONL 会话，并在共享 Agent 配置锁内级联删除 Custom Agent 及其全部会话。
 - `auxiliary_window::open_auxiliary_window`：按封闭类型定义创建或复用轻量辅助窗口，设置页是首个注册页面。
@@ -234,6 +234,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `header/`、`statusbar/`、`sidebar/`：应用框架、状态和侧边栏。
 - `shortcuts/`：快捷键注册；跨平台组合键使用 `metaKey || ctrlKey`。
 - `settings/`：白名单共享设置。
+- `channels/`：只由 Local 永久主窗口拥有的 TS 消息连接、独立保活与固定 AI 会话；设置和通知入口只消费状态。
 - `source-control/`、`git-history/`：Git 状态、diff、提交和历史。
 - `lsp/`：按需启用，未启用时不得产生进程、PATH 检查或额外 eager bundle 成本。没有 root marker 就不能启动 session，每个 server 最多 4 个 session。
 - `markdown/`：Markdown 预览。
@@ -267,6 +268,15 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 用户拒绝审批时保持 AI SDK `output-denied` 状态，将稳定拒绝原因作为 tool result 返回模型并持久化；模型不得通过替代工具、路径、编码或 Shell 重试绕过拒绝。
 - 需要批准的 `write_file` 和 `apply_patch` 通过一个或多个 `ai-diff` 标签页审阅，并按整个 tool call 批准或拒绝；批准前不得实际写入。cwd 内自动执行的修改仍必须通过 prepared mutation、read-before-edit 和条件提交。
 - `run_subagent` 只接受通用任务、标签和 `wait`，每聊天默认最多并发 3 个，超过上限立即拒绝。请求批准模式下 Subagent 只能使用父 Agent 白名单中的只读工具，且没有独立 UI 审批通道，需要提权的调用以原生边界错误返回；完全访问模式继承父白名单；两种模式都移除 `run_subagent`。`wait=false` 完成结果以标准 user 消息投影进入模型上下文，但在 UI 中保持隐藏，且不得改写既有 tool result 或消息前缀。
+
+### Channels
+
+- 仅 Local 永久 Workspace 主窗口启动 Channels。连接、协议、重连、消息队列和 Agent 接入均位于 TS；Rust 只提供通用 HTTP、秘密、存储和已有工具边界。
+- 每个连接实例绑定固定 session UUID，使用 Local 的 `~/.terax/workspace`、主 Agent、每轮冻结的全局默认模型和完全访问权限，不修改桌面聊天的全局选择。首版最多八个连接，连接独立在线，Agent 轮次全局串行。
+- 会话 metadata 的 `channelId` 不可变并投影到摘要。人工输入沿用跨环境会话的禁用机制，保留输入框；只有匹配连接在 Local 永久窗口可以提交 Channel 会话。
+- 连接配置和有界协议状态位于 `~/.terax/channels`，正文继续保存在既有 `sessions`。状态存储不包含凭据或回复令牌，不进入 Workspace 恢复文件。
+- 入站身份先记录再执行，回复在会话终态提交后发送。发送失败不重跑 Agent，异常退出后的未完成请求不自动重放。设置是独立 WebView，通过定向消息管理唯一主窗口服务。
+- 首版个人微信只接受扫码账号本人私聊文本。扩展规则与协议恢复边界见 `docs/architecture/channels.md`。
 
 ### UI 与路径约定
 
@@ -304,6 +314,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider
+- `docs/architecture/channels.md`：消息连接、固定会话、微信协议及通用网络边界
 - `docs/architecture/external-agent-runtime.md`：外部 CLI Agent 的进程、协议、会话和跨环境边界
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量
 - `docs/architecture/workspace-page-handoff.md`：主窗口向同环境临时 Workspace 复制可重建工作页

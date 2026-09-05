@@ -4,6 +4,11 @@
  */
 
 import { HOST_PLATFORM } from "@/lib/platform";
+import {
+  type ModelRef,
+  modelRequiresCredential,
+  providerFromBuiltinId,
+} from "@/modules/ai/config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { Chat, type UIMessage } from "@ai-sdk/react";
@@ -11,7 +16,6 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { modelRequiresCredential } from "../config";
 import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { parseSessionAgent } from "../lib/agents";
 import { resolveAgentExecutionEnvironment } from "../lib/prompt";
@@ -20,14 +24,26 @@ import { createSessionTransport } from "../lib/transport";
 import type { ToolContext } from "../tools/tools";
 import {
   chats,
-  getActiveProviderKey,
   getAgentMetaForSession,
+  isSessionWritable,
   seedMessages,
   sessionMetadata,
   touchChat,
   useChatStore,
 } from "./chatStore";
 
+/** 保存本轮显式模型，Channel 不读取界面的模型选择。 */
+const runModels = new WeakMap<Chat<UIMessage>, ModelRef>();
+
+/** 根据会话来源解析权限，Channel 的完全访问不修改桌面全局设置。 */
+function sessionPermission(sessionId: string) {
+  return useChatStore.getState().sessions.find((item) => item.id === sessionId)
+    ?.channelId
+    ? ("full-access" as const)
+    : useChatStore.getState().permissionMode;
+}
+
+/** 创建会话 Chat，并保持桌面与 Channel 共用执行和持久化数据流。 */
 function makeChat(sessionId: string): Chat<UIMessage> {
   /** 返回发送前已经冻结的会话 cwd，缺失表示运行时不变量被破坏。 */
   const getSessionCwd = () => {
@@ -41,7 +57,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getCwd: getSessionCwd,
     getTerminalContext: () => {
       const state = useChatStore.getState();
-      return state.activeSessionId === sessionId
+      return !state.sessions.find((item) => item.id === sessionId)?.channelId &&
+        state.activeSessionId === sessionId
         ? state.live.getTerminalContext()
         : null;
     },
@@ -53,7 +70,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       );
     },
     getSessionId: () => sessionId,
-    getPermissionMode: () => useChatStore.getState().permissionMode,
+    getPermissionMode: () => sessionPermission(sessionId),
     supportsApprovals: true,
   };
 
@@ -61,7 +78,14 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
     getModel: () => {
-      const model = useChatStore.getState().selectedModel;
+      const state = useChatStore.getState();
+      const cachedChat = chats.get(sessionId);
+      const model = state.sessions.find((item) => item.id === sessionId)
+        ?.channelId
+        ? cachedChat
+          ? runModels.get(cachedChat)
+          : undefined
+        : state.selectedModel;
       if (!model) throw new Error("No AI model is selected");
       return model;
     },
@@ -84,7 +108,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
           : null)
       );
     },
-    getPermissionMode: () => useChatStore.getState().permissionMode,
+    getPermissionMode: () => sessionPermission(sessionId),
     getProviderBaseURLs: () => usePreferencesStore.getState().providerBaseURLs,
     getProviderModels: () => usePreferencesStore.getState().providerModels,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
@@ -147,6 +171,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   });
 }
 
+/** 复用会话运行时，并由已有 LRU 管理空闲实例。 */
 export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
   const existing = chats.get(sessionId);
   if (existing) {
@@ -162,7 +187,7 @@ export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
 export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
-  if (!sessionId) return false;
+  if (!sessionId || !isSessionWritable(sessionId)) return false;
   return startChatMessage(sessionId, {
     role: "user",
     parts: [{ type: "text", text }],
@@ -175,13 +200,15 @@ export async function sendChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): Promise<boolean> {
+  if (!isSessionWritable(sessionId)) return false;
   return startChatMessage(sessionId, message);
 }
 
 /** 统一校验模型、Chat 状态和运行锁后启动一轮消息。 */
-async function startChatMessage(
+export async function startChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+  channel?: { id: string; model: ModelRef },
 ): Promise<boolean> {
   const state = useChatStore.getState();
   const cwd = resolveSessionCwd(
@@ -196,21 +223,27 @@ async function startChatMessage(
     (state.draftSessionId === sessionId && state.draftExternalAgentId
       ? { agentId: state.draftExternalAgentId, sessionId: null }
       : null);
-  if (!externalAgent && !state.selectedModel) return false;
-  const selectedModel = state.selectedModel;
+  const selectedModel = channel?.model ?? state.selectedModel;
+  if (!externalAgent && !selectedModel) return false;
+  const provider =
+    selectedModel && providerFromBuiltinId(selectedModel.providerId);
+  const credential = provider
+    ? state.apiKeys[provider]
+    : selectedModel && state.providerInstanceKeys[selectedModel.providerId];
   if (
     !externalAgent &&
     selectedModel &&
     modelRequiresCredential(selectedModel, {
       customProviders: usePreferencesStore.getState().customProviders,
     }) &&
-    !getActiveProviderKey()
+    !credential
   ) {
     return false;
   }
   const chat = getOrCreateChat(sessionId);
   if (chat.status === "submitted" || chat.status === "streaming") return false;
-  if (!(await state.beginSessionRun(sessionId))) return false;
+  if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
+  if (channel) runModels.set(chat, channel.model);
   if (isUserSubmission(message)) {
     state.promoteSession(sessionId, messagesForPromotion(message), cwd);
   }

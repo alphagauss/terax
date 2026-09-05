@@ -12,6 +12,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { canConsumeLaunchFiles, consumeLaunchFiles } from "@/lib/launchDir";
+import { useChannelsHost } from "@/modules/channels/useChannelsHost";
 import { flushSharedStoreWrites } from "@/lib/sharedStore";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
@@ -438,7 +439,10 @@ export default function App() {
   const setLive = useChatStore((s) => s.setLive);
   const respondApproval = useApprovalStore((state) => state.respond);
 
-  const { hasComposer } = useAiBootstrap();
+  const { hasComposer, keysLoaded } = useAiBootstrap();
+  const hasActiveAiRuns = useChatStore(
+    (state) => Object.keys(state.runLockSessionIds).length > 0,
+  );
 
   const activeTab = tabs.find((t) => t.id === activeId);
   const isTerminalTab = activeTab?.kind === "terminal";
@@ -1328,6 +1332,8 @@ export default function App() {
     [openAiPanel],
   );
 
+  useChannelsHost(onActivateLocalAgent, keysLoaded);
+
   const handleTerminalExit = useCallback(
     (tabId: number, _code: number) => {
       const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
@@ -2166,7 +2172,7 @@ export default function App() {
             toastOptions={{ closeButtonAriaLabel: t("close") }}
           />
 
-          {hasComposer ? (
+          {hasComposer || hasActiveAiRuns ? (
             <>
               <AgentRunBridge />
               <ApprovalToastHost

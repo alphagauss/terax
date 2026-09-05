@@ -18,9 +18,14 @@ import {
   type RuntimeAdapterId,
 } from "../providerRegistry";
 import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
-import { createProxyFetch } from "./proxyFetch";
+import { createHttpFetch } from "@/lib/http";
 
-const privateNetworkFetch = createProxyFetch({ allowPrivateNetwork: true });
+const privateNetworkFetch = createHttpFetch({
+  allowPrivateNetwork: true,
+  proxyMode: "direct",
+  timeoutMs: null,
+  maxResponseBytes: 64 * 1024 * 1024,
+});
 
 type RuntimeFactory = (
   connection: ResolvedProviderConnection,

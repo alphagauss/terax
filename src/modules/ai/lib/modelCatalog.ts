@@ -3,7 +3,7 @@
  * 目录结果只用于辅助选择，不会自动加入用户配置或成为模型可用性的事实来源。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { createHttpFetch } from "@/lib/http";
 import { normalizeModelId } from "../config";
 import type { ResolvedProviderConnection } from "../providerRegistry";
 
@@ -33,8 +33,7 @@ export class ModelCatalogError extends Error {
 
 type HttpResponse = {
   status: number;
-  headers: Record<string, string>;
-  body: number[];
+  body: string;
 };
 
 export type CatalogRequest = {
@@ -195,15 +194,18 @@ export function parseModelCatalogPage(
   return { models, nextPageToken };
 }
 
+/** 通过公共 HTTP 边界获取有界模型目录正文。 */
 async function invokeCatalogRequest(
   request: CatalogRequest,
 ): Promise<HttpResponse> {
-  return invoke<HttpResponse>("ai_http_request", {
-    url: request.url,
-    method: "GET",
-    headers: request.headers,
+  const response = await createHttpFetch({
     allowPrivateNetwork: request.allowPrivateNetwork,
-  });
+    proxyMode: request.allowPrivateNetwork ? "direct" : "system",
+  })(request.url, { headers: request.headers });
+  return {
+    status: response.status,
+    body: await response.text(),
+  };
 }
 
 function decodeJson(response: HttpResponse): unknown {
@@ -229,9 +231,7 @@ function decodeJson(response: HttpResponse): unknown {
     );
   }
   try {
-    return JSON.parse(
-      new TextDecoder().decode(Uint8Array.from(response.body)),
-    ) as unknown;
+    return JSON.parse(response.body) as unknown;
   } catch {
     throw new ModelCatalogError(
       "invalid-response",

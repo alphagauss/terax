@@ -1,17 +1,19 @@
 //! 受控 HTTP 客户端与网络安全边界。
 //!
-//! 本模块统一执行协议、地址、重定向和请求头校验，防止 AI 请求与图片下载绕过 SSRF 限制。
+//! 本模块统一执行协议、地址、重定向和请求头校验，并按 WebView 隔离取消与响应上限。
+//! AI、Channel 与图片下载复用网络边界；不管理平台协议或业务重试。
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
+use tokio_util::sync::CancellationToken;
 
 const HEADER_BLOCKLIST: &[&str] = &[
     "host",
@@ -27,8 +29,8 @@ const HEADER_BLOCKLIST: &[&str] = &[
 ];
 const IMAGE_REDIRECT_LIMIT: usize = 5;
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const AI_HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const AI_HTTP_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
+const HTTP_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const HTTP_REQUEST_LIMIT: usize = 128;
 
 /// 已通过公开地址校验和体积限制的网络图片。
 pub(crate) struct DownloadedImage {
@@ -211,13 +213,6 @@ fn sanitize_headers(headers: Option<HashMap<String, String>>) -> Result<HeaderMa
 // AI HTTP proxy: bypasses webview CORS / Mixed-Content / PNA so local-network
 // model servers (LM Studio, Ollama, vLLM) work in the production bundle.
 
-#[derive(Debug, Serialize)]
-pub struct HttpResponse {
-    pub status: u16,
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
-}
-
 fn build_request(
     client: &reqwest::Client,
     method: &str,
@@ -235,12 +230,18 @@ fn build_request(
     Ok(req)
 }
 
-/// 为 AI HTTP 代理构造固定已验证 DNS 结果的客户端。
+/// 构造固定已验证 DNS 结果的客户端，并遵守调用方的重定向和代理策略。
 fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
+    proxy_mode: HttpProxyMode,
+    redirect_mode: HttpRedirectMode,
 ) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
+    if matches!(proxy_mode, HttpProxyMode::Direct) {
+        // 私网服务可能使用非 RFC1918 地址，直连策略必须由调用者明确选择。
+        builder = builder.no_proxy();
+    }
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
     // for the same hostname between classify and connect; classic DNS
@@ -254,6 +255,11 @@ fn build_safe_client(
     }
     builder
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            match redirect_mode {
+                HttpRedirectMode::Error => return attempt.error("HTTP redirect is not allowed"),
+                HttpRedirectMode::Manual => return attempt.stop(),
+                HttpRedirectMode::Follow => {}
+            }
             if attempt.previous().len() > 10 {
                 return attempt.error("too many redirects");
             }
@@ -403,151 +409,219 @@ fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
     out
 }
 
-/// 执行受 SSRF 防护、总时限和响应体积限制的非流式 AI HTTP 请求。
-#[tauri::command]
-pub async fn ai_http_request(
-    url: String,
-    method: String,
-    headers: Option<HashMap<String, String>>,
-    body: Option<Vec<u8>>,
-    allow_private_network: Option<bool>,
-) -> Result<HttpResponse, String> {
-    tokio::time::timeout(AI_HTTP_REQUEST_TIMEOUT, async move {
-        let allow_private = allow_private_network.unwrap_or(false);
-        let parsed = validate_url(&url)?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| "missing host".to_string())?
-            .to_string();
-        let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
-        let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
-        let request = build_request(&client, &method, parsed, headers, body)?;
-        let response = request.send().await.map_err(|error| error.to_string())?;
-        if response
-            .content_length()
-            .is_some_and(|length| length > AI_HTTP_RESPONSE_MAX_BYTES as u64)
-        {
-            return Err("AI HTTP response is too large".into());
-        }
-
-        let status = response.status().as_u16();
-        let headers = header_map_to_strings(response.headers());
-        let mut body = Vec::new();
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            append_bounded_response(&mut body, &chunk.map_err(|error| error.to_string())?)?;
-        }
-        Ok(HttpResponse {
-            status,
-            headers,
-            body,
-        })
-    })
-    .await
-    .map_err(|_| "AI HTTP request timed out".to_string())?
+/// 通用 HTTP 代理策略，网络访问权限与代理路由分别声明。
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HttpProxyMode {
+    /// 使用环境或系统的代理配置。
+    #[default]
+    System,
+    /// 直连目标，不读取自动代理配置。
+    Direct,
 }
 
-/// 追加非流式响应块，并在分配前拒绝超过固定上限的正文。
-fn append_bounded_response(body: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
-    if body.len().saturating_add(chunk.len()) > AI_HTTP_RESPONSE_MAX_BYTES {
-        return Err("AI HTTP response is too large".into());
+/// 遵循 Fetch 的重定向模式；平台适配器可拒绝未经协议校验的目标变更。
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HttpRedirectMode {
+    /// 在通用地址安全检查通过后跟随跳转。
+    #[default]
+    Follow,
+    /// 任何重定向均返回错误，不转发正文与请求头。
+    Error,
+    /// 将重定向响应交回调用者。
+    Manual,
+}
+
+/// 当前 WebView 拥有的可取消 HTTP 请求；不保存平台协议或业务状态。
+#[derive(Default)]
+pub struct HttpState {
+    requests: Mutex<HashMap<(String, String), CancellationToken>>,
+}
+
+/// 请求退出时释放登记；取消会丢弃整个网络 future，包括等待响应头的阶段。
+struct RequestGuard<'a> {
+    state: &'a HttpState,
+    key: (String, String),
+    token: CancellationToken,
+}
+
+impl Drop for RequestGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut requests) = self.state.requests.lock() {
+            requests.remove(&self.key);
+        }
     }
-    body.extend_from_slice(chunk);
-    Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl HttpState {
+    /// 在发送启动确认前登记请求，同一窗口不能重复使用正在运行的请求 ID。
+    fn begin(&self, owner: &str, id: &str) -> Result<RequestGuard<'_>, String> {
+        if uuid::Uuid::parse_str(id).is_err() {
+            return Err("HTTP request ID must be a UUID".into());
+        }
+        let key = (owner.to_string(), id.to_string());
+        let mut requests = self.requests.lock().map_err(|error| error.to_string())?;
+        if requests.len() >= HTTP_REQUEST_LIMIT || requests.contains_key(&key) {
+            return Err("HTTP request limit reached or duplicate request ID".into());
+        }
+        let token = CancellationToken::new();
+        requests.insert(key.clone(), token.clone());
+        Ok(RequestGuard {
+            state: self,
+            key,
+            token,
+        })
+    }
+
+    /// 窗口销毁时取消它拥有的全部请求，不影响其他 WebView。
+    pub fn cancel_owner(&self, owner: &str) {
+        if let Ok(requests) = self.requests.lock() {
+            for ((window, _), token) in requests.iter() {
+                if window == owner {
+                    token.cancel();
+                }
+            }
+        }
+    }
+
+    /// 请求只能由发起它的 WebView 取消。
+    fn cancel(&self, owner: &str, id: &str) {
+        if let Ok(requests) = self.requests.lock() {
+            if let Some(token) = requests.get(&(owner.to_string(), id.to_string())) {
+                token.cancel();
+            }
+        }
+    }
+}
+
+/// HTTP 传输事件，启动事件解决前端取消早于原生登记的竞争。
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum AiStreamEvent {
+pub enum HttpEvent {
+    /// 原生请求已经登记，前端此时可以安全发送取消。
+    Started,
+    /// 状态码与响应头先于正文到达。
     Headers {
         status: u16,
         headers: HashMap<String, String>,
     },
-    Chunk {
-        bytes: Vec<u8>,
-    },
+    /// 有界正文片段，沿用平台传输顺序。
+    Chunk { bytes: Vec<u8> },
+    /// 正文已经完整结束。
     End,
-    Error {
-        message: String,
-    },
 }
 
+/// 执行通用、有界且可取消的 HTTP 请求；AI 流与长轮询共用同一安全边界。
 #[tauri::command]
-pub async fn ai_http_stream(
+#[allow(clippy::too_many_arguments)]
+pub async fn http_request(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, HttpState>,
+    request_id: String,
     url: String,
     method: String,
+    redirect: Option<HttpRedirectMode>,
     headers: Option<HashMap<String, String>>,
     body: Option<Vec<u8>>,
     allow_private_network: Option<bool>,
-    on_event: Channel<AiStreamEvent>,
+    proxy_mode: Option<HttpProxyMode>,
+    timeout_ms: Option<u64>,
+    max_response_bytes: usize,
+    on_event: Channel<HttpEvent>,
 ) -> Result<(), String> {
-    let allow_private = allow_private_network.unwrap_or(false);
-    let parsed = match validate_url(&url) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
-            return Err(e);
-        }
-    };
-    let host = match parsed.host_str() {
-        Some(h) => h.to_string(),
-        None => {
-            let e = "missing host".to_string();
-            let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
-            return Err(e);
-        }
-    };
-    let safe_ips = match classify_and_collect_safe_ips(&host, allow_private).await {
-        Ok(v) => v,
-        Err(e) => {
-            let _ = on_event.send(AiStreamEvent::Error { message: e.clone() });
-            return Err(e);
-        }
-    };
-
-    let client = build_safe_client(allow_private, &[(host, safe_ips)])?;
-
-    let req = build_request(&client, &method, parsed, headers, body)?;
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = on_event.send(AiStreamEvent::Error {
-                message: e.to_string(),
-            });
-            return Err(e.to_string());
-        }
-    };
-
-    let status = resp.status().as_u16();
-    let headers = header_map_to_strings(resp.headers());
-    let _ = on_event.send(AiStreamEvent::Headers { status, headers });
-
-    let mut stream = resp.bytes_stream();
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(chunk) => {
-                let bytes: Bytes = chunk;
-                if on_event
-                    .send(AiStreamEvent::Chunk {
-                        bytes: bytes.to_vec(),
-                    })
-                    .is_err()
-                {
-                    // Channel dropped (frontend aborted), stop streaming.
-                    return Ok(());
-                }
-            }
-            Err(e) => {
-                let _ = on_event.send(AiStreamEvent::Error {
-                    message: e.to_string(),
-                });
-                return Err(e.to_string());
-            }
-        }
+    if max_response_bytes == 0 || max_response_bytes > HTTP_RESPONSE_MAX_BYTES {
+        return Err("HTTP response limit is out of range".into());
     }
+    if timeout_ms.is_some_and(|value| value == 0 || value > 600_000) {
+        return Err("HTTP timeout must be between 1 and 600000 milliseconds".into());
+    }
+    if body
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > HTTP_RESPONSE_MAX_BYTES)
+    {
+        return Err("HTTP request body is too large".into());
+    }
+    let request = state.begin(window.label(), &request_id)?;
+    on_event
+        .send(HttpEvent::Started)
+        .map_err(|error| error.to_string())?;
+    let work = async {
+        let parsed = validate_url(&url)?;
+        let host = parsed.host_str().ok_or("missing host")?.to_string();
+        let allow_private = allow_private_network.unwrap_or(false);
+        let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+        let client = build_safe_client(
+            allow_private,
+            &[(host, safe_ips)],
+            proxy_mode.unwrap_or_default(),
+            redirect.unwrap_or_default(),
+        )?;
+        let response = build_request(&client, &method, parsed, headers, body)?
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > max_response_bytes as u64)
+        {
+            return Err("HTTP response is too large".into());
+        }
+        on_event
+            .send(HttpEvent::Headers {
+                status: response.status().as_u16(),
+                headers: header_map_to_strings(response.headers()),
+            })
+            .map_err(|error| error.to_string())?;
+        let mut size = 0usize;
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.map_err(|error| error.to_string())?;
+            size = size.saturating_add(bytes.len());
+            if size > max_response_bytes {
+                return Err("HTTP response is too large".into());
+            }
+            on_event
+                .send(HttpEvent::Chunk {
+                    bytes: bytes.to_vec(),
+                })
+                .map_err(|error| error.to_string())?;
+        }
+        on_event
+            .send(HttpEvent::End)
+            .map_err(|error| error.to_string())
+    };
+    run_request(&request.token, timeout_ms, work).await
+}
 
-    let _ = on_event.send(AiStreamEvent::End);
-    Ok(())
+/// 等待完整请求的取消或总超时，返回时网络 future 已释放。
+async fn run_request<T>(
+    token: &CancellationToken,
+    timeout_ms: Option<u64>,
+    work: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, String> {
+    let deadline = async {
+        match timeout_ms {
+            Some(ms) => tokio::time::sleep(Duration::from_millis(ms)).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err("HTTP request cancelled".into()),
+        _ = deadline => Err("HTTP request timed out".into()),
+        result = work => result,
+    }
+}
+
+/// 取消当前 WebView 发起的指定 HTTP 请求。
+#[tauri::command]
+pub fn http_cancel(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, HttpState>,
+    request_id: String,
+) {
+    state.cancel(window.label(), &request_id);
 }
 
 #[cfg(test)]
@@ -675,10 +749,59 @@ mod tests {
         }
     }
 
-    #[test]
-    fn bounded_ai_response_rejects_oversized_chunks_before_append() {
-        let mut body = vec![0; AI_HTTP_RESPONSE_MAX_BYTES];
-        assert!(append_bounded_response(&mut body, &[1]).is_err());
-        assert_eq!(body.len(), AI_HTTP_RESPONSE_MAX_BYTES);
+    #[tokio::test]
+    async fn explicit_redirect_modes_do_not_forward_the_request() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let read = socket.read(&mut request).await.unwrap();
+                let response = if request[..read].starts_with(b"GET /target ") {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                } else {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: /target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+        });
+        let url = format!("http://{address}/redirect");
+        let rejected = build_safe_client(true, &[], HttpProxyMode::Direct, HttpRedirectMode::Error)
+            .unwrap()
+            .get(&url)
+            .send()
+            .await;
+        assert!(rejected.unwrap_err().is_redirect());
+        let manual = build_safe_client(true, &[], HttpProxyMode::Direct, HttpRedirectMode::Manual)
+            .unwrap()
+            .get(&url)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(manual.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn cancellation_is_window_scoped_and_releases_pending_work() {
+        let state = HttpState::default();
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = state.begin("main", &id).unwrap();
+        state.cancel("settings", &id);
+        assert!(!request.token.is_cancelled());
+        state.cancel("main", &id);
+        let result = run_request::<()>(&request.token, None, std::future::pending()).await;
+        assert_eq!(result.unwrap_err(), "HTTP request cancelled");
+        drop(request);
+        assert!(state.requests.lock().unwrap().is_empty());
+        let next = state.begin("main", &id).unwrap();
+        assert_eq!(
+            run_request::<()>(&next.token, Some(1), std::future::pending())
+                .await
+                .unwrap_err(),
+            "HTTP request timed out"
+        );
     }
 }

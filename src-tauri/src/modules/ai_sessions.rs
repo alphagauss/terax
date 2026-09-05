@@ -4,6 +4,7 @@
 //! Rust 校验外层环境归属和不可变 cwd，列表只投影摘要，内层业务 metadata 保持不透明。
 //! 用户消息与终态记录分阶段原子追加，运行锁确保两个进程不能同时续写同一会话。
 //! Custom Agent 删除在共享配置锁内级联其全部会话，运行中会话会阻止整个操作。
+//! Channel 来源不可改绑，列表只投影入口 ID；绑定中的会话禁止从普通删除入口移除。
 
 use crate::modules::shared_store;
 use crate::modules::storage::{write_atomic, FileLock};
@@ -53,6 +54,9 @@ pub struct SessionMetadata {
     pub agent_id: String,
     pub agent_name: String,
     pub agent_icon: String,
+    /// 外部消息入口的固定归属，展示层据此禁用人工输入。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
     pub modified_at: u64,
     pub size: u64,
     pub fingerprint: String,
@@ -110,6 +114,7 @@ fn validate_session_file(session: &SessionFile) -> Result<Uuid, String> {
     if session.cwd.trim().is_empty() {
         return Err("session cwd must not be empty".to_string());
     }
+    validate_channel_metadata(&session.metadata)?;
     validate_agent_metadata(&session.metadata)?;
     validate_external_agent_metadata(&session.metadata)?;
     for (index, message) in session.messages.iter().enumerate() {
@@ -136,8 +141,17 @@ fn validate_header(header: &SessionFileHeader, expected_id: Uuid) -> Result<(), 
         return Err("session cwd must not be empty".to_string());
     }
     validate_timestamps(&header.created_at, &header.updated_at)?;
+    validate_channel_metadata(&header.metadata)?;
     validate_agent_metadata(&header.metadata)?;
     validate_external_agent_metadata(&header.metadata)
+}
+
+/// 校验会话的外部入口身份，不解释入口协议和运行策略。
+fn validate_channel_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
+    if let Some(value) = metadata.get("channelId") {
+        strict_uuid(value.as_str().ok_or("session channelId must be a UUID")?)?;
+    }
+    Ok(())
 }
 
 /// 校验可选 External Agent 绑定，避免损坏或超长 session ID 进入启动参数。
@@ -319,6 +333,9 @@ fn commit_session(
         if existing.cwd != update.cwd {
             return Err("session cwd must not change".to_string());
         }
+        if existing.metadata.get("channelId") != update.metadata.get("channelId") {
+            return Err("session channel ownership must not change".into());
+        }
         if existing.metadata.get("agent") != update.metadata.get("agent") {
             return Err("session agent snapshot must not change".to_string());
         }
@@ -421,6 +438,11 @@ fn metadata(root: &Path, id: Uuid) -> Result<SessionMetadata, String> {
         .to_string();
     let (agent_id, agent_name, agent_icon) = session_agent_summary(&header.metadata);
     Ok(SessionMetadata {
+        channel_id: header
+            .metadata
+            .get("channelId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         id: header.key,
         title,
         created_at: header.created_at,
@@ -552,6 +574,14 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "session is running in another window".to_string())?;
     let path = session_path(&root, id);
+    if path.exists() {
+        let header = read_header(&path, id)?;
+        if let Some(channel_id) = header.metadata.get("channelId").and_then(Value::as_str) {
+            if shared_store::read_value::<Value>("channels", channel_id)?.is_some() {
+                return Err("CHANNEL_SESSION_IS_BOUND".into());
+            }
+        }
+    }
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -976,6 +1006,26 @@ mod tests {
         let stored = read_session(dir.path(), id).unwrap();
         assert_eq!(stored.cwd, "D:/workspace/project");
         assert_eq!(stored.metadata["title"], "local");
+    }
+
+    #[test]
+    fn channel_ownership_survives_listing_and_cannot_be_rebound() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let owner = Uuid::new_v4().to_string();
+        let mut initial = session(id, "channel");
+        initial.metadata.insert("channelId".into(), json!(owner));
+        commit_session(dir.path(), &initial, "local").unwrap();
+        assert_eq!(
+            metadata(dir.path(), id).unwrap().channel_id.as_deref(),
+            Some(owner.as_str())
+        );
+        initial.metadata.remove("channelId");
+        assert!(commit_session(dir.path(), &initial, "local").is_err());
+        assert_eq!(
+            read_session(dir.path(), id).unwrap().metadata["channelId"],
+            owner
+        );
     }
 
     #[test]

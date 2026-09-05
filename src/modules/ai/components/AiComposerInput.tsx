@@ -297,9 +297,11 @@ export function AiComposerInput() {
               }}
               placeholder={
                 c.readOnly
-                  ? t("composer.foreignEnvironmentPlaceholder", {
-                      environment: c.readOnlyEnvironmentKey,
-                    })
+                  ? c.readOnlyEnvironmentKey
+                    ? t("composer.foreignEnvironmentPlaceholder", {
+                        environment: c.readOnlyEnvironmentKey,
+                      })
+                    : t("composer.channelReadOnly")
                   : t("composer.placeholder")
               }
               rows={1}

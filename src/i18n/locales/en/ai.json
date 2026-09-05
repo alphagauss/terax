@@ -106,7 +106,9 @@
     "connectProvider": "Connect provider",
     "fileTooLarge": "{{name}} is too large to attach ({{size}}).",
     "unsupportedFile": "{{name}} is not a supported text or image file.",
-    "attachFailed": "Could not attach the file: {{error}}"
+    "attachFailed": "Could not attach the file: {{error}}",
+    "channelReadOnly": "This session receives messages from its Channel.",
+    "channelBound": "This conversation is bound to a Channel. Remove its connection in Settings before deleting the conversation."
   },
   "statusBar": {
     "openAiAgent": "Open AI agent",

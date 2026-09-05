@@ -71,31 +71,37 @@ export function useAiBootstrap(): {
       }),
     [apiKeys, customProviders, providerBaseURLs, providerModels],
   );
+  const activeSession = sessions.find(
+    (session) => session.id === activeSessionId,
+  );
   const hasComposer =
     availableModels.length > 0 ||
     externalAgentAvailability?.some((agent) => agent.installed) === true ||
     Boolean(
-      activeSessionId &&
-        sessions.some((session) => session.id === activeSessionId) &&
-        parseExternalAgentBinding(sessionMetadata.get(activeSessionId)),
+      activeSession &&
+        (parseExternalAgentBinding(sessionMetadata.get(activeSession.id)) ||
+          activeSession.channelId),
     );
 
   const prefsHydrated = usePreferencesStore((s) => s.hydrated);
   const [keysLoaded, setKeysLoaded] = useState(false);
   useEffect(() => {
+    if (!prefsHydrated) return;
     let alive = true;
+    let revision = 0;
     const reload = () => {
-      void getAllKeys().then((keys) => {
-        if (!alive) return;
+      const requestRevision = ++revision;
+      // 两类凭据均就绪后才启动后台连接，较早的刷新结果不能覆盖最新密钥。
+      void Promise.all([
+        getAllKeys(),
+        getAllProviderInstanceKeys(
+          usePreferencesStore.getState().customProviders,
+        ),
+      ]).then(([keys, instanceKeys]) => {
+        if (!alive || requestRevision !== revision) return;
         setApiKeys(keys);
-        setKeysLoaded(true);
-      });
-      if (!prefsHydrated) return;
-      void getAllProviderInstanceKeys(
-        usePreferencesStore.getState().customProviders,
-      ).then((instanceKeys) => {
-        if (!alive) return;
         setProviderInstanceKeys(instanceKeys);
+        setKeysLoaded(true);
       });
     };
     reload();
