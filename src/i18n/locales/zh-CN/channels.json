@@ -52,7 +52,11 @@
     "interrupted": "部分消息在连接停止时被中断，未自动重新执行，请重新发送。",
     "delivery": "回复发送失败，完整结果仍可在 Channel 会话中查看。",
     "account-mismatch": "此连接已绑定另一个微信账号，请为新账号创建连接。",
-    "duplicate-account": "此微信账号已存在连接。",
-    "limit": "最多支持八个连接。"
+    "duplicate-account": "此微信账号已存在连接。"
+  },
+  "busyMessageMode": {
+    "label": "运行中收到消息时",
+    "steer": "引导当前任务",
+    "queue": "等待本轮完成"
   }
 }

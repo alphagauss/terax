@@ -7,14 +7,14 @@ import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
-import { modelRefForProvider } from "../config";
-import { runAgentStream } from "./agent";
-import { EMPTY_PROVIDER_KEYS } from "./keyring";
+import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
+import { modelRefForProvider } from "@/modules/ai/config";
+import { runAgentStream } from "@/modules/ai/lib/agent";
+import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import {
   activityDurationFromPart,
   reasoningDurationFromPart,
-} from "./sessionMessages";
+} from "@/modules/ai/lib/sessionMessages";
 
 let activeModel: MockLanguageModelV3;
 
@@ -121,7 +121,7 @@ describe("Agent reasoning duration", () => {
       systemPrompt: "Stable prompt",
       allowedTools: ["get_terminal_output"],
       maxConcurrentSubagents: 3,
-      subagentCoordinator: new SubagentTurnCoordinator(),
+      turnCoordinator: new AgentTurnCoordinator(),
       toolContext: {
         getTerminalContext: () => "terminal output",
         isActiveTerminalPrivate: () => false,

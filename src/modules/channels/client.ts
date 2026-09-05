@@ -14,6 +14,13 @@ export const CHANNEL_RESPONSE = "terax://channels-response";
 export const CHANNEL_SNAPSHOT = "terax://channels-snapshot";
 
 export const actionSchema = z.discriminatedUnion("action", [
+  z
+    .object({
+      action: z.literal("busy-message-mode"),
+      id: z.uuid(),
+      mode: z.enum(["steer", "queue"]),
+    })
+    .strict(),
   z.object({ action: z.literal("snapshot") }).strict(),
   z
     .object({

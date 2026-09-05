@@ -3,33 +3,34 @@
  * 系统提示词和工具白名单在 Chat runtime 内冻结，并转发每聊天 Subagent 展示状态。
  */
 
+import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
 import type { UIMessage } from "@ai-sdk/react";
-import type { SubagentDisplayState } from "../agents/subagentDisplay";
-import {
-  getSubagentCoordinator,
-  type SubagentResultEvent,
-} from "../agents/subagentRuntime";
+import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
+import { getAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import type {
   ModelRef,
   ProviderBaseURLs,
   ProviderInstance,
   ProviderModels,
-} from "../config";
+} from "@/modules/ai/config";
 import {
   type ExternalAgentBinding,
   type ExternalAgentId,
   runExternalAgentStream,
-} from "../external-agents/runtime";
-import type { ToolContext } from "../tools/tools";
-import { type AgentUsageDelta, runAgentStream } from "./agent";
-import type { SessionAgentSnapshot } from "./agents";
-import { formatAiError } from "./errors";
-import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
-import { readAgentsMd } from "./projectInstructions";
+} from "@/modules/ai/external-agents/runtime";
+import type { ToolContext } from "@/modules/ai/tools/tools";
+import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
+import type { SessionAgentSnapshot } from "@/modules/ai/lib/agents";
+import { formatAiError } from "@/modules/ai/lib/errors";
+import type {
+  ProviderInstanceKeys,
+  ProviderKeys,
+} from "@/modules/ai/lib/keyring";
+import { readAgentsMd } from "@/modules/ai/lib/projectInstructions";
 import {
   type AgentExecutionEnvironment,
   buildAgentSystemPrompt,
-} from "./prompt";
+} from "@/modules/ai/lib/prompt";
 
 type Deps = {
   getKeys: () => ProviderKeys;
@@ -58,7 +59,7 @@ type Deps = {
   ) => void | Promise<void>;
   onCheckpoint: (
     completedMessages: UIMessage[],
-    event: SubagentResultEvent,
+    event: TurnEvent,
   ) => void | Promise<void>;
   onExternalSession?: (
     agentId: ExternalAgentId,
@@ -134,9 +135,7 @@ export function createSessionTransport(deps: Deps) {
       model: deps.getModel(),
       defaultSubagentModel: deps.getDefaultSubagentModel(),
       maxConcurrentSubagents: deps.getMaxConcurrentSubagents(),
-      subagentCoordinator: getSubagentCoordinator(
-        deps.toolContext.getSessionId(),
-      ),
+      turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,
       allowedTools: agent.tools,
       toolContext: deps.toolContext,

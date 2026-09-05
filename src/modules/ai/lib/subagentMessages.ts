@@ -3,14 +3,15 @@
  * 结果事件投影为 append-only user 消息，display-only 进度和活动耗时在边界处显式剔除。
  */
 
+import { isSteeringPart } from "@/modules/ai/lib/turnInbox";
 import type { UIMessage } from "@ai-sdk/react";
 import { convertToModelMessages, type ModelMessage } from "ai";
 import {
   formatSubagentResultEvent,
   isSubagentResultDataPart,
-} from "../agents/subagentRuntime";
-import { isSubagentDisplayDataPart } from "../agents/subagentDisplay";
-import { activityDurationFromPart } from "./sessionMessages";
+} from "@/modules/ai/agents/subagentRuntime";
+import { isSubagentDisplayDataPart } from "@/modules/ai/agents/subagentDisplay";
+import { activityDurationFromPart } from "@/modules/ai/lib/sessionMessages";
 
 /** 将 UI 历史按内部事件切开，保证磁盘记录与 provider 看到相同的消息顺序。 */
 export async function convertToAgentModelMessages(
@@ -18,7 +19,18 @@ export async function convertToAgentModelMessages(
 ): Promise<ModelMessage[]> {
   const converted: ModelMessage[] = [];
   for (const message of messages) {
-    const providerParts = message.parts.filter(
+    const sourceParts =
+      message.role === "user" &&
+      (message.metadata as { guided?: boolean })?.guided
+        ? [
+            {
+              type: "text" as const,
+              text: "The user provided additional guidance for the current task. Apply this supplement or correction to your ongoing work:\n",
+            },
+            ...message.parts,
+          ]
+        : message.parts;
+    const providerParts = sourceParts.filter(
       (part) =>
         !isSubagentDisplayDataPart(part) &&
         activityDurationFromPart(part) === undefined,
@@ -28,7 +40,9 @@ export async function convertToAgentModelMessages(
     }
     if (
       message.role !== "assistant" ||
-      !providerParts.some(isSubagentResultDataPart)
+      !providerParts.some(
+        (part) => isSubagentResultDataPart(part) || isSteeringPart(part),
+      )
     ) {
       converted.push(
         ...(await convertToModelMessages([
@@ -51,6 +65,13 @@ export async function convertToAgentModelMessages(
     };
 
     for (const part of providerParts) {
+      if (isSteeringPart(part)) {
+        await flush();
+        converted.push(
+          ...(await convertToAgentModelMessages([part.data.message])),
+        );
+        continue;
+      }
       if (!isSubagentResultDataPart(part)) {
         segment.push(part);
         continue;

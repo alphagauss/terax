@@ -3,6 +3,11 @@
  * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
+import {
+  getAgentTurnCoordinator,
+  clearAgentTurnCoordinator,
+} from "@/modules/ai/agents/subagentRuntime";
+import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import { HOST_PLATFORM } from "@/lib/platform";
 import {
   type ModelRef,
@@ -16,12 +21,12 @@ import {
   type ChatTransport,
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
-import { parseExternalAgentBinding } from "../external-agents/runtime";
-import { parseSessionAgent } from "../lib/agents";
-import { resolveAgentExecutionEnvironment } from "../lib/prompt";
-import { resolveSessionCwd } from "../lib/sessions";
-import { createSessionTransport } from "../lib/transport";
-import type { ToolContext } from "../tools/tools";
+import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import { parseSessionAgent } from "@/modules/ai/lib/agents";
+import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
+import { resolveSessionCwd } from "@/modules/ai/lib/sessions";
+import { createSessionTransport } from "@/modules/ai/lib/transport";
+import type { ToolContext } from "@/modules/ai/tools/tools";
 import {
   chats,
   getAgentMetaForSession,
@@ -30,7 +35,7 @@ import {
   sessionMetadata,
   touchChat,
   useChatStore,
-} from "./chatStore";
+} from "@/modules/ai/store/chatStore";
 
 /** 保存本轮显式模型，Channel 不读取界面的模型选择。 */
 const runModels = new WeakMap<Chat<UIMessage>, ModelRef>();
@@ -163,6 +168,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     messages: initialMessages,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onError: (e) => {
+      void clearAgentTurnCoordinator(sessionId);
       useChatStore.getState().patchAgentMeta(sessionId, {
         status: "error",
         error: e instanceof Error ? e.message : String(e),
@@ -188,7 +194,7 @@ export async function sendMessage(text: string): Promise<boolean> {
   const state = useChatStore.getState();
   const sessionId = state.activeSessionId;
   if (!sessionId || !isSessionWritable(sessionId)) return false;
-  return startChatMessage(sessionId, {
+  return sendChatMessage(sessionId, {
     role: "user",
     parts: [{ type: "text", text }],
     metadata: { createdAt: Date.now() },
@@ -201,7 +207,81 @@ export async function sendChatMessage(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): Promise<boolean> {
   if (!isSessionWritable(sessionId)) return false;
+  const chat = chats.get(sessionId);
+  if (chat && useChatStore.getState().runLockSessionIds[sessionId]) {
+    if (!message || !("parts" in message) || !message.parts) return false;
+    const receipt = steerChatMessage(sessionId, {
+      ...message,
+      id: message.id ?? crypto.randomUUID(),
+      role: "user",
+    } as UIMessage);
+    if (receipt) return true;
+    if (
+      parseExternalAgentBinding(sessionMetadata.get(sessionId)) ||
+      getAgentMetaForSession(useChatStore.getState(), sessionId).cancelled ||
+      getAgentMetaForSession(useChatStore.getState(), sessionId).commitError
+    )
+      return false;
+    // 当前轮已经封闭接入但终态仍在落盘时，等锁释放后作为下一轮提交。
+    await new Promise<void>((resolve) => {
+      const unsubscribe = useChatStore.subscribe((state) => {
+        if (
+          !state.runLockSessionIds[sessionId] ||
+          getAgentMetaForSession(state, sessionId).cancelled ||
+          getAgentMetaForSession(state, sessionId).commitError
+        ) {
+          unsubscribe();
+          resolve();
+        }
+      });
+      if (!useChatStore.getState().runLockSessionIds[sessionId]) {
+        unsubscribe();
+        resolve();
+      }
+    });
+    const current = useChatStore.getState();
+    if (
+      getAgentMetaForSession(current, sessionId).cancelled ||
+      getAgentMetaForSession(current, sessionId).commitError
+    )
+      return false;
+  }
   return startChatMessage(sessionId, message);
+}
+
+/** 向当前运行接入用户引导，返回回执供 Channel 归并回复和处理取消。 */
+export function steerChatMessage(
+  sessionId: string,
+  message: UIMessage,
+  channelId?: string,
+): SteeringReceipt | null {
+  const state = useChatStore.getState();
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (
+    !state.runLockSessionIds[sessionId] ||
+    (channelId
+      ? session?.channelId !== channelId
+      : !isSessionWritable(sessionId)) ||
+    parseExternalAgentBinding(sessionMetadata.get(sessionId))
+  )
+    return null;
+  if (getAgentMetaForSession(state, sessionId).cancelled) return null;
+  const receipt = getAgentTurnCoordinator(sessionId).inbox.steer(message);
+  if (!receipt) return null;
+  state.patchAgentMeta(sessionId, {
+    pendingSteering:
+      getAgentMetaForSession(state, sessionId).pendingSteering + 1,
+  });
+  void receipt.then(() => {
+    const current = useChatStore.getState();
+    current.patchAgentMeta(sessionId, {
+      pendingSteering: Math.max(
+        0,
+        getAgentMetaForSession(current, sessionId).pendingSteering - 1,
+      ),
+    });
+  });
+  return receipt;
 }
 
 /** 统一校验模型、Chat 状态和运行锁后启动一轮消息。 */
@@ -243,10 +323,12 @@ export async function startChatMessage(
   const chat = getOrCreateChat(sessionId);
   if (chat.status === "submitted" || chat.status === "streaming") return false;
   if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
+  state.patchAgentMeta(sessionId, { cancelled: false });
   if (channel) runModels.set(chat, channel.model);
   if (isUserSubmission(message)) {
     state.promoteSession(sessionId, messagesForPromotion(message), cwd);
   }
+  if (!externalAgent) getAgentTurnCoordinator(sessionId).inbox.open();
   const sending = chat.sendMessage(message);
   void sending;
   return true;
@@ -265,7 +347,12 @@ function isUserSubmission(
 function messagesForPromotion(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
 ): UIMessage[] {
-  if (!message || !("parts" in message) || !Array.isArray(message.parts)) {
+  if (
+    !message ||
+    !("parts" in message) ||
+    !message.parts ||
+    !Array.isArray(message.parts)
+  ) {
     return [];
   }
   const messageWithParts = message as {

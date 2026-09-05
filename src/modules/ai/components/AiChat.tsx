@@ -5,6 +5,7 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
+import { projectSteeredMessages } from "@/modules/ai/lib/turnInbox";
 import {
   Conversation,
   ConversationContent,
@@ -57,27 +58,33 @@ import type { StickToBottomContext } from "use-stick-to-bottom";
 import {
   isSubagentDisplayDataPart,
   type SubagentDisplaySnapshot,
-} from "../agents/subagentDisplay";
-import { isSubagentResultDataPart } from "../agents/subagentRuntime";
-import { CHAT_SCROLL_SPRING } from "../lib/chatScroll";
-import { formatMessageTimestamp } from "../lib/messageTimestamp";
+} from "@/modules/ai/agents/subagentDisplay";
+import { isSubagentResultDataPart } from "@/modules/ai/agents/subagentRuntime";
+import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
+import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
 import {
   activityDurationFromPart,
   reasoningDurationFromPart,
-} from "../lib/sessionMessages";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "../lib/slashCommands";
-import { sendMessage } from "../store/chatRuntime";
-import { getAgentMetaForSession, useChatStore } from "../store/chatStore";
-import { useSessionAttentionStore } from "../store/sessionAttentionStore";
-import { AiChatScrollControls } from "./AiChatScrollControls";
+} from "@/modules/ai/lib/sessionMessages";
+import { SLASH_COMMANDS, TERAX_CMD_RE } from "@/modules/ai/lib/slashCommands";
+import { sendMessage } from "@/modules/ai/store/chatRuntime";
+import {
+  getAgentMetaForSession,
+  useChatStore,
+} from "@/modules/ai/store/chatStore";
+import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
+import { AiChatScrollControls } from "@/modules/ai/components/AiChatScrollControls";
 import {
   ChatActivityBlock,
   type ChatActivityHeadline,
-} from "./ChatActivityBlock";
-import { ChatCollapsibleScrollGuard } from "./ChatCollapsibleScrollGuard";
-import { ChatReasoningPart } from "./ChatReasoningPart";
-import { ChatStatusDots } from "./ChatStatusDots";
-import { SubagentCard, type SubagentResultView } from "./SubagentCard";
+} from "@/modules/ai/components/ChatActivityBlock";
+import { ChatCollapsibleScrollGuard } from "@/modules/ai/components/ChatCollapsibleScrollGuard";
+import { ChatReasoningPart } from "@/modules/ai/components/ChatReasoningPart";
+import { ChatStatusDots } from "@/modules/ai/components/ChatStatusDots";
+import {
+  SubagentCard,
+  type SubagentResultView,
+} from "@/modules/ai/components/SubagentCard";
 
 type ConversationScrollPosition = {
   top: number;
@@ -379,12 +386,12 @@ type Props = {
 /**
  * AI 会话消息视图。
  *
- * 负责恢复每个会话的滚动位置、渲染流式末尾消息，并在通知导航时等待面板可见后前往最新结果。
+ * 负责恢复滚动位置、按已接入引导切开活动块和渲染流式末尾消息，通知导航等待面板可见。
  */
 export function AiChatView({
   sessionId,
   visible,
-  messages,
+  messages: sourceMessages,
   status,
   error,
   clearError,
@@ -392,6 +399,10 @@ export function AiChatView({
   const { t } = useTranslation("ai");
   const scrollMemory = useConversationScrollMemory(sessionId, visible);
   const isBusy = status === "submitted" || status === "streaming";
+  const messages = useMemo(
+    () => projectSteeredMessages(sourceMessages),
+    [sourceMessages],
+  );
   const lastMessage = messages[messages.length - 1];
   const showPendingResponse =
     isBusy &&
@@ -602,6 +613,11 @@ const RenderedMessage = memo(function RenderedMessage({
         className="group/message"
       >
         <MessageContent>
+          {(message.metadata as { guided?: boolean })?.guided ? (
+            <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+              {t("chat.guided")}
+            </span>
+          ) : null}
           {commandName ? <CommandSnippet name={commandName} /> : null}
           {stripped.chips.length > 0 ? (
             <ContextChips chips={stripped.chips} />

@@ -17,7 +17,6 @@ import { ChannelManager } from "@/modules/channels/manager";
 import {
   loadCheckpoint,
   loadConnections,
-  MAX_CONNECTIONS,
   removeConnection,
   saveCheckpoint,
   saveConnection,
@@ -231,8 +230,6 @@ export async function startChannelsService(
   async function execute(action: ChannelAction) {
     if (action.action === "snapshot") return;
     if (action.action === "add") {
-      if (connections.length >= MAX_CONNECTIONS)
-        throw new ChannelError("limit");
       await saveConnection({
         id: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
@@ -240,12 +237,17 @@ export async function startChannelsService(
         name: action.name,
         enabled: false,
         accountId: null,
+        busyMessageMode: "steer",
       });
       await reload();
       return;
     }
     const target = connection(action.id);
     switch (action.action) {
+      case "busy-message-mode":
+        await saveConnection({ ...target, busyMessageMode: action.mode });
+        await reload();
+        break;
       case "enable":
         if (!action.enabled) cancelLogin(target.id);
         await saveConnection({ ...target, enabled: action.enabled });

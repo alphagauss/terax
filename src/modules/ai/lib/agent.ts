@@ -3,6 +3,7 @@
  * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
+import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
 import {
   createUIMessageStream,
   generateText,
@@ -16,14 +17,13 @@ import {
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
   summarizeSubagentToolInput,
-} from "../agents/subagentDisplay";
+} from "@/modules/ai/agents/subagentDisplay";
 import {
   formatSubagentResultEvent,
-  releaseSubagentCoordinator,
-  type SubagentResultEvent,
+  releaseAgentTurnCoordinator,
   type SubagentTaskRunner,
-  type SubagentTurnCoordinator,
-} from "../agents/subagentRuntime";
+  type AgentTurnCoordinator,
+} from "@/modules/ai/agents/subagentRuntime";
 import {
   getModelContextWindow,
   MAX_AGENT_STEPS,
@@ -32,18 +32,24 @@ import {
   type ProviderInstance,
   type ProviderModels,
   resolveModel,
-} from "../config";
-import { buildTools, type ToolContext } from "../tools/tools";
-import { type AgentToolId, resolveSubagentTools } from "./agentTools";
-import { compactModelMessagesDetailed } from "./compact";
-import type { ProviderInstanceKeys, ProviderKeys } from "./keyring";
-import { prepareAgentPrompt } from "./prompt";
-import { buildConfiguredLanguageModel } from "./providerRuntime";
+} from "@/modules/ai/config";
+import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
+import {
+  type AgentToolId,
+  resolveSubagentTools,
+} from "@/modules/ai/lib/agentTools";
+import { compactModelMessagesDetailed } from "@/modules/ai/lib/compact";
+import type {
+  ProviderInstanceKeys,
+  ProviderKeys,
+} from "@/modules/ai/lib/keyring";
+import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
+import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
 import {
   ACTIVITY_DURATION_PART_TYPE,
   REASONING_DURATION_PART_TYPE,
-} from "./sessionMessages";
-import { convertToAgentModelMessages } from "./subagentMessages";
+} from "@/modules/ai/lib/sessionMessages";
+import { convertToAgentModelMessages } from "@/modules/ai/lib/subagentMessages";
 
 const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
   {
@@ -95,7 +101,7 @@ export type RunAgentOptions = {
   allowedTools: readonly AgentToolId[];
   defaultSubagentModel?: ModelRef | null;
   maxConcurrentSubagents: number;
-  subagentCoordinator: SubagentTurnCoordinator;
+  turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
   onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
@@ -108,7 +114,7 @@ export type RunAgentOptions = {
   ) => void | Promise<void>;
   onCheckpoint: (
     completedMessages: UIMessage[],
-    event: SubagentResultEvent,
+    event: TurnEvent,
   ) => void | Promise<void>;
   providerBaseURLs?: Readonly<ProviderBaseURLs>;
   providerModels?: Readonly<ProviderModels>;
@@ -148,7 +154,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
   });
 
   const subagentModel = opts.defaultSubagentModel ?? modelRef;
-  const coordinator = opts.subagentCoordinator;
+  const coordinator = opts.turnCoordinator;
   const rootTools = buildTools(
     opts.toolContext,
     opts.allowedTools,
@@ -209,53 +215,72 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
           const appendEvent = async (
             completedMessages: UIMessage[],
-            event: SubagentResultEvent,
+            event: TurnEvent,
           ) => {
+            opts.abortSignal?.throwIfAborted();
             await opts.onCheckpoint(completedMessages, event);
             if (!streamStarted) {
               writer.write({ type: "start" });
               streamStarted = true;
             }
-            writer.write({
-              type: "data-subagent-result",
-              data: { event },
-            });
-            modelHistory.push({
-              role: "user",
-              content: formatSubagentResultEvent(event),
-            });
+            if (event.event === "user_steering") {
+              writer.write({ type: "data-user-steering", data: event });
+              modelHistory.push(
+                ...(await convertToAgentModelMessages([event.message])),
+              );
+            } else {
+              writer.write({ type: "data-subagent-result", data: { event } });
+              modelHistory.push({
+                role: "user",
+                content: formatSubagentResultEvent(event),
+              });
+            }
           };
 
-          /**
-           * 持续取出当前已经完成的后台结果，避免写盘期间新完成的任务越过
-           * 下一次 provider 请求边界。只有首个事件需要携带尚未 checkpoint 的步骤。
-           */
+          /** 接入与持久化串行执行，后到的用户引导优先于尚未消费的后台结果。 */
           const appendPendingEvents = (
             completedMessages: UIMessage[],
           ): Promise<boolean> | null => {
-            const firstEvent = coordinator.drainResultEvent();
-            if (!firstEvent) return null;
+            const first = coordinator.inbox.take();
+            if (!first) return null;
             return (async () => {
-              await appendEvent(completedMessages, firstEvent);
-              while (true) {
-                const event = coordinator.drainResultEvent();
-                if (!event) return true;
-                await appendEvent([], event);
+              let entry: typeof first | null = first;
+              let messages = completedMessages;
+              while (entry) {
+                try {
+                  await appendEvent(messages, entry.event);
+                  entry.settle("consumed");
+                } catch (error) {
+                  entry.settle("cancelled");
+                  throw error;
+                }
+                messages = [];
+                entry = coordinator.inbox.take();
               }
+              return true;
             })();
           };
 
           try {
+            opts.abortSignal?.throwIfAborted();
+            coordinator.inbox.open();
             const last = originalMessages[originalMessages.length - 1];
-            const initialAppend = appendPendingEvents(
-              last?.role === "assistant" ? [last] : [],
-            );
+            // SDK 只从末尾 tool 消息收集审批响应；先插入引导会让批准或拒绝失效。
+            let resolvingApprovals =
+              last?.role === "assistant" &&
+              last.parts.some(
+                (part) =>
+                  "state" in part && part.state === "approval-responded",
+              );
+            const initialAppend = resolvingApprovals
+              ? null
+              : appendPendingEvents(last?.role === "assistant" ? [last] : []);
             if (initialAppend) await initialAppend;
 
             while (stepsSeen < MAX_AGENT_STEPS || finalizationOnly) {
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。
-              while (true) {
+              while (!resolvingApprovals) {
                 const pendingAppend = appendPendingEvents([]);
                 if (!pendingAppend) break;
                 await pendingAppend;
@@ -294,7 +319,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   ? stepCountIs(1)
                   : ({ steps }) =>
                       stepsSeen + steps.length >= MAX_AGENT_STEPS ||
-                      coordinator.hasPendingResults,
+                      coordinator.inbox.hasPending,
                 abortSignal: opts.abortSignal,
                 onStepFinish: (step) => {
                   cycleSteps++;
@@ -302,6 +327,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 },
               });
               const uiStream = result.toUIMessageStream<UIMessage>({
+                originalMessages: resolvingApprovals
+                  ? originalMessages
+                  : undefined,
                 sendStart: !streamStarted,
                 sendFinish: false,
                 onError,
@@ -361,6 +389,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 );
               }
               streamStarted = true;
+              resolvingApprovals = false;
 
               const [response, resultFinishReason] = await Promise.all([
                 result.response,
@@ -377,14 +406,20 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 coordinator.runningCount > 0 &&
                 (reachedCandidateEnd || stepsSeen >= MAX_AGENT_STEPS);
               if (mustDrainBackground) {
-                await coordinator.waitForAll();
+                await coordinator.inbox.waitUntil(coordinator.waitForAll());
               }
 
               let completed = false;
-              if (!approvalPending && coordinator.hasPendingResults) {
+              if (!approvalPending && coordinator.inbox.hasPending) {
                 if (!cycleMessage) {
                   throw new Error("Subagent checkpoint message is unavailable");
                 }
+                const durationMs = finishActivity();
+                if (durationMs !== undefined)
+                  cycleMessage.parts.push({
+                    type: ACTIVITY_DURATION_PART_TYPE,
+                    data: { durationMs },
+                  });
                 const pendingAppend = appendPendingEvents([cycleMessage]);
                 completed = pendingAppend ? await pendingAppend : false;
               }
@@ -397,6 +432,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               break;
             }
 
+            if (!approvalPending) coordinator.inbox.close();
             finishActivity();
             writer.write({
               type: "finish",
@@ -409,7 +445,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
             });
             if (!approvalPending) {
               coordinator.reset();
-              releaseSubagentCoordinator(
+              releaseAgentTurnCoordinator(
                 opts.toolContext.getSessionId(),
                 coordinator,
               );
@@ -417,7 +453,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
           } catch (error) {
             finishActivity();
             await coordinator.cancelAll();
-            releaseSubagentCoordinator(
+            releaseAgentTurnCoordinator(
               opts.toolContext.getSessionId(),
               coordinator,
             );

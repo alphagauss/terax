@@ -1,12 +1,14 @@
 /**
- * 本文件管理单个聊天 turn 内的通用 Subagent 任务。
- * 负责并发拒绝、同步等待、后台结果队列、取消和结构化展示进度。
+ * 本文件协调单个聊天 turn 的消息接入与通用 Subagent 任务。
+ * 负责统一接入队列、Subagent 并发拒绝、同步等待、取消和结构化展示进度。
  */
+
+import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 
 import type {
   SubagentDisplayState,
   SubagentDisplayStep,
-} from "./subagentDisplay";
+} from "@/modules/ai/agents/subagentDisplay";
 
 export type SubagentUsage = {
   inputTokens: number;
@@ -87,31 +89,31 @@ const EMPTY_USAGE: SubagentUsage = {
   cachedInputTokens: 0,
 };
 
-const coordinators = new Map<string, SubagentTurnCoordinator>();
+const coordinators = new Map<string, AgentTurnCoordinator>();
 
 /** 取得进程内按聊天隔离的协调器；运行锁保证同一聊天只有一个活动 turn。 */
-export function getSubagentCoordinator(
+export function getAgentTurnCoordinator(
   sessionId: string,
-): SubagentTurnCoordinator {
+): AgentTurnCoordinator {
   const existing = coordinators.get(sessionId);
   if (existing) return existing;
-  const created = new SubagentTurnCoordinator();
+  const created = new AgentTurnCoordinator();
   coordinators.set(sessionId, created);
   return created;
 }
 
 /** 正常 turn 结束后释放空闲协调器，避免历史聊天长期占用进程内映射。 */
-export function releaseSubagentCoordinator(
+export function releaseAgentTurnCoordinator(
   sessionId: string,
-  coordinator: SubagentTurnCoordinator,
+  coordinator: AgentTurnCoordinator,
 ): void {
   if (coordinators.get(sessionId) === coordinator && coordinator.isIdle) {
     coordinators.delete(sessionId);
   }
 }
 
-/** 取消并释放指定聊天的全部 Subagent 状态。 */
-export async function clearSubagentCoordinator(
+/** 取消并释放指定聊天的待接入输入和全部 Subagent 状态。 */
+export async function clearAgentTurnCoordinator(
   sessionId: string,
 ): Promise<void> {
   const coordinator = coordinators.get(sessionId);
@@ -121,17 +123,14 @@ export async function clearSubagentCoordinator(
 }
 
 /**
- * 单聊天 Subagent 协调器。
+ * 单聊天运行协调器，持有当前轮输入和 Subagent 资源。
  *
  * 并发检查和任务登记在首次异步等待前完成，因此同一模型 step 并行调用工具时
  * 也不会突破上限。后台完成结果只追加到待消费队列，不改写既有工具结果。
  */
-export class SubagentTurnCoordinator {
+export class AgentTurnCoordinator {
   private readonly running = new Map<string, RunningTask>();
-  private readonly pending: Array<{
-    order: number;
-    result: SubagentTaskResult;
-  }> = [];
+  readonly inbox = new TurnInbox();
   private order = 0;
   private cancelled = false;
 
@@ -139,12 +138,8 @@ export class SubagentTurnCoordinator {
     return this.running.size;
   }
 
-  get hasPendingResults(): boolean {
-    return this.pending.length > 0;
-  }
-
   get isIdle(): boolean {
-    return this.running.size === 0 && this.pending.length === 0;
+    return this.running.size === 0 && !this.inbox.hasPending;
   }
 
   /** 启动一个同步等待或后台 Subagent，超过当前聊天额度时立即拒绝。 */
@@ -263,7 +258,24 @@ export class SubagentTurnCoordinator {
     void done.then((result) => {
       this.running.delete(taskId);
       if (!options.wait && !this.cancelled) {
-        this.pending.push({ order, result });
+        this.inbox.push(
+          {
+            version: 1,
+            event: "subagent_result",
+            results: [
+              {
+                taskId: result.taskId,
+                label: result.label,
+                status: result.status,
+                ...(result.result === undefined
+                  ? {}
+                  : { result: result.result }),
+                ...(result.error === undefined ? {} : { error: result.error }),
+              },
+            ],
+          },
+          order,
+        );
       }
     });
 
@@ -286,26 +298,10 @@ export class SubagentTurnCoordinator {
     }
   }
 
-  /** 按创建顺序取出尚未进入主 Agent 上下文的后台结果。 */
-  drainResultEvent(): SubagentResultEvent | null {
-    if (this.pending.length === 0) return null;
-    const results = this.pending
-      .splice(0)
-      .sort((a, b) => a.order - b.order)
-      .map(({ result }) => ({
-        taskId: result.taskId,
-        label: result.label,
-        status: result.status,
-        ...(result.result === undefined ? {} : { result: result.result }),
-        ...(result.error === undefined ? {} : { error: result.error }),
-      }));
-    return { version: 1, event: "subagent_result", results };
-  }
-
-  /** 取消本聊天的全部 Subagent，并丢弃尚未消费的后台结果。 */
+  /** 取消本聊天的全部 Subagent，并丢弃尚未消费的用户输入和后台结果。 */
   async cancelAll(): Promise<void> {
     this.cancelled = true;
-    this.pending.length = 0;
+    this.inbox.cancel();
     const tasks = [...this.running.values()];
     for (const task of tasks) {
       task.cancelDisplay();
@@ -317,7 +313,7 @@ export class SubagentTurnCoordinator {
 
   /** 在一个 turn 正常完成后清除临时序号，下一轮重新开始。 */
   reset(): void {
-    if (this.running.size > 0 || this.pending.length > 0) return;
+    if (this.running.size > 0 || this.inbox.hasPending) return;
     this.order = 0;
     this.cancelled = false;
   }

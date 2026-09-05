@@ -3,12 +3,14 @@
  * 不修改活动聊天、输入草稿或全局模型权限；结果只在本轮持久化完成后交给适配器。
  */
 
+import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import i18n from "@/i18n";
 import { MAIN_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
 import { commitSession } from "@/modules/ai/lib/sessions";
 import {
   getOrCreateChat,
   startChatMessage,
+  steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
 import {
   chats,
@@ -97,7 +99,8 @@ export async function runChannelTurn(
   connection: ChannelConnection,
   message: ChannelInbound,
   signal: AbortSignal,
-): Promise<string> {
+  ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
+): Promise<string | null> {
   signal.throwIfAborted();
   const model = usePreferencesStore.getState().defaultModel;
   if (!model) throw new ChannelError("model");
@@ -129,6 +132,18 @@ export async function runChannelTurn(
     { id: connection.id, model },
   );
   if (!accepted) throw new ChannelError("model");
+  ready((input) =>
+    steerChatMessage(
+      connection.sessionId,
+      {
+        id: crypto.randomUUID(),
+        role: "user",
+        parts: [{ type: "text", text: input.text }],
+        metadata: { createdAt: input.receivedAt },
+      },
+      connection.id,
+    ),
+  );
   let cleanup = () => {};
   try {
     await new Promise<void>((resolve, reject) => {
@@ -160,6 +175,11 @@ export async function runChannelTurn(
         .status === "error"
     )
       throw new ChannelError("agent");
+    if (
+      getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
+        .cancelled
+    )
+      return null;
     return (
       channelReplyText(chat.messages.slice(offset)) ||
       i18n.t("channels:emptyReply")

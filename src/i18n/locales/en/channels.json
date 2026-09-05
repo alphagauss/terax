@@ -52,7 +52,11 @@
     "interrupted": "Some messages were interrupted when the connection stopped. They were not run again automatically; please resend them.",
     "delivery": "The reply could not be delivered. The result is available in the Channel conversation.",
     "account-mismatch": "This connection belongs to a different WeChat account. Create another connection for a new account.",
-    "duplicate-account": "This WeChat account already has a connection.",
-    "limit": "Up to eight connections are supported."
+    "duplicate-account": "This WeChat account already has a connection."
+  },
+  "busyMessageMode": {
+    "label": "Messages received while running",
+    "steer": "Guide the current task",
+    "queue": "Wait for the current turn"
   }
 }

@@ -3,6 +3,11 @@
  * 测试锁定临时窗口与失效选择回退草稿，以及运行和持久化的关键顺序。
  */
 
+import {
+  getAgentTurnCoordinator,
+  clearAgentTurnCoordinator,
+} from "@/modules/ai/agents/subagentRuntime";
+import { steerChatMessage } from "@/modules/ai/store/chatRuntime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
@@ -25,8 +30,8 @@ vi.mock("@/lib/sharedStore", async (importOriginal) => ({
   readSharedStore: io.sharedRead,
 }));
 
-vi.mock("../lib/sessions", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/sessions")>()),
+vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/modules/ai/lib/sessions")>()),
   acquireSessionRun: io.acquire,
   releaseSessionRun: io.release,
   listSessions: io.list,
@@ -47,11 +52,11 @@ vi.mock("@/modules/workspace-process", () => ({
   deleteWorkspaceValue: io.workspaceDelete,
 }));
 
-vi.mock("../lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
+vi.mock("@/modules/ai/lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
-import { MAIN_AGENT_ID } from "../lib/agents";
-import type { SessionMeta } from "../lib/sessions";
-import { useAgentsStore } from "./agentsStore";
+import { MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
+import type { SessionMeta } from "@/modules/ai/lib/sessions";
+import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import {
   chats,
   flushCompletedSessionRuns,
@@ -61,8 +66,8 @@ import {
   seedMessages,
   sessionMetadata,
   useChatStore,
-} from "./chatStore";
-import { useSessionAttentionStore } from "./sessionAttentionStore";
+} from "@/modules/ai/store/chatStore";
+import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
 const realCommitMessages = useChatStore.getState().commitMessages;
@@ -195,6 +200,29 @@ describe("chat store multi-process lifecycle", () => {
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  it("中止已发布但协调器尚未释放时拒绝新引导", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      runLockSessionIds: { [first.id]: true },
+    });
+    const coordinator = getAgentTurnCoordinator(first.id);
+    coordinator.inbox.open();
+    useChatStore.getState().patchAgentMeta(first.id, { cancelled: true });
+    try {
+      expect(
+        steerChatMessage(first.id, {
+          id: "late",
+          role: "user",
+          parts: [{ type: "text", text: "late guidance" }],
+        }),
+      ).toBeNull();
+      expect(coordinator.inbox.hasPending).toBe(false);
+    } finally {
+      await clearAgentTurnCoordinator(first.id);
+    }
   });
 
   it("关闭前提交失败时向调用方返回错误", async () => {

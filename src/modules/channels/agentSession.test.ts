@@ -52,6 +52,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
     name: "WeChat",
     enabled: true,
     accountId: "owner",
+    busyMessageMode: "queue" as const,
   };
   const chat = { status: "ready", messages: [] };
   chats.set(connection.sessionId, chat as never);
@@ -80,6 +81,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
       replyContext: "context",
     },
     new AbortController().signal,
+    () => {},
   );
   const failed = expect(turn).rejects.toMatchObject({ issue: "storage" });
   await vi.waitFor(() => expect(startChatMessage).toHaveBeenCalled());

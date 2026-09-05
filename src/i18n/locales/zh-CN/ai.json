@@ -108,7 +108,9 @@
     "unsupportedFile": "{{name}} 不是支持的文本或图片文件。",
     "attachFailed": "无法附加文件：{{error}}",
     "channelReadOnly": "此会话通过 Channel 接收消息",
-    "channelBound": "此会话已绑定 Channel，请先在设置中移除连接，再删除会话。"
+    "channelBound": "此会话已绑定 Channel，请先在设置中移除连接，再删除会话。",
+    "pendingSteering": "待引导：{{count}} 条",
+    "sendFailed": "消息未能发送，请重试。"
   },
   "statusBar": {
     "openAiAgent": "打开 AI agent",
@@ -145,7 +147,8 @@
     "configureCta": "配置 {{label}} 以使用这些模型。",
     "open": "打开",
     "unfavorite": "取消收藏",
-    "favorite": "收藏"
+    "favorite": "收藏",
+    "steer": "引导当前任务"
   },
   "chat": {
     "editorSelection": "编辑器选区",
@@ -231,7 +234,8 @@
     "recentUserMessages": "最近的用户消息",
     "scrollNavigation": "会话导航",
     "scrollToLatest": "前往最新输出并恢复跟随",
-    "userMessageFallback": "[附件或上下文]"
+    "userMessageFallback": "[附件或上下文]",
+    "guided": "已引导"
   },
   "filePicker": {
     "workspaceFiles": "工作区文件",

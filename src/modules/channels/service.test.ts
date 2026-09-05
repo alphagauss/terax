@@ -26,6 +26,7 @@ const io = vi.hoisted(() => ({
     kind: "weixin",
     name: "WeChat",
     accountId: "owner",
+    busyMessageMode: "queue" as const,
     enabled: true,
   } as ChannelConnection,
 }));
@@ -66,7 +67,6 @@ vi.mock("@/lib/sharedStore", () => ({
   },
 }));
 vi.mock("@/modules/channels/storage", () => ({
-  MAX_CONNECTIONS: 8,
   loadConnections: async () => [structuredClone(io.connection)],
   loadCheckpoint: async () => structuredClone(io.checkpoint),
   saveCheckpoint: async (_id: string, checkpoint: ChannelCheckpoint) => {

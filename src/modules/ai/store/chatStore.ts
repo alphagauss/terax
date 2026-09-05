@@ -3,6 +3,7 @@
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
+import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
 import i18n from "@/i18n";
 import { readSharedStore } from "@/lib/sharedStore";
 import {
@@ -17,36 +18,33 @@ import {
   materializeSubagentDisplayParts,
   type SubagentDisplayState,
   toSubagentDisplaySnapshot,
-} from "../agents/subagentDisplay";
-import {
-  clearSubagentCoordinator,
-  type SubagentResultEvent,
-} from "../agents/subagentRuntime";
+} from "@/modules/ai/agents/subagentDisplay";
+import { clearAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import {
   type ModelRef,
   type ProviderId,
   providerFromBuiltinId,
   providerRequiresCredential,
-} from "../config";
+} from "@/modules/ai/config";
 import type {
   ExternalAgentAvailability,
   ExternalAgentId,
-} from "../external-agents/runtime";
-import { parseExternalAgentBinding } from "../external-agents/runtime";
-import type { AgentUsage } from "../lib/agent";
-import { snapshotAgent } from "../lib/agents";
+} from "@/modules/ai/external-agents/runtime";
+import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import type { AgentUsage } from "@/modules/ai/lib/agent";
+import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
   EMPTY_PROVIDER_KEYS,
   type ProviderInstanceKeys,
   type ProviderKeys,
-} from "../lib/keyring";
-import { pushRecentModel } from "../lib/modelPrefs";
+} from "@/modules/ai/lib/keyring";
+import { pushRecentModel } from "@/modules/ai/lib/modelPrefs";
 import {
   projectSessionMessages,
   serializeSessionMessages,
   serializeSubagentDisplaySnapshots,
   serializeSubagentResultEvent,
-} from "../lib/sessionMessages";
+} from "@/modules/ai/lib/sessionMessages";
 import {
   acquireSessionRun,
   clearSessionProcesses,
@@ -60,12 +58,12 @@ import {
   releaseSessionRun,
   type SessionData,
   type SessionMeta,
-} from "../lib/sessions";
-import { useAgentsStore } from "./agentsStore";
+} from "@/modules/ai/lib/sessions";
+import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import {
   type SessionRunOutcome,
   useSessionAttentionStore,
-} from "./sessionAttentionStore";
+} from "@/modules/ai/store/sessionAttentionStore";
 
 export type Live = {
   draftCwd: string | null;
@@ -82,6 +80,8 @@ export type AgentRunStatus =
   | "error";
 
 export type AgentMeta = {
+  pendingSteering: number;
+  cancelled: boolean;
   status: AgentRunStatus;
   step: string | null;
   approvalsPending: number;
@@ -98,6 +98,8 @@ export type AgentMeta = {
 /** 创建独立的空闲运行状态，避免不同会话共享可变嵌套对象。 */
 export function createIdleAgentMeta(): AgentMeta {
   return {
+    pendingSteering: 0,
+    cancelled: false,
     status: "idle",
     step: null,
     approvalsPending: 0,
@@ -204,7 +206,7 @@ type StoreState = {
   persistTurnCheckpoint: (
     id: string,
     completedMessages: UIMessage[],
-    event: SubagentResultEvent,
+    event: TurnEvent,
   ) => Promise<void>;
   persistExternalAgentSession: (
     id: string,
@@ -225,7 +227,6 @@ const NOOP_LIVE: Live = {
 
 const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
-const cancelledRuns = new Set<string>();
 const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
@@ -245,7 +246,8 @@ function persistActiveSession(id: string | null): Promise<void> {
 
 /** 读取本轮最终结果，取消优先于 AI SDK 暴露的错误状态。 */
 function sessionRunOutcome(id: string): SessionRunOutcome {
-  if (cancelledRuns.has(id)) return "cancelled";
+  if (getAgentMetaForSession(useChatStore.getState(), id).cancelled)
+    return "cancelled";
   return getAgentMetaForSession(useChatStore.getState(), id).status === "error"
     ? "error"
     : "completed";
@@ -475,7 +477,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const after = diskById.get(session.id);
         if (after?.fingerprint === session.fingerprint) continue;
         if (!after) {
-          await clearSubagentCoordinator(session.id);
+          await clearAgentTurnCoordinator(session.id);
           await clearSessionProcesses(session.id);
           useSessionAttentionStore.getState().clearSession(session.id);
           deletedSessionIds.push(session.id);
@@ -713,7 +715,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   },
 
   /**
-   * 在同一 turn 的下一次 provider 请求前追加完整步骤和 Subagent 事件。
+   * 在同一 turn 的下一次 provider 请求前追加完整步骤、用户引导或后台结果。
    *
    * checkpoint 不前移 UIMessage 数量游标，也不释放运行锁；最终提交会依据
    * Assistant 内的 checkpoint data part 跳过已经落盘的前缀。
@@ -730,7 +732,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (!pendingTurnIds.has(id)) pendingTurnIds.set(id, options.turnId);
     const messages = [
       ...serializeSessionMessages(completedMessages, options),
-      serializeSubagentResultEvent(event, options),
+      ...(event.event === "user_steering"
+        ? serializeSessionMessages(
+            [
+              {
+                ...event.message,
+                metadata: {
+                  ...(event.message.metadata as object),
+                  guided: true,
+                },
+              },
+            ],
+            options,
+          )
+        : [serializeSubagentResultEvent(event, options)]),
     ];
     const committedMeta = await commitSession({
       id,
@@ -828,7 +843,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         ) {
           throw new Error(i18n.t("ai:composer.channelBound"));
         }
-        await clearSubagentCoordinator(id);
+        await clearAgentTurnCoordinator(id);
         await clearSessionProcesses(id);
         await deleteSessionFile(id);
         const remaining = get().sessions.filter((session) => session.id !== id);
@@ -906,7 +921,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
       );
       if (messages.length === 0 && meta.title === "New chat") {
         await releaseSessionRun(id);
-        cancelledRuns.delete(id);
         pendingTurnIds.delete(id);
         useSessionAttentionStore.getState().finalizeRun(id, outcome);
         const runLockSessionIds = { ...get().runLockSessionIds };
@@ -980,7 +994,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
       });
       await get().refreshSessions();
       await releaseSessionRun(id);
-      cancelledRuns.delete(id);
       pendingTurnIds.delete(id);
       useSessionAttentionStore.getState().finalizeRun(id, outcome);
       const runLockSessionIds = { ...get().runLockSessionIds };
@@ -1070,7 +1083,7 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
 export async function stopSession(sessionId: string): Promise<void> {
   const chat = chats.get(sessionId);
   if (!chat || !useChatStore.getState().runLockSessionIds[sessionId]) return;
-  cancelledRuns.add(sessionId);
-  await clearSubagentCoordinator(sessionId);
+  useChatStore.getState().patchAgentMeta(sessionId, { cancelled: true });
+  await clearAgentTurnCoordinator(sessionId);
   await chat.stop();
 }

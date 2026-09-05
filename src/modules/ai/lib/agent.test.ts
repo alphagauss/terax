@@ -5,11 +5,11 @@
 
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it, vi } from "vitest";
-import { runAgentStream } from "./agent";
-import { SubagentTurnCoordinator } from "../agents/subagentRuntime";
-import { AGENT_TOOL_IDS } from "./agentTools";
-import { EMPTY_PROVIDER_KEYS } from "./keyring";
-import { modelRefForProvider } from "../config";
+import { runAgentStream } from "@/modules/ai/lib/agent";
+import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
+import { AGENT_TOOL_IDS } from "@/modules/ai/lib/agentTools";
+import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
+import { modelRefForProvider } from "@/modules/ai/config";
 
 describe("agent preflight persistence", () => {
   it("awaits the user message and system prompt commit before model setup", async () => {
@@ -32,7 +32,7 @@ describe("agent preflight persistence", () => {
         systemPrompt: "Stable prompt",
         allowedTools: AGENT_TOOL_IDS,
         maxConcurrentSubagents: 3,
-        subagentCoordinator: new SubagentTurnCoordinator(),
+        turnCoordinator: new AgentTurnCoordinator(),
         toolContext: {
           getPermissionMode: () => "ask",
         } as never,

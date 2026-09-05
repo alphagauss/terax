@@ -3,6 +3,13 @@
  * 设置 WebView 仅订阅主窗口快照和发送管理请求，二维码渲染按需加载。
  */
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/controls/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -114,11 +121,7 @@ export function ChannelsSection() {
               aria-label={t("namePlaceholder")}
               disabled={!ready || busy}
             />
-            <Button
-              variant="outline"
-              type="submit"
-              disabled={!ready || busy || snapshots.length >= 8}
-            >
+            <Button variant="outline" type="submit" disabled={!ready || busy}>
               {t("addWeixin")}
             </Button>
           </form>
@@ -197,6 +200,34 @@ function ConnectionCard({
             void run({ action: "enable", id: connection.id, enabled });
           }}
         />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">
+          {t("busyMessageMode.label")}
+        </span>
+        <Select
+          value={connection.busyMessageMode}
+          disabled={disabled || snapshot.busy}
+          onValueChange={(mode) => {
+            if (mode === "steer" || mode === "queue")
+              void run({
+                action: "busy-message-mode",
+                id: connection.id,
+                mode,
+              });
+          }}
+        >
+          <SelectTrigger
+            aria-label={t("busyMessageMode.label")}
+            className="w-auto"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="steer">{t("busyMessageMode.steer")}</SelectItem>
+            <SelectItem value="queue">{t("busyMessageMode.queue")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       {snapshot.issue ? (
         <p className="text-xs text-destructive">
