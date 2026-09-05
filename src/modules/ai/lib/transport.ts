@@ -3,8 +3,6 @@
  * 系统提示词和工具白名单在 Chat runtime 内冻结，并转发每聊天 Subagent 展示状态。
  */
 
-import type { TurnEvent } from "@/modules/ai/lib/turnInbox";
-import type { UIMessage } from "@ai-sdk/react";
 import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
 import { getAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import type {
@@ -18,9 +16,9 @@ import {
   type ExternalAgentId,
   runExternalAgentStream,
 } from "@/modules/ai/external-agents/runtime";
-import type { ToolContext } from "@/modules/ai/tools/tools";
 import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
 import type { SessionAgentSnapshot } from "@/modules/ai/lib/agents";
+import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
 import type {
   ProviderInstanceKeys,
@@ -31,6 +29,8 @@ import {
   type AgentExecutionEnvironment,
   buildAgentSystemPrompt,
 } from "@/modules/ai/lib/prompt";
+import type { ToolContext } from "@/modules/ai/tools/tools";
+import type { UIMessage } from "@ai-sdk/react";
 
 type Deps = {
   getKeys: () => ProviderKeys;

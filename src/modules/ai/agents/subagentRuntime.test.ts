@@ -3,13 +3,13 @@
  * 测试使用可控 Promise，不发起真实模型或工具请求。
  */
 
-import { describe, expect, it, vi } from "vitest";
+import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
 import {
-  isSubagentResultDataPart,
   AgentTurnCoordinator,
   type SubagentTaskResult,
 } from "@/modules/ai/agents/subagentRuntime";
-import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
+import { isSubagentResultDataPart } from "@/modules/ai/lib/conversation";
+import { describe, expect, it, vi } from "vitest";
 
 const usage = {
   inputTokens: 1,

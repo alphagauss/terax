@@ -100,19 +100,19 @@ Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `
 
 权限在任务启动时冻结。主 Agent 为请求批准模式时，Subagent 工具进一步收窄到 `read_file`、`find_files`、`grep` 和 `get_terminal_output` 的父白名单交集；Subagent 没有独立 UI 审批通道，越界或敏感读取继续以请求批准模式进入 Rust，并将明确拒绝返回模型。完全访问模式继承父白名单。两种模式都移除 `run_subagent`，所以 Subagent 不能递归创建 Subagent。
 
-`wait=true` 时，最终结果直接作为原工具调用的 tool result。`wait=false` 时，原工具调用立即返回 started，后台完成结果以 append-only 的内部 `subagent_result` user 消息进入同一 turn。该内部事件在 UI 中保存为隐藏 data part，在 JSONL 中保存稳定正文和 task ID metadata，发送给 provider 时投影为相同正文的标准 user 消息。它不改写既有 tool result 或历史前缀。
+`wait=true` 时，最终结果直接作为原工具调用的 tool result。`wait=false` 时，原工具调用立即返回 started，后台完成结果以 append-only 的 `role=event` 记录进入同一 turn，`content` 只保存结构化 `subagent_result`。SDK 流用隐藏 data part 承载事件；会话模块在模型投影时生成标准 user 正文，在展示投影时将结果归属工具卡片，不重复保存格式化正文或任务 ID 列表。它不改写既有 tool result 或历史前缀。
 
 主 Agent 在普通工具边界消费已经完成的后台结果。若模型到达候选终态但仍有后台任务，session run lock 保持占用，等待后台结果或用户引导唤醒，持久化待消费消息后恢复完整 Agent 循环。恢复后的模型仍可继续调用普通工具或创建新的 Subagent，只有模型给出终态且没有运行中任务或待消费结果时才结束本轮。
 
 每个 `run_subagent` 在聊天中使用专用卡片。运行时只报告模型调用中、工具开始、工具完成和终态，不传输 Subagent 推理正文或中间回答。标题当前显示的工具动作至少保持一秒，期间的新状态合并为最新动作；该计时只属于 UI，不阻塞真实执行。展开卡片可查看原始 task、工具过程和最终结果，结果仍来自 wait=true 工具输出或 wait=false 内部结果事件。
 
-运行中的展示状态按 session 保存在当前进程，跨聊天切换和工具审批等待时继续更新。本轮终态提交会为每个 Subagent 追加一个 `role=display` 的最终快照，历史加载时投影为 `data-subagent-display`。快照只包含 task ID、父工具调用 ID、label、状态、耗时和有界脱敏的工具摘要，不重复 task、结果正文、完整参数或工具输出。进程在本轮结束前崩溃时不保证恢复详细过程。
+运行中的展示状态按 session 保存在当前进程，跨聊天切换和工具审批等待时继续更新。本轮终态提交会为每个 Subagent 追加一个 `role=display`、`content` 为最终快照的记录，历史加载时投影为 `data-subagent-display`。快照只包含 task ID、父工具调用 ID、label、状态、耗时和有界脱敏的工具摘要，不重复 task、结果正文、完整参数或工具输出。进程在本轮结束前崩溃时不保证恢复详细过程。
 
 `role=display` 和 `data-subagent-display` 永远不会转换为 model message。它们不改变原 `subagent_result` 的正文和顺序，所以 provider 请求和 prompt cache 前缀与没有展示数据时相同。损坏或找不到对应 `run_subagent` 工具调用的展示记录会被忽略，不会暴露为用户消息。
 
 ## Session
 
-对话按 session 组织。已接受的 user message 和完整 response record 以每个 UUID 一个原子 JSONL 文件的形式存储在 `~/.terax/sessions/` 下（`src-tauri/src/modules/ai_sessions.rs`、`src/modules/ai/lib/sessions.ts` 和 `src/modules/ai/lib/sessionMessages.ts`）：
+对话按 session 组织。已接受的 user message 和完整 response record 以每个 UUID 一个原子 JSONL 文件的形式存储在 `~/.terax/sessions/` 下（`src-tauri/src/modules/ai_sessions.rs`、`src/modules/ai/lib/sessions.ts` 和 `src/modules/ai/lib/conversation.ts`）：
 
 - `<uuid>.jsonl`：第一行是固定 metadata record，其余每行是一条 role message
 - `<uuid>.lock`：一个进程运行该 session 时使用的 OS lock
@@ -122,6 +122,8 @@ Subagent 模型默认跟随本轮主模型，也可以通过模型设置页的 `
 ```json
 {"_type":"metadata","key":"<uuid>","createdAt":"2026-07-26T10:00:00.000Z","updatedAt":"2026-07-26T10:00:01.000Z","environmentKey":"local","cwd":"/workspace/project","metadata":{"title":"Session title","agent":{"id":"a-review","name":"Reviewer","icon":"reviewer","instructions":"...","tools":["read_file","grep"]},"todos":[],"systemPrompt":"..."}}
 ```
+
+会话消息规则集中在 `lib/conversation.ts`：`projectSessionMessages` 恢复 SDK 状态，`serializeSessionMessages` 编码完整记录，`convertToAgentModelMessages` 和 `projectConversationDisplay` 分别投影模型与展示。实时接入和历史恢复共用事件适配与有序展开规则。模型投影只选取协议内容，展示投影剥离内部事件并提供卡片数据；UI 不解释 SDK 事件结构。每个会话只持久化一份 JSONL，不建立模型、展示副本或额外历史 store。展示投影按 SDK 不可变消息快照使用弱引用缓存，流式更新不会反复处理已完成历史。
 
 JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant 文本使用直接的 `role` 和 `content` field，reasoning 使用 `reasoning_content`，tool result 使用 `role: "tool"`。tool call 刻意遵循 OpenAI-compatible envelope：
 
@@ -152,7 +154,7 @@ composer 根据 active session 在 `agentMetaBySession` 中的 entry 派生 `isB
 
 draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，AI 面板仅在可见后延迟准备环境默认目录：Local 与 WSL 使用各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。SSH profile root 只提供默认位置，用户明确打开的任意可访问远端目录都可以成为 Explorer root。draft 可以选择 Agent；第一条被接受的 user message 会将 draft 提升为 persisted session，并同时冻结实际目录和 Agent 快照。persisted session 始终显示已保存的 Agent，不能中途切换。文件和 selection 仅在明确附加时作为可见 user-message content 发送。
 
-每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。Subagent 内部事件恢复模型循环前，以相同 turn ID 追加完整步骤和稳定 user record；终态 bridge 只追加最后一个 checkpoint 之后的剩余 Assistant 和 tool record。streaming fragment 永远不会写入。
+每次模型 request 都先在 session run lock 下 commit 新 user message 和当前 Chat runtime system prompt 的准确内容。approval continuation 复用同一 prompt，且不会重复 user record。Subagent 内部事件恢复模型循环前，以相同 turn ID 追加完整步骤和原始 event record；运行时的 `pendingTurns` 在原子提交成功后推进 part 游标，终态 bridge 使用该游标选择剩余记录。序列化函数完整转换传入内容，不根据内部事件标记推断已保存前缀。streaming fragment 永远不会写入。
 
 ## 工具与审批
 

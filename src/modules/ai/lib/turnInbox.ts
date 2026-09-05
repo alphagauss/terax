@@ -2,11 +2,13 @@
  * 本文件管理会话运行中的待接入消息。
  * 用户引导优先于后台结果且各自保持顺序；关闭接入与取消均同步裁决，不持久化未消费输入。
  */
-import type { UIMessage } from "ai";
-import type { SubagentResultEvent } from "@/modules/ai/agents/subagentRuntime";
 
-export type SteeringEvent = { event: "user_steering"; message: UIMessage };
-export type TurnEvent = SteeringEvent | SubagentResultEvent;
+import type {
+  SubagentResultEvent,
+  TurnEvent,
+} from "@/modules/ai/lib/conversation";
+import type { UIMessage } from "ai";
+
 export type SteeringReceipt = Promise<"consumed" | "cancelled">;
 
 /** 会话运行时拥有的优先队列，Subagent 只负责生产结果。 */
@@ -52,10 +54,7 @@ export class TurnInbox {
     this.entries.push({
       event: {
         event: "user_steering",
-        message: {
-          ...message,
-          metadata: { ...(message.metadata as object), guided: true },
-        },
+        message,
       },
       settle,
     });
@@ -121,67 +120,4 @@ export class TurnInbox {
     this.entries = [];
     this.notify();
   }
-}
-
-/** 读取内部引导 part，正文与媒体保持真实用户消息结构。 */
-export function isSteeringPart(
-  part: unknown,
-): part is { type: "data-user-steering"; data: SteeringEvent } {
-  const value = part as { type?: unknown; data?: SteeringEvent } | null;
-  return (
-    value?.type === "data-user-steering" &&
-    value.data?.event === "user_steering" &&
-    value.data.message?.role === "user" &&
-    Array.isArray(value.data.message.parts)
-  );
-}
-
-/** 展示层按引导消息切开活动，原始 Chat 流仍由一个运行锁管理。 */
-export function projectSteeredMessages(
-  messages: readonly UIMessage[],
-): UIMessage[] {
-  return messages.flatMap((message) => {
-    if (message.role !== "assistant" || !message.parts.some(isSteeringPart))
-      return [message];
-    const result: UIMessage[] = [];
-    let parts: UIMessage["parts"] = [];
-    let id = message.id;
-    // 后台结果和终态快照可能晚于引导到达，仍供前面所属的 Subagent 卡片消费。
-    const background = message.parts.filter(
-      (part) =>
-        part.type === "data-subagent-result" ||
-        part.type === "data-subagent-display",
-    );
-    const segment = (): UIMessage => ({
-      ...message,
-      id,
-      parts: parts.some(
-        (part) =>
-          part.type === "tool-run_subagent" ||
-          (part.type === "dynamic-tool" && part.toolName === "run_subagent"),
-      )
-        ? [...parts, ...background]
-        : parts,
-    });
-    for (const part of message.parts) {
-      if (
-        part.type === "data-subagent-result" ||
-        part.type === "data-subagent-display"
-      )
-        continue;
-      if (!isSteeringPart(part)) {
-        parts.push(part);
-        continue;
-      }
-      if (parts.length) result.push(segment());
-      result.push({
-        ...part.data.message,
-        metadata: { ...(part.data.message.metadata as object), guided: true },
-      });
-      id = `${message.id}:after:${part.data.message.id}`;
-      parts = [];
-    }
-    result.push(segment());
-    return result;
-  });
 }

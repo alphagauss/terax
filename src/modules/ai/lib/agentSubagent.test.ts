@@ -3,15 +3,19 @@
  * 测试锁定活动在 Subagent 前结束、append-only 事件先 checkpoint，且最终模型正常响应。
  */
 
+import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
+import { modelRefForProvider } from "@/modules/ai/config";
+import { runAgentStream } from "@/modules/ai/lib/agent";
+import {
+  activityDurationFromPart,
+  serializeSessionMessages,
+} from "@/modules/ai/lib/conversation";
+import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
 import type { UIMessage } from "@ai-sdk/react";
+import { readUIMessageStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
-import { runAgentStream } from "@/modules/ai/lib/agent";
-import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
-import { modelRefForProvider } from "@/modules/ai/config";
-import { activityDurationFromPart } from "@/modules/ai/lib/sessionMessages";
 
 let activeModel: MockLanguageModelV3;
 
@@ -24,11 +28,20 @@ const usage = {
   outputTokens: { total: 5, text: 5, reasoning: 0 },
 };
 
-function textStream(text: string) {
+function textStream(text: string, reasoning?: string) {
   return {
     stream: new ReadableStream({
       start(controller) {
         controller.enqueue({ type: "stream-start", warnings: [] });
+        if (reasoning) {
+          controller.enqueue({ type: "reasoning-start", id: "reasoning" });
+          controller.enqueue({
+            type: "reasoning-delta",
+            id: "reasoning",
+            delta: reasoning,
+          });
+          controller.enqueue({ type: "reasoning-end", id: "reasoning" });
+        }
         controller.enqueue({ type: "text-start", id: "text" });
         controller.enqueue({ type: "text-delta", id: "text", delta: text });
         controller.enqueue({ type: "text-end", id: "text" });
@@ -125,6 +138,7 @@ describe.sequential("Agent background subagents", () => {
         role: "user",
         parts: [{ type: "text", text: "New guidance" }],
       });
+      const checkpoint = vi.fn();
       const messages: UIMessage[] = [
         {
           id: "initial",
@@ -135,6 +149,9 @@ describe.sequential("Agent background subagents", () => {
           id: "approval",
           role: "assistant",
           parts: [
+            { type: "reasoning", text: "Previous reasoning", state: "done" },
+            { type: "data-reasoning-duration", data: { durationMs: 17 } },
+            { type: "text", text: "Request permission", state: "done" },
             {
               type: "tool-shell_exec",
               toolCallId: "shell-call",
@@ -157,7 +174,7 @@ describe.sequential("Agent background subagents", () => {
           } else {
             expect(JSON.stringify(prompt)).toContain("New guidance");
           }
-          return textStream("answer");
+          return textStream("answer", "Fresh reasoning");
         },
       });
       try {
@@ -177,12 +194,31 @@ describe.sequential("Agent background subagents", () => {
             supportsApprovals: true,
           },
           uiMessages: messages,
-          onCheckpoint: vi.fn(),
+          onCheckpoint: checkpoint,
         });
-        const chunks: Array<{ type: string }> = [];
-        for await (const chunk of result.toUIMessageStream())
-          chunks.push(chunk);
-        expect(chunks.filter((chunk) => chunk.type === "error")).toEqual([]);
+        let streamed: UIMessage | undefined;
+        for await (const message of readUIMessageStream({
+          stream: result.toUIMessageStream(),
+          message: structuredClone(messages[1]),
+          terminateOnError: true,
+        }))
+          streamed = message;
+        const prefix = checkpoint.mock.calls[0][0][0] as UIMessage;
+        const options = {
+          timestamp: "2026-09-06T00:00:00Z",
+          turnId: "approval-turn",
+        };
+        expect(
+          serializeSessionMessages(
+            [
+              {
+                ...prefix,
+                parts: streamed?.parts.slice(0, prefix.parts.length) ?? [],
+              },
+            ],
+            options,
+          ),
+        ).toEqual(serializeSessionMessages([prefix], options));
         await expect(receipt).resolves.toBe("consumed");
         expect(activeModel.doStreamCalls).toHaveLength(2);
         expect(execute).toHaveBeenCalledTimes(approved ? 1 : 0);
@@ -477,11 +513,12 @@ describe.sequential("Agent background subagents", () => {
       onCheckpoint: checkpoint,
     });
 
+    let streamed: UIMessage | undefined;
     const consuming = (async () => {
-      for await (const _chunk of result.toUIMessageStream({
-        originalMessages: messages,
+      for await (const message of readUIMessageStream({
+        stream: result.toUIMessageStream({ originalMessages: messages }),
       })) {
-        // 消费完整流，断言通过 mock provider 和 checkpoint 调用完成。
+        streamed = message;
       }
     })();
 
@@ -501,7 +538,14 @@ describe.sequential("Agent background subagents", () => {
       [UIMessage[]]
     >;
     expect(checkpointCalls[0][0]).toHaveLength(1);
-    expect(checkpointCalls[1][0]).toEqual([]);
+    expect(checkpointCalls[1][0][0].parts).toContainEqual(
+      expect.objectContaining({ type: "data-subagent-result" }),
+    );
+    for (const [prefix] of checkpointCalls) {
+      expect(streamed?.parts.slice(0, prefix[0].parts.length)).toEqual(
+        prefix[0].parts,
+      );
+    }
     expect(activeModel.doStreamCalls).toHaveLength(3);
   });
 

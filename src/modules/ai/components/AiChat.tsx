@@ -5,7 +5,6 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
-import { projectSteeredMessages } from "@/modules/ai/lib/turnInbox";
 import {
   Conversation,
   ConversationContent,
@@ -27,6 +26,34 @@ import {
 import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
 import { displayAgent } from "@/modules/agents/lib/format";
+import type { SubagentDisplaySnapshot } from "@/modules/ai/agents/subagentDisplay";
+import { AiChatScrollControls } from "@/modules/ai/components/AiChatScrollControls";
+import {
+  ChatActivityBlock,
+  type ChatActivityHeadline,
+} from "@/modules/ai/components/ChatActivityBlock";
+import { ChatCollapsibleScrollGuard } from "@/modules/ai/components/ChatCollapsibleScrollGuard";
+import { ChatReasoningPart } from "@/modules/ai/components/ChatReasoningPart";
+import { ChatStatusDots } from "@/modules/ai/components/ChatStatusDots";
+import {
+  SubagentCard,
+  type SubagentResultView,
+} from "@/modules/ai/components/SubagentCard";
+import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
+import {
+  activityDurationFromPart,
+  messageMetadata,
+  projectConversationDisplay,
+  reasoningDurationFromPart,
+} from "@/modules/ai/lib/conversation";
+import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
+import { SLASH_COMMANDS, TERAX_CMD_RE } from "@/modules/ai/lib/slashCommands";
+import { sendMessage } from "@/modules/ai/store/chatRuntime";
+import {
+  getAgentMetaForSession,
+  useChatStore,
+} from "@/modules/ai/store/chatStore";
+import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 import {
   ArrowRight01Icon,
   CodeIcon,
@@ -55,36 +82,6 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import {
-  isSubagentDisplayDataPart,
-  type SubagentDisplaySnapshot,
-} from "@/modules/ai/agents/subagentDisplay";
-import { isSubagentResultDataPart } from "@/modules/ai/agents/subagentRuntime";
-import { CHAT_SCROLL_SPRING } from "@/modules/ai/lib/chatScroll";
-import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
-import {
-  activityDurationFromPart,
-  reasoningDurationFromPart,
-} from "@/modules/ai/lib/sessionMessages";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "@/modules/ai/lib/slashCommands";
-import { sendMessage } from "@/modules/ai/store/chatRuntime";
-import {
-  getAgentMetaForSession,
-  useChatStore,
-} from "@/modules/ai/store/chatStore";
-import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
-import { AiChatScrollControls } from "@/modules/ai/components/AiChatScrollControls";
-import {
-  ChatActivityBlock,
-  type ChatActivityHeadline,
-} from "@/modules/ai/components/ChatActivityBlock";
-import { ChatCollapsibleScrollGuard } from "@/modules/ai/components/ChatCollapsibleScrollGuard";
-import { ChatReasoningPart } from "@/modules/ai/components/ChatReasoningPart";
-import { ChatStatusDots } from "@/modules/ai/components/ChatStatusDots";
-import {
-  SubagentCard,
-  type SubagentResultView,
-} from "@/modules/ai/components/SubagentCard";
 
 type ConversationScrollPosition = {
   top: number;
@@ -400,7 +397,7 @@ export function AiChatView({
   const scrollMemory = useConversationScrollMemory(sessionId, visible);
   const isBusy = status === "submitted" || status === "streaming";
   const messages = useMemo(
-    () => projectSteeredMessages(sourceMessages),
+    () => projectConversationDisplay(sourceMessages),
     [sourceMessages],
   );
   const lastMessage = messages[messages.length - 1];
@@ -591,10 +588,7 @@ const RenderedMessage = memo(function RenderedMessage({
   );
   const timestamp = useMessageTimestamp(message);
   const copyText = useMemo(() => messageTextForCopy(message), [message]);
-  const subagentParts = useMemo(
-    () => collectSubagentParts(message.parts as AnyPart[]),
-    [message.parts],
-  );
+  const subagentParts = messageMetadata(message).subagents;
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -613,7 +607,7 @@ const RenderedMessage = memo(function RenderedMessage({
         className="group/message"
       >
         <MessageContent>
-          {(message.metadata as { guided?: boolean })?.guided ? (
+          {messageMetadata(message).guided ? (
             <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
               {t("chat.guided")}
             </span>
@@ -702,7 +696,7 @@ const RenderedLeafGroup = memo(function RenderedLeafGroup({
   sessionId: string;
   streaming: boolean;
   streamingPartIdx: number;
-  subagentParts: CollectedSubagentParts;
+  subagentParts: ReturnType<typeof messageMetadata>["subagents"];
 }) {
   if (group.kind === "reads") {
     return (
@@ -741,12 +735,12 @@ const RenderedLeafGroup = memo(function RenderedLeafGroup({
         reasoningDurationMs={reasoningDurationFromPart(
           message.parts[group.idx + 1],
         )}
-        persistedSubagent={subagentParts.displaysByToolCallId.get(
+        persistedSubagent={subagentParts?.displaysByToolCallId.get(
           toolCallIdFromPart(group.part),
         )}
         subagentResult={subagentResultForPart(
           group.part,
-          subagentParts.resultsByTaskId,
+          subagentParts?.resultsByTaskId,
         )}
       />
     </PartAppear>
@@ -990,13 +984,6 @@ function buildPartGroups(parts: AnyPart[], offset = 0): LeafGroup[] {
       flushRun();
       return;
     }
-    if (
-      partType(p) === "data-subagent-result" ||
-      partType(p) === "data-subagent-display"
-    ) {
-      flushRun();
-      return;
-    }
     if (isReadFilePart(p)) {
       if (!run) run = { parts: [], startIdx: i };
       run.parts.push(p);
@@ -1169,46 +1156,15 @@ function externalAgentActivityLabel(
   }
 }
 
-type CollectedSubagentParts = {
-  displaysByToolCallId: Map<string, SubagentDisplaySnapshot>;
-  resultsByTaskId: Map<string, SubagentResultView>;
-};
-
-function collectSubagentParts(
-  parts: readonly AnyPart[],
-): CollectedSubagentParts {
-  const displaysByToolCallId = new Map<string, SubagentDisplaySnapshot>();
-  const resultsByTaskId = new Map<string, SubagentResultView>();
-  for (const part of parts) {
-    const value: unknown = part;
-    if (isSubagentDisplayDataPart(value)) {
-      displaysByToolCallId.set(
-        value.data.snapshot.toolCallId,
-        value.data.snapshot,
-      );
-      continue;
-    }
-    if (!isSubagentResultDataPart(value)) continue;
-    for (const result of value.data.event.results) {
-      resultsByTaskId.set(result.taskId, {
-        status: result.status,
-        ...(result.result === undefined ? {} : { result: result.result }),
-        ...(result.error === undefined ? {} : { error: result.error }),
-      });
-    }
-  }
-  return { displaysByToolCallId, resultsByTaskId };
-}
-
 function subagentResultForPart(
   part: AnyPart,
-  resultsByTaskId: ReadonlyMap<string, SubagentResultView>,
+  resultsByTaskId: ReadonlyMap<string, SubagentResultView> | undefined,
 ): SubagentResultView | undefined {
   const taskId = objectStringValue(
     "output" in part ? part.output : undefined,
     "taskId",
   );
-  return taskId ? resultsByTaskId.get(taskId) : undefined;
+  return taskId ? resultsByTaskId?.get(taskId) : undefined;
 }
 
 function toolCallIdFromPart(part: AnyPart): string {

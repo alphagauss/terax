@@ -3,7 +3,6 @@
  * 展示数据只记录工具生命周期摘要，不包含推理正文、完整工具输出或模型上下文。
  */
 
-import type { UIMessage } from "@ai-sdk/react";
 import { redactSensitive } from "../lib/redact";
 
 export type SubagentDisplayStatus =
@@ -46,10 +45,6 @@ export type SubagentDisplaySnapshot = Pick<
   status: Exclude<SubagentDisplayStatus, "running">;
   durationMs: number;
   steps: SubagentDisplaySnapshotStep[];
-};
-
-type SubagentDisplayData = {
-  snapshot: SubagentDisplaySnapshot;
 };
 
 const SUMMARY_LIMIT = 160;
@@ -185,79 +180,6 @@ export function isSubagentDisplaySnapshot(
     return false;
   }
   return snapshot.steps.every(isDisplayStep);
-}
-
-/** 判断 AI SDK data part 是否为历史 Subagent 展示快照。 */
-export function isSubagentDisplayDataPart(value: unknown): value is {
-  type: "data-subagent-display";
-  data: SubagentDisplayData;
-} {
-  if (!value || typeof value !== "object") return false;
-  const part = value as { type?: unknown; data?: unknown };
-  if (part.type !== "data-subagent-display" || !part.data) return false;
-  return isSubagentDisplaySnapshot(
-    (part.data as { snapshot?: unknown }).snapshot,
-  );
-}
-
-/**
- * 把终态快照附加到拥有对应 run_subagent 工具调用的 UI 消息。
- *
- * 此操作只在本轮提交成功后执行，避免与 AI SDK 的活动流同时修改消息。
- */
-export function materializeSubagentDisplayParts(
-  messages: readonly UIMessage[],
-  snapshots: readonly SubagentDisplaySnapshot[],
-): UIMessage[] {
-  if (snapshots.length === 0) return [...messages];
-  const byToolCallId = new Map(
-    snapshots.map((snapshot) => [snapshot.toolCallId, snapshot]),
-  );
-  let changed = false;
-  const next = messages.map((message) => {
-    if (message.role !== "assistant") return message;
-    const owned = message.parts
-      .filter(
-        (part) =>
-          part.type === "tool-run_subagent" ||
-          (part.type === "dynamic-tool" &&
-            "toolName" in part &&
-            part.toolName === "run_subagent"),
-      )
-      .map((part) =>
-        "toolCallId" in part && typeof part.toolCallId === "string"
-          ? part.toolCallId
-          : null,
-      )
-      .filter((toolCallId): toolCallId is string => toolCallId !== null)
-      .map((toolCallId) => byToolCallId.get(toolCallId))
-      .filter((snapshot): snapshot is SubagentDisplaySnapshot => !!snapshot)
-      .filter(
-        (snapshot, index, values) =>
-          values.findIndex((item) => item.taskId === snapshot.taskId) === index,
-      );
-    if (owned.length === 0) return message;
-    const ownedIds = new Set(owned.map((snapshot) => snapshot.taskId));
-    changed = true;
-    return {
-      ...message,
-      parts: [
-        ...message.parts.filter(
-          (part) =>
-            !isSubagentDisplayDataPart(part) ||
-            !ownedIds.has(part.data.snapshot.taskId),
-        ),
-        ...owned.map(
-          (snapshot) =>
-            ({
-              type: "data-subagent-display",
-              data: { snapshot },
-            }) as UIMessage["parts"][number],
-        ),
-      ],
-    };
-  });
-  return changed ? next : [...messages];
 }
 
 function isTerminalStatus(
