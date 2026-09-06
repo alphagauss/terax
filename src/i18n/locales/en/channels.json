@@ -46,6 +46,7 @@
     "auth": "Sign in to WeChat again.",
     "protocol": "WeChat returned an unsupported response. Try signing in again.",
     "storage": "Channel data could not be saved or loaded. Check the local data directory.",
+    "configuration": "Channel configuration is invalid. Check the records in ~/.terax/channels/config.json against the current configuration format.",
     "model": "Configure an available default model and its credentials in Settings.",
     "agent": "The Agent run failed. Open the conversation for details.",
     "queue-full": "The message queue is full. New requests are waiting for space.",

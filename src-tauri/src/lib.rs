@@ -307,6 +307,7 @@ pub fn run() {
             shared_store::shared_store_read,
             shared_store::shared_store_set,
             shared_store::shared_store_delete,
+            shared_store::shared_store_delete_state,
             shared_store::shared_store_mutate,
             shared_store::shared_store_revision,
             open_with::open_with_register,

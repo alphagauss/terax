@@ -1,19 +1,23 @@
 /**
- * 本文件验证登录替换失败后主窗口服务仍可管理已有连接。
+ * 本文件验证配置失败、验证码重试及删除失败后的连接可管理性。
  * 使用真实 Manager 和设置请求链，只替换平台、密钥和磁盘边界。
  */
 
 import { requestChannels, useChannelsView } from "@/modules/channels/client";
 import { startChannelsService } from "@/modules/channels/service";
-import type {
-  ChannelCheckpoint,
-  ChannelConnection,
+import {
+  ChannelError,
+  type ChannelCheckpoint,
+  type ChannelConnection,
 } from "@/modules/channels/types";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
   listeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
   saveCredentials: vi.fn(),
+  poll: vi.fn(),
+  deleteState: vi.fn(),
+  stores: new Map<string, Record<string, unknown>>(),
   checkpoint: {
     cursor: "old-cursor",
     cursorScope: "old-bot",
@@ -65,17 +69,18 @@ vi.mock("@/lib/sharedStore", () => ({
     await reload();
     return () => {};
   },
-}));
-vi.mock("@/modules/channels/storage", () => ({
-  loadConnections: async () => [structuredClone(io.connection)],
-  loadCheckpoint: async () => structuredClone(io.checkpoint),
-  saveCheckpoint: async (_id: string, checkpoint: ChannelCheckpoint) => {
-    io.checkpoint = structuredClone(checkpoint);
+  readSharedStore: async (store: string) =>
+    structuredClone(io.stores.get(store) ?? {}),
+  setSharedStoreKey: async (store: string, key: string, value: unknown) => {
+    io.stores.set(store, {
+      ...io.stores.get(store),
+      [key]: structuredClone(value),
+    });
   },
-  saveConnection: async (connection: ChannelConnection) => {
-    io.connection = connection;
+  deleteSharedStoreKey: async (store: string, key: string) => {
+    delete io.stores.get(store)?.[key];
   },
-  removeConnection: vi.fn(),
+  deleteSharedStoreState: io.deleteState,
 }));
 vi.mock("@/modules/channels/agentSession", () => ({
   ensureChannelSession: vi.fn(),
@@ -83,12 +88,10 @@ vi.mock("@/modules/channels/agentSession", () => ({
 vi.mock("@/modules/channels/adapters/weixin", () => ({
   loadWeixinCredentials: async () => ({ userId: "owner", botId: "old-bot" }),
   saveWeixinCredentials: io.saveCredentials,
+  deleteWeixinCredentials: vi.fn(),
   beginWeixinLogin: async () => ({
     qrContent: "scan",
-    poll: async () => ({
-      state: "scanned",
-      credentials: { userId: "owner", botId: "new-bot" },
-    }),
+    poll: io.poll,
   }),
   WeixinAdapter: class {
     cursorScope = "old-bot";
@@ -107,6 +110,30 @@ vi.mock("@/modules/channels/adapters/weixin", () => ({
   },
 }));
 
+beforeEach(() => {
+  io.stores.clear();
+  io.stores.set("channels", {
+    [io.connection.id]: structuredClone(io.connection),
+  });
+  io.stores.set(`channels-state:${io.connection.id}`, {
+    checkpoint: structuredClone(io.checkpoint),
+  });
+  io.saveCredentials.mockReset();
+  io.deleteState.mockReset().mockImplementation(async (store: string) => {
+    io.stores.delete(store);
+  });
+  io.poll.mockReset().mockResolvedValue({
+    state: "scanned",
+    credentials: { userId: "owner", botId: "new-bot" },
+  });
+  useChannelsView.setState({
+    epoch: "",
+    version: 0,
+    snapshots: [],
+    error: null,
+  });
+});
+
 it("restores the configured connection when replacing its credentials fails", async () => {
   io.saveCredentials.mockRejectedValue(new Error("keychain unavailable"));
   const dispose = await startChannelsService(() => {});
@@ -122,7 +149,9 @@ it("restores the configured connection when replacing its credentials fails", as
         issue: "storage",
       }),
     );
-    expect(io.checkpoint.cursor).toBe("old-cursor");
+    expect(
+      io.stores.get(`channels-state:${io.connection.id}`)?.checkpoint,
+    ).toMatchObject({ cursor: "old-cursor" });
     expect(useChannelsView.getState().snapshots).toHaveLength(1);
     const view = await requestChannels({
       action: "enable",
@@ -130,6 +159,93 @@ it("restores the configured connection when replacing its credentials fails", as
       enabled: false,
     });
     expect(view.snapshots[0].status).toBe("disabled");
+  } finally {
+    await dispose();
+  }
+});
+
+it("配置无效时拒绝新增且不写入，修正当前记录后可正常新增", async () => {
+  const invalid: Record<string, unknown> = { ...io.connection };
+  delete invalid.busyMessageMode;
+  io.stores.set("channels", { [io.connection.id]: invalid });
+  const dispose = await startChannelsService(() => {});
+  try {
+    expect(useChannelsView.getState().error).toBe("configuration");
+    await expect(
+      requestChannels({ action: "add", name: "test" }),
+    ).rejects.toThrow("configuration");
+    expect(io.stores.get("channels")).toEqual({ [io.connection.id]: invalid });
+    io.stores.set("channels", {
+      [io.connection.id]: structuredClone(io.connection),
+    });
+    const view = await requestChannels({ action: "add", name: "test" });
+    expect(view.error).toBeNull();
+    expect(view.snapshots).toHaveLength(2);
+    expect(Object.keys(io.stores.get("channels") ?? {})).toHaveLength(2);
+  } finally {
+    await dispose();
+  }
+});
+
+it("验证码请求短暂断网后自动重试并继续登录", async () => {
+  vi.useFakeTimers();
+  io.poll
+    .mockReset()
+    .mockResolvedValueOnce({ state: "verify" })
+    .mockRejectedValueOnce(new ChannelError("network"))
+    .mockResolvedValue({
+      state: "scanned",
+      credentials: { userId: "owner", botId: "new-bot" },
+    });
+  const dispose = await startChannelsService(() => {});
+  try {
+    await requestChannels({ action: "login", id: io.connection.id });
+    await vi.advanceTimersByTimeAsync(1000);
+    await requestChannels({
+      action: "verify",
+      id: io.connection.id,
+      code: "123456",
+    });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(io.poll.mock.calls.map(([code]) => code)).toEqual([
+      "",
+      "123456",
+      "123456",
+    ]);
+    expect(io.saveCredentials).toHaveBeenCalledOnce();
+    expect(useChannelsView.getState().snapshots[0].login).toBeUndefined();
+  } finally {
+    await dispose();
+    vi.useRealTimers();
+  }
+});
+
+it("删除清理失败时保留可重试连接，重试后清除其状态与路由", async () => {
+  io.stores.set("channels", {
+    [io.connection.id]: { ...io.connection, enabled: false },
+  });
+  io.stores.set("settings", {
+    [`network.channel:${io.connection.id}`]: "direct",
+    theme: "dark",
+  });
+  io.deleteState.mockRejectedValueOnce(new Error("state is busy"));
+  const dispose = await startChannelsService(() => {});
+  try {
+    await expect(
+      requestChannels({ action: "remove", id: io.connection.id }),
+    ).rejects.toThrow("storage");
+    expect(useChannelsView.getState().snapshots[0].connection.id).toBe(
+      io.connection.id,
+    );
+    expect(io.stores.get("channels")?.[io.connection.id]).toBeDefined();
+    const view = await requestChannels({
+      action: "remove",
+      id: io.connection.id,
+    });
+    expect(view.snapshots).toEqual([]);
+    expect(io.stores.has(`channels-state:${io.connection.id}`)).toBe(false);
+    expect(io.stores.get("settings")).toEqual({ theme: "dark" });
+    expect(io.stores.get("channels")).toEqual({});
   } finally {
     await dispose();
   }

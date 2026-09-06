@@ -31,7 +31,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 展示连接管理与微信授权流程，不依赖主窗口的 React 实例。 */
+/** 展示连接管理与微信授权流程；配置加载失败时禁用新增，避免累积不可见记录。 */
 export function ChannelsSection() {
   const { t } = useTranslation("channels");
   const snapshots = useChannelsView((state) => state.snapshots);
@@ -120,9 +120,13 @@ export function ChannelsSection() {
               maxLength={80}
               placeholder={t("namePlaceholder")}
               aria-label={t("namePlaceholder")}
-              disabled={!ready || busy}
+              disabled={!ready || busy || Boolean(serviceError)}
             />
-            <Button variant="outline" type="submit" disabled={!ready || busy}>
+            <Button
+              variant="outline"
+              type="submit"
+              disabled={!ready || busy || Boolean(serviceError)}
+            >
               {t("addWeixin")}
             </Button>
           </form>
@@ -167,8 +171,7 @@ export function ChannelsSection() {
   );
 }
 
-/** 单连接的启停、登录和会话导航，删除仅移除连接配置与凭据。 */
-/** 展示单个连接的运行状态、平台操作与独立网络路由。 */
+/** 展示单个连接的运行状态、平台操作与独立网络路由，删除时保留聊天历史。 */
 function ConnectionCard({
   snapshot,
   disabled,

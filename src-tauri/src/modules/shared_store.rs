@@ -372,6 +372,32 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
     emit_changed(&app, &root, &store)
 }
 
+/// 在状态记录的既有锁内删除正文；拒绝普通配置表和非规范 UUID。
+///
+/// 保留锁文件，避免已等待旧锁的调用与新调用锁定不同文件而并发写入。
+fn delete_state_at(root: &Path, store: &str) -> Result<(), String> {
+    if state_id(store)?.is_none() {
+        return Err("only scoped state stores can be deleted".into());
+    }
+    if !root.exists() {
+        return Ok(());
+    }
+    let _lock = FileLock::acquire(&lock_path(root, store)?, Duration::from_secs(5))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("shared store {store} is busy"))?;
+    match fs::remove_file(store_path(root, store)?) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// 删除白名单中的单个协议状态文件，不允许调用方指定路径或删除普通配置。
+#[tauri::command]
+pub fn shared_store_delete_state(store: String) -> Result<(), String> {
+    delete_state_at(&store_dir(&store)?, &store)
+}
+
 /// 在一次锁内应用明确列出的键变更，不执行整表覆盖。
 #[tauri::command]
 pub fn shared_store_mutate(
@@ -466,6 +492,42 @@ mod tests {
         );
         assert!(store_path(dir.path(), "channels-state:../../outside").is_err());
         assert!(store_path(dir.path(), &a.to_uppercase()).is_err());
+    }
+
+    #[test]
+    fn state_deletion_waits_for_writers_and_preserves_other_stores() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = format!("channels-state:{}", uuid::Uuid::new_v4());
+        let other = format!("channels-state:{}", uuid::Uuid::new_v4());
+        mutate(dir.path(), &state, |map| {
+            map.insert("checkpoint".into(), Value::Bool(true));
+        })
+        .unwrap();
+        mutate(dir.path(), &other, |map| {
+            map.insert("checkpoint".into(), Value::Bool(true));
+        })
+        .unwrap();
+        let path = store_path(dir.path(), &state).unwrap();
+        let lock = FileLock::try_acquire(&lock_path(dir.path(), &state).unwrap())
+            .unwrap()
+            .unwrap();
+        let root = dir.path().to_path_buf();
+        let deleting_state = state.clone();
+        let deleting = std::thread::spawn(move || delete_state_at(&root, &deleting_state));
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(path.exists());
+        drop(lock);
+        deleting.join().unwrap().unwrap();
+        assert!(!path.exists());
+        assert!(store_path(dir.path(), &other).unwrap().exists());
+        // 缺失文件和损坏正文都可清理，失败重试不依赖状态内容能否解析。
+        delete_state_at(dir.path(), &state).unwrap();
+        fs::write(&path, b"invalid json").unwrap();
+        delete_state_at(dir.path(), &state).unwrap();
+        assert!(!path.exists());
+        for forbidden in ["settings", "channels", "channels-state:../../outside"] {
+            assert!(delete_state_at(dir.path(), forbidden).is_err());
+        }
     }
 
     #[test]
