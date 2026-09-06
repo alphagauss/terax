@@ -23,8 +23,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
@@ -70,19 +70,27 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
+import {
+  ExplorerSearch,
+  type ExplorerSearchHandle,
+} from "@/modules/explorer/ExplorerSearch";
 import {
   copyToClipboard,
   relativePath,
   revealInFinder,
-} from "./lib/contextActions";
-import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { folderIconUrl } from "./lib/iconResolver";
-import { useExplorerDnd } from "./lib/useExplorerDnd";
-import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
-import { ancestorDirs, useFileTree } from "./lib/useFileTree";
-import { useGitStatus } from "./lib/useGitStatus";
-import { EntryRow, PendingRow, type RowActions, StatusRow } from "./TreeRow";
+} from "@/modules/explorer/lib/contextActions";
+import type { GitStatusCode } from "@/modules/explorer/lib/gitStatusUtils";
+import { folderIconUrl } from "@/modules/explorer/lib/iconResolver";
+import { useExplorerDnd } from "@/modules/explorer/lib/useExplorerDnd";
+import { useExplorerFileDrop } from "@/modules/explorer/lib/useExplorerFileDrop";
+import { ancestorDirs, useFileTree } from "@/modules/explorer/lib/useFileTree";
+import { useGitStatus } from "@/modules/explorer/lib/useGitStatus";
+import {
+  EntryRow,
+  PendingRow,
+  type RowActions,
+  StatusRow,
+} from "@/modules/explorer/TreeRow";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -224,7 +232,7 @@ function RemoteConnectionNotice({
         <Button
           variant="outline"
           size="sm"
-          className="mt-1 h-7 text-xs"
+          className="mt-1"
           onClick={onReconnect}
         >
           {t("remoteWorkspace.reconnectAction")}
@@ -745,7 +753,7 @@ export const FileExplorer = memo(
             <Button
               variant="outline"
               size="sm"
-              className="mt-1 h-7 gap-1.5 text-xs"
+              className="mt-1"
               onClick={onOpenFolder}
             >
               <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
@@ -756,7 +764,7 @@ export const FileExplorer = memo(
             <Button
               variant="outline"
               size="sm"
-              className="mt-1 h-7 gap-1.5 text-xs"
+              className="mt-1"
               onClick={onOpenHome}
             >
               <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
@@ -779,7 +787,7 @@ export const FileExplorer = memo(
                 aria-label={t("pathPlaceholder")}
                 className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
               />
-              <Button type="submit" variant="outline" size="sm" className="h-7">
+              <Button type="submit" variant="outline" size="sm">
                 {t("openPath")}
               </Button>
             </form>
@@ -1039,8 +1047,8 @@ export const FileExplorer = memo(
                   {onOpenFolder ? (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="size-6 text-muted-foreground hover:text-foreground"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-foreground"
                       onClick={onOpenFolder}
                       title={t("openFolder")}
                       aria-label={t("openFolder")}
@@ -1055,8 +1063,8 @@ export const FileExplorer = memo(
 
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={() => setIsSearchOpen((v) => !v)}
                     title={t("searchFiles")}
                     aria-label={t("searchFiles")}
@@ -1070,8 +1078,8 @@ export const FileExplorer = memo(
 
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={() =>
                       tree.beginCreate(toolbarCreateParent, "file")
                     }
@@ -1085,8 +1093,8 @@ export const FileExplorer = memo(
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={() => tree.beginCreate(toolbarCreateParent, "dir")}
                     title={t("newFolder")}
                   >
@@ -1098,8 +1106,8 @@ export const FileExplorer = memo(
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={() => tree.refresh(rootPath)}
                     title="Refresh"
                     aria-label="Refresh"
@@ -1112,8 +1120,8 @@ export const FileExplorer = memo(
                   </Button>
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="size-6 text-muted-foreground hover:text-foreground"
+                    size="icon-xs"
+                    className="text-muted-foreground hover:text-foreground"
                     onClick={tree.collapseAll}
                     title="Collapse All"
                     aria-label="Collapse All"

@@ -3,14 +3,14 @@
  * 负责地址输入、刷新、外部打开以及临时通知的交互。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/controls/input";
 import {
   ArrowReloadHorizontalIcon,
   Globe02Icon,
@@ -124,10 +124,10 @@ export const WebPreviewAddressBar = forwardRef<
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           onClick={onReload}
           title={t("addressBar.reloadTitle")}
-          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <HugeiconsIcon
             icon={ArrowReloadHorizontalIcon}
@@ -142,7 +142,7 @@ export const WebPreviewAddressBar = forwardRef<
               variant="ghost"
               size="sm"
               title={t("addressBar.portsTitle")}
-              className="h-7 shrink-0 gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="shrink-0 gap-1 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <HugeiconsIcon icon={Globe02Icon} size={13} strokeWidth={1.75} />
               <span className="hidden sm:inline">{t("addressBar.ports")}</span>
@@ -177,7 +177,7 @@ export const WebPreviewAddressBar = forwardRef<
             placeholder={t("addressBar.placeholder")}
             spellCheck={false}
             autoComplete="off"
-            className="h-7 w-full bg-muted/60 px-2 text-xs placeholder:text-muted-foreground/70 focus-visible:ring-0"
+            className="h-7 w-full bg-muted/60 px-2 placeholder:text-muted-foreground/70"
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -194,12 +194,12 @@ export const WebPreviewAddressBar = forwardRef<
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          size="icon-sm"
           onClick={() => {
             if (url) void openUrl(url).catch(console.error);
           }}
           title={t("addressBar.openInBrowserTitle")}
-          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
           disabled={!url}
         >
           <HugeiconsIcon icon={LinkSquare02Icon} size={14} strokeWidth={1.75} />

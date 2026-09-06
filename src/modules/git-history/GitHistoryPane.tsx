@@ -3,7 +3,7 @@
  * 密集的提交元信息使用清晰的语义文字颜色，不额外降低小字号透明度。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverAnchor,
@@ -39,20 +39,27 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { CommitDetail, type CommitDetailFilesEntry } from "./CommitDetail";
-import { GraphRail, MAX_VISIBLE_LANES, railWidth } from "./GraphRail";
+import {
+  CommitDetail,
+  type CommitDetailFilesEntry,
+} from "@/modules/git-history/CommitDetail";
+import {
+  GraphRail,
+  MAX_VISIBLE_LANES,
+  railWidth,
+} from "@/modules/git-history/GraphRail";
 import {
   EMPTY_GRAPH_STATE,
   type GraphRow,
   type GraphState,
   layoutGraph,
-} from "./lib/graph";
+} from "@/modules/git-history/lib/graph";
 import {
   commitWebUrl,
   hostLabel,
   parseRemoteWebUrl,
   type RemoteWebInfo,
-} from "./lib/remoteWebUrl";
+} from "@/modules/git-history/lib/remoteWebUrl";
 
 const RAIL_RESERVED_PX = railWidth(MAX_VISIBLE_LANES);
 // rail | sha | subject(capped) | spacer(absorbs slack) | author(hugs) | date | changes
@@ -701,7 +708,7 @@ export function GitHistoryPane({
                   <Button
                     size="xs"
                     variant="ghost"
-                    className="h-6 cursor-pointer text-[11px]"
+                    className="cursor-pointer"
                     onClick={
                       loadStatus === "initial-error"
                         ? handleRefresh

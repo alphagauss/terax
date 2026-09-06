@@ -32,7 +32,14 @@ import {
   UserMultiple02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { type ComponentType, lazy, Suspense, useEffect, useState } from "react";
+import {
+  type ComponentType,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 const ChannelsSection = lazy(() =>
@@ -64,10 +71,16 @@ function readInitialTab(): SettingsTab {
   return isSettingsTab(tab) ? tab : "general";
 }
 
+/** 只滚动标题栏内的目标标签，不改变设置正文的滚动位置。 */
+function revealTab(tab: HTMLElement | null | undefined) {
+  tab?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
 /** 渲染设置辅助窗口，并响应统一窗口事件中的设置分区请求。 */
 export function SettingsWindowPage() {
   const { t } = useTranslation("settings");
   const [active, setActive] = useState<SettingsTab>(readInitialTab);
+  const navigationRef = useRef<HTMLDivElement>(null);
   const openEnvelope = useAuxiliaryOpenRequest();
   const init = usePreferencesStore((state) => state.init);
   const ActiveSection = TABS.find((tab) => tab.id === active)?.component;
@@ -75,6 +88,25 @@ export function SettingsWindowPage() {
   useEffect(() => {
     void init();
   }, [init]);
+
+  useEffect(() => {
+    const viewport = navigationRef.current;
+    if (!viewport) return;
+    // 只观察轻量标题栏，不监听设置表单或触发 React 布局状态。
+    const observer = new ResizeObserver(() =>
+      revealTab(viewport.querySelector('[role="tab"][data-state="active"]')),
+    );
+    observer.observe(viewport);
+    if (viewport.firstElementChild)
+      observer.observe(viewport.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    revealTab(
+      navigationRef.current?.querySelector(`[data-settings-tab="${active}"]`),
+    );
+  }, [active]);
 
   useEffect(() => {
     const request = openEnvelope?.request;
@@ -91,18 +123,37 @@ export function SettingsWindowPage() {
       className="flex min-w-0 flex-1 items-center"
       data-tauri-drag-region
     >
-      <TabsList className="mx-auto h-7 max-w-full gap-0.5 overflow-x-auto rounded-none bg-transparent p-0">
-        {TABS.map((tab) => (
-          <TabsTrigger
-            key={tab.id}
-            value={tab.id}
-            className="h-7 flex-none gap-1.5 rounded-md bg-transparent px-2 text-[11.5px] data-active:bg-accent dark:data-active:bg-accent"
-          >
-            <HugeiconsIcon icon={tab.icon} size={12} strokeWidth={1.75} />
-            <span>{t(`tabs.${tab.id}`)}</span>
-          </TabsTrigger>
-        ))}
-      </TabsList>
+      <div
+        ref={navigationRef}
+        data-tauri-drag-region
+        className="w-full min-w-0 overflow-x-auto overflow-y-hidden overscroll-x-contain scroll-smooth motion-reduce:scroll-auto"
+        onWheel={(event) => {
+          // 普通鼠标的纵向滚轮也能浏览横向标签；触控板横向手势交给浏览器。
+          if (event.deltaX !== 0) return;
+          const viewport = event.currentTarget;
+          const unit =
+            event.deltaMode === 1
+              ? 16
+              : event.deltaMode === 2
+                ? viewport.clientWidth
+                : 1;
+          viewport.scrollBy({ left: event.deltaY * unit });
+        }}
+      >
+        <TabsList className="mx-auto flex h-7 w-max justify-start gap-0.5 rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-7">
+          {TABS.map((tab) => (
+            <TabsTrigger
+              key={tab.id}
+              value={tab.id}
+              data-settings-tab={tab.id}
+              className="h-7 flex-none gap-1.5 rounded-md bg-transparent px-2 text-xs duration-control ease-standard focus-visible:ring-0 focus-visible:outline-none data-active:bg-accent dark:data-active:bg-accent"
+            >
+              <HugeiconsIcon icon={tab.icon} size={12} strokeWidth={1.75} />
+              <span>{t(`tabs.${tab.id}`)}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
     </Tabs>
   );
 
@@ -111,7 +162,7 @@ export function SettingsWindowPage() {
       title={t("windowTitle")}
       headerContent={headerContent}
     >
-      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <main className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-page">
         <div
           className={cn(
             "mx-auto flex w-full flex-1 flex-col",
@@ -124,7 +175,7 @@ export function SettingsWindowPage() {
             <div key={active} className="terax-tab-in flex flex-1 flex-col">
               <Suspense
                 fallback={
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {t("channels:loading")}
                   </p>
                 }

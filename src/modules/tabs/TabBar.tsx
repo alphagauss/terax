@@ -19,7 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
@@ -63,7 +63,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { filePathFor, labelFor } from "./lib/tabLabel";
+import { filePathFor, labelFor } from "@/modules/tabs/lib/tabLabel";
 
 type Props = {
   groupId: number;
@@ -697,8 +697,8 @@ export function TabBar({
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              size="icon"
-              className="sticky right-0 z-10 size-7 shrink-0 rounded-md bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+              size="icon-sm"
+              className="sticky right-0 z-10 shrink-0 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
               title={tr("newTab")}
             >
               <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />

@@ -3,7 +3,7 @@
  * 列表仅在打开时按需发现；本地环境允许使用系统文件选择器作为未发现环境的兜底。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Command,
   CommandDialog,

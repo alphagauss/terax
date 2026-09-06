@@ -3,6 +3,7 @@
  * 草稿由父页面按实例保留；配置和网络路由分别提交，二维码库仅在授权时加载。
  */
 
+import { FormField } from "@/components/layout/FormField";
 import {
   Select,
   SelectContent,
@@ -10,8 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import { Switch } from "@/components/ui/switch";
 import { requestChannels, type ChannelAction } from "@/modules/channels/client";
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
@@ -24,10 +25,7 @@ import {
   useNetworkSettings,
   type ProxyMode,
 } from "@/modules/network/settings";
-import {
-  ConnectionSettingsField,
-  ConnectionSettingsActions,
-} from "@/settings/components/ConnectionSettingsLayout";
+import { ConnectionSettingsActions } from "@/settings/components/ConnectionSettingsLayout";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -165,7 +163,7 @@ export function ChannelConnectionEditor({
         }}
       >
         <div className="grid gap-4">
-          <ConnectionSettingsField label={t("namePlaceholder")}>
+          <FormField label={t("namePlaceholder")}>
             <Input
               aria-label={t("namePlaceholder")}
               value={draft.name}
@@ -179,8 +177,8 @@ export function ChannelConnectionEditor({
             {invalidName ? (
               <p className="text-[11px] text-destructive">{t("errors.name")}</p>
             ) : null}
-          </ConnectionSettingsField>
-          <ConnectionSettingsField label={t("busyMessageMode.label")}>
+          </FormField>
+          <FormField label={t("busyMessageMode.label")}>
             <Select
               value={draft.mode}
               disabled={disabled || snapshot.busy}
@@ -204,8 +202,8 @@ export function ChannelConnectionEditor({
                 </SelectItem>
               </SelectContent>
             </Select>
-          </ConnectionSettingsField>
-          <ConnectionSettingsField label={t("settings:network.route")}>
+          </FormField>
+          <FormField label={t("settings:network.route")}>
             <Select
               value={draft.route}
               disabled={disabled || !network.ready || network.error}
@@ -239,13 +237,12 @@ export function ChannelConnectionEditor({
                 {t("settings:network.saveError")}
               </p>
             ) : null}
-          </ConnectionSettingsField>
+          </FormField>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           {connection.accountId ? (
             <Button
               type="button"
-              size="sm"
               variant="outline"
               disabled={disabled}
               onClick={() => void run({ action: "open", id: connection.id })}
@@ -256,7 +253,6 @@ export function ChannelConnectionEditor({
           {!login ? (
             <Button
               type="button"
-              size="sm"
               variant={connection.accountId ? "ghost" : "outline"}
               disabled={disabled}
               onClick={() => void run({ action: "login", id: connection.id })}
@@ -270,7 +266,6 @@ export function ChannelConnectionEditor({
             snapshot.status === "reconnecting") ? (
             <Button
               type="button"
-              size="sm"
               variant="ghost"
               disabled={disabled || snapshot.busy}
               onClick={() =>
@@ -284,7 +279,6 @@ export function ChannelConnectionEditor({
         <ConnectionSettingsActions>
           <Button
             type="button"
-            size="sm"
             variant="ghost"
             className="text-muted-foreground hover:text-destructive"
             disabled={disabled || connection.enabled || snapshot.busy}
@@ -294,11 +288,7 @@ export function ChannelConnectionEditor({
             {t("remove")}
           </Button>
           <span className="flex-1" />
-          <Button
-            type="submit"
-            size="sm"
-            disabled={disabled || !dirty || invalidName}
-          >
+          <Button type="submit" disabled={disabled || !dirty || invalidName}>
             {t("save")}
           </Button>
         </ConnectionSettingsActions>
@@ -351,14 +341,13 @@ function ChannelLogin({
             placeholder={t("verification")}
             aria-label={t("verification")}
           />
-          <Button size="sm" type="submit" disabled={disabled || !code}>
+          <Button type="submit" disabled={disabled || !code}>
             {t("confirm")}
           </Button>
         </form>
       ) : null}
       {login.state === "expired" ? (
         <Button
-          size="sm"
           variant="outline"
           disabled={disabled}
           onClick={() => void run({ action: "login", id: connection.id })}
@@ -367,7 +356,6 @@ function ChannelLogin({
         </Button>
       ) : null}
       <Button
-        size="sm"
         variant="ghost"
         disabled={disabled}
         onClick={() => void run({ action: "cancel-login", id: connection.id })}

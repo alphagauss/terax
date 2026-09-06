@@ -27,7 +27,7 @@ afterEach(() => {
   mocks.runtimePhase = "idle";
 });
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@/components/controls/button", () => ({
   Button: ({
     children,
     variant: _variant,
@@ -42,7 +42,7 @@ vi.mock("@/components/ui/spinner", () => ({
   Spinner: () => createElement("span", null, "spinner"),
 }));
 
-vi.mock("@/components/ui/alert-dialog", () => {
+vi.mock("@/components/controls/alert-dialog", () => {
   const Pass = ({ children }: { children?: React.ReactNode }) => children;
   return {
     AlertDialog: Pass,
@@ -199,7 +199,7 @@ import {
   FileExplorer,
   resolvePendingCreateIndex,
   resolveToolbarCreateParent,
-} from "./FileExplorer";
+} from "@/modules/explorer/FileExplorer";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(path.join(here, "FileExplorer.tsx"), "utf8");

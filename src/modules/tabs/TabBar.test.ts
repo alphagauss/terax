@@ -28,9 +28,7 @@ describe("TabBar close control", () => {
 
 describe("TabBar new-tab control", () => {
   it("keeps the new-tab trigger visible at the scrolling edge", () => {
-    expect(source).toContain(
-      "sticky right-0 z-10 size-7 shrink-0 rounded-md bg-card",
-    );
+    expect(source).toContain("sticky right-0 z-10 shrink-0 bg-card");
   });
 });
 

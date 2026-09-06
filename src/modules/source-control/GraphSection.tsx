@@ -12,8 +12,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverAnchor,

@@ -1,4 +1,8 @@
-import { Button } from "@/components/ui/button";
+/**
+ * 本文件渲染语言服务器设置分组和连接状态。
+ * 负责启停、配置入口和状态反馈，不直接管理 LSP 进程。
+ */
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
@@ -6,8 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -27,7 +31,8 @@ import { Delete02Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SettingRow } from "./SettingRow";
+import { SettingGroup } from "@/components/settings/SettingGroup";
+import { SettingRow } from "@/components/settings/SettingRow";
 
 /** 语言服务器设置分组，展示启用状态并提供配置操作。 */
 export function LspServersGroup() {
@@ -37,11 +42,10 @@ export function LspServersGroup() {
   const servers = allServers(customServers);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <Label>{t("editor.lsp.label")}</Label>
-        <AddCustomServerDialog customServers={customServers} />
-      </div>
+    <SettingGroup
+      title={t("editor.lsp.label")}
+      actions={<AddCustomServerDialog customServers={customServers} />}
+    >
       {servers.map((server) => (
         <ServerRow
           key={server.id}
@@ -51,7 +55,7 @@ export function LspServersGroup() {
           customServers={customServers}
         />
       ))}
-    </div>
+    </SettingGroup>
   );
 }
 
@@ -196,7 +200,7 @@ function AddCustomServerDialog({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-7 text-xs"
+        className="h-7"
       />
     </div>
   );
@@ -204,17 +208,17 @@ function AddCustomServerDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-6 px-2 text-[11px]">
+        <Button size="xs" variant="outline" className="px-2">
           {t("editor.lsp.addCustomServer")}
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-sm">
             {t("editor.lsp.dialogTitle")}
           </DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-field">
           {field(t("editor.lsp.fieldName"), name, setName, "Zig")}
           {field(t("editor.lsp.fieldCommand"), command, setCommand, "zls")}
           {field(t("editor.lsp.fieldArguments"), args, setArgs, "--stdio")}
@@ -238,7 +242,7 @@ function AddCustomServerDialog({
           )}
         </div>
         <DialogFooter>
-          <Button size="sm" disabled={!valid} onClick={save}>
+          <Button disabled={!valid} onClick={save}>
             {t("editor.lsp.addServer")}
           </Button>
         </DialogFooter>
@@ -246,7 +250,3 @@ function AddCustomServerDialog({
     </Dialog>
   );
 }
-/**
- * 本文件渲染语言服务器设置分组和连接状态。
- * 负责启停、配置入口和状态反馈，不直接管理 LSP 进程。
- */

@@ -3,7 +3,7 @@
  * 对话框只收集和持久化凭据，连接生命周期由统一 Remote Runtime 管理。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -12,8 +12,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";

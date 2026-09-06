@@ -6,13 +6,13 @@
 import {
   SelectItem as BaseItem,
   SelectTrigger as BaseTrigger,
+  SelectContent as BaseContent,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ComponentProps } from "react";
 
 export {
   Select,
-  SelectContent,
   SelectGroup,
   SelectLabel,
   SelectScrollDownButton,
@@ -21,20 +21,33 @@ export {
   SelectValue,
 } from "@/components/ui/select";
 
-/** 默认使用紧凑触发器；size 可选择标准高度，className 和 style 可覆盖样式。 */
+/** 默认 32px，工具栏使用 sm；菜单关闭恢复焦点时不增加边框或光晕。 */
 export function SelectTrigger({
   className,
-  size = "sm",
+  size = "default",
   ...props
 }: ComponentProps<typeof BaseTrigger>) {
   return (
     <BaseTrigger
       size={size}
       className={cn(
-        "text-[12px] leading-4 focus-visible:border-transparent focus-visible:ring-0",
+        "min-w-0 max-w-full rounded-md px-2.5 py-1 text-xs leading-4 data-[size=default]:h-8 data-[size=sm]:h-7 duration-control ease-standard focus-visible:border-transparent focus-visible:ring-0",
         className,
       )}
       {...props}
+    />
+  );
+}
+
+/** 下拉表面沿用基础组件的定位与键盘行为，统一圆角与动效。 */
+export function SelectContent({
+  className,
+  ...props
+}: ComponentProps<typeof BaseContent>) {
+  return (
+    <BaseContent
+      {...props}
+      className={cn("rounded-lg duration-control ease-standard", className)}
     />
   );
 }
@@ -45,6 +58,9 @@ export function SelectItem({
   ...props
 }: ComponentProps<typeof BaseItem>) {
   return (
-    <BaseItem className={cn("text-[12px] leading-4", className)} {...props} />
+    <BaseItem
+      className={cn("rounded-md text-xs leading-4", className)}
+      {...props}
+    />
   );
 }

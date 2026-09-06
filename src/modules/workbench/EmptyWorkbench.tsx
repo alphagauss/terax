@@ -3,7 +3,7 @@
  * 页面只复用现有新建标签动作，不保存状态，也不作为 Workbench 标签存在。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   ComputerTerminal02Icon,
   GitBranchIcon,
@@ -55,9 +55,10 @@ export function EmptyWorkbench({
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
           {actions.map(([label, icon, action]) => (
             <Button
+              size="lg"
               key={label}
               variant="ghost"
-              className="h-9 justify-start gap-2 px-2.5 text-primary hover:text-primary"
+              className="justify-start px-2.5 text-primary hover:text-primary"
               onClick={action}
             >
               <HugeiconsIcon icon={icon} size={16} strokeWidth={1.75} />

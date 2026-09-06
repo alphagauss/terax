@@ -36,9 +36,7 @@ export function NetworkRouteSelect({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[11.5px] text-muted-foreground">
-          {routeLabel}
-        </span>
+        <span className="text-xs text-muted-foreground">{routeLabel}</span>
         <Select
           value={mode}
           disabled={disabled || !ready || loadError || saving}

@@ -49,7 +49,7 @@ const profile = {
   tunnels: [],
 };
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@/components/controls/button", () => ({
   Button: ({
     children,
     size: _size,
@@ -70,7 +70,7 @@ vi.mock("@/components/ui/checkbox", () => ({
   }) => createElement("input", { type: "checkbox", ...props }),
 }));
 
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@/components/controls/input", () => ({
   Input: (props: InputHTMLAttributes<HTMLInputElement>) =>
     createElement("input", props),
 }));
@@ -89,7 +89,7 @@ vi.mock("@/components/ui/collapsible", () => ({
     createElement(Fragment, null, children),
 }));
 
-vi.mock("@/components/ui/dialog", () => {
+vi.mock("@/components/controls/dialog", () => {
   const Wrapper = ({ children }: { children?: ReactNode }) =>
     createElement(Fragment, null, children);
   return {
@@ -103,7 +103,7 @@ vi.mock("@/components/ui/dialog", () => {
   };
 });
 
-vi.mock("@/components/ui/alert-dialog", () => {
+vi.mock("@/components/controls/alert-dialog", () => {
   const Wrapper = ({ children }: { children?: ReactNode }) =>
     createElement(Fragment, null, children);
   const Action = ({
@@ -181,8 +181,8 @@ vi.mock("@/modules/workspace-process", () => ({
   spawnWorkspaceProcess: mocks.spawnWorkspaceProcess,
 }));
 
-vi.mock("@/settings/components/SectionHeader", () => ({
-  SectionHeader: ({ title }: { title: string }) =>
+vi.mock("@/components/layout/PageHeader", () => ({
+  PageHeader: ({ title }: { title: string }) =>
     createElement("h1", null, title),
 }));
 

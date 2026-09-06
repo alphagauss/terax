@@ -1,4 +1,10 @@
-import { Button } from "@/components/ui/button";
+/**
+ * 本文件实现设置窗口的关于页面。
+ * 页面展示应用版本和项目入口。
+ */
+
+import { Button } from "@/components/controls/button";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { GithubIcon, Globe02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getName, getVersion } from "@tauri-apps/api/app";
@@ -6,7 +12,6 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { arch, platform } from "@tauri-apps/plugin-os";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SectionHeader } from "../components/SectionHeader";
 
 const REPO_URL = "https://github.com/crynta/terax-ai";
 const WEBSITE = "https://terax.app";
@@ -40,10 +45,10 @@ export function AboutSection() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-6">
-      <SectionHeader title={t("about.header.title")} description="" />
+    <div className="flex flex-col gap-section">
+      <PageHeader title={t("about.header.title")} description="" />
 
-      <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-card/60 p-5">
+      <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-card/60 p-3">
         <img src="/logo.png" alt="" className="size-12" draggable={false} />
         <div className="flex min-w-0 flex-col">
           <span className="text-[15px] font-semibold tracking-tight">
@@ -58,14 +63,14 @@ export function AboutSection() {
         </div>
       </div>
 
-      <dl className="grid grid-cols-[110px_1fr] gap-y-2.5 text-[12px]">
+      <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-field text-xs leading-[18px]">
         <dt className="text-muted-foreground">{t("about.build")}</dt>
-        <dd className="font-mono text-[11.5px]">
+        <dd className="font-mono text-xs">
           {build ? `${build} · v${version}` : `v${version}`}
         </dd>
 
         <dt className="text-muted-foreground">{t("about.bundleId")}</dt>
-        <dd className="font-mono text-[11.5px]">app.crynta.terax</dd>
+        <dd className="font-mono text-xs">app.crynta.terax</dd>
 
         <dt className="text-muted-foreground">{t("about.license")}</dt>
         <dd>Apache 2.0</dd>
@@ -95,22 +100,20 @@ export function AboutSection() {
       </dl>
 
       <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void openUrl(REPO_URL)}
-            className="gap-1.5"
-          >
-            <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
-            View on GitHub
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
-          >
-            Report an issue
-          </Button>
+        <Button
+          variant="outline"
+          onClick={() => void openUrl(REPO_URL)}
+          className="gap-1.5"
+        >
+          <HugeiconsIcon icon={GithubIcon} size={12} strokeWidth={1.75} />
+          {t("about.viewOnGitHub")}
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => void openUrl(`${REPO_URL}/issues/new`)}
+        >
+          {t("about.reportIssue")}
+        </Button>
       </div>
     </div>
   );

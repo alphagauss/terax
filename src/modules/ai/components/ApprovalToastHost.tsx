@@ -3,7 +3,7 @@
  * Toast 只负责展示和操作，实际响应与文件预览仍由审批运行时持有。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
@@ -17,8 +17,11 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useApprovalStore, type ApprovalRequest } from "../store/approvalStore";
-import { useChatStore } from "../store/chatStore";
+import {
+  useApprovalStore,
+  type ApprovalRequest,
+} from "@/modules/ai/store/approvalStore";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 
 export type ApprovalDiffOpenInput = {
   requestKey: string;
@@ -186,7 +189,7 @@ function ApprovalToast({
             variant="ghost"
             onClick={review}
             disabled={responding}
-            className="mr-auto h-7 text-[11px]"
+            className="mr-auto"
           >
             {t("toolApproval.review")}
           </Button>
@@ -196,7 +199,6 @@ function ApprovalToast({
           variant="ghost"
           onClick={() => respond(false)}
           disabled={responding}
-          className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
           {t("toolApproval.deny")}
@@ -209,7 +211,6 @@ function ApprovalToast({
             Boolean(request.previewError) ||
             (isFile && !request.preview)
           }
-          className="h-7 gap-1.5 text-[11px]"
         >
           <HugeiconsIcon icon={Tick02Icon} size={12} strokeWidth={2} />
           {t("toolApproval.approve")}

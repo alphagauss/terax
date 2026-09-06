@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   type ChannelAction,
   requestChannels,
@@ -32,7 +32,7 @@ import {
   ConnectionSettingsItem,
   ConnectionSettingsDetail,
 } from "@/settings/components/ConnectionSettingsLayout";
-import { SectionHeader } from "@/settings/components/SectionHeader";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -173,8 +173,8 @@ export function ChannelsSection() {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-5">
-      <SectionHeader title={t("title")} description={t("description")} />
+    <div className="flex min-w-0 flex-1 flex-col gap-section">
+      <PageHeader title={t("title")} description={t("description")} />
       {owner === false ? (
         <div className="flex flex-col gap-3 text-[12px] text-muted-foreground">
           <p>{t("localOnly")}</p>
@@ -198,11 +198,7 @@ export function ChannelsSection() {
             toolbar={
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="w-full text-[12px]"
-                    disabled={disabled}
-                  >
+                  <Button className="w-full" disabled={disabled}>
                     {t("add")}
                     <HugeiconsIcon
                       icon={ArrowDown01Icon}
@@ -286,7 +282,6 @@ export function ChannelsSection() {
           </p>
           {!ready && owner !== false ? (
             <Button
-              size="sm"
               variant="outline"
               onClick={() => {
                 setErrors((current) => ({ ...current, page: undefined }));
@@ -299,7 +294,7 @@ export function ChannelsSection() {
         </div>
       ) : null}
       {owner !== false ? (
-        <p className="mt-auto text-[11px] leading-relaxed text-muted-foreground">
+        <p className="mt-auto text-[11px] leading-4 text-muted-foreground">
           {t("defaults")}
         </p>
       ) : null}

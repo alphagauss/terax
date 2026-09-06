@@ -13,9 +13,9 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShortcuts } from "@/modules/settings/store";
@@ -35,8 +35,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SectionHeader } from "../components/SectionHeader";
+import { PageHeader } from "@/components/layout/PageHeader";
 
+/** 展示按功能分组的快捷键列表，并提供录制、冲突提示与重置入口。 */
 export function ShortcutsSection() {
   const { t } = useTranslation();
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
@@ -81,16 +82,15 @@ export function ShortcutsSection() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-section">
       <div className="flex items-center justify-between">
-        <SectionHeader
+        <PageHeader
           title={t("shortcuts.header.title")}
           description={t("shortcuts.header.description")}
         />
         <Button
           variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 px-2.5 text-[11px] duration-control ease-standard"
+          className="gap-1.5 px-2.5"
           onClick={() => setResetDialogOpen(true)}
         >
           <HugeiconsIcon
@@ -113,11 +113,11 @@ export function ShortcutsSection() {
           placeholder={t("shortcuts.searchPlaceholder")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-9 pl-9 text-[12.5px]"
+          className="h-9 pl-9"
         />
       </div>
 
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-section">
         {SHORTCUT_GROUPS.map((group) => {
           const items = filteredShortcuts.filter((s) => s.group === group);
           if (items.length === 0) return null;
@@ -239,8 +239,8 @@ function ShortcutRow({
               {isModified && (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  className="size-7 text-muted-foreground duration-control ease-standard hover:text-foreground"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
                   onClick={onReset}
                   title={t("shortcuts.resetToDefault")}
                 >
@@ -249,8 +249,8 @@ function ShortcutRow({
               )}
               <Button
                 variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground opacity-0 transition-opacity duration-control ease-standard hover:text-destructive group-hover:opacity-100"
+                size="icon-sm"
+                className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
                 onClick={onClear}
                 title={t("shortcuts.clearShortcut")}
               >

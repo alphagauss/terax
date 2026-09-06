@@ -28,7 +28,7 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 };
 reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@/components/controls/button", () => ({
   Button: ({
     children,
     variant: _variant,
@@ -39,7 +39,7 @@ vi.mock("@/components/ui/button", () => ({
     size?: string;
   }) => createElement("button", { type: "button", ...props }, children),
 }));
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@/components/controls/input", () => ({
   Input: (props: InputHTMLAttributes<HTMLInputElement>) =>
     createElement("input", props),
 }));
@@ -82,7 +82,7 @@ vi.mock("@/modules/ai/lib/modelCatalog", async (importOriginal) => ({
   modelCatalog: { list: mocks.list },
 }));
 
-import { ProviderModelPicker } from "./ProviderModelPicker";
+import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

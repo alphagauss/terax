@@ -9,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "@/modules/agents/lib/agentIcon";
@@ -183,11 +183,11 @@ export function AiSidebarComposer() {
           ) : null}
           <Button
             type="button"
-            size="icon"
+            size="icon-sm"
             onClick={stopping ? c.stop : c.submit}
             disabled={c.readOnly || (!c.isBusy && !c.canSend)}
             className={cn(
-              "size-7 rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
+              "bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
               guiding &&
                 "bg-primary text-primary-foreground hover:bg-primary/85",
             )}
@@ -257,7 +257,7 @@ function PermissionModeDropdown() {
           variant="ghost"
           size="sm"
           className={cn(
-            "my-1 h-5.5 shrink-0 gap-1 rounded-md px-1.5 text-xs hover:bg-accent focus-visible:border-transparent focus-visible:ring-0",
+            "my-1 shrink-0 hover:bg-accent",
             mode === "full-access"
               ? "text-amber-600! dark:text-amber-400!"
               : "text-foreground!",
@@ -466,7 +466,7 @@ function ModelDropdown() {
               availableExternalAgents.length === 0)
           }
           className={cn(
-            "my-1 h-5.5 min-w-0 shrink gap-1 rounded-md px-1.5 text-xs hover:bg-accent hover:text-foreground",
+            "my-1 min-w-0 shrink hover:bg-accent hover:text-foreground",
             "text-muted-foreground",
           )}
           title={
@@ -835,14 +835,11 @@ function IconBtn({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-xs"
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className={cn(
-        "size-6 rounded-md text-muted-foreground hover:text-foreground",
-        className,
-      )}
+      className={cn("text-muted-foreground hover:text-foreground", className)}
     >
       {children}
     </Button>

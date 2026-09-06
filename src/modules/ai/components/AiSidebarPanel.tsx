@@ -23,7 +23,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
@@ -42,30 +42,30 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { getModelContextWindow, tryResolveModel } from "../config";
-import { parseExternalAgentBinding } from "../external-agents/runtime";
-import { MAIN_AGENT, MAIN_AGENT_ID } from "../lib/agents";
+import { getModelContextWindow, tryResolveModel } from "@/modules/ai/config";
+import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import { MAIN_AGENT, MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
 import {
   estimateUiMessageTokens,
   STREAM_RENDER_INTERVAL_MS,
-} from "../lib/chatRendering";
-import { formatMessageTimestamp } from "../lib/messageTimestamp";
-import type { SessionMeta } from "../lib/sessions";
-import { useAgentsStore } from "../store/agentsStore";
-import { getOrCreateChat } from "../store/chatRuntime";
+} from "@/modules/ai/lib/chatRendering";
+import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
+import type { SessionMeta } from "@/modules/ai/lib/sessions";
+import { useAgentsStore } from "@/modules/ai/store/agentsStore";
+import { getOrCreateChat } from "@/modules/ai/store/chatRuntime";
 import {
   getAgentMetaForSession,
   sessionMetadata,
   useChatStore,
-} from "../store/chatStore";
+} from "@/modules/ai/store/chatStore";
 import {
   type SessionAttention,
   useSessionAttentionStore,
-} from "../store/sessionAttentionStore";
-import { AGENT_ICONS } from "./AgentSwitcher";
-import { AiChatView } from "./AiChat";
-import { AiInputBarConnect } from "./AiInputBar";
-import { AiSidebarComposer } from "./AiSidebarComposer";
+} from "@/modules/ai/store/sessionAttentionStore";
+import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
+import { AiChatView } from "@/modules/ai/components/AiChat";
+import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
+import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
 
 const SUGGESTIONS = [
   {
@@ -226,10 +226,10 @@ function Header({
         ) : null}
         <Button
           type="button"
-          size="icon"
+          size="icon-sm"
           variant="ghost"
           onClick={() => void openSettingsWindow("models")}
-          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label={t("miniWindow.aiSettings")}
           title={t("miniWindow.aiSettings")}
         >
@@ -237,10 +237,10 @@ function Header({
         </Button>
         <Button
           type="button"
-          size="icon"
+          size="icon-sm"
           variant="ghost"
           onClick={() => newSession()}
-          className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label={t("miniWindow.newSession")}
           title={t("miniWindow.newSession")}
         >

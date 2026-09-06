@@ -4,10 +4,9 @@
  */
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import type { ProviderInfo } from "@/modules/ai/config";
 import {
@@ -112,7 +111,7 @@ export function ProviderKeyCard({
         <button
           type="button"
           onClick={() => void openUrl(provider.consoleUrl)}
-          className="ml-auto inline-flex items-center gap-0.5 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+          className="ml-auto inline-flex items-center gap-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
         >
           {t(usesApiKey ? "models.card.getKey" : "models.card.docs")}
           <HugeiconsIcon
@@ -122,11 +121,11 @@ export function ProviderKeyCard({
           />
         </button>
         <Button
-          size="icon"
+          size="icon-sm"
           variant="ghost"
           onClick={onRemove}
           title={t("models.card.removeProvider")}
-          className="size-7 text-muted-foreground hover:text-destructive"
+          className="text-muted-foreground hover:text-destructive"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
         </Button>
@@ -160,7 +159,7 @@ export function ProviderKeyCard({
                     setEditing(false);
                   }
                 }}
-                className="h-8 pr-7 font-mono text-[11.5px]"
+                className="pr-7 font-mono"
               />
               <button
                 type="button"
@@ -179,34 +178,28 @@ export function ProviderKeyCard({
               </button>
             </div>
             <Button
-              size="sm"
               onClick={() => void submit()}
               disabled={saving || !value.trim()}
-              className="h-8 gap-1 px-3 text-[11px]"
+              className="gap-1"
             >
               {saving ? <Spinner className="size-3" /> : null}
               {t("common.save")}
             </Button>
           </div>
           {error ? (
-            <p className="text-[10.5px] text-destructive">{error}</p>
+            <p className="text-[11px] text-destructive">{error}</p>
           ) : null}
         </div>
       ) : usesApiKey ? (
         <div className="flex items-center gap-1.5">
-          <code
-            className={cn(
-              "flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground",
-            )}
-          >
+          <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
             {maskKey(currentKey ?? "")}
           </code>
           <Button
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             onClick={() => setEditing(true)}
             title={t("models.card.replace")}
-            className="size-7"
           >
             <HugeiconsIcon icon={Edit02Icon} size={12} strokeWidth={1.75} />
           </Button>

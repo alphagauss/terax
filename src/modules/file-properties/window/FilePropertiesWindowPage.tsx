@@ -5,7 +5,7 @@
 
 import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
 import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { formatBytes, formatPosixMode } from "@/modules/file-properties/format";
@@ -222,7 +222,7 @@ export function FilePropertiesWindowPage() {
           <Button
             variant="ghost"
             size="icon-xs"
-            className="size-6 text-muted-foreground"
+            className="text-muted-foreground"
             disabled={!target || loading || scan.status === "loading"}
             onClick={refreshProperties}
             aria-label={t("common:refresh")}
@@ -276,7 +276,7 @@ export function FilePropertiesWindowPage() {
                     size="icon-xs"
                     variant="ghost"
                     onClick={() => void copyPath()}
-                    className="size-5 shrink-0 text-muted-foreground hover:text-foreground"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
                     aria-label={
                       pathCopied ? t("common:copied") : t("common:copy")
                     }

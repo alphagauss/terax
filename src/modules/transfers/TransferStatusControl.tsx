@@ -3,7 +3,7 @@
  * 面板关闭不会影响 Rust 后台任务，全局冲突对话框仍保持挂载；任务状态只订阅独立 Zustand slice。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -14,7 +14,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/controls/alert-dialog";
 import {
   Popover,
   PopoverContent,

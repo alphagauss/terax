@@ -3,7 +3,7 @@
  * 面板按需调用统一搜索后端并在内存中保留查询，不建立索引、监听器或持久搜索历史。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
@@ -38,8 +38,11 @@ import {
   searchContent,
   type ContentSearchHit,
   type ContentSearchResponse,
-} from "./api";
-import { groupContentHits, parseGlobInput } from "./model";
+} from "@/modules/workspace-search/api";
+import {
+  groupContentHits,
+  parseGlobInput,
+} from "@/modules/workspace-search/model";
 
 const SEARCH_DEBOUNCE_MS = 220;
 const SEARCH_RESULT_LIMIT = 500;
@@ -435,12 +438,12 @@ function ToolbarButton({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      size="icon-xs"
       title={label}
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="size-6 text-muted-foreground hover:text-foreground"
+      className="text-muted-foreground hover:text-foreground"
     >
       {children}
     </Button>
