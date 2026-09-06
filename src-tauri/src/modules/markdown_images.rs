@@ -208,6 +208,7 @@ impl MarkdownImageState {
 /// 准备可显示、复制和保存的 Markdown 图片资源。
 #[tauri::command]
 pub async fn markdown_image_prepare(
+    app: tauri::AppHandle,
     source: MarkdownImageSource,
     state: tauri::State<'_, MarkdownImageState>,
     remote: tauri::State<'_, RemoteState>,
@@ -223,7 +224,7 @@ pub async fn markdown_image_prepare(
             load_workspace_image(key, path, workspace, &remote, &registry).await?
         }
         MarkdownImageSource::Network { url, user_agent } => {
-            load_network_image(key, url, &user_agent).await?
+            load_network_image(&app, key, url, &user_agent).await?
         }
     };
     state.insert_or_retain(loaded)
@@ -368,11 +369,13 @@ fn is_remote_path_within_root(path: &str, root: &str) -> bool {
 
 /// 下载公开网络图片并写入受引用计数管理的临时文件。
 async fn load_network_image(
+    app: &tauri::AppHandle,
     key: String,
     url: String,
     user_agent: &str,
 ) -> Result<LoadedImage, String> {
-    let downloaded = net::download_public_image(&url, MAX_IMAGE_BYTES as usize, user_agent).await?;
+    let downloaded =
+        net::download_public_image(app, &url, MAX_IMAGE_BYTES as usize, user_agent).await?;
     let format = detect_image_format(&downloaded.bytes)
         .ok_or_else(|| "unsupported or invalid image format".to_string())?;
     let name = downloaded

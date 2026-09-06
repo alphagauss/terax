@@ -7,9 +7,12 @@
 //! 命令与 channel 生命周期参考 Eussh 的 `ssh/session.rs`，认证、代理与远程转发行为
 //! 补充参考 meatshell。
 
+use crate::modules::network_proxy::{self, ProxyConfig, SshProxyMode};
+use crate::modules::secrets::{self, SecretsState};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tauri::Manager;
 
 use russh::client::{self, Handle, Handler, KeyboardInteractiveAuthResponse, Msg};
 use russh::keys::ssh_key::{HashAlg, PublicKey};
@@ -22,8 +25,8 @@ use zeroize::Zeroizing;
 use super::health::SshTransportHealth;
 use super::host_key::HostKeyVerifier;
 use super::models::{
-    ConnectRequest, ForegroundIntent, ProxyConfig, SshAuthMethod, SshCapabilitySnapshot,
-    SshHealthSnapshot, SshProfile, SshTaskFallback,
+    ConnectRequest, ForegroundIntent, SshAuthMethod, SshCapabilitySnapshot, SshHealthSnapshot,
+    SshProfile, SshTaskFallback,
 };
 use super::remote_fs::RemoteFs;
 use super::tasks::{RemoteTaskRuntime, TaskKind, TASK_PREHEAT_RTT_MS};
@@ -131,7 +134,7 @@ pub struct RemoteWorkspace {
     home: RwLock<String>,
     login_home: RwLock<String>,
     secret: Zeroizing<String>,
-    proxy_secret: Zeroizing<String>,
+    proxy_secret_override: Option<Zeroizing<String>>,
     health: Arc<SshTransportHealth>,
     probe_lock: Mutex<()>,
     pub(crate) tasks: Arc<RemoteTaskRuntime>,
@@ -177,11 +180,31 @@ impl RemoteWorkspace {
             .to_string();
         let root_assignment = workspace_root_assignment(&requested_root)?;
         let secret = Zeroizing::new(request.secret.unwrap_or_default());
-        let proxy_secret = Zeroizing::new(request.proxy_secret.unwrap_or_default());
-        let proxy = ProxyConfig::parse(
-            profile.proxy_url.as_deref().unwrap_or(""),
-            (!proxy_secret.is_empty()).then_some(proxy_secret.as_str()),
-        )?;
+        let proxy_secret_override = request.proxy_secret_override.map(Zeroizing::new);
+        let proxy = match profile.proxy_mode {
+            SshProxyMode::Direct => None,
+            SshProxyMode::Shared => Some(network_proxy::shared_proxy(&app)?),
+            SshProxyMode::Custom => {
+                // 未明确覆盖的密码每次建连重新读取，保存或清除凭据后不使用旧快照。
+                let saved = if proxy_secret_override.is_none() {
+                    secrets::get(
+                        &app,
+                        &app.state::<SecretsState>(),
+                        super::profile::SECRET_SERVICE,
+                        &format!("{}:proxy", profile.id),
+                    )?
+                } else {
+                    None
+                };
+                Some(ProxyConfig::parse(
+                    profile.proxy_url.as_deref().unwrap_or(""),
+                    proxy_secret_override
+                        .as_deref()
+                        .map(String::as_str)
+                        .or(saved.as_deref()),
+                )?)
+            }
+        };
 
         // Keep russh's real client identifier. Advertising OpenSSH makes an
         // OpenSSH server enable private channel extensions such as
@@ -251,7 +274,7 @@ impl RemoteWorkspace {
             home: RwLock::new("/".into()),
             login_home: RwLock::new("/".into()),
             secret,
-            proxy_secret,
+            proxy_secret_override,
             health,
             probe_lock: Mutex::new(()),
             tasks: Arc::new(RemoteTaskRuntime::default()),
@@ -356,13 +379,18 @@ impl RemoteWorkspace {
         })
     }
 
-    /// 复制保存在内存中的连接参数，供当前生命周期自动重连使用。
-    pub fn reconnect_request(&self) -> ConnectRequest {
-        ConnectRequest {
+    /// 每次自动重连读取最新代理设置，其余 Workspace 连接参数保持当前生命周期快照。
+    pub fn reconnect_request(&self) -> Result<ConnectRequest, String> {
+        let mut request = ConnectRequest {
             profile: self.profile.clone(),
             secret: (!self.secret.is_empty()).then(|| self.secret.to_string()),
-            proxy_secret: (!self.proxy_secret.is_empty()).then(|| self.proxy_secret.to_string()),
-        }
+            proxy_secret_override: self
+                .proxy_secret_override
+                .as_ref()
+                .map(|secret| secret.to_string()),
+        };
+        request.refresh_proxy(&super::profile::load(&self.profile.id)?)?;
+        Ok(request)
     }
 
     /// 返回已校验的 Workspace root。

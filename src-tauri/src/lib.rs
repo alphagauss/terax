@@ -322,6 +322,7 @@ pub fn run() {
             secrets::secrets_set,
             secrets::secrets_delete,
             secrets::secrets_get_all,
+            modules::network_proxy::network_validate_proxy,
             net::http_request,
             net::http_cancel,
             history::history_suggest,

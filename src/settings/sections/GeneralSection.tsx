@@ -64,8 +64,9 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { SectionHeader } from "../components/SectionHeader";
-import { SettingRow } from "../components/SettingRow";
+import { NetworkSettings } from "@/settings/components/NetworkSettings";
+import { SectionHeader } from "@/settings/components/SectionHeader";
+import { SettingRow } from "@/settings/components/SettingRow";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -99,7 +100,7 @@ type NotificationTestState =
   | "waiting"
   | "sending";
 
-/** 常规设置分区。 */
+/** 常规设置分区，组合外观、网络、终端和启动等独立设置组。 */
 export function GeneralSection() {
   const { t } = useTranslation("settings");
   const { mode, setMode } = useTheme();
@@ -118,9 +119,7 @@ export function GeneralSection() {
     (s) => s.terminalWebglEnabled,
   );
   const terminalCursorBlink = usePreferencesStore((s) => s.terminalCursorBlink);
-  const terminalCursorStyle = usePreferencesStore(
-    (s) => s.terminalCursorStyle,
-  );
+  const terminalCursorStyle = usePreferencesStore((s) => s.terminalCursorStyle);
   const terminalSmartCopyPaste = usePreferencesStore(
     (s) => s.terminalSmartCopyPaste,
   );
@@ -271,12 +270,12 @@ export function GeneralSection() {
             value={language}
             onValueChange={(v) => void setLanguage(v as Language)}
           >
-            <SelectTrigger value={language} className="h-8 w-40 text-[12px]">
+            <SelectTrigger value={language} className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {SUPPORTED_LANGUAGES.map((l) => (
-                <SelectItem key={l.id} value={l.id} className="text-[12px]">
+                <SelectItem key={l.id} value={l.id}>
                   {l.label}
                 </SelectItem>
               ))}
@@ -305,6 +304,8 @@ export function GeneralSection() {
           />
         </div>
       </div>
+
+      <NetworkSettings />
 
       <div className="flex flex-col gap-2">
         <Label>{t("general.explorer.label")}</Label>
@@ -391,16 +392,12 @@ export function GeneralSection() {
             value={terminalCursorStyle}
             onValueChange={(value) => void setTerminalCursorStyle(value)}
           >
-            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+            <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {TERMINAL_CURSOR_STYLES.map((style) => (
-                <SelectItem
-                  key={style}
-                  value={style}
-                  className="text-[12px]"
-                >
+                <SelectItem key={style} value={style}>
                   {t(`general.terminal.cursorStyle.options.${style}`)}
                 </SelectItem>
               ))}
@@ -430,19 +427,12 @@ export function GeneralSection() {
             value={terminalFontWeight}
             onValueChange={(v) => void setTerminalFontWeight(v)}
           >
-            <SelectTrigger
-              value={terminalFontWeight}
-              className="h-8 w-28 text-[12px]"
-            >
+            <SelectTrigger value={terminalFontWeight} className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {TERMINAL_FONT_WEIGHTS.map((w) => (
-                <SelectItem
-                  key={w.value}
-                  value={w.value}
-                  className="text-[12px]"
-                >
+                <SelectItem key={w.value} value={w.value}>
                   {t(`general.terminal.fontWeight.${w.labelKey}`)}
                 </SelectItem>
               ))}
@@ -465,18 +455,15 @@ export function GeneralSection() {
               void setTerminalShell(v === SHELL_AUTO ? "" : v)
             }
           >
-            <SelectTrigger
-              value={terminalShell || SHELL_AUTO}
-              className="h-8 w-40 text-[12px]"
-            >
+            <SelectTrigger value={terminalShell || SHELL_AUTO} className="w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={SHELL_AUTO} className="text-[12px]">
+              <SelectItem value={SHELL_AUTO}>
                 {t("general.terminal.shell.auto")}
               </SelectItem>
               {shells.map((s) => (
-                <SelectItem key={s.path} value={s.path} className="text-[12px]">
+                <SelectItem key={s.path} value={s.path}>
                   {s.name}
                 </SelectItem>
               ))}
@@ -491,12 +478,12 @@ export function GeneralSection() {
             value={String(terminalLetterSpacing)}
             onValueChange={(v) => void setTerminalLetterSpacing(Number(v))}
           >
-            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+            <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {LETTER_SPACINGS.map((v) => (
-                <SelectItem key={v} value={String(v)} className="text-[12px]">
+                <SelectItem key={v} value={String(v)}>
                   {v > 0 ? `+${v}` : v} px
                 </SelectItem>
               ))}
@@ -511,16 +498,12 @@ export function GeneralSection() {
             value={String(terminalFontSize)}
             onValueChange={(v) => void setTerminalFontSize(Number(v))}
           >
-            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+            <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {TERMINAL_FONT_SIZES.map((size) => (
-                <SelectItem
-                  key={size}
-                  value={String(size)}
-                  className="text-[12px]"
-                >
+                <SelectItem key={size} value={String(size)}>
                   {size} px
                 </SelectItem>
               ))}
@@ -535,16 +518,12 @@ export function GeneralSection() {
             value={String(terminalScrollback)}
             onValueChange={(v) => void setTerminalScrollback(Number(v))}
           >
-            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+            <SelectTrigger className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {TERMINAL_SCROLLBACK_PRESETS.map((lines) => (
-                <SelectItem
-                  key={lines}
-                  value={String(lines)}
-                  className="text-[12px]"
-                >
+                <SelectItem key={lines} value={String(lines)}>
                   {t("general.terminal.scrollback.lines", {
                     count: lines.toLocaleString(),
                   })}
@@ -572,9 +551,7 @@ export function GeneralSection() {
               )}
               onClick={() => void testNotification()}
             >
-              {t(
-                `general.agents.notifications.test.label.${notificationTest}`,
-              )}
+              {t(`general.agents.notifications.test.label.${notificationTest}`)}
             </Button>
             <Switch
               checked={agentNotifications}
@@ -621,14 +598,14 @@ export function GeneralSection() {
                 )
               }
             >
-              <SelectTrigger className="h-8 w-56 text-[12px]">
+              <SelectTrigger className="w-56">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="single" className="text-[12px]">
+                <SelectItem value="single">
                   {t("general.startup.workspaceWindows.single")}
                 </SelectItem>
-                <SelectItem value="multiple" className="text-[12px]">
+                <SelectItem value="multiple">
                   {t("general.startup.workspaceWindows.multiple")}
                 </SelectItem>
               </SelectContent>

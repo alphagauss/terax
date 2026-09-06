@@ -58,7 +58,11 @@ describe("personal WeChat", () => {
           redirect_host: "attacker.test",
         }),
       );
-    const flow = await beginWeixinLogin(new AbortController().signal, fetch);
+    const flow = await beginWeixinLogin(
+      "connection",
+      new AbortController().signal,
+      fetch,
+    );
     await expect(flow.poll()).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -88,6 +92,7 @@ describe("personal WeChat", () => {
           botId: "bot",
           userId: "owner",
         },
+        "connection",
         fetch,
       );
       const sending = adapter.send(

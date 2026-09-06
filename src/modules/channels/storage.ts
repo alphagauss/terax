@@ -44,8 +44,9 @@ export function saveConnection(connection: ChannelConnection): Promise<void> {
 }
 
 /** 删除配置引用，保留已经生成的聊天历史。 */
-export function removeConnection(id: string): Promise<void> {
-  return deleteSharedStoreKey("channels", id);
+export async function removeConnection(id: string): Promise<void> {
+  await deleteSharedStoreKey("channels", id);
+  await deleteSharedStoreKey("settings", `network.channel:${id}`);
 }
 
 /** 读取单连接检查点；没有文件表示尚未开始接收。 */

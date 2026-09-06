@@ -168,7 +168,8 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 
 ### 网络（`src-tauri/src/modules/net.rs`）
 
-- `http_request` / `http_cancel` - 通用 HTTP 传输与按 WebView 隔离的取消。响应通过 started、headers、chunk、end 事件返回，配置有界总超时和响应大小，保留 SSRF guard。AI 私网请求、模型目录与 Channels 共用该边界。
+- `http_request` / `http_cancel` - 通用 HTTP 传输与按 WebView 隔离的取消。响应通过 started、headers、chunk、end 事件返回，配置有界总超时和响应大小，保留 SSRF guard。全部网络 Provider、模型目录与 Channels、语音共用该边界；`networkTarget` 声明连接身份，由 Rust 读取最新路由。
+- `network_validate_proxy` - 供设置页验证不含密码的代理 URL，实际保存仍在共享存储入口再次校验。详见 [内置网络与代理](network.md)。
 
 ### 秘密（`src-tauri/src/modules/secrets.rs`）
 

@@ -1094,6 +1094,7 @@ mod tests {
             auth_method: crate::modules::remote::models::SshAuthMethod::Agent,
             identity_file: None,
             proxy_url: None,
+            proxy_mode: crate::modules::network_proxy::SshProxyMode::Direct,
             reconnect_enabled: true,
             reconnect_max_attempts: 2,
             root_path: Some("~".to_string()),

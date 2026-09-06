@@ -5,6 +5,9 @@
 
 use super::models::SshProfile;
 
+/// SSH 登录及服务器专用代理凭据共享的秘密服务标识。
+pub(super) const SECRET_SERVICE: &str = "terax-ssh";
+
 /// 拒绝可能越过共享存储键空间的 profile ID。
 fn validate_id(profile_id: &str) -> Result<(), String> {
     if profile_id.is_empty()
@@ -61,6 +64,7 @@ mod tests {
             auth_method: SshAuthMethod::Agent,
             identity_file: None,
             proxy_url: None,
+            proxy_mode: crate::modules::network_proxy::SshProxyMode::Direct,
             reconnect_enabled: true,
             reconnect_max_attempts: 2,
             root_path: None,

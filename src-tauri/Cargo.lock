@@ -6161,6 +6161,7 @@ dependencies = [
  "nucleo-matcher",
  "objc2",
  "objc2-foundation",
+ "percent-encoding",
  "portable-pty",
  "proptest",
  "reqwest 0.12.28",

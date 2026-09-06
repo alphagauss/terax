@@ -3,9 +3,10 @@
  * 目录结果只用于辅助选择，不会自动加入用户配置或成为模型可用性的事实来源。
  */
 
+import { useNetworkStore } from "@/modules/network/settings";
 import { createHttpFetch } from "@/lib/http";
-import { normalizeModelId } from "../config";
-import type { ResolvedProviderConnection } from "../providerRegistry";
+import { normalizeModelId } from "@/modules/ai/config";
+import type { ResolvedProviderConnection } from "@/modules/ai/providerRegistry";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const CACHE_CAPACITY = 16;
@@ -40,6 +41,7 @@ export type CatalogRequest = {
   url: string;
   headers: Record<string, string>;
   allowPrivateNetwork: boolean;
+  providerId: string;
 };
 
 type CatalogPage = {
@@ -55,6 +57,7 @@ type CacheEntry = {
   fetchedAt: number;
 };
 
+/** 网络配置与凭据修订变化后使用新缓存身份，避免复用旧出口的在途请求。 */
 function catalogCacheKey(
   connection: ResolvedProviderConnection,
   credentialRevision: number,
@@ -63,6 +66,7 @@ function catalogCacheKey(
     connection.instanceId,
     connection.baseURL,
     credentialRevision,
+    useNetworkStore.getState().revision,
   ]);
 }
 
@@ -132,6 +136,7 @@ export function buildModelCatalogRequest(
     url,
     headers,
     allowPrivateNetwork: connection.allowPrivateNetwork,
+    providerId: connection.instanceId,
   };
 }
 
@@ -200,7 +205,7 @@ async function invokeCatalogRequest(
 ): Promise<HttpResponse> {
   const response = await createHttpFetch({
     allowPrivateNetwork: request.allowPrivateNetwork,
-    proxyMode: request.allowPrivateNetwork ? "direct" : "system",
+    networkTarget: { kind: "provider", id: request.providerId },
   })(request.url, { headers: request.headers });
   return {
     status: response.status,

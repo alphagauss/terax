@@ -42,6 +42,7 @@ const profile = {
   authMethod: "agent" as const,
   identityFile: null,
   proxyUrl: null,
+  proxyMode: "direct",
   reconnectEnabled: true,
   reconnectMaxAttempts: 2,
   rootPath: "~",

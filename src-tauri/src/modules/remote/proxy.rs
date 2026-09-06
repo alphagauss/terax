@@ -1,4 +1,7 @@
-//! SSH transport proxy support.
+//! SSH 直连与显式代理传输。
+//!
+//! 复用共享代理模型，HTTP CONNECT、HTTPS CONNECT 和 SOCKS5 均不读取环境代理。
+//! 服务器地址由连接配置决定，隧道认证不会作为目标服务器请求头转发。
 //!
 //! Adapted from CrabPort `crabport-proxy/src/lib.rs` (Apache-2.0), with the
 //! persistence model removed and Terax's profile-level proxy URL model added.
@@ -6,12 +9,13 @@
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
-use super::models::{ProxyConfig, ProxyKind};
+use crate::modules::network_proxy::{ProxyConfig, ProxyKind};
 
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + ?Sized> Stream for T {}
 pub type BoxStream = Box<dyn Stream>;
 
+/// 按已解析的服务器出口建立字节流，代理失败不会尝试直连。
 pub async fn connect(
     proxy: Option<&ProxyConfig>,
     target_host: &str,
@@ -19,7 +23,7 @@ pub async fn connect(
 ) -> std::io::Result<BoxStream> {
     match proxy {
         Some(proxy) => connect_via_proxy(proxy, target_host, target_port).await,
-        None => TcpStream::connect(format!("{target_host}:{target_port}"))
+        None => TcpStream::connect((target_host, target_port))
             .await
             .map(|stream| Box::new(stream) as BoxStream),
     }
@@ -38,6 +42,7 @@ async fn connect_via_proxy(
     }
 }
 
+/// 使用代理端 DNS 解析目标，保留显式用户名及空密码认证语义。
 async fn connect_socks5(
     proxy: &ProxyConfig,
     target_host: &str,
@@ -45,26 +50,25 @@ async fn connect_socks5(
 ) -> std::io::Result<BoxStream> {
     use tokio_socks::tcp::Socks5Stream;
 
-    let proxy_addr = format!("{}:{}", proxy.host, proxy.port);
-    let target = format!("{target_host}:{target_port}");
-    let stream = match (proxy.username.as_deref(), proxy.password.as_deref()) {
-        (Some(user), Some(password)) if !user.is_empty() && !password.is_empty() => {
-            Socks5Stream::connect_with_password(
-                proxy_addr.as_str(),
-                target.as_str(),
-                user,
-                password,
-            )
-            .await
-            .map_err(io_err)?
-        }
-        _ => Socks5Stream::connect(proxy_addr.as_str(), target.as_str())
+    let proxy_addr = (proxy.host.as_str(), proxy.port);
+    let target = (target_host, target_port);
+    let stream = match proxy.username.as_deref() {
+        Some(user) => Socks5Stream::connect_with_password(
+            proxy_addr,
+            target,
+            user,
+            proxy.password.as_deref().unwrap_or(""),
+        )
+        .await
+        .map_err(io_err)?,
+        _ => Socks5Stream::connect(proxy_addr, target)
             .await
             .map_err(io_err)?,
     };
     Ok(Box::new(stream))
 }
 
+/// 建立封闭 CONNECT 隧道，支持 IPv6 authority 并限制响应头大小。
 async fn connect_http_connect(
     proxy: &ProxyConfig,
     target_host: &str,
@@ -72,18 +76,22 @@ async fn connect_http_connect(
 ) -> std::io::Result<BoxStream> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let target = format!("{target_host}:{target_port}");
-    let tcp = TcpStream::connect(format!("{}:{}", proxy.host, proxy.port)).await?;
+    let target = if target_host.contains(':') {
+        format!("[{target_host}]:{target_port}")
+    } else {
+        format!("{target_host}:{target_port}")
+    };
+    let tcp = TcpStream::connect((proxy.host.as_str(), proxy.port)).await?;
     let mut stream: BoxStream = if proxy.kind == ProxyKind::Https {
         connect_tls_over(tcp, &proxy.host).await?
     } else {
         Box::new(tcp)
     };
 
-    let auth = match (proxy.username.as_deref(), proxy.password.as_deref()) {
-        (Some(user), Some(password)) if !user.is_empty() => format!(
+    let auth = match proxy.username.as_deref() {
+        Some(user) => format!(
             "Proxy-Authorization: Basic {}\r\n",
-            base64_encode(format!("{user}:{password}").as_bytes())
+            base64_encode(format!("{user}:{}", proxy.password.as_deref().unwrap_or("")).as_bytes())
         ),
         _ => String::new(),
     };
@@ -169,4 +177,40 @@ fn base64_encode(input: &[u8]) -> String {
         });
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn explicit_proxy_preserves_auth_ipv6_target_and_ssh_banner() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = ProxyConfig::parse(
+            &format!("http://alice@{}", listener.local_addr().unwrap()),
+            None,
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                request.push(stream.read_u8().await.unwrap());
+                assert!(request.len() < 4096);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert!(request.starts_with("CONNECT [::1]:22 HTTP/1.1\r\n"));
+            assert!(request.contains("Proxy-Authorization: Basic YWxpY2U6\r\n"));
+            stream
+                .write_all(b"HTTP/1.1 200 Connection established\r\n\r\nSSH-2.0-test\r\n")
+                .await
+                .unwrap();
+        });
+        let mut stream = connect(Some(&proxy), "::1", 22).await.unwrap();
+        let mut banner = [0; 14];
+        stream.read_exact(&mut banner).await.unwrap();
+        assert_eq!(&banner, b"SSH-2.0-test\r\n");
+        server.await.unwrap();
+    }
 }

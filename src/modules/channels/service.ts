@@ -75,7 +75,7 @@ export async function startChannelsService(
       const credentials = await loadWeixinCredentials(connection.id);
       if (credentials.userId !== connection.accountId)
         throw new ChannelError("account-mismatch");
-      return new WeixinAdapter(credentials);
+      return new WeixinAdapter(credentials, connection.id);
     },
     changed: (value) => {
       snapshots = value;
@@ -138,7 +138,7 @@ export async function startChannelsService(
     );
     let flow: Awaited<ReturnType<typeof beginWeixinLogin>>;
     try {
-      flow = await beginWeixinLogin(login.abort.signal);
+      flow = await beginWeixinLogin(id, login.abort.signal);
     } catch (error) {
       logins.delete(id);
       throw error;

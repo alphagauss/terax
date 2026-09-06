@@ -3,8 +3,8 @@
  * 隧道不在 profile 编辑表单中修改，但转换时必须保留已有的持久化隧道。
  */
 
-import type { SshAuthMethod, SshProfile } from "./types";
-import { DEFAULT_SSH_GROUP_ID } from "./groups";
+import type { SshAuthMethod, SshProfile } from "@/modules/remote/types";
+import { DEFAULT_SSH_GROUP_ID } from "@/modules/remote/groups";
 
 export type SshProfileForm = {
   id: string;
@@ -19,6 +19,7 @@ export type SshProfileForm = {
   secretDirty: boolean;
   rememberSecret: boolean;
   proxyUrl: string;
+  proxyMode: SshProfile["proxyMode"];
   proxySecret: string;
   proxySecretDirty: boolean;
   rememberProxySecret: boolean;
@@ -37,6 +38,7 @@ export type ProfileValidationIssue =
 
 export type LaunchSecretIssue = "secret" | "proxy";
 
+/** 创建默认直连的 SSH 表单。 */
 export function emptySshProfileForm(id: string): SshProfileForm {
   return {
     id,
@@ -51,6 +53,7 @@ export function emptySshProfileForm(id: string): SshProfileForm {
     secretDirty: false,
     rememberSecret: true,
     proxyUrl: "",
+    proxyMode: "direct",
     proxySecret: "",
     proxySecretDirty: false,
     rememberProxySecret: true,
@@ -60,6 +63,7 @@ export function emptySshProfileForm(id: string): SshProfileForm {
   };
 }
 
+/** 读取当前 SSH 配置，不推断旧代理格式。 */
 export function sshProfileFormFrom(profile: SshProfile): SshProfileForm {
   return {
     id: profile.id,
@@ -74,6 +78,7 @@ export function sshProfileFormFrom(profile: SshProfile): SshProfileForm {
     secretDirty: false,
     rememberSecret: true,
     proxyUrl: profile.proxyUrl ?? "",
+    proxyMode: profile.proxyMode,
     proxySecret: "",
     proxySecretDirty: false,
     rememberProxySecret: true,
@@ -83,6 +88,7 @@ export function sshProfileFormFrom(profile: SshProfile): SshProfileForm {
   };
 }
 
+/** 保存显式出口，只有自定义模式保留服务器代理地址。 */
 export function sshProfileFromForm(form: SshProfileForm): SshProfile {
   const host = form.host.trim();
   const username = form.username.trim();
@@ -95,7 +101,8 @@ export function sshProfileFromForm(form: SshProfileForm): SshProfile {
     username,
     authMethod: form.authMethod,
     identityFile: form.identityFile.trim() || null,
-    proxyUrl: form.proxyUrl.trim() || null,
+    proxyMode: form.proxyMode,
+    proxyUrl: form.proxyMode === "custom" ? form.proxyUrl.trim() || null : null,
     reconnectEnabled: form.reconnectEnabled,
     reconnectMaxAttempts: Number(form.reconnectMaxAttempts),
     rootPath: form.rootPath.trim() || "~",
@@ -103,6 +110,7 @@ export function sshProfileFromForm(form: SshProfileForm): SshProfile {
   };
 }
 
+/** 校验当前连接及其生效的自定义代理字段。 */
 export function profileValidationIssue(
   form: SshProfileForm,
 ): ProfileValidationIssue | null {
@@ -115,7 +123,8 @@ export function profileValidationIssue(
   if (form.authMethod === "private_key" && !form.identityFile.trim()) {
     return "identityFile";
   }
-  if (proxyUrlContainsPassword(form.proxyUrl)) return "proxyPassword";
+  if (form.proxyMode === "custom" && proxyUrlContainsPassword(form.proxyUrl))
+    return "proxyPassword";
   const reconnectAttempts = Number(form.reconnectMaxAttempts);
   if (
     !Number.isInteger(reconnectAttempts) ||
@@ -160,14 +169,24 @@ export async function applyCredentialMutation(
   }
 }
 
+/** 只检查当前出口实际使用的临时凭据。 */
 export function launchSecretIssue(
   form: Pick<
     SshProfileForm,
-    "secret" | "rememberSecret" | "proxySecret" | "rememberProxySecret"
+    | "secret"
+    | "rememberSecret"
+    | "proxySecret"
+    | "rememberProxySecret"
+    | "proxyMode"
   >,
 ): LaunchSecretIssue | null {
   if (form.secret && !form.rememberSecret) return "secret";
-  if (form.proxySecret && !form.rememberProxySecret) return "proxy";
+  if (
+    form.proxyMode === "custom" &&
+    form.proxySecret &&
+    !form.rememberProxySecret
+  )
+    return "proxy";
   return null;
 }
 

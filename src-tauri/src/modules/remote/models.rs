@@ -4,6 +4,7 @@
 //! Workspace 进程中有效的运行时隧道信息。持久化 ID 与运行时 ID 分离，
 //! 避免窗口重启后将旧的网络资源标识误作有效状态。
 
+use crate::modules::network_proxy::{ProxyConfig, SshProxyMode};
 use serde::{Deserialize, Serialize};
 
 fn default_port() -> u16 {
@@ -45,6 +46,8 @@ pub struct SshProfile {
     #[serde(default)]
     pub proxy_url: Option<String>,
     #[serde(default)]
+    pub proxy_mode: SshProxyMode,
+    #[serde(default)]
     pub reconnect_enabled: bool,
     #[serde(default = "default_reconnect_attempts")]
     pub reconnect_max_attempts: u32,
@@ -78,6 +81,12 @@ impl SshProfile {
                 .is_empty()
         {
             return Err("A private-key path is required".into());
+        }
+        if self.proxy_mode == SshProxyMode::Custom {
+            crate::modules::network_proxy::ProxyConfig::parse(
+                self.proxy_url.as_deref().unwrap_or(""),
+                None,
+            )?;
         }
         if !(1..=20).contains(&self.reconnect_max_attempts) {
             return Err("SSH reconnect attempts must be between 1 and 20".into());
@@ -149,7 +158,30 @@ impl SshTunnel {
 pub struct ConnectRequest {
     pub profile: SshProfile,
     pub secret: Option<String>,
-    pub proxy_secret: Option<String>,
+    /// 仅当前生命周期使用的代理密码，不代替每次连接时读取的持久化凭据。
+    pub proxy_secret_override: Option<String>,
+}
+
+impl ConnectRequest {
+    /// 重连仅刷新代理字段；一次性密码只可复用到同一代理身份，不能携带到新出口。
+    pub fn refresh_proxy(&mut self, latest: &SshProfile) -> Result<(), String> {
+        if self.profile.id != latest.id {
+            return Err("SSH reconnect profile identity changed".into());
+        }
+        let keep_override = self.proxy_secret_override.is_some()
+            && self.profile.proxy_mode == SshProxyMode::Custom
+            && latest.proxy_mode == SshProxyMode::Custom
+            && ProxyConfig::parse(self.profile.proxy_url.as_deref().unwrap_or(""), None)?
+                .credential_account()
+                == ProxyConfig::parse(latest.proxy_url.as_deref().unwrap_or(""), None)?
+                    .credential_account();
+        if !keep_override {
+            self.proxy_secret_override = None;
+        }
+        self.profile.proxy_mode = latest.proxy_mode;
+        self.profile.proxy_url = latest.proxy_url.clone();
+        Ok(())
+    }
 }
 
 /// 当前应用进程经 SSH transport 传输的累计字节数。
@@ -397,111 +429,48 @@ pub enum TunnelStatus {
     Closed,
 }
 
-#[derive(Clone, Debug)]
-pub struct ProxyConfig {
-    pub kind: ProxyKind,
-    pub host: String,
-    pub port: u16,
-    pub username: Option<String>,
-    pub password: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProxyKind {
-    Socks5,
-    Http,
-    Https,
-}
-
-impl ProxyConfig {
-    pub fn parse(value: &str, proxy_secret: Option<&str>) -> Result<Option<Self>, String> {
-        let value = value.trim();
-        if value.is_empty() {
-            return Ok(None);
-        }
-        let (scheme, rest) = value
-            .split_once("://")
-            .ok_or_else(|| "proxy URL must include a scheme".to_string())?;
-        let kind = match scheme.to_ascii_lowercase().as_str() {
-            "socks" | "socks5" | "socks5h" => ProxyKind::Socks5,
-            "http" => ProxyKind::Http,
-            "https" => ProxyKind::Https,
-            _ => return Err(format!("unsupported proxy scheme: {scheme}")),
-        };
-        let (auth, address) = rest
-            .rsplit_once('@')
-            .map_or((None, rest), |(a, v)| (Some(a), v));
-        let (host, port) = split_host_port(address)?;
-        let username = auth
-            .map(|auth| auth.split_once(':').map_or(auth, |(user, _)| user))
-            .filter(|user| !user.is_empty())
-            .map(str::to_string);
-        if auth
-            .and_then(|auth| auth.split_once(':'))
-            .is_some_and(|(_, password)| !password.is_empty())
-        {
-            return Err(
-                "proxy URL must not contain a password; use the secure proxy-password field".into(),
-            );
-        }
-        let password = proxy_secret
-            .filter(|secret| !secret.is_empty())
-            .map(str::to_string);
-        if password.is_some() && username.is_none() {
-            return Err("proxy username is required in the proxy URL".into());
-        }
-        Ok(Some(Self {
-            kind,
-            host,
-            port,
-            username,
-            password,
-        }))
-    }
-}
-
-fn split_host_port(value: &str) -> Result<(String, u16), String> {
-    let value = value.trim_end_matches('/');
-    let (host, port) = if let Some(rest) = value.strip_prefix('[') {
-        let (host, tail) = rest
-            .split_once(']')
-            .ok_or_else(|| "invalid bracketed proxy host".to_string())?;
-        let port = tail
-            .strip_prefix(':')
-            .ok_or_else(|| "proxy port is required".to_string())?;
-        (host, port)
-    } else {
-        value
-            .rsplit_once(':')
-            .ok_or_else(|| "proxy port is required".to_string())?
-    };
-    let port = port
-        .parse::<u16>()
-        .map_err(|_| "invalid proxy port".to_string())?;
-    if host.is_empty() || port == 0 {
-        return Err("invalid proxy host or port".into());
-    }
-    Ok((host.to_string(), port))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn parses_authenticated_proxy() {
-        let parsed = ProxyConfig::parse("socks5://alice@127.0.0.1:1080", Some("secret"))
-            .unwrap()
-            .unwrap();
-        assert_eq!(parsed.kind, ProxyKind::Socks5);
-        assert_eq!(parsed.username.as_deref(), Some("alice"));
-        assert_eq!(parsed.port, 1080);
-        assert_eq!(parsed.password.as_deref(), Some("secret"));
-    }
-
-    #[test]
-    fn rejects_inline_proxy_password() {
-        assert!(ProxyConfig::parse("http://alice:secret@proxy:8080", None).is_err());
+    fn reconnect_refreshes_only_network_settings_and_scopes_temporary_credentials() {
+        let profile: SshProfile = serde_json::from_value(serde_json::json!({
+            "id": "server", "name": "Server", "host": "original.example", "port": 22,
+            "username": "original-user", "authMethod": "password", "rootPath": "/workspace",
+            "proxyMode": "custom", "proxyUrl": "http://alice@proxy.example:8080"
+        }))
+        .unwrap();
+        let mut request = ConnectRequest {
+            profile: profile.clone(),
+            secret: Some("login-secret".into()),
+            proxy_secret_override: Some("temporary-proxy-secret".into()),
+        };
+        let mut latest = profile;
+        latest.host = "changed.example".into();
+        latest.username = "changed-user".into();
+        latest.root_path = Some("/other".into());
+        latest.proxy_url = Some("http://alice@proxy.example:8080/".into());
+        request.refresh_proxy(&latest).unwrap();
+        assert_eq!(
+            request.proxy_secret_override.as_deref(),
+            Some("temporary-proxy-secret")
+        );
+        latest.proxy_url = Some("http://alice@new-proxy.example:8080".into());
+        request.refresh_proxy(&latest).unwrap();
+        assert!(request.proxy_secret_override.is_none());
+        assert_eq!(request.profile.proxy_url, latest.proxy_url);
+        assert_eq!(request.profile.host, "original.example");
+        assert_eq!(request.profile.username, "original-user");
+        assert_eq!(request.profile.root_path.as_deref(), Some("/workspace"));
+        assert_eq!(request.secret.as_deref(), Some("login-secret"));
+        latest.proxy_mode = SshProxyMode::Shared;
+        latest.proxy_url = None;
+        request.refresh_proxy(&latest).unwrap();
+        assert_eq!(request.profile.proxy_mode, SshProxyMode::Shared);
+        latest.proxy_mode = SshProxyMode::Direct;
+        request.refresh_proxy(&latest).unwrap();
+        assert_eq!(request.profile.proxy_mode, SshProxyMode::Direct);
     }
 
     #[test]
@@ -568,6 +537,7 @@ mod tests {
             auth_method: SshAuthMethod::Password,
             identity_file: None,
             proxy_url: None,
+            proxy_mode: crate::modules::network_proxy::SshProxyMode::Direct,
             reconnect_enabled: false,
             reconnect_max_attempts: 2,
             root_path: None,

@@ -69,18 +69,22 @@ async function request(
   endpoint: string,
   signal: AbortSignal,
   options: {
+    connectionId: string;
     body?: Payload;
     token?: string;
     timeoutMs?: number;
     fetch?: typeof fetch;
-  } = {},
+  },
 ): Promise<Payload> {
   const random = crypto.getRandomValues(new Uint32Array(1))[0];
   let response: Response;
   try {
     response = await (
       options.fetch ??
-      createHttpFetch({ timeoutMs: options.timeoutMs ?? 15_000 })
+      createHttpFetch({
+        networkTarget: { kind: "channel", id: options.connectionId },
+        timeoutMs: options.timeoutMs ?? 15_000,
+      })
     )(`${weixinBaseUrl(base)}/ilink/bot/${endpoint}`, {
       method: options.body ? "POST" : "GET",
       headers: {
@@ -177,10 +181,12 @@ export type WeixinLogin = {
 
 /** 创建独立扫码流程；重定向和验证码属于当前流程，不改变已经运行的连接。 */
 export async function beginWeixinLogin(
+  connectionId: string,
   signal: AbortSignal,
   fetchImpl?: typeof fetch,
 ): Promise<WeixinLogin> {
   const qr = await request(BASE_URL, "get_bot_qrcode?bot_type=3", signal, {
+    connectionId,
     body: { local_token_list: [] },
     fetch: fetchImpl,
   });
@@ -199,7 +205,7 @@ export async function beginWeixinLogin(
         baseUrl,
         `get_qrcode_status?${query}`,
         signal,
-        { timeoutMs: 45_000, fetch: fetchImpl },
+        { connectionId, timeoutMs: 45_000, fetch: fetchImpl },
       );
       if (data.status === "confirmed") {
         const credentials = credentialsSchema.parse({
@@ -283,6 +289,7 @@ export class WeixinAdapter implements ChannelAdapter {
 
   constructor(
     private readonly credentials: WeixinCredentials,
+    private readonly connectionId: string,
     private readonly fetchImpl?: typeof fetch,
   ) {
     this.cursorScope = credentials.botId;
@@ -397,6 +404,7 @@ export class WeixinAdapter implements ChannelAdapter {
     timeoutMs?: number,
   ): Promise<Payload> {
     return request(this.credentials.baseUrl, endpoint, signal, {
+      connectionId: this.connectionId,
       body: { ...body, base_info: BASE_INFO },
       token: this.credentials.token,
       timeoutMs,

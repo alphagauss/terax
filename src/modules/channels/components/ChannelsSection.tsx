@@ -19,6 +19,7 @@ import {
   subscribeChannelsView,
   useChannelsView,
 } from "@/modules/channels/client";
+import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
 import type { ChannelSnapshot } from "@/modules/channels/types";
 import {
@@ -167,6 +168,7 @@ export function ChannelsSection() {
 }
 
 /** 单连接的启停、登录和会话导航，删除仅移除连接配置与凭据。 */
+/** 展示单个连接的运行状态、平台操作与独立网络路由。 */
 function ConnectionCard({
   snapshot,
   disabled,
@@ -229,6 +231,10 @@ function ConnectionCard({
           </SelectContent>
         </Select>
       </div>
+      <NetworkRouteSelect
+        target={`channel:${connection.id}`}
+        disabled={disabled}
+      />
       {snapshot.issue ? (
         <p className="text-xs text-destructive">
           {t(`errors.${snapshot.issue}`)}

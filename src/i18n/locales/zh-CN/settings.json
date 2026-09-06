@@ -630,5 +630,25 @@
       "updateTo": "更新到 v{{version}}",
       "checkForUpdates": "检查更新"
     }
+  },
+  "network": {
+    "title": "网络与代理",
+    "description": "统一配置共享代理，再为各个连接单独选择是否使用。内置请求默认直连。",
+    "route": "网络连接",
+    "direct": "直连",
+    "shared": "使用共享代理",
+    "custom": "自定义代理",
+    "missing": "请先在“设置 > 常规 > 网络与代理”中配置共享代理，未配置时请求会失败。",
+    "url": "代理地址",
+    "urlHint": "支持 HTTP、HTTPS 和 SOCKS5。需要认证时在地址中填写用户名，例如 http://user@127.0.0.1:7890，密码单独填写。",
+    "password": "代理密码",
+    "passwordHint": "留空保留已保存的密码",
+    "save": "保存",
+    "clearPassword": "清除已保存的密码",
+    "saved": "已保存，后续请求使用新设置。",
+    "saveError": "无法加载或保存网络设置，请检查代理地址和凭据后重试。",
+    "images": "Markdown 网络图片",
+    "scope": "作用于 Terax 内置请求。终端命令、外部 Agent、Git 进程、网页预览和 Python 数据源独立管理网络。代理失败时不会回退直连。",
+    "sshHint": "仅控制到此 SSH 服务器的连接，下次连接生效，不控制服务器中运行的程序。"
   }
 }

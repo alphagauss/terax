@@ -321,6 +321,23 @@ pub fn shared_store_read(store: String) -> Result<Map<String, Value>, String> {
     read_map(&store_path(&store_dir(&store)?, &store)?)
 }
 
+/// 在所有单键与批量写入入口校验网络配置，不能把代理密码写入普通存储。
+fn validate_record_set(store: &str, key: &str, value: &Value) -> Result<(), String> {
+    if store == "settings" && key.starts_with("network.") {
+        crate::modules::network_proxy::validate_setting(&key["network.".len()..], value)?;
+    } else if store == "ssh-profiles" && key.starts_with("profile:") {
+        let profile: crate::modules::remote::models::SshProfile =
+            serde_json::from_value(value.clone()).map_err(|_| "invalid SSH profile")?;
+        if let Some(url) = &profile.proxy_url {
+            if !url.is_empty() {
+                crate::modules::network_proxy::ProxyConfig::parse(url, None)?;
+            }
+        }
+        profile.validate()?;
+    }
+    Ok(())
+}
+
 /// 加锁更新一个配置键，保留其他进程已经提交的数据。
 #[tauri::command]
 pub fn shared_store_set(
@@ -332,6 +349,7 @@ pub fn shared_store_set(
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
+    validate_record_set(&store, &key, &value)?;
     let root = store_dir(&store)?;
     mutate(&root, &store, |map| {
         map.insert(key, value);
@@ -364,6 +382,9 @@ pub fn shared_store_mutate(
         return Ok(());
     }
     for mutation in &mutations {
+        if let SharedStoreMutation::Set { key, value } = mutation {
+            validate_record_set(&store, key, value)?;
+        }
         if let SharedStoreMutation::Delete { key } = mutation {
             validate_record_delete(&store, key)?;
         }
@@ -385,6 +406,29 @@ mod tests {
     use std::process::Command;
     use std::sync::Arc;
     use std::time::Instant;
+
+    #[test]
+    fn general_settings_keep_the_network_validation_boundary() {
+        assert!(validate_record_set("settings", "theme", &Value::from("dark")).is_ok());
+        assert!(validate_record_set(
+            "settings",
+            "network.proxyUrl",
+            &Value::from("http://127.0.0.1:8080")
+        )
+        .is_ok());
+        assert!(validate_record_set(
+            "settings",
+            "network.proxyUrl",
+            &Value::from("http://user:secret@127.0.0.1:8080")
+        )
+        .is_err());
+        assert!(validate_record_set(
+            "settings",
+            "network.provider:builtin:openai",
+            &Value::from("system")
+        )
+        .is_err());
+    }
 
     fn wait_for(path: &Path) {
         let deadline = Instant::now() + Duration::from_secs(5);

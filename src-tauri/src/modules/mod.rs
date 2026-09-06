@@ -13,6 +13,7 @@ pub mod history;
 pub mod lsp;
 pub mod markdown_images;
 pub mod net;
+pub mod network_proxy;
 pub mod open_with;
 pub mod proc;
 pub mod pty;
