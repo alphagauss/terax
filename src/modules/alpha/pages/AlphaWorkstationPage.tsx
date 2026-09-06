@@ -9,8 +9,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import { AlphaLoading } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { ChartSyncProvider } from "@/modules/alpha/chart/sync/ChartSyncContext";
 import { AlphaQueryProvider } from "@/modules/alpha/query";
@@ -151,7 +151,7 @@ function AlphaWorkstationPageContent({ visible }: Props) {
             spellCheck={false}
             aria-invalid={symbolError}
             aria-describedby={symbolError ? symbolErrorId : undefined}
-            className="h-7 w-40 font-mono text-xs uppercase"
+            className="h-7 w-40 font-mono uppercase"
             onChange={(event) => setSymbolDraft(event.target.value)}
             onBlur={commitSymbol}
             onKeyDown={(event) => {
@@ -167,12 +167,7 @@ function AlphaWorkstationPageContent({ visible }: Props) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 text-[11px]"
-            >
+            <Button size="sm" type="button" variant="outline">
               <HugeiconsIcon icon={GridIcon} size={12} strokeWidth={1.8} />
               {t("workstation.templates.action")}
             </Button>
@@ -199,10 +194,9 @@ function AlphaWorkstationPageContent({ visible }: Props) {
         </DropdownMenu>
 
         <Button
+          size="sm"
           type="button"
           variant={state.chartSync.rangeEnabled ? "secondary" : "outline"}
-          size="sm"
-          className="h-7 gap-1.5 text-[11px]"
           title={t("workstation.sync.range")}
           aria-label={t("workstation.sync.range")}
           aria-pressed={state.chartSync.rangeEnabled}
@@ -226,10 +220,9 @@ function AlphaWorkstationPageContent({ visible }: Props) {
         </Button>
 
         <Button
+          size="sm"
           type="button"
           variant={state.chartSync.crosshairEnabled ? "secondary" : "outline"}
-          size="sm"
-          className="h-7 gap-1.5 text-[11px]"
           title={t("workstation.sync.crosshair")}
           aria-label={t("workstation.sync.crosshair")}
           aria-pressed={state.chartSync.crosshairEnabled}
@@ -249,10 +242,9 @@ function AlphaWorkstationPageContent({ visible }: Props) {
         </Button>
 
         <Button
+          size="sm"
           type="button"
           variant={state.locked ? "secondary" : "outline"}
-          size="sm"
-          className="h-7 gap-1.5 text-[11px]"
           aria-pressed={state.locked}
           onClick={() =>
             updateAlphaWorkstationState((current) => ({

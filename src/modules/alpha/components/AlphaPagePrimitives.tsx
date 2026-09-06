@@ -4,6 +4,7 @@
  */
 
 import { Spinner } from "@/components/ui/spinner";
+import { SectionHeading } from "@/components/layout/PageHeader";
 import type { ReactNode } from "react";
 
 /** 渲染一个 Alpha 摘要指标。 */
@@ -15,8 +16,8 @@ export function AlphaMetric({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card px-4 py-3">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+    <div className="rounded-lg border border-border/60 bg-card p-3">
+      <div className="text-[11px] leading-4 text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-semibold" title={value}>
         {value}
       </div>
@@ -34,7 +35,7 @@ export function AlphaSectionTitle({
 }) {
   return (
     <div>
-      <h2 className="text-sm font-medium">{title}</h2>
+      <SectionHeading>{title}</SectionHeading>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
     </div>
   );

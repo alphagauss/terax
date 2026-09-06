@@ -3,7 +3,7 @@
  * 标题栏承载拖动手柄、标的跟随或固定切换和删除操作，不接触面板业务内容。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import type {
   AlphaPanelInstance,
   AlphaSymbolBinding,
@@ -61,8 +61,8 @@ export function AlphaPanelChrome({
         <Button
           type="button"
           variant={followed ? "ghost" : "secondary"}
-          size="sm"
-          className="h-6 shrink-0 gap-1 px-1.5 text-[10px]"
+          size="xs"
+          className="shrink-0"
           aria-pressed={!followed}
           title={
             followed
@@ -91,8 +91,8 @@ export function AlphaPanelChrome({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
-        className="size-6 shrink-0 text-muted-foreground hover:text-destructive"
+        size="icon-xs"
+        className="shrink-0 text-muted-foreground hover:text-destructive"
         title={t("workstation.panel.remove")}
         aria-label={t("workstation.panel.remove")}
         onClick={onRemove}

@@ -3,7 +3,7 @@
  * 页面管理服务状态、数据目录和解释器设置，服务控制仍通过 Rust 的幂等命令完成。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Switch } from "@/components/ui/switch";
 import { getAlphaSettings, updateAlphaSettings } from "@/modules/alpha/api";
 import {
@@ -30,8 +30,9 @@ import {
   PythonInterpreterDialog,
 } from "@/modules/python";
 import { LOCAL_WORKSPACE } from "@/modules/workspace";
-import { SectionHeader } from "@/settings/components/SectionHeader";
-import { SettingRow } from "@/settings/components/SettingRow";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SettingGroup } from "@/components/settings/SettingGroup";
+import { SettingRow } from "@/components/settings/SettingRow";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
@@ -239,18 +240,16 @@ function AlphaSettingsPageContent({ visible }: Props) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-8 py-6">
-        <SectionHeader
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-section p-4 sm:p-page">
+        <PageHeader
           title={t("header.title")}
           description={t("header.description")}
         />
 
-        <div className="flex flex-col gap-2">
-          <Label>{t("python.label")}</Label>
+        <SettingGroup title={t("python.label")}>
           <SettingRow
             title={t("python.title")}
             description={t("python.description")}
-            className="items-center"
           >
             <div className="flex max-w-90 items-center gap-2">
               <span
@@ -260,7 +259,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
                 {status?.pythonPath ?? t("python.unconfigured")}
               </span>
               <Button
-                size="sm"
                 variant="outline"
                 disabled={action !== null}
                 onClick={() => setPythonPickerOpen(true)}
@@ -284,7 +282,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
               }
             >
               <Button
-                size="sm"
                 variant="outline"
                 disabled={action !== null}
                 onClick={() => void checkPython()}
@@ -295,10 +292,9 @@ function AlphaSettingsPageContent({ visible }: Props) {
               </Button>
             </SettingRow>
           ) : null}
-        </div>
+        </SettingGroup>
 
-        <div className="flex flex-col gap-2">
-          <Label>{t("availability.label")}</Label>
+        <SettingGroup title={t("availability.label")}>
           <SettingRow
             title={t("availability.title")}
             description={t("availability.description")}
@@ -311,10 +307,9 @@ function AlphaSettingsPageContent({ visible }: Props) {
               }
             />
           </SettingRow>
-        </div>
+        </SettingGroup>
 
-        <div className="flex flex-col gap-2">
-          <Label>{t("storage.label")}</Label>
+        <SettingGroup title={t("storage.label")}>
           <SettingRow
             title={t("storage.title")}
             description={
@@ -328,7 +323,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
                       ? t("storage.loading")
                       : t("storage.description")
             }
-            className="items-center"
           >
             <div className="flex max-w-90 items-center gap-2">
               <span
@@ -344,7 +338,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
                     : t("storage.unavailable")}
               </span>
               <Button
-                size="sm"
                 variant="outline"
                 disabled={
                   !status?.running ||
@@ -363,7 +356,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
                 {settings.error ? t("common.retry") : t("storage.select")}
               </Button>
               <Button
-                size="sm"
                 disabled={
                   !status?.running ||
                   dataDir === null ||
@@ -377,10 +369,9 @@ function AlphaSettingsPageContent({ visible }: Props) {
               </Button>
             </div>
           </SettingRow>
-        </div>
+        </SettingGroup>
 
-        <div className="flex flex-col gap-2">
-          <Label>{t("service.label")}</Label>
+        <SettingGroup title={t("service.label")}>
           <SettingRow title={t("service.title")} description={stateText}>
             <span
               className={
@@ -435,11 +426,10 @@ function AlphaSettingsPageContent({ visible }: Props) {
               onCheckedChange={(enabled) => void toggleAutoStart(enabled)}
             />
           </SettingRow>
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex flex-wrap justify-end gap-2 px-3 py-2">
             {status?.running ? (
               <>
                 <Button
-                  size="sm"
                   variant="outline"
                   disabled={action !== null}
                   onClick={() => void run("restart", restartAlpha)}
@@ -449,7 +439,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
                     : t("actions.restart")}
                 </Button>
                 <Button
-                  size="sm"
                   variant="destructive"
                   disabled={action !== null}
                   onClick={() => void run("stop", stopAlpha)}
@@ -461,7 +450,6 @@ function AlphaSettingsPageContent({ visible }: Props) {
               </>
             ) : (
               <Button
-                size="sm"
                 disabled={action !== null || !status?.configured}
                 onClick={() => void run("start", startAlpha)}
               >
@@ -471,7 +459,7 @@ function AlphaSettingsPageContent({ visible }: Props) {
               </Button>
             )}
           </div>
-        </div>
+        </SettingGroup>
       </div>
       <PythonInterpreterDialog
         open={pythonPickerOpen}
@@ -483,13 +471,5 @@ function AlphaSettingsPageContent({ visible }: Props) {
         onSelect={selectPython}
       />
     </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }

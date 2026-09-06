@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ChartAccessibilityLayer } from "@/modules/alpha/chart/accessibility/ChartAccessibilityLayer";
@@ -379,7 +379,7 @@ export function FinancialChartFrame({
               >
                 <SelectTrigger
                   size="sm"
-                  className="h-7 min-w-14 rounded-md px-2 text-[11px]"
+                  className="min-w-14 px-2"
                   title={t("data.chart.controls.interval")}
                   aria-label={t("data.chart.controls.interval")}
                 >
@@ -406,7 +406,7 @@ export function FinancialChartFrame({
               >
                 <SelectTrigger
                   size="sm"
-                  className="h-7 min-w-16 rounded-md px-2 text-[11px]"
+                  className="min-w-16 px-2"
                   title={t("data.chart.controls.adjust")}
                   aria-label={t("data.chart.controls.adjust")}
                 >
@@ -433,7 +433,7 @@ export function FinancialChartFrame({
               >
                 <SelectTrigger
                   size="sm"
-                  className="h-7 min-w-18 rounded-md px-2 text-[11px]"
+                  className="min-w-18 px-2"
                   title={t("data.chart.controls.chartType")}
                   aria-label={t("data.chart.controls.chartType")}
                 >
@@ -453,7 +453,6 @@ export function FinancialChartFrame({
                 type="button"
                 size="sm"
                 variant={options.showVolume ? "secondary" : "ghost"}
-                className="h-7 px-2 text-[11px]"
                 title={t("data.chart.controls.volume")}
                 aria-label={t("data.chart.controls.volume")}
                 aria-pressed={options.showVolume}
@@ -471,7 +470,7 @@ export function FinancialChartFrame({
                   type="button"
                   size="sm"
                   variant={studies.length > 0 ? "secondary" : "ghost"}
-                  className="h-7 gap-1 px-2 text-[11px]"
+                  className="gap-1"
                   title={t("data.chart.studies.open")}
                   aria-label={t("data.chart.studies.open")}
                   onClick={() => {
@@ -495,7 +494,6 @@ export function FinancialChartFrame({
                 key={type}
                 size="sm"
                 variant={options.chartType === type ? "secondary" : "ghost"}
-                className="h-7 px-2 text-[11px]"
                 aria-pressed={options.chartType === type}
                 onClick={() => onOptionsChange({ ...options, chartType: type })}
               >
@@ -505,9 +503,8 @@ export function FinancialChartFrame({
           )}
           <Button
             type="button"
-            size="icon"
+            size="icon-sm"
             variant="ghost"
-            className="size-7"
             title={t("data.chart.resetView")}
             aria-label={t("data.chart.resetView")}
             onClick={() => chartRef.current?.resetView()}
@@ -519,9 +516,8 @@ export function FinancialChartFrame({
               <DropdownMenuTrigger asChild>
                 <Button
                   type="button"
-                  size="icon"
+                  size="icon-sm"
                   variant="ghost"
-                  className="size-7"
                   title={t("data.chart.actions.menu")}
                   aria-label={t("data.chart.actions.menu")}
                 >
@@ -738,7 +734,7 @@ export function FinancialChartFrame({
           <Button
             size="sm"
             variant="outline"
-            className="absolute bottom-2 left-2 h-7 bg-background/90 text-[10px]"
+            className="absolute bottom-2 left-2 bg-background/90"
             onClick={onRequestMore}
           >
             {t("data.chart.historyRetry")}
@@ -750,7 +746,7 @@ export function FinancialChartFrame({
           <Button
             size="sm"
             variant="outline"
-            className="absolute bottom-2 right-2 h-7 bg-background/90 text-[10px]"
+            className="absolute bottom-2 right-2 bg-background/90"
             onClick={() => chartRef.current?.returnToLatest()}
           >
             {t("data.chart.realtime.returnToLatest")}
@@ -826,7 +822,7 @@ function ChartStatusOverlay({
           {label}
         </div>
         {status === "error" ? (
-          <Button size="sm" variant="outline" className="h-7" onClick={onRetry}>
+          <Button size="sm" variant="outline" onClick={onRetry}>
             {t("data.chart.retry")}
           </Button>
         ) : null}

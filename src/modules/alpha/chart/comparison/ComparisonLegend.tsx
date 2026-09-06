@@ -3,7 +3,7 @@
  * Legend 只消费统一十字线快照或最新值，不订阅图表，也不触发行情查询。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import type {
   ChartComparisonLegendValues,
   ChartComparisonState,
@@ -105,9 +105,8 @@ export function ComparisonLegend({
           {comparison.status === "error" ? (
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5"
               title={t("data.chart.comparisons.actions.retry")}
               aria-label={t("data.chart.comparisons.actions.retry")}
               onClick={() => onRetry(comparison.vtSymbol)}
@@ -117,9 +116,8 @@ export function ComparisonLegend({
           ) : null}
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="ghost"
-            className="size-5"
             title={t("data.chart.comparisons.actions.manage")}
             aria-label={t("data.chart.comparisons.actions.manage")}
             onClick={onManage}
@@ -128,9 +126,9 @@ export function ComparisonLegend({
           </Button>
           <Button
             type="button"
-            size="icon"
+            size="icon-xs"
             variant="ghost"
-            className="size-5 text-destructive"
+            className="text-destructive"
             title={t("data.chart.comparisons.actions.remove")}
             aria-label={t("data.chart.comparisons.actions.remove")}
             onClick={() => onRemove(comparison.vtSymbol)}

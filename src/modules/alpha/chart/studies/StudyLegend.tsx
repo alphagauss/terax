@@ -3,7 +3,7 @@
  * Legend 只消费统一十字线快照或最新值，不订阅图表也不执行计算。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import type { ChartStudyLegendValues } from "@/modules/alpha/chart/controller/FinancialChartController";
 import type { ChartStudyInstance } from "@/modules/alpha/chart/studies/model";
 import {
@@ -93,9 +93,8 @@ export function StudyLegend({
           <div className="flex items-center">
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5"
               title={t(
                 instance.visible
                   ? "data.chart.studies.actions.hide"
@@ -116,9 +115,8 @@ export function StudyLegend({
             </Button>
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5"
               title={t("data.chart.studies.actions.edit")}
               aria-label={t("data.chart.studies.actions.edit")}
               onClick={() => onEdit(instance.instanceId)}
@@ -131,9 +129,8 @@ export function StudyLegend({
             </Button>
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5"
               disabled={index === 0}
               title={t("data.chart.studies.actions.moveUp")}
               aria-label={t("data.chart.studies.actions.moveUp")}
@@ -143,9 +140,8 @@ export function StudyLegend({
             </Button>
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5"
               disabled={index === instances.length - 1}
               title={t("data.chart.studies.actions.moveDown")}
               aria-label={t("data.chart.studies.actions.moveDown")}
@@ -159,9 +155,9 @@ export function StudyLegend({
             </Button>
             <Button
               type="button"
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-5 text-destructive"
+              className="text-destructive"
               title={t("data.chart.studies.actions.remove")}
               aria-label={t("data.chart.studies.actions.remove")}
               onClick={() => onRemove(instance.instanceId)}

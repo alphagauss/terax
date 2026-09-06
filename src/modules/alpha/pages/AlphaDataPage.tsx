@@ -10,8 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import {
   getAlphaDataOverview,
   getAlphaSecurities,
@@ -147,9 +148,7 @@ function AlphaDataPageContent({ visible }: Props) {
             finished_at: task.finished_at,
             message: task.message,
           };
-          const exists = current.tasks.some(
-            (item) => item.task_id === task.id,
-          );
+          const exists = current.tasks.some((item) => item.task_id === task.id);
           return {
             ...current,
             tasks: exists
@@ -164,9 +163,15 @@ function AlphaDataPageContent({ visible }: Props) {
       );
       if (task.status !== "running") {
         void Promise.all([
-          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.syncOverview }),
-          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.dataOverview }),
-          queryClient.invalidateQueries({ queryKey: alphaQueryKeys.securities }),
+          queryClient.invalidateQueries({
+            queryKey: alphaQueryKeys.syncOverview,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: alphaQueryKeys.dataOverview,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: alphaQueryKeys.securities,
+          }),
           queryClient.invalidateQueries({ queryKey: alphaQueryKeys.bars }),
         ]);
       }
@@ -271,24 +276,21 @@ function AlphaDataPageContent({ visible }: Props) {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-5">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-base font-semibold">{t("data.title")}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("data.description")}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={refreshing}
-            onClick={() => void refresh()}
-          >
-            {t("common.refresh")}
-          </Button>
-        </header>
+    <div className="app-scrollbar h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-section p-4 sm:p-page">
+        <PageHeader
+          title={t("data.title")}
+          description={t("data.description")}
+          actions={
+            <Button
+              variant="outline"
+              disabled={refreshing}
+              onClick={() => void refresh()}
+            >
+              {t("common.refresh")}
+            </Button>
+          }
+        />
 
         {error ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs text-destructive">
@@ -315,7 +317,7 @@ function AlphaDataPageContent({ visible }: Props) {
           />
         </div>
 
-        <section className="rounded-xl border border-border/70 bg-card p-4">
+        <section className="rounded-lg border border-border/60 bg-card p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <AlphaSectionTitle
               title={t("data.sync.title")}
@@ -323,7 +325,6 @@ function AlphaDataPageContent({ visible }: Props) {
             />
             <div className="flex gap-2">
               <Button
-                size="sm"
                 variant="outline"
                 disabled={syncRunning || syncActionPending}
                 onClick={() => void startSync()}
@@ -331,7 +332,6 @@ function AlphaDataPageContent({ visible }: Props) {
                 {t("data.sync.start")}
               </Button>
               <Button
-                size="sm"
                 variant="outline"
                 disabled={
                   syncRunning ||
@@ -345,10 +345,7 @@ function AlphaDataPageContent({ visible }: Props) {
             </div>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <AlphaMetric
-              label={t("data.sync.status")}
-              value={syncStatusText}
-            />
+            <AlphaMetric label={t("data.sync.status")} value={syncStatusText} />
             <AlphaMetric
               label={t("data.sync.savedRows")}
               value={number.format(
@@ -387,7 +384,7 @@ function AlphaDataPageContent({ visible }: Props) {
           ) : null}
         </section>
 
-        <section className="min-w-0 rounded-xl border border-border/70 bg-card p-4">
+        <section className="min-w-0 rounded-lg border border-border/60 bg-card p-3">
           <AlphaSectionTitle
             title={t("data.securities.title")}
             description={t("data.securities.description", {
@@ -465,7 +462,6 @@ function AlphaDataPageContent({ visible }: Props) {
             <span>{t("data.pagination.page", { page, pageCount })}</span>
             <div className="flex gap-2">
               <Button
-                size="sm"
                 variant="outline"
                 disabled={offset === 0 || securities.isFetching}
                 onClick={() => {
@@ -476,7 +472,6 @@ function AlphaDataPageContent({ visible }: Props) {
                 {t("data.pagination.previous")}
               </Button>
               <Button
-                size="sm"
                 variant="outline"
                 disabled={page >= pageCount || securities.isFetching}
                 onClick={() => {
@@ -490,7 +485,7 @@ function AlphaDataPageContent({ visible }: Props) {
           </div>
         </section>
 
-        <section className="min-w-0 rounded-xl border border-border/70 bg-card p-4">
+        <section className="min-w-0 rounded-lg border border-border/60 bg-card p-3">
           <AlphaSectionTitle
             title={selectedSymbol ?? t("data.chart.title")}
             description={t("data.chart.description")}
@@ -535,19 +530,13 @@ function FacetSelect({
         onChange(nextValue === ALL_FACET_VALUES ? "" : nextValue)
       }
     >
-      <SelectTrigger aria-label={label} className="w-full text-xs">
+      <SelectTrigger aria-label={label} className="w-full">
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent align="start" position="popper">
-        <SelectItem value={ALL_FACET_VALUES} className="text-xs">
-          {label}
-        </SelectItem>
+        <SelectItem value={ALL_FACET_VALUES}>{label}</SelectItem>
         {options.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            className="text-xs"
-          >
+          <SelectItem key={option.value} value={option.value}>
             {option.label ?? option.value} ({option.count})
           </SelectItem>
         ))}

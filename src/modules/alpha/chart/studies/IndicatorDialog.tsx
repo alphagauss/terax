@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { getAlphaStudyDefinitions } from "@/modules/alpha/api";
@@ -178,7 +178,6 @@ export default function IndicatorDialog({
               onChange={(event) => setSearch(event.target.value)}
               placeholder={t("data.chart.studies.dialog.search")}
               aria-label={t("data.chart.studies.dialog.search")}
-              className="h-8"
             />
             <div className="mt-3 max-h-[calc(100%-2.75rem)] space-y-1 overflow-y-auto">
               {definitionsQuery.isPending ? (
@@ -240,7 +239,6 @@ export default function IndicatorDialog({
                           }));
                           setInvalid(false);
                         }}
-                        className="h-8"
                       />
                     </div>
                   ))}
@@ -278,7 +276,7 @@ export default function IndicatorDialog({
                               onChange={(event) =>
                                 updateStyle({ color: event.target.value })
                               }
-                              className="h-8 p-1"
+                              className="p-1"
                             />
                           </div>
                           <div className="space-y-1.5">
@@ -294,7 +292,6 @@ export default function IndicatorDialog({
                               }
                             >
                               <SelectTrigger
-                                className="h-8"
                                 aria-label={t(
                                   "data.chart.studies.styles.width",
                                 )}
@@ -327,7 +324,7 @@ export default function IndicatorDialog({
                                       positiveColor: event.target.value,
                                     })
                                   }
-                                  className="h-8 p-1"
+                                  className="p-1"
                                 />
                               </div>
                               <div className="space-y-1.5">
@@ -345,7 +342,7 @@ export default function IndicatorDialog({
                                       negativeColor: event.target.value,
                                     })
                                   }
-                                  className="h-8 p-1"
+                                  className="p-1"
                                 />
                               </div>
                             </>

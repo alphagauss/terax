@@ -3,7 +3,8 @@
  * 页面连接回测列表、统一任务事件、净值和回撤接口，不在前端重新计算回测指标。
  */
 
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Button } from "@/components/controls/button";
 import { getAlphaBacktests, getAlphaBacktestSeries } from "@/modules/alpha/api";
 import { AlphaBacktestTable } from "@/modules/alpha/components/AlphaBacktestTable";
 import {
@@ -189,23 +190,17 @@ function AlphaBacktestsPageContent({ visible }: Props) {
   );
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-5">
-        <header className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-base font-semibold">{t("backtests.title")}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("backtests.description")}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void backtests.refetch()}
-          >
-            {t("common.refresh")}
-          </Button>
-        </header>
+    <div className="app-scrollbar h-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-section p-4 sm:p-page">
+        <PageHeader
+          title={t("backtests.title")}
+          description={t("backtests.description")}
+          actions={
+            <Button variant="outline" onClick={() => void backtests.refetch()}>
+              {t("common.refresh")}
+            </Button>
+          }
+        />
 
         {backtests.error ? (
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs text-destructive">
@@ -213,7 +208,7 @@ function AlphaBacktestsPageContent({ visible }: Props) {
           </div>
         ) : null}
 
-        <section className="rounded-xl border border-border/70 bg-card p-4">
+        <section className="rounded-lg border border-border/60 bg-card p-3">
           <AlphaSectionTitle
             title={t("backtests.list.title")}
             description={t("backtests.list.description", {
@@ -258,7 +253,7 @@ function AlphaBacktestsPageContent({ visible }: Props) {
           />
         </div>
 
-        <section className="rounded-xl border border-border/70 bg-card p-4">
+        <section className="rounded-lg border border-border/60 bg-card p-3">
           <AlphaSectionTitle
             title={selected?.name ?? t("backtests.chart.title")}
             description={t("backtests.chart.description")}

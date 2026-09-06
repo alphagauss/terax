@@ -3,7 +3,7 @@
  * Dialog 复用 Alpha 证券目录搜索，只维护最多三个标的与有界颜色配置。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +11,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Spinner } from "@/components/ui/spinner";
 import { getAlphaSecurities } from "@/modules/alpha/api";
 import {
@@ -127,7 +127,6 @@ export default function ComparisonDialog({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  className="h-7"
                   onClick={() =>
                     onChange(
                       comparisons.filter(
@@ -148,7 +147,6 @@ export default function ComparisonDialog({
             onChange={(event) => setSearch(event.target.value)}
             placeholder={t("data.chart.comparisons.dialog.search")}
             aria-label={t("data.chart.comparisons.dialog.search")}
-            className="h-8"
           />
           <div className="mt-3 space-y-1">
             {securitiesQuery.isPending ? (

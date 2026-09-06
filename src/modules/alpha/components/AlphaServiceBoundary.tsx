@@ -3,7 +3,7 @@
  * 服务未运行时阻止业务页面挂载，避免通过失败的业务请求判断服务状态。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { AlphaLoading } from "@/modules/alpha/components/AlphaPagePrimitives";
 import { useAlphaServiceStatus } from "@/modules/alpha/query";
 import type { ReactNode } from "react";
@@ -26,11 +26,7 @@ export function AlphaServiceBoundary({ visible, children }: Props) {
           title={t("errors.status")}
           description={String(service.error)}
           action={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void service.refetch()}
-            >
+            <Button variant="outline" onClick={() => void service.refetch()}>
               {t("common.retry")}
             </Button>
           }

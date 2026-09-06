@@ -6,6 +6,8 @@
 
 Alpha 是由 Terax 管理和使用的独立 FastAPI 量化后端。Terax 提供统一的桌面界面、工作区、AI Agent、设置和通知能力，Alpha 提供量化业务 API、任务运行时和数据访问。
 
+React 页面采用项目 [桌面 UI 样式规范](../contributing/ui-style.md)：控件统一从 `components/controls/` 导入，页面标题和设置分组复用公共展示组件。数据与回测页保留宽内容布局，工作台保留图表和表格密度，不建立 Alpha 专用的控件风格或运行时密度状态。
+
 ```text
 Terax React 页面与 AI Agent
               |
