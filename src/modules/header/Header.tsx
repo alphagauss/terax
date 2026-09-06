@@ -3,7 +3,7 @@
  * Agent 通知导航直接使用 Workbench 标签 ID。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
@@ -47,8 +47,8 @@ export function Header({
   const settingsButton = (
     <Button
       variant="ghost"
-      size="icon"
-      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      size="icon-sm"
+      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
       onClick={onOpenSettings}
       title={t("settings")}
     >
@@ -59,8 +59,8 @@ export function Header({
   const secondarySidebarButton = onToggleSecondarySidebar ? (
     <Button
       variant="ghost"
-      size="icon"
-      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      size="icon-sm"
+      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
       onClick={onToggleSecondarySidebar}
       title="Toggle secondary sidebar"
       aria-label="Toggle secondary sidebar"
@@ -73,8 +73,8 @@ export function Header({
   const themeButton = (
     <Button
       variant="ghost"
-      size="icon"
-      className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      size="icon-sm"
+      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
       onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
       title={t("toggleTheme")}
       aria-label={t("toggleTheme")}
@@ -100,7 +100,7 @@ export function Header({
           title={t("toggleSidebar")}
           variant="ghost"
           size="icon-sm"
-          className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
         </Button>
@@ -110,7 +110,7 @@ export function Header({
           variant="ghost"
           onClick={onOpenCommandPalette}
           title={t("commandPalette")}
-          className="shrink-0 gap-1.5 rounded-md px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="shrink-0 gap-1.5 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.75} />
         </Button>

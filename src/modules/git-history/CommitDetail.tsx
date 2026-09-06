@@ -3,7 +3,7 @@
  * 提交说明、作者信息和文件路径需在紧凑布局下保持可读。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitCommitFileChange, GitLogEntry } from "@/modules/ai/lib/native";
@@ -131,7 +131,7 @@ export function CommitDetail({
           <Button
             size="xs"
             variant="ghost"
-            className="h-6 cursor-pointer gap-1.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={() => {
               void navigator.clipboard
                 .writeText(commit.sha)
@@ -150,7 +150,7 @@ export function CommitDetail({
             <Button
               size="xs"
               variant="ghost"
-              className="h-6 cursor-pointer gap-1.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
               onClick={onUndo}
             >
               <HugeiconsIcon icon={Undo02Icon} size={11} strokeWidth={1.9} />
@@ -161,7 +161,7 @@ export function CommitDetail({
             <Button
               size="xs"
               variant="ghost"
-              className="h-6 cursor-pointer gap-1.5 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+              className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
               onClick={remoteAction.onClick}
             >
               <HugeiconsIcon
@@ -263,12 +263,8 @@ function CommitFileRow({
         </span>
       ) : (
         <span className="flex w-16 shrink-0 justify-end gap-1.5 text-[10px] tabular-nums">
-          <span className="text-success">
-            +{file.added}
-          </span>
-          <span className="text-destructive">
-            −{file.removed}
-          </span>
+          <span className="text-success">+{file.added}</span>
+          <span className="text-destructive">−{file.removed}</span>
         </span>
       )}
     </button>

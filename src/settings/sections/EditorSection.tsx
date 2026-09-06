@@ -3,7 +3,8 @@
  * 仅负责将偏好状态绑定到界面，所有用户可见的固定文案均由翻译资源提供。
  */
 
-import { Input } from "@/components/ui/input";
+import { Input } from "@/components/controls/input";
+import { Button } from "@/components/controls/button";
 import {
   Select,
   SelectContent,
@@ -40,12 +41,14 @@ import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { LspServersGroup } from "../components/LspServersGroup";
-import { SectionHeader } from "../components/SectionHeader";
-import { SettingRow } from "../components/SettingRow";
+import { LspServersGroup } from "@/settings/components/LspServersGroup";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SettingGroup } from "@/components/settings/SettingGroup";
+import { SettingRow } from "@/components/settings/SettingRow";
 
 const AUTO_SAVE_STEP = 100;
 
+/** 展示编辑器偏好分组，条件字段随保存与格式化选项显示。 */
 export function EditorSection() {
   const { t } = useTranslation();
   const editorFontSize = usePreferencesStore((s) => s.editorFontSize);
@@ -64,39 +67,36 @@ export function EditorSection() {
     Object.values(editorFormatterByLang).includes("custom");
 
   return (
-    <div className="flex flex-col gap-6">
-      <SectionHeader
+    <div className="flex flex-col gap-section">
+      <PageHeader
         title={t("editor.header.title")}
         description={t("editor.header.description")}
       />
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("editor.appearance.label")}</Label>
-        <SettingRow title={t("editor.appearance.fontSize.title")} description={t("editor.appearance.fontSize.description")}>
+      <SettingGroup title={t("editor.appearance.label")}>
+        <SettingRow
+          title={t("editor.appearance.fontSize.title")}
+          description={t("editor.appearance.fontSize.description")}
+        >
           <Select
             value={String(editorFontSize)}
             onValueChange={(v) => void setEditorFontSize(Number(v))}
           >
-            <SelectTrigger size="sm" className="h-8 w-28 text-[12px]">
+            <SelectTrigger className="w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {EDITOR_FONT_SIZES.map((size) => (
-                <SelectItem
-                  key={size}
-                  value={String(size)}
-                  className="text-[12px]"
-                >
+                <SelectItem key={size} value={String(size)}>
                   {size}px
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("editor.editing.label")}</Label>
+      <SettingGroup title={t("editor.editing.label")}>
         <SettingRow
           title={t("editor.editing.vimMode.title")}
           description={t("editor.editing.vimMode.description")}
@@ -123,23 +123,22 @@ export function EditorSection() {
             value={diffViewMode}
             onValueChange={(v) => void setDiffViewMode(v as DiffViewMode)}
           >
-            <SelectTrigger size="sm" className="h-8 w-36 text-[12px]">
+            <SelectTrigger className="w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="inline" className="text-[12px]">
+              <SelectItem value="inline">
                 {t("editor.editing.diffView.inline")}
               </SelectItem>
-              <SelectItem value="split" className="text-[12px]">
+              <SelectItem value="split">
                 {t("editor.editing.diffView.sideBySide")}
               </SelectItem>
             </SelectContent>
           </Select>
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("editor.saving.label")}</Label>
+      <SettingGroup title={t("editor.saving.label")}>
         <SettingRow
           title={t("editor.saving.autoSave.title")}
           description={t("editor.saving.autoSave.description")}
@@ -179,7 +178,7 @@ export function EditorSection() {
             <FormatterOverrides />
           </>
         )}
-      </div>
+      </SettingGroup>
 
       <LspServersGroup />
     </div>
@@ -203,7 +202,7 @@ function FormatterSelect({
 
   return (
     <Select value={value} onValueChange={(v) => onChange(v as EditorFormatter)}>
-      <SelectTrigger className="h-8 w-40 text-[12px]">
+      <SelectTrigger className="w-40">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -245,7 +244,7 @@ function CustomFormatCommandInput() {
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="h-8 w-64 font-mono text-[12px] md:text-[12px]"
+        className="w-64 font-mono"
       />
     </SettingRow>
   );
@@ -266,22 +265,22 @@ function FormatterOverrides() {
         title={t("editor.saving.languageOverrides.title")}
         description={t("editor.saving.languageOverrides.description")}
       >
-        <button
+        <Button
           type="button"
           disabled={unused.length === 0}
-          className="h-8 rounded-md border border-border px-3 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          variant="outline"
           onClick={() => {
             const first = unused[0];
             if (first) update({ ...byLang, [first.ext]: "lsp" });
           }}
         >
           {t("editor.saving.languageOverrides.add")}
-        </button>
+        </Button>
       </SettingRow>
       {entries.map(([lang, formatter]) => (
         <div
           key={lang}
-          className="flex items-center justify-end gap-2 rounded-md border border-border/50 bg-muted/20 px-3 py-1.5"
+          className="flex flex-wrap items-center justify-end gap-2 px-3 py-2"
         >
           <Select
             value={lang}
@@ -293,7 +292,7 @@ function FormatterOverrides() {
               update(next);
             }}
           >
-            <SelectTrigger className="h-7 w-44 text-[12px]">
+            <SelectTrigger className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -325,14 +324,6 @@ function FormatterOverrides() {
         </div>
       ))}
     </>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }
 
@@ -380,7 +371,7 @@ function AutoSaveDelayInput({
               e.currentTarget.blur();
             }
           }}
-          className="h-8 w-20 rounded-md border border-border bg-background px-2.5 text-right text-[12px] md:text-[12px] tabular-nums outline-none focus:border-foreground/40 focus-visible:ring-0 focus-visible:border-foreground/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          className="w-20 border border-border bg-background px-2.5 text-right tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
         />
         <span className="text-[11px] text-muted-foreground">
           {t("editor.saving.autoSaveDelay.unit")}

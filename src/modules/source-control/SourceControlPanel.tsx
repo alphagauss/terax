@@ -28,11 +28,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
+import { Textarea } from "@/components/controls/textarea";
 import {
   Tooltip,
   TooltipContent,
@@ -80,14 +80,14 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { GraphSection } from "./GraphSection";
-import type { GitDiffSide } from "./gitTypes";
-import type { RepositoryController } from "./useRepositoryController";
+import { GraphSection } from "@/modules/source-control/GraphSection";
+import type { GitDiffSide } from "@/modules/source-control/gitTypes";
+import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
 import {
   type CheckState,
   type SourceControlFileEntry,
   useSourceControlPanel,
-} from "./useSourceControlPanel";
+} from "@/modules/source-control/useSourceControlPanel";
 
 type Props = {
   open: boolean;
@@ -805,9 +805,7 @@ function SourceControlViewContainerComponent({
                             onKeyDown={handleCommitShortcut}
                             placeholder="Commit message"
                             rows={3}
-                            className={cn(
-                              "min-h-[72px] border-border resize-none rounded-lg bg-transparent px-3 pb-7 pt-2.5 text-[12.5px] leading-snug shadow-none placeholder:text-muted-foreground/65 focus-visible:ring-0 focus:border-0",
-                            )}
+                            className="min-h-[72px] border-border resize-none bg-transparent pb-7 shadow-none"
                           />
                           <div className="pointer-events-none absolute inset-x-3 bottom-1.5 flex items-center justify-between p-1 gap-2 text-[10px] tabular-nums text-muted-foreground">
                             {scm.commitMessage.length > 0 ? (
@@ -883,8 +881,8 @@ function SourceControlViewContainerComponent({
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
-                                size="xs"
-                                className="h-7 cursor-pointer text-[11.5px] font-semibold tracking-tight shadow-sm disabled:cursor-not-allowed disabled:shadow-none"
+                                size="sm"
+                                className="cursor-pointer font-semibold tracking-tight shadow-sm disabled:cursor-not-allowed disabled:shadow-none"
                                 disabled={!canCommit}
                                 onClick={() => void scm.commit()}
                               >
@@ -906,9 +904,9 @@ function SourceControlViewContainerComponent({
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
-                                size="xs"
+                                size="sm"
                                 variant="secondary"
-                                className="h-7 cursor-pointer text-[11.5px] font-medium disabled:cursor-not-allowed"
+                                className="cursor-pointer font-medium disabled:cursor-not-allowed"
                                 disabled={!scm.canPush || !!scm.actionBusy}
                                 onClick={() => void scm.push()}
                               >
@@ -1435,7 +1433,7 @@ function IconActionButton({
           size="icon-sm"
           variant="ghost"
           className={cn(
-            "size-6 cursor-pointer rounded-md p-3 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed",
+            "text-muted-foreground hover:text-foreground disabled:cursor-not-allowed",
             className,
           )}
           aria-label={label}

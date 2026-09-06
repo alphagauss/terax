@@ -28,7 +28,9 @@
           "options": {
             "groups": [
               ":NODE:",
-              ["@/**"],
+              [
+                "@/**"
+              ],
               ":PACKAGE:",
               ":ALIAS:",
               ":PATH:"
@@ -87,5 +89,34 @@
         "noAccumulatingSpread": "warn"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/**",
+        "!src/components/controls/**",
+        "!src/components/ui/**",
+        "!src/components/ai-elements/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@/components/ui/button": "业务代码统一从 @/components/controls/button 导入。",
+                  "@/components/ui/input": "业务代码统一从 @/components/controls/input 导入。",
+                  "@/components/ui/textarea": "业务代码统一从 @/components/controls/textarea 导入。",
+                  "@/components/ui/select": "业务代码统一从 @/components/controls/select 导入。",
+                  "@/components/ui/dialog": "业务对话框统一从 @/components/controls/dialog 导入。",
+                  "@/components/ui/alert-dialog": "业务对话框统一从 @/components/controls/alert-dialog 导入。"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

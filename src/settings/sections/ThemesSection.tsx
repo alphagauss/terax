@@ -3,7 +3,7 @@
  * 主题卡片及其操作控件使用项目控制级动效，避免与设置页其他分区出现不同节奏。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Select,
   SelectContent,
@@ -49,7 +49,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { SectionHeader } from "../components/SectionHeader";
+import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
 /** 主题设置分区。 */
 export function ThemesSection() {
@@ -153,8 +153,8 @@ export function ThemesSection() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <SectionHeader
+    <div className="flex flex-col gap-section">
+      <PageHeader
         title={t("themes.header.title")}
         description={t("themes.header.description")}
       />
@@ -172,23 +172,13 @@ export function ThemesSection() {
         }}
       >
         <div className="flex items-center justify-between">
-          <Label>{t("themes.theme.label")}</Label>
+          <SectionHeading>{t("themes.theme.label")}</SectionHeading>
           <div className="flex items-center gap-1.5">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1.5 px-2 text-[11px] duration-control ease-standard"
-              onClick={onCreateTheme}
-            >
+            <Button size="sm" variant="outline" onClick={onCreateTheme}>
               <HugeiconsIcon icon={PlusSignIcon} size={11} strokeWidth={2} />
               {t("themes.theme.create")}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[11px] duration-control ease-standard"
-              onClick={onPickThemeFile}
-            >
+            <Button size="sm" variant="outline" onClick={onPickThemeFile}>
               {t("themes.theme.import")}
             </Button>
           </div>
@@ -204,7 +194,7 @@ export function ThemesSection() {
           />
         </div>
         {importError ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[11.5px] text-destructive">
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
             {importError}
           </div>
         ) : null}
@@ -228,7 +218,7 @@ export function ThemesSection() {
                   aria-pressed={selected}
                   onClick={() => setThemeId(theme.id)}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-[color,background-color,border-color,box-shadow] duration-control ease-standard focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    "flex w-full items-center gap-3 rounded-lg border p-2.5 text-left transition-[color,background-color,border-color,box-shadow] duration-control ease-standard focus-visible:outline-none focus-visible:ring-0",
                     isCustom && "pr-16",
                     selected
                       ? "border-foreground/60 ring-1 ring-foreground/20"
@@ -306,7 +296,7 @@ export function ThemesSection() {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col">
-            <Label>{t("themes.editorTheme.label")}</Label>
+            <SectionHeading>{t("themes.editorTheme.label")}</SectionHeading>
             <span className="text-[11px] text-muted-foreground">
               {t("themes.editorTheme.description")}
             </span>
@@ -315,11 +305,11 @@ export function ThemesSection() {
             value={editorThemePref}
             onValueChange={(v) => void setEditorTheme(v as EditorThemePref)}
           >
-            <SelectTrigger size="sm" className="h-8 w-44 text-[12px]">
+            <SelectTrigger className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={EDITOR_THEME_AUTO} className="text-[12px]">
+              <SelectItem value={EDITOR_THEME_AUTO}>
                 {t("themes.editorTheme.auto")}
               </SelectItem>
               <SelectSeparator />
@@ -343,7 +333,6 @@ export function ThemesSection() {
                       EDITOR_THEME_MODE[id] !== "both" &&
                       EDITOR_THEME_MODE[id] !== resolvedMode
                     }
-                    className="text-[12px]"
                   >
                     {EDITOR_THEME_LABELS[id]}
                   </SelectItem>
@@ -366,24 +355,19 @@ export function ThemesSection() {
         }}
       >
         <div className="flex items-center justify-between">
-          <Label>{t("themes.background.label")}</Label>
+          <SectionHeading>{t("themes.background.label")}</SectionHeading>
           <div className="flex items-center gap-2">
             {backgroundKind === "image" && backgroundImageId ? (
               <Button
-                variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-[11px] text-muted-foreground duration-control ease-standard hover:text-destructive"
+                variant="ghost"
+                className="text-muted-foreground hover:text-destructive"
                 onClick={() => void onRemoveBackground()}
               >
                 {t("themes.background.remove")}
               </Button>
             ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[11px] duration-control ease-standard"
-              onClick={onPickBgFile}
-            >
+            <Button size="sm" variant="outline" onClick={onPickBgFile}>
               {backgroundKind === "image"
                 ? t("themes.background.replace")
                 : t("themes.background.choose")}
@@ -401,14 +385,14 @@ export function ThemesSection() {
           </div>
         </div>
         {bgError ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[11.5px] text-destructive">
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive">
             {bgError}
           </div>
         ) : null}
         {backgroundKind === "image" && backgroundImageId ? (
           <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-[11.5px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {t("themes.background.opacity")}
               </span>
               <span className="tabular-nums text-[11px] text-muted-foreground">
@@ -423,7 +407,7 @@ export function ThemesSection() {
               onValueChange={(v) => void setBackgroundOpacity(v[0] ?? 0)}
             />
             <div className="flex items-center justify-between gap-3 pt-1">
-              <span className="text-[11.5px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {t("themes.background.blur")}
               </span>
               <span className="tabular-nums text-[11px] text-muted-foreground">
@@ -445,13 +429,5 @@ export function ThemesSection() {
         )}
       </fieldset>
     </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }

@@ -2,8 +2,10 @@
  * 本文件实现常规设置中的共享代理设置组。
  * 地址通过原生校验后保存，密码单独写入秘密存储，配置不会全局启用代理。
  */
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
+import { FormField } from "@/components/layout/FormField";
+import { SettingGroup } from "@/components/settings/SettingGroup";
 import { setSharedStoreKey } from "@/lib/sharedStore";
 import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
 import { useNetworkSettings } from "@/modules/network/settings";
@@ -58,34 +60,24 @@ export function NetworkSettings() {
     }
   };
   return (
-    <section
-      className="flex flex-col gap-2"
-      aria-labelledby="network-settings-title"
-    >
-      <h3
-        id="network-settings-title"
-        className="text-[11px] font-medium tracking-tight text-muted-foreground"
-      >
-        {t("network.title")}
-      </h3>
+    <SettingGroup title={t("network.title")}>
       <form
-        className="flex flex-col gap-3 rounded-lg border border-border/60 bg-card/60 p-3"
+        className="flex flex-col gap-field p-3"
         onSubmit={(event) => {
           event.preventDefault();
           void save();
         }}
       >
-        <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+        <p className="text-[11px] leading-4 text-muted-foreground">
           {t("network.description")}
         </p>
-        <label
+        <FormField
           htmlFor="network-proxy-url"
-          className="flex flex-col gap-1.5 text-[11.5px]"
+          label={t("network.url")}
+          description={t("network.urlHint")}
         >
-          {t("network.url")}
           <Input
             id="network-proxy-url"
-            className="h-8 text-[12px]"
             value={url}
             onChange={(event) => {
               setUrl(event.target.value);
@@ -95,18 +87,13 @@ export function NetworkSettings() {
             spellCheck={false}
             disabled={busy || !ready}
           />
-        </label>
-        <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-          {t("network.urlHint")}
-        </p>
-        <label
+        </FormField>
+        <FormField
           htmlFor="network-proxy-password"
-          className="flex flex-col gap-1.5 text-[11.5px]"
+          label={t("network.password")}
         >
-          {t("network.password")}
           <Input
             id="network-proxy-password"
-            className="h-8 text-[12px]"
             type="password"
             autoComplete="new-password"
             value={password}
@@ -117,19 +104,12 @@ export function NetworkSettings() {
             placeholder={t("network.passwordHint")}
             disabled={busy || !ready}
           />
-        </label>
+        </FormField>
         <div className="flex gap-2">
-          <Button
-            size="sm"
-            className="text-[12px]"
-            type="submit"
-            disabled={busy || !ready || loadError}
-          >
+          <Button type="submit" disabled={busy || !ready || loadError}>
             {t("network.save")}
           </Button>
           <Button
-            size="sm"
-            className="text-[12px]"
             type="button"
             variant="outline"
             disabled={busy || !ready || loadError || !currentUrl}
@@ -151,12 +131,12 @@ export function NetworkSettings() {
           </p>
         )}
       </form>
-      <div className="rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+      <div className="px-3 py-2">
         <NetworkRouteSelect target="markdown" label={t("network.images")} />
       </div>
-      <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+      <p className="px-3 py-2 text-[11px] leading-4 text-muted-foreground">
         {t("network.scope")}
       </p>
-    </section>
+    </SettingGroup>
   );
 }

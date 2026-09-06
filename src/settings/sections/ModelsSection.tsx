@@ -18,8 +18,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
@@ -100,7 +100,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ProviderKeyCard } from "@/settings/components/ProviderKeyCard";
 import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
-import { SectionHeader } from "@/settings/components/SectionHeader";
+import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
 type KeysMap = Record<ProviderId, string | null>;
 type ProviderInstanceUpdate = Partial<
@@ -453,8 +453,8 @@ export function ModelsSection() {
   };
 
   return (
-    <div className="flex flex-col gap-7">
-      <SectionHeader
+    <div className="@container flex min-w-0 flex-col gap-section">
+      <PageHeader
         title={t("models.header.title")}
         description={t("models.header.description")}
       />
@@ -479,9 +479,9 @@ export function ModelsSection() {
 
       <VoiceBlock />
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-field">
         <div className="flex items-center justify-between">
-          <Label>{t("models.providers.label")}</Label>
+          <SectionHeading>{t("models.providers.label")}</SectionHeading>
           <AddProviderMenu
             providers={addableProviders}
             onAdd={addProvider}
@@ -494,7 +494,7 @@ export function ModelsSection() {
             <p className="text-[12px] text-muted-foreground">
               {t("models.providers.emptyTitle")}
             </p>
-            <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
               {t("models.providers.emptyHint")}
             </p>
           </div>
@@ -573,11 +573,7 @@ function AddProviderMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-7 gap-1.5 px-2.5 text-[11px]"
-        >
+        <Button size="sm" variant="outline" className="px-2.5">
           <HugeiconsIcon icon={Add01Icon} size={12} strokeWidth={2} />
           {t("models.providers.addProvider")}
         </Button>
@@ -685,9 +681,9 @@ function DefaultsBlock({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3">
-      <Label>{t("models.defaults.label")}</Label>
-      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.defaults.label")}</SectionHeading>
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
         <FieldRow label={t("models.defaults.chatModel")}>
           <ModelPicker
             model={defaultModel}
@@ -714,7 +710,7 @@ function DefaultsBlock({
               void setMaxConcurrentSubagents(Number(value))
             }
           >
-            <SelectTrigger className="w-full text-[11.5px]">
+            <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -783,7 +779,7 @@ function ModelPicker({
         <Button
           variant="outline"
           disabled={!hasAny}
-          className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
+          className="flex-1 justify-between px-2.5"
         >
           <span className="flex items-center gap-2 truncate">
             {current ? (
@@ -918,9 +914,9 @@ function ModelParametersCard({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <Label>{t("models.parameters.label")}</Label>
-      <div className="flex flex-col gap-2.5 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.parameters.label")}</SectionHeading>
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
         <FieldRow label={t("models.parameters.model")}>
           <ModelPicker
             model={selectedModel}
@@ -944,7 +940,7 @@ function ModelParametersCard({
               placeholder={formatContextWindow(DEFAULT_MODEL_CONTEXT_WINDOW)}
               inputMode="decimal"
               spellCheck={false}
-              className="h-8 flex-1 font-mono text-[11.5px]"
+              className="flex-1 font-mono"
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -954,7 +950,7 @@ function ModelParametersCard({
                   variant="outline"
                   disabled={!selectedModel}
                   title={t("models.parameters.selectPreset")}
-                  className="size-8 shrink-0"
+                  className="shrink-0"
                 >
                   <HugeiconsIcon
                     icon={ArrowDown01Icon}
@@ -969,7 +965,7 @@ function ModelParametersCard({
                     key={preset}
                     onSelect={() => saveContextWindow(String(preset))}
                     className={cn(
-                      "font-mono text-[11.5px]",
+                      "font-mono text-xs",
                       preset === contextWindow && "bg-interactive-active",
                     )}
                   >
@@ -978,12 +974,12 @@ function ModelParametersCard({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <span className="text-[10.5px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground">
               {t("models.parameters.tokens")}
             </span>
           </div>
         </FieldRow>
-        <p className="pl-19 text-[10.5px] leading-relaxed text-muted-foreground">
+        <p className="@min-[30rem]:pl-31 text-[11px] leading-4 text-muted-foreground">
           {t("models.parameters.description")}
         </p>
       </div>
@@ -1053,7 +1049,7 @@ function AutocompleteRow({
               <Button
                 variant="outline"
                 disabled={!enabled || items.length === 0}
-                className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
+                className="flex-1 justify-between px-2.5"
               >
                 <span className="flex items-center gap-2 truncate">
                   {currentModel ? (
@@ -1087,7 +1083,7 @@ function AutocompleteRow({
                       key={modelRefKey(ref)}
                       onSelect={() => void setAutocompleteModel(ref)}
                       className={cn(
-                        "text-[11.5px]",
+                        "text-xs",
                         model &&
                           modelRefsEqual(ref, model) &&
                           "bg-interactive-active",
@@ -1110,7 +1106,7 @@ function AutocompleteRow({
               void setAutocompleteTrigger(value as AutocompleteTrigger)
             }
           >
-            <SelectTrigger className="w-full text-[11.5px]">
+            <SelectTrigger className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1165,7 +1161,7 @@ function BuiltinProviderFields({
     <>
       {provider.endpoint.kind === "editable" ? (
         <>
-          <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+          <span className="text-[11px] leading-4 text-muted-foreground">
             {t(`models.local.${provider.id}.description`)}
           </span>
           <FieldRow label={t("models.card.baseUrl")}>
@@ -1178,7 +1174,7 @@ function BuiltinProviderFields({
               }}
               placeholder={provider.endpoint.defaultBaseURL}
               spellCheck={false}
-              className="h-8 flex-1 font-mono text-[11.5px]"
+              className="flex-1 font-mono"
             />
           </FieldRow>
         </>
@@ -1257,7 +1253,7 @@ function CustomProviderCard({
           {provider.name || t("models.providers.openaiCompatible")}
         </span>
         {models.length > 0 && (
-          <span className="text-[10.5px] text-muted-foreground truncate font-mono">
+          <span className="text-[11px] text-muted-foreground truncate font-mono">
             {t("models.catalog.configuredCount", { count: models.length })}
           </span>
         )}
@@ -1275,21 +1271,21 @@ function CustomProviderCard({
           </Badge>
         ) : null}
         <Button
-          size="icon"
+          size="icon-sm"
           variant="ghost"
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
           }}
           title={t("models.card.removeEndpoint")}
-          className="ml-auto size-7 text-muted-foreground hover:text-destructive"
+          className="ml-auto text-muted-foreground hover:text-destructive"
         >
           <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
         </Button>
       </button>
 
       {expanded && (
-        <div className="flex flex-col gap-2.5 border-t border-border/40 px-3 py-2.5">
+        <div className="flex flex-col gap-field border-t border-border/40 px-3 py-2.5">
           <FieldRow label={t("models.card.name")}>
             <Input
               value={nameDraft}
@@ -1300,7 +1296,7 @@ function CustomProviderCard({
               }}
               placeholder={t("models.card.namePlaceholder")}
               spellCheck={false}
-              className="h-8 flex-1 text-[11.5px]"
+              className="flex-1"
             />
           </FieldRow>
 
@@ -1314,7 +1310,7 @@ function CustomProviderCard({
               }}
               placeholder="https://api.example.com/v1"
               spellCheck={false}
-              className="h-8 flex-1 font-mono text-[11.5px]"
+              className="flex-1 font-mono"
             />
           </FieldRow>
 
@@ -1340,11 +1336,11 @@ function CustomProviderCard({
                     : `${providerKey.slice(0, 4)}${"•".repeat(8)}${providerKey.slice(-4)}`}
                 </code>
                 <Button
-                  size="icon"
+                  size="icon-sm"
                   variant="ghost"
                   onClick={() => void onClearKey()}
                   title={t("models.card.removeKey")}
-                  className="size-7 text-muted-foreground hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive"
                 >
                   <HugeiconsIcon
                     icon={Cancel01Icon}
@@ -1361,10 +1357,9 @@ function CustomProviderCard({
                   onChange={(e) => setKeyDraft(e.target.value)}
                   placeholder={t("models.card.optionalKeyPlaceholder")}
                   spellCheck={false}
-                  className="h-8 flex-1 font-mono text-[11.5px]"
+                  className="flex-1 font-mono"
                 />
                 <Button
-                  size="sm"
                   onClick={async () => {
                     const v = keyDraft.trim();
                     if (!v) return;
@@ -1372,7 +1367,6 @@ function CustomProviderCard({
                     setKeyDraft("");
                   }}
                   disabled={!keyDraft.trim()}
-                  className="h-8 px-3 text-[11px]"
                 >
                   {t("common.save")}
                 </Button>
@@ -1385,6 +1379,7 @@ function CustomProviderCard({
   );
 }
 
+/** 模型配置使用固定标签列；窄容器中转为纵向字段，避免挤压模型选择器。 */
 function FieldRow({
   label,
   children,
@@ -1393,11 +1388,9 @@ function FieldRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-16 shrink-0 text-[11px] tracking-tight text-muted-foreground">
-        {label}
-      </span>
-      <div className="flex flex-1 items-center">{children}</div>
+    <div className="grid min-w-0 gap-1 @min-[30rem]:grid-cols-[7rem_minmax(0,1fr)] @min-[30rem]:items-center @min-[30rem]:gap-3">
+      <span className="text-xs leading-[18px] font-medium">{label}</span>
+      <div className="flex min-w-0 items-center [&>*]:min-w-0">{children}</div>
     </div>
   );
 }
@@ -1415,7 +1408,7 @@ function VoiceBlock() {
   useEffect(() => setGroqModelDraft(groqSttModel), [groqSttModel]);
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+    <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
       <div className="flex items-center gap-2">
         <HugeiconsIcon icon={Mic01Icon} size={15} strokeWidth={1.5} />
         <span className="text-[12.5px] font-medium">
@@ -1426,10 +1419,7 @@ function VoiceBlock() {
       <FieldRow label={t("models.voice.provider")}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
-            >
+            <Button variant="outline" className="flex-1 justify-between px-2.5">
               <span>{sttLabel(t, sttProvider)}</span>
               <HugeiconsIcon
                 icon={ArrowDown01Icon}
@@ -1456,7 +1446,7 @@ function VoiceBlock() {
         </DropdownMenu>
       </FieldRow>
 
-      <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+      <p className="text-[11px] leading-4 text-muted-foreground">
         {sttProvider === "openai" && t("models.voice.descOpenai")}
         {sttProvider === "groq" && t("models.voice.descGroq")}
         {sttProvider === "whispercpp" && t("models.voice.descWhispercpp")}
@@ -1466,7 +1456,7 @@ function VoiceBlock() {
         <NetworkRouteSelect target={`speech:${sttProvider}`} />
       )}
       {sttProvider === "groq" && (
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-field">
           <FieldRow label={t("models.voice.model")}>
             <Input
               value={groqModelDraft}
@@ -1477,14 +1467,14 @@ function VoiceBlock() {
               }}
               placeholder="whisper-large-v3-turbo"
               spellCheck={false}
-              className="h-8 font-mono text-[11.5px]"
+              className="font-mono"
             />
           </FieldRow>
         </div>
       )}
 
       {sttProvider === "whispercpp" && (
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-field">
           <FieldRow label={t("models.voice.baseUrl")}>
             <Input
               value={urlDraft}
@@ -1495,19 +1485,11 @@ function VoiceBlock() {
               }}
               placeholder={WHISPERCPP_DEFAULT_BASE_URL}
               spellCheck={false}
-              className="h-8 font-mono text-[11.5px]"
+              className="font-mono"
             />
           </FieldRow>
         </div>
       )}
     </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }

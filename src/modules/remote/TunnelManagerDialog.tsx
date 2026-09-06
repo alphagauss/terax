@@ -3,15 +3,15 @@
  * 配置保存到 profile，启用项在连接后自动启动；运行时状态仅用于展示和单条重启。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -32,9 +32,13 @@ import {
   tunnelFormFromSaved,
   tunnelValidationIssue,
   type TunnelForm,
-} from "./tunnelForm";
-import { remoteNative } from "./native";
-import type { SshTunnel, TunnelInfo, TunnelStatus } from "./types";
+} from "@/modules/remote/tunnelForm";
+import { remoteNative } from "@/modules/remote/native";
+import type {
+  SshTunnel,
+  TunnelInfo,
+  TunnelStatus,
+} from "@/modules/remote/types";
 
 const NUMBER_INPUT_CLASS =
   "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";

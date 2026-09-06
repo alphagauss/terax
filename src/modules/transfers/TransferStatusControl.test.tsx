@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   ignoreFailure: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@/components/controls/button", () => ({
   Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
     createElement("button", { type: "button", ...props }, children),
 }));
@@ -45,7 +45,7 @@ vi.mock("@/components/ui/checkbox", () => ({
         onCheckedChange?.(event.currentTarget.checked),
     }),
 }));
-vi.mock("@/components/ui/alert-dialog", () => {
+vi.mock("@/components/controls/alert-dialog", () => {
   const Wrapper = ({ children }: { children?: ReactNode }) => children;
   const Action = ({
     children,
@@ -100,8 +100,9 @@ vi.mock("@/modules/transfers/store", () => ({
     }),
 }));
 vi.mock("@/modules/workspace", () => ({
-  useWorkspaceEnvStore: (select: (state: { env: { kind: string } }) => unknown) =>
-    select({ env: { kind: "wsl" } }),
+  useWorkspaceEnvStore: (
+    select: (state: { env: { kind: string } }) => unknown,
+  ) => select({ env: { kind: "wsl" } }),
 }));
 vi.mock("@hugeicons/core-free-icons", () => ({
   ArrowDataTransferVerticalIcon: {},
@@ -266,7 +267,9 @@ describe("Direct failure actions", () => {
       createdAt: 1,
       updatedAt: 2,
     };
-    const { container, root } = render(createElement(TransferTaskRow, { task }));
+    const { container, root } = render(
+      createElement(TransferTaskRow, { task }),
+    );
     const expand = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent === "transfers.failedFiles",
     );

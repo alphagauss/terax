@@ -12,8 +12,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -21,9 +21,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
+import { Textarea } from "@/components/controls/textarea";
 import { cn } from "@/lib/utils";
 import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import {
@@ -62,7 +62,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { SectionHeader } from "../components/SectionHeader";
+import { FormField } from "@/components/layout/FormField";
+import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
 const ICON_OPTIONS: AgentIconId[] = [
   "coder",
@@ -131,8 +132,8 @@ export function AgentsSection() {
   };
 
   return (
-    <div className="flex flex-col gap-7">
-      <SectionHeader
+    <div className="flex flex-col gap-section">
+      <PageHeader
         title={t("agents.header.title")}
         description={t("agents.header.description")}
       />
@@ -141,11 +142,10 @@ export function AgentsSection() {
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <Label>{t("agents.list.label")}</Label>
+          <SectionHeading>{t("agents.list.label")}</SectionHeading>
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1.5 px-2 text-[11px]"
             onClick={() =>
               setEditingAgent({
                 id: newAgentId(),
@@ -184,8 +184,8 @@ export function AgentsSection() {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
-            <Label>{t("agents.snippets.label")}</Label>
-            <span className="text-[10.5px] text-muted-foreground">
+            <SectionHeading>{t("agents.snippets.label")}</SectionHeading>
+            <span className="text-[11px] text-muted-foreground">
               <Trans
                 i18nKey="agents.snippets.description"
                 components={{
@@ -197,7 +197,6 @@ export function AgentsSection() {
           <Button
             size="sm"
             variant="outline"
-            className="h-7 gap-1.5 px-2 text-[11px]"
             onClick={() =>
               setEditingSnippet({
                 id: newSnippetId(),
@@ -235,15 +234,14 @@ export function AgentsSection() {
                     {s.name}
                   </span>
                   {s.description ? (
-                    <span className="truncate text-[10.5px] text-muted-foreground">
+                    <span className="truncate text-[11px] text-muted-foreground">
                       {s.description}
                     </span>
                   ) : null}
                 </div>
                 <Button
-                  size="icon"
+                  size="icon-sm"
                   variant="ghost"
-                  className="size-7"
                   onClick={() => setEditingSnippet(s)}
                   title={t("common.edit")}
                 >
@@ -254,9 +252,9 @@ export function AgentsSection() {
                   />
                 </Button>
                 <Button
-                  size="icon"
+                  size="icon-sm"
                   variant="ghost"
-                  className="size-7 text-muted-foreground hover:text-destructive"
+                  className="text-muted-foreground hover:text-destructive"
                   onClick={() => removeSnippet(s.id)}
                   title={t("common.delete")}
                 >
@@ -361,7 +359,7 @@ function AgentCard({
               </span>
             ) : null}
           </span>
-          <span className="line-clamp-2 text-[10.5px] leading-relaxed text-muted-foreground">
+          <span className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">
             {agentDisplayDescription(agent)}
           </span>
         </div>
@@ -372,12 +370,11 @@ function AgentCard({
             ? t("agents.list.allTools")
             : t("agents.list.toolCount", { count: agent.tools.length })}
         </span>
-        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           {onEdit ? (
             <Button
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-6"
               onClick={onEdit}
               title={t("common.edit")}
             >
@@ -386,9 +383,9 @@ function AgentCard({
           ) : null}
           {onDelete ? (
             <Button
-              size="icon"
+              size="icon-xs"
               variant="ghost"
-              className="size-6 text-muted-foreground hover:text-destructive"
+              className="text-muted-foreground hover:text-destructive"
               onClick={onDelete}
               title={t("common.delete")}
             >
@@ -401,6 +398,7 @@ function AgentCard({
   );
 }
 
+/** 编辑智能体草稿，字段标签关联控件；取消时不提交配置。 */
 function AgentEditorDialog({
   agent,
   existing,
@@ -423,9 +421,9 @@ function AgentEditorDialog({
 
   return (
     <Dialog open={!!agent} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-[14px]">
+          <DialogTitle>
             {isNew
               ? t("agents.agentDialog.newTitle")
               : t("agents.agentDialog.editTitle")}
@@ -433,8 +431,7 @@ function AgentEditorDialog({
         </DialogHeader>
         <div className="-mx-2 max-h-[calc(100vh-14rem)] overflow-y-auto px-2 flex flex-col gap-3">
           <div className="flex gap-2">
-            <div className="flex flex-col gap-1">
-              <Label>{t("agents.agentDialog.icon")}</Label>
+            <FormField label={t("agents.agentDialog.icon")}>
               <div className="flex flex-wrap gap-1">
                 {ICON_OPTIONS.map((id) => {
                   const Icon = AGENT_ICONS[id] ?? SparklesIcon;
@@ -456,52 +453,60 @@ function AgentEditorDialog({
                   );
                 })}
               </div>
-            </div>
-            <div className="flex flex-1 flex-col gap-1">
-              <Label>{t("agents.agentDialog.name")}</Label>
+            </FormField>
+            <FormField
+              label={t("agents.agentDialog.name")}
+              htmlFor="agent-name"
+              className="flex-1"
+            >
               <Input
+                id="agent-name"
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                className="h-8 text-[12px]"
                 placeholder={t("agents.agentDialog.namePlaceholder")}
               />
-            </div>
+            </FormField>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label>{t("agents.agentDialog.description")}</Label>
+          <FormField
+            label={t("agents.agentDialog.description")}
+            htmlFor="agent-description"
+          >
             <Input
+              id="agent-description"
               value={draft.description}
               onChange={(e) =>
                 setDraft({ ...draft, description: e.target.value })
               }
               placeholder={t("agents.agentDialog.descriptionPlaceholder")}
-              className="h-8 text-[12px]"
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label>{t("agents.agentDialog.instructions")}</Label>
+          </FormField>
+          <FormField
+            label={t("agents.agentDialog.instructions")}
+            htmlFor="agent-instructions"
+          >
             <Textarea
+              id="agent-instructions"
               value={draft.instructions}
               onChange={(e) =>
                 setDraft({ ...draft, instructions: e.target.value })
               }
               placeholder={t("agents.agentDialog.instructionsPlaceholder")}
-              className="min-h-40 resize-y text-[12px] leading-relaxed"
+              className="min-h-40 resize-y leading-relaxed"
             />
-          </div>
+          </FormField>
           <div className="flex flex-col gap-1.5">
-            <Label>{t("agents.agentDialog.tools")}</Label>
-            <span className="text-[10.5px] leading-relaxed text-muted-foreground">
+            <SectionHeading>{t("agents.agentDialog.tools")}</SectionHeading>
+            <span className="text-[11px] leading-4 text-muted-foreground">
               {t("agents.agentDialog.toolsDescription")}
             </span>
-            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            <div className="divide-y divide-border/40 rounded-lg border border-border/60 bg-card/60">
               {AGENT_TOOL_GROUPS.map((group) => {
                 const checked = agentToolGroupEnabled(draft.tools, group.id);
                 return (
                   <label
                     key={group.id}
                     htmlFor={`agent-tool-${group.id}`}
-                    className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 bg-card/50 px-2.5 py-2"
+                    className="flex cursor-pointer items-start gap-2 px-3 py-2 first:rounded-t-lg last:rounded-b-lg transition-colors duration-control ease-standard hover:bg-interactive-hover focus-within:bg-interactive-hover"
                   >
                     <Checkbox
                       id={`agent-tool-${group.id}`}
@@ -518,11 +523,11 @@ function AgentEditorDialog({
                       }
                       className="mt-0.5"
                     />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-[11.5px] font-medium">
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="text-[12.5px] leading-[18px] font-medium">
                         {t(`agents.tools.${group.id}.label`)}
                       </span>
-                      <span className="text-[10px] leading-relaxed text-muted-foreground">
+                      <span className="text-[11px] leading-4 text-muted-foreground">
                         {t(`agents.tools.${group.id}.description`)}
                       </span>
                     </span>
@@ -530,16 +535,16 @@ function AgentEditorDialog({
                 );
               })}
             </div>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[11px] leading-4 text-muted-foreground">
               {t("agents.agentDialog.newSessionsOnly")}
             </span>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button size="sm" disabled={!canSave} onClick={() => onSave(draft)}>
+          <Button disabled={!canSave} onClick={() => onSave(draft)}>
             {t("common.save")}
           </Button>
         </DialogFooter>
@@ -548,6 +553,7 @@ function AgentEditorDialog({
   );
 }
 
+/** 编辑片段草稿，保留标识校验与显式保存行为。 */
 function SnippetEditorDialog({
   snippet,
   existing,
@@ -578,9 +584,9 @@ function SnippetEditorDialog({
 
   return (
     <Dialog open={!!snippet} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-[14px]">
+          <DialogTitle>
             {existing.some((s) => s.id === draft.id)
               ? t("agents.snippetDialog.editTitle")
               : t("agents.snippetDialog.newTitle")}
@@ -588,13 +594,17 @@ function SnippetEditorDialog({
         </DialogHeader>
         <div className="-mx-2 max-h-[calc(100vh-14rem)] overflow-y-auto px-2 flex flex-col gap-3">
           <div className="flex gap-2">
-            <div className="flex w-32 flex-col gap-1">
-              <Label>{t("agents.snippetDialog.handle")}</Label>
+            <FormField
+              label={t("agents.snippetDialog.handle")}
+              htmlFor="snippet-handle"
+              className="w-32"
+            >
               <div className="relative">
-                <span className="absolute top-1/2 left-2 -translate-y-1/2 font-mono text-[11.5px] text-muted-foreground">
+                <span className="absolute top-1/2 left-2 -translate-y-1/2 font-mono text-xs text-muted-foreground">
                   #
                 </span>
                 <Input
+                  id="snippet-handle"
                   value={draft.handle}
                   onChange={(e) =>
                     setDraft({
@@ -603,7 +613,7 @@ function SnippetEditorDialog({
                     })
                   }
                   placeholder={t("agents.snippetDialog.handlePlaceholder")}
-                  className="h-8 pl-5 font-mono text-[11.5px]"
+                  className="pl-5 font-mono"
                 />
               </div>
               {handleErr ? (
@@ -611,43 +621,51 @@ function SnippetEditorDialog({
                   {handleErr}
                 </span>
               ) : null}
-            </div>
-            <div className="flex flex-1 flex-col gap-1">
-              <Label>{t("agents.snippetDialog.name")}</Label>
+            </FormField>
+            <FormField
+              label={t("agents.snippetDialog.name")}
+              htmlFor="snippet-name"
+              className="flex-1"
+            >
               <Input
+                id="snippet-name"
                 value={draft.name}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 placeholder={t("agents.snippetDialog.namePlaceholder")}
-                className="h-8 text-[12px]"
               />
-            </div>
+            </FormField>
           </div>
-          <div className="flex flex-col gap-1">
-            <Label>{t("agents.snippetDialog.description")}</Label>
+          <FormField
+            label={t("agents.snippetDialog.description")}
+            htmlFor="snippet-description"
+          >
             <Input
+              id="snippet-description"
               value={draft.description}
               onChange={(e) =>
                 setDraft({ ...draft, description: e.target.value })
               }
               placeholder={t("agents.snippetDialog.descriptionPlaceholder")}
-              className="h-8 text-[12px]"
             />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label>{t("agents.snippetDialog.content")}</Label>
+          </FormField>
+          <FormField
+            label={t("agents.snippetDialog.content")}
+            htmlFor="snippet-content"
+          >
             <Textarea
+              id="snippet-content"
               value={draft.content}
               onChange={(e) => setDraft({ ...draft, content: e.target.value })}
               placeholder={t("agents.snippetDialog.contentPlaceholder")}
-              className="min-h-40 resize-y font-mono text-[11.5px] leading-relaxed"
+              className="min-h-40 resize-y font-mono leading-relaxed"
             />
-          </div>
+          </FormField>
         </div>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button size="sm" disabled={!canSave} onClick={() => onSave(draft)}>
+          <Button disabled={!canSave} onClick={() => onSave(draft)}>
             {t("common.save")}
           </Button>
         </DialogFooter>
@@ -671,7 +689,7 @@ function CustomInstructionsBlock({ value }: { value: string }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <Label>{t("agents.customInstructions.label")}</Label>
+        <SectionHeading>{t("agents.customInstructions.label")}</SectionHeading>
         {draft && (
           <Button size="xs" onClick={() => void setCustomInstructions(draft)}>
             {t("common.save")}
@@ -682,16 +700,8 @@ function CustomInstructionsBlock({ value }: { value: string }) {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         placeholder={t("agents.customInstructions.placeholder")}
-        className="min-h-[100px] resize-y bg-card/60 font-sans text-[12px] leading-relaxed border border-border"
+        className="min-h-[100px] resize-y bg-card/60 font-sans leading-relaxed border border-border"
       />
     </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }

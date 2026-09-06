@@ -3,8 +3,8 @@
  * 服务端发现结果保持临时，只有用户明确添加的模型才写入设置。
  */
 
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import {
   Popover,
   PopoverContent,
@@ -153,10 +153,7 @@ export function ProviderModelPicker({ connection, models, onChange }: Props) {
   return (
     <Popover onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          className="h-8 flex-1 justify-between gap-2 px-2.5 text-[11.5px]"
-        >
+        <Button variant="outline" className="flex-1 justify-between px-2.5">
           <span className="truncate">
             {models.length > 0
               ? t("models.catalog.configuredCount", { count: models.length })
@@ -168,7 +165,7 @@ export function ProviderModelPicker({ connection, models, onChange }: Props) {
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="w-80 max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-xl p-0"
+        className="w-80 max-w-[calc(100vw-1rem)] gap-0 overflow-hidden rounded-lg p-0"
       >
         <div className="flex items-center gap-1.5 border-b border-border/60 p-2">
           <Input
@@ -181,18 +178,17 @@ export function ProviderModelPicker({ connection, models, onChange }: Props) {
             }}
             placeholder={t("models.catalog.searchOrEnter")}
             spellCheck={false}
-            className="h-7 flex-1 font-mono text-[11px]"
+            className="h-7 flex-1 font-mono"
           />
           <Button
             type="button"
-            size="icon"
+            size="icon-sm"
             variant="ghost"
             onClick={() => void load(true)}
             disabled={
               !connection || status === "loading" || status === "refreshing"
             }
             title={t("models.catalog.refresh")}
-            className="size-7"
           >
             {status === "loading" || status === "refreshing" ? (
               <Spinner className="size-3" />
@@ -361,7 +357,7 @@ function CatalogMessage({
   return (
     <div
       className={cn(
-        "px-3 py-3 text-[10.5px] text-muted-foreground",
+        "px-3 py-3 text-[11px] text-muted-foreground",
         destructive && "text-destructive",
       )}
     >

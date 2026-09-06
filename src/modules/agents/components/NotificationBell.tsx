@@ -5,7 +5,7 @@
 
 import { ChannelStatusRows } from "@/modules/channels/components/ChannelStatusRows";
 import { useChannelsView } from "@/modules/channels/client";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   Popover,
   PopoverContent,
@@ -23,10 +23,13 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AgentIcon } from "../lib/agentIcon";
-import { displayAgent } from "../lib/format";
-import type { AgentNotification, AgentStatus } from "../lib/types";
-import { useAgentStore } from "../store/agentStore";
+import { AgentIcon } from "@/modules/agents/lib/agentIcon";
+import { displayAgent } from "@/modules/agents/lib/format";
+import type {
+  AgentNotification,
+  AgentStatus,
+} from "@/modules/agents/lib/types";
+import { useAgentStore } from "@/modules/agents/store/agentStore";
 
 type Props = {
   onActivate: (tabId: number) => void;
@@ -261,8 +264,8 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          size="icon"
-          className="relative size-7 shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          size="icon-sm"
+          className="relative shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
           title={t("bell.title")}
         >
           <HugeiconsIcon

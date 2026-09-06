@@ -4,7 +4,7 @@
  */
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import type { AiDiffStatus } from "@/modules/workbench";
 import { presentableDiff, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
@@ -18,9 +18,12 @@ import {
   buildSharedExtensions,
   DEFAULT_INDENT,
   languageCompartment,
-} from "./lib/extensions";
-import { resolveLanguage, resolveLanguageSync } from "./lib/languageResolver";
-import { useEditorThemeExt } from "./lib/useEditorThemeExt";
+} from "@/modules/editor/lib/extensions";
+import {
+  resolveLanguage,
+  resolveLanguageSync,
+} from "@/modules/editor/lib/languageResolver";
+import { useEditorThemeExt } from "@/modules/editor/lib/useEditorThemeExt";
 
 type Props = {
   path: string;
@@ -167,31 +170,17 @@ export function AiDiffPane({
             {path}
           </span>
           <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] tabular-nums">
-            <span className="text-success">
-              +{stats.added}
-            </span>
-            <span className="text-destructive">
-              −{stats.removed}
-            </span>
+            <span className="text-success">+{stats.added}</span>
+            <span className="text-destructive">−{stats.removed}</span>
           </span>
         </div>
         {status === "pending" ? (
           <div className="flex shrink-0 items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="default"
-              onClick={onAccept}
-              className="h-7 gap-1.5"
-            >
+            <Button size="sm" variant="default" onClick={onAccept}>
               <HugeiconsIcon icon={Tick02Icon} size={13} strokeWidth={2} />
               {t("accept")}
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onReject}
-              className="h-7 gap-1.5"
-            >
+            <Button size="sm" variant="ghost" onClick={onReject}>
               <HugeiconsIcon icon={Cancel01Icon} size={13} strokeWidth={2} />
               {t("reject")}
             </Button>

@@ -284,6 +284,9 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 
 ### UI 与路径约定
 
+- 界面样式统一遵循 `docs/contributing/ui-style.md`。业务 Button、Input、Textarea、Select、Dialog 和 AlertDialog 从 `@/components/controls/` 导入，使用公共默认字号、圆角、焦点和动效，不在页面中重复覆盖。菜单触发器和设置导航沿用无额外焦点边框的交互，不在菜单关闭恢复焦点时留下描边或光晕。
+- 设置页与其他业务模块共享 `components/layout/` 和 `components/settings/` 的标题、字段和设置分组。组间距使用 `gap-section`，字段间距使用 `gap-field`；父容器拥有间距，普通设置采用组内分隔行，独立业务实体保留卡片。
+
 - `src/components/ui/` 由 shadcn/ui 管理，`src/components/ai-elements/` 由 AI Elements registry 管理，不要手工修改生成代码。
 - 业务代码中的 Dropdown Menu 和 Context Menu 统一从 `src/components/menu/` 导入，默认使用紧凑桌面密度；只有 registry 包装层可以直接导入对应的 `src/components/ui/` 生成组件。
 - 业务代码中的 Select 统一从 `src/components/controls/select.tsx` 导入；包装层默认使用 12px 字号、32px 触发器高度和紧凑菜单行高，调用方只声明不同于默认值的尺寸或样式。只有该项目级包装层可以直接导入 `src/components/ui/select.tsx`。
@@ -326,4 +329,5 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/contributing/testing.md`：测试约定和核心子系统不变量
 - `docs/contributing/public-release.md`：public 低频发布、选择性重放和同步检查点流程
 - `docs/contributing/themes.md`：主题字段、Modern 基准、透明度规则和新增主题流程
+- `docs/contributing/ui-style.md`：紧凑桌面 UI、公共控件入口、文字层级、间距和动效规范
 - `docs/contributing/ui-runtime-debugging.md`：复杂 UI 的运行时调试和回归验证

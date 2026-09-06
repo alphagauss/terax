@@ -3,7 +3,8 @@
  * 外观选项的状态切换使用项目控制级动效，其他设置行为保持不变。
  */
 
-import { Button } from "@/components/ui/button";
+import { Input } from "@/components/controls/input";
+import { Button } from "@/components/controls/button";
 import {
   Select,
   SelectContent,
@@ -65,8 +66,9 @@ import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { NetworkSettings } from "@/settings/components/NetworkSettings";
-import { SectionHeader } from "@/settings/components/SectionHeader";
-import { SettingRow } from "@/settings/components/SettingRow";
+import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
+import { SettingGroup } from "@/components/settings/SettingGroup";
+import { SettingRow } from "@/components/settings/SettingRow";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -222,14 +224,14 @@ export function GeneralSection() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <SectionHeader
+    <div className="flex flex-col gap-section">
+      <PageHeader
         title={t("general.header.title")}
         description={t("general.header.description")}
       />
 
       <div className="flex flex-col gap-2">
-        <Label>{t("general.appearance.label")}</Label>
+        <SectionHeading>{t("general.appearance.label")}</SectionHeading>
         <div className="grid grid-cols-3 gap-2">
           {APPEARANCE.map((o) => (
             <button
@@ -237,16 +239,14 @@ export function GeneralSection() {
               type="button"
               onClick={() => setMode(o.id)}
               className={cn(
-                "group flex h-20 flex-col items-center justify-center gap-1.5 rounded-lg border bg-card transition-[color,background-color,border-color,box-shadow] duration-control ease-standard",
+                "group flex h-12 items-center justify-center gap-2 rounded-lg border bg-card transition-[color,background-color,border-color,box-shadow] duration-control ease-standard focus-visible:outline-none focus-visible:ring-0",
                 mode === o.id
                   ? "border-foreground/60 ring-1 ring-foreground/20"
                   : "border-border/60 hover:border-border",
               )}
             >
               <HugeiconsIcon icon={o.icon} size={18} strokeWidth={1.5} />
-              <span className="text-[11.5px]">
-                {t(`general.appearance.${o.id}`)}
-              </span>
+              <span className="text-xs">{t(`general.appearance.${o.id}`)}</span>
             </button>
           ))}
         </div>
@@ -260,8 +260,7 @@ export function GeneralSection() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.language.label")}</Label>
+      <SettingGroup>
         <SettingRow
           title={t("general.language.label")}
           description={t("general.language.description")}
@@ -282,13 +281,13 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </SettingRow>
-      </div>
+      </SettingGroup>
 
       <div className="flex flex-col gap-2">
-        <Label>{t("general.zoom.label")}</Label>
+        <SectionHeading>{t("general.zoom.label")}</SectionHeading>
         <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-[11.5px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {t("general.zoom.uiZoomLevel")}
             </span>
             <span className="tabular-nums text-[11px] text-muted-foreground">
@@ -307,8 +306,7 @@ export function GeneralSection() {
 
       <NetworkSettings />
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.explorer.label")}</Label>
+      <SettingGroup title={t("general.explorer.label")}>
         <SettingRow
           title={t("general.explorer.showHidden.title")}
           description={t("general.explorer.showHidden.description")}
@@ -327,10 +325,9 @@ export function GeneralSection() {
             onCheckedChange={(v) => void setExplorerGitDecorations(v)}
           />
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.sourceControl.label")}</Label>
+      <SettingGroup title={t("general.sourceControl.label")}>
         <SettingRow
           title={t("general.sourceControl.showUndoCommit.title")}
           description={t("general.sourceControl.showUndoCommit.description")}
@@ -342,10 +339,9 @@ export function GeneralSection() {
             }
           />
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.terminal.label")}</Label>
+      <SettingGroup title={t("general.terminal.label")}>
         <SettingRow
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -532,10 +528,9 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.agents.label")}</Label>
+      <SettingGroup title={t("general.agents.label")}>
         <SettingRow
           title={t("general.agents.notifications.title")}
           description={t("general.agents.notifications.description")}
@@ -563,67 +558,62 @@ export function GeneralSection() {
             />
           </div>
         </SettingRow>
-      </div>
+      </SettingGroup>
 
-      <div className="flex flex-col gap-2">
-        <Label>{t("general.startup.label")}</Label>
-        <div className="flex flex-col gap-2">
-          <SettingRow
-            title={t("general.startup.launchAtLogin.title")}
-            description={t("general.startup.launchAtLogin.description")}
+      <SettingGroup title={t("general.startup.label")}>
+        <SettingRow
+          title={t("general.startup.launchAtLogin.title")}
+          description={t("general.startup.launchAtLogin.description")}
+        >
+          <Switch
+            checked={autostart}
+            onCheckedChange={(v) => void onToggleAutostart(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title={t("general.startup.restoreWindow.title")}
+          description={t("general.startup.restoreWindow.description")}
+        >
+          <Switch
+            checked={restoreWindowState}
+            onCheckedChange={(v) => void setRestoreWindowState(v)}
+          />
+        </SettingRow>
+        <SettingRow
+          title={t("general.startup.workspaceWindows.title")}
+          description={t("general.startup.workspaceWindows.description")}
+        >
+          <Select
+            value={workspaceWindowMode}
+            onValueChange={(v) =>
+              void setWorkspaceWindowMode(
+                v === "multiple" ? "multiple" : "single",
+              )
+            }
           >
-            <Switch
-              checked={autostart}
-              onCheckedChange={(v) => void onToggleAutostart(v)}
-            />
-          </SettingRow>
-          <SettingRow
-            title={t("general.startup.restoreWindow.title")}
-            description={t("general.startup.restoreWindow.description")}
-          >
-            <Switch
-              checked={restoreWindowState}
-              onCheckedChange={(v) => void setRestoreWindowState(v)}
-            />
-          </SettingRow>
-          <SettingRow
-            title={t("general.startup.workspaceWindows.title")}
-            description={t("general.startup.workspaceWindows.description")}
-          >
-            <Select
-              value={workspaceWindowMode}
-              onValueChange={(v) =>
-                void setWorkspaceWindowMode(
-                  v === "multiple" ? "multiple" : "single",
-                )
-              }
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="single">
-                  {t("general.startup.workspaceWindows.single")}
-                </SelectItem>
-                <SelectItem value="multiple">
-                  {t("general.startup.workspaceWindows.multiple")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </SettingRow>
-        </div>
-      </div>
+            <SelectTrigger className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="single">
+                {t("general.startup.workspaceWindows.single")}
+              </SelectItem>
+              <SelectItem value="multiple">
+                {t("general.startup.workspaceWindows.multiple")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </SettingGroup>
 
       {IS_WINDOWS ? (
-        <div className="flex flex-col gap-2">
-          <Label>{t("general.openWith.label")}</Label>
+        <SettingGroup title={t("general.openWith.label")}>
           <SettingRow
             title={t("general.openWith.fileAssociations.title")}
             description={t("general.openWith.fileAssociations.description")}
           >
             <div className="flex gap-2">
               <Button
-                size="sm"
                 onClick={() => void registerOpenWith()}
                 disabled={openWithAction !== null}
               >
@@ -632,7 +622,6 @@ export function GeneralSection() {
                   : t("general.openWith.register")}
               </Button>
               <Button
-                size="sm"
                 variant="outline"
                 onClick={() => void unregisterOpenWith()}
                 disabled={openWithAction !== null}
@@ -643,17 +632,9 @@ export function GeneralSection() {
               </Button>
             </div>
           </SettingRow>
-        </div>
+        </SettingGroup>
       ) : null}
     </div>
-  );
-}
-
-function Label({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-[11px] font-medium tracking-tight text-muted-foreground">
-      {children}
-    </span>
   );
 }
 
@@ -684,7 +665,7 @@ function FontFamilyInput({
       title={t("general.terminal.fontFamily.title")}
       description={t("general.terminal.fontFamily.description")}
     >
-      <input
+      <Input
         type="text"
         value={draft}
         placeholder={t("general.terminal.fontFamily.placeholder")}
@@ -693,7 +674,7 @@ function FontFamilyInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="h-8 w-48 rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-foreground/40"
+        className="w-48 font-mono"
       />
     </SettingRow>
   );

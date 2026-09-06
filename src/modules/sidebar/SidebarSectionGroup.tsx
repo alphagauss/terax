@@ -3,7 +3,7 @@
  * 分区标题和辅助说明在紧凑布局下保持可读。
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   animateResizableLayout,
   ResizableHandle,
@@ -32,7 +32,7 @@ import {
   normalizeSidebarSectionLayout,
   SIDEBAR_SECTION_HEADER_HEIGHT,
   type SidebarSectionLayout,
-} from "./sectionLayout";
+} from "@/modules/sidebar/sectionLayout";
 
 export type SidebarSectionRenderState = {
   expanded: boolean;
@@ -295,6 +295,7 @@ function SidebarSectionHeader({
   );
 }
 
+/** 渲染分区标题栏的紧凑操作，按钮尺寸与键盘焦点沿用公共控件。 */
 export function SidebarSectionAction({
   label,
   disabled,
@@ -311,12 +312,12 @@ export function SidebarSectionAction({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="icon-sm"
+          size="icon-xs"
           variant="ghost"
           aria-label={label}
           disabled={disabled}
           onClick={onClick}
-          className="size-5 cursor-pointer rounded text-muted-foreground hover:text-foreground disabled:cursor-not-allowed"
+          className="cursor-pointer text-muted-foreground hover:text-foreground disabled:cursor-not-allowed"
         >
           {children}
         </Button>

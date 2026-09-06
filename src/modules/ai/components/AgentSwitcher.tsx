@@ -10,7 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
@@ -33,9 +33,9 @@ import {
   agentDisplayName,
   findAgent,
   MAIN_AGENT,
-} from "../lib/agents";
-import { useAgentsStore } from "../store/agentsStore";
-import { useChatStore } from "../store/chatStore";
+} from "@/modules/ai/lib/agents";
+import { useAgentsStore } from "@/modules/ai/store/agentsStore";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 
 const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   coder: CodeIcon,
@@ -105,7 +105,7 @@ export function AgentSwitcher() {
         <Button
           size="xs"
           variant="outline"
-          className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+          className="flex items-center border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
           title={t("trigger.title", { name: agentDisplayName(active) })}
         >
           {triggerContent}

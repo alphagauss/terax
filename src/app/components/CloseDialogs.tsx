@@ -5,7 +5,7 @@
  */
 
 import type { AppCloseDialogState } from "@/app/hooks/useAppCloseGuard";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/controls/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +15,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@/components/controls/alert-dialog";
 import type { Tab } from "@/modules/workbench";
 import { useTranslation } from "react-i18next";
 
@@ -208,14 +208,10 @@ export function CloseDialogs({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              {t("common:cancel")}
-            </AlertDialogCancel>
+            <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
             <Button
               variant={
-                pendingAppClose?.kind === "blocker"
-                  ? "default"
-                  : "destructive"
+                pendingAppClose?.kind === "blocker" ? "default" : "destructive"
               }
               onClick={onConfirmAppClose}
             >

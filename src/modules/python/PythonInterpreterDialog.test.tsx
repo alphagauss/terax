@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 
-vi.mock("@/components/ui/button", () => ({
+vi.mock("@/components/controls/button", () => ({
   Button: ({ children, ...props }: { children: ReactNode }) =>
     createElement("button", { type: "button", ...props }, children),
 }));

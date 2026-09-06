@@ -1,4 +1,8 @@
-import { Button } from "@/components/ui/button";
+/**
+ * 本文件实现新建编辑器文件的对话框。
+ * 收集文件名并交由所属编辑器流程处理，使用公共控件统一输入与操作反馈。
+ */
+import { Button } from "@/components/controls/button";
 import {
   Dialog,
   DialogContent,
@@ -6,8 +10,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { File02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -27,6 +31,7 @@ function joinPath(parent: string, name: string): string {
   return `${parent}/${name}`;
 }
 
+/** 收集新文件信息并在确认后通知调用方，不自行创建编辑器页面。 */
 export function NewEditorDialog({
   open,
   onOpenChange,

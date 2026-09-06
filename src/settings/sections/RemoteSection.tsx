@@ -3,6 +3,7 @@
  * 分组只用于管理和导航；隧道仍由主 SSH Workspace 管理并随配置保存。
  */
 
+import { FormField } from "@/components/layout/FormField";
 import {
   Select,
   SelectContent,
@@ -26,8 +27,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Collapsible,
@@ -41,8 +42,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+} from "@/components/controls/dialog";
+import { Input } from "@/components/controls/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { remoteNative, useRemoteStore } from "@/modules/remote";
@@ -83,10 +84,9 @@ import {
   ConnectionSettingsList,
   ConnectionSettingsItem,
   ConnectionSettingsDetail,
-  ConnectionSettingsField as Field,
   ConnectionSettingsActions,
 } from "@/settings/components/ConnectionSettingsLayout";
-import { SectionHeader } from "@/settings/components/SectionHeader";
+import { PageHeader } from "@/components/layout/PageHeader";
 
 const NUMBER_INPUT_CLASS =
   "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
@@ -481,8 +481,8 @@ export function RemoteSection() {
   ) => setForm((current) => ({ ...current, [key]: value }));
 
   return (
-    <div className="flex min-w-0 flex-col gap-5">
-      <SectionHeader
+    <div className="flex min-w-0 flex-col gap-section">
+      <PageHeader
         title={t("remote.header.title")}
         description={t("remote.header.description")}
       />
@@ -492,7 +492,6 @@ export function RemoteSection() {
           toolbar={
             <>
               <Button
-                size="sm"
                 className="min-w-0 flex-1"
                 disabled={busy}
                 onClick={() => startNew()}
@@ -672,7 +671,7 @@ export function RemoteSection() {
           </div>
 
           <div className="grid items-start gap-3 sm:grid-cols-2">
-            <Field label={t("remote.fields.name")}>
+            <FormField label={t("remote.fields.name")}>
               <Input
                 value={form.name}
                 onChange={(event) => update("name", event.target.value)}
@@ -681,8 +680,8 @@ export function RemoteSection() {
               <p className="text-[11px] text-muted-foreground">
                 {t("remote.hints.name")}
               </p>
-            </Field>
-            <Field label={t("remote.fields.group")}>
+            </FormField>
+            <FormField label={t("remote.fields.group")}>
               <Select
                 value={form.groupId}
                 onValueChange={(value) => update("groupId", value)}
@@ -705,16 +704,16 @@ export function RemoteSection() {
                   ))}
                 </SelectContent>
               </Select>
-            </Field>
-            <Field label={t("remote.fields.host")}>
+            </FormField>
+            <FormField label={t("remote.fields.host")}>
               <Input
                 value={form.host}
                 onChange={(event) => update("host", event.target.value)}
                 placeholder={t("remote.placeholders.host")}
                 spellCheck={false}
               />
-            </Field>
-            <Field label={t("remote.fields.port")}>
+            </FormField>
+            <FormField label={t("remote.fields.port")}>
               <Input
                 type="number"
                 min={1}
@@ -724,15 +723,15 @@ export function RemoteSection() {
                 className={NUMBER_INPUT_CLASS}
                 onWheel={blurNumberInputOnWheel}
               />
-            </Field>
-            <Field label={t("remote.fields.username")}>
+            </FormField>
+            <FormField label={t("remote.fields.username")}>
               <Input
                 value={form.username}
                 onChange={(event) => update("username", event.target.value)}
                 autoComplete="username"
               />
-            </Field>
-            <Field label={t("remote.fields.authentication")}>
+            </FormField>
+            <FormField label={t("remote.fields.authentication")}>
               <Select
                 value={form.authMethod}
                 onValueChange={(value) =>
@@ -758,9 +757,9 @@ export function RemoteSection() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-            </Field>
+            </FormField>
             {form.authMethod === "private_key" ? (
-              <Field
+              <FormField
                 label={t("remote.fields.identityFile")}
                 className="sm:col-span-2"
               >
@@ -772,10 +771,10 @@ export function RemoteSection() {
                   placeholder="~/.ssh/id_ed25519"
                   spellCheck={false}
                 />
-              </Field>
+              </FormField>
             ) : null}
             {form.authMethod !== "agent" ? (
-              <Field
+              <FormField
                 label={
                   form.authMethod === "password"
                     ? t("remote.fields.password")
@@ -801,7 +800,7 @@ export function RemoteSection() {
                   onCheckedChange={(value) => update("rememberSecret", value)}
                   label={t("remote.secret.remember")}
                 />
-              </Field>
+              </FormField>
             ) : null}
           </div>
 
@@ -829,15 +828,15 @@ export function RemoteSection() {
             </CollapsibleTrigger>
             <CollapsibleContent className="terax-collapsible-content">
               <div className="grid gap-3 p-3 sm:grid-cols-2">
-                <Field label={t("remote.fields.rootPath")}>
+                <FormField label={t("remote.fields.rootPath")}>
                   <Input
                     value={form.rootPath}
                     onChange={(event) => update("rootPath", event.target.value)}
                     placeholder="~"
                     spellCheck={false}
                   />
-                </Field>
-                <Field
+                </FormField>
+                <FormField
                   label={t("settings:network.route")}
                   className="sm:col-span-2"
                 >
@@ -870,9 +869,9 @@ export function RemoteSection() {
                   <p className="text-xs text-muted-foreground">
                     {t("settings:network.sshHint")}
                   </p>
-                </Field>
+                </FormField>
                 {form.proxyMode === "custom" && (
-                  <Field
+                  <FormField
                     label={t("remote.fields.proxyUrl")}
                     className="sm:col-span-2"
                   >
@@ -884,10 +883,10 @@ export function RemoteSection() {
                       placeholder={t("remote.placeholders.proxyUrl")}
                       spellCheck={false}
                     />
-                  </Field>
+                  </FormField>
                 )}
                 {form.proxyMode === "custom" && form.proxyUrl.trim() ? (
-                  <Field
+                  <FormField
                     label={t("remote.fields.proxyPassword")}
                     className="sm:col-span-2"
                   >
@@ -911,7 +910,7 @@ export function RemoteSection() {
                       }
                       label={t("remote.secret.rememberProxy")}
                     />
-                  </Field>
+                  </FormField>
                 ) : null}
                 <div className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2 sm:col-span-2">
                   <Checkbox
@@ -956,7 +955,6 @@ export function RemoteSection() {
           <ConnectionSettingsActions>
             {selected ? (
               <Button
-                size="sm"
                 variant="ghost"
                 className="text-muted-foreground hover:text-destructive"
                 disabled={busy}
@@ -967,14 +965,13 @@ export function RemoteSection() {
             ) : null}
             <div className="flex-1" />
             <Button
-              size="sm"
               variant="outline"
               disabled={busy}
               onClick={() => void openWorkspace()}
             >
               {t("remote.actions.openWorkspace")}
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => void save()}>
+            <Button disabled={busy} onClick={() => void save()}>
               <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={2} />
               {t("common.save")}
             </Button>
@@ -991,7 +988,7 @@ export function RemoteSection() {
           }
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sm:max-w-sm">
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -1036,14 +1033,13 @@ export function RemoteSection() {
             <DialogFooter className="mt-5">
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
                 disabled={busy}
                 onClick={() => setGroupEditor(null)}
               >
                 {t("common.cancel")}
               </Button>
-              <Button type="submit" size="sm" disabled={busy}>
+              <Button type="submit" disabled={busy}>
                 {t("common.save")}
               </Button>
             </DialogFooter>
