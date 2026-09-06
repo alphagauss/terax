@@ -1,14 +1,13 @@
 {
   "title": "Channels",
-  "description": "通过即时通信应用与 Terax 聊天。连接由 Local 永久主窗口保持运行。",
+  "description": "通过即时通信应用与 Terax 聊天。",
   "defaults": "每个连接独占一个会话，工作目录为 ~/.terax/workspace，使用主 Agent、默认模型和完全访问权限。聊天记录可在 AI 侧栏查看。",
   "localOnly": "连接由 Local 永久主窗口统一管理。",
   "openLocal": "打开 Local 主窗口",
   "loading": "正在连接 Local 主窗口…",
-  "empty": "添加微信并扫码，即可开始连接。",
+  "empty": "还没有连接。",
   "namePlaceholder": "连接名称",
-  "defaultName": "我的微信",
-  "addWeixin": "添加微信",
+  "defaultName": "微信 {{number}}",
   "weixin": "个人微信",
   "enable": "启用 {{name}}",
   "login": "扫码连接",
@@ -53,11 +52,20 @@
     "interrupted": "部分消息在连接停止时被中断，未自动重新执行，请重新发送。",
     "delivery": "回复发送失败，完整结果仍可在 Channel 会话中查看。",
     "account-mismatch": "此连接已绑定另一个微信账号，请为新账号创建连接。",
-    "duplicate-account": "此微信账号已存在连接。"
+    "duplicate-account": "此微信账号已存在连接。",
+    "name": "名称需为 1–80 个字符。",
+    "route-save": "网络路由保存失败，其他已提交配置已保留。请重试保存。"
   },
   "busyMessageMode": {
     "label": "运行中收到消息时",
     "steer": "引导当前任务",
     "queue": "等待本轮完成"
-  }
+  },
+  "add": "添加连接",
+  "save": "保存",
+  "enabled": "启用",
+  "emptyDetail": "添加连接后，在这里完成授权和配置。",
+  "refreshQr": "刷新二维码",
+  "removeConfirm": "移除“{{name}}”？已有聊天记录会保留。",
+  "preparingQr": "正在获取二维码…"
 }

@@ -1,37 +1,53 @@
 /**
- * 本文件实现设置中的 Channels 管理页。
- * 设置 WebView 仅订阅主窗口快照和发送管理请求，二维码渲染按需加载。
+ * 本文件实现 Channels 双栏管理页、平台选择菜单和实例编辑。
+ * 草稿按连接 ID 保留，设置窗口只订阅主窗口并发送管理请求，不拥有连接运行时。
  */
 
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/controls/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import {
   type ChannelAction,
   requestChannels,
   subscribeChannelsView,
   useChannelsView,
 } from "@/modules/channels/client";
-import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
+import {
+  ChannelConnectionEditor,
+  type ChannelDraft,
+} from "@/modules/channels/components/ChannelConnectionEditor";
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
-import type { ChannelSnapshot } from "@/modules/channels/types";
+import type { ChannelConnection } from "@/modules/channels/types";
 import {
   spawnWorkspaceProcess,
   type WorkspaceBootstrap,
 } from "@/modules/workspace-process";
+import {
+  ConnectionSettingsLayout,
+  ConnectionSettingsList,
+  ConnectionSettingsItem,
+  ConnectionSettingsDetail,
+} from "@/settings/components/ConnectionSettingsLayout";
 import { SectionHeader } from "@/settings/components/SectionHeader";
 import { invoke } from "@tauri-apps/api/core";
+import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 展示连接管理与微信授权流程；配置加载失败时禁用新增，避免累积不可见记录。 */
+const CHANNEL_OPTIONS = [
+  { kind: "weixin", labelKey: "weixin", defaultNameKey: "defaultName" },
+] satisfies {
+  kind: ChannelConnection["kind"];
+  labelKey: string;
+  defaultNameKey: string;
+}[];
+
+/** 管理实例草稿与显式保存；运行说明置于内容区底部，长内容按正常文档流延伸。 */
 export function ChannelsSection() {
   const { t } = useTranslation("channels");
   const snapshots = useChannelsView((state) => state.snapshots);
@@ -39,14 +55,24 @@ export function ChannelsSection() {
   const [owner, setOwner] = useState<boolean | null>(null);
   const [ready, setReady] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [name, setName] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, Partial<ChannelDraft>>>(
+    {},
+  );
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loginPendingId, setLoginPendingId] = useState<string | null>(null);
+  const pending = useRef(false);
+  const selected =
+    snapshots.find((item) => item.connection.id === selectedId) ?? snapshots[0];
+  const connection = selected?.connection;
+  const id = connection?.id;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 重试版本用于重新建立服务订阅，清理失效监听。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 重试版本重新建立订阅；卸载只释放监听，不取消主窗口任务。
   useEffect(() => {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
+    setReady(false);
     void invoke<WorkspaceBootstrap>("get_workspace_bootstrap")
       .then(async (bootstrap) => {
         if (disposed) return;
@@ -58,7 +84,8 @@ export function ChannelsSection() {
         else setReady(true);
       })
       .catch(() => {
-        if (!disposed) setError("unavailable");
+        if (!disposed)
+          setErrors((current) => ({ ...current, page: "unavailable" }));
       });
     return () => {
       disposed = true;
@@ -66,306 +93,216 @@ export function ChannelsSection() {
     };
   }, [retry]);
 
-  const run = async (action: ChannelAction) => {
-    if (busy) return;
+  /** 同一设置页一次只提交一组操作，错误归属发起实例，切换选择不会串入其他详情。 */
+  const perform = async (
+    key: string,
+    work: () => Promise<void>,
+  ): Promise<boolean> => {
+    if (pending.current) return false;
+    pending.current = true;
     setBusy(true);
-    setError(null);
+    setErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
     try {
-      await requestChannels(action);
-      if (action.action === "add") setName("");
+      await work();
+      return true;
     } catch (error) {
-      setError(error instanceof Error ? error.message : "unavailable");
+      setErrors((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "unavailable",
+      }));
+      return false;
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   };
 
-  const message = error ?? serviceError;
+  const run = (action: ChannelAction) =>
+    perform("id" in action ? action.id : "page", async () => {
+      if (action.action === "login") setLoginPendingId(action.id);
+      try {
+        await requestChannels(action);
+      } finally {
+        if (action.action === "login") setLoginPendingId(null);
+      }
+    });
+
+  /** 选定平台后保存默认命名实例并进入授权；只打开或关闭菜单不会创建记录。 */
+  const add = async (platform: (typeof CHANNEL_OPTIONS)[number]) => {
+    let createdId: string | undefined;
+    await perform("page", async () => {
+      const names = new Set(snapshots.map((item) => item.connection.name));
+      let number = 1;
+      while (names.has(t(platform.defaultNameKey, { number }))) number++;
+      const existing = new Set(snapshots.map((item) => item.connection.id));
+      const view = await requestChannels({
+        action: "add",
+        kind: platform.kind,
+        name: t(platform.defaultNameKey, { number }),
+      });
+      createdId = view.snapshots.find(
+        (item) => !existing.has(item.connection.id),
+      )?.connection.id;
+      if (!createdId) throw new Error("storage");
+      setSelectedId(createdId);
+    });
+    if (createdId) await run({ action: "login", id: createdId });
+  };
+
+  // 以显式实例身份更新或清除草稿，异步保存完成时不依赖当前选择。
+  const updateDraft = (targetId: string, patch?: Partial<ChannelDraft>) => {
+    setDrafts((current) => {
+      const next = { ...current };
+      if (patch) next[targetId] = { ...next[targetId], ...patch };
+      else delete next[targetId];
+      return next;
+    });
+  };
+
+  const message = errors.page ?? serviceError;
+  const disabled = busy || !ready || Boolean(serviceError);
+  const groups = new Map<string, typeof snapshots>();
+  for (const snapshot of snapshots) {
+    const group = groups.get(snapshot.connection.kind);
+    if (group) group.push(snapshot);
+    else groups.set(snapshot.connection.kind, [snapshot]);
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex min-w-0 flex-1 flex-col gap-5">
       <SectionHeader title={t("title")} description={t("description")} />
       {owner === false ? (
-        <div className="flex flex-col gap-3 text-sm text-muted-foreground">
+        <div className="flex flex-col gap-3 text-[12px] text-muted-foreground">
           <p>{t("localOnly")}</p>
           <Button
             variant="outline"
             className="self-start"
-            onClick={() => {
-              void spawnWorkspaceProcess({ kind: "local" }, "recent").catch(
-                () => setError("unavailable"),
-              );
-            }}
+            onClick={() =>
+              void perform("page", () =>
+                spawnWorkspaceProcess({ kind: "local" }, "recent").then(
+                  () => {},
+                ),
+              )
+            }
           >
             {t("openLocal")}
           </Button>
         </div>
       ) : (
-        <>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            {t("defaults")}
-          </p>
-          <form
-            className="flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void run({
-                action: "add",
-                name: name.trim() || t("defaultName"),
-              });
-            }}
+        <ConnectionSettingsLayout>
+          <ConnectionSettingsList
+            toolbar={
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="w-full text-[12px]"
+                    disabled={disabled}
+                  >
+                    {t("add")}
+                    <HugeiconsIcon
+                      icon={ArrowDown01Icon}
+                      size={12}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="w-[var(--radix-dropdown-menu-trigger-width)]"
+                >
+                  {CHANNEL_OPTIONS.map((platform) => (
+                    <DropdownMenuItem
+                      key={platform.kind}
+                      disabled={disabled}
+                      onSelect={() => void add(platform)}
+                    >
+                      {t(platform.labelKey)}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            }
           >
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              maxLength={80}
-              placeholder={t("namePlaceholder")}
-              aria-label={t("namePlaceholder")}
-              disabled={!ready || busy || Boolean(serviceError)}
-            />
-            <Button
-              variant="outline"
-              type="submit"
-              disabled={!ready || busy || Boolean(serviceError)}
-            >
-              {t("addWeixin")}
-            </Button>
-          </form>
-          {!ready && !message ? (
-            <p className="text-sm text-muted-foreground">{t("loading")}</p>
-          ) : null}
-          {ready && !snapshots.length ? (
-            <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              {t("empty")}
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-3">
-            {snapshots.map((snapshot) => (
-              <ConnectionCard
-                key={snapshot.connection.id}
-                snapshot={snapshot}
-                disabled={busy}
-                run={run}
-              />
+            {[...groups].map(([kind, members]) => (
+              <div key={kind} className="mb-2">
+                <div className="flex items-center justify-between px-2.5 py-2 text-[12px] font-medium text-muted-foreground">
+                  <span>{t(kind)}</span>
+                  <span>{members.length}</span>
+                </div>
+                {members.map((snapshot) => (
+                  <ConnectionSettingsItem
+                    key={snapshot.connection.id}
+                    selected={id === snapshot.connection.id}
+                    onClick={() => setSelectedId(snapshot.connection.id)}
+                  >
+                    <span className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="truncate text-[13px] font-medium">
+                        {snapshot.connection.name}
+                      </span>
+                      <ConnectionStatus snapshot={snapshot} />
+                    </span>
+                  </ConnectionSettingsItem>
+                ))}
+              </div>
             ))}
-          </div>
-        </>
+            {!snapshots.length ? (
+              <p className="px-2.5 py-4 text-[12px] text-muted-foreground">
+                {t(ready ? "empty" : "loading")}
+              </p>
+            ) : null}
+          </ConnectionSettingsList>
+          <ConnectionSettingsDetail
+            selectionKey={id ?? "empty"}
+            aria-busy={busy}
+          >
+            {selected ? (
+              <ChannelConnectionEditor
+                snapshot={selected}
+                edits={drafts[selected.connection.id]}
+                loginPending={loginPendingId === selected.connection.id}
+                disabled={disabled}
+                error={errors[selected.connection.id]}
+                updateDraft={updateDraft}
+                run={run}
+                perform={perform}
+              />
+            ) : (
+              <p className="py-8 text-center text-[12px] text-muted-foreground">
+                {t(ready ? "emptyDetail" : "loading")}
+              </p>
+            )}
+          </ConnectionSettingsDetail>
+        </ConnectionSettingsLayout>
       )}
-      {!ready && owner !== false && message ? (
-        <Button
-          variant="outline"
-          className="self-start"
-          onClick={() => {
-            setError(null);
-            setRetry((value) => value + 1);
-          }}
-        >
-          {t("reconnect")}
-        </Button>
-      ) : null}
       {message ? (
-        <p role="alert" className="text-sm text-destructive">
-          {t(`errors.${message}`, { defaultValue: t("errors.unavailable") })}
+        <div className="flex items-center gap-3">
+          <p role="alert" className="text-[12px] text-destructive">
+            {t(`errors.${message}`, { defaultValue: t("errors.unavailable") })}
+          </p>
+          {!ready && owner !== false ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setErrors((current) => ({ ...current, page: undefined }));
+                setRetry((value) => value + 1);
+              }}
+            >
+              {t("reconnect")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {owner !== false ? (
+        <p className="mt-auto text-[11px] leading-relaxed text-muted-foreground">
+          {t("defaults")}
         </p>
       ) : null}
     </div>
-  );
-}
-
-/** 展示单个连接的运行状态、平台操作与独立网络路由，删除时保留聊天历史。 */
-function ConnectionCard({
-  snapshot,
-  disabled,
-  run,
-}: {
-  snapshot: ChannelSnapshot;
-  disabled: boolean;
-  run: (action: ChannelAction) => Promise<void>;
-}) {
-  const { t } = useTranslation("channels");
-  const [code, setCode] = useState("");
-  const { connection, login } = snapshot;
-  return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-sm font-medium">
-            {connection.name}
-          </span>
-          <span className="truncate text-xs text-muted-foreground">
-            {t("weixin")}
-            {connection.accountId ? ` · ${connection.accountId}` : ""}
-          </span>
-          <ConnectionStatus snapshot={snapshot} />
-        </div>
-        <Switch
-          checked={connection.enabled}
-          disabled={disabled || !connection.accountId}
-          aria-label={t("enable", { name: connection.name })}
-          onCheckedChange={(enabled) => {
-            void run({ action: "enable", id: connection.id, enabled });
-          }}
-        />
-      </div>
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-muted-foreground">
-          {t("busyMessageMode.label")}
-        </span>
-        <Select
-          value={connection.busyMessageMode}
-          disabled={disabled || snapshot.busy}
-          onValueChange={(mode) => {
-            if (mode === "steer" || mode === "queue")
-              void run({
-                action: "busy-message-mode",
-                id: connection.id,
-                mode,
-              });
-          }}
-        >
-          <SelectTrigger
-            aria-label={t("busyMessageMode.label")}
-            className="w-auto"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="steer">{t("busyMessageMode.steer")}</SelectItem>
-            <SelectItem value="queue">{t("busyMessageMode.queue")}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <NetworkRouteSelect
-        target={`channel:${connection.id}`}
-        disabled={disabled}
-      />
-      {snapshot.issue ? (
-        <p className="text-xs text-destructive">
-          {t(`errors.${snapshot.issue}`)}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={disabled || Boolean(login && login.state !== "expired")}
-          onClick={() => {
-            void run({ action: "login", id: connection.id });
-          }}
-        >
-          {connection.accountId ? t("loginAgain") : t("login")}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={disabled}
-          onClick={() => {
-            void run({ action: "open", id: connection.id });
-          }}
-        >
-          {t("openSession")}
-        </Button>
-        {connection.enabled ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled || snapshot.busy}
-            onClick={() => {
-              void run({ action: "reconnect", id: connection.id });
-            }}
-          >
-            {t("reconnect")}
-          </Button>
-        ) : null}
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={disabled || connection.enabled || snapshot.busy}
-          className="ml-auto text-muted-foreground"
-          title={t("removeHint")}
-          onClick={() => {
-            void run({ action: "remove", id: connection.id });
-          }}
-        >
-          {t("remove")}
-        </Button>
-      </div>
-      {login ? (
-        <div className="flex flex-col items-center gap-3 rounded-md bg-muted/40 p-4">
-          {login.state !== "expired" ? (
-            <LoginQr content={login.qrContent} />
-          ) : null}
-          <p className="text-center text-xs text-muted-foreground">
-            {t(`loginState.${login.state}`)}
-          </p>
-          {login.state === "verify" ? (
-            <form
-              className="flex w-full max-w-64 gap-2"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void run({ action: "verify", id: connection.id, code }).then(
-                  () => setCode(""),
-                );
-              }}
-            >
-              <Input
-                value={code}
-                inputMode="numeric"
-                maxLength={8}
-                onChange={(event) =>
-                  setCode(event.target.value.replace(/\D/g, ""))
-                }
-                placeholder={t("verification")}
-                aria-label={t("verification")}
-              />
-              <Button size="sm" type="submit" disabled={disabled || !code}>
-                {t("confirm")}
-              </Button>
-            </form>
-          ) : null}
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={disabled}
-            onClick={() => {
-              void run({ action: "cancel-login", id: connection.id });
-            }}
-          >
-            {t("cancel")}
-          </Button>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-/** 在本地生成二维码，扫码内容不会发送到第三方图片服务。 */
-function LoginQr({ content }: { content: string }) {
-  const { t } = useTranslation("channels");
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    let disposed = false;
-    setFailed(false);
-    void import("qrcode")
-      .then(async (qr) => {
-        if (!disposed && canvas.current)
-          await qr.toCanvas(canvas.current, content, { width: 220, margin: 3 });
-      })
-      .catch(() => {
-        if (!disposed) setFailed(true);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [content]);
-  return failed ? (
-    <p className="text-xs text-destructive">{t("errors.protocol")}</p>
-  ) : (
-    <canvas
-      ref={canvas}
-      role="img"
-      aria-label={t("qrLabel")}
-      className="rounded-md"
-    />
   );
 }

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import type { ChannelSnapshot } from "@/modules/channels/types";
 import { useTranslation } from "react-i18next";
 
-/** 在设置和通知入口使用相同的连接状态描述。 */
+/** 在设置和通知入口使用相同描述，未绑定账号的实例明确提示需要登录。 */
 export function ConnectionStatus({ snapshot }: { snapshot: ChannelSnapshot }) {
   const { t } = useTranslation("channels");
   return (
@@ -23,7 +23,9 @@ export function ConnectionStatus({ snapshot }: { snapshot: ChannelSnapshot }) {
         )}
       />
       <span>
-        {t(`status.${snapshot.status}`)}
+        {t(
+          `status.${snapshot.connection.accountId ? snapshot.status : "login-required"}`,
+        )}
         {snapshot.busy ? ` · ${t("busy")}` : ""}
         {snapshot.queued ? ` · ${t("queued", { count: snapshot.queued })}` : ""}
       </span>

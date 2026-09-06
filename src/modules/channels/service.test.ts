@@ -172,13 +172,17 @@ it("配置无效时拒绝新增且不写入，修正当前记录后可正常新�
   try {
     expect(useChannelsView.getState().error).toBe("configuration");
     await expect(
-      requestChannels({ action: "add", name: "test" }),
+      requestChannels({ action: "add", kind: "weixin", name: "test" }),
     ).rejects.toThrow("configuration");
     expect(io.stores.get("channels")).toEqual({ [io.connection.id]: invalid });
     io.stores.set("channels", {
       [io.connection.id]: structuredClone(io.connection),
     });
-    const view = await requestChannels({ action: "add", name: "test" });
+    const view = await requestChannels({
+      action: "add",
+      kind: "weixin",
+      name: "test",
+    });
     expect(view.error).toBeNull();
     expect(view.snapshots).toHaveLength(2);
     expect(Object.keys(io.stores.get("channels") ?? {})).toHaveLength(2);

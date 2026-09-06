@@ -1,14 +1,13 @@
 {
   "title": "Channels",
-  "description": "Chat with Terax from messaging apps. Connections run in your permanent Local window.",
+  "description": "Chat with Terax through messaging apps.",
   "defaults": "Each connection has its own session in ~/.terax/workspace, using the main Agent, default model and full access. Conversation history is available in the AI sidebar.",
   "localOnly": "Connections are managed by the permanent Local window.",
   "openLocal": "Open Local window",
   "loading": "Connecting to the Local window…",
-  "empty": "Add WeChat and scan the QR code to connect.",
+  "empty": "No connections yet.",
   "namePlaceholder": "Connection name",
-  "defaultName": "My WeChat",
-  "addWeixin": "Add WeChat",
+  "defaultName": "WeChat {{number}}",
   "weixin": "Personal WeChat",
   "enable": "Enable {{name}}",
   "login": "Scan to connect",
@@ -53,11 +52,20 @@
     "interrupted": "Some messages were interrupted when the connection stopped. They were not run again automatically; please resend them.",
     "delivery": "The reply could not be delivered. The result is available in the Channel conversation.",
     "account-mismatch": "This connection belongs to a different WeChat account. Create another connection for a new account.",
-    "duplicate-account": "This WeChat account already has a connection."
+    "duplicate-account": "This WeChat account already has a connection.",
+    "name": "Use a name between 1 and 80 characters.",
+    "route-save": "The network route could not be saved. Other submitted settings have been kept. Please retry saving."
   },
   "busyMessageMode": {
     "label": "Messages received while running",
     "steer": "Guide the current task",
     "queue": "Wait for the current turn"
-  }
+  },
+  "add": "Add connection",
+  "save": "Save",
+  "enabled": "Enabled",
+  "emptyDetail": "Add a connection to authorize and configure it here.",
+  "refreshQr": "Refresh QR code",
+  "removeConfirm": "Remove “{{name}}”? Existing chat history will be kept.",
+  "preparingQr": "Getting QR code…"
 }

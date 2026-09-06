@@ -16,8 +16,9 @@ export const CHANNEL_SNAPSHOT = "terax://channels-snapshot";
 export const actionSchema = z.discriminatedUnion("action", [
   z
     .object({
-      action: z.literal("busy-message-mode"),
+      action: z.literal("update"),
       id: z.uuid(),
+      name: z.string().trim().min(1).max(80),
       mode: z.enum(["steer", "queue"]),
     })
     .strict(),
@@ -25,6 +26,7 @@ export const actionSchema = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("add"),
+      kind: z.literal("weixin"),
       name: z.string().trim().min(1).max(80),
     })
     .strict(),
