@@ -5,6 +5,7 @@
 
 import {
   deleteSharedStoreKey,
+  deleteSharedStoreState,
   readSharedStore,
   setSharedStoreKey,
 } from "@/lib/sharedStore";
@@ -27,7 +28,7 @@ export async function loadConnections(): Promise<ChannelConnection[]> {
       result.data.id !== id ||
       ids.has(result.data.sessionId)
     )
-      throw new ChannelError("storage");
+      throw new ChannelError("configuration");
     ids.add(result.data.sessionId);
     return result.data;
   });
@@ -43,10 +44,11 @@ export function saveConnection(connection: ChannelConnection): Promise<void> {
   );
 }
 
-/** 删除配置引用，保留已经生成的聊天历史。 */
+/** 先清理协议状态和网络设置，最后删除配置引用；中途失败时保留可重试的连接。 */
 export async function removeConnection(id: string): Promise<void> {
-  await deleteSharedStoreKey("channels", id);
+  await deleteSharedStoreState(`channels-state:${id}`);
   await deleteSharedStoreKey("settings", `network.channel:${id}`);
+  await deleteSharedStoreKey("channels", id);
 }
 
 /** 读取单连接检查点；没有文件表示尚未开始接收。 */

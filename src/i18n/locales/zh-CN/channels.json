@@ -46,6 +46,7 @@
     "auth": "请重新登录微信。",
     "protocol": "微信返回了暂不支持的响应，请尝试重新登录。",
     "storage": "无法保存或加载 Channel 数据，请检查本地数据目录。",
+    "configuration": "Channel 配置格式无效，请检查 ~/.terax/channels/config.json 中的记录是否符合当前配置格式。",
     "model": "请在设置中配置可用的默认模型及其凭据。",
     "agent": "Agent 执行失败，请打开会话查看详情。",
     "queue-full": "消息队列已满，新请求正在等待空位。",

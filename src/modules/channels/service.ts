@@ -108,10 +108,16 @@ export async function startChannelsService(
     return task;
   }
 
+  /** 加载失败时保留明确的错误类别，修复配置后由同一入口恢复服务。 */
   async function reload() {
-    connections = await loadConnections();
-    serviceError = null;
-    await manager.configure(connections);
+    try {
+      connections = await loadConnections();
+      serviceError = null;
+      await manager.configure(connections);
+    } catch (error) {
+      publish(error instanceof ChannelError ? error.issue : "storage");
+      throw error;
+    }
   }
 
   function connection(id: string): ChannelConnection {
@@ -127,6 +133,7 @@ export async function startChannelsService(
     loginErrors.delete(id);
   }
 
+  /** 管理一次扫码流程，验证码在请求成功前保留，网络重试不要求重复输入。 */
   async function startLogin(id: string) {
     connection(id);
     logins.get(id)?.abort.abort();
@@ -153,10 +160,11 @@ export async function startChannelsService(
           continue;
         }
         const code = login.code;
-        login.code = "";
         let result: Awaited<ReturnType<typeof flow.poll>>;
         try {
           result = await flow.poll(code);
+          // 请求失败时保留验证码供网络重试；不清除请求期间收到的新验证码。
+          if (login.code === code) login.code = "";
         } catch (error) {
           if (!(error instanceof ChannelError) || error.issue !== "network")
             throw error;
@@ -227,10 +235,12 @@ export async function startChannelsService(
     });
   }
 
+  /** 串行执行设置操作；新增必须先确认现有配置可读，再提交新记录。 */
   async function execute(action: ChannelAction) {
     if (action.action === "snapshot") return;
     if (action.action === "add") {
-      await saveConnection({
+      await reload();
+      const created: ChannelConnection = {
         id: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
         kind: "weixin",
@@ -238,8 +248,11 @@ export async function startChannelsService(
         enabled: false,
         accountId: null,
         busyMessageMode: "steer",
-      });
-      await reload();
+      };
+      await saveConnection(created);
+      // 保存成功后直接发布已提交记录，避免随后读取失败把成功新增报告成失败。
+      connections = [...connections, created];
+      await manager.configure(connections);
       return;
     }
     const target = connection(action.id);
@@ -284,9 +297,13 @@ export async function startChannelsService(
         const { deleteWeixinCredentials } = await import(
           "@/modules/channels/adapters/weixin"
         );
-        await deleteWeixinCredentials(target.id);
-        await removeConnection(target.id);
-        await reload();
+        try {
+          await deleteWeixinCredentials(target.id);
+          await removeConnection(target.id);
+        } finally {
+          // 清理失败时配置仍存在，重新展示连接以允许用户重试删除。
+          await reload();
+        }
         break;
       }
     }
@@ -316,7 +333,7 @@ export async function startChannelsService(
       .catch(() => undefined);
   });
   const unwatch = await onSharedStoreChange("channels", () =>
-    enqueue(reload).catch(() => publish("storage")),
+    enqueue(reload).catch(() => undefined),
   );
   // 服务没有额外保活 timer，平台按需轮询；配置监听复用现有 shared_store。
   return async () => {

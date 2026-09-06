@@ -155,6 +155,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 ### 共享配置（`src-tauri/src/modules/shared_store.rs`）
 
 - `shared_store_read` / `shared_store_revision`
+- `shared_store_delete_state` - 在既有锁内删除规范 UUID 的协议状态正文，拒绝普通配置表并保留锁文件
 - `shared_store_set` / `shared_store_delete` - 加锁、读取最新 object、修改一个 key，并原子替换文件
 
 白名单逻辑存储 `channels` 映射到 `~/.terax/channels/config.json`，`channels-state:<uuid>` 映射到独立协议状态文件。UUID 必须规范化，前端不能提供任意路径。协议检查点不广播高频配置事件。

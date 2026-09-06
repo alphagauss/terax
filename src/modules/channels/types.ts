@@ -30,6 +30,7 @@ export type ChannelIssue =
   | "auth"
   | "protocol"
   | "storage"
+  | "configuration"
   | "model"
   | "agent"
   | "queue-full"
