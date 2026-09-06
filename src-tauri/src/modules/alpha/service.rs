@@ -601,9 +601,15 @@ fn python_check_from_runtime(path: String, result: RuntimeCheck) -> PythonCheck 
     }
 }
 
+/// 本机 Alpha 通道固定直连，不读取环境或共享代理。
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(reqwest::Client::new)
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("local Alpha HTTP client configuration must be valid")
+    })
 }
 
 pub(super) fn base_url() -> String {

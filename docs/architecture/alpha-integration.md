@@ -79,7 +79,7 @@ alpha-native Rust 计算模块
 
 - Rust 负责可信目标限制、连接管理、传输错误、凭据注入和必要的资源边界。
 - Rust 使用稳定的通用请求与事件通道，不为每个 Alpha 接口建立一组领域 command 和结构体。
-- 通用 HTTP 代理只接受 `/api/alpha` 下的 GET、POST 和 JSON，通用 WebSocket 代理支持双向 JSON 消息。两者都固定访问本机共享服务并由 Rust 注入凭据。
+- 通用 HTTP 代理只接受 `/api/alpha` 下的 GET、POST 和 JSON，通用 WebSocket 代理支持双向 JSON 消息。两者都固定访问本机共享服务并由 Rust 注入凭据。HTTP 探活和转发显式禁用自动代理，不受环境变量或内置共享代理选择影响；Python 对外数据源仍独立管理网络。
 - `/api/alpha/system/*` 只能由专用生命周期命令访问，不能通过通用代理转发。
 - 通用代理不会隐式启动 Alpha。传输失败由 Rust 报告，FastAPI 的 HTTP 业务状态码和 JSON 响应原样返回前端。
 - FastAPI 新增普通业务接口时，原则上只修改 Alpha 和前端 API 封装。

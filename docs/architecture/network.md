@@ -46,9 +46,9 @@ SSH 出口只控制 Terax 到服务器的连接，不修改远端程序的环境
 
 ## 固定直连与范围
 
-本机 Whisper.cpp 固定回环地址、直连并拒绝 HTTP 重定向。
+本机 Whisper.cpp 固定回环地址、直连并拒绝 HTTP 重定向。Rust 到 Alpha 本机服务的探活与 API 转发固定直连。
 
-终端命令、外部 CLI Agent、Git 子进程、网页预览、外部浏览器及其他独立子进程使用各自网络执行环境，不受此 HTTP 路由管理。
+终端命令、外部 CLI Agent、Git 子进程、网页预览、外部浏览器和 Alpha Python 对外数据源使用各自网络执行环境，不受此 HTTP 路由管理。
 
 ## 验证
 

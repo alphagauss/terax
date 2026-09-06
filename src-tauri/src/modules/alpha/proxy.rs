@@ -366,10 +366,12 @@ fn response_headers(headers: &HeaderMap) -> HashMap<String, String> {
         .collect()
 }
 
+/// 本机 Alpha 通道固定直连，不读取环境或共享代理。
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            .no_proxy()
             .connect_timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
             .build()
