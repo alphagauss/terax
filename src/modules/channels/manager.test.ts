@@ -1,6 +1,6 @@
 /**
  * 本文件验证多连接的隔离、轮次串行与接收检查点。
- * 重连不重跑已接受消息，停止一个连接不会取消另一个连接的接收。
+ * 重连不重跑已接受消息，改名保留在途任务，停止一个连接不会取消另一个连接的接收。
  */
 
 import { TurnInbox } from "@/modules/ai/lib/turnInbox";
@@ -118,6 +118,32 @@ function harness() {
 }
 
 describe("ChannelManager", () => {
+  it("在线改名保留接收任务、当前执行和待处理消息", async () => {
+    const h = harness();
+    const original = connection("a");
+    await h.manager.configure([original]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    const receiver = h.receivers.get("a");
+    await receiver?.receive(message("first"));
+    await receiver?.receive(message("queued"));
+    try {
+      await h.manager.configure([{ ...original, name: "新名称" }]);
+      expect(receiver?.signal.aborted).toBe(false);
+      expect(h.receivers.get("a")).toBe(receiver);
+      expect(h.snapshots()[0]).toMatchObject({
+        connection: { ...original, name: "新名称" },
+        busy: true,
+        queued: 1,
+      });
+      h.gates[0]();
+      await vi.waitFor(() => expect(h.calls).toEqual(["a:first", "a:queued"]));
+      h.gates[1]();
+      await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(2));
+    } finally {
+      await h.manager.dispose();
+    }
+  });
+
   it("引导模式归并补充并只发送一次回复", async () => {
     const h = harness();
     await h.manager.configure([

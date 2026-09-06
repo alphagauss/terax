@@ -78,6 +78,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  ConnectionSettingsLayout,
+  ConnectionSettingsList,
+  ConnectionSettingsItem,
+  ConnectionSettingsDetail,
+  ConnectionSettingsField as Field,
+  ConnectionSettingsActions,
+} from "@/settings/components/ConnectionSettingsLayout";
 import { SectionHeader } from "@/settings/components/SectionHeader";
 
 const NUMBER_INPUT_CLASS =
@@ -95,8 +103,7 @@ function blurNumberInputOnWheel(event: React.WheelEvent<HTMLInputElement>) {
   event.currentTarget.blur();
 }
 
-/** 管理 SSH 配置、分组、凭据和远程 Workspace 启动。 */
-/** 编辑服务器连接与显式代理路由，现有连接不因配置保存而断开。 */
+/** 管理 SSH 配置、分组、凭据和 Workspace 启动，复用连接设置布局；保存不主动断开现有连接。 */
 export function RemoteSection() {
   const { t } = useTranslation("settings");
   const profiles = useRemoteStore((state) => state.profiles);
@@ -480,191 +487,185 @@ export function RemoteSection() {
         description={t("remote.header.description")}
       />
 
-      <div className="grid min-w-0 gap-5 md:grid-cols-[15rem_minmax(0,1fr)]">
-        <aside className="flex min-w-0 flex-col rounded-xl border border-border/60 bg-card/60">
-          <div className="flex gap-2 border-b border-border/60 p-2.5">
-            <Button
-              size="sm"
-              className="min-w-0 flex-1"
-              disabled={busy}
-              onClick={() => startNew()}
-            >
-              <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
-              {t("remote.actions.new")}
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                setGroupEditor({ id: null, name: "" });
-                setGroupEditorError(null);
-              }}
-              title={t("remote.groups.actions.new")}
-              aria-label={t("remote.groups.actions.new")}
-            >
-              <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => void importProfiles()}
-              title={t("remote.actions.import")}
-              aria-label={t("remote.actions.import")}
-            >
-              <HugeiconsIcon icon={Download01Icon} size={13} strokeWidth={2} />
-            </Button>
-          </div>
-          <div className="max-h-[calc(100vh-13rem)] min-h-28 overflow-y-auto p-1.5">
-            {groupedProfiles.map((group) => {
-              const collapsed = collapsedGroups.has(group.id);
-              const name = group.name ?? t("remote.groups.defaultName");
-              return (
-                <div key={group.id} data-ssh-group-id={group.id}>
-                  <div className="mb-0.5 flex min-w-0 items-center gap-0.5">
-                    <button
-                      type="button"
-                      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[11.5px] font-medium transition-colors duration-control ease-standard hover:bg-accent"
-                      aria-expanded={!collapsed}
-                      onClick={() => toggleGroup(group.id)}
-                    >
-                      <HugeiconsIcon
-                        icon={ArrowDown01Icon}
-                        size={11}
-                        strokeWidth={2}
-                        className={cn(
-                          "shrink-0 text-muted-foreground transition-transform duration-control ease-standard",
-                          collapsed && "-rotate-90",
-                        )}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{name}</span>
-                      <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
-                        {group.profiles.length}
-                      </span>
-                    </button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          size="icon-xs"
-                          variant="ghost"
-                          disabled={busy}
-                          title={t("remote.groups.actions.menu", { name })}
-                          aria-label={t("remote.groups.actions.menu", {
-                            name,
-                          })}
-                        >
-                          <HugeiconsIcon
-                            icon={MoreHorizontalIcon}
-                            size={12}
-                            strokeWidth={2}
-                          />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="start"
-                        className="min-w-44 p-1"
-                      >
-                        <DropdownMenuItem
-                          className="text-[12px]"
-                          onSelect={() => startNew(group.id)}
-                        >
-                          <HugeiconsIcon
-                            icon={Add01Icon}
-                            size={13}
-                            strokeWidth={2}
-                          />
-                          {t("remote.groups.actions.newProfile")}
-                        </DropdownMenuItem>
-                        {group.id !== DEFAULT_SSH_GROUP_ID ? (
-                          <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-[12px]"
-                              onSelect={() => {
-                                setGroupEditor({
-                                  id: group.id,
-                                  name: group.name ?? "",
-                                });
-                                setGroupEditorError(null);
-                              }}
-                            >
-                              <HugeiconsIcon
-                                icon={Edit02Icon}
-                                size={13}
-                                strokeWidth={2}
-                              />
-                              {t("remote.groups.actions.rename")}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              variant="destructive"
-                              className="text-[12px]"
-                              onSelect={() => removeGroup(group.id, name)}
-                            >
-                              <HugeiconsIcon
-                                icon={Delete02Icon}
-                                size={13}
-                                strokeWidth={2}
-                              />
-                              {t("remote.groups.actions.delete")}
-                            </DropdownMenuItem>
-                          </>
-                        ) : null}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  <Collapsible open={!collapsed}>
-                    <CollapsibleContent className="terax-collapsible-content">
-                      <div>
-                        {group.profiles.map((profile) => (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            disabled={busy}
-                            onClick={() => void selectProfile(profile)}
-                            className={cn(
-                              "mb-1 ml-5 flex w-[calc(100%-1.25rem)] items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors duration-control ease-standard hover:bg-accent",
-                              selectedId === profile.id && "bg-accent",
-                            )}
-                          >
-                            <span className="min-w-0">
-                              <span className="block truncate text-[12px] font-medium">
-                                {profile.name}
-                              </span>
-                              <span className="block truncate font-mono text-[10px] text-muted-foreground">
-                                {profile.username}@{profile.host}:{profile.port}
-                              </span>
-                              <span className="block text-[10px] text-muted-foreground">
-                                {t(`settings:network.${profile.proxyMode}`)}
-                              </span>
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-              );
-            })}
-            {profiles.length === 0 ? (
-              <p className="px-2 py-4 text-[11px] text-muted-foreground">
-                {t("remote.list.empty")}
-              </p>
-            ) : null}
-          </div>
-        </aside>
-
-        <section
-          className="min-w-0 rounded-xl border border-border/60 bg-card/60 p-4"
-          aria-busy={busy}
+      <ConnectionSettingsLayout>
+        <ConnectionSettingsList
+          toolbar={
+            <>
+              <Button
+                size="sm"
+                className="min-w-0 flex-1"
+                disabled={busy}
+                onClick={() => startNew()}
+              >
+                <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+                {t("remote.actions.new")}
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setGroupEditor({ id: null, name: "" });
+                  setGroupEditorError(null);
+                }}
+                title={t("remote.groups.actions.new")}
+                aria-label={t("remote.groups.actions.new")}
+              >
+                <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => void importProfiles()}
+                title={t("remote.actions.import")}
+                aria-label={t("remote.actions.import")}
+              >
+                <HugeiconsIcon
+                  icon={Download01Icon}
+                  size={13}
+                  strokeWidth={2}
+                />
+              </Button>
+            </>
+          }
         >
+          {groupedProfiles.map((group) => {
+            const collapsed = collapsedGroups.has(group.id);
+            const name = group.name ?? t("remote.groups.defaultName");
+            return (
+              <div key={group.id} data-ssh-group-id={group.id}>
+                <div className="mb-0.5 flex min-w-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[12px] font-medium transition-colors duration-control ease-standard hover:bg-accent"
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleGroup(group.id)}
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowDown01Icon}
+                      size={11}
+                      strokeWidth={2}
+                      className={cn(
+                        "shrink-0 text-muted-foreground transition-transform duration-control ease-standard",
+                        collapsed && "-rotate-90",
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{name}</span>
+                    <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
+                      {group.profiles.length}
+                    </span>
+                  </button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        disabled={busy}
+                        title={t("remote.groups.actions.menu", { name })}
+                        aria-label={t("remote.groups.actions.menu", {
+                          name,
+                        })}
+                      >
+                        <HugeiconsIcon
+                          icon={MoreHorizontalIcon}
+                          size={12}
+                          strokeWidth={2}
+                        />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="min-w-44 p-1">
+                      <DropdownMenuItem
+                        className="text-[12px]"
+                        onSelect={() => startNew(group.id)}
+                      >
+                        <HugeiconsIcon
+                          icon={Add01Icon}
+                          size={13}
+                          strokeWidth={2}
+                        />
+                        {t("remote.groups.actions.newProfile")}
+                      </DropdownMenuItem>
+                      {group.id !== DEFAULT_SSH_GROUP_ID ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-[12px]"
+                            onSelect={() => {
+                              setGroupEditor({
+                                id: group.id,
+                                name: group.name ?? "",
+                              });
+                              setGroupEditorError(null);
+                            }}
+                          >
+                            <HugeiconsIcon
+                              icon={Edit02Icon}
+                              size={13}
+                              strokeWidth={2}
+                            />
+                            {t("remote.groups.actions.rename")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            className="text-[12px]"
+                            onSelect={() => removeGroup(group.id, name)}
+                          >
+                            <HugeiconsIcon
+                              icon={Delete02Icon}
+                              size={13}
+                              strokeWidth={2}
+                            />
+                            {t("remote.groups.actions.delete")}
+                          </DropdownMenuItem>
+                        </>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <Collapsible open={!collapsed}>
+                  <CollapsibleContent className="terax-collapsible-content">
+                    <div>
+                      {group.profiles.map((profile) => (
+                        <ConnectionSettingsItem
+                          key={profile.id}
+                          selected={selectedId === profile.id}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void selectProfile(profile)}
+                          className="ml-5 w-[calc(100%-1.25rem)]"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-[13px] font-medium">
+                              {profile.name}
+                            </span>
+                            <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                              {profile.username}@{profile.host}:{profile.port}
+                            </span>
+                          </span>
+                        </ConnectionSettingsItem>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            );
+          })}
+          {profiles.length === 0 ? (
+            <p className="px-2 py-4 text-[11px] text-muted-foreground">
+              {t("remote.list.empty")}
+            </p>
+          ) : null}
+        </ConnectionSettingsList>
+
+        <ConnectionSettingsDetail selectionKey={form.id} aria-busy={busy}>
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[13px] font-medium">
                 {newDraft ? t("remote.editor.new") : t("remote.editor.edit")}
               </h2>
-              <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {t("remote.editor.description")}
               </p>
             </div>
@@ -677,7 +678,7 @@ export function RemoteSection() {
                 onChange={(event) => update("name", event.target.value)}
                 placeholder={t("remote.placeholders.name")}
               />
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[11px] text-muted-foreground">
                 {t("remote.hints.name")}
               </p>
             </Field>
@@ -807,12 +808,12 @@ export function RemoteSection() {
           <Collapsible
             open={advancedOpen}
             onOpenChange={setAdvancedOpen}
-            className="mt-4 rounded-lg border border-border/60"
+            className="mt-4 border-t border-border/60"
           >
             <CollapsibleTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-muted-foreground transition-colors duration-control ease-standard hover:bg-interactive-hover"
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] font-medium text-muted-foreground transition-colors duration-control ease-standard hover:bg-interactive-hover"
               >
                 {t("remote.advanced.title")}
                 <HugeiconsIcon
@@ -826,7 +827,7 @@ export function RemoteSection() {
                 />
               </button>
             </CollapsibleTrigger>
-            <CollapsibleContent className="terax-collapsible-content border-t border-border/60">
+            <CollapsibleContent className="terax-collapsible-content">
               <div className="grid gap-3 p-3 sm:grid-cols-2">
                 <Field label={t("remote.fields.rootPath")}>
                   <Input
@@ -922,11 +923,11 @@ export function RemoteSection() {
                   />
                   <Label
                     htmlFor={`ssh-reconnect-${form.id}`}
-                    className="flex-1 text-[11.5px] font-normal"
+                    className="flex-1 text-[12px] font-normal"
                   >
                     {t("remote.fields.reconnect")}
                   </Label>
-                  <Label className="text-[10.5px] text-muted-foreground">
+                  <Label className="text-[11px] text-muted-foreground">
                     {t("remote.fields.reconnectAttempts")}
                   </Label>
                   <Input
@@ -952,11 +953,12 @@ export function RemoteSection() {
             </p>
           ) : null}
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+          <ConnectionSettingsActions>
             {selected ? (
               <Button
                 size="sm"
-                variant="destructive"
+                variant="ghost"
+                className="text-muted-foreground hover:text-destructive"
                 disabled={busy}
                 onClick={() => void remove()}
               >
@@ -976,9 +978,9 @@ export function RemoteSection() {
               <HugeiconsIcon icon={FloppyDiskIcon} size={13} strokeWidth={2} />
               {t("common.save")}
             </Button>
-          </div>
-        </section>
-      </div>
+          </ConnectionSettingsActions>
+        </ConnectionSettingsDetail>
+      </ConnectionSettingsLayout>
 
       <Dialog
         open={groupEditor !== null}
@@ -1084,25 +1086,6 @@ export function RemoteSection() {
   );
 }
 
-function Field({
-  label,
-  className,
-  children,
-}: {
-  label: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={cn("grid min-w-0 gap-1.5", className)}>
-      <span className="text-[10.5px] font-medium text-muted-foreground">
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
 function SecretToggle({
   id,
   checked,
@@ -1123,7 +1106,7 @@ function SecretToggle({
       />
       <Label
         htmlFor={id}
-        className="text-[10.5px] font-normal text-muted-foreground"
+        className="text-[11px] font-normal text-muted-foreground"
       >
         {label}
       </Label>

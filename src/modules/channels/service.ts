@@ -243,7 +243,7 @@ export async function startChannelsService(
       const created: ChannelConnection = {
         id: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
-        kind: "weixin",
+        kind: action.kind,
         name: action.name,
         enabled: false,
         accountId: null,
@@ -257,8 +257,12 @@ export async function startChannelsService(
     }
     const target = connection(action.id);
     switch (action.action) {
-      case "busy-message-mode":
-        await saveConnection({ ...target, busyMessageMode: action.mode });
+      case "update":
+        await saveConnection({
+          ...target,
+          name: action.name,
+          busyMessageMode: action.mode,
+        });
         await reload();
         break;
       case "enable":

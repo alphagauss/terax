@@ -111,15 +111,17 @@ export function SettingsWindowPage() {
       title={t("windowTitle")}
       headerContent={headerContent}
     >
-      <main className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 pt-6 pb-7 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div
           className={cn(
-            "mx-auto w-full",
-            active === "remote" ? "max-w-[58rem]" : "max-w-160",
+            "mx-auto flex w-full flex-1 flex-col",
+            active === "remote" || active === "channels"
+              ? "max-w-[58rem]"
+              : "max-w-160",
           )}
         >
           {ActiveSection ? (
-            <div key={active} className="terax-tab-in">
+            <div key={active} className="terax-tab-in flex flex-1 flex-col">
               <Suspense
                 fallback={
                   <p className="text-sm text-muted-foreground">

@@ -48,7 +48,7 @@ export class ChannelManager {
 
   constructor(private readonly deps: Dependencies) {}
 
-  /** 只重启配置发生变化的实例，调用方串行调用以保持启停顺序。 */
+  /** 仅资源身份与启停变化重建实例；名称和消息策略热更新，保留接收任务与在途消息。 */
   async configure(connections: readonly ChannelConnection[]): Promise<void> {
     for (const [id, runtime] of this.runtimes) {
       const next = connections.find((connection) => connection.id === id);
@@ -57,7 +57,6 @@ export class ChannelManager {
         next &&
         next.sessionId === current.sessionId &&
         next.kind === current.kind &&
-        next.name === current.name &&
         next.enabled === current.enabled &&
         next.accountId === current.accountId
       ) {
