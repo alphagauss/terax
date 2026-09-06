@@ -22,6 +22,8 @@ AI 子系统采用 BYOK（bring your own key）模式。它通过 `@ai-sdk/*` �
 
 `src/modules/ai/lib/providerRuntime.ts` 根据注册表引用的 runtime adapter 构造 AI SDK provider instance。OpenAI、Anthropic、Google、xAI、Cerebras 和 Groq 使用各自的延迟加载 SDK adapter；DeepSeek、Mistral、OpenRouter、本地服务和自定义 Provider 复用 `openai-compatible` adapter。是否允许私网访问由连接定义决定，不由组件传入。
 
+全部 SDK adapter 注入 `createHttpFetch`，云端和本地请求均经过 Rust。目录与推理只传同一个 Provider 实例身份，由原生层在请求开始时读取最新出口；语音服务另有独立路由。SDK 本地下载远端附件时也走原生传输并保留公开地址限制。配置格式与生命周期见 [内置网络与代理](network.md)。
+
 模型身份统一使用结构化的 `ModelRef { providerId, modelId }`。内置 Provider 实例 ID 固定为 `builtin:<provider>`；用户新增的 OpenAI-compatible Provider 在创建时生成 `custom:<uuid>`，名称、地址和模型名变化都不会改变该实例 ID。自定义 Provider 的密钥也只按这个稳定 ID 绑定。
 
 Terax 不维护静态模型目录。`modelCatalog.ts` 使用 `openai`、`anthropic`、`google` 和 `xai` 四种目录 adapter，从统一连接解析模型接口、分页和鉴权。成功结果进入五分钟、有界容量的进程内 LRU，同一连接的并发请求会合并；失败和刷新结果都不会直接改变用户配置。设置页最多同时渲染 100 个匹配项，避免大型目录产生无界 React 节点。

@@ -1,9 +1,12 @@
 /**
  * 本文件提供项目级 Select 包装组件。
- * 统一选择控件的焦点反馈，同时保留 registry 组件的结构、动效和覆盖能力。
+ * 默认采用 12px 字号和 32px 控件高度，统一焦点反馈，保留调用方的尺寸与样式覆盖。
  */
 
-import { SelectTrigger as BaseTrigger } from "@/components/ui/select";
+import {
+  SelectItem as BaseItem,
+  SelectTrigger as BaseTrigger,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ComponentProps } from "react";
 
@@ -11,7 +14,6 @@ export {
   Select,
   SelectContent,
   SelectGroup,
-  SelectItem,
   SelectLabel,
   SelectScrollDownButton,
   SelectScrollUpButton,
@@ -19,18 +21,30 @@ export {
   SelectValue,
 } from "@/components/ui/select";
 
-/** 渲染不带高亮边框和光晕的统一选择器触发控件。 */
+/** 默认使用紧凑触发器；size 可选择标准高度，className 和 style 可覆盖样式。 */
 export function SelectTrigger({
   className,
+  size = "sm",
   ...props
 }: ComponentProps<typeof BaseTrigger>) {
   return (
     <BaseTrigger
+      size={size}
       className={cn(
-        "focus-visible:border-transparent focus-visible:ring-0",
+        "text-[12px] leading-4 focus-visible:border-transparent focus-visible:ring-0",
         className,
       )}
       {...props}
     />
+  );
+}
+
+/** 单行菜单项默认采用 12px 字号和紧凑行高，多行内容仍可自然撑开。 */
+export function SelectItem({
+  className,
+  ...props
+}: ComponentProps<typeof BaseItem>) {
+  return (
+    <BaseItem className={cn("text-[12px] leading-4", className)} {...props} />
   );
 }

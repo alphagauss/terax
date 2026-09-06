@@ -473,7 +473,7 @@ impl RemoteManager {
         });
     }
 
-    /// 失效当前 epoch，并按 profile 策略串行尝试全新连接。
+    /// 失效当前 epoch 并串行重连，每次尝试在连接锁内读取最新代理设置。
     async fn handle_transport_closed(
         self: &Arc<Self>,
         workspace: Arc<RemoteWorkspace>,
@@ -491,7 +491,6 @@ impl RemoteManager {
 
         let profile = workspace.profile.clone();
         let profile_id = profile.id.clone();
-        let request = workspace.reconnect_request();
         let published = if profile.reconnect_enabled {
             self.publish_reconnecting(app, &lifecycle, &profile_id)
                 .await
@@ -538,7 +537,10 @@ impl RemoteManager {
                 _ = lifecycle.cancellation.cancelled() => return,
                 guard = self.connect_lock.lock() => guard,
             };
-            let result = self.connect_locked(request.clone(), &lifecycle, app).await;
+            let result = match workspace.reconnect_request() {
+                Ok(request) => self.connect_locked(request, &lifecycle, app).await,
+                Err(error) => Err(error),
+            };
             drop(guard);
             if lifecycle.cancellation.is_cancelled() {
                 return;

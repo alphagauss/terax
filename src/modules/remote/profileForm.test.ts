@@ -4,14 +4,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SSH_GROUP_ID } from "./groups";
+import { DEFAULT_SSH_GROUP_ID } from "@/modules/remote/groups";
 import {
   credentialMutation,
   emptySshProfileForm,
   launchSecretIssue,
   profileValidationIssue,
   sshProfileFromForm,
-} from "./profileForm";
+} from "@/modules/remote/profileForm";
 
 describe("SSH profile form", () => {
   it("creates a normalized profile with safe defaults", () => {
@@ -52,6 +52,7 @@ describe("SSH profile form", () => {
     form.rememberSecret = false;
     expect(launchSecretIssue(form)).toBe("secret");
     form.rememberSecret = true;
+    form.proxyMode = "custom";
     form.proxySecret = "proxy";
     form.rememberProxySecret = false;
     expect(launchSecretIssue(form)).toBe("proxy");

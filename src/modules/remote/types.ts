@@ -20,6 +20,7 @@ export type SshProfile = {
   authMethod: SshAuthMethod;
   identityFile?: string | null;
   proxyUrl?: string | null;
+  proxyMode: "direct" | "shared" | "custom";
   reconnectEnabled: boolean;
   reconnectMaxAttempts: number;
   rootPath?: string | null;
@@ -28,6 +29,7 @@ export type SshProfile = {
 
 export type SshCredentialInput = {
   secret: string | null;
+  /** 仅传未持久化的一次性代理密码，普通密码由 Rust 在每次建连时读取。 */
   proxySecret: string | null;
 };
 

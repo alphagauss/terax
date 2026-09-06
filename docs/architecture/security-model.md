@@ -77,7 +77,9 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 1. 解析一次 hostname（`resolve_and_classify`）。
 2. 将解析得到的每个 IP 分类为 public、private、loopback 或 blocked metadata。
 3. 阻止云 metadata endpoint（`169.254.169.254`、`metadata.google.internal`、AWS IPv6 metadata 等）。
-4. 将 reqwest 固定到解析得到的 IP，防止第二次 DNS 查询返回不同地址（DNS rebinding）。
+4. 直连时将 reqwest 固定到解析得到的 IP，防止第二次 DNS 查询返回不同地址（DNS rebinding）。
+
+所有客户端默认显式直连，不继承系统或环境代理。用户按连接选择的共享代理属于受信任出口；代理端 DNS 和实际转发不受本机 DNS 固定约束，代理模式仍执行本机目标分类和 metadata 拒绝。代理地址在普通存储写入时拒绝内嵌密码，密码只从秘密存储读取。详见 [内置网络与代理](network.md)。
 
 本地 LLM endpoint 会被明确允许，因为用户通过将 Terax 指向这些 endpoint 主动选择了它们，但系统仍会对其分类并记录日志。
 

@@ -78,7 +78,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { SectionHeader } from "../components/SectionHeader";
+import { SectionHeader } from "@/settings/components/SectionHeader";
 
 const NUMBER_INPUT_CLASS =
   "[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none";
@@ -96,6 +96,7 @@ function blurNumberInputOnWheel(event: React.WheelEvent<HTMLInputElement>) {
 }
 
 /** 管理 SSH 配置、分组、凭据和远程 Workspace 启动。 */
+/** 编辑服务器连接与显式代理路由，现有连接不因配置保存而断开。 */
 export function RemoteSection() {
   const { t } = useTranslation("settings");
   const profiles = useRemoteStore((state) => state.profiles);
@@ -147,7 +148,9 @@ export function RemoteSection() {
     try {
       const [secret, proxySecret] = await Promise.all([
         remoteNative.getSecret(profile.id),
-        remoteNative.getProxySecret(profile.id),
+        profile.proxyMode === "custom"
+          ? remoteNative.getProxySecret(profile.id)
+          : null,
       ]);
       if (selectionRevision.current !== revision) return;
       setForm((current) =>
@@ -219,7 +222,7 @@ export function RemoteSection() {
         value: value.proxySecret,
         dirty: value.proxySecretDirty,
         remember: value.rememberProxySecret,
-        applicable: Boolean(profile.proxyUrl),
+        applicable: profile.proxyMode === "custom",
       }),
       (secret) => remoteNative.setProxySecret(profile.id, secret),
       () => remoteNative.deleteProxySecret(profile.id),
@@ -347,6 +350,7 @@ export function RemoteSection() {
             authMethod: host.identityFile ? "private_key" : "agent",
             identityFile: host.identityFile || null,
             proxyUrl: null,
+            proxyMode: "direct",
             reconnectEnabled: true,
             reconnectMaxAttempts: 2,
             rootPath: null,
@@ -631,6 +635,9 @@ export function RemoteSection() {
                               <span className="block truncate font-mono text-[10px] text-muted-foreground">
                                 {profile.username}@{profile.host}:{profile.port}
                               </span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                {t(`settings:network.${profile.proxyMode}`)}
+                              </span>
                             </span>
                           </button>
                         ))}
@@ -679,7 +686,7 @@ export function RemoteSection() {
                 value={form.groupId}
                 onValueChange={(value) => update("groupId", value)}
               >
-                <SelectTrigger className="w-full text-[12px]">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent
@@ -687,18 +694,11 @@ export function RemoteSection() {
                   align="start"
                   className="[&_[data-position=popper]]:h-auto"
                 >
-                  <SelectItem
-                    value={DEFAULT_SSH_GROUP_ID}
-                    className="text-[12px]"
-                  >
+                  <SelectItem value={DEFAULT_SSH_GROUP_ID}>
                     {t("remote.groups.defaultName")}
                   </SelectItem>
                   {groups.map((group) => (
-                    <SelectItem
-                      key={group.id}
-                      value={group.id}
-                      className="text-[12px]"
-                    >
+                    <SelectItem key={group.id} value={group.id}>
                       {group.name}
                     </SelectItem>
                   ))}
@@ -738,7 +738,7 @@ export function RemoteSection() {
                   update("authMethod", value as SshProfile["authMethod"])
                 }
               >
-                <SelectTrigger className="w-full text-[12px]">
+                <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent
@@ -746,13 +746,13 @@ export function RemoteSection() {
                   align="start"
                   className="[&_[data-position=popper]]:h-auto"
                 >
-                  <SelectItem value="password" className="text-[12px]">
+                  <SelectItem value="password">
                     {t("remote.auth.password")}
                   </SelectItem>
-                  <SelectItem value="private_key" className="text-[12px]">
+                  <SelectItem value="private_key">
                     {t("remote.auth.privateKey")}
                   </SelectItem>
-                  <SelectItem value="agent" className="text-[12px]">
+                  <SelectItem value="agent">
                     {t("remote.auth.agent")}
                   </SelectItem>
                 </SelectContent>
@@ -837,17 +837,55 @@ export function RemoteSection() {
                   />
                 </Field>
                 <Field
-                  label={t("remote.fields.proxyUrl")}
+                  label={t("settings:network.route")}
                   className="sm:col-span-2"
                 >
-                  <Input
-                    value={form.proxyUrl}
-                    onChange={(event) => update("proxyUrl", event.target.value)}
-                    placeholder={t("remote.placeholders.proxyUrl")}
-                    spellCheck={false}
-                  />
+                  <Select
+                    value={form.proxyMode}
+                    onValueChange={(value) => {
+                      if (
+                        value === "direct" ||
+                        value === "shared" ||
+                        value === "custom"
+                      )
+                        update("proxyMode", value);
+                    }}
+                  >
+                    <SelectTrigger aria-label={t("settings:network.route")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="direct">
+                        {t("settings:network.direct")}
+                      </SelectItem>
+                      <SelectItem value="shared">
+                        {t("settings:network.shared")}
+                      </SelectItem>
+                      <SelectItem value="custom">
+                        {t("settings:network.custom")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings:network.sshHint")}
+                  </p>
                 </Field>
-                {form.proxyUrl.trim() ? (
+                {form.proxyMode === "custom" && (
+                  <Field
+                    label={t("remote.fields.proxyUrl")}
+                    className="sm:col-span-2"
+                  >
+                    <Input
+                      value={form.proxyUrl}
+                      onChange={(event) =>
+                        update("proxyUrl", event.target.value)
+                      }
+                      placeholder={t("remote.placeholders.proxyUrl")}
+                      spellCheck={false}
+                    />
+                  </Field>
+                )}
+                {form.proxyMode === "custom" && form.proxyUrl.trim() ? (
                   <Field
                     label={t("remote.fields.proxyPassword")}
                     className="sm:col-span-2"

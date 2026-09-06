@@ -45,8 +45,10 @@ tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", default-features = false, features = [
 	"rustls-tls",
 	"stream",
+	"socks",
 ] }
 bytes = "1"
+percent-encoding = "2"
 futures-util = "0.3"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 filetime = "0.2"

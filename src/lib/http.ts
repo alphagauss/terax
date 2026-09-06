@@ -11,9 +11,13 @@ type HttpEvent =
   | { kind: "chunk"; bytes: number[] }
   | { kind: "end" };
 
+export type NetworkTarget =
+  | { kind: "direct" | "markdown" }
+  | { kind: "provider" | "channel" | "speech"; id: string };
+
 export type HttpOptions = {
   allowPrivateNetwork?: boolean;
-  proxyMode?: "system" | "direct";
+  networkTarget?: NetworkTarget;
   timeoutMs?: number | null;
   maxResponseBytes?: number;
 };
@@ -102,7 +106,7 @@ export function createHttpFetch(options: HttpOptions = {}): typeof fetch {
         headers: Object.fromEntries(request.headers),
         body,
         allowPrivateNetwork: options.allowPrivateNetwork === true,
-        proxyMode: options.proxyMode ?? "system",
+        networkTarget: options.networkTarget ?? { kind: "direct" },
         timeoutMs: options.timeoutMs === undefined ? 15_000 : options.timeoutMs,
         maxResponseBytes: options.maxResponseBytes ?? 2 * 1024 * 1024,
         onEvent,

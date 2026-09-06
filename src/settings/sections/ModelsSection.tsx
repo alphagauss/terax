@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
+import { deleteSharedStoreKey } from "@/lib/sharedStore";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import {
   builtinProviderId,
@@ -96,9 +98,9 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ProviderKeyCard } from "../components/ProviderKeyCard";
-import { ProviderModelPicker } from "../components/ProviderModelPicker";
-import { SectionHeader } from "../components/SectionHeader";
+import { ProviderKeyCard } from "@/settings/components/ProviderKeyCard";
+import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
+import { SectionHeader } from "@/settings/components/SectionHeader";
 
 type KeysMap = Record<ProviderId, string | null>;
 type ProviderInstanceUpdate = Partial<
@@ -332,6 +334,7 @@ export function ModelsSection() {
     });
     syncChatReference(matchesProvider, replacement);
     modelCatalog.invalidate(id);
+    await deleteSharedStoreKey("settings", `network.provider:${id}`);
     await clearProviderInstanceKey(id);
     setCustomProviderKeys((previous) => {
       const next = { ...previous };
@@ -396,6 +399,7 @@ export function ModelsSection() {
     await setModelSettings(settingsPatch);
     syncChatReference(matchesProvider, replacement);
     modelCatalog.invalidate(providerId);
+    await deleteSharedStoreKey("settings", `network.provider:${providerId}`);
     if (keys?.[id]) await onClearKey(id);
     setAdding((previous) => {
       const next = new Set(previous);
@@ -710,7 +714,7 @@ function DefaultsBlock({
               void setMaxConcurrentSubagents(Number(value))
             }
           >
-            <SelectTrigger className="h-8 w-full text-[11.5px]">
+            <SelectTrigger className="w-full text-[11.5px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1106,7 +1110,7 @@ function AutocompleteRow({
               void setAutocompleteTrigger(value as AutocompleteTrigger)
             }
           >
-            <SelectTrigger className="h-8 w-full text-[11.5px]">
+            <SelectTrigger className="w-full text-[11.5px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1126,6 +1130,7 @@ function AutocompleteRow({
     </>
   );
 }
+/** 展示内置连接的地址、统一出口和模型目录。 */
 function BuiltinProviderFields({
   provider,
   credentialValue,
@@ -1178,6 +1183,9 @@ function BuiltinProviderFields({
           </FieldRow>
         </>
       ) : null}
+      <NetworkRouteSelect
+        target={`provider:${builtinProviderId(provider.id)}`}
+      />
       <FieldRow label={t("models.catalog.models")}>
         <ProviderModelPicker
           connection={connection}
@@ -1189,6 +1197,7 @@ function BuiltinProviderFields({
   );
 }
 
+/** 编辑自定义连接，所有请求以该实例身份选择出口。 */
 function CustomProviderCard({
   provider,
   models,
@@ -1309,6 +1318,7 @@ function CustomProviderCard({
             />
           </FieldRow>
 
+          <NetworkRouteSelect target={`provider:${provider.id}`} />
           <FieldRow label={t("models.catalog.models")}>
             <ProviderModelPicker
               connection={
@@ -1392,6 +1402,7 @@ function FieldRow({
   );
 }
 
+/** 语音服务独立选择出口，本机离线服务固定直连。 */
 function VoiceBlock() {
   const { t } = useTranslation();
   const sttProvider = usePreferencesStore((s) => s.sttProvider);
@@ -1451,6 +1462,9 @@ function VoiceBlock() {
         {sttProvider === "whispercpp" && t("models.voice.descWhispercpp")}
       </p>
 
+      {sttProvider !== "whispercpp" && (
+        <NetworkRouteSelect target={`speech:${sttProvider}`} />
+      )}
       {sttProvider === "groq" && (
         <div className="flex flex-col gap-2.5">
           <FieldRow label={t("models.voice.model")}>

@@ -8,6 +8,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::modules::network_proxy::{self, NetworkTarget, ProxyConfig};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
@@ -234,14 +235,16 @@ fn build_request(
 fn build_safe_client(
     allow_private: bool,
     pinned: &[(String, Vec<IpAddr>)],
-    proxy_mode: HttpProxyMode,
+    proxy: Option<&ProxyConfig>,
     redirect_mode: HttpRedirectMode,
 ) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().connect_timeout(Duration::from_secs(10));
-    if matches!(proxy_mode, HttpProxyMode::Direct) {
-        // 私网服务可能使用非 RFC1918 地址，直连策略必须由调用者明确选择。
-        builder = builder.no_proxy();
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(Duration::from_secs(10));
+    if let Some(proxy) = proxy {
+        builder = proxy.apply(builder)?;
     }
+    // 直连固定已验证的 DNS；显式代理是受信任出口，目标解析由代理端负责。
     // Pin reqwest's resolver to the IPs we just classified. Without this,
     // reqwest's own DNS lookup could return a different (private/metadata) IP
     // for the same hostname between classify and connect; classic DNS
@@ -302,9 +305,16 @@ fn build_pinned_client(
     host: &str,
     safe_ips: &[IpAddr],
     timeout: Duration,
+    proxy: Option<&ProxyConfig>,
 ) -> Result<reqwest::Client, String> {
     let addrs: Vec<SocketAddr> = safe_ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect();
-    reqwest::Client::builder()
+    let builder = reqwest::Client::builder().no_proxy();
+    let builder = if let Some(proxy) = proxy {
+        proxy.apply(builder)?
+    } else {
+        builder
+    };
+    builder
         .connect_timeout(Duration::from_secs(10).min(timeout))
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
@@ -323,10 +333,12 @@ fn remaining_image_request_time(started: Instant) -> Result<Duration, String> {
 
 /// 下载公开网络图片，并对每次重定向重新执行地址校验和体积限制。
 pub(crate) async fn download_public_image(
+    app: &tauri::AppHandle,
     url: &str,
     max_bytes: usize,
     user_agent: &str,
 ) -> Result<DownloadedImage, String> {
+    let proxy = network_proxy::resolve(app, &NetworkTarget::Markdown)?;
     let started = Instant::now();
     let mut current = validate_url(url)?;
 
@@ -340,7 +352,7 @@ pub(crate) async fn download_public_image(
             .await
             .map_err(|_| "image request timed out".to_string())??;
         let remaining = remaining_image_request_time(started)?;
-        let client = build_pinned_client(&host, &safe_ips, remaining)?;
+        let client = build_pinned_client(&host, &safe_ips, remaining, proxy.as_ref())?;
         let mut request = client.get(current.clone()).header(
             ACCEPT,
             "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,image/*;q=0.9,*/*;q=0.5",
@@ -407,17 +419,6 @@ fn header_map_to_strings(headers: &HeaderMap) -> HashMap<String, String> {
         }
     }
     out
-}
-
-/// 通用 HTTP 代理策略，网络访问权限与代理路由分别声明。
-#[derive(Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum HttpProxyMode {
-    /// 使用环境或系统的代理配置。
-    #[default]
-    System,
-    /// 直连目标，不读取自动代理配置。
-    Direct,
 }
 
 /// 遵循 Fetch 的重定向模式；平台适配器可拒绝未经协议校验的目标变更。
@@ -516,6 +517,7 @@ pub enum HttpEvent {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn http_request(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     state: tauri::State<'_, HttpState>,
     request_id: String,
@@ -525,7 +527,7 @@ pub async fn http_request(
     headers: Option<HashMap<String, String>>,
     body: Option<Vec<u8>>,
     allow_private_network: Option<bool>,
-    proxy_mode: Option<HttpProxyMode>,
+    network_target: NetworkTarget,
     timeout_ms: Option<u64>,
     max_response_bytes: usize,
     on_event: Channel<HttpEvent>,
@@ -551,10 +553,11 @@ pub async fn http_request(
         let host = parsed.host_str().ok_or("missing host")?.to_string();
         let allow_private = allow_private_network.unwrap_or(false);
         let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+        let proxy = network_proxy::resolve(&app, &network_target)?;
         let client = build_safe_client(
             allow_private,
             &[(host, safe_ips)],
-            proxy_mode.unwrap_or_default(),
+            proxy.as_ref(),
             redirect.unwrap_or_default(),
         )?;
         let response = build_request(&client, &method, parsed, headers, body)?
@@ -627,6 +630,100 @@ pub fn http_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 环境变量只注入隔离测试子进程，不能污染并发测试或开发进程。
+    #[test]
+    fn explicit_routes_ignore_environment_and_never_fall_back() {
+        const MARKER: &str = "TERAX_PROXY_TEST_CHILD";
+        if std::env::var_os(MARKER).is_none() {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "modules::net::tests::explicit_routes_ignore_environment_and_never_fall_back",
+                    "--nocapture",
+                ])
+                .env(MARKER, "1")
+                .env("HTTP_PROXY", "http://127.0.0.1:1")
+                .env("HTTPS_PROXY", "http://127.0.0.1:1")
+                .env("ALL_PROXY", "http://127.0.0.1:1")
+                .env("http_proxy", "http://127.0.0.1:1")
+                .env("https_proxy", "http://127.0.0.1:1")
+                .env("all_proxy", "http://127.0.0.1:1")
+                .env("NO_PROXY", "")
+                .env("no_proxy", "")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{}",
+                String::from_utf8_lossy(&result.stdout)
+            );
+            return;
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let direct = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/model", direct.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = direct.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                let read = stream.read(&mut bytes).await.unwrap();
+                assert!(read > 0);
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect",
+                    )
+                    .await
+                    .unwrap();
+                direct
+            });
+            let response = build_safe_client(true, &[], None, HttpRedirectMode::Follow)
+                .unwrap()
+                .get(&url)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.text().await.unwrap(), "direct");
+            let direct = server.await.unwrap();
+            let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let proxy = ProxyConfig::parse(
+                &format!("http://{}", proxy_listener.local_addr().unwrap()),
+                None,
+            )
+            .unwrap();
+            let proxy_server = tokio::spawn(async move {
+                let (mut stream, _) = proxy_listener.accept().await.unwrap();
+                let mut bytes = [0; 4096];
+                let read = stream.read(&mut bytes).await.unwrap();
+                assert!(String::from_utf8_lossy(&bytes[..read]).starts_with("GET http://"));
+                stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy",
+                    )
+                    .await
+                    .unwrap();
+            });
+            let response = build_safe_client(true, &[], Some(&proxy), HttpRedirectMode::Follow)
+                .unwrap()
+                .get(&url)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.text().await.unwrap(), "proxy");
+            proxy_server.await.unwrap();
+            let failed = build_safe_client(true, &[], Some(&proxy), HttpRedirectMode::Follow)
+                .unwrap()
+                .get(&url)
+                .send()
+                .await;
+            assert!(failed.is_err());
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), direct.accept())
+                    .await
+                    .is_err()
+            );
+        });
+    }
     use std::net::Ipv4Addr;
 
     #[test]
@@ -768,13 +865,13 @@ mod tests {
             }
         });
         let url = format!("http://{address}/redirect");
-        let rejected = build_safe_client(true, &[], HttpProxyMode::Direct, HttpRedirectMode::Error)
+        let rejected = build_safe_client(true, &[], None, HttpRedirectMode::Error)
             .unwrap()
             .get(&url)
             .send()
             .await;
         assert!(rejected.unwrap_err().is_redirect());
-        let manual = build_safe_client(true, &[], HttpProxyMode::Direct, HttpRedirectMode::Manual)
+        let manual = build_safe_client(true, &[], None, HttpRedirectMode::Manual)
             .unwrap()
             .get(&url)
             .send()

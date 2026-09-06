@@ -17,10 +17,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { remoteNative } from "./native";
-import { applyCredentialMutation, credentialMutation } from "./profileForm";
-import { useRemoteStore } from "./store";
-import type { SshCredentialInput } from "./types";
+import { remoteNative } from "@/modules/remote/native";
+import {
+  applyCredentialMutation,
+  credentialMutation,
+} from "@/modules/remote/profileForm";
+import { useRemoteStore } from "@/modules/remote/store";
+import type { SshCredentialInput } from "@/modules/remote/types";
 
 type Props = {
   open: boolean;
@@ -76,7 +79,7 @@ export function SshConnectionDialog({
           loadedProfile.authMethod === "agent"
             ? null
             : remoteNative.getSecret(profileId),
-          loadedProfile.proxyUrl
+          loadedProfile.proxyMode === "custom"
             ? remoteNative.getProxySecret(profileId)
             : null,
         ]);
@@ -112,7 +115,7 @@ export function SshConnectionDialog({
         value: proxySecret,
         dirty: proxySecretDirty,
         remember: rememberProxySecret,
-        applicable: Boolean(profile.proxyUrl),
+        applicable: profile.proxyMode === "custom",
       }),
       (value) => remoteNative.setProxySecret(profile.id, value),
       () => remoteNative.deleteProxySecret(profile.id),
@@ -131,7 +134,7 @@ export function SshConnectionDialog({
       if (
         !(await onConnect({
           secret: secret || null,
-          proxySecret: proxySecret || null,
+          proxySecret: rememberProxySecret ? null : proxySecret || null,
         }))
       ) {
         throw new Error(t("sshConnection.homeError"));
@@ -189,7 +192,7 @@ export function SshConnectionDialog({
             </div>
           )}
 
-          {profile?.proxyUrl ? (
+          {profile?.proxyMode === "custom" ? (
             <div className="grid gap-1.5">
               <Label htmlFor="ssh-connection-proxy-secret">
                 {t("sshConnection.proxyPassword")}

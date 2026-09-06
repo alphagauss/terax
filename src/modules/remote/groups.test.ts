@@ -4,12 +4,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { SshGroup, SshProfile } from "./types";
+import type { SshGroup, SshProfile } from "@/modules/remote/types";
 import {
   DEFAULT_SSH_GROUP_ID,
   groupNameIssue,
   groupSshProfiles,
-} from "./groups";
+} from "@/modules/remote/groups";
 
 function profile(id: string, name: string, groupId: string): SshProfile {
   return {
@@ -20,6 +20,7 @@ function profile(id: string, name: string, groupId: string): SshProfile {
     port: 22,
     username: "deploy",
     authMethod: "agent",
+    proxyMode: "direct",
     reconnectEnabled: true,
     reconnectMaxAttempts: 5,
     tunnels: [],

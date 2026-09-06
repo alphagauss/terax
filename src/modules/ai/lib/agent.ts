@@ -39,7 +39,10 @@ import type {
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
 import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
-import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
+import {
+  buildConfiguredLanguageModel,
+  createProviderDownload,
+} from "@/modules/ai/lib/providerRuntime";
 import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
 import {
   createUIMessageStream,
@@ -312,6 +315,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
               let cycleSteps = 0;
               const result = streamText({
                 model,
+                experimental_download: createProviderDownload(
+                  modelRef.providerId,
+                  opts.abortSignal,
+                ),
                 system: prompt.system,
                 messages: prompt.messages,
                 allowSystemInMessages: false,
@@ -568,6 +575,10 @@ function buildSubagentTaskRunner({
     );
     const result = await generateText({
       model: childModel,
+      experimental_download: createProviderDownload(
+        model.providerId,
+        abortSignal,
+      ),
       system: prompt.system,
       messages: prompt.messages,
       tools: buildTools(toolContext, allowedTools),

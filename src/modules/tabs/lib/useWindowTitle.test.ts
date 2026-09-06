@@ -6,7 +6,7 @@
 import type { SshProfile } from "@/modules/remote";
 import type { WorkspaceBootstrap } from "@/modules/workspace-process";
 import { describe, expect, it } from "vitest";
-import { formatWindowTitle } from "./useWindowTitle";
+import { formatWindowTitle } from "@/modules/tabs/lib/useWindowTitle";
 
 const labels = {
   local: "Local",
@@ -32,6 +32,7 @@ const profile: SshProfile = {
   port: 22,
   username: "root",
   authMethod: "password",
+  proxyMode: "direct",
   reconnectEnabled: true,
   reconnectMaxAttempts: 2,
   tunnels: [],

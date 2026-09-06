@@ -157,7 +157,7 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `shell::shell_exec`、`shell::shell_process`、`shell::shell_list`：按聊天 owner 隔离的统一 Agent 进程启动、stdin/EOF/增量输出/终止和发现；`shell_clear_owner` 在聊天删除时回收所属进程。
 - `workspace::*`：工作区授权、当前目录、WSL 桥接，以及无 Explorer 根时延迟准备默认 Agent 工作目录。
 - `lsp::*`：语言服务器进程及 JSON-RPC 管道；协议智能位于前端。
-- `net::http_request`、`net::http_cancel`：带 SSRF 防护、响应上限和按 WebView 隔离取消的通用 HTTP 传输，供 AI 与 Channels 复用。
+- `net::http_request`、`net::http_cancel`：带地址安全检查、响应上限和按 WebView 隔离取消的通用 HTTP 传输，全部网络 Provider、Channels 和语音复用；请求按连接身份由 `network_proxy` 解析出口，默认直连，不继承环境代理。
 - `secrets::secrets_*`：通过 `keyring` 访问系统密钥链。
 - `ai_sessions::*`：保存、列出和锁定 JSONL 会话，并在共享 Agent 配置锁内级联删除 Custom Agent 及其全部会话。
 - `auxiliary_window::open_auxiliary_window`：按封闭类型定义创建或复用轻量辅助窗口，设置页是首个注册页面。
@@ -251,6 +251,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - 云端 provider 通过 `@ai-sdk/*` 接入；本地 provider 包括 LM Studio、MLX、Ollama。
 - Claude Code、Codex 等完整 CLI Agent 通过独立 External Agent Runtime 接入，不伪装成网络 Provider 或 AI SDK `LanguageModel`。CLI 必须安装并登录在当前 Local、WSL 或 SSH 环境中，运行、探测和恢复不得回退到宿主环境。
 - External Agent 复用统一 Agent 进程的 owner、Workspace 授权、stdin/EOF、有界输出和完整进程树清理；Rust 只接受封闭 Agent ID 并构造命令，前端 adapter 只解析结构化输出。直接聊天会话绑定 Agent 与外部 session ID，恢复数据随 Terax session metadata 持久化。
+- 网络偏好统一保存到 `terax-settings.json` 的 `network.` 前缀键，逐连接精确更新；不单独维护网络配置文件。SSH 每次自动重连读取最新代理设置，但不改变当前 Workspace 的主机、身份与工作目录。
+- 所有网络 Provider 的 SDK 必须注入原生 HTTP fetch，目录与推理使用相同实例身份选择出口；聊天、补全等消费者不另设路由。SDK 远端附件下载沿用 Provider 出口但不继承模型服务器的私网许可。代理策略与地址权限独立，失败不回退直连。详见 `docs/architecture/network.md`。
 - 内置 provider 的地址、凭据策略、模型目录和运行时 adapter 统一定义在 `src/modules/ai/providerRegistry.ts`。设置页和 Agent 只消费解析后的连接，不按供应商名称重复拼接协议。新增流程见 `docs/architecture/ai-subsystem.md`。
 - 远端模型目录只用于发现模型 ID；用户明确添加的模型才进入设置。不得重新加入静态模型清单、价格、上下文长度、营销说明或主观能力评分。
 - 密钥只存放在系统 keychain 或 Linux secrets fallback，绝不能写入磁盘配置、settings store 或 `localStorage`。
@@ -284,7 +286,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 
 - `src/components/ui/` 由 shadcn/ui 管理，`src/components/ai-elements/` 由 AI Elements registry 管理，不要手工修改生成代码。
 - 业务代码中的 Dropdown Menu 和 Context Menu 统一从 `src/components/menu/` 导入，默认使用紧凑桌面密度；只有 registry 包装层可以直接导入对应的 `src/components/ui/` 生成组件。
-- 业务代码中的 Select 统一从 `src/components/controls/select.tsx` 导入；只有该项目级包装层可以直接导入 `src/components/ui/select.tsx`。
+- 业务代码中的 Select 统一从 `src/components/controls/select.tsx` 导入；包装层默认使用 12px 字号、32px 触发器高度和紧凑菜单行高，调用方只声明不同于默认值的尺寸或样式。只有该项目级包装层可以直接导入 `src/components/ui/select.tsx`。
 - Tailwind v4 配置位于 `src/styles/globals.css`，不存在 `tailwind.config.*`。
 - 从 `@/lib/utils` 导入并使用 `cn()`。
 - 前端规范路径使用正斜杠。来自 OSC 7、Explorer 或系统的路径必须同时兼容 `/` 和 `\`。
@@ -316,6 +318,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - `docs/architecture/pty-shell-integration.md`：PTY、Shell 初始化、OSC、ConPTY、Job Object
 - `docs/architecture/security-model.md`：安全模型和边界
 - `docs/architecture/ai-subsystem.md`：AI 技术栈、会话、工具和 provider
+- `docs/architecture/network.md`：内置 HTTP、连接级代理选择、SSH 共享与自定义代理及安全边界
 - `docs/architecture/channels.md`：消息连接、固定会话、微信协议及通用网络边界
 - `docs/architecture/external-agent-runtime.md`：外部 CLI Agent 的进程、协议、会话和跨环境边界
 - `docs/architecture/terminal-renderer-pool.md`：renderer pool 和 DormantRing 不变量

@@ -11,9 +11,9 @@ import {
   setSharedStoreKey,
 } from "@/lib/sharedStore";
 import { create } from "zustand";
-import { remoteNative } from "./native";
-import { DEFAULT_SSH_GROUP_ID } from "./groups";
-import type { SshGroup, SshProfile, SshTunnel } from "./types";
+import { remoteNative } from "@/modules/remote/native";
+import { DEFAULT_SSH_GROUP_ID } from "@/modules/remote/groups";
+import type { SshGroup, SshProfile, SshTunnel } from "@/modules/remote/types";
 
 const profileKey = (id: string) => `profile:${id}`;
 const groupKey = (id: string) => `group:${id}`;
@@ -33,22 +33,21 @@ type RemoteState = {
   deleteProfile: (profileId: string) => Promise<void>;
 };
 
-function removeInlineProxyPassword(value?: string | null): string | null {
-  if (!value) return null;
-  return value.replace(/^([a-z][a-z0-9+.-]*:\/\/[^/@:\s]+):[^@/]*@/i, "$1@");
-}
-
+/** 归一化当前服务器配置，代理路由必须是明确支持的模式。 */
 function normalizeProfile(
-  profile: SshProfile,
+  { proxyMode = "direct", ...profile }: SshProfile,
   knownGroupIds: ReadonlySet<string>,
 ): SshProfile {
+  if (!["direct", "shared", "custom"].includes(proxyMode))
+    throw new Error("invalid SSH proxy mode");
   return {
     ...profile,
     groupId: knownGroupIds.has(profile.groupId)
       ? profile.groupId
       : DEFAULT_SSH_GROUP_ID,
     name: profile.name?.trim() || `${profile.username}@${profile.host}`,
-    proxyUrl: removeInlineProxyPassword(profile.proxyUrl),
+    proxyMode,
+    proxyUrl: proxyMode === "custom" ? profile.proxyUrl : null,
     port: normalizeInteger(profile.port, 1, 65535, 22),
     reconnectMaxAttempts: normalizeInteger(
       profile.reconnectMaxAttempts,
@@ -203,12 +202,12 @@ export const useRemoteStore = create<RemoteState>((set, get) => ({
       ...get().profiles.filter((item) => item.id !== normalized.id),
       normalized,
     ].sort((a, b) => a.name.localeCompare(b.name));
-    set({ profiles });
     await setSharedStoreKey(
       "ssh-profiles",
       profileKey(normalized.id),
       normalized,
     );
+    set({ profiles });
   },
   saveProfiles: async (incoming) => {
     const knownGroupIds = new Set([

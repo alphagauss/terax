@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SshProfile } from "./types";
+import type { SshProfile } from "@/modules/remote/types";
 
 const mocks = vi.hoisted(() => ({
   mutateSharedStore: vi.fn(async () => {}),
@@ -28,8 +28,8 @@ vi.mock("./native", () => ({
   },
 }));
 
-import { DEFAULT_SSH_GROUP_ID } from "./groups";
-import { useRemoteStore } from "./store";
+import { DEFAULT_SSH_GROUP_ID } from "@/modules/remote/groups";
+import { useRemoteStore } from "@/modules/remote/store";
 
 function profile(id: string, groupId: string): SshProfile {
   return {
@@ -40,6 +40,7 @@ function profile(id: string, groupId: string): SshProfile {
     port: 22,
     username: "deploy",
     authMethod: "agent",
+    proxyMode: "direct",
     reconnectEnabled: true,
     reconnectMaxAttempts: 5,
     tunnels: [],

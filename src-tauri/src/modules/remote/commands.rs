@@ -12,7 +12,7 @@ use super::models::{
     TunnelConfig, TunnelEventKind, TunnelInfo,
 };
 
-const SSH_SECRET_SERVICE: &str = "terax-ssh";
+use super::profile::SECRET_SERVICE;
 
 /// 将 profile、单次凭据覆盖或系统密钥链合并为内存连接请求。
 fn connect_request(
@@ -30,31 +30,16 @@ fn connect_request(
             let secret = if profile.auth_method == SshAuthMethod::Agent {
                 None
             } else {
-                secrets::get(app, secrets_state, SSH_SECRET_SERVICE, &profile.id)?
+                secrets::get(app, secrets_state, SECRET_SERVICE, &profile.id)?
                     .filter(|value| !value.is_empty())
             };
-            let proxy_secret = if profile
-                .proxy_url
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-            {
-                secrets::get(
-                    app,
-                    secrets_state,
-                    SSH_SECRET_SERVICE,
-                    &format!("{}:proxy", profile.id),
-                )?
-                .filter(|value| !value.is_empty())
-            } else {
-                None
-            };
-            (secret, proxy_secret)
+            (secret, None)
         }
     };
     Ok(ConnectRequest {
         profile,
         secret,
-        proxy_secret,
+        proxy_secret_override: proxy_secret,
     })
 }
 
