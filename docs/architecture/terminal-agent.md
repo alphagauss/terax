@@ -30,7 +30,42 @@ pnpm agent --full-access
 
 模型、提供商地址、自定义指令、Subagent 设置和界面语言读取现有共享配置。凭据沿用系统密钥链或 Linux secrets 文件。`--model` 和 `--full-access` 只影响本次终端运行，不改写桌面的全局选择。`TERAX_API_KEY` 可向本次进程提供所选模型的凭据，不会写回磁盘。
 
-默认寻找工作树内的 `src-tauri/target/debug/terax-host`，Windows 使用 `.exe`。发行时可以通过 `TERAX_NATIVE_HOST` 指定同版本原生程序；是否随发行包提供 Bun 属于打包规则。Release 原生构建为：
+默认寻找工作树内的 `src-tauri/target/debug/terax-host`，Windows 使用 `.exe`。`TERAX_NATIVE_HOST` 始终优先指定同版本原生程序，供开发、诊断和测试使用。
+
+## 构建入口
+
+```sh
+pnpm build             # 前端类型检查与 Vite 构建
+pnpm build tui         # TUI 独立可执行文件
+pnpm build tui mjs     # TUI 外部 Bun 单文件
+pnpm tauri build       # 桌面应用打包
+```
+
+`scripts/build.mjs` 使用 Node 分发构建任务，无参数时保持原有 `tsc`、`vite build` 顺序，仅 `tui` 分支启动 Bun。`pnpm tauri build` 继续沿用 Tauri 配置，并通过 `pnpm build` 构建前端。TUI 未指定格式时默认生成独立程序，`mjs` 选择外部 Bun 模式；未知目标、格式和多余参数会直接报错。
+
+## Windows TUI 单文件发行
+
+当前提供 Windows x64 本机构建。两种模式都发布同一套 `terax` CLI，命令仍然是 `terax agent`，不会构建名为 `agent` 的独立程序：
+
+```powershell
+pnpm build tui
+pnpm build tui mjs
+```
+
+- `pnpm build tui` 生成 `artifacts/tui/windows-x64/standalone/terax.exe`。它内嵌 Bun runtime 和 `terax-host.exe`，目标机器不需要安装 Bun、Node、pnpm 或依赖目录，直接运行 `./terax.exe agent`。
+- `pnpm build tui mjs` 生成 `artifacts/tui/windows-x64/runtime/terax.mjs`。它内嵌 Rust host、OpenTUI DLL、WASM、worker 与 JS bundle，但不嵌入 Bun runtime；目标机器须安装兼容的 Bun，并以 `bun ./terax.mjs agent` 启动。
+
+两种发行物都是单文件分发。Rust 宿主需要由操作系统作为子进程加载，启动时会释放至当前用户随机创建的临时目录，通过既有私有 stdio 管道通信，退出后清理。外部 Bun runtime 模式还会将 OpenTUI 运行资源释放到同一进程专属临时目录，以保持其基于 `import.meta.url` 的资源寻址。内嵌资源按内容去重后使用 gzip 压缩，启动时通过内置 `node:zlib` 解压并恢复全部资源路径，不增加第三方依赖。正常退出时尽力清理；Windows 仍占用的 DLL 留待后续启动确认所属进程已退出后回收，不按目录年龄删除运行中的实例资源。该释放不监听端口，也不改变 `TERAX_NATIVE_HOST` 的外部覆盖优先级。
+
+构建中间产物位于 `artifacts/tui/windows-x64/cargo/`，已被 Git 忽略。Cargo 使用该专属 `--target-dir`，不会读取、覆盖或清理桌面应用的 `src-tauri/target/debug` 与 `src-tauri/target/release`。构建本身不需要联网，但首次安装依赖或本地 pnpm、Cargo 缓存不完整时仍需下载依赖；模型调用是否联网取决于所选 Provider。
+
+构建后可运行以下只读 smoke test，它将两个单文件复制到仓库外，在无 TTY 环境执行 `agent --list`，验证内嵌宿主启动，并将 MJS 实际释放的全部资源与构建输入逐一校验 SHA-256，同时验证只回收已退出进程的临时目录。该测试不覆盖交互式 TUI 渲染：
+
+```powershell
+pnpm test:tui:package
+```
+
+开发模式的 headless Rust 构建仍使用以下命令：
 
 ```sh
 cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --bin terax-host --release --locked

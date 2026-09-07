@@ -4,6 +4,9 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NativeChannel, NativeHost } from "@/lib/nativeHost";
 
@@ -13,16 +16,68 @@ type Pending = {
   channel?: NativeChannel<unknown>;
 };
 
+type PackagedNativeHost = { executable: string; embedded: boolean };
+
+let packagedNativeHost: PackagedNativeHost | undefined;
+
+/**
+ * 注册发行构建的原生宿主；embedded 表示路径位于 Bun 虚拟文件系统，执行前需要释放。
+ *
+ * 开发入口不调用此函数，仍从工作树的 debug 输出启动宿主。外部
+ * `TERAX_NATIVE_HOST` 始终具有更高优先级，以保留诊断和测试能力。
+ */
+export function setPackagedNativeHost(host: PackagedNativeHost) {
+  packagedNativeHost = host;
+}
+
+/**
+ * 解析本次运行所需的原生宿主，并在内嵌模式下释放到独占临时目录。
+ *
+ * Rust 宿主必须由操作系统作为子进程加载，不能直接从 Bun 的虚拟文件系统执行。
+ * 使用每次运行独有的目录可避免固定路径被其他进程替换；调用方负责在子进程结束后清理。
+ */
+function resolveNativeHost() {
+  const configured = process.env.TERAX_NATIVE_HOST;
+  if (configured) return { executable: configured };
+  if (!packagedNativeHost) {
+    return {
+      executable: fileURLToPath(
+        new URL(
+          `../src-tauri/target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
+          import.meta.url,
+        ),
+      ),
+    };
+  }
+  if (!packagedNativeHost.embedded)
+    return { executable: packagedNativeHost.executable };
+  const directory = mkdtempSync(join(tmpdir(), "terax-host-"));
+  const executable = join(
+    directory,
+    `terax-host${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  try {
+    const contents = readFileSync(packagedNativeHost.executable);
+    writeFileSync(executable, contents, { flag: "wx" });
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+  return {
+    executable,
+    cleanup: () =>
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 100,
+      }),
+  };
+}
+
 /** 启动当前平台的原生宿主，并为所有请求保留唯一的关联身份。 */
 export function createTerminalHost(cwd: string) {
-  const executable =
-    process.env.TERAX_NATIVE_HOST ??
-    fileURLToPath(
-      new URL(
-        `../src-tauri/target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
-        import.meta.url,
-      ),
-    );
+  const { executable, cleanup } = resolveNativeHost();
   const child = spawn(executable, [cwd], {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -53,6 +108,10 @@ export function createTerminalHost(cwd: string) {
           diagnostics.trim() || `Native host exited (${code ?? "signal"})`,
         ),
       );
+      // 杀毒软件可能暂时占用已退出的程序；临时文件回收失败不能打断业务收尾。
+      try {
+        cleanup?.();
+      } catch {}
       resolve();
     }),
   );

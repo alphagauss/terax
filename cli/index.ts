@@ -31,13 +31,18 @@ export async function main(args: string[]) {
   await runAgent(values);
 }
 
-if (import.meta.main) {
+/** 运行命令入口并将未处理错误转换为一致的进程退出状态。 */
+export async function runCli(args: string[]) {
   try {
-    await main(process.argv.slice(2));
+    await main(args);
   } catch (error) {
     process.stderr.write(
       `${error instanceof Error ? error.message : String(error)}\n`,
     );
     process.exitCode = 1;
   }
+}
+
+if (import.meta.main) {
+  await runCli(process.argv.slice(2));
 }

@@ -17,6 +17,8 @@
   "include": [
     "./**/*.ts",
     "./**/*.tsx",
+    "../scripts/build-tui.ts",
+    "../scripts/terminal-package-smoke.ts",
     "../scripts/terminal-smoke.ts",
     "../scripts/terminal-ui-smoke.tsx"
   ],

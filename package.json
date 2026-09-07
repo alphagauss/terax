@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vite",
     "dev:inspect": "INSPECT=true vite",
-    "build": "tsc && vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
@@ -29,7 +29,8 @@
     "build:host": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --bin terax-host --locked",
     "check-types:terminal": "tsc --noEmit -p cli/tsconfig.json",
     "test:terminal": "bun scripts/terminal-smoke.ts",
-    "test:tui": "bun scripts/terminal-ui-smoke.tsx"
+    "test:tui": "bun scripts/terminal-ui-smoke.tsx",
+    "test:tui:package": "bun scripts/terminal-package-smoke.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.94",
