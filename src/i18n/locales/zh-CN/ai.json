@@ -163,6 +163,19 @@
       "completedWithDuration": "已思考 {{duration}} 秒"
     },
     "activity": {
+      "fileOperation": {
+        "move": "正在移动",
+        "copy": "正在复制",
+        "delete": "正在删除",
+        "createDirectory": "正在创建目录"
+      },
+      "activeTerminal": "正在读取活动终端",
+      "process": {
+        "poll": "正在等待进程",
+        "write": "正在写入进程",
+        "closeStdin": "正在关闭进程输入",
+        "terminate": "正在终止进程"
+      },
       "thinking": "正在思考",
       "completed": "已处理",
       "completedWithDuration": "已处理 {{duration}} 秒"

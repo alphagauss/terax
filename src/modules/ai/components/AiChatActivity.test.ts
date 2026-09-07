@@ -4,8 +4,87 @@
  */
 
 import type { UIMessage } from "ai";
-import { describe, expect, it } from "vitest";
-import { buildMessageGroups, resolveToolDisplay } from "./AiChat";
+import { beforeAll, describe, expect, it } from "vitest";
+import { preloadEn } from "@/i18n";
+import {
+  activityHeadline,
+  buildMessageGroups,
+  resolveToolDisplay,
+} from "./AiChat";
+
+describe("activity headline summaries", () => {
+  beforeAll(() => preloadEn());
+  const headline = (tool: string, input: unknown, state = "input-streaming") =>
+    activityHeadline(
+      {
+        type: `tool-${tool}`,
+        toolCallId: "call",
+        state,
+        input,
+      } as Parameters<typeof activityHeadline>[0],
+      "Thinking",
+    );
+
+  it("waits for meaningful fields but not for full tool parameters", () => {
+    expect(headline("shell_exec", {})).toBeNull();
+    expect(headline("shell_exec", { command: " \n " })).toBeNull();
+    expect(headline("shell_exec", { command: "Get-Date" })?.text).toBe(
+      "Get-Date",
+    );
+    expect(headline("write_file", { path: "src/app.tsx" })?.text).toBe(
+      "src/app.tsx",
+    );
+    expect(headline("apply_patch", { files: [{}] })).toBeNull();
+    expect(headline("apply_patch", { files: [{ path: "a.ts" }] })?.text).toBe(
+      "a.ts",
+    );
+    expect(headline("find_files", {})).toBeNull();
+    expect(headline("find_files", {}, "input-available")?.text).toBe(".");
+  });
+
+  it("uses search conditions and process actions instead of opaque IDs", () => {
+    expect(headline("shell_exec", { command: "pnpm test" })).toMatchObject({
+      action: "Running",
+      text: "pnpm test",
+    });
+    expect(headline("read_file", { path: "a.ts" })).toMatchObject({
+      action: "Reading",
+      text: "a.ts",
+    });
+    expect(headline("write_file", { path: "a.ts" })).toMatchObject({
+      action: "Writing",
+      text: "a.ts",
+    });
+    expect(
+      headline("file_operation", {
+        operation: "move",
+        path: "a.ts",
+        destination: "b.ts",
+      }),
+    ).toMatchObject({ action: "Moving", text: "a.ts → b.ts" });
+    expect(
+      headline("find_files", { glob: "**/*.tsx", path: "src" })?.text,
+    ).toBe("**/*.tsx · src");
+    expect(
+      headline("shell_process", {
+        action: "terminate",
+        process_id: "opaque-id",
+      })?.text,
+    ).toBe("Terminating process");
+    expect(headline("get_terminal_output", {})?.text).toBe(
+      "Reading active terminal",
+    );
+  });
+
+  it("bounds a single-line summary without changing the command", () => {
+    const input = { command: `echo  one\n\t${"x".repeat(200)}` };
+    const original = input.command;
+    const result = headline("shell_exec", input);
+    expect(result?.text).toHaveLength(160);
+    expect(result?.text).toMatch(/^echo one x+…$/);
+    expect(input.command).toBe(original);
+  });
+});
 
 describe("AI chat activity grouping", () => {
   it("shows structured tool failures as errors", () => {
