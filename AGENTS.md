@@ -166,6 +166,8 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `terax agent` 使用 OpenTUI React 和 Bun；依赖仍只用 pnpm 管理。
 - Agent 执行、审批协调、取消和增量提交独立于 React 生命周期，桌面与终端复用同一套规则。
 - Rust 默认 `desktop` 特性注册 Tauri；`headless` 特性提供不链接 WebView 的 `terax-host`，通过继承的私有管道调用共享服务。
+- 共享原生能力的宿主入口集中于 `src-tauri/src/adapters/tauri/` 与 `adapters/stdio.rs`，编译条件放在 `adapters/mod.rs`。共享服务保留于 `modules/`，不使用 Tauri 类型或命令宏；通知由宿主实现明确的事件接口。仅桌面使用的既有模块无需为终端提前拆分。
+- SSH 连接生命周期目前仍由桌面 Workspace 拥有，对应能力分支保留构建条件；不得为消除条件而把未支持的远端请求降级成本地执行。
 - 首版终端绑定启动系统的 Local 环境，拒绝把 WSL、SSH 请求当成本地操作。daemon、远程服务与其他 TUI 子命令不属于当前实现。
 - 宿主能力不能依赖聊天 UI；Agent 专属权限和 owner 规则保留在工具服务边界。详细启动和验证流程见 `docs/architecture/terminal-agent.md`。
 

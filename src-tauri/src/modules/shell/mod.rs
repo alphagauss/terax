@@ -53,23 +53,7 @@ pub struct CommandOutput {
 }
 
 /// 运行非 AI 模块使用的一次性命令，输出有界且超时后终止进程树。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn shell_run_command(
-    command: String,
-    cwd: Option<String>,
-    timeout_secs: Option<u64>,
-    workspace: Option<WorkspaceEnv>,
-    registry: tauri::State<'_, WorkspaceRegistry>,
-) -> Result<CommandOutput, String> {
-    shell_run_command_service(command, cwd, timeout_secs, workspace, registry.inner()).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn shell_run_command_service(
     command: String,
     cwd: Option<String>,
     timeout_secs: Option<u64>,
@@ -135,46 +119,8 @@ pub enum ProcessAction {
 }
 
 /// 启动统一 Agent 进程，并等待首轮时限或终态。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn shell_exec(
-    state: tauri::State<'_, ShellState>,
-    registry: tauri::State<'_, WorkspaceRegistry>,
-    owner_session_id: String,
-    command: String,
-    initial_cwd: String,
-    cwd: Option<String>,
-    permission_mode: AgentPermissionMode,
-    timeout_secs: u64,
-    yield_time_ms: u64,
-    max_output_bytes: usize,
-    shell: ShellKind,
-    login: bool,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<ProcessResponse, String> {
-    shell_exec_service(
-        state.inner(),
-        registry.inner(),
-        owner_session_id,
-        command,
-        initial_cwd,
-        cwd,
-        permission_mode,
-        timeout_secs,
-        yield_time_ms,
-        max_output_bytes,
-        shell,
-        login,
-        workspace,
-    )
-    .await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn shell_exec_service(
     state: &ShellState,
     registry: &WorkspaceRegistry,
     owner_session_id: String,
@@ -305,44 +251,8 @@ pub async fn shell_exec_service(
 }
 
 /// 轮询、写入、关闭 stdin 或终止一个已登记的 Agent 进程。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn shell_process(
-    state: tauri::State<'_, ShellState>,
-    owner_session_id: String,
-    process_id: String,
-    action: ProcessAction,
-    input: Option<String>,
-    close_stdin: bool,
-    since_offset: Option<u64>,
-    yield_time_ms: Option<u64>,
-    wait_for: Option<String>,
-    wait_timeout_ms: Option<u64>,
-    max_output_bytes: Option<usize>,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<ProcessResponse, String> {
-    shell_process_service(
-        state.inner(),
-        owner_session_id,
-        process_id,
-        action,
-        input,
-        close_stdin,
-        since_offset,
-        yield_time_ms,
-        wait_for,
-        wait_timeout_ms,
-        max_output_bytes,
-        workspace,
-    )
-    .await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn shell_process_service(
     state: &ShellState,
     owner_session_id: String,
     process_id: String,
@@ -410,22 +320,7 @@ pub async fn shell_process_service(
 }
 
 /// 列出当前 Workspace 中运行中或最近结束的 Agent 进程。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub fn shell_list(
-    state: tauri::State<'_, ShellState>,
-    owner_session_id: String,
-    include_exited: bool,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<Vec<ProcessInfo>, String> {
-    shell_list_service(state.inner(), owner_session_id, include_exited, workspace)
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub fn shell_list_service(
     state: &ShellState,
     owner_session_id: String,
     include_exited: bool,
@@ -452,23 +347,7 @@ pub fn shell_list_service(
 }
 
 /// 删除聊天时终止并清理该 owner 的全部 Agent 进程。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn shell_clear_owner(
-    state: tauri::State<'_, ShellState>,
-    owner_session_id: String,
-) -> Result<(), String> {
-    shell_clear_owner_service(state.inner(), owner_session_id).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn shell_clear_owner_service(
-    state: &ShellState,
-    owner_session_id: String,
-) -> Result<(), String> {
+pub async fn shell_clear_owner(state: &ShellState, owner_session_id: String) -> Result<(), String> {
     validate_owner(&owner_session_id)?;
     let _spawn_guard = state.spawn_lock.lock().await;
     let processes: Vec<_> = state

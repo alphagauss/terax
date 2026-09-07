@@ -18,7 +18,6 @@ use super::profile::SECRET_SERVICE;
 fn connect_request(
     profile: SshProfile,
     credentials: Option<CredentialOverride>,
-    app: &tauri::AppHandle,
     secrets_state: &SecretsState,
 ) -> Result<ConnectRequest, String> {
     let (secret, proxy_secret) = match credentials {
@@ -30,7 +29,7 @@ fn connect_request(
             let secret = if profile.auth_method == SshAuthMethod::Agent {
                 None
             } else {
-                secrets::get(app, secrets_state, SECRET_SERVICE, &profile.id)?
+                secrets::get_value(secrets_state, SECRET_SERVICE, &profile.id)?
                     .filter(|value| !value.is_empty())
             };
             (secret, None)
@@ -55,7 +54,7 @@ pub(crate) async fn connect_saved_profile(
     let profile = super::profile::load(&profile_id)?;
     profile.validate()?;
     workspace.assert_ssh_runtime_owner(&profile)?;
-    let request = connect_request(profile, credentials, &app, secrets_state)?;
+    let request = connect_request(profile, credentials, secrets_state)?;
     state.manager.connect(request, app).await
 }
 
@@ -72,7 +71,7 @@ pub(crate) async fn connect_startup_profile(
         let profile = super::profile::load(&profile_id)?;
         profile.validate()?;
         workspace.assert_ssh_runtime_owner(&profile)?;
-        connect_request(profile, None, &app, secrets_state)
+        connect_request(profile, None, secrets_state)
     })() {
         Ok(request) => request,
         Err(error) => {

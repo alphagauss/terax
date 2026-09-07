@@ -12,8 +12,6 @@ use std::sync::Mutex;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "desktop")]
-use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use super::file::{CheckedWriteResult, FileVersion, ReadResult, WriteCondition};
@@ -21,7 +19,7 @@ use super::grep::{self, ContentSearchCaseMode, ContentSearchRequest, ContentSear
 use super::to_canon;
 use super::tree::{DirEntry, EntryKind};
 #[cfg(feature = "desktop")]
-use crate::modules::remote::{self, RemoteState};
+use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
 const MAX_PATH_BYTES: usize = 32 * 1024;
@@ -358,23 +356,7 @@ struct AgentPathContext<'a> {
 }
 
 /// 读取当前工作区内的普通 UTF-8 文件，并记录聊天级文件版本。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_read(
-    state: State<'_, AgentFileState>,
-    remote: State<'_, RemoteState>,
-    registry: State<'_, WorkspaceRegistry>,
-    request: AgentReadRequest,
-) -> Result<AgentReadResponse, String> {
-    let _ = remote;
-    agent_file_read_service(state.inner(), registry.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_read_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     request: AgentReadRequest,
@@ -401,8 +383,7 @@ pub async fn agent_file_read_service(
         return Err("startLine must be at least 1".into());
     }
     let result =
-        super::file::fs_read_file_service(authorized.io_path.clone(), Some(workspace), Some(false))
-            .await?;
+        super::file::fs_read_file(authorized.io_path.clone(), Some(workspace), Some(false)).await?;
     let ReadResult::Text {
         content,
         size,
@@ -456,21 +437,7 @@ pub async fn agent_file_read_service(
 }
 
 /// 统一执行直接目录列举和递归 glob 路径发现。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_find(
-    state: State<'_, AgentFileState>,
-    registry: State<'_, WorkspaceRegistry>,
-    request: AgentFindRequest,
-) -> Result<AgentFindResponse, String> {
-    agent_file_find_service(state.inner(), registry.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_find_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     request: AgentFindRequest,
@@ -537,23 +504,7 @@ pub async fn agent_file_find_service(
 }
 
 /// 使用共享搜索引擎执行 Agent 正文搜索，并在安全过滤后分页和聚合。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_grep(
-    state: State<'_, AgentFileState>,
-    remote: State<'_, RemoteState>,
-    registry: State<'_, WorkspaceRegistry>,
-    request: AgentGrepRequest,
-) -> Result<AgentGrepResponse, String> {
-    let _ = remote;
-    agent_file_grep_service(state.inner(), registry.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_grep_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     request: AgentGrepRequest,
@@ -717,23 +668,7 @@ pub async fn agent_file_grep_service(
 }
 
 /// 准备全文写入或多文件精确补丁，并缓存审批所见内容。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_prepare_mutation(
-    state: State<'_, AgentFileState>,
-    remote: State<'_, RemoteState>,
-    registry: State<'_, WorkspaceRegistry>,
-    request: AgentPrepareMutationRequest,
-) -> Result<AgentMutationPreview, String> {
-    let _ = remote;
-    agent_file_prepare_mutation_service(state.inner(), registry.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_prepare_mutation_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     request: AgentPrepareMutationRequest,
@@ -782,24 +717,7 @@ pub async fn agent_file_prepare_mutation_service(
 }
 
 /// 提交已准备的修改；任何基线冲突都会在写入前拒绝。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_commit_mutation(
-    state: State<'_, AgentFileState>,
-    remote: State<'_, RemoteState>,
-    registry: State<'_, WorkspaceRegistry>,
-    app: AppHandle,
-    request: AgentMutationKeyRequest,
-) -> Result<AgentMutationResult, String> {
-    let _ = remote;
-    agent_file_commit_mutation_service(state.inner(), registry.inner(), &app, request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_commit_mutation_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     app: &dyn crate::modules::fs::file::FileEvents,
@@ -821,7 +739,7 @@ pub async fn agent_file_commit_mutation_service(
             let failures = rollback_writes(app, &mutation.workspace, &committed).await;
             return Err(with_rollback_status(error, failures));
         }
-        let result = match super::file::fs_write_file_checked_service(
+        let result = match super::file::fs_write_file_checked(
             write.io_path.clone(),
             write.after.clone(),
             write.condition.clone(),
@@ -878,20 +796,7 @@ pub async fn agent_file_commit_mutation_service(
 }
 
 /// 丢弃单个预备快照。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_clear_mutation(
-    state: State<'_, AgentFileState>,
-    request: AgentMutationKeyRequest,
-) -> Result<(), String> {
-    agent_file_clear_mutation_service(state.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_clear_mutation_service(
     state: &AgentFileState,
     request: AgentMutationKeyRequest,
 ) -> Result<(), String> {
@@ -905,20 +810,7 @@ pub async fn agent_file_clear_mutation_service(
 }
 
 /// 清理聊天拥有的读取版本和预备快照。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_clear_owner(
-    state: State<'_, AgentFileState>,
-    owner_session_id: String,
-) -> Result<(), String> {
-    agent_file_clear_owner_service(state.inner(), owner_session_id).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_clear_owner_service(
     state: &AgentFileState,
     owner_session_id: String,
 ) -> Result<(), String> {
@@ -942,22 +834,7 @@ pub async fn agent_file_clear_owner_service(
 }
 
 /// 执行经过审批的结构化路径操作。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_operation(
-    state: State<'_, AgentFileState>,
-    registry: State<'_, WorkspaceRegistry>,
-    app: AppHandle,
-    request: AgentFileOperationRequest,
-) -> Result<AgentFileOperationResponse, String> {
-    agent_file_operation_service(state.inner(), registry.inner(), &app, request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn agent_file_operation_service(
     state: &AgentFileState,
     registry: &WorkspaceRegistry,
     app: &dyn crate::modules::fs::file::FileEvents,
@@ -1983,8 +1860,7 @@ async fn find_recursive(
 
 async fn read_context_file(workspace: &WorkspaceEnv, path: &str) -> Result<Vec<String>, String> {
     let result =
-        super::file::fs_read_file_service(path.to_string(), Some(workspace.clone()), Some(false))
-            .await?;
+        super::file::fs_read_file(path.to_string(), Some(workspace.clone()), Some(false)).await?;
     let ReadResult::Text { content, .. } = result else {
         return Ok(Vec::new());
     };
@@ -2137,9 +2013,7 @@ struct TextSnapshot {
 
 async fn read_text_snapshot(path: &str, workspace: &WorkspaceEnv) -> Result<TextSnapshot, String> {
     ensure_regular_file(path, workspace).await?;
-    match super::file::fs_read_file_service(path.to_string(), Some(workspace.clone()), Some(false))
-        .await?
-    {
+    match super::file::fs_read_file(path.to_string(), Some(workspace.clone()), Some(false)).await? {
         ReadResult::Text {
             content,
             size,
@@ -2379,7 +2253,7 @@ async fn rollback_writes(
             }
             continue;
         }
-        let result = super::file::fs_write_file_checked_service(
+        let result = super::file::fs_write_file_checked(
             write.io_path.clone(),
             write.before.clone(),
             WriteCondition::Match {

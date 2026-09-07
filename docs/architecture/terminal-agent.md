@@ -43,9 +43,27 @@ Enter 发送，Shift+Enter 换行，Escape 停止，Ctrl+C 在运行时停止、
 - `src/lib/nativeHost.ts`、`tauriHost.ts`：共享宿主接口与按需加载的桌面接入。桌面仍使用原有 IPC 和进程结构。
 - `apps/terminal/`：终端参数、配置接入、原生管道和交互展示，不另写模型循环或文件策略。
 
-Rust 默认 `desktop` 特性保留 Tauri 应用，注册入口在 `src-tauri/src/desktop.rs`。`headless` 特性提供 `terax-host`；其 `host.rs` 只路由固定操作，服务实现位于现有 `modules/` 中。需要宿主状态的共享操作使用普通引用，Tauri command 只负责转换注入状态。文件通知和 HTTP 事件通过明确接口传递。
+Rust 默认 `desktop` 特性保留 Tauri 应用，启动和命令注册在 `src-tauri/src/desktop.rs`。共享能力的宿主接入统一位于 `adapters/`：
 
-当前无界面构建不包含 SSH 连接管理。现有桌面 Local、WSL、SSH 行为保持在桌面特性下；终端请求中的非 Local 环境被明确拒绝，不会被当成本地路径执行。
+```text
+adapters/
+  mod.rs       集中选择编译的宿主
+  tauri/       共享能力的桌面命令、Channel 转换和配置监听
+  stdio.rs     terax-host 私有管道和封闭请求映射
+modules/
+  fs/          文件策略、正文、目录、条件写入和搜索
+  shell/       受管进程与执行规则
+  net.rs       HTTP 地址安全、传输和取消
+  ai_sessions.rs、secrets.rs、shared_store.rs
+```
+
+保留 `modules/` 名称以避免无关路径改动。其中上述共享服务只接收普通 Rust 参数，不包含 Tauri command、State 或 AppHandle；桌面包装负责提取状态，stdio 直接调用同一服务。文件、配置和 HTTP 的通知通过 `FileEvents`、`StoreEvents`、`HttpEventSink` 传出，由宿主决定通知方式。配置 watcher 仅由桌面启动。
+
+`adapters/tauri/` 整体受 `desktop` 特性控制，内部命令无需逐个声明 `cfg(desktop)`。其余仅用于桌面的模块仍保留在已有位置，不为未来子命令提前增加适配目录。添加原生能力时修改一次服务，再在需要它的宿主入口增加薄映射。
+
+PTY、配置监听、文件模糊搜索与 SSH 管理依赖由 `desktop` 特性启用，无界面构建不引入这些当前未使用的能力。
+
+当前无界面构建不包含 SSH 连接管理。现有 SSH Runtime 仍由桌面 Workspace 管理，因此共享服务中的 SSH 分支暂时保留对应构建条件；这不表示 SSH 天然属于桌面。未来支持终端 SSH 时需要独立提取连接生命周期，本次不扩大到该重构。终端请求中的非 Local 环境被明确拒绝，不会被当成本地路径执行。
 
 ## 不变量
 

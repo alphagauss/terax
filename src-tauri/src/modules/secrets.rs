@@ -5,9 +5,6 @@
 
 use std::sync::Mutex;
 
-#[cfg(feature = "desktop")]
-use tauri::AppHandle;
-
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
@@ -52,7 +49,7 @@ pub(crate) fn read_store_at(path: &std::path::Path) -> Result<HashMap<String, St
     serde_json::from_slice::<HashMap<String, String>>(&bytes).map_err(|e| e.to_string())
 }
 
-#[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
+#[cfg(target_os = "linux")]
 pub(crate) fn write_store_at(
     path: &std::path::Path,
     map: &HashMap<String, String>,
@@ -75,7 +72,7 @@ where
     Ok(f(&mut map))
 }
 
-#[cfg(all(target_os = "linux", feature = "desktop"))]
+#[cfg(target_os = "linux")]
 fn mutate_store<F>(state: &SecretsState, f: F) -> Result<(), String>
 where
     F: FnOnce(&mut HashMap<String, String>),
@@ -96,17 +93,6 @@ where
 #[cfg(not(target_os = "linux"))]
 fn entry(service: &str, account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(service, account).map_err(|e| e.to_string())
-}
-
-/// 从当前平台的秘密存储读取一个值。
-#[cfg(feature = "desktop")]
-pub(crate) fn get(
-    _app: &AppHandle,
-    state: &SecretsState,
-    service: &str,
-    account: &str,
-) -> Result<Option<String>, String> {
-    get_value(state, service, account)
 }
 
 /// 从共享系统秘密存储读取凭据，无界面宿主沿用相同的平台身份。
@@ -132,22 +118,9 @@ pub fn get_value(
     }
 }
 
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub async fn secrets_get(
-    app: AppHandle,
-    state: tauri::State<'_, SecretsState>,
-    service: String,
-    account: String,
-) -> Result<Option<String>, String> {
-    get(&app, &state, &service, &account)
-}
-
-#[cfg(feature = "desktop")]
-#[tauri::command]
+/// 更新系统凭据，变更通知由宿主发送。
 pub async fn secrets_set(
-    app: AppHandle,
-    state: tauri::State<'_, SecretsState>,
+    state: &SecretsState,
     service: String,
     account: String,
     password: String,
@@ -155,38 +128,36 @@ pub async fn secrets_set(
     #[cfg(target_os = "linux")]
     let result = {
         let key = key(&service, &account);
-        mutate_store(&state, |m| {
+        mutate_store(state, |m| {
             m.insert(key, password);
         })
     };
     #[cfg(not(target_os = "linux"))]
     let result = {
-        let _ = &state;
+        let _ = state;
         let e = entry(&service, &account)?;
         e.set_password(&password).map_err(|e| e.to_string())
     };
     result?;
-    crate::modules::shared_store::bump_keys_epoch(&app)
+    Ok(())
 }
 
-#[cfg(feature = "desktop")]
-#[tauri::command]
+/// 删除系统凭据，缺失账户视为已经完成。
 pub async fn secrets_delete(
-    app: AppHandle,
-    state: tauri::State<'_, SecretsState>,
+    state: &SecretsState,
     service: String,
     account: String,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     let result = {
         let key = key(&service, &account);
-        mutate_store(&state, |m| {
+        mutate_store(state, |m| {
             m.remove(&key);
         })
     };
     #[cfg(not(target_os = "linux"))]
     let result = {
-        let _ = &state;
+        let _ = state;
         let e = entry(&service, &account)?;
         match e.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
@@ -194,7 +165,7 @@ pub async fn secrets_delete(
         }
     };
     result?;
-    crate::modules::shared_store::bump_keys_epoch(&app)
+    Ok(())
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -280,18 +251,15 @@ mod tests {
     }
 }
 
-/// 在一次桌面 IPC 内批量读取凭据，启动时避免逐个账户往返。
-#[cfg(feature = "desktop")]
-#[tauri::command]
+/// 批量读取凭据，Linux 复用一次文件快照，避免启动时逐账户重复读取。
 pub async fn secrets_get_all(
-    _app: AppHandle,
-    state: tauri::State<'_, SecretsState>,
+    state: &SecretsState,
     service: String,
     accounts: Vec<String>,
 ) -> Result<Vec<Option<String>>, String> {
     #[cfg(target_os = "linux")]
     {
-        with_store(&state, |m| {
+        with_store(state, |m| {
             accounts
                 .iter()
                 .map(|a| m.get(&key(&service, a)).cloned())
@@ -300,7 +268,7 @@ pub async fn secrets_get_all(
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (_app, state);
+        let _ = state;
         Ok(accounts
             .into_iter()
             .map(|a| {

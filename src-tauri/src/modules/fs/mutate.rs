@@ -23,7 +23,6 @@ pub enum TrashResult {
 }
 
 /// Creates a new empty file. Fails if the file already exists.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
@@ -53,7 +52,6 @@ pub async fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Re
 /// Creates a new directory. Fails if the directory already exists.
 /// Parents are created as needed — matches the common "new folder" UX
 /// where typing "a/b/c" creates the full chain.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
@@ -81,7 +79,6 @@ pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Res
 }
 
 /// Renames (or moves) a path. Refuses to overwrite an existing target.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_rename(
     from: String,
     to: String,
@@ -123,7 +120,6 @@ pub async fn fs_rename(
 /// 删除文件或目录，目录会在所属 Workspace 环境内递归删除。
 ///
 /// 调用方必须先完成破坏性操作确认；本命令负责环境分流和底层错误报告。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
@@ -252,7 +248,6 @@ fn validate_posix_destructive_path(path: &str) -> Result<(), String> {
 ///
 /// SSH 和 WSL 自有文件系统没有兼容的宿主机回收站，返回明确的不可用结果，
 /// 由前端继续请求永久删除确认。WSL 的 Windows 盘挂载仍保留本机回收站能力。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_trash(
     path: String,
     workspace: Option<WorkspaceEnv>,
@@ -303,7 +298,6 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
 ///
 /// 来源是拖放提供的宿主机绝对路径，只有目标经过 Workspace 路径解析。SSH 跨环境
 /// 复制必须进入 transfers 子系统，本命令拒绝覆盖已有目标。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_copy(
     sources: Vec<String>,
     dest_dir: String,

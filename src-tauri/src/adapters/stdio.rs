@@ -88,29 +88,24 @@ impl Host {
                 json!({"cwd": self.cwd, "platform": std::env::consts::OS, "environmentKey": "local", "protocol": 1}),
             ),
             "workspace_current_dir" => Ok(json!(self.cwd)),
-            "workspace_authorize" => value(
-                workspace::workspace_authorize_service(arg(a, "path")?, env, &self.registry).await,
-            ),
+            "workspace_authorize" => {
+                value(workspace::workspace_authorize(arg(a, "path")?, env, &self.registry).await)
+            }
             "fs_read_file" => {
-                value(fs::file::fs_read_file_service(arg(a, "path")?, env, arg(a, "force")?).await)
+                value(fs::file::fs_read_file(arg(a, "path")?, env, arg(a, "force")?).await)
             }
-            "fs_canonicalize" => {
-                value(fs::file::fs_canonicalize_service(arg(a, "path")?, env).await)
-            }
+            "fs_canonicalize" => value(fs::file::fs_canonicalize(arg(a, "path")?, env).await),
             "agent_file_read" => value(
-                fs::agent::agent_file_read_service(&self.files, &self.registry, arg(a, "request")?)
-                    .await,
+                fs::agent::agent_file_read(&self.files, &self.registry, arg(a, "request")?).await,
             ),
             "agent_file_find" => value(
-                fs::agent::agent_file_find_service(&self.files, &self.registry, arg(a, "request")?)
-                    .await,
+                fs::agent::agent_file_find(&self.files, &self.registry, arg(a, "request")?).await,
             ),
             "agent_file_grep" => value(
-                fs::agent::agent_file_grep_service(&self.files, &self.registry, arg(a, "request")?)
-                    .await,
+                fs::agent::agent_file_grep(&self.files, &self.registry, arg(a, "request")?).await,
             ),
             "agent_file_prepare_mutation" => value(
-                fs::agent::agent_file_prepare_mutation_service(
+                fs::agent::agent_file_prepare_mutation(
                     &self.files,
                     &self.registry,
                     arg(a, "request")?,
@@ -118,7 +113,7 @@ impl Host {
                 .await,
             ),
             "agent_file_commit_mutation" => value(
-                fs::agent::agent_file_commit_mutation_service(
+                fs::agent::agent_file_commit_mutation(
                     &self.files,
                     &self.registry,
                     &(),
@@ -126,15 +121,14 @@ impl Host {
                 )
                 .await,
             ),
-            "agent_file_clear_mutation" => value(
-                fs::agent::agent_file_clear_mutation_service(&self.files, arg(a, "request")?).await,
-            ),
+            "agent_file_clear_mutation" => {
+                value(fs::agent::agent_file_clear_mutation(&self.files, arg(a, "request")?).await)
+            }
             "agent_file_clear_owner" => value(
-                fs::agent::agent_file_clear_owner_service(&self.files, arg(a, "ownerSessionId")?)
-                    .await,
+                fs::agent::agent_file_clear_owner(&self.files, arg(a, "ownerSessionId")?).await,
             ),
             "agent_file_operation" => value(
-                fs::agent::agent_file_operation_service(
+                fs::agent::agent_file_operation(
                     &self.files,
                     &self.registry,
                     &(),
@@ -143,7 +137,7 @@ impl Host {
                 .await,
             ),
             "shell_exec" => value(
-                shell::shell_exec_service(
+                shell::shell_exec(
                     &self.shell,
                     &self.registry,
                     arg(a, "ownerSessionId")?,
@@ -161,7 +155,7 @@ impl Host {
                 .await,
             ),
             "shell_process" => value(
-                shell::shell_process_service(
+                shell::shell_process(
                     &self.shell,
                     arg(a, "ownerSessionId")?,
                     arg(a, "processId")?,
@@ -177,15 +171,15 @@ impl Host {
                 )
                 .await,
             ),
-            "shell_list" => value(shell::shell_list_service(
+            "shell_list" => value(shell::shell_list(
                 &self.shell,
                 arg(a, "ownerSessionId")?,
                 arg(a, "includeExited")?,
                 env,
             )),
-            "shell_clear_owner" => value(
-                shell::shell_clear_owner_service(&self.shell, arg(a, "ownerSessionId")?).await,
-            ),
+            "shell_clear_owner" => {
+                value(shell::shell_clear_owner(&self.shell, arg(a, "ownerSessionId")?).await)
+            }
             "ai_sessions_list" => value(ai_sessions::ai_sessions_list()),
             "ai_session_read" => value(ai_sessions::ai_session_read(arg(a, "id")?)),
             "ai_session_commit" => value(ai_sessions::commit(
@@ -216,12 +210,7 @@ impl Host {
                 if accounts.len() > 256 {
                     return Err("too many credential accounts".into());
                 }
-                value(
-                    accounts
-                        .iter()
-                        .map(|account| secrets::get_value(&self.secrets, &service, account))
-                        .collect::<Result<Vec<_>, _>>(),
-                )
+                value(secrets::secrets_get_all(&self.secrets, service, accounts).await)
             }
             "http_cancel" => {
                 self.http.cancel(OWNER, &arg::<String>(a, "requestId")?);
@@ -230,7 +219,7 @@ impl Host {
             "http_request" => {
                 let id = request.id;
                 value(
-                    net::http_request_service(
+                    net::http_request(
                         &self.secrets,
                         OWNER,
                         &self.http,

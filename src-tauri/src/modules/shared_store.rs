@@ -5,27 +5,19 @@
 //! Custom Agent 的新会话提交和
 //! 级联删除共享配置锁，通用删除接口不能绕过会话清理。
 
-#[cfg(any(feature = "desktop", test))]
 use crate::modules::storage::write_atomic;
 use crate::modules::storage::FileLock;
-#[cfg(feature = "desktop")]
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-#[cfg(feature = "desktop")]
-use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-#[cfg(feature = "desktop")]
-use std::sync::Mutex;
 use std::time::Duration;
-#[cfg(feature = "desktop")]
-use tauri::{AppHandle, Emitter};
 
-const STORES: &[(&str, &str)] = &[
+/// 配置白名单及其固定文件名，桌面监听器复用同一份定义。
+pub(crate) const STORES: &[(&str, &str)] = &[
     ("channels", "config.json"),
     ("settings", "terax-settings.json"),
     ("ssh-profiles", "terax-ssh-profiles.json"),
@@ -35,19 +27,6 @@ const STORES: &[(&str, &str)] = &[
     ("ui-layout", "terax-ui-layout.json"),
     ("keys-epoch", "terax-keys-epoch.json"),
 ];
-#[cfg(feature = "desktop")]
-pub struct SharedStoreState {
-    _watcher: Mutex<RecommendedWatcher>,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg(feature = "desktop")]
-struct SharedStoreChanged {
-    store: String,
-    revision: String,
-}
-
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 /// 一次共享存储批量提交中的精确键变更。
@@ -57,7 +36,7 @@ pub enum SharedStoreMutation {
 }
 
 /// 动态记录仅允许规范 UUID，调用者不能提供目录或文件路径。
-fn state_id(store: &str) -> Result<Option<uuid::Uuid>, String> {
+pub(crate) fn state_id(store: &str) -> Result<Option<uuid::Uuid>, String> {
     let Some(value) = store.strip_prefix("channels-state:") else {
         return Ok(None);
     };
@@ -79,7 +58,7 @@ fn filename(store: &str) -> Result<String, String> {
 }
 
 /// 所有目录由原生白名单决定，配置与状态复用同一套锁和原子提交。
-fn store_dir(store: &str) -> Result<PathBuf, String> {
+pub(crate) fn store_dir(store: &str) -> Result<PathBuf, String> {
     use crate::modules::app_data::{directory, Directory};
     filename(store)?;
     if state_id(store)?.is_some() {
@@ -124,7 +103,6 @@ pub(crate) fn read_value<T: DeserializeOwned>(store: &str, key: &str) -> Result<
         .map_err(|error| format!("shared store {store} key {key} is invalid: {error}"))
 }
 
-#[cfg(any(feature = "desktop", test))]
 fn mutate<T>(
     root: &Path,
     store: &str,
@@ -172,19 +150,17 @@ fn with_ai_agent_at<T>(
 /// 在 Custom Agent 配置锁内完成关联资源删除，再移除对应定义。
 ///
 /// 关联操作失败时定义保持不变；成功后发出共享存储变更事件。
-#[cfg(feature = "desktop")]
 pub(crate) fn delete_ai_agent_with<T>(
-    app: &AppHandle,
+    events: &dyn StoreEvents,
     agent_id: &str,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
     let root = store_dir("ai-agents")?;
     let result = delete_ai_agent_at(&root, agent_id, operation)?;
-    emit_changed(app, &root, "ai-agents")?;
+    events.changed("ai-agents")?;
     Ok(result)
 }
 
-#[cfg(any(feature = "desktop", test))]
 fn delete_ai_agent_at<T>(
     root: &Path,
     agent_id: &str,
@@ -213,7 +189,6 @@ fn delete_ai_agent_at<T>(
 /// 校验并应用一组精确的键变更。
 ///
 /// 调用方必须在 `mutate` 持有文件锁期间调用，避免其他进程观察到部分结果。
-#[cfg(any(feature = "desktop", test))]
 fn apply_mutations(
     map: &mut Map<String, Value>,
     mutations: Vec<SharedStoreMutation>,
@@ -239,7 +214,6 @@ fn apply_mutations(
 }
 
 /// 禁止通用共享存储接口绕过 Custom Agent 的会话级联删除。
-#[cfg(any(feature = "desktop", test))]
 fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
     if store == "ai-agents" && key.starts_with("agent:") {
         return Err("CUSTOM_AGENT_DELETE_REQUIRES_CASCADE".to_string());
@@ -247,8 +221,8 @@ fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(feature = "desktop")]
-pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
+/// 更新凭据修订并通知宿主重新读取，普通配置中不保存秘密。
+pub fn bump_keys_epoch(events: &dyn StoreEvents) -> Result<(), String> {
     let root = store_dir("keys-epoch")?;
     mutate(&root, "keys-epoch", |map| {
         map.insert(
@@ -256,7 +230,7 @@ pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
             Value::from(uuid::Uuid::new_v4().to_string()),
         );
     })?;
-    emit_changed(app, &root, "keys-epoch")
+    events.changed("keys-epoch")
 }
 
 fn revision(path: &Path) -> String {
@@ -268,78 +242,12 @@ fn revision(path: &Path) -> String {
     format!("{:016x}:{}", hasher.finish(), bytes.len())
 }
 
-#[cfg(feature = "desktop")]
-fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String> {
-    if state_id(store)?.is_some() {
-        return Ok(());
-    }
-    app.emit(
-        "terax://shared-store-changed",
-        SharedStoreChanged {
-            store: store.to_string(),
-            revision: revision(&store_path(root, store)?),
-        },
-    )
-    .map_err(|error| error.to_string())
-}
-
-#[cfg(feature = "desktop")]
-impl SharedStoreState {
-    /// 复用一个 watcher 观察两个低频配置目录；协议状态不参与跨窗口广播。
-    pub fn new(app: &AppHandle) -> Result<Self, String> {
-        let roots = [store_dir("settings")?, store_dir("channels")?];
-        for root in &roots {
-            fs::create_dir_all(root).map_err(|error| error.to_string())?;
-        }
-        let handle = app.clone();
-        let watched = roots.clone();
-        let mut watcher =
-            notify::recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
-                let Ok(event) = result else {
-                    return;
-                };
-                for path in event.paths {
-                    let Some(file) = path.file_name().and_then(|value| value.to_str()) else {
-                        continue;
-                    };
-                    if let Some((store, _)) = STORES.iter().find(|(store, candidate)| {
-                        *candidate == file
-                            && path.parent()
-                                == Some(
-                                    if *store == "channels" {
-                                        &watched[1]
-                                    } else {
-                                        &watched[0]
-                                    }
-                                    .as_path(),
-                                )
-                    }) {
-                        if let Ok(root) = store_dir(store) {
-                            let _ = emit_changed(&handle, &root, store);
-                        }
-                    }
-                }
-            })
-            .map_err(|error| error.to_string())?;
-        for root in &roots {
-            watcher
-                .watch(root, RecursiveMode::NonRecursive)
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(Self {
-            _watcher: Mutex::new(watcher),
-        })
-    }
-}
-
 /// 读取白名单配置或状态记录，不接受任意磁盘路径。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_read(store: String) -> Result<Map<String, Value>, String> {
     read_map(&store_path(&store_dir(&store)?, &store)?)
 }
 
 /// 在所有单键与批量写入入口校验网络配置，不能把代理密码写入普通存储。
-#[cfg(any(feature = "desktop", test))]
 fn validate_record_set(store: &str, key: &str, value: &Value) -> Result<(), String> {
     if store == "settings" && key.starts_with("network.") {
         crate::modules::network_proxy::validate_setting(&key["network.".len()..], value)?;
@@ -362,10 +270,8 @@ fn validate_record_set(store: &str, key: &str, value: &Value) -> Result<(), Stri
 }
 
 /// 加锁更新一个配置键，保留其他进程已经提交的数据。
-#[cfg_attr(feature = "desktop", tauri::command)]
-#[cfg(feature = "desktop")]
 pub fn shared_store_set(
-    app: AppHandle,
+    events: impl StoreEvents,
     store: String,
     key: String,
     value: Value,
@@ -378,13 +284,15 @@ pub fn shared_store_set(
     mutate(&root, &store, |map| {
         map.insert(key, value);
     })?;
-    emit_changed(&app, &root, &store)
+    events.changed(&store)
 }
 
 /// 删除一个配置键，并保留业务所有者要求的级联边界。
-#[cfg_attr(feature = "desktop", tauri::command)]
-#[cfg(feature = "desktop")]
-pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result<(), String> {
+pub fn shared_store_delete(
+    events: impl StoreEvents,
+    store: String,
+    key: String,
+) -> Result<(), String> {
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
     }
@@ -393,7 +301,7 @@ pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result
     mutate(&root, &store, |map| {
         map.remove(&key);
     })?;
-    emit_changed(&app, &root, &store)
+    events.changed(&store)
 }
 
 /// 在状态记录的既有锁内删除正文；拒绝普通配置表和非规范 UUID。
@@ -417,16 +325,13 @@ fn delete_state_at(root: &Path, store: &str) -> Result<(), String> {
 }
 
 /// 删除白名单中的单个协议状态文件，不允许调用方指定路径或删除普通配置。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_delete_state(store: String) -> Result<(), String> {
     delete_state_at(&store_dir(&store)?, &store)
 }
 
 /// 在一次锁内应用明确列出的键变更，不执行整表覆盖。
-#[cfg_attr(feature = "desktop", tauri::command)]
-#[cfg(feature = "desktop")]
 pub fn shared_store_mutate(
-    app: AppHandle,
+    events: impl StoreEvents,
     store: String,
     mutations: Vec<SharedStoreMutation>,
 ) -> Result<(), String> {
@@ -443,13 +348,18 @@ pub fn shared_store_mutate(
     }
     let root = store_dir(&store)?;
     mutate(&root, &store, |map| apply_mutations(map, mutations))??;
-    emit_changed(&app, &root, &store)
+    events.changed(&store)
 }
 
 /// 返回配置修订指纹，供跨窗口事件合并后检查最新值。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_revision(store: String) -> Result<String, String> {
     Ok(revision(&store_path(&store_dir(&store)?, &store)?))
+}
+
+/// 已提交配置的通知出口；持久化和验证不依赖窗口。
+pub trait StoreEvents {
+    /// 通知订阅者重新读取对应配置，协议状态不参与广播。
+    fn changed(&self, store: &str) -> Result<(), String>;
 }
 
 #[cfg(test)]
