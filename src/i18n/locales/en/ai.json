@@ -163,6 +163,19 @@
       "completedWithDuration": "Reasoned for {{duration}}s"
     },
     "activity": {
+      "fileOperation": {
+        "move": "Moving",
+        "copy": "Copying",
+        "delete": "Deleting",
+        "createDirectory": "Creating directory"
+      },
+      "activeTerminal": "Reading active terminal",
+      "process": {
+        "poll": "Waiting for process",
+        "write": "Writing to process",
+        "closeStdin": "Closing process input",
+        "terminate": "Terminating process"
+      },
       "thinking": "Thinking",
       "completed": "Processed",
       "completedWithDuration": "Processed for {{duration}}s"

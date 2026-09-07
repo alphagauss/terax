@@ -86,6 +86,129 @@ describe("ChatActivityBlock", () => {
     act(() => vi.advanceTimersByTime(1000));
     expect(container.textContent).toContain("Run pnpm test");
   });
+
+  it("reveals a ready summary immediately and completes a short call without delay", () => {
+    vi.useFakeTimers();
+    renderBlock(root, null, true);
+    expect(container.querySelector("button")).toBeNull();
+    act(() => vi.advanceTimersByTime(100));
+    const command = { kind: "tool", key: "shell", text: "Get-Date" } as const;
+    renderBlock(root, command, true);
+    expect(container.textContent).toContain("Get-Date");
+    renderBlock(
+      root,
+      { ...command, text: "Get-Date -Format yyyy-MM-dd" },
+      true,
+    );
+    expect(container.textContent).toContain("Get-Date -Format yyyy-MM-dd");
+    renderBlock(root, command, false, 200);
+    expect(container.textContent).toContain("Processed for 1s");
+    expect(container.textContent).not.toContain("Get-Date");
+  });
+
+  it("updates the same call without restarting the interval and skips intermediate calls", () => {
+    vi.useFakeTimers();
+    const first = { kind: "tool", key: "first", text: "pnpm" } as const;
+    renderBlock(root, first, true);
+    act(() => vi.advanceTimersByTime(400));
+    renderBlock(root, { ...first, text: "pnpm test" }, true);
+    expect(container.textContent).toContain("pnpm test");
+    renderBlock(
+      root,
+      { kind: "tool", key: "second", text: "second command" },
+      true,
+    );
+    act(() => vi.advanceTimersByTime(300));
+    renderBlock(
+      root,
+      { kind: "tool", key: "third", text: "latest command" },
+      true,
+    );
+    act(() => vi.advanceTimersByTime(299));
+    expect(container.textContent).toContain("pnpm test");
+    act(() => vi.advanceTimersByTime(1));
+    expect(container.textContent).toContain("latest command");
+    expect(container.textContent).not.toContain("second command");
+  });
+
+  it("keeps thinking until the tool summary is ready without an intermediate label", () => {
+    vi.useFakeTimers();
+    renderBlock(root, thinking, true);
+    renderBlock(root, null, true);
+    act(() => vi.advanceTimersByTime(1200));
+    expect(container.querySelector("button")?.textContent).toBe("Thinking");
+    renderBlock(
+      root,
+      { kind: "tool", key: "shell", action: "Running", text: "pnpm test" },
+      true,
+    );
+    expect(container.textContent).toContain("Running");
+    expect(container.textContent).toContain("pnpm test");
+    expect(container.textContent).not.toContain("Thinking");
+  });
+
+  it("discards an older candidate and retains the shown tool while the latest input is incomplete", () => {
+    vi.useFakeTimers();
+    renderBlock(
+      root,
+      { kind: "tool", key: "first", text: "first command" },
+      true,
+    );
+    renderBlock(
+      root,
+      { kind: "tool", key: "second", text: "obsolete command" },
+      true,
+    );
+    renderBlock(root, null, true);
+    act(() => vi.advanceTimersByTime(1200));
+    expect(container.textContent).toContain("first command");
+    expect(container.textContent).not.toContain("obsolete command");
+    renderBlock(
+      root,
+      { kind: "tool", key: "third", text: "latest command" },
+      true,
+    );
+    expect(container.textContent).toContain("latest command");
+  });
+
+  it("discards a queued headline when the activity completes", () => {
+    vi.useFakeTimers();
+    renderBlock(
+      root,
+      { kind: "tool", key: "first", text: "first command" },
+      true,
+    );
+    const pending = {
+      kind: "tool",
+      key: "second",
+      text: "pending command",
+    } as const;
+    renderBlock(root, pending, true);
+    renderBlock(root, pending, false, 200);
+    expect(container.textContent).toContain("Processed for 1s");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(container.textContent).not.toContain("pending command");
+    renderBlock(root, thinking, true);
+    expect(container.textContent).toContain("Thinking");
+  });
+
+  it("keeps the action separate from the truncating summary and updates it in place", () => {
+    const headline = {
+      kind: "tool",
+      key: "file",
+      action: "Read",
+      text: "src/app.tsx",
+    } as const;
+    renderBlock(root, headline, true);
+    const action = container.querySelector(".shrink-0.whitespace-nowrap");
+    const summary = container.querySelector(".truncate.font-mono");
+    expect(action?.textContent).toBe("Read");
+    expect(summary?.textContent).toBe("src/app.tsx");
+    renderBlock(root, { ...headline, action: "Write" }, true);
+    expect(
+      container.querySelector(".shrink-0.whitespace-nowrap")?.textContent,
+    ).toBe("Write");
+  });
 });
 
 function renderBlock(

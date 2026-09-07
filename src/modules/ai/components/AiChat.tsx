@@ -1038,14 +1038,13 @@ const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
   apply_patch: () => i18n.t("ai:chat.subagent.actions.edit"),
   file_operation: () => i18n.t("ai:chat.subagent.actions.manage"),
   shell_exec: () => i18n.t("ai:chat.subagent.actions.run"),
-  shell_process: () => i18n.t("ai:chat.subagent.actions.process"),
   shell_list: () => i18n.t("ai:chat.subagent.actions.listProcesses"),
   grep: () => i18n.t("ai:chat.subagent.actions.search"),
-  get_terminal_output: () => i18n.t("ai:chat.subagent.actions.terminal"),
+  get_terminal_output: () => i18n.t("ai:chat.activity.activeTerminal"),
 };
 
-/** 复用当前工具行的名称和参数摘要生成活动标题，不额外处理参数内容。 */
-function activityHeadline(
+/** 仅为展示压缩摘要；参数未提供可读内容时不生成标题，不改写工具输入。 */
+export function activityHeadline(
   part: AnyPart,
   thinkingText: string,
 ): ChatActivityHeadline {
@@ -1064,19 +1063,61 @@ function activityHeadline(
     return {
       kind: "tool",
       key: toolCallIdFromPart(part) || toolName,
-      text: externalLabel,
+      text: compactActivityText(externalLabel),
     };
   }
-  const label = ACTIVITY_TOOL_LABELS[toolName]?.() ?? toolName;
+  let label = ACTIVITY_TOOL_LABELS[toolName]?.() ?? toolName;
+  if (toolName === "file_operation") {
+    const operations: Record<string, string> = {
+      move: i18n.t("ai:chat.activity.fileOperation.move"),
+      copy: i18n.t("ai:chat.activity.fileOperation.copy"),
+      delete: i18n.t("ai:chat.activity.fileOperation.delete"),
+      create_directory: i18n.t(
+        "ai:chat.activity.fileOperation.createDirectory",
+      ),
+    };
+    label =
+      operations[
+        objectStringValue((part as { input?: unknown }).input, "operation") ??
+          ""
+      ] ?? label;
+  }
   const summary = activityToolSummary(
     toolName,
     (part as { input?: unknown }).input,
   );
+  const needsSummary = [
+    "read_file",
+    "write_file",
+    "file_operation",
+    "find_files",
+    "apply_patch",
+    "shell_exec",
+    "shell_process",
+    "grep",
+  ].includes(toolName);
+  const defaultFind =
+    toolName === "find_files" &&
+    (part as { state?: string }).state !== "input-streaming";
+  if (needsSummary && !summary?.trim() && !defaultFind) {
+    return null;
+  }
+  const actionOnly =
+    toolName === "shell_process" || toolName === "get_terminal_output";
   return {
     kind: "tool",
     key: toolCallIdFromPart(part) || toolName,
-    text: summary ? `${label} ${summary}` : label,
+    text: compactActivityText(summary || (defaultFind ? "." : label)),
+    ...(!actionOnly && (summary || defaultFind) ? { action: label } : {}),
   };
+}
+
+function compactActivityText(text: string): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const characters = Array.from(normalized);
+  return characters.length > 160
+    ? `${characters.slice(0, 159).join("")}…`
+    : normalized;
 }
 
 function activityToolSummary(toolName: string, input: unknown): string | null {
@@ -1090,21 +1131,33 @@ function activityToolSummary(toolName: string, input: unknown): string | null {
     case "write_file":
       return text("path");
     case "file_operation": {
-      const operation = text("operation") ?? "manage";
-      const path = text("path") ?? "";
+      const path = text("path");
+      if (!path) return null;
       const destination = text("destination");
-      return `${operation} ${path}${destination ? ` → ${destination}` : ""}`;
+      return `${path}${destination ? ` → ${destination}` : ""}`;
     }
     case "find_files":
-      return text("path") ?? ".";
+      return [text("glob"), text("path")].filter(Boolean).join(" · ") || null;
     case "apply_patch": {
       const files = Array.isArray(value.files) ? value.files : [];
-      return `${files.length} file${files.length === 1 ? "" : "s"}`;
+      const paths = files
+        .map((file) => objectStringValue(file, "path"))
+        .filter(Boolean);
+      return paths.join(", ") || null;
     }
     case "shell_exec":
       return text("command");
-    case "shell_process":
-      return text("process_id");
+    case "shell_process": {
+      const actions: Record<string, string> = {
+        poll: i18n.t("ai:chat.activity.process.poll"),
+        write: i18n.t("ai:chat.activity.process.write"),
+        close_stdin: i18n.t("ai:chat.activity.process.closeStdin"),
+        terminate: i18n.t("ai:chat.activity.process.terminate"),
+      };
+      return actions[text("action") ?? ""] ?? null;
+    }
+    case "get_terminal_output":
+      return i18n.t("ai:chat.activity.activeTerminal");
     case "grep":
       return text("pattern") ?? text("query");
     default:
