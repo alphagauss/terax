@@ -203,4 +203,4 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - [双进程模型](two-process-model.md) - IPC 边界和 command 目录
 - [安全模型](security-model.md) - 每个工具都必须遵守的边界
 
-终端接入与共享生命周期见 [终端 Agent](terminal-agent.md)。
+当前开发重点为桌面应用和实际业务需求。已提取的运行生命周期与持久化规则继续保留；后续按功能和故障边界渐进解耦，不以全面统一桌面与终端控制器为独立目标。实验性终端已暂停主动开发，其现状、已知限制和验证入口见 [终端 Agent](terminal-agent.md)。
