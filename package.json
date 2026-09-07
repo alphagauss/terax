@@ -25,9 +25,9 @@
     "analyze:eager": "node scripts/eager-graph.mjs src/main.tsx && node scripts/eager-graph.mjs src/auxiliary/main.tsx",
     "size": "size-limit",
     "knip": "knip",
-    "agent": "bun apps/terminal/index.ts agent",
+    "agent": "bun cli/index.ts agent",
     "build:host": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --bin terax-host --locked",
-    "check-types:terminal": "tsc --noEmit -p apps/terminal/tsconfig.json",
+    "check-types:terminal": "tsc --noEmit -p cli/tsconfig.json",
     "test:terminal": "bun scripts/terminal-smoke.ts",
     "test:tui": "bun scripts/terminal-ui-smoke.tsx"
   },
@@ -147,6 +147,6 @@
     "vitest": "^4.1.10"
   },
   "bin": {
-    "terax": "bin/terax"
+    "terax": "cli/index.ts"
   }
 }
