@@ -875,8 +875,9 @@ fn build_local_command(
                     .unwrap_or_else(|_| "powershell.exe".into());
                 let mut command_line = Command::new(program);
                 command_line.args(["-NoLogo", "-NoProfile", "-Command"]);
+                // 无窗口启动时 PowerShell 7 也可能使用系统代码页，须与管道的 UTF-8 契约对齐。
                 command_line.arg(format!(
-                    "{command}\n\n$__terax_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\nWrite-Output \"{marker}$($PWD.Path)\"\nexit $__terax_rc"
+                    "[Console]::InputEncoding = [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n{command}\n\n$__terax_rc = if ($null -ne $LASTEXITCODE) {{ $LASTEXITCODE }} elseif ($?) {{ 0 }} else {{ 1 }}\nWrite-Output \"{marker}$($PWD.Path)\"\nexit $__terax_rc"
                 ));
                 command_line
             }
@@ -1101,6 +1102,95 @@ mod tests {
             let key = key.to_string_lossy().to_ascii_uppercase();
             key.contains("TOKEN") || key.contains("SECRET") || key.contains("API_KEY")
         }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn powershell_utf8_pipes_preserve_text_cwd_and_exit_code() {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("中文目录");
+        std::fs::create_dir(&cwd).unwrap();
+        let marker = "__TERAX_AGENT_CWD_encoding__";
+        let mut tested = 0;
+        for shell in ["pwsh", "powershell"] {
+            let Ok(program) = which::which(shell) else {
+                continue;
+            };
+            tested += 1;
+            for exit_code in [0, 7] {
+                // 子进程显式按 UTF-8 接收管道，验证父 Shell 的 $OutputEncoding。
+                let script = format!(
+                    r#"[System.Globalization.CultureInfo]::CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('zh-CN')
+Get-Date -Date '2026-09-08' -Format 'yyyy-MM-dd dddd'
+[Console]::Error.WriteLine('中文错误')
+$line = [Console]::ReadLine()
+Write-Output "stdin:$line"
+$line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::WriteLine(''pipe:'' + [Console]::ReadLine()); exit {exit_code}'"#
+                );
+                let (template, _) = build_local_command(
+                    "encoding",
+                    &WorkspaceEnv::Local,
+                    &script,
+                    cwd.to_str().unwrap(),
+                    ShellKind::Powershell,
+                    false,
+                    marker,
+                )
+                .unwrap();
+                // 复用实际命令封装，仅替换可执行文件以覆盖已安装的两个版本。
+                let mut native = Command::new(&program);
+                native
+                    .args(template.get_args())
+                    .current_dir(&cwd)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                apply_minimal_environment(&mut native);
+                let (child, _job) =
+                    crate::modules::proc::job::ProcessJob::spawn(&mut native).unwrap();
+                child
+                    .take_stdin()
+                    .unwrap()
+                    .write_all("中文输入\n".as_bytes())
+                    .unwrap();
+                let deadline = Instant::now() + Duration::from_secs(15);
+                let status = loop {
+                    if let Some(status) = child.try_wait().unwrap() {
+                        break status;
+                    }
+                    if Instant::now() >= deadline {
+                        child.kill().unwrap();
+                        child.wait().unwrap();
+                        panic!("{shell} encoding test timed out");
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                };
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                child
+                    .take_stdout()
+                    .unwrap()
+                    .read_to_string(&mut stdout)
+                    .unwrap();
+                child
+                    .take_stderr()
+                    .unwrap()
+                    .read_to_string(&mut stderr)
+                    .unwrap();
+                assert_eq!(status.code(), Some(exit_code), "{shell}: {stderr}");
+                assert!(stdout.contains("2026-09-08 星期二"), "{shell}: {stdout}");
+                assert!(stdout.contains("stdin:中文输入"), "{shell}: {stdout}");
+                assert!(stdout.contains("pipe:中文输入"), "{shell}: {stdout}");
+                assert_eq!(stderr.trim(), "中文错误", "{shell}");
+                let (_, cwd_after) = strip_cwd_marker(&stdout, marker);
+                assert_eq!(
+                    cwd_after,
+                    Some(cwd.to_str().unwrap().replace('\\', "/")),
+                    "{shell}"
+                );
+            }
+        }
+        assert!(tested > 0, "no PowerShell executable available");
     }
 
     #[cfg(windows)]
