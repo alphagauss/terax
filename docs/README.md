@@ -1,31 +1,26 @@
-# Terax 贡献者文档
+# 文档索引
 
-本目录存放面向贡献者和维护者的详细指南。仓库根目录的 `AGENTS.md` 是持续更新的架构文档和权威信息源；这些指南在不重复其内容的前提下，对特定领域进行详细说明。
+[AGENTS.md](../AGENTS.md) 记录全局约定，以下专题各自维护业务规则；具体接口、类型、常量与测试入口以源码为准。未完成方向见 [ROADMAP](../ROADMAP.md)。
 
-如果某份指南与 `AGENTS.md` 冲突，以 `AGENTS.md` 为准。
+## Workspace 与原生能力
 
-## 入门
+- [进程与共享状态](architecture/two-process-model.md)
+- [PTY 与 Shell](architecture/pty-shell-integration.md)、[终端 renderer pool](architecture/terminal-renderer-pool.md)
+- [辅助窗口](architecture/auxiliary-windows.md)、[工作页跨窗口复制](architecture/workspace-page-handoff.md)
+- [文件传输](architecture/file-transfers.md)
+- [实验性终端宿主](architecture/terminal-agent.md)
 
-- [AGENTS.md](../AGENTS.md) - 架构权威文档，请先阅读
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - 贡献方式、质量标准和项目布局
+## AI 与连接
 
-## 架构指南
+- [会话与运行](architecture/ai-subsystem.md)
+- [内置工具安全](architecture/security-model.md)
+- [网络与代理](architecture/network.md)
+- [Channels](architecture/channels.md)
+- [外部 CLI Agent](architecture/external-agent-runtime.md)
 
-- [终端 Agent 与共享运行能力](architecture/terminal-agent.md)：已暂停主动开发的实验性 `terax agent`，保留其启动、宿主边界和验证说明。
-- [双进程模型与 IPC command 参考](architecture/two-process-model.md) - Rust 负责所有操作系统访问；WebView 通过 `invoke()` 通信。包含 command 目录以及新增 command 的方法。
-- [PTY Shell 集成](architecture/pty-shell-integration.md) - PTY session、Shell 初始化脚本、OSC 7 / 133、ConPTY、SPAWN_LOCK、Job Object 和 WSL。
-- [安全模型](architecture/security-model.md) - deny-list、SSRF 防护、Workspace 授权、AI 工具审批、IPC allowlist、OSC 信任机制和 keychain 处理。
-- [AI 子系统](architecture/ai-subsystem.md) - provider、Agent、sub-agent、session、composer、工具、编辑 diff 和实时上下文桥接。包含新增 provider 的完整操作说明。
-- [内置网络与代理](architecture/network.md) - 统一原生 HTTP、按连接选择代理、SSH 出口及生效边界。
-- [Channels](architecture/channels.md) - Local 主窗口的消息连接、固定 AI 会话、个人微信接入与恢复边界。
-- [External Agent Runtime](architecture/external-agent-runtime.md) - Claude Code、Codex 等本地 CLI Agent 的统一进程、协议、会话和 Local、WSL、SSH 边界。
-- [终端 renderer pool](architecture/terminal-renderer-pool.md) - slot pool、DormantRing，以及禁止在命令执行中序列化的不变量。
-- [通用辅助窗口](architecture/auxiliary-windows.md) - 为简单业务视图提供统一原生窗口外壳、主题和生命周期。
-- [Workspace 工作页跨窗口复制](architecture/workspace-page-handoff.md) - 基于现有多进程窗口模型复制可重建的 Workbench 页面。
-- [文件传输](architecture/file-transfers.md) - Direct 与 Archive 任务生命周期、staging、no-replace commit、重试、资源上限和真实环境验证。
+## 开发与操作
 
-## 贡献指南
-
-- [测试](contributing/testing.md) - 测试约定、检查运行方式，以及优秀核心子系统测试的标准。
-- [主题开发](contributing/themes.md) - Modern 基准、完整字段、透明度规则、自定义主题和新增内置主题流程。
-- [桌面 UI 样式](contributing/ui-style.md) - 公共控件入口、紧凑设置分组、文字层级、间距和动效规范。
+- [检查与验证](contributing/testing.md)
+- [桌面样式](contributing/ui-style.md)、[主题](contributing/themes.md)
+- [Tauri 运行时调试](contributing/ui-runtime-debugging.md)
+- [public 发布](contributing/public-release.md)、[上游移植](../FORK_NOTES.md)
