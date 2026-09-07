@@ -4,6 +4,13 @@
  */
 
 import i18n from "@/i18n";
+import { cancelAgentRun } from "@/modules/ai/lib/runLifecycle";
+import {
+  persistSubmittedTurn,
+  persistTurnCheckpoint,
+  persistCompletedTurn,
+  type SessionCommitCursor,
+} from "@/modules/ai/lib/sessionPersistence";
 import { readSharedStore } from "@/lib/sharedStore";
 import {
   type SubagentDisplayState,
@@ -24,13 +31,9 @@ import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime"
 import type { AgentUsage } from "@/modules/ai/lib/agent";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
-  conversationEventPart,
   materializeSubagentDisplayParts,
   projectSessionMessages,
-  serializeSessionMessages,
-  serializeSubagentDisplaySnapshots,
   type TurnEvent,
-  uncommittedConversationMessages,
 } from "@/modules/ai/lib/conversation";
 import {
   EMPTY_PROVIDER_KEYS,
@@ -293,6 +296,22 @@ function pendingTurn(id: string) {
     pendingTurns.set(id, turn);
   }
   return turn;
+}
+
+/** 将桌面缓存的提交进度交给共享持久化规则。 */
+function sessionCommitCursor(id: string): SessionCommitCursor {
+  const turn = pendingTurn(id);
+  return {
+    persistedMessages: persistedMessageCounts.get(id) ?? 0,
+    committedParts: turn.committedParts,
+    turnId: turn.id,
+  };
+}
+
+/** 只有共享提交成功后才发布新游标，失败时保留原始重试位置。 */
+function applySessionCommitCursor(id: string, cursor: SessionCommitCursor) {
+  persistedMessageCounts.set(id, cursor.persistedMessages);
+  pendingTurn(id).committedParts = cursor.committedParts;
 }
 
 /** 创建不暴露存储格式细节的 turn ID。 */
@@ -678,20 +697,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
   persistSubmittedTurn: async (id, messages, systemPrompt) => {
     const meta = get().sessions.find((session) => session.id === id);
     if (!meta) throw new Error("AI session metadata is unavailable");
-    const persistedCount = persistedMessageCounts.get(id) ?? 0;
-    if (messages.length < persistedCount) {
-      throw new Error(
-        "The UI message history is shorter than the session file",
-      );
-    }
-
-    const submittedUsers: UIMessage[] = [];
-    for (const message of messages.slice(persistedCount)) {
-      if (message.role !== "user") break;
-      submittedUsers.push(message);
-    }
-
-    const turnId = pendingTurn(id).id;
+    const cursor = sessionCommitCursor(id);
     const updatedAt = Date.now();
     const title =
       !meta.title || meta.title === "New chat"
@@ -703,19 +709,20 @@ export const useChatStore = create<StoreState>((set, get) => ({
       systemPrompt,
     };
     sessionMetadata.set(id, metadata);
-    const committedMeta = await commitSession({
-      id,
-      createdAt: meta.createdAt,
-      updatedAt,
-      environmentKey: currentWorkspaceBootstrap().environmentKey,
-      cwd: meta.cwd,
-      metadata,
-      messages: serializeSessionMessages(submittedUsers, {
-        timestamp: new Date(updatedAt).toISOString(),
-        turnId,
-      }),
-    });
-    persistedMessageCounts.set(id, persistedCount + submittedUsers.length);
+    const committedMeta = await persistSubmittedTurn(
+      {
+        id,
+        createdAt: meta.createdAt,
+        updatedAt,
+        environmentKey: currentWorkspaceBootstrap().environmentKey,
+        cwd: meta.cwd,
+        metadata,
+        messages: [],
+      },
+      cursor,
+      messages,
+    );
+    applySessionCommitCursor(id, cursor);
     set({
       sessions: get().sessions.map((session) =>
         session.id === id ? committedMeta : session,
@@ -734,39 +741,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const meta = get().sessions.find((session) => session.id === id);
     if (!meta) throw new Error("AI session metadata is unavailable");
     const updatedAt = Date.now();
-    const turn = pendingTurn(id);
-    const options = {
-      timestamp: new Date(updatedAt).toISOString(),
-      turnId: turn.id,
-      turnStatus: "running",
-    };
-    const messages = serializeSessionMessages(
-      [
-        ...uncommittedConversationMessages(
-          completedMessages,
-          turn.committedParts,
-        ),
-        {
-          id: "event",
-          role: "assistant",
-          parts: [conversationEventPart(event)],
-        },
-      ],
-      options,
-    );
-    const committedMeta = await commitSession({
-      id,
-      createdAt: meta.createdAt,
-      updatedAt,
-      environmentKey: currentWorkspaceBootstrap().environmentKey,
-      cwd: meta.cwd,
-      metadata: {
-        ...(sessionMetadata.get(id) ?? {}),
-        title: meta.title,
+    const cursor = sessionCommitCursor(id);
+    const committedMeta = await persistTurnCheckpoint(
+      {
+        id,
+        createdAt: meta.createdAt,
+        updatedAt,
+        environmentKey: currentWorkspaceBootstrap().environmentKey,
+        cwd: meta.cwd,
+        metadata: { ...(sessionMetadata.get(id) ?? {}), title: meta.title },
+        messages: [],
       },
-      messages,
-    });
-    turn.committedParts = (completedMessages[0]?.parts.length ?? 0) + 1;
+      cursor,
+      completedMessages,
+      event,
+    );
+    applySessionCommitCursor(id, cursor);
     set({
       sessions: get().sessions.map((session) =>
         session.id === id ? committedMeta : session,
@@ -941,19 +931,11 @@ export const useChatStore = create<StoreState>((set, get) => ({
         return;
       }
       const updatedAt = Date.now();
-      const timestamp = new Date(updatedAt).toISOString();
-      const turn = pendingTurn(id);
-      const turnId = turn.id;
+      const cursor = sessionCommitCursor(id);
       const title =
         !meta.title || meta.title === "New chat"
           ? deriveTitle(messages)
           : meta.title;
-      const persistedCount = persistedMessageCounts.get(id) ?? 0;
-      if (messages.length < persistedCount) {
-        throw new Error(
-          "The UI message history is shorter than the session file",
-        );
-      }
       const snapshots = liveDisplays.map((display) =>
         toSubagentDisplaySnapshot(
           display,
@@ -961,32 +943,22 @@ export const useChatStore = create<StoreState>((set, get) => ({
           updatedAt,
         ),
       );
-      const recordOptions = { timestamp, turnId, turnStatus: outcome };
-      const records = [
-        ...serializeSessionMessages(
-          uncommittedConversationMessages(
-            messages.slice(persistedCount),
-            turn.committedParts,
-          ),
-          recordOptions,
-        ),
-        ...serializeSubagentDisplaySnapshots(snapshots, recordOptions),
-      ];
-      const committedMeta = await commitSession({
-        id,
-        createdAt: meta.createdAt,
-        updatedAt,
-        environmentKey: currentWorkspaceBootstrap().environmentKey,
-        cwd: meta.cwd,
-        metadata: {
-          ...(sessionMetadata.get(id) ?? {}),
-          title,
+      const committedMeta = await persistCompletedTurn(
+        {
+          id,
+          createdAt: meta.createdAt,
+          updatedAt,
+          environmentKey: currentWorkspaceBootstrap().environmentKey,
+          cwd: meta.cwd,
+          metadata: { ...(sessionMetadata.get(id) ?? {}), title },
+          messages: [],
         },
-        messages: records,
-      });
-      persistedMessageCounts.set(id, messages.length);
-      // 终态记录已落盘；后续刷新或解锁失败重试时，不能再次截取已完成响应的 part。
-      turn.committedParts = 0;
+        cursor,
+        messages,
+        outcome,
+        snapshots,
+      );
+      applySessionCommitCursor(id, cursor);
       const chat = chats.get(id);
       if (chat && snapshots.length > 0) {
         chat.messages = materializeSubagentDisplayParts(
@@ -1097,7 +1069,8 @@ export function getChat(sessionId?: string): Chat<UIMessage> | undefined {
 export async function stopSession(sessionId: string): Promise<void> {
   const chat = chats.get(sessionId);
   if (!chat || !useChatStore.getState().runLockSessionIds[sessionId]) return;
+  const committing = sessionCommits.get(sessionId);
+  if (committing) return committing;
   useChatStore.getState().patchAgentMeta(sessionId, { cancelled: true });
-  await clearAgentTurnCoordinator(sessionId);
-  await chat.stop();
+  await cancelAgentRun(chat, sessionId);
 }

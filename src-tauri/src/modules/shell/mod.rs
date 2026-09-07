@@ -5,6 +5,7 @@
 
 mod output;
 mod process;
+pub mod quote;
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
 
 use crate::modules::fs::agent::AgentPermissionMode;
+#[cfg(feature = "desktop")]
 use crate::modules::remote;
 use crate::modules::workspace::resolve_path;
 #[cfg(windows)]
@@ -51,7 +53,10 @@ pub struct CommandOutput {
 }
 
 /// 运行非 AI 模块使用的一次性命令，输出有界且超时后终止进程树。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn shell_run_command(
     command: String,
     cwd: Option<String>,
@@ -59,12 +64,24 @@ pub async fn shell_run_command(
     workspace: Option<WorkspaceEnv>,
     registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<CommandOutput, String> {
+    shell_run_command_service(command, cwd, timeout_secs, workspace, registry.inner()).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn shell_run_command_service(
+    command: String,
+    cwd: Option<String>,
+    timeout_secs: Option<u64>,
+    workspace: Option<WorkspaceEnv>,
+    registry: &WorkspaceRegistry,
+) -> Result<CommandOutput, String> {
     let trimmed = command.trim().to_string();
     if trimmed.is_empty() {
         return Err("empty command".into());
     }
     let workspace = WorkspaceEnv::from_option(workspace);
-    authorize_spawn_cwd(&registry, cwd.as_deref(), &workspace)?;
+    authorize_spawn_cwd(registry, cwd.as_deref(), &workspace)?;
     let cwd = cwd
         .as_deref()
         .map(str::trim)
@@ -75,7 +92,7 @@ pub async fn shell_run_command(
             .unwrap_or(DEFAULT_TIMEOUT_SECS)
             .clamp(1, MAX_ONESHOT_TIMEOUT_SECS),
     );
-    tauri::async_runtime::spawn_blocking(move || run_blocking(trimmed, cwd, workspace, timeout))
+    tokio::task::spawn_blocking(move || run_blocking(trimmed, cwd, workspace, timeout))
         .await
         .map_err(|error| error.to_string())?
 }
@@ -118,11 +135,48 @@ pub enum ProcessAction {
 }
 
 /// 启动统一 Agent 进程，并等待首轮时限或终态。
-#[allow(clippy::too_many_arguments)]
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn shell_exec(
     state: tauri::State<'_, ShellState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
+    owner_session_id: String,
+    command: String,
+    initial_cwd: String,
+    cwd: Option<String>,
+    permission_mode: AgentPermissionMode,
+    timeout_secs: u64,
+    yield_time_ms: u64,
+    max_output_bytes: usize,
+    shell: ShellKind,
+    login: bool,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<ProcessResponse, String> {
+    shell_exec_service(
+        state.inner(),
+        registry.inner(),
+        owner_session_id,
+        command,
+        initial_cwd,
+        cwd,
+        permission_mode,
+        timeout_secs,
+        yield_time_ms,
+        max_output_bytes,
+        shell,
+        login,
+        workspace,
+    )
+    .await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn shell_exec_service(
+    state: &ShellState,
+    registry: &WorkspaceRegistry,
     owner_session_id: String,
     command: String,
     initial_cwd: String,
@@ -166,7 +220,7 @@ pub async fn shell_exec(
     });
     validate_cwd(&effective_cwd)?;
     let authorized = authorize_agent_spawn_cwd(
-        &registry,
+        registry,
         &initial_cwd,
         &effective_cwd,
         &workspace,
@@ -185,17 +239,24 @@ pub async fn shell_exec(
     state.enforce_limits(&owner_session_id)?;
     let id = uuid::Uuid::new_v4().to_string();
     let process = if workspace.is_ssh() {
-        AgentProcess::spawn_remote(
-            id.clone(),
-            owner_session_id.clone(),
-            workspace.clone(),
-            command,
-            effective_cwd,
-            shell,
-            login,
-            ProcessPurpose::Shell,
-        )
-        .await?
+        #[cfg(not(feature = "desktop"))]
+        {
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            AgentProcess::spawn_remote(
+                id.clone(),
+                owner_session_id.clone(),
+                workspace.clone(),
+                command,
+                effective_cwd,
+                shell,
+                login,
+                ProcessPurpose::Shell,
+            )
+            .await?
+        }
     } else {
         AgentProcess::spawn_local(
             id.clone(),
@@ -214,7 +275,7 @@ pub async fn shell_exec(
     if timeout_secs > 0 {
         let timeout = timeout_secs.clamp(1, MAX_AGENT_TIMEOUT_SECS);
         let timed = Arc::downgrade(&process);
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(timeout)).await;
             if let Some(timed) = timed.upgrade() {
                 if timed.is_running() {
@@ -227,11 +288,10 @@ pub async fn shell_exec(
     let wait = Duration::from_millis(yield_time_ms.min(30_000));
     let max_output = normalize_output_limit(max_output_bytes);
     let waited = process.clone();
-    let response = tauri::async_runtime::spawn_blocking(move || {
-        waited.wait_snapshot(0, wait, None, max_output)
-    })
-    .await
-    .map_err(|error| error.to_string())?;
+    let response =
+        tokio::task::spawn_blocking(move || waited.wait_snapshot(0, wait, None, max_output))
+            .await
+            .map_err(|error| error.to_string())?;
     if explicit_cwd.is_none() && response.status != ProcessStatus::Running {
         if let Some(cwd_after) = response.cwd_after.clone() {
             state
@@ -245,10 +305,45 @@ pub async fn shell_exec(
 }
 
 /// 轮询、写入、关闭 stdin 或终止一个已登记的 Agent 进程。
-#[allow(clippy::too_many_arguments)]
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn shell_process(
     state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    process_id: String,
+    action: ProcessAction,
+    input: Option<String>,
+    close_stdin: bool,
+    since_offset: Option<u64>,
+    yield_time_ms: Option<u64>,
+    wait_for: Option<String>,
+    wait_timeout_ms: Option<u64>,
+    max_output_bytes: Option<usize>,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<ProcessResponse, String> {
+    shell_process_service(
+        state.inner(),
+        owner_session_id,
+        process_id,
+        action,
+        input,
+        close_stdin,
+        since_offset,
+        yield_time_ms,
+        wait_for,
+        wait_timeout_ms,
+        max_output_bytes,
+        workspace,
+    )
+    .await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn shell_process_service(
+    state: &ShellState,
     owner_session_id: String,
     process_id: String,
     action: ProcessAction,
@@ -302,7 +397,7 @@ pub async fn shell_process(
     };
     let max_output = normalize_output_limit(max_output_bytes.unwrap_or(DEFAULT_TOOL_OUTPUT_BYTES));
     let waited = process.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         waited.wait_snapshot(
             since,
             Duration::from_millis(wait_ms),
@@ -315,9 +410,23 @@ pub async fn shell_process(
 }
 
 /// 列出当前 Workspace 中运行中或最近结束的 Agent 进程。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn shell_list(
     state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+    include_exited: bool,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Vec<ProcessInfo>, String> {
+    shell_list_service(state.inner(), owner_session_id, include_exited, workspace)
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub fn shell_list_service(
+    state: &ShellState,
     owner_session_id: String,
     include_exited: bool,
     workspace: Option<WorkspaceEnv>,
@@ -343,9 +452,21 @@ pub fn shell_list(
 }
 
 /// 删除聊天时终止并清理该 owner 的全部 Agent 进程。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn shell_clear_owner(
     state: tauri::State<'_, ShellState>,
+    owner_session_id: String,
+) -> Result<(), String> {
+    shell_clear_owner_service(state.inner(), owner_session_id).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn shell_clear_owner_service(
+    state: &ShellState,
     owner_session_id: String,
 ) -> Result<(), String> {
     validate_owner(&owner_session_id)?;
@@ -377,6 +498,7 @@ pub async fn shell_clear_owner(
 
 impl ShellState {
     /// 在当前 Workspace 中启动由封闭适配器构造的 External Agent 命令。
+    #[cfg(feature = "desktop")]
     pub(crate) async fn spawn_external_agent(
         &self,
         registry: &WorkspaceRegistry,
@@ -402,17 +524,24 @@ impl ShellState {
         let id = uuid::Uuid::new_v4().to_string();
         let login = !cfg!(windows) || !matches!(workspace, WorkspaceEnv::Local);
         let process = if workspace.is_ssh() {
-            AgentProcess::spawn_remote(
-                id.clone(),
-                owner_session_id,
-                workspace,
-                command,
-                cwd,
-                ShellKind::Default,
-                login,
-                ProcessPurpose::ExternalAgent,
-            )
-            .await?
+            #[cfg(not(feature = "desktop"))]
+            {
+                return Err("SSH requires a desktop workspace in this build".into());
+            }
+            #[cfg(feature = "desktop")]
+            {
+                AgentProcess::spawn_remote(
+                    id.clone(),
+                    owner_session_id,
+                    workspace,
+                    command,
+                    cwd,
+                    ShellKind::Default,
+                    login,
+                    ProcessPurpose::ExternalAgent,
+                )
+                .await?
+            }
         } else {
             AgentProcess::spawn_local(
                 id.clone(),
@@ -431,6 +560,7 @@ impl ShellState {
     }
 
     /// 只返回由 External Agent Runtime 创建且归当前聊天所有的进程。
+    #[cfg(any(feature = "desktop", test))]
     pub(crate) fn owned_external_agent(
         &self,
         process_id: &str,
@@ -787,13 +917,23 @@ fn authorize_agent_spawn_cwd(
     permission_mode: AgentPermissionMode,
 ) -> Result<std::path::PathBuf, String> {
     if workspace.is_ssh() {
-        remote::session::validate_remote_path(session_root)?;
-        remote::session::validate_remote_path(cwd)?;
-        if permission_mode == AgentPermissionMode::Ask && !remote_path_is_within(cwd, session_root)
+        #[cfg(not(feature = "desktop"))]
         {
-            return Err("Agent process cwd requires approval outside the session workspace".into());
+            return Err("SSH requires a desktop workspace in this build".into());
         }
-        return Ok(std::path::PathBuf::from(cwd));
+        #[cfg(feature = "desktop")]
+        {
+            remote::session::validate_remote_path(session_root)?;
+            remote::session::validate_remote_path(cwd)?;
+            if permission_mode == AgentPermissionMode::Ask
+                && !remote_path_is_within(cwd, session_root)
+            {
+                return Err(
+                    "Agent process cwd requires approval outside the session workspace".into(),
+                );
+            }
+            return Ok(std::path::PathBuf::from(cwd));
+        }
     }
 
     let resolved = resolve_path(cwd, workspace);
@@ -812,6 +952,7 @@ fn authorize_agent_spawn_cwd(
     Ok(canonical)
 }
 
+#[cfg(feature = "desktop")]
 fn remote_path_is_within(path: &str, root: &str) -> bool {
     let normalized_path = normalize_remote_path(path);
     let normalized_root = normalize_remote_path(root);
@@ -819,6 +960,7 @@ fn remote_path_is_within(path: &str, root: &str) -> bool {
         || normalized_path.starts_with(&format!("{}/", normalized_root.trim_end_matches('/')))
 }
 
+#[cfg(feature = "desktop")]
 fn normalize_remote_path(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     let absolute = normalized.starts_with('/');
@@ -933,14 +1075,23 @@ fn run_blocking(
     timeout: Duration,
 ) -> Result<CommandOutput, String> {
     if let WorkspaceEnv::Ssh { profile_id } = &workspace {
-        let output = remote::manager::exec_blocking(profile_id, &command, cwd.as_deref(), timeout)?;
-        return Ok(CommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            exit_code: output.exit_code,
-            timed_out: output.timed_out,
-            truncated: output.truncated,
-        });
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let output =
+                remote::manager::exec_blocking(profile_id, &command, cwd.as_deref(), timeout)?;
+            return Ok(CommandOutput {
+                stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                exit_code: output.exit_code,
+                timed_out: output.timed_out,
+                truncated: output.truncated,
+            });
+        }
     }
     let mut native = build_oneshot_command(&command, &workspace, cwd.as_deref())?;
     if let (WorkspaceEnv::Local, Some(dir)) = (&workspace, cwd) {
@@ -1025,6 +1176,7 @@ fn run_blocking(
     })
 }
 
+#[cfg(any(feature = "desktop", all(test, unix)))]
 pub(crate) fn run_blocking_inner(
     command: String,
     cwd: Option<String>,
@@ -1064,7 +1216,7 @@ pub(crate) fn build_oneshot_command(
     }
     #[cfg(windows)]
     {
-        let shell = crate::modules::pty::shell_init::windows_shell_path();
+        let shell = crate::modules::proc::windows_shell_path();
         let mut native = Command::new(&shell);
         let is_cmd = shell
             .file_name()

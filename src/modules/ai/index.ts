@@ -4,7 +4,6 @@
  */
 
 export {
-  AgentRunBridge,
   ApprovalToastHost,
   AiSidebarPanel,
   SelectionAskAi,

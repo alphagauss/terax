@@ -16,9 +16,38 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Lines};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+/// 在宿主固定环境中取得会话锁并恢复历史会话目录授权。
+pub fn acquire(
+    state: &AiSessionsState,
+    registry: &WorkspaceRegistry,
+    id: &str,
+    environment_key: &str,
+    environment: &WorkspaceEnv,
+) -> Result<bool, String> {
+    acquire_session_run(
+        &sessions_dir()?,
+        state,
+        registry,
+        strict_uuid(id)?,
+        environment_key,
+        environment,
+    )
+}
+
+/// 释放当前宿主持有的会话锁；提交失败的运行必须先由调用者处理。
+pub fn release(state: &AiSessionsState, id: &str) -> Result<(), String> {
+    state
+        .run_locks
+        .lock()
+        .map_err(|_| "AI session lock state is poisoned".to_string())?
+        .remove(&strict_uuid(id)?);
+    Ok(())
+}
+
 #[cfg(test)]
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -492,13 +521,13 @@ fn list_sessions(root: &Path) -> Result<Vec<SessionMetadata>, String> {
 }
 
 /// 列出当前用户的全部有效 AI 会话。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ai_sessions_list() -> Result<Vec<SessionMetadata>, String> {
     list_sessions(&sessions_dir()?)
 }
 
 /// 读取指定 AI 会话的 metadata 和全部消息记录。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ai_session_read(id: String) -> Result<SessionFile, String> {
     read_session(&sessions_dir()?, strict_uuid(&id)?)
 }
@@ -528,13 +557,27 @@ fn commit_with_run_lock(
 /// 将新增记录提交到 AI 会话并返回最新摘要。
 ///
 /// 新会话 cwd 来自已授权的 Explorer 根目录；历史会话仍由不可变校验防止换根。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn ai_session_commit(
     state: State<'_, AiSessionsState>,
     workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
+    session: SessionFile,
+) -> Result<SessionMetadata, String> {
+    commit(
+        state.inner(),
+        &workspace_state.bootstrap().environment_key,
+        session,
+    )
+}
+
+/// 按宿主绑定的环境提交会话，保持固定 cwd、Agent 归属和跨进程运行锁。
+pub fn commit(
+    state: &AiSessionsState,
+    environment_key: &str,
     mut session: SessionFile,
 ) -> Result<SessionMetadata, String> {
-    let environment_key = workspace_state.bootstrap().environment_key.clone();
+    let environment_key = environment_key.to_string();
     session.environment_key = environment_key.clone();
     let id = validate_session_file(&session)?;
     let root = sessions_dir()?;
@@ -550,14 +593,15 @@ pub fn ai_session_commit(
     }
     let agent_id = session_agent_id(&session.metadata).to_string();
     if agent_id == MAIN_AGENT_ID {
-        return commit_with_run_lock(&root, state.inner(), id, &session, &environment_key);
+        return commit_with_run_lock(&root, state, id, &session, &environment_key);
     }
     shared_store::with_ai_agent(&agent_id, || {
-        commit_with_run_lock(&root, state.inner(), id, &session, &environment_key)
+        commit_with_run_lock(&root, state, id, &session, &environment_key)
     })
 }
 
 /// 删除指定会话文件，运行中的会话不可删除。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
     let id = strict_uuid(&id)?;
@@ -593,6 +637,7 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
 ///
 /// 调用方必须先持有共享 Agent 配置锁。函数会先取得全部会话锁再删除任何文件，
 /// 检测到任一运行中会话时不产生部分删除。
+#[cfg(any(feature = "desktop", test))]
 fn delete_sessions_by_agent(
     root: &Path,
     state: &AiSessionsState,
@@ -634,6 +679,7 @@ fn delete_sessions_by_agent(
 }
 
 /// 级联删除 Custom Agent 和其跨 Workspace 的全部会话。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn ai_agent_delete(
     app: AppHandle,
@@ -683,6 +729,7 @@ fn acquire_session_run(
 }
 
 /// 尝试为一次 AI 运行取得跨进程锁，重复取得同一锁视为成功。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn ai_session_run_acquire(
     state: State<'_, AiSessionsState>,
@@ -703,6 +750,7 @@ pub fn ai_session_run_acquire(
 }
 
 /// 释放当前进程持有的 AI 会话运行锁。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn ai_session_run_release(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
     let id = strict_uuid(&id)?;

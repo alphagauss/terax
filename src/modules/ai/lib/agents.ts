@@ -6,65 +6,27 @@
 import i18n from "@/i18n";
 import { readSharedStore, setSharedStoreKey } from "@/lib/sharedStore";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  AGENT_TOOL_IDS,
-  type AgentToolId,
-  normalizeAgentTools,
-} from "./agentTools";
+import { normalizeAgentTools } from "./agentTools";
 
-export type AgentIconId =
-  | "coder"
-  | "architect"
-  | "reviewer"
-  | "security"
-  | "designer"
-  | "spark";
-
-export type Agent = {
-  id: string;
-  name: string;
-  description: string;
-  instructions: string;
-  icon: AgentIconId;
-  tools: AgentToolId[];
-};
-
-export type SessionAgentSnapshot = Pick<
+export {
+  MAIN_AGENT,
+  MAIN_AGENT_ID,
+  normalizeAgentIcon,
+  findAgent,
+  snapshotAgent,
+  parseSessionAgent,
+} from "@/modules/ai/lib/agentDefinition";
+export type {
   Agent,
-  "id" | "name" | "instructions" | "icon" | "tools"
->;
-
-export const MAIN_AGENT_ID = "builtin:main";
-
-export const MAIN_AGENT: Readonly<Agent> = {
-  id: MAIN_AGENT_ID,
-  name: "Terax",
-  description: "Built-in general-purpose engineering agent with all tools.",
-  instructions: "",
-  icon: "coder",
-  tools: [...AGENT_TOOL_IDS],
-};
-
-const AGENT_ICONS = new Set<AgentIconId>([
-  "coder",
-  "architect",
-  "reviewer",
-  "security",
-  "designer",
-  "spark",
-]);
-
+  AgentIconId,
+  SessionAgentSnapshot,
+} from "@/modules/ai/lib/agentDefinition";
+import {
+  MAIN_AGENT_ID,
+  normalizeAgentIcon,
+  type Agent,
+} from "@/modules/ai/lib/agentDefinition";
 const agentKey = (id: string) => `agent:${id}`;
-
-/** 将不可信持久化值规范为已知 Agent 图标。 */
-export function normalizeAgentIcon(
-  value: unknown,
-  fallback: AgentIconId = "spark",
-): AgentIconId {
-  return AGENT_ICONS.has(value as AgentIconId)
-    ? (value as AgentIconId)
-    : fallback;
-}
 
 /** 读取所有有效 Custom Agent，并在内存中迁移旧版缺失的工具列表。 */
 export async function loadAgents(): Promise<Agent[]> {
@@ -109,52 +71,6 @@ export function agentDisplayDescription(
   return agent.id === MAIN_AGENT_ID
     ? i18n.t("aiAgents:desc.main", { defaultValue: agent.description })
     : agent.description;
-}
-
-/** 从 Custom Agent 列表解析指定定义，无效 ID 统一回退固定主 Agent。 */
-export function findAgent(
-  customAgents: readonly Agent[],
-  id: string | null | undefined,
-): Agent {
-  const main = () => ({ ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] });
-  if (!id || id === MAIN_AGENT_ID) return main();
-  return customAgents.find((agent) => agent.id === id) ?? main();
-}
-
-/** 创建与后续 Agent 编辑解耦的会话运行快照。 */
-export function snapshotAgent(agent: Agent): SessionAgentSnapshot {
-  return {
-    id: agent.id,
-    name: agent.name,
-    instructions: agent.instructions,
-    icon: agent.icon,
-    tools: normalizeAgentTools(agent.tools),
-  };
-}
-
-/** 从不透明会话 metadata 值恢复 Agent 快照，旧会话统一归入主 Agent。 */
-export function parseSessionAgent(value: unknown): SessionAgentSnapshot {
-  if (!value || typeof value !== "object")
-    return snapshotAgent(findAgent([], null));
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== "string" ||
-    typeof record.name !== "string" ||
-    typeof record.instructions !== "string"
-  ) {
-    return snapshotAgent(findAgent([], null));
-  }
-  if (record.id === MAIN_AGENT_ID) {
-    return snapshotAgent(findAgent([], null));
-  }
-  const icon = normalizeAgentIcon(record.icon);
-  return {
-    id: record.id,
-    name: record.name,
-    instructions: record.instructions,
-    icon,
-    tools: normalizeAgentTools(record.tools),
-  };
 }
 
 /** 严格解析共享存储中的 Custom Agent，忽略损坏记录和保留 ID。 */

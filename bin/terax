@@ -1,0 +1,12 @@
+#!/usr/bin/env bun
+/**
+ * 本文件提供 terax 终端命令，复用独立终端入口。
+ * Bun 负责执行 TS；原生服务由同版本 terax-host 提供。
+ */
+import { main } from "../apps/terminal/index.ts";
+
+try { await main(process.argv.slice(2)); }
+catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+}

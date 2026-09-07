@@ -1,5 +1,5 @@
 /**
- * 本文件定义 AI Provider 实例、用户模型引用和基础系统提示词。
+ * 本文件定义 AI Provider 实例、用户模型引用、基础系统提示词和 Agent 运行参数。
  * 运行时只从结构化配置解析连接，不维护易过时的静态模型目录。
  */
 
@@ -327,3 +327,16 @@ export const SYSTEM_PROMPT = `You are Terax, a hands-on engineering agent in a d
 # Responses
 - Be concise and direct. State the reason in one short sentence before a mutation.
 - After finishing, report the outcome and any necessary next step. Use language fences on code blocks.`;
+
+export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;
+export const MAX_CONCURRENT_SUBAGENTS_MIN = 1;
+export const MAX_CONCURRENT_SUBAGENTS_MAX = 8;
+
+/** 将每聊天 Subagent 并发数约束到设置界面允许的安全范围。 */
+export function clampMaxConcurrentSubagents(value: number): number {
+  if (!Number.isFinite(value)) return MAX_CONCURRENT_SUBAGENTS_DEFAULT;
+  return Math.min(
+    MAX_CONCURRENT_SUBAGENTS_MAX,
+    Math.max(MAX_CONCURRENT_SUBAGENTS_MIN, Math.round(value)),
+  );
+}

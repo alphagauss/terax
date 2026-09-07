@@ -3,7 +3,7 @@
  * 自定义凭据只按稳定实例 ID 绑定，不从名称、地址或模型名派生。
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative as invoke } from "@/lib/nativeHost";
 import {
   getProvider,
   KEYRING_SERVICE,

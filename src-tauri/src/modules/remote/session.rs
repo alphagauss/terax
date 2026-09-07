@@ -1103,9 +1103,7 @@ async fn authenticate_agent(
     Err("SSH agent authentication is unsupported on this platform".into())
 }
 
-pub fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
+pub use crate::modules::shell::quote::shell_quote;
 
 pub(crate) fn signal_exit_code(signal: &Sig) -> i32 {
     128 + match signal {

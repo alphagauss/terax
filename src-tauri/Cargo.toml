@@ -1,5 +1,6 @@
 [package]
 name = "terax"
+default-run = "terax"
 version = "0.8.2"
 description = "Terax — an open-source AI-native terminal emulator"
 authors = ["crynta"]
@@ -7,6 +8,33 @@ license = "Apache-2.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["desktop"]
+headless = []
+desktop = ["dep:tauri-build", "dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-log", "dep:tauri-plugin-os", "dep:tauri-plugin-store", "dep:tauri-plugin-process", "dep:tauri-plugin-notification", "dep:tauri-plugin-dialog", "dep:tauri-plugin-clipboard-manager", "dep:tauri-plugin-autostart", "dep:tauri-plugin-window-state"]
+
+[[bin]]
+name = "terax"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "terax-host"
+path = "src/bin/terax-host.rs"
+required-features = ["headless"]
+
+[[test]]
+name = "terminal_host"
+required-features = ["headless"]
+
+[[test]]
+name = "git_operations"
+required-features = ["desktop"]
+
+[[test]]
+name = "fs_search"
+required-features = ["desktop"]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -16,11 +44,11 @@ name = "terax_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { optional = true, version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
-tauri-plugin-opener = "2"
+tauri = { optional = true, version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 portable-pty = "0.9"
@@ -33,12 +61,12 @@ grep-matcher = "0.1"
 globset = "0.4"
 nucleo-matcher = "0.3"
 shared_child = "1"
-tauri-plugin-log = "2"
-tauri-plugin-os = "2"
-tauri-plugin-store = "2"
-tauri-plugin-process = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-dialog = "2"
+tauri-plugin-log = { version = "2", optional = true }
+tauri-plugin-os = { version = "2", optional = true }
+tauri-plugin-store = { version = "2", optional = true }
+tauri-plugin-process = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
 	"rustls-tls",
 	"stream",
@@ -57,6 +85,7 @@ tokio = { version = "1", default-features = false, features = [
 	"sync",
 	"net",
 	"io-util",
+	"signal",
 	"process",
 	"time",
 	"fs",
@@ -97,7 +126,7 @@ objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] 
 
 # WebKitGTK can't read external clipboard copies; mac/win webviews can.
 [target.'cfg(target_os = "linux")'.dependencies]
-tauri-plugin-clipboard-manager = "2"
+tauri-plugin-clipboard-manager = { version = "2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = [
@@ -121,8 +150,8 @@ winreg = "0.55"
 junction = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-autostart = "2"
-tauri-plugin-window-state = "2"
+tauri-plugin-autostart = { version = "2", optional = true }
+tauri-plugin-window-state = { version = "2", optional = true }
 
 [profile.dev]
 incremental = true

@@ -7,6 +7,7 @@ import {
   getAgentTurnCoordinator,
   clearAgentTurnCoordinator,
 } from "@/modules/ai/agents/subagentRuntime";
+import { startDesktopRunLifecycle } from "@/modules/ai/store/runLifecycle";
 import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import { HOST_PLATFORM } from "@/lib/platform";
 import {
@@ -329,6 +330,7 @@ export async function startChatMessage(
     state.promoteSession(sessionId, messagesForPromotion(message), cwd);
   }
   if (!externalAgent) getAgentTurnCoordinator(sessionId).inbox.open();
+  startDesktopRunLifecycle(sessionId, chat);
   const sending = chat.sendMessage(message);
   void sending;
   return true;

@@ -5,6 +5,7 @@
 
 use std::sync::Mutex;
 
+#[cfg(feature = "desktop")]
 use tauri::AppHandle;
 
 #[cfg(target_os = "linux")]
@@ -13,8 +14,6 @@ use std::collections::HashMap;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
-#[cfg(target_os = "linux")]
-use tauri::Manager;
 
 #[derive(Default)]
 pub struct SecretsState {
@@ -30,15 +29,18 @@ pub(crate) fn key(service: &str, account: &str) -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn store_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+/// 沿用桌面应用标识对应的数据目录，终端不建立第二份 Linux 凭据。
+fn store_path() -> Result<PathBuf, String> {
+    let dir = dirs::data_local_dir()
+        .ok_or("local data directory is unavailable")?
+        .join("app.crynta.terax");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("secrets.json"))
 }
 
 #[cfg(target_os = "linux")]
-fn read_store(app: &AppHandle) -> Result<HashMap<String, String>, String> {
-    read_store_at(&store_path(app)?)
+fn read_store() -> Result<HashMap<String, String>, String> {
+    read_store_at(&store_path()?)
 }
 
 #[cfg(target_os = "linux")]
@@ -50,7 +52,7 @@ pub(crate) fn read_store_at(path: &std::path::Path) -> Result<HashMap<String, St
     serde_json::from_slice::<HashMap<String, String>>(&bytes).map_err(|e| e.to_string())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
 pub(crate) fn write_store_at(
     path: &std::path::Path,
     map: &HashMap<String, String>,
@@ -64,22 +66,22 @@ pub(crate) fn write_store_at(
 }
 
 #[cfg(target_os = "linux")]
-fn with_store<F, R>(app: &AppHandle, state: &SecretsState, f: F) -> Result<R, String>
+fn with_store<F, R>(state: &SecretsState, f: F) -> Result<R, String>
 where
     F: FnOnce(&mut HashMap<String, String>) -> R,
 {
     let _guard = state.guard.lock().map_err(|e| e.to_string())?;
-    let mut map = read_store(app)?;
+    let mut map = read_store()?;
     Ok(f(&mut map))
 }
 
-#[cfg(target_os = "linux")]
-fn mutate_store<F>(app: &AppHandle, state: &SecretsState, f: F) -> Result<(), String>
+#[cfg(all(target_os = "linux", feature = "desktop"))]
+fn mutate_store<F>(state: &SecretsState, f: F) -> Result<(), String>
 where
     F: FnOnce(&mut HashMap<String, String>),
 {
     let _guard = state.guard.lock().map_err(|e| e.to_string())?;
-    let path = store_path(app)?;
+    let path = store_path()?;
     let _file_lock = crate::modules::storage::FileLock::acquire(
         &path.with_extension("json.lock"),
         std::time::Duration::from_secs(5),
@@ -97,8 +99,18 @@ fn entry(service: &str, account: &str) -> Result<keyring::Entry, String> {
 }
 
 /// 从当前平台的秘密存储读取一个值。
+#[cfg(feature = "desktop")]
 pub(crate) fn get(
-    app: &AppHandle,
+    _app: &AppHandle,
+    state: &SecretsState,
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, String> {
+    get_value(state, service, account)
+}
+
+/// 从共享系统秘密存储读取凭据，无界面宿主沿用相同的平台身份。
+pub fn get_value(
     state: &SecretsState,
     service: &str,
     account: &str,
@@ -106,11 +118,11 @@ pub(crate) fn get(
     #[cfg(target_os = "linux")]
     {
         let key = key(service, account);
-        with_store(app, state, |map| map.get(&key).cloned())
+        with_store(state, |map| map.get(&key).cloned())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, state);
+        let _ = state;
         let entry = entry(service, account)?;
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
@@ -120,6 +132,7 @@ pub(crate) fn get(
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn secrets_get(
     app: AppHandle,
@@ -130,6 +143,7 @@ pub async fn secrets_get(
     get(&app, &state, &service, &account)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn secrets_set(
     app: AppHandle,
@@ -141,7 +155,7 @@ pub async fn secrets_set(
     #[cfg(target_os = "linux")]
     let result = {
         let key = key(&service, &account);
-        mutate_store(&app, &state, |m| {
+        mutate_store(&state, |m| {
             m.insert(key, password);
         })
     };
@@ -155,6 +169,7 @@ pub async fn secrets_set(
     crate::modules::shared_store::bump_keys_epoch(&app)
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn secrets_delete(
     app: AppHandle,
@@ -165,7 +180,7 @@ pub async fn secrets_delete(
     #[cfg(target_os = "linux")]
     let result = {
         let key = key(&service, &account);
-        mutate_store(&app, &state, |m| {
+        mutate_store(&state, |m| {
             m.remove(&key);
         })
     };
@@ -265,17 +280,18 @@ mod tests {
     }
 }
 
-/// Batch read — single IPC roundtrip for the cold-boot fan-out.
+/// 在一次桌面 IPC 内批量读取凭据，启动时避免逐个账户往返。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn secrets_get_all(
-    app: AppHandle,
+    _app: AppHandle,
     state: tauri::State<'_, SecretsState>,
     service: String,
     accounts: Vec<String>,
 ) -> Result<Vec<Option<String>>, String> {
     #[cfg(target_os = "linux")]
     {
-        with_store(&app, &state, |m| {
+        with_store(&state, |m| {
             accounts
                 .iter()
                 .map(|a| m.get(&key(&service, a)).cloned())
@@ -284,7 +300,7 @@ pub async fn secrets_get_all(
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, state);
+        let _ = (_app, state);
         Ok(accounts
             .into_iter()
             .map(|a| {

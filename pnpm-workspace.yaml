@@ -4,3 +4,8 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: false
   msw: true
+
+# 此锁定版本的类型辅助库仅声明 TS 5；当前 TS 6.0.3 已通过类型检查与两平台原生渲染验证。
+peerDependencyRules:
+  allowedVersions:
+    "bun-ffi-structs@0.3.1>typescript": "6.0.3"

@@ -17,14 +17,19 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-types": "tsc --noEmit",
-    "lint": "biome lint ./src",
+    "lint": "biome lint .",
     "lint:fix": "biome lint --write ./src",
-    "format": "biome format --write ./src",
-    "format:check": "biome format ./src",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
     "analyze:bundle": "ANALYZE=true vite build",
     "analyze:eager": "node scripts/eager-graph.mjs src/main.tsx && node scripts/eager-graph.mjs src/auxiliary/main.tsx",
     "size": "size-limit",
-    "knip": "knip"
+    "knip": "knip",
+    "agent": "bun apps/terminal/index.ts agent",
+    "build:host": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features headless --bin terax-host --locked",
+    "check-types:terminal": "tsc --noEmit -p apps/terminal/tsconfig.json",
+    "test:terminal": "bun scripts/terminal-smoke.ts",
+    "test:tui": "bun scripts/terminal-ui-smoke.tsx"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.94",
@@ -114,6 +119,8 @@
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@biomejs/biome": "^2.5.9",
+    "@opentui/core": "^0.5.10",
+    "@opentui/react": "^0.5.10",
     "@rolldown/plugin-babel": "^0.2.3",
     "@size-limit/file": "^12.1.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -124,6 +131,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
     "babel-plugin-react-compiler": "^1.0.0",
+    "diff": "^9.0.0",
     "happy-dom": "^20.10.6",
     "knip": "^6.32.2",
     "react-compiler-healthcheck": "^1.0.0",
@@ -137,5 +145,8 @@
     "vite": "^8.2.1",
     "vite-plugin-inspect": "^12.0.2",
     "vitest": "^4.1.10"
+  },
+  "bin": {
+    "terax": "bin/terax"
   }
 }

@@ -3,6 +3,7 @@
 //! 路径由当前 Workspace 环境解析。跨环境后台传输不在这里执行，而由 transfers
 //! 子系统统一管理任务、取消、进度和提交。
 
+#[cfg(feature = "desktop")]
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 use serde::Serialize;
@@ -22,14 +23,22 @@ pub enum TrashResult {
 }
 
 /// Creates a new empty file. Fails if the file already exists.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let profile_id = profile_id.to_string();
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(&profile_id).await?;
-        return remote::sftp::create_file(&workspace, &path).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let profile_id = profile_id.to_string();
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(&profile_id).await?;
+            return remote::sftp::create_file(&workspace, &path).await;
+        }
     }
     let p = resolve_path(&path, &workspace);
     if p.exists() {
@@ -44,14 +53,22 @@ pub async fn fs_create_file(path: String, workspace: Option<WorkspaceEnv>) -> Re
 /// Creates a new directory. Fails if the directory already exists.
 /// Parents are created as needed — matches the common "new folder" UX
 /// where typing "a/b/c" creates the full chain.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let profile_id = profile_id.to_string();
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(&profile_id).await?;
-        return remote::mutation_service::create_directory(&workspace, &path).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let profile_id = profile_id.to_string();
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(&profile_id).await?;
+            return remote::mutation_service::create_directory(&workspace, &path).await;
+        }
     }
     let p = resolve_path(&path, &workspace);
     if p.exists() {
@@ -64,7 +81,7 @@ pub async fn fs_create_dir(path: String, workspace: Option<WorkspaceEnv>) -> Res
 }
 
 /// Renames (or moves) a path. Refuses to overwrite an existing target.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_rename(
     from: String,
     to: String,
@@ -72,10 +89,18 @@ pub async fn fs_rename(
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let profile_id = profile_id.to_string();
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(&profile_id).await?;
-        return remote::sftp::rename(&workspace, &from, &to).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let profile_id = profile_id.to_string();
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(&profile_id).await?;
+            return remote::sftp::rename(&workspace, &from, &to).await;
+        }
     }
     let from_p = resolve_path(&from, &workspace);
     let to_p = resolve_path(&to, &workspace);
@@ -98,14 +123,22 @@ pub async fn fs_rename(
 /// 删除文件或目录，目录会在所属 Workspace 环境内递归删除。
 ///
 /// 调用方必须先完成破坏性操作确认；本命令负责环境分流和底层错误报告。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_delete(path: String, workspace: Option<WorkspaceEnv>) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let profile_id = profile_id.to_string();
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(&profile_id).await?;
-        return remote::mutation_service::delete(&workspace, &path).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let profile_id = profile_id.to_string();
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(&profile_id).await?;
+            return remote::mutation_service::delete(&workspace, &path).await;
+        }
     }
     if let WorkspaceEnv::Wsl { distro } = &workspace {
         // Windows 盘挂载已经由 resolve_path 映射为本机盘符，继续走原生文件系统更快，
@@ -219,7 +252,7 @@ fn validate_posix_destructive_path(path: &str) -> Result<(), String> {
 ///
 /// SSH 和 WSL 自有文件系统没有兼容的宿主机回收站，返回明确的不可用结果，
 /// 由前端继续请求永久删除确认。WSL 的 Windows 盘挂载仍保留本机回收站能力。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_trash(
     path: String,
     workspace: Option<WorkspaceEnv>,
@@ -270,7 +303,7 @@ fn copy_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Resu
 ///
 /// 来源是拖放提供的宿主机绝对路径，只有目标经过 Workspace 路径解析。SSH 跨环境
 /// 复制必须进入 transfers 子系统，本命令拒绝覆盖已有目标。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_copy(
     sources: Vec<String>,
     dest_dir: String,

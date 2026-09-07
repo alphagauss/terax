@@ -7,7 +7,7 @@
 一个 Terax Workspace 窗口由一对进程组成：Rust 后端（`src-tauri/`）及其 WebView 前端（`src/`）。打开另一个 Workspace 窗口会启动另一个独立应用进程，从而形成另一对进程。runtime resource 不会跨越该边界；只有明确共享的原子文件和操作系统 keychain 是全局资源。
 
 - **Rust 负责所有操作系统访问**：PTY、文件系统、Git、Shell spawn、网络、秘密和 Workspace 授权。
-- **WebView 绝不直接访问文件系统、进程或 Shell**。每项 host 操作都通过 `invoke()` 调用注册在 `src-tauri/src/lib.rs` 中的 command。
+- **WebView 绝不直接访问文件系统、进程或 Shell**。每项 host 操作都通过 `invoke()` 调用注册在 `src-tauri/src/desktop.rs` 中的 command。
 
 该边界是安全模型的基础。不受信任的输入（终端 escape sequence、文件内容、AI 工具结果）由 Rust 或严格限定范围的前端代码解析和验证，绝不会由 renderer 执行。
 
@@ -20,7 +20,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 ## 新增 IPC command
 
 1. 在合适的 `src-tauri/src/modules/<area>/` 模块中编写 `#[tauri::command]` async 函数。
-2. 在 `src-tauri/src/lib.rs` 的 `tauri::generate_handler![...]` block（`src-tauri/src/lib.rs:191`）中注册。
+2. 在 `src-tauri/src/desktop.rs` 的 `tauri::generate_handler![...]` block（`src-tauri/src/desktop.rs`）中注册。
 3. 如果 command 使用 Tauri plugin API（window、clipboard、dialog 等），将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
 4. 在对应的 `src/modules/<area>/lib/` 目录中添加带类型的前端 wrapper，并通过 Tauri 的 `invoke()` API 调用。
 5. 如果 command 涉及文件系统、网络或 Shell，必须通过现有 guard（Agent 文件 Rust 策略、Workspace 授权 registry、SSRF guard、Shell 安全检查和 AI 工具审批）。
@@ -29,7 +29,7 @@ SSH 文件内容 command 统一进入 `remote/file_service.rs`。正文读取固
 
 ## Command 目录
 
-下面按模块列出注册在 `src-tauri/src/lib.rs` 中的 command。名称均为前端所见的 Rust 函数名。
+下面按模块列出注册在 `src-tauri/src/desktop.rs` 中的 command。名称均为前端所见的 Rust 函数名。
 
 ### PTY（`src-tauri/src/modules/pty/`）
 
@@ -200,7 +200,7 @@ SSH 目录汇总优先在一个受控只读 exec channel 内完成服务端聚�
 ## 不变量
 
 - WebView 除通过上述 command 外，不得 spawn 进程、读取文件或发起网络调用。
-- 新 command 必须在 `lib.rs` 中注册，并在边界处受到保护（Workspace auth、deny-list、SSRF、approval flow）。
+- 新 command 必须在 `desktop.rs` 中注册，并在边界处受到保护（Workspace auth、deny-list、SSRF、approval flow）。
 - 如果 command 使用 plugin API，必须将 plugin permission 添加到 `src-tauri/capabilities/default.json`。
 - 绝不通过进程参数或 Workspace 文件传递 SSH password、proxy password 或其他秘密。
 - 共享 entity writer 只能修改其目标 key，绝不能持久化过时的完整 list snapshot。
@@ -212,3 +212,5 @@ SSH 目录汇总优先在一个受控只读 exec channel 内完成服务端聚�
 - [`docs/README.md`](../README.md) - 贡献者指南索引
 - [PTY Shell 集成](pty-shell-integration.md) - session 与 Shell 集成的工作方式
 - [安全模型](security-model.md) - 每个 command 都必须遵守的边界
+
+独立终端宿主通过私有管道调用同一套原生服务，不创建上述桌面进程对，见 [终端 Agent](terminal-agent.md)。
