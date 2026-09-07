@@ -1,4 +1,5 @@
 //! AI Agent 文件工具的统一原生后端。
+//! 共享服务接收普通状态引用，Tauri command 仅转换桌面注入的上下文。
 //!
 //! 本模块负责会话工作目录、权限模式、敏感路径、读取版本、修改快照和文件树操作，
 //! 并复用现有文件服务将同一契约路由到 Local、WSL 与 SSH。请求批准模式限制在
@@ -11,6 +12,7 @@ use std::sync::Mutex;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -18,6 +20,7 @@ use super::file::{CheckedWriteResult, FileVersion, ReadResult, WriteCondition};
 use super::grep::{self, ContentSearchCaseMode, ContentSearchRequest, ContentSearchSyntax};
 use super::to_canon;
 use super::tree::{DirEntry, EntryKind};
+#[cfg(feature = "desktop")]
 use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv, WorkspaceRegistry};
 
@@ -355,17 +358,31 @@ struct AgentPathContext<'a> {
 }
 
 /// 读取当前工作区内的普通 UTF-8 文件，并记录聊天级文件版本。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_read(
     state: State<'_, AgentFileState>,
     remote: State<'_, RemoteState>,
     registry: State<'_, WorkspaceRegistry>,
     request: AgentReadRequest,
 ) -> Result<AgentReadResponse, String> {
+    let _ = remote;
+    agent_file_read_service(state.inner(), registry.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_read_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
+    request: AgentReadRequest,
+) -> Result<AgentReadResponse, String> {
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let authorized = authorize_path(
-        &registry,
+        registry,
         &request.root,
         &request.path,
         &workspace,
@@ -383,13 +400,9 @@ pub async fn agent_file_read(
     if start_line == 0 {
         return Err("startLine must be at least 1".into());
     }
-    let result = super::file::fs_read_file(
-        remote,
-        authorized.io_path.clone(),
-        Some(workspace),
-        Some(false),
-    )
-    .await?;
+    let result =
+        super::file::fs_read_file_service(authorized.io_path.clone(), Some(workspace), Some(false))
+            .await?;
     let ReadResult::Text {
         content,
         size,
@@ -443,17 +456,30 @@ pub async fn agent_file_read(
 }
 
 /// 统一执行直接目录列举和递归 glob 路径发现。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_find(
     state: State<'_, AgentFileState>,
     registry: State<'_, WorkspaceRegistry>,
+    request: AgentFindRequest,
+) -> Result<AgentFindResponse, String> {
+    agent_file_find_service(state.inner(), registry.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_find_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
     request: AgentFindRequest,
 ) -> Result<AgentFindResponse, String> {
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let requested_path = request.path.as_deref().unwrap_or(".");
     let authorized = authorize_path(
-        &registry,
+        registry,
         &request.root,
         requested_path,
         &workspace,
@@ -511,18 +537,32 @@ pub async fn agent_file_find(
 }
 
 /// 使用共享搜索引擎执行 Agent 正文搜索，并在安全过滤后分页和聚合。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_grep(
     state: State<'_, AgentFileState>,
     remote: State<'_, RemoteState>,
     registry: State<'_, WorkspaceRegistry>,
     request: AgentGrepRequest,
 ) -> Result<AgentGrepResponse, String> {
+    let _ = remote;
+    agent_file_grep_service(state.inner(), registry.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_grep_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
+    request: AgentGrepRequest,
+) -> Result<AgentGrepResponse, String> {
     validate_owner(&request.owner_session_id)?;
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let requested_path = request.path.as_deref().unwrap_or(".");
     let authorized = authorize_path(
-        &registry,
+        registry,
         &request.root,
         requested_path,
         &workspace,
@@ -604,7 +644,7 @@ pub async fn agent_file_grep(
                                 "grep context spans too many files; narrow the search".into()
                             );
                         }
-                        let lines = read_context_file(remote.clone(), &workspace, &hit.path)
+                        let lines = read_context_file(&workspace, &hit.path)
                             .await
                             .unwrap_or_default();
                         context_files.insert(hit.path.clone(), lines);
@@ -677,11 +717,25 @@ pub async fn agent_file_grep(
 }
 
 /// 准备全文写入或多文件精确补丁，并缓存审批所见内容。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_prepare_mutation(
     state: State<'_, AgentFileState>,
     remote: State<'_, RemoteState>,
     registry: State<'_, WorkspaceRegistry>,
+    request: AgentPrepareMutationRequest,
+) -> Result<AgentMutationPreview, String> {
+    let _ = remote;
+    agent_file_prepare_mutation_service(state.inner(), registry.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_prepare_mutation_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
     request: AgentPrepareMutationRequest,
 ) -> Result<AgentMutationPreview, String> {
     validate_owner(&request.owner_session_id)?;
@@ -704,9 +758,8 @@ pub async fn agent_file_prepare_mutation(
     }
     let workspace = WorkspaceEnv::from_option(request.workspace);
     let writes = prepare_writes(
-        &state,
-        remote,
-        &registry,
+        state,
+        registry,
         &request.owner_session_id,
         AgentPathContext {
             root: &request.root,
@@ -729,12 +782,27 @@ pub async fn agent_file_prepare_mutation(
 }
 
 /// 提交已准备的修改；任何基线冲突都会在写入前拒绝。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_commit_mutation(
     state: State<'_, AgentFileState>,
     remote: State<'_, RemoteState>,
     registry: State<'_, WorkspaceRegistry>,
     app: AppHandle,
+    request: AgentMutationKeyRequest,
+) -> Result<AgentMutationResult, String> {
+    let _ = remote;
+    agent_file_commit_mutation_service(state.inner(), registry.inner(), &app, request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_commit_mutation_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
+    app: &dyn crate::modules::fs::file::FileEvents,
     request: AgentMutationKeyRequest,
 ) -> Result<AgentMutationResult, String> {
     validate_owner(&request.owner_session_id)?;
@@ -745,31 +813,27 @@ pub async fn agent_file_commit_mutation(
         .get(&key)
         .cloned()
         .ok_or_else(|| "file mutation was not prepared".to_string())?;
-    validate_prepared(remote.clone(), &registry, &mutation).await?;
+    validate_prepared(registry, &mutation).await?;
     let mut results = Vec::with_capacity(mutation.writes.len());
     let mut committed = Vec::new();
     for write in &mutation.writes {
         if let Err(error) = ensure_parent(&write.io_path, &mutation.workspace).await {
-            let failures =
-                rollback_writes(remote.clone(), app.clone(), &mutation.workspace, &committed).await;
+            let failures = rollback_writes(app, &mutation.workspace, &committed).await;
             return Err(with_rollback_status(error, failures));
         }
-        let result = match super::file::fs_write_file_checked(
-            remote.clone(),
+        let result = match super::file::fs_write_file_checked_service(
             write.io_path.clone(),
             write.after.clone(),
             write.condition.clone(),
             Some(mutation.workspace.clone()),
             Some("ai".into()),
-            app.clone(),
+            app,
         )
         .await
         {
             Ok(result) => result,
             Err(error) => {
-                let failures =
-                    rollback_writes(remote.clone(), app.clone(), &mutation.workspace, &committed)
-                        .await;
+                let failures = rollback_writes(app, &mutation.workspace, &committed).await;
                 return Err(with_rollback_status(error, failures));
             }
         };
@@ -779,8 +843,7 @@ pub async fn agent_file_commit_mutation(
             mtime,
         } = result
         else {
-            let failures =
-                rollback_writes(remote.clone(), app.clone(), &mutation.workspace, &committed).await;
+            let failures = rollback_writes(app, &mutation.workspace, &committed).await;
             return Err(with_rollback_status(
                 "file changed after approval; review the updated files again".into(),
                 failures,
@@ -793,7 +856,7 @@ pub async fn agent_file_commit_mutation(
         };
         committed.push((write.clone(), new_version.clone()));
         if !paths_equal(&write.path, &write.io_path, &mutation.workspace) {
-            super::file::emit_file_written(&app, &write.path, Some("ai".into()));
+            super::file::emit_file_written(app, &write.path, Some("ai".into()));
         }
         results.push(AgentMutationFileResult {
             path: write.path.clone(),
@@ -815,9 +878,21 @@ pub async fn agent_file_commit_mutation(
 }
 
 /// 丢弃单个预备快照。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_clear_mutation(
     state: State<'_, AgentFileState>,
+    request: AgentMutationKeyRequest,
+) -> Result<(), String> {
+    agent_file_clear_mutation_service(state.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_clear_mutation_service(
+    state: &AgentFileState,
     request: AgentMutationKeyRequest,
 ) -> Result<(), String> {
     validate_owner(&request.owner_session_id)?;
@@ -830,9 +905,21 @@ pub async fn agent_file_clear_mutation(
 }
 
 /// 清理聊天拥有的读取版本和预备快照。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_clear_owner(
     state: State<'_, AgentFileState>,
+    owner_session_id: String,
+) -> Result<(), String> {
+    agent_file_clear_owner_service(state.inner(), owner_session_id).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_clear_owner_service(
+    state: &AgentFileState,
     owner_session_id: String,
 ) -> Result<(), String> {
     validate_owner(&owner_session_id)?;
@@ -855,11 +942,25 @@ pub async fn agent_file_clear_owner(
 }
 
 /// 执行经过审批的结构化路径操作。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn agent_file_operation(
     state: State<'_, AgentFileState>,
     registry: State<'_, WorkspaceRegistry>,
     app: AppHandle,
+    request: AgentFileOperationRequest,
+) -> Result<AgentFileOperationResponse, String> {
+    agent_file_operation_service(state.inner(), registry.inner(), &app, request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_operation_service(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
+    app: &dyn crate::modules::fs::file::FileEvents,
     request: AgentFileOperationRequest,
 ) -> Result<AgentFileOperationResponse, String> {
     validate_owner(&request.owner_session_id)?;
@@ -869,7 +970,7 @@ pub async fn agent_file_operation(
     }
     let source_must_exist = !matches!(request.operation, AgentFileOperation::CreateDirectory);
     let source = authorize_path(
-        &registry,
+        registry,
         &request.root,
         &request.path,
         &workspace,
@@ -893,7 +994,7 @@ pub async fn agent_file_operation(
                 .as_deref()
                 .ok_or_else(|| "destination is required".to_string())?;
             let target = authorize_path(
-                &registry,
+                registry,
                 &request.root,
                 raw,
                 &workspace,
@@ -946,9 +1047,9 @@ pub async fn agent_file_operation(
             super::mutate::fs_create_dir(source.io_path.clone(), Some(workspace.clone())).await?;
         }
     }
-    super::file::emit_file_written(&app, &source.actual, Some("ai".into()));
+    super::file::emit_file_written(app, &source.actual, Some("ai".into()));
     if let Some(target) = &destination {
-        super::file::emit_file_written(&app, &target.actual, Some("ai".into()));
+        super::file::emit_file_written(app, &target.actual, Some("ai".into()));
     }
     Ok(AgentFileOperationResponse {
         operation: request.operation,
@@ -1356,23 +1457,31 @@ async fn authorize_path(
         ensure_safe_path(&actual)?;
     }
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let root_canonical = remote::sftp::canonicalize(&remote_workspace, root).await?;
-        let canonical = canonicalize_remote_nearest(&remote_workspace, &actual).await?;
-        if permission_mode == AgentPermissionMode::Ask {
-            ensure_safe_path(&canonical)?;
-            ensure_within_remote(&root_canonical, &canonical)?;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
         }
-        if must_exist {
-            remote::sftp::stat(&remote_workspace, &actual).await?;
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            let root_canonical = remote::sftp::canonicalize(&remote_workspace, root).await?;
+            let canonical = canonicalize_remote_nearest(&remote_workspace, &actual).await?;
+            if permission_mode == AgentPermissionMode::Ask {
+                ensure_safe_path(&canonical)?;
+                ensure_within_remote(&root_canonical, &canonical)?;
+            }
+            if must_exist {
+                remote::sftp::stat(&remote_workspace, &actual).await?;
+            }
+            return Ok(AuthorizedPath {
+                actual,
+                io_path: canonical.clone(),
+                canonical,
+                root_canonical,
+            });
         }
-        return Ok(AuthorizedPath {
-            actual,
-            io_path: canonical.clone(),
-            canonical,
-            root_canonical,
-        });
     }
     let root_host = resolve_path(root, workspace);
     let root_canonical = std::fs::canonicalize(&root_host).map_err(|error| {
@@ -1524,6 +1633,7 @@ fn canonicalize_local_nearest(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(feature = "desktop")]
 async fn canonicalize_remote_nearest(
     workspace: &std::sync::Arc<remote::session::RemoteWorkspace>,
     path: &str,
@@ -1553,6 +1663,7 @@ async fn canonicalize_remote_nearest(
     }
 }
 
+#[cfg(feature = "desktop")]
 fn ensure_within_remote(root: &str, target: &str) -> Result<(), String> {
     let root = root.trim_end_matches('/');
     if target == root || target.starts_with(&format!("{root}/")) {
@@ -1564,15 +1675,23 @@ fn ensure_within_remote(root: &str, target: &str) -> Result<(), String> {
 
 async fn ensure_regular_file(path: &str, workspace: &WorkspaceEnv) -> Result<(), String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let canonical = remote::sftp::canonicalize(&remote_workspace, path).await?;
-        let stat = remote::sftp::stat(&remote_workspace, &canonical).await?;
-        return if stat.kind == remote::sftp::RemoteEntryKind::File {
-            Ok(())
-        } else {
-            Err("path is not a regular file".into())
-        };
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            let canonical = remote::sftp::canonicalize(&remote_workspace, path).await?;
+            let stat = remote::sftp::stat(&remote_workspace, &canonical).await?;
+            return if stat.kind == remote::sftp::RemoteEntryKind::File {
+                Ok(())
+            } else {
+                Err("path is not a regular file".into())
+            };
+        }
     }
     let metadata =
         std::fs::metadata(resolve_path(path, workspace)).map_err(|error| error.to_string())?;
@@ -1585,9 +1704,17 @@ async fn ensure_regular_file(path: &str, workspace: &WorkspaceEnv) -> Result<(),
 
 async fn path_exists(path: &str, workspace: &WorkspaceEnv) -> Result<bool, String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        remote::sftp::exists(&remote_workspace, path).await
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            Err("SSH requires a desktop workspace in this build".into())
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            remote::sftp::exists(&remote_workspace, path).await
+        }
     } else {
         resolve_path(path, workspace)
             .try_exists()
@@ -1597,13 +1724,21 @@ async fn path_exists(path: &str, workspace: &WorkspaceEnv) -> Result<bool, Strin
 
 async fn path_targets_directory(path: &str, workspace: &WorkspaceEnv) -> Result<bool, String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let canonical = remote::sftp::canonicalize(&remote_workspace, path).await?;
-        return Ok(remote::sftp::stat(&remote_workspace, &canonical)
-            .await?
-            .kind
-            == remote::sftp::RemoteEntryKind::Dir);
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            let canonical = remote::sftp::canonicalize(&remote_workspace, path).await?;
+            return Ok(remote::sftp::stat(&remote_workspace, &canonical)
+                .await?
+                .kind
+                == remote::sftp::RemoteEntryKind::Dir);
+        }
     }
     Ok(std::fs::metadata(resolve_path(path, workspace))
         .map_err(|error| error.to_string())?
@@ -1612,10 +1747,18 @@ async fn path_targets_directory(path: &str, workspace: &WorkspaceEnv) -> Result<
 
 async fn path_is_symlink(path: &str, workspace: &WorkspaceEnv) -> Result<bool, String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        return Ok(remote::sftp::stat(&remote_workspace, path).await?.kind
-            == remote::sftp::RemoteEntryKind::Symlink);
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            return Ok(remote::sftp::stat(&remote_workspace, path).await?.kind
+                == remote::sftp::RemoteEntryKind::Symlink);
+        }
     }
     Ok(std::fs::symlink_metadata(resolve_path(path, workspace))
         .map_err(|error| error.to_string())?
@@ -1625,10 +1768,18 @@ async fn path_is_symlink(path: &str, workspace: &WorkspaceEnv) -> Result<bool, S
 
 async fn path_is_directory(path: &str, workspace: &WorkspaceEnv) -> Result<bool, String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        return Ok(remote::sftp::stat(&remote_workspace, path).await?.kind
-            == remote::sftp::RemoteEntryKind::Dir);
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            return Ok(remote::sftp::stat(&remote_workspace, path).await?.kind
+                == remote::sftp::RemoteEntryKind::Dir);
+        }
     }
     Ok(std::fs::symlink_metadata(resolve_path(path, workspace))
         .map_err(|error| error.to_string())?
@@ -1738,33 +1889,46 @@ async fn find_recursive(
     include_hidden: bool,
 ) -> Result<(Vec<AgentFindEntry>, bool), String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let (entries, truncated) =
-            remote::tree_service::walk(&remote_workspace, root, include_hidden, 16, MAX_FIND_SCAN)
-                .await?;
-        return Ok((
-            entries
-                .into_iter()
-                .filter_map(|entry| {
-                    let kind = match entry.kind {
-                        remote::sftp::RemoteEntryKind::File => AgentPathKind::File,
-                        remote::sftp::RemoteEntryKind::Dir if include_directories => {
-                            AgentPathKind::Directory
-                        }
-                        remote::sftp::RemoteEntryKind::Dir => return None,
-                        remote::sftp::RemoteEntryKind::Symlink => AgentPathKind::Symlink,
-                    };
-                    entry_matches(matcher, &entry.rel, &entry.name).then_some(AgentFindEntry {
-                        path: entry.path,
-                        rel: entry.rel,
-                        kind,
-                        size: entry.size,
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            let (entries, truncated) = remote::tree_service::walk(
+                &remote_workspace,
+                root,
+                include_hidden,
+                16,
+                MAX_FIND_SCAN,
+            )
+            .await?;
+            return Ok((
+                entries
+                    .into_iter()
+                    .filter_map(|entry| {
+                        let kind = match entry.kind {
+                            remote::sftp::RemoteEntryKind::File => AgentPathKind::File,
+                            remote::sftp::RemoteEntryKind::Dir if include_directories => {
+                                AgentPathKind::Directory
+                            }
+                            remote::sftp::RemoteEntryKind::Dir => return None,
+                            remote::sftp::RemoteEntryKind::Symlink => AgentPathKind::Symlink,
+                        };
+                        entry_matches(matcher, &entry.rel, &entry.name).then_some(AgentFindEntry {
+                            path: entry.path,
+                            rel: entry.rel,
+                            kind,
+                            size: entry.size,
+                        })
                     })
-                })
-                .collect(),
-            truncated,
-        ));
+                    .collect(),
+                truncated,
+            ));
+        }
     }
     let host_root = resolve_path(root, workspace);
     if !host_root.is_dir() {
@@ -1817,18 +1981,10 @@ async fn find_recursive(
     Ok((entries, truncated))
 }
 
-async fn read_context_file(
-    remote: State<'_, RemoteState>,
-    workspace: &WorkspaceEnv,
-    path: &str,
-) -> Result<Vec<String>, String> {
-    let result = super::file::fs_read_file(
-        remote,
-        path.to_string(),
-        Some(workspace.clone()),
-        Some(false),
-    )
-    .await?;
+async fn read_context_file(workspace: &WorkspaceEnv, path: &str) -> Result<Vec<String>, String> {
+    let result =
+        super::file::fs_read_file_service(path.to_string(), Some(workspace.clone()), Some(false))
+            .await?;
     let ReadResult::Text { content, .. } = result else {
         return Ok(Vec::new());
     };
@@ -1868,7 +2024,6 @@ fn context_for_hit(
 
 async fn prepare_writes(
     state: &AgentFileState,
-    remote: State<'_, RemoteState>,
     registry: &WorkspaceRegistry,
     owner: &str,
     path_context: AgentPathContext<'_>,
@@ -1908,8 +2063,7 @@ async fn prepare_writes(
                     }])
                 }
                 AgentWriteMode::Rewrite => {
-                    let snapshot =
-                        read_text_snapshot(remote, &authorized.io_path, workspace).await?;
+                    let snapshot = read_text_snapshot(&authorized.io_path, workspace).await?;
                     if snapshot.content.len().saturating_add(content.len()) > MAX_PREVIEW_BYTES {
                         return Err("file preview exceeds mutation limit".into());
                     }
@@ -1949,8 +2103,7 @@ async fn prepare_writes(
                 if !seen.insert(authorized.canonical.clone()) {
                     return Err(format!("duplicate patch path: {}", authorized.actual));
                 }
-                let snapshot =
-                    read_text_snapshot(remote.clone(), &authorized.io_path, workspace).await?;
+                let snapshot = read_text_snapshot(&authorized.io_path, workspace).await?;
                 require_read_version(state, owner, &authorized.canonical, &snapshot.version)?;
                 let (after, replacements) = apply_edits(snapshot.content.clone(), &file.edits)?;
                 total_bytes = total_bytes
@@ -1982,19 +2135,10 @@ struct TextSnapshot {
     version: FileVersion,
 }
 
-async fn read_text_snapshot(
-    remote: State<'_, RemoteState>,
-    path: &str,
-    workspace: &WorkspaceEnv,
-) -> Result<TextSnapshot, String> {
+async fn read_text_snapshot(path: &str, workspace: &WorkspaceEnv) -> Result<TextSnapshot, String> {
     ensure_regular_file(path, workspace).await?;
-    match super::file::fs_read_file(
-        remote,
-        path.to_string(),
-        Some(workspace.clone()),
-        Some(false),
-    )
-    .await?
+    match super::file::fs_read_file_service(path.to_string(), Some(workspace.clone()), Some(false))
+        .await?
     {
         ReadResult::Text {
             content,
@@ -2146,7 +2290,6 @@ fn preview_for(mutation: &PreparedMutation) -> AgentMutationPreview {
 }
 
 async fn validate_prepared(
-    remote: State<'_, RemoteState>,
     registry: &WorkspaceRegistry,
     mutation: &PreparedMutation,
 ) -> Result<(), String> {
@@ -2176,8 +2319,7 @@ async fn validate_prepared(
                 }
             }
             WriteCondition::Match { version } => {
-                let current =
-                    read_text_snapshot(remote.clone(), &write.io_path, &mutation.workspace).await?;
+                let current = read_text_snapshot(&write.io_path, &mutation.workspace).await?;
                 if !versions_equal(version, &current.version) {
                     return Err(format!("file changed after approval: {}", write.path));
                 }
@@ -2202,23 +2344,30 @@ async fn ensure_parent(path: &str, workspace: &WorkspaceEnv) -> Result<(), Strin
         return Ok(());
     }
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        return remote::mutation_service::create_directory(&remote_workspace, parent).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            return remote::mutation_service::create_directory(&remote_workspace, parent).await;
+        }
     }
     std::fs::create_dir_all(resolve_path(parent, workspace)).map_err(|error| error.to_string())
 }
 
 async fn rollback_writes(
-    remote: State<'_, RemoteState>,
-    app: AppHandle,
+    app: &dyn super::file::FileEvents,
     workspace: &WorkspaceEnv,
     committed: &[(PreparedWrite, FileVersion)],
 ) -> Vec<String> {
     let mut failures = Vec::new();
     for (write, current) in committed.iter().rev() {
         if write.is_new_file {
-            let unchanged = read_text_snapshot(remote.clone(), &write.io_path, workspace)
+            let unchanged = read_text_snapshot(&write.io_path, workspace)
                 .await
                 .is_ok_and(|snapshot| versions_equal(&snapshot.version, current));
             if !unchanged
@@ -2230,8 +2379,7 @@ async fn rollback_writes(
             }
             continue;
         }
-        let result = super::file::fs_write_file_checked(
-            remote.clone(),
+        let result = super::file::fs_write_file_checked_service(
             write.io_path.clone(),
             write.before.clone(),
             WriteCondition::Match {
@@ -2239,7 +2387,7 @@ async fn rollback_writes(
             },
             Some(workspace.clone()),
             Some("ai-rollback".into()),
-            app.clone(),
+            app,
         )
         .await;
         if !matches!(result, Ok(CheckedWriteResult::Written { .. })) {
@@ -2266,17 +2414,25 @@ async fn copy_file(
     workspace: &WorkspaceEnv,
 ) -> Result<(), String> {
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let remote_workspace = manager.workspace(profile_id).await?;
-        let bytes = remote::sftp::read_file(&remote_workspace, source, MAX_COPY_BYTES).await?;
-        return match remote::sftp::write_file_missing(&remote_workspace, destination, &bytes)
-            .await?
+        #[cfg(not(feature = "desktop"))]
         {
-            remote::file_service::RemoteCheckedWrite::Written { .. } => Ok(()),
-            remote::file_service::RemoteCheckedWrite::Conflict { .. } => {
-                Err(format!("destination already exists: {destination}"))
-            }
-        };
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let remote_workspace = manager.workspace(profile_id).await?;
+            let bytes = remote::sftp::read_file(&remote_workspace, source, MAX_COPY_BYTES).await?;
+            return match remote::sftp::write_file_missing(&remote_workspace, destination, &bytes)
+                .await?
+            {
+                remote::file_service::RemoteCheckedWrite::Written { .. } => Ok(()),
+                remote::file_service::RemoteCheckedWrite::Conflict { .. } => {
+                    Err(format!("destination already exists: {destination}"))
+                }
+            };
+        }
     }
     let source = resolve_path(source, workspace);
     let destination = resolve_path(destination, workspace);

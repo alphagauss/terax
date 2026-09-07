@@ -1,5 +1,5 @@
 /**
- * 本文件连接聊天 UI 与 Agent 流式运行时。
+ * 本文件连接会话请求与 Agent 流式运行时。
  * 系统提示词和工具白名单在 Chat runtime 内冻结，并转发每聊天 Subagent 展示状态。
  */
 
@@ -11,10 +11,9 @@ import type {
   ProviderInstance,
   ProviderModels,
 } from "@/modules/ai/config";
-import {
-  type ExternalAgentBinding,
-  type ExternalAgentId,
-  runExternalAgentStream,
+import type {
+  ExternalAgentBinding,
+  ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
 import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
 import type { SessionAgentSnapshot } from "@/modules/ai/lib/agents";
@@ -32,7 +31,7 @@ import {
 import type { ToolContext } from "@/modules/ai/tools/tools";
 import type { UIMessage } from "@ai-sdk/react";
 
-type Deps = {
+export type SessionTransportDependencies = {
   getKeys: () => ProviderKeys;
   toolContext: ToolContext;
   getModel: () => ModelRef;
@@ -79,7 +78,7 @@ type SendOptions = {
  * 首次发送时读取 AGENTS.md，并冻结 cwd、执行环境、Agent 快照和自定义指令。
  * 后续发送复用同一个 Promise；Chat 被淘汰后自然丢弃并在下次创建时重建。
  */
-export function createSessionTransport(deps: Deps) {
+export function createSessionTransport(deps: SessionTransportDependencies) {
   let runtimeTask: Promise<{
     systemPrompt: string;
     agent: SessionAgentSnapshot;
@@ -108,6 +107,9 @@ export function createSessionTransport(deps: Deps) {
   const run = async (options: SendOptions) => {
     const externalAgent = deps.getExternalAgent?.() ?? null;
     if (externalAgent) {
+      const { runExternalAgentStream } = await import(
+        "@/modules/ai/external-agents/runtime"
+      );
       await deps.onSystemPrompt?.("", options.messages);
       return runExternalAgentStream({
         agentId: externalAgent.agentId,

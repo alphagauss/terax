@@ -8,9 +8,11 @@ use std::{fs, io::Read, io::Write};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(feature = "desktop")]
 use tauri::Emitter;
 use tempfile::NamedTempFile;
 
+#[cfg(feature = "desktop")]
 use crate::modules::remote::{self, RemoteState};
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -42,7 +44,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> Result<T, String> + Send + 'static,
 {
-    tauri::async_runtime::spawn_blocking(operation)
+    tokio::task::spawn_blocking(operation)
         .await
         .map_err(|error| error.to_string())?
 }
@@ -229,74 +231,146 @@ fn normalize_write_condition(mut condition: WriteCondition) -> Result<WriteCondi
 }
 
 /// 读取文件并为文本内容返回基于原始字节的稳定版本。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_read_file(
     remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
 ) -> Result<ReadResult, String> {
+    let _ = remote;
+    fs_read_file_service(path, workspace, force).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_read_file_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    force: Option<bool>,
+) -> Result<ReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        let limit = if force.unwrap_or(false) {
-            FORCE_MAX_READ_BYTES
-        } else {
-            MAX_READ_BYTES
-        };
-        return match remote::file_service::read_snapshot(&workspace, &path, limit).await? {
-            remote::file_service::RemoteFileRead::TooLarge { size, mtime } => {
-                Ok(ReadResult::TooLarge { size, limit, mtime })
-            }
-            remote::file_service::RemoteFileRead::Content { bytes, mtime, .. } => {
-                classify_bytes(bytes, mtime)
-            }
-        };
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
+                .await?;
+            let limit = if force.unwrap_or(false) {
+                FORCE_MAX_READ_BYTES
+            } else {
+                MAX_READ_BYTES
+            };
+            return match remote::file_service::read_snapshot(&workspace, &path, limit).await? {
+                remote::file_service::RemoteFileRead::TooLarge { size, mtime } => {
+                    Ok(ReadResult::TooLarge { size, limit, mtime })
+                }
+                remote::file_service::RemoteFileRead::Content { bytes, mtime, .. } => {
+                    classify_bytes(bytes, mtime)
+                }
+            };
+        }
     }
     read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
 }
 
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_read_binary(
     remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<BinaryReadResult, String> {
+    let _ = remote;
+    fs_read_binary_service(path, workspace).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_read_binary_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<BinaryReadResult, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        return match remote::file_service::read_snapshot(&workspace, &path, MAX_READ_BYTES).await? {
-            remote::file_service::RemoteFileRead::TooLarge { size, .. } => {
-                Err(format!("file is too large: {size} bytes"))
-            }
-            remote::file_service::RemoteFileRead::Content { bytes, size, .. } => {
-                Ok(BinaryReadResult { size, bytes })
-            }
-        };
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
+                .await?;
+            return match remote::file_service::read_snapshot(&workspace, &path, MAX_READ_BYTES)
+                .await?
+            {
+                remote::file_service::RemoteFileRead::TooLarge { size, .. } => {
+                    Err(format!("file is too large: {size} bytes"))
+                }
+                remote::file_service::RemoteFileRead::Content { bytes, size, .. } => {
+                    Ok(BinaryReadResult { size, bytes })
+                }
+            };
+        }
     }
 
     read_binary_sync(&resolve_path(&path, &workspace))
 }
 
 /// 在数据源端计算当前文件版本，不传输文件正文。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_file_version(
     remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Option<FileVersion>, String> {
+    let _ = remote;
+    fs_file_version_service(path, workspace).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_file_version_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<Option<FileVersion>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        return remote::file_service::read_version(&workspace, &path, FORCE_MAX_READ_BYTES)
-            .await
-            .map(|version| {
-                version.map(|value| FileVersion {
-                    revision: value.revision,
-                    size: value.size,
-                    mtime: value.mtime,
-                })
-            });
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
+                .await?;
+            return remote::file_service::read_version(&workspace, &path, FORCE_MAX_READ_BYTES)
+                .await
+                .map(|version| {
+                    version.map(|value| FileVersion {
+                        revision: value.revision,
+                        size: value.size,
+                        mtime: value.mtime,
+                    })
+                });
+        }
     }
 
     run_blocking(move || file_version_sync(&path, &workspace)).await
@@ -436,6 +510,7 @@ fn read_binary_sync(p: &Path) -> Result<BinaryReadResult, String> {
 }
 
 #[derive(Serialize, Clone)]
+#[cfg(feature = "desktop")]
 struct FileWrittenEvent {
     path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -776,18 +851,39 @@ fn checked_write_wsl_sync(
     }
 }
 
-pub(crate) fn emit_file_written(app: &tauri::AppHandle, path: &str, source: Option<String>) {
-    let _ = app.emit(
-        "fs:file-written",
-        FileWrittenEvent {
-            path: path.to_string(),
-            source,
-        },
-    );
+/// 文件写入通知由宿主接收，不将窗口类型带入服务。
+pub trait FileEvents: Send + Sync {
+    /// 发布已经确认的文件变更，宿主决定是否通知界面。
+    fn file_written(&self, path: &str, source: Option<String>);
+}
+
+#[cfg(feature = "desktop")]
+impl FileEvents for tauri::AppHandle {
+    fn file_written(&self, path: &str, source: Option<String>) {
+        let _ = self.emit(
+            "fs:file-written",
+            FileWrittenEvent {
+                path: path.to_string(),
+                source,
+            },
+        );
+    }
+}
+
+/// 无界面宿主未订阅文件展示事件时不分配通知资源。
+impl FileEvents for () {
+    fn file_written(&self, _path: &str, _source: Option<String>) {}
+}
+
+pub(crate) fn emit_file_written(app: &dyn FileEvents, path: &str, source: Option<String>) {
+    app.file_written(path, source);
 }
 
 /// 无条件原子写入文件，供创建文件、主题和已审批的工具操作使用。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_write_file(
     remote: tauri::State<'_, RemoteState>,
     path: String,
@@ -796,16 +892,43 @@ pub async fn fs_write_file(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<u64, String> {
+    let _ = remote;
+    fs_write_file_service(path, content, workspace, source, &app).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_write_file_service(
+    path: String,
+    content: String,
+    workspace: Option<WorkspaceEnv>,
+    source: Option<String>,
+    app: &dyn crate::modules::fs::file::FileEvents,
+) -> Result<u64, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        let bytes = content.as_bytes();
-        let replacement_revision = content_revision(bytes);
-        let mtime =
-            remote::file_service::write_overwrite(&workspace, &path, bytes, &replacement_revision)
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
                 .await?;
-        emit_file_written(&app, &path, source);
-        return Ok(mtime);
+            let bytes = content.as_bytes();
+            let replacement_revision = content_revision(bytes);
+            let mtime = remote::file_service::write_overwrite(
+                &workspace,
+                &path,
+                bytes,
+                &replacement_revision,
+            )
+            .await?;
+            emit_file_written(app, &path, source);
+            return Ok(mtime);
+        }
     }
     let write_path = path.clone();
     let mtime = run_blocking(move || {
@@ -817,7 +940,7 @@ pub async fn fs_write_file(
         write_local(&target, content.as_bytes())
     })
     .await?;
-    emit_file_written(&app, &path, source);
+    emit_file_written(app, &path, source);
 
     Ok(mtime)
 }
@@ -825,7 +948,10 @@ pub async fn fs_write_file(
 /// 按内容版本或缺失条件写入编辑器与 AI 工具文件。
 ///
 /// 普通保存必须显式匹配最近读取或成功写入的版本；新文件和覆盖也必须显式声明。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_write_file_checked(
     remote: tauri::State<'_, RemoteState>,
     path: String,
@@ -835,83 +961,107 @@ pub async fn fs_write_file_checked(
     source: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<CheckedWriteResult, String> {
+    let _ = remote;
+    fs_write_file_checked_service(path, content, condition, workspace, source, &app).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_write_file_checked_service(
+    path: String,
+    content: String,
+    condition: WriteCondition,
+    workspace: Option<WorkspaceEnv>,
+    source: Option<String>,
+    app: &dyn crate::modules::fs::file::FileEvents,
+) -> Result<CheckedWriteResult, String> {
     let condition = normalize_write_condition(condition)?;
     let workspace = WorkspaceEnv::from_option(workspace);
     let result = if let Some(profile_id) = workspace.ssh_profile_id() {
-        let bytes = content.as_bytes();
-        let replacement_revision = content_revision(bytes);
-        let workspace = remote.manager.workspace(profile_id).await?;
-        match &condition {
-            WriteCondition::Match { version } => {
-                let expected = remote::file_service::RemoteVersion {
-                    revision: version.revision.clone(),
-                    size: version.size,
-                    mtime: version.mtime,
-                };
-                match remote::file_service::write_checked(
-                    &workspace,
-                    &path,
-                    bytes,
-                    &expected,
-                    &replacement_revision,
-                )
-                .await?
-                {
-                    remote::file_service::RemoteCheckedWrite::Written { mtime } => {
-                        CheckedWriteResult::Written {
-                            revision: replacement_revision,
-                            size: bytes.len() as u64,
-                            mtime,
-                        }
-                    }
-                    remote::file_service::RemoteCheckedWrite::Conflict { current } => {
-                        CheckedWriteResult::Conflict {
-                            current: current.map(|value| ObservedMetadata {
-                                size: value.size,
-                                mtime: value.mtime,
-                            }),
-                        }
-                    }
-                }
-            }
-            WriteCondition::Missing => {
-                match remote::file_service::write_missing(
-                    &workspace,
-                    &path,
-                    bytes,
-                    &replacement_revision,
-                )
-                .await?
-                {
-                    remote::file_service::RemoteCheckedWrite::Written { mtime } => {
-                        CheckedWriteResult::Written {
-                            revision: replacement_revision,
-                            size: bytes.len() as u64,
-                            mtime,
-                        }
-                    }
-                    remote::file_service::RemoteCheckedWrite::Conflict { current } => {
-                        CheckedWriteResult::Conflict {
-                            current: current.map(|value| ObservedMetadata {
-                                size: value.size,
-                                mtime: value.mtime,
-                            }),
-                        }
-                    }
-                }
-            }
-            WriteCondition::Overwrite => {
-                let mtime = remote::file_service::write_overwrite(
-                    &workspace,
-                    &path,
-                    bytes,
-                    &replacement_revision,
-                )
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let bytes = content.as_bytes();
+            let replacement_revision = content_revision(bytes);
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
                 .await?;
-                CheckedWriteResult::Written {
-                    revision: replacement_revision,
-                    size: bytes.len() as u64,
-                    mtime,
+            match &condition {
+                WriteCondition::Match { version } => {
+                    let expected = remote::file_service::RemoteVersion {
+                        revision: version.revision.clone(),
+                        size: version.size,
+                        mtime: version.mtime,
+                    };
+                    match remote::file_service::write_checked(
+                        &workspace,
+                        &path,
+                        bytes,
+                        &expected,
+                        &replacement_revision,
+                    )
+                    .await?
+                    {
+                        remote::file_service::RemoteCheckedWrite::Written { mtime } => {
+                            CheckedWriteResult::Written {
+                                revision: replacement_revision,
+                                size: bytes.len() as u64,
+                                mtime,
+                            }
+                        }
+                        remote::file_service::RemoteCheckedWrite::Conflict { current } => {
+                            CheckedWriteResult::Conflict {
+                                current: current.map(|value| ObservedMetadata {
+                                    size: value.size,
+                                    mtime: value.mtime,
+                                }),
+                            }
+                        }
+                    }
+                }
+                WriteCondition::Missing => {
+                    match remote::file_service::write_missing(
+                        &workspace,
+                        &path,
+                        bytes,
+                        &replacement_revision,
+                    )
+                    .await?
+                    {
+                        remote::file_service::RemoteCheckedWrite::Written { mtime } => {
+                            CheckedWriteResult::Written {
+                                revision: replacement_revision,
+                                size: bytes.len() as u64,
+                                mtime,
+                            }
+                        }
+                        remote::file_service::RemoteCheckedWrite::Conflict { current } => {
+                            CheckedWriteResult::Conflict {
+                                current: current.map(|value| ObservedMetadata {
+                                    size: value.size,
+                                    mtime: value.mtime,
+                                }),
+                            }
+                        }
+                    }
+                }
+                WriteCondition::Overwrite => {
+                    let mtime = remote::file_service::write_overwrite(
+                        &workspace,
+                        &path,
+                        bytes,
+                        &replacement_revision,
+                    )
+                    .await?;
+                    CheckedWriteResult::Written {
+                        revision: replacement_revision,
+                        size: bytes.len() as u64,
+                        mtime,
+                    }
                 }
             }
         }
@@ -954,47 +1104,93 @@ pub async fn fs_write_file_checked(
     };
 
     if matches!(&result, CheckedWriteResult::Written { .. }) {
-        emit_file_written(&app, &path, source);
+        emit_file_written(app, &path, source);
     }
     Ok(result)
 }
 
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_canonicalize(
     remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
+    let _ = remote;
+    fs_canonicalize_service(path, workspace).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_canonicalize_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        return remote::sftp::canonicalize(&workspace, &path).await;
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
+                .await?;
+            return remote::sftp::canonicalize(&workspace, &path).await;
+        }
     }
     let p = resolve_path(&path, &workspace);
     let canon = std::fs::canonicalize(&p).map_err(|e| e.to_string())?;
     Ok(super::to_canon(&canon))
 }
 
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_stat(
     remote: tauri::State<'_, RemoteState>,
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<FileStat, String> {
+    let _ = remote;
+    fs_stat_service(path, workspace).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_stat_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+) -> Result<FileStat, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let workspace = remote.manager.workspace(profile_id).await?;
-        let meta = remote::sftp::stat(&workspace, &path).await?;
-        let kind = match meta.kind {
-            remote::sftp::RemoteEntryKind::File => StatKind::File,
-            remote::sftp::RemoteEntryKind::Dir => StatKind::Dir,
-            remote::sftp::RemoteEntryKind::Symlink => StatKind::Symlink,
-        };
-        return Ok(FileStat {
-            size: meta.size,
-            mtime: meta.mtime,
-            kind,
-        });
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let workspace = remote::manager::global_manager()?
+                .workspace(profile_id)
+                .await?;
+            let meta = remote::sftp::stat(&workspace, &path).await?;
+            let kind = match meta.kind {
+                remote::sftp::RemoteEntryKind::File => StatKind::File,
+                remote::sftp::RemoteEntryKind::Dir => StatKind::Dir,
+                remote::sftp::RemoteEntryKind::Symlink => StatKind::Symlink,
+            };
+            return Ok(FileStat {
+                size: meta.size,
+                mtime: meta.mtime,
+                kind,
+            });
+        }
     }
     let p = resolve_path(&path, &workspace);
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;

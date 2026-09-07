@@ -20,7 +20,6 @@ import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
 import { AgentNotificationsBridge, nextAttentionTabId } from "@/modules/agents";
 import {
-  AgentRunBridge,
   AiSidebarPanel,
   ApprovalToastHost,
   flushCompletedSessionRuns,
@@ -2174,7 +2173,6 @@ export default function App() {
 
           {hasComposer || hasActiveAiRuns ? (
             <>
-              <AgentRunBridge />
               <ApprovalToastHost
                 openDiff={openAiDiffTab}
                 onResolved={setAiDiffStatus}

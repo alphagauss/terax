@@ -9,6 +9,10 @@
     "includes": [
       "src/**/*.ts",
       "src/**/*.tsx",
+      "apps/terminal/**/*.ts",
+      "apps/terminal/**/*.tsx",
+      "scripts/terminal-*.ts",
+      "scripts/terminal-*.tsx",
       "!src/components/ui/**",
       "!src/components/ai-elements/**"
     ]

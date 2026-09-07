@@ -3,7 +3,7 @@
  * 支持有界响应、流式读取和原生取消，启动确认保证提前取消不会遗留长轮询。
  */
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { getNativeHost } from "@/lib/nativeHost";
 
 type HttpEvent =
   | { kind: "started" }
@@ -32,6 +32,8 @@ export function createHttpFetch(options: HttpOptions = {}): typeof fetch {
       ? Array.from(new Uint8Array(await request.arrayBuffer()))
       : undefined;
     signal.throwIfAborted();
+    const host = await getNativeHost();
+    signal.throwIfAborted();
     const requestId = crypto.randomUUID();
     return new Promise<Response>((resolve, reject) => {
       let started = false;
@@ -49,7 +51,7 @@ export function createHttpFetch(options: HttpOptions = {}): typeof fetch {
         }
       };
       const cancelNative = () => {
-        void invoke("http_cancel", { requestId }).catch(() => undefined);
+        void host.invoke("http_cancel", { requestId }).catch(() => undefined);
       };
       const abort = () => {
         if (finished || cancelled) return;
@@ -58,7 +60,7 @@ export function createHttpFetch(options: HttpOptions = {}): typeof fetch {
         if (started) cancelNative();
       };
       signal.addEventListener("abort", abort, { once: true });
-      const onEvent = new Channel<HttpEvent>();
+      const onEvent = host.channel<HttpEvent>();
       onEvent.onmessage = (event) => {
         if (event.kind === "started") {
           started = true;
@@ -98,19 +100,21 @@ export function createHttpFetch(options: HttpOptions = {}): typeof fetch {
       };
       // 注册监听与 IPC 发起之间发生的取消，仍在收到原生确认后回收请求。
       if (signal.aborted) abort();
-      void invoke("http_request", {
-        requestId,
-        url: request.url,
-        method: request.method,
-        redirect: request.redirect,
-        headers: Object.fromEntries(request.headers),
-        body,
-        allowPrivateNetwork: options.allowPrivateNetwork === true,
-        networkTarget: options.networkTarget ?? { kind: "direct" },
-        timeoutMs: options.timeoutMs === undefined ? 15_000 : options.timeoutMs,
-        maxResponseBytes: options.maxResponseBytes ?? 2 * 1024 * 1024,
-        onEvent,
-      })
+      void host
+        .invoke("http_request", {
+          requestId,
+          url: request.url,
+          method: request.method,
+          redirect: request.redirect,
+          headers: Object.fromEntries(request.headers),
+          body,
+          allowPrivateNetwork: options.allowPrivateNetwork === true,
+          networkTarget: options.networkTarget ?? { kind: "direct" },
+          timeoutMs:
+            options.timeoutMs === undefined ? 15_000 : options.timeoutMs,
+          maxResponseBytes: options.maxResponseBytes ?? 2 * 1024 * 1024,
+          onEvent,
+        })
         .catch((error) => {
           if (!cancelled) fail(error);
           finished = true;

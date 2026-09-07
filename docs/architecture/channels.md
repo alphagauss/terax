@@ -42,7 +42,7 @@ Channel 只持有传输队列、去重身份和回复上下文，接入后的输
 - 全局 `defaultModel`，每轮开始解析并固定，界面临时选中的模型不影响它。
 - 完全访问权限，保持现有文件类型、版本、进程归属和灾难性操作保护。
 
-Channel 通过既有 Chat、transport、工具、运行锁和 `AgentRunBridge` 执行，不修改活动聊天、全局模型选择、权限选择或 Composer 草稿。只有匹配连接在 Local 永久窗口可以提交 Channel 会话。
+Channel 通过既有 Chat、transport、工具、运行锁和 共享 `runLifecycle.ts` 执行，不修改活动聊天、全局模型选择、权限选择或 Composer 草稿。只有匹配连接在 Local 永久窗口可以提交 Channel 会话。
 
 JSONL metadata 保存不可变的 `channelId`，列表摘要投影该字段。Composer 沿用跨环境会话的禁用机制：环境不匹配或存在 Channel 来源时禁用人工输入与发送，保留输入框和现有布局。
 
@@ -117,3 +117,5 @@ HTTP 保留协议、地址分类、直连 DNS 固定、重定向和请求头安�
 回归测试覆盖 HTTP 提前取消、终态事件顺序、跨连接并行、连接内顺序、引导归并和中止清队列、崩溃去重、扫码地址安全、授权对端、分片投递重试和不可变会话来源。真实 Tauri 验证设置与主窗口通信、固定会话输入禁用、HTTP 取消及侧栏关闭后的运行。微信账号登录与远端回包需要真实扫码和私聊联调。
 
 参考项目为本地 NanoClaw 的 Adapter/宿主路由边界和 nanobot 的 Channel/消息队列结构，微信协议以 [腾讯插件](https://github.com/Tencent/openclaw-weixin) 与当前 nanobot iLink 实现为参考。
+
+终端接入与共享生命周期见 [终端 Agent](terminal-agent.md)。

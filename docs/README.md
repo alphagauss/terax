@@ -11,6 +11,7 @@
 
 ## 架构指南
 
+- [终端 Agent 与共享运行能力](architecture/terminal-agent.md)：`terax agent` 的启动、宿主边界和验证。
 - [双进程模型与 IPC command 参考](architecture/two-process-model.md) - Rust 负责所有操作系统访问；WebView 通过 `invoke()` 通信。包含 command 目录以及新增 command 的方法。
 - [PTY Shell 集成](architecture/pty-shell-integration.md) - PTY session、Shell 初始化脚本、OSC 7 / 133、ConPTY、SPAWN_LOCK、Job Object 和 WSL。
 - [安全模型](architecture/security-model.md) - deny-list、SSRF 防护、Workspace 授权、AI 工具审批、IPC allowlist、OSC 信任机制和 keychain 处理。

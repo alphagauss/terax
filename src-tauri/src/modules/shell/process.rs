@@ -11,12 +11,15 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
+#[cfg(feature = "desktop")]
 use russh::{ChannelMsg, Sig};
 use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
+#[cfg(feature = "desktop")]
 use tokio::sync::{mpsc, oneshot};
 
 use super::output::{OutputLog, OutputSlice, OutputStream};
+#[cfg(feature = "desktop")]
 use crate::modules::remote;
 use crate::modules::workspace::WorkspaceEnv;
 
@@ -48,6 +51,7 @@ pub enum ProcessStatus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProcessPurpose {
     Shell,
+    #[cfg(any(feature = "desktop", test))]
     ExternalAgent,
 }
 
@@ -123,18 +127,21 @@ struct WslTermination {
     pid_file: String,
 }
 
+#[cfg(feature = "desktop")]
 enum RemoteAction {
     Write(Vec<u8>, oneshot::Sender<Result<(), String>>),
     Eof(oneshot::Sender<Result<(), String>>),
     Terminate(ProcessStatus, oneshot::Sender<Result<(), String>>),
 }
 
+#[cfg(feature = "desktop")]
 struct RemoteControl {
     tx: mpsc::Sender<RemoteAction>,
 }
 
 enum ProcessControl {
     Local(Arc<LocalControl>),
+    #[cfg(feature = "desktop")]
     Remote(RemoteControl),
 }
 
@@ -288,6 +295,7 @@ impl AgentProcess {
 
     /// 启动 SSH exec channel，并保留其输入和输出直到命令终止。
     #[allow(clippy::too_many_arguments)]
+    #[cfg(feature = "desktop")]
     pub async fn spawn_remote(
         id: String,
         owner_session_id: String,
@@ -334,7 +342,7 @@ impl AgentProcess {
         });
 
         let worker = Arc::downgrade(&process);
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             let mut exit_code = None;
             loop {
                 tokio::select! {
@@ -417,7 +425,7 @@ impl AgentProcess {
         match &self.control {
             ProcessControl::Local(control) => {
                 let control = control.clone();
-                tauri::async_runtime::spawn_blocking(move || {
+                tokio::task::spawn_blocking(move || {
                     let mut stdin = control.stdin.lock().unwrap();
                     let stdin = stdin
                         .as_mut()
@@ -430,6 +438,7 @@ impl AgentProcess {
                 .await
                 .map_err(|error| error.to_string())?
             }
+            #[cfg(feature = "desktop")]
             ProcessControl::Remote(control) => {
                 let (reply, result) = oneshot::channel();
                 control
@@ -452,6 +461,7 @@ impl AgentProcess {
                 control.stdin.lock().unwrap().take();
                 Ok(())
             }
+            #[cfg(feature = "desktop")]
             ProcessControl::Remote(control) => {
                 let (reply, result) = oneshot::channel();
                 control
@@ -477,13 +487,14 @@ impl AgentProcess {
                 // 先锁定调用方终态，避免 Job Object 关闭后 wait 线程抢先写成 Exited。
                 self.shared.finish(status, None);
                 let control = control.clone();
-                tauri::async_runtime::spawn_blocking(move || terminate_local(&control))
+                tokio::task::spawn_blocking(move || terminate_local(&control))
                     .await
                     .map_err(|error| error.to_string())?;
                 self.capture_cwd();
                 self.shared.compact_output();
                 Ok(())
             }
+            #[cfg(feature = "desktop")]
             ProcessControl::Remote(control) => {
                 let (reply, result) = oneshot::channel();
                 control
@@ -539,6 +550,7 @@ impl AgentProcess {
     }
 
     /// 等待输出 offset 前移或进程进入终态，用于把受管进程桥接为推送事件。
+    #[cfg(feature = "desktop")]
     pub fn wait_for_change(&self, since: u64, wait: Duration, max_bytes: usize) -> ProcessResponse {
         self.touch();
         let deadline = Instant::now() + wait;
@@ -602,6 +614,7 @@ impl AgentProcess {
         self.shared.finish(ProcessStatus::Terminated, None);
         match &self.control {
             ProcessControl::Local(control) => stop_local_now(control),
+            #[cfg(feature = "desktop")]
             ProcessControl::Remote(control) => {
                 let (reply, _) = oneshot::channel();
                 let _ = control
@@ -757,6 +770,7 @@ fn terminate_wsl_group(termination: &WslTermination) {
     let _ = process.status();
 }
 
+#[cfg(feature = "desktop")]
 async fn remote_group_kill(
     workspace: &Arc<remote::session::RemoteWorkspace>,
     pid_file: &str,
@@ -776,14 +790,15 @@ async fn remote_group_kill(
 }
 
 fn posix_group_kill_command(pid_file: &str) -> String {
-    let file = remote::session::shell_quote(pid_file);
+    let file = crate::modules::shell::quote::shell_quote(pid_file);
     format!(
         "i=0; while [ ! -s {file} ] && [ $i -lt 20 ]; do sleep 0.05; i=$((i+1)); done; if read -r pid < {file} && kill -TERM -- -\"$pid\" 2>/dev/null; then sleep 1; kill -KILL -- -\"$pid\" 2>/dev/null || true; fi; rm -f -- {file}"
     )
 }
 
+/// 构造本地或 WSL 命令，进程身份仅用于 WSL 进程组控制文件。
 fn build_local_command(
-    id: &str,
+    _id: &str,
     workspace: &WorkspaceEnv,
     command: &str,
     cwd: &str,
@@ -796,7 +811,7 @@ fn build_local_command(
         crate::modules::workspace::validate_wsl_distro_name(distro)?;
         let shell_program = posix_shell(shell)?;
         let payload = posix_payload(command, marker);
-        let pid_file = format!("/tmp/terax-agent-{id}.pid");
+        let pid_file = format!("/tmp/terax-agent-{_id}.pid");
         let wrapper = posix_group_wrapper(&payload, &pid_file, shell_program, login);
         let mut native = Command::new("wsl.exe");
         native.args(["-d", distro]);
@@ -871,6 +886,7 @@ fn build_local_command(
     }
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn build_remote_command(
     command: &str,
     cwd: &str,
@@ -881,25 +897,29 @@ fn build_remote_command(
 ) -> Result<String, String> {
     let shell_program = posix_shell(shell)?;
     let payload = posix_payload(command, marker);
-    let command = format!("cd -- {} && {payload}", remote::session::shell_quote(cwd),);
+    let command = format!(
+        "cd -- {} && {payload}",
+        crate::modules::shell::quote::shell_quote(cwd),
+    );
     let wrapper = posix_group_wrapper(&command, pid_file, shell_program, login);
     let trap = format!(
         "if read -r pid < {}; then kill -TERM -- -\"$pid\" 2>/dev/null || true; fi",
-        remote::session::shell_quote(pid_file)
+        crate::modules::shell::quote::shell_quote(pid_file)
     );
     Ok(format!(
         "command -v setsid >/dev/null 2>&1 || exit 72; trap {} TERM INT HUP; setsid --wait /bin/sh -c {}; rc=$?; trap - TERM INT HUP; exit $rc",
-        remote::session::shell_quote(&trap),
-        remote::session::shell_quote(&wrapper),
+        crate::modules::shell::quote::shell_quote(&trap),
+        crate::modules::shell::quote::shell_quote(&wrapper),
     ))
 }
 
+#[cfg(any(feature = "desktop", windows, test))]
 fn posix_group_wrapper(payload: &str, pid_file: &str, shell: &str, login: bool) -> String {
     let login_flag = if login { " -l" } else { "" };
-    let pid_file = remote::session::shell_quote(pid_file);
+    let pid_file = crate::modules::shell::quote::shell_quote(pid_file);
     format!(
         "printf '%s\\n' \"$$\" > {pid_file}; trap 'trap - TERM INT HUP; kill -TERM -- -$$ 2>/dev/null || true' TERM INT HUP; {shell}{login_flag} -c {}; exit $?",
-        remote::session::shell_quote(payload)
+        crate::modules::shell::quote::shell_quote(payload)
     )
 }
 
@@ -1204,7 +1224,7 @@ mod tests {
         let (command, shell) = (
             format!(
                 "(sleep 2; touch -- {}) & sleep 30",
-                remote::session::shell_quote(&marker.to_string_lossy())
+                crate::modules::shell::quote::shell_quote(&marker.to_string_lossy())
             ),
             ShellKind::Sh,
         );
@@ -1259,7 +1279,7 @@ mod tests {
         let (command, shell) = (
             format!(
                 "(sleep 2; touch -- {}) & exit 0",
-                remote::session::shell_quote(&marker.to_string_lossy())
+                crate::modules::shell::quote::shell_quote(&marker.to_string_lossy())
             ),
             ShellKind::Sh,
         );

@@ -6,14 +6,21 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "desktop")]
+use std::time::Instant;
 
 use crate::modules::network_proxy::{self, NetworkTarget, ProxyConfig};
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, LOCATION, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+#[cfg(feature = "desktop")]
+use reqwest::header::{ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "desktop")]
 use tauri::ipc::Channel;
+#[cfg(feature = "desktop")]
+use tauri::Manager;
 use tokio_util::sync::CancellationToken;
 
 const HEADER_BLOCKLIST: &[&str] = &[
@@ -28,12 +35,15 @@ const HEADER_BLOCKLIST: &[&str] = &[
     "trailer",
     "expect",
 ];
+#[cfg(feature = "desktop")]
 const IMAGE_REDIRECT_LIMIT: usize = 5;
+#[cfg(feature = "desktop")]
 const IMAGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const HTTP_RESPONSE_MAX_BYTES: usize = 64 * 1024 * 1024;
 const HTTP_REQUEST_LIMIT: usize = 128;
 
 /// 已通过公开地址校验和体积限制的网络图片。
+#[cfg(feature = "desktop")]
 pub(crate) struct DownloadedImage {
     /// 未解码的原始响应字节。
     pub bytes: Vec<u8>,
@@ -301,6 +311,7 @@ fn build_safe_client(
 }
 
 /// 为单次图片请求创建固定 DNS 结果且禁用自动重定向的客户端。
+#[cfg(feature = "desktop")]
 fn build_pinned_client(
     host: &str,
     safe_ips: &[IpAddr],
@@ -324,6 +335,7 @@ fn build_pinned_client(
 }
 
 /// 返回网络图片请求的剩余总时限，避免 DNS 和重定向分别获得完整超时。
+#[cfg(feature = "desktop")]
 fn remaining_image_request_time(started: Instant) -> Result<Duration, String> {
     IMAGE_REQUEST_TIMEOUT
         .checked_sub(started.elapsed())
@@ -332,6 +344,7 @@ fn remaining_image_request_time(started: Instant) -> Result<Duration, String> {
 }
 
 /// 下载公开网络图片，并对每次重定向重新执行地址校验和体积限制。
+#[cfg(feature = "desktop")]
 pub(crate) async fn download_public_image(
     app: &tauri::AppHandle,
     url: &str,
@@ -487,7 +500,7 @@ impl HttpState {
     }
 
     /// 请求只能由发起它的 WebView 取消。
-    fn cancel(&self, owner: &str, id: &str) {
+    pub fn cancel(&self, owner: &str, id: &str) {
         if let Ok(requests) = self.requests.lock() {
             if let Some(token) = requests.get(&(owner.to_string(), id.to_string())) {
                 token.cancel();
@@ -514,6 +527,7 @@ pub enum HttpEvent {
 }
 
 /// 执行通用、有界且可取消的 HTTP 请求；AI 流与长轮询共用同一安全边界。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn http_request(
@@ -532,6 +546,43 @@ pub async fn http_request(
     max_response_bytes: usize,
     on_event: Channel<HttpEvent>,
 ) -> Result<(), String> {
+    http_request_service(
+        &app.state::<crate::modules::secrets::SecretsState>(),
+        window.label(),
+        state.inner(),
+        request_id,
+        url,
+        method,
+        redirect,
+        headers,
+        body,
+        allow_private_network,
+        network_target,
+        timeout_ms,
+        max_response_bytes,
+        on_event,
+    )
+    .await
+}
+
+/// 在宿主隔离身份下执行相同的地址校验、出口选择、流式传输和取消。
+#[allow(clippy::too_many_arguments)]
+pub async fn http_request_service(
+    secrets: &crate::modules::secrets::SecretsState,
+    owner: &str,
+    state: &HttpState,
+    request_id: String,
+    url: String,
+    method: String,
+    redirect: Option<HttpRedirectMode>,
+    headers: Option<HashMap<String, String>>,
+    body: Option<Vec<u8>>,
+    allow_private_network: Option<bool>,
+    network_target: NetworkTarget,
+    timeout_ms: Option<u64>,
+    max_response_bytes: usize,
+    on_event: impl HttpEventSink,
+) -> Result<(), String> {
     if max_response_bytes == 0 || max_response_bytes > HTTP_RESPONSE_MAX_BYTES {
         return Err("HTTP response limit is out of range".into());
     }
@@ -544,7 +595,7 @@ pub async fn http_request(
     {
         return Err("HTTP request body is too large".into());
     }
-    let request = state.begin(window.label(), &request_id)?;
+    let request = state.begin(owner, &request_id)?;
     on_event
         .send(HttpEvent::Started)
         .map_err(|error| error.to_string())?;
@@ -553,7 +604,7 @@ pub async fn http_request(
         let host = parsed.host_str().ok_or("missing host")?.to_string();
         let allow_private = allow_private_network.unwrap_or(false);
         let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
-        let proxy = network_proxy::resolve(&app, &network_target)?;
+        let proxy = network_proxy::resolve_service(secrets, &network_target)?;
         let client = build_safe_client(
             allow_private,
             &[(host, safe_ips)],
@@ -618,6 +669,7 @@ async fn run_request<T>(
 }
 
 /// 取消当前 WebView 发起的指定 HTTP 请求。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub fn http_cancel(
     window: tauri::WebviewWindow,
@@ -625,6 +677,25 @@ pub fn http_cancel(
     request_id: String,
 ) {
     state.cancel(window.label(), &request_id);
+}
+
+/// 宿主提供的有序 HTTP 事件出口，写入失败会结束请求。
+pub trait HttpEventSink: Send + Sync {
+    /// 按顺序发送事件，出口关闭时返回错误以终止传输。
+    fn send(&self, event: HttpEvent) -> Result<(), String>;
+}
+
+impl<F: Fn(HttpEvent) -> Result<(), String> + Send + Sync> HttpEventSink for F {
+    fn send(&self, event: HttpEvent) -> Result<(), String> {
+        self(event)
+    }
+}
+
+#[cfg(feature = "desktop")]
+impl HttpEventSink for Channel<HttpEvent> {
+    fn send(&self, event: HttpEvent) -> Result<(), String> {
+        Channel::send(self, event).map_err(|error| error.to_string())
+    }
 }
 
 #[cfg(test)]

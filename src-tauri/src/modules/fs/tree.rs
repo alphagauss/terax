@@ -11,6 +11,7 @@ use std::time::UNIX_EPOCH;
 use ignore::WalkBuilder;
 use serde::Serialize;
 
+#[cfg(feature = "desktop")]
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -152,7 +153,7 @@ fn sort_names(names: &mut [String]) {
 /// case-insensitively. Dot-prefixed entries (files and dirs) are hidden unless
 /// `show_hidden` is set. `git_decorations` opts into the per-entry `gitignored`
 /// flag; off by default so non-explorer callers pay nothing.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_read_dir(
     path: String,
     show_hidden: bool,
@@ -161,28 +162,36 @@ pub async fn fs_read_dir(
 ) -> Result<Vec<DirEntry>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(profile_id).await?;
-        let mut entries = remote::sftp::read_dir(&workspace, &path, show_hidden)
-            .await
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .map(|entry| DirEntry {
-                        name: entry.name,
-                        kind: match entry.kind {
-                            remote::sftp::RemoteEntryKind::File => EntryKind::File,
-                            remote::sftp::RemoteEntryKind::Dir => EntryKind::Dir,
-                            remote::sftp::RemoteEntryKind::Symlink => EntryKind::Symlink,
-                        },
-                        size: entry.size,
-                        mtime: entry.mtime,
-                        gitignored: false,
-                    })
-                    .collect::<Vec<_>>()
-            })?;
-        sort_dir_entries(&mut entries);
-        return Ok(entries);
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(profile_id).await?;
+            let mut entries = remote::sftp::read_dir(&workspace, &path, show_hidden)
+                .await
+                .map(|entries| {
+                    entries
+                        .into_iter()
+                        .map(|entry| DirEntry {
+                            name: entry.name,
+                            kind: match entry.kind {
+                                remote::sftp::RemoteEntryKind::File => EntryKind::File,
+                                remote::sftp::RemoteEntryKind::Dir => EntryKind::Dir,
+                                remote::sftp::RemoteEntryKind::Symlink => EntryKind::Symlink,
+                            },
+                            size: entry.size,
+                            mtime: entry.mtime,
+                            gitignored: false,
+                        })
+                        .collect::<Vec<_>>()
+                })?;
+            sort_dir_entries(&mut entries);
+            return Ok(entries);
+        }
     }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {
@@ -254,7 +263,7 @@ pub async fn fs_read_dir(
 ///
 /// Symlinks to directories are included (matches shell `cd` semantics).
 /// Hidden entries are filtered by dot-prefix only.
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_subdirs(
     path: String,
     show_hidden: bool,
@@ -262,19 +271,27 @@ pub async fn list_subdirs(
 ) -> Result<Vec<String>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(profile_id).await?;
-        let mut dirs = remote::sftp::read_dir(&workspace, &path, show_hidden)
-            .await
-            .map(|entries| {
-                entries
-                    .into_iter()
-                    .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::Dir)
-                    .map(|entry| entry.name)
-                    .collect::<Vec<_>>()
-            })?;
-        sort_names(&mut dirs);
-        return Ok(dirs);
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(profile_id).await?;
+            let mut dirs = remote::sftp::read_dir(&workspace, &path, show_hidden)
+                .await
+                .map(|entries| {
+                    entries
+                        .into_iter()
+                        .filter(|entry| entry.kind == remote::sftp::RemoteEntryKind::Dir)
+                        .map(|entry| entry.name)
+                        .collect::<Vec<_>>()
+                })?;
+            sort_names(&mut dirs);
+            return Ok(dirs);
+        }
     }
     let root = resolve_path(&path, &workspace);
     let read = std::fs::read_dir(&root).map_err(|e| {

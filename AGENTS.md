@@ -147,7 +147,7 @@ fn create_session() {}
 
 ### 双进程边界
 
-Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件系统、进程或 Shell，必须通过注册在 `src-tauri/src/lib.rs` 的 Tauri command 调用：
+Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件系统、进程或 Shell，必须通过注册在 `src-tauri/src/desktop.rs` 的 Tauri command 调用：
 
 - `pty::pty_*`：长生命周期交互式 PTY，由 `PtyState` 管理，通过 `Channel<PtyEvent>` 输出。
 - `fs::*`：文件树、读取、写入、元数据、搜索、grep、glob 和变更操作。
@@ -162,6 +162,14 @@ Rust `src-tauri/` 负责所有操作系统访问。WebView 不直接访问文件
 - `ai_sessions::*`：保存、列出和锁定 JSONL 会话，并在共享 Agent 配置锁内级联删除 Custom Agent 及其全部会话。
 - `auxiliary_window::open_auxiliary_window`：按封闭类型定义创建或复用轻量辅助窗口，设置页是首个注册页面。
 - `workspace_runtime::*`：登记完整 Workspace 进程，并通过原子运行时文件投递窗口激活、打开文件和可重建工作页。
+
+### 终端宿主
+
+- `terax agent` 使用 OpenTUI React 和 Bun；依赖仍只用 pnpm 管理。
+- Agent 执行、审批协调、取消和增量提交独立于 React 生命周期，桌面与终端复用同一套规则。
+- Rust 默认 `desktop` 特性注册 Tauri；`headless` 特性提供不链接 WebView 的 `terax-host`，通过继承的私有管道调用共享服务。
+- 首版终端绑定启动系统的 Local 环境，拒绝把 WSL、SSH 请求当成本地操作。daemon、远程服务与其他 TUI 子命令不属于当前实现。
+- 宿主能力不能依赖聊天 UI；Agent 专属权限和 owner 规则保留在工具服务边界。详细启动和验证流程见 `docs/architecture/terminal-agent.md`。
 
 ### Alpha 量化服务边界
 
@@ -262,8 +270,8 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 - Terax 只有一个代码内定义、不可编辑或删除的主 Agent。Custom Agent 跨 Workspace 共享，只配置专属指令和内置工具白名单；Agent 仅能在未发送的 draft 中选择，首次发送后以 `metadata.agent` 快照绑定会话，persisted session 不得切换 Agent。
 - 每个 Chat runtime 在首次模型请求时读取 Workspace 根 `AGENTS.md`，并冻结统一核心提示、执行环境、固定 cwd、会话 Agent 快照和自定义指令。后续轮次复用逐字相同的 system prompt 和工具集；LRU 淘汰或进程重启后从当前文件、设置和会话 Agent 快照重新构造。磁盘 metadata 中的 `systemPrompt` 只用于检查，不得作为恢复输入。
 - Custom Agent ID 是会话归属和历史筛选键。删除 Custom Agent 必须通过 Rust 级联删除所有 Workspace 中的关联会话，并在任一关联会话运行时拒绝整个操作；不得保留孤儿会话或通过通用共享存储删除绕过该入口。
-- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，`AgentRunBridge` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤、恢复所需终态数据和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
-- AI sidebar 是唯一完整聊天界面。面板卸载后运行仍通过 `AgentRunBridge` 继续；长任务的状态收集和持久化不得依赖可卸载 UI。
+- 用户消息和该 Chat runtime 的系统提示词必须在模型请求前写入会话；普通流式半成品保留在所属进程，共享 `runLifecycle.ts` 在 idle、error 或 stop 后追加终态记录。`wait=false` Subagent 结果恢复主循环前，必须把此前完整步骤、恢复所需终态数据和 append-only 内部事件 checkpoint 到同一 turn，checkpoint 不得释放 session run lock。
+- AI sidebar 是桌面唯一完整聊天界面，`terax agent` 提供独立终端界面。面板卸载后运行仍通过共享生命周期订阅继续；长任务的状态收集和持久化不得依赖可卸载 UI。
 - Composer context 始终挂载，保证侧边栏关闭后草稿和附件仍然存在。
 - 内置 Agent 运行中允许用户引导，统一由会话运行协调器的接入队列管理，用户输入优先于未消费的后台 Subagent 结果且同类保持顺序。前台工具调用和审批仍是接入边界。消费前不显示正文；消费时先保存完整前缀和带 `guided` 标记的用户消息，再分段展示并请求模型。中止清空所有未消费输入，不自动重放。
 - 草稿会话的 cwd 优先跟随 Explorer 根目录；没有 Explorer 根时，Local 与 WSL 延迟创建并授权各自的 `~/.terax/workspace`，SSH 使用连接时验证的 profile Workspace root。SSH profile root 只提供默认位置，用户明确打开的任意可访问 Explorer 根都可以成为会话 cwd。首次发送时冻结并写入会话；所有相对工具路径始终基于该固定 cwd。终端最后 300 行仅在工具调用时读取，禁止提前快照。
@@ -299,7 +307,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 
 - macOS 使用 `titleBarStyle: Overlay` 和原生窗口控制按钮。
 - Linux、Windows 使用无边框透明窗口，由 React 渲染 `WindowControls`。
-- 新增 Tauri plugin 通常需要同时修改 `Cargo.toml`、`lib.rs` 中的 `.plugin(...)` 和 `src-tauri/capabilities/default.json`。
+- 新增 Tauri plugin 通常需要同时修改 `Cargo.toml`、`desktop.rs` 中的 `.plugin(...)` 和 `src-tauri/capabilities/default.json`。
 - HOME 和缓存目录使用 `dirs` crate，不直接读取 `$HOME` 或 `%USERPROFILE%`。
 - `bundle.targets` 为 `all`；保留各平台已有 minimum version、Linux 依赖、NSIS 和 WebView2 设置。
 
@@ -314,6 +322,7 @@ Workspace 窗口登记和一次性消息使用 `~/.terax/workspaces/terax-worksp
 详细贡献者文档位于 `docs/`。它们用于展开本文件；发生冲突时以 `AGENTS.md` 为准。
 
 - `docs/README.md`：贡献者文档索引
+- `docs/architecture/terminal-agent.md`：终端 Agent、共享业务运行时与无界面原生宿主
 - `docs/architecture/two-process-model.md`：IPC 边界和命令参考
 - `docs/architecture/alpha-integration.md`：Alpha FastAPI、Rust 代理、前端和 PyO3 边界
 - `docs/architecture/alpha-quant-workstation.md`：Alpha 综合量化工作站、公共金融图表、面板布局、外部参考项目和分阶段实施建议

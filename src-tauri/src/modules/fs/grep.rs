@@ -4,6 +4,7 @@
 //! ripgrep、GNU grep、SFTP 回退；
 //! 交互式调用可取消上一轮扫描，但不会取消并发的 AI 搜索。
 
+#[cfg(any(feature = "desktop", test))]
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -19,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
 use super::to_canon;
+#[cfg(feature = "desktop")]
 use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
@@ -370,7 +372,7 @@ pub async fn search_content(
 async fn search_content_with_cancel(
     request: ContentSearchRequest,
     cancel: &(dyn Fn() -> bool + Sync),
-    remote_cancellation: Option<&CancellationToken>,
+    _remote_cancellation: Option<&CancellationToken>,
 ) -> Result<ContentSearchResponse, String> {
     if request.pattern.is_empty() {
         return Err("empty pattern".into());
@@ -383,30 +385,19 @@ async fn search_content_with_cancel(
     let matcher = build_matcher(&request)?;
     let filters = build_path_filters(&request.includes, &request.excludes)?;
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        if let Some(response) = search_remote_rg(
-            profile_id,
-            &request.root,
-            &request,
-            cap,
-            remote_cancellation,
-        )
-        .await?
+        #[cfg(not(feature = "desktop"))]
         {
-            return if cancel() {
-                Ok(empty_content_search_response())
-            } else {
-                Ok(response)
-            };
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
         }
-        if matches!(request.syntax, ContentSearchSyntax::Literal) {
-            if let Some(response) = search_remote_grep(
+        #[cfg(feature = "desktop")]
+        {
+            if let Some(response) = search_remote_rg(
                 profile_id,
                 &request.root,
                 &request,
-                &matcher,
-                &filters,
                 cap,
-                remote_cancellation,
+                _remote_cancellation,
             )
             .await?
             {
@@ -416,17 +407,36 @@ async fn search_content_with_cancel(
                     Ok(response)
                 };
             }
+            if matches!(request.syntax, ContentSearchSyntax::Literal) {
+                if let Some(response) = search_remote_grep(
+                    profile_id,
+                    &request.root,
+                    &request,
+                    &matcher,
+                    &filters,
+                    cap,
+                    _remote_cancellation,
+                )
+                .await?
+                {
+                    return if cancel() {
+                        Ok(empty_content_search_response())
+                    } else {
+                        Ok(response)
+                    };
+                }
+            }
+            return search_remote_sftp(
+                profile_id,
+                &request.root,
+                &matcher,
+                &filters,
+                cap,
+                cancel,
+                _remote_cancellation,
+            )
+            .await;
         }
-        return search_remote_sftp(
-            profile_id,
-            &request.root,
-            &matcher,
-            &filters,
-            cap,
-            cancel,
-            remote_cancellation,
-        )
-        .await;
     }
     let root_path = resolve_path(&request.root, &workspace);
     if !root_path.is_dir() {
@@ -445,6 +455,7 @@ async fn search_content_with_cancel(
 }
 
 /// 在缺少 ripgrep 时使用 GNU find 与 grep 执行服务端字面量搜索。
+#[cfg(feature = "desktop")]
 async fn search_remote_grep(
     profile_id: &str,
     root: &str,
@@ -498,6 +509,7 @@ async fn search_remote_grep(
 }
 
 /// 解析物理根目录及 `filename NUL line:content LF` 记录，并由 Rust matcher 锁定公共语义。
+#[cfg(any(feature = "desktop", test))]
 fn parse_remote_grep(
     bytes: &[u8],
     matcher: &RegexMatcher,
@@ -583,9 +595,21 @@ fn parse_remote_grep(
 ///
 /// `cancelPrevious` 只供唯一的搜索面板使用；AI 并发查询不会推进 generation，
 /// 因而不会互相取消或被用户输入取消。
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn fs_content_search(
     state: tauri::State<'_, ContentSearchState>,
+    request: ContentSearchRequest,
+) -> Result<ContentSearchResponse, String> {
+    fs_content_search_service(state.inner(), request).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn fs_content_search_service(
+    state: &ContentSearchState,
     request: ContentSearchRequest,
 ) -> Result<ContentSearchResponse, String> {
     if !request.cancel_previous {
@@ -620,7 +644,7 @@ pub struct GlobResponse {
     pub truncated: bool,
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_glob(
     pattern: String,
     root: String,
@@ -632,20 +656,28 @@ pub async fn fs_glob(
     }
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
-        let cap = max_results.unwrap_or(500).clamp(1, HARD_MAX_RESULTS);
-        let manager = remote::manager::global_manager()?;
-        let workspace = manager.workspace(profile_id).await?;
-        let (entries, truncated) =
-            remote::tree_service::list_files(&workspace, &root, Some(&pattern), false, 16, cap)
-                .await?;
-        let hits = entries
-            .into_iter()
-            .map(|entry| GlobHit {
-                path: entry.path,
-                rel: entry.rel,
-            })
-            .collect();
-        return Ok(GlobResponse { hits, truncated });
+        #[cfg(not(feature = "desktop"))]
+        {
+            let _ = profile_id;
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            let cap = max_results.unwrap_or(500).clamp(1, HARD_MAX_RESULTS);
+            let manager = remote::manager::global_manager()?;
+            let workspace = manager.workspace(profile_id).await?;
+            let (entries, truncated) =
+                remote::tree_service::list_files(&workspace, &root, Some(&pattern), false, 16, cap)
+                    .await?;
+            let hits = entries
+                .into_iter()
+                .map(|entry| GlobHit {
+                    path: entry.path,
+                    rel: entry.rel,
+                })
+                .collect();
+            return Ok(GlobResponse { hits, truncated });
+        }
     }
     let root_path = resolve_path(&root, &workspace);
     if !root_path.is_dir() {
@@ -695,6 +727,7 @@ pub async fn fs_glob(
     Ok(GlobResponse { hits, truncated })
 }
 
+#[cfg(feature = "desktop")]
 async fn search_remote_sftp(
     profile_id: &str,
     root: &str,
@@ -759,6 +792,7 @@ async fn search_remote_sftp(
 }
 
 /// 使用当前 SSH epoch 的集中式 ripgrep 任务执行内容搜索。
+#[cfg(feature = "desktop")]
 async fn search_remote_rg(
     profile_id: &str,
     root: &str,
@@ -801,6 +835,7 @@ async fn search_remote_rg(
 }
 
 /// 构造远端 ripgrep 参数，保持本地 matcher 与 SSH 快速路径的选项一致。
+#[cfg(any(feature = "desktop", test))]
 fn remote_content_search_args(root: &str, request: &ContentSearchRequest) -> Vec<String> {
     let mut args = vec![
         "rg".to_string(),
@@ -832,6 +867,7 @@ fn remote_content_search_args(root: &str, request: &ContentSearchRequest) -> Vec
     args
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn parse_remote_rg(
     stdout: &[u8],
     root: &str,
@@ -906,14 +942,20 @@ fn parse_remote_rg(
     })
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn remote_absolute(root: &str, path: &str) -> String {
     if path.starts_with('/') {
         path.to_string()
     } else {
-        remote::session::join_remote(root, path)
+        format!(
+            "{}/{}",
+            root.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        )
     }
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn remote_relative(root: &str, path: &str) -> String {
     let root = root.trim_end_matches('/');
     if path == root {

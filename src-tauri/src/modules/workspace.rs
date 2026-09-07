@@ -11,12 +11,14 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "desktop")]
 use crate::modules::workspace_process::WorkspaceProcessState;
 
 // Short TTL keeps the auth-check TOCTOU window tight while still coalescing the
 // burst of canonicalize calls within a single panel refresh (~100ms).
 const CANONICAL_TTL: Duration = Duration::from_secs(1);
 const CANONICAL_CACHE_CAP: usize = 256;
+#[cfg(any(feature = "desktop", test))]
 const DEFAULT_WORKSPACE_DIRECTORY: &str = "workspace";
 
 struct CanonicalEntry {
@@ -97,8 +99,15 @@ pub fn authorize_spawn_cwd(
         return Ok(None);
     };
     if workspace.is_ssh() {
-        crate::modules::remote::session::validate_remote_path(cwd)?;
-        return Ok(Some(PathBuf::from(cwd)));
+        #[cfg(not(feature = "desktop"))]
+        {
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            crate::modules::remote::session::validate_remote_path(cwd)?;
+            return Ok(Some(PathBuf::from(cwd)));
+        }
     }
     let resolved = resolve_path(cwd, workspace);
     let canonical =
@@ -126,8 +135,15 @@ pub fn authorize_user_spawn_cwd(
         return Ok(None);
     };
     if workspace.is_ssh() {
-        crate::modules::remote::session::validate_remote_path(cwd)?;
-        return Ok(Some(PathBuf::from(cwd)));
+        #[cfg(not(feature = "desktop"))]
+        {
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            crate::modules::remote::session::validate_remote_path(cwd)?;
+            return Ok(Some(PathBuf::from(cwd)));
+        }
     }
     let resolved = resolve_path(cwd, workspace);
     let canonical =
@@ -163,16 +179,36 @@ pub fn bootstrap_registry(registry: &WorkspaceRegistry) {
     }
 }
 
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn workspace_authorize(
     path: String,
     workspace: Option<WorkspaceEnv>,
     registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<String, String> {
+    workspace_authorize_service(path, workspace, registry.inner()).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn workspace_authorize_service(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    registry: &WorkspaceRegistry,
+) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if workspace.is_ssh() {
-        crate::modules::remote::session::validate_remote_path(&path)?;
-        return Ok(path.replace('\\', "/"));
+        #[cfg(not(feature = "desktop"))]
+        {
+            return Err("SSH requires a desktop workspace in this build".into());
+        }
+        #[cfg(feature = "desktop")]
+        {
+            crate::modules::remote::session::validate_remote_path(&path)?;
+            return Ok(path.replace('\\', "/"));
+        }
     }
     let resolved = resolve_path(&path, &workspace);
     let canonical = registry.authorize(&resolved).map_err(|e| e.to_string())?;
@@ -182,6 +218,7 @@ pub async fn workspace_authorize(
 /// 幂等创建并授权本机可访问的默认工作目录。
 ///
 /// 返回物理规范路径，确保后续 Agent owner 只能绑定到这个精确根目录。
+#[cfg(any(feature = "desktop", test))]
 fn prepare_host_default_root(path: &Path, registry: &WorkspaceRegistry) -> Result<PathBuf, String> {
     std::fs::create_dir_all(path).map_err(|error| {
         format!(
@@ -193,6 +230,7 @@ fn prepare_host_default_root(path: &Path, registry: &WorkspaceRegistry) -> Resul
 }
 
 /// 返回 WSL 用户目录内的默认工作目录规范路径。
+#[cfg(any(feature = "desktop", test))]
 fn wsl_default_workspace_path(home: &str) -> Result<String, String> {
     let home = home.trim().trim_end_matches('/');
     if home.is_empty() || !home.starts_with('/') {
@@ -205,6 +243,7 @@ fn wsl_default_workspace_path(home: &str) -> Result<String, String> {
 ///
 /// Local 与 WSL 延迟创建各自用户目录下的 `~/.terax/workspace` 并登记授权；SSH
 /// 必须继续使用连接时验证的 profile Workspace root，不能在前端扩大远端根边界。
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn workspace_prepare_default_root(
     process: tauri::State<'_, WorkspaceProcessState>,
@@ -235,10 +274,19 @@ pub async fn workspace_prepare_default_root(
     }
 }
 
+/// 将桌面调用上下文接入共享原生服务。
+#[cfg(feature = "desktop")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn workspace_current_dir(
     registry: tauri::State<'_, WorkspaceRegistry>,
 ) -> Result<String, String> {
+    workspace_current_dir_service(registry.inner()).await
+}
+
+/// 执行共享服务操作，调用者状态由宿主显式提供。
+#[allow(clippy::too_many_arguments)]
+pub async fn workspace_current_dir_service(registry: &WorkspaceRegistry) -> Result<String, String> {
     let launch = resolve_launch_dir();
     let canonical = registry.authorize(&launch).map_err(|e| e.to_string())?;
     Ok(crate::modules::fs::to_canon(&canonical))
@@ -452,6 +500,7 @@ pub fn resolve_path(path: &str, _workspace: &WorkspaceEnv) -> PathBuf {
 ///
 /// 校验保持为跨平台纯逻辑，使所有平台都能安全解析持久化的 Workspace 环境参数；
 /// 实际 WSL 命令和 UNC 路径转换仍只在 Windows 编译。
+#[cfg(any(feature = "desktop", windows))]
 fn is_safe_distro_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 255 {
         return false;
@@ -465,6 +514,7 @@ fn is_safe_distro_name(name: &str) -> bool {
 }
 
 /// 校验 WSL 发行版名称，拒绝路径穿越、控制字符和路径元字符。
+#[cfg(any(feature = "desktop", windows))]
 pub(crate) fn validate_wsl_distro_name(distro: &str) -> Result<(), String> {
     if is_safe_distro_name(distro) {
         Ok(())
@@ -665,6 +715,7 @@ fn wsl_runtime_info(distro: &str) -> Result<WslRuntimeInfo, String> {
 }
 
 #[cfg(windows)]
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn normalize_wsl_value(output: String, fallback: &str) -> String {
     let value = output
         .lines()
@@ -706,7 +757,7 @@ pub(crate) fn list_distros_blocking() -> Result<Vec<WslDistro>, String> {
     Ok(distros)
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn wsl_list_distros() -> Result<Vec<WslDistro>, String> {
     #[cfg(not(windows))]
     {
@@ -714,13 +765,13 @@ pub async fn wsl_list_distros() -> Result<Vec<WslDistro>, String> {
     }
     #[cfg(windows)]
     {
-        tauri::async_runtime::spawn_blocking(list_distros_blocking)
+        tokio::task::spawn_blocking(list_distros_blocking)
             .await
             .map_err(|e| e.to_string())?
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     #[cfg(not(windows))]
     {
@@ -728,7 +779,7 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     }
     #[cfg(windows)]
     {
-        tauri::async_runtime::spawn_blocking(|| {
+        tokio::task::spawn_blocking(|| {
             let distros = list_distros_blocking()?;
             Ok(distros
                 .iter()
@@ -741,7 +792,7 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     }
 }
 
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 /// 返回指定 WSL 发行版的用户主目录。
 ///
 /// 首次调用会同时探测登录 shell，后续终端启动复用同一进程内的结果。

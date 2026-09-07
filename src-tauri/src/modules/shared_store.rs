@@ -5,17 +5,24 @@
 //! Custom Agent 的新会话提交和
 //! 级联删除共享配置锁，通用删除接口不能绕过会话清理。
 
-use crate::modules::storage::{write_atomic, FileLock};
+#[cfg(any(feature = "desktop", test))]
+use crate::modules::storage::write_atomic;
+use crate::modules::storage::FileLock;
+#[cfg(feature = "desktop")]
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+#[cfg(feature = "desktop")]
+use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "desktop")]
 use std::sync::Mutex;
 use std::time::Duration;
+#[cfg(feature = "desktop")]
 use tauri::{AppHandle, Emitter};
 
 const STORES: &[(&str, &str)] = &[
@@ -29,12 +36,14 @@ const STORES: &[(&str, &str)] = &[
     ("ui-layout", "terax-ui-layout.json"),
     ("keys-epoch", "terax-keys-epoch.json"),
 ];
+#[cfg(feature = "desktop")]
 pub struct SharedStoreState {
     _watcher: Mutex<RecommendedWatcher>,
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg(feature = "desktop")]
 struct SharedStoreChanged {
     store: String,
     revision: String,
@@ -116,6 +125,7 @@ pub(crate) fn read_value<T: DeserializeOwned>(store: &str, key: &str) -> Result<
         .map_err(|error| format!("shared store {store} key {key} is invalid: {error}"))
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn mutate<T>(
     root: &Path,
     store: &str,
@@ -163,6 +173,7 @@ fn with_ai_agent_at<T>(
 /// 在 Custom Agent 配置锁内完成关联资源删除，再移除对应定义。
 ///
 /// 关联操作失败时定义保持不变；成功后发出共享存储变更事件。
+#[cfg(feature = "desktop")]
 pub(crate) fn delete_ai_agent_with<T>(
     app: &AppHandle,
     agent_id: &str,
@@ -174,6 +185,7 @@ pub(crate) fn delete_ai_agent_with<T>(
     Ok(result)
 }
 
+#[cfg(any(feature = "desktop", test))]
 fn delete_ai_agent_at<T>(
     root: &Path,
     agent_id: &str,
@@ -202,6 +214,7 @@ fn delete_ai_agent_at<T>(
 /// 校验并应用一组精确的键变更。
 ///
 /// 调用方必须在 `mutate` 持有文件锁期间调用，避免其他进程观察到部分结果。
+#[cfg(any(feature = "desktop", test))]
 fn apply_mutations(
     map: &mut Map<String, Value>,
     mutations: Vec<SharedStoreMutation>,
@@ -227,6 +240,7 @@ fn apply_mutations(
 }
 
 /// 禁止通用共享存储接口绕过 Custom Agent 的会话级联删除。
+#[cfg(any(feature = "desktop", test))]
 fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
     if store == "ai-agents" && key.starts_with("agent:") {
         return Err("CUSTOM_AGENT_DELETE_REQUIRES_CASCADE".to_string());
@@ -234,6 +248,7 @@ fn validate_record_delete(store: &str, key: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn bump_keys_epoch(app: &AppHandle) -> Result<(), String> {
     let root = store_dir("keys-epoch")?;
     mutate(&root, "keys-epoch", |map| {
@@ -254,6 +269,7 @@ fn revision(path: &Path) -> String {
     format!("{:016x}:{}", hasher.finish(), bytes.len())
 }
 
+#[cfg(feature = "desktop")]
 fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String> {
     if state_id(store)?.is_some() {
         return Ok(());
@@ -268,6 +284,7 @@ fn emit_changed(app: &AppHandle, root: &Path, store: &str) -> Result<(), String>
     .map_err(|error| error.to_string())
 }
 
+#[cfg(feature = "desktop")]
 impl SharedStoreState {
     /// 复用一个 watcher 观察两个低频配置目录；协议状态不参与跨窗口广播。
     pub fn new(app: &AppHandle) -> Result<Self, String> {
@@ -317,30 +334,37 @@ impl SharedStoreState {
 }
 
 /// 读取白名单配置或状态记录，不接受任意磁盘路径。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_read(store: String) -> Result<Map<String, Value>, String> {
     read_map(&store_path(&store_dir(&store)?, &store)?)
 }
 
 /// 在所有单键与批量写入入口校验网络配置，不能把代理密码写入普通存储。
+#[cfg(any(feature = "desktop", test))]
 fn validate_record_set(store: &str, key: &str, value: &Value) -> Result<(), String> {
     if store == "settings" && key.starts_with("network.") {
         crate::modules::network_proxy::validate_setting(&key["network.".len()..], value)?;
     } else if store == "ssh-profiles" && key.starts_with("profile:") {
-        let profile: crate::modules::remote::models::SshProfile =
-            serde_json::from_value(value.clone()).map_err(|_| "invalid SSH profile")?;
-        if let Some(url) = &profile.proxy_url {
-            if !url.is_empty() {
-                crate::modules::network_proxy::ProxyConfig::parse(url, None)?;
+        #[cfg(not(feature = "desktop"))]
+        return Err("SSH profile configuration requires the desktop host".into());
+        #[cfg(feature = "desktop")]
+        {
+            let profile: crate::modules::remote::models::SshProfile =
+                serde_json::from_value(value.clone()).map_err(|_| "invalid SSH profile")?;
+            if let Some(url) = &profile.proxy_url {
+                if !url.is_empty() {
+                    crate::modules::network_proxy::ProxyConfig::parse(url, None)?;
+                }
             }
+            profile.validate()?;
         }
-        profile.validate()?;
     }
     Ok(())
 }
 
 /// 加锁更新一个配置键，保留其他进程已经提交的数据。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(feature = "desktop")]
 pub fn shared_store_set(
     app: AppHandle,
     store: String,
@@ -359,7 +383,8 @@ pub fn shared_store_set(
 }
 
 /// 删除一个配置键，并保留业务所有者要求的级联边界。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(feature = "desktop")]
 pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result<(), String> {
     if key.is_empty() {
         return Err("shared store key cannot be empty".to_string());
@@ -393,13 +418,14 @@ fn delete_state_at(root: &Path, store: &str) -> Result<(), String> {
 }
 
 /// 删除白名单中的单个协议状态文件，不允许调用方指定路径或删除普通配置。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_delete_state(store: String) -> Result<(), String> {
     delete_state_at(&store_dir(&store)?, &store)
 }
 
 /// 在一次锁内应用明确列出的键变更，不执行整表覆盖。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
+#[cfg(feature = "desktop")]
 pub fn shared_store_mutate(
     app: AppHandle,
     store: String,
@@ -422,7 +448,7 @@ pub fn shared_store_mutate(
 }
 
 /// 返回配置修订指纹，供跨窗口事件合并后检查最新值。
-#[tauri::command]
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn shared_store_revision(store: String) -> Result<String, String> {
     Ok(revision(&store_path(&store_dir(&store)?, &store)?))
 }

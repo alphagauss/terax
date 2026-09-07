@@ -6,9 +6,12 @@ pub mod agent;
 pub mod file;
 pub mod grep;
 pub mod mutate;
+#[cfg(feature = "desktop")]
 pub mod properties;
+#[cfg(feature = "desktop")]
 pub mod search;
 pub mod tree;
+#[cfg(feature = "desktop")]
 pub mod watch;
 
 use std::path::Path;

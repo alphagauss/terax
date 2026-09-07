@@ -136,7 +136,7 @@ JSONL message schema 属于 Terax，而不是 Vercel AI SDK。user 和 Assistant
 
 `function.arguments` 始终为 JSON string。经过审批的 tool record 保存原始 approval ID、决定、原因和可选签名，保证批准、拒绝和执行失败在恢复后的 approval request/response 与实时 provider 前缀逐字一致。chat hydrate 时，显式 adapter 会将这些 record 投影为 AI SDK `UIMessage` 值。每个 persistence phase 只将其新增 record 发送给 Rust；Rust 在 session lock 下读取现有 JSONL、追加 record，并原子替换完整文件。这使磁盘格式保持可读，也使未来切换 SDK 的影响限制在 adapter 内。
 
-streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的 runtime bridge，因此 active UI 可以切换 session，而不会停止后台 streaming、Subagent 展示更新或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。普通运行由 `AgentRunBridge` 在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后追加完整记录和 Subagent display 快照；`wait=false` Subagent 恢复主循环前则通过 checkpoint 追加此前完整的 Assistant、tool 和内部结果事件，但不提交仅供展示的运行中过程。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message 和已经 checkpoint 的完整步骤，但不会写入未完成的流式 fragment 或 Subagent 详细过程。
+streaming state 保留在所属进程中。发送操作首先获取 session run lock。每个 locked session 都保留自己的直接 SDK 生命周期订阅，因此 active UI 可以切换 session，而不会停止后台 streaming、Subagent 展示更新或 approval。运行中的 session 不能删除。transport 在创建模型 request 前 commit 已接受的 user record 和 Chat runtime 冻结的 prompt。metadata 中的 `systemPrompt` 只用于事后检查，不参与会话恢复。普通运行由 共享 `runLifecycle.ts` 在 session 进入 idle、error 或 stopped 状态且没有 pending approval 后追加完整记录和 Subagent display 快照；`wait=false` Subagent 恢复主循环前则通过 checkpoint 追加此前完整的 Assistant、tool 和内部结果事件，但不提交仅供展示的运行中过程。只有 terminal commit 和 Rust lock release 都成功后，才清除前端可观察 lock。background-running 和 completed-unread indicator 是进程内 memory state：查看对应 session 会将其清除，且永远不会写入 session file。focus/poll/normal-close 路径也会 flush 已完成的 run。进程 crash 会保留最近接受的 user message 和已经 checkpoint 的完整步骤，但不会写入未完成的流式 fragment 或 Subagent 详细过程。
 
 其他 Workspace 进程每三秒 poll metadata（窗口隐藏且 AI panel 关闭时暂停），在 focus 或 Agent 配置变化时 refresh，并且绝不覆盖本地正在运行的 session。fingerprint 变化会在复用前驱逐 inactive cached runtime；发现会话已被外部删除时，还会清理该进程中对应的 Shell 和文件工具 owner 状态。稳定主窗口把 active session ID 存储在按环境隔离的 Workspace 文件中，只恢复仍然存在的明确记录；没有记录、记录失效或活动会话被其他窗口删除时进入未持久化 draft。临时 Workspace 窗口始终从 draft 开始，但仍可在会话列表中主动选择历史记录。
 
@@ -202,3 +202,5 @@ draft 会显示并优先跟随当前 Explorer root。没有 Explorer root 时，
 - [`docs/README.md`](../README.md) - 贡献者指南索引
 - [双进程模型](two-process-model.md) - IPC 边界和 command 目录
 - [安全模型](security-model.md) - 每个工具都必须遵守的边界
+
+终端接入与共享生命周期见 [终端 Agent](terminal-agent.md)。

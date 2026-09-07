@@ -2,29 +2,44 @@
 //!
 //! 每个子模块负责一类系统边界，具体 Tauri command 仍由 crate 入口显式注册。
 
+#[cfg(feature = "desktop")]
 pub mod agent;
 pub mod ai_sessions;
+#[cfg(feature = "desktop")]
 pub mod alpha;
 pub mod app_data;
+#[cfg(feature = "desktop")]
 pub mod auxiliary_window;
+#[cfg(feature = "desktop")]
 pub mod external_agent;
 pub mod fs;
+#[cfg(feature = "desktop")]
 pub mod git;
+#[cfg(feature = "desktop")]
 pub mod history;
+#[cfg(feature = "desktop")]
 pub mod lsp;
+#[cfg(feature = "desktop")]
 pub mod markdown_images;
 pub mod net;
 pub mod network_proxy;
+#[cfg(feature = "desktop")]
 pub mod open_with;
 pub mod proc;
+#[cfg(feature = "desktop")]
 pub mod pty;
+#[cfg(feature = "desktop")]
 pub mod python;
+#[cfg(feature = "desktop")]
 pub mod remote;
 pub mod secrets;
 pub mod shared_store;
 pub mod shell;
 pub mod storage;
+#[cfg(feature = "desktop")]
 pub mod transfers;
 pub mod workspace;
+#[cfg(feature = "desktop")]
 pub mod workspace_process;
+#[cfg(feature = "desktop")]
 pub mod workspace_runtime;

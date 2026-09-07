@@ -4,6 +4,17 @@
  */
 
 import {
+  clampMaxConcurrentSubagents,
+  MAX_CONCURRENT_SUBAGENTS_DEFAULT,
+} from "@/modules/ai/config";
+export {
+  clampMaxConcurrentSubagents,
+  MAX_CONCURRENT_SUBAGENTS_DEFAULT,
+  MAX_CONCURRENT_SUBAGENTS_MIN,
+  MAX_CONCURRENT_SUBAGENTS_MAX,
+} from "@/modules/ai/config";
+
+import {
   mutateSharedStore,
   onSharedStoreChange,
   readSharedStore,
@@ -295,10 +306,6 @@ export const TERMINAL_SCROLLBACK_MAX = 50_000;
 export const TERMINAL_SCROLLBACK_PRESETS = [
   500, 1000, 2000, 5000, 10_000, 25_000,
 ] as const;
-
-export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;
-export const MAX_CONCURRENT_SUBAGENTS_MIN = 1;
-export const MAX_CONCURRENT_SUBAGENTS_MAX = 8;
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "dark",
@@ -721,15 +728,6 @@ export async function setDefaultSubagentModel(
   value: ModelRef | null,
 ): Promise<void> {
   await writePref(KEY_DEFAULT_SUBAGENT_MODEL, value);
-}
-
-/** 将每聊天 Subagent 并发数约束到设置界面允许的安全范围。 */
-export function clampMaxConcurrentSubagents(value: number): number {
-  if (!Number.isFinite(value)) return MAX_CONCURRENT_SUBAGENTS_DEFAULT;
-  return Math.min(
-    MAX_CONCURRENT_SUBAGENTS_MAX,
-    Math.max(MAX_CONCURRENT_SUBAGENTS_MIN, Math.round(value)),
-  );
 }
 
 export async function setMaxConcurrentSubagents(value: number): Promise<void> {

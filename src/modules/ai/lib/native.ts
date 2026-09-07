@@ -1,11 +1,10 @@
 /**
- * 本文件定义前端与 Tauri 原生命令之间的类型化调用边界。
- * 负责注入当前工作区环境，并传递文件条件写入与 Shell 访问级别，不包含业务状态或缓存。
+ * 本文件定义共享业务与原生宿主之间的类型化调用边界。
+ * 通过宿主注入当前工作区环境，并传递文件条件写入与 Shell 访问级别，不包含业务状态或缓存。
  */
 
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
-import { currentWorkspaceEnv } from "@/modules/workspace";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative, invokeWorkspace as invoke } from "@/lib/nativeHost";
 
 export type ReadResult =
   | {
@@ -260,21 +259,18 @@ export type GitBranchListResult = {
 };
 
 export const native = {
-  workspaceCurrentDir: () => invoke<string>("workspace_current_dir"),
+  workspaceCurrentDir: () => invokeNative<string>("workspace_current_dir"),
   workspaceAuthorize: (path: string) =>
     invoke<string>("workspace_authorize", {
       path,
-      workspace: currentWorkspaceEnv(),
     }),
   readFile: (path: string) =>
     invoke<ReadResult>("fs_read_file", {
       path,
-      workspace: currentWorkspaceEnv(),
     }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,
-      workspace: currentWorkspaceEnv(),
     }),
   agentFileRead: (params: {
     ownerSessionId: string;
@@ -286,7 +282,7 @@ export const native = {
     force?: boolean;
   }) =>
     invoke<AgentReadResponse>("agent_file_read", {
-      request: { ...params, workspace: currentWorkspaceEnv() },
+      request: { ...params },
     }),
   agentFileFind: (params: {
     ownerSessionId: string;
@@ -301,7 +297,7 @@ export const native = {
     limit?: number;
   }) =>
     invoke<AgentFindResponse>("agent_file_find", {
-      request: { ...params, workspace: currentWorkspaceEnv() },
+      request: { ...params },
     }),
   agentFileGrep: (params: {
     ownerSessionId: string;
@@ -318,7 +314,7 @@ export const native = {
     limit?: number;
   }) =>
     invoke<AgentGrepResponse>("agent_file_grep", {
-      request: { ...params, workspace: currentWorkspaceEnv() },
+      request: { ...params },
     }),
   agentPrepareMutation: (params: {
     ownerSessionId: string;
@@ -328,14 +324,14 @@ export const native = {
     mutation: AgentMutationInput;
   }) =>
     invoke<AgentMutationPreview>("agent_file_prepare_mutation", {
-      request: { ...params, workspace: currentWorkspaceEnv() },
+      request: { ...params },
     }),
   agentCommitMutation: (ownerSessionId: string, toolCallId: string) =>
-    invoke<AgentMutationResult>("agent_file_commit_mutation", {
+    invokeNative<AgentMutationResult>("agent_file_commit_mutation", {
       request: { ownerSessionId, toolCallId },
     }),
   agentClearMutation: (ownerSessionId: string, toolCallId: string) =>
-    invoke<void>("agent_file_clear_mutation", {
+    invokeNative<void>("agent_file_clear_mutation", {
       request: { ownerSessionId, toolCallId },
     }),
   agentFileOperation: (params: {
@@ -348,14 +344,13 @@ export const native = {
     recursive?: boolean;
   }) =>
     invoke<AgentFileOperationResponse>("agent_file_operation", {
-      request: { ...params, workspace: currentWorkspaceEnv() },
+      request: { ...params },
     }),
   runCommand: (command: string, cwd?: string | null, timeoutSecs?: number) =>
     invoke<CommandOutput>("shell_run_command", {
       command,
       cwd: cwd ?? null,
       timeoutSecs: timeoutSecs ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
 
   shellExec: (params: {
@@ -373,7 +368,6 @@ export const native = {
     invoke<ShellProcessResponse>("shell_exec", {
       ...params,
       cwd: params.cwd ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
   shellProcess: (params: {
     ownerSessionId: string;
@@ -396,35 +390,29 @@ export const native = {
       waitTimeoutMs: null,
       maxOutputBytes: null,
       ...params,
-      workspace: currentWorkspaceEnv(),
     }),
   shellList: (ownerSessionId: string, includeExited = false) =>
     invoke<ShellProcessInfo[]>("shell_list", {
       ownerSessionId,
       includeExited,
-      workspace: currentWorkspaceEnv(),
     }),
   gitResolveRepo: (cwd: string) =>
     invoke<GitRepoInfo | null>("git_resolve_repo", {
       cwd,
-      workspace: currentWorkspaceEnv(),
     }),
   gitPanelSnapshot: (cwd: string) =>
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
-      workspace: currentWorkspaceEnv(),
     }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
     }),
   gitDiff: (repoRoot: string, path: string | null, side: GitDiffSide) =>
     invoke<GitDiffResult>("git_diff", {
       repoRoot,
       path,
       side,
-      workspace: currentWorkspaceEnv(),
     }),
   gitDiffContent: (
     repoRoot: string,
@@ -437,52 +425,43 @@ export const native = {
       path,
       side,
       originalPath: originalPath ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
   gitStage: (repoRoot: string, paths: string[]) =>
     invoke<void>("git_stage", {
       repoRoot,
       paths,
-      workspace: currentWorkspaceEnv(),
     }),
   gitUnstage: (repoRoot: string, paths: string[]) =>
     invoke<void>("git_unstage", {
       repoRoot,
       paths,
-      workspace: currentWorkspaceEnv(),
     }),
   gitDiscard: (repoRoot: string, entries: GitDiscardEntry[]) =>
     invoke<void>("git_discard", {
       repoRoot,
       entries,
-      workspace: currentWorkspaceEnv(),
     }),
   gitCommit: (repoRoot: string, message: string) =>
     invoke<GitCommitResult>("git_commit", {
       repoRoot,
       message,
-      workspace: currentWorkspaceEnv(),
     }),
   gitUndoCommit: (repoRoot: string, expectedHead: string) =>
     invoke<void>("git_undo_commit", {
       repoRoot,
       expectedHead,
-      workspace: currentWorkspaceEnv(),
     }),
   gitFetch: (repoRoot: string) =>
     invoke<void>("git_fetch", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
     }),
   gitPullFfOnly: (repoRoot: string) =>
     invoke<void>("git_pull_ff_only", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
     }),
   gitPush: (repoRoot: string) =>
     invoke<GitPushResult>("git_push", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
     }),
   gitLog: (
     repoRoot: string,
@@ -492,25 +471,21 @@ export const native = {
       repoRoot,
       limit: options?.limit ?? null,
       beforeSha: options?.beforeSha ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
     }),
   gitCommitMessage: (repoRoot: string, sha: string) =>
     invoke<string>("git_commit_message", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
     }),
   gitCommitFiles: (repoRoot: string, sha: string) =>
     invoke<GitCommitFileChange[]>("git_commit_files", {
       repoRoot,
       sha,
-      workspace: currentWorkspaceEnv(),
     }),
   gitCommitFileDiff: (
     repoRoot: string,
@@ -523,23 +498,19 @@ export const native = {
       sha,
       path,
       originalPath: originalPath ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
   gitRemoteUrl: (repoRoot: string, name?: string) =>
     invoke<string | null>("git_remote_url", {
       repoRoot,
       name: name ?? null,
-      workspace: currentWorkspaceEnv(),
     }),
   gitListBranches: (repoRoot: string) =>
     invoke<GitBranchListResult>("git_list_branches", {
       repoRoot,
-      workspace: currentWorkspaceEnv(),
     }),
   gitCheckoutBranch: (repoRoot: string, branch: string) =>
     invoke<void>("git_checkout_branch", {
       repoRoot,
       branch,
-      workspace: currentWorkspaceEnv(),
     }),
 };

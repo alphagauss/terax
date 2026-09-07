@@ -1,12 +1,15 @@
 /**
- * 本文件封装 AI 会话的 Tauri IPC，并隔离磁盘 JSONL 与前端运行时类型。
+ * 本文件封装 AI 会话的原生宿主调用，并隔离磁盘 JSONL 与前端运行时类型。
  * 外层环境与 Agent 归属由 Rust 投影，内层业务 metadata 由前端解释，消息记录不直接依赖 AI SDK。
  */
 
 import type { SessionMessage } from "@/modules/ai/lib/conversation";
 import type { UIMessage } from "@ai-sdk/react";
-import { invoke } from "@tauri-apps/api/core";
-import { type AgentIconId, normalizeAgentIcon } from "./agents";
+import { invokeNative as invoke } from "@/lib/nativeHost";
+import {
+  type AgentIconId,
+  normalizeAgentIcon,
+} from "@/modules/ai/lib/agentDefinition";
 
 /** Rust 不解释的会话业务 metadata，由前端按需扩展。 */
 export type SessionData = Record<string, unknown>;

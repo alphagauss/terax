@@ -8,7 +8,7 @@ Terax 会运行 Shell、读写文件并向 AI provider 发送数据。其安全�
 
 主要信任边界包括：
 
-1. **IPC 边界** - 注册在 `src-tauri/src/lib.rs` 中并受 `src-tauri/capabilities/default.json` 限制的 command。
+1. **IPC 边界** - 注册在 `src-tauri/src/desktop.rs` 中并受 `src-tauri/capabilities/default.json` 限制的 command。
 2. **文件系统边界** - AI 文件工具通过 `src-tauri/src/modules/fs/agent.rs`；PTY spawn 通过 Workspace 授权 registry。
 3. **网络边界** - `src-tauri/src/modules/net.rs` 中带有 SSRF 和 DNS rebinding 防护的 AI HTTP proxy。
 4. **秘密存储边界** - key 存储在操作系统 keychain 中，绝不存入磁盘或 `localStorage`。
