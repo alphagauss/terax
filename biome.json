@@ -11,6 +11,8 @@
       "src/**/*.tsx",
       "cli/**/*.ts",
       "cli/**/*.tsx",
+      "scripts/build-tui.ts",
+      "scripts/build.mjs",
       "scripts/terminal-*.ts",
       "scripts/terminal-*.tsx",
       "!src/components/ui/**",
