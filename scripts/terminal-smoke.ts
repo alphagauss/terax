@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
-import { createTerminalHost } from "../apps/terminal/nativeHost";
+import { createTerminalHost } from "../cli/nativeHost";
 import { installNativeHost } from "@/lib/nativeHost";
 import { createAgentSession } from "@/modules/ai/lib/agentSession";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";

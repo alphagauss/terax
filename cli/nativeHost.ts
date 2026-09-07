@@ -19,7 +19,7 @@ export function createTerminalHost(cwd: string) {
     process.env.TERAX_NATIVE_HOST ??
     fileURLToPath(
       new URL(
-        `../../src-tauri/target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
+        `../src-tauri/target/debug/terax-host${process.platform === "win32" ? ".exe" : ""}`,
         import.meta.url,
       ),
     );

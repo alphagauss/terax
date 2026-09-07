@@ -18,7 +18,7 @@ pnpm build:host
 pnpm agent
 ```
 
-`bin/terax` 是发行命令入口，也可直接运行 `bun bin/terax agent`。开发入口的用法如下：
+`cli/index.ts` 是唯一命令入口，包的 `terax` 命令映射和开发脚本都指向它，也可直接运行 `bun cli/index.ts agent`。开发入口的用法如下：
 
 ```sh
 pnpm agent --help
@@ -47,7 +47,10 @@ Enter 发送，Shift+Enter 换行，Escape 停止，Ctrl+C 在运行时停止、
 - `agentSession.ts`：无界面单会话控制器，显式接收配置并发布可订阅快照。
 - `src/modules/ai/store/runLifecycle.ts`：桌面会话状态和审批展示的接入；订阅随运行锁释放。
 - `src/lib/nativeHost.ts`、`tauriHost.ts`：共享宿主接口与按需加载的桌面接入。桌面仍使用原有 IPC 和进程结构。
-- `apps/terminal/`：终端参数、配置接入、原生管道和交互展示，不另写模型循环或文件策略。
+- `cli/index.ts`：统一参数解析、按需分发命令与启动错误处理；帮助不初始化业务运行时或 TUI。
+- `cli/commands/agent.ts`：组装配置、共享 Agent 运行时与原生宿主，负责列表输出或启动交互。
+- `cli/tui/AgentView.tsx`：OpenTUI 界面、键盘操作和状态展示。
+- `cli/settings.ts`、`cli/nativeHost.ts`：配置与原生管道接入，不另写模型循环或文件策略。
 
 Rust 默认 `desktop` 特性保留 Tauri 应用，启动和命令注册在 `src-tauri/src/desktop.rs`。共享能力的宿主接入统一位于 `adapters/`：
 

@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../tsconfig.json",
   "compilerOptions": {
     "target": "ES2022",
     "lib": [
@@ -17,8 +17,8 @@
   "include": [
     "./**/*.ts",
     "./**/*.tsx",
-    "../../scripts/terminal-smoke.ts",
-    "../../scripts/terminal-ui-smoke.tsx"
+    "../scripts/terminal-smoke.ts",
+    "../scripts/terminal-ui-smoke.tsx"
   ],
   "references": []
 }

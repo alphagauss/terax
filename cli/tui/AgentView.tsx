@@ -17,7 +17,7 @@ import { createRoot, useKeyboard } from "@opentui/react";
 import type { UIMessage } from "ai";
 import { createTwoFilesPatch } from "diff";
 import { useRef, useState, useSyncExternalStore } from "react";
-import type { TerminalText } from "./settings";
+import type { TerminalText } from "../settings";
 
 /** 启动独立 TUI，退出时先完成宿主清理，再恢复终端显示模式。 */
 export async function showAgent(

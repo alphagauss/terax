@@ -13,7 +13,7 @@ import type {
 import { createTestRenderer } from "@opentui/core/testing";
 import { createRoot } from "@opentui/react";
 import { act } from "react";
-import { AgentView } from "../apps/terminal/view";
+import { AgentView } from "../cli/tui/AgentView";
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
