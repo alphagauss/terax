@@ -20,9 +20,9 @@
 
 ## Alpha
 
-- [Alpha 集成](architecture/alpha-integration.md) - Terax Rust 生命周期、通用代理、React 集成和可选 PyO3 的跨进程边界。
-- [Alpha 综合量化工作站](architecture/alpha-quant-workstation.md) - 公共金融图表、面板工作台、数据管理、回测、模拟交易、参考项目和分阶段实施指南。
-- [Alpha Python 后端](../alpha/docs/README.md) - FastAPI 业务协议、领域架构、行情存储、复权和同步不变量。
+- [宿主集成](architecture/alpha-integration.md)
+- [工作站](architecture/alpha-quant-workstation.md)
+- [Python 后端](../alpha/docs/README.md)
 
 ## 开发与操作
 

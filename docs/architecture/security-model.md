@@ -38,4 +38,4 @@ Agent 短命令和长任务使用同一 owner 隔离的原生进程表，输出�
 
 ## 秘密
 
-模型和连接凭据使用系统密钥链；Linux 使用既有受限权限 secrets 文件。秘密不进入普通配置、localStorage、会话正文或日志。
+模型和连接凭据使用系统密钥链；Linux 使用既有受限权限 secrets 文件。秘密不进入普通配置、localStorage、会话正文或日志。Alpha 本机服务令牌的独立归属见 [Alpha 集成](alpha-integration.md)。

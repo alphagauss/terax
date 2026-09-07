@@ -30,22 +30,7 @@
 - 页面移动、分割或隐藏不得重建终端和其他后台运行实例。派生展示数据不得进入模型请求或下游业务协议。
 - Terax 自有数据位于 `~/.terax`；跨进程共享配置经白名单存储加锁并精确修改，不能持久化过时的整表快照。
 - 内置 AI 工具的权限由 [安全模型](docs/architecture/security-model.md) 定义；外部 CLI Agent 使用独立权限边界，不能宣称受内置工具策略保护。
-
-### Alpha 量化服务边界
-
-- `alpha/` 是通过 FastAPI 接入 Terax 的独立量化后端，负责量化 API、领域逻辑、数据、任务和事件。
-- Alpha 对 Terax 的接口统一位于 `/api/alpha`。React 页面和 AI Agent 通过 Rust 通用代理访问，不直接管理 Python 进程或服务凭据。
-- Rust 只负责 Alpha 生命周期、探活、凭据注入及通用 GET、POST、WebSocket 转发，不复制或解释 Alpha 领域模型。
-- Alpha 页面属于 `src/modules/alpha/`，复用 Terax 的 Workbench、组件、国际化、通知和设置。Agent 工具复用同一套 Alpha API 调用链。
-- Alpha 进程内变化统一进入同步 `EventEngine`。有限回测、优化和同步任务只由 `TaskManager` 管理；MarketFeed 和未来模拟盘、策略 Engine 各自拥有领域资源。`WebSocketEventGateway` 只把白名单事件转换为 `event + key` 远程 callback，HTTP 和 Repository 始终是权威状态。
-- `alpha-native/` 用于可选的 PyO3 原生计算模块。原生实现不得改变 FastAPI 协议和上层调用方式。
-- Rust、前端和跨进程职责见 `docs/architecture/alpha-integration.md`，工作站长期架构见 `docs/architecture/alpha-quant-workstation.md`。
-- Python 服务内部架构、API 和行情存储文档统一位于 `alpha/docs/`，入口为 `alpha/docs/README.md`。不要在 `docs/architecture/` 复制 Python 内部实现。
-- 工作站当前阶段和下一项任务见临时文档 `docs/architecture/alpha-quant-workstation-implementation.md`。完成任务时同步更新 Rust/前端长期基线、Python 对应文档和临时进度；全部阶段完成后删除临时文档并移除相关入口。
-
-- `docs/architecture/alpha-integration.md`：Alpha FastAPI、Rust 代理、前端和 PyO3 边界
-- `docs/architecture/alpha-quant-workstation.md`：Alpha 综合量化工作站、公共金融图表、面板布局、外部参考项目和分阶段实施建议
-- `alpha/docs/README.md`：Alpha Python 后端架构、API、行情存储和代码地图入口
+- Alpha 的领域与权威数据属于 Python 服务；Rust 只管理生命周期和通用代理，页面与 Agent 共用 API。详见 [Alpha 集成](docs/architecture/alpha-integration.md)。
 
 ## UI 与验证
 
