@@ -8,12 +8,10 @@ use std::{fs, io::Read, io::Write};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-#[cfg(feature = "desktop")]
-use tauri::Emitter;
 use tempfile::NamedTempFile;
 
 #[cfg(feature = "desktop")]
-use crate::modules::remote::{self, RemoteState};
+use crate::modules::remote;
 use crate::modules::workspace::{resolve_path, WorkspaceEnv};
 
 const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
@@ -231,23 +229,7 @@ fn normalize_write_condition(mut condition: WriteCondition) -> Result<WriteCondi
 }
 
 /// 读取文件并为文本内容返回基于原始字节的稳定版本。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn fs_read_file(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-    force: Option<bool>,
-) -> Result<ReadResult, String> {
-    let _ = remote;
-    fs_read_file_service(path, workspace, force).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_read_file_service(
     path: String,
     workspace: Option<WorkspaceEnv>,
     force: Option<bool>,
@@ -282,22 +264,8 @@ pub async fn fs_read_file_service(
     read_file_sync(&resolve_path(&path, &workspace), force.unwrap_or(false))
 }
 
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
+/// 在指定工作区执行操作，状态由调用者持有。
 pub async fn fs_read_binary(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<BinaryReadResult, String> {
-    let _ = remote;
-    fs_read_binary_service(path, workspace).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_read_binary_service(
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<BinaryReadResult, String> {
@@ -330,22 +298,7 @@ pub async fn fs_read_binary_service(
 }
 
 /// 在数据源端计算当前文件版本，不传输文件正文。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn fs_file_version(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<Option<FileVersion>, String> {
-    let _ = remote;
-    fs_file_version_service(path, workspace).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_file_version_service(
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Option<FileVersion>, String> {
@@ -507,14 +460,6 @@ fn read_binary_sync(p: &Path) -> Result<BinaryReadResult, String> {
         size: bytes.len() as u64,
         bytes,
     })
-}
-
-#[derive(Serialize, Clone)]
-#[cfg(feature = "desktop")]
-struct FileWrittenEvent {
-    path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<String>,
 }
 
 /// 在目标目录创建并同步排他临时文件，随机文件名阻止预置符号链接攻击。
@@ -857,19 +802,6 @@ pub trait FileEvents: Send + Sync {
     fn file_written(&self, path: &str, source: Option<String>);
 }
 
-#[cfg(feature = "desktop")]
-impl FileEvents for tauri::AppHandle {
-    fn file_written(&self, path: &str, source: Option<String>) {
-        let _ = self.emit(
-            "fs:file-written",
-            FileWrittenEvent {
-                path: path.to_string(),
-                source,
-            },
-        );
-    }
-}
-
 /// 无界面宿主未订阅文件展示事件时不分配通知资源。
 impl FileEvents for () {
     fn file_written(&self, _path: &str, _source: Option<String>) {}
@@ -880,25 +812,7 @@ pub(crate) fn emit_file_written(app: &dyn FileEvents, path: &str, source: Option
 }
 
 /// 无条件原子写入文件，供创建文件、主题和已审批的工具操作使用。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn fs_write_file(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    content: String,
-    workspace: Option<WorkspaceEnv>,
-    source: Option<String>,
-    app: tauri::AppHandle,
-) -> Result<u64, String> {
-    let _ = remote;
-    fs_write_file_service(path, content, workspace, source, &app).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_write_file_service(
     path: String,
     content: String,
     workspace: Option<WorkspaceEnv>,
@@ -948,26 +862,7 @@ pub async fn fs_write_file_service(
 /// 按内容版本或缺失条件写入编辑器与 AI 工具文件。
 ///
 /// 普通保存必须显式匹配最近读取或成功写入的版本；新文件和覆盖也必须显式声明。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn fs_write_file_checked(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    content: String,
-    condition: WriteCondition,
-    workspace: Option<WorkspaceEnv>,
-    source: Option<String>,
-    app: tauri::AppHandle,
-) -> Result<CheckedWriteResult, String> {
-    let _ = remote;
-    fs_write_file_checked_service(path, content, condition, workspace, source, &app).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_write_file_checked_service(
     path: String,
     content: String,
     condition: WriteCondition,
@@ -1109,22 +1004,8 @@ pub async fn fs_write_file_checked_service(
     Ok(result)
 }
 
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
+/// 在指定工作区执行操作，状态由调用者持有。
 pub async fn fs_canonicalize(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<String, String> {
-    let _ = remote;
-    fs_canonicalize_service(path, workspace).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_canonicalize_service(
     path: String,
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
@@ -1148,25 +1029,8 @@ pub async fn fs_canonicalize_service(
     Ok(super::to_canon(&canon))
 }
 
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_stat(
-    remote: tauri::State<'_, RemoteState>,
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<FileStat, String> {
-    let _ = remote;
-    fs_stat_service(path, workspace).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_stat_service(
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-) -> Result<FileStat, String> {
+/// 在指定工作区执行操作，状态由调用者持有。
+pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         #[cfg(not(feature = "desktop"))]

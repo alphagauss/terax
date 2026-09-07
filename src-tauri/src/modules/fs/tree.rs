@@ -153,7 +153,6 @@ fn sort_names(names: &mut [String]) {
 /// case-insensitively. Dot-prefixed entries (files and dirs) are hidden unless
 /// `show_hidden` is set. `git_decorations` opts into the per-entry `gitignored`
 /// flag; off by default so non-explorer callers pay nothing.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_read_dir(
     path: String,
     show_hidden: bool,
@@ -263,7 +262,6 @@ pub async fn fs_read_dir(
 ///
 /// Symlinks to directories are included (matches shell `cd` semantics).
 /// Hidden entries are filtered by dot-prefix only.
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn list_subdirs(
     path: String,
     show_hidden: bool,

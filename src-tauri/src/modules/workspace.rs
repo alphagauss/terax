@@ -11,14 +11,10 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "desktop")]
-use crate::modules::workspace_process::WorkspaceProcessState;
-
 // Short TTL keeps the auth-check TOCTOU window tight while still coalescing the
 // burst of canonicalize calls within a single panel refresh (~100ms).
 const CANONICAL_TTL: Duration = Duration::from_secs(1);
 const CANONICAL_CACHE_CAP: usize = 256;
-#[cfg(any(feature = "desktop", test))]
 const DEFAULT_WORKSPACE_DIRECTORY: &str = "workspace";
 
 struct CanonicalEntry {
@@ -179,21 +175,8 @@ pub fn bootstrap_registry(registry: &WorkspaceRegistry) {
     }
 }
 
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
+/// 在指定工作区执行操作，状态由调用者持有。
 pub async fn workspace_authorize(
-    path: String,
-    workspace: Option<WorkspaceEnv>,
-    registry: tauri::State<'_, WorkspaceRegistry>,
-) -> Result<String, String> {
-    workspace_authorize_service(path, workspace, registry.inner()).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn workspace_authorize_service(
     path: String,
     workspace: Option<WorkspaceEnv>,
     registry: &WorkspaceRegistry,
@@ -218,7 +201,6 @@ pub async fn workspace_authorize_service(
 /// 幂等创建并授权本机可访问的默认工作目录。
 ///
 /// 返回物理规范路径，确保后续 Agent owner 只能绑定到这个精确根目录。
-#[cfg(any(feature = "desktop", test))]
 fn prepare_host_default_root(path: &Path, registry: &WorkspaceRegistry) -> Result<PathBuf, String> {
     std::fs::create_dir_all(path).map_err(|error| {
         format!(
@@ -230,7 +212,6 @@ fn prepare_host_default_root(path: &Path, registry: &WorkspaceRegistry) -> Resul
 }
 
 /// 返回 WSL 用户目录内的默认工作目录规范路径。
-#[cfg(any(feature = "desktop", test))]
 fn wsl_default_workspace_path(home: &str) -> Result<String, String> {
     let home = home.trim().trim_end_matches('/');
     if home.is_empty() || !home.starts_with('/') {
@@ -243,50 +224,44 @@ fn wsl_default_workspace_path(home: &str) -> Result<String, String> {
 ///
 /// Local 与 WSL 延迟创建各自用户目录下的 `~/.terax/workspace` 并登记授权；SSH
 /// 必须继续使用连接时验证的 profile Workspace root，不能在前端扩大远端根边界。
-#[cfg(feature = "desktop")]
-#[tauri::command]
 pub async fn workspace_prepare_default_root(
-    process: tauri::State<'_, WorkspaceProcessState>,
-    registry: tauri::State<'_, WorkspaceRegistry>,
+    workspace: &WorkspaceEnv,
+    registry: &WorkspaceRegistry,
 ) -> Result<String, String> {
-    let workspace = &process.bootstrap().env;
     match workspace {
         WorkspaceEnv::Local => {
             let path = crate::modules::app_data::directory(
                 crate::modules::app_data::Directory::Workspace,
             )?;
-            let canonical = prepare_host_default_root(&path, &registry)?;
+            let canonical = prepare_host_default_root(&path, registry)?;
             Ok(crate::modules::fs::to_canon(&canonical))
         }
         WorkspaceEnv::Wsl { distro } => {
             let path = wsl_default_workspace_path(&wsl_home(distro.clone())?)?;
             let host_path = resolve_path(&path, workspace);
-            prepare_host_default_root(&host_path, &registry)?;
+            prepare_host_default_root(&host_path, registry)?;
             Ok(path)
         }
         WorkspaceEnv::Ssh { profile_id } => {
-            let root = crate::modules::remote::manager::global_manager()?
-                .home(profile_id)
-                .await?;
-            crate::modules::remote::session::validate_remote_path(&root)?;
-            Ok(root.replace('\\', "/"))
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = profile_id;
+                Err("SSH requires a desktop workspace in this build".into())
+            }
+            #[cfg(feature = "desktop")]
+            {
+                let root = crate::modules::remote::manager::global_manager()?
+                    .home(profile_id)
+                    .await?;
+                crate::modules::remote::session::validate_remote_path(&root)?;
+                Ok(root.replace('\\', "/"))
+            }
         }
     }
 }
 
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn workspace_current_dir(
-    registry: tauri::State<'_, WorkspaceRegistry>,
-) -> Result<String, String> {
-    workspace_current_dir_service(registry.inner()).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn workspace_current_dir_service(registry: &WorkspaceRegistry) -> Result<String, String> {
+/// 在指定工作区执行操作，状态由调用者持有。
+pub async fn workspace_current_dir(registry: &WorkspaceRegistry) -> Result<String, String> {
     let launch = resolve_launch_dir();
     let canonical = registry.authorize(&launch).map_err(|e| e.to_string())?;
     Ok(crate::modules::fs::to_canon(&canonical))
@@ -757,7 +732,6 @@ pub(crate) fn list_distros_blocking() -> Result<Vec<WslDistro>, String> {
     Ok(distros)
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn wsl_list_distros() -> Result<Vec<WslDistro>, String> {
     #[cfg(not(windows))]
     {
@@ -771,7 +745,6 @@ pub async fn wsl_list_distros() -> Result<Vec<WslDistro>, String> {
     }
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     #[cfg(not(windows))]
     {
@@ -792,7 +765,6 @@ pub async fn wsl_default_distro() -> Result<Option<String>, String> {
     }
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 /// 返回指定 WSL 发行版的用户主目录。
 ///
 /// 首次调用会同时探测登录 shell，后续终端启动复用同一进程内的结果。

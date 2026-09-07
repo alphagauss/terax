@@ -11,5 +11,4 @@ pub mod menu;
 pub mod modules;
 #[cfg(feature = "desktop")]
 pub use desktop::run;
-#[cfg(feature = "headless")]
-pub mod host;
+pub mod adapters;

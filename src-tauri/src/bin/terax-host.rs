@@ -3,7 +3,7 @@
 #[tokio::main]
 async fn main() {
     let result = match std::env::args().nth(1) {
-        Some(cwd) => terax_lib::host::run(cwd).await,
+        Some(cwd) => terax_lib::adapters::stdio::run(cwd).await,
         None => Err("native host requires an absolute working directory".to_string()),
     };
     if let Err(error) = result {

@@ -4,8 +4,6 @@
 //! 共享代理是用户信任的网络出口，凭据仅在原生层读取，不进入普通配置或请求 IPC。
 
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "desktop")]
-use tauri::Manager;
 
 use crate::modules::{secrets, shared_store};
 
@@ -160,14 +158,8 @@ impl ProxyConfig {
     }
 }
 
-/// 读取共享代理与密钥；未配置时显式失败，不退回环境代理或直连。
-#[cfg(feature = "desktop")]
-pub fn shared_proxy(app: &tauri::AppHandle) -> Result<ProxyConfig, String> {
-    shared_proxy_service(&app.state::<secrets::SecretsState>())
-}
-
 /// 使用宿主提供的秘密存储解析共享出口，不继承环境代理。
-pub fn shared_proxy_service(state: &secrets::SecretsState) -> Result<ProxyConfig, String> {
+pub fn shared_proxy(state: &secrets::SecretsState) -> Result<ProxyConfig, String> {
     let url = shared_store::read_value::<String>("settings", "network.proxyUrl")?
         .filter(|value| !value.trim().is_empty())
         .ok_or("shared proxy is not configured")?;
@@ -179,17 +171,8 @@ pub fn shared_proxy_service(state: &secrets::SecretsState) -> Result<ProxyConfig
     Ok(proxy)
 }
 
-/// 请求启动时解析连接出口，后续设置变化不会改变已经建立的流。
-#[cfg(feature = "desktop")]
-pub fn resolve(
-    app: &tauri::AppHandle,
-    target: &NetworkTarget,
-) -> Result<Option<ProxyConfig>, String> {
-    resolve_service(&app.state::<secrets::SecretsState>(), target)
-}
-
 /// 按连接身份读取最新出口配置，供桌面和无界面 HTTP 服务共用。
-pub fn resolve_service(
+pub fn resolve(
     state: &secrets::SecretsState,
     target: &NetworkTarget,
 ) -> Result<Option<ProxyConfig>, String> {
@@ -198,18 +181,16 @@ pub fn resolve_service(
     };
     match shared_store::read_value::<ProxyMode>("settings", &key)?.unwrap_or_default() {
         ProxyMode::Direct => Ok(None),
-        ProxyMode::Shared => shared_proxy_service(state).map(Some),
+        ProxyMode::Shared => shared_proxy(state).map(Some),
     }
 }
 
 /// 保存前验证共享地址并返回凭据账户标识，秘密不会经此入口返回前端。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn network_validate_proxy(url: String) -> Result<String, String> {
     ProxyConfig::parse(&url, None).map(|proxy| proxy.credential_account())
 }
 
 /// 通用共享存储写入也必须通过校验，防止绕过设置页把秘密写入普通配置。
-#[cfg(any(feature = "desktop", test))]
 pub(crate) fn validate_setting(key: &str, value: &serde_json::Value) -> Result<(), String> {
     if key == "proxyUrl" {
         let url = value.as_str().ok_or("proxy URL must be a string")?;

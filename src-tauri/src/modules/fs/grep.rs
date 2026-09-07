@@ -246,7 +246,6 @@ fn match_ranges(matcher: &RegexMatcher, text: &str) -> Vec<MatchRange> {
     ranges
 }
 
-#[allow(clippy::too_many_arguments)]
 /// 并行扫描本地或 WSL 文件树，并在命中上限或取消时尽快停止。
 fn search_tree(
     root_path: &Path,
@@ -595,20 +594,7 @@ fn parse_remote_grep(
 ///
 /// `cancelPrevious` 只供唯一的搜索面板使用；AI 并发查询不会推进 generation，
 /// 因而不会互相取消或被用户输入取消。
-/// 将桌面调用上下文接入共享原生服务。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
 pub async fn fs_content_search(
-    state: tauri::State<'_, ContentSearchState>,
-    request: ContentSearchRequest,
-) -> Result<ContentSearchResponse, String> {
-    fs_content_search_service(state.inner(), request).await
-}
-
-/// 执行共享服务操作，调用者状态由宿主显式提供。
-#[allow(clippy::too_many_arguments)]
-pub async fn fs_content_search_service(
     state: &ContentSearchState,
     request: ContentSearchRequest,
 ) -> Result<ContentSearchResponse, String> {
@@ -644,7 +630,6 @@ pub struct GlobResponse {
     pub truncated: bool,
 }
 
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub async fn fs_glob(
     pattern: String,
     root: String,

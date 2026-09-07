@@ -183,12 +183,13 @@ impl RemoteWorkspace {
         let proxy_secret_override = request.proxy_secret_override.map(Zeroizing::new);
         let proxy = match profile.proxy_mode {
             SshProxyMode::Direct => None,
-            SshProxyMode::Shared => Some(network_proxy::shared_proxy(&app)?),
+            SshProxyMode::Shared => Some(network_proxy::shared_proxy(
+                &app.state::<secrets::SecretsState>(),
+            )?),
             SshProxyMode::Custom => {
                 // 未明确覆盖的密码每次建连重新读取，保存或清除凭据后不使用旧快照。
                 let saved = if proxy_secret_override.is_none() {
-                    secrets::get(
-                        &app,
+                    secrets::get_value(
                         &app.state::<SecretsState>(),
                         super::profile::SECRET_SERVICE,
                         &format!("{}:proxy", profile.id),

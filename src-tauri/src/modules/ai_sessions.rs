@@ -47,8 +47,6 @@ pub fn release(state: &AiSessionsState, id: &str) -> Result<(), String> {
 #[cfg(test)]
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
-#[cfg(feature = "desktop")]
-use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 const MAIN_AGENT_ID: &str = "builtin:main";
@@ -521,13 +519,11 @@ fn list_sessions(root: &Path) -> Result<Vec<SessionMetadata>, String> {
 }
 
 /// 列出当前用户的全部有效 AI 会话。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ai_sessions_list() -> Result<Vec<SessionMetadata>, String> {
     list_sessions(&sessions_dir()?)
 }
 
 /// 读取指定 AI 会话的 metadata 和全部消息记录。
-#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn ai_session_read(id: String) -> Result<SessionFile, String> {
     read_session(&sessions_dir()?, strict_uuid(&id)?)
 }
@@ -552,23 +548,6 @@ fn commit_with_run_lock(
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "session is running in another window".to_string())?;
     commit_session(root, session, environment_key)
-}
-
-/// 将新增记录提交到 AI 会话并返回最新摘要。
-///
-/// 新会话 cwd 来自已授权的 Explorer 根目录；历史会话仍由不可变校验防止换根。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn ai_session_commit(
-    state: State<'_, AiSessionsState>,
-    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
-    session: SessionFile,
-) -> Result<SessionMetadata, String> {
-    commit(
-        state.inner(),
-        &workspace_state.bootstrap().environment_key,
-        session,
-    )
 }
 
 /// 按宿主绑定的环境提交会话，保持固定 cwd、Agent 归属和跨进程运行锁。
@@ -601,9 +580,7 @@ pub fn commit(
 }
 
 /// 删除指定会话文件，运行中的会话不可删除。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
+pub fn ai_session_delete(state: &AiSessionsState, id: String) -> Result<(), String> {
     let id = strict_uuid(&id)?;
     let root = sessions_dir()?;
     if state
@@ -637,7 +614,6 @@ pub fn ai_session_delete(state: State<'_, AiSessionsState>, id: String) -> Resul
 ///
 /// 调用方必须先持有共享 Agent 配置锁。函数会先取得全部会话锁再删除任何文件，
 /// 检测到任一运行中会话时不产生部分删除。
-#[cfg(any(feature = "desktop", test))]
 fn delete_sessions_by_agent(
     root: &Path,
     state: &AiSessionsState,
@@ -679,16 +655,14 @@ fn delete_sessions_by_agent(
 }
 
 /// 级联删除 Custom Agent 和其跨 Workspace 的全部会话。
-#[cfg(feature = "desktop")]
-#[tauri::command]
 pub fn ai_agent_delete(
-    app: AppHandle,
-    state: State<'_, AiSessionsState>,
+    events: &dyn shared_store::StoreEvents,
+    state: &AiSessionsState,
     agent_id: String,
 ) -> Result<Vec<String>, String> {
     let root = sessions_dir()?;
-    shared_store::delete_ai_agent_with(&app, &agent_id, || {
-        delete_sessions_by_agent(&root, state.inner(), &agent_id)
+    shared_store::delete_ai_agent_with(events, &agent_id, || {
+        delete_sessions_by_agent(&root, state, &agent_id)
     })
 }
 
@@ -726,40 +700,6 @@ fn acquire_session_run(
     }
     locks.insert(id, lock);
     Ok(true)
-}
-
-/// 尝试为一次 AI 运行取得跨进程锁，重复取得同一锁视为成功。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn ai_session_run_acquire(
-    state: State<'_, AiSessionsState>,
-    registry: State<'_, WorkspaceRegistry>,
-    workspace_state: State<'_, crate::modules::workspace_process::WorkspaceProcessState>,
-    id: String,
-) -> Result<bool, String> {
-    let id = strict_uuid(&id)?;
-    let bootstrap = workspace_state.bootstrap();
-    acquire_session_run(
-        &sessions_dir()?,
-        state.inner(),
-        registry.inner(),
-        id,
-        &bootstrap.environment_key,
-        &bootstrap.env,
-    )
-}
-
-/// 释放当前进程持有的 AI 会话运行锁。
-#[cfg(feature = "desktop")]
-#[tauri::command]
-pub fn ai_session_run_release(state: State<'_, AiSessionsState>, id: String) -> Result<(), String> {
-    let id = strict_uuid(&id)?;
-    state
-        .run_locks
-        .lock()
-        .map_err(|_| "AI session lock state is poisoned".to_string())?
-        .remove(&id);
-    Ok(())
 }
 
 #[cfg(test)]

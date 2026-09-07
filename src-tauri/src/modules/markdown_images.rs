@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tempfile::{Builder as TempFileBuilder, NamedTempFile};
 use uuid::Uuid;
@@ -374,8 +375,13 @@ async fn load_network_image(
     url: String,
     user_agent: &str,
 ) -> Result<LoadedImage, String> {
-    let downloaded =
-        net::download_public_image(app, &url, MAX_IMAGE_BYTES as usize, user_agent).await?;
+    let downloaded = net::download_public_image(
+        &app.state::<crate::modules::secrets::SecretsState>(),
+        &url,
+        MAX_IMAGE_BYTES as usize,
+        user_agent,
+    )
+    .await?;
     let format = detect_image_format(&downloaded.bytes)
         .ok_or_else(|| "unsupported or invalid image format".to_string())?;
     let name = downloaded
