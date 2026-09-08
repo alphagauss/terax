@@ -12,6 +12,8 @@ pub mod app_data;
 pub mod auxiliary_window;
 #[cfg(feature = "desktop")]
 pub mod external_agent;
+#[cfg(feature = "desktop")]
+pub mod file_actions;
 pub mod fs;
 #[cfg(feature = "desktop")]
 pub mod git;

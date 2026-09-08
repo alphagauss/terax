@@ -414,7 +414,11 @@ export function MarkdownPreviewPane({
       : null;
     setActiveOutlineId(active);
     if (viewMode === "raw") {
-      editorRef.current?.scrollToSourceLine(sourceLine);
+      pendingSourceNavigationRef.current = { line: sourceLine };
+      if (editorRef.current) {
+        pendingSourceNavigationRef.current = null;
+        editorRef.current.gotoLine(sourceLine);
+      }
     } else {
       requestRenderedRestore(sourceLine);
     }

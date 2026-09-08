@@ -53,6 +53,7 @@ export type TransferStage =
   | "finished";
 
 export type EnqueueTransferRequest = {
+  destinationName?: string;
   direction: TransferDirection;
   strategy: TransferStrategy;
   sources: string[];

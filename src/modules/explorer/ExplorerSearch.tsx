@@ -3,6 +3,7 @@
  * 负责结果分组、打开操作和与文件树一致的上下文菜单。
  */
 
+import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import { Input } from "@/components/controls/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -30,10 +31,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
-import {
-  copyToClipboard,
-  revealInFinder,
-} from "@/modules/explorer/lib/contextActions";
 import { cn } from "@/lib/utils";
 
 type SearchHit = {
@@ -294,13 +291,10 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                         </button>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
-                        {!hit.is_dir && (
-                          <ContextMenuItem
-                            onSelect={() => onOpenFile(hit.path)}
-                          >
-                            {t("menu.open")}
-                          </ContextMenuItem>
-                        )}
+                        <FileActionItems
+                          target={{ path: hit.path, isDir: hit.is_dir }}
+                          onOpen={onOpenFile}
+                        />
                         {hit.is_dir && onRevealInTerminal && (
                           <ContextMenuItem
                             onSelect={() => onRevealInTerminal(hit.path)}
@@ -308,17 +302,6 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                             {t("menu.openInTerminal")}
                           </ContextMenuItem>
                         )}
-                        <ContextMenuItem
-                          onSelect={() => void revealInFinder(hit.path)}
-                        >
-                          {t("menu.revealInFinder")}
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                          onSelect={() => void copyToClipboard(hit.path)}
-                        >
-                          {t("menu.copyPath")}
-                        </ContextMenuItem>
                         <ContextMenuSeparator />
                         <ContextMenuItem
                           onSelect={() => onAttachToAgent?.(hit.path)}

@@ -635,6 +635,13 @@ impl TransferManager {
         };
         let destination = retry_destination_parent(&workspace, &failure.destination_path)?;
         let request = EnqueueTransferRequest {
+            destination_name: if direction == TransferDirection::Download {
+                std::path::Path::new(&failure.destination_path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            } else {
+                None
+            },
             direction,
             strategy: TransferStrategy::Direct,
             sources: vec![failure.source_path],
@@ -1617,6 +1624,7 @@ mod tests {
                 updated_at: created_at,
             },
             request: EnqueueTransferRequest {
+                destination_name: None,
                 direction: TransferDirection::Upload,
                 strategy: TransferStrategy::Direct,
                 sources: vec![id.into()],

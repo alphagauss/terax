@@ -221,6 +221,8 @@ pub fn run() {
             commands::files::fs_write_file,
             commands::files::fs_write_file_checked,
             commands::files::fs_stat,
+            crate::modules::file_actions::file_save_as,
+            crate::modules::file_actions::file_open_with,
             commands::files::fs_canonicalize,
             fs::properties::fs_properties_get,
             fs::properties::fs_properties_scan,

@@ -36,5 +36,17 @@
       "trust": "Trust and connect",
       "trustChanged": "Trust changed key"
     }
+  },
+  "fileActions": {
+    "open": "Open file",
+    "openDirectory": "Open folder",
+    "openWith": "Open with…",
+    "saveAs": "Save as…",
+    "copyPath": "Copy path",
+    "copyContent": "Copy file contents",
+    "reveal": "Show in file manager",
+    "failed": "File operation failed",
+    "binary": "Binary file contents cannot be copied as text.",
+    "toolarge": "The file exceeds the 10 MB text copy limit."
   }
 }

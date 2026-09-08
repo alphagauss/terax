@@ -33,11 +33,12 @@ use super::source::LocalSourceIdentity;
 
 type RunResult<T> = Result<T, TransferRunError>;
 
-/// 区分 staging 固定命名与聚合历史清理所有权使用的任务身份。
+/// 规划期间使用的任务归属与单文件下载目标名。
 #[derive(Clone, Copy)]
 struct PlanningTaskIdentity<'a> {
     staging_id: &'a str,
     owner_id: &'a str,
+    destination_name: Option<&'a str>,
 }
 
 /// 同一宿主文件系统中的单文件复制项。
@@ -261,6 +262,7 @@ pub(crate) async fn prepare(
     let task = PlanningTaskIdentity {
         staging_id: task_id,
         owner_id: &owner_id,
+        destination_name: request.destination_name.as_deref(),
     };
     let plan = match workspace {
         WorkspaceEnv::Local => {
@@ -360,6 +362,29 @@ pub(crate) async fn prepare(
     Ok(prepared)
 }
 
+/// 在检查源目标关系之前应用用户选定的名称，避免改名另存为被原文件名误判。
+fn local_root_destination(
+    source: &Path,
+    parent: &Path,
+    sanitize: bool,
+    requested_name: Option<&str>,
+    is_dir: bool,
+) -> RunResult<PathBuf> {
+    let name = match requested_name {
+        Some(_) if is_dir => return Err(invalid("save as requires one regular file".into())),
+        Some(name) => OsString::from(name),
+        None => local_destination_name(
+            source
+                .file_name()
+                .ok_or_else(|| message(format!("invalid source path: {}", source.display())))?,
+            sanitize,
+        ),
+    };
+    let destination = parent.join(name);
+    validate_local_relationship(source, &destination, is_dir)?;
+    Ok(destination)
+}
+
 /// 扫描同一宿主文件系统中的来源，并为每个顶层项目生成同级 staging 目标。
 async fn plan_local(
     sources: Vec<PathBuf>,
@@ -432,19 +457,19 @@ async fn plan_local(
         }
         source_roots.push(source.clone());
         let source_identity = LocalSourceIdentity::capture(&source, &metadata).await;
-        let source_name = source
-            .file_name()
-            .ok_or_else(|| message(format!("invalid source path: {}", source.display())))?;
-        let destination_name = local_destination_name(source_name, sanitize_names);
-        let identity = local_name_identity(&destination_name);
-        if !root_names.insert(identity) {
+        let final_path = local_root_destination(
+            &source,
+            &destination_parent,
+            sanitize_names,
+            task.destination_name,
+            metadata.is_dir(),
+        )?;
+        if !root_names.insert(local_name_identity(final_path.as_os_str())) {
             return Err(message(format!(
-                "multiple sources map to the same destination name: {}",
-                destination_name.to_string_lossy()
+                "multiple sources map to the same destination: {}",
+                final_path.display()
             )));
         }
-        let final_path = destination_parent.join(&destination_name);
-        validate_local_relationship(&source, &final_path, metadata.is_dir())?;
         let stage = local_stage_path(&final_path, task.staging_id, plan.roots.len())?;
         ensure_local_target_available(&stage).await?;
         let source_root = source.clone();
@@ -846,7 +871,13 @@ async fn plan_remote_download(
         }
         source_roots.push(source.clone());
         let source_name = remote_name(&source)?.to_string();
-        let destination_name = remote::sftp::sanitize_local_name(&source_name);
+        let destination_name = match task.destination_name {
+            Some(_) if !source_metadata.file_type().is_file() => {
+                return Err(invalid("save as requires one regular file".into()))
+            }
+            Some(name) => name.to_owned(),
+            None => remote::sftp::sanitize_local_name(&source_name),
+        };
         if !root_names.insert(local_name_identity(OsStr::new(&destination_name))) {
             return Err(invalid(format!(
                 "multiple remote sources map to the same local name: {destination_name}"
@@ -1217,6 +1248,32 @@ fn invalid(value: String) -> TransferRunError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_as_checks_the_selected_destination_before_source_overlap() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("source.txt");
+        std::fs::write(&source, b"content").unwrap();
+        let renamed =
+            local_root_destination(&source, directory.path(), true, Some("renamed.txt"), false)
+                .unwrap();
+        assert_eq!(renamed, directory.path().join("renamed.txt"));
+        assert!(local_root_destination(&source, directory.path(), true, None, false).is_err());
+        assert!(
+            local_root_destination(&source, directory.path(), true, Some("source.txt"), false)
+                .is_err()
+        );
+        assert!(local_root_destination(
+            directory.path(),
+            directory.path(),
+            true,
+            Some("folder"),
+            true
+        )
+        .is_err());
+        assert_eq!(std::fs::read(source).unwrap(), b"content");
+        assert!(!renamed.exists());
+    }
 
     #[test]
     fn remote_archive_overlap_requires_a_component_boundary() {

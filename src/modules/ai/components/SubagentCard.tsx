@@ -3,8 +3,8 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
-import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/modules/ai/components/Shimmer";
 import {
   Collapsible,
@@ -313,9 +313,9 @@ function ResultPanel({
         status === "failed" && "border-destructive/30 bg-destructive/5",
       )}
     >
-      <MessageResponse className="[&_*]:text-[11.5px]! [&_*]:leading-relaxed!">
+      <ChatMessageResponse className="[&_*]:text-[11.5px]! [&_*]:leading-relaxed!">
         {content}
-      </MessageResponse>
+      </ChatMessageResponse>
     </div>
   );
 }
