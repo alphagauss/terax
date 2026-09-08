@@ -30,6 +30,7 @@ import {
   SecurityWarningIcon,
   StarIcon,
   Tick01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useRef, useState } from "react";
@@ -492,7 +493,7 @@ function ModelDropdown() {
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
-        align="end"
+        align="start"
         className="w-max min-w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border/70 p-0 shadow-xl"
         onFocusCapture={(e) => {
           if (e.target !== inputRef.current) inputRef.current?.focus();
@@ -808,7 +809,7 @@ function ModelRow({
 
       {selected ? (
         <HugeiconsIcon
-          icon={Tick01Icon}
+          icon={Tick02Icon}
           size={13}
           strokeWidth={2}
           className="shrink-0 text-foreground"
