@@ -271,17 +271,26 @@ export function MarkdownSplitLayout({
         >
           <aside
             id={outlineId}
-            className="h-full min-h-0 shrink-0 overflow-hidden transition-[clip-path,opacity,transform] duration-pane ease-emphasized"
+            className="h-full min-h-0 shrink-0 overflow-hidden transition-[opacity,transform] duration-pane ease-emphasized motion-reduce:transition-none"
             style={{
               width: renderedWidth,
-              clipPath: open ? "inset(0 0 0 0)" : "inset(0 100% 0 0)",
               opacity: open ? 1 : 0,
               transform: open
                 ? "translate3d(0, 0, 0)"
-                : "translate3d(-8px, 0, 0)",
+                : "translate3d(calc(-100% - 8px), 0, 0)",
             }}
           >
-            {outline}
+            {/* 固定裁剪边界与内容反向位移，保留揭示效果而不逐帧更新 clip-path。 */}
+            <div
+              className="h-full min-h-0 transition-transform duration-pane ease-emphasized motion-reduce:transition-none"
+              style={{
+                transform: open
+                  ? "translate3d(0, 0, 0)"
+                  : "translate3d(100%, 0, 0)",
+              }}
+            >
+              {outline}
+            </div>
           </aside>
 
           <hr

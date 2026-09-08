@@ -5,7 +5,6 @@
 
 import { Button } from "@/components/controls/button";
 import {
-  animateResizableLayout,
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -16,6 +15,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import {
+  normalizeSidebarSectionLayout,
+  SIDEBAR_SECTION_HEADER_HEIGHT,
+  type SidebarSectionLayout,
+} from "@/modules/sidebar/sectionLayout";
+import { useSectionLayoutAnimation } from "@/modules/sidebar/useSectionLayoutAnimation";
 import {
   getWorkspaceValue,
   setWorkspaceValue,
@@ -28,11 +33,6 @@ import type {
   LayoutChangedMeta,
   PanelImperativeHandle,
 } from "react-resizable-panels";
-import {
-  normalizeSidebarSectionLayout,
-  SIDEBAR_SECTION_HEADER_HEIGHT,
-  type SidebarSectionLayout,
-} from "@/modules/sidebar/sectionLayout";
 
 export type SidebarSectionRenderState = {
   expanded: boolean;
@@ -95,6 +95,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
     () => new Set(collapsedRef.current),
   );
   const groupElementRef = useRef<HTMLDivElement>(null);
+  const captureLayout = useSectionLayoutAnimation(groupElementRef);
 
   const persistLayout = useCallback(() => {
     const next: SidebarSectionLayout = { version: 1, sections: {} };
@@ -140,6 +141,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
     (section: SidebarSectionDefinition) => {
       const panel = panelRefs.current.get(section.id);
       if (!panel) return;
+      captureLayout();
       const wasCollapsed = collapsedRef.current.has(section.id);
       if (!wasCollapsed) {
         sizesRef.current.set(section.id, panel.getSize().inPixels);
@@ -150,15 +152,13 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
       replaceCollapsedSections(nextCollapsed);
       persistLayout();
 
-      animateResizableLayout(groupElementRef.current, () => {
-        if (wasCollapsed) {
-          panel.resize(
-            `${sizesRef.current.get(section.id) ?? section.defaultSize}px`,
-          );
-        } else panel.collapse();
-      });
+      if (wasCollapsed) {
+        panel.resize(
+          `${sizesRef.current.get(section.id) ?? section.defaultSize}px`,
+        );
+      } else panel.collapse();
     },
-    [persistLayout, replaceCollapsedSections],
+    [captureLayout, persistLayout, replaceCollapsedSections],
   );
 
   return (
@@ -166,7 +166,7 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
       id={`sidebar-sections-${id}`}
       elementRef={groupElementRef}
       orientation="vertical"
-      className={cn("min-h-0 flex-1", className)}
+      className={cn("min-h-0 flex-1 overflow-hidden", className)}
       onLayoutChanged={handleUserLayoutChanged}
     >
       {sections.map((section, index) => {
@@ -198,29 +198,39 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
                   ? "preserve-pixel-size"
                   : "preserve-relative-size"
               }
-              className="flex min-h-0 flex-col bg-sidebar"
+              className="pointer-events-none min-h-0"
+              style={{ overflow: "visible" }}
             >
-              <SidebarSectionHeader
-                title={section.title}
-                badge={section.badge}
-                description={section.description}
-                expanded={!collapsed}
-                onToggle={state.toggle}
-                actions={
-                  typeof section.actions === "function"
-                    ? section.actions(state)
-                    : section.actions
-                }
-              />
               <div
-                aria-hidden={collapsed}
-                inert={collapsed}
-                className={cn(
-                  "min-h-0 flex-1 overflow-hidden transition-opacity duration-pane ease-standard motion-reduce:transition-none",
-                  collapsed ? "pointer-events-none opacity-0" : "opacity-100",
-                )}
+                data-section-viewport
+                className="pointer-events-none h-full overflow-hidden"
               >
-                {section.render(state)}
+                <div className="pointer-events-auto flex h-full min-h-0 flex-col bg-sidebar">
+                  <SidebarSectionHeader
+                    title={section.title}
+                    badge={section.badge}
+                    description={section.description}
+                    expanded={!collapsed}
+                    onToggle={state.toggle}
+                    actions={
+                      typeof section.actions === "function"
+                        ? section.actions(state)
+                        : section.actions
+                    }
+                  />
+                  <div
+                    aria-hidden={collapsed}
+                    inert={collapsed}
+                    className={cn(
+                      "min-h-0 flex-1 overflow-hidden transition-opacity duration-pane ease-standard motion-reduce:transition-none",
+                      collapsed
+                        ? "pointer-events-none opacity-0"
+                        : "opacity-100",
+                    )}
+                  >
+                    {section.render(state)}
+                  </div>
+                </div>
               </div>
             </ResizablePanel>
           </Fragment>
