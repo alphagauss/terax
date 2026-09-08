@@ -3,7 +3,7 @@
  * 推理结束后保留展开内容，直到后继可见输出出现或整条消息结束，再立即收起一次。
  */
 
-import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Shimmer } from "@/modules/ai/components/Shimmer";
 import {
   Collapsible,
   CollapsibleContent,
@@ -58,9 +58,7 @@ export function ChatReasoningPart({
     >
       <CollapsibleTrigger className="flex items-center gap-1.5 text-[12px] leading-4 italic text-muted-foreground transition-colors duration-control hover:text-foreground">
         {isStreaming ? (
-          <Shimmer sweepDuration={1.2} pauseDuration={0.6}>
-            {t("chat.reasoning.thinking")}
-          </Shimmer>
+          <Shimmer>{t("chat.reasoning.thinking")}</Shimmer>
         ) : (
           <span>
             {durationSeconds === undefined

@@ -1,0 +1,60 @@
+/* 扫光与反向文字使用同一节奏，供合成器复用遮罩与字形。 */
+.ai-shimmer {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  color: var(--color-muted-foreground);
+}
+
+.ai-shimmer-light,
+.ai-shimmer-text {
+  animation-duration: 1.8s;
+  animation-timing-function: linear(0, 1 66.6667%, 1);
+  animation-iteration-count: infinite;
+}
+
+.ai-shimmer-light {
+  position: absolute;
+  inset: 0 calc(0px - var(--shimmer-spread));
+  pointer-events: none;
+  user-select: none;
+  text-overflow: inherit;
+  mask-image: radial-gradient(
+    circle var(--shimmer-spread) at center,
+    black 0%,
+    rgb(0 0 0 / 80%) 54%,
+    transparent 100%
+  );
+  animation-name: ai-shimmer-light;
+}
+
+.ai-shimmer-text {
+  display: block;
+  position: relative;
+  left: var(--shimmer-spread);
+  width: calc(100% - var(--shimmer-spread) - var(--shimmer-spread));
+  height: 100%;
+  overflow: hidden;
+  white-space: inherit;
+  text-overflow: inherit;
+  color: color-mix(in oklab, var(--color-foreground) 30%, var(--color-primary-foreground));
+  animation-name: ai-shimmer-text;
+}
+
+.ai-shimmer-text::before {
+  content: attr(data-text);
+}
+
+@keyframes ai-shimmer-light {
+  from { transform: translateX(-50%); }
+  to { transform: translateX(50%); }
+}
+
+@keyframes ai-shimmer-text {
+  from { transform: translateX(calc(50% + var(--shimmer-spread))); }
+  to { transform: translateX(calc(-50% - var(--shimmer-spread))); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-shimmer-light { display: none; }
+}

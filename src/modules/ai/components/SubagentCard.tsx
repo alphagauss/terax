@@ -5,7 +5,7 @@
 
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Shimmer } from "@/modules/ai/components/Shimmer";
 import {
   Collapsible,
   CollapsibleContent,
@@ -130,7 +130,7 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
           </span>
           <span className="mt-0.5 block min-w-0 truncate text-[11px] text-muted-foreground">
             {headline.kind === "running" ? (
-              <Shimmer as="span" sweepDuration={1.2} pauseDuration={0.6}>
+              <Shimmer as="span">
                 {runningActionLabel(headline.action, t)}
               </Shimmer>
             ) : (

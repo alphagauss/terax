@@ -252,7 +252,10 @@ function Header({
       <div className="flex shrink-0 items-center gap-1">
         {isBusy ? (
           <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <Spinner className="size-2.5" />
+            {/* 保持 SVG 静止，由 HTML 容器旋转，避免 WebView 逐帧重算 SVG 样式。 */}
+            <span className="inline-flex size-2.5 shrink-0 animate-spin motion-reduce:animate-none">
+              <Spinner className="size-full animate-none" />
+            </span>
             <span className="max-w-32 truncate">
               {step ?? t("miniWindow.thinking")}
             </span>
