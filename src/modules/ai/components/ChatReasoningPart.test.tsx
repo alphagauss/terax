@@ -107,7 +107,7 @@ describe("ChatReasoningPart", () => {
         );
       });
       expect(container.textContent).toContain("chat.reasoning.thinking");
-      expect(container.querySelector(".terax-shimmer")).not.toBeNull();
+      expect(container.querySelector(".ai-shimmer")).not.toBeNull();
 
       act(() => {
         root.render(
@@ -121,7 +121,7 @@ describe("ChatReasoningPart", () => {
 
       expect(container.textContent).toContain("chat.reasoning.completed");
       expect(container.textContent).not.toContain("chat.reasoning.thinking");
-      expect(container.querySelector(".terax-shimmer")).toBeNull();
+      expect(container.querySelector(".ai-shimmer")).toBeNull();
     } finally {
       act(() => root.unmount());
     }

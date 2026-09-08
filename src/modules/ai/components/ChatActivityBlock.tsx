@@ -3,7 +3,7 @@
  * 不同工具的标题切换至少间隔一秒，同一调用的摘要立即更新；活动结束立即完成并收起一次。
  */
 
-import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Shimmer } from "@/modules/ai/components/Shimmer";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import {
   Collapsible,
@@ -74,12 +74,7 @@ export function ChatActivityBlock({
     >
       <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-1.5 text-[14px] leading-[22px] text-muted-foreground transition-colors duration-control hover:text-foreground">
         {running && shownHeadline?.kind === "tool" && shownHeadline.action && (
-          <Shimmer
-            as="span"
-            className="shrink-0 whitespace-nowrap"
-            sweepDuration={1.2}
-            pauseDuration={0.6}
-          >
+          <Shimmer as="span" className="shrink-0 whitespace-nowrap">
             {shownHeadline.action}
           </Shimmer>
         )}
@@ -92,8 +87,6 @@ export function ChatActivityBlock({
                 shownHeadline.action &&
                 "font-mono",
             )}
-            sweepDuration={1.2}
-            pauseDuration={0.6}
           >
             {title}
           </Shimmer>
