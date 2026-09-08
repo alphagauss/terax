@@ -151,6 +151,17 @@
     "steer": "Guide the current task"
   },
   "chat": {
+    "fileEdits": {
+      "title": "Edited {{count}} files",
+      "tabTitle": "File changes",
+      "estimate": "Estimated changes while generating the edit",
+      "uncertain": "Changes unconfirmed",
+      "uncertainPaths": "Could not confirm the remaining changes after rollback: {{paths}}",
+      "discontinuous": "Other changes occurred between edits. Each section shows only the changes committed by these tools.",
+      "failed": "Failed",
+      "collapse": "Show fewer files",
+      "more": "Show {{count}} more files"
+    },
     "editorSelection": "Editor selection",
     "terminalSelection": "Terminal selection",
     "emptyTitle": "Ask Terax anything",

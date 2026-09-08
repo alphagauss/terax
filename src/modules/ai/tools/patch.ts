@@ -7,16 +7,13 @@ import { tool } from "ai";
 import { z } from "zod";
 import type { ToolContext } from "./context";
 import { accessModeForCall, pathNeedsApproval } from "./authorization";
-import {
-  clearPreparedFileMutation,
-  commitPreparedFileMutation,
-  prepareFileMutation,
-} from "./fileMutation";
+import { executeFileMutation, fileEditInputHooks } from "./fileMutation";
 
 /** 创建支持一个或多个已有文本文件的严格精确补丁工具。 */
 export function buildPatchTools(ctx: ToolContext) {
   return {
     apply_patch: tool({
+      ...fileEditInputHooks(ctx, "apply_patch"),
       description:
         "Apply ordered exact-text replacements to one or more existing UTF-8 files. Every file must be read with read_file first. Each non-replace_all old_text must occur exactly once; any invalid edit aborts the whole preparation before writing. Workspace-local patches run automatically; outside or sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
@@ -51,23 +48,17 @@ export function buildPatchTools(ctx: ToolContext) {
           input.files.some((file) =>
             pathNeedsApproval(file.path, ctx.getCwd()),
           );
-        try {
-          await prepareFileMutation({
-            sessionId,
-            toolCallId,
-            toolName: "apply_patch",
-            input,
-            cwd: ctx.getCwd(),
-            permissionMode: accessModeForCall(
-              ctx.getPermissionMode(),
-              approvalRequired,
-            ),
-          });
-          return await commitPreparedFileMutation(sessionId, toolCallId);
-        } catch (error) {
-          clearPreparedFileMutation(sessionId, toolCallId);
-          return { error: String(error) };
-        }
+        return executeFileMutation(ctx, {
+          sessionId,
+          toolCallId,
+          toolName: "apply_patch",
+          input,
+          cwd: ctx.getCwd(),
+          permissionMode: accessModeForCall(
+            ctx.getPermissionMode(),
+            approvalRequired,
+          ),
+        });
       },
     }),
   } as const;

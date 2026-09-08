@@ -512,6 +512,35 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [addPage, allocId],
   );
 
+  const openFileEditsTab = useCallback(
+    (input: import("@/modules/ai/lib/fileEdits").FileEditsOpenInput) => {
+      const existing = Object.values(stateRef.current.tabs).find(
+        (tab) =>
+          tab.kind === "file-edits" &&
+          tab.sessionId === input.sessionId &&
+          tab.edits.turnId === input.edits.turnId,
+      );
+      if (existing) {
+        commit((current) => ({
+          ...current,
+          tabs: { ...current.tabs, [existing.id]: { ...existing, ...input } },
+        }));
+        revealTab(existing.id);
+        return existing.id;
+      }
+      const id = allocId();
+      addPage({
+        id,
+        kind: "file-edits",
+        spaceId: activeSpaceIdRef.current,
+        title: i18n.t("ai:chat.fileEdits.tabTitle"),
+        ...input,
+      });
+      return id;
+    },
+    [addPage, allocId, commit, revealTab],
+  );
+
   const openAiDiffTab = useCallback(
     (input: {
       sessionId: string;
@@ -978,6 +1007,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     newWebPreviewTab,
     newMarkdownTab,
     openAiDiffTab,
+    openFileEditsTab,
     openGitDiffTab,
     openCommitHistoryTab,
     openCommitFileDiffTab,

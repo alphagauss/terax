@@ -3,6 +3,7 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import {
@@ -111,10 +112,21 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
             <span className="shrink-0 text-[12px] font-medium text-foreground">
               {t("chat.subagent.label")}
             </span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
               {label}
             </span>
-            <StatusIcon status={shownStatus} />
+            {!open &&
+              headline.kind === "running" &&
+              headline.action.kind === "tool" && (
+                <FileEditStats
+                  toolCallId={headline.action.key}
+                  taskId={display?.taskId}
+                  className="ml-1 inline-flex shrink-0"
+                />
+              )}
+            <span className="ml-auto inline-flex shrink-0">
+              <StatusIcon status={shownStatus} />
+            </span>
           </span>
           <span className="mt-0.5 block min-w-0 truncate text-[11px] text-muted-foreground">
             {headline.kind === "running" ? (
@@ -180,7 +192,11 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
           </div>
 
           {tab === "process" ? (
-            <ProcessList steps={steps} running={status === "running"} />
+            <ProcessList
+              steps={steps}
+              running={status === "running"}
+              taskId={display?.taskId}
+            />
           ) : (
             <ResultPanel status={status} result={result} />
           )}
@@ -219,9 +235,11 @@ function TabButton({
 function ProcessList({
   steps,
   running,
+  taskId,
 }: {
   steps: readonly SubagentDisplayStep[];
   running: boolean;
+  taskId?: string;
 }) {
   const { t } = useTranslation("ai");
   if (steps.length === 0) {
@@ -243,12 +261,15 @@ function ProcessList({
             {toolLabel(step.toolName, t)}
           </span>
           {step.summary ? (
-            <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-muted-foreground">
+            <span className="min-w-0 truncate font-mono text-[10.5px] text-muted-foreground">
               {step.summary}
             </span>
-          ) : (
-            <span className="flex-1" />
-          )}
+          ) : null}
+          <FileEditStats
+            toolCallId={step.id}
+            taskId={taskId}
+            className="ml-1 inline-flex shrink-0"
+          />
         </div>
       ))}
     </div>

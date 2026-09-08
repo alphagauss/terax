@@ -151,6 +151,17 @@
     "steer": "引导当前任务"
   },
   "chat": {
+    "fileEdits": {
+      "title": "已编辑 {{count}} 个文件",
+      "tabTitle": "文件改动",
+      "estimate": "编辑生成期间的预估改动",
+      "uncertain": "修改状态未确认",
+      "uncertainPaths": "回滚后无法确认残留修改：{{paths}}",
+      "discontinuous": "编辑之间存在其他修改，以下分段仅展示这些工具提交的改动。",
+      "failed": "失败",
+      "collapse": "收起文件列表",
+      "more": "再显示 {{count}} 个文件"
+    },
     "editorSelection": "编辑器选区",
     "terminalSelection": "终端选区",
     "emptyTitle": "向 Terax 提问",

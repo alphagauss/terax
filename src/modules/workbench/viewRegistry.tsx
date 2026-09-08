@@ -5,6 +5,7 @@
  */
 
 import { useTranslation } from "react-i18next";
+import { lazy, Suspense } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
@@ -25,6 +26,12 @@ import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
 import { type TerminalPaneHandle, TerminalView } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench/types";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+
+const FileEditsView = lazy(() =>
+  import("@/modules/ai/components/FileEditsView").then((module) => ({
+    default: module.FileEditsView,
+  })),
+);
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -163,6 +170,11 @@ export function WorkbenchRegisteredView({
           onAccept={services.onAiDiffAccept}
           onReject={services.onAiDiffReject}
         />
+      )}
+      {tab.kind === "file-edits" && (
+        <Suspense fallback={null}>
+          <FileEditsView tab={tab} />
+        </Suspense>
       )}
       {(tab.kind === "git-diff" || tab.kind === "git-commit-file") && (
         <GitDiffView tab={tab} visible={visible} />

@@ -12,6 +12,10 @@ import {
 } from "@/modules/ai/lib/conversation";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
+import {
+  getFileEditRuntime,
+  releaseFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
@@ -115,16 +119,182 @@ function terminalToolStream() {
   ]);
 }
 
-function childResult(text: string) {
-  return {
-    content: [{ type: "text", text }],
-    finishReason: { unified: "stop", raw: "stop" },
-    usage,
-    warnings: [],
-  } as never;
+function rootCalls() {
+  return activeModel.doStreamCalls.filter(
+    (call) => !JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),
+  );
+}
+
+type StreamHandler = (
+  options: Parameters<MockLanguageModelV3["doStream"]>[0],
+) =>
+  | ReturnType<MockLanguageModelV3["doStream"]>
+  | Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
+
+function mockModel(options: {
+  doStream: StreamHandler;
+  childStream?: StreamHandler;
+}) {
+  return new MockLanguageModelV3({
+    doStream: async (call) =>
+      options.childStream &&
+      JSON.stringify(call.prompt).includes("## SUBAGENT ROLE")
+        ? options.childStream(call)
+        : options.doStream(call),
+  });
 }
 
 describe.sequential("Agent background subagents", () => {
+  it("Subagent 参数流实时发布编辑预估，提交事实归属父会话且不泄露子任务正文流", async () => {
+    const sessionId = "stream-file-edit";
+    const preview = vi.spyOn(native, "agentPrepareMutation").mockResolvedValue({
+      files: [
+        {
+          path: "/workspace/a.txt",
+          identity: "/workspace/a.txt",
+          before: "",
+          after: "new\nline\n",
+          isNewFile: true,
+          replacements: 0,
+        },
+      ],
+    });
+    const commit = vi.spyOn(native, "agentCommitMutation").mockResolvedValue({
+      files: [{ path: "/workspace/a.txt", bytesWritten: 9, replacements: 0 }],
+    });
+    let finishInput!: () => void;
+    let childCalls = 0;
+    const displays = vi.fn();
+    activeModel = mockModel({
+      doStream: () =>
+        rootCalls().length === 1
+          ? toolCallsStream([
+              {
+                id: "spawn-edit",
+                name: "run_subagent",
+                input: { task: "Write a file", wait: true },
+              },
+            ])
+          : textStream("Parent done"),
+      childStream: async () => {
+        if (++childCalls > 1)
+          return textStream("Child done", "Private child reasoning");
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({
+                type: "tool-input-start",
+                id: "child-edit",
+                toolName: "write_file",
+              });
+              controller.enqueue({
+                type: "tool-input-delta",
+                id: "child-edit",
+                delta: '{"path":"a.txt","content":"new\\n',
+              });
+              finishInput = () => {
+                controller.enqueue({
+                  type: "tool-input-delta",
+                  id: "child-edit",
+                  delta: 'line\\n"}',
+                });
+                controller.enqueue({
+                  type: "tool-input-end",
+                  id: "child-edit",
+                });
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallId: "child-edit",
+                  toolName: "write_file",
+                  input: JSON.stringify({
+                    path: "a.txt",
+                    content: "new\nline\n",
+                  }),
+                });
+                controller.enqueue({
+                  type: "finish",
+                  usage,
+                  finishReason: { unified: "tool-calls", raw: "tool_calls" },
+                });
+                controller.close();
+              };
+            },
+          }),
+        } as never;
+      },
+    });
+    try {
+      const result = await runAgentStream({
+        keys: EMPTY_PROVIDER_KEYS,
+        model: modelRefForProvider("lmstudio", "stream-edits"),
+        systemPrompt: "Stable prompt",
+        allowedTools: ["run_subagent", "write_file"],
+        maxConcurrentSubagents: 1,
+        turnCoordinator: new AgentTurnCoordinator(),
+        toolContext: {
+          getCwd: () => "/workspace",
+          getSessionId: () => sessionId,
+          getPermissionMode: () => "full-access",
+          supportsApprovals: true,
+          getTerminalContext: () => null,
+          isActiveTerminalPrivate: () => false,
+        },
+        uiMessages: [
+          {
+            id: "user",
+            role: "user",
+            parts: [{ type: "text", text: "Write" }],
+          },
+        ],
+        onSubagentDisplay: displays,
+        onCheckpoint: async () => {},
+      });
+      const chunks: unknown[] = [];
+      const consuming = (async () => {
+        for await (const chunk of result.toUIMessageStream())
+          chunks.push(chunk);
+      })();
+      await vi.waitFor(() => expect(finishInput).toBeDefined());
+      const taskId = displays.mock.calls[0][0].taskId as string;
+      const runtime = getFileEditRuntime(sessionId);
+      await vi.waitFor(() =>
+        expect(runtime.getCall("child-edit", taskId)).toMatchObject({
+          approximate: true,
+          added: 1,
+        }),
+      );
+      expect(displays.mock.lastCall?.[0]).toMatchObject({
+        phase: "tool",
+        steps: [
+          {
+            id: "child-edit",
+            toolName: "write_file",
+            summary: "a.txt",
+            status: "running",
+          },
+        ],
+      });
+      expect(preview).not.toHaveBeenCalled();
+      finishInput();
+      await consuming;
+      expect(runtime.getCall("child-edit", taskId)).toMatchObject({
+        approximate: false,
+        added: 2,
+        removed: 0,
+      });
+      expect(runtime.snapshot().files[0]).toMatchObject({
+        path: "a.txt",
+        after: "new\nline\n",
+      });
+      expect(JSON.stringify(chunks)).not.toContain("Private child reasoning");
+    } finally {
+      preview.mockRestore();
+      commit.mockRestore();
+      releaseFileEditRuntime(sessionId);
+    }
+  });
+
   it.each([true, false])(
     "审批响应=%s 时先落实工具结果，再接入引导",
     async (approved) => {
@@ -166,9 +336,9 @@ describe.sequential("Agent background subagents", () => {
           ],
         },
       ];
-      activeModel = new MockLanguageModelV3({
+      activeModel = mockModel({
         doStream: ({ prompt }) => {
-          if (activeModel.doStreamCalls.length === 1) {
+          if (rootCalls().length === 1) {
             expect(JSON.stringify(prompt)).toContain('"type":"tool-result"');
             expect(JSON.stringify(prompt)).not.toContain("New guidance");
           } else {
@@ -220,7 +390,7 @@ describe.sequential("Agent background subagents", () => {
           ),
         ).toEqual(serializeSessionMessages([prefix], options));
         await expect(receipt).resolves.toBe("consumed");
-        expect(activeModel.doStreamCalls).toHaveLength(2);
+        expect(rootCalls()).toHaveLength(2);
         expect(execute).toHaveBeenCalledTimes(approved ? 1 : 0);
       } finally {
         execute.mockRestore();
@@ -241,9 +411,9 @@ describe.sequential("Agent background subagents", () => {
       const checkpoint = vi.fn(async (_messages, event) => {
         if (event.event === "user_steering") await checkpointGate;
       });
-      activeModel = new MockLanguageModelV3({
+      activeModel = mockModel({
         doStream: () =>
-          activeModel.doStreamCalls.length === 1
+          rootCalls().length === 1
             ? toolCallsStream(
                 [
                   {
@@ -255,7 +425,7 @@ describe.sequential("Agent background subagents", () => {
                 "开始检查",
               )
             : textStream("answer"),
-        doGenerate: () =>
+        childStream: () =>
           new Promise((resolve) => {
             finishChild = resolve as (value: never) => void;
           }),
@@ -290,10 +460,7 @@ describe.sequential("Agent background subagents", () => {
           chunks.push(chunk);
       })();
       await vi.waitFor(() => expect(finishChild).toBeDefined());
-      if (!wait)
-        await vi.waitFor(() =>
-          expect(activeModel.doStreamCalls.length).toBe(2),
-        );
+      if (!wait) await vi.waitFor(() => expect(rootCalls().length).toBe(2));
       const receipt = coordinator.inbox.steer({
         id: "guidance",
         role: "user",
@@ -302,7 +469,7 @@ describe.sequential("Agent background subagents", () => {
       expect(receipt).not.toBeNull();
       if (wait) {
         expect(checkpoint).not.toHaveBeenCalled();
-        finishChild(childResult("done"));
+        finishChild(textStream("done"));
       }
       await vi.waitFor(() => expect(checkpoint).toHaveBeenCalled());
       expect(checkpoint.mock.calls[0][1].event).toBe("user_steering");
@@ -316,13 +483,10 @@ describe.sequential("Agent background subagents", () => {
           chunks.some((chunk) => chunk.type === "data-user-steering"),
         ).toBe(true),
       );
-      if (!wait) finishChild(childResult("done"));
+      if (!wait) finishChild(textStream("done"));
       await consuming;
       expect(
-        JSON.stringify(
-          activeModel.doStreamCalls[activeModel.doStreamCalls.length - 1]
-            ?.prompt,
-        ),
+        JSON.stringify(rootCalls()[rootCalls().length - 1]?.prompt),
       ).toContain("Focus on the parser");
       expect(coordinator.isIdle).toBe(true);
     },
@@ -331,9 +495,9 @@ describe.sequential("Agent background subagents", () => {
   it("waits before terminal commit, checkpoints the result, and resumes the model", async () => {
     let resolveChild!: (value: never) => void;
     const childStarted = new Promise<void>((resolve) => {
-      activeModel = new MockLanguageModelV3({
+      activeModel = mockModel({
         doStream: ({ prompt }) => {
-          const rootCall = activeModel.doStreamCalls.length;
+          const rootCall = rootCalls().length;
           if (rootCall === 1) return spawnStream();
           if (rootCall === 2) return textStream("Provisional answer");
           if (rootCall === 3) {
@@ -342,7 +506,7 @@ describe.sequential("Agent background subagents", () => {
           }
           return textStream("Final answer");
         },
-        doGenerate: () => {
+        childStream: () => {
           resolve();
           return new Promise((done) => {
             resolveChild = done as (value: never) => void;
@@ -390,10 +554,10 @@ describe.sequential("Agent background subagents", () => {
     })();
 
     await childStarted;
-    resolveChild(childResult("Tests are healthy."));
+    resolveChild(textStream("Tests are healthy."));
     await consuming;
 
-    expect(activeModel.doStreamCalls).toHaveLength(4);
+    expect(rootCalls()).toHaveLength(4);
     expect(checkpoint).toHaveBeenCalledTimes(1);
     const checkpointParts = checkpoint.mock.calls[0][0][0]?.parts ?? [];
     const activityIndex = checkpointParts.findIndex(
@@ -444,9 +608,9 @@ describe.sequential("Agent background subagents", () => {
         releaseFirstCheckpoint = resolve;
       });
     });
-    activeModel = new MockLanguageModelV3({
+    activeModel = mockModel({
       doStream: ({ prompt }) => {
-        const rootCall = activeModel.doStreamCalls.length;
+        const rootCall = rootCalls().length;
         if (rootCall === 1) {
           return toolCallsStream([
             {
@@ -474,7 +638,7 @@ describe.sequential("Agent background subagents", () => {
         expect(JSON.stringify(prompt)).toContain("second result");
         return textStream("All delegated work is complete.");
       },
-      doGenerate: ({ prompt }) =>
+      childStream: ({ prompt }) =>
         new Promise((resolve) => {
           const serialized = JSON.stringify(prompt);
           const task = [
@@ -523,12 +687,10 @@ describe.sequential("Agent background subagents", () => {
     })();
 
     await vi.waitFor(() => expect(childResolvers.size).toBe(3));
-    childResolvers.get("first background task")?.(childResult("first result"));
-    childResolvers.get("blocking task")?.(childResult("blocking result"));
+    childResolvers.get("first background task")?.(textStream("first result"));
+    childResolvers.get("blocking task")?.(textStream("blocking result"));
     await vi.waitFor(() => expect(checkpoint).toHaveBeenCalledTimes(1));
-    childResolvers.get("second background task")?.(
-      childResult("second result"),
-    );
+    childResolvers.get("second background task")?.(textStream("second result"));
     await vi.waitFor(() => expect(coordinator.inbox.hasPending).toBe(true));
     releaseFirstCheckpoint();
     await consuming;
@@ -546,11 +708,11 @@ describe.sequential("Agent background subagents", () => {
         prefix[0].parts,
       );
     }
-    expect(activeModel.doStreamCalls).toHaveLength(3);
+    expect(rootCalls()).toHaveLength(3);
   });
 
   it("defers background result injection while another tool awaits approval", async () => {
-    activeModel = new MockLanguageModelV3({
+    activeModel = mockModel({
       doStream: () =>
         toolCallsStream([
           {
@@ -564,7 +726,7 @@ describe.sequential("Agent background subagents", () => {
             input: { command: "curl https://example.com" },
           },
         ]),
-      doGenerate: async () => childResult("background result"),
+      childStream: async () => textStream("background result"),
     });
     const coordinator = new AgentTurnCoordinator();
     const checkpoint = vi.fn();

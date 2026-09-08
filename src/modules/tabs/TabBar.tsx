@@ -825,7 +825,7 @@ export function TabIcon({ tab }: { tab: Tab }) {
       />
     );
   }
-  if (tab.kind === "ai-diff") {
+  if (tab.kind === "ai-diff" || tab.kind === "file-edits") {
     return (
       <HugeiconsIcon
         icon={GitCompareIcon}

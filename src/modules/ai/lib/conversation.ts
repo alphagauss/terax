@@ -8,6 +8,12 @@ import {
   type SubagentDisplaySnapshot,
 } from "@/modules/ai/agents/subagentDisplay";
 import type { ModelMessage, UIMessage } from "ai";
+import {
+  isFileEditSnapshot,
+  mergeFileEdits,
+  type FileEditSnapshot,
+  type TurnFileEdits,
+} from "@/modules/ai/lib/fileEdits";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -59,7 +65,7 @@ export type SessionMessage = {
       approval_signature?: string;
     }
   | { role: "event"; content: SubagentResultEvent }
-  | { role: "display"; content: SubagentDisplaySnapshot }
+  | { role: "display"; content: SubagentDisplaySnapshot | FileEditSnapshot }
 );
 
 type AppendOptions = {
@@ -108,6 +114,8 @@ export type SteeringEvent = { event: "user_steering"; message: UIMessage };
 export type TurnEvent = SteeringEvent | SubagentResultEvent;
 
 type ConversationMetadata = {
+  fileEdits?: TurnFileEdits;
+  fileEditsSummary?: boolean;
   createdAt?: number;
   guided?: boolean;
   subagentResult?: SubagentResultEvent;
@@ -258,7 +266,8 @@ export function projectConversationDisplay(
         (part) =>
           isSteeringPart(part) ||
           isSubagentResultDataPart(part) ||
-          isSubagentDisplayDataPart(part),
+          isSubagentDisplayDataPart(part) ||
+          isFileEditDataPart(part),
       )
     ) {
       const unchanged = [message];
@@ -280,17 +289,34 @@ export function projectConversationDisplay(
           subagents.resultsByTaskId.set(result.taskId, result);
       }
     }
-    const projected = expandConversationMessages([message], false).map(
-      (segment) =>
-        segment.role !== "assistant"
-          ? segment
-          : {
-              ...segment,
-              metadata: { ...messageMetadata(segment), subagents },
-              parts: segment.parts.filter(
-                (part) => part.type !== "data-subagent-display",
-              ),
+    const fileEditParts = message.parts.filter(isFileEditDataPart);
+    const fileEdits = fileEditParts.length
+      ? {
+          ...mergeFileEdits(fileEditParts.map((part) => part.data.snapshot)),
+          turnId: fileEditParts[0].data.turnId,
+        }
+      : undefined;
+    const segments = expandConversationMessages([message], false);
+    const lastAssistant = [...segments]
+      .reverse()
+      .find((segment) => segment.role === "assistant");
+    const projected = segments.map((segment) =>
+      segment.role !== "assistant"
+        ? segment
+        : {
+            ...segment,
+            metadata: {
+              ...messageMetadata(segment),
+              subagents,
+              fileEdits,
+              fileEditsSummary: segment === lastAssistant,
             },
+            parts: segment.parts.filter(
+              (part) =>
+                part.type !== "data-subagent-display" &&
+                !isFileEditDataPart(part),
+            ),
+          },
     );
     displayProjections.set(message, projected);
     return projected;
@@ -376,6 +402,16 @@ export function projectSessionMessages(
   records.forEach((record, index) => {
     const timestamp = parseRecordedTimestamp(record.timestamp);
     if (record.role === "display") {
+      if (
+        isFileEditSnapshot(record.content) &&
+        assistantParts &&
+        record.turn_id === assistantTurnId
+      ) {
+        assistantParts.push(
+          fileEditDataPart(record.content, record.turn_id ?? ""),
+        );
+        return;
+      }
       if (
         assistantParts &&
         (!assistantTurnId ||
@@ -597,8 +633,9 @@ function serializeUiMessage(
   }
 
   const displays = message.parts.filter(isSubagentDisplayDataPart);
+  const fileEdits = message.parts.filter(isFileEditDataPart);
   const contentParts = message.parts.filter(
-    (part) => !isSubagentDisplayDataPart(part),
+    (part) => !isSubagentDisplayDataPart(part) && !isFileEditDataPart(part),
   );
   const records =
     contentParts.length || !displays.length
@@ -618,7 +655,64 @@ function serializeUiMessage(
       displays.map((part) => part.data.snapshot),
       messageOptions,
     ),
+    ...fileEdits.map(
+      (part): SessionMessage => ({
+        role: "display",
+        content: part.data.snapshot,
+        timestamp: messageOptions.timestamp,
+        turn_id: part.data.turnId,
+      }),
+    ),
   ];
+}
+
+type FileEditDataPart = {
+  type: "data-file-edits";
+  data: { snapshot: FileEditSnapshot; turnId: string };
+};
+function isFileEditDataPart(
+  part: UIMessage["parts"][number],
+): part is FileEditDataPart {
+  return (
+    part.type === "data-file-edits" &&
+    Boolean(
+      part.data &&
+        typeof part.data === "object" &&
+        "snapshot" in part.data &&
+        isFileEditSnapshot(part.data.snapshot) &&
+        "turnId" in part.data &&
+        typeof part.data.turnId === "string",
+    )
+  );
+}
+function fileEditDataPart(
+  snapshot: FileEditSnapshot,
+  turnId: string,
+): FileEditDataPart {
+  return { type: "data-file-edits", data: { snapshot, turnId } };
+}
+
+/** 终态保存成功后挂到本轮末尾；分段展示时所有工具共享事实，仅末段显示汇总。 */
+export function materializeFileEditParts(
+  messages: readonly UIMessage[],
+  snapshot: FileEditSnapshot | undefined,
+  turnId: string,
+): UIMessage[] {
+  if (!snapshot?.calls.length) return [...messages];
+  const last = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  return messages.map((message) =>
+    message !== last
+      ? message
+      : {
+          ...message,
+          parts: [
+            ...message.parts.filter((part) => !isFileEditDataPart(part)),
+            fileEditDataPart(snapshot, turnId),
+          ],
+        },
+  );
 }
 
 /** 保存后台事件的原始结构，模型提示正文仅在模型投影时生成。 */

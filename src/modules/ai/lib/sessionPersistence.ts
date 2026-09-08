@@ -13,6 +13,7 @@ import {
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import { commitSession, type SessionFile } from "@/modules/ai/lib/sessions";
+import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 
 export type SessionCommitCursor = {
   persistedMessages: number;
@@ -50,24 +51,38 @@ export async function persistTurnCheckpoint(
   messages: UIMessage[],
   event: TurnEvent,
 ) {
+  const edits = peekFileEditRuntime(session.id)?.pending();
   const result = await commitSession({
     ...session,
-    messages: serializeSessionMessages(
-      [
-        ...uncommittedConversationMessages(messages, cursor.committedParts),
+    messages: [
+      ...serializeSessionMessages(
+        [
+          ...uncommittedConversationMessages(messages, cursor.committedParts),
+          {
+            id: "event",
+            role: "assistant",
+            parts: [conversationEventPart(event)],
+          },
+        ],
         {
-          id: "event",
-          role: "assistant",
-          parts: [conversationEventPart(event)],
+          timestamp: new Date(session.updatedAt).toISOString(),
+          turnId: cursor.turnId,
+          turnStatus: "running",
         },
-      ],
-      {
-        timestamp: new Date(session.updatedAt).toISOString(),
-        turnId: cursor.turnId,
-        turnStatus: "running",
-      },
-    ),
+      ),
+      ...(edits?.snapshot.calls.length
+        ? [
+            {
+              role: "display" as const,
+              content: edits.snapshot,
+              timestamp: new Date(session.updatedAt).toISOString(),
+              turn_id: cursor.turnId,
+            },
+          ]
+        : []),
+    ],
   });
+  if (edits) peekFileEditRuntime(session.id)?.acknowledge(edits.count);
   cursor.committedParts = (messages[0]?.parts.length ?? 0) + 1;
   return result;
 }
@@ -81,6 +96,8 @@ export async function persistCompletedTurn(
   snapshots: SubagentDisplaySnapshot[],
 ) {
   assertHistory(cursor, messages);
+  await peekFileEditRuntime(session.id)?.settled();
+  const edits = peekFileEditRuntime(session.id)?.pending();
   const options = {
     timestamp: new Date(session.updatedAt).toISOString(),
     turnId: cursor.turnId,
@@ -97,8 +114,19 @@ export async function persistCompletedTurn(
         options,
       ),
       ...serializeSubagentDisplaySnapshots(snapshots, options),
+      ...(edits?.snapshot.calls.length
+        ? [
+            {
+              role: "display" as const,
+              content: edits.snapshot,
+              timestamp: options.timestamp,
+              turn_id: cursor.turnId,
+            },
+          ]
+        : []),
     ],
   });
+  if (edits) peekFileEditRuntime(session.id)?.acknowledge(edits.count);
   cursor.persistedMessages = messages.length;
   cursor.committedParts = 0;
   return result;
