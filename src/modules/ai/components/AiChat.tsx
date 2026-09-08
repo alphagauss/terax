@@ -619,7 +619,7 @@ const RenderedMessage = memo(function RenderedMessage({
         data-conversation-message-id={message.id}
         className="group/message"
       >
-        <MessageContent>
+        <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
           {messageMetadata(message).guided ? (
             <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
               {t("chat.guided")}

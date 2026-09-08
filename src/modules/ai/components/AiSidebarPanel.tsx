@@ -109,7 +109,7 @@ export function AiSidebarPanel({
     );
   });
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-[12px]">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-[12px] dark:bg-sidebar">
       {visible &&
         (sessionId ? (
           <SessionBody
@@ -238,7 +238,7 @@ function Header({
   const newSession = useChatStore((s) => s.newSession);
 
   return (
-    <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-2.5">
+    <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-sidebar px-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         <SessionPicker />
         {messages !== undefined ? (

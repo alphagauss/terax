@@ -89,7 +89,7 @@ export function AiSidebarComposer() {
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
-      <div className="flex flex-col gap-2 rounded-2xl border border-border/70 bg-background/95 p-2.5 shadow-sm">
+      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-background p-2.5 shadow-sm">
         <input
           ref={fileInputRef}
           type="file"
@@ -512,7 +512,7 @@ function ModelDropdown() {
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.stopPropagation()}
             placeholder={t("statusBar.searchPlaceholder")}
-            className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground/60"
+            className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           />
         </div>
 

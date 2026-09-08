@@ -43,7 +43,7 @@ export function AiSidebarPanel({
   return (
     <Suspense
       fallback={
-        <div className="flex h-full items-center justify-center bg-sidebar text-xs text-muted-foreground">
+        <div className="flex h-full items-center justify-center bg-background text-xs text-muted-foreground dark:bg-sidebar">
           {t("loading")}
         </div>
       }

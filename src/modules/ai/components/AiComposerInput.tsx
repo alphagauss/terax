@@ -307,7 +307,7 @@ export function AiComposerInput() {
               rows={1}
               className={cn(
                 "max-h-40 flex-1 resize-none bg-transparent text-[13px] leading-relaxed outline-none",
-                "placeholder:text-muted-foreground/60",
+                "placeholder:text-muted-foreground",
                 "disabled:cursor-not-allowed",
               )}
             />
