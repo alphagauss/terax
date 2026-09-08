@@ -7,11 +7,21 @@ import { startChatMessage } from "@/modules/ai/store/chatRuntime";
 import { chats, useChatStore } from "@/modules/ai/store/chatStore";
 import {
   channelReplyText,
+  ensureChannelSession,
   runChannelTurn,
 } from "@/modules/channels/agentSession";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { UIMessage } from "ai";
 import { expect, it, vi } from "vitest";
+import { commitSession } from "@/modules/ai/lib/sessions";
+vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
+  ...(await importOriginal()),
+  commitSession: vi.fn(),
+}));
+vi.mock("@/modules/workspace", async (importOriginal) => ({
+  ...(await importOriginal()),
+  prepareDefaultWorkspaceRoot: async () => "D:/workspace",
+}));
 
 vi.mock("@/lib/platform", () => ({ HOST_PLATFORM: "windows" }));
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
@@ -122,11 +132,9 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
     defaultModel: { providerId: "builtin:deepseek", modelId: "deepseek-chat" },
   });
   chats.set(connection.sessionId, previous as never);
-  useChatStore
-    .getState()
-    .patchAgentMeta(connection.sessionId, {
-      commitError: "previous save failed",
-    });
+  useChatStore.getState().patchAgentMeta(connection.sessionId, {
+    commitError: "previous save failed",
+  });
   const commit = vi
     .spyOn(useChatStore.getState(), "commitMessages")
     .mockImplementation(async () => {
@@ -165,4 +173,30 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
     commit.mockRestore();
     chats.clear();
   }
+});
+
+it("creates a Channel identity without persisting mutable prompts and tools", async () => {
+  useChatStore.setState({ sessions: [] });
+  vi.mocked(commitSession).mockResolvedValue({
+    id: "channel-session",
+  } as never);
+  await ensureChannelSession({
+    id: "connection",
+    sessionId: "channel-session",
+    kind: "weixin",
+    name: "WeChat",
+    enabled: true,
+    accountId: "owner",
+    busyMessageMode: "queue",
+  });
+  expect(commitSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      cwd: "D:/workspace",
+      metadata: {
+        title: "WeChat",
+        channelId: "connection",
+        agent: { id: "builtin:channel", name: "Channel", icon: "spark" },
+      },
+    }),
+  );
 });

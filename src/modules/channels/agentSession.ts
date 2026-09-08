@@ -5,7 +5,7 @@
 
 import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import i18n from "@/i18n";
-import { MAIN_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
+import { CHANNEL_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
 import { commitSession } from "@/modules/ai/lib/sessions";
 import {
   loadChat,
@@ -47,7 +47,7 @@ export async function ensureChannelSession(
   const metadata = {
     title: connection.name,
     channelId: connection.id,
-    agent: snapshotAgent(MAIN_AGENT),
+    agent: snapshotAgent(CHANNEL_AGENT),
   };
   const meta = await commitSession({
     id: connection.sessionId,

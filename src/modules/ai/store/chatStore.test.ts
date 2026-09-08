@@ -153,7 +153,7 @@ describe("chat store multi-process lifecycle", () => {
     sessionMetadata.clear();
     pendingTurns.clear();
     useAgentsStore.setState({
-      customAgents: [],
+      agents: [],
       draftAgentId: MAIN_AGENT_ID,
     });
     useSessionAttentionStore.setState({
@@ -590,12 +590,13 @@ describe("chat store multi-process lifecycle", () => {
   it("freezes the selected Custom Agent when a draft becomes a session", () => {
     const draftId = "44444444-4444-4444-8444-444444444444";
     useAgentsStore.setState({
-      customAgents: [
+      agents: [
         {
           id: "a-review",
           name: "Reviewer",
           description: "Review code",
           instructions: "Review carefully.",
+          workspaceFiles: ["AGENTS.md"],
           icon: "reviewer",
           tools: ["read_file", "grep"],
         },
@@ -628,9 +629,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(sessionMetadata.get(draftId)?.agent).toEqual({
       id: "a-review",
       name: "Reviewer",
-      instructions: "Review carefully.",
       icon: "reviewer",
-      tools: ["read_file", "grep"],
     });
     expect(useAgentsStore.getState().draftAgentId).toBe(MAIN_AGENT_ID);
   });

@@ -305,7 +305,7 @@ export const pendingTurns = new Map<
 >();
 
 /** 同一 turn 的提交游标只在原子写入成功后推进。 */
-function pendingTurn(id: string) {
+export function pendingTurn(id: string) {
   let turn = pendingTurns.get(id);
   if (!turn) {
     turn = { id: newTurnId(), committedParts: 0 };

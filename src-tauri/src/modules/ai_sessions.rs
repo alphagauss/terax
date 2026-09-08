@@ -49,10 +49,6 @@ use std::time::Duration;
 use std::time::UNIX_EPOCH;
 use uuid::Uuid;
 
-const MAIN_AGENT_ID: &str = "builtin:main";
-const MAIN_AGENT_NAME: &str = "Terax";
-const MAIN_AGENT_ICON: &str = "coder";
-
 /// 前端与 Rust 之间传递的会话文件内容。
 ///
 /// 读取时 messages 是完整记录，提交时 messages 只包含本次新增记录。
@@ -214,40 +210,23 @@ fn validate_external_agent_metadata(metadata: &Map<String, Value>) -> Result<(),
     Ok(())
 }
 
-/// 校验可选 Agent 快照，缺失字段仅用于兼容归入主 Agent 的旧会话。
+/// 会话只接受完整身份，不持久化可变的指令和工具配置。
 fn validate_agent_metadata(metadata: &Map<String, Value>) -> Result<(), String> {
-    let Some(value) = metadata.get("agent") else {
-        return Ok(());
-    };
-    let agent = value
-        .as_object()
+    let agent = metadata
+        .get("agent")
+        .and_then(Value::as_object)
         .ok_or_else(|| "session agent must be an object".to_string())?;
-    for field in ["id", "name", "instructions", "icon"] {
-        if !agent.get(field).is_some_and(Value::is_string) {
-            return Err(format!("session agent {field} must be a string"));
+    if agent.len() != 3 {
+        return Err("session agent must contain only id, name and icon".to_string());
+    }
+    for field in ["id", "name", "icon"] {
+        if agent
+            .get(field)
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            return Err(format!("session agent {field} must be a nonempty string"));
         }
-    }
-    if agent
-        .get("id")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-        || agent
-            .get("name")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        || agent
-            .get("icon")
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-    {
-        return Err("session agent identity must not be empty".to_string());
-    }
-    let tools = agent
-        .get("tools")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "session agent tools must be an array".to_string())?;
-    if !tools.iter().all(Value::is_string) {
-        return Err("session agent tools must contain strings".to_string());
     }
     Ok(())
 }
@@ -364,7 +343,7 @@ fn commit_session(
             return Err("session channel ownership must not change".into());
         }
         if existing.metadata.get("agent") != update.metadata.get("agent") {
-            return Err("session agent snapshot must not change".to_string());
+            return Err("session agent identity must not change".to_string());
         }
         match (
             existing.metadata.get("externalAgent"),
@@ -400,49 +379,26 @@ fn commit_session(
     metadata(root, id)
 }
 
-/// 从不透明业务 metadata 中读取稳定的 Agent 归属，旧会话归入主 Agent。
+/// 读取已通过完整身份校验的会话归属。
 fn session_agent_id(metadata: &Map<String, Value>) -> &str {
-    metadata
-        .get("agent")
-        .and_then(Value::as_object)
-        .and_then(|agent| agent.get("id"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(MAIN_AGENT_ID)
+    metadata["agent"]["id"]
+        .as_str()
+        .expect("validated agent id")
 }
 
-/// 将 Agent 快照投影为会话列表需要的轻量显示字段。
 fn session_agent_summary(metadata: &Map<String, Value>) -> (String, String, String) {
-    let Some(agent) = metadata.get("agent").and_then(Value::as_object) else {
-        return (
-            MAIN_AGENT_ID.to_string(),
-            MAIN_AGENT_NAME.to_string(),
-            MAIN_AGENT_ICON.to_string(),
-        );
-    };
-    let id = agent
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(MAIN_AGENT_ID);
-    if id == MAIN_AGENT_ID {
-        return (
-            MAIN_AGENT_ID.to_string(),
-            MAIN_AGENT_NAME.to_string(),
-            MAIN_AGENT_ICON.to_string(),
-        );
-    }
-    let name = agent
-        .get("name")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(MAIN_AGENT_NAME);
-    let icon = agent
-        .get("icon")
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(MAIN_AGENT_ICON);
-    (id.to_string(), name.to_string(), icon.to_string())
+    let agent = &metadata["agent"];
+    (
+        session_agent_id(metadata).to_string(),
+        agent["name"]
+            .as_str()
+            .expect("validated agent name")
+            .to_string(),
+        agent["icon"]
+            .as_str()
+            .expect("validated agent icon")
+            .to_string(),
+    )
 }
 
 /// 从首行 metadata 和文件系统属性构造会话列表项。
@@ -571,9 +527,6 @@ pub fn commit(
         }
     }
     let agent_id = session_agent_id(&session.metadata).to_string();
-    if agent_id == MAIN_AGENT_ID {
-        return commit_with_run_lock(&root, state, id, &session, &environment_key);
-    }
     shared_store::with_ai_agent(&agent_id, || {
         commit_with_run_lock(&root, state, id, &session, &environment_key)
     })
@@ -731,7 +684,8 @@ mod tests {
             environment_key: "local".to_string(),
             cwd: "D:/workspace/project".to_string(),
             metadata: serde_json::from_value(json!({
-                "title": title
+                "title": title,
+                "agent": { "id": "builtin:main", "name": "Terax", "icon": "coder" }
             }))
             .unwrap(),
             messages: vec![json!({
@@ -749,9 +703,7 @@ mod tests {
             json!({
                 "id": agent_id,
                 "name": "Reviewer",
-                "icon": "reviewer",
-                "instructions": "Review carefully.",
-                "tools": ["read_file", "grep"]
+                "icon": "reviewer"
             }),
         );
         value
@@ -843,6 +795,7 @@ mod tests {
                     cwd: "D:/workspace/project".to_string(),
                     metadata: serde_json::from_value(json!({
                         "title": "metadata only",
+                        "agent": { "id": "builtin:main", "name": "Terax", "icon": "coder" },
                         "systemPrompt": "large inspection-only value"
                     }))
                     .unwrap(),
@@ -863,7 +816,7 @@ mod tests {
     }
 
     #[test]
-    fn list_projects_agent_identity_and_legacy_sessions_as_main() {
+    fn list_projects_main_and_custom_agent_identities() {
         let dir = tempfile::tempdir().unwrap();
         let custom_id = Uuid::new_v4();
         let main_id = Uuid::new_v4();
@@ -873,7 +826,7 @@ mod tests {
             "local",
         )
         .unwrap();
-        commit_session(dir.path(), &session(main_id, "legacy"), "local").unwrap();
+        commit_session(dir.path(), &session(main_id, "main"), "local").unwrap();
 
         let sessions = list_sessions(dir.path()).unwrap();
         let custom = sessions
@@ -887,9 +840,9 @@ mod tests {
         assert_eq!(custom.agent_id, "a-review");
         assert_eq!(custom.agent_name, "Reviewer");
         assert_eq!(custom.agent_icon, "reviewer");
-        assert_eq!(main.agent_id, MAIN_AGENT_ID);
-        assert_eq!(main.agent_name, MAIN_AGENT_NAME);
-        assert_eq!(main.agent_icon, MAIN_AGENT_ICON);
+        assert_eq!(main.agent_id, "builtin:main");
+        assert_eq!(main.agent_name, "Terax");
+        assert_eq!(main.agent_icon, "coder");
     }
 
     #[test]
@@ -1017,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_change_a_session_agent_snapshot() {
+    fn refuses_to_change_a_session_agent_identity() {
         let dir = tempfile::tempdir().unwrap();
         let id = Uuid::new_v4();
         commit_session(
@@ -1028,18 +981,15 @@ mod tests {
         .unwrap();
 
         let mut changed = custom_session(id, "changed", "a-review");
-        changed.metadata["agent"]["instructions"] = json!("Different instructions.");
+        changed.metadata["agent"]["id"] = json!("a-other");
         assert_eq!(
             commit_session(dir.path(), &changed, "local").unwrap_err(),
-            "session agent snapshot must not change"
+            "session agent identity must not change"
         );
 
         let stored = read_session(dir.path(), id).unwrap();
         assert_eq!(stored.metadata["title"], "review");
-        assert_eq!(
-            stored.metadata["agent"]["instructions"],
-            "Review carefully."
-        );
+        assert_eq!(stored.metadata["agent"]["id"], "a-review");
     }
 
     #[test]
@@ -1107,9 +1057,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_partial_agent_snapshots_but_accepts_legacy_sessions() {
+    fn rejects_missing_partial_and_old_agent_snapshots() {
         let id = Uuid::new_v4();
-        assert!(validate_session_file(&session(id, "legacy")).is_ok());
+        let mut missing = session(id, "missing");
+        missing.metadata.remove("agent");
+        assert!(validate_session_file(&missing).is_err());
+        let mut old = session(id, "old");
+        old.metadata["agent"]["instructions"] = json!("old instructions");
+        assert!(validate_session_file(&old).is_err());
         let mut partial = session(id, "partial");
         partial
             .metadata

@@ -1,12 +1,25 @@
 /**
- * 本文件构造会话级稳定系统提示和发送给模型的消息序列。
- * 执行环境、目录和指令只在会话首次请求时冻结，不持有 UI 或审批状态。
+ * 本文件构造每轮稳定系统提示和发送给模型的消息序列。
+ * 执行环境和目录属于会话，指令在每轮开始时冻结，不持有 UI 或审批状态。
  */
 
 import type { ModelMessage, SystemModelMessage } from "ai";
 import type { HostPlatform } from "@/lib/platform";
-import { SYSTEM_PROMPT, type ProviderId } from "@/modules/ai/config";
+import type { ProviderId } from "@/modules/ai/config";
 import type { WorkspaceEnv } from "@/modules/workspace";
+
+import CORE_PROMPT from "@/modules/ai/prompts/core";
+import type { WorkspaceInstruction } from "./projectInstructions";
+
+export const PROMPT_SECTION_ORDER = [
+  "core",
+  "environment",
+  "workspace",
+  "agent",
+  "custom",
+] as const;
+export type PromptSectionKind = (typeof PROMPT_SECTION_ORDER)[number];
+export type PromptSection = { kind: PromptSectionKind; content: string };
 
 export type AgentExecutionEnvironment = {
   platform: "Windows" | "macOS" | "Linux" | "Unknown";
@@ -19,7 +32,7 @@ type BuildAgentSystemPromptOptions = {
   environment: AgentExecutionEnvironment;
   agent: { name: string; instructions: string };
   customInstructions: string | undefined;
-  projectInstructions: string | null;
+  projectInstructions: readonly WorkspaceInstruction[];
 };
 
 export type PreparedAgentPrompt = {
@@ -62,16 +75,16 @@ export function resolveAgentExecutionEnvironment(
 }
 
 /**
- * 构造会话首次请求后保持不变的完整系统提示词。
+ * 构造一轮内保持不变的系统提示词分段。
  * 环境块使用受控枚举，并将工作目录编码为 JSON string，避免特殊路径改变提示结构。
  */
-export function buildAgentSystemPrompt({
+export function buildAgentPromptSections({
   cwd,
   environment,
   agent,
   customInstructions,
   projectInstructions,
-}: BuildAgentSystemPromptOptions): string {
+}: BuildAgentSystemPromptOptions): PromptSection[] {
   const executionEnvironment =
     environment.workspace === "Local"
       ? `${environment.platform} Local`
@@ -82,20 +95,60 @@ export function buildAgentSystemPrompt({
 Execution environment: ${executionEnvironment}
 Shell tool default: ${environment.defaultShell}
 Working directory: ${JSON.stringify(cwd)}
-Relative paths passed to tools resolve from this directory. Use the default shell's syntax unless shell_exec explicitly selects another shell. Terminal scrollback is not included automatically; use get_terminal_output when it is relevant. This environment is fixed for the session.`;
-  const normalizedProject = normalizeInstructions(projectInstructions);
-  const normalizedAgent = normalizeInstructions(agent.instructions);
-  const normalizedCustom = normalizeInstructions(customInstructions);
-  const instructionsBlock = normalizedProject
-    ? `\n\n## PROJECT INSTRUCTIONS: AGENTS.md\n${normalizedProject}`
+Relative paths passed to tools resolve from this directory. Use the default shell's syntax unless shell_exec explicitly selects another shell. This environment is fixed for the session.`;
+  return composeAgentPromptSections({
+    environment: environmentBlock,
+    workspace: projectInstructions.map(({ path, content }) =>
+      instructionBlock(`PROJECT INSTRUCTIONS: ${path}`, content),
+    ),
+    agent,
+    customInstructions,
+  });
+}
+
+/** 配置页与运行时共用顺序及静态段；配置页为动态内容传入明确的说明。 */
+export function composeAgentPromptSections(options: {
+  environment: string;
+  workspace: string[];
+  agent: { name: string; instructions: string };
+  customInstructions: string | undefined;
+}): PromptSection[] {
+  const blocks: Record<PromptSectionKind, string[]> = {
+    core: [normalizeInstructions(CORE_PROMPT)],
+    environment: [options.environment],
+    workspace: options.workspace,
+    agent: [
+      instructionBlock(
+        `AGENT INSTRUCTIONS: ${options.agent.name}`,
+        options.agent.instructions,
+      ),
+    ],
+    custom: [
+      normalizeInstructions(options.customInstructions)
+        ? `## USER CUSTOM INSTRUCTIONS\nFollow these unless they conflict with higher-priority safety rules.\n${normalizeInstructions(options.customInstructions)}`
+        : "",
+    ],
+  };
+  return PROMPT_SECTION_ORDER.flatMap((kind) =>
+    blocks[kind].map((content) => ({ kind, content })),
+  );
+}
+
+function instructionBlock(title: string, content: string): string {
+  const normalized = normalizeInstructions(content);
+  return normalized
+    ? `## ${title.replace(/[\r\n]+/g, " ").trim()}\n${normalized}`
     : "";
-  const agentBlock = normalizedAgent
-    ? `\n\n## AGENT INSTRUCTIONS: ${agent.name.replace(/[\r\n]+/g, " ").trim()}\n${normalizedAgent}`
-    : "";
-  const customBlock = normalizedCustom
-    ? `\n\n## USER CUSTOM INSTRUCTIONS\nFollow these unless they conflict with higher-priority safety rules.\n${normalizedCustom}`
-    : "";
-  return `${SYSTEM_PROMPT}\n\n${environmentBlock}${instructionsBlock}${agentBlock}${customBlock}`;
+}
+
+/** 将有序分段拼成模型实际使用的完整系统提示。 */
+export function buildAgentSystemPrompt(
+  options: BuildAgentSystemPromptOptions,
+): string {
+  return buildAgentPromptSections(options)
+    .map((section) => section.content)
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** 统一指令文本换行并忽略无语义的首尾空白，避免产生偶发的 prompt 差异。 */

@@ -1,5 +1,5 @@
 /**
- * 本文件呈现固定主 Agent、Custom Agent、工具权限及提示片段设置。
+ * 本文件呈现内置和自定义智能体、工具权限及提示片段设置。
  * Custom Agent 删除会级联删除其跨 Workspace 会话，运行中会话由后端拒绝删除。
  */
 
@@ -32,13 +32,17 @@ import {
   agentDisplayDescription,
   agentDisplayName,
   MAIN_AGENT,
+  builtinAgent,
+  CHANNEL_AGENT_ID,
+  parseWorkspaceFiles,
 } from "@/modules/ai/lib/agents";
 import {
   AGENT_TOOL_GROUPS,
-  AGENT_TOOL_IDS,
-  agentToolGroupEnabled,
-  setAgentToolGroupEnabled,
+  availableAgentTools,
+  setAgentToolEnabled,
 } from "@/modules/ai/lib/agentTools";
+import { composeAgentPromptSections } from "@/modules/ai/lib/prompt";
+import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
 import { listSessions } from "@/modules/ai/lib/sessions";
 import {
   isValidHandle,
@@ -74,11 +78,11 @@ const ICON_OPTIONS: AgentIconId[] = [
   "spark",
 ];
 
-/** 固定主 Agent、Custom Agent、工具权限及复用片段设置区域。 */
+/** 内置与自定义智能体、工具权限及复用片段设置区域。 */
 export function AgentsSection() {
   const { t } = useTranslation();
   const customInstructions = usePreferencesStore((s) => s.customInstructions);
-  const customAgents = useAgentsStore((s) => s.customAgents);
+  const agents = useAgentsStore((s) => s.agents);
   const upsertAgent = useAgentsStore((s) => s.upsert);
   const removeAgent = useAgentsStore((s) => s.remove);
   const hydrateAgents = useAgentsStore((s) => s.hydrate);
@@ -151,9 +155,10 @@ export function AgentsSection() {
                 id: newAgentId(),
                 name: t("agents.list.newAgentName"),
                 description: "",
-                instructions: "",
+                instructions: MAIN_AGENT.instructions,
+                workspaceFiles: [...MAIN_AGENT.workspaceFiles],
                 icon: "spark",
-                tools: [...AGENT_TOOL_IDS],
+                tools: [...MAIN_AGENT.tools],
               })
             }
           >
@@ -162,19 +167,14 @@ export function AgentsSection() {
           </Button>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {[
-            { ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] },
-            ...customAgents,
-          ].map((a) => (
+          {agents.map((a) => (
             <AgentCard
               key={a.id}
               agent={a}
-              main={a.id === MAIN_AGENT.id}
-              onEdit={a.id === MAIN_AGENT.id ? null : () => setEditingAgent(a)}
+              builtIn={Boolean(builtinAgent(a.id))}
+              onEdit={() => setEditingAgent(a)}
               onDelete={
-                a.id === MAIN_AGENT.id
-                  ? null
-                  : () => void requestAgentDeletion(a)
+                builtinAgent(a.id) ? null : () => void requestAgentDeletion(a)
               }
             />
           ))}
@@ -272,10 +272,10 @@ export function AgentsSection() {
 
       <AgentEditorDialog
         agent={editingAgent}
-        existing={customAgents}
+        existing={agents}
         onClose={() => setEditingAgent(null)}
-        onSave={(a) => {
-          upsertAgent(a);
+        onSave={async (a) => {
+          await upsertAgent(a);
           setEditingAgent(null);
         }}
       />
@@ -333,12 +333,12 @@ export function AgentsSection() {
 
 function AgentCard({
   agent,
-  main,
+  builtIn,
   onEdit,
   onDelete,
 }: {
   agent: Agent;
-  main: boolean;
+  builtIn: boolean;
   onEdit: (() => void) | null;
   onDelete: (() => void) | null;
 }) {
@@ -353,9 +353,9 @@ function AgentCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="flex items-center gap-1.5 text-[12.5px] font-medium">
             {agentDisplayName(agent)}
-            {main ? (
+            {builtIn ? (
               <span className="rounded bg-muted/50 px-1 py-0.5 text-[9px] tracking-wide text-muted-foreground uppercase">
-                {t("agents.list.main")}
+                {t("agents.list.builtin")}
               </span>
             ) : null}
           </span>
@@ -366,9 +366,7 @@ function AgentCard({
       </div>
       <div className="mt-0.5 flex items-center justify-between gap-1">
         <span className="text-[10px] text-muted-foreground">
-          {main
-            ? t("agents.list.allTools")
-            : t("agents.list.toolCount", { count: agent.tools.length })}
+          {t("agents.list.toolCount", { count: agent.tools.length })}
         </span>
         <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           {onEdit ? (
@@ -399,7 +397,7 @@ function AgentCard({
 }
 
 /** 编辑智能体草稿，字段标签关联控件；取消时不提交配置。 */
-function AgentEditorDialog({
+export function AgentEditorDialog({
   agent,
   existing,
   onClose,
@@ -408,19 +406,54 @@ function AgentEditorDialog({
   agent: Agent | null;
   existing: Agent[];
   onClose: () => void;
-  onSave: (a: Agent) => void;
+  onSave: (a: Agent) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<Agent | null>(agent);
-  useEffect(() => setDraft(agent), [agent]);
+  const [workspaceFiles, setWorkspaceFiles] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const customInstructions = usePreferencesStore(
+    (state) => state.customInstructions,
+  );
+  useEffect(() => {
+    setDraft(agent);
+    setWorkspaceFiles(agent?.workspaceFiles.join(", ") ?? "");
+    setSaveError(false);
+  }, [agent]);
   if (!draft) return null;
 
+  const defaults = builtinAgent(draft.id);
   const isNew = !existing.some((a) => a.id === draft.id);
-  const canSave =
-    draft.name.trim().length > 0 && draft.instructions.trim().length > 0;
+  let parsedFiles: string[] = [];
+  let invalidFiles = false;
+  try {
+    parsedFiles = parseWorkspaceFiles(workspaceFiles);
+  } catch {
+    invalidFiles = true;
+  }
+  const canSave = draft.name.trim().length > 0 && !invalidFiles && !saving;
+  const availableTools = availableAgentTools(draft.id === CHANNEL_AGENT_ID);
+  const sections = composeAgentPromptSections({
+    environment: t("agents.prompt.environmentRuntime"),
+    workspace: [t("agents.prompt.workspaceRuntime")],
+    agent: draft,
+    customInstructions,
+  });
+  const save = async () => {
+    setSaving(true);
+    setSaveError(false);
+    try {
+      await onSave({ ...draft, workspaceFiles: parsedFiles });
+    } catch {
+      setSaveError(true);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <Dialog open={!!agent} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={!!agent} onOpenChange={(o) => !o && !saving && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
@@ -430,121 +463,225 @@ function AgentEditorDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="-mx-2 max-h-[calc(100vh-14rem)] overflow-y-auto px-2 flex flex-col gap-3">
-          <div className="flex gap-2">
-            <FormField label={t("agents.agentDialog.icon")}>
-              <div className="flex flex-wrap gap-1">
-                {ICON_OPTIONS.map((id) => {
-                  const Icon = AGENT_ICONS[id] ?? SparklesIcon;
-                  const active = draft.icon === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setDraft({ ...draft, icon: id })}
-                      className={cn(
-                        "flex size-7 items-center justify-center rounded-md border transition-colors",
-                        active
-                          ? "border-foreground/40 bg-interactive-active"
-                          : "border-border/60 hover:bg-interactive-hover",
-                      )}
-                    >
-                      <HugeiconsIcon icon={Icon} size={13} strokeWidth={1.75} />
-                    </button>
-                  );
-                })}
-              </div>
-            </FormField>
+          <fieldset
+            disabled={saving || Boolean(defaults)}
+            className="flex flex-col gap-3"
+          >
+            <div className="flex gap-2">
+              <FormField label={t("agents.agentDialog.icon")}>
+                <div className="flex flex-wrap gap-1">
+                  {ICON_OPTIONS.map((id) => {
+                    const Icon = AGENT_ICONS[id] ?? SparklesIcon;
+                    const active = draft.icon === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, icon: id })}
+                        className={cn(
+                          "flex size-7 items-center justify-center rounded-md border transition-colors",
+                          active
+                            ? "border-foreground/40 bg-interactive-active"
+                            : "border-border/60 hover:bg-interactive-hover",
+                        )}
+                      >
+                        <HugeiconsIcon
+                          icon={Icon}
+                          size={13}
+                          strokeWidth={1.75}
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              </FormField>
+              <FormField
+                label={t("agents.agentDialog.name")}
+                htmlFor="agent-name"
+                className="flex-1"
+              >
+                <Input
+                  id="agent-name"
+                  value={draft.name}
+                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  placeholder={t("agents.agentDialog.namePlaceholder")}
+                />
+              </FormField>
+            </div>
             <FormField
-              label={t("agents.agentDialog.name")}
-              htmlFor="agent-name"
-              className="flex-1"
+              label={t("agents.agentDialog.description")}
+              htmlFor="agent-description"
             >
               <Input
-                id="agent-name"
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder={t("agents.agentDialog.namePlaceholder")}
+                id="agent-description"
+                value={draft.description}
+                onChange={(e) =>
+                  setDraft({ ...draft, description: e.target.value })
+                }
+                placeholder={t("agents.agentDialog.descriptionPlaceholder")}
               />
             </FormField>
-          </div>
-          <FormField
-            label={t("agents.agentDialog.description")}
-            htmlFor="agent-description"
-          >
-            <Input
-              id="agent-description"
-              value={draft.description}
-              onChange={(e) =>
-                setDraft({ ...draft, description: e.target.value })
-              }
-              placeholder={t("agents.agentDialog.descriptionPlaceholder")}
-            />
-          </FormField>
-          <FormField
-            label={t("agents.agentDialog.instructions")}
-            htmlFor="agent-instructions"
-          >
-            <Textarea
-              id="agent-instructions"
-              value={draft.instructions}
-              onChange={(e) =>
-                setDraft({ ...draft, instructions: e.target.value })
-              }
-              placeholder={t("agents.agentDialog.instructionsPlaceholder")}
-              className="min-h-40 resize-y leading-relaxed"
-            />
-          </FormField>
+          </fieldset>
+          <SectionHeading>{t("agents.prompt.title")}</SectionHeading>
+          <p className="text-muted-foreground">
+            {t("agents.prompt.description")}
+          </p>
+          {sections.map((section) => (
+            <section key={section.kind} className="flex flex-col gap-2">
+              <SectionHeading>
+                {t(`agents.prompt.${section.kind}`)}
+              </SectionHeading>
+              {section.kind === "agent" ? (
+                <>
+                  {section.content && (
+                    <code>{section.content.split("\n", 1)[0]}</code>
+                  )}
+                  <FormField
+                    label={t("agents.agentDialog.instructions")}
+                    htmlFor="agent-instructions"
+                  >
+                    <Textarea
+                      id="agent-instructions"
+                      value={draft.instructions}
+                      disabled={saving}
+                      onChange={(e) =>
+                        setDraft({ ...draft, instructions: e.target.value })
+                      }
+                      className="min-h-40 resize-y font-mono"
+                    />
+                  </FormField>
+                  {defaults && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() =>
+                        setDraft({
+                          ...draft,
+                          instructions: defaults.instructions,
+                        })
+                      }
+                    >
+                      {t("agents.prompt.resetInstructions")}
+                    </Button>
+                  )}
+                </>
+              ) : section.kind === "workspace" ? (
+                <>
+                  <FormField
+                    label={t("agents.prompt.files")}
+                    htmlFor="agent-workspace-files"
+                  >
+                    <Input
+                      id="agent-workspace-files"
+                      value={workspaceFiles}
+                      disabled={saving}
+                      aria-invalid={invalidFiles}
+                      onChange={(e) => setWorkspaceFiles(e.target.value)}
+                    />
+                  </FormField>
+                  <p className="text-muted-foreground">{section.content}</p>
+                  {invalidFiles && (
+                    <p role="alert" className="text-destructive">
+                      {t("agents.prompt.invalidFiles")}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono">
+                  {section.content || t("agents.prompt.empty")}
+                </pre>
+              )}
+            </section>
+          ))}
+          <details>
+            <summary className="cursor-pointer">
+              {t("agents.prompt.subagent")}
+            </summary>
+            <pre className="whitespace-pre-wrap break-words rounded-md bg-muted/40 p-2 font-mono">
+              {SUBAGENT_PROMPT}
+            </pre>
+          </details>
           <div className="flex flex-col gap-1.5">
             <SectionHeading>{t("agents.agentDialog.tools")}</SectionHeading>
             <span className="text-[11px] leading-4 text-muted-foreground">
               {t("agents.agentDialog.toolsDescription")}
             </span>
             <div className="divide-y divide-border/40 rounded-lg border border-border/60 bg-card/60">
-              {AGENT_TOOL_GROUPS.map((group) => {
-                const checked = agentToolGroupEnabled(draft.tools, group.id);
-                return (
-                  <label
-                    key={group.id}
-                    htmlFor={`agent-tool-${group.id}`}
-                    className="flex cursor-pointer items-start gap-2 px-3 py-2 first:rounded-t-lg last:rounded-b-lg transition-colors duration-control ease-standard hover:bg-interactive-hover focus-within:bg-interactive-hover"
-                  >
-                    <Checkbox
-                      id={`agent-tool-${group.id}`}
-                      checked={checked}
-                      onCheckedChange={(value) =>
-                        setDraft({
-                          ...draft,
-                          tools: setAgentToolGroupEnabled(
-                            draft.tools,
-                            group.id,
-                            value === true,
-                          ),
-                        })
-                      }
-                      className="mt-0.5"
-                    />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="text-[12.5px] leading-[18px] font-medium">
-                        {t(`agents.tools.${group.id}.label`)}
-                      </span>
-                      <span className="text-[11px] leading-4 text-muted-foreground">
-                        {t(`agents.tools.${group.id}.description`)}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
+              {AGENT_TOOL_GROUPS.map((group) => (
+                <section key={group.id} className="flex flex-col">
+                  <div className="px-3 py-2">
+                    <SectionHeading>
+                      {t(`agents.tools.${group.id}.label`)}
+                    </SectionHeading>
+                  </div>
+                  {group.tools.map((id) => {
+                    const unavailable = !availableTools.includes(id);
+                    return (
+                      <label
+                        key={id}
+                        htmlFor={`agent-tool-${id}`}
+                        className="flex items-start gap-2 px-3 py-2 hover:bg-interactive-hover"
+                      >
+                        <Checkbox
+                          id={`agent-tool-${id}`}
+                          checked={draft.tools.includes(id)}
+                          disabled={saving || unavailable}
+                          onCheckedChange={(value) =>
+                            setDraft({
+                              ...draft,
+                              tools: setAgentToolEnabled(
+                                draft.tools,
+                                id,
+                                value === true,
+                              ),
+                            })
+                          }
+                        />
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <code>{id}</code>
+                          <span className="text-muted-foreground">
+                            {t(`agents.toolDescriptions.${id}`)}
+                          </span>
+                          {unavailable && (
+                            <span className="text-muted-foreground">
+                              {t("agents.agentDialog.unavailable")}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </section>
+              ))}
             </div>
             <span className="text-[11px] leading-4 text-muted-foreground">
-              {t("agents.agentDialog.newSessionsOnly")}
+              {t("agents.agentDialog.nextTurn")}
             </span>
+            {defaults && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={() =>
+                  setDraft({ ...draft, tools: [...defaults.tools] })
+                }
+              >
+                {t("agents.agentDialog.resetTools")}
+              </Button>
+            )}
           </div>
         </div>
+        {saveError && (
+          <p role="alert" className="text-destructive">
+            {t("agents.agentDialog.saveFailed")}
+          </p>
+        )}
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" disabled={saving} onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button disabled={!canSave} onClick={() => onSave(draft)}>
+          <Button disabled={!canSave} onClick={() => void save()}>
             {t("common.save")}
           </Button>
         </DialogFooter>

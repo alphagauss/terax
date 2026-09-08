@@ -1,20 +1,25 @@
 /**
- * 本文件定义固定主 Agent、自定义 Agent 及其会话快照。
- * 自定义定义跨 Workspace 共享，会话只依赖首次发送时保存的运行快照。
+ * 本文件持久化内置与自定义智能体配置。
+ * 所有定义跨 Workspace 共享，配置按智能体记录精确写入。
  */
 
+import { publishAgentConfigurations } from "./agentConfiguration";
 import i18n from "@/i18n";
 import { readSharedStore, setSharedStoreKey } from "@/lib/sharedStore";
 import { invoke } from "@tauri-apps/api/core";
-import { normalizeAgentTools } from "./agentTools";
 
 export {
   MAIN_AGENT,
   MAIN_AGENT_ID,
+  CHANNEL_AGENT,
+  CHANNEL_AGENT_ID,
+  BUILTIN_AGENTS,
+  builtinAgent,
   normalizeAgentIcon,
   findAgent,
   snapshotAgent,
   parseSessionAgent,
+  parseWorkspaceFiles,
 } from "@/modules/ai/lib/agentDefinition";
 export type {
   Agent,
@@ -22,25 +27,39 @@ export type {
   SessionAgentSnapshot,
 } from "@/modules/ai/lib/agentDefinition";
 import {
-  MAIN_AGENT_ID,
-  normalizeAgentIcon,
+  builtinAgent,
+  resolveAgentRecords,
+  parseAgentRecord,
   type Agent,
 } from "@/modules/ai/lib/agentDefinition";
 const agentKey = (id: string) => `agent:${id}`;
 
-/** 读取所有有效 Custom Agent，并在内存中迁移旧版缺失的工具列表。 */
-export async function loadAgents(): Promise<Agent[]> {
-  const values = await readSharedStore("ai-agents");
-  return Object.entries(values)
-    .filter(([key]) => key.startsWith("agent:"))
-    .map(([key, value]) => parseCustomAgent(key, value))
-    .filter((agent): agent is Agent => agent !== null);
+let loadingAgents: Promise<Agent[]> | undefined;
+
+/** 串行读取并发布配置，避免保存与共享存储刷新交错时旧读取覆盖新值。 */
+export function loadAgents(): Promise<Agent[]> {
+  const load = async () => {
+    const agents = resolveAgentRecords(await readSharedStore("ai-agents"));
+    publishAgentConfigurations(agents);
+    return agents;
+  };
+  loadingAgents = loadingAgents ? loadingAgents.then(load, load) : load();
+  return loadingAgents;
 }
 
-/** 保存单个 Custom Agent，工具列表在写入前规范为稳定顺序。 */
-export function upsertCustomAgent(agent: Agent): Promise<void> {
-  const normalized = { ...agent, tools: normalizeAgentTools(agent.tools) };
-  return setSharedStoreKey("ai-agents", agentKey(agent.id), normalized);
+/** 保存单条配置；内置字段等于默认值时不持久化覆盖，空提示词仍是有效覆盖。 */
+export async function saveAgent(agent: Agent): Promise<void> {
+  const normalized = parseAgentRecord(agent.id, agent);
+  if (!normalized) throw new Error("Invalid agent configuration");
+  const defaults = builtinAgent(agent.id);
+  const value: Record<string, unknown> = defaults ? {} : { ...normalized };
+  if (defaults) {
+    for (const key of ["instructions", "tools", "workspaceFiles"] as const) {
+      if (JSON.stringify(normalized[key]) !== JSON.stringify(defaults[key]))
+        value[key] = normalized[key];
+    }
+  }
+  await setSharedStoreKey("ai-agents", agentKey(agent.id), value);
 }
 
 /**
@@ -57,46 +76,19 @@ export function newAgentId(): string {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-/** 解析 Agent 显示名称，固定主 Agent 支持运行时语言切换。 */
+/** 内置名称与说明按界面语言显示，自定义文本保持用户输入。 */
 export function agentDisplayName(agent: Pick<Agent, "id" | "name">): string {
-  return agent.id === MAIN_AGENT_ID
-    ? i18n.t("aiAgents:name.main", { defaultValue: agent.name })
+  return builtinAgent(agent.id)
+    ? i18n.t(`aiAgents:name.${agent.id.slice(8)}`, { defaultValue: agent.name })
     : agent.name;
 }
 
-/** 解析 Agent 显示描述，Custom Agent 保留用户输入。 */
 export function agentDisplayDescription(
   agent: Pick<Agent, "id" | "description">,
 ): string {
-  return agent.id === MAIN_AGENT_ID
-    ? i18n.t("aiAgents:desc.main", { defaultValue: agent.description })
+  return builtinAgent(agent.id)
+    ? i18n.t(`aiAgents:desc.${agent.id.slice(8)}`, {
+        defaultValue: agent.description,
+      })
     : agent.description;
-}
-
-/** 严格解析共享存储中的 Custom Agent，忽略损坏记录和保留 ID。 */
-function parseCustomAgent(key: string, value: unknown): Agent | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.id !== "string" ||
-    !record.id ||
-    record.id.startsWith("builtin:") ||
-    key !== agentKey(record.id) ||
-    typeof record.name !== "string" ||
-    !record.name.trim() ||
-    typeof record.description !== "string" ||
-    typeof record.instructions !== "string" ||
-    !record.instructions.trim()
-  ) {
-    return null;
-  }
-  const icon = normalizeAgentIcon(record.icon);
-  return {
-    id: record.id,
-    name: record.name,
-    description: record.description,
-    instructions: record.instructions,
-    icon,
-    tools: normalizeAgentTools(record.tools),
-  };
 }

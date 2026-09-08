@@ -422,7 +422,7 @@
   "agents": {
     "header": {
       "title": "智能体",
-      "description": "创建具有专属指令和工具的会话级智能体。"
+      "description": "管理智能体提示词、默认加载的工作区文件和可用工具。"
     },
     "customInstructions": {
       "label": "全局指令",
@@ -432,9 +432,8 @@
       "label": "智能体",
       "newAgent": "新建智能体",
       "newAgentName": "新智能体",
-      "main": "主智能体",
-      "allTools": "全部工具",
-      "toolCount": "{{count}} 个工具"
+      "toolCount": "{{count}} 个工具",
+      "builtin": "内置"
     },
     "snippets": {
       "label": "片段",
@@ -451,31 +450,28 @@
       "description": "描述",
       "descriptionPlaceholder": "一行说明，显示在智能体选择器中",
       "instructions": "指令",
-      "instructionsPlaceholder": "专属行为和规则。Terax 的核心指令保持不变。",
       "tools": "工具",
-      "toolsDescription": "这些工具会提供给智能体。需要审批的操作在执行前仍会请求确认。",
-      "newSessionsOnly": "指令和工具修改仅应用于新会话。"
+      "toolsDescription": "逐项选择工具。write_file 和 apply_patch 依赖 read_file；取消 read_file 会同时取消这两个编辑工具。工具授权规则仍然生效。",
+      "nextTurn": "保存后，新会话和既有会话的下一轮生效；正在执行的一轮保持当前配置。",
+      "resetTools": "恢复默认工具",
+      "unavailable": "Channels 不支持此工具：需要活动桌面终端。",
+      "saveFailed": "智能体保存失败，已保留编辑内容。"
     },
     "tools": {
       "workspaceRead": {
-        "label": "读取工作区",
-        "description": "读取文件、查找路径并搜索内容。"
+        "label": "读取工作区"
       },
       "workspaceWrite": {
-        "label": "修改工作区",
-        "description": "写入、补丁、移动、复制和删除文件，并自动包含读取能力。"
+        "label": "修改工作区"
       },
       "shell": {
-        "label": "Shell",
-        "description": "运行命令并管理后台进程。"
+        "label": "Shell"
       },
       "terminal": {
-        "label": "终端输出",
-        "description": "按需读取活动终端的回滚内容。"
+        "label": "终端输出"
       },
       "subagents": {
-        "label": "子智能体",
-        "description": "使用继承自当前智能体的权限委派聚焦任务。"
+        "label": "子智能体"
       }
     },
     "delete": {
@@ -501,6 +497,35 @@
       "errRequired": "必填。",
       "errFormat": "只能包含小写字母、数字和短横线。",
       "errInUse": "已被占用。"
+    },
+    "prompt": {
+      "title": "提示词配置",
+      "description": "各段按发送给模型的顺序展示，动态内容由实际会话确定。",
+      "core": "1. 通用系统提示词（只读）",
+      "environment": "2. 执行环境（运行时生成）",
+      "workspace": "3. 工作区指令文件",
+      "agent": "4. 智能体提示词",
+      "custom": "5. 全局自定义指令（此处只读）",
+      "environmentRuntime": "运行时根据会话 Workspace、操作系统、默认 Shell 和固定工作目录生成。",
+      "files": "默认加载的工作区文件",
+      "workspaceRuntime": "使用英文逗号分隔相对文件路径，例如 AGENTS.md, docs/agent.md。运行时相对会话工作目录按顺序加载，文件不存在时静默跳过。留空表示不加载。不支持绝对路径、越界路径、通配符和文件名中的英文逗号。",
+      "invalidFiles": "请填写工作区内的相对文件路径，不使用通配符。",
+      "empty": "未配置额外指令。",
+      "resetInstructions": "恢复默认提示词",
+      "subagent": "Subagent 在以上各段之后追加的角色说明（只读）"
+    },
+    "toolDescriptions": {
+      "read_file": "读取文本文件，支持指定行范围。",
+      "find_files": "查找文件和目录路径。",
+      "grep": "搜索文件内容。",
+      "write_file": "创建或整体重写文本文件。",
+      "apply_patch": "对文件应用局部修改。",
+      "file_operation": "移动、复制、删除文件或创建目录。",
+      "shell_exec": "执行 Shell 命令。",
+      "shell_process": "读取受管进程输出、发送输入或停止进程。",
+      "shell_list": "列出受管 Shell 进程。",
+      "get_terminal_output": "读取活动非隐私终端的历史输出。",
+      "run_subagent": "将任务委派给子智能体。"
     }
   },
   "remote": {

@@ -1,9 +1,11 @@
 {
   "name": {
-    "main": "Terax"
+    "main": "Main agent",
+    "channel": "Channel agent"
   },
   "desc": {
-    "main": "Built-in engineering agent with the complete tool set."
+    "main": "Desktop engineering agent with editable instructions and tools.",
+    "channel": "Receives tasks and replies through instant messaging channels."
   },
   "trigger": {
     "title": "Agent: {{name}}",

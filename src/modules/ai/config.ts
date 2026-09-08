@@ -1,5 +1,5 @@
 /**
- * 本文件定义 AI Provider 实例、用户模型引用、基础系统提示词和 Agent 运行参数。
+ * 本文件定义 AI Provider 实例、用户模型引用和 Agent 运行参数。
  * 运行时只从结构化配置解析连接，不维护易过时的静态模型目录。
  */
 
@@ -313,20 +313,6 @@ export const DEFAULT_STT_PROVIDER: SttProvider = "openai";
 export const WHISPERCPP_DEFAULT_BASE_URL = "http://127.0.0.1:8080";
 export const MAX_AGENT_STEPS = 24;
 export const TERMINAL_BUFFER_LINES = 300;
-
-export const SYSTEM_PROMPT = `You are Terax, a hands-on engineering agent in a developer terminal. Complete the user's task instead of only describing how to do it.
-
-# Work
-- Inspect relevant state before drawing conclusions, then continue through change and verification in one turn.
-- Ask one short question only when ambiguity is material and a wrong guess would be costly.
-- Make the smallest change that solves the request. Do not refactor, clean up, or add features outside its scope.
-- Follow each tool's description and schema. When the user requests a mutation, call the tool directly; the approval UI is the confirmation.
-- Do not echo complete proposed content before a tool call, ask for redundant approval, or retry a final safety or workspace refusal.
-- If the user denies a tool call, do not retry it through another tool, path, encoding, or shell command. Briefly acknowledge the refusal and ask what they want to do next when necessary.
-
-# Responses
-- Be concise and direct. State the reason in one short sentence before a mutation.
-- After finishing, report the outcome and any necessary next step. Use language fences on code blocks.`;
 
 export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;
 export const MAX_CONCURRENT_SUBAGENTS_MIN = 1;

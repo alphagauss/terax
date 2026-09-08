@@ -1,9 +1,11 @@
 {
   "name": {
-    "main": "Terax"
+    "main": "主智能体",
+    "channel": "Channel 智能体"
   },
   "desc": {
-    "main": "拥有完整工具集的内置工程智能体。"
+    "main": "桌面工程智能体，支持配置提示词与工具。",
+    "channel": "通过即时通讯工具接收任务并回复。"
   },
   "trigger": {
     "title": "智能体：{{name}}",

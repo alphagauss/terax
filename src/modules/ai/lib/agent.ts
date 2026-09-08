@@ -3,6 +3,7 @@
  * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
+import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
 import {
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
@@ -568,7 +569,7 @@ function buildSubagentTaskRunner({
       providerInstanceKeys: opts.providerInstanceKeys,
     });
     const prompt = prepareAgentPrompt(
-      `${opts.systemPrompt}\n\n## SUBAGENT ROLE\nYou are a focused subagent working for the main agent. Complete only the assigned task and return a concise, evidence-based result. You cannot create other subagents or request interactive tool approval. Report any restricted tool error to the main agent.`,
+      `${opts.systemPrompt}\n\n${SUBAGENT_PROMPT}`,
       [{ role: "user", content: task }],
       resolveModel(model, {
         customProviders: opts.customProviders,

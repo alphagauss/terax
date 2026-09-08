@@ -1,6 +1,6 @@
 /**
  * 本文件连接会话请求与 Agent 流式运行时。
- * 系统提示词和工具白名单在 Chat runtime 内冻结，并转发每聊天 Subagent 展示状态。
+ * 系统提示词和工具白名单在每轮内冻结，并转发每聊天 Subagent 展示状态。
  */
 
 import type { SubagentDisplayState } from "@/modules/ai/agents/subagentDisplay";
@@ -16,7 +16,7 @@ import type {
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
 import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
-import type { SessionAgentSnapshot } from "@/modules/ai/lib/agents";
+import type { AgentConfiguration } from "./agentConfiguration";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
 import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
@@ -24,7 +24,7 @@ import type {
   ProviderInstanceKeys,
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
-import { readAgentsMd } from "@/modules/ai/lib/projectInstructions";
+import { readWorkspaceInstructions } from "@/modules/ai/lib/projectInstructions";
 import {
   type AgentExecutionEnvironment,
   buildAgentSystemPrompt,
@@ -39,7 +39,8 @@ export type SessionTransportDependencies = {
   getDefaultSubagentModel: () => ModelRef | null;
   getMaxConcurrentSubagents: () => number;
   getCustomInstructions: () => string;
-  getAgent: () => SessionAgentSnapshot;
+  getAgent: () => AgentConfiguration | Promise<AgentConfiguration>;
+  getTurnId: () => string;
   getCwd: () => string;
   getEnvironment: () => AgentExecutionEnvironment;
   getExternalAgent?: () => ExternalAgentBinding | null;
@@ -76,32 +77,59 @@ type SendOptions = {
 /**
  * 创建只从真实会话消息和固定会话环境构造请求的聊天传输层。
  *
- * 首次发送时读取 AGENTS.md，并冻结 cwd、执行环境、Agent 快照和自定义指令。
- * 后续发送复用同一个 Promise；Chat 被淘汰后自然丢弃并在下次创建时重建。
+ * 配置未变时复用完整运行配置，版本或全局指令变化后完整初始化提示词。
+ * 初始化包含读取工作区文件；不监听文档，审批续跑保持本轮快照。
  */
 export function createSessionTransport(deps: SessionTransportDependencies) {
   let runtimeTask: Promise<{
     systemPrompt: string;
-    agent: SessionAgentSnapshot;
+    agent: AgentConfiguration;
   }> | null = null;
 
-  /** 首次调用冻结 Agent 并构造系统提示，后续调用复用同一运行配置。 */
+  let runtimeTurnId: string | null = null;
+
+  let prepared:
+    | {
+        customInstructions: string;
+        systemPrompt: string;
+        agent: AgentConfiguration;
+      }
+    | undefined;
+
+  /** 同轮续跑保持快照；新轮比较内存版本，只在实际变化后重新组装。 */
   const getRuntime = () => {
-    if (runtimeTask) return runtimeTask;
+    const turnId = deps.getTurnId();
+    if (runtimeTask && runtimeTurnId === turnId) return runtimeTask;
+    runtimeTurnId = turnId;
     const cwd = deps.getCwd();
     const environment = deps.getEnvironment();
-    const agent = deps.getAgent();
-    const customInstructions = deps.getCustomInstructions();
-    runtimeTask = readAgentsMd(cwd).then((projectInstructions) => ({
-      agent,
-      systemPrompt: buildAgentSystemPrompt({
+    const customInstructions = deps
+      .getCustomInstructions()
+      .replace(/\r\n?/g, "\n")
+      .trim();
+    runtimeTask = Promise.resolve(deps.getAgent()).then(async (agent) => {
+      if (
+        prepared?.agent.revision === agent.revision &&
+        prepared.customInstructions === customInstructions
+      )
+        return prepared;
+      const projectInstructions = await readWorkspaceInstructions(
         cwd,
-        environment,
-        agent,
+        agent.workspaceFiles,
+      );
+      prepared = {
         customInstructions,
-        projectInstructions,
-      }),
-    }));
+        agent,
+        systemPrompt: buildAgentSystemPrompt({
+          cwd,
+          environment,
+          agent,
+          customInstructions,
+          projectInstructions,
+        }),
+      };
+      return prepared;
+    });
     return runtimeTask;
   };
 
