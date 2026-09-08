@@ -422,7 +422,7 @@
   "agents": {
     "header": {
       "title": "Agents",
-      "description": "Create session-specific agents with focused instructions and tools."
+      "description": "Manage agent instructions, default workspace files, and available tools."
     },
     "customInstructions": {
       "label": "Global instructions",
@@ -432,9 +432,8 @@
       "label": "Agents",
       "newAgent": "New agent",
       "newAgentName": "New agent",
-      "main": "Main",
-      "allTools": "All tools",
-      "toolCount": "{{count}} tools"
+      "toolCount": "{{count}} tools",
+      "builtin": "Built-in"
     },
     "snippets": {
       "label": "Snippets",
@@ -451,31 +450,28 @@
       "description": "Description",
       "descriptionPlaceholder": "One line, shown in the agent picker",
       "instructions": "Instructions",
-      "instructionsPlaceholder": "Focused behavior and rules. Terax keeps its core instructions.",
       "tools": "Tools",
-      "toolsDescription": "These tools are visible to the agent. Operations that require approval still ask before running.",
-      "newSessionsOnly": "Instruction and tool changes apply to new conversations only."
+      "toolsDescription": "Select tools individually. write_file and apply_patch require read_file; deselecting read_file also deselects both editing tools. Tool permissions still apply.",
+      "nextTurn": "Saved changes apply to the next turn in new and existing conversations. A running turn keeps its current configuration.",
+      "resetTools": "Restore default tools",
+      "unavailable": "Unavailable in Channels: requires an active desktop terminal.",
+      "saveFailed": "Could not save the agent. Your edits have been kept."
     },
     "tools": {
       "workspaceRead": {
-        "label": "Read workspace",
-        "description": "Read files, find paths, and search contents."
+        "label": "Read workspace"
       },
       "workspaceWrite": {
-        "label": "Modify workspace",
-        "description": "Write, patch, move, copy, and delete files. Includes reading."
+        "label": "Modify workspace"
       },
       "shell": {
-        "label": "Shell",
-        "description": "Run commands and manage background processes."
+        "label": "Shell"
       },
       "terminal": {
-        "label": "Terminal output",
-        "description": "Read the active terminal scrollback on demand."
+        "label": "Terminal output"
       },
       "subagents": {
-        "label": "Subagents",
-        "description": "Delegate focused tasks with permissions inherited from this agent."
+        "label": "Subagents"
       }
     },
     "delete": {
@@ -501,6 +497,35 @@
       "errRequired": "Required.",
       "errFormat": "Lowercase letters, digits, and dashes only.",
       "errInUse": "Already in use."
+    },
+    "prompt": {
+      "title": "Prompt configuration",
+      "description": "Sections appear in the order sent to the model. Runtime sections depend on the conversation.",
+      "core": "1. Shared system instructions (read-only)",
+      "environment": "2. Execution environment (runtime)",
+      "workspace": "3. Workspace instruction files",
+      "agent": "4. Agent instructions",
+      "custom": "5. Global instructions (read-only here)",
+      "environmentRuntime": "Generated at runtime from the conversation workspace, operating system, default shell, and fixed working directory.",
+      "files": "Default workspace files",
+      "workspaceRuntime": "Separate relative file paths with English commas, e.g. AGENTS.md, docs/agent.md. Files load in order relative to the conversation working directory. Missing files are silently skipped. Leave empty to load none. Absolute paths, parent traversal, wildcards, and commas in file names are not supported.",
+      "invalidFiles": "Use relative file paths within the workspace, without wildcards.",
+      "empty": "No additional instructions.",
+      "resetInstructions": "Restore default instructions",
+      "subagent": "Subagent role appended after the above sections (read-only)"
+    },
+    "toolDescriptions": {
+      "read_file": "Read text files with line ranges.",
+      "find_files": "Find file and directory paths.",
+      "grep": "Search file contents.",
+      "write_file": "Create or rewrite a complete text file.",
+      "apply_patch": "Apply targeted edits to files.",
+      "file_operation": "Move, copy, delete files, or create directories.",
+      "shell_exec": "Execute a shell command.",
+      "shell_process": "Read output, send input, or stop a managed process.",
+      "shell_list": "List managed shell processes.",
+      "get_terminal_output": "Read the active non-private terminal scrollback.",
+      "run_subagent": "Delegate a task to a subagent."
     }
   },
   "remote": {

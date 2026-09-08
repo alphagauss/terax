@@ -22,13 +22,14 @@ const customAgent = {
   name: "Reviewer",
   description: "Review code",
   instructions: "Review carefully.",
+  workspaceFiles: ["AGENTS.md"],
   icon: "reviewer" as const,
   tools: ["read_file" as const, "grep" as const],
 };
 
 afterEach(() => {
   useAgentsStore.setState({
-    customAgents: [],
+    agents: [],
     draftAgentId: MAIN_AGENT_ID,
   });
   useChatStore.setState({ sessions: [], activeSessionId: null });
@@ -38,7 +39,7 @@ afterEach(() => {
 describe("AgentSwitcher", () => {
   it("allows selection only for an unsent draft", async () => {
     useAgentsStore.setState({
-      customAgents: [customAgent],
+      agents: [customAgent],
       draftAgentId: customAgent.id,
     });
     useChatStore.setState({
@@ -58,7 +59,7 @@ describe("AgentSwitcher", () => {
   });
 
   it("renders a locked identity for a persisted session", async () => {
-    useAgentsStore.setState({ customAgents: [customAgent] });
+    useAgentsStore.setState({ agents: [customAgent] });
     useChatStore.setState({
       activeSessionId: "55555555-5555-4555-8555-555555555555",
       sessions: [

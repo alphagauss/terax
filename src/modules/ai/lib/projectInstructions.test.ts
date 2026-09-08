@@ -1,84 +1,86 @@
-/**
- * 本文件验证 AGENTS.md 的实时读取、缺失处理和完整内容返回行为。
- * 长指令测试用于防止重新引入静默截断。
- */
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { native } from "./native";
-import { readAgentsMd } from "./projectInstructions";
-
+import { readWorkspaceInstructions } from "./projectInstructions";
 vi.mock("./native", () => ({
-  native: { readFile: vi.fn() },
+  native: { readFile: vi.fn(), fileVersion: vi.fn() },
 }));
+const textFile = (content: string) => ({
+  kind: "text" as const,
+  content,
+  size: content.length,
+  mtime: 1,
+  revision: "a".repeat(64),
+});
 
-const readFileMock = vi.mocked(native.readFile);
-
-describe("readAgentsMd", () => {
-  beforeEach(() => {
-    readFileMock.mockReset();
-  });
-
-  it("reads AGENTS.md from the session working directory", async () => {
-    readFileMock.mockResolvedValue({
-      kind: "text",
-      content: "# Project instructions",
-      size: 22,
-      mtime: 1,
-      revision: "a".repeat(64),
-    });
-
-    await expect(readAgentsMd("C:/work/project-available")).resolves.toBe(
-      "# Project instructions",
+describe("workspace instruction loading", () => {
+  beforeEach(() => vi.resetAllMocks());
+  it("loads relative files in configured order and silently skips only missing files", async () => {
+    vi.mocked(native.readFile)
+      .mockResolvedValueOnce(textFile("First"))
+      .mockRejectedValueOnce("localized missing error")
+      .mockResolvedValueOnce(textFile("Last"));
+    vi.mocked(native.fileVersion).mockResolvedValue(null);
+    expect(
+      await readWorkspaceInstructions("D:/workspace", [
+        "AGENTS.md",
+        "missing.md",
+        "docs/rules.md",
+      ]),
+    ).toEqual([
+      { path: "AGENTS.md", content: "First" },
+      { path: "docs/rules.md", content: "Last" },
+    ]);
+    expect(vi.mocked(native.readFile).mock.calls.map(([path]) => path)).toEqual(
+      [
+        "D:/workspace/AGENTS.md",
+        "D:/workspace/missing.md",
+        "D:/workspace/docs/rules.md",
+      ],
     );
-    expect(readFileMock).toHaveBeenCalledWith(
-      "C:/work/project-available/AGENTS.md",
+  });
+  it("does not swallow permission or remote connection errors", async () => {
+    vi.mocked(native.readFile).mockRejectedValue(
+      new Error("permission denied"),
     );
+    vi.mocked(native.fileVersion).mockRejectedValue(
+      new Error("permission denied"),
+    );
+    await expect(
+      readWorkspaceInstructions("/workspace", ["AGENTS.md"]),
+    ).rejects.toThrow("permission denied");
+    vi.mocked(native.fileVersion).mockResolvedValue({ revision: "a" });
+    await expect(
+      readWorkspaceInstructions("/workspace", ["AGENTS.md"]),
+    ).rejects.toThrow("permission denied");
   });
-
-  it("returns null when AGENTS.md does not exist", async () => {
-    readFileMock.mockRejectedValue(new Error("not found"));
-
-    await expect(readAgentsMd("C:/work/project-missing")).resolves.toBeNull();
-  });
-
-  it("returns instructions larger than 32 KiB without truncation", async () => {
+  it("keeps full text and rereads files whenever initialization requests them", async () => {
     const content = "a".repeat(32 * 1024 + 10);
-    readFileMock.mockResolvedValue({
-      kind: "text",
-      content,
-      size: content.length,
-      mtime: 1,
-      revision: "a".repeat(64),
-    });
-
-    const result = await readAgentsMd("C:/work/project-large");
-
-    expect(result).toBe(content);
+    vi.mocked(native.readFile)
+      .mockResolvedValueOnce(textFile(content))
+      .mockResolvedValueOnce(textFile("Changed"));
+    expect(
+      (await readWorkspaceInstructions("/workspace", ["AGENTS.md"]))[0].content,
+    ).toBe(content);
+    expect(
+      (await readWorkspaceInstructions("/workspace", ["AGENTS.md"]))[0].content,
+    ).toBe("Changed");
+    expect(native.fileVersion).not.toHaveBeenCalled();
   });
-
-  it("reads the file again for a newly created Chat runtime", async () => {
-    readFileMock
-      .mockResolvedValueOnce({
-        kind: "text",
-        content: "First instructions",
-        size: 18,
-        mtime: 1,
-        revision: "a".repeat(64),
-      })
-      .mockResolvedValueOnce({
-        kind: "text",
-        content: "Updated instructions",
-        size: 20,
-        mtime: 2,
-        revision: "b".repeat(64),
-      });
-
-    await expect(readAgentsMd("C:/work/project")).resolves.toBe(
-      "First instructions",
-    );
-    await expect(readAgentsMd("C:/work/project")).resolves.toBe(
-      "Updated instructions",
-    );
-    expect(readFileMock).toHaveBeenCalledTimes(2);
+  it("loads nothing when the field is empty and rejects invalid paths before IO", async () => {
+    expect(await readWorkspaceInstructions("/workspace", [])).toEqual([]);
+    await expect(
+      readWorkspaceInstructions("/workspace", ["../secret"]),
+    ).rejects.toThrow();
+    expect(native.readFile).not.toHaveBeenCalled();
+  });
+  it("rejects binary instructions instead of silently losing configured rules", async () => {
+    vi.mocked(native.readFile).mockResolvedValue({
+      kind: "binary",
+      size: 5,
+      mtime: 1,
+    });
+    await expect(
+      readWorkspaceInstructions("/workspace", ["rules.bin"]),
+    ).rejects.toThrow("not readable text");
   });
 });

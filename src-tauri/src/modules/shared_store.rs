@@ -137,6 +137,9 @@ fn with_ai_agent_at<T>(
     agent_id: &str,
     operation: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    if matches!(agent_id, "builtin:main" | "builtin:channel") {
+        return operation();
+    }
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
     let _lock = FileLock::acquire(&lock_path(root, "ai-agents")?, Duration::from_secs(5))
         .map_err(|error| error.to_string())?
@@ -369,6 +372,20 @@ mod tests {
     use std::process::Command;
     use std::sync::Arc;
     use std::time::Instant;
+
+    #[test]
+    fn builtin_agents_work_without_overrides_and_cannot_be_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        for id in ["builtin:main", "builtin:channel"] {
+            assert_eq!(
+                with_ai_agent_at(dir.path(), id, || Ok("committed")).unwrap(),
+                "committed"
+            );
+            assert!(delete_ai_agent_at(dir.path(), id, || Ok(())).is_err());
+        }
+        assert!(!store_path(dir.path(), "ai-agents").unwrap().exists());
+        assert!(with_ai_agent_at(dir.path(), "builtin:unknown", || Ok(())).is_err());
+    }
 
     #[test]
     fn general_settings_keep_the_network_validation_boundary() {

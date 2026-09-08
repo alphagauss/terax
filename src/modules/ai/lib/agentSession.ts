@@ -7,6 +7,7 @@ import {
   peekFileEditRuntime,
   releaseFileEditRuntime,
 } from "@/modules/ai/lib/fileEditRuntime";
+import { readAgentConfiguration } from "./agentConfiguration";
 import { Chat } from "@ai-sdk/react";
 import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -89,7 +90,7 @@ export type AgentSessionSnapshot = {
   commitFailed: boolean;
 };
 
-/** 创建或恢复当前本地环境的会话，历史 cwd 和 Agent 快照保持不变。 */
+/** 创建或恢复当前本地环境的会话，历史 cwd 和 Agent 身份保持不变。 */
 export async function createAgentSession(options: {
   cwd: string;
   sessionId?: string;
@@ -146,7 +147,9 @@ export async function createAgentSession(options: {
   const record = () => ({ ...session, updatedAt: Date.now(), messages: [] });
   const transport = createSessionTransport({
     ...options.configuration,
-    getAgent: () => parseSessionAgent(session.metadata.agent),
+    getAgent: () =>
+      readAgentConfiguration(parseSessionAgent(session.metadata.agent).id),
+    getTurnId: () => cursor.turnId,
     getCwd: () => session.cwd,
     toolContext: {
       getCwd: () => session.cwd,

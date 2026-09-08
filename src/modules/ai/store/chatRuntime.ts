@@ -23,6 +23,8 @@ import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
 } from "ai";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import { readAgentConfiguration } from "@/modules/ai/lib/agentConfiguration";
+import { availableAgentTools } from "@/modules/ai/lib/agentTools";
 import { parseSessionAgent } from "@/modules/ai/lib/agents";
 import { resolveAgentExecutionEnvironment } from "@/modules/ai/lib/prompt";
 import { resolveSessionCwd } from "@/modules/ai/lib/sessions";
@@ -30,6 +32,7 @@ import { createSessionTransport } from "@/modules/ai/lib/transport";
 import type { ToolContext } from "@/modules/ai/tools/tools";
 import {
   chats,
+  pendingTurn,
   getAgentMetaForSession,
   isSessionWritable,
   seedMessages,
@@ -79,7 +82,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     },
     getSessionId: () => sessionId,
     getPermissionMode: () => sessionPermission(sessionId),
-    supportsApprovals: true,
+    supportsApprovals: !sessionMetadata.get(sessionId)?.channelId,
   };
 
   const transport = createSessionTransport({
@@ -103,7 +106,19 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().maxConcurrentSubagents,
     getCustomInstructions: () =>
       usePreferencesStore.getState().customInstructions,
-    getAgent: () => parseSessionAgent(sessionMetadata.get(sessionId)?.agent),
+    getTurnId: () => pendingTurn(sessionId).id,
+    getAgent: async () => {
+      const metadata = sessionMetadata.get(sessionId);
+      const agent = await readAgentConfiguration(
+        parseSessionAgent(metadata?.agent).id,
+      );
+      return {
+        ...agent,
+        tools: agent.tools.filter((tool) =>
+          availableAgentTools(Boolean(metadata?.channelId)).includes(tool),
+        ),
+      };
+    },
     getCwd: getSessionCwd,
     getEnvironment: () =>
       resolveAgentExecutionEnvironment(currentWorkspaceEnv(), HOST_PLATFORM),

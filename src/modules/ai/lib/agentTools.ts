@@ -1,6 +1,6 @@
 /**
  * 本文件定义 Custom Agent 可选择的内置工具目录。
- * 工具 ID 使用稳定顺序保存，工具组只服务于设置界面并约束必要依赖。
+ * 工具 ID 使用稳定顺序保存，工具组只服务于设置界面，编辑工具只依赖文件读取。
  */
 
 export const AGENT_TOOL_IDS = [
@@ -45,11 +45,8 @@ export const AGENT_TOOL_GROUPS = [
   tools: readonly AgentToolId[];
 }[];
 
-export type AgentToolGroupId = (typeof AGENT_TOOL_GROUPS)[number]["id"];
-
 const TOOL_IDS = new Set<string>(AGENT_TOOL_IDS);
-const READ_TOOLS = AGENT_TOOL_GROUPS[0].tools;
-const WRITE_TOOLS = AGENT_TOOL_GROUPS[1].tools;
+const EDIT_TOOLS: readonly AgentToolId[] = ["write_file", "apply_patch"];
 const SUBAGENT_READ_ONLY_TOOLS = new Set<AgentToolId>([
   "read_file",
   "find_files",
@@ -57,59 +54,39 @@ const SUBAGENT_READ_ONLY_TOOLS = new Set<AgentToolId>([
   "get_terminal_output",
 ]);
 
-/**
- * 将持久化工具列表规范为已知 ID 的稳定顺序。
- *
- * 缺失值来自旧版 Custom Agent，按完整工具集迁移；空数组则保留无工具语义。
- * 修改工具依赖读取工具，因此发现任一修改工具时自动补齐读取组。
- */
-export function normalizeAgentTools(value: unknown): AgentToolId[] {
-  if (!Array.isArray(value)) return [...AGENT_TOOL_IDS];
+/** 将工具列表规范为稳定顺序，并补齐编辑工具真正需要的文件读取能力。 */
+export function normalizeAgentTools(value: readonly unknown[]): AgentToolId[] {
   const selected = new Set(
     value.filter(
       (tool): tool is AgentToolId =>
         typeof tool === "string" && TOOL_IDS.has(tool),
     ),
   );
-  if (WRITE_TOOLS.some((tool) => selected.has(tool))) {
-    for (const tool of READ_TOOLS) selected.add(tool);
-  }
+  if (EDIT_TOOLS.some((tool) => selected.has(tool))) selected.add("read_file");
   return AGENT_TOOL_IDS.filter((tool) => selected.has(tool));
 }
 
-/** 判断一个工具组是否完整启用。 */
-export function agentToolGroupEnabled(
+/** 独立切换工具；关闭文件读取时同步移除依赖它的编辑工具。 */
+export function setAgentToolEnabled(
   tools: readonly AgentToolId[],
-  groupId: AgentToolGroupId,
-): boolean {
-  const selected = new Set(tools);
-  const group = AGENT_TOOL_GROUPS.find((item) => item.id === groupId);
-  return Boolean(group?.tools.every((tool) => selected.has(tool)));
-}
-
-/**
- * 切换设置界面的工具组，并维护修改依赖读取的不变量。
- * 关闭读取组时同时关闭修改组，避免保存无法实际工作的工具组合。
- */
-export function setAgentToolGroupEnabled(
-  tools: readonly AgentToolId[],
-  groupId: AgentToolGroupId,
+  id: AgentToolId,
   enabled: boolean,
 ): AgentToolId[] {
   const selected = new Set(tools);
-  const group = AGENT_TOOL_GROUPS.find((item) => item.id === groupId);
-  if (!group) return normalizeAgentTools(tools);
-  for (const tool of group.tools) {
-    if (enabled) selected.add(tool);
-    else selected.delete(tool);
-  }
-  if (groupId === "workspaceWrite" && enabled) {
-    for (const tool of READ_TOOLS) selected.add(tool);
-  }
-  if (groupId === "workspaceRead" && !enabled) {
-    for (const tool of WRITE_TOOLS) selected.delete(tool);
+  if (enabled) selected.add(id);
+  else {
+    selected.delete(id);
+    if (id === "read_file")
+      for (const tool of EDIT_TOOLS) selected.delete(tool);
   }
   return normalizeAgentTools([...selected]);
+}
+
+/** Channel 没有活动桌面终端，不能通过配置启用该能力。 */
+export function availableAgentTools(channel: boolean): AgentToolId[] {
+  return AGENT_TOOL_IDS.filter(
+    (id) => !channel || id !== "get_terminal_output",
+  );
 }
 
 /**

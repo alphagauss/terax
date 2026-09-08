@@ -33,6 +33,7 @@ import {
   agentDisplayName,
   findAgent,
   MAIN_AGENT,
+  CHANNEL_AGENT_ID,
 } from "@/modules/ai/lib/agents";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { useChatStore } from "@/modules/ai/store/chatStore";
@@ -46,19 +47,19 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   spark: SparklesIcon,
 };
 
-/** Agent 选择器；持久化会话只显示身份，避免中途改变提示词和工具集。 */
+/** Agent 选择器；持久化会话只显示身份，会话中不允许切换智能体身份。 */
 export function AgentSwitcher() {
   const { t } = useTranslation("aiAgents");
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const session = useChatStore((state) =>
     state.sessions.find((item) => item.id === state.activeSessionId),
   );
-  const customAgents = useAgentsStore((state) => state.customAgents);
+  const definitions = useAgentsStore((state) => state.agents);
   const draftAgentId = useAgentsStore((state) => state.draftAgentId);
   const setDraftAgentId = useAgentsStore((state) => state.setDraftAgentId);
-  const draftAgent = findAgent(customAgents, draftAgentId);
+  const draftAgent = findAgent(definitions, draftAgentId);
   const isDraft = activeSessionId !== null && session === undefined;
-  const sessionAgent = customAgents.find(
+  const sessionAgent = definitions.find(
     (agent) => agent.id === session?.agentId,
   );
   const active = isDraft
@@ -95,10 +96,7 @@ export function AgentSwitcher() {
     );
   }
 
-  const agents = [
-    { ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] },
-    ...customAgents,
-  ];
+  const agents = definitions.filter((agent) => agent.id !== CHANNEL_AGENT_ID);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

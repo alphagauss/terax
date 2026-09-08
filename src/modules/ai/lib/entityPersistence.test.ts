@@ -20,7 +20,7 @@ vi.mock("@/lib/sharedStore", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { deleteCustomAgent, upsertCustomAgent, type Agent } from "./agents";
+import { deleteCustomAgent, saveAgent, type Agent } from "./agents";
 import { deleteSnippet, upsertSnippet, type Snippet } from "./snippets";
 
 describe("per-record AI entity persistence", () => {
@@ -37,11 +37,12 @@ describe("per-record AI entity persistence", () => {
       name: "One",
       description: "test",
       instructions: "test",
+      workspaceFiles: ["AGENTS.md"],
       icon: "coder",
       tools: ["read_file"],
     };
 
-    await upsertCustomAgent(agent);
+    await saveAgent(agent);
     await deleteCustomAgent(agent.id);
 
     expect(shared.set).toHaveBeenCalledWith(

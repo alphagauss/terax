@@ -44,7 +44,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelContextWindow, tryResolveModel } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
-import { MAIN_AGENT, MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
+import { agentDisplayName, MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
 import {
   estimateUiMessageTokens,
   STREAM_RENDER_INTERVAL_MS,
@@ -431,14 +431,10 @@ function SessionPicker() {
   const deleteSession = useChatStore((s) => s.deleteSession);
   const agentFilter = useChatStore((state) => state.sessionAgentFilter);
   const setAgentFilter = useChatStore((state) => state.setSessionAgentFilter);
-  const customAgents = useAgentsStore((state) => state.customAgents);
+  const agents = useAgentsStore((state) => state.agents);
 
   const active = sessions.find((s) => s.id === activeId) ?? null;
   const isDraft = activeId != null && !active;
-  const agents = useMemo(
-    () => [{ ...MAIN_AGENT, tools: [...MAIN_AGENT.tools] }, ...customAgents],
-    [customAgents],
-  );
   useEffect(() => {
     if (
       agentFilter !== null &&
@@ -507,7 +503,7 @@ function SessionPicker() {
               {agents.map((agent) => (
                 <DropdownMenuRadioItem key={agent.id} value={agent.id}>
                   <span className="flex flex-1 justify-between gap-4">
-                    <span className="truncate">{agentDisplayLabel(agent)}</span>
+                    <span className="truncate">{agentDisplayName(agent)}</span>
                     <span className="text-muted-foreground">
                       {
                         sessions.filter(
@@ -627,11 +623,6 @@ function SessionRow({
       </button>
     </DropdownMenuItem>
   );
-}
-
-/** 返回历史筛选器中的 Agent 名称，主 Agent 使用固定产品名称。 */
-function agentDisplayLabel(agent: { id: string; name: string }): string {
-  return agent.id === MAIN_AGENT_ID ? MAIN_AGENT.name : agent.name;
 }
 
 function SessionAttentionIndicator({

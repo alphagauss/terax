@@ -271,6 +271,8 @@ export const native = {
     invoke<ReadResult>("fs_read_file", {
       path,
     }),
+  fileVersion: (path: string) =>
+    invoke<{ revision: string } | null>("fs_file_version", { path }),
   canonicalize: (path: string) =>
     invoke<string>("fs_canonicalize", {
       path,

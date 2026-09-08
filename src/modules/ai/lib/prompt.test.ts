@@ -8,6 +8,8 @@ import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildAgentSystemPrompt,
+  buildAgentPromptSections,
+  composeAgentPromptSections,
   prepareAgentPrompt,
   resolveAgentExecutionEnvironment,
 } from "./prompt";
@@ -53,6 +55,58 @@ describe("agent system prompt", () => {
     },
   );
 
+  it("uses the same ordered sections for configuration and requests without desktop rules leaking into Channels", () => {
+    const agent = { name: "Channel", instructions: "Reply through messaging." };
+    const options = {
+      cwd: "/workspace",
+      environment: resolveAgentExecutionEnvironment({ kind: "local" }, "linux"),
+      agent,
+      customInstructions: "Global rule",
+      projectInstructions: [
+        { path: "AGENTS.md", content: "First file" },
+        { path: "docs/rules.md", content: "Second file" },
+      ],
+    };
+    const sections = buildAgentPromptSections(options);
+    expect(sections.map((section) => section.kind)).toEqual([
+      "core",
+      "environment",
+      "workspace",
+      "workspace",
+      "agent",
+      "custom",
+    ]);
+    expect(buildAgentSystemPrompt(options)).toBe(
+      sections.map((section) => section.content).join("\n\n"),
+    );
+    expect(
+      sections
+        .filter((section) => section.kind === "workspace")
+        .map((section) => section.content),
+    ).toEqual([
+      "## PROJECT INSTRUCTIONS: AGENTS.md\nFirst file",
+      "## PROJECT INSTRUCTIONS: docs/rules.md\nSecond file",
+    ]);
+    const preview = composeAgentPromptSections({
+      environment: "Runtime environment",
+      workspace: ["Runtime files"],
+      agent,
+      customInstructions: "Global rule",
+    });
+    for (const kind of ["core", "agent", "custom"]) {
+      expect(preview.find((section) => section.kind === kind)?.content).toBe(
+        sections.find((section) => section.kind === kind)?.content,
+      );
+    }
+    expect(buildAgentSystemPrompt(options)).not.toContain("developer terminal");
+    expect(buildAgentSystemPrompt(options)).not.toContain(
+      "approval UI is the confirmation",
+    );
+    expect(buildAgentSystemPrompt(options)).not.toContain(
+      "get_terminal_output",
+    );
+  });
+
   it("builds deterministic normalized instructions with explicit shell context", () => {
     const options = {
       cwd: "D:/workspace/project",
@@ -63,7 +117,9 @@ describe("agent system prompt", () => {
       } as const,
       agent: { name: "Builder", instructions: "  Build carefully.\r\n" },
       customInstructions: "  Be direct.\r\n",
-      projectInstructions: "# Rules\r\n\r\nUse pnpm.\r\n",
+      projectInstructions: [
+        { path: "AGENTS.md", content: "# Rules\r\n\r\nUse pnpm.\r\n" },
+      ],
     };
 
     const prompt = buildAgentSystemPrompt(options);
@@ -71,7 +127,7 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("Execution environment: Windows Local");
     expect(prompt).toContain("Shell tool default: PowerShell");
     expect(prompt).toContain('Working directory: "D:/workspace/project"');
-    expect(prompt).toContain("Terminal scrollback is not included automatically");
+
     expect(prompt).toContain(
       "## AGENT INSTRUCTIONS: Builder\nBuild carefully.",
     );

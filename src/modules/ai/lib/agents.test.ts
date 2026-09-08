@@ -1,86 +1,140 @@
-/**
- * 本文件测试固定主 Agent、自定义定义迁移和会话快照解析。
- * 锁定旧定义补齐工具、无效选择回退主 Agent以及会话快照独立复制。
- */
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const shared = vi.hoisted(() => ({ read: vi.fn() }));
-
+const shared = vi.hoisted(() => ({ read: vi.fn(), set: vi.fn() }));
 vi.mock("@/lib/sharedStore", () => ({
   readSharedStore: shared.read,
-  setSharedStoreKey: vi.fn(),
+  setSharedStoreKey: shared.set,
 }));
-
 import {
-  type Agent,
-  findAgent,
   loadAgents,
+  saveAgent,
   MAIN_AGENT,
-  parseSessionAgent,
+  CHANNEL_AGENT,
   snapshotAgent,
 } from "./agents";
-import { AGENT_TOOL_IDS } from "./agentTools";
+import { parseWorkspaceFiles, parseSessionAgent } from "./agentDefinition";
 
-const custom: Agent = {
-  id: "a-1",
-  name: "Mine",
-  description: "Focused agent",
-  instructions: "Inspect carefully.",
-  icon: "spark",
-  tools: ["read_file", "grep"],
-};
-
-describe("agent definitions", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("keeps one fixed main agent and falls back to it", () => {
-    expect(findAgent([custom], "a-1")).toBe(custom);
-    expect(findAgent([custom], "missing")).toMatchObject({
-      id: MAIN_AGENT.id,
-      name: "Terax",
-    });
+describe("agent configuration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    shared.read.mockResolvedValue({});
   });
 
-  it("loads old custom agents with the complete tool set", async () => {
+  it("resolves two defaults without creating stored records", async () => {
+    expect(await loadAgents()).toEqual([MAIN_AGENT, CHANNEL_AGENT]);
+    expect(shared.set).not.toHaveBeenCalled();
+    expect(MAIN_AGENT.instructions).toContain(":line_number");
+    expect(CHANNEL_AGENT.instructions).not.toContain("# Local file references");
+    expect(CHANNEL_AGENT.tools).not.toContain("get_terminal_output");
+  });
+
+  it("serializes refreshes so a pending old read cannot overwrite a saved configuration", async () => {
+    const { readAgentConfiguration } = await import("./agentConfiguration");
+    let resolve!: (value: unknown) => void;
+    shared.read
+      .mockReturnValueOnce(
+        new Promise((done) => {
+          resolve = done;
+        }),
+      )
+      .mockResolvedValueOnce({
+        "agent:builtin:main": { instructions: "Saved" },
+      });
+    const first = loadAgents();
+    const second = loadAgents();
+    await vi.waitFor(() => expect(shared.read).toHaveBeenCalledTimes(1));
+    resolve({ "agent:builtin:main": { instructions: "Old" } });
+    await first;
+    expect((await second)[0].instructions).toBe("Saved");
+    expect((await readAgentConfiguration(MAIN_AGENT.id)).instructions).toBe(
+      "Saved",
+    );
+    shared.read
+      .mockRejectedValueOnce(new Error("read failed"))
+      .mockResolvedValueOnce({});
+    await expect(loadAgents()).rejects.toThrow("read failed");
+    expect(await loadAgents()).toEqual([MAIN_AGENT, CHANNEL_AGENT]);
+  });
+
+  it("keeps explicit empty overrides and removes defaults from saved records", async () => {
+    await saveAgent({
+      ...MAIN_AGENT,
+      instructions: "",
+      tools: [],
+      workspaceFiles: [],
+    });
+    expect(shared.set).toHaveBeenLastCalledWith(
+      "ai-agents",
+      "agent:builtin:main",
+      { instructions: "", tools: [], workspaceFiles: [] },
+    );
     shared.read.mockResolvedValue({
-      "agent:a-1": {
-        id: "a-1",
-        name: "Mine",
-        description: "Focused agent",
-        instructions: "Inspect carefully.",
-        icon: "spark",
-        builtIn: false,
-      },
-      "agent:broken": { id: "builtin:legacy" },
-      "agent:mismatched": {
-        id: "a-other",
-        name: "Other",
-        description: "Wrong key",
-        instructions: "Should be ignored.",
-        icon: "spark",
-      },
+      "agent:builtin:main": { instructions: "", tools: [], workspaceFiles: [] },
     });
-
-    await expect(loadAgents()).resolves.toEqual([
-      { ...custom, tools: [...AGENT_TOOL_IDS] },
-    ]);
+    expect((await loadAgents())[0]).toMatchObject({
+      instructions: "",
+      tools: [],
+      workspaceFiles: [],
+    });
+    await saveAgent(MAIN_AGENT);
+    expect(shared.set).toHaveBeenLastCalledWith(
+      "ai-agents",
+      "agent:builtin:main",
+      {},
+    );
   });
 
-  it("copies snapshots and treats legacy session metadata as main", () => {
-    const snapshot = snapshotAgent(custom);
-    custom.tools.push("find_files");
+  it("persists independent complete custom definitions and rejects incomplete old records", async () => {
+    const custom = { ...MAIN_AGENT, id: "a-custom", name: "Custom" };
+    await saveAgent(custom);
+    expect(shared.set).toHaveBeenLastCalledWith(
+      "ai-agents",
+      "agent:a-custom",
+      custom,
+    );
+    shared.read.mockResolvedValue({
+      "agent:a-custom": custom,
+      "agent:old": { id: "old", name: "Old", instructions: "Old" },
+    });
+    expect(await loadAgents()).toEqual([MAIN_AGENT, CHANNEL_AGENT, custom]);
+  });
 
-    expect(snapshot.tools).toEqual(["read_file", "grep"]);
-    expect(parseSessionAgent(undefined).id).toBe(MAIN_AGENT.id);
+  it("does not grant unsupported Channel tools from a hand-edited record", async () => {
+    shared.read.mockResolvedValue({
+      "agent:builtin:channel": { tools: ["get_terminal_output", "grep"] },
+    });
+    expect((await loadAgents())[1].tools).toEqual(["grep"]);
+  });
+
+  it("stores only the session identity and propagates save failure", async () => {
+    expect(snapshotAgent(MAIN_AGENT)).toEqual({
+      id: MAIN_AGENT.id,
+      name: MAIN_AGENT.name,
+      icon: MAIN_AGENT.icon,
+    });
+    expect(() => parseSessionAgent(undefined)).toThrow();
+    shared.set.mockRejectedValueOnce(new Error("disk full"));
+    await expect(saveAgent(MAIN_AGENT)).rejects.toThrow("disk full");
+  });
+});
+
+describe("workspace instruction paths", () => {
+  it("preserves order, normalizes separators, and allows an empty list", () => {
     expect(
-      parseSessionAgent({
-        id: MAIN_AGENT.id,
-        name: "Modified main",
-        instructions: "Override the fixed main agent.",
-        icon: "security",
-        tools: [],
-      }),
-    ).toEqual(snapshotAgent(findAgent([], null)));
+      parseWorkspaceFiles(
+        " AGENTS.md, docs/rules.md, ./AGENTS.md, docs\\more.md,, ",
+      ),
+    ).toEqual(["AGENTS.md", "docs/rules.md", "docs/more.md"]);
+    expect(parseWorkspaceFiles(" , ")).toEqual([]);
+  });
+  it.each([
+    "../secret",
+    "/tmp/rules",
+    "D:/rules",
+    "docs/../../rules",
+    "*.md",
+    ".",
+    "//server/share",
+  ])("rejects unsupported path %s", (path) => {
+    expect(() => parseWorkspaceFiles(path)).toThrow();
   });
 });

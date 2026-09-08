@@ -91,6 +91,7 @@ impl Host {
             "workspace_authorize" => {
                 value(workspace::workspace_authorize(arg(a, "path")?, env, &self.registry).await)
             }
+            "fs_file_version" => value(fs::file::fs_file_version(arg(a, "path")?, env).await),
             "fs_read_file" => {
                 value(fs::file::fs_read_file(arg(a, "path")?, env, arg(a, "force")?).await)
             }
