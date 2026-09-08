@@ -136,9 +136,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getProviderModels: () => usePreferencesStore.getState().providerModels,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
     getProviderInstanceKeys: () => useChatStore.getState().providerInstanceKeys,
-    onStep: (step) => {
-      useChatStore.getState().patchAgentMeta(sessionId, { step });
-    },
     onCompact: (info) => {
       useChatStore.getState().patchAgentMeta(sessionId, {
         compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },

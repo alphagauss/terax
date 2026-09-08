@@ -96,7 +96,6 @@ export type AgentMeta = {
   pendingSteering: number;
   cancelled: boolean;
   status: AgentRunStatus;
-  step: string | null;
   approvalsPending: number;
   error: string | null;
   /** 终态保存失败归属具体会话，后台调用方不能只等待运行锁释放。 */
@@ -114,7 +113,6 @@ export function createIdleAgentMeta(): AgentMeta {
     pendingSteering: 0,
     cancelled: false,
     status: "idle",
-    step: null,
     approvalsPending: 0,
     error: null,
     tokens: {

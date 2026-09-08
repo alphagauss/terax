@@ -56,32 +56,6 @@ import {
   type UIMessage,
 } from "ai";
 
-const TOOL_LABELS: Record<string, (input: Record<string, unknown>) => string> =
-  {
-    read_file: (i) => `Reading ${shortPath(i.path)}`,
-    find_files: (i) => `Finding ${shortPath(i.path ?? ".")}`,
-    grep: (i) => `Grepping ${ellipsize(String(i.pattern ?? ""), 40)}`,
-    apply_patch: (i) =>
-      `Editing ${Array.isArray(i.files) ? i.files.length : 0} file(s)`,
-    write_file: (i) => `Writing ${shortPath(i.path)}`,
-    file_operation: (i) =>
-      `${String(i.operation ?? "Managing")} ${shortPath(i.path)}`,
-    shell_exec: (i) => `Running ${ellipsize(String(i.command ?? ""), 60)}`,
-    shell_process: (i) => `${String(i.action ?? "Polling")} shell process`,
-    shell_list: () => `Listing shell processes`,
-    run_subagent: (i) => `Spawning ${String(i.label ?? i.task ?? "subagent")}`,
-  };
-
-function shortPath(p: unknown): string {
-  if (typeof p !== "string") return "";
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-
-function ellipsize(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
-}
-
 export type AgentUsage = {
   inputTokens: number;
   outputTokens: number;
@@ -108,7 +82,6 @@ export type RunAgentOptions = {
   maxConcurrentSubagents: number;
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
-  onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
@@ -333,7 +306,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 abortSignal: opts.abortSignal,
                 onStepFinish: (step) => {
                   cycleSteps++;
-                  reportAgentStep(opts, step);
+                  reportUsage(opts, step.usage);
                 },
               });
               const uiStream = result.toUIMessageStream<UIMessage>({
@@ -461,7 +434,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
               type: "finish",
               finishReason: normalizeFinishReason(finishReason),
             });
-            opts.onStep?.(null);
             opts.onFinishMeta?.({
               hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
               finishReason,
@@ -664,28 +636,6 @@ function buildSubagentTaskRunner({
       peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(taskId);
     }
   };
-}
-
-function reportAgentStep(
-  opts: RunAgentOptions,
-  step: Parameters<
-    NonNullable<Parameters<typeof streamText>[0]["onStepFinish"]>
-  >[0],
-): void {
-  if (opts.onStep) {
-    const last = step.toolCalls?.[step.toolCalls.length - 1];
-    if (last) {
-      const label = TOOL_LABELS[last.toolName];
-      opts.onStep(
-        label
-          ? label((last.input ?? {}) as Record<string, unknown>)
-          : `Calling ${last.toolName}`,
-      );
-    } else if (step.text) {
-      opts.onStep("Writing");
-    }
-  }
-  reportUsage(opts, step.usage);
 }
 
 function reportUsage(

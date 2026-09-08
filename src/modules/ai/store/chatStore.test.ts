@@ -1064,7 +1064,6 @@ describe("chat store multi-process lifecycle", () => {
       draftSessionId: null,
       runLockSessionIds: {},
     });
-    useChatStore.getState().patchAgentMeta(first.id, { step: "Reading" });
     useSessionAttentionStore.getState().markBackgroundRunning(first.id);
     io.list.mockResolvedValue([second]);
 

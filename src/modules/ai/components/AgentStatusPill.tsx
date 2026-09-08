@@ -1,6 +1,6 @@
 /**
  * 本文件渲染状态栏中的 AI 面板入口和聚合运行提示。
- * 入口不展示具体会话步骤，任一会话持有运行锁时仅显示橙色呼吸灯。
+ * 入口不展示具体会话步骤，任一会话持有运行锁时仅显示橙色状态点。
  */
 
 import { cn } from "@/lib/utils";
@@ -42,7 +42,7 @@ export function AgentStatusPill({ onClick, active = false }: Props) {
       aria-pressed={active}
     >
       {hasRunningSession ? (
-        <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-warning motion-reduce:animate-none" />
+        <span className="size-1.5 shrink-0 rounded-full bg-warning" />
       ) : null}
       <HugeiconsIcon icon={AiChat01Icon} size={12} strokeWidth={1.75} />
       <span>AI</span>

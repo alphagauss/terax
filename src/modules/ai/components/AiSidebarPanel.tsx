@@ -24,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Button } from "@/components/controls/button";
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -170,10 +169,6 @@ function Body({
   chat: Chat<UIMessage>;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
-  const step = useChatStore(
-    (state) => getAgentMetaForSession(state, sessionId).step,
-  );
-
   const helpers = useChat<UIMessage>({
     chat,
     experimental_throttle: STREAM_RENDER_INTERVAL_MS,
@@ -187,7 +182,6 @@ function Body({
     <>
       <Header
         sessionId={sessionId}
-        step={step}
         isBusy={showHeaderRunStatus}
         messages={helpers.messages}
       />
@@ -215,7 +209,7 @@ function EmptyShell() {
   const { t } = useTranslation("ai");
   return (
     <>
-      <Header sessionId={null} step={null} isBusy={false} />
+      <Header sessionId={null} isBusy={false} />
       <div className="flex flex-1 items-center justify-center text-[11px] text-muted-foreground">
         {t("miniWindow.loadingSessions")}
       </div>
@@ -225,12 +219,10 @@ function EmptyShell() {
 
 function Header({
   sessionId,
-  step,
   isBusy,
   messages,
 }: {
   sessionId: string | null;
-  step: string | null;
   isBusy: boolean;
   messages?: UIMessage[];
 }) {
@@ -250,17 +242,6 @@ function Header({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        {isBusy ? (
-          <span className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            {/* 保持 SVG 静止，由 HTML 容器旋转，避免 WebView 逐帧重算 SVG 样式。 */}
-            <span className="inline-flex size-2.5 shrink-0 animate-spin motion-reduce:animate-none">
-              <Spinner className="size-full animate-none" />
-            </span>
-            <span className="max-w-32 truncate">
-              {step ?? t("miniWindow.thinking")}
-            </span>
-          </span>
-        ) : null}
         <Button
           type="button"
           size="icon-sm"
@@ -641,8 +622,7 @@ function SessionAttentionIndicator({
           title={label ?? undefined}
           className={cn(
             "size-1.5 rounded-full",
-            attention === "background-running" &&
-              "animate-pulse bg-warning motion-reduce:animate-none",
+            attention === "background-running" && "bg-warning",
             attention === "completed-unread" && "bg-success",
             attention === "error-unread" && "bg-destructive",
           )}
