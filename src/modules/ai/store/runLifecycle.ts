@@ -58,7 +58,6 @@ export function startDesktopRunLifecycle(
       useChatStore.getState().patchAgentMeta(sessionId, {
         status,
         approvalsPending,
-        ...(status === "idle" || status === "error" ? { step: null } : {}),
         ...(status === "idle" ? { error: null } : {}),
       }),
     onMessages: (messages) => clearTerminalFileMutations(sessionId, messages),

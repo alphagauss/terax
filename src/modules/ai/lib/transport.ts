@@ -49,7 +49,6 @@ export type SessionTransportDependencies = {
   getProviderModels?: () => Readonly<ProviderModels>;
   getCustomProviders?: () => readonly ProviderInstance[];
   getProviderInstanceKeys?: () => ProviderInstanceKeys;
-  onStep?: (step: string | null) => void;
   onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
@@ -172,7 +171,6 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       systemPrompt,
       allowedTools: agent.tools,
       toolContext: deps.toolContext,
-      onStep: deps.onStep,
       onUsage: deps.onUsage,
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
