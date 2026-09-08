@@ -3,7 +3,17 @@
   position: relative;
   display: inline-block;
   overflow: hidden;
-  color: var(--color-muted-foreground);
+  /* 基础文字继承宿主的状态色，避免扫光组件阻断标题的悬停反馈。 */
+  color: inherit;
+}
+
+/* 深色下压低运行中文字的基色，增强扫光反差，同时跟随当前主题配色。 */
+.ai-shimmer:where(.dark *) {
+  color: color-mix(in oklab, currentColor 90%, var(--background));
+}
+
+.ai-shimmer:where(button:hover *) {
+  color: inherit;
 }
 
 .ai-shimmer-light,
@@ -37,7 +47,7 @@
   overflow: hidden;
   white-space: inherit;
   text-overflow: inherit;
-  color: color-mix(in oklab, var(--color-foreground) 30%, var(--color-primary-foreground));
+  color: color-mix(in oklab, var(--color-foreground) 15%, var(--color-primary-foreground));
   animation-name: ai-shimmer-text;
 }
 
