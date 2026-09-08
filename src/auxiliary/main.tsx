@@ -3,6 +3,7 @@
  * 它在窗口显示前加载主题、读取原生能力并按受控 label 懒加载业务页面。
  */
 
+import "@/lib/developmentPerformance";
 import {
   AuxiliaryWindowErrorBoundary,
   AuxiliaryWindowUnavailablePage,

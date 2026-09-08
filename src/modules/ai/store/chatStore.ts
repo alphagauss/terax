@@ -203,6 +203,8 @@ type StoreState = {
   sessions: SessionMeta[];
   activeSessionId: string | null;
   activeSessionRevision: number;
+  chatViewVisible: boolean;
+  setChatViewVisible: (visible: boolean) => void;
   runLockSessionIds: Record<string, true>;
   sessionSyncError: string | null;
   hydrateSessions: () => Promise<void>;
@@ -237,7 +239,6 @@ const NOOP_LIVE: Live = {
   isActiveTerminalPrivate: () => false,
 };
 
-const CHATS_LRU_CAP = 8;
 export const chats = new Map<string, Chat<UIMessage>>();
 const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
@@ -265,22 +266,26 @@ function sessionRunOutcome(id: string): SessionRunOutcome {
     : "completed";
 }
 
-/** 更新聊天实例的 LRU 位置，并只驱逐没有运行锁的非活动实例。 */
-export function touchChat(id: string, c: Chat<UIMessage>) {
-  if (chats.has(id)) chats.delete(id);
-  chats.set(id, c);
-  while (chats.size > CHATS_LRU_CAP) {
-    const state = useChatStore.getState();
-    const candidate = [...chats.keys()].find(
-      (sessionId) =>
-        sessionId !== id &&
-        sessionId !== state.activeSessionId &&
-        !state.runLockSessionIds[sessionId],
-    );
-    if (!candidate) break;
-    void chats.get(candidate)?.stop();
-    chats.delete(candidate);
-    sessionMetadata.delete(candidate);
+/** 只保留前台展示和未提交的业务运行；已完成的后台会话下次从磁盘恢复。 */
+export function releaseUnusedChats() {
+  const state = useChatStore.getState();
+  for (const id of new Set([...chats.keys(), ...seedMessages.keys()])) {
+    const chat = chats.get(id);
+    if (
+      (state.chatViewVisible && id === state.activeSessionId) ||
+      state.runLockSessionIds[id] ||
+      acquiringSessionRuns.has(id) ||
+      sessionCommits.has(id) ||
+      chat?.status === "submitted" ||
+      chat?.status === "streaming" ||
+      (chat && hasPendingApproval(chat.messages))
+    )
+      continue;
+    chats.delete(id);
+    seedMessages.delete(id);
+    sessionMetadata.delete(id);
+    persistedMessageCounts.delete(id);
+    releaseFileEditRuntime(id);
   }
 }
 // Initial messages for a session, populated at hydration time and consumed
@@ -330,6 +335,8 @@ function newTurnId(): string {
 /** 读取磁盘记录，同时准备 UI 消息和完整会话 metadata。 */
 export async function seedSession(id: string): Promise<void> {
   const session = await readSession(id);
+  // 较早发起的磁盘读取不能覆盖随后已经创建的运行实例与提交游标。
+  if (chats.has(id)) return;
   const messages = projectSessionMessages(id, session.messages);
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
@@ -470,6 +477,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   activeSessionRevision: 0,
+  chatViewVisible: false,
+  setChatViewVisible: (chatViewVisible) => set({ chatViewVisible }),
   runLockSessionIds: {},
   sessionSyncError: null,
 
@@ -487,7 +496,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         : null;
       const draftId = restored ? null : newSessionId();
       const activeId = restored?.id ?? draftId;
-      if (restored) await seedSession(restored.id);
+      if (restored && get().chatViewVisible) await seedSession(restored.id);
       if (primary && savedActive && !restored) await persistActiveSession(null);
       set({
         sessions,
@@ -539,7 +548,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const before = local.find((session) => session.id === activeId);
         const after = diskById.get(activeId);
         if (after && before?.fingerprint !== after.fingerprint) {
-          await seedSession(activeId);
+          if (get().chatViewVisible) await seedSession(activeId);
           activeChanged = true;
         }
       }
@@ -563,7 +572,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
 
       if (nextActive && nextActive !== activeId) {
         const nextMeta = next.find((session) => session.id === nextActive);
-        if (nextMeta?.fingerprint) await seedSession(nextActive);
+        if (nextMeta?.fingerprint && get().chatViewVisible)
+          await seedSession(nextActive);
         await persistActiveSession(nextMeta ? nextActive : null);
         activeChanged = true;
       }
@@ -633,6 +643,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
       return true;
     } finally {
       acquiringSessionRuns.delete(id);
+      releaseUnusedChats();
     }
   },
 
@@ -814,14 +825,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
     const requestSequence = ++sessionSwitchSequence;
     if (get().activeSessionId === id) return;
     if (!get().sessions.some((s) => s.id === id)) return;
-    // Lazily seed the chat with persisted messages the first time we open
-    // this session. Subsequent switches reuse the cached Chat instance.
+    // 运行中的会话复用业务实例；已完成后台会话重新读取持久化记录。
     const flip = () => {
-      if (requestSequence !== sessionSwitchSequence) return;
+      if (requestSequence !== sessionSwitchSequence) {
+        releaseUnusedChats();
+        return;
+      }
       set({ activeSessionId: id, draftSessionId: null });
       void persistActiveSession(id);
     };
-    if (chats.has(id) || seedMessages.has(id)) {
+    if (!get().chatViewVisible || chats.has(id) || seedMessages.has(id)) {
       flip();
       return;
     }
@@ -1011,9 +1024,19 @@ export const useChatStore = create<StoreState>((set, get) => ({
       throw error;
     } finally {
       if (sessionCommits.get(id) === commit) sessionCommits.delete(id);
+      releaseUnusedChats();
     }
   },
 }));
+
+useChatStore.subscribe((state, previous) => {
+  if (
+    state.activeSessionId !== previous.activeSessionId ||
+    state.activeSessionRevision !== previous.activeSessionRevision ||
+    state.chatViewVisible !== previous.chatViewVisible
+  )
+    releaseUnusedChats();
+});
 
 function hasPendingApproval(messages: UIMessage[]): boolean {
   return messages.some(

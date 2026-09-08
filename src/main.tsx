@@ -3,6 +3,7 @@
  * WSL 与 SSH 可由原生端提前显示冷启动占位，本地窗口保持隐藏直至主应用挂载。
  */
 
+import "@/lib/developmentPerformance";
 import "@xterm/xterm/css/xterm.css";
 import "./styles/globals.css";
 import "./i18n";

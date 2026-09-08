@@ -14,7 +14,11 @@ import {
   type SessionMessage,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
-import { steerChatMessage } from "@/modules/ai/store/chatRuntime";
+import {
+  loadChat,
+  startChatMessage,
+  steerChatMessage,
+} from "@/modules/ai/store/chatRuntime";
 import type { UIMessage } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -72,6 +76,7 @@ import {
   pendingTurns,
   persistedMessageCounts,
   seedMessages,
+  seedSession,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -198,6 +203,7 @@ describe("chat store multi-process lifecycle", () => {
       sessions: [],
       activeSessionId: null,
       activeSessionRevision: 0,
+      chatViewVisible: true,
       runLockSessionIds: {},
       agentMetaBySession: {},
       subagentDisplaysBySession: {},
@@ -400,6 +406,7 @@ describe("chat store multi-process lifecycle", () => {
       sessions: [first],
       runLockSessionIds: { [first.id]: true },
       refreshSessions: refresh,
+      activeSessionId: first.id,
       subagentDisplaysBySession: {
         [first.id]: {
           "parent-call": {
@@ -879,7 +886,7 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().activeSessionId).toBe(first.id);
   });
 
-  it("evicts an inactive cached Chat when its disk fingerprint changes", async () => {
+  it("releases a completed background Chat before the next disk refresh", async () => {
     const stop = vi.fn().mockResolvedValue(undefined);
     chats.set(second.id, { stop, status: "ready", messages: [] } as never);
     useChatStore.setState({
@@ -894,9 +901,114 @@ describe("chat store multi-process lifecycle", () => {
 
     await useChatStore.getState().refreshSessions();
 
-    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).not.toHaveBeenCalled();
     expect(chats.has(second.id)).toBe(false);
     expect(io.clearProcesses).not.toHaveBeenCalled();
+  });
+
+  it("releases hidden completed history but retains an unsaved background run", async () => {
+    useChatStore.setState({
+      sessions: [first, second],
+      activeSessionId: first.id,
+      runLockSessionIds: { [second.id]: true },
+    });
+    const completed = { status: "ready", messages: [] } as never;
+    const unsaved = { status: "ready", messages: [] } as never;
+    chats.set(first.id, completed);
+    chats.set(second.id, unsaved);
+    sessionMetadata.set(first.id, { title: "first" });
+    persistedMessageCounts.set(first.id, 1);
+    useChatStore.getState().setChatViewVisible(false);
+    expect(chats.has(first.id)).toBe(false);
+    expect(sessionMetadata.has(first.id)).toBe(false);
+    expect(persistedMessageCounts.has(first.id)).toBe(false);
+    expect(chats.get(second.id)).toBe(unsaved);
+    useChatStore
+      .getState()
+      .patchAgentMeta(second.id, { commitError: "disk full" });
+    useChatStore.getState().newSession();
+    expect(chats.get(second.id)).toBe(unsaved);
+  });
+
+  it("cold-loads released history once when the foreground reopens concurrently", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    const initial = await loadChat(first.id);
+    useChatStore.getState().setChatViewVisible(false);
+    expect(chats.has(first.id)).toBe(false);
+    useChatStore.getState().setChatViewVisible(true);
+    const [left, right] = await Promise.all([
+      loadChat(first.id),
+      loadChat(first.id),
+    ]);
+    expect(left).toBe(right);
+    expect(left).not.toBe(initial);
+    expect(io.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not project hidden history during hydration or selection", async () => {
+    useChatStore.setState({ chatViewVisible: false });
+    io.list.mockResolvedValue([first, second]);
+    io.workspaceGet.mockReturnValue(first.id);
+    await useChatStore.getState().hydrateSessions();
+    useChatStore.getState().switchSession(second.id);
+    expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    expect(io.read).not.toHaveBeenCalled();
+    expect(seedMessages.size).toBe(0);
+  });
+
+  it("loads an external binding before validating built-in model credentials", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      selectedModel: null,
+    });
+    const file = sessionFile(first);
+    io.read.mockResolvedValue({
+      ...file,
+      metadata: {
+        ...file.metadata,
+        externalAgent: { agentId: "claude", sessionId: "external" },
+      },
+    });
+    io.acquire.mockResolvedValue(false);
+    expect(await startChatMessage(first.id, { text: "continue" })).toBe(false);
+    expect(io.acquire).toHaveBeenCalledWith(first.id);
+  });
+
+  it("ignores a stale disk seed once a Chat owns the current history", async () => {
+    let resolve!: (value: ReturnType<typeof sessionFile>) => void;
+    io.read.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const reading = seedSession(first.id);
+    chats.set(first.id, { status: "streaming", messages: [] } as never);
+    persistedMessageCounts.set(first.id, 3);
+    sessionMetadata.set(first.id, { title: "current" });
+    resolve(sessionFile(first));
+    await reading;
+    expect(persistedMessageCounts.get(first.id)).toBe(3);
+    expect(sessionMetadata.get(first.id)?.title).toBe("current");
+    expect(seedMessages.has(first.id)).toBe(false);
+  });
+
+  it("does not evict a Chat while native run acquisition is pending", async () => {
+    let resolve!: (value: boolean) => void;
+    io.acquire.mockReturnValue(
+      new Promise<boolean>((done) => {
+        resolve = done;
+      }),
+    );
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    const chat = { status: "ready", messages: [] } as never;
+    chats.set(first.id, chat);
+    const acquiring = useChatStore.getState().beginSessionRun(first.id);
+    useChatStore.getState().setChatViewVisible(false);
+    expect(chats.get(first.id)).toBe(chat);
+    resolve(true);
+    expect(await acquiring).toBe(true);
+    expect(chats.get(first.id)).toBe(chat);
   });
 
   it("opens a draft after deleting the active session", async () => {

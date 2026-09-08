@@ -34,7 +34,8 @@ import {
   isSessionWritable,
   seedMessages,
   sessionMetadata,
-  touchChat,
+  seedSession,
+  releaseUnusedChats,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
 
@@ -178,16 +179,29 @@ function makeChat(sessionId: string): Chat<UIMessage> {
   });
 }
 
-/** 复用会话运行时，并由已有 LRU 管理空闲实例。 */
-export function getOrCreateChat(sessionId: string): Chat<UIMessage> {
+const loadingChats = new Map<string, Promise<Chat<UIMessage>>>();
+
+/** 冷恢复前台或即将运行的会话；并发打开和发送共用一次磁盘读取。 */
+export function loadChat(sessionId: string): Promise<Chat<UIMessage>> {
   const existing = chats.get(sessionId);
-  if (existing) {
-    touchChat(sessionId, existing);
-    return existing;
-  }
-  const c = makeChat(sessionId);
-  touchChat(sessionId, c);
-  return c;
+  if (existing) return Promise.resolve(existing);
+  const pending = loadingChats.get(sessionId);
+  if (pending) return pending;
+  const task = (async () => {
+    if (
+      !seedMessages.has(sessionId) &&
+      useChatStore
+        .getState()
+        .sessions.some((session) => session.id === sessionId)
+    )
+      await seedSession(sessionId);
+    const chat = chats.get(sessionId) ?? makeChat(sessionId);
+    chats.set(sessionId, chat);
+    return chat;
+  })();
+  loadingChats.set(sessionId, task);
+  void task.finally(() => loadingChats.delete(sessionId)).catch(() => {});
+  return task;
 }
 
 /** 发送纯文本用户消息；消息被运行时接受后立即返回，不等待流式回复完成。 */
@@ -291,49 +305,54 @@ export async function startChatMessage(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
   channel?: { id: string; model: ModelRef },
 ): Promise<boolean> {
-  const state = useChatStore.getState();
-  const cwd = resolveSessionCwd(
-    sessionId,
-    state.draftSessionId,
-    state.sessions,
-    state.live.draftCwd,
-  );
-  if (!cwd?.trim()) return false;
-  const externalAgent =
-    parseExternalAgentBinding(sessionMetadata.get(sessionId)) ??
-    (state.draftSessionId === sessionId && state.draftExternalAgentId
-      ? { agentId: state.draftExternalAgentId, sessionId: null }
-      : null);
-  const selectedModel = channel?.model ?? state.selectedModel;
-  if (!externalAgent && !selectedModel) return false;
-  const provider =
-    selectedModel && providerFromBuiltinId(selectedModel.providerId);
-  const credential = provider
-    ? state.apiKeys[provider]
-    : selectedModel && state.providerInstanceKeys[selectedModel.providerId];
-  if (
-    !externalAgent &&
-    selectedModel &&
-    modelRequiresCredential(selectedModel, {
-      customProviders: usePreferencesStore.getState().customProviders,
-    }) &&
-    !credential
-  ) {
-    return false;
+  const chat = await loadChat(sessionId);
+  try {
+    const state = useChatStore.getState();
+    const cwd = resolveSessionCwd(
+      sessionId,
+      state.draftSessionId,
+      state.sessions,
+      state.live.draftCwd,
+    );
+    if (!cwd?.trim()) return false;
+    const externalAgent =
+      parseExternalAgentBinding(sessionMetadata.get(sessionId)) ??
+      (state.draftSessionId === sessionId && state.draftExternalAgentId
+        ? { agentId: state.draftExternalAgentId, sessionId: null }
+        : null);
+    const selectedModel = channel?.model ?? state.selectedModel;
+    if (!externalAgent && !selectedModel) return false;
+    const provider =
+      selectedModel && providerFromBuiltinId(selectedModel.providerId);
+    const credential = provider
+      ? state.apiKeys[provider]
+      : selectedModel && state.providerInstanceKeys[selectedModel.providerId];
+    if (
+      !externalAgent &&
+      selectedModel &&
+      modelRequiresCredential(selectedModel, {
+        customProviders: usePreferencesStore.getState().customProviders,
+      }) &&
+      !credential
+    ) {
+      return false;
+    }
+    if (chat.status === "submitted" || chat.status === "streaming")
+      return false;
+    if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
+    state.patchAgentMeta(sessionId, { cancelled: false });
+    if (channel) runModels.set(chat, channel.model);
+    if (isUserSubmission(message)) {
+      state.promoteSession(sessionId, messagesForPromotion(message), cwd);
+    }
+    if (!externalAgent) getAgentTurnCoordinator(sessionId).inbox.open();
+    startDesktopRunLifecycle(sessionId, chat);
+    const sending = chat.sendMessage(message);
+    void sending;
+    return true;
+  } finally {
+    releaseUnusedChats();
   }
-  const chat = getOrCreateChat(sessionId);
-  if (chat.status === "submitted" || chat.status === "streaming") return false;
-  if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
-  state.patchAgentMeta(sessionId, { cancelled: false });
-  if (channel) runModels.set(chat, channel.model);
-  if (isUserSubmission(message)) {
-    state.promoteSession(sessionId, messagesForPromotion(message), cwd);
-  }
-  if (!externalAgent) getAgentTurnCoordinator(sessionId).inbox.open();
-  startDesktopRunLifecycle(sessionId, chat);
-  const sending = chat.sendMessage(message);
-  void sending;
-  return true;
 }
 
 /** 判断待发送内容是否代表一条用户输入，兼容 AI SDK 的 text 简写形式。 */

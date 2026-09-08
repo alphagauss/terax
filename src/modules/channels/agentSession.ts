@@ -8,17 +8,12 @@ import i18n from "@/i18n";
 import { MAIN_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
 import { commitSession } from "@/modules/ai/lib/sessions";
 import {
-  getOrCreateChat,
+  loadChat,
   startChatMessage,
   steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
 import {
-  chats,
   getAgentMetaForSession,
-  persistedMessageCounts,
-  seedMessages,
-  seedSession,
-  sessionMetadata,
   stopSession,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -45,8 +40,6 @@ export async function ensureChannelSession(
       existing.environmentKey !== "local"
     )
       throw new ChannelError("storage");
-    if (!chats.has(existing.id) && !seedMessages.has(existing.id))
-      await seedSession(existing.id);
     return;
   }
   const cwd = await prepareDefaultWorkspaceRoot();
@@ -65,9 +58,6 @@ export async function ensureChannelSession(
     metadata,
     messages: [],
   });
-  sessionMetadata.set(meta.id, metadata);
-  seedMessages.set(meta.id, []);
-  persistedMessageCounts.set(meta.id, 0);
   useChatStore.setState((current) => ({
     sessions: [meta, ...current.sessions.filter((item) => item.id !== meta.id)],
   }));
@@ -106,7 +96,7 @@ export async function runChannelTurn(
   if (!model) throw new ChannelError("model");
   await ensureChannelSession(connection);
   signal.throwIfAborted();
-  const chat = getOrCreateChat(connection.sessionId);
+  let chat = await loadChat(connection.sessionId);
   if (
     getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
       .commitError
@@ -116,6 +106,8 @@ export async function runChannelTurn(
       await useChatStore
         .getState()
         .commitMessages(connection.sessionId, chat.messages);
+      // 补交成功会释放后台实例，后续发送与回复必须使用重新加载的同一实例。
+      chat = await loadChat(connection.sessionId);
     } catch {
       throw new ChannelError("storage");
     }
