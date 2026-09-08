@@ -12,6 +12,8 @@
 
 ## 视觉语义
 
+侧栏标题、工具栏和导航列表使用 sidebar；AI 对话及底部输入区域的底色在浅色模式使用 background，深色模式使用 sidebar，与面板放置位置无关。输入框使用 background；用户消息使用 secondary 与 secondaryForeground，保持与阅读背景的层次。
+
 hover、active、selected、focus 和拖放是不同状态，不能用同一个强调色取代。语义小字号文字直接使用 foreground 或 mutedForeground，不通过多层 opacity 弱化，也不用页面透明度补偿错误 token。
 
 遮罩、选区、边框、禁用、动画和交互覆盖层可以使用透明度。新增内置主题从 Modern 结构开始，分别配置 light/dark 并注册；自定义主题由设置页创建完整模板，单模式可以删除另一变体。

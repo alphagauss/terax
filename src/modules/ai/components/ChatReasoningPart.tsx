@@ -79,7 +79,7 @@ export function ChatReasoningPart({
         />
       </CollapsibleTrigger>
       <CollapsibleContent className="terax-collapsible-content outline-none [&_*]:text-[12px]!">
-        <div className="mt-1 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-muted-foreground whitespace-pre-wrap wrap-break-word">
+        <div className="mt-1 ml-1 border-l border-border/50 pl-3 text-[11.5px] leading-relaxed text-foreground whitespace-pre-wrap wrap-break-word">
           {visibleText}
         </div>
       </CollapsibleContent>

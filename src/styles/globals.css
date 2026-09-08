@@ -139,19 +139,19 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
 /* React 挂载前的安全回退必须与完整 Modern 基准保持一致。 */
 :root {
     --background: #ffffff;
-    --foreground: #3b3b3b;
+    --foreground: #292929;
     --card: #f8f8f8;
-    --card-foreground: #3b3b3b;
+    --card-foreground: #292929;
     --popover: #ffffff;
-    --popover-foreground: #3b3b3b;
+    --popover-foreground: #292929;
     --primary: #005fb8;
     --primary-foreground: #ffffff;
     --secondary: #e5e5e5;
-    --secondary-foreground: #3b3b3b;
+    --secondary-foreground: #292929;
     --muted: #f8f8f8;
-    --muted-foreground: #616161;
+    --muted-foreground: #595959;
     --accent: #f2f2f2;
-    --accent-foreground: #3b3b3b;
+    --accent-foreground: #292929;
     --destructive: #f85149;
     --success: #188038;
     --warning: #895503;
@@ -176,30 +176,30 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --chart-5: #ad0707;
     --radius: 0.5rem;
     --sidebar: #f8f8f8;
-    --sidebar-foreground: #3b3b3b;
+    --sidebar-foreground: #292929;
     --sidebar-primary: #005fb8;
     --sidebar-primary-foreground: #ffffff;
     --sidebar-accent: #f2f2f2;
-    --sidebar-accent-foreground: #3b3b3b;
+    --sidebar-accent-foreground: #292929;
     --sidebar-border: #e5e5e5;
     --sidebar-ring: #005fb8;
 }
 
 .dark {
     --background: #1f1f1f;
-    --foreground: #cccccc;
+    --foreground: #dedede;
     --card: #181818;
-    --card-foreground: #cccccc;
+    --card-foreground: #dedede;
     --popover: #202020;
-    --popover-foreground: #cccccc;
+    --popover-foreground: #dedede;
     --primary: #0078d4;
     --primary-foreground: #ffffff;
     --secondary: #2b2b2b;
-    --secondary-foreground: #cccccc;
+    --secondary-foreground: #dedede;
     --muted: #2b2b2b;
-    --muted-foreground: #9d9d9d;
+    --muted-foreground: #adadad;
     --accent: #2b2b2b;
-    --accent-foreground: #cccccc;
+    --accent-foreground: #dedede;
     --destructive: #f85149;
     --success: #73c991;
     --warning: #e2c08d;
@@ -223,11 +223,11 @@ html[data-sidebar-dragging="true"] [data-sidebar-navigation-viewport] {
     --chart-4: #d670d6;
     --chart-5: #c74e39;
     --sidebar: #181818;
-    --sidebar-foreground: #cccccc;
+    --sidebar-foreground: #dedede;
     --sidebar-primary: #0078d4;
     --sidebar-primary-foreground: #ffffff;
     --sidebar-accent: #2b2b2b;
-    --sidebar-accent-foreground: #cccccc;
+    --sidebar-accent-foreground: #dedede;
     --sidebar-border: #2b2b2b;
     --sidebar-ring: #0078d4;
 }
