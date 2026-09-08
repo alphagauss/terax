@@ -101,6 +101,10 @@ vi.mock("@/modules/remote", () => ({
 }));
 vi.mock("@/modules/shortcuts", () => ({ useGlobalShortcuts: vi.fn() }));
 vi.mock("@/modules/workspace", () => ({
+  currentWorkspaceEnv: () => ({
+    kind: mocks.environmentKind,
+    profileId: "server",
+  }),
   useWorkspaceEnvStore: (
     select: (state: { env: { kind: string; profileId?: string } }) => unknown,
   ) =>
@@ -332,12 +336,16 @@ describe("root title interactions", () => {
     act(() =>
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
     );
-    expect(container.textContent).toContain("menu.open");
+    expect(container.textContent).toContain("fileActions.open");
 
     act(() =>
       title.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
     );
-    expect(container.textContent).not.toContain("menu.open");
+    expect(
+      [...container.querySelectorAll("*")].some(
+        (element) => element.textContent === "fileActions.open",
+      ),
+    ).toBe(false);
     expect(container.textContent).toContain("menu.refresh");
     act(() => root.unmount());
   });

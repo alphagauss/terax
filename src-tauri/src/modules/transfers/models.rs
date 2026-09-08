@@ -74,6 +74,8 @@ pub struct EnqueueTransferRequest {
     pub strategy: TransferStrategy,
     pub sources: Vec<String>,
     pub destination: String,
+    /// 单文件下载的用户指定名称，目录与上传不接受此字段。
+    pub destination_name: Option<String>,
 }
 
 impl EnqueueTransferRequest {
@@ -108,6 +110,24 @@ impl EnqueueTransferRequest {
                 TransferErrorCode::ResourceLimit,
                 "transfer path exceeds the IPC safety limit",
             ));
+        }
+        if let Some(name) = &self.destination_name {
+            if self.direction != TransferDirection::Download
+                || self.strategy != TransferStrategy::Direct
+                || self.sources.len() != 1
+                || name.is_empty()
+                || name == "."
+                || name == ".."
+                || name.contains('/')
+                || (cfg!(windows) && name.contains(['\\', ':']))
+                || name.chars().any(char::is_control)
+                || name.len() > 255
+            {
+                return Err(TransferFailure::new(
+                    TransferErrorCode::InvalidRequest,
+                    "invalid single-file download name",
+                ));
+            }
         }
         Ok(self)
     }
@@ -214,8 +234,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn save_as_name_is_limited_to_single_file_direct_downloads() {
+        let request = EnqueueTransferRequest {
+            direction: TransferDirection::Download,
+            strategy: TransferStrategy::Direct,
+            sources: vec!["/home/file.txt".into()],
+            destination: "/tmp".into(),
+            destination_name: Some("新文件.txt".into()),
+        };
+        assert!(request.clone().normalize().is_ok());
+        for name in ["", ".", "..", "../escape", "a/b", "a\nname"] {
+            let mut invalid = request.clone();
+            invalid.destination_name = Some(name.into());
+            assert!(invalid.normalize().is_err(), "{name}");
+        }
+        for name in ["a\\b", "a:stream"] {
+            let mut platform_name = request.clone();
+            platform_name.destination_name = Some(name.into());
+            assert_eq!(platform_name.normalize().is_ok(), !cfg!(windows));
+        }
+        let mut upload = request.clone();
+        upload.direction = TransferDirection::Upload;
+        assert!(upload.normalize().is_err());
+        let mut archive = request.clone();
+        archive.strategy = TransferStrategy::Archive;
+        assert!(archive.normalize().is_err());
+        let mut multiple = request;
+        multiple.sources.push("/home/other".into());
+        assert!(multiple.normalize().is_err());
+    }
+
+    #[test]
     fn normalize_rejects_empty_requests_without_rewriting_paths() {
         let normalized = EnqueueTransferRequest {
+            destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
             sources: vec!["  ".into(), " C:/a.txt ".into()],
@@ -227,6 +279,7 @@ mod tests {
         assert_eq!(normalized.destination, " /tmp ");
 
         assert!(EnqueueTransferRequest {
+            destination_name: None,
             direction: TransferDirection::Download,
             strategy: TransferStrategy::Archive,
             sources: vec![],
@@ -250,6 +303,7 @@ mod tests {
     #[test]
     fn normalize_caps_untrusted_request_size() {
         let error = EnqueueTransferRequest {
+            destination_name: None,
             direction: TransferDirection::Upload,
             strategy: TransferStrategy::Direct,
             sources: (0..=MAX_TRANSFER_SOURCES)

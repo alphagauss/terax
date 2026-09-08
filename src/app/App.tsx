@@ -844,11 +844,9 @@ export default function App() {
 
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean) => {
-      // Markdown opens in its rendered view by default; a per-tab toggle flips
-      // it to the raw editor. Other files default to preview (pin=false);
-      // explicit actions like context-menu "Open" pass pin=true to persist.
+      // 文件默认使用临时标签；双击等显式固定操作仍通过 pin 保留标签。
       if (isMarkdownPath(path))
-        newMarkdownTab(path, true, explorerRoot ?? undefined);
+        newMarkdownTab(path, pin ?? false, explorerRoot ?? undefined);
       else openFileTab(path, pin ?? false, explorerRoot ?? undefined);
     },
     [explorerRoot, openFileTab, newMarkdownTab],
@@ -1536,7 +1534,13 @@ export default function App() {
       path: string,
       line: number,
       selection?: EditorSourceSelection,
-      temporary = false,
+      {
+        temporary = false,
+        markdownSource = false,
+      }: {
+        temporary?: boolean;
+        markdownSource?: boolean;
+      } = {},
     ) => {
       const markdown = isMarkdownPath(path);
       const root = explorerRoot ?? undefined;
@@ -1547,7 +1551,7 @@ export default function App() {
       pendingContentNavigation.current.set(id, {
         line,
         selection,
-        markdownSource: markdown && temporary,
+        markdownSource: markdown && markdownSource,
       });
       applyPendingContentNavigation(id);
     },
@@ -1571,6 +1575,10 @@ export default function App() {
   );
 
   useAiLiveBridge({
+    openFileReference: (path, line) => {
+      if (line === undefined) handleOpenFile(path, false);
+      else openContentHit(path, line, undefined, { temporary: true });
+    },
     openFileEdits: openFileEditsTab,
     setLive,
     activeId,
@@ -1799,7 +1807,10 @@ export default function App() {
           rootPath={explorerRoot}
           visible={sidebar.isVisible("search") && !zenMode}
           onOpenHit={(hit: ContentSearchHit) =>
-            openContentHit(hit.path, hit.line, hit.ranges[0], true)
+            openContentHit(hit.path, hit.line, hit.ranges[0], {
+              temporary: true,
+              markdownSource: true,
+            })
           }
         />
       ),

@@ -5,6 +5,7 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
+import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditContext } from "@/modules/ai/components/FileEditStats";
 import { FileEditTool } from "@/modules/ai/components/FileEditTool";
 import {
@@ -17,7 +18,6 @@ import {
   MessageAction,
   MessageActions,
   MessageContent,
-  MessageResponse,
 } from "@/components/ai-elements/message";
 import { Tool } from "@/components/ai-elements/tool";
 import {
@@ -1403,9 +1403,9 @@ const RenderedPart = memo(function RenderedPart({
 }) {
   if (part.type === "text") {
     return (
-      <MessageResponse className="[&>*:last-child]:mb-0!" streaming={streaming}>
+      <ChatMessageResponse className="[&>*:last-child]:mb-0!" streaming={streaming}>
         {(part as unknown as { text: string }).text}
-      </MessageResponse>
+      </ChatMessageResponse>
     );
   }
 

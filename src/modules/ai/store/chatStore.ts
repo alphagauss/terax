@@ -75,6 +75,7 @@ import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 
 export type Live = {
+  openFileReference?: (path: string, line?: number) => void | Promise<void>;
   openFileEdits?: (
     input: import("@/modules/ai/lib/fileEdits").FileEditsOpenInput,
   ) => void;

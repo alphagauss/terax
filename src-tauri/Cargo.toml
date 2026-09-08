@@ -25,6 +25,7 @@ desktop = [
     "dep:tauri-plugin-clipboard-manager",
     "dep:tauri-plugin-autostart",
     "dep:tauri-plugin-window-state",
+    "dep:zbus",
     # 当前只有桌面宿主启用 PTY、配置监听、文件模糊搜索与 SSH 连接管理。
     "dep:portable-pty",
     "dep:notify",
@@ -149,6 +150,7 @@ objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] 
 
 # WebKitGTK can't read external clipboard copies; mac/win webviews can.
 [target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", optional = true }
 tauri-plugin-clipboard-manager = { version = "2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]

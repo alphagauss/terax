@@ -19,6 +19,7 @@ import { redactSensitive } from "./redact";
 import { resolveWorkingDirectoryTarget } from "./workingDirectoryNavigation";
 
 type Params = {
+  openFileReference?: Live["openFileReference"];
   openFileEdits?: Live["openFileEdits"];
   setLive: (live: Live) => void;
   activeId: number;
@@ -83,6 +84,7 @@ export function useAiLiveBridge(params: Params) {
 
   useEffect(() => {
     setLive({
+      openFileReference: (path, line) => ref.current.openFileReference?.(path, line),
       openFileEdits: (input) => ref.current.openFileEdits?.(input),
       draftCwd: params.explorerRoot ?? defaultRoot,
       revealWorkingDirectory: async (cwd: string) => {

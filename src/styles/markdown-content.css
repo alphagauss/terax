@@ -97,7 +97,7 @@
 }
 
 .markdown-content [data-streamdown="link"] {
-  color: var(--primary);
+  color: var(--info);
   text-decoration: none;
 }
 

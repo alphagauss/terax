@@ -4,6 +4,7 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -77,7 +78,6 @@ import {
 import {
   copyToClipboard,
   relativePath,
-  revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
 import type { GitStatusCode } from "@/modules/explorer/lib/gitStatusUtils";
 import { folderIconUrl } from "@/modules/explorer/lib/iconResolver";
@@ -1239,13 +1239,10 @@ export const FileExplorer = memo(
           >
             {menuTarget ? (
               <>
-                {!menuTarget.isDir && (
-                  <ContextMenuItem
-                    onSelect={() => onOpenFile(menuTarget.path, true)}
-                  >
-                    {t("menu.open")}
-                  </ContextMenuItem>
-                )}
+                <FileActionItems
+                  target={menuTarget}
+                  onOpen={(path) => onOpenFile(path, false)}
+                />
                 {!menuTarget.isDir &&
                   isPythonFile(menuTarget.path) &&
                   onRunPythonFile && (
@@ -1294,13 +1291,7 @@ export const FileExplorer = memo(
                       />
                     ))}
                   </>
-                ) : (
-                  <ContextMenuItem
-                    onSelect={() => void revealInFinder(menuTarget.path)}
-                  >
-                    {t("menu.revealInFinder")}
-                  </ContextMenuItem>
-                )}
+                ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem
                   onSelect={() =>
@@ -1327,11 +1318,6 @@ export const FileExplorer = memo(
                   {t("menu.newFolder")}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem
-                  onSelect={() => void copyToClipboard(menuTarget.path)}
-                >
-                  {t("menu.copyPath")}
-                </ContextMenuItem>
                 <ContextMenuItem
                   onSelect={() =>
                     void copyToClipboard(
@@ -1376,6 +1362,10 @@ export const FileExplorer = memo(
               </>
             ) : (
               <>
+                <FileActionItems
+                  target={{ path: rootPath, isDir: true }}
+                  onOpen={(path) => onOpenFile(path, false)}
+                />
                 {onRevealInTerminal && (
                   <ContextMenuItem
                     onSelect={() => onRevealInTerminal(rootPath)}
@@ -1383,27 +1373,21 @@ export const FileExplorer = memo(
                     {t("menu.openInTerminal")}
                   </ContextMenuItem>
                 )}
-                {workspaceEnv.kind !== "local" ? (
-                  (["files", "folders"] as const).map((kind) => (
-                    <TransferStrategyMenu
-                      key={kind}
-                      label={t(
-                        kind === "files"
-                          ? "menu.uploadFiles"
-                          : "menu.uploadFolder",
-                      )}
-                      onSelect={(strategy) =>
-                        void enqueueUpload(rootPath, kind, strategy)
-                      }
-                    />
-                  ))
-                ) : (
-                  <ContextMenuItem
-                    onSelect={() => void revealInFinder(rootPath)}
-                  >
-                    {t("menu.revealInFinder")}
-                  </ContextMenuItem>
-                )}
+                {workspaceEnv.kind !== "local"
+                  ? (["files", "folders"] as const).map((kind) => (
+                      <TransferStrategyMenu
+                        key={kind}
+                        label={t(
+                          kind === "files"
+                            ? "menu.uploadFiles"
+                            : "menu.uploadFolder",
+                        )}
+                        onSelect={(strategy) =>
+                          void enqueueUpload(rootPath, kind, strategy)
+                        }
+                      />
+                    ))
+                  : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem
                   onSelect={() => tree.beginCreate(rootPath, "file")}
@@ -1416,11 +1400,6 @@ export const FileExplorer = memo(
                   {t("menu.newFolder")}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem
-                  onSelect={() => void copyToClipboard(rootPath)}
-                >
-                  {t("menu.copyPath")}
-                </ContextMenuItem>
                 <ContextMenuItem onSelect={() => tree.refresh(rootPath)}>
                   {t("menu.refresh")}
                 </ContextMenuItem>
