@@ -36,6 +36,7 @@ import {
   sessionMetadata,
   seedSession,
   releaseUnusedChats,
+  startingSessionIds,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
 
@@ -305,8 +306,10 @@ export async function startChatMessage(
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
   channel?: { id: string; model: ModelRef },
 ): Promise<boolean> {
-  const chat = await loadChat(sessionId);
+  if (startingSessionIds.has(sessionId)) return false;
+  startingSessionIds.add(sessionId);
   try {
+    const chat = await loadChat(sessionId);
     const state = useChatStore.getState();
     const cwd = resolveSessionCwd(
       sessionId,
@@ -351,6 +354,7 @@ export async function startChatMessage(
     void sending;
     return true;
   } finally {
+    startingSessionIds.delete(sessionId);
     releaseUnusedChats();
   }
 }
