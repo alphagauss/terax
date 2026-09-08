@@ -178,8 +178,12 @@ export function AiSidebarComposer() {
           <span className="min-w-1 flex-1" />
 
           {guiding ? (
-            <IconBtn title={t("statusBar.stop")} onClick={c.stop}>
-              <span className="size-2 rounded-[2px] bg-current" />
+            <IconBtn
+              title={t("statusBar.stop")}
+              onClick={c.stop}
+              className="rounded-full"
+            >
+              <span className="size-2.5 rounded-[2px] bg-current" />
             </IconBtn>
           ) : null}
           <Button
@@ -188,7 +192,7 @@ export function AiSidebarComposer() {
             onClick={stopping ? c.stop : c.submit}
             disabled={c.readOnly || (!c.isBusy && !c.canSend)}
             className={cn(
-              "bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
+              "rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
               guiding &&
                 "bg-primary text-primary-foreground hover:bg-primary/85",
             )}
@@ -196,7 +200,7 @@ export function AiSidebarComposer() {
             title={submitLabel}
           >
             {stopping ? (
-              <span className="size-2 rounded-[2px] bg-current" />
+              <span className="size-2.5 rounded-[2px] bg-current" />
             ) : (
               <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />
             )}
