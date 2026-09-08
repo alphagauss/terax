@@ -4,6 +4,7 @@
  */
 
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import {
   Collapsible,
   CollapsibleContent,
@@ -98,6 +99,12 @@ export function ChatActivityBlock({
           </Shimmer>
         ) : (
           <span className="min-w-0 truncate text-left">{title}</span>
+        )}
+        {!open && running && shownHeadline?.kind === "tool" && (
+          <FileEditStats
+            toolCallId={shownHeadline.key}
+            className="ml-1 inline-flex shrink-0"
+          />
         )}
         <HugeiconsIcon
           icon={ArrowDown01Icon}

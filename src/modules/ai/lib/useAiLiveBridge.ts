@@ -19,6 +19,7 @@ import { redactSensitive } from "./redact";
 import { resolveWorkingDirectoryTarget } from "./workingDirectoryNavigation";
 
 type Params = {
+  openFileEdits?: Live["openFileEdits"];
   setLive: (live: Live) => void;
   activeId: number;
   activeSpaceId: string | null;
@@ -82,6 +83,7 @@ export function useAiLiveBridge(params: Params) {
 
   useEffect(() => {
     setLive({
+      openFileEdits: (input) => ref.current.openFileEdits?.(input),
       draftCwd: params.explorerRoot ?? defaultRoot,
       revealWorkingDirectory: async (cwd: string) => {
         const decide = (path: string) => {

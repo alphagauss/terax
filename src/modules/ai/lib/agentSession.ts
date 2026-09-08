@@ -3,6 +3,10 @@
  * 宿主显式注入配置，执行、审批、增量提交和取消复用桌面同一套业务实现。
  */
 
+import {
+  peekFileEditRuntime,
+  releaseFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
 import { Chat } from "@ai-sdk/react";
 import {
   lastAssistantMessageIsCompleteWithApprovalResponses,
@@ -24,6 +28,7 @@ import {
 } from "@/modules/ai/lib/agentDefinition";
 import {
   materializeSubagentDisplayParts,
+  materializeFileEditParts,
   projectSessionMessages,
 } from "@/modules/ai/lib/conversation";
 import {
@@ -209,6 +214,12 @@ export async function createAgentSession(options: {
           chat.messages,
           savedDisplays,
         );
+      chat.messages = materializeFileEditParts(
+        chat.messages,
+        peekFileEditRuntime(session.id)?.snapshot(),
+        cursor.turnId,
+      );
+      releaseFileEditRuntime(session.id);
       displays.clear();
       clearSessionFileMutations(session.id, chat.messages);
       await releaseSessionRun(session.id);

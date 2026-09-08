@@ -48,6 +48,11 @@ export type MarkdownTab = TabBase & {
 
 export type AiDiffStatus = "pending" | "approved" | "rejected";
 
+export type FileEditsTab = TabBase &
+  import("@/modules/ai/lib/fileEdits").FileEditsOpenInput & {
+    kind: "file-edits";
+  };
+
 export type AiDiffTab = TabBase & {
   kind: "ai-diff";
   sessionId: string;
@@ -88,6 +93,7 @@ export type Tab =
   | WebPreviewTab
   | MarkdownTab
   | AiDiffTab
+  | FileEditsTab
   | GitDiffTab
   | GitHistoryTab
   | GitCommitFileDiffTab;

@@ -16,6 +16,13 @@ export type ToolContext = {
   getPermissionMode: () => "ask" | "full-access";
   /** 当前 runner 是否能将需要提权的调用交给 UI 审批。 */
   supportsApprovals: boolean;
+  /** 内置 Subagent 的展示归属，与原生会话授权身份分开。 */
+  fileEditTaskId?: string;
+  onFileEditInput?: (
+    toolCallId: string,
+    toolName: string,
+    input: unknown,
+  ) => void;
 };
 
 export function resolvePath(rawPath: string, cwd: string): string {

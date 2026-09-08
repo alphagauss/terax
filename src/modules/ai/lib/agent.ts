@@ -44,9 +44,9 @@ import {
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
 import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
+import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import {
   createUIMessageStream,
-  generateText,
   type ModelMessage,
   pruneMessages,
   stepCountIs,
@@ -559,7 +559,7 @@ function buildSubagentTaskRunner({
     // Subagent 没有独立审批通道，越界调用应由原生边界返回明确错误。
     supportsApprovals: false,
   };
-  return async ({ task, abortSignal, onProgress }) => {
+  return async ({ taskId, task, abortSignal, onProgress }) => {
     const childModel = await buildConfiguredLanguageModel(model, opts.keys, {
       providerBaseURLs: opts.providerBaseURLs,
       customProviders: opts.customProviders,
@@ -573,7 +573,7 @@ function buildSubagentTaskRunner({
         providerBaseURLs: opts.providerBaseURLs,
       }).provider,
     );
-    const result = await generateText({
+    const result = streamText({
       model: childModel,
       experimental_download: createProviderDownload(
         model.providerId,
@@ -581,7 +581,21 @@ function buildSubagentTaskRunner({
       ),
       system: prompt.system,
       messages: prompt.messages,
-      tools: buildTools(toolContext, allowedTools),
+      tools: buildTools(
+        {
+          ...toolContext,
+          fileEditTaskId: taskId,
+          onFileEditInput: (id, toolName, input) => {
+            onProgress({
+              type: "tool-start",
+              id,
+              toolName,
+              summary: summarizeSubagentToolInput(toolName, input),
+            });
+          },
+        },
+        allowedTools,
+      ),
       stopWhen: stepCountIs(MAX_AGENT_STEPS),
       abortSignal,
       experimental_onStepStart: () => {
@@ -612,17 +626,40 @@ function buildSubagentTaskRunner({
       },
       onStepFinish: (step) => reportUsage(opts, step.usage),
     });
-    const usage = result.totalUsage;
-    return {
-      status: "completed",
-      result:
-        result.text || "Task completed but no final response was generated.",
-      usage: {
-        inputTokens: usage.inputTokens ?? 0,
-        outputTokens: usage.outputTokens ?? 0,
-        cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
-      },
-    };
+    try {
+      for await (const chunk of result.fullStream) {
+        if (chunk.type === "error") throw chunk.error;
+        if (
+          chunk.type === "tool-error" ||
+          chunk.type === "tool-output-denied"
+        ) {
+          peekFileEditRuntime(opts.toolContext.getSessionId())?.fail(
+            chunk.toolCallId,
+            taskId,
+          );
+          onProgress({
+            type: "tool-finish",
+            id: chunk.toolCallId,
+            status: "failed",
+          });
+        }
+      }
+      abortSignal.throwIfAborted();
+      const usage = await result.totalUsage;
+      return {
+        status: "completed",
+        result:
+          (await result.text) ||
+          "Task completed but no final response was generated.",
+        usage: {
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+        },
+      };
+    } finally {
+      peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(taskId);
+    }
   };
 }
 

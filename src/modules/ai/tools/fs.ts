@@ -12,11 +12,7 @@ import {
   fileOperationNeedsApproval,
   pathNeedsApproval,
 } from "./authorization";
-import {
-  clearPreparedFileMutation,
-  commitPreparedFileMutation,
-  prepareFileMutation,
-} from "./fileMutation";
+import { executeFileMutation, fileEditInputHooks } from "./fileMutation";
 
 /** 创建已知文件读取、完整文件写入和结构化路径操作工具。 */
 export function buildFsTools(ctx: ToolContext) {
@@ -57,6 +53,7 @@ export function buildFsTools(ctx: ToolContext) {
     }),
 
     write_file: tool({
+      ...fileEditInputHooks(ctx, "write_file"),
       description:
         "Create one complete UTF-8 text file, or intentionally rewrite one complete file. Missing parent directories are created automatically. mode defaults to create and refuses an existing target; rewrite requires read_file on the current version first. Use apply_patch for targeted changes. Workspace-local writes run automatically; outside or sensitive paths require approval unless full access is enabled.",
       inputSchema: z.object({
@@ -68,23 +65,17 @@ export function buildFsTools(ctx: ToolContext) {
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         const approvalRequired = needsPathApproval(input.path);
-        try {
-          await prepareFileMutation({
-            sessionId,
-            toolCallId,
-            toolName: "write_file",
-            input,
-            cwd: ctx.getCwd(),
-            permissionMode: accessModeForCall(
-              ctx.getPermissionMode(),
-              approvalRequired,
-            ),
-          });
-          return await commitPreparedFileMutation(sessionId, toolCallId);
-        } catch (error) {
-          clearPreparedFileMutation(sessionId, toolCallId);
-          return { error: String(error), path: input.path };
-        }
+        return executeFileMutation(ctx, {
+          sessionId,
+          toolCallId,
+          toolName: "write_file",
+          input,
+          cwd: ctx.getCwd(),
+          permissionMode: accessModeForCall(
+            ctx.getPermissionMode(),
+            approvalRequired,
+          ),
+        });
       },
     }),
 

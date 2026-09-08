@@ -1,0 +1,14 @@
+.file-edit-number { display: inline-block; overflow: hidden; height: 1.4em; line-height: 1.4; }
+.file-edit-number > span { position: relative; display: inline-block; }
+.file-edit-number-old { position: absolute; inset: 0 auto auto 0; }
+.file-edit-number-new { display: inline-block; }
+.file-edit-number[data-direction="up"] { --edit-from: 100%; --edit-to: -100%; }
+.file-edit-number[data-direction="down"] { --edit-from: -100%; --edit-to: 100%; }
+.file-edit-number-motion .file-edit-number-new { animation: file-edit-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.file-edit-number-motion .file-edit-number-old { animation: file-edit-exit 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes file-edit-enter { from { transform: translateY(var(--edit-from)); } to { transform: translateY(0); } }
+@keyframes file-edit-exit { from { transform: translateY(0); } to { transform: translateY(var(--edit-to)); } }
+@media (prefers-reduced-motion: reduce) {
+  .file-edit-number-motion .file-edit-number-new { animation: none; }
+  .file-edit-number-motion .file-edit-number-old { display: none; }
+}

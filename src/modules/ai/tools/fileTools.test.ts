@@ -7,6 +7,10 @@ import type { ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
+import {
+  getFileEditRuntime,
+  releaseFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
 
 const nativeMock = vi.hoisted(() => ({
   agentFileRead: vi.fn(),
@@ -38,6 +42,7 @@ const context: ToolContext = {
 
 describe("AI file tools", () => {
   beforeEach(() => {
+    releaseFileEditRuntime(context.getSessionId());
     vi.clearAllMocks();
     useChatStore.setState({ permissionMode: "ask" });
     nativeMock.agentFileRead.mockResolvedValue({ content: "1| text" });
@@ -216,5 +221,78 @@ describe("AI file tools", () => {
       destination: "nested/new.txt",
       recursive: undefined,
     });
+  });
+
+  it("提交成功后原位修正统计，文件快照不进入模型工具输出", async () => {
+    nativeMock.agentPrepareMutation.mockResolvedValue({
+      files: [
+        {
+          path: "/workspace/a.txt",
+          identity: "/workspace/a.txt",
+          before: "old\n",
+          after: "new\nmore\n",
+          isNewFile: false,
+          replacements: 1,
+        },
+      ],
+    });
+    const output = {
+      files: [{ path: "/workspace/a.txt", bytesWritten: 9, replacements: 1 }],
+    };
+    nativeMock.agentCommitMutation.mockResolvedValue(output);
+    const runtime = getFileEditRuntime(context.getSessionId());
+    const tool = buildFsTools(context).write_file;
+    if (!tool.execute) throw new Error("write_file execute missing");
+    const result = await tool.execute(
+      { path: "a.txt", content: "new\nmore\n", mode: "rewrite" },
+      options,
+    );
+    expect(result).toEqual(output);
+    expect(runtime.getCall(options.toolCallId)).toMatchObject({
+      added: 2,
+      removed: 1,
+      approximate: false,
+    });
+    expect(runtime.snapshot().files).toEqual([
+      {
+        path: "a.txt",
+        identity: "/workspace/a.txt",
+        before: "old\n",
+        after: "new\nmore\n",
+        isNewFile: false,
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("old");
+  });
+
+  it("回滚失败不发布成功快照，并清理原生预备修改", async () => {
+    nativeMock.agentPrepareMutation.mockResolvedValue({
+      files: [
+        {
+          path: "/workspace/a.txt",
+          identity: "/workspace/a.txt",
+          before: "old",
+          after: "new",
+          isNewFile: false,
+        },
+      ],
+    });
+    nativeMock.agentCommitMutation.mockResolvedValue({
+      files: [],
+      error: "rollback failed",
+      uncertainPaths: ["/workspace/a.txt"],
+    });
+    const tool = buildFsTools(context).write_file;
+    if (!tool.execute) throw new Error("write_file execute missing");
+    expect(
+      await tool.execute({ path: "a.txt", content: "new" }, options),
+    ).toMatchObject({ error: "rollback failed" });
+    const runtime = getFileEditRuntime(context.getSessionId());
+    expect(runtime.snapshot().files).toEqual([]);
+    expect(runtime.getCall(options.toolCallId)?.uncertain).toBe(true);
+    expect(nativeMock.agentClearMutation).toHaveBeenCalledWith(
+      context.getSessionId(),
+      options.toolCallId,
+    );
   });
 });

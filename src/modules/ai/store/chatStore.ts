@@ -3,6 +3,10 @@
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
 
+import {
+  peekFileEditRuntime,
+  releaseFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
 import i18n from "@/i18n";
 import { cancelAgentRun } from "@/modules/ai/lib/runLifecycle";
 import {
@@ -32,6 +36,7 @@ import type { AgentUsage } from "@/modules/ai/lib/agent";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
   materializeSubagentDisplayParts,
+  materializeFileEditParts,
   projectSessionMessages,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
@@ -70,6 +75,9 @@ import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
 
 export type Live = {
+  openFileEdits?: (
+    input: import("@/modules/ai/lib/fileEdits").FileEditsOpenInput,
+  ) => void;
   draftCwd: string | null;
   revealWorkingDirectory: (cwd: string) => Promise<void>;
   getTerminalContext: () => string | null;
@@ -847,6 +855,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const remaining = get().sessions.filter((session) => session.id !== id);
         await chats.get(id)?.stop();
         chats.delete(id);
+        releaseFileEditRuntime(id);
         seedMessages.delete(id);
         persistedMessageCounts.delete(id);
         sessionMetadata.delete(id);
@@ -966,6 +975,13 @@ export const useChatStore = create<StoreState>((set, get) => ({
           snapshots,
         );
       }
+      if (chat)
+        chat.messages = materializeFileEditParts(
+          chat.messages,
+          peekFileEditRuntime(id)?.snapshot(),
+          cursor.turnId,
+        );
+      releaseFileEditRuntime(id);
       set((state) => {
         const subagentDisplaysBySession = {
           ...state.subagentDisplaysBySession,

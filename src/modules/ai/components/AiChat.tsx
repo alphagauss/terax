@@ -5,6 +5,8 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
+import { FileEditContext } from "@/modules/ai/components/FileEditStats";
+import { FileEditTool } from "@/modules/ai/components/FileEditTool";
 import {
   Conversation,
   ConversationContent,
@@ -73,6 +75,8 @@ import type {
 } from "ai";
 import {
   memo,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -82,6 +86,12 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { StickToBottomContext } from "use-stick-to-bottom";
+
+const FileEditsCard = lazy(() =>
+  import("@/modules/ai/components/FileEditsCard").then((module) => ({
+    default: module.FileEditsCard,
+  })),
+);
 
 type ConversationScrollPosition = {
   top: number;
@@ -589,6 +599,11 @@ const RenderedMessage = memo(function RenderedMessage({
   const timestamp = useMessageTimestamp(message);
   const copyText = useMemo(() => messageTextForCopy(message), [message]);
   const subagentParts = messageMetadata(message).subagents;
+  const fileEdits = messageMetadata(message).fileEdits;
+  const fileEditContext = useMemo(
+    () => ({ sessionId, calls: fileEdits?.calls }),
+    [sessionId, fileEdits?.calls],
+  );
   if (message.role === "user") {
     const rawText = message.parts
       .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -628,58 +643,65 @@ const RenderedMessage = memo(function RenderedMessage({
   }
 
   return (
-    <Message
-      from={message.role}
-      data-conversation-message-id={message.id}
-      className="group/message gap-1"
-    >
-      <MessageContent>
-        <div className="flex flex-col gap-0.5 [&>div:has(.ai-activity-block)+div:has(.markdown-content)]:mt-4">
-          {groups.map((g) => {
-            if (g.kind === "activity") {
+    <FileEditContext.Provider value={fileEditContext}>
+      <Message
+        from={message.role}
+        data-conversation-message-id={message.id}
+        className="group/message gap-1"
+      >
+        <MessageContent>
+          <div className="flex flex-col gap-0.5 [&>div:has(.ai-activity-block)+div:has(.markdown-content)]:mt-4">
+            {groups.map((g) => {
+              if (g.kind === "activity") {
+                return (
+                  <PartAppear key={`${message.id}-${g.key}`}>
+                    <ChatActivityBlock
+                      durationMs={g.durationMs}
+                      headline={activityHeadline(
+                        g.headlinePart,
+                        t("chat.activity.thinking"),
+                      )}
+                      running={streaming && !g.completed}
+                    >
+                      {g.groups.map((group) => (
+                        <RenderedLeafGroup
+                          key={`${message.id}-${group.key}`}
+                          group={group}
+                          message={message}
+                          sessionId={sessionId}
+                          streaming={streaming}
+                          streamingPartIdx={streamingPartIdx}
+                          subagentParts={subagentParts}
+                        />
+                      ))}
+                    </ChatActivityBlock>
+                  </PartAppear>
+                );
+              }
               return (
-                <PartAppear key={`${message.id}-${g.key}`}>
-                  <ChatActivityBlock
-                    durationMs={g.durationMs}
-                    headline={activityHeadline(
-                      g.headlinePart,
-                      t("chat.activity.thinking"),
-                    )}
-                    running={streaming && !g.completed}
-                  >
-                    {g.groups.map((group) => (
-                      <RenderedLeafGroup
-                        key={`${message.id}-${group.key}`}
-                        group={group}
-                        message={message}
-                        sessionId={sessionId}
-                        streaming={streaming}
-                        streamingPartIdx={streamingPartIdx}
-                        subagentParts={subagentParts}
-                      />
-                    ))}
-                  </ChatActivityBlock>
-                </PartAppear>
+                <RenderedLeafGroup
+                  key={`${message.id}-${g.key}`}
+                  group={g}
+                  message={message}
+                  sessionId={sessionId}
+                  streaming={streaming}
+                  streamingPartIdx={streamingPartIdx}
+                  subagentParts={subagentParts}
+                />
               );
-            }
-            return (
-              <RenderedLeafGroup
-                key={`${message.id}-${g.key}`}
-                group={g}
-                message={message}
-                sessionId={sessionId}
-                streaming={streaming}
-                streamingPartIdx={streamingPartIdx}
-                subagentParts={subagentParts}
-              />
-            );
-          })}
-        </div>
-      </MessageContent>
-      {!streaming ? (
-        <MessageMeta timestamp={timestamp} copyText={copyText} />
-      ) : null}
-    </Message>
+            })}
+          </div>
+          {messageMetadata(message).fileEditsSummary && fileEdits && (
+            <Suspense fallback={null}>
+              <FileEditsCard sessionId={sessionId} edits={fileEdits} />
+            </Suspense>
+          )}
+        </MessageContent>
+        {!streaming ? (
+          <MessageMeta timestamp={timestamp} copyText={copyText} />
+        ) : null}
+      </Message>
+    </FileEditContext.Provider>
   );
 });
 
@@ -1489,16 +1511,25 @@ const RenderedTool = memo(function RenderedTool({
   const externalLabel = externalAgentActivityLabel(toolName, part.input);
   const display = resolveToolDisplay(part);
   const denied = part.state === "output-denied";
-  const tool = (
-    <Tool
-      className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
-      toolName={externalLabel ?? toolName}
-      state={display.state}
-      input={externalLabel ? undefined : part.input}
-      output={"output" in part ? part.output : undefined}
-      errorText={display.errorText}
-    />
-  );
+  const tool =
+    toolName === "write_file" || toolName === "apply_patch" ? (
+      <FileEditTool
+        toolName={toolName}
+        toolCallId={part.toolCallId}
+        input={part.input}
+        state={display.state}
+        errorText={display.errorText}
+      />
+    ) : (
+      <Tool
+        className="ai-tool-details [&_*]:text-[12px]! [&>button]:py-[3px] [&>button]:leading-4"
+        toolName={externalLabel ?? toolName}
+        state={display.state}
+        input={externalLabel ? undefined : part.input}
+        output={"output" in part ? part.output : undefined}
+        errorText={display.errorText}
+      />
+    );
 
   if (!denied) return tool;
 

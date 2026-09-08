@@ -276,6 +276,7 @@ pub struct AgentPrepareMutationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AgentFilePreview {
     path: String,
+    identity: String,
     before: String,
     after: String,
     is_new_file: bool,
@@ -299,6 +300,10 @@ pub struct AgentMutationKeyRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AgentMutationResult {
     files: Vec<AgentMutationFileResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    uncertain_paths: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -737,7 +742,7 @@ pub async fn agent_file_commit_mutation(
     for write in &mutation.writes {
         if let Err(error) = ensure_parent(&write.io_path, &mutation.workspace).await {
             let failures = rollback_writes(app, &mutation.workspace, &committed).await;
-            return Err(with_rollback_status(error, failures));
+            return mutation_failure(error, failures);
         }
         let result = match super::file::fs_write_file_checked(
             write.io_path.clone(),
@@ -752,7 +757,7 @@ pub async fn agent_file_commit_mutation(
             Ok(result) => result,
             Err(error) => {
                 let failures = rollback_writes(app, &mutation.workspace, &committed).await;
-                return Err(with_rollback_status(error, failures));
+                return mutation_failure(error, failures);
             }
         };
         let CheckedWriteResult::Written {
@@ -762,10 +767,10 @@ pub async fn agent_file_commit_mutation(
         } = result
         else {
             let failures = rollback_writes(app, &mutation.workspace, &committed).await;
-            return Err(with_rollback_status(
+            return mutation_failure(
                 "file changed after approval; review the updated files again".into(),
                 failures,
-            ));
+            );
         };
         let new_version = FileVersion {
             revision,
@@ -792,7 +797,11 @@ pub async fn agent_file_commit_mutation(
         );
     }
     prepared.remove(&key);
-    Ok(AgentMutationResult { files: results })
+    Ok(AgentMutationResult {
+        files: results,
+        error: None,
+        uncertain_paths: Vec::new(),
+    })
 }
 
 /// 丢弃单个预备快照。
@@ -2154,6 +2163,11 @@ fn preview_for(mutation: &PreparedMutation) -> AgentMutationPreview {
             .iter()
             .map(|write| AgentFilePreview {
                 path: write.path.clone(),
+                identity: if cfg!(windows) && matches!(mutation.workspace, WorkspaceEnv::Local) {
+                    write.canonical.to_ascii_lowercase()
+                } else {
+                    write.canonical.clone()
+                },
                 before: write.before.clone(),
                 after: write.after.clone(),
                 is_new_file: write.is_new_file,
@@ -2271,14 +2285,19 @@ async fn rollback_writes(
     failures
 }
 
-fn with_rollback_status(error: String, failures: Vec<String>) -> String {
+/// 回滚失败时保留不确定路径，展示层不能把未确认的磁盘状态记为零改动。
+fn mutation_failure(error: String, failures: Vec<String>) -> Result<AgentMutationResult, String> {
     if failures.is_empty() {
-        error
+        Err(error)
     } else {
-        format!(
-            "{error}; rollback could not restore: {}",
-            failures.join(", ")
-        )
+        Ok(AgentMutationResult {
+            files: Vec::new(),
+            error: Some(format!(
+                "{error}; rollback could not restore: {}",
+                failures.join(", ")
+            )),
+            uncertain_paths: failures,
+        })
     }
 }
 
@@ -2352,6 +2371,87 @@ async fn copy_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn failed_batch_reports_uncertain_paths_only_when_rollback_cannot_restore() {
+        struct ConcurrentWrite {
+            first: PathBuf,
+            second: PathBuf,
+            overwrite_first: bool,
+        }
+        impl super::super::file::FileEvents for ConcurrentWrite {
+            fn file_written(&self, path: &str, source: Option<String>) {
+                if source.as_deref() == Some("ai")
+                    && Path::new(path).file_name().unwrap() == "a.txt"
+                {
+                    // 在第一份文件发布后制造第二份基线冲突，并可选地阻止第一份回滚。
+                    std::fs::write(&self.second, "external b").unwrap();
+                    if self.overwrite_first {
+                        std::fs::write(&self.first, "external a").unwrap();
+                    }
+                }
+            }
+        }
+        for overwrite_first in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = to_canon(directory.path());
+            let state = AgentFileState::default();
+            let registry = WorkspaceRegistry::default();
+            registry.authorize(directory.path()).unwrap();
+            let owner = Uuid::new_v4().to_string();
+            for name in ["a.txt", "b.txt"] {
+                std::fs::write(directory.path().join(name), "before\r\n").unwrap();
+                agent_file_read(&state, &registry, serde_json::from_value(serde_json::json!({
+                    "ownerSessionId": owner, "root": root, "permissionMode": "full-access", "path": name
+                })).unwrap()).await.unwrap();
+            }
+            let preview = agent_file_prepare_mutation(&state, &registry, serde_json::from_value(serde_json::json!({
+                "ownerSessionId": owner, "toolCallId": "edit", "root": root, "permissionMode": "full-access",
+                "mutation": { "kind": "patch", "files": [
+                    { "path": "a.txt", "edits": [{ "old_text": "before", "new_text": "after" }] },
+                    { "path": "b.txt", "edits": [{ "old_text": "before", "new_text": "after" }] }
+                ] }
+            })).unwrap()).await.unwrap();
+            assert_eq!(preview.files[0].before, "before\r\n");
+            assert_eq!(preview.files[0].after, "after\r\n");
+            assert!(!preview.files[0].identity.is_empty());
+            let events = ConcurrentWrite {
+                first: directory.path().join("a.txt"),
+                second: directory.path().join("b.txt"),
+                overwrite_first,
+            };
+            let result = agent_file_commit_mutation(
+                &state,
+                &registry,
+                &events,
+                AgentMutationKeyRequest {
+                    owner_session_id: owner,
+                    tool_call_id: "edit".into(),
+                },
+            )
+            .await;
+            if overwrite_first {
+                let result = result.unwrap();
+                assert!(result.error.is_some());
+                assert!(result.files.is_empty());
+                assert_eq!(result.uncertain_paths, vec![preview.files[0].path.clone()]);
+                assert_eq!(
+                    std::fs::read_to_string(&events.first).unwrap(),
+                    "external a"
+                );
+            } else {
+                assert!(result.is_err());
+                assert_eq!(
+                    std::fs::read_to_string(&events.first).unwrap(),
+                    "before\r\n"
+                );
+            }
+            assert_eq!(
+                std::fs::read_to_string(&events.second).unwrap(),
+                "external b"
+            );
+        }
+    }
 
     #[test]
     fn read_window_uses_one_based_lines_and_utf8_boundaries() {

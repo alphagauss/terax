@@ -200,6 +200,7 @@ export default function App() {
     newWebPreviewTab,
     newMarkdownTab,
     openAiDiffTab,
+    openFileEditsTab,
     setAiDiffStatus,
     openGitDiffTab,
     openCommitHistoryTab,
@@ -1570,6 +1571,7 @@ export default function App() {
   );
 
   useAiLiveBridge({
+    openFileEdits: openFileEditsTab,
     setLive,
     activeId,
     activeSpaceId,

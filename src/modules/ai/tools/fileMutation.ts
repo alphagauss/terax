@@ -6,10 +6,106 @@
 import type { UIMessage, UIMessagePart } from "ai";
 
 import { native, type AgentMutationInput } from "../lib/native";
+import {
+  getFileEditRuntime,
+  peekFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
+import type { ToolContext } from "./context";
 
 export type PreparedFileMutation = Awaited<
   ReturnType<typeof native.agentPrepareMutation>
 >;
+
+/** 两个编辑工具共用 SDK 输入事件，回调只入队，不等待解析或动画。 */
+export function fileEditInputHooks(
+  ctx: ToolContext,
+  toolName: "write_file" | "apply_patch",
+) {
+  return {
+    onInputDelta: ({
+      toolCallId,
+      inputTextDelta,
+    }: {
+      toolCallId: string;
+      inputTextDelta: string;
+    }) => {
+      getFileEditRuntime(ctx.getSessionId()).input(
+        toolCallId,
+        ctx.fileEditTaskId,
+        toolName,
+        inputTextDelta,
+        undefined,
+        ctx.onFileEditInput,
+      );
+    },
+    onInputAvailable: ({
+      toolCallId,
+      input,
+    }: {
+      toolCallId: string;
+      input: unknown;
+    }) => {
+      getFileEditRuntime(ctx.getSessionId()).input(
+        toolCallId,
+        ctx.fileEditTaskId,
+        toolName,
+        undefined,
+        input,
+        ctx.onFileEditInput,
+      );
+    },
+  };
+}
+
+/** 成功快照进入展示通道，模型只收到原有精简提交结果。 */
+export async function executeFileMutation(
+  ctx: ToolContext,
+  request: PrepareInput,
+) {
+  const runtime = getFileEditRuntime(request.sessionId);
+  return runtime.track(async () => {
+    try {
+      await import("@/modules/ai/lib/fileEditDiff");
+      const preview = await prepareFileMutation(request);
+      const result = await commitPreparedFileMutation(
+        request.sessionId,
+        request.toolCallId,
+      );
+      await runtime.complete(
+        request.toolCallId,
+        ctx.fileEditTaskId,
+        result.error
+          ? []
+          : preview.files.map(
+              ({ path, identity, before, after, isNewFile }) => ({
+                path: displayMutationPath(path, request.cwd),
+                identity,
+                before,
+                after,
+                isNewFile,
+              }),
+            ),
+        result.uncertainPaths ?? [],
+      );
+      if (result.error)
+        clearPreparedFileMutation(request.sessionId, request.toolCallId);
+      return result;
+    } catch (error) {
+      runtime.fail(request.toolCallId, ctx.fileEditTaskId);
+      clearPreparedFileMutation(request.sessionId, request.toolCallId);
+      return { error: String(error) };
+    }
+  });
+}
+
+function displayMutationPath(path: string, cwd: string): string {
+  const root = `${cwd.replace(/\\/g, "/").replace(/\/$/, "")}/`;
+  const windows = /^[a-z]:/i.test(root);
+  const inside = windows
+    ? path.toLowerCase().startsWith(root.toLowerCase())
+    : path.startsWith(root);
+  return inside ? path.slice(root.length) : path;
+}
 
 type PrepareInput = {
   sessionId: string;
@@ -141,6 +237,12 @@ export function clearTerminalFileMutations(
         isTerminalFileMutationState(candidate.state)
       ) {
         clearPreparedFileMutation(sessionId, candidate.toolCallId);
+        const runtime = peekFileEditRuntime(sessionId);
+        if (
+          runtime &&
+          runtime.getCall(candidate.toolCallId)?.approximate !== false
+        )
+          runtime.fail(candidate.toolCallId);
       }
     }
   }

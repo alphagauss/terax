@@ -6,24 +6,12 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/controls/button";
 import type { AiDiffStatus } from "@/modules/workbench";
-import { presentableDiff, unifiedMergeView } from "@codemirror/merge";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  buildSharedExtensions,
-  DEFAULT_INDENT,
-  languageCompartment,
-} from "@/modules/editor/lib/extensions";
-import {
-  resolveLanguage,
-  resolveLanguageSync,
-} from "@/modules/editor/lib/languageResolver";
-import { useEditorThemeExt } from "@/modules/editor/lib/useEditorThemeExt";
+import { computeLineStats } from "@/modules/ai/lib/fileEditDiff";
+import { ReadonlyDiff } from "@/modules/editor/ReadonlyDiff";
 
 type Props = {
   path: string;
@@ -34,50 +22,6 @@ type Props = {
   onAccept: () => void;
   onReject: () => void;
 };
-
-const SHARED_EXT: readonly Extension[] = buildSharedExtensions();
-const READONLY_EXT: Extension[] = [
-  EditorState.readOnly.of(true),
-  EditorView.editable.of(false),
-];
-
-const DIFF_THEME = EditorView.theme({
-  // ".cm-changedLine": {
-  //   backgroundColor:
-  //     "color-mix(in srgb, #22c55e 10%, transparent) !important",
-  // },
-  // ".cm-merge-b .cm-changedText, .cm-merge-b ins.cm-insertedLine": {
-  //   background:
-  //     "color-mix(in srgb, #22c55e 28%, transparent) !important",
-  //   textDecoration: "none !important",
-  //   borderRadius: "2px",
-  // },
-  // ".cm-deletedChunk": {
-  //   backgroundColor:
-  //     "color-mix(in srgb, #ef4444 8%, transparent)",
-  //   paddingLeft: "6px",
-  //   paddingTop: "1px",
-  //   paddingBottom: "1px",
-  // },
-  // ".cm-deletedChunk .cm-deletedText, .cm-deletedLine del": {
-  //   background:
-  //     "color-mix(in srgb, #ef4444 26%, transparent) !important",
-  //   textDecoration: "none !important",
-  //   borderRadius: "2px",
-  // },
-  // ".cm-changeGutter": {
-  //   width: "3px",
-  // },
-  // ".cm-changedLineGutter": {
-  //   backgroundColor: "#22c55e",
-  // },
-  // ".cm-deletedLineGutter": {
-  //   backgroundColor: "#ef4444",
-  // },
-  ".cm-changedText": {
-    background: "#88ff881a !important",
-  },
-});
 
 const STATUS_LABEL_KEY: Record<AiDiffStatus, string> = {
   pending: "statusPending",
@@ -105,44 +49,6 @@ export function AiDiffPane({
   onReject,
 }: Props) {
   const { t } = useTranslation("editor");
-  const cmRef = useRef<ReactCodeMirrorRef>(null);
-  const themeExt = useEditorThemeExt();
-
-  // Language resolves before mount; reconfiguring after would leave the
-  // merge view's deleted-chunk widgets unhighlighted.
-  const [lang, setLang] = useState<Extension | null>(
-    () => resolveLanguageSync(path)?.ext ?? null,
-  );
-  useEffect(() => {
-    if (lang) return;
-    let cancelled = false;
-    resolveLanguage(path).then((res) => {
-      if (!cancelled && res) setLang(res.ext);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, lang]);
-
-  const extensions = useMemo(
-    () => [
-      ...SHARED_EXT,
-      DEFAULT_INDENT,
-      languageCompartment.of(lang ?? []),
-      ...READONLY_EXT,
-      unifiedMergeView({
-        original: originalContent,
-        mergeControls: false,
-        highlightChanges: true,
-        gutter: true,
-        syntaxHighlightDeletions: true,
-        collapseUnchanged: { margin: 3, minSize: 6 },
-      }),
-      DIFF_THEME,
-    ],
-    [originalContent, lang],
-  );
-
   const stats = useMemo(
     () => computeLineStats(originalContent, proposedContent),
     [originalContent, proposedContent],
@@ -189,49 +95,12 @@ export function AiDiffPane({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <CodeMirror
-          ref={cmRef}
-          value={proposedContent}
-          theme={themeExt}
-          extensions={extensions}
-          editable={false}
-          height="100%"
-          className="h-full"
-          basicSetup={{
-            lineNumbers: true,
-            foldGutter: true,
-            highlightActiveLine: false,
-            highlightActiveLineGutter: false,
-            searchKeymap: true,
-          }}
+        <ReadonlyDiff
+          path={path}
+          before={originalContent}
+          after={proposedContent}
         />
       </div>
     </div>
   );
-}
-
-function computeLineStats(
-  original: string,
-  proposed: string,
-): { added: number; removed: number } {
-  const changes = presentableDiff(original, proposed);
-  let added = 0;
-  let removed = 0;
-  for (const c of changes) {
-    removed += countLines(original, c.fromA, c.toA);
-    added += countLines(proposed, c.fromB, c.toB);
-  }
-  return { added, removed };
-}
-
-function countLines(doc: string, from: number, to: number): number {
-  if (from === to) return 0;
-  const slice = doc.slice(from, to);
-  // 末尾换行产生的空片段不属于实际修改行，不能计入统计。
-  let n = 1;
-  for (let i = 0; i < slice.length; i++) {
-    if (slice.charCodeAt(i) === 10) n++;
-  }
-  if (slice.endsWith("\n")) n--;
-  return Math.max(n, 1);
 }

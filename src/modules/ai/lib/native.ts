@@ -134,6 +134,7 @@ export type AgentMutationInput =
 export type AgentMutationPreview = {
   files: Array<{
     path: string;
+    identity: string;
     before: string;
     after: string;
     isNewFile: boolean;
@@ -142,6 +143,8 @@ export type AgentMutationPreview = {
 };
 
 export type AgentMutationResult = {
+  error?: string;
+  uncertainPaths?: string[];
   files: Array<{
     path: string;
     bytesWritten: number;
