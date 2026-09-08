@@ -22,6 +22,7 @@ import {
   type ProviderModels,
   resolveModel,
 } from "@/modules/ai/config";
+import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import {
   type AgentToolId,
   resolveSubagentTools,
@@ -188,7 +189,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
       originalMessages?: UIMessage[];
       onError?: (error: unknown) => string;
     } = {}) {
-      return createUIMessageStream<UIMessage>({
+      const stream = createUIMessageStream<UIMessage>({
         originalMessages,
         onError,
         execute: async ({ writer }) => {
@@ -484,6 +485,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
           }
         },
       });
+      return coalesceStream(stream);
     },
   };
 }

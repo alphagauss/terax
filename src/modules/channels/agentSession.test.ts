@@ -16,7 +16,7 @@ import { expect, it, vi } from "vitest";
 vi.mock("@/lib/platform", () => ({ HOST_PLATFORM: "windows" }));
 vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/modules/ai/store/chatRuntime", () => ({
-  getOrCreateChat: (id: string) => chats.get(id),
+  loadChat: async (id: string) => chats.get(id),
   startChatMessage: vi.fn(),
 }));
 
@@ -93,4 +93,76 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
     true,
   );
   chats.clear();
+});
+
+it("reads the new Chat response after retrying a previous terminal commit", async () => {
+  const connection = {
+    id: "retry-channel",
+    sessionId: "retry-session",
+    kind: "weixin" as const,
+    name: "Retry",
+    enabled: true,
+    accountId: "owner",
+    busyMessageMode: "queue" as const,
+  };
+  const previous = { status: "ready", messages: [] as UIMessage[] };
+  const next = { status: "ready", messages: [] as UIMessage[] };
+  useChatStore.setState({
+    sessions: [
+      {
+        id: connection.sessionId,
+        channelId: connection.id,
+        environmentKey: "local",
+      } as never,
+    ],
+    agentMetaBySession: {},
+    runLockSessionIds: { [connection.sessionId]: true },
+  });
+  usePreferencesStore.setState({
+    defaultModel: { providerId: "builtin:deepseek", modelId: "deepseek-chat" },
+  });
+  chats.set(connection.sessionId, previous as never);
+  useChatStore
+    .getState()
+    .patchAgentMeta(connection.sessionId, {
+      commitError: "previous save failed",
+    });
+  const commit = vi
+    .spyOn(useChatStore.getState(), "commitMessages")
+    .mockImplementation(async () => {
+      chats.set(connection.sessionId, next as never);
+      useChatStore
+        .getState()
+        .patchAgentMeta(connection.sessionId, { commitError: undefined });
+    });
+  vi.mocked(startChatMessage).mockImplementation(async () => {
+    next.messages = [
+      {
+        id: "reply",
+        role: "assistant",
+        parts: [{ type: "text", text: "new response" }],
+      },
+    ];
+    useChatStore.setState({ runLockSessionIds: {} });
+    return true;
+  });
+  try {
+    await expect(
+      runChannelTurn(
+        connection,
+        {
+          id: "input",
+          senderId: "owner",
+          text: "hello",
+          receivedAt: 1,
+          replyContext: "context",
+        },
+        new AbortController().signal,
+        () => {},
+      ),
+    ).resolves.toBe("new response");
+  } finally {
+    commit.mockRestore();
+    chats.clear();
+  }
 });

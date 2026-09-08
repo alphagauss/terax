@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
-import { type UIMessage, useChat } from "@ai-sdk/react";
+import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
 import {
   AlertCircleIcon,
   ArrowDown01Icon,
@@ -40,7 +40,7 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelContextWindow, tryResolveModel } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
@@ -52,9 +52,10 @@ import {
 import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
 import type { SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
-import { getOrCreateChat } from "@/modules/ai/store/chatRuntime";
+import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
   getAgentMetaForSession,
+  releaseUnusedChats,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -96,6 +97,10 @@ export function AiSidebarPanel({
 }) {
   const sessionId = useChatStore((s) => s.activeSessionId);
   const revision = useChatStore((s) => s.activeSessionRevision);
+  useLayoutEffect(() => {
+    useChatStore.getState().setChatViewVisible(visible);
+    return () => useChatStore.getState().setChatViewVisible(false);
+  }, [visible]);
   const readOnly = useChatStore((s) => {
     const session = s.sessions.find((item) => item.id === s.activeSessionId);
     return (
@@ -105,16 +110,16 @@ export function AiSidebarPanel({
   });
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-sidebar text-[12px]">
-      {sessionId ? (
-        <Body
-          key={`${sessionId}:${revision}`}
-          sessionId={sessionId}
-          readOnly={readOnly}
-          visible={visible}
-        />
-      ) : (
-        <EmptyShell />
-      )}
+      {visible &&
+        (sessionId ? (
+          <SessionBody
+            key={`${sessionId}:${revision}`}
+            sessionId={sessionId}
+            readOnly={readOnly}
+          />
+        ) : (
+          <EmptyShell />
+        ))}
       {hasComposer ? (
         <AiSidebarComposer />
       ) : (
@@ -124,21 +129,51 @@ export function AiSidebarPanel({
   );
 }
 
-function Body({
+/** 展示加载与业务运行解耦，隐藏时卸载订阅，重新显示时冷恢复已释放的历史。 */
+function SessionBody({
   sessionId,
   readOnly,
-  visible,
 }: {
   sessionId: string;
   readOnly: boolean;
-  visible: boolean;
+}) {
+  const [chat, setChat] = useState<Chat<UIMessage> | null>(null);
+  useEffect(() => {
+    let active = true;
+    void loadChat(sessionId).then(
+      (loaded) => {
+        if (active) setChat(loaded);
+        else releaseUnusedChats();
+      },
+      (error: unknown) => {
+        if (active) useChatStore.setState({ sessionSyncError: String(error) });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [sessionId]);
+  return chat ? (
+    <Body sessionId={sessionId} readOnly={readOnly} chat={chat} />
+  ) : (
+    <EmptyShell />
+  );
+}
+
+function Body({
+  sessionId,
+  readOnly,
+  chat,
+}: {
+  sessionId: string;
+  readOnly: boolean;
+  chat: Chat<UIMessage>;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
   const step = useChatStore(
     (state) => getAgentMetaForSession(state, sessionId).step,
   );
 
-  const chat = useMemo(() => getOrCreateChat(sessionId), [sessionId]);
   const helpers = useChat<UIMessage>({
     chat,
     experimental_throttle: STREAM_RENDER_INTERVAL_MS,
@@ -164,7 +199,6 @@ function Body({
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
             <AiChatView
               sessionId={sessionId}
-              visible={visible}
               messages={helpers.messages}
               status={helpers.status}
               error={helpers.error}

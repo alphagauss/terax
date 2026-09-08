@@ -8,7 +8,8 @@
 import "@/i18n";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { progressiveTextStore } from "@/modules/ai/lib/progressiveText";
 import { ChatReasoningPart } from "./ChatReasoningPart";
 
 const reactTestEnvironment = globalThis as typeof globalThis & {
@@ -16,6 +17,36 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 };
 
 describe("ChatReasoningPart", () => {
+  it("stops progressive work while collapsed and resumes at the current text", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const target = vi.spyOn(progressiveTextStore, "setTarget");
+    try {
+      act(() =>
+        root.render(
+          <ChatReasoningPart text="first" isStreaming autoCollapse={false} />,
+        ),
+      );
+      const button = container.querySelector("button");
+      act(() => button?.click());
+      target.mockClear();
+      act(() =>
+        root.render(
+          <ChatReasoningPart
+            text="first and latest"
+            isStreaming
+            autoCollapse={false}
+          />,
+        ),
+      );
+      expect(target).not.toHaveBeenCalled();
+      act(() => button?.click());
+      expect(container.textContent).toContain("first and latest");
+    } finally {
+      act(() => root.unmount());
+      target.mockRestore();
+    }
+  });
   beforeEach(() => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   });

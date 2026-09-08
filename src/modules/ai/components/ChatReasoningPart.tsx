@@ -38,7 +38,7 @@ export function ChatReasoningPart({
   const { t } = useTranslation("ai");
   const [isOpen, setIsOpen] = useState(!autoCollapse);
   const hasAutoCollapsed = useRef(autoCollapse);
-  const visibleText = useProgressiveText(text, isStreaming);
+  const visibleText = useProgressiveText(text, isStreaming && isOpen);
   const durationSeconds =
     durationMs === undefined
       ? undefined

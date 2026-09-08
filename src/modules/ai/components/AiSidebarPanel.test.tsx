@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({ chat: null as Chat<UIMessage> | null }));
 
 vi.mock("../store/chatRuntime", () => ({
-  getOrCreateChat: () => runtime.chat,
+  loadChat: async () => runtime.chat,
 }));
 vi.mock("@/modules/workspace-process", () => ({
   currentWorkspaceBootstrap: () => ({ environmentKey: "local" }),
@@ -54,6 +54,42 @@ afterEach(() => {
 });
 
 describe("AI sidebar chat subscription", () => {
+  it("unsubscribes hidden messages and resumes the same running Chat", async () => {
+    const current = chat([message("m1", "first")]);
+    runtime.chat = current;
+    useChatStore.setState({
+      activeSessionId: sessionId,
+      sessions: [],
+      runLockSessionIds: { [sessionId]: true },
+    });
+    let listeners = 0;
+    const subscribe = current["~registerMessagesCallback"];
+    current["~registerMessagesCallback"] = (callback, throttle) => {
+      listeners++;
+      const unsubscribe = subscribe(callback, throttle);
+      return () => {
+        listeners--;
+        unsubscribe();
+      };
+    };
+    const stop = vi.spyOn(current, "stop");
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
+    expect(listeners).toBe(1);
+    await act(async () =>
+      root.render(<AiSidebarPanel hasComposer visible={false} />),
+    );
+    expect(listeners).toBe(0);
+    expect(container.querySelector('[data-testid="messages"]')).toBeNull();
+    current.messages = [message("m2", "background result")];
+    await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
+    expect(container.textContent).toContain("background result");
+    expect(listeners).toBe(1);
+    expect(stop).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+    expect(listeners).toBe(0);
+  });
   it("re-subscribes when the active revision replaces a same-id Chat", async () => {
     runtime.chat = chat([message("m1", "first")]);
     useChatStore.setState({

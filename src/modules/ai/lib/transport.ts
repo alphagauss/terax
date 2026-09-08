@@ -19,6 +19,7 @@ import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
 import type { SessionAgentSnapshot } from "@/modules/ai/lib/agents";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
+import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
@@ -111,25 +112,27 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
         "@/modules/ai/external-agents/runtime"
       );
       await deps.onSystemPrompt?.("", options.messages);
-      return runExternalAgentStream({
-        agentId: externalAgent.agentId,
-        ownerSessionId: deps.toolContext.getSessionId(),
-        externalSessionId: externalAgent.sessionId,
-        cwd: deps.getCwd(),
-        permissionMode: deps.getPermissionMode?.() ?? "ask",
-        messages: options.messages,
-        abortSignal: options.abortSignal,
-        onSession: (sessionId) =>
-          deps.onExternalSession?.(externalAgent.agentId, sessionId),
-        onUsage: (usage) =>
-          deps.onUsage?.({
-            inputTokens: usage.input,
-            outputTokens: usage.output,
-            cachedInputTokens: usage.cached,
-            lastInputTokens: usage.input,
-            lastCachedTokens: usage.cached,
-          }),
-      });
+      return coalesceStream(
+        await runExternalAgentStream({
+          agentId: externalAgent.agentId,
+          ownerSessionId: deps.toolContext.getSessionId(),
+          externalSessionId: externalAgent.sessionId,
+          cwd: deps.getCwd(),
+          permissionMode: deps.getPermissionMode?.() ?? "ask",
+          messages: options.messages,
+          abortSignal: options.abortSignal,
+          onSession: (sessionId) =>
+            deps.onExternalSession?.(externalAgent.agentId, sessionId),
+          onUsage: (usage) =>
+            deps.onUsage?.({
+              inputTokens: usage.input,
+              outputTokens: usage.output,
+              cachedInputTokens: usage.cached,
+              lastInputTokens: usage.input,
+              lastCachedTokens: usage.cached,
+            }),
+        }),
+      );
     }
     const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({

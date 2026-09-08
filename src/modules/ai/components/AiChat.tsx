@@ -108,7 +108,7 @@ const conversationScrollPositions = new Map<
 >();
 
 /** 记忆并恢复会话滚动位置，滚动事件按动画帧合并，底部状态不采集消息锚点。 */
-function useConversationScrollMemory(sessionId: string, visible: boolean) {
+function useConversationScrollMemory(sessionId: string) {
   const contextRef = useRef<StickToBottomContext | null>(null);
   const remembered = conversationScrollPositions.get(sessionId);
   const revealLatest = useSessionAttentionStore((state) =>
@@ -206,20 +206,20 @@ function useConversationScrollMemory(sessionId: string, visible: boolean) {
 
   useLayoutEffect(() => {
     if (
-      !visible ||
       !revealLatest ||
       !useSessionAttentionStore.getState().takeRevealLatest(sessionId)
     ) {
       return;
     }
     conversationScrollPositions.delete(sessionId);
-    window.requestAnimationFrame(() => {
+    const frame = window.requestAnimationFrame(() => {
       void contextRef.current?.scrollToBottom({
         animation: "instant",
         ignoreEscapes: true,
       });
     });
-  }, [revealLatest, sessionId, visible]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [revealLatest, sessionId]);
 
   return {
     contextRef,
@@ -383,7 +383,6 @@ type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
 
 type Props = {
   sessionId: string;
-  visible: boolean;
   messages: UIMessage[];
   status: ChatStatus;
   error: Error | undefined;
@@ -393,18 +392,17 @@ type Props = {
 /**
  * AI 会话消息视图。
  *
- * 负责恢复滚动位置、按已接入引导切开活动块和渲染流式末尾消息，通知导航等待面板可见。
+ * 仅在前台挂载，负责恢复滚动位置、按引导切开活动块和渲染流式末尾消息。
  */
 export function AiChatView({
   sessionId,
-  visible,
   messages: sourceMessages,
   status,
   error,
   clearError,
 }: Props) {
   const { t } = useTranslation("ai");
-  const scrollMemory = useConversationScrollMemory(sessionId, visible);
+  const scrollMemory = useConversationScrollMemory(sessionId);
   const isBusy = status === "submitted" || status === "streaming";
   const messages = useMemo(
     () => projectConversationDisplay(sourceMessages),

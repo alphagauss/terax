@@ -60,7 +60,15 @@ describe("session transport", () => {
     mocks.runAgentStream.mockResolvedValue({
       toUIMessageStream: mocks.toUIMessageStream,
     });
-    mocks.runExternalAgentStream.mockReturnValue("external-stream");
+    mocks.runExternalAgentStream.mockImplementation(
+      () =>
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "finish" });
+            controller.close();
+          },
+        }),
+    );
   });
 
   it("passes the canonical messages unchanged and reads instructions from session cwd", async () => {
@@ -201,7 +209,10 @@ describe("session transport", () => {
       onExternalSession: capture,
     });
 
-    expect(await transport.sendMessages({ messages })).toBe("external-stream");
+    const stream = await transport.sendMessages({ messages });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    expect(chunks).toEqual([{ type: "finish" }]);
     expect(persist).toHaveBeenCalledWith("", messages);
     expect(mocks.readAgentsMd).not.toHaveBeenCalled();
     expect(mocks.runAgentStream).not.toHaveBeenCalled();
