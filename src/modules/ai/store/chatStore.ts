@@ -240,6 +240,8 @@ const NOOP_LIVE: Live = {
 };
 
 export const chats = new Map<string, Chat<UIMessage>>();
+/** 发送准备跨越磁盘读取，期间不能被已经卸载的展示加载回调释放。 */
+export const startingSessionIds = new Set<string>();
 const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
@@ -274,6 +276,7 @@ export function releaseUnusedChats() {
     if (
       (state.chatViewVisible && id === state.activeSessionId) ||
       state.runLockSessionIds[id] ||
+      startingSessionIds.has(id) ||
       acquiringSessionRuns.has(id) ||
       sessionCommits.has(id) ||
       chat?.status === "submitted" ||

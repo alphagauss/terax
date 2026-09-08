@@ -77,6 +77,7 @@ import {
   persistedMessageCounts,
   seedMessages,
   seedSession,
+  releaseUnusedChats,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -991,6 +992,33 @@ describe("chat store multi-process lifecycle", () => {
     expect(persistedMessageCounts.get(first.id)).toBe(3);
     expect(sessionMetadata.get(first.id)?.title).toBe("current");
     expect(seedMessages.has(first.id)).toBe(false);
+  });
+
+  it("retains a cold Chat when the abandoned view completes before a pending send", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      selectedModel: { providerId: "builtin:ollama", modelId: "test" },
+    });
+    let resolve!: (value: ReturnType<typeof sessionFile>) => void;
+    io.read.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const abandonedView = loadChat(first.id).then(releaseUnusedChats);
+    const sending = startChatMessage(first.id, { text: "continue" });
+    useChatStore.getState().setChatViewVisible(false);
+    io.acquire.mockImplementation(async () => {
+      expect(chats.has(first.id)).toBe(true);
+      expect(sessionMetadata.has(first.id)).toBe(true);
+      return false;
+    });
+    resolve(sessionFile(first));
+    await abandonedView;
+    expect(await sending).toBe(false);
+    expect(io.acquire).toHaveBeenCalledWith(first.id);
+    expect(chats.has(first.id)).toBe(false);
   });
 
   it("does not evict a Chat while native run acquisition is pending", async () => {
