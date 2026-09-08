@@ -170,7 +170,16 @@ export function MarkdownPreviewPane({
   const hasOutline = Boolean(document?.outline.length);
 
   useEffect(() => {
-    if (!visible || viewMode !== "rendered" || !scrollContainer || !document) {
+    // 目录隐藏时停止高亮定位；重新打开后立即同步当前阅读位置。
+    if (
+      !visible ||
+      viewMode !== "rendered" ||
+      !outlineOpen ||
+      !outlineAvailable ||
+      !hasOutline ||
+      !scrollContainer ||
+      !document
+    ) {
       return;
     }
     let frame = 0;
@@ -203,7 +212,15 @@ export function MarkdownPreviewPane({
       );
       if (frame !== 0) cancelAnimationFrame(frame);
     };
-  }, [document, scrollContainer, viewMode, visible]);
+  }, [
+    document,
+    hasOutline,
+    outlineAvailable,
+    outlineOpen,
+    scrollContainer,
+    viewMode,
+    visible,
+  ]);
 
   const requestRenderedRestore = useCallback((sourceLine: number | null) => {
     if (sourceLine == null) return;
