@@ -60,8 +60,8 @@ struct AgentScope {
 #[derive(Clone)]
 struct ReadState {
     version: FileVersion,
-    start_line: usize,
-    line_count: usize,
+    // 写入提交保留后续编辑的版本基线，但不能代表正文已经返回给模型。
+    read_window: Option<(usize, usize)>,
 }
 
 #[derive(Clone)]
@@ -417,13 +417,6 @@ pub async fn agent_file_read(
             start_line,
             line_count,
         );
-    state.record_read(
-        &request.owner_session_id,
-        authorized.canonical,
-        version,
-        start_line,
-        line_count,
-    );
     if unchanged {
         return Ok(AgentReadResponse {
             path: authorized.actual,
@@ -438,7 +431,14 @@ pub async fn agent_file_read(
             unchanged: true,
         });
     }
-    format_read_response(authorized.actual, content, size, start_line, line_count)
+    let response = format_read_response(authorized.actual, content, size, start_line, line_count)?;
+    state.record_version(
+        &request.owner_session_id,
+        authorized.canonical,
+        version,
+        Some((start_line, line_count)),
+    );
+    Ok(response)
 }
 
 /// 统一执行直接目录列举和递归 glob 路径发现。
@@ -788,12 +788,11 @@ pub async fn agent_file_commit_mutation(
         });
     }
     for (write, version) in &committed {
-        state.record_read(
+        state.record_version(
             &mutation.owner_session_id,
             write.canonical.clone(),
             version.clone(),
-            1,
-            DEFAULT_READ_LINES,
+            None,
         );
     }
     prepared.remove(&key);
@@ -992,18 +991,16 @@ impl AgentFileState {
             .and_then(|reads| reads.get(path))
             .is_some_and(|read| {
                 versions_equal(&read.version, version)
-                    && read.start_line == start_line
-                    && read.line_count == line_count
+                    && read.read_window == Some((start_line, line_count))
             })
     }
 
-    fn record_read(
+    fn record_version(
         &self,
         owner: &str,
         path: String,
         version: FileVersion,
-        start_line: usize,
-        line_count: usize,
+        read_window: Option<(usize, usize)>,
     ) {
         let mut owners = self
             .reads
@@ -1017,8 +1014,7 @@ impl AgentFileState {
             path,
             ReadState {
                 version,
-                start_line,
-                line_count,
+                read_window,
             },
         );
     }
@@ -2373,6 +2369,51 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn committed_mutations_keep_edit_versions_without_marking_content_as_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = to_canon(directory.path());
+        let state = AgentFileState::default();
+        let registry = WorkspaceRegistry::default();
+        registry.authorize(directory.path()).unwrap();
+        let owner = Uuid::new_v4().to_string();
+        let read = |start_line| {
+            agent_file_read(&state, &registry, serde_json::from_value(serde_json::json!({
+            "ownerSessionId": owner, "root": root, "permissionMode": "full-access", "path": "a.txt", "startLine": start_line
+        })).unwrap())
+        };
+        for (index, (mutation, expected, reread)) in [
+            (serde_json::json!({ "kind": "write", "path": "a.txt", "content": "first\n", "mode": "create" }), "first", true),
+            (serde_json::json!({ "kind": "write", "path": "a.txt", "content": "second\n", "mode": "rewrite" }), "second", true),
+            (serde_json::json!({ "kind": "patch", "files": [{ "path": "a.txt", "edits": [{ "old_text": "second", "new_text": "third!" }] }] }), "third!", false),
+            (serde_json::json!({ "kind": "patch", "files": [{ "path": "a.txt", "edits": [{ "old_text": "third!", "new_text": "fourth" }] }] }), "fourth", true),
+        ].into_iter().enumerate() {
+            let tool_call_id = format!("edit-{index}");
+            agent_file_prepare_mutation(&state, &registry, serde_json::from_value(serde_json::json!({
+                "ownerSessionId": owner, "toolCallId": tool_call_id, "root": root,
+                "permissionMode": "full-access", "mutation": mutation
+            })).unwrap()).await.unwrap();
+            let result = agent_file_commit_mutation(&state, &registry, &(), AgentMutationKeyRequest {
+                owner_session_id: owner.clone(), tool_call_id,
+            }).await.unwrap();
+            assert!(result.error.is_none(), "{:?}", result.error);
+            if reread {
+                let response = read(1).await.unwrap();
+                assert!(!response.unchanged, "mutation {index} was not read yet");
+                assert!(response.content.contains(expected));
+                assert_eq!(response.size, (expected.len() + 1) as u64);
+                let cached = read(1).await.unwrap();
+                assert!(cached.unchanged);
+                assert!(cached.content.is_empty());
+            }
+        }
+        // 超出文件末尾的失败读取不应登记范围，也不能使下次失败请求变成 unchanged。
+        for _ in 0..2 {
+            assert!(read(2).await.is_err());
+        }
+        assert!(read(1).await.unwrap().unchanged);
+    }
+
+    #[tokio::test]
     async fn failed_batch_reports_uncertain_paths_only_when_rollback_cannot_restore() {
         struct ConcurrentWrite {
             first: PathBuf,
@@ -2635,7 +2676,12 @@ mod tests {
             size: 4,
             mtime: 1,
         };
-        state.record_read("owner", "/work/a.txt".into(), version.clone(), 1, 20);
+        state.record_version(
+            "owner",
+            "/work/a.txt".into(),
+            version.clone(),
+            Some((1, 20)),
+        );
         assert!(state.read_matches("owner", "/work/a.txt", &version, 1, 20));
         assert!(!state.read_matches("owner", "/work/a.txt", &version, 21, 20));
         let changed = FileVersion {

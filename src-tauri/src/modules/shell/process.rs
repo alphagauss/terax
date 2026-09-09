@@ -1242,6 +1242,24 @@ $line | & (Get-Process -Id $PID).Path -NoLogo -NoProfile -Command '[Console]::In
         assert_eq!(response.status, ProcessStatus::Exited);
         assert!(observed.stdout.contains("got:hello"));
         assert_eq!(response.exit_code, Some(0));
+        // 匹配包含指定 offset 之后仍保留的旧输出，不要求输出在等待期间产生。
+        assert_eq!(
+            process
+                .wait_snapshot(0, Duration::ZERO, Some("got:hello"), 8192)
+                .wait_for_matched,
+            Some(true)
+        );
+        assert_eq!(
+            process
+                .wait_snapshot(
+                    observed.next_offset,
+                    Duration::ZERO,
+                    Some("got:hello"),
+                    8192
+                )
+                .wait_for_matched,
+            Some(false)
+        );
     }
 
     #[tokio::test]

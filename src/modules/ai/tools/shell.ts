@@ -19,7 +19,14 @@ const DEFAULT_YIELD_MS = 10_000;
 const DEFAULT_OUTPUT_BYTES = 64 * 1024;
 
 const outputOptions = {
-  since_offset: z.number().int().min(0).optional(),
+  since_offset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Byte offset for returned output and wait_for matching; defaults to 0. Reuse next_offset for only subsequent output. Use 0 to also search earlier output still retained in the buffer.",
+    ),
   max_output_bytes: z
     .number()
     .int()
@@ -30,7 +37,14 @@ const outputOptions = {
 
 const waitOptions = {
   yield_time_ms: z.number().int().min(0).max(30_000).optional(),
-  wait_for: z.string().min(1).max(4096).optional(),
+  wait_for: z
+    .string()
+    .min(1)
+    .max(4096)
+    .optional()
+    .describe(
+      "Literal text to match in stdout or stderr at or after since_offset, including already-buffered output. An option for action=poll or action=write, not an action itself. Earlier or evicted output is not searched.",
+    ),
   wait_timeout_ms: z.number().int().min(0).max(120_000).optional(),
 };
 
@@ -47,6 +61,17 @@ const processInputSchema = z
     ...waitOptions,
   })
   .superRefine((input, ctx) => {
+    if (
+      input.wait_for !== undefined &&
+      input.action !== "poll" &&
+      input.action !== "write"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["wait_for"],
+        message: "wait_for is only valid for poll or write",
+      });
+    }
     if (input.action === "write" && input.input === undefined) {
       ctx.addIssue({
         code: "custom",
