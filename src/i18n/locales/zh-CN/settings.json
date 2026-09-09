@@ -297,7 +297,7 @@
       "title": "快捷键",
       "description": "查看并自定义键盘快捷键。"
     },
-    "resetAll": "全部重置",
+    "resetAll": "重置应用内快捷键",
     "searchPlaceholder": "搜索快捷键...",
     "unassigned": "未分配",
     "recording": "录制中...",
@@ -305,8 +305,8 @@
     "resetToDefault": "重置为默认",
     "clearShortcut": "清除快捷键",
     "resetDialog": {
-      "title": "重置所有快捷键？",
-      "description": "这会将你所有自定义的键盘快捷键还原为出厂默认值。此操作无法撤销。",
+      "title": "重置应用内快捷键？",
+      "description": "这会将所有应用内快捷键还原为默认值，不修改系统全局截图快捷键。此操作无法撤销。",
       "cancel": "取消"
     }
   },

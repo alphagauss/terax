@@ -5,6 +5,7 @@
 use crate::adapters::tauri as commands;
 use crate::{fullscreen, menu, modules};
 
+use modules::screenshots;
 use modules::{
     agent, ai_sessions, alpha, app_data, auxiliary_window, external_agent, fs, git, history, lsp,
     markdown_images, net, open_with, pty, python, remote, secrets, shell, transfers, workspace,
@@ -91,9 +92,9 @@ pub fn run() {
     workspace::init_launch_cwd(cli_dir.as_deref());
 
     let builder = tauri::Builder::default();
-    #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     builder
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         // 不恢复 VISIBLE。本地窗口等待前端首屏挂载，远端窗口在 Ready 阶段显示加载反馈。
         .plugin(
@@ -144,6 +145,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(workspace_process)
         .manage(auxiliary_window::AuxiliaryWindowState::default())
+        .manage(screenshots::ScreenshotState::default())
         .manage(ai_sessions::AiSessionsState::default())
         .manage(net::HttpState::default())
         .manage(remote::RemoteState::default())
@@ -176,6 +178,14 @@ pub fn run() {
         .manage(LaunchFiles(Mutex::new(launch_files)))
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
+            screenshots::screenshot_status,
+            screenshots::screenshot_configure,
+            screenshots::screenshot_start,
+            screenshots::screenshot_frame,
+            screenshots::screenshot_image,
+            screenshots::screenshot_present,
+            screenshots::screenshot_cancel,
+            screenshots::screenshot_export,
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,
@@ -351,14 +361,25 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(move |app, event| {
             if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if label == "screenshot" {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        screenshots::close_requested(app);
+                    }
+                }
                 if matches!(event, tauri::WindowEvent::Destroyed) {
                     app.state::<net::HttpState>().cancel_owner(label);
                 }
                 if label == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                    screenshots::shutdown(app);
                     auxiliary_window::destroy_all_auxiliary_windows(app);
+                }
+                if label == "screenshot" && matches!(event, tauri::WindowEvent::Destroyed) {
+                    screenshots::window_destroyed(app);
                 }
             }
             if let tauri::RunEvent::Ready = event {
+                screenshots::initialize(app);
                 alpha::schedule_runtime_coordination();
                 if let Some(main) = app.get_webview_window("main") {
                     if let Some(geometry) = window_geometry {

@@ -34,6 +34,8 @@ pub mod pty;
 pub mod python;
 #[cfg(feature = "desktop")]
 pub mod remote;
+#[cfg(feature = "desktop")]
+pub mod screenshots;
 pub mod secrets;
 pub mod shared_store;
 pub mod shell;

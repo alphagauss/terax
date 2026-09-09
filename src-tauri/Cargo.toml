@@ -23,6 +23,9 @@ desktop = [
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-clipboard-manager",
+    "dep:tauri-plugin-global-shortcut",
+    "dep:xcap",
+    "dep:image",
     "dep:tauri-plugin-autostart",
     "dep:tauri-plugin-window-state",
     "dep:zbus",
@@ -94,6 +97,10 @@ tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-clipboard-manager = { version = "2", optional = true }
+tauri-plugin-global-shortcut = { version = "2", optional = true }
+xcap = { version = "0.9.8", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 reqwest = { version = "0.12", default-features = false, features = [
 	"rustls-tls",
 	"stream",
@@ -152,10 +159,9 @@ keyring = { version = "3.6", default-features = false, features = [
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] }
 
-# WebKitGTK can't read external clipboard copies; mac/win webviews can.
+# Linux 桌面还使用 D-Bus；图片剪贴板由三端共享的原生插件提供。
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5.19", optional = true }
-tauri-plugin-clipboard-manager = { version = "2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = [

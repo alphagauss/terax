@@ -12,3 +12,6 @@ allowBuilds:
 peerDependencyRules:
   allowedVersions:
     "bun-ffi-structs@0.3.1>typescript": "6.0.3"
+
+patchedDependencies:
+  react-screenshots@0.6.1: patches/react-screenshots@0.6.1.patch

@@ -297,7 +297,7 @@
       "title": "Shortcuts",
       "description": "View and customize keyboard shortcuts."
     },
-    "resetAll": "Reset All",
+    "resetAll": "Reset App Shortcuts",
     "searchPlaceholder": "Search shortcuts...",
     "unassigned": "Unassigned",
     "recording": "Recording...",
@@ -305,8 +305,8 @@
     "resetToDefault": "Reset to default",
     "clearShortcut": "Clear shortcut",
     "resetDialog": {
-      "title": "Reset all shortcuts?",
-      "description": "This will revert all your custom keyboard shortcuts to their factory defaults. This action cannot be undone.",
+      "title": "Reset app shortcuts?",
+      "description": "This will restore all in-app shortcuts to their defaults. System-wide screenshot shortcuts are unchanged. This action cannot be undone.",
       "cancel": "Cancel"
     }
   },

@@ -8,6 +8,9 @@ overrides:
   react-doctor: 0.8.0
   react-grab: 0.1.48
 
+patchedDependencies:
+  react-screenshots@0.6.1: ba4bbf011352648de7ef261b2053dba54ff5c1c61cbe804846aa5f867774d99b
+
 importers:
 
   .:
@@ -258,6 +261,9 @@ importers:
       react-resizable-panels:
         specifier: ^4.12.3
         version: 4.12.3(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react-screenshots:
+        specifier: 0.6.1
+        version: 0.6.1(patch_hash=ba4bbf011352648de7ef261b2053dba54ff5c1c61cbe804846aa5f867774d99b)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       sonner:
         specifier: ^2.0.8
         version: 2.0.8(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5443,6 +5449,12 @@ packages:
     peerDependenciesMeta:
       esbuild:
         optional: true
+
+  react-screenshots@0.6.1:
+    resolution: {integrity: sha512-DsIuxuYrNFX6IQAeHxUiUMaf+OjHOp2HKkrO9HULPBYQGFujh0KyMm4T/ZW93tZPcV//PGwd8+DlH4aXv1XuQg==}
+    peerDependencies:
+      react: '>=16.9.0'
+      react-dom: '>=16.9.0'
 
   react-style-singleton@2.2.3:
     resolution: {integrity: sha512-b6jSvxvVnyptAiLjbkWLE/lOnR4lfTtDAl+eUC7RZy+QQWc6wRzIV2CE6xBuMmDxc2qIihtDCZD5NPOFl7fRBQ==}
@@ -11771,6 +11783,11 @@ snapshots:
       - oxlint-tsgolint
       - rollup
       - supports-color
+
+  react-screenshots@0.6.1(patch_hash=ba4bbf011352648de7ef261b2053dba54ff5c1c61cbe804846aa5f867774d99b)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   react-style-singleton@2.2.3(@types/react@19.2.18)(react@19.2.8):
     dependencies:
