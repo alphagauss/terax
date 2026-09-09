@@ -275,7 +275,7 @@ describe("Direct failure actions", () => {
     );
     act(() => expand?.click());
     const retry = container.querySelector<HTMLButtonElement>(
-      'button[title="transfers.retryFile"]',
+      'button[aria-label="transfers.retryFile"]',
     );
     act(() => retry?.click());
 
@@ -288,7 +288,7 @@ describe("Direct failure actions", () => {
     ).find((button) => button.textContent === "transfers.failedFiles");
     act(() => ignoredExpand?.click());
     const remove = ignored.container.querySelector<HTMLButtonElement>(
-      'button[title="transfers.removeFailure"]',
+      'button[aria-label="transfers.removeFailure"]',
     );
     act(() => remove?.click());
 

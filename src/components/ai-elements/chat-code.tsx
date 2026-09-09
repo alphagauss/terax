@@ -6,6 +6,7 @@
 
 "use client";
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/modules/theme";
@@ -386,20 +387,21 @@ function DiagramButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      aria-pressed={active || undefined}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
-        active && "bg-accent text-foreground",
-      )}
-    >
-      <HugeiconsIcon icon={icon} size={16} strokeWidth={1.6} />
-    </button>
+    <Hint content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active || undefined}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          "flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+          active && "bg-accent text-foreground",
+        )}
+      >
+        <HugeiconsIcon icon={icon} size={16} strokeWidth={1.6} />
+      </button>
+    </Hint>
   );
 }
 

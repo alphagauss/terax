@@ -21,7 +21,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
@@ -454,7 +454,6 @@ function DraggableContainerButton({
       <TooltipContent
         side={tooltipSide}
         sideOffset={appearance === "vertical" ? 7 : 5}
-        className="rounded-md border border-border/60 bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-lg"
       >
         {t(container.titleKey)}
       </TooltipContent>
@@ -648,7 +647,7 @@ export function SidebarActivityBar({
   );
 
   return (
-    <TooltipProvider delayDuration={450} skipDelayDuration={100}>
+    <TooltipProvider>
       <ActivityBarMenu {...props} activityBar={activityBar}>
         {bar}
       </ActivityBarMenu>
@@ -711,11 +710,7 @@ export function SecondarySidebarTabs({
             />
           </button>
         </TooltipTrigger>
-        <TooltipContent
-          side={bottom ? "top" : "bottom"}
-          sideOffset={5}
-          className="rounded-md border border-border/60 bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-lg"
-        >
+        <TooltipContent side={bottom ? "top" : "bottom"} sideOffset={5}>
           {t(maximized ? "restoreSecondary" : "maximizeSecondary")}
         </TooltipContent>
       </Tooltip>
@@ -730,11 +725,7 @@ export function SecondarySidebarTabs({
             <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />
           </button>
         </TooltipTrigger>
-        <TooltipContent
-          side={bottom ? "top" : "bottom"}
-          sideOffset={5}
-          className="rounded-md border border-border/60 bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground shadow-lg"
-        >
+        <TooltipContent side={bottom ? "top" : "bottom"} sideOffset={5}>
           {t("closeSecondary")}
         </TooltipContent>
       </Tooltip>
@@ -742,7 +733,7 @@ export function SecondarySidebarTabs({
   );
 
   return (
-    <TooltipProvider delayDuration={450} skipDelayDuration={100}>
+    <TooltipProvider>
       <ActivityBarMenu {...props} activityBar={activityBar}>
         {bar}
       </ActivityBarMenu>

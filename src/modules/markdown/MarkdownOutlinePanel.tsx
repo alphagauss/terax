@@ -3,6 +3,7 @@
  * 目录使用独立绘制边界，避免滚动时的高亮过渡使整张 WebView 重新栅格化。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import type { MarkdownOutlineItem } from "@/modules/markdown/lib/outline";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -86,24 +87,26 @@ export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
-                <button
-                  type="button"
-                  aria-current={activeId === item.id ? "location" : undefined}
-                  onClick={() => onSelect(item)}
-                  className={cn(
-                    "mx-2 h-7 w-[calc(100%-1rem)] truncate rounded-md pr-2 text-left text-xs leading-7 transition-colors",
-                    "hover:bg-interactive-hover hover:text-foreground",
-                    activeId === item.id
-                      ? "bg-interactive-active font-semibold text-foreground"
-                      : "font-normal text-muted-foreground",
-                  )}
-                  style={{
-                    paddingLeft: `${8 + (item.level - baseLevel) * 10}px`,
-                  }}
-                  title={item.title}
-                >
-                  {item.title}
-                </button>
+                <Hint content={item.title}>
+                  <button
+                    aria-label={item.title}
+                    type="button"
+                    aria-current={activeId === item.id ? "location" : undefined}
+                    onClick={() => onSelect(item)}
+                    className={cn(
+                      "mx-2 h-7 w-[calc(100%-1rem)] truncate rounded-md pr-2 text-left text-xs leading-7 transition-colors",
+                      "hover:bg-interactive-hover hover:text-foreground",
+                      activeId === item.id
+                        ? "bg-interactive-active font-semibold text-foreground"
+                        : "font-normal text-muted-foreground",
+                    )}
+                    style={{
+                      paddingLeft: `${8 + (item.level - baseLevel) * 10}px`,
+                    }}
+                  >
+                    {item.title}
+                  </button>
+                </Hint>
               </div>
             );
           })}

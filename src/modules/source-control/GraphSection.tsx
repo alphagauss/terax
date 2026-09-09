@@ -3,6 +3,7 @@
  * 负责提交列表、分页加载和选中提交详情展示。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -394,42 +395,46 @@ export const GraphSection = memo(function GraphSection({
               if (!commit || !graphRow) return null;
               const refs = commit.refs.map(refLabel).slice(0, 2);
               return (
-                <button
+                <Hint
+                  content={`${commit.shortSha} ${commit.subject}`}
                   key={virtualRow.key}
-                  type="button"
-                  onClick={(event) => openCommit(commit, event.currentTarget)}
-                  title={`${commit.shortSha} ${commit.subject}`}
-                  className={cn(
-                    "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
-                    openAnchor?.sha === commit.sha &&
-                      "bg-interactive-active hover:bg-interactive-active",
-                  )}
-                  style={{
-                    height: virtualRow.size,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
                 >
-                  <GraphRail
-                    row={graphRow}
-                    rowHeight={ROW_HEIGHT}
-                    maxLaneCount={maxLaneCount}
-                    active={openAnchor?.sha === commit.sha}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                    {commit.subject || "(no subject)"}
-                  </span>
-                  {refs.map((value) => (
-                    <span
-                      key={value}
-                      className="ml-1 max-w-20 shrink-0 truncate rounded border border-primary/25 bg-primary/10 px-1 py-px text-[9px] font-medium text-primary"
-                    >
-                      {value}
+                  <button
+                    aria-label={`${commit.shortSha} ${commit.subject}`}
+                    type="button"
+                    onClick={(event) => openCommit(commit, event.currentTarget)}
+                    className={cn(
+                      "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
+                      openAnchor?.sha === commit.sha &&
+                        "bg-interactive-active hover:bg-interactive-active",
+                    )}
+                    style={{
+                      height: virtualRow.size,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <GraphRail
+                      row={graphRow}
+                      rowHeight={ROW_HEIGHT}
+                      maxLaneCount={maxLaneCount}
+                      active={openAnchor?.sha === commit.sha}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                      {commit.subject || "(no subject)"}
                     </span>
-                  ))}
-                  <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
-                    {relativeTime(commit.timestampSecs)}
-                  </span>
-                </button>
+                    {refs.map((value) => (
+                      <span
+                        key={value}
+                        className="ml-1 max-w-20 shrink-0 truncate rounded border border-primary/25 bg-primary/10 px-1 py-px text-[9px] font-medium text-primary"
+                      >
+                        {value}
+                      </span>
+                    ))}
+                    <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
+                      {relativeTime(commit.timestampSecs)}
+                    </span>
+                  </button>
+                </Hint>
               );
             })}
           </div>

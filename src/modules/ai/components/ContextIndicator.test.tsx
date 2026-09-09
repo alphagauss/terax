@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, type ComponentProps } from "react";
+import { act, type ReactNode, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { ContextIndicator } from "./ContextIndicator";
@@ -34,6 +34,22 @@ vi.mock("@/modules/ai/store/chatStore", () => ({
 vi.mock("@/modules/settings/preferences", () => ({
   usePreferencesStore: (select: (state: unknown) => unknown) =>
     select({ providerModels: {}, customProviders: [] }),
+}));
+
+vi.mock("@/components/controls/tooltip", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/controls/tooltip")>()),
+  Hint: ({
+    content,
+    children,
+  }: {
+    content?: ReactNode;
+    children: ReactNode;
+  }) => (
+    <>
+      {children}
+      <span data-hint-content>{content}</span>
+    </>
+  ),
 }));
 
 const id = "context-display";
@@ -87,16 +103,20 @@ it("keeps completed statistics across remounts and replaces only main context af
       <ContextIndicator sessionId={id} isBusy={false} messages={[]} />,
     ),
   );
-  expect(container.querySelector("button")?.title).toContain("12K / 128K");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("12K / 128K");
   expect(container.querySelector("svg")).not.toBeNull();
+  expect(container.querySelector("button[title]")).toBeNull();
+  expect(container.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
   expect(container.textContent).toContain("9.4%");
   // 悬浮明细与圆形图表使用同一次主请求，不累加子任务或历史输入。
-  expect(document.body.querySelector('[title="12,000"]')).not.toBeNull();
-  expect(document.body.querySelector('[title="102,000"]')).toBeNull();
+  expect(document.body.textContent).toContain("12,000");
+  expect(document.body.textContent).not.toContain("102,000");
   expect(document.body.querySelector("button[aria-pressed]")).toBeNull();
-  expect(document.body.querySelector('[title="500"]')).toBeNull();
+  expect(document.body.textContent).not.toContain("500");
   expect(document.body.textContent).toContain("9.7K / 81%");
-  expect(document.body.querySelector('[title="1,327"]')).toBeNull();
+  expect(document.body.textContent).not.toContain("1,327");
 
   await act(async () =>
     recordUsage(
@@ -110,17 +130,23 @@ it("keeps completed statistics across remounts and replaces only main context af
       }),
     ),
   );
-  expect(container.querySelector("button")?.title).toContain("12K / 128K");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("12K / 128K");
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () =>
     root.render(<ContextIndicator sessionId={id} isBusy messages={[]} />),
   );
-  expect(container.querySelector("button")?.title).toContain("12K / 128K");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("12K / 128K");
   await act(async () => settleUsage(id));
-  expect(container.querySelector("button")?.title).toContain("24K / 64K");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("24K / 64K");
   expect(container.textContent).toContain("37.5%");
-  expect(document.body.querySelector('[title="200"]')).toBeNull();
+  expect(document.body.textContent).not.toContain("200");
 });
 
 it("uses the Chinese character estimate for a session without usage records", async () => {
@@ -139,5 +165,7 @@ it("uses the Chinese character estimate for a session without usage records", as
       />,
     ),
   );
-  expect(container.querySelector("button")?.title).toContain("≈16");
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("≈16");
 });

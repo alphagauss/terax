@@ -3,6 +3,7 @@
  * 负责 Space 的选择、重命名、拖拽和标签导航。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Kbd } from "@/components/ui/kbd";
 import {
   Popover,
@@ -253,21 +254,27 @@ export function SpaceSwitcher({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          title={shortcut ? t("titleWithShortcut", { shortcut }) : t("title")}
-          className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+        <Hint
+          content={shortcut ? t("titleWithShortcut", { shortcut }) : t("title")}
         >
-          <span className="max-w-36 truncate text-xs font-medium">
-            {current.name}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowRight01Icon}
-            size={14}
-            strokeWidth={1.75}
-            className="shrink-0 opacity-65"
-          />
-        </button>
+          <button
+            aria-label={
+              shortcut ? t("titleWithShortcut", { shortcut }) : t("title")
+            }
+            type="button"
+            className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+          >
+            <span className="max-w-36 truncate text-xs font-medium">
+              {current.name}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              size={14}
+              strokeWidth={1.75}
+              className="shrink-0 opacity-65"
+            />
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={6} className="w-[20rem] p-1.5">
         <div className="flex items-center justify-between px-1.5 pb-1.5 pt-0.5">
@@ -653,22 +660,23 @@ function RowAction({
   destructive?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      className={cn(
-        "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
-        destructive
-          ? "hover:bg-destructive/10 hover:text-destructive"
-          : "hover:bg-accent hover:text-foreground",
-      )}
-    >
-      <HugeiconsIcon icon={icon} size={13} strokeWidth={1.75} />
-    </button>
+    <Hint content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+        className={cn(
+          "flex size-5 items-center justify-center rounded text-muted-foreground transition-colors",
+          destructive
+            ? "hover:bg-destructive/10 hover:text-destructive"
+            : "hover:bg-accent hover:text-foreground",
+        )}
+      >
+        <HugeiconsIcon icon={icon} size={13} strokeWidth={1.75} />
+      </button>
+    </Hint>
   );
 }

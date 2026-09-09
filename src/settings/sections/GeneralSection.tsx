@@ -3,6 +3,7 @@
  * 外观选项的状态切换使用项目控制级动效，其他设置行为保持不变。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Input } from "@/components/controls/input";
 import { Button } from "@/components/controls/button";
 import {
@@ -17,9 +18,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
-  TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -346,22 +346,20 @@ export function GeneralSection() {
           title={
             <span className="inline-flex items-center gap-1.5">
               {t("general.terminal.webgl.title")}
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      role="img"
-                      className="cursor-help text-[11px] text-muted-foreground leading-none"
-                      aria-label={t("general.terminal.webgl.moreInfo")}
-                    >
-                      ⓘ
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-65 text-[11px]">
-                    {t("general.terminal.webgl.tooltip")}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    role="img"
+                    className="cursor-help text-[11px] text-muted-foreground leading-none"
+                    aria-label={t("general.terminal.webgl.moreInfo")}
+                  >
+                    ⓘ
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-65">
+                  {t("general.terminal.webgl.tooltip")}
+                </TooltipContent>
+              </Tooltip>
             </span>
           }
           description={t("general.terminal.webgl.description")}
@@ -536,18 +534,26 @@ export function GeneralSection() {
           description={t("general.agents.notifications.description")}
         >
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              disabled={!agentNotifications || notificationTestPending}
-              title={t(
+            <Hint
+              content={t(
                 `general.agents.notifications.test.hint.${notificationTest}`,
               )}
-              onClick={() => void testNotification()}
             >
-              {t(`general.agents.notifications.test.label.${notificationTest}`)}
-            </Button>
+              <Button
+                aria-label={t(
+                  `general.agents.notifications.test.hint.${notificationTest}`,
+                )}
+                type="button"
+                variant="outline"
+                size="xs"
+                disabled={!agentNotifications || notificationTestPending}
+                onClick={() => void testNotification()}
+              >
+                {t(
+                  `general.agents.notifications.test.label.${notificationTest}`,
+                )}
+              </Button>
+            </Hint>
             <Switch
               checked={agentNotifications}
               disabled={notificationTestPending}

@@ -3,6 +3,7 @@
  * 终端 Agent 通过唯一标签 ID 激活，内置 Agent 使用独立入口。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { ChannelStatusRows } from "@/modules/channels/components/ChannelStatusRows";
 import { useChannelsView } from "@/modules/channels/client";
 import { Button } from "@/components/controls/button";
@@ -262,23 +263,25 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="relative shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={t("bell.title")}
-        >
-          <HugeiconsIcon
-            icon={Notification01Icon}
-            size={16}
-            strokeWidth={1.75}
-          />
-          {badge > 0 ? (
-            <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
-              {badge > 9 ? "9+" : badge}
-            </span>
-          ) : null}
-        </Button>
+        <Hint content={t("bell.title")}>
+          <Button
+            aria-label={t("bell.title")}
+            variant="ghost"
+            size="icon-sm"
+            className="relative shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={Notification01Icon}
+              size={16}
+              strokeWidth={1.75}
+            />
+            {badge > 0 ? (
+              <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold leading-none text-primary-foreground">
+                {badge > 9 ? "9+" : badge}
+              </span>
+            ) : null}
+          </Button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         align="end"

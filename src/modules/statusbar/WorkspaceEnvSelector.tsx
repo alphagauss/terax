@@ -3,6 +3,7 @@
  * SSH 配置按分组进入二级菜单，连接仍通过稳定 profile ID 启动独立进程。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -118,36 +119,38 @@ export function WorkspaceEnvSelector({
     <>
       <DropdownMenu onOpenChange={handleOpenChange}>
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className="flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
-            title={triggerTitle}
-          >
-            <HugeiconsIcon
-              icon={ServerStack03Icon}
-              size={13}
-              strokeWidth={1.75}
-            />
-            {env.kind === "ssh" ? (
-              <>
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    connectionStatus === "connected" && "bg-success",
-                    (connectionStatus === "connecting" ||
-                      connectionStatus === "reconnecting") &&
-                      "animate-pulse bg-warning motion-reduce:animate-none",
-                    connectionStatus === "disconnected" &&
-                      "bg-muted-foreground/50",
-                  )}
-                />
-                <span className="sr-only">
-                  {t(`workspace.connectionStatus.${connectionStatus}`)}
-                </span>
-              </>
-            ) : null}
-            <span className="max-w-36 truncate">{label}</span>
-          </button>
+          <Hint content={triggerTitle}>
+            <button
+              aria-label={triggerTitle}
+              type="button"
+              className="flex h-6 shrink-0 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus:outline-none focus-visible:outline-none focus-visible:ring-0 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+            >
+              <HugeiconsIcon
+                icon={ServerStack03Icon}
+                size={13}
+                strokeWidth={1.75}
+              />
+              {env.kind === "ssh" ? (
+                <>
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      connectionStatus === "connected" && "bg-success",
+                      (connectionStatus === "connecting" ||
+                        connectionStatus === "reconnecting") &&
+                        "animate-pulse bg-warning motion-reduce:animate-none",
+                      connectionStatus === "disconnected" &&
+                        "bg-muted-foreground/50",
+                    )}
+                  />
+                  <span className="sr-only">
+                    {t(`workspace.connectionStatus.${connectionStatus}`)}
+                  </span>
+                </>
+              ) : null}
+              <span className="max-w-36 truncate">{label}</span>
+            </button>
+          </Hint>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className={COMPACT_MENU_CONTENT}>
           <DropdownMenuItem

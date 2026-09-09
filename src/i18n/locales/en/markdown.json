@@ -1,4 +1,9 @@
 {
+  "outline": {
+    "collapse": "Collapse outline",
+    "expand": "Expand outline",
+    "tooNarrow": "The document pane is too narrow"
+  },
   "rendered": "Rendered",
   "raw": "Raw",
   "toggle": {

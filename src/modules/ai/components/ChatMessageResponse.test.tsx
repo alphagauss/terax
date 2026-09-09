@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { act } from "react";
+import { decodeFileReference } from "@/modules/file-actions/references";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -95,7 +96,11 @@ describe("chat file references", () => {
           </ChatMessageResponse>,
         ),
       );
-      expect([...container.querySelectorAll("a")].map((a) => a.title)).toEqual([
+      expect(
+        [...container.querySelectorAll("a")].map(
+          (a) => decodeFileReference(a.getAttribute("href") ?? "")?.literalPath,
+        ),
+      ).toEqual([
         "D:/project/config.ts:12",
         "/workspace/config.ts:5",
         "/workspace/my project/配置.ts:9",

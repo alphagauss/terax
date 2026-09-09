@@ -3,6 +3,7 @@
  * 组件只负责模式输入、选项切换和聚焦，不持有单文件导航或工作区搜索状态。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import {
   forwardRef,
@@ -44,24 +45,25 @@ export function FindControlButton({
   className,
 }: FindControlButtonProps) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active === undefined ? undefined : active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "inline-flex size-5.5 shrink-0 items-center justify-center rounded border border-transparent text-[11px] font-medium text-muted-foreground transition-colors duration-control",
-        "hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        "disabled:pointer-events-none disabled:opacity-35",
-        active &&
-          "border-primary bg-accent text-foreground ring-1 ring-primary/60 ring-inset",
-        className,
-      )}
-    >
-      {children}
-    </button>
+    <Hint content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active === undefined ? undefined : active}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          "inline-flex size-5.5 shrink-0 items-center justify-center rounded border border-transparent text-[11px] font-medium text-muted-foreground transition-colors duration-control",
+          "hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "disabled:pointer-events-none disabled:opacity-35",
+          active &&
+            "border-primary bg-accent text-foreground ring-1 ring-primary/60 ring-inset",
+          className,
+        )}
+      >
+        {children}
+      </button>
+    </Hint>
   );
 }
 

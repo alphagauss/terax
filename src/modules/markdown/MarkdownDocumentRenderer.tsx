@@ -4,6 +4,7 @@
  * 负责延迟挂载长文档块、代码高亮、受控链接和源码位置，不负责文件读取与持久化。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
 import { cn } from "@/lib/utils";
@@ -176,36 +177,42 @@ function MarkdownPreviewCode({
 function MarkdownPreviewLink({
   href,
   children,
+  title,
   node: _node,
   ...props
 }: MarkdownLinkProps) {
   const navigateToFragment = useContext(MarkdownFragmentNavigationContext);
   const target = classifyMarkdownLink(href);
   if (target.kind === "blocked") {
-    return <span title={href}>{children}</span>;
+    return (
+      <Hint content={href}>
+        <span>{children}</span>
+      </Hint>
+    );
   }
 
   return (
-    <a
-      {...props}
-      href={href}
-      title={props.title ?? href}
-      data-streamdown="link"
-      rel="noreferrer"
-      onAuxClick={(event) => event.preventDefault()}
-      onClick={(event) => {
-        event.preventDefault();
-        if (target.kind === "fragment") {
-          navigateToFragment(target.fragment);
-        } else if (isMarkdownExternalOpenGesture(event)) {
-          void openUrl(target.url).catch((error) =>
-            console.error("[markdown-preview] open link failed", error),
-          );
-        }
-      }}
-    >
-      {children}
-    </a>
+    <Hint content={title ?? href}>
+      <a
+        {...props}
+        href={href}
+        data-streamdown="link"
+        rel="noreferrer"
+        onAuxClick={(event) => event.preventDefault()}
+        onClick={(event) => {
+          event.preventDefault();
+          if (target.kind === "fragment") {
+            navigateToFragment(target.fragment);
+          } else if (isMarkdownExternalOpenGesture(event)) {
+            void openUrl(target.url).catch((error) =>
+              console.error("[markdown-preview] open link failed", error),
+            );
+          }
+        }}
+      >
+        {children}
+      </a>
+    </Hint>
   );
 }
 

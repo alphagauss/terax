@@ -3,6 +3,7 @@
  * 服务端发现结果保持临时，只有用户明确添加的模型才写入设置。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Input } from "@/components/controls/input";
 import {
@@ -180,22 +181,24 @@ export function ProviderModelPicker({ connection, models, onChange }: Props) {
             spellCheck={false}
             className="h-7 flex-1 font-mono"
           />
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => void load(true)}
-            disabled={
-              !connection || status === "loading" || status === "refreshing"
-            }
-            title={t("models.catalog.refresh")}
-          >
-            {status === "loading" || status === "refreshing" ? (
-              <Spinner className="size-3" />
-            ) : (
-              <HugeiconsIcon icon={ReloadIcon} size={12} strokeWidth={1.75} />
-            )}
-          </Button>
+          <Hint content={t("models.catalog.refresh")}>
+            <Button
+              aria-label={t("models.catalog.refresh")}
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => void load(true)}
+              disabled={
+                !connection || status === "loading" || status === "refreshing"
+              }
+            >
+              {status === "loading" || status === "refreshing" ? (
+                <Spinner className="size-3" />
+              ) : (
+                <HugeiconsIcon icon={ReloadIcon} size={12} strokeWidth={1.75} />
+              )}
+            </Button>
+          </Hint>
         </div>
 
         <div className="max-h-72 overflow-y-auto py-1">
@@ -333,16 +336,17 @@ function ModelRow({
           {badge}
         </span>
       ) : null}
-      <button
-        type="button"
-        onClick={onAction}
-        aria-label={actionLabel}
-        title={actionLabel}
-        disabled={disabled}
-        className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-active hover:text-foreground"
-      >
-        <HugeiconsIcon icon={actionIcon} size={12} strokeWidth={1.75} />
-      </button>
+      <Hint content={actionLabel}>
+        <button
+          type="button"
+          onClick={onAction}
+          aria-label={actionLabel}
+          disabled={disabled}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-interactive-active hover:text-foreground"
+        >
+          <HugeiconsIcon icon={actionIcon} size={12} strokeWidth={1.75} />
+        </button>
+      </Hint>
     </div>
   );
 }

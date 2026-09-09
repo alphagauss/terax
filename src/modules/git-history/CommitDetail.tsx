@@ -3,6 +3,7 @@
  * 提交说明、作者信息和文件路径需在紧凑布局下保持可读。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -248,15 +249,16 @@ function CommitFileRow({
           </span>
         ) : null}
       </div>
-      <span
-        title={file.statusLabel}
-        className={cn(
-          "inline-flex size-4 shrink-0 items-center justify-center text-[9px] font-bold",
-          statusBadgeClass(file.status),
-        )}
-      >
-        {file.status.toUpperCase()}
-      </span>
+      <Hint content={file.statusLabel}>
+        <span
+          className={cn(
+            "inline-flex size-4 shrink-0 items-center justify-center text-[9px] font-bold",
+            statusBadgeClass(file.status),
+          )}
+        >
+          {file.status.toUpperCase()}
+        </span>
+      </Hint>
       {file.isBinary ? (
         <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
           binary

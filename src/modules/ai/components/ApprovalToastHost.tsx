@@ -3,6 +3,7 @@
  * Toast 只负责展示和操作，实际响应与文件预览仍由审批运行时持有。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import {
@@ -161,12 +162,11 @@ function ApprovalToast({
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
           {meta ? t(meta.labelKey) : request.toolName}
         </span>
-        <span
-          className="max-w-28 truncate text-[10px] text-muted-foreground"
-          title={`${sessionTitle}: ${t("toolApproval.needsApproval")}`}
-        >
-          {sessionTitle}
-        </span>
+        <Hint content={`${sessionTitle}: ${t("toolApproval.needsApproval")}`}>
+          <span className="max-w-28 truncate text-[10px] text-muted-foreground">
+            {sessionTitle}
+          </span>
+        </Hint>
       </div>
 
       <button

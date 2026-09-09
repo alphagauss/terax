@@ -3,11 +3,12 @@
  * 状态栏只显示总数和失败数，单条运行状态统一由面板列表中的状态点表达。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
@@ -129,7 +130,7 @@ export function TunnelStatusControl() {
             <span className="sr-only">{t("tunnels.label")}</span>
           </span>
         </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-64 text-[11px]">
+        <TooltipContent side="top" className="max-w-64">
           {t("tunnels.managedByPrimary")}
         </TooltipContent>
       </Tooltip>
@@ -138,24 +139,29 @@ export function TunnelStatusControl() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-        title={lifecycleError ?? t("tunnels.label")}
-      >
-        <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
-        <span>
-          {t("tunnels.count", { count: profile?.tunnels.length ?? 0 })}
-        </span>
-        {failedCount ? (
-          <span
-            className={cn("text-destructive", lifecycleError && "font-medium")}
-          >
-            {t("tunnels.failedCount", { count: failedCount })}
+      <Hint content={lifecycleError ?? t("tunnels.label")}>
+        <button
+          aria-label={lifecycleError ?? t("tunnels.label")}
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <HugeiconsIcon icon={Route01Icon} size={13} strokeWidth={1.75} />
+          <span>
+            {t("tunnels.count", { count: profile?.tunnels.length ?? 0 })}
           </span>
-        ) : null}
-      </button>
+          {failedCount ? (
+            <span
+              className={cn(
+                "text-destructive",
+                lifecycleError && "font-medium",
+              )}
+            >
+              {t("tunnels.failedCount", { count: failedCount })}
+            </span>
+          ) : null}
+        </button>
+      </Hint>
       <TunnelManagerDialog
         open={open}
         onOpenChange={setOpen}

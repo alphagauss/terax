@@ -3,6 +3,7 @@
  * 草稿由父页面按实例保留；配置和网络路由分别提交，二维码库仅在授权时加载。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { FormField } from "@/components/layout/FormField";
 import {
   Select,
@@ -277,16 +278,18 @@ export function ChannelConnectionEditor({
           ) : null}
         </div>
         <ConnectionSettingsActions>
-          <Button
-            type="button"
-            variant="ghost"
-            className="text-muted-foreground hover:text-destructive"
-            disabled={disabled || connection.enabled || snapshot.busy}
-            title={t("removeHint")}
-            onClick={remove}
-          >
-            {t("remove")}
-          </Button>
+          <Hint content={t("removeHint")}>
+            <Button
+              aria-label={t("removeHint")}
+              type="button"
+              variant="ghost"
+              className="text-muted-foreground hover:text-destructive"
+              disabled={disabled || connection.enabled || snapshot.busy}
+              onClick={remove}
+            >
+              {t("remove")}
+            </Button>
+          </Hint>
           <span className="flex-1" />
           <Button type="submit" disabled={disabled || !dirty || invalidName}>
             {t("save")}

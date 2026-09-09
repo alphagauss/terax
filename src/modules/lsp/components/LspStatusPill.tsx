@@ -1,3 +1,4 @@
+import { Hint } from "@/components/controls/tooltip";
 import {
   Popover,
   PopoverContent,
@@ -37,15 +38,17 @@ export function LspStatusPill({ filePath }: Props) {
   if (hint.kind === "enable") {
     return (
       <span key={`enable-${hint.preset.id}`} className={PILL_CLASS}>
-        <button
-          type="button"
-          className="flex items-center gap-1"
-          onClick={() => void setLspActivation(hint.preset.id, "enabled")}
-          title={t("startTitle", { command: hint.preset.command })}
-        >
-          <HugeiconsIcon icon={SourceCodeIcon} size={11} strokeWidth={2} />
-          <span>{t("enableLsp", { name: hint.preset.name })}</span>
-        </button>
+        <Hint content={t("startTitle", { command: hint.preset.command })}>
+          <button
+            aria-label={t("startTitle", { command: hint.preset.command })}
+            type="button"
+            className="flex items-center gap-1"
+            onClick={() => void setLspActivation(hint.preset.id, "enabled")}
+          >
+            <HugeiconsIcon icon={SourceCodeIcon} size={11} strokeWidth={2} />
+            <span>{t("enableLsp", { name: hint.preset.name })}</span>
+          </button>
+        </Hint>
         <DismissButton preset={hint.preset} />
       </span>
     );
@@ -81,14 +84,16 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={PILL_CLASS}
-          title={t("serverStoppedTitle")}
-        >
-          <span className="size-1.5 rounded-full bg-destructive" />
-          <span>{t("pillLabel", { name: preset.name })}</span>
-        </button>
+        <Hint content={t("serverStoppedTitle")}>
+          <button
+            aria-label={t("serverStoppedTitle")}
+            type="button"
+            className={PILL_CLASS}
+          >
+            <span className="size-1.5 rounded-full bg-destructive" />
+            <span>{t("pillLabel", { name: preset.name })}</span>
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         side="top"
@@ -124,14 +129,16 @@ function ErrorPill({ preset, reason }: { preset: LspPreset; reason: string }) {
 function DismissButton({ preset }: { preset: LspPreset }) {
   const { t } = useTranslation("lsp");
   return (
-    <button
-      type="button"
-      className="rounded-full p-0.5 hover:bg-interactive-active"
-      onClick={() => void setLspActivation(preset.id, "dismissed")}
-      title={t("dismissTitle")}
-    >
-      <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2.2} />
-    </button>
+    <Hint content={t("dismissTitle")}>
+      <button
+        aria-label={t("dismissTitle")}
+        type="button"
+        className="rounded-full p-0.5 hover:bg-interactive-active"
+        onClick={() => void setLspActivation(preset.id, "dismissed")}
+      >
+        <HugeiconsIcon icon={Cancel01Icon} size={9} strokeWidth={2.2} />
+      </button>
+    </Hint>
   );
 }
 
@@ -186,18 +193,20 @@ function InstallPill({ preset }: { preset: LspPreset }) {
             <span className="min-w-0 flex-1 truncate select-text">
               {install.command}
             </span>
-            <button
-              type="button"
-              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={copy}
-              title={t("copyCommandTitle")}
-            >
-              <HugeiconsIcon
-                icon={copied ? Tick02Icon : Copy01Icon}
-                size={12}
-                strokeWidth={2}
-              />
-            </button>
+            <Hint content={t("copyCommandTitle")}>
+              <button
+                aria-label={t("copyCommandTitle")}
+                type="button"
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={copy}
+              >
+                <HugeiconsIcon
+                  icon={copied ? Tick02Icon : Copy01Icon}
+                  size={12}
+                  strokeWidth={2}
+                />
+              </button>
+            </Hint>
           </div>
         ) : null}
         <div className="flex items-center justify-between">
@@ -237,25 +246,29 @@ function ActivePill({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={PILL_CLASS}
-          title={
-            starting ? t("serverStartingTitle") : t("serverActiveTitle")
-          }
+        <Hint
+          content={starting ? t("serverStartingTitle") : t("serverActiveTitle")}
         >
-          {starting ? (
-            <HugeiconsIcon
-              icon={Loading03Icon}
-              size={11}
-              strokeWidth={2}
-              className="animate-spin"
-            />
-          ) : (
-            <span className="size-1.5 rounded-full bg-success" />
-          )}
-          <span>{t("pillLabel", { name: preset.name })}</span>
-        </button>
+          <button
+            aria-label={
+              starting ? t("serverStartingTitle") : t("serverActiveTitle")
+            }
+            type="button"
+            className={PILL_CLASS}
+          >
+            {starting ? (
+              <HugeiconsIcon
+                icon={Loading03Icon}
+                size={11}
+                strokeWidth={2}
+                className="animate-spin"
+              />
+            ) : (
+              <span className="size-1.5 rounded-full bg-success" />
+            )}
+            <span>{t("pillLabel", { name: preset.name })}</span>
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         side="top"

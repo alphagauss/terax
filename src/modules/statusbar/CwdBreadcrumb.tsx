@@ -3,6 +3,7 @@
  * 路径分段兼容 Windows 与 Unix 分隔符，只有目录段支持导航。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -277,17 +278,19 @@ function CollapsedSegments({
       <BreadcrumbItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              title={t("cwd.showHiddenFolders")}
-              className="flex items-center rounded-sm px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <HugeiconsIcon
-                icon={MoreHorizontalIcon}
-                className="size-3"
-                strokeWidth={1.75}
-              />
-            </button>
+            <Hint content={t("cwd.showHiddenFolders")}>
+              <button
+                aria-label={t("cwd.showHiddenFolders")}
+                type="button"
+                className="flex items-center rounded-sm px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon
+                  icon={MoreHorizontalIcon}
+                  className="size-3"
+                  strokeWidth={1.75}
+                />
+              </button>
+            </Hint>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-44">
             {segments.map((s) => (

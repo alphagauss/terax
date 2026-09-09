@@ -3,6 +3,7 @@
  * 面板按需调用统一搜索后端并在内存中保留查询，不建立索引、监听器或持久搜索历史。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
@@ -383,33 +384,37 @@ export const WorkspaceSearchPanel = forwardRef<
                     </button>
                     {!collapsed
                       ? group.hits.map((hit) => (
-                          <button
+                          <Hint
+                            content={`${hit.rel}:${hit.line}`}
                             key={hitKey(hit)}
-                            type="button"
-                            aria-current={
-                              selectedHitKey === hitKey(hit)
-                                ? "true"
-                                : undefined
-                            }
-                            onClick={() => {
-                              setSelectedHitKey(hitKey(hit));
-                              onOpenHit(hit);
-                            }}
-                            title={`${hit.rel}:${hit.line}`}
-                            className={cn(
-                              "flex h-6 w-full min-w-0 items-center gap-2 rounded-sm pr-2 pl-2 text-left font-mono text-[13px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
-                              selectedHitKey === hitKey(hit)
-                                ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
-                                : "hover:bg-interactive-hover",
-                            )}
                           >
-                            <span className="w-7 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
-                              {hit.line}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate whitespace-pre">
-                              <HighlightedLine hit={hit} />
-                            </span>
-                          </button>
+                            <button
+                              aria-label={`${hit.rel}:${hit.line}`}
+                              type="button"
+                              aria-current={
+                                selectedHitKey === hitKey(hit)
+                                  ? "true"
+                                  : undefined
+                              }
+                              onClick={() => {
+                                setSelectedHitKey(hitKey(hit));
+                                onOpenHit(hit);
+                              }}
+                              className={cn(
+                                "flex h-6 w-full min-w-0 items-center gap-2 rounded-sm pr-2 pl-2 text-left font-mono text-[13px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                                selectedHitKey === hitKey(hit)
+                                  ? "bg-primary/12 text-foreground ring-1 ring-inset ring-primary/70"
+                                  : "hover:bg-interactive-hover",
+                              )}
+                            >
+                              <span className="w-7 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                                {hit.line}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate whitespace-pre">
+                                <HighlightedLine hit={hit} />
+                              </span>
+                            </button>
+                          </Hint>
                         ))
                       : null}
                   </div>
@@ -435,18 +440,19 @@ function ToolbarButton({
   children: ReactNode;
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="text-muted-foreground hover:text-foreground"
-    >
-      {children}
-    </Button>
+    <Hint content={label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        {children}
+      </Button>
+    </Hint>
   );
 }
 

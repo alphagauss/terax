@@ -3,6 +3,7 @@
  * 负责绑定偏好与密钥状态，并在模型或 Provider 配置变化时同步关联引用。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   Select,
   SelectContent,
@@ -944,20 +945,22 @@ function ModelParametersCard({
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="outline"
-                  disabled={!selectedModel}
-                  title={t("models.parameters.selectPreset")}
-                  className="shrink-0"
-                >
-                  <HugeiconsIcon
-                    icon={ArrowDown01Icon}
-                    size={11}
-                    strokeWidth={2}
-                  />
-                </Button>
+                <Hint content={t("models.parameters.selectPreset")}>
+                  <Button
+                    aria-label={t("models.parameters.selectPreset")}
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    disabled={!selectedModel}
+                    className="shrink-0"
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowDown01Icon}
+                      size={11}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                </Hint>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-28 p-1">
                 {CONTEXT_WINDOW_PRESETS.map((preset) => (
@@ -1270,18 +1273,20 @@ function CustomProviderCard({
             {t("common.configured")}
           </Badge>
         ) : null}
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          title={t("models.card.removeEndpoint")}
-          className="ml-auto text-muted-foreground hover:text-destructive"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("models.card.removeEndpoint")}>
+          <Button
+            aria-label={t("models.card.removeEndpoint")}
+            size="icon-sm"
+            variant="ghost"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="ml-auto text-muted-foreground hover:text-destructive"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
+          </Button>
+        </Hint>
       </button>
 
       {expanded && (
@@ -1335,19 +1340,21 @@ function CustomProviderCard({
                     ? "•".repeat(providerKey.length)
                     : `${providerKey.slice(0, 4)}${"•".repeat(8)}${providerKey.slice(-4)}`}
                 </code>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => void onClearKey()}
-                  title={t("models.card.removeKey")}
-                  className="text-muted-foreground hover:text-destructive"
-                >
-                  <HugeiconsIcon
-                    icon={Cancel01Icon}
-                    size={12}
-                    strokeWidth={1.75}
-                  />
-                </Button>
+                <Hint content={t("models.card.removeKey")}>
+                  <Button
+                    aria-label={t("models.card.removeKey")}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => void onClearKey()}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <HugeiconsIcon
+                      icon={Cancel01Icon}
+                      size={12}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                </Hint>
               </div>
             ) : (
               <div className="flex flex-1 gap-1.5">

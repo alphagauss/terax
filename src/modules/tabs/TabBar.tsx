@@ -3,6 +3,7 @@
  * 负责标签切换、拖拽和新建入口展示，菜单内容必须在不同语言和快捷键长度下保持可读。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -439,32 +440,34 @@ export function TabBar({
                     <TabIcon tab={t} />
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
-                    <span
-                      title={filePath}
-                      className={cn("truncate", isPreview && "italic")}
-                    >
-                      {labelFor(t)}
-                    </span>
+                    <Hint content={filePath}>
+                      <span className={cn("truncate", isPreview && "italic")}>
+                        {labelFor(t)}
+                      </span>
+                    </Hint>
                     {dirty || connectionAlert ? (
-                      <span
-                        role="img"
-                        aria-label={tr(
-                          dirty && connectionAlert
-                            ? "unsavedAndSshDisconnected"
-                            : connectionAlert
-                              ? "sshDisconnected"
-                              : "unsavedChanges",
-                        )}
-                        title={
+                      <Hint
+                        content={
                           connectionAlert ? tr("sshDisconnected") : undefined
                         }
-                        className={cn(
-                          "size-1.5 shrink-0 rounded-full",
-                          connectionAlert
-                            ? "bg-destructive"
-                            : "bg-foreground/70",
-                        )}
-                      />
+                      >
+                        <span
+                          role="img"
+                          aria-label={tr(
+                            dirty && connectionAlert
+                              ? "unsavedAndSshDisconnected"
+                              : connectionAlert
+                                ? "sshDisconnected"
+                                : "unsavedChanges",
+                          )}
+                          className={cn(
+                            "size-1.5 shrink-0 rounded-full",
+                            connectionAlert
+                              ? "bg-destructive"
+                              : "bg-foreground/70",
+                          )}
+                        />
+                      </Hint>
                     ) : null}
                   </span>
                 </TabsTrigger>
@@ -695,14 +698,16 @@ export function TabBar({
         {/* 正常宽度下跟随标签，横向溢出时吸附在滚动视口右侧。 */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="sticky right-0 z-10 shrink-0 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
-              title={tr("newTab")}
-            >
-              <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
-            </Button>
+            <Hint content={tr("newTab")}>
+              <Button
+                aria-label={tr("newTab")}
+                variant="ghost"
+                size="icon-sm"
+                className="sticky right-0 z-10 shrink-0 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
+              </Button>
+            </Hint>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"

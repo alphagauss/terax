@@ -3,6 +3,7 @@
  * 负责地址输入、刷新、外部打开以及临时通知的交互。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import {
   DropdownMenu,
@@ -121,32 +122,42 @@ export const WebPreviewAddressBar = forwardRef<
   return (
     <div className="shrink-0 border-b border-border/60">
       <div className="flex h-9 items-center gap-1 bg-card/40 px-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={onReload}
-          title={t("addressBar.reloadTitle")}
-          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <HugeiconsIcon
-            icon={ArrowReloadHorizontalIcon}
-            size={14}
-            strokeWidth={1.75}
-          />
-        </Button>
+        <Hint content={t("addressBar.reloadTitle")}>
+          <Button
+            aria-label={t("addressBar.reloadTitle")}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onReload}
+            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={ArrowReloadHorizontalIcon}
+              size={14}
+              strokeWidth={1.75}
+            />
+          </Button>
+        </Hint>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              title={t("addressBar.portsTitle")}
-              className="shrink-0 gap-1 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <HugeiconsIcon icon={Globe02Icon} size={13} strokeWidth={1.75} />
-              <span className="hidden sm:inline">{t("addressBar.ports")}</span>
-            </Button>
+            <Hint content={t("addressBar.portsTitle")}>
+              <Button
+                aria-label={t("addressBar.portsTitle")}
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0 gap-1 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <HugeiconsIcon
+                  icon={Globe02Icon}
+                  size={13}
+                  strokeWidth={1.75}
+                />
+                <span className="hidden sm:inline">
+                  {t("addressBar.ports")}
+                </span>
+              </Button>
+            </Hint>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -191,19 +202,25 @@ export const WebPreviewAddressBar = forwardRef<
             }}
           />
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => {
-            if (url) void openUrl(url).catch(console.error);
-          }}
-          title={t("addressBar.openInBrowserTitle")}
-          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-          disabled={!url}
-        >
-          <HugeiconsIcon icon={LinkSquare02Icon} size={14} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("addressBar.openInBrowserTitle")}>
+          <Button
+            aria-label={t("addressBar.openInBrowserTitle")}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => {
+              if (url) void openUrl(url).catch(console.error);
+            }}
+            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            disabled={!url}
+          >
+            <HugeiconsIcon
+              icon={LinkSquare02Icon}
+              size={14}
+              strokeWidth={1.75}
+            />
+          </Button>
+        </Hint>
       </div>
       {notice ? (
         <div className="flex items-center gap-1.5 bg-warning/8 px-3 py-1 text-[11px] text-warning">

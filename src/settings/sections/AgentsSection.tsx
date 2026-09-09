@@ -3,6 +3,7 @@
  * Custom Agent 删除会级联删除其跨 Workspace 会话，运行中会话由后端拒绝删除。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -239,31 +240,35 @@ export function AgentsSection() {
                     </span>
                   ) : null}
                 </div>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={() => setEditingSnippet(s)}
-                  title={t("common.edit")}
-                >
-                  <HugeiconsIcon
-                    icon={Edit02Icon}
-                    size={12}
-                    strokeWidth={1.75}
-                  />
-                </Button>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="text-muted-foreground hover:text-destructive"
-                  onClick={() => removeSnippet(s.id)}
-                  title={t("common.delete")}
-                >
-                  <HugeiconsIcon
-                    icon={Delete02Icon}
-                    size={12}
-                    strokeWidth={1.75}
-                  />
-                </Button>
+                <Hint content={t("common.edit")}>
+                  <Button
+                    aria-label={t("common.edit")}
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => setEditingSnippet(s)}
+                  >
+                    <HugeiconsIcon
+                      icon={Edit02Icon}
+                      size={12}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                </Hint>
+                <Hint content={t("common.delete")}>
+                  <Button
+                    aria-label={t("common.delete")}
+                    size="icon-sm"
+                    variant="ghost"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => removeSnippet(s.id)}
+                  >
+                    <HugeiconsIcon
+                      icon={Delete02Icon}
+                      size={12}
+                      strokeWidth={1.75}
+                    />
+                  </Button>
+                </Hint>
               </li>
             ))}
           </ul>
@@ -370,25 +375,33 @@ function AgentCard({
         </span>
         <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
           {onEdit ? (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={onEdit}
-              title={t("common.edit")}
-            >
-              <HugeiconsIcon icon={Edit02Icon} size={11} strokeWidth={1.75} />
-            </Button>
+            <Hint content={t("common.edit")}>
+              <Button
+                aria-label={t("common.edit")}
+                size="icon-xs"
+                variant="ghost"
+                onClick={onEdit}
+              >
+                <HugeiconsIcon icon={Edit02Icon} size={11} strokeWidth={1.75} />
+              </Button>
+            </Hint>
           ) : null}
           {onDelete ? (
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={onDelete}
-              title={t("common.delete")}
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
-            </Button>
+            <Hint content={t("common.delete")}>
+              <Button
+                aria-label={t("common.delete")}
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={onDelete}
+              >
+                <HugeiconsIcon
+                  icon={Delete02Icon}
+                  size={11}
+                  strokeWidth={1.75}
+                />
+              </Button>
+            </Hint>
           ) : null}
         </div>
       </div>

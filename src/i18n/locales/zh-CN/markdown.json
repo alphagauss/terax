@@ -1,4 +1,9 @@
 {
+  "outline": {
+    "collapse": "收起大纲",
+    "expand": "展开大纲",
+    "tooNarrow": "文档面板过窄"
+  },
   "rendered": "渲染",
   "raw": "源码",
   "toggle": {

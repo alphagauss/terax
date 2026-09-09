@@ -3,6 +3,7 @@
  * 标签值和可选前缀使用语义文字颜色，避免多层透明度叠加。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -58,39 +59,40 @@ export function Chip({
   children,
 }: Props) {
   return (
-    <div
-      title={title}
-      className={cn(
-        "group inline-flex h-[22px] items-center gap-1.5 rounded-md border text-[11px] leading-none",
-        children ? "px-2" : "px-1.5",
-        "animate-in fade-in-0 zoom-in-95 duration-control",
-        !onRemove && "pointer-events-none select-none",
-        TONES[tone].box,
-      )}
-    >
-      {iconNode ??
-        (icon && (
-          <HugeiconsIcon
-            icon={icon}
-            size={11}
-            strokeWidth={1.75}
-            className={cn("shrink-0", TONES[tone].icon)}
-          />
-        ))}
-      {label && <span className="text-muted-foreground">{label}</span>}
-      {children != null && (
-        <span className="max-w-[12rem] truncate font-medium">{children}</span>
-      )}
-      {onRemove && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label={removeLabel}
-          className="-mr-0.5 ml-0.5 grid size-3.5 shrink-0 place-items-center rounded-sm opacity-0 transition-opacity hover:!opacity-100 group-hover:opacity-60"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={10} strokeWidth={2} />
-        </button>
-      )}
-    </div>
+    <Hint content={title}>
+      <div
+        className={cn(
+          "group inline-flex h-[22px] items-center gap-1.5 rounded-md border text-[11px] leading-none",
+          children ? "px-2" : "px-1.5",
+          "animate-in fade-in-0 zoom-in-95 duration-control",
+          !onRemove && "select-none",
+          TONES[tone].box,
+        )}
+      >
+        {iconNode ??
+          (icon && (
+            <HugeiconsIcon
+              icon={icon}
+              size={11}
+              strokeWidth={1.75}
+              className={cn("shrink-0", TONES[tone].icon)}
+            />
+          ))}
+        {label && <span className="text-muted-foreground">{label}</span>}
+        {children != null && (
+          <span className="max-w-[12rem] truncate font-medium">{children}</span>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={removeLabel}
+            className="-mr-0.5 ml-0.5 grid size-3.5 shrink-0 place-items-center rounded-sm opacity-0 transition-opacity hover:!opacity-100 group-hover:opacity-60"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={10} strokeWidth={2} />
+          </button>
+        )}
+      </div>
+    </Hint>
   );
 }

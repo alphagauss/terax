@@ -3,6 +3,7 @@
  * Agent 通知导航直接使用 Workbench 标签 ID。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
@@ -45,46 +46,50 @@ export function Header({
   const { t } = useTranslation("header");
   const { resolvedMode, setMode } = useTheme();
   const settingsButton = (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-      onClick={onOpenSettings}
-      title={t("settings")}
-    >
-      <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.75} />
-    </Button>
+    <Hint content={t("settings")}>
+      <Button
+        aria-label={t("settings")}
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={onOpenSettings}
+      >
+        <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.75} />
+      </Button>
+    </Hint>
   );
 
   const secondarySidebarButton = onToggleSecondarySidebar ? (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-      onClick={onToggleSecondarySidebar}
-      title="Toggle secondary sidebar"
-      aria-label="Toggle secondary sidebar"
-      aria-pressed={secondarySidebarOpen}
-    >
-      <HugeiconsIcon icon={SidebarRightIcon} size={15} strokeWidth={1.75} />
-    </Button>
+    <Hint content={t("toggleSecondarySidebar")}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={onToggleSecondarySidebar}
+        aria-label={t("toggleSecondarySidebar")}
+        aria-pressed={secondarySidebarOpen}
+      >
+        <HugeiconsIcon icon={SidebarRightIcon} size={15} strokeWidth={1.75} />
+      </Button>
+    </Hint>
   ) : null;
 
   const themeButton = (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-      onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
-      title={t("toggleTheme")}
-      aria-label={t("toggleTheme")}
-    >
-      <HugeiconsIcon
-        icon={resolvedMode === "dark" ? Sun03Icon : Moon02Icon}
-        size={15}
-        strokeWidth={1.75}
-      />
-    </Button>
+    <Hint content={t("toggleTheme")}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
+        aria-label={t("toggleTheme")}
+      >
+        <HugeiconsIcon
+          icon={resolvedMode === "dark" ? Sun03Icon : Moon02Icon}
+          size={15}
+          strokeWidth={1.75}
+        />
+      </Button>
+    </Hint>
   );
 
   return (
@@ -95,25 +100,33 @@ export function Header({
       }`}
     >
       <div className="flex shrink-0 items-center gap-0.5">
-        <Button
-          onClick={onToggleSidebar}
-          title={t("toggleSidebar")}
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("toggleSidebar")}>
+          <Button
+            aria-label={t("toggleSidebar")}
+            onClick={onToggleSidebar}
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={SidebarLeftIcon}
+              size={18}
+              strokeWidth={1.75}
+            />
+          </Button>
+        </Hint>
 
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={onOpenCommandPalette}
-          title={t("commandPalette")}
-          className="shrink-0 gap-1.5 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("commandPalette")}>
+          <Button
+            aria-label={t("commandPalette")}
+            size="icon-sm"
+            variant="ghost"
+            onClick={onOpenCommandPalette}
+            className="shrink-0 gap-1.5 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.75} />
+          </Button>
+        </Hint>
 
         {!IS_MAC && (
           <NotificationBell

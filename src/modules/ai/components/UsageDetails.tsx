@@ -1,5 +1,6 @@
 /** 主 Agent 与子任务共用的用量明细：上下文和缓存均取末次请求。 */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   getProvider,
   providerFromBuiltinId,
@@ -49,24 +50,23 @@ export function UsageDetails({ records }: { records: readonly UsageRecord[] }) {
             className="flex items-baseline justify-between gap-3 text-muted-foreground"
           >
             <span>{t(`miniWindow.context.${field}`)}</span>
-            <span
-              className="text-right font-mono text-foreground"
-              title={value?.toLocaleString()}
-            >
-              {value == null ? (
-                t("miniWindow.context.unavailable")
-              ) : (
-                <>
-                  {formatTokens(value)}
-                  {field === "cacheReadTokens" &&
-                    cacheRate != null &&
-                    ` / ${(cacheRate * 100).toFixed(0)}%`}
-                  {field === "inputTokens" &&
-                    latest?.estimated.includes(field) &&
-                    ` · ${t("miniWindow.context.estimated")}`}
-                </>
-              )}
-            </span>
+            <Hint content={value?.toLocaleString()}>
+              <span className="text-right font-mono text-foreground">
+                {value == null ? (
+                  t("miniWindow.context.unavailable")
+                ) : (
+                  <>
+                    {formatTokens(value)}
+                    {field === "cacheReadTokens" &&
+                      cacheRate != null &&
+                      ` / ${(cacheRate * 100).toFixed(0)}%`}
+                    {field === "inputTokens" &&
+                      latest?.estimated.includes(field) &&
+                      ` · ${t("miniWindow.context.estimated")}`}
+                  </>
+                )}
+              </span>
+            </Hint>
           </div>
         );
       })}

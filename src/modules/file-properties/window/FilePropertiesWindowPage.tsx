@@ -3,6 +3,7 @@
  * 页面先展示目标自身的快速快照，再异步执行可取消的目录统计，不持有 Workspace 运行时。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { AuxiliaryWindowLayout } from "@/auxiliary/AuxiliaryWindowLayout";
 import { useAuxiliaryOpenRequest } from "@/auxiliary/useAuxiliaryOpenRequest";
 import { Button } from "@/components/controls/button";
@@ -219,17 +220,22 @@ export function FilePropertiesWindowPage() {
           >
             {title}
           </span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-muted-foreground"
-            disabled={!target || loading || scan.status === "loading"}
-            onClick={refreshProperties}
-            aria-label={t("common:refresh")}
-            title={t("common:refresh")}
-          >
-            <HugeiconsIcon icon={Refresh01Icon} size={13} strokeWidth={1.75} />
-          </Button>
+          <Hint content={t("common:refresh")}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="text-muted-foreground"
+              disabled={!target || loading || scan.status === "loading"}
+              onClick={refreshProperties}
+              aria-label={t("common:refresh")}
+            >
+              <HugeiconsIcon
+                icon={Refresh01Icon}
+                size={13}
+                strokeWidth={1.75}
+              />
+            </Button>
+          </Hint>
         </div>
       }
     >
@@ -271,23 +277,26 @@ export function FilePropertiesWindowPage() {
                   <p className="min-w-0 flex-1 break-all font-mono text-[10.5px] text-muted-foreground select-text">
                     {snapshot.path}
                   </p>
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    onClick={() => void copyPath()}
-                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                    aria-label={
-                      pathCopied ? t("common:copied") : t("common:copy")
-                    }
-                    title={pathCopied ? t("common:copied") : t("common:copy")}
+                  <Hint
+                    content={pathCopied ? t("common:copied") : t("common:copy")}
                   >
-                    <HugeiconsIcon
-                      icon={pathCopied ? CheckmarkCircle01Icon : CopyIcon}
-                      size={11}
-                      strokeWidth={1.75}
-                    />
-                  </Button>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      onClick={() => void copyPath()}
+                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      aria-label={
+                        pathCopied ? t("common:copied") : t("common:copy")
+                      }
+                    >
+                      <HugeiconsIcon
+                        icon={pathCopied ? CheckmarkCircle01Icon : CopyIcon}
+                        size={11}
+                        strokeWidth={1.75}
+                      />
+                    </Button>
+                  </Hint>
                 </div>
               </div>
             </section>

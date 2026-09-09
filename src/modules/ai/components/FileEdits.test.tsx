@@ -177,7 +177,7 @@ describe("文件改动展示", async () => {
     expect(trigger.textContent).not.toContain("+2");
   });
 
-  it("卡片延迟一秒挂载历史 Diff，点击传递整轮而非单个文件", async () => {
+  it("卡片按统一悬停延迟挂载历史 Diff，点击传递整轮而非单个文件", async () => {
     const runtime = getFileEditRuntime(sessionId);
     await runtime.complete(
       "edit",
@@ -204,13 +204,13 @@ describe("文件改动展示", async () => {
     const first = firstButton();
     act(() =>
       first.dispatchEvent(
-        new PointerEvent("pointerover", {
+        new PointerEvent("pointermove", {
           bubbles: true,
           pointerType: "mouse",
         }),
       ),
     );
-    await act(async () => vi.advanceTimersByTimeAsync(999));
+    await act(async () => vi.advanceTimersByTimeAsync(799));
     expect(document.querySelector('[data-testid="diff"]')).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(

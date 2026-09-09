@@ -3,6 +3,7 @@
  * 配置保存到 profile，启用项在连接后自动启动；运行时状态仅用于展示和单条重启。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import {
   Dialog,
@@ -410,19 +411,20 @@ export function TunnelManagerDialog({
 /** 在名称右侧呈现可访问的运行状态，不重复在编辑区展示。 */
 function StatusDot({ status, label }: { status: TunnelStatus; label: string }) {
   return (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      className={cn(
-        "size-1.5 shrink-0 rounded-full transition-colors duration-control ease-standard",
-        status === "active"
-          ? "bg-success"
-          : status === "failed"
-            ? "bg-destructive"
-            : "bg-muted-foreground/45",
-      )}
-    />
+    <Hint content={label}>
+      <span
+        role="img"
+        aria-label={label}
+        className={cn(
+          "size-1.5 shrink-0 rounded-full transition-colors duration-control ease-standard",
+          status === "active"
+            ? "bg-success"
+            : status === "failed"
+              ? "bg-destructive"
+              : "bg-muted-foreground/45",
+        )}
+      />
+    </Hint>
   );
 }
 
