@@ -77,6 +77,8 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         ],
       },
       output: {
+        // 非递归分组可能产生跨块循环引用，必须保持依赖初始化顺序，避免生产启动白屏。
+        strictExecutionOrder: true,
         codeSplitting: {
           // 明确分组不能递归吸收 React 等共享依赖，否则轻量截图入口会加载 AI provider。
           includeDependenciesRecursively: false,

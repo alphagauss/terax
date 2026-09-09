@@ -27,6 +27,28 @@ Invoke-RestMethod http://127.0.0.1:9223/json |
 
 macOS、Linux 使用各自 WebView inspector；上述环境变量只适用于 Windows。
 
+## 仅生产构建白屏
+
+先比较可运行提交与失败提交，重点检查生产分块、资源路径和启动初始化。`pnpm tauri dev` 不执行生产分块，开发启动成功不能替代 release 验证。
+
+原生日志写入 `~/.terax/logs/`，当前桌面日志文件为 `Terax.log`。Windows 可持续查看：
+
+```powershell
+Get-Content "$env:USERPROFILE\.terax\logs\Terax.log" -Tail 100 -Wait
+```
+
+当前日志插件只配置文件输出，前端 `console.error` 和未捕获异常不会自动写入该文件。原生日志正常时仍需检查 WebView Console。
+
+退出目标 Workspace 的已有实例后，在设置上述 WebView2 调试环境变量的同一 PowerShell 中启动构建产物：
+
+```powershell
+& .\src-tauri\target\release\terax.exe
+```
+
+已有实例可能只被激活而不继承调试环境变量。通过 `http://127.0.0.1:9223/json` 查找 URL 为 `http://tauri.localhost/` 的主窗口 target，使用返回的 `devtoolsFrontendUrl` 打开检查器，或连接 `webSocketDebuggerUrl`。启用 Console 的 Preserve log，并在 Network 中检查失败的脚本和样式请求；必要时重新加载捕获首次异常。不要把截图窗口或辅助窗口误当成主窗口。
+
+优先记录第一条异常的完整堆栈、资源文件名及行列号，再检查后续连带错误。如果错误只存在于压缩产物，可临时启用 Vite 的 `build.sourcemap` 后重新构建定位，结束后撤销。手动分块的循环引用可能改变依赖初始化顺序；非递归分组需配合 `output.strictExecutionOrder`，修复后仍应使用 `pnpm tauri build` 的实际产物复验。
+
 ## 证据与收尾
 
 React 开发组件轨道会把变化前后的完整 props 复制到浏览器 Performance 时间线，长流可能在 JS 堆之外累积大量内存。桌面入口默认及时清理这些组件记录，业务埋点、断点、热更新和源码映射不受影响。需要直接查询最近的组件记录时设置 `VITE_REACT_PROFILE=true`，保留窗口为一秒；浏览器性能录制仍可消费轨道事件。不要通过关闭整个 Performance API 或要求用户清空会话处理内存问题。
