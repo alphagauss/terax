@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { compactModelMessages, compactModelMessagesDetailed } from "./compact";
+import { compactModelMessagesDetailed, estimateMessageTokens } from "./compact";
 
 const BIG = "x".repeat(2000);
 
@@ -27,20 +27,6 @@ function readResult(id: string, value: string): ModelMessage {
   } as unknown as ModelMessage;
 }
 
-function writeCall(id: string, path: string): ModelMessage {
-  return {
-    role: "assistant",
-    content: [
-      {
-        type: "tool-call",
-        toolCallId: id,
-        toolName: "write_file",
-        input: { path },
-      },
-    ],
-  } as unknown as ModelMessage;
-}
-
 function outputOf(message: ModelMessage): { __elided?: boolean } {
   const parts = message.content as Array<{ output?: { __elided?: boolean } }>;
   return parts[0].output ?? {};
@@ -51,67 +37,77 @@ function isElided(message: ModelMessage): boolean {
 }
 
 describe("compactModelMessagesDetailed", () => {
+  it("does not count media encoding as text tokens", () => {
+    const image = (data: string): ModelMessage[] => [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "中文" },
+          { type: "image", image: data },
+        ],
+      },
+    ];
+    expect(estimateMessageTokens(image("a"))).toBe(
+      estimateMessageTokens(image("a".repeat(100000))),
+    );
+  });
+
+  it("preserves system instructions and complete current tool pairs when dropping old turns", () => {
+    const system: ModelMessage = { role: "system", content: "永久指令" };
+    const current: ModelMessage[] = [
+      { role: "user", content: "当前问题" },
+      readCall("new", "/new"),
+      readResult("new", "小结果"),
+    ];
+    const result = compactModelMessagesDetailed(
+      [
+        system,
+        { role: "user", content: BIG.repeat(5) },
+        { role: "assistant", content: "旧回答" },
+        ...current,
+      ],
+      1500,
+    );
+    expect(result.messages).toEqual([system, ...current]);
+  });
+
   it("returns the input untouched when it fits the context budget", () => {
     const messages = [{ role: "user", content: "hi" }] as ModelMessage[];
-    const result = compactModelMessagesDetailed(messages, 1000);
+    const result = compactModelMessagesDetailed(messages, 6000);
     expect(result.compacted).toBe(false);
     expect(result.messages).toBe(messages);
   });
 
-  it("elides a read result once its file has been written", () => {
-    const messages = [
+  it("elides older tool results only over budget and preserves recent reads even after writes", () => {
+    const messages: ModelMessage[] = [
+      { role: "user", content: "检查文件" },
       readCall("c1", "/a.txt"),
-      readResult("c1", BIG),
-      writeCall("c2", "/a.txt"),
-      { role: "user", content: BIG } as ModelMessage,
-    ];
-    const result = compactModelMessagesDetailed(messages, 1000);
-    expect(result.compacted).toBe(true);
-    expect(isElided(result.messages[1])).toBe(true);
-  });
-
-  it("keeps the latest read of a path and elides the superseded one", () => {
-    const messages = [
-      readCall("c1", "/a.txt"),
-      readResult("c1", BIG),
+      readResult("c1", BIG.repeat(3)),
+      { role: "assistant", content: "已检查" },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "write",
+            toolName: "write_file",
+            input: { path: "/a.txt" },
+          },
+        ],
+      },
+      readResult("write", "written"),
       readCall("c2", "/a.txt"),
-      readResult("c2", BIG),
-      { role: "user", content: BIG } as ModelMessage,
+      readResult("c2", "最新内容"),
     ];
-    const result = compactModelMessagesDetailed(messages, 1000);
-    expect(isElided(result.messages[1])).toBe(true);
-    expect(isElided(result.messages[3])).toBe(false);
-  });
-
-  it("does not elide superseded reads while under the budget", () => {
-    const messages = [
-      readCall("c1", "/a.txt"),
-      readResult("c1", "tiny"),
-      readCall("c2", "/a.txt"),
-      readResult("c2", "tiny"),
-    ];
-    const result = compactModelMessagesDetailed(messages, 100_000);
-    expect(result.compacted).toBe(false);
-    expect(isElided(result.messages[1])).toBe(false);
-  });
-
-  it("is idempotent: re-running does not re-elide an already-elided result", () => {
-    const messages = [
-      readCall("c1", "/a.txt"),
-      readResult("c1", BIG),
-      writeCall("c2", "/a.txt"),
-      { role: "user", content: BIG } as ModelMessage,
-    ];
-    const once = compactModelMessagesDetailed(messages, 1000);
-    const twice = compactModelMessagesDetailed(once.messages, 1000);
+    expect(compactModelMessagesDetailed(messages, 10000).messages).toBe(
+      messages,
+    );
+    const once = compactModelMessagesDetailed(messages, 4000);
+    expect(isElided(once.messages[2])).toBe(true);
+    expect(once.messages.slice(-4)).toEqual(messages.slice(-4));
+    expect(messages[2]).toEqual(readResult("c1", BIG.repeat(3)));
+    const twice = compactModelMessagesDetailed(once.messages, 4000);
     expect(twice.compacted).toBe(false);
-    expect(isElided(twice.messages[1])).toBe(true);
-  });
-});
-
-describe("compactModelMessages", () => {
-  it("returns the messages array from the detailed result", () => {
-    const messages = [{ role: "user", content: "hi" }] as ModelMessage[];
-    expect(compactModelMessages(messages, 1000)).toBe(messages);
+    expect(twice.messages).toBe(once.messages);
   });
 });

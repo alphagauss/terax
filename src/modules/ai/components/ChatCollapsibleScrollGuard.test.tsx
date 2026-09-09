@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const stickMocks = vi.hoisted(() => ({
   context: {
     scrollRef: { current: null as HTMLDivElement | null },
+    contentRef: { current: null as HTMLDivElement | null },
     state: {
       escapedFromLock: false,
       isAtBottom: true,
@@ -57,6 +58,7 @@ describe("ChatCollapsibleScrollGuard", () => {
     reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
     vi.restoreAllMocks();
     stickMocks.context.scrollRef.current = null;
+    stickMocks.context.contentRef.current = null;
   });
 
   it("pauses following before resizing and after the final collapsed size", () => {
@@ -76,6 +78,35 @@ describe("ChatCollapsibleScrollGuard", () => {
     expect(stickMocks.context.state.isAtBottom).toBe(false);
 
     expect(stickMocks.context.stopScroll).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses following for tab switches before their content changes size", () => {
+    const tab = document.createElement("button");
+    tab.setAttribute("data-chat-scroll-preserve", "");
+    stickMocks.context.scrollRef.current?.append(tab);
+    act(() => tab.click());
+    expect(stickMocks.context.stopScroll).toHaveBeenCalledOnce();
+    expect(stickMocks.context.state.escapedFromLock).toBe(true);
+  });
+
+  it("reserves the viewport while collapsing and releases it when resuming", () => {
+    const scroll = stickMocks.context.scrollRef.current as HTMLDivElement;
+    const content = stickMocks.context.contentRef.current as HTMLDivElement;
+    Object.defineProperty(scroll, "clientHeight", {
+      value: 400,
+      configurable: true,
+    });
+    scroll.scrollTop = 300;
+    act(() => trigger().click());
+    expect(content.style.minHeight).toBe("701px");
+    expect(scroll.style.overflowAnchor).toBe("none");
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>("[data-chat-scroll-resume]")
+        ?.click(),
+    );
+    expect(content.style.minHeight).toBe("");
+    expect(scroll.style.overflowAnchor).toBe("");
   });
 
   it("ignores clicks outside collapsible triggers", () => {
@@ -99,7 +130,17 @@ function renderGuard() {
         <button type="button" data-slot="collapsible-trigger">
           Details
         </button>
-        <div className="terax-collapsible-content">content</div>
+        <div
+          ref={(element) => {
+            stickMocks.context.contentRef.current = element;
+          }}
+          className="terax-collapsible-content"
+        >
+          content
+        </div>
+        <button data-chat-scroll-resume type="button">
+          Latest
+        </button>
       </div>,
     );
   });

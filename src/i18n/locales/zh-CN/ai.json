@@ -22,15 +22,14 @@
     "thinking": "思考中…",
     "closeTitle": "关闭 (Esc)",
     "context": {
-      "model": "模型",
-      "lastRequest": "上次请求",
-      "estimatedContext": "预估上下文",
-      "ofWhichCached": "其中已缓存",
-      "sessionInput": "会话输入",
-      "sessionOutput": "会话输出",
-      "cacheHit": "缓存命中",
-      "footerLastRequest": "上次请求反映当前上下文大小；会话合计为累计值。",
-      "footerApprox": "Token 数量为近似值（字符数 / 4）。"
+      "usage": "上下文",
+      "footerApprox": "本地预估：字符数 × 0.8。媒体及不可见推理的用量未知。",
+      "estimated": "本地预估",
+      "unavailable": "未提供",
+      "noUsage": "暂无用量记录，上下文使用本地预估。",
+      "taskUsage": "用量统计",
+      "inputTokens": "上下文输入",
+      "cacheReadTokens": "缓存命中"
     },
     "switchSession": "切换会话",
     "aiSettings": "AI 设置",
@@ -151,6 +150,17 @@
     "steer": "引导当前任务"
   },
   "chat": {
+    "metrics": {
+      "output": "本轮输出",
+      "tokens": "{{value}} token",
+      "title": "本轮统计",
+      "firstToken": "首 token 延迟",
+      "speed": "生成速度",
+      "toolCalls": "工具调用",
+      "seconds": "{{value}} 秒",
+      "tokensPerSecond": "{{value}} token/s",
+      "partial": "生成速度仅统计具有有效 SDK 计时和实际输出量的调用。"
+    },
     "fileEdits": {
       "title": "已编辑 {{count}} 个文件",
       "tabTitle": "文件改动",
@@ -199,10 +209,10 @@
       "tool": "正在使用 {{tool}}"
     },
     "continuePrompt": "从你停下的地方继续。不要复述，直接接着做。",
+    "contextBudgetExceeded": "当前请求超出可用上下文预算。请减少输入内容，或选择上下文窗口更大的模型。",
     "somethingWentWrong": "出错了。",
     "dismiss": "忽略",
-    "contextCompacted_one": "上下文已压缩，省略了 {{count}} 条较早的工具结果以节省 token。",
-    "contextCompacted_other": "上下文已压缩，省略了 {{count}} 条较早的工具结果以节省 token。",
+    "contextCompacted": "上下文已压缩，较早的历史和工具结果已精简。",
     "hitStepLimit": "已达到步数上限。继续以接着运行。",
     "continue": "继续",
     "copy": "复制消息",

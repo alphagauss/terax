@@ -15,7 +15,7 @@ import type {
   ExternalAgentBinding,
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
-import { type AgentUsageDelta, runAgentStream } from "@/modules/ai/lib/agent";
+import { runAgentStream } from "@/modules/ai/lib/agent";
 import type { AgentConfiguration } from "./agentConfiguration";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
@@ -49,7 +49,6 @@ export type SessionTransportDependencies = {
   getProviderModels?: () => Readonly<ProviderModels>;
   getCustomProviders?: () => readonly ProviderInstance[];
   getProviderInstanceKeys?: () => ProviderInstanceKeys;
-  onUsage?: (delta: AgentUsageDelta) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onSubagentDisplay?: (state: SubagentDisplayState) => void;
@@ -150,14 +149,6 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
           abortSignal: options.abortSignal,
           onSession: (sessionId) =>
             deps.onExternalSession?.(externalAgent.agentId, sessionId),
-          onUsage: (usage) =>
-            deps.onUsage?.({
-              inputTokens: usage.input,
-              outputTokens: usage.output,
-              cachedInputTokens: usage.cached,
-              lastInputTokens: usage.input,
-              lastCachedTokens: usage.cached,
-            }),
         }),
       );
     }
@@ -171,7 +162,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       systemPrompt,
       allowedTools: agent.tools,
       toolContext: deps.toolContext,
-      onUsage: deps.onUsage,
+      turnId: deps.getTurnId(),
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
       onSubagentDisplay: deps.onSubagentDisplay,

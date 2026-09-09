@@ -15,6 +15,7 @@ import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 
 let activeModel: MockLanguageModelV4;
 
@@ -127,6 +128,7 @@ describe("Agent reasoning duration", () => {
     const onFinishMeta = vi.fn();
     const errors = vi.fn();
     const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "interrupted-stream"),
       systemPrompt: "Stable prompt",
@@ -174,6 +176,15 @@ describe("Agent reasoning duration", () => {
     expect(errors).toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledOnce();
     expect(onFinishMeta).not.toHaveBeenCalled();
+    const records = usageRecords("interrupted-stream");
+    expect(records).toHaveLength(2);
+    expect(records[0].values).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    expect(records[0].estimated).toEqual([]);
+    expect(records[1].estimated).toContain("outputTokens");
+    expect(records[1].values.outputTokens).toBeGreaterThan(0);
   });
 
   it("keeps activity boundaries stable across blank text and direct tools", async () => {
@@ -205,6 +216,7 @@ describe("Agent reasoning duration", () => {
       },
     ];
     const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "mock-model-reasoning"),
       systemPrompt: "Stable prompt",

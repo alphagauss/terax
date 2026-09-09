@@ -11,12 +11,6 @@ import {
 import { isSubagentResultDataPart } from "@/modules/ai/lib/conversation";
 import { describe, expect, it, vi } from "vitest";
 
-const usage = {
-  inputTokens: 1,
-  outputTokens: 2,
-  cachedInputTokens: 0,
-};
-
 function deferredResult() {
   let resolve!: (
     result: Omit<SubagentTaskResult, "taskId" | "label" | "durationMs">,
@@ -84,9 +78,9 @@ describe("AgentTurnCoordinator", () => {
       error: expect.stringContaining("(3/3 running)"),
     });
 
-    deferred[2].resolve({ status: "completed", result: "third", usage });
-    deferred[0].resolve({ status: "completed", result: "first", usage });
-    deferred[1].resolve({ status: "completed", result: "second", usage });
+    deferred[2].resolve({ status: "completed", result: "third" });
+    deferred[0].resolve({ status: "completed", result: "first" });
+    deferred[1].resolve({ status: "completed", result: "second" });
     await coordinator.waitForAll();
 
     const event = coordinator.inbox.take()?.event;
@@ -106,7 +100,7 @@ describe("AgentTurnCoordinator", () => {
       toolCallId: "call-inspect",
       wait: true,
       limit: 3,
-      run: async () => ({ status: "completed", result: "done", usage }),
+      run: async () => ({ status: "completed", result: "done" }),
     });
 
     expect(result).toEqual(
@@ -143,7 +137,7 @@ describe("AgentTurnCoordinator", () => {
           id: "child-call",
           status: "completed",
         });
-        return { status: "completed", result: "done", usage };
+        return { status: "completed", result: "done" };
       },
     });
     await coordinator.waitForAll();
@@ -177,7 +171,6 @@ describe("AgentTurnCoordinator", () => {
     const run = vi.fn(async () => ({
       status: "completed" as const,
       result: "late",
-      usage,
     }));
     await coordinator.start({
       task: "long task",

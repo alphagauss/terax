@@ -98,6 +98,7 @@ const RUNTIME_FACTORIES: Record<RuntimeAdapterId, RuntimeFactory> = {
     );
     return createOpenAICompatible({
       name: connection.provider,
+      includeUsage: true,
       baseURL: connection.baseURL,
       apiKey,
       headers: connection.runtime.headers,

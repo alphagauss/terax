@@ -360,7 +360,7 @@ describe("AI session message conversion", () => {
       ),
     ).toEqual([
       { createdAt: Date.parse("2026-07-26T09:00:00.000Z") },
-      { createdAt: Date.parse("2026-07-26T09:00:01.000Z") },
+      { createdAt: Date.parse("2026-07-26T09:00:01.000Z"), turnId: "turn-1" },
     ]);
   });
 
@@ -376,7 +376,10 @@ describe("AI session message conversion", () => {
         {
           id: "assistant-1",
           role: "assistant",
-          metadata: { createdAt: Date.parse("2026-07-26T09:00:01.000Z") },
+          metadata: {
+            createdAt: Date.parse("2026-07-26T09:00:01.000Z"),
+            turnId: "turn-1",
+          },
           parts: [{ type: "text", text: "回答", state: "done" }],
         },
       ],

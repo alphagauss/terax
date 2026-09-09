@@ -227,6 +227,7 @@ describe.sequential("Agent background subagents", () => {
     });
     try {
       const result = await runAgentStream({
+        turnId: crypto.randomUUID(),
         keys: EMPTY_PROVIDER_KEYS,
         model: modelRefForProvider("lmstudio", "stream-edits"),
         systemPrompt: "Stable prompt",
@@ -350,6 +351,7 @@ describe.sequential("Agent background subagents", () => {
       });
       try {
         const result = await runAgentStream({
+          turnId: crypto.randomUUID(),
           keys: EMPTY_PROVIDER_KEYS,
           model: modelRefForProvider("lmstudio", "approval-resume"),
           systemPrompt: "Stable prompt",
@@ -432,6 +434,7 @@ describe.sequential("Agent background subagents", () => {
           }),
       });
       const result = await runAgentStream({
+        turnId: crypto.randomUUID(),
         keys: EMPTY_PROVIDER_KEYS,
         model: modelRefForProvider("lmstudio", "guided"),
         systemPrompt: "Stable prompt",
@@ -525,6 +528,7 @@ describe.sequential("Agent background subagents", () => {
       },
     ];
     const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "mock-model-background"),
       systemPrompt: "Stable prompt",
@@ -660,6 +664,7 @@ describe.sequential("Agent background subagents", () => {
     ];
     const coordinator = new AgentTurnCoordinator();
     const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "mock-model-checkpoint"),
       systemPrompt: "Stable prompt",
@@ -739,6 +744,7 @@ describe.sequential("Agent background subagents", () => {
       },
     ];
     const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "mock-model-approval"),
       systemPrompt: "Stable prompt",
@@ -768,7 +774,7 @@ describe.sequential("Agent background subagents", () => {
       "tool-approval-request",
     );
     expect(checkpoint).not.toHaveBeenCalled();
-    expect(coordinator.inbox.hasPending).toBe(true);
+    await vi.waitFor(() => expect(coordinator.inbox.hasPending).toBe(true));
     await coordinator.cancelAll();
   });
 });

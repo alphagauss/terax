@@ -9,6 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentDisplayState } from "../agents/subagentDisplay";
+import { restoreUsage, releaseUsage } from "../lib/usageRuntime";
 import { SubagentCard } from "./SubagentCard";
 
 const part = {
@@ -56,9 +57,54 @@ afterEach(async () => {
   delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
     .IS_REACT_ACT_ENVIRONMENT;
   document.body.replaceChildren();
+  releaseUsage("subagent-usage-tab");
 });
 
 describe("SubagentCard", () => {
+  it("shows only the four task statistics in a third tab", async () => {
+    restoreUsage("subagent-usage-tab", [
+      {
+        role: "usage",
+        timestamp: "now",
+        content: {
+          id: "child-call",
+          turnId: "turn",
+          taskId: "task-1",
+          model: { providerId: "test", modelId: "test" },
+          contextWindow: 10000,
+          values: { inputTokens: 1200, cacheReadTokens: 960, outputTokens: 45 },
+          estimated: [],
+          toolCalls: 2,
+          timing: { responseTimeMs: 1500, timeToFirstOutputMs: 500 },
+        },
+      },
+    ]);
+    await act(async () =>
+      root.render(
+        <SubagentCard
+          sessionId="subagent-usage-tab"
+          part={part as never}
+          display={display({ status: "completed", result: "Final result" })}
+        />,
+      ),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>("button[data-state]")?.click(),
+    );
+    const tab = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Usage",
+    );
+    expect(tab).toBeDefined();
+    expect(container.textContent).not.toContain("Context input");
+    await act(async () => tab?.click());
+    expect(container.textContent).toContain("Context input");
+    expect(container.textContent).toContain("960 / 80%");
+    expect(container.textContent).toContain("Turn output45 token");
+    expect(container.textContent).toContain("Tool calls2");
+    expect(container.textContent).not.toContain("First token latency");
+    expect(container.textContent).not.toContain("Generation speed");
+  });
+
   it("holds the visible tool action for one second without queuing stale actions", async () => {
     await act(async () => {
       root.render(<SubagentCard part={part as never} display={display()} />);

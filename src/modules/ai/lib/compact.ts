@@ -1,39 +1,33 @@
 /**
  * 本文件压缩发送给模型的历史消息和大型工具结果。
- * 文件读取结果按路径保留最新有效版本，修改后的旧读取内容可以安全省略。
+ * 超出输入预算后先省略较早工具结果，再裁剪完整旧轮次，保留最近消息与工具配对。
  */
 
 import type { ModelMessage } from "ai";
+import { estimateTokens } from "@/modules/ai/lib/usage";
 
-const KEEP_TAIL = 24;
 const ELISION_TEXT = "[elided to save context; see prior tool call in history]";
 
 type ToolPart = {
   type: string;
-  toolName?: string;
-  toolCallId?: string;
-  input?: unknown;
   output?: unknown;
   [k: string]: unknown;
 };
 
-function approxBytes(messages: ModelMessage[]): number {
-  let n = 0;
-  for (const m of messages) {
-    if (typeof m.content === "string") n += m.content.length;
-    else if (Array.isArray(m.content)) {
-      for (const part of m.content as ToolPart[]) {
-        if (part.type === "text" && typeof part.text === "string")
-          n += (part.text as string).length;
-        else if (part.type === "tool-result")
-          n += JSON.stringify(part.output ?? "").length;
-        else if (part.type === "tool-call")
-          n += JSON.stringify(part.input ?? "").length;
-        else n += 64;
-      }
-    }
-  }
-  return n;
+export function estimateMessageTokens(
+  messages: readonly ModelMessage[],
+): number {
+  if (!messages.length) return 0;
+  // 图片和文件的编码长度不等于模型 token，不能把 base64 当作正文计数。
+  return estimateTokens(
+    JSON.stringify(messages, (_key, value) =>
+      value &&
+      typeof value === "object" &&
+      (value.type === "image" || value.type === "file")
+        ? { type: value.type }
+        : value,
+    ),
+  );
 }
 
 function elideToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
@@ -54,141 +48,23 @@ function elideToolResult(part: ToolPart): { changed: boolean; part: ToolPart } {
   };
 }
 
-function pathOfInput(input: unknown): string | null {
-  if (!input || typeof input !== "object") return null;
-  const p = (input as { path?: unknown }).path;
-  return typeof p === "string" && p.length > 0 ? p : null;
-}
-
-function collectMutationPaths(messages: ModelMessage[]): Set<string> {
-  const paths = new Set<string>();
-  for (const m of messages) {
-    if (!Array.isArray(m.content)) continue;
-    for (const part of m.content as ToolPart[]) {
-      if (part.type !== "tool-call") continue;
-      const name = part.toolName;
-      if (name === "write_file" || name === "file_operation") {
-        const p = pathOfInput(part.input);
-        if (p) paths.add(p);
-      }
-      if (
-        name === "apply_patch" &&
-        part.input &&
-        typeof part.input === "object"
-      ) {
-        const files = (part.input as { files?: unknown }).files;
-        if (!Array.isArray(files)) continue;
-        for (const file of files) {
-          const p = pathOfInput(file);
-          if (p) paths.add(p);
-        }
-      }
-    }
-  }
-  return paths;
-}
-
-function collectLastReadIdxPerPath(
-  messages: ModelMessage[],
-): Map<string, number> {
-  const lastIdx = new Map<string, number>();
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (!Array.isArray(m.content)) continue;
-    for (const part of m.content as ToolPart[]) {
-      if (part.type !== "tool-call") continue;
-      if (part.toolName !== "read_file") continue;
-      const p = pathOfInput(part.input);
-      if (p) lastIdx.set(p, i);
-    }
-  }
-  return lastIdx;
-}
-
-function dropSupersededReads(messages: ModelMessage[]): {
-  out: ModelMessage[];
-  touched: boolean;
-} {
-  const mutated = collectMutationPaths(messages);
-  const lastReadIdx = collectLastReadIdxPerPath(messages);
-
-  const callIdxToPath = new Map<string, string>();
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    if (!Array.isArray(m.content)) continue;
-    for (const part of m.content as ToolPart[]) {
-      if (part.type !== "tool-call" || part.toolName !== "read_file") continue;
-      const p = pathOfInput(part.input);
-      const id = part.toolCallId;
-      if (p && typeof id === "string") callIdxToPath.set(id, p);
-    }
-  }
-
-  let touched = false;
-  const out = messages.map((m, i): ModelMessage => {
-    if (!Array.isArray(m.content)) return m;
-    let local = false;
-    const nextContent = (m.content as ToolPart[]).map((part) => {
-      if (part.type !== "tool-result") return part;
-      const id = part.toolCallId;
-      if (typeof id !== "string") return part;
-      const path = callIdxToPath.get(id);
-      if (!path) return part;
-      const isStale =
-        mutated.has(path) ||
-        (lastReadIdx.has(path) && (lastReadIdx.get(path) as number) > i);
-      if (!isStale) return part;
-      const r = elideToolResult(part);
-      if (r.changed) local = true;
-      return r.part;
-    });
-    if (!local) return m;
-    touched = true;
-    return { ...m, content: nextContent } as ModelMessage;
-  });
-  return { out, touched };
-}
-
 export type CompactResult = {
   messages: ModelMessage[];
   compacted: boolean;
   droppedCount: number;
 };
 
-export function compactModelMessages(
-  messages: ModelMessage[],
-  contextLimit: number,
-): ModelMessage[] {
-  return compactModelMessagesDetailed(messages, contextLimit).messages;
-}
-
 export function compactModelMessagesDetailed(
   messages: ModelMessage[],
   contextLimit: number,
+  estimate: (messages: ModelMessage[]) => number = estimateMessageTokens,
 ): CompactResult {
+  if (estimate(messages) < contextLimit)
+    return { messages, compacted: false, droppedCount: 0 };
+
   let dropped = 0;
-  let working = messages;
-  let approxTokens = approxBytes(working) / 4;
-
-  if (approxTokens >= 0.55 * contextLimit) {
-    const r = dropSupersededReads(working);
-    if (r.touched) {
-      working = r.out;
-      dropped++;
-      approxTokens = approxBytes(working) / 4;
-    }
-  }
-
-  if (approxTokens < 0.7 * contextLimit) {
-    return {
-      messages: working,
-      compacted: dropped > 0,
-      droppedCount: dropped,
-    };
-  }
-
-  const out = working.slice();
-  const stopIdx = Math.max(0, out.length - KEEP_TAIL);
+  const out = messages.slice();
+  const stopIdx = Math.max(0, out.length - 4);
   for (let i = 0; i < stopIdx; i++) {
     if (out[i].role === "system") continue;
     if (!Array.isArray(out[i].content)) continue;
@@ -201,10 +77,25 @@ export function compactModelMessagesDetailed(
     if (local) {
       out[i] = { ...out[i], content: next } as ModelMessage;
       dropped++;
-      if (approxBytes(out) / 4 < 0.6 * contextLimit) break;
+      if (estimate(out) < 0.8 * contextLimit) break;
     }
   }
 
+  // 按完整用户轮次裁剪，不能留下没有调用的工具结果或删除当前用户请求。
+  while (estimate(out) >= 0.8 * contextLimit) {
+    const firstUser = out.findIndex((message) => message.role === "user");
+    const nextUser = out.findIndex(
+      (message, index) =>
+        index > Math.max(0, firstUser) && message.role === "user",
+    );
+    if (nextUser < 0) break;
+    const instructions = out
+      .slice(0, nextUser)
+      .filter((message) => message.role === "system");
+    if (instructions.length === nextUser) break;
+    out.splice(0, nextUser, ...instructions);
+    dropped++;
+  }
   return {
     messages: out,
     compacted: dropped > 0,

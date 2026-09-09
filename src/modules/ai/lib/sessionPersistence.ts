@@ -14,6 +14,11 @@ import {
 } from "@/modules/ai/lib/conversation";
 import { commitSession, type SessionFile } from "@/modules/ai/lib/sessions";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
+import {
+  acknowledgeUsage,
+  pendingUsage,
+  settleUsage,
+} from "@/modules/ai/lib/usageRuntime";
 
 export type SessionCommitCursor = {
   persistedMessages: number;
@@ -52,9 +57,14 @@ export async function persistTurnCheckpoint(
   event: TurnEvent,
 ) {
   const edits = peekFileEditRuntime(session.id)?.pending();
+  const usage = pendingUsage(
+    session.id,
+    new Date(session.updatedAt).toISOString(),
+  );
   const result = await commitSession({
     ...session,
     messages: [
+      ...usage,
       ...serializeSessionMessages(
         [
           ...uncommittedConversationMessages(messages, cursor.committedParts),
@@ -82,6 +92,7 @@ export async function persistTurnCheckpoint(
         : []),
     ],
   });
+  acknowledgeUsage(session.id, usage.length);
   if (edits) peekFileEditRuntime(session.id)?.acknowledge(edits.count);
   cursor.committedParts = (messages[0]?.parts.length ?? 0) + 1;
   return result;
@@ -98,6 +109,10 @@ export async function persistCompletedTurn(
   assertHistory(cursor, messages);
   await peekFileEditRuntime(session.id)?.settled();
   const edits = peekFileEditRuntime(session.id)?.pending();
+  const usage = pendingUsage(
+    session.id,
+    new Date(session.updatedAt).toISOString(),
+  );
   const options = {
     timestamp: new Date(session.updatedAt).toISOString(),
     turnId: cursor.turnId,
@@ -106,6 +121,7 @@ export async function persistCompletedTurn(
   const result = await commitSession({
     ...session,
     messages: [
+      ...usage,
       ...serializeSessionMessages(
         uncommittedConversationMessages(
           messages.slice(cursor.persistedMessages),
@@ -126,7 +142,9 @@ export async function persistCompletedTurn(
         : []),
     ],
   });
+  acknowledgeUsage(session.id, usage.length);
   if (edits) peekFileEditRuntime(session.id)?.acknowledge(edits.count);
+  settleUsage(session.id);
   cursor.persistedMessages = messages.length;
   cursor.committedParts = 0;
   return result;

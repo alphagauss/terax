@@ -27,6 +27,7 @@ describe("agent preflight persistence", () => {
 
     await expect(
       runAgentStream({
+        turnId: crypto.randomUUID(),
         keys: EMPTY_PROVIDER_KEYS,
         model: modelRefForProvider("lmstudio", "mock-model"),
         systemPrompt: "Stable prompt",

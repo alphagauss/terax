@@ -159,19 +159,6 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore
         .getState()
         .persistExternalAgentSession(sessionId, agentId, externalSessionId),
-    onUsage: (delta) => {
-      const state = useChatStore.getState();
-      const cur = getAgentMetaForSession(state, sessionId).tokens;
-      state.patchAgentMeta(sessionId, {
-        tokens: {
-          inputTokens: cur.inputTokens + delta.inputTokens,
-          outputTokens: cur.outputTokens + delta.outputTokens,
-          cachedInputTokens: cur.cachedInputTokens + delta.cachedInputTokens,
-        },
-        lastInputTokens: delta.lastInputTokens,
-        lastCachedTokens: delta.lastCachedTokens,
-      });
-    },
   }) as unknown as ChatTransport<UIMessage>;
 
   const initialMessages = seedMessages.get(sessionId);
