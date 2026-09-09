@@ -8,9 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildSubagentTools } from "./subagent";
 
-const toolOptions: ToolExecutionOptions = {
+const toolOptions: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
   messages: [],
+  context: undefined as never,
 };
 
 type Result = Record<string, unknown>;

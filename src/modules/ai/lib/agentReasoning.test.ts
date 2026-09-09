@@ -13,13 +13,14 @@ import {
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-let activeModel: MockLanguageModelV3;
+let activeModel: MockLanguageModelV4;
 
-vi.mock("@ai-sdk/openai-compatible", () => ({
-  createOpenAICompatible: () => () => activeModel,
+vi.mock("@/modules/ai/lib/providerRuntime", () => ({
+  buildConfiguredLanguageModel: async () => activeModel,
+  createProviderDownload: () => undefined,
 }));
 
 const usage = {
@@ -87,8 +88,96 @@ function activityStream(options: {
 }
 
 describe("Agent reasoning duration", () => {
+  it("模型中途报错时保留已收到的正文，取消本轮且不报告正常完成", async () => {
+    activeModel = new MockLanguageModelV4({
+      doStream: async () =>
+        activeModel.doStreamCalls.length === 1
+          ? activityStream({ reasoning: false, toolCallId: "terminal-1" })
+          : {
+              stream: new ReadableStream({
+                start(controller) {
+                  controller.enqueue({ type: "stream-start", warnings: [] });
+                  controller.enqueue({ type: "text-start", id: "partial" });
+                  controller.enqueue({
+                    type: "text-delta",
+                    id: "partial",
+                    delta: "已收到的正文",
+                  });
+                  controller.enqueue({
+                    type: "error",
+                    error: new Error("connection lost"),
+                  });
+                  controller.close();
+                },
+              }),
+            },
+    });
+    const coordinator = new AgentTurnCoordinator();
+    const cancelAll = coordinator.cancelAll.bind(coordinator);
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    const cancel = vi
+      .spyOn(coordinator, "cancelAll")
+      .mockImplementation(async () => {
+        await cleanup;
+        await cancelAll();
+      });
+    const onFinishMeta = vi.fn();
+    const errors = vi.fn();
+    const result = await runAgentStream({
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "interrupted-stream"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["get_terminal_output"],
+      maxConcurrentSubagents: 3,
+      turnCoordinator: coordinator,
+      toolContext: {
+        getCwd: () => "/workspace",
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "interrupted-stream",
+        getPermissionMode: () => "ask",
+        supportsApprovals: true,
+      },
+      uiMessages: [
+        {
+          id: "user",
+          role: "user",
+          parts: [{ type: "text", text: "Inspect" }],
+        },
+      ],
+      onCheckpoint: vi.fn(),
+      onFinishMeta,
+    });
+    let message: UIMessage | undefined;
+    const consuming = (async () => {
+      for await (const update of readUIMessageStream({
+        stream: result.toUIMessageStream(),
+        onError: errors,
+      })) {
+        message = update;
+      }
+    })();
+    try {
+      await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+      // Chat 收到 error 就可能提交并释放会话，必须先完成后台任务清理。
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      finishCleanup();
+      await consuming;
+    }
+    expect(message?.parts).toContainEqual(
+      expect.objectContaining({ type: "text", text: "已收到的正文" }),
+    );
+    expect(errors).toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(onFinishMeta).not.toHaveBeenCalled();
+  });
+
   it("keeps activity boundaries stable across blank text and direct tools", async () => {
-    activeModel = new MockLanguageModelV3({
+    activeModel = new MockLanguageModelV4({
       doStream: () => {
         const call = activeModel.doStreamCalls.length;
         if (call === 1) {

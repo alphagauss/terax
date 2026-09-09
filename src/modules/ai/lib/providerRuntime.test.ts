@@ -111,6 +111,11 @@ describe("provider native transport", () => {
         kind: "auth",
       });
       expect(native.invoke).toHaveBeenCalledTimes(2);
+      if (provider === "xai") {
+        expect(native.invoke.mock.calls[0][1].url).toBe(
+          `${connection.baseURL}/responses`,
+        );
+      }
       for (const [, args] of native.invoke.mock.calls) {
         expect(args.networkTarget).toEqual({
           kind: "provider",

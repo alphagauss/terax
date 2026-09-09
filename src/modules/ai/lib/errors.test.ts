@@ -1,5 +1,5 @@
-import { streamText } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { streamText, toUIMessageStream, type UIMessageChunk } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { formatAiError } from "./errors";
 
@@ -68,7 +68,7 @@ describe("formatAiError", () => {
           "The model `gpt-5.6-luna` is in limited preview and is not available on this account.",
       },
     };
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: {
         stream: new ReadableStream({
           start(controller) {
@@ -84,12 +84,17 @@ describe("formatAiError", () => {
       prompt: "hello",
       onError: () => {},
     });
-    const chunks = [];
-    for await (const chunk of result.toUIMessageStream({
+    const chunks: UIMessageChunk[] = [];
+    await toUIMessageStream({
+      stream: result.stream,
       onError: formatAiError,
-    })) {
-      chunks.push(chunk);
-    }
+    }).pipeTo(
+      new WritableStream({
+        write: (chunk) => {
+          chunks.push(chunk);
+        },
+      }),
+    );
 
     expect(chunks).toContainEqual({
       type: "error",

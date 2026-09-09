@@ -18,13 +18,14 @@ import {
 } from "@/modules/ai/lib/fileEditRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-let activeModel: MockLanguageModelV3;
+let activeModel: MockLanguageModelV4;
 
-vi.mock("@ai-sdk/openai-compatible", () => ({
-  createOpenAICompatible: () => () => activeModel,
+vi.mock("@/modules/ai/lib/providerRuntime", () => ({
+  buildConfiguredLanguageModel: async () => activeModel,
+  createProviderDownload: () => undefined,
 }));
 
 const usage = {
@@ -126,16 +127,16 @@ function rootCalls() {
 }
 
 type StreamHandler = (
-  options: Parameters<MockLanguageModelV3["doStream"]>[0],
+  options: Parameters<MockLanguageModelV4["doStream"]>[0],
 ) =>
-  | ReturnType<MockLanguageModelV3["doStream"]>
-  | Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
+  | ReturnType<MockLanguageModelV4["doStream"]>
+  | Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
 
 function mockModel(options: {
   doStream: StreamHandler;
   childStream?: StreamHandler;
 }) {
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     doStream: async (call) =>
       options.childStream &&
       JSON.stringify(call.prompt).includes("## SUBAGENT ROLE")

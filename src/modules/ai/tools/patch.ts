@@ -36,10 +36,6 @@ export function buildPatchTools(ctx: ToolContext) {
           .min(1)
           .max(20),
       }),
-      needsApproval: ({ files }) =>
-        ctx.supportsApprovals &&
-        ctx.getPermissionMode() === "ask" &&
-        files.some((file) => pathNeedsApproval(file.path, ctx.getCwd())),
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         const approvalRequired =

@@ -24,10 +24,6 @@ export function buildSearchTools(ctx: ToolContext) {
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(2_000).optional(),
       }),
-      needsApproval: (input) =>
-        ctx.supportsApprovals &&
-        ctx.getPermissionMode() === "ask" &&
-        pathNeedsApproval(input.path ?? ".", ctx.getCwd()),
       execute: async (input) => {
         const approvalRequired =
           ctx.supportsApprovals &&
@@ -69,10 +65,6 @@ export function buildSearchTools(ctx: ToolContext) {
         offset: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(500).optional(),
       }),
-      needsApproval: (input) =>
-        ctx.supportsApprovals &&
-        ctx.getPermissionMode() === "ask" &&
-        pathNeedsApproval(input.path ?? ".", ctx.getCwd()),
       execute: async (input) => {
         const approvalRequired =
           ctx.supportsApprovals &&

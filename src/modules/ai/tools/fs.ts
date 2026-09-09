@@ -30,7 +30,6 @@ export function buildFsTools(ctx: ToolContext) {
         line_count: z.number().int().min(1).max(10_000).optional(),
         force: z.boolean().optional(),
       }),
-      needsApproval: ({ path }) => needsPathApproval(path),
       execute: async ({ path, start_line, line_count, force }) => {
         const approvalRequired = needsPathApproval(path);
         try {
@@ -61,7 +60,6 @@ export function buildFsTools(ctx: ToolContext) {
         content: z.string(),
         mode: z.enum(["create", "rewrite"]).optional(),
       }),
-      needsApproval: ({ path }) => needsPathApproval(path),
       execute: async (input, { toolCallId }) => {
         const sessionId = ctx.getSessionId();
         const approvalRequired = needsPathApproval(input.path);
@@ -109,10 +107,6 @@ export function buildFsTools(ctx: ToolContext) {
             });
           }
         }),
-      needsApproval: (input) =>
-        ctx.supportsApprovals &&
-        ctx.getPermissionMode() === "ask" &&
-        fileOperationNeedsApproval(input, ctx.getCwd()),
       execute: async (input) => {
         const approvalRequired =
           ctx.supportsApprovals &&

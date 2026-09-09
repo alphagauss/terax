@@ -25,10 +25,12 @@ vi.mock("../lib/native", () => ({ native: nativeMock }));
 import { buildFsTools } from "./fs";
 import { buildPatchTools } from "./patch";
 import { buildTools } from "./tools";
+import { buildToolApproval } from "./approval";
 
-const options: ToolExecutionOptions = {
+const options: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
   messages: [],
+  context: undefined as never,
 };
 
 const context: ToolContext = {
@@ -97,19 +99,22 @@ describe("AI file tools", () => {
 
   it("runs workspace writes automatically and approves outside writes", async () => {
     const tool = buildFsTools(context).write_file;
-    if (typeof tool.needsApproval !== "function" || !tool.execute) {
+    if (!tool.execute) {
       throw new Error("write_file must support dynamic approval and execution");
     }
     expect(
-      tool.needsApproval({ path: "a.txt", content: "text" }, options),
-    ).toBe(false);
+      buildToolApproval(context).write_file({ path: "a.txt", content: "text" }),
+    ).toBe("not-applicable");
     expect(
-      tool.needsApproval({ path: "../outside.txt", content: "text" }, options),
-    ).toBe(true);
+      buildToolApproval(context).write_file({
+        path: "../outside.txt",
+        content: "text",
+      }),
+    ).toBe("user-approval");
     useChatStore.setState({ permissionMode: "full-access" });
     expect(
-      tool.needsApproval({ path: "a.txt", content: "text" }, options),
-    ).toBe(false);
+      buildToolApproval(context).write_file({ path: "a.txt", content: "text" }),
+    ).toBe("not-applicable");
 
     await tool.execute({ path: "a.txt", content: "text" }, options);
     expect(nativeMock.agentPrepareMutation).toHaveBeenCalledWith(
@@ -131,10 +136,12 @@ describe("AI file tools", () => {
 
   it("uses one-call full access after approving an outside read", async () => {
     const tool = buildFsTools(context).read_file;
-    if (typeof tool.needsApproval !== "function" || !tool.execute) {
+    if (!tool.execute) {
       throw new Error("read_file must support selective approval");
     }
-    expect(tool.needsApproval({ path: "../secret.txt" }, options)).toBe(true);
+    expect(
+      buildToolApproval(context).read_file({ path: "../secret.txt" }),
+    ).toBe("user-approval");
 
     await tool.execute({ path: "../secret.txt" }, options);
 
@@ -148,10 +155,14 @@ describe("AI file tools", () => {
       ...context,
       supportsApprovals: false,
     }).read_file;
-    if (typeof tool.needsApproval !== "function" || !tool.execute) {
+    if (!tool.execute) {
       throw new Error("read_file must support non-interactive runners");
     }
-    expect(tool.needsApproval({ path: "../secret.txt" }, options)).toBe(false);
+    expect(
+      buildToolApproval({ ...context, supportsApprovals: false }).read_file({
+        path: "../secret.txt",
+      }),
+    ).toBe("not-applicable");
 
     await tool.execute({ path: "../secret.txt" }, options);
 
@@ -161,19 +172,11 @@ describe("AI file tools", () => {
   });
 
   it("requires approval before moving or deleting the session root", () => {
-    const tool = buildFsTools(context).file_operation;
-    if (typeof tool.needsApproval !== "function") {
-      throw new Error("file_operation approval gate must be dynamic");
-    }
+    const approval = buildToolApproval(context).file_operation;
     expect(
-      tool.needsApproval(
-        { operation: "move", path: ".", destination: "archive" },
-        options,
-      ),
-    ).toBe(true);
-    expect(
-      tool.needsApproval({ operation: "delete", path: "." }, options),
-    ).toBe(true);
+      approval({ operation: "move", path: ".", destination: "archive" }),
+    ).toBe("user-approval");
+    expect(approval({ operation: "delete", path: "." })).toBe("user-approval");
   });
 
   it("sends multi-file exact replacements as one prepared patch", async () => {

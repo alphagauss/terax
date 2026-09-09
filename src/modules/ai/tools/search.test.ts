@@ -15,10 +15,12 @@ const nativeMock = vi.hoisted(() => ({
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
 import { buildSearchTools } from "./search";
+import { buildToolApproval } from "./approval";
 
-const toolOptions: ToolExecutionOptions = {
+const toolOptions: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
   messages: [],
+  context: undefined as never,
 };
 
 function makeContext(): ToolContext {
@@ -33,6 +35,17 @@ function makeContext(): ToolContext {
 }
 
 describe("AI search tools", () => {
+  it.each([
+    [undefined, "not-applicable"],
+    ["src", "not-applicable"],
+    ["../outside", "user-approval"],
+    [".ssh", "user-approval"],
+  ] as const)("搜索路径 %s 使用请求级审批策略", (path, expected) => {
+    const policy = buildToolApproval(makeContext());
+    expect(policy.find_files({ path })).toBe(expected);
+    expect(policy.grep({ path, pattern: "text" })).toBe(expected);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     nativeMock.agentFileFind.mockResolvedValue({ entries: [] });

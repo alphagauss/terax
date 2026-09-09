@@ -85,10 +85,6 @@ export function buildShellTools(ctx: ToolContext) {
           .optional(),
         login: z.boolean().optional(),
       }),
-      needsApproval: (input) =>
-        ctx.supportsApprovals &&
-        ctx.getPermissionMode() === "ask" &&
-        shellNeedsApproval(input.command, input.cwd, ctx.getCwd()),
       execute: async (input) => {
         const approvalRequired =
           ctx.supportsApprovals &&
@@ -126,10 +122,6 @@ export function buildShellTools(ctx: ToolContext) {
       description:
         "Control a process returned by shell_exec in this chat. Poll incremental stdout/stderr, wait for literal output, write exact stdin bytes, close stdin to send EOF, or terminate the complete process tree. Reuse next_offset as since_offset to avoid duplicate output.",
       inputSchema: processInputSchema,
-      needsApproval: (input) =>
-        ctx.supportsApprovals &&
-        input.action === "write" &&
-        ctx.getPermissionMode() === "ask",
       execute: async (input) => {
         const sessionId = ctx.getSessionId();
         if (!sessionId) return { error: "no active chat session" };

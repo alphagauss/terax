@@ -92,7 +92,7 @@ export function fileOperationNeedsApproval(
 
 /**
  * 将本次工具调用映射为原生访问级别。
- * AI SDK 只会在 `needsApproval` 为假或用户已批准后进入 execute，因此需要审批的
+ * AI SDK 按请求级 `toolApproval` 策略，仅在无需审批或用户已批准后进入 execute，需要审批的
  * 调用到达这里时已经取得一次性授权。
  */
 export function accessModeForCall(

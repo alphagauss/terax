@@ -45,13 +45,20 @@ import {
   buildConfiguredLanguageModel,
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
+import { buildToolApproval } from "@/modules/ai/tools/approval";
 import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import {
   createUIMessageStream,
   type ModelMessage,
   pruneMessages,
-  stepCountIs,
+  isStepCount,
+  toUIMessageChunk,
+  type UIMessageStreamOutcome,
+  type UIMessageChunk,
+  type UIMessageStreamWriter,
+  type LanguageModelUsage,
+  type FinishReason,
   streamText,
   type UIMessage,
 } from "ai";
@@ -173,21 +180,23 @@ export async function runAgentStream(opts: RunAgentOptions) {
           let completedMessage = last?.role === "assistant" ? last : undefined;
           let stepsSeen = 0;
           let streamStarted = false;
-          let finishReason = "stop";
+          let finishReason: FinishReason = "stop";
           let approvalPending = false;
           let finalizationOnly = false;
           let activityStartedAt: number | undefined;
           const abort = () => void coordinator.cancelAll();
           opts.abortSignal?.addEventListener("abort", abort, { once: true });
 
-          const finishActivity = (): number | undefined => {
+          const finishActivity = (
+            target: UIMessageStreamWriter = writer,
+          ): number | undefined => {
             if (activityStartedAt === undefined) return undefined;
             const durationMs = Math.max(
               0,
               Math.round(performance.now() - activityStartedAt),
             );
             activityStartedAt = undefined;
-            writer.write({
+            target.write({
               type: ACTIVITY_DURATION_PART_TYPE,
               data: { durationMs },
             });
@@ -281,12 +290,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 compact.messages,
                 provider,
               );
-              let cycleMessage: UIMessage | undefined;
+              const cycle: {
+                message?: UIMessage;
+                outcome: UIMessageStreamOutcome;
+                terminal?: Extract<UIMessageChunk, { type: "error" | "abort" }>;
+              } = { outcome: { status: "unknown" } };
               let reasoningStartedAt: number | undefined;
-              const reasoningDurations: number[] = [];
-              const activityDurations: number[] = [];
-              const activityRunningAtCycleStart =
-                activityStartedAt !== undefined;
               let cycleSteps = 0;
               const result = streamText({
                 model,
@@ -294,107 +303,120 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   modelRef.providerId,
                   opts.abortSignal,
                 ),
-                system: prompt.system,
+                instructions: prompt.instructions,
                 messages: prompt.messages,
-                allowSystemInMessages: false,
                 tools: finalizationOnly ? undefined : rootTools,
+                toolApproval: buildToolApproval(opts.toolContext),
                 stopWhen: finalizationOnly
-                  ? stepCountIs(1)
+                  ? isStepCount(1)
                   : ({ steps }) =>
                       stepsSeen + steps.length >= MAX_AGENT_STEPS ||
                       coordinator.inbox.hasPending,
                 abortSignal: opts.abortSignal,
-                onStepFinish: (step) => {
+                onStepEnd: (step) => {
                   cycleSteps++;
                   reportUsage(opts, step.usage);
                 },
               });
-              const uiStream = result.toUIMessageStream<UIMessage>({
-                originalMessages: resolvingApprovals
-                  ? originalMessages
-                  : undefined,
-                sendStart: !streamStarted,
-                sendFinish: false,
+              // SDK 从实际输出流构造 checkpoint，耗时与历史前缀不再手工回填。
+              const uiStream = createUIMessageStream<UIMessage>({
+                originalMessages: completedMessage
+                  ? [completedMessage]
+                  : originalMessages,
                 onError,
-                onFinish: ({ responseMessage }) => {
-                  cycleMessage = responseMessage;
+                onEnd: ({ responseMessage, outcome }) => {
+                  cycle.message = responseMessage;
+                  cycle.outcome = outcome;
+                },
+                execute: async ({ writer: cycleWriter }) => {
+                  for await (const part of result.stream) {
+                    if (part.type === "error") throw part.error;
+                    if (part.type === "finish")
+                      cycleWriter.setOutcome({ status: "completed" });
+                    if (part.type === "abort")
+                      cycleWriter.setOutcome({ status: "aborted" });
+                    const chunk = toUIMessageChunk(part, {
+                      tools: rootTools,
+                      sendStart: !streamStarted,
+                      sendFinish: false,
+                      onError,
+                    });
+                    if (!chunk) continue;
+                    if (chunk.type === "reasoning-start") {
+                      reasoningStartedAt = performance.now();
+                      activityStartedAt ??= performance.now();
+                    }
+                    const toolName =
+                      chunk.type === "tool-input-start" ||
+                      chunk.type === "tool-input-available" ||
+                      chunk.type === "tool-input-error"
+                        ? chunk.toolName
+                        : null;
+                    // 空白正文不结束工具活动，Subagent 则是独立展示边界。
+                    if (
+                      (chunk.type === "text-delta" &&
+                        chunk.delta.trim().length > 0) ||
+                      toolName === "run_subagent"
+                    ) {
+                      finishActivity(cycleWriter);
+                    } else if (toolName !== null) {
+                      activityStartedAt ??= performance.now();
+                    }
+                    cycleWriter.write(chunk);
+                    if (
+                      chunk.type === "reasoning-end" &&
+                      reasoningStartedAt !== undefined
+                    ) {
+                      cycleWriter.write({
+                        type: REASONING_DURATION_PART_TYPE,
+                        data: {
+                          durationMs: Math.max(
+                            0,
+                            Math.round(performance.now() - reasoningStartedAt),
+                          ),
+                        },
+                      });
+                      reasoningStartedAt = undefined;
+                    }
+                  }
                 },
               });
-              for await (const chunk of uiStream) {
-                if (chunk.type === "reasoning-start") {
-                  reasoningStartedAt = performance.now();
-                  activityStartedAt ??= performance.now();
-                }
-                const toolName =
-                  chunk.type === "tool-input-start" ||
-                  chunk.type === "tool-input-available" ||
-                  chunk.type === "tool-input-error"
-                    ? chunk.toolName
-                    : null;
-                // Provider 可能只发送空白 text block，首个非空 delta 才是正文边界。
-                if (
-                  (chunk.type === "text-delta" &&
-                    chunk.delta.trim().length > 0) ||
-                  toolName === "run_subagent"
-                ) {
-                  const durationMs = finishActivity();
-                  if (durationMs !== undefined)
-                    activityDurations.push(durationMs);
-                } else if (toolName !== null) {
-                  activityStartedAt ??= performance.now();
-                }
-                writer.write(chunk);
-                if (
-                  chunk.type === "reasoning-end" &&
-                  reasoningStartedAt !== undefined
-                ) {
-                  const durationMs = Math.max(
-                    0,
-                    Math.round(performance.now() - reasoningStartedAt),
-                  );
-                  reasoningDurations.push(durationMs);
-                  writer.write({
-                    type: REASONING_DURATION_PART_TYPE,
-                    data: { durationMs },
-                  });
-                  reasoningStartedAt = undefined;
-                }
-              }
+              await uiStream.pipeTo(
+                new WritableStream({
+                  write: (chunk) => {
+                    // 错误与中止会触发 Chat 收尾，必须等后台任务清理后再发布。
+                    if (chunk.type === "error" || chunk.type === "abort")
+                      cycle.terminal = chunk;
+                    else writer.write(chunk);
+                  },
+                }),
+              );
               if (
-                cycleMessage &&
-                (activityDurations.length > 0 || reasoningDurations.length > 0)
+                cycle.outcome.status === "failed" ||
+                cycle.outcome.status === "aborted"
               ) {
-                insertDisplayDurations(
-                  cycleMessage,
-                  reasoningDurations,
-                  activityDurations,
-                  activityRunningAtCycleStart,
-                  resolvingApprovals ? (last?.parts.length ?? 0) : 0,
+                writer.setOutcome(cycle.outcome);
+                finishActivity();
+                await coordinator.cancelAll();
+                releaseAgentTurnCoordinator(
+                  opts.toolContext.getSessionId(),
+                  coordinator,
                 );
+                if (cycle.terminal) writer.write(cycle.terminal);
+                return;
               }
-              if (cycleMessage) {
-                completedMessage =
-                  resolvingApprovals || !completedMessage
-                    ? cycleMessage
-                    : {
-                        ...cycleMessage,
-                        parts: [
-                          ...completedMessage.parts,
-                          ...cycleMessage.parts,
-                        ],
-                      };
-              }
+              if (cycle.message) completedMessage = cycle.message;
               streamStarted = true;
               resolvingApprovals = false;
 
               const [response, resultFinishReason] = await Promise.all([
-                result.response,
+                result.responseMessages,
                 result.finishReason,
               ]);
-              modelHistory.push(...response.messages);
+              modelHistory.push(...response);
               stepsSeen += cycleSteps;
               finishReason = resultFinishReason;
-              approvalPending = hasApprovalRequest(cycleMessage);
+              approvalPending = hasApprovalRequest(cycle.message);
 
               const reachedCandidateEnd = resultFinishReason !== "tool-calls";
               const mustDrainBackground =
@@ -430,9 +452,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
             if (!approvalPending) coordinator.inbox.close();
             finishActivity();
+            writer.setOutcome({ status: "completed" });
             writer.write({
               type: "finish",
-              finishReason: normalizeFinishReason(finishReason),
+              finishReason,
             });
             opts.onFinishMeta?.({
               hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
@@ -461,60 +484,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
       return coalesceStream(stream);
     },
   };
-}
-
-/** 把实时耗时同步到本次新增片段，审批续传保留已有前缀，避免改写历史耗时。 */
-function insertDisplayDurations(
-  message: UIMessage,
-  reasoningDurations: readonly number[],
-  activityDurations: readonly number[],
-  activityActiveAtStart: boolean,
-  prefixLength: number,
-): void {
-  let activityActive = activityActiveAtStart;
-  let activityIndex = 0;
-  let reasoningIndex = 0;
-  const parts = message.parts.slice(0, prefixLength);
-  for (const part of message.parts.slice(prefixLength)) {
-    if (isActivityContentPart(part)) activityActive = true;
-    if (activityActive && isActivityBoundaryPart(part)) {
-      const durationMs = activityDurations[activityIndex++];
-      if (durationMs !== undefined) {
-        parts.push({
-          type: ACTIVITY_DURATION_PART_TYPE,
-          data: { durationMs },
-        } as UIMessage["parts"][number]);
-      }
-      activityActive = false;
-    }
-    parts.push(part);
-    if (part.type === "reasoning") {
-      const durationMs = reasoningDurations[reasoningIndex++];
-      if (durationMs !== undefined) {
-        parts.push({
-          type: REASONING_DURATION_PART_TYPE,
-          data: { durationMs },
-        } as UIMessage["parts"][number]);
-      }
-    }
-  }
-  message.parts = parts;
-}
-
-function isActivityContentPart(part: UIMessage["parts"][number]): boolean {
-  return (
-    part.type === "reasoning" ||
-    ((part.type === "dynamic-tool" || part.type.startsWith("tool-")) &&
-      !isActivityBoundaryPart(part))
-  );
-}
-
-function isActivityBoundaryPart(part: UIMessage["parts"][number]): boolean {
-  return (
-    (part.type === "text" && part.text.trim().length > 0) ||
-    part.type === "tool-run_subagent" ||
-    (part.type === "dynamic-tool" && part.toolName === "run_subagent")
-  );
 }
 
 /** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
@@ -554,7 +523,7 @@ function buildSubagentTaskRunner({
         model.providerId,
         abortSignal,
       ),
-      system: prompt.system,
+      instructions: prompt.instructions,
       messages: prompt.messages,
       tools: buildTools(
         {
@@ -571,13 +540,13 @@ function buildSubagentTaskRunner({
         },
         allowedTools,
       ),
-      stopWhen: stepCountIs(MAX_AGENT_STEPS),
+      toolApproval: buildToolApproval(toolContext),
+      stopWhen: isStepCount(MAX_AGENT_STEPS),
       abortSignal,
-      experimental_onStepStart: () => {
+      onStepStart: () => {
         onProgress({ type: "thinking" });
       },
-      experimental_onToolCallStart: ({ toolCall }) => {
-        if (!toolCall) return;
+      onToolExecutionStart: ({ toolCall }) => {
         onProgress({
           type: "tool-start",
           id: toolCall.toolCallId,
@@ -588,21 +557,21 @@ function buildSubagentTaskRunner({
           ),
         });
       },
-      experimental_onToolCallFinish: ({ toolCall, success, output }) => {
-        if (!toolCall) return;
+      onToolExecutionEnd: ({ toolCall, toolOutput }) => {
         onProgress({
           type: "tool-finish",
           id: toolCall.toolCallId,
           status:
-            success && !isSubagentToolErrorOutput(output)
+            toolOutput.type === "tool-result" &&
+            !isSubagentToolErrorOutput(toolOutput.output)
               ? "completed"
               : "failed",
         });
       },
-      onStepFinish: (step) => reportUsage(opts, step.usage),
+      onStepEnd: (step) => reportUsage(opts, step.usage),
     });
     try {
-      for await (const chunk of result.fullStream) {
+      for await (const chunk of result.stream) {
         if (chunk.type === "error") throw chunk.error;
         if (
           chunk.type === "tool-error" ||
@@ -620,7 +589,7 @@ function buildSubagentTaskRunner({
         }
       }
       abortSignal.throwIfAborted();
-      const usage = await result.totalUsage;
+      const usage = await result.usage;
       return {
         status: "completed",
         result:
@@ -640,11 +609,7 @@ function buildSubagentTaskRunner({
 
 function reportUsage(
   opts: RunAgentOptions,
-  usage:
-    | Parameters<
-        NonNullable<Parameters<typeof streamText>[0]["onStepFinish"]>
-      >[0]["usage"]
-    | undefined,
+  usage: LanguageModelUsage | undefined,
 ): void {
   if (!opts.onUsage || !usage) return;
   const stepInput = usage.inputTokens ?? 0;
@@ -666,21 +631,6 @@ function hasApprovalRequest(message: UIMessage | undefined): boolean {
         (part as { state?: string }).state === "approval-requested",
     ),
   );
-}
-
-function normalizeFinishReason(
-  value: string,
-): "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" {
-  if (
-    value === "stop" ||
-    value === "length" ||
-    value === "content-filter" ||
-    value === "tool-calls" ||
-    value === "error"
-  ) {
-    return value;
-  }
-  return "other";
 }
 
 export { EMPTY_USAGE };

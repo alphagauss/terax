@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
+import { buildToolApproval } from "./approval";
 
 const nativeMock = vi.hoisted(() => ({
   shellExec: vi.fn(),
@@ -17,9 +18,10 @@ const nativeMock = vi.hoisted(() => ({
 
 vi.mock("../lib/native", () => ({ native: nativeMock }));
 
-const toolOptions: ToolExecutionOptions = {
+const toolOptions: ToolExecutionOptions<never> = {
   toolCallId: "tool-call",
   messages: [],
+  context: undefined as never,
 };
 
 const context: ToolContext = {
@@ -40,21 +42,17 @@ describe("AI tool approval mode", () => {
   });
 
   it("auto-runs workspace commands and approves external access", () => {
-    const tools = buildShellTools(context);
-    const needsApproval = tools.shell_exec.needsApproval;
-    if (typeof needsApproval !== "function") {
-      throw new Error("shell_exec approval gate must be dynamic");
-    }
+    const approval = buildToolApproval(context).shell_exec;
 
-    expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(false);
-    expect(
-      needsApproval({ command: "curl https://example.com" }, toolOptions),
-    ).toBe(true);
+    expect(approval({ command: "echo safe" })).toBe("not-applicable");
+    expect(approval({ command: "curl https://example.com" })).toBe(
+      "user-approval",
+    );
     useChatStore.setState({ permissionMode: "full-access" });
-    expect(needsApproval({ command: "echo safe" }, toolOptions)).toBe(false);
-    expect(
-      needsApproval({ command: "curl https://example.com" }, toolOptions),
-    ).toBe(false);
+    expect(approval({ command: "echo safe" })).toBe("not-applicable");
+    expect(approval({ command: "curl https://example.com" })).toBe(
+      "not-applicable",
+    );
   });
 
   it("elevates only a shell call classified for approval", async () => {
@@ -104,20 +102,14 @@ describe("AI tool approval mode", () => {
   });
 
   it("only requires process approval when writing stdin", () => {
-    const needsApproval = buildShellTools(context).shell_process.needsApproval;
-    if (typeof needsApproval !== "function") {
-      throw new Error("shell_process approval gate must be dynamic");
-    }
+    const approval = buildToolApproval(context).shell_process;
     const processId = "00000000-0000-4000-8000-000000000002";
+    expect(approval({ process_id: processId, action: "poll" })).toBe(
+      "not-applicable",
+    );
     expect(
-      needsApproval({ process_id: processId, action: "poll" }, toolOptions),
-    ).toBe(false);
-    expect(
-      needsApproval(
-        { process_id: processId, action: "write", input: "yes\n" },
-        toolOptions,
-      ),
-    ).toBe(true);
+      approval({ process_id: processId, action: "write", input: "yes\n" }),
+    ).toBe("user-approval");
   });
 
   it("requires input when writing to a process", async () => {
