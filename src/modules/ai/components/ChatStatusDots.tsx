@@ -5,10 +5,10 @@
 
 import { cn } from "@/lib/utils";
 
-/** 三个依次上跳的会话状态点。 */
+/** 三个依次上跳的会话状态点，全部落下后停留 420ms 再开始下一轮。 */
 export function ChatStatusDots({ className }: { className?: string }) {
   const dotClassName =
-    "size-1 rounded-full bg-current motion-safe:animate-[terax-chat-dot-wave_900ms_ease-in-out_infinite]";
+    "size-1 rounded-full bg-current motion-safe:animate-[terax-chat-dot-wave_1200ms_ease-in-out_infinite]";
 
   return (
     <span
