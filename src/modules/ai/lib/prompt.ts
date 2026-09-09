@@ -36,7 +36,7 @@ type BuildAgentSystemPromptOptions = {
 };
 
 export type PreparedAgentPrompt = {
-  system: SystemModelMessage[];
+  instructions: SystemModelMessage[];
   messages: ModelMessage[];
 };
 
@@ -162,18 +162,18 @@ export function prepareAgentPrompt(
   history: readonly ModelMessage[],
   provider: ProviderId,
 ): PreparedAgentPrompt {
-  const system: SystemModelMessage[] = [
+  const instructions: SystemModelMessage[] = [
     { role: "system", content: stableSystem },
   ];
   const messages = history.slice();
-  if (provider !== "anthropic") return { system, messages };
+  if (provider !== "anthropic") return { instructions, messages };
 
-  system[0] = withAnthropicCacheMarker(system[0]);
+  instructions[0] = withAnthropicCacheMarker(instructions[0]);
   const lastIdx = messages.length - 1;
   if (lastIdx >= 0) {
     messages[lastIdx] = withAnthropicCacheMarker(messages[lastIdx]);
   }
-  return { system, messages };
+  return { instructions, messages };
 }
 
 /** 为 Anthropic 消息添加短期缓存断点，同时保留其他 provider option。 */

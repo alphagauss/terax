@@ -11,8 +11,10 @@ const STT_TIMEOUT_WHISPERCPP_MS = 180_000;
 
 /** 使用在线 OpenAI 语音服务及其独立出口。 */
 async function transcribeOpenAI(blob: Blob, apiKey: string): Promise<string> {
-  const [{ createOpenAI }, { experimental_transcribe: transcribe }] =
-    await Promise.all([import("@ai-sdk/openai"), import("ai")]);
+  const [{ createOpenAI }, { transcribe }] = await Promise.all([
+    import("@ai-sdk/openai"),
+    import("ai"),
+  ]);
   const openai = createOpenAI({
     apiKey,
     fetch: createHttpFetch({

@@ -71,8 +71,8 @@ const RUNTIME_FACTORIES: Record<RuntimeAdapterId, RuntimeFactory> = {
     );
   },
   google: async (connection, modelId, apiKey, fetch) => {
-    const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-    return createGoogleGenerativeAI({
+    const { createGoogle } = await import("@ai-sdk/google");
+    return createGoogle({
       apiKey,
       fetch,
       baseURL: connection.baseURL,

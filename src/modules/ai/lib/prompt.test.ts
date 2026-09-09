@@ -4,7 +4,7 @@
  */
 
 import { streamText, type ModelMessage } from "ai";
-import { MockLanguageModelV3 } from "ai/test";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildAgentSystemPrompt,
@@ -141,7 +141,7 @@ describe("prepareAgentPrompt", () => {
   it("keeps trusted instructions outside conversation messages", () => {
     const prompt = prepareAgentPrompt("Stable instructions", history, "openai");
 
-    expect(prompt.system).toEqual([
+    expect(prompt.instructions).toEqual([
       { role: "system", content: "Stable instructions" },
     ]);
     expect(prompt.messages).toEqual(history);
@@ -157,7 +157,7 @@ describe("prepareAgentPrompt", () => {
       "anthropic",
     );
 
-    expect(prompt.system[0].providerOptions).toEqual({
+    expect(prompt.instructions[0].providerOptions).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
     });
     expect(prompt.messages[0].providerOptions).toBeUndefined();
@@ -171,7 +171,7 @@ describe("prepareAgentPrompt", () => {
 
   it("does not trigger the SDK system-message warning", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       doStream: {
         stream: new ReadableStream({
           start(controller) {
@@ -186,7 +186,7 @@ describe("prepareAgentPrompt", () => {
     try {
       const result = streamText({
         model,
-        system: prompt.system,
+        instructions: prompt.instructions,
         messages: prompt.messages,
         allowSystemInMessages: false,
         onError: () => {},
