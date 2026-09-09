@@ -1,0 +1,255 @@
+diff --git a/lib/Screenshots/ScreenshotsBackground/index.js b/lib/Screenshots/ScreenshotsBackground/index.js
+index e0c1a3927537429b038038950d0776b51e20ae24..5f1babcbeb91ac7ebfc48100a4916a7c40d114da 100644
+--- a/lib/Screenshots/ScreenshotsBackground/index.js
++++ b/lib/Screenshots/ScreenshotsBackground/index.js
+@@ -4,7 +4,6 @@ import useBounds from "../hooks/useBounds.js";
+ import useStore from "../hooks/useStore.js";
+ import ScreenshotsMagnifier from "../ScreenshotsMagnifier/index.js";
+ import getBoundsByPoints from "./getBoundsByPoints.js";
+-import "./index.css";
+ const Screenshots_ScreenshotsBackground = /*#__PURE__*/ memo(function() {
+     const { url, image, width, height } = useStore();
+     const [bounds, boundsDispatcher] = useBounds();
+diff --git a/lib/Screenshots/ScreenshotsButton/index.js b/lib/Screenshots/ScreenshotsButton/index.js
+index 64d1bb9e35308511adc91fbcb4d71450c7402f0e..e3b625c9c7c6f1e545d41832b0332ec05683b5da 100644
+--- a/lib/Screenshots/ScreenshotsButton/index.js
++++ b/lib/Screenshots/ScreenshotsButton/index.js
+@@ -1,8 +1,9 @@
+ import { jsx } from "react/jsx-runtime";
+ import { memo, useCallback } from "react";
+ import ScreenshotsOption from "../ScreenshotsOption/index.js";
+-import "./index.css";
++import useStore from "../hooks/useStore.js";
+ const Screenshots_ScreenshotsButton = /*#__PURE__*/ memo(function({ title, icon, checked, disabled, option, onClick }) {
++    const { renderButton } = useStore();
+     const classNames = [
+         'screenshots-button'
+     ];
+@@ -18,7 +19,7 @@ const Screenshots_ScreenshotsButton = /*#__PURE__*/ memo(function({ title, icon,
+     return /*#__PURE__*/ jsx(ScreenshotsOption, {
+         open: checked,
+         content: option,
+-        children: /*#__PURE__*/ jsx("div", {
++        children: renderButton ? renderButton({ label: title, className: classNames.join(' '), disabled, onClick: onButtonClick, children: jsx("span", { className: icon }) }) : /*#__PURE__*/ jsx("div", {
+             className: classNames.join(' '),
+             title: title,
+             onClick: onButtonClick,
+diff --git a/lib/Screenshots/ScreenshotsCanvas/index.js b/lib/Screenshots/ScreenshotsCanvas/index.js
+index e89c8713c962532af6852507f343f06802d61540..9f6a47d576f16e3d9bce40a03a1a3e5122f29ae4 100644
+--- a/lib/Screenshots/ScreenshotsCanvas/index.js
++++ b/lib/Screenshots/ScreenshotsCanvas/index.js
+@@ -9,7 +9,6 @@ import useStore from "../hooks/useStore.js";
+ import { HistoryItemType } from "../types.js";
+ import getBoundsByPoints from "./getBoundsByPoints.js";
+ import getPoints from "./getPoints.js";
+-import "./index.css";
+ import isPointInDraw from "./isPointInDraw.js";
+ const borders = [
+     "top",
+diff --git a/lib/Screenshots/ScreenshotsColor/index.js b/lib/Screenshots/ScreenshotsColor/index.js
+index f2cb52a0b51ec1c5a57283214c83c466bb57005b..a05f04380e49977ab14b1a1335e2e5f6326151d1 100644
+--- a/lib/Screenshots/ScreenshotsColor/index.js
++++ b/lib/Screenshots/ScreenshotsColor/index.js
+@@ -1,6 +1,5 @@
+ import { jsx } from "react/jsx-runtime";
+ import { memo } from "react";
+-import "./index.css";
+ const Screenshots_ScreenshotsColor = /*#__PURE__*/ memo(function({ value, onChange }) {
+     const colors = [
+         '#ee5126',
+diff --git a/lib/Screenshots/ScreenshotsMagnifier/index.js b/lib/Screenshots/ScreenshotsMagnifier/index.js
+index 05bd5b70083678f4f77d7ffc3c741c467c8dd9e5..79e05262ddb9facc98ff4d649d763802b8c115ec 100644
+--- a/lib/Screenshots/ScreenshotsMagnifier/index.js
++++ b/lib/Screenshots/ScreenshotsMagnifier/index.js
+@@ -2,7 +2,6 @@ import { jsx, jsxs } from "react/jsx-runtime";
+ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+ import useLang from "../hooks/useLang.js";
+ import useStore from "../hooks/useStore.js";
+-import "./index.css";
+ const magnifierWidth = 100;
+ const magnifierHeight = 80;
+ const Screenshots_ScreenshotsMagnifier = /*#__PURE__*/ memo(function({ x, y }) {
+diff --git a/lib/Screenshots/ScreenshotsOperations/index.js b/lib/Screenshots/ScreenshotsOperations/index.js
+index 243a44effd1a489c72e2cb61e0c19a2462bd25c0..73e4a13b387a138be2ebb444533affb5df012c05 100644
+--- a/lib/Screenshots/ScreenshotsOperations/index.js
++++ b/lib/Screenshots/ScreenshotsOperations/index.js
+@@ -3,7 +3,6 @@ import react, { memo, useCallback, useEffect, useRef, useState } from "react";
+ import useBounds from "../hooks/useBounds.js";
+ import useStore from "../hooks/useStore.js";
+ import operations from "../operations/index.js";
+-import "./index.css";
+ const ScreenshotsOperationsCtx = /*#__PURE__*/ react.createContext(null);
+ const Screenshots_ScreenshotsOperations = /*#__PURE__*/ memo(function() {
+     const { width, height } = useStore();
+diff --git a/lib/Screenshots/ScreenshotsOption/index.js b/lib/Screenshots/ScreenshotsOption/index.js
+index 8822a48df862cc4b315ddcddb35836d0e77fa238..a271f8496298a5ddfaf8f028f242aae731fabd92 100644
+--- a/lib/Screenshots/ScreenshotsOption/index.js
++++ b/lib/Screenshots/ScreenshotsOption/index.js
+@@ -2,7 +2,6 @@ import { Fragment, jsx, jsxs } from "react/jsx-runtime";
+ import { cloneElement, memo, useContext, useEffect, useRef, useState } from "react";
+ import { createPortal } from "react-dom";
+ import { ScreenshotsOperationsCtx } from "../ScreenshotsOperations/index.js";
+-import "./index.css";
+ var ScreenshotsOption_Placement = /*#__PURE__*/ function(Placement) {
+     Placement["Bottom"] = "bottom";
+     Placement["Top"] = "top";
+diff --git a/lib/Screenshots/ScreenshotsSize/index.js b/lib/Screenshots/ScreenshotsSize/index.js
+index b87a5463317aff49f9a7963d27d77d097879368d..8cc94d69a79c669c67dd0187c0576270a4649101 100644
+--- a/lib/Screenshots/ScreenshotsSize/index.js
++++ b/lib/Screenshots/ScreenshotsSize/index.js
+@@ -1,6 +1,5 @@
+ import { jsx } from "react/jsx-runtime";
+ import { memo } from "react";
+-import "./index.css";
+ const Screenshots_ScreenshotsSize = /*#__PURE__*/ memo(function({ value, onChange }) {
+     const sizes = [
+         3,
+diff --git a/lib/Screenshots/ScreenshotsSizeColor/index.js b/lib/Screenshots/ScreenshotsSizeColor/index.js
+index e1910f5cfcd4e22978ffed96511d0c5fe016324e..d087d9196ced1cc79f3c9dfd7aadc418476b5139 100644
+--- a/lib/Screenshots/ScreenshotsSizeColor/index.js
++++ b/lib/Screenshots/ScreenshotsSizeColor/index.js
+@@ -2,7 +2,6 @@ import { jsx, jsxs } from "react/jsx-runtime";
+ import { memo } from "react";
+ import ScreenshotsColor from "../ScreenshotsColor/index.js";
+ import ScreenshotsSize from "../ScreenshotsSize/index.js";
+-import "./index.css";
+ const Screenshots_ScreenshotsSizeColor = /*#__PURE__*/ memo(function({ size, color, onSizeChange, onColorChange }) {
+     return /*#__PURE__*/ jsxs("div", {
+         className: "screenshots-sizecolor",
+diff --git a/lib/Screenshots/ScreenshotsTextarea/index.js b/lib/Screenshots/ScreenshotsTextarea/index.js
+index 88e968cbc207b3b743ce16d422f39f86bf2275e9..4ea2e714a68b0a7f5ed0d08192ab8daa05dfbf03 100644
+--- a/lib/Screenshots/ScreenshotsTextarea/index.js
++++ b/lib/Screenshots/ScreenshotsTextarea/index.js
+@@ -2,7 +2,6 @@ import { jsx } from "react/jsx-runtime";
+ import { memo, useLayoutEffect, useRef, useState } from "react";
+ import { createPortal } from "react-dom";
+ import calculateNodeSize from "./calculateNodeSize.js";
+-import "./index.css";
+ const Screenshots_ScreenshotsTextarea = /*#__PURE__*/ memo(function({ x, y, maxWidth, maxHeight, size, color, value, onChange, onBlur }) {
+     const popoverRef = useRef(null);
+     const textareaRef = useRef(null);
+diff --git a/lib/Screenshots/composeImage.js b/lib/Screenshots/composeImage.js
+index 68afc8947497f5ee4439ab8888f656da6dd2e210..6421fbb1ee008a734b7369161c4e0616da955a95 100644
+--- a/lib/Screenshots/composeImage.js
++++ b/lib/Screenshots/composeImage.js
+@@ -2,8 +2,8 @@ import { HistoryItemType } from "./types.js";
+ function composeImage({ image, width, height, history, bounds }) {
+     return new Promise((resolve, reject)=>{
+         const $canvas = document.createElement('canvas');
+-        const targetWidth = bounds.width * window.devicePixelRatio;
+-        const targetHeight = bounds.height * window.devicePixelRatio;
++        const targetWidth = Math.round(bounds.width * image.naturalWidth / width);
++        const targetHeight = Math.round(bounds.height * image.naturalHeight / height);
+         $canvas.width = targetWidth;
+         $canvas.height = targetHeight;
+         const ctx = $canvas.getContext('2d');
+@@ -12,7 +12,7 @@ function composeImage({ image, width, height, history, bounds }) {
+         const ry = image.naturalHeight / height;
+         ctx.imageSmoothingEnabled = true;
+         ctx.imageSmoothingQuality = 'low';
+-        ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
++        ctx.setTransform(rx, 0, 0, ry, 0, 0);
+         ctx.clearRect(0, 0, bounds.width, bounds.height);
+         ctx.drawImage(image, bounds.x * rx, bounds.y * ry, bounds.width * rx, bounds.height * ry, 0, 0, bounds.width, bounds.height);
+         history.stack.slice(0, history.index + 1).forEach((item)=>{
+diff --git a/lib/Screenshots/index.js b/lib/Screenshots/index.js
+index d8e70d98af11fb21ddf5ca16d6e38a083067deb2..8c2e9b7b3867f9b1b3570d521ce44659b3eb7295 100644
+--- a/lib/Screenshots/index.js
++++ b/lib/Screenshots/index.js
+@@ -1,8 +1,7 @@
++import "../../dist/static/css/index.23cabfe1.css";
+ import { jsx, jsxs } from "react/jsx-runtime";
+ import { useCallback, useLayoutEffect, useRef, useState } from "react";
+ import composeImage from "./composeImage.js";
+-import "./icons/iconfont.css";
+-import "./screenshots.css";
+ import ScreenshotsBackground from "./ScreenshotsBackground/index.js";
+ import ScreenshotsCanvas from "./ScreenshotsCanvas/index.js";
+ import ScreenshotsContext from "./ScreenshotsContext.js";
+@@ -36,12 +35,16 @@ function Screenshots({ url, width, height, lang, className, ...props }) {
+         history,
+         bounds,
+         cursor,
+-        operation
++        operation,
++        renderButton: props.renderButton
+     };
+     const call = useCallback((funcName, ...args)=>{
+         const func = propsRef.current[funcName];
+-        if ('function' == typeof func) func(...args);
++        if ('function' == typeof func) return func(...args);
+     }, []);
++    useLayoutEffect(()=>{
++        if (image) call('onReady');
++    }, [image, call]);
+     const dispatcher = {
+         call,
+         setHistory,
+@@ -73,8 +76,7 @@ function Screenshots({ url, width, height, lang, className, ...props }) {
+             bounds
+         }).then((blob)=>{
+             call('onOk', blob, bounds);
+-            reset();
+-        });
++        }).catch((error)=>call('onError', error));
+         else {
+             const targetBounds = {
+                 x: 0,
+@@ -90,8 +92,7 @@ function Screenshots({ url, width, height, lang, className, ...props }) {
+                 bounds: targetBounds
+             }).then((blob)=>{
+                 call('onOk', blob, targetBounds);
+-                reset();
+-            });
++            }).catch((error)=>call('onError', error));
+         }
+     }, [
+         image,
+@@ -106,7 +107,6 @@ function Screenshots({ url, width, height, lang, className, ...props }) {
+         if (2 !== e.button) return;
+         e.preventDefault();
+         call('onCancel');
+-        reset();
+     }, [
+         call,
+         reset
+diff --git a/lib/Screenshots/operations/Cancel/index.js b/lib/Screenshots/operations/Cancel/index.js
+index 1e364383e1f0591da60520ec571b220f5f2c034c..377e9d927c0c90cda364330efff1cb209d0d3e46 100644
+--- a/lib/Screenshots/operations/Cancel/index.js
++++ b/lib/Screenshots/operations/Cancel/index.js
+@@ -10,7 +10,6 @@ function Cancel() {
+     const lang = useLang();
+     const onClick = useCallback(()=>{
+         call('onCancel');
+-        reset();
+     }, [
+         call,
+         reset
+diff --git a/lib/Screenshots/operations/Ok/index.js b/lib/Screenshots/operations/Ok/index.js
+index 1d4f02b7470f743b4bb931339d97b283e2fd084d..8d115b312103c037db78e9f8702fc82b230dd10c 100644
+--- a/lib/Screenshots/operations/Ok/index.js
++++ b/lib/Screenshots/operations/Ok/index.js
+@@ -25,8 +25,7 @@ function Ok() {
+                 bounds
+             }).then((blob)=>{
+                 call('onOk', blob, bounds);
+-                reset();
+-            });
++                    }).catch((error)=>call('onError', error));
+         });
+     }, [
+         canvasContextRef,
+diff --git a/lib/Screenshots/operations/Save/index.js b/lib/Screenshots/operations/Save/index.js
+index df3aa490847981bcfff6a11856da7b2d274fbda9..a8cf0853486f922d7d1c2d6797a346ff6acc5c28 100644
+--- a/lib/Screenshots/operations/Save/index.js
++++ b/lib/Screenshots/operations/Save/index.js
+@@ -25,8 +25,7 @@ function Save() {
+                 bounds
+             }).then((blob)=>{
+                 call('onSave', blob, bounds);
+-                reset();
+-            });
++                    }).catch((error)=>call('onError', error));
+         });
+     }, [
+         canvasContextRef,

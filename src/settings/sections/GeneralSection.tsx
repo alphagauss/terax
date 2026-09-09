@@ -69,6 +69,7 @@ import { NetworkSettings } from "@/settings/components/NetworkSettings";
 import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 import { SettingGroup } from "@/components/settings/SettingGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
+import { ScreenshotSettings } from "@/modules/screenshots/ScreenshotSettings";
 
 const APPEARANCE: {
   id: ThemePref;
@@ -305,6 +306,7 @@ export function GeneralSection() {
       </div>
 
       <NetworkSettings />
+      <ScreenshotSettings />
 
       <SettingGroup title={t("general.explorer.label")}>
         <SettingRow

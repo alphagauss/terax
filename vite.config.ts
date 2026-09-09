@@ -4,6 +4,7 @@
  * 按需功能必须保持独立入口，避免未启用的编辑器语言、Vim 或 AI provider 进入基础加载链路。
  */
 
+/// <reference types="vitest/config" />
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
@@ -22,6 +23,7 @@ const inspectGraph = process.env.INSPECT === "true";
 
 // https://vite.dev/config/
 export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
+  test: { server: { deps: { inline: ["react-screenshots"] } } },
   plugins: [
     babel({
       presets: [reactCompilerPreset({ target: "19" })],
@@ -63,6 +65,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
       input: {
         main: path.resolve(import.meta.dirname, "index.html"),
         auxiliary: path.resolve(import.meta.dirname, "auxiliary.html"),
+        screenshot: path.resolve(import.meta.dirname, "screenshot.html"),
       },
       // Oxc drops `debugger` by default. These calls return undefined, so
       // marking them pure lets DCE strip them from production builds.
@@ -74,53 +77,61 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         ],
       },
       output: {
-        manualChunks(id: string) {
-          // Vite's __vitePreload helper is a virtual module. Left to Rollup it
-          // gets hoisted into whichever chunk it happens to land in (observed:
-          // the 480kB streamdown chunk), and since every lazy importer pulls the
-          // helper, that heavy chunk gets dragged into the eager startup graph.
-          // Pin it to the always-eager react chunk so it costs nothing extra.
-          if (id.includes("vite/preload-helper") || id.includes("/vite/dist/"))
-            return "react";
+        codeSplitting: {
+          // 明确分组不能递归吸收 React 等共享依赖，否则轻量截图入口会加载 AI provider。
+          includeDependenciesRecursively: false,
+          groups: [
+            {
+              name(id: string) {
+                // Vite's __vitePreload helper is a virtual module. Left to Rollup it
+                // gets hoisted into whichever chunk it happens to land in (observed:
+                // the 480kB streamdown chunk), and since every lazy importer pulls the
+                // helper, that heavy chunk gets dragged into the eager startup graph.
+                // Pin it to the always-eager react chunk so it costs nothing extra.
+                if (id.includes("vite/preload-helper") || id.includes("/vite/dist/"))
+                  return "react";
 
-          if (!id.includes("node_modules")) return null;
+                if (!id.includes("node_modules")) return null;
 
-          // Ubiquitous styling utils used by `cn()` on nearly every eager
-          // component. Left unassigned, Rollup absorbs them into whichever
-          // feature chunk claims them first (observed: streamdown), dragging
-          // that heavy chunk into the eager graph. Pin them to react (eager).
-          if (
-            id.includes("/clsx/") ||
-            id.includes("/tailwind-merge/") ||
-            id.includes("/class-variance-authority/")
-          )
-            return "react";
+                // Ubiquitous styling utils used by `cn()` on nearly every eager
+                // component. Left unassigned, Rollup absorbs them into whichever
+                // feature chunk claims them first (observed: streamdown), dragging
+                // that heavy chunk into the eager graph. Pin them to react (eager).
+                if (
+                  id.includes("/clsx/") ||
+                  id.includes("/tailwind-merge/") ||
+                  id.includes("/class-variance-authority/")
+                )
+                  return "react";
 
-          // Each AI provider SDK in its own chunk so unused providers
-          // don't bloat the initial load (lazy-imported in agent.ts).
-          if (id.includes("@ai-sdk/anthropic")) return "ai-anthropic";
-          if (id.includes("@ai-sdk/google")) return "ai-google";
-          if (id.includes("@ai-sdk/openai-compatible"))
-            return "ai-openai-compat";
-          if (id.includes("@ai-sdk/openai")) return "ai-openai";
-          if (id.includes("@ai-sdk/cerebras")) return "ai-cerebras";
-          if (id.includes("@ai-sdk/groq")) return "ai-groq";
-          if (id.includes("@ai-sdk/xai")) return "ai-xai";
-          if (id.includes("@ai-sdk/")) return "ai-sdk-shared";
+                // Each AI provider SDK in its own chunk so unused providers
+                // don't bloat the initial load (lazy-imported in agent.ts).
+                if (id.includes("@ai-sdk/anthropic")) return "ai-anthropic";
+                if (id.includes("@ai-sdk/google")) return "ai-google";
+                if (id.includes("@ai-sdk/openai-compatible"))
+                  return "ai-openai-compat";
+                if (id.includes("@ai-sdk/openai")) return "ai-openai";
+                if (id.includes("@ai-sdk/cerebras")) return "ai-cerebras";
+                if (id.includes("@ai-sdk/groq")) return "ai-groq";
+                if (id.includes("@ai-sdk/xai")) return "ai-xai";
+                if (id.includes("@ai-sdk/")) return "ai-sdk-shared";
 
-          if (id.includes("/xterm/") || id.includes("@xterm/")) return "xterm";
-          if (id.includes("/streamdown/") || id.includes("@streamdown/"))
-            return "streamdown";
-          if (
-            id.includes("/react-dom/") ||
-            id.includes("/react/") ||
-            id.includes("/scheduler/")
-          )
-            return "react";
-          if (id.includes("@radix-ui/") || id.includes("/radix-ui/"))
-            return "radix";
+                if (id.includes("/xterm/") || id.includes("@xterm/")) return "xterm";
+                if (id.includes("/streamdown/") || id.includes("@streamdown/"))
+                  return "streamdown";
+                if (
+                  id.includes("/react-dom/") ||
+                  id.includes("/react/") ||
+                  id.includes("/scheduler/")
+                )
+                  return "react";
+                if (id.includes("@radix-ui/") || id.includes("/radix-ui/"))
+                  return "radix";
 
-          return null;
+                return null;
+              },
+            },
+          ],
         },
       },
     },

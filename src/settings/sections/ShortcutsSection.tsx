@@ -1,7 +1,7 @@
 /**
  * 本文件实现设置窗口的快捷键查询、录制和重置界面。
  *
- * 快捷键定义由 modules/shortcuts 提供，本文件只编辑用户偏好中的绑定覆盖值。
+ * 应用内快捷键编辑绑定覆盖值，系统截图快捷键使用独立分组并交给原生运行时注册。
  */
 
 import { Hint } from "@/components/controls/tooltip";
@@ -20,6 +20,7 @@ import { Input } from "@/components/controls/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setShortcuts } from "@/modules/settings/store";
+import { ScreenshotShortcutSettings } from "@/modules/screenshots/ScreenshotShortcutSettings";
 import {
   getBindingTokens,
   type KeyBinding,
@@ -34,7 +35,8 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { ShortcutRecorder } from "@/modules/shortcuts/components/ShortcutRecorder";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/layout/PageHeader";
 
@@ -43,7 +45,9 @@ export function ShortcutsSection() {
   const { t } = useTranslation();
   const userShortcuts = usePreferencesStore((s) => s.shortcuts);
   const [search, setSearch] = useState("");
-  const [recordingId, setRecordingId] = useState<ShortcutId | null>(null);
+  const [recordingId, setRecordingId] = useState<
+    ShortcutId | "screenshot" | null
+  >(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
   const filteredShortcuts = useMemo(() => {
@@ -113,12 +117,21 @@ export function ShortcutsSection() {
         <Input
           placeholder={t("shortcuts.searchPlaceholder")}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setRecordingId(null);
+            setSearch(e.target.value);
+          }}
           className="h-9 pl-9"
         />
       </div>
 
       <div className="flex flex-col gap-section">
+        <ScreenshotShortcutSettings
+          search={search}
+          isRecording={recordingId === "screenshot"}
+          onStartRecording={() => setRecordingId("screenshot")}
+          onStopRecording={() => setRecordingId(null)}
+        />
         {SHORTCUT_GROUPS.map((group) => {
           const items = filteredShortcuts.filter((s) => s.group === group);
           if (items.length === 0) return null;
@@ -210,7 +223,7 @@ function ShortcutRow({
 
       <div className="flex items-center gap-2">
         {isRecording ? (
-          <Recorder onRecord={onRecord} onCancel={onStopRecording} />
+          <ShortcutRecorder onRecord={onRecord} onCancel={onStopRecording} />
         ) : (
           <>
             <button
@@ -265,91 +278,6 @@ function ShortcutRow({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-function Recorder({
-  onRecord,
-  onCancel,
-}: {
-  onRecord: (b: KeyBinding) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation();
-  const [_mods, setMods] = useState({
-    ctrl: false,
-    shift: false,
-    alt: false,
-    meta: false,
-  });
-
-  useEffect(() => {
-    const onDown = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (e.key === "Escape") {
-        onCancel();
-        return;
-      }
-
-      const isMod = ["Control", "Shift", "Alt", "Meta"].includes(e.key);
-      if (isMod) {
-        setMods({
-          ctrl: e.ctrlKey,
-          shift: e.shiftKey,
-          alt: e.altKey,
-          meta: e.metaKey,
-        });
-        return;
-      }
-
-      // Require at least one primary modifier (Ctrl, Alt, Meta).
-      // Reject Shift‑only shortcuts that would insert a character.
-      const hasPrimaryModifier = e.ctrlKey || e.altKey || e.metaKey;
-      const isCharacterKey = e.key.length === 1; // anything that types a glyph
-      // this blocks shortcuts such as Shift+2 which would be "@" and Shift+, which would be "<" on many layouts
-      if (!hasPrimaryModifier && (!e.shiftKey || isCharacterKey)) {
-        return;
-      }
-      onRecord({
-        key: e.key,
-        ctrl: e.ctrlKey,
-        shift: e.shiftKey,
-        alt: e.altKey,
-        meta: e.metaKey,
-      });
-    };
-
-    const onUp = (e: KeyboardEvent) => {
-      const isMod = ["Control", "Shift", "Alt", "Meta"].includes(e.key);
-      if (isMod) {
-        setMods({
-          ctrl: e.ctrlKey,
-          shift: e.shiftKey,
-          alt: e.altKey,
-          meta: e.metaKey,
-        });
-      }
-    };
-
-    window.addEventListener("keydown", onDown, { capture: true });
-    window.addEventListener("keyup", onUp, { capture: true });
-    return () => {
-      window.removeEventListener("keydown", onDown, { capture: true });
-      window.removeEventListener("keyup", onUp, { capture: true });
-    };
-  }, [onRecord, onCancel]);
-
-  return (
-    <div className="flex items-center gap-2 rounded bg-interactive-active px-2 py-1 text-[11px] ring-1 ring-accent">
-      <span className="animate-pulse font-medium">
-        {t("shortcuts.recording")}
-      </span>
-      <span className="text-muted-foreground">
-        {t("shortcuts.escToCancel")}
-      </span>
     </div>
   );
 }

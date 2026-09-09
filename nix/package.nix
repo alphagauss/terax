@@ -1,6 +1,7 @@
 { lib, stdenv, fetchurl
 , dpkg, autoPatchelfHook, makeWrapper, wrapGAppsHook3
 , gtk3, gdk-pixbuf, cairo, glib, webkitgtk_4_1, libsoup_3, libgcc, gst_all_1
+, libxcb, libXrandr, dbus, pipewire, wayland, libglvnd, libgbm
 }:
 
 let
@@ -40,6 +41,7 @@ stdenv.mkDerivation {
 
   buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
     gtk3 gdk-pixbuf cairo glib webkitgtk_4_1 libsoup_3 libgcc
+    libxcb libXrandr dbus pipewire wayland libglvnd libgbm
     gst_all_1.gstreamer gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good gst_all_1.gst-plugins-bad
   ];

@@ -7,6 +7,7 @@
 - [进程与共享状态](architecture/two-process-model.md)
 - [PTY 与 Shell](architecture/pty-shell-integration.md)、[终端 renderer pool](architecture/terminal-renderer-pool.md)
 - [辅助窗口](architecture/auxiliary-windows.md)、[工作页跨窗口复制](architecture/workspace-page-handoff.md)
+- [桌面截图](architecture/screenshots.md)
 - [文件传输](architecture/file-transfers.md)
 - [实验性终端宿主](architecture/terminal-agent.md)
 
