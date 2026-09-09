@@ -32,11 +32,11 @@ import type {
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
-import type { AgentUsage } from "@/modules/ai/lib/agent";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
   materializeSubagentDisplayParts,
   materializeFileEditParts,
+  materializeTurnMetadata,
   projectSessionMessages,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
@@ -73,6 +73,7 @@ import {
 } from "@/modules/workspace-process";
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
+import { releaseUsage, restoreUsage } from "@/modules/ai/lib/usageRuntime";
 
 export type Live = {
   openFileReference?: (path: string, line?: number) => void | Promise<void>;
@@ -100,9 +101,6 @@ export type AgentMeta = {
   error: string | null;
   /** 终态保存失败归属具体会话，后台调用方不能只等待运行锁释放。 */
   commitError?: string;
-  tokens: AgentUsage;
-  lastInputTokens: number;
-  lastCachedTokens: number;
   hitStepCap: boolean;
   compactionNotice: { droppedCount: number; at: number } | null;
 };
@@ -115,13 +113,6 @@ export function createIdleAgentMeta(): AgentMeta {
     status: "idle",
     approvalsPending: 0,
     error: null,
-    tokens: {
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-    },
-    lastInputTokens: 0,
-    lastCachedTokens: 0,
     hitStepCap: false,
     compactionNotice: null,
   };
@@ -284,6 +275,7 @@ export function releaseUnusedChats() {
     )
       continue;
     chats.delete(id);
+    releaseUsage(id);
     seedMessages.delete(id);
     sessionMetadata.delete(id);
     persistedMessageCounts.delete(id);
@@ -343,6 +335,7 @@ export async function seedSession(id: string): Promise<void> {
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
+  restoreUsage(id, session.messages);
 }
 
 /** 判断持久化会话是否属于当前 Workspace 进程。 */
@@ -536,6 +529,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         }
         await chats.get(session.id)?.stop();
         chats.delete(session.id);
+        releaseUsage(session.id);
         seedMessages.delete(session.id);
         persistedMessageCounts.delete(session.id);
         sessionMetadata.delete(session.id);
@@ -870,6 +864,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const remaining = get().sessions.filter((session) => session.id !== id);
         await chats.get(id)?.stop();
         chats.delete(id);
+        releaseUsage(id);
         releaseFileEditRuntime(id);
         seedMessages.delete(id);
         persistedMessageCounts.delete(id);
@@ -996,6 +991,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
           peekFileEditRuntime(id)?.snapshot(),
           cursor.turnId,
         );
+      if (chat)
+        chat.messages = materializeTurnMetadata(chat.messages, cursor.turnId);
       releaseFileEditRuntime(id);
       set((state) => {
         const subagentDisplaysBySession = {

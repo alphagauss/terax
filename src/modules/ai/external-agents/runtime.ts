@@ -260,7 +260,6 @@ export type ExternalAgentStreamOptions = {
   messages: UIMessage[];
   abortSignal?: AbortSignal;
   onSession: (sessionId: string) => void | Promise<void>;
-  onUsage?: (usage: { input: number; output: number; cached: number }) => void;
 };
 
 /** 根据 CLI 协议终态和进程终态判断本轮是否失败。 */
@@ -361,8 +360,6 @@ export function runExternalAgentStream(
             sawText = true;
           } else if (event.type === "activity") {
             pushActivity(event.toolName, event.input);
-          } else if (event.type === "usage") {
-            options.onUsage?.(event);
           } else if (event.type === "completed") {
             completeActivity();
             protocolCompleted = true;

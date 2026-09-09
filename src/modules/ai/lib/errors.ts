@@ -1,3 +1,6 @@
+export const CONTEXT_BUDGET_ERROR =
+  "The current request exceeds the available context budget. Reduce the input or use a model with a larger context window.";
+
 type ErrorDetails = {
   code: string | null;
   message: string;

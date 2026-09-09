@@ -5,6 +5,8 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
+import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
+import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditContext } from "@/modules/ai/components/FileEditStats";
 import { FileEditTool } from "@/modules/ai/components/FileEditTool";
@@ -511,7 +513,11 @@ export function AiChatView({
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">{t("chat.somethingWentWrong")}</div>
-            <div className="mt-0.5 leading-relaxed">{error.message}</div>
+            <div className="mt-0.5 leading-relaxed">
+              {error.message.includes(CONTEXT_BUDGET_ERROR)
+                ? t("chat.contextBudgetExceeded")
+                : error.message}
+            </div>
             <button
               type="button"
               onClick={clearError}
@@ -696,7 +702,12 @@ const RenderedMessage = memo(function RenderedMessage({
           )}
         </MessageContent>
         {!streaming ? (
-          <MessageMeta timestamp={timestamp} copyText={copyText} />
+          <MessageMeta
+            timestamp={timestamp}
+            copyText={copyText}
+            sessionId={sessionId}
+            turnId={messageMetadata(message).turnId}
+          />
         ) : null}
       </Message>
     </FileEditContext.Provider>
@@ -790,13 +801,17 @@ function messageTextForCopy(message: UIMessage): string {
   return stripUserContextBlocks(withoutCommand).text;
 }
 
-/** 消息底部的时间与复制操作，仅在消息悬停或键盘聚焦时显示。 */
+/** 消息底部的时间、复制操作与最终回答的本轮统计入口。 */
 const MessageMeta = memo(function MessageMeta({
   timestamp,
   copyText,
+  sessionId,
+  turnId,
 }: {
   timestamp: number;
   copyText: string;
+  sessionId?: string;
+  turnId?: string;
 }) {
   const { t, i18n } = useTranslation("ai");
   const [copied, setCopied] = useState(false);
@@ -851,6 +866,9 @@ const MessageMeta = memo(function MessageMeta({
           strokeWidth={1.75}
         />
       </MessageAction>
+      {sessionId && turnId && (
+        <TurnMetrics sessionId={sessionId} turnId={turnId} />
+      )}
     </MessageActions>
   );
 });
@@ -1403,7 +1421,10 @@ const RenderedPart = memo(function RenderedPart({
 }) {
   if (part.type === "text") {
     return (
-      <ChatMessageResponse className="[&>*:last-child]:mb-0!" streaming={streaming}>
+      <ChatMessageResponse
+        className="[&>*:last-child]:mb-0!"
+        streaming={streaming}
+      >
         {(part as unknown as { text: string }).text}
       </ChatMessageResponse>
     );
@@ -1461,6 +1482,7 @@ const LiveSubagentCard = memo(function LiveSubagentCard({
   );
   return (
     <SubagentCard
+      sessionId={sessionId}
       part={part}
       display={liveDisplay ?? persistedDisplay}
       backgroundResult={backgroundResult}

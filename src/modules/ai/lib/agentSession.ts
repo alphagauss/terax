@@ -30,6 +30,7 @@ import {
 import {
   materializeSubagentDisplayParts,
   materializeFileEditParts,
+  materializeTurnMetadata,
   projectSessionMessages,
 } from "@/modules/ai/lib/conversation";
 import {
@@ -62,6 +63,7 @@ import {
   prepareFileMutation,
   type PreparedFileMutation,
 } from "@/modules/ai/tools/fileMutation";
+import { releaseUsage, restoreUsage } from "@/modules/ai/lib/usageRuntime";
 
 type Configuration = Pick<
   SessionTransportDependencies,
@@ -118,6 +120,7 @@ export async function createAgentSession(options: {
       "This session cannot be continued by the local built-in Agent",
     );
   }
+  restoreUsage(session.id, session.messages);
   const initial = projectSessionMessages(session.id, session.messages);
   let persisted = Boolean(options.sessionId);
   let cursor: SessionCommitCursor = {
@@ -222,10 +225,12 @@ export async function createAgentSession(options: {
         peekFileEditRuntime(session.id)?.snapshot(),
         cursor.turnId,
       );
+      chat.messages = materializeTurnMetadata(chat.messages, cursor.turnId);
       releaseFileEditRuntime(session.id);
       displays.clear();
       clearSessionFileMutations(session.id, chat.messages);
       await releaseSessionRun(session.id);
+      releaseUsage(session.id);
       lifecycle?.dispose();
       lifecycle = undefined;
       publish({
@@ -264,6 +269,7 @@ export async function createAgentSession(options: {
           try {
             // 空闲期间另一个客户端可能完成一轮；持锁后重新读取，避免用过期历史继续会话。
             session = await readSession(session.id);
+            restoreUsage(session.id, session.messages);
             chat.messages = projectSessionMessages(
               session.id,
               session.messages,

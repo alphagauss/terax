@@ -22,15 +22,14 @@
     "thinking": "Thinking…",
     "closeTitle": "Close (Esc)",
     "context": {
-      "model": "Model",
-      "lastRequest": "Last request",
-      "estimatedContext": "Estimated context",
-      "ofWhichCached": "Of which cached",
-      "sessionInput": "Session input",
-      "sessionOutput": "Session output",
-      "cacheHit": "Cache hit",
-      "footerLastRequest": "Last request reflects current context size; session totals are cumulative.",
-      "footerApprox": "Token count is approximate (chars / 4)."
+      "usage": "Context",
+      "footerApprox": "Local estimate: characters × 0.8. Media and hidden reasoning usage are unknown.",
+      "estimated": "Local estimate",
+      "unavailable": "Not reported",
+      "noUsage": "No usage records. Context is estimated locally.",
+      "taskUsage": "Usage",
+      "inputTokens": "Context input",
+      "cacheReadTokens": "Cache hit"
     },
     "switchSession": "Switch session",
     "aiSettings": "AI settings",
@@ -151,6 +150,17 @@
     "steer": "Guide the current task"
   },
   "chat": {
+    "metrics": {
+      "output": "Turn output",
+      "tokens": "{{value}} token",
+      "title": "Turn statistics",
+      "firstToken": "First token latency",
+      "speed": "Generation speed",
+      "toolCalls": "Tool calls",
+      "seconds": "{{value}} s",
+      "tokensPerSecond": "{{value}} token/s",
+      "partial": "Speed includes only calls with usable SDK timing and reported output."
+    },
     "fileEdits": {
       "title": "Edited {{count}} files",
       "tabTitle": "File changes",
@@ -199,10 +209,10 @@
       "tool": "Using {{tool}}"
     },
     "continuePrompt": "Continue from where you stopped. Don't recap - just keep going.",
+    "contextBudgetExceeded": "The current request exceeds the available context budget. Reduce the input or select a model with a larger context window.",
     "somethingWentWrong": "Something went wrong.",
     "dismiss": "Dismiss",
-    "contextCompacted_one": "Context compacted - {{count}} older tool result elided to save tokens.",
-    "contextCompacted_other": "Context compacted - {{count}} older tool results elided to save tokens.",
+    "contextCompacted": "Context compacted: earlier history and tool results have been reduced.",
     "hitStepLimit": "Hit the step limit. Continue to keep going.",
     "continue": "Continue",
     "copy": "Copy message",

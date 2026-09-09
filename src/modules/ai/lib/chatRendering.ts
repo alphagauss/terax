@@ -52,5 +52,5 @@ export function estimateUiMessageTokens(
       }
     }
   }
-  return Math.ceil(chars / 4);
+  return Math.ceil(chars * 0.8);
 }

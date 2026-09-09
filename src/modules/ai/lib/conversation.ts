@@ -14,6 +14,7 @@ import {
   type FileEditSnapshot,
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
+import type { UsageRecord } from "@/modules/ai/lib/usage";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -64,6 +65,7 @@ export type SessionMessage = {
       approval_reason?: string;
       approval_signature?: string;
     }
+  | { role: "usage"; content: UsageRecord }
   | { role: "event"; content: SubagentResultEvent }
   | { role: "display"; content: SubagentDisplaySnapshot | FileEditSnapshot }
 );
@@ -114,6 +116,7 @@ export type SteeringEvent = { event: "user_steering"; message: UIMessage };
 export type TurnEvent = SteeringEvent | SubagentResultEvent;
 
 type ConversationMetadata = {
+  turnId?: string;
   fileEdits?: TurnFileEdits;
   fileEditsSummary?: boolean;
   createdAt?: number;
@@ -310,6 +313,10 @@ export function projectConversationDisplay(
               subagents,
               fileEdits,
               fileEditsSummary: segment === lastAssistant,
+              turnId:
+                segment === lastAssistant
+                  ? messageMetadata(message).turnId
+                  : undefined,
             },
             parts: segment.parts.filter(
               (part) =>
@@ -367,9 +374,7 @@ export function projectSessionMessages(
       id: `${sessionId}:assistant:${assistantStart}`,
       role: "assistant",
       parts: assistantParts,
-      ...(assistantTimestamp === undefined
-        ? {}
-        : { metadata: { createdAt: assistantTimestamp } }),
+      metadata: { createdAt: assistantTimestamp, turnId: assistantTurnId },
     });
     assistantParts = null;
     assistantStart = -1;
@@ -400,6 +405,7 @@ export function projectSessionMessages(
   };
 
   records.forEach((record, index) => {
+    if (record.role === "usage") return;
     const timestamp = parseRecordedTimestamp(record.timestamp);
     if (record.role === "display") {
       if (
@@ -575,6 +581,17 @@ export function projectSessionMessages(
   });
 
   flushAssistant();
+  const finalByTurn = new Map<string, UIMessage>();
+  for (const message of messages) {
+    const turnId = messageMetadata(message).turnId;
+    if (turnId) finalByTurn.set(turnId, message);
+  }
+  for (const message of messages) {
+    const metadata = messageMetadata(message);
+    if (metadata.turnId && finalByTurn.get(metadata.turnId) !== message)
+      delete metadata.turnId;
+  }
+
   return messages;
 }
 
@@ -1039,5 +1056,18 @@ function attachSubagentDisplays(
           data: { snapshot },
         }) as UIMessage["parts"][number],
     ),
+  ];
+}
+
+/** 终态回答使用持久化 turn ID 关联统计；仅标记末尾回答，不污染模型输入。 */
+export function materializeTurnMetadata(
+  messages: UIMessage[],
+  turnId: string,
+): UIMessage[] {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant") return messages;
+  return [
+    ...messages.slice(0, -1),
+    { ...last, metadata: { ...messageMetadata(last), turnId } },
   ];
 }

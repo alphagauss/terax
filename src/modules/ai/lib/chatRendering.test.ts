@@ -40,7 +40,7 @@ describe("chat rendering performance helpers", () => {
       JSON.stringify({ path: "a" }).length +
       JSON.stringify({ ok: true }).length;
 
-    expect(estimateUiMessageTokens(messages)).toBe(Math.ceil(chars / 4));
+    expect(estimateUiMessageTokens(messages)).toBe(Math.ceil(chars * 0.8));
   });
 
   it("ignores a cyclic tool payload instead of blocking rendering", () => {

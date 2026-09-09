@@ -3,6 +3,7 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
+import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { Shimmer } from "@/modules/ai/components/Shimmer";
@@ -29,6 +30,7 @@ import type {
   SubagentDisplayStatus,
   SubagentDisplayStep,
 } from "../agents/subagentDisplay";
+import { TaskUsageDetails } from "@/modules/ai/components/UsageDetails";
 
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 type Display = SubagentDisplayState | SubagentDisplaySnapshot;
@@ -40,6 +42,7 @@ export type SubagentResultView = {
 };
 
 type Props = {
+  sessionId?: string;
   part: AnyToolPart;
   display?: Display;
   backgroundResult?: SubagentResultView;
@@ -66,7 +69,12 @@ const TOOL_HEADLINE_MIN_MS = 1000;
  * 标题中的工具动作至少保持一秒，新动作在此期间合并为最新状态；此计时只影响
  * 展示，不会阻塞子智能体、主 Agent 或持久化。
  */
-export function SubagentCard({ part, display, backgroundResult }: Props) {
+export function SubagentCard({
+  sessionId = "",
+  part,
+  display,
+  backgroundResult,
+}: Props) {
   const { t } = useTranslation("ai");
   const input = objectValue(part.input);
   const output = objectValue("output" in part ? part.output : undefined);
@@ -88,7 +96,7 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
     backgroundResult ??
     resultFromToolError(part);
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"process" | "result">(() =>
+  const [tab, setTab] = useState<"process" | "result" | "usage">(() =>
     status === "running" ? "process" : "result",
   );
   const [taskOpen, setTaskOpen] = useState(false);
@@ -189,6 +197,9 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
             >
               {t("chat.subagent.result")}
             </TabButton>
+            <TabButton active={tab === "usage"} onClick={() => setTab("usage")}>
+              {t("miniWindow.context.taskUsage")}
+            </TabButton>
           </div>
 
           {tab === "process" ? (
@@ -196,6 +207,11 @@ export function SubagentCard({ part, display, backgroundResult }: Props) {
               steps={steps}
               running={status === "running"}
               taskId={display?.taskId}
+            />
+          ) : tab === "usage" ? (
+            <TaskUsageDetails
+              sessionId={sessionId}
+              taskId={display?.taskId ?? stringValue(output?.taskId)}
             />
           ) : (
             <ResultPanel status={status} result={result} />
@@ -220,6 +236,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      data-chat-scroll-preserve
       className={cn(
         "rounded px-2 py-0.5 transition-colors",
         active
@@ -298,7 +315,12 @@ function ResultPanel({
       </div>
     );
   }
-  const content = result?.result ?? result?.error ?? "";
+  const content =
+    result?.result ??
+    (result?.error?.includes(CONTEXT_BUDGET_ERROR)
+      ? t("chat.contextBudgetExceeded")
+      : result?.error) ??
+    "";
   if (!content) {
     return (
       <div className="rounded-md bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground">

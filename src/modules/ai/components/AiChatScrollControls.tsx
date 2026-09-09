@@ -191,6 +191,7 @@ export function AiChatScrollControls({
       <button
         type="button"
         onClick={handleJumpToBottom}
+        data-chat-scroll-resume
         className={cn(
           "flex size-8 items-center justify-center rounded-full border border-border/60 bg-background/90 shadow-md backdrop-blur",
           "text-foreground transition-colors duration-control hover:bg-muted",

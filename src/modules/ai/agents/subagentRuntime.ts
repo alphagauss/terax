@@ -9,12 +9,6 @@ import type {
 } from "@/modules/ai/agents/subagentDisplay";
 import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 
-export type SubagentUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-};
-
 export type SubagentTaskResult = {
   taskId: string;
   label: string;
@@ -22,7 +16,6 @@ export type SubagentTaskResult = {
   result?: string;
   error?: string;
   durationMs: number;
-  usage: SubagentUsage;
 };
 
 export type SubagentStartResult =
@@ -65,12 +58,6 @@ type RunningTask = {
   controller: AbortController;
   done: Promise<SubagentTaskResult>;
   cancelDisplay: () => void;
-};
-
-const EMPTY_USAGE: SubagentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
 };
 
 const coordinators = new Map<string, AgentTurnCoordinator>();
@@ -233,7 +220,6 @@ export class AgentTurnCoordinator {
           status: "failed",
           error: String(error),
           durationMs: now - startedAt,
-          usage: EMPTY_USAGE,
         };
       })
       .finally(detachAbort);

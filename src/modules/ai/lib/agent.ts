@@ -28,7 +28,6 @@ import {
   type AgentToolId,
   resolveSubagentTools,
 } from "@/modules/ai/lib/agentTools";
-import { compactModelMessagesDetailed } from "@/modules/ai/lib/compact";
 import {
   ACTIVITY_DURATION_PART_TYPE,
   conversationEventPart,
@@ -50,35 +49,18 @@ import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
 import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import {
   createUIMessageStream,
+  type FinishReason,
+  isStepCount,
   type ModelMessage,
   pruneMessages,
-  isStepCount,
-  toUIMessageChunk,
-  type UIMessageStreamOutcome,
-  type UIMessageChunk,
-  type UIMessageStreamWriter,
-  type LanguageModelUsage,
-  type FinishReason,
   streamText,
+  toUIMessageChunk,
   type UIMessage,
+  type UIMessageChunk,
+  type UIMessageStreamOutcome,
+  type UIMessageStreamWriter,
 } from "ai";
-
-export type AgentUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-};
-
-export type AgentUsageDelta = AgentUsage & {
-  lastInputTokens: number;
-  lastCachedTokens: number;
-};
-
-const EMPTY_USAGE: AgentUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cachedInputTokens: 0,
-};
+import { createContextUsage } from "@/modules/ai/lib/contextUsage";
 
 export type RunAgentOptions = {
   keys: ProviderKeys;
@@ -89,7 +71,7 @@ export type RunAgentOptions = {
   maxConcurrentSubagents: number;
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
-  onUsage?: (delta: AgentUsageDelta) => void;
+  turnId: string;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onSubagentDisplay?: (state: SubagentDisplayState) => void;
@@ -250,6 +232,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
             })();
           };
 
+          let contextUsage:
+            | Awaited<ReturnType<typeof createContextUsage>>
+            | undefined;
           try {
             opts.abortSignal?.throwIfAborted();
             coordinator.inbox.open();
@@ -266,6 +251,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
             if (initialAppend) await initialAppend;
 
             while (stepsSeen < MAX_AGENT_STEPS || finalizationOnly) {
+              contextUsage = await createContextUsage({
+                sessionId: opts.toolContext.getSessionId(),
+                turnId: opts.turnId,
+                model: modelRef,
+                contextWindow: getModelContextWindow(
+                  modelRef,
+                  opts.providerModels ?? {},
+                ),
+                instructions: prepareAgentPrompt(
+                  opts.systemPrompt,
+                  [],
+                  provider,
+                ).instructions,
+                tools: finalizationOnly ? undefined : rootTools,
+                onCompact: opts.onCompact,
+              });
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。
               while (!resolvingApprovals) {
@@ -273,21 +274,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 if (!pendingAppend) break;
                 await pendingAppend;
               }
-              const compact = compactModelMessagesDetailed(
-                modelHistory,
-                getModelContextWindow(modelRef, opts.providerModels ?? {}),
-              );
-              if (compact.compacted) {
-                opts.onCompact?.({ droppedCount: compact.droppedCount });
-                modelHistory.splice(
-                  0,
-                  modelHistory.length,
-                  ...compact.messages,
-                );
-              }
               const prompt = prepareAgentPrompt(
                 opts.systemPrompt,
-                compact.messages,
+                modelHistory,
                 provider,
               );
               const cycle: {
@@ -298,6 +287,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               let reasoningStartedAt: number | undefined;
               let cycleSteps = 0;
               const result = streamText({
+                prepareStep: contextUsage.prepareStep,
                 model,
                 experimental_download: createProviderDownload(
                   modelRef.providerId,
@@ -313,9 +303,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
                       stepsSeen + steps.length >= MAX_AGENT_STEPS ||
                       coordinator.inbox.hasPending,
                 abortSignal: opts.abortSignal,
-                onStepEnd: (step) => {
+                onLanguageModelCallEnd: (event) =>
+                  contextUsage?.finish(
+                    event.usage,
+                    event.content,
+                    event.performance,
+                  ),
+                onStepEnd: () => {
                   cycleSteps++;
-                  reportUsage(opts, step.usage);
                 },
               });
               // SDK 从实际输出流构造 checkpoint，耗时与历史前缀不再手工回填。
@@ -330,6 +325,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 },
                 execute: async ({ writer: cycleWriter }) => {
                   for await (const part of result.stream) {
+                    contextUsage?.observe(part);
                     if (part.type === "error") throw part.error;
                     if (part.type === "finish")
                       cycleWriter.setOutcome({ status: "completed" });
@@ -391,6 +387,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   },
                 }),
               );
+              contextUsage.finish();
               if (
                 cycle.outcome.status === "failed" ||
                 cycle.outcome.status === "aborted"
@@ -469,6 +466,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               );
             }
           } catch (error) {
+            contextUsage?.finish();
             finishActivity();
             await coordinator.cancelAll();
             releaseAgentTurnCoordinator(
@@ -517,7 +515,32 @@ function buildSubagentTaskRunner({
         providerBaseURLs: opts.providerBaseURLs,
       }).provider,
     );
+    const tools = buildTools(
+      {
+        ...toolContext,
+        fileEditTaskId: taskId,
+        onFileEditInput: (id, toolName, input) => {
+          onProgress({
+            type: "tool-start",
+            id,
+            toolName,
+            summary: summarizeSubagentToolInput(toolName, input),
+          });
+        },
+      },
+      allowedTools,
+    );
+    const contextUsage = await createContextUsage({
+      sessionId: opts.toolContext.getSessionId(),
+      turnId: opts.turnId,
+      taskId,
+      model,
+      contextWindow: getModelContextWindow(model, opts.providerModels ?? {}),
+      instructions: prompt.instructions,
+      tools,
+    });
     const result = streamText({
+      prepareStep: contextUsage.prepareStep,
       model: childModel,
       experimental_download: createProviderDownload(
         model.providerId,
@@ -525,21 +548,7 @@ function buildSubagentTaskRunner({
       ),
       instructions: prompt.instructions,
       messages: prompt.messages,
-      tools: buildTools(
-        {
-          ...toolContext,
-          fileEditTaskId: taskId,
-          onFileEditInput: (id, toolName, input) => {
-            onProgress({
-              type: "tool-start",
-              id,
-              toolName,
-              summary: summarizeSubagentToolInput(toolName, input),
-            });
-          },
-        },
-        allowedTools,
-      ),
+      tools,
       toolApproval: buildToolApproval(toolContext),
       stopWhen: isStepCount(MAX_AGENT_STEPS),
       abortSignal,
@@ -568,10 +577,12 @@ function buildSubagentTaskRunner({
               : "failed",
         });
       },
-      onStepEnd: (step) => reportUsage(opts, step.usage),
+      onLanguageModelCallEnd: (event) =>
+        contextUsage.finish(event.usage, event.content, event.performance),
     });
     try {
       for await (const chunk of result.stream) {
+        contextUsage.observe(chunk);
         if (chunk.type === "error") throw chunk.error;
         if (
           chunk.type === "tool-error" ||
@@ -589,38 +600,17 @@ function buildSubagentTaskRunner({
         }
       }
       abortSignal.throwIfAborted();
-      const usage = await result.usage;
       return {
         status: "completed",
         result:
           (await result.text) ||
           "Task completed but no final response was generated.",
-        usage: {
-          inputTokens: usage.inputTokens ?? 0,
-          outputTokens: usage.outputTokens ?? 0,
-          cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
-        },
       };
     } finally {
+      contextUsage.finish();
       peekFileEditRuntime(opts.toolContext.getSessionId())?.finishTask(taskId);
     }
   };
-}
-
-function reportUsage(
-  opts: RunAgentOptions,
-  usage: LanguageModelUsage | undefined,
-): void {
-  if (!opts.onUsage || !usage) return;
-  const stepInput = usage.inputTokens ?? 0;
-  const stepCached = usage.inputTokenDetails?.cacheReadTokens ?? 0;
-  opts.onUsage({
-    inputTokens: stepInput,
-    outputTokens: usage.outputTokens ?? 0,
-    cachedInputTokens: stepCached,
-    lastInputTokens: stepInput,
-    lastCachedTokens: stepCached,
-  });
 }
 
 function hasApprovalRequest(message: UIMessage | undefined): boolean {
@@ -632,5 +622,3 @@ function hasApprovalRequest(message: UIMessage | undefined): boolean {
     ),
   );
 }
-
-export { EMPTY_USAGE };

@@ -4,14 +4,6 @@
  */
 
 import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentFooter,
-  ContextContentHeader,
-  ContextTrigger,
-} from "@/components/ai-elements/context";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,7 +18,6 @@ import {
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { usePreferencesStore } from "@/modules/settings/preferences";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
 import {
@@ -39,21 +30,16 @@ import {
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { getModelContextWindow, tryResolveModel } from "@/modules/ai/config";
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { agentDisplayName, MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
-import {
-  estimateUiMessageTokens,
-  STREAM_RENDER_INTERVAL_MS,
-} from "@/modules/ai/lib/chatRendering";
+import { STREAM_RENDER_INTERVAL_MS } from "@/modules/ai/lib/chatRendering";
 import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
 import type { SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
-  getAgentMetaForSession,
   releaseUnusedChats,
   sessionMetadata,
   useChatStore,
@@ -66,6 +52,7 @@ import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
 import { AiChatView } from "@/modules/ai/components/AiChat";
 import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
 import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
+import { ContextIndicator } from "@/modules/ai/components/ContextIndicator";
 
 const SUGGESTIONS = [
   {
@@ -233,13 +220,13 @@ function Header({
     <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border/60 bg-sidebar px-2.5">
       <div className="flex min-w-0 items-center gap-1.5">
         <SessionPicker />
-        {messages !== undefined ? (
+        {messages !== undefined && (
           <ContextIndicator
             sessionId={sessionId}
             isBusy={isBusy}
             messages={messages}
           />
-        ) : null}
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button
@@ -266,139 +253,6 @@ function Header({
         </Button>
       </div>
     </div>
-  );
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
-  return `${(n / 1_000_000).toFixed(2)}M`;
-}
-
-function ContextIndicator({
-  sessionId,
-  isBusy,
-  messages,
-}: {
-  sessionId: string | null;
-  isBusy: boolean;
-  messages: UIMessage[];
-}) {
-  const { t } = useTranslation("ai");
-  const model = useChatStore((s) => s.selectedModel);
-  const draftSessionId = useChatStore((s) => s.draftSessionId);
-  const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
-  const customProviders = usePreferencesStore((s) => s.customProviders);
-  const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
-  const providerModels = usePreferencesStore((s) => s.providerModels);
-  const resolvedModel = useMemo(
-    () => tryResolveModel(model, { customProviders, providerBaseURLs }),
-    [customProviders, model, providerBaseURLs],
-  );
-  const meta = useChatStore((state) =>
-    getAgentMetaForSession(state, sessionId),
-  );
-  const {
-    tokens,
-    lastInputTokens: lastInput,
-    lastCachedTokens: lastCached,
-  } = meta;
-  const settledEstimateRef = useRef(0);
-  const shouldEstimate = !isBusy && lastInput <= 0;
-  const estimated = useMemo(() => {
-    if (!shouldEstimate) {
-      return settledEstimateRef.current;
-    }
-    const nextEstimate = estimateUiMessageTokens(messages);
-    settledEstimateRef.current = nextEstimate;
-    return nextEstimate;
-  }, [messages, shouldEstimate]);
-  const used = lastInput > 0 ? lastInput : estimated;
-  const reported = tokens.inputTokens + tokens.outputTokens;
-  const contextWindow = getModelContextWindow(model, providerModels);
-  const modelLabel = resolvedModel?.label ?? t("statusBar.noModels");
-  const cacheRate =
-    tokens.inputTokens > 0
-      ? Math.round((tokens.cachedInputTokens / tokens.inputTokens) * 100)
-      : 0;
-  const externalAgent =
-    parseExternalAgentBinding(
-      sessionId ? sessionMetadata.get(sessionId) : undefined,
-    ) ??
-    (sessionId === draftSessionId && draftExternalAgentId
-      ? { agentId: draftExternalAgentId, sessionId: null }
-      : null);
-  if (externalAgent) return null;
-
-  return (
-    <Context usedTokens={used} maxTokens={contextWindow}>
-      <ContextTrigger
-        className="h-6 gap-1 px-0 text-[10.5px]"
-        title={
-          lastInput > 0
-            ? t("miniWindow.context.lastRequest")
-            : t("miniWindow.context.estimatedContext")
-        }
-      />
-      <ContextContent className="w-64 text-[11px]">
-        <ContextContentHeader />
-        <ContextContentBody>
-          <div className="flex items-center justify-between text-muted-foreground">
-            <span>{t("miniWindow.context.model")}</span>
-            <span className="font-mono text-foreground">{modelLabel}</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between text-muted-foreground">
-            <span>
-              {lastInput > 0
-                ? t("miniWindow.context.lastRequest")
-                : t("miniWindow.context.estimatedContext")}
-            </span>
-            <span className="font-mono text-foreground">
-              {formatTokens(used)}
-            </span>
-          </div>
-          {lastCached > 0 && (
-            <div className="flex items-center justify-between text-muted-foreground">
-              <span>{t("miniWindow.context.ofWhichCached")}</span>
-              <span className="font-mono text-foreground">
-                {formatTokens(lastCached)}
-              </span>
-            </div>
-          )}
-          {reported > 0 && (
-            <>
-              <div className="mt-1.5 flex items-center justify-between text-muted-foreground">
-                <span>{t("miniWindow.context.sessionInput")}</span>
-                <span className="font-mono text-foreground">
-                  {formatTokens(tokens.inputTokens)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-muted-foreground">
-                <span>{t("miniWindow.context.sessionOutput")}</span>
-                <span className="font-mono text-foreground">
-                  {formatTokens(tokens.outputTokens)}
-                </span>
-              </div>
-              {tokens.cachedInputTokens > 0 && (
-                <div className="flex items-center justify-between text-muted-foreground">
-                  <span>{t("miniWindow.context.cacheHit")}</span>
-                  <span className="font-mono text-foreground">
-                    {cacheRate}%
-                  </span>
-                </div>
-              )}
-            </>
-          )}
-        </ContextContentBody>
-        <ContextContentFooter>
-          <span className="text-[10px] italic text-muted-foreground">
-            {lastInput > 0
-              ? t("miniWindow.context.footerLastRequest")
-              : t("miniWindow.context.footerApprox")}
-          </span>
-        </ContextContentFooter>
-      </ContextContent>
-    </Context>
   );
 }
 
