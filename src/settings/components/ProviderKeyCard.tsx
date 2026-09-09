@@ -3,6 +3,7 @@
  * 卡片按凭据类型显示密钥交互，并通过子内容组合地址和模型设置。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/controls/button";
 import { Input } from "@/components/controls/input";
@@ -120,15 +121,17 @@ export function ProviderKeyCard({
             strokeWidth={1.75}
           />
         </button>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={onRemove}
-          title={t("models.card.removeProvider")}
-          className="text-muted-foreground hover:text-destructive"
-        >
-          <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("models.card.removeProvider")}>
+          <Button
+            aria-label={t("models.card.removeProvider")}
+            size="icon-sm"
+            variant="ghost"
+            onClick={onRemove}
+            className="text-muted-foreground hover:text-destructive"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
+          </Button>
+        </Hint>
       </div>
 
       {usesApiKey && editing ? (
@@ -195,14 +198,16 @@ export function ProviderKeyCard({
           <code className="flex-1 truncate rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground">
             {maskKey(currentKey ?? "")}
           </code>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setEditing(true)}
-            title={t("models.card.replace")}
-          >
-            <HugeiconsIcon icon={Edit02Icon} size={12} strokeWidth={1.75} />
-          </Button>
+          <Hint content={t("models.card.replace")}>
+            <Button
+              aria-label={t("models.card.replace")}
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setEditing(true)}
+            >
+              <HugeiconsIcon icon={Edit02Icon} size={12} strokeWidth={1.75} />
+            </Button>
+          </Hint>
         </div>
       ) : null}
       {children}

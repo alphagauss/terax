@@ -45,7 +45,6 @@ const urlMatcher = new MatchDecorator({
   regexp: URL_RE,
   decoration: Decoration.mark({
     class: "cm-md-url",
-    attributes: { title: "Cmd/Ctrl+Click to open" },
   }),
 });
 

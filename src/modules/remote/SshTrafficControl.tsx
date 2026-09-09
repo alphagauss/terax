@@ -3,6 +3,7 @@
  * 前端仅在 Workspace WebView 可见时低频读取累计值，速率由相邻快照计算，统计本身始终由 Rust 持有。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   Popover,
   PopoverContent,
@@ -222,21 +223,26 @@ function SshTrafficPanel() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex h-6 items-center gap-1.5 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={t("sshTraffic.label")}
-          aria-label={t("sshTraffic.label")}
-        >
-          <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
-            <HugeiconsIcon icon={ArrowUp02Icon} size={11} strokeWidth={1.8} />
-            <span>{uploadRate}</span>
-          </span>
-          <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
-            <HugeiconsIcon icon={ArrowDown02Icon} size={11} strokeWidth={1.8} />
-            <span>{downloadRate}</span>
-          </span>
-        </button>
+        <Hint content={t("sshTraffic.label")}>
+          <button
+            type="button"
+            className="flex h-6 items-center gap-1.5 rounded-sm px-1 text-[11px] tabular-nums text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={t("sshTraffic.label")}
+          >
+            <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
+              <HugeiconsIcon icon={ArrowUp02Icon} size={11} strokeWidth={1.8} />
+              <span>{uploadRate}</span>
+            </span>
+            <span className="grid grid-cols-[11px_54px] items-center gap-0.5 whitespace-nowrap">
+              <HugeiconsIcon
+                icon={ArrowDown02Icon}
+                size={11}
+                strokeWidth={1.8}
+              />
+              <span>{downloadRate}</span>
+            </span>
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         side="top"

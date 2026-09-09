@@ -2,6 +2,7 @@
  * 本文件渲染语言服务器设置分组和连接状态。
  * 负责启停、配置入口和状态反馈，不直接管理 LSP 进程。
  */
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import {
   Dialog,
@@ -98,28 +99,32 @@ function ServerRow({
       description={`${server.command} (${langs}) - ${status}`}
     >
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => void redetectBinary(server.command)}
-          title={t("editor.lsp.detectAgain")}
-        >
-          <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={1.75} />
-        </button>
-        {custom ? (
+        <Hint content={t("editor.lsp.detectAgain")}>
           <button
+            aria-label={t("editor.lsp.detectAgain")}
             type="button"
-            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
-            onClick={() => {
-              void setLspActivation(server.id, null);
-              void setLspCustomServers(
-                customServers.filter((c) => c.id !== server.id),
-              );
-            }}
-            title={t("editor.lsp.removeServer")}
+            className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => void redetectBinary(server.command)}
           >
-            <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
+            <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={1.75} />
           </button>
+        </Hint>
+        {custom ? (
+          <Hint content={t("editor.lsp.removeServer")}>
+            <button
+              aria-label={t("editor.lsp.removeServer")}
+              type="button"
+              className="cursor-pointer rounded p-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+              onClick={() => {
+                void setLspActivation(server.id, null);
+                void setLspCustomServers(
+                  customServers.filter((c) => c.id !== server.id),
+                );
+              }}
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
+            </button>
+          </Hint>
         ) : null}
         <Switch
           checked={enabled}

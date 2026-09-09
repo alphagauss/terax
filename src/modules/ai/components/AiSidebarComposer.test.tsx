@@ -54,7 +54,7 @@ it("运行中从中止切为引导，提交后恢复中止并显示待接入状�
       'button[aria-label="Guide the current task"]',
     );
     expect(guide).not.toBeNull();
-    expect(container.querySelector('button[title="Stop"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Stop"]')).not.toBeNull();
     act(() => guide?.click());
     expect(composer.submit).toHaveBeenCalledTimes(1);
     composer.canSend = false;

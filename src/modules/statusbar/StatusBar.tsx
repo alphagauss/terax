@@ -7,7 +7,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { AgentStatusPill } from "@/modules/ai/components/AgentStatusPill";
 import { LspStatusPill } from "@/modules/lsp";
 import type { PythonInterpreter } from "@/modules/python/native";
@@ -83,10 +83,7 @@ export function StatusBar({
                 <span>{t("private.label")}</span>
               </span>
             </TooltipTrigger>
-            <TooltipContent
-              side="top"
-              className="max-w-64 text-[11px] leading-relaxed"
-            >
+            <TooltipContent side="top" className="max-w-64 leading-relaxed">
               {t("private.tooltip")}
             </TooltipContent>
           </Tooltip>
@@ -115,7 +112,7 @@ export function StatusBar({
                 </span>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-80 text-[11px]">
+            <TooltipContent side="top" className="max-w-80">
               {pythonInterpreter
                 ? t("python.selected", { path: pythonInterpreter.path })
                 : t("python.unselected")}

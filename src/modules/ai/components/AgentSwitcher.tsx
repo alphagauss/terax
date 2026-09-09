@@ -3,6 +3,7 @@
  * 空白草稿允许选择固定主 Agent 或 Custom Agent，首次发送后只展示冻结身份。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -87,12 +88,11 @@ export function AgentSwitcher() {
 
   if (!isDraft) {
     return (
-      <span
-        className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground"
-        title={t("trigger.locked", { name: active.name })}
-      >
-        {triggerContent}
-      </span>
+      <Hint content={t("trigger.locked", { name: active.name })}>
+        <span className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground">
+          {triggerContent}
+        </span>
+      </Hint>
     );
   }
 
@@ -100,14 +100,16 @@ export function AgentSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="xs"
-          variant="outline"
-          className="flex items-center border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
-          title={t("trigger.title", { name: agentDisplayName(active) })}
-        >
-          {triggerContent}
-        </Button>
+        <Hint content={t("trigger.title", { name: agentDisplayName(active) })}>
+          <Button
+            aria-label={t("trigger.title", { name: agentDisplayName(active) })}
+            size="xs"
+            variant="outline"
+            className="flex items-center border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+          >
+            {triggerContent}
+          </Button>
+        </Hint>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-60">
         {agents.map((agent, index) => {

@@ -3,6 +3,7 @@
  * 流式消息更新在此合并提交，避免头部统计和聊天正文按每个 delta 重渲染。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -229,28 +230,34 @@ function Header({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => void openSettingsWindow("models")}
-          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={t("miniWindow.aiSettings")}
-          title={t("miniWindow.aiSettings")}
-        >
-          <HugeiconsIcon icon={Wrench01Icon} size={15} strokeWidth={1.75} />
-        </Button>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => newSession()}
-          className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label={t("miniWindow.newSession")}
-          title={t("miniWindow.newSession")}
-        >
-          <HugeiconsIcon icon={PencilEdit02Icon} size={15} strokeWidth={1.75} />
-        </Button>
+        <Hint content={t("miniWindow.aiSettings")}>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => void openSettingsWindow("models")}
+            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={t("miniWindow.aiSettings")}
+          >
+            <HugeiconsIcon icon={Wrench01Icon} size={15} strokeWidth={1.75} />
+          </Button>
+        </Hint>
+        <Hint content={t("miniWindow.newSession")}>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => newSession()}
+            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={t("miniWindow.newSession")}
+          >
+            <HugeiconsIcon
+              icon={PencilEdit02Icon}
+              size={15}
+              strokeWidth={1.75}
+            />
+          </Button>
+        </Hint>
       </div>
     </div>
   );
@@ -288,26 +295,28 @@ function SessionPicker() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "flex min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 py-1",
-            "text-[11px] text-foreground outline-none transition-colors",
-            "hover:bg-accent hover:text-foreground",
-            "focus-visible:outline-none",
-          )}
-          title={t("miniWindow.switchSession")}
-        >
-          <span className="truncate">
-            {active?.title || t("miniWindow.newChat")}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={10}
-            strokeWidth={2}
-            className="opacity-70"
-          />
-        </button>
+        <Hint content={t("miniWindow.switchSession")}>
+          <button
+            aria-label={t("miniWindow.switchSession")}
+            type="button"
+            className={cn(
+              "flex min-w-0 max-w-48 items-center gap-1 rounded-md px-1.5 py-1",
+              "text-[11px] text-foreground outline-none transition-colors",
+              "hover:bg-accent hover:text-foreground",
+              "focus-visible:outline-none",
+            )}
+          >
+            <span className="truncate">
+              {active?.title || t("miniWindow.newChat")}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={10}
+              strokeWidth={2}
+              className="opacity-70"
+            />
+          </button>
+        </Hint>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-56">
         <DropdownMenuSub>
@@ -443,19 +452,21 @@ function SessionRow({
           {updatedAt}
         </time>
       ) : null}
-      <button
-        type="button"
-        disabled={deleteDisabled}
-        data-session-delete
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        title={t("miniWindow.deleteSession")}
-        className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-      >
-        <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
-      </button>
+      <Hint content={t("miniWindow.deleteSession")}>
+        <button
+          aria-label={t("miniWindow.deleteSession")}
+          type="button"
+          disabled={deleteDisabled}
+          data-session-delete
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+        >
+          <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.75} />
+        </button>
+      </Hint>
     </DropdownMenuItem>
   );
 }
@@ -470,17 +481,18 @@ function SessionAttentionIndicator({
   return (
     <span className="flex w-2 shrink-0 items-center justify-center">
       {attention ? (
-        <span
-          role="img"
-          aria-label={label ?? undefined}
-          title={label ?? undefined}
-          className={cn(
-            "size-1.5 rounded-full",
-            attention === "background-running" && "bg-warning",
-            attention === "completed-unread" && "bg-success",
-            attention === "error-unread" && "bg-destructive",
-          )}
-        />
+        <Hint content={label ?? undefined}>
+          <span
+            role="img"
+            aria-label={label ?? undefined}
+            className={cn(
+              "size-1.5 rounded-full",
+              attention === "background-running" && "bg-warning",
+              attention === "completed-unread" && "bg-success",
+              attention === "error-unread" && "bg-destructive",
+            )}
+          />
+        </Hint>
       ) : null}
     </span>
   );

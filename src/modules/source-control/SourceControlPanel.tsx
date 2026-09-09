@@ -38,7 +38,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
@@ -112,9 +112,6 @@ type Props = {
   onOpenFile?: (absolutePath: string) => void;
   onNavigateToPath?: (path: string) => void;
 };
-
-const SOURCE_CONTROL_TOOLTIP_CLASS =
-  "border border-border/70 bg-zinc-950 text-zinc-100 shadow-lg shadow-black/30 dark:border-border/60 dark:bg-zinc-950 dark:text-zinc-100";
 
 const ROW_HEIGHTS = {
   banner: 32,
@@ -646,7 +643,7 @@ function SourceControlViewContainerComponent({
   const pullBusy = sourceControl.busyAction === "pull";
 
   return (
-    <TooltipProvider delayDuration={800} skipDelayDuration={300}>
+    <TooltipProvider>
       <aside className="flex h-full min-w-0 flex-col bg-sidebar [contain:layout_style]">
         <SidebarSectionGroup
           id="source-control"
@@ -661,7 +658,7 @@ function SourceControlViewContainerComponent({
               actions: (
                 <>
                   <IconActionButton
-                    label={fetchBusy ? "Fetching…" : "Fetch from remote"}
+                    label={t(fetchBusy ? "fetch.fetching" : "fetch.label")}
                     disabled={!canFetch}
                     onClick={handleFetch}
                     side="bottom"
@@ -679,14 +676,16 @@ function SourceControlViewContainerComponent({
                   <IconActionButton
                     label={
                       pullBusy
-                        ? "Pulling…"
+                        ? t("pull.pulling")
                         : isDiverged
-                          ? "Branch diverged; resolve in terminal"
+                          ? t("pull.diverged")
                           : !hasUpstream
-                            ? "No upstream configured"
+                            ? t("pull.noUpstream")
                             : (scm.status?.behind ?? 0) === 0
-                              ? "Already up to date"
-                              : `Pull ${scm.status?.behind ?? 0} commits (fast-forward)`
+                              ? t("pull.upToDate")
+                              : t("pull.commits", {
+                                  count: scm.status?.behind ?? 0,
+                                })
                     }
                     disabled={!canPull}
                     onClick={handlePull}
@@ -703,7 +702,7 @@ function SourceControlViewContainerComponent({
                     )}
                   </IconActionButton>
                   <IconActionButton
-                    label="Refresh source control"
+                    label={t("refresh")}
                     disabled={isRefreshing || !!scm.actionBusy}
                     onClick={handleRefresh}
                     side="bottom"
@@ -843,13 +842,7 @@ function SourceControlViewContainerComponent({
                                   )}
                                 </button>
                               </TooltipTrigger>
-                              <TooltipContent
-                                side="left"
-                                className={cn(
-                                  SOURCE_CONTROL_TOOLTIP_CLASS,
-                                  "text-[10.5px]",
-                                )}
-                              >
+                              <TooltipContent side="left">
                                 {`${scm.generateCommitMessageHint} (${generateShortcut})`}
                               </TooltipContent>
                             </Tooltip>
@@ -891,13 +884,7 @@ function SourceControlViewContainerComponent({
                                   : "Commit"}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent
-                              side="bottom"
-                              className={cn(
-                                SOURCE_CONTROL_TOOLTIP_CLASS,
-                                "text-[10.5px]",
-                              )}
-                            >
+                            <TooltipContent side="bottom">
                               {commitHint}
                             </TooltipContent>
                           </Tooltip>
@@ -915,13 +902,7 @@ function SourceControlViewContainerComponent({
                                   : "Push"}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent
-                              side="bottom"
-                              className={cn(
-                                SOURCE_CONTROL_TOOLTIP_CLASS,
-                                "max-w-64 text-[10.5px]",
-                              )}
-                            >
+                            <TooltipContent side="bottom" className="max-w-64">
                               {pushDisabledReason}
                             </TooltipContent>
                           </Tooltip>
@@ -1443,12 +1424,7 @@ function IconActionButton({
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipContent
-        side={side}
-        className={cn(SOURCE_CONTROL_TOOLTIP_CLASS, "text-[10.5px]")}
-      >
-        {label}
-      </TooltipContent>
+      <TooltipContent side={side}>{label}</TooltipContent>
     </Tooltip>
   );
 }

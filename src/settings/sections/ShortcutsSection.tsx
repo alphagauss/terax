@@ -4,6 +4,7 @@
  * 快捷键定义由 modules/shortcuts 提供，本文件只编辑用户偏好中的绑定覆盖值。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -237,25 +238,29 @@ function ShortcutRow({
 
             <div className="flex items-center gap-1">
               {isModified && (
+                <Hint content={t("shortcuts.resetToDefault")}>
+                  <Button
+                    aria-label={t("shortcuts.resetToDefault")}
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={onReset}
+                  >
+                    <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={12} />
+                  </Button>
+                </Hint>
+              )}
+              <Hint content={t("shortcuts.clearShortcut")}>
                 <Button
+                  aria-label={t("shortcuts.clearShortcut")}
                   variant="ghost"
                   size="icon-sm"
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={onReset}
-                  title={t("shortcuts.resetToDefault")}
+                  className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
+                  onClick={onClear}
                 >
-                  <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={12} />
+                  <HugeiconsIcon icon={Delete02Icon} size={12} />
                 </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
-                onClick={onClear}
-                title={t("shortcuts.clearShortcut")}
-              >
-                <HugeiconsIcon icon={Delete02Icon} size={12} />
-              </Button>
+              </Hint>
             </div>
           </>
         )}

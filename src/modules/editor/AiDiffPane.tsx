@@ -3,6 +3,7 @@
  * 页面只响应整次工具审批，不直接执行或持久化文件修改。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/controls/button";
 import type { AiDiffStatus } from "@/modules/workbench";
@@ -69,12 +70,11 @@ export function AiDiffPane({
               {t("newFile")}
             </span>
           ) : null}
-          <span
-            className="truncate font-mono text-[11px] text-muted-foreground"
-            title={path}
-          >
-            {path}
-          </span>
+          <Hint content={path}>
+            <span className="truncate font-mono text-[11px] text-muted-foreground">
+              {path}
+            </span>
+          </Hint>
           <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] tabular-nums">
             <span className="text-success">+{stats.added}</span>
             <span className="text-destructive">−{stats.removed}</span>

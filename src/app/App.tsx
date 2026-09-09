@@ -10,7 +10,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/controls/tooltip";
 import { canConsumeLaunchFiles, consumeLaunchFiles } from "@/lib/launchDir";
 import { useChannelsHost } from "@/modules/channels/useChannelsHost";
 import { flushSharedStoreWrites } from "@/lib/sharedStore";

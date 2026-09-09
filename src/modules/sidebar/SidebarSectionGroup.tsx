@@ -13,7 +13,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import {
   normalizeSidebarSectionLayout,
@@ -332,9 +332,7 @@ export function SidebarSectionAction({
           {children}
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="top" className="text-[10.5px]">
-        {label}
-      </TooltipContent>
+      <TooltipContent side="top">{label}</TooltipContent>
     </Tooltip>
   );
 }

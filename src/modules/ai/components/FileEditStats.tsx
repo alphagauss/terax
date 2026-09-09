@@ -1,4 +1,5 @@
 /** 文件编辑统计共用入口，实时数字按调用订阅，历史数据来自消息的展示投影。 */
+import { Hint } from "@/components/controls/tooltip";
 import {
   createContext,
   memo,
@@ -82,23 +83,22 @@ export function DiffStats({
 }) {
   const { t } = useTranslation("ai");
   return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums"
-      title={approximate ? t("chat.fileEdits.estimate") : undefined}
-    >
-      <RollingNumber
-        value={stats.added}
-        direction="up"
-        prefix="+"
-        animate={animate}
-      />
-      <RollingNumber
-        value={stats.removed}
-        direction="down"
-        prefix="-"
-        animate={animate}
-      />
-    </span>
+    <Hint content={approximate ? t("chat.fileEdits.estimate") : undefined}>
+      <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums">
+        <RollingNumber
+          value={stats.added}
+          direction="up"
+          prefix="+"
+          animate={animate}
+        />
+        <RollingNumber
+          value={stats.removed}
+          direction="down"
+          prefix="-"
+          animate={animate}
+        />
+      </span>
+    </Hint>
   );
 }
 

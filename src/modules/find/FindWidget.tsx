@@ -3,6 +3,7 @@
  * 单文件导航和替换状态由调用方提供，查询输入复用共享的匹配模式控件。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
@@ -255,20 +256,23 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
             className="terax-find-widget__find-field"
           />
 
-          <span
-            aria-live="polite"
-            title={
+          <Hint
+            content={
               result?.limited
                 ? t("matchLimit", { count: result.total })
                 : status
             }
-            className={cn(
-              "terax-find-widget__status max-w-20 shrink-0 truncate px-1 text-[10.5px] tabular-nums text-muted-foreground",
-              invalid && "text-destructive",
-            )}
           >
-            {status}
-          </span>
+            <span
+              aria-live="polite"
+              className={cn(
+                "terax-find-widget__status max-w-20 shrink-0 truncate px-1 text-[10.5px] tabular-nums text-muted-foreground",
+                invalid && "text-destructive",
+              )}
+            >
+              {status}
+            </span>
+          </Hint>
 
           {onPrevious ? (
             <FindControlButton

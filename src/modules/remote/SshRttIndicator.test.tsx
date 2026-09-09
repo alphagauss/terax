@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   unlisten: vi.fn(),
 }));
 
-vi.mock("@/components/ui/tooltip", () => ({
+vi.mock("@/components/controls/tooltip", () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => children,
   TooltipContent: ({ children }: { children?: ReactNode }) =>
     createElement("div", null, children),

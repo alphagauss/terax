@@ -1,4 +1,5 @@
 /** 会话正文的业务渲染入口，连接文件引用菜单与宿主导航。 */
+import { Hint } from "@/components/controls/tooltip";
 import { ChatStreamingProvider } from "@/components/ai-elements/chat-code";
 import { MarkdownCode } from "@/components/ai-elements/markdown-code";
 import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
@@ -106,32 +107,33 @@ function ChatFileLink({
       }}
     >
       <ContextMenuTrigger asChild>
-        <a
-          href={href}
-          title={reference.literalPath}
-          data-streamdown="link"
-          onAuxClick={(event) => event.preventDefault()}
-          onClick={(event) => {
-            event.preventDefault();
-            void resolve()
-              .then((file) =>
-                file.isDir
-                  ? currentWorkspaceEnv().kind === "local"
-                    ? openSystemFile(file.path)
-                    : useChatStore
-                        .getState()
-                        .live.revealWorkingDirectory(file.path)
-                  : open(file.path, file.line),
-              )
-              .catch((error) =>
-                toast.error(t("fileActions.failed"), {
-                  description: String(error),
-                }),
-              );
-          }}
-        >
-          {children}
-        </a>
+        <Hint content={reference.literalPath}>
+          <a
+            href={href}
+            data-streamdown="link"
+            onAuxClick={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.preventDefault();
+              void resolve()
+                .then((file) =>
+                  file.isDir
+                    ? currentWorkspaceEnv().kind === "local"
+                      ? openSystemFile(file.path)
+                      : useChatStore
+                          .getState()
+                          .live.revealWorkingDirectory(file.path)
+                    : open(file.path, file.line),
+                )
+                .catch((error) =>
+                  toast.error(t("fileActions.failed"), {
+                    description: String(error),
+                  }),
+                );
+            }}
+          >
+            {children}
+          </a>
+        </Hint>
       </ContextMenuTrigger>
       <ContextMenuContent>
         <FileActionItems

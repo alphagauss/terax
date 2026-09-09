@@ -3,6 +3,7 @@
  * 密集的提交元信息使用清晰的语义文字颜色，不额外降低小字号透明度。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import {
   Popover,
@@ -10,7 +11,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/controls/tooltip";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import {
@@ -579,7 +580,7 @@ export function GitHistoryPane({
   );
 
   return (
-    <TooltipProvider delayDuration={500} skipDelayDuration={200}>
+    <TooltipProvider>
       <div
         ref={rootRef}
         tabIndex={-1}
@@ -861,39 +862,39 @@ const CommitRow = memo(function CommitRow({
         )}
       </span>
       <span aria-hidden />
-      <span
-        className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground"
-        title={commit.authorEmail || commit.author}
-      >
-        <span
-          className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] font-mono text-[8.5px] font-bold uppercase tabular-nums text-background"
-          style={{
-            backgroundColor: authorTint(commit.authorEmail || commit.author),
-          }}
-        >
-          {initials}
+      <Hint content={commit.authorEmail || commit.author}>
+        <span className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground">
+          <span
+            className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] font-mono text-[8.5px] font-bold uppercase tabular-nums text-background"
+            style={{
+              backgroundColor: authorTint(commit.authorEmail || commit.author),
+            }}
+          >
+            {initials}
+          </span>
+          <span className="min-w-0 truncate">
+            {commit.author
+              ? highlight(commit.author, query)
+              : t("unknownAuthor")}
+          </span>
         </span>
-        <span className="min-w-0 truncate">
-          {commit.author ? highlight(commit.author, query) : t("unknownAuthor")}
-        </span>
-      </span>
+      </Hint>
       <span className="text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
         {date}
       </span>
       <span className="flex min-w-0 items-center justify-end gap-1.5 font-mono text-[10px] tabular-nums">
         {commit.filesChanged > 0 ? (
-          <span
-            className="inline-flex items-center gap-1 text-muted-foreground"
-            title={t("filesChanged", { count: commit.filesChanged })}
-          >
-            <HugeiconsIcon
-              icon={File02Icon}
-              size={10.5}
-              strokeWidth={1.7}
-              className="opacity-70"
-            />
-            <span className="font-medium">{commit.filesChanged}</span>
-          </span>
+          <Hint content={t("filesChanged", { count: commit.filesChanged })}>
+            <span className="inline-flex items-center gap-1 text-muted-foreground">
+              <HugeiconsIcon
+                icon={File02Icon}
+                size={10.5}
+                strokeWidth={1.7}
+                className="opacity-70"
+              />
+              <span className="font-medium">{commit.filesChanged}</span>
+            </span>
+          </Hint>
         ) : null}
         {commit.filesChanged > 0 && totalStat > 0 ? (
           <span

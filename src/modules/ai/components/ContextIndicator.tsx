@@ -75,8 +75,7 @@ export function ContextIndicator({
     <Context usedTokens={used} maxTokens={max}>
       <ContextTrigger
         className="h-6 shrink-0 gap-1 px-0 text-[10.5px]"
-        aria-label={t("miniWindow.context.usage")}
-        title={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}`}
+        aria-label={`${t("miniWindow.context.usage")}: ${approximate ? "≈" : ""}${formatTokens(used)} / ${formatTokens(max)}${approximate ? ` · ${t("miniWindow.context.estimated")}` : ""}`}
       />
       <ContextContent className="w-80 max-h-[70vh] overflow-y-auto text-[11px]">
         <ContextContentHeader />

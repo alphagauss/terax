@@ -3,6 +3,7 @@
  * 面板关闭不会影响 Rust 后台任务，全局冲突对话框仍保持挂载；任务状态只订阅独立 Zustand slice。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -136,36 +137,37 @@ function TransferStatusPanel() {
   return (
     <Popover open={panelOpen} onOpenChange={setPanelOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground",
-            failed > 0 && "text-destructive",
-          )}
-          title={t("transfers.title")}
-          aria-label={t("transfers.title")}
-        >
-          <HugeiconsIcon
-            icon={ArrowDataTransferVerticalIcon}
-            size={13}
-            strokeWidth={1.8}
-          />
-          <span>
-            {active.length > 0
-              ? showAggregateProgress
-                ? t("transfers.activeSummary", {
-                    count: active.length,
-                    progress: Math.round(progress),
-                  })
-                : t("transfers.activeCount", { count: active.length })
-              : t("transfers.label")}
-          </span>
-          {failed > 0 ? (
-            <span className="font-medium">
-              {t("transfers.failedCount", { count: failed })}
+        <Hint content={t("transfers.title")}>
+          <button
+            type="button"
+            className={cn(
+              "flex h-6 items-center gap-1 rounded-sm px-1.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground",
+              failed > 0 && "text-destructive",
+            )}
+            aria-label={t("transfers.title")}
+          >
+            <HugeiconsIcon
+              icon={ArrowDataTransferVerticalIcon}
+              size={13}
+              strokeWidth={1.8}
+            />
+            <span>
+              {active.length > 0
+                ? showAggregateProgress
+                  ? t("transfers.activeSummary", {
+                      count: active.length,
+                      progress: Math.round(progress),
+                    })
+                  : t("transfers.activeCount", { count: active.length })
+                : t("transfers.label")}
             </span>
-          ) : null}
-        </button>
+            {failed > 0 ? (
+              <span className="font-medium">
+                {t("transfers.failedCount", { count: failed })}
+              </span>
+            ) : null}
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         side="top"
@@ -188,30 +190,36 @@ function TransferStatusPanel() {
                 {Math.round(progress)}%
               </div>
             ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              title={t("transfers.clearCompleted")}
-              aria-label={t("transfers.clearCompleted")}
-              disabled={completedCount === 0 || clearing !== null}
-              onClick={() => void clearTasks("completed")}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <HugeiconsIcon icon={CleanIcon} size={13} strokeWidth={1.8} />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              title={t("transfers.clearAll")}
-              aria-label={t("transfers.clearAll")}
-              disabled={clearableCount === 0 || clearing !== null}
-              onClick={() => setConfirmClearAllOpen(true)}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={13} strokeWidth={1.8} />
-            </Button>
+            <Hint content={t("transfers.clearCompleted")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("transfers.clearCompleted")}
+                disabled={completedCount === 0 || clearing !== null}
+                onClick={() => void clearTasks("completed")}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <HugeiconsIcon icon={CleanIcon} size={13} strokeWidth={1.8} />
+              </Button>
+            </Hint>
+            <Hint content={t("transfers.clearAll")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("transfers.clearAll")}
+                disabled={clearableCount === 0 || clearing !== null}
+                onClick={() => setConfirmClearAllOpen(true)}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <HugeiconsIcon
+                  icon={Delete02Icon}
+                  size={13}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
           </div>
         </div>
         {tasks.length === 0 ? (
@@ -362,12 +370,11 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
               {taskStateLabel(task, t)}
             </span>
           </div>
-          <div
-            className="mt-0.5 truncate text-[10.5px] text-muted-foreground"
-            title={detail}
-          >
-            {detail}
-          </div>
+          <Hint content={detail}>
+            <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+              {detail}
+            </div>
+          </Hint>
           {hasPartialResult ? (
             <div className="mt-1 text-[10px] text-foreground">
               {t("transfers.partialResult", {
@@ -416,18 +423,16 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
               {fileFailures.map((failure) => (
                 <div key={failure.id} className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
-                    <div
-                      className="truncate text-[10px] text-foreground"
-                      title={failure.destinationPath}
-                    >
-                      {basename(failure.destinationPath)}
-                    </div>
-                    <div
-                      className="line-clamp-2 text-[9.5px] leading-3.5 text-muted-foreground"
-                      title={failure.failure.detail}
-                    >
-                      {formatTransferFailure(failure.failure, t)}
-                    </div>
+                    <Hint content={failure.destinationPath}>
+                      <div className="truncate text-[10px] text-foreground">
+                        {basename(failure.destinationPath)}
+                      </div>
+                    </Hint>
+                    <Hint content={failure.failure.detail}>
+                      <div className="line-clamp-2 text-[9.5px] leading-3.5 text-muted-foreground">
+                        {formatTransferFailure(failure.failure, t)}
+                      </div>
+                    </Hint>
                   </div>
                   <div className="flex shrink-0 gap-0.5">
                     <TaskButton
@@ -461,23 +466,22 @@ export function TransferTaskRow({ task }: { task: TransferTask }) {
             <Progress value={progress} className="mt-2 h-1" />
           ) : null}
           <div className="mt-1.5 flex min-h-5 items-center justify-between gap-2">
-            <div
-              className="min-w-0 truncate text-[10px] tabular-nums text-muted-foreground"
-              title={task.failure?.detail}
-            >
-              {failureMessage
-                ? t("transfers.failureDetail", { error: failureMessage })
-                : task.totalBytes > 0
-                  ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
-                  : t("transfers.filesProgress", {
-                      completed: task.completedFiles,
-                      total: task.totalFiles,
-                      count: task.totalFiles,
-                    })}
-              {active && task.speedBytesPerSecond > 0
-                ? ` · ${formatBytes(task.speedBytesPerSecond)}/s`
-                : ""}
-            </div>
+            <Hint content={task.failure?.detail}>
+              <div className="min-w-0 truncate text-[10px] tabular-nums text-muted-foreground">
+                {failureMessage
+                  ? t("transfers.failureDetail", { error: failureMessage })
+                  : task.totalBytes > 0
+                    ? `${formatBytes(task.transferredBytes)} / ${formatBytes(task.totalBytes)}`
+                    : t("transfers.filesProgress", {
+                        completed: task.completedFiles,
+                        total: task.totalFiles,
+                        count: task.totalFiles,
+                      })}
+                {active && task.speedBytesPerSecond > 0
+                  ? ` · ${formatBytes(task.speedBytesPerSecond)}/s`
+                  : ""}
+              </div>
+            </Hint>
             <div className="flex shrink-0 items-center gap-0.5">
               {task.status === "paused" ? (
                 <TaskButton
@@ -579,17 +583,17 @@ export function TransferConflictDialog({
             <div className="text-muted-foreground">
               {t("transfers.conflict.source")}
             </div>
-            <div className="break-all" title={conflict.sourcePath}>
-              {conflict.sourcePath}
-            </div>
+            <Hint content={conflict.sourcePath}>
+              <div className="break-all">{conflict.sourcePath}</div>
+            </Hint>
           </div>
           <div>
             <div className="text-muted-foreground">
               {t("transfers.conflict.destination")}
             </div>
-            <div className="break-all" title={conflict.destinationPath}>
-              {conflict.destinationPath}
-            </div>
+            <Hint content={conflict.destinationPath}>
+              <div className="break-all">{conflict.destinationPath}</div>
+            </Hint>
           </div>
         </div>
         {conflict.allowApplyToRemaining ? (
@@ -672,18 +676,19 @@ function TaskButton({
   disabled?: boolean;
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      title={label}
-      aria-label={label}
-      onClick={onClick}
-      disabled={disabled}
-      className="text-muted-foreground"
-    >
-      <HugeiconsIcon icon={icon} size={11} strokeWidth={1.9} />
-    </Button>
+    <Hint content={label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label={label}
+        onClick={onClick}
+        disabled={disabled}
+        className="text-muted-foreground"
+      >
+        <HugeiconsIcon icon={icon} size={11} strokeWidth={1.9} />
+      </Button>
+    </Hint>
   );
 }
 

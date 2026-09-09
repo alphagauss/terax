@@ -3,6 +3,7 @@
  * 快照严格绑定连接 epoch；自动探测不阻塞 Workspace，用户可以显式重新检测当前连接。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   Popover,
   PopoverContent,
@@ -106,16 +107,17 @@ export function SshCapabilityControl() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className="flex h-6 w-5 items-center justify-center rounded-sm hover:bg-accent"
-          title={t("sshCapabilities.aria", { state: label })}
-          aria-label={t("sshCapabilities.aria", { state: label })}
-        >
-          <span
-            className={cn("size-2 rounded-full", lampClass[current.state])}
-          />
-        </button>
+        <Hint content={t("sshCapabilities.aria", { state: label })}>
+          <button
+            type="button"
+            className="flex h-6 w-5 items-center justify-center rounded-sm hover:bg-accent"
+            aria-label={t("sshCapabilities.aria", { state: label })}
+          >
+            <span
+              className={cn("size-2 rounded-full", lampClass[current.state])}
+            />
+          </button>
+        </Hint>
       </PopoverTrigger>
       <PopoverContent
         side="top"

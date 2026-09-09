@@ -26,7 +26,7 @@ export function SelectTrigger({
   className,
   size = "default",
   ...props
-}: ComponentProps<typeof BaseTrigger>) {
+}: Omit<ComponentProps<typeof BaseTrigger>, "title">) {
   return (
     <BaseTrigger
       size={size}

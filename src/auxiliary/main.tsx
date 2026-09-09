@@ -4,6 +4,7 @@
  */
 
 import "@/lib/developmentPerformance";
+import { TooltipProvider } from "@/components/controls/tooltip";
 import {
   AuxiliaryWindowErrorBoundary,
   AuxiliaryWindowUnavailablePage,
@@ -57,11 +58,13 @@ async function mountAuxiliaryWindow(): Promise<void> {
     document.getElementById("auxiliary-root") as HTMLElement,
   ).render(
     <ThemeProvider>
-      <AuxiliaryWindowProvider capabilities={capabilities}>
-        <AuxiliaryWindowErrorBoundary>
-          {Page ? <Page /> : <AuxiliaryWindowUnavailablePage />}
-        </AuxiliaryWindowErrorBoundary>
-      </AuxiliaryWindowProvider>
+      <TooltipProvider>
+        <AuxiliaryWindowProvider capabilities={capabilities}>
+          <AuxiliaryWindowErrorBoundary>
+            {Page ? <Page /> : <AuxiliaryWindowUnavailablePage />}
+          </AuxiliaryWindowErrorBoundary>
+        </AuxiliaryWindowProvider>
+      </TooltipProvider>
     </ThemeProvider>,
   );
 }

@@ -3,6 +3,7 @@
  * 负责命令块操作、AI 入口及相关下拉菜单，不持有终端会话生命周期。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -210,15 +211,21 @@ function Toolbar({ block, all, onSearch }: ChromeProps) {
       )}
       {duration && <span className="bt-dur">{duration}</span>}
       {!block.running && !!block.command && (
-        <button
-          type="button"
-          title={t("block.runAgain")}
-          className="bt-btn"
-          disabled={!all.promptReady}
-          onClick={() => all.onRunAgain(block.command)}
-        >
-          <HugeiconsIcon icon={Refresh01Icon} size={12.5} strokeWidth={1.75} />
-        </button>
+        <Hint content={t("block.runAgain")}>
+          <button
+            aria-label={t("block.runAgain")}
+            type="button"
+            className="bt-btn"
+            disabled={!all.promptReady}
+            onClick={() => all.onRunAgain(block.command)}
+          >
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              size={12.5}
+              strokeWidth={1.75}
+            />
+          </button>
+        </Hint>
       )}
       <BlockMenu block={block} all={all} onSearch={onSearch} />
     </div>
@@ -236,13 +243,19 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" title={t("block.actions")} className="bt-btn">
-          <HugeiconsIcon
-            icon={MoreHorizontalIcon}
-            size={14}
-            strokeWidth={1.75}
-          />
-        </button>
+        <Hint content={t("block.actions")}>
+          <button
+            aria-label={t("block.actions")}
+            type="button"
+            className="bt-btn"
+          >
+            <HugeiconsIcon
+              icon={MoreHorizontalIcon}
+              size={14}
+              strokeWidth={1.75}
+            />
+          </button>
+        </Hint>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
@@ -403,8 +416,15 @@ function SearchBtn({
   onClick: () => void;
 }) {
   return (
-    <button type="button" title={title} onClick={onClick} className="bt-btn">
-      <HugeiconsIcon icon={icon} size={13} strokeWidth={1.75} />
-    </button>
+    <Hint content={title}>
+      <button
+        aria-label={title}
+        type="button"
+        onClick={onClick}
+        className="bt-btn"
+      >
+        <HugeiconsIcon icon={icon} size={13} strokeWidth={1.75} />
+      </button>
+    </Hint>
   );
 }

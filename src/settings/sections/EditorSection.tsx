@@ -3,6 +3,7 @@
  * 仅负责将偏好状态绑定到界面，所有用户可见的固定文案均由翻译资源提供。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Input } from "@/components/controls/input";
 import { Button } from "@/components/controls/button";
 import {
@@ -309,18 +310,20 @@ function FormatterOverrides() {
             value={formatter}
             onChange={(v) => update({ ...byLang, [lang]: v })}
           />
-          <button
-            type="button"
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title={t("editor.saving.languageOverrides.remove")}
-            onClick={() => {
-              const next = { ...byLang };
-              delete next[lang];
-              update(next);
-            }}
-          >
-            <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
-          </button>
+          <Hint content={t("editor.saving.languageOverrides.remove")}>
+            <button
+              aria-label={t("editor.saving.languageOverrides.remove")}
+              type="button"
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                const next = { ...byLang };
+                delete next[lang];
+                update(next);
+              }}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={2} />
+            </button>
+          </Hint>
         </div>
       ))}
     </>

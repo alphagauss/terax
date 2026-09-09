@@ -7,7 +7,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -87,7 +87,7 @@ export function SshRttIndicator() {
           <span>{value} ms</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-64 text-[11px]">
+      <TooltipContent side="top" className="max-w-64">
         <div>{tooltip}</div>
       </TooltipContent>
     </Tooltip>

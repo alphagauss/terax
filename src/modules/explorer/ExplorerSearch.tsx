@@ -3,6 +3,7 @@
  * 负责结果分组、打开操作和与文件树一致的上下文菜单。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import { Input } from "@/components/controls/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -253,42 +254,47 @@ export const ExplorerSearch = forwardRef<ExplorerSearchHandle, Props>(
                   return (
                     <ContextMenu key={hit.path}>
                       <ContextMenuTrigger asChild>
-                        <button
-                          type="button"
-                          data-index={index}
-                          onClick={() => handleSelect(hit)}
-                          onMouseEnter={() => {
-                            if (Date.now() - lastKeyboardNavAt.current > 250) {
-                              setSelectedIndex(index);
-                            }
-                          }}
-                          className={cn(
-                            "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors",
-                            isSelected
-                              ? "bg-interactive-active text-foreground"
-                              : "text-foreground hover:bg-interactive-hover",
-                          )}
-                          title={hit.path}
-                        >
-                          {url ? (
-                            <img
-                              src={url}
-                              alt=""
-                              className="size-3.5 shrink-0"
-                            />
-                          ) : (
-                            <HugeiconsIcon
-                              icon={Folder01Icon}
-                              size={13}
-                              strokeWidth={1.75}
-                              className="shrink-0 text-muted-foreground"
-                            />
-                          )}
-                          <span className="truncate">{hit.name}</span>
-                          <span className="ml-auto truncate text-[10px] text-muted-foreground">
-                            {hit.rel}
-                          </span>
-                        </button>
+                        <Hint content={hit.path}>
+                          <button
+                            aria-label={hit.path}
+                            type="button"
+                            data-index={index}
+                            onClick={() => handleSelect(hit)}
+                            onMouseEnter={() => {
+                              if (
+                                Date.now() - lastKeyboardNavAt.current >
+                                250
+                              ) {
+                                setSelectedIndex(index);
+                              }
+                            }}
+                            className={cn(
+                              "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors",
+                              isSelected
+                                ? "bg-interactive-active text-foreground"
+                                : "text-foreground hover:bg-interactive-hover",
+                            )}
+                          >
+                            {url ? (
+                              <img
+                                src={url}
+                                alt=""
+                                className="size-3.5 shrink-0"
+                              />
+                            ) : (
+                              <HugeiconsIcon
+                                icon={Folder01Icon}
+                                size={13}
+                                strokeWidth={1.75}
+                                className="shrink-0 text-muted-foreground"
+                              />
+                            )}
+                            <span className="truncate">{hit.name}</span>
+                            <span className="ml-auto truncate text-[10px] text-muted-foreground">
+                              {hit.rel}
+                            </span>
+                          </button>
+                        </Hint>
                       </ContextMenuTrigger>
                       <ContextMenuContent>
                         <FileActionItems

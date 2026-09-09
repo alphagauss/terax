@@ -116,7 +116,9 @@
                   "@/components/ui/textarea": "业务代码统一从 @/components/controls/textarea 导入。",
                   "@/components/ui/select": "业务代码统一从 @/components/controls/select 导入。",
                   "@/components/ui/dialog": "业务对话框统一从 @/components/controls/dialog 导入。",
-                  "@/components/ui/alert-dialog": "业务对话框统一从 @/components/controls/alert-dialog 导入。"
+                  "@/components/ui/alert-dialog": "业务对话框统一从 @/components/controls/alert-dialog 导入。",
+                  "@/components/ui/tooltip": "悬停提示统一从 @/components/controls/tooltip 导入。",
+                  "@/components/ui/hover-card": "悬停详情统一使用 @/components/controls/tooltip。"
                 }
               }
             }

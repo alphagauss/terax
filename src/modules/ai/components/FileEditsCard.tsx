@@ -1,12 +1,12 @@
-/** 轮末净改动卡片。悬浮一秒才挂载快照 Diff，点击交给 Workbench 打开整轮。 */
+/** 轮末净改动卡片。统一悬停提示打开后才挂载快照 Diff，点击交给 Workbench 打开整轮。 */
 import { summarizeFileEdits } from "@/modules/ai/lib/fileEditDiff";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/controls/tooltip";
 import { DiffStats } from "@/modules/ai/components/FileEditStats";
 import type { FileEditFile, TurnFileEdits } from "@/modules/ai/lib/fileEdits";
 import { useChatStore } from "@/modules/ai/store/chatStore";
@@ -76,13 +76,8 @@ export function FileEditsCard({
 function FileRow({ file, onOpen }: { file: FileEditFile; onOpen: () => void }) {
   const [open, setOpen] = useState(false);
   return (
-    <HoverCard
-      openDelay={1000}
-      closeDelay={150}
-      open={open}
-      onOpenChange={setOpen}
-    >
-      <HoverCardTrigger asChild>
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onOpen}
@@ -91,19 +86,19 @@ function FileRow({ file, onOpen }: { file: FileEditFile; onOpen: () => void }) {
           <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
           <DiffStats stats={file} />
         </button>
-      </HoverCardTrigger>
-      <HoverCardContent
+      </TooltipTrigger>
+      <TooltipContent
         side="top"
         align="start"
-        className="w-[min(640px,calc(100vw-24px))] overflow-hidden rounded-md p-0"
+        className="w-[min(640px,calc(100vw-24px))] max-w-none overflow-hidden p-0"
       >
         <div className="flex items-center gap-3 border-b border-border/50 px-3 py-2 text-xs">
           <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
           <DiffStats stats={file} />
         </div>
         {open && <FileDiffSegments file={file} preview />}
-      </HoverCardContent>
-    </HoverCard>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

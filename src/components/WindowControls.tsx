@@ -3,6 +3,7 @@
  * 同步最大化与全屏状态，并确保指针焦点不会跨窗口形态残留。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
@@ -131,24 +132,25 @@ function CtlButton({
   danger?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      onClick={(event) => {
-        onClick();
-        // 鼠标或触控点击不应把焦点外观带入随后的全屏状态；键盘触发的
-        // click.detail 为 0，继续保留焦点以维持键盘导航可见性。
-        if (event.detail > 0) event.currentTarget.blur();
-      }}
-      className={cn(
-        "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors",
-        danger
-          ? "hover:bg-destructive/15 hover:text-destructive"
-          : "hover:bg-accent hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
+    <Hint content={ariaLabel}>
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={(event) => {
+          onClick();
+          // 鼠标或触控点击不应把焦点外观带入随后的全屏状态；键盘触发的
+          // click.detail 为 0，继续保留焦点以维持键盘导航可见性。
+          if (event.detail > 0) event.currentTarget.blur();
+        }}
+        className={cn(
+          "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors",
+          danger
+            ? "hover:bg-destructive/15 hover:text-destructive"
+            : "hover:bg-accent hover:text-foreground",
+        )}
+      >
+        {children}
+      </button>
+    </Hint>
   );
 }

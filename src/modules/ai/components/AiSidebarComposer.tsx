@@ -3,6 +3,7 @@
  * 负责输入、上下文标签、模型筛选和发送控制。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -186,25 +187,26 @@ export function AiSidebarComposer() {
               <span className="size-2.5 rounded-[2px] bg-current" />
             </IconBtn>
           ) : null}
-          <Button
-            type="button"
-            size="icon-sm"
-            onClick={stopping ? c.stop : c.submit}
-            disabled={c.readOnly || (!c.isBusy && !c.canSend)}
-            className={cn(
-              "rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
-              guiding &&
-                "bg-primary text-primary-foreground hover:bg-primary/85",
-            )}
-            aria-label={submitLabel}
-            title={submitLabel}
-          >
-            {stopping ? (
-              <span className="size-2.5 rounded-[2px] bg-current" />
-            ) : (
-              <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />
-            )}
-          </Button>
+          <Hint content={submitLabel}>
+            <Button
+              type="button"
+              size="icon-sm"
+              onClick={stopping ? c.stop : c.submit}
+              disabled={c.readOnly || (!c.isBusy && !c.canSend)}
+              className={cn(
+                "rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85",
+                guiding &&
+                  "bg-primary text-primary-foreground hover:bg-primary/85",
+              )}
+              aria-label={submitLabel}
+            >
+              {stopping ? (
+                <span className="size-2.5 rounded-[2px] bg-current" />
+              ) : (
+                <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />
+              )}
+            </Button>
+          </Hint>
         </div>
 
         {c.workingDirectory ? (
@@ -221,14 +223,15 @@ export function AiSidebarComposer() {
               {workingDirectoryContent}
             </button>
           ) : (
-            <div
-              className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground"
-              title={t("composer.workingDirectory", {
+            <Hint
+              content={t("composer.workingDirectory", {
                 path: c.workingDirectory,
               })}
             >
-              {workingDirectoryContent}
-            </div>
+              <div className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+                {workingDirectoryContent}
+              </div>
+            </Hint>
           )
         ) : null}
       </div>
@@ -256,31 +259,32 @@ function PermissionModeDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          disabled={readOnly}
-          variant="ghost"
-          size="sm"
-          className={cn(
-            "my-1 shrink-0 hover:bg-accent",
-            mode === "full-access"
-              ? "text-amber-600! dark:text-amber-400!"
-              : "text-foreground!",
-          )}
-          title={t(`statusBar.permissionMode.${mode}`)}
-          aria-label={t(`statusBar.permissionMode.${mode}`)}
-        >
-          <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
-          <span className="terax-ai-permission-label">
-            {t(`statusBar.permissionMode.${mode}`)}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="terax-ai-permission-chevron"
-          />
-        </Button>
+        <Hint content={t(`statusBar.permissionMode.${mode}`)}>
+          <Button
+            type="button"
+            disabled={readOnly}
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "my-1 shrink-0 hover:bg-accent",
+              mode === "full-access"
+                ? "text-amber-600! dark:text-amber-400!"
+                : "text-foreground!",
+            )}
+            aria-label={t(`statusBar.permissionMode.${mode}`)}
+          >
+            <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
+            <span className="terax-ai-permission-label">
+              {t(`statusBar.permissionMode.${mode}`)}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={11}
+              strokeWidth={2}
+              className="terax-ai-permission-chevron"
+            />
+          </Button>
+        </Hint>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {PERMISSION_MODES.map((item) => (
@@ -460,21 +464,8 @@ function ModelDropdown() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={
-            readOnly ||
-            (!current &&
-              !currentExternal &&
-              availableExternalAgents.length === 0)
-          }
-          className={cn(
-            "my-1 min-w-0 shrink hover:bg-accent hover:text-foreground",
-            "text-muted-foreground",
-          )}
-          title={
+        <Hint
+          content={
             currentExternal || current
               ? t("statusBar.modelTitle", {
                   label: currentExternal?.label ?? current?.label,
@@ -482,18 +473,41 @@ function ModelDropdown() {
               : t("statusBar.noModels")
           }
         >
-          <span className="truncate">
-            {currentExternal?.label ??
-              current?.label ??
-              t("statusBar.noModels")}
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="opacity-70"
-          />
-        </Button>
+          <Button
+            aria-label={
+              currentExternal || current
+                ? t("statusBar.modelTitle", {
+                    label: currentExternal?.label ?? current?.label,
+                  })
+                : t("statusBar.noModels")
+            }
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={
+              readOnly ||
+              (!current &&
+                !currentExternal &&
+                availableExternalAgents.length === 0)
+            }
+            className={cn(
+              "my-1 min-w-0 shrink hover:bg-accent hover:text-foreground",
+              "text-muted-foreground",
+            )}
+          >
+            <span className="truncate">
+              {currentExternal?.label ??
+                current?.label ??
+                t("statusBar.noModels")}
+            </span>
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={11}
+              strokeWidth={2}
+              className="opacity-70"
+            />
+          </Button>
+        </Hint>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent
@@ -716,25 +730,27 @@ function ProviderPill({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      className={cn(
-        "relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors",
-        active
-          ? "bg-interactive-active text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
-          : muted
-            ? "text-muted-foreground/50 hover:bg-interactive-hover hover:text-foreground"
-            : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
-      )}
-    >
-      {provider ? (
-        <ProviderIcon provider={provider} size={16} />
-      ) : icon ? (
-        <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
-      ) : null}
-    </button>
+    <Hint content={title}>
+      <button
+        aria-label={title}
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "relative mx-auto flex size-8 items-center justify-center rounded-md transition-colors",
+          active
+            ? "bg-interactive-active text-foreground after:absolute after:right-0 after:top-1.5 after:bottom-1.5 after:w-[2px] after:rounded-full after:bg-primary after:content-['']"
+            : muted
+              ? "text-muted-foreground/50 hover:bg-interactive-hover hover:text-foreground"
+              : "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
+        )}
+      >
+        {provider ? (
+          <ProviderIcon provider={provider} size={16} />
+        ) : icon ? (
+          <HugeiconsIcon icon={icon} size={16} strokeWidth={1.5} />
+        ) : null}
+      </button>
+    </Hint>
   );
 }
 
@@ -776,28 +792,34 @@ function ModelRow({
         selected ? "bg-interactive-active text-foreground" : "text-foreground",
       )}
     >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onToggleFavorite();
-        }}
-        title={favorite ? t("statusBar.unfavorite") : t("statusBar.favorite")}
-        className={cn(
-          "shrink-0 rounded p-0.5 transition-colors",
-          favorite
-            ? "text-amber-500"
-            : "text-muted-foreground/40 hover:text-amber-500",
-        )}
+      <Hint
+        content={favorite ? t("statusBar.unfavorite") : t("statusBar.favorite")}
       >
-        <HugeiconsIcon
-          icon={StarIcon}
-          size={12}
-          strokeWidth={favorite ? 2 : 1.75}
-          className={favorite ? "fill-amber-500" : ""}
-        />
-      </button>
+        <button
+          aria-label={
+            favorite ? t("statusBar.unfavorite") : t("statusBar.favorite")
+          }
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          className={cn(
+            "shrink-0 rounded p-0.5 transition-colors",
+            favorite
+              ? "text-amber-500"
+              : "text-muted-foreground/40 hover:text-amber-500",
+          )}
+        >
+          <HugeiconsIcon
+            icon={StarIcon}
+            size={12}
+            strokeWidth={favorite ? 2 : 1.75}
+            className={favorite ? "fill-amber-500" : ""}
+          />
+        </button>
+      </Hint>
 
       {showProviderIcon ? (
         <ProviderIcon
@@ -837,16 +859,18 @@ function IconBtn({
   children: React.ReactNode;
 }) {
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      title={title}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn("text-muted-foreground hover:text-foreground", className)}
-    >
-      {children}
-    </Button>
+    <Hint content={title}>
+      <Button
+        aria-label={title}
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        onClick={onClick}
+        disabled={disabled}
+        className={cn("text-muted-foreground hover:text-foreground", className)}
+      >
+        {children}
+      </Button>
+    </Hint>
   );
 }

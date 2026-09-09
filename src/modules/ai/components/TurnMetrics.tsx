@@ -8,8 +8,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-  TooltipProvider,
-} from "@/components/ui/tooltip";
+} from "@/components/controls/tooltip";
 import { summarizePerformance } from "@/modules/ai/lib/usage";
 import {
   OutputToolDetails,
@@ -26,25 +25,19 @@ export function TurnMetrics({
   const { t } = useTranslation("ai");
   const [open, setOpen] = useState(false);
   return (
-    <TooltipProvider>
-      <Tooltip open={open} onOpenChange={setOpen}>
-        <TooltipTrigger asChild>
-          <MessageAction
-            label={t("chat.metrics.title")}
-            className="size-5 text-muted-foreground hover:text-foreground"
-          >
-            <HugeiconsIcon
-              icon={MoreVerticalIcon}
-              size={12}
-              strokeWidth={1.75}
-            />
-          </MessageAction>
-        </TooltipTrigger>
-        <TooltipContent side="top" align="start">
-          {open && <TurnMetricsContent sessionId={sessionId} turnId={turnId} />}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <MessageAction
+          label={t("chat.metrics.title")}
+          className="size-5 text-muted-foreground hover:text-foreground"
+        >
+          <HugeiconsIcon icon={MoreVerticalIcon} size={12} strokeWidth={1.75} />
+        </MessageAction>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start">
+        {open && <TurnMetricsContent sessionId={sessionId} turnId={turnId} />}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

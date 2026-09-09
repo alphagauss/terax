@@ -3,6 +3,7 @@
  * 分组只用于管理和导航；隧道仍由主 SSH Workspace 管理并随配置保存。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { FormField } from "@/components/layout/FormField";
 import {
   Select,
@@ -499,33 +500,39 @@ export function RemoteSection() {
                 <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
                 {t("remote.actions.new")}
               </Button>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  setGroupEditor({ id: null, name: "" });
-                  setGroupEditorError(null);
-                }}
-                title={t("remote.groups.actions.new")}
-                aria-label={t("remote.groups.actions.new")}
-              >
-                <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() => void importProfiles()}
-                title={t("remote.actions.import")}
-                aria-label={t("remote.actions.import")}
-              >
-                <HugeiconsIcon
-                  icon={Download01Icon}
-                  size={13}
-                  strokeWidth={2}
-                />
-              </Button>
+              <Hint content={t("remote.groups.actions.new")}>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    setGroupEditor({ id: null, name: "" });
+                    setGroupEditorError(null);
+                  }}
+                  aria-label={t("remote.groups.actions.new")}
+                >
+                  <HugeiconsIcon
+                    icon={FolderAddIcon}
+                    size={13}
+                    strokeWidth={2}
+                  />
+                </Button>
+              </Hint>
+              <Hint content={t("remote.actions.import")}>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void importProfiles()}
+                  aria-label={t("remote.actions.import")}
+                >
+                  <HugeiconsIcon
+                    icon={Download01Icon}
+                    size={13}
+                    strokeWidth={2}
+                  />
+                </Button>
+              </Hint>
             </>
           }
         >
@@ -557,22 +564,23 @@ export function RemoteSection() {
                   </button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        disabled={busy}
-                        title={t("remote.groups.actions.menu", { name })}
-                        aria-label={t("remote.groups.actions.menu", {
-                          name,
-                        })}
-                      >
-                        <HugeiconsIcon
-                          icon={MoreHorizontalIcon}
-                          size={12}
-                          strokeWidth={2}
-                        />
-                      </Button>
+                      <Hint content={t("remote.groups.actions.menu", { name })}>
+                        <Button
+                          type="button"
+                          size="icon-xs"
+                          variant="ghost"
+                          disabled={busy}
+                          aria-label={t("remote.groups.actions.menu", {
+                            name,
+                          })}
+                        >
+                          <HugeiconsIcon
+                            icon={MoreHorizontalIcon}
+                            size={12}
+                            strokeWidth={2}
+                          />
+                        </Button>
+                      </Hint>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="min-w-44 p-1">
                       <DropdownMenuItem

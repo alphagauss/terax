@@ -22,7 +22,7 @@ export function Button({
   className,
   size = "default",
   ...props
-}: Omit<ComponentProps<typeof BaseButton>, "size"> & {
+}: Omit<ComponentProps<typeof BaseButton>, "size" | "title"> & {
   size?: keyof typeof sizes;
 }) {
   return (

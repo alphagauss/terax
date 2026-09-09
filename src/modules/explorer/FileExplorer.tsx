@@ -4,6 +4,7 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import {
   ContextMenu,
@@ -1020,118 +1021,130 @@ export const FileExplorer = memo(
               onContextMenuCapture={prepareContextMenu}
             >
               <div className="flex h-8 shrink-0 items-center border-b border-border/60 px-2">
-                <button
-                  type="button"
-                  data-explorer-context="root"
-                  className="flex h-6 min-w-0 flex-1 cursor-pointer items-center truncate rounded-sm text-left text-xs font-medium text-foreground transition-colors duration-control hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  title={rootPath}
-                  onClick={scrollTreeToTop}
-                  onKeyDown={(event) => {
-                    if (event.key === "Home") {
-                      event.preventDefault();
-                      scrollTreeToTop();
-                    }
-                  }}
-                >
-                  <img
-                    src={folderIconUrl(basename(rootPath), false)}
-                    alt=""
-                    height={15}
-                    width={15}
-                    className="mx-1.5"
-                  />
-                  <span className="truncate">{basename(rootPath)}</span>
-                </button>
+                <Hint content={rootPath}>
+                  <button
+                    aria-label={rootPath}
+                    type="button"
+                    data-explorer-context="root"
+                    className="flex h-6 min-w-0 flex-1 cursor-pointer items-center truncate rounded-sm text-left text-xs font-medium text-foreground transition-colors duration-control hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    onClick={scrollTreeToTop}
+                    onKeyDown={(event) => {
+                      if (event.key === "Home") {
+                        event.preventDefault();
+                        scrollTreeToTop();
+                      }
+                    }}
+                  >
+                    <img
+                      src={folderIconUrl(basename(rootPath), false)}
+                      alt=""
+                      height={15}
+                      width={15}
+                      className="mx-1.5"
+                    />
+                    <span className="truncate">{basename(rootPath)}</span>
+                  </button>
+                </Hint>
 
                 <div className="ml-0.5 flex shrink-0 items-center gap-0">
                   {onOpenFolder ? (
+                    <Hint content={t("openFolder")}>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        className="text-muted-foreground hover:text-foreground"
+                        onClick={onOpenFolder}
+                        aria-label={t("openFolder")}
+                      >
+                        <HugeiconsIcon
+                          icon={FolderOpenIcon}
+                          size={13}
+                          strokeWidth={2}
+                        />
+                      </Button>
+                    </Hint>
+                  ) : null}
+
+                  <Hint content={t("searchFiles")}>
                     <Button
                       variant="ghost"
                       size="icon-xs"
                       className="text-muted-foreground hover:text-foreground"
-                      onClick={onOpenFolder}
-                      title={t("openFolder")}
-                      aria-label={t("openFolder")}
+                      onClick={() => setIsSearchOpen((v) => !v)}
+                      aria-label={t("searchFiles")}
                     >
                       <HugeiconsIcon
-                        icon={FolderOpenIcon}
+                        icon={Search01Icon}
                         size={13}
                         strokeWidth={2}
                       />
                     </Button>
-                  ) : null}
+                  </Hint>
 
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsSearchOpen((v) => !v)}
-                    title={t("searchFiles")}
-                    aria-label={t("searchFiles")}
-                  >
-                    <HugeiconsIcon
-                      icon={Search01Icon}
-                      size={13}
-                      strokeWidth={2}
-                    />
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() =>
-                      tree.beginCreate(toolbarCreateParent, "file")
-                    }
-                    title={t("newFile")}
-                  >
-                    <HugeiconsIcon
-                      icon={FileAddIcon}
-                      size={13}
-                      strokeWidth={2}
-                    />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => tree.beginCreate(toolbarCreateParent, "dir")}
-                    title={t("newFolder")}
-                  >
-                    <HugeiconsIcon
-                      icon={FolderAddIcon}
-                      size={13}
-                      strokeWidth={2}
-                    />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => tree.refresh(rootPath)}
-                    title="Refresh"
-                    aria-label="Refresh"
-                  >
-                    <HugeiconsIcon
-                      icon={Refresh01Icon}
-                      size={12}
-                      strokeWidth={2}
-                    />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={tree.collapseAll}
-                    title="Collapse All"
-                    aria-label="Collapse All"
-                  >
-                    <HugeiconsIcon
-                      icon={ListChevronsDownUpIcon}
-                      size={13}
-                      strokeWidth={2}
-                    />
-                  </Button>
+                  <Hint content={t("newFile")}>
+                    <Button
+                      aria-label={t("newFile")}
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        tree.beginCreate(toolbarCreateParent, "file")
+                      }
+                    >
+                      <HugeiconsIcon
+                        icon={FileAddIcon}
+                        size={13}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  </Hint>
+                  <Hint content={t("newFolder")}>
+                    <Button
+                      aria-label={t("newFolder")}
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() =>
+                        tree.beginCreate(toolbarCreateParent, "dir")
+                      }
+                    >
+                      <HugeiconsIcon
+                        icon={FolderAddIcon}
+                        size={13}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  </Hint>
+                  <Hint content={t("menu.refresh")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => tree.refresh(rootPath)}
+                      aria-label={t("menu.refresh")}
+                    >
+                      <HugeiconsIcon
+                        icon={Refresh01Icon}
+                        size={12}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  </Hint>
+                  <Hint content={t("workspaceSearch:collapseAll")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={tree.collapseAll}
+                      aria-label={t("workspaceSearch:collapseAll")}
+                    >
+                      <HugeiconsIcon
+                        icon={ListChevronsDownUpIcon}
+                        size={13}
+                        strokeWidth={2}
+                      />
+                    </Button>
+                  </Hint>
                 </div>
               </div>
 
