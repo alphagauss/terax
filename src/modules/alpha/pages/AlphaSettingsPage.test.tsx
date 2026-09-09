@@ -157,9 +157,23 @@ describe("AlphaSettingsPage", () => {
     expect(container.textContent).toContain("service.startedAtTitle");
     expect(container.textContent).toContain("service.runtimeRevisionTitle");
     expect(container.textContent).toContain("release:0123456789ab");
-    expect(
-      container.querySelector('[title="release:0123456789abcdef"]'),
-    ).not.toBeNull();
+    expect(container.querySelector("[title]")).toBeNull();
+    const revision = [...container.querySelectorAll("span")].find(
+      (element) => element.textContent === "release:0123456789ab",
+    );
+    expect(revision).toBeDefined();
+    act(() =>
+      revision?.dispatchEvent(
+        new PointerEvent("pointermove", {
+          bubbles: true,
+          pointerType: "mouse",
+        }),
+      ),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(800));
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
+      "release:0123456789abcdef",
+    );
     act(() => root.unmount());
   });
 

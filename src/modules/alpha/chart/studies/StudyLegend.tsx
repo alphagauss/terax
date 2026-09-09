@@ -3,6 +3,7 @@
  * Legend 只消费统一十字线快照或最新值，不订阅图表也不执行计算。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import type { ChartStudyLegendValues } from "@/modules/alpha/chart/controller/FinancialChartController";
 import type { ChartStudyInstance } from "@/modules/alpha/chart/studies/model";
@@ -62,108 +63,127 @@ export function StudyLegend({
           data-alpha-study-instance={instance.instanceId}
           data-visible={instance.visible}
         >
-          <button
-            type="button"
-            className="max-w-36 truncate font-medium hover:underline"
-            style={{
-              color: Object.values(instance.styles)[0]?.color ?? "currentColor",
-              opacity: instance.visible ? 1 : 0.55,
-            }}
-            title={t("data.chart.studies.actions.edit")}
-            onClick={() => onEdit(instance.instanceId)}
-          >
-            {t(`data.chart.studies.types.${instance.type}`)}(
-            {Object.values(instance.params).join(",")})
-          </button>
+          <Hint content={t("data.chart.studies.actions.edit")}>
+            <button
+              aria-label={t("data.chart.studies.actions.edit")}
+              type="button"
+              className="max-w-36 truncate font-medium hover:underline"
+              style={{
+                color:
+                  Object.values(instance.styles)[0]?.color ?? "currentColor",
+                opacity: instance.visible ? 1 : 0.55,
+              }}
+              onClick={() => onEdit(instance.instanceId)}
+            >
+              {t(`data.chart.studies.types.${instance.type}`)}(
+              {Object.values(instance.params).join(",")})
+            </button>
+          </Hint>
           {instance.visible
             ? Object.entries(values[instance.instanceId] ?? {}).map(
                 ([outputId, value]) => (
-                  <span
-                    key={outputId}
-                    style={{ color: instance.styles[outputId]?.color }}
-                    title={t(
+                  <Hint
+                    content={t(
                       `data.chart.studies.outputs.${instance.type}.${outputId}`,
                     )}
+                    key={outputId}
                   >
-                    {value === null ? "-" : number.format(value)}
-                  </span>
+                    <span style={{ color: instance.styles[outputId]?.color }}>
+                      {value === null ? "-" : number.format(value)}
+                    </span>
+                  </Hint>
                 ),
               )
             : null}
           <div className="flex items-center">
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              title={t(
+            <Hint
+              content={t(
                 instance.visible
                   ? "data.chart.studies.actions.hide"
                   : "data.chart.studies.actions.show",
               )}
-              aria-label={t(
-                instance.visible
-                  ? "data.chart.studies.actions.hide"
-                  : "data.chart.studies.actions.show",
-              )}
-              onClick={() => onToggle(instance.instanceId)}
             >
-              <HugeiconsIcon
-                icon={instance.visible ? ViewIcon : ViewOffIcon}
-                size={11}
-                strokeWidth={1.8}
-              />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              title={t("data.chart.studies.actions.edit")}
-              aria-label={t("data.chart.studies.actions.edit")}
-              onClick={() => onEdit(instance.instanceId)}
-            >
-              <HugeiconsIcon
-                icon={Settings02Icon}
-                size={11}
-                strokeWidth={1.8}
-              />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              disabled={index === 0}
-              title={t("data.chart.studies.actions.moveUp")}
-              aria-label={t("data.chart.studies.actions.moveUp")}
-              onClick={() => onMove(instance.instanceId, -1)}
-            >
-              <HugeiconsIcon icon={ArrowUp01Icon} size={11} strokeWidth={1.8} />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              disabled={index === instances.length - 1}
-              title={t("data.chart.studies.actions.moveDown")}
-              aria-label={t("data.chart.studies.actions.moveDown")}
-              onClick={() => onMove(instance.instanceId, 1)}
-            >
-              <HugeiconsIcon
-                icon={ArrowDown01Icon}
-                size={11}
-                strokeWidth={1.8}
-              />
-            </Button>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              className="text-destructive"
-              title={t("data.chart.studies.actions.remove")}
-              aria-label={t("data.chart.studies.actions.remove")}
-              onClick={() => onRemove(instance.instanceId)}
-            >
-              <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.8} />
-            </Button>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={t(
+                  instance.visible
+                    ? "data.chart.studies.actions.hide"
+                    : "data.chart.studies.actions.show",
+                )}
+                onClick={() => onToggle(instance.instanceId)}
+              >
+                <HugeiconsIcon
+                  icon={instance.visible ? ViewIcon : ViewOffIcon}
+                  size={11}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
+            <Hint content={t("data.chart.studies.actions.edit")}>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={t("data.chart.studies.actions.edit")}
+                onClick={() => onEdit(instance.instanceId)}
+              >
+                <HugeiconsIcon
+                  icon={Settings02Icon}
+                  size={11}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
+            <Hint content={t("data.chart.studies.actions.moveUp")}>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                disabled={index === 0}
+                aria-label={t("data.chart.studies.actions.moveUp")}
+                onClick={() => onMove(instance.instanceId, -1)}
+              >
+                <HugeiconsIcon
+                  icon={ArrowUp01Icon}
+                  size={11}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
+            <Hint content={t("data.chart.studies.actions.moveDown")}>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                disabled={index === instances.length - 1}
+                aria-label={t("data.chart.studies.actions.moveDown")}
+                onClick={() => onMove(instance.instanceId, 1)}
+              >
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  size={11}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
+            <Hint content={t("data.chart.studies.actions.remove")}>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className="text-destructive"
+                aria-label={t("data.chart.studies.actions.remove")}
+                onClick={() => onRemove(instance.instanceId)}
+              >
+                <HugeiconsIcon
+                  icon={Delete02Icon}
+                  size={11}
+                  strokeWidth={1.8}
+                />
+              </Button>
+            </Hint>
           </div>
         </div>
       ))}

@@ -3,6 +3,7 @@
  * 仅统一指标、区块标题和局部状态样式，不包含查询或领域逻辑。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { SectionHeading } from "@/components/layout/PageHeader";
 import type { ReactNode } from "react";
@@ -18,9 +19,9 @@ export function AlphaMetric({
   return (
     <div className="rounded-lg border border-border/60 bg-card p-3">
       <div className="text-[11px] leading-4 text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold" title={value}>
-        {value}
-      </div>
+      <Hint content={value}>
+        <div className="mt-1 truncate text-sm font-semibold">{value}</div>
+      </Hint>
     </div>
   );
 }

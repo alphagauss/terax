@@ -3,6 +3,7 @@
  * Legend 只消费统一十字线快照或最新值，不订阅图表，也不触发行情查询。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import type {
   ChartComparisonLegendValues,
@@ -59,18 +60,19 @@ export function ComparisonLegend({
     >
       {mainSymbol ? (
         <div className="flex min-w-0 items-center gap-1.5 text-chart-1">
-          <span
-            className="max-w-36 truncate font-medium"
-            title={
+          <Hint
+            content={
               mainName && mainName !== mainSymbol
                 ? `${mainName} ${mainSymbol}`
                 : mainSymbol
             }
           >
-            {mainName && mainName !== mainSymbol
-              ? `${mainName} ${mainSymbol}`
-              : mainSymbol}
-          </span>
+            <span className="max-w-36 truncate font-medium">
+              {mainName && mainName !== mainSymbol
+                ? `${mainName} ${mainSymbol}`
+                : mainSymbol}
+            </span>
+          </Hint>
           <span>{formatValue(values[mainSymbol])}</span>
         </div>
       ) : null}
@@ -81,17 +83,19 @@ export function ComparisonLegend({
           data-alpha-comparison={comparison.vtSymbol}
           data-status={comparison.status}
         >
-          <button
-            type="button"
-            className="max-w-36 truncate font-medium hover:underline"
-            style={{ color: comparison.color }}
-            title={`${comparison.name} ${comparison.vtSymbol}`}
-            onClick={onManage}
-          >
-            {comparison.name === comparison.vtSymbol
-              ? comparison.vtSymbol
-              : `${comparison.name} ${comparison.vtSymbol}`}
-          </button>
+          <Hint content={`${comparison.name} ${comparison.vtSymbol}`}>
+            <button
+              aria-label={`${comparison.name} ${comparison.vtSymbol}`}
+              type="button"
+              className="max-w-36 truncate font-medium hover:underline"
+              style={{ color: comparison.color }}
+              onClick={onManage}
+            >
+              {comparison.name === comparison.vtSymbol
+                ? comparison.vtSymbol
+                : `${comparison.name} ${comparison.vtSymbol}`}
+            </button>
+          </Hint>
           <span style={{ color: comparison.color }}>
             {comparison.status === "ready"
               ? formatValue(values[comparison.vtSymbol])
@@ -103,38 +107,45 @@ export function ComparisonLegend({
             </span>
           ) : null}
           {comparison.status === "error" ? (
+            <Hint content={t("data.chart.comparisons.actions.retry")}>
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                aria-label={t("data.chart.comparisons.actions.retry")}
+                onClick={() => onRetry(comparison.vtSymbol)}
+              >
+                <HugeiconsIcon icon={RefreshIcon} size={11} strokeWidth={1.8} />
+              </Button>
+            </Hint>
+          ) : null}
+          <Hint content={t("data.chart.comparisons.actions.manage")}>
             <Button
               type="button"
               size="icon-xs"
               variant="ghost"
-              title={t("data.chart.comparisons.actions.retry")}
-              aria-label={t("data.chart.comparisons.actions.retry")}
-              onClick={() => onRetry(comparison.vtSymbol)}
+              aria-label={t("data.chart.comparisons.actions.manage")}
+              onClick={onManage}
             >
-              <HugeiconsIcon icon={RefreshIcon} size={11} strokeWidth={1.8} />
+              <HugeiconsIcon
+                icon={Settings02Icon}
+                size={11}
+                strokeWidth={1.8}
+              />
             </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            title={t("data.chart.comparisons.actions.manage")}
-            aria-label={t("data.chart.comparisons.actions.manage")}
-            onClick={onManage}
-          >
-            <HugeiconsIcon icon={Settings02Icon} size={11} strokeWidth={1.8} />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            className="text-destructive"
-            title={t("data.chart.comparisons.actions.remove")}
-            aria-label={t("data.chart.comparisons.actions.remove")}
-            onClick={() => onRemove(comparison.vtSymbol)}
-          >
-            <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.8} />
-          </Button>
+          </Hint>
+          <Hint content={t("data.chart.comparisons.actions.remove")}>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="text-destructive"
+              aria-label={t("data.chart.comparisons.actions.remove")}
+              onClick={() => onRemove(comparison.vtSymbol)}
+            >
+              <HugeiconsIcon icon={Delete02Icon} size={11} strokeWidth={1.8} />
+            </Button>
+          </Hint>
         </div>
       ))}
     </div>

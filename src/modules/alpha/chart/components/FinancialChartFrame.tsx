@@ -3,6 +3,7 @@
  * 外壳负责受控图表选项、价格、指标与对比 legend、可选同步桥、懒加载管理入口、导出和状态反馈，不拥有查询。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   Select,
   SelectContent,
@@ -377,16 +378,17 @@ export function FinancialChartFrame({
                   if (interval) onOptionsChange({ ...options, interval });
                 }}
               >
-                <SelectTrigger
-                  size="sm"
-                  className="min-w-14 px-2"
-                  title={t("data.chart.controls.interval")}
-                  aria-label={t("data.chart.controls.interval")}
-                >
-                  <SelectValue>
-                    {t(`data.chart.intervals.${options.interval}`)}
-                  </SelectValue>
-                </SelectTrigger>
+                <Hint content={t("data.chart.controls.interval")}>
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-14 px-2"
+                    aria-label={t("data.chart.controls.interval")}
+                  >
+                    <SelectValue>
+                      {t(`data.chart.intervals.${options.interval}`)}
+                    </SelectValue>
+                  </SelectTrigger>
+                </Hint>
                 <SelectContent>
                   {availableIntervals.map((interval) => (
                     <SelectItem key={interval} value={interval}>
@@ -404,16 +406,17 @@ export function FinancialChartFrame({
                   if (adjust) onOptionsChange({ ...options, adjust });
                 }}
               >
-                <SelectTrigger
-                  size="sm"
-                  className="min-w-16 px-2"
-                  title={t("data.chart.controls.adjust")}
-                  aria-label={t("data.chart.controls.adjust")}
-                >
-                  <SelectValue>
-                    {t(`data.chart.adjustments.${options.adjust}`)}
-                  </SelectValue>
-                </SelectTrigger>
+                <Hint content={t("data.chart.controls.adjust")}>
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-16 px-2"
+                    aria-label={t("data.chart.controls.adjust")}
+                  >
+                    <SelectValue>
+                      {t(`data.chart.adjustments.${options.adjust}`)}
+                    </SelectValue>
+                  </SelectTrigger>
+                </Hint>
                 <SelectContent>
                   {MARKET_ADJUSTMENTS.map((adjust) => (
                     <SelectItem key={adjust} value={adjust}>
@@ -431,16 +434,17 @@ export function FinancialChartFrame({
                   if (chartType) onOptionsChange({ ...options, chartType });
                 }}
               >
-                <SelectTrigger
-                  size="sm"
-                  className="min-w-18 px-2"
-                  title={t("data.chart.controls.chartType")}
-                  aria-label={t("data.chart.controls.chartType")}
-                >
-                  <SelectValue>
-                    {t(`data.chart.types.${options.chartType}`)}
-                  </SelectValue>
-                </SelectTrigger>
+                <Hint content={t("data.chart.controls.chartType")}>
+                  <SelectTrigger
+                    size="sm"
+                    className="min-w-18 px-2"
+                    aria-label={t("data.chart.controls.chartType")}
+                  >
+                    <SelectValue>
+                      {t(`data.chart.types.${options.chartType}`)}
+                    </SelectValue>
+                  </SelectTrigger>
+                </Hint>
                 <SelectContent>
                   {FINANCIAL_CHART_TYPES.map((type) => (
                     <SelectItem key={type} value={type}>
@@ -449,43 +453,45 @@ export function FinancialChartFrame({
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                type="button"
-                size="sm"
-                variant={options.showVolume ? "secondary" : "ghost"}
-                title={t("data.chart.controls.volume")}
-                aria-label={t("data.chart.controls.volume")}
-                aria-pressed={options.showVolume}
-                onClick={() =>
-                  onOptionsChange({
-                    ...options,
-                    showVolume: !options.showVolume,
-                  })
-                }
-              >
-                {t("data.chart.legend.volume")}
-              </Button>
-              {onStudiesChange ? (
+              <Hint content={t("data.chart.controls.volume")}>
                 <Button
                   type="button"
                   size="sm"
-                  variant={studies.length > 0 ? "secondary" : "ghost"}
-                  className="gap-1"
-                  title={t("data.chart.studies.open")}
-                  aria-label={t("data.chart.studies.open")}
-                  onClick={() => {
-                    setEditingStudyId(null);
-                    setIndicatorDialogOpen(true);
-                  }}
+                  variant={options.showVolume ? "secondary" : "ghost"}
+                  aria-label={t("data.chart.controls.volume")}
+                  aria-pressed={options.showVolume}
+                  onClick={() =>
+                    onOptionsChange({
+                      ...options,
+                      showVolume: !options.showVolume,
+                    })
+                  }
                 >
-                  <HugeiconsIcon
-                    icon={ChartLineData01Icon}
-                    size={12}
-                    strokeWidth={1.8}
-                  />
-                  {t("data.chart.studies.label")}
-                  {studies.length > 0 ? ` ${studies.length}` : ""}
+                  {t("data.chart.legend.volume")}
                 </Button>
+              </Hint>
+              {onStudiesChange ? (
+                <Hint content={t("data.chart.studies.open")}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={studies.length > 0 ? "secondary" : "ghost"}
+                    className="gap-1"
+                    aria-label={t("data.chart.studies.open")}
+                    onClick={() => {
+                      setEditingStudyId(null);
+                      setIndicatorDialogOpen(true);
+                    }}
+                  >
+                    <HugeiconsIcon
+                      icon={ChartLineData01Icon}
+                      size={12}
+                      strokeWidth={1.8}
+                    />
+                    {t("data.chart.studies.label")}
+                    {studies.length > 0 ? ` ${studies.length}` : ""}
+                  </Button>
+                </Hint>
               ) : null}
             </>
           ) : (
@@ -501,32 +507,38 @@ export function FinancialChartFrame({
               </Button>
             ))
           )}
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            title={t("data.chart.resetView")}
-            aria-label={t("data.chart.resetView")}
-            onClick={() => chartRef.current?.resetView()}
-          >
-            <HugeiconsIcon icon={FitToScreenIcon} size={13} strokeWidth={1.8} />
-          </Button>
+          <Hint content={t("data.chart.resetView")}>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t("data.chart.resetView")}
+              onClick={() => chartRef.current?.resetView()}
+            >
+              <HugeiconsIcon
+                icon={FitToScreenIcon}
+                size={13}
+                strokeWidth={1.8}
+              />
+            </Button>
+          </Hint>
           {density === "panel" ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  title={t("data.chart.actions.menu")}
-                  aria-label={t("data.chart.actions.menu")}
-                >
-                  <HugeiconsIcon
-                    icon={MoreHorizontalIcon}
-                    size={13}
-                    strokeWidth={1.8}
-                  />
-                </Button>
+                <Hint content={t("data.chart.actions.menu")}>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("data.chart.actions.menu")}
+                  >
+                    <HugeiconsIcon
+                      icon={MoreHorizontalIcon}
+                      size={13}
+                      strokeWidth={1.8}
+                    />
+                  </Button>
+                </Hint>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
                 {onComparisonsChange ? (

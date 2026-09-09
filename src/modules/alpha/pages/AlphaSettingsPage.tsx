@@ -3,6 +3,7 @@
  * 页面管理服务状态、数据目录和解释器设置，服务控制仍通过 Rust 的幂等命令完成。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import { Switch } from "@/components/ui/switch";
 import { getAlphaSettings, updateAlphaSettings } from "@/modules/alpha/api";
@@ -252,12 +253,11 @@ function AlphaSettingsPageContent({ visible }: Props) {
             description={t("python.description")}
           >
             <div className="flex max-w-90 items-center gap-2">
-              <span
-                className="max-w-62 truncate text-[11px] text-muted-foreground"
-                title={status?.pythonPath ?? undefined}
-              >
-                {status?.pythonPath ?? t("python.unconfigured")}
-              </span>
+              <Hint content={status?.pythonPath ?? undefined}>
+                <span className="max-w-62 truncate text-[11px] text-muted-foreground">
+                  {status?.pythonPath ?? t("python.unconfigured")}
+                </span>
+              </Hint>
               <Button
                 variant="outline"
                 disabled={action !== null}
@@ -325,18 +325,19 @@ function AlphaSettingsPageContent({ visible }: Props) {
             }
           >
             <div className="flex max-w-90 items-center gap-2">
-              <span
-                className="max-w-54 truncate text-[11px] text-muted-foreground"
-                title={status?.running ? (dataDir ?? undefined) : undefined}
+              <Hint
+                content={status?.running ? (dataDir ?? undefined) : undefined}
               >
-                {!service.data && service.isPending
-                  ? t("common.loading")
-                  : status?.running
-                    ? settings.error
-                      ? t("errors.setting")
-                      : (dataDir ?? t("storage.loading"))
-                    : t("storage.unavailable")}
-              </span>
+                <span className="max-w-54 truncate text-[11px] text-muted-foreground">
+                  {!service.data && service.isPending
+                    ? t("common.loading")
+                    : status?.running
+                      ? settings.error
+                        ? t("errors.setting")
+                        : (dataDir ?? t("storage.loading"))
+                      : t("storage.unavailable")}
+                </span>
+              </Hint>
               <Button
                 variant="outline"
                 disabled={
@@ -405,14 +406,13 @@ function AlphaSettingsPageContent({ visible }: Props) {
                 title={t("service.runtimeRevisionTitle")}
                 description={t("service.runtimeRevisionDescription")}
               >
-                <span
-                  className="max-w-48 truncate font-mono text-[11px] text-muted-foreground"
-                  title={status.runtimeRevision ?? undefined}
-                >
-                  {status.runtimeRevision
-                    ? formatRuntimeRevision(status.runtimeRevision)
-                    : t("service.unknownValue")}
-                </span>
+                <Hint content={status.runtimeRevision ?? undefined}>
+                  <span className="max-w-48 truncate font-mono text-[11px] text-muted-foreground">
+                    {status.runtimeRevision
+                      ? formatRuntimeRevision(status.runtimeRevision)
+                      : t("service.unknownValue")}
+                  </span>
+                </Hint>
               </SettingRow>
             </>
           ) : null}

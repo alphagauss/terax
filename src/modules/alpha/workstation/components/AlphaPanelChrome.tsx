@@ -3,6 +3,7 @@
  * 标题栏承载拖动手柄、标的跟随或固定切换和删除操作，不接触面板业务内容。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
 import type {
   AlphaPanelInstance,
@@ -58,47 +59,58 @@ export function AlphaPanelChrome({
       </div>
 
       {descriptor?.pinnable ? (
-        <Button
-          type="button"
-          variant={followed ? "ghost" : "secondary"}
-          size="xs"
-          className="shrink-0"
-          aria-pressed={!followed}
-          title={
+        <Hint
+          content={
             followed
               ? t("workstation.panel.pinCurrent", { symbol: mainSymbol })
               : t("workstation.panel.restoreFollow")
           }
-          onClick={() =>
-            onBindingChange(
-              followed
-                ? { mode: "pinned", vtSymbol: mainSymbol }
-                : { mode: "follow" },
-            )
-          }
         >
-          <HugeiconsIcon
-            icon={followed ? Link01Icon : PinIcon}
-            size={11}
-            strokeWidth={1.8}
-          />
-          {t(
-            followed ? "workstation.panel.follow" : "workstation.panel.pinned",
-          )}
-        </Button>
+          <Button
+            aria-label={
+              followed
+                ? t("workstation.panel.pinCurrent", { symbol: mainSymbol })
+                : t("workstation.panel.restoreFollow")
+            }
+            type="button"
+            variant={followed ? "ghost" : "secondary"}
+            size="xs"
+            className="shrink-0"
+            aria-pressed={!followed}
+            onClick={() =>
+              onBindingChange(
+                followed
+                  ? { mode: "pinned", vtSymbol: mainSymbol }
+                  : { mode: "follow" },
+              )
+            }
+          >
+            <HugeiconsIcon
+              icon={followed ? Link01Icon : PinIcon}
+              size={11}
+              strokeWidth={1.8}
+            />
+            {t(
+              followed
+                ? "workstation.panel.follow"
+                : "workstation.panel.pinned",
+            )}
+          </Button>
+        </Hint>
       ) : null}
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        className="shrink-0 text-muted-foreground hover:text-destructive"
-        title={t("workstation.panel.remove")}
-        aria-label={t("workstation.panel.remove")}
-        onClick={onRemove}
-      >
-        <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.8} />
-      </Button>
+      <Hint content={t("workstation.panel.remove")}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0 text-muted-foreground hover:text-destructive"
+          aria-label={t("workstation.panel.remove")}
+          onClick={onRemove}
+        >
+          <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.8} />
+        </Button>
+      </Hint>
     </header>
   );
 }

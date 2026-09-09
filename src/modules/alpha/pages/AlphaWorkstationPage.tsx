@@ -3,6 +3,7 @@
  * 页面组合共享状态、同步开关、内置模板、24 列网格和稳定面板池，所有窗口读写同一份 Alpha 配置。
  */
 
+import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -193,53 +194,55 @@ function AlphaWorkstationPageContent({ visible }: Props) {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button
-          size="sm"
-          type="button"
-          variant={state.chartSync.rangeEnabled ? "secondary" : "outline"}
-          title={t("workstation.sync.range")}
-          aria-label={t("workstation.sync.range")}
-          aria-pressed={state.chartSync.rangeEnabled}
-          data-alpha-chart-range-sync
-          onClick={() =>
-            updateAlphaWorkstationState((current) => ({
-              ...current,
-              chartSync: {
-                ...current.chartSync,
-                rangeEnabled: !current.chartSync.rangeEnabled,
-              },
-            }))
-          }
-        >
-          <HugeiconsIcon
-            icon={ChartRelationshipIcon}
-            size={12}
-            strokeWidth={1.8}
-          />
-          {t("workstation.sync.range")}
-        </Button>
+        <Hint content={t("workstation.sync.range")}>
+          <Button
+            size="sm"
+            type="button"
+            variant={state.chartSync.rangeEnabled ? "secondary" : "outline"}
+            aria-label={t("workstation.sync.range")}
+            aria-pressed={state.chartSync.rangeEnabled}
+            data-alpha-chart-range-sync
+            onClick={() =>
+              updateAlphaWorkstationState((current) => ({
+                ...current,
+                chartSync: {
+                  ...current.chartSync,
+                  rangeEnabled: !current.chartSync.rangeEnabled,
+                },
+              }))
+            }
+          >
+            <HugeiconsIcon
+              icon={ChartRelationshipIcon}
+              size={12}
+              strokeWidth={1.8}
+            />
+            {t("workstation.sync.range")}
+          </Button>
+        </Hint>
 
-        <Button
-          size="sm"
-          type="button"
-          variant={state.chartSync.crosshairEnabled ? "secondary" : "outline"}
-          title={t("workstation.sync.crosshair")}
-          aria-label={t("workstation.sync.crosshair")}
-          aria-pressed={state.chartSync.crosshairEnabled}
-          data-alpha-chart-crosshair-sync
-          onClick={() =>
-            updateAlphaWorkstationState((current) => ({
-              ...current,
-              chartSync: {
-                ...current.chartSync,
-                crosshairEnabled: !current.chartSync.crosshairEnabled,
-              },
-            }))
-          }
-        >
-          <HugeiconsIcon icon={Cursor02Icon} size={12} strokeWidth={1.8} />
-          {t("workstation.sync.crosshair")}
-        </Button>
+        <Hint content={t("workstation.sync.crosshair")}>
+          <Button
+            size="sm"
+            type="button"
+            variant={state.chartSync.crosshairEnabled ? "secondary" : "outline"}
+            aria-label={t("workstation.sync.crosshair")}
+            aria-pressed={state.chartSync.crosshairEnabled}
+            data-alpha-chart-crosshair-sync
+            onClick={() =>
+              updateAlphaWorkstationState((current) => ({
+                ...current,
+                chartSync: {
+                  ...current.chartSync,
+                  crosshairEnabled: !current.chartSync.crosshairEnabled,
+                },
+              }))
+            }
+          >
+            <HugeiconsIcon icon={Cursor02Icon} size={12} strokeWidth={1.8} />
+            {t("workstation.sync.crosshair")}
+          </Button>
+        </Hint>
 
         <Button
           size="sm"
