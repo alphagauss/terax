@@ -3,9 +3,6 @@
   container-type: inline-size;
 }
 
-@container (max-width: 280px) {
-  .terax-ai-permission-label,
-  .terax-ai-permission-chevron {
-    display: none;
-  }
+.terax-ai-permission-label {
+  display: none;
 }
