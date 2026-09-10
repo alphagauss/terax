@@ -32,6 +32,7 @@ import {
   type ProviderModels,
   normalizeConfiguredModels,
   providerFromBuiltinId,
+  resolveProviderInstance,
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
@@ -389,7 +390,10 @@ export async function setModelParameters(
   ref: ModelRef,
   parameters: ModelParameter[],
 ): Promise<void> {
-  const error = validateModelParameters(parameters);
+  const { customProviders } = await loadPreferences();
+  const adapter = resolveProviderInstance(ref.providerId, { customProviders })
+    .runtime.adapter;
+  const error = validateModelParameters(parameters, adapter);
   if (error) throw new Error(error);
   await writePref(MODEL_PARAMETERS_PREFIX + modelRefKey(ref), parameters);
 }

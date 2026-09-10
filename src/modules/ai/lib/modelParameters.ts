@@ -65,10 +65,15 @@ const RESERVED = new Set([
 /** 返回可定位的配置错误，路径重叠会造成对象覆盖，保存前必须拒绝。 */
 export function validateModelParameters(
   parameters: readonly ModelParameter[],
+  adapter?: RuntimeAdapterId,
 ): string | null {
+  // 保存与读取使用相同的结构校验，再额外检查当前 SDK 转换后的路径。
+  if (adapter) {
+    const invalid = validateModelParameters(parameters);
+    if (invalid) return invalid;
+  }
   const ids = new Set<string>();
   const paths: string[] = [];
-  const aliases = new Set<string>();
   for (const p of parameters) {
     if (!p.id || ids.has(p.id) || !p.label.trim()) return "invalidDefinition";
     ids.add(p.id);
@@ -88,7 +93,7 @@ export function validateModelParameters(
       return "invalidStandard";
     if (p.target === "provider" && STANDARD_PARAMETER_PATHS.includes(p.path))
       return "useStandard";
-    const path = `${p.target}.${p.target === "standard" ? STANDARD_FIELDS[p.path as keyof typeof STANDARD_FIELDS] : p.path}`;
+    const path = `${p.target}.${p.target === "standard" ? STANDARD_FIELDS[p.path as keyof typeof STANDARD_FIELDS] : adapter ? providerParameterPath(p.path, adapter) : p.path}`;
     if (
       paths.some(
         (other) =>
@@ -99,12 +104,6 @@ export function validateModelParameters(
     )
       return "duplicatePath";
     paths.push(path);
-    // Responses 与 Chat Completions 的同义字段不能覆盖同一个 SDK 选项。
-    if (p.target === "provider") {
-      const alias = RESPONSE_ALIASES[p.path] ?? COMPATIBLE_ALIASES[p.path];
-      if (alias && aliases.has(alias)) return "duplicatePath";
-      if (alias) aliases.add(alias);
-    }
     if (
       !["string", "number", "boolean"].includes(p.valueType) ||
       !p.options.length
@@ -198,6 +197,38 @@ const RESPONSE_ALIASES: Record<string, string> = {
   "text.verbosity": "textVerbosity",
 };
 
+/** 按当前适配器转换路径，协议不同的字段不做全局合并。 */
+function providerParameterPath(
+  path: string,
+  adapter: RuntimeAdapterId,
+): string {
+  if (
+    adapter === "openai-compatible" ||
+    adapter === "groq" ||
+    adapter === "cerebras"
+  )
+    path = COMPATIBLE_ALIASES[path] ?? path;
+  if (adapter === "openai" || adapter === "xai")
+    path = RESPONSE_ALIASES[path] ?? COMPATIBLE_ALIASES[path] ?? path;
+  if (
+    ["openai", "xai", "groq", "cerebras"].includes(adapter) &&
+    path === "parallel_tool_calls"
+  )
+    path = "parallelToolCalls";
+  if (adapter === "anthropic" && path === "thinking.budget_tokens")
+    path = "thinking.budgetTokens";
+  if (adapter === "google")
+    path =
+      (
+        {
+          "thinking_config.thinking_budget": "thinkingConfig.thinkingBudget",
+          "thinking_config.thinking_level": "thinkingConfig.thinkingLevel",
+          "thinking_config.include_thoughts": "thinkingConfig.includeThoughts",
+        } as Record<string, string>
+      )[path] ?? path;
+  return path;
+}
+
 /** 仅转换 SDK 已定义的字段，其余扩展保留官方参数名及嵌套结构。 */
 export function buildParameterOptions(
   assignments: readonly ParameterAssignment[],
@@ -214,38 +245,20 @@ export function buildParameterOptions(
         a.value as number;
       continue;
     }
-    let path = a.path;
-    if (
-      adapter === "openai-compatible" ||
-      adapter === "groq" ||
-      adapter === "cerebras"
-    )
-      path = COMPATIBLE_ALIASES[path] ?? path;
-    if (adapter === "openai" || adapter === "xai")
-      path = RESPONSE_ALIASES[path] ?? COMPATIBLE_ALIASES[path] ?? path;
-    if (
-      ["openai", "xai", "groq", "cerebras"].includes(adapter) &&
-      path === "parallel_tool_calls"
-    )
-      path = "parallelToolCalls";
-    if (adapter === "anthropic" && path === "thinking.budget_tokens")
-      path = "thinking.budgetTokens";
-    if (adapter === "google")
-      path =
-        (
-          {
-            "thinking_config.thinking_budget": "thinkingConfig.thinkingBudget",
-            "thinking_config.thinking_level": "thinkingConfig.thinkingLevel",
-            "thinking_config.include_thoughts":
-              "thinkingConfig.includeThoughts",
-          } as Record<string, string>
-        )[path] ?? path;
+    const path = providerParameterPath(a.path, adapter);
     const parts = path.split(".");
     let node = extension;
     for (const part of parts.slice(0, -1)) {
+      if (
+        node[part] !== undefined &&
+        (node[part] === null || typeof node[part] !== "object")
+      )
+        throw new Error(`Model parameter paths overlap: ${a.path}`);
       node[part] ??= {};
       node = node[part] as Record<string, JSONValue>;
     }
+    if (node[parts[parts.length - 1]] !== undefined)
+      throw new Error(`Model parameter paths overlap: ${a.path}`);
     node[parts[parts.length - 1]] = a.value;
   }
   const namespace =

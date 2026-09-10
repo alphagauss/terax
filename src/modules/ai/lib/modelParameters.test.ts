@@ -4,6 +4,7 @@ import {
   type ModelParameter,
   parseParameterValue,
   resolveModelParameters,
+  readModelParameters,
   validateModelParameters,
 } from "./modelParameters";
 
@@ -107,12 +108,6 @@ describe("model parameters", () => {
     ).toEqual([]);
     expect(validateModelParameters([thinking])).toBeNull();
     expect(
-      validateModelParameters([
-        { ...thinking, path: "reasoning_effort" },
-        { ...thinking, id: "effort", path: "reasoning.effort" },
-      ]),
-    ).toBe("duplicatePath");
-    expect(
       validateModelParameters([thinking, { ...thinking, id: "other" }]),
     ).toBe("duplicatePath");
     expect(
@@ -132,4 +127,36 @@ describe("model parameters", () => {
       ]),
     ).toBe("invalidStandard");
   });
+});
+
+it("checks SDK aliases only for the selected adapter and preserves nested compatible fields", () => {
+  const parameters: ModelParameter[] = [
+    {
+      ...thinking,
+      path: "reasoning_effort",
+      valueType: "string",
+      options: [{ id: "on", label: "High", value: "high" }],
+    },
+    {
+      ...thinking,
+      id: "nested",
+      path: "reasoning.effort",
+      valueType: "string",
+      options: [{ id: "on", label: "Low", value: "low" }],
+    },
+  ];
+  expect(readModelParameters(parameters)).toEqual(parameters);
+  expect(validateModelParameters(parameters, "openai-compatible")).toBeNull();
+  expect(validateModelParameters(parameters, "openai")).toBe("duplicatePath");
+  const assignments = resolveModelParameters(parameters);
+  expect(
+    buildParameterOptions(assignments, "openai-compatible", "deepseek"),
+  ).toEqual({
+    providerOptions: {
+      deepseek: { reasoningEffort: "high", reasoning: { effort: "low" } },
+    },
+  });
+  expect(() => buildParameterOptions(assignments, "openai", "openai")).toThrow(
+    "paths overlap",
+  );
 });
