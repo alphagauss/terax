@@ -228,7 +228,9 @@ function CommitFileRow({
   onOpen: () => void;
 }) {
   const name = basename(file.path);
-  const dir = dirname(file.path);
+  const pathLabel = file.originalPath
+    ? `${file.originalPath} → ${file.path}`
+    : dirname(file.path);
   const iconUrl = fileIconUrl(name);
   return (
     <button
@@ -243,9 +245,9 @@ function CommitFileRow({
       )}
       <div className="flex min-w-0 flex-1 items-baseline gap-1.5 leading-none">
         <span className="truncate text-[11.5px] font-medium">{name}</span>
-        {dir ? (
+        {pathLabel ? (
           <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">
-            {dir}
+            {pathLabel}
           </span>
         ) : null}
       </div>

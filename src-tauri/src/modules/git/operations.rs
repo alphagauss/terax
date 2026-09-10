@@ -880,34 +880,17 @@ pub fn commit_files(
         &repo_root.git_path,
         ["rev-parse", "--verify", parent_spec.as_str()],
     )?;
-    let diff_tree_args = |format: &str| {
-        let mut args: Vec<OsString> = vec![
-            "diff-tree".into(),
-            "--no-commit-id".into(),
-            "-r".into(),
-            "-z".into(),
-            format.into(),
-        ];
-        if let Some(parent) = &first_parent {
-            args.push(parent.into());
-        } else {
-            args.push("--root".into());
-        }
-        args.push(sha.into());
-        args
-    };
-
     let name_status_output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        diff_tree_args("--name-status"),
+        commit_diff_tree_args("--name-status", sha, first_parent.as_deref()),
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&name_status_output, "git diff-tree failed")?;
     let numstat_output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        diff_tree_args("--numstat"),
+        commit_diff_tree_args("--numstat", sha, first_parent.as_deref()),
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&numstat_output, "git diff-tree failed")?;
@@ -915,6 +898,25 @@ pub fn commit_files(
     let mut files = parse_diff_tree_name_status(&name_status_output.stdout);
     apply_numstat(&mut files, &numstat_output.stdout);
     Ok(files)
+}
+
+/// 构造提交文件列表与统计共用的 diff-tree 参数，保证二者以相同规则识别重命名。
+fn commit_diff_tree_args(format: &str, sha: &str, parent: Option<&str>) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "diff-tree".into(),
+        "--no-commit-id".into(),
+        "-r".into(),
+        "-z".into(),
+        "--find-renames=50%".into(),
+        format.into(),
+    ];
+    if let Some(parent) = parent {
+        args.push(parent.into());
+    } else {
+        args.push("--root".into());
+    }
+    args.push(sha.into());
+    args
 }
 
 pub fn commit_file_diff(
@@ -1545,6 +1547,29 @@ mod tests {
     #[test]
     fn status_label_for_unknown_falls_back() {
         assert_eq!(status_label_for('X'), "Status X");
+    }
+
+    #[test]
+    fn commit_file_diff_args_detect_renames_for_each_output() {
+        for format in ["--name-status", "--numstat"] {
+            let args = commit_diff_tree_args(format, "abc123", Some("def456"));
+            let args: Vec<_> = args.iter().filter_map(|arg| arg.to_str()).collect();
+            assert!(args.contains(&"--find-renames=50%"));
+            assert!(args.contains(&format));
+        }
+    }
+
+    #[test]
+    fn commit_file_parser_keeps_rename_paths_and_statistics() {
+        let mut files = parse_diff_tree_name_status(b"R098\0old/path.rs\0new/path.rs\0");
+        apply_numstat(&mut files, b"3\t1\0old/path.rs\0new/path.rs\0");
+
+        assert_eq!(files.len(), 1);
+        let file = &files[0];
+        assert_eq!(file.status, "R");
+        assert_eq!(file.original_path.as_deref(), Some("old/path.rs"));
+        assert_eq!(file.path, "new/path.rs");
+        assert_eq!((file.added, file.removed), (3, 1));
     }
 
     #[test]
