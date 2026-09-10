@@ -12,8 +12,7 @@
 //      additional parents (reusing a lane that already expects them when
 //      possible — keeps history visually consistent).
 //
-// Lane colors are stable per slot index. This keeps the rail readable when
-// you load more pages, since lane indices don't shift retroactively.
+// 无引用的轨道按槽位稳定配色；分支和远端引用会将颜色传给其父提交。
 
 import type { GitLogEntry } from "@/modules/ai/lib/native";
 
@@ -32,6 +31,20 @@ export const LANE_COLORS: LaneColor[] = [
 
 export function laneColor(index: number): LaneColor {
   return LANE_COLORS[index % LANE_COLORS.length];
+}
+
+const REF_COLORS = {
+  local: "#3b82f6",
+  remote: "#8b5cf6",
+  tag: "#f59e0b",
+} as const;
+
+/** 本地分支优先于远端与标签，使 HEAD 所在分支保持最醒目的颜色。 */
+function refColor(commit: GitLogEntry): LaneColor | undefined {
+  for (const kind of ["local", "remote", "tag"] as const) {
+    if (commit.refs.some((ref) => ref.kind === kind)) return REF_COLORS[kind];
+  }
+  return undefined;
 }
 
 export type GraphEdge =
@@ -56,9 +69,11 @@ export type GraphRow = {
 export type GraphState = {
   // `lanes[i]` = SHA the next row at lane i is expected to emit (or null).
   lanes: (string | null)[];
+  // `laneColors[i]` 是该轨道下一个提交继承的颜色。
+  laneColors: (LaneColor | null)[];
 };
 
-export const EMPTY_GRAPH_STATE: GraphState = { lanes: [] };
+export const EMPTY_GRAPH_STATE: GraphState = { lanes: [], laneColors: [] };
 
 function trimTrailing(lanes: (string | null)[]): (string | null)[] {
   let end = lanes.length;
@@ -82,7 +97,12 @@ export function layoutGraph(
   previous: GraphState = EMPTY_GRAPH_STATE,
 ): { rows: GraphRow[]; state: GraphState } {
   const lanes: (string | null)[] = previous.lanes.slice();
+  const laneColors: (LaneColor | null)[] = previous.laneColors.slice();
   const rows: GraphRow[] = [];
+
+  while (laneColors.length < lanes.length) laneColors.push(null);
+  const colorAt = (lane: number): LaneColor =>
+    laneColors[lane] ?? laneColor(lane);
 
   for (const commit of commits) {
     // Lanes currently expecting this commit.
@@ -96,10 +116,16 @@ export function layoutGraph(
       lane = claiming[0];
     } else {
       lane = firstFreeSlot(lanes);
-      if (lane === lanes.length) lanes.push(null);
+      if (lane === lanes.length) {
+        lanes.push(null);
+        laneColors.push(null);
+      }
     }
 
     const lanesBefore = lanes.slice();
+    const colorsBefore = laneColors.slice();
+    const inheritedColor = colorsBefore[lane] ?? laneColor(lane);
+    const nodeColor = refColor(commit) ?? inheritedColor;
     const topEdges: GraphEdge[] = [];
 
     // Passthrough lanes (top half): every lane that had a value and is not
@@ -113,14 +139,18 @@ export function layoutGraph(
           kind: "merge",
           fromLane: i,
           toLane: lane,
-          color: laneColor(i),
+          color: colorsBefore[i] ?? laneColor(i),
         });
       } else if (i === lane && v === commit.sha) {
         // Vertical into node, same lane.
-        topEdges.push({ kind: "straight", lane: i, color: laneColor(i) });
+        topEdges.push({ kind: "straight", lane: i, color: inheritedColor });
       } else {
         // Unrelated lane passing through.
-        topEdges.push({ kind: "straight", lane: i, color: laneColor(i) });
+        topEdges.push({
+          kind: "straight",
+          lane: i,
+          color: colorsBefore[i] ?? laneColor(i),
+        });
       }
     }
 
@@ -128,10 +158,14 @@ export function layoutGraph(
     // visually (no incoming top edge for this lane).
 
     // Collapse all claiming lanes (they're consumed by this row).
-    for (const idx of claiming) lanes[idx] = null;
+    for (const idx of claiming) {
+      lanes[idx] = null;
+      laneColors[idx] = null;
+    }
     if (claiming.length === 0) {
       // Reserve the freshly allocated lane temporarily.
       lanes[lane] = null;
+      laneColors[lane] = null;
     }
 
     // Place parents.
@@ -140,6 +174,7 @@ export function layoutGraph(
     if (parents.length > 0) {
       // First parent stays in commit's lane.
       lanes[lane] = parents[0];
+      laneColors[lane] = nodeColor;
 
       // Additional parents → reuse existing lane or allocate new.
       for (let p = 1; p < parents.length; p++) {
@@ -147,15 +182,19 @@ export function layoutGraph(
         let parentLane = lanes.indexOf(parentSha);
         if (parentLane === -1) {
           parentLane = firstFreeSlot(lanes);
-          if (parentLane === lanes.length) lanes.push(null);
+          if (parentLane === lanes.length) {
+            lanes.push(null);
+            laneColors.push(null);
+          }
           lanes[parentLane] = parentSha;
+          laneColors[parentLane] = laneColor(parentLane);
         }
         if (parentLane !== lane) {
           bottomEdges.push({
             kind: "branch",
             fromLane: lane,
             toLane: parentLane,
-            color: laneColor(parentLane),
+            color: laneColors[parentLane] ?? laneColor(parentLane),
           });
         }
       }
@@ -173,12 +212,13 @@ export function layoutGraph(
       if (v === null) continue;
       if (branchTargets.has(i)) continue;
       // First parent extension on commit's own lane, or unrelated passthrough.
-      bottomEdges.push({ kind: "straight", lane: i, color: laneColor(i) });
+      bottomEdges.push({ kind: "straight", lane: i, color: colorAt(i) });
     }
 
     const trimmed = trimTrailing(lanes);
     if (trimmed.length !== lanes.length) {
       lanes.length = trimmed.length;
+      laneColors.length = trimmed.length;
     }
 
     const widestLane = Math.max(
@@ -190,12 +230,12 @@ export function layoutGraph(
     rows.push({
       sha: commit.sha,
       lane,
-      nodeColor: laneColor(lane),
+      nodeColor,
       laneCount: widestLane,
       topEdges,
       bottomEdges,
     });
   }
 
-  return { rows, state: { lanes: lanes.slice() } };
+  return { rows, state: { lanes: lanes.slice(), laneColors: laneColors.slice() } };
 }

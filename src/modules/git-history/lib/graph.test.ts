@@ -3,7 +3,7 @@ import type { GitLogEntry } from "@/modules/ai/lib/native";
 import { LANE_COLORS, laneColor, layoutGraph } from "./graph";
 
 function commit(sha: string, parents: string[]): GitLogEntry {
-  return { sha, parents } as unknown as GitLogEntry;
+  return { sha, parents, refs: [] } as unknown as GitLogEntry;
 }
 
 describe("laneColor", () => {
@@ -42,6 +42,59 @@ describe("layoutGraph", () => {
     for (const row of rows) {
       expect(row.nodeColor).toBe(laneColor(row.lane));
     }
+  });
+
+  it("inherits a remote reference color through its ancestor lane", () => {
+    const remote = "#8b5cf6";
+    const { rows } = layoutGraph([
+      {
+        ...commit("C", ["B"]),
+        refs: [{ label: "origin/main", kind: "remote" }],
+      },
+      commit("B", ["A"]),
+      commit("A", []),
+    ]);
+
+    expect(rows.map((row) => row.nodeColor)).toEqual([remote, remote, remote]);
+    expect(rows[0]?.bottomEdges).toContainEqual({
+      kind: "straight",
+      lane: 0,
+      color: remote,
+    });
+  });
+
+  it("uses the local branch color when a commit has local and remote refs", () => {
+    const { rows } = layoutGraph([
+      {
+        ...commit("C", ["B"]),
+        refs: [
+          { label: "main", kind: "local" },
+          { label: "origin/main", kind: "remote" },
+        ],
+      },
+      commit("B", []),
+    ]);
+
+    expect(rows.map((row) => row.nodeColor)).toEqual(["#3b82f6", "#3b82f6"]);
+  });
+
+  it("keeps a merge's secondary-parent edge aligned with its target lane", () => {
+    const { rows } = layoutGraph([
+      {
+        ...commit("D", ["C", "B"]),
+        refs: [{ label: "origin/main", kind: "remote" }],
+      },
+      commit("C", ["A"]),
+      commit("B", ["A"]),
+      commit("A", []),
+    ]);
+
+    expect(rows[0]?.bottomEdges).toContainEqual({
+      kind: "branch",
+      fromLane: 0,
+      toLane: 1,
+      color: laneColor(1),
+    });
   });
 
   it("assigns a second lane to a diverging branch", () => {
