@@ -29,6 +29,12 @@ import {
 } from "@/modules/git-history/CommitDetail";
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
+import {
+  CloudIcon,
+  GitBranchIcon,
+  Tag01Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   memo,
@@ -94,10 +100,6 @@ function relativeTime(timestampSecs: number): string {
   if (delta < 86400 * 30) return `${Math.floor(delta / 86400)}d`;
   if (delta < 86400 * 365) return `${Math.floor(delta / (86400 * 30))}mo`;
   return `${Math.floor(delta / (86400 * 365))}y`;
-}
-
-function refLabel(value: string): string {
-  return value.replace(/^HEAD -> /, "").replace(/^tag: /, "");
 }
 
 function withFilesEntry(
@@ -393,7 +395,7 @@ export const GraphSection = memo(function GraphSection({
               const commit = commits[virtualRow.index];
               const graphRow = commit ? graphBySha.get(commit.sha) : null;
               if (!commit || !graphRow) return null;
-              const refs = commit.refs.map(refLabel).slice(0, 2);
+              const refs = commit.refs.slice(0, 2);
               return (
                 <Hint
                   content={`${commit.shortSha} ${commit.subject}`}
@@ -422,13 +424,8 @@ export const GraphSection = memo(function GraphSection({
                     <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
                       {commit.subject || "(no subject)"}
                     </span>
-                    {refs.map((value) => (
-                      <span
-                        key={value}
-                        className="ml-1 max-w-20 shrink-0 truncate rounded border border-primary/25 bg-primary/10 px-1 py-px text-[9px] font-medium text-primary"
-                      >
-                        {value}
-                      </span>
+                    {refs.map((ref) => (
+                      <GitRefBadge key={`${ref.kind}:${ref.label}`} ref={ref} />
                     ))}
                     <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
                       {relativeTime(commit.timestampSecs)}
@@ -560,6 +557,49 @@ export const GraphSection = memo(function GraphSection({
     </div>
   );
 });
+
+/** 将提交引用按 Git 类别渲染，避免本地与远端跟踪分支混为同一种标签。 */
+function GitRefBadge({
+  ref,
+}: {
+  ref: GitLogEntry["refs"][number];
+}) {
+  const appearance =
+    ref.kind === "remote"
+      ? {
+          icon: CloudIcon,
+          className:
+            "border-violet-500 bg-violet-500 text-white dark:text-black",
+        }
+      : ref.kind === "tag"
+        ? {
+            icon: Tag01Icon,
+            className: "border-amber-600 bg-amber-600 text-white dark:text-black",
+          }
+        : {
+            icon: GitBranchIcon,
+            className: "border-blue-500 bg-blue-500 text-white dark:text-black",
+          };
+
+  return (
+    <Hint content={ref.label}>
+      <span
+        className={cn(
+          "ml-1 inline-flex h-5 max-w-28 shrink-0 items-center gap-1 truncate rounded border px-1.5 text-[11px] font-medium",
+          appearance.className,
+        )}
+      >
+        <HugeiconsIcon
+          icon={appearance.icon}
+          size={13}
+          strokeWidth={1.8}
+          className="shrink-0"
+        />
+        <span className="truncate">{ref.label}</span>
+      </span>
+    </Hint>
+  );
+}
 
 function GraphPlaceholder({ children }: { children: ReactNode }) {
   return (

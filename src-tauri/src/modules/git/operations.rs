@@ -2,7 +2,7 @@
 //!
 //! 所有路径先经过工作区授权和仓库内校验，再交给本地、WSL 或 SSH Git 进程。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
@@ -13,14 +13,14 @@ use crate::modules::git::process::{
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
-    DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitDiffSide, GitLogEntry, GitOutput, GitPanelSnapshot,
-    GitPushResult, GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource,
-    DEFAULT_TIMEOUT_SECS, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
+    DEFAULT_TIMEOUT_SECS, DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange,
+    GitCommitResult, GitDiffContentResult, GitDiffResult, GitDiffSide, GitLogEntry, GitLogRef,
+    GitLogRefKind, GitOutput, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo,
+    GitStatusSnapshot, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS, TextSource,
 };
 use crate::modules::git::utils::{
-    authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
-    ResolvedGitDirectory,
+    ResolvedGitDirectory, authorized_repo_root, canonical_dir, is_safe_pathspec,
+    resolve_within_repo, split_upstream,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -658,6 +658,11 @@ pub fn log(
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
     let bounded = limit.clamp(1, MAX_LOG_LIMIT);
+    let remote_names: HashSet<String> =
+        git_stdout_lines(&repo_root.workspace, &repo_root.git_path, ["remote"])?
+            .into_iter()
+            .filter(|name| !name.is_empty())
+            .collect();
     let count_arg = format!("--max-count={bounded}");
     let format_arg = format!("--format={LOG_FORMAT}");
     let cursor = match before_sha {
@@ -727,14 +732,7 @@ pub fn log(
                 .split_ascii_whitespace()
                 .map(|s| s.to_string())
                 .collect();
-            let refs = fields
-                .next()
-                .unwrap_or("")
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-                .collect();
+            let refs = parse_log_refs(fields.next().unwrap_or(""), &remote_names);
             let subject = fields.next().unwrap_or("").to_string();
             let short_sha = sha.chars().take(7).collect::<String>();
             entries.push(GitLogEntry {
@@ -762,6 +760,45 @@ pub fn log(
         }
     }
     Ok(entries)
+}
+
+/// 将 `git log --decorate` 的文本装饰转换为可供界面稳定着色的引用类别。
+fn parse_log_refs(decorations: &str, remote_names: &HashSet<String>) -> Vec<GitLogRef> {
+    decorations
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| {
+            if let Some(label) = value.strip_prefix("HEAD -> ") {
+                return Some(GitLogRef {
+                    label: label.to_string(),
+                    kind: GitLogRefKind::Local,
+                });
+            }
+            if let Some(label) = value.strip_prefix("tag: ") {
+                return Some(GitLogRef {
+                    label: label.to_string(),
+                    kind: GitLogRefKind::Tag,
+                });
+            }
+
+            let source = value.split_once(" -> ").map_or(value, |(source, _)| source);
+            let remote_name = source.split_once('/').map(|(name, _)| name);
+            if remote_name.is_some_and(|name| remote_names.contains(name))
+                && source.ends_with("/HEAD")
+            {
+                return None;
+            }
+            Some(GitLogRef {
+                label: source.to_string(),
+                kind: if remote_name.is_some_and(|name| remote_names.contains(name)) {
+                    GitLogRefKind::Remote
+                } else {
+                    GitLogRefKind::Local
+                },
+            })
+        })
+        .collect()
 }
 
 pub fn show_commit_diff(
@@ -1533,6 +1570,32 @@ mod tests {
     #[test]
     fn parse_shortstat_returns_zeros_when_absent() {
         assert_eq!(parse_shortstat("no stat here"), (0, 0, 0));
+    }
+
+    #[test]
+    fn parse_log_refs_keeps_branches_and_tags_but_skips_remote_head() {
+        let remote_names = HashSet::from(["origin".to_string(), "fork".to_string()]);
+
+        assert_eq!(
+            parse_log_refs(
+                "HEAD -> main, origin/main, fork/HEAD -> fork/main, tag: v1.0.0",
+                &remote_names,
+            ),
+            vec![
+                GitLogRef {
+                    label: "main".to_string(),
+                    kind: GitLogRefKind::Local,
+                },
+                GitLogRef {
+                    label: "origin/main".to_string(),
+                    kind: GitLogRefKind::Remote,
+                },
+                GitLogRef {
+                    label: "v1.0.0".to_string(),
+                    kind: GitLogRefKind::Tag,
+                },
+            ],
+        );
     }
 
     #[test]

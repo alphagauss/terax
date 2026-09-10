@@ -222,11 +222,18 @@ export type GitLogEntry = {
   authorEmail: string;
   timestampSecs: number;
   parents: string[];
-  refs: string[];
+  refs: GitLogRef[];
   subject: string;
   filesChanged: number;
   insertions: number;
   deletions: number;
+};
+
+export type GitLogRefKind = "local" | "remote" | "tag";
+
+export type GitLogRef = {
+  label: string;
+  kind: GitLogRefKind;
 };
 
 export type GitCommitFileChange = {

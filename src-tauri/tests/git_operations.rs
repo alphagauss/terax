@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{git_available, GitRepoFixture};
+use common::{GitRepoFixture, git_available};
 use tempfile::TempDir;
 use terax_lib::modules::fs::to_canon;
 use terax_lib::modules::git::errors::GitError;
@@ -265,7 +265,12 @@ fn stage_then_commit_produces_log_entry() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sha, commit.commit_sha);
     assert_eq!(entries[0].subject, "add a");
-    assert!(entries[0].refs.iter().any(|value| value.contains("main")));
+    assert!(
+        entries[0]
+            .refs
+            .iter()
+            .any(|reference| reference.label.contains("main"))
+    );
 
     let snap = operations::status(&fx.registry, &fx.repo_str(), &fx.workspace).unwrap();
     assert_eq!(snap.head_sha.as_deref(), Some(commit.commit_sha.as_str()));

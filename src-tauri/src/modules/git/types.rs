@@ -131,11 +131,27 @@ pub struct GitLogEntry {
     pub author_email: String,
     pub timestamp_secs: i64,
     pub parents: Vec<String>,
-    pub refs: Vec<String>,
+    pub refs: Vec<GitLogRef>,
     pub subject: String,
     pub files_changed: u32,
     pub insertions: u32,
     pub deletions: u32,
+}
+
+/// 提交装饰引用，保留本地、远端和标签的类别供界面区分展示。
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum GitLogRefKind {
+    Local,
+    Remote,
+    Tag,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLogRef {
+    pub label: String,
+    pub kind: GitLogRefKind,
 }
 
 #[derive(Serialize)]
