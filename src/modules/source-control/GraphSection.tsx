@@ -396,6 +396,7 @@ export const GraphSection = memo(function GraphSection({
               const graphRow = commit ? graphBySha.get(commit.sha) : null;
               if (!commit || !graphRow) return null;
               const refs = commit.refs.slice(0, 2);
+              const hasLocalRef = refs.some((ref) => ref.kind === "local");
               return (
                 <Hint
                   content={`${commit.shortSha} ${commit.subject}`}
@@ -425,7 +426,11 @@ export const GraphSection = memo(function GraphSection({
                       {commit.subject || "(no subject)"}
                     </span>
                     {refs.map((ref) => (
-                      <GitRefBadge key={`${ref.kind}:${ref.label}`} ref={ref} />
+                      <GitRefBadge
+                        key={`${ref.kind}:${ref.label}`}
+                        ref={ref}
+                        iconOnly={hasLocalRef && ref.kind === "remote"}
+                      />
                     ))}
                     <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
                       {relativeTime(commit.timestampSecs)}
@@ -561,8 +566,10 @@ export const GraphSection = memo(function GraphSection({
 /** 将提交引用按 Git 类别渲染，避免本地与远端跟踪分支混为同一种标签。 */
 function GitRefBadge({
   ref,
+  iconOnly = false,
 }: {
   ref: GitLogEntry["refs"][number];
+  iconOnly?: boolean;
 }) {
   const appearance =
     ref.kind === "remote"
@@ -595,7 +602,11 @@ function GitRefBadge({
           strokeWidth={1.8}
           className="shrink-0"
         />
-        <span className="truncate">{ref.label}</span>
+        {iconOnly ? (
+          <span className="sr-only">{ref.label}</span>
+        ) : (
+          <span className="truncate">{ref.label}</span>
+        )}
       </span>
     </Hint>
   );
