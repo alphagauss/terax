@@ -175,6 +175,7 @@ export function AiSidebarComposer() {
             </IconBtn>
           ) : null}
 
+          <PermissionModeDropdown />
           <ModelDropdown />
           <span className="min-w-1 flex-1" />
 
@@ -215,7 +216,7 @@ export function AiSidebarComposer() {
               type="button"
               disabled={c.revealingWorkingDirectory}
               onClick={c.revealWorkingDirectory}
-              className="flex min-w-0 items-center gap-1.5 rounded px-1 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
+              className="-mt-2 flex min-w-0 items-center gap-1.5 rounded px-1 text-left text-[11px] leading-3 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none"
               aria-label={t("composer.workingDirectory", {
                 path: c.workingDirectory,
               })}
@@ -223,15 +224,9 @@ export function AiSidebarComposer() {
               {workingDirectoryContent}
             </button>
           ) : (
-            <Hint
-              content={t("composer.workingDirectory", {
-                path: c.workingDirectory,
-              })}
-            >
-              <div className="flex min-w-0 items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-                {workingDirectoryContent}
-              </div>
-            </Hint>
+            <div className="-mt-2 flex min-w-0 items-center gap-1.5 px-1 text-[11px] leading-3 text-muted-foreground">
+              {workingDirectoryContent}
+            </div>
           )
         ) : null}
       </div>
@@ -268,8 +263,8 @@ function PermissionModeDropdown() {
             className={cn(
               "my-1 shrink-0 hover:bg-accent",
               mode === "full-access"
-                ? "text-amber-600! dark:text-amber-400!"
-                : "text-foreground!",
+                ? "text-amber-600! hover:text-amber-700! dark:text-amber-400! dark:hover:text-amber-300!"
+                : "text-muted-foreground hover:text-foreground",
             )}
             aria-label={t(`statusBar.permissionMode.${mode}`)}
           >
@@ -277,12 +272,6 @@ function PermissionModeDropdown() {
             <span className="terax-ai-permission-label">
               {t(`statusBar.permissionMode.${mode}`)}
             </span>
-            <HugeiconsIcon
-              icon={ArrowDown01Icon}
-              size={11}
-              strokeWidth={2}
-              className="terax-ai-permission-chevron"
-            />
           </Button>
         </Hint>
       </DropdownMenuTrigger>
@@ -674,7 +663,6 @@ function ModelDropdown() {
           </div>
         </div>
       </DropdownMenuContent>
-      <PermissionModeDropdown />
     </DropdownMenu>
   );
 }
@@ -864,7 +852,7 @@ function IconBtn({
         aria-label={title}
         type="button"
         variant="ghost"
-        size="icon-xs"
+        size="icon-sm"
         onClick={onClick}
         disabled={disabled}
         className={cn("text-muted-foreground hover:text-foreground", className)}

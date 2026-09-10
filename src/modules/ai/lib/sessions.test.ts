@@ -72,9 +72,9 @@ describe("session working directory", () => {
     ).toBe("/workspace/saved");
   });
 
-  it("only enables navigation for persisted sessions in the current environment", () => {
+  it("enables navigation for the current draft and persisted sessions in the current environment", () => {
     const persisted = meta("saved", 1);
-    expect(canRevealSessionCwd("draft", "draft", [], "local")).toBe(false);
+    expect(canRevealSessionCwd("draft", "draft", [], "local")).toBe(true);
     expect(
       canRevealSessionCwd(
         "saved",

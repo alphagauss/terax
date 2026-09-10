@@ -80,14 +80,15 @@ export function resolveSessionCwd(
   return sessionId === draftSessionId ? explorerRoot : null;
 }
 
-/** 判断活动会话是否为当前环境中已持久化、可导航到固定 cwd 的会话。 */
+/** 判断活动会话是否可导航到当前环境中的工作目录。 */
 export function canRevealSessionCwd(
   sessionId: string | null,
   draftSessionId: string | null,
   sessions: readonly SessionMeta[],
   environmentKey: string,
 ): boolean {
-  if (!sessionId || sessionId === draftSessionId) return false;
+  if (!sessionId) return false;
+  if (sessionId === draftSessionId) return true;
   return sessions.some(
     (session) =>
       session.id === sessionId && session.environmentKey === environmentKey,
