@@ -73,7 +73,7 @@ describe("EntryRow Git decorations", () => {
     act(() => root.unmount());
   });
 
-  it.each(["M", "U"] as const)(
+  it.each(["A", "M", "D", "R", "U"] as const)(
     "keeps the %s color and trailing marker when selected",
     (gitStatusCode) => {
       const { container, root } = renderEntryRow({

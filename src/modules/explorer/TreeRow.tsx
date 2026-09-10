@@ -169,7 +169,7 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
-      {!isDir && (gitStatusCode === "M" || gitStatusCode === "U") ? (
+      {!isDir && gitStatusCode ? (
         <span
           aria-hidden="true"
           className={cn(
