@@ -7,6 +7,10 @@ import { buildLanguageModel } from "@/modules/ai/lib/providerRuntime";
 import type { ResolvedProviderConnection } from "@/modules/ai/providerRegistry";
 import { generateText } from "ai";
 import {
+  buildParameterOptions,
+  type ParameterAssignment,
+} from "@/modules/ai/lib/modelParameters";
+import {
   buildUserPrompt,
   COMPLETION_SYSTEM_PROMPT,
   type CompletionRequest,
@@ -15,6 +19,7 @@ import {
 export type CompletionDeps = {
   connection: ResolvedProviderConnection | null;
   modelId: string;
+  parameters?: ParameterAssignment[];
 };
 
 const MAX_OUTPUT_TOKENS = 1024;
@@ -35,6 +40,11 @@ export async function requestCompletion(
     instructions: COMPLETION_SYSTEM_PROMPT,
     prompt: buildUserPrompt(req),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
+    ...buildParameterOptions(
+      deps.parameters ?? [],
+      deps.connection.runtime.adapter,
+      deps.connection.provider,
+    ),
     maxRetries: 0,
     abortSignal: signal,
   });

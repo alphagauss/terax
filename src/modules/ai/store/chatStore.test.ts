@@ -77,6 +77,7 @@ import {
   persistedMessageCounts,
   seedMessages,
   seedSession,
+  getSessionParameterSelections,
   releaseUnusedChats,
   sessionMetadata,
   useChatStore,
@@ -210,11 +211,53 @@ describe("chat store multi-process lifecycle", () => {
       subagentDisplaysBySession: {},
       sessionAgentFilter: null,
       sessionSyncError: null,
+      parameterSelectionsBySession: {},
+      modelSnapshotsBySession: {},
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  it("isolates parameter selections by session and model and restores their scalar choices", async () => {
+    const a = { providerId: "builtin:deepseek", modelId: "a" };
+    const b = { ...a, modelId: "b" };
+    const store = useChatStore.getState();
+    await Promise.all([
+      store.setParameterSelections(first.id, a, { thinking: "off" }),
+      store.setParameterSelections(first.id, b, { thinking: "omit" }),
+      store.setParameterSelections(second.id, a, { thinking: "on" }),
+    ]);
+    const saved = useChatStore.getState().parameterSelectionsBySession;
+    expect(saved[first.id][JSON.stringify([a.providerId, a.modelId])]).toEqual({
+      thinking: "off",
+    });
+    expect(saved[first.id][JSON.stringify([b.providerId, b.modelId])]).toEqual({
+      thinking: "omit",
+    });
+    expect(saved[second.id][JSON.stringify([a.providerId, a.modelId])]).toEqual(
+      { thinking: "on" },
+    );
+    expect(io.workspaceSet).toHaveBeenLastCalledWith(
+      `ai:parameters:${second.id}`,
+      saved[second.id],
+    );
+    useChatStore.setState({ parameterSelectionsBySession: {} });
+    io.workspaceGet.mockImplementation((key) =>
+      key === `ai:parameters:${first.id}` ? saved[first.id] : undefined,
+    );
+    expect(getSessionParameterSelections(first.id)).toEqual(saved[first.id]);
+    await seedSession(first.id);
+    expect(
+      useChatStore.getState().parameterSelectionsBySession[first.id],
+    ).toEqual(saved[first.id]);
+    await store.setParameterSelections(first.id, a, { thinking: "on" });
+    expect(
+      getSessionParameterSelections(first.id)[
+        JSON.stringify([a.providerId, a.modelId])
+      ],
+    ).toEqual({ thinking: "on" });
   });
 
   it("中止已发布但协调器尚未释放时拒绝新引导", async () => {
@@ -1054,7 +1097,10 @@ describe("chat store multi-process lifecycle", () => {
 
     expect(useChatStore.getState().sessions).toEqual([second]);
     expect(io.read).not.toHaveBeenCalledWith(second.id);
-    expect(io.workspaceDelete).toHaveBeenCalledOnce();
+    expect(io.workspaceDelete).toHaveBeenCalledWith(
+      `ai:parameters:${first.id}`,
+    );
+    expect(io.workspaceDelete).toHaveBeenCalledWith("ai:activeSessionId");
   });
 
   it("opens a draft when refresh observes the active session was deleted", async () => {

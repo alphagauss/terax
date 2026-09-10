@@ -71,6 +71,9 @@ import {
 } from "@/modules/ai/providerRegistry";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
+import { ModelParameterFields } from "@/modules/ai/components/ModelParameterFields";
+import { setCompletionParameterSelections } from "@/modules/settings/store";
 import {
   type AutocompleteTrigger,
   MAX_CONCURRENT_SUBAGENTS_MAX,
@@ -847,7 +850,7 @@ function ModelPicker({
   );
 }
 
-/** 编辑已保存模型的运行参数；当前只管理上下文窗口。 */
+/** 编辑已保存模型的上下文窗口及请求参数定义。 */
 function ModelParametersCard({
   models,
   providerModels,
@@ -985,6 +988,14 @@ function ModelParametersCard({
         <p className="@min-[30rem]:pl-31 text-[11px] leading-4 text-muted-foreground">
           {t("models.parameters.description")}
         </p>
+        {selectedModel && (
+          <div className="border-t border-border/60 pt-3">
+            <ModelParameterEditor
+              key={modelRefKey(selectedModel)}
+              model={selectedModel}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1003,6 +1014,13 @@ function AutocompleteRow({
   const enabled = usePreferencesStore((state) => state.autocompleteEnabled);
   const trigger = usePreferencesStore((state) => state.autocompleteTrigger);
   const model = usePreferencesStore((state) => state.autocompleteModel);
+  const parameterDefinitions = usePreferencesStore(
+    (state) => state.modelParameters,
+  );
+  const completionSelections = usePreferencesStore(
+    (state) => state.completionParameterSelections,
+  );
+  const [parameterError, setParameterError] = useState<string | null>(null);
   const userShortcuts = usePreferencesStore((state) => state.shortcuts);
   const groups = useMemo(
     () =>
@@ -1126,6 +1144,49 @@ function AutocompleteRow({
           </Select>
         </FieldRow>
       ) : null}
+      {enabled &&
+        model &&
+        (parameterDefinitions[modelRefKey(model)]?.length ?? 0) > 0 && (
+          <FieldRow label={t("models.requestParameters.completion")}>
+            <div className="flex flex-1 flex-col gap-field">
+              <ModelParameterFields
+                parameters={parameterDefinitions[modelRefKey(model)]}
+                selections={completionSelections[modelRefKey(model)] ?? {}}
+                onChange={(next) => {
+                  setParameterError(null);
+                  void setCompletionParameterSelections(model, next).catch(
+                    (error) => setParameterError(String(error)),
+                  );
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("models.requestParameters.completionHelp")}
+              </p>
+              <Button
+                size="xs"
+                variant="ghost"
+                className="self-end"
+                disabled={
+                  !Object.keys(completionSelections[modelRefKey(model)] ?? {})
+                    .length
+                }
+                onClick={() => {
+                  setParameterError(null);
+                  void setCompletionParameterSelections(model, {}).catch(
+                    (error) => setParameterError(String(error)),
+                  );
+                }}
+              >
+                {t("models.requestParameters.reset")}
+              </Button>
+              {parameterError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {parameterError}
+                </p>
+              )}
+            </div>
+          </FieldRow>
+        )}
     </>
   );
 }

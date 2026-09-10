@@ -16,6 +16,7 @@ import type {
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
 import { runAgentStream } from "@/modules/ai/lib/agent";
+import type { ParameterAssignment } from "@/modules/ai/lib/modelParameters";
 import type { AgentConfiguration } from "./agentConfiguration";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
@@ -49,6 +50,14 @@ export type SessionTransportDependencies = {
   getProviderModels?: () => Readonly<ProviderModels>;
   getCustomProviders?: () => readonly ProviderInstance[];
   getProviderInstanceKeys?: () => ProviderInstanceKeys;
+  getModelParameters?: (
+    model: ModelRef,
+    subagent: boolean,
+  ) => ParameterAssignment[];
+  onModelSnapshot?: (snapshot: {
+    model: ModelRef;
+    parameters: ParameterAssignment[];
+  }) => void;
   onCompact?: (info: { droppedCount: number }) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onSubagentDisplay?: (state: SubagentDisplayState) => void;
@@ -79,6 +88,13 @@ type SendOptions = {
  * 初始化包含读取工作区文件；不监听文档，审批续跑保持本轮快照。
  */
 export function createSessionTransport(deps: SessionTransportDependencies) {
+  let modelTurnId: string | null = null;
+  let modelSnapshot: {
+    model: ModelRef;
+    defaultSubagentModel: ModelRef | null;
+    modelParameters: ParameterAssignment[];
+    subagentParameters: ParameterAssignment[];
+  } | null = null;
   let runtimeTask: Promise<{
     systemPrompt: string;
     agent: AgentConfiguration;
@@ -152,17 +168,35 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
         }),
       );
     }
+    // 在任何异步准备前冻结本轮模型与实际参数，同轮续跑不重新读取 UI。
+    const turnId = deps.getTurnId();
+    if (!modelSnapshot || modelTurnId !== turnId) {
+      const model = deps.getModel();
+      const defaultSubagentModel = deps.getDefaultSubagentModel();
+      modelSnapshot = structuredClone({
+        model,
+        defaultSubagentModel,
+        modelParameters: deps.getModelParameters?.(model, false) ?? [],
+        subagentParameters:
+          deps.getModelParameters?.(defaultSubagentModel ?? model, true) ?? [],
+      });
+      modelTurnId = turnId;
+      deps.onModelSnapshot?.({
+        model: modelSnapshot.model,
+        parameters: modelSnapshot.modelParameters,
+      });
+    }
+    const frozenModel = modelSnapshot;
     const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),
-      model: deps.getModel(),
-      defaultSubagentModel: deps.getDefaultSubagentModel(),
+      ...frozenModel,
       maxConcurrentSubagents: deps.getMaxConcurrentSubagents(),
       turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,
       allowedTools: agent.tools,
       toolContext: deps.toolContext,
-      turnId: deps.getTurnId(),
+      turnId,
       onCompact: deps.onCompact,
       onFinishMeta: deps.onFinishMeta,
       onSubagentDisplay: deps.onSubagentDisplay,

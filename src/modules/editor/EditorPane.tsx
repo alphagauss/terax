@@ -15,6 +15,8 @@ import { createProviderConnection } from "@/modules/ai/providerRegistry";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { modelRefKey } from "@/modules/ai/config";
+import { resolveModelParameters } from "@/modules/ai/lib/modelParameters";
 import { onKeysChanged } from "@/modules/settings/store";
 import { matchBinding, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
@@ -543,6 +545,14 @@ export const EditorCore = memo(
             return {
               enabled: s.autocompleteEnabled && !!configuredModel,
               trigger: s.autocompleteTrigger,
+              parameters: s.autocompleteModel
+                ? resolveModelParameters(
+                    s.modelParameters[modelRefKey(s.autocompleteModel)] ?? [],
+                    s.completionParameterSelections[
+                      modelRefKey(s.autocompleteModel)
+                    ],
+                  )
+                : [],
               connection: configuredModel
                 ? createProviderConnection({
                     instanceId: configuredModel.providerId,

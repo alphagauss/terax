@@ -46,6 +46,13 @@ import {
   type ProviderKeys,
 } from "@/modules/ai/lib/keyring";
 import { pushRecentModel } from "@/modules/ai/lib/modelPrefs";
+import { modelRefKey } from "@/modules/ai/config";
+import {
+  type ModelParameterSelections,
+  type ParameterSelections,
+  type ParameterAssignment,
+  readParameterSelections,
+} from "@/modules/ai/lib/modelParameters";
 import {
   acquireSessionRun,
   clearSessionProcesses,
@@ -144,6 +151,16 @@ type StoreState = {
   setProviderInstanceKeys: (keys: ProviderInstanceKeys) => void;
 
   selectedModel: ModelRef | null;
+  parameterSelectionsBySession: Record<string, ModelParameterSelections>;
+  modelSnapshotsBySession: Record<
+    string,
+    { model: ModelRef; parameters: ParameterAssignment[] }
+  >;
+  setParameterSelections: (
+    sessionId: string,
+    model: ModelRef,
+    selections: ParameterSelections,
+  ) => Promise<void>;
   setSelectedModel: (model: ModelRef | null, recordRecent?: boolean) => void;
   externalAgentAvailability: ExternalAgentAvailability[] | null;
   setExternalAgentAvailability: (
@@ -236,6 +253,7 @@ const acquiringSessionRuns = new Set<string>();
 const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
 let activeSessionPersistence = Promise.resolve();
+let parameterSelectionPersistence = Promise.resolve();
 
 /** 串行保存主窗口的活动会话选择，空值表示下次启动进入新草稿。 */
 function persistActiveSession(id: string | null): Promise<void> {
@@ -326,6 +344,23 @@ function newTurnId(): string {
   return `turn_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
+/** 冷恢复发送也能同步读取已保存的参数选择，内存中的新选择优先。 */
+export function getSessionParameterSelections(
+  id: string,
+): ModelParameterSelections {
+  const current = useChatStore.getState().parameterSelectionsBySession[id];
+  if (current) return current;
+  const storedSelections = getWorkspaceValue<Record<string, unknown>>(
+    `ai:parameters:${id}`,
+  );
+  return Object.fromEntries(
+    Object.entries(storedSelections ?? {}).map(([key, value]) => [
+      key,
+      readParameterSelections(value),
+    ]),
+  );
+}
+
 /** 读取磁盘记录，同时准备 UI 消息和完整会话 metadata。 */
 export async function seedSession(id: string): Promise<void> {
   const session = await readSession(id);
@@ -335,6 +370,12 @@ export async function seedSession(id: string): Promise<void> {
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
+  useChatStore.setState((state) => ({
+    parameterSelectionsBySession: {
+      ...state.parameterSelectionsBySession,
+      [id]: getSessionParameterSelections(id),
+    },
+  }));
   restoreUsage(id, session.messages);
 }
 
@@ -364,6 +405,25 @@ export const useChatStore = create<StoreState>((set, get) => ({
   setProviderInstanceKeys: (keys) => set({ providerInstanceKeys: keys }),
 
   selectedModel: null,
+  parameterSelectionsBySession: {},
+  modelSnapshotsBySession: {},
+  setParameterSelections: async (sessionId, model, selections) => {
+    const next = {
+      ...getSessionParameterSelections(sessionId),
+      [modelRefKey(model)]: selections,
+    };
+    set((state) => ({
+      parameterSelectionsBySession: {
+        ...state.parameterSelectionsBySession,
+        [sessionId]: next,
+      },
+    }));
+    const write = parameterSelectionPersistence.then(() =>
+      setWorkspaceValue(`ai:parameters:${sessionId}`, next),
+    );
+    parameterSelectionPersistence = write.catch(() => undefined);
+    await write;
+  },
   setSelectedModel: (model, recordRecent = true) => {
     set({ selectedModel: model });
     if (model && recordRecent) void pushRecentModel(model);
@@ -861,6 +921,17 @@ export const useChatStore = create<StoreState>((set, get) => ({
         await clearAgentTurnCoordinator(id);
         await clearSessionProcesses(id);
         await deleteSessionFile(id);
+        await parameterSelectionPersistence;
+        await deleteWorkspaceValue(`ai:parameters:${id}`);
+        set((state) => {
+          const parameterSelectionsBySession = {
+            ...state.parameterSelectionsBySession,
+          };
+          const modelSnapshotsBySession = { ...state.modelSnapshotsBySession };
+          delete parameterSelectionsBySession[id];
+          delete modelSnapshotsBySession[id];
+          return { parameterSelectionsBySession, modelSnapshotsBySession };
+        });
         const remaining = get().sessions.filter((session) => session.id !== id);
         await chats.get(id)?.stop();
         chats.delete(id);

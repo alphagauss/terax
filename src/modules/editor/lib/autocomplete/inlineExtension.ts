@@ -238,6 +238,15 @@ function hasProviderConnection(prefs: AutocompletePrefs): boolean {
   return !!prefs.connection && isProviderConnectionReady(prefs.connection);
 }
 
+/** 缓存与进行中的建议绑定生成它的模型和参数，不能跨配置复用。 */
+function completionConfigKey(prefs: AutocompletePrefs): string {
+  return JSON.stringify([
+    prefs.modelId,
+    prefs.connection?.instanceId,
+    prefs.parameters ?? [],
+  ]);
+}
+
 function shouldTrigger(
   state: EditorState,
   prefs: AutocompletePrefs,
@@ -376,7 +385,8 @@ class CompletionDriver implements PluginValue {
     );
 
     const lang = this.ctx.getLanguage();
-    const key = suggestionKey(prefix, suffix, lang);
+    const configKey = completionConfigKey(prefs);
+    const key = configKey + suggestionKey(prefix, suffix, lang);
 
     const cached = this.cache.get(key);
     if (cached !== undefined) {
@@ -418,6 +428,12 @@ class CompletionDriver implements PluginValue {
       this.inflightKey = null;
     }
 
+    const currentPrefs = this.ctx.getPrefs();
+    if (
+      !currentPrefs.enabled ||
+      completionConfigKey(currentPrefs) !== configKey
+    )
+      return;
     const cursorLine = doc.lineAt(cursor);
     const lineSoFar = doc.sliceString(cursorLine.from, cursor);
     const lineSuffix = doc.sliceString(cursor, cursorLine.to);
