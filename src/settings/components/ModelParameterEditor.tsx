@@ -18,7 +18,11 @@ import {
   DialogFooter,
 } from "@/components/controls/dialog";
 import { Switch } from "@/components/ui/switch";
-import { type ModelRef, modelRefKey } from "@/modules/ai/config";
+import {
+  type ModelRef,
+  modelRefKey,
+  resolveProviderInstance,
+} from "@/modules/ai/config";
 import {
   type ModelParameter,
   STANDARD_PARAMETER_PATHS,
@@ -41,6 +45,9 @@ export function ModelParameterEditor({ model }: { model: ModelRef }) {
   const parameters = usePreferencesStore(
     (s) => s.modelParameters[key] ?? EMPTY,
   );
+  const customProviders = usePreferencesStore((s) => s.customProviders);
+  const adapter = resolveProviderInstance(model.providerId, { customProviders })
+    .runtime.adapter;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -48,7 +55,7 @@ export function ModelParameterEditor({ model }: { model: ModelRef }) {
   const update = (patch: Partial<Draft>) =>
     setDraft((current) => (current ? { ...current, ...patch } : current));
   const save = async (next: ModelParameter[]) => {
-    const invalid = validateModelParameters(next);
+    const invalid = validateModelParameters(next, adapter);
     if (invalid) {
       setError(text(invalid));
       return;

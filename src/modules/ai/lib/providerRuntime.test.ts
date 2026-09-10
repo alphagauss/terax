@@ -99,6 +99,7 @@ describe("provider native transport", () => {
           value: provider === "deepseek" ? "disabled" : false,
         },
         { target: "provider", path: "reasoning_effort", value: "medium" },
+        { target: "provider", path: "reasoning.effort", value: "low" },
         { target: "provider", path: "parallel_tool_calls", value: false },
         { target: "standard", path: "temperature", value: 0.7 },
         {
@@ -136,6 +137,7 @@ describe("provider native transport", () => {
           new TextDecoder().decode(Uint8Array.from(args.body)),
         );
         expect(body.reasoning_effort).toBe("medium");
+        expect(body.reasoning).toEqual({ effort: "low" });
         expect(body).not.toHaveProperty("reasoningEffort");
         expect(body.parallel_tool_calls).toBe(false);
         expect(body).not.toHaveProperty("parallelToolCalls");

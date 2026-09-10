@@ -58,4 +58,19 @@ describe("model parameter persistence", () => {
     ).rejects.toThrow("invalidPath");
     expect(storage.set).not.toHaveBeenCalled();
   });
+  it("validates mapped paths against the model provider when saving", async () => {
+    const parameters = [
+      { ...parameter, path: "reasoning_effort" },
+      { ...parameter, id: "nested", path: "reasoning.effort" },
+    ];
+    await setModelParameters(ref, parameters);
+    expect((await loadPreferences()).modelParameters[modelRefKey(ref)]).toEqual(
+      parameters,
+    );
+    storage.set.mockClear();
+    await expect(
+      setModelParameters({ ...ref, providerId: "builtin:openai" }, parameters),
+    ).rejects.toThrow("duplicatePath");
+    expect(storage.set).not.toHaveBeenCalled();
+  });
 });
