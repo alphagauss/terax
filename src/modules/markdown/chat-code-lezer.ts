@@ -157,7 +157,7 @@ type ResolvedKey =
 function resolve(lang: string | null | undefined): ResolvedKey | null {
   if (!lang) return null;
   const lower = lang.toLowerCase();
-  const direct = lower in aliases ? aliases[lower]! : lower;
+  const direct = aliases[lower] ?? lower;
   if (direct in loaders) return { kind: "lezer", key: direct as keyof typeof loaders };
   if (direct in streamLoaders)
     return { kind: "stream", key: direct as keyof typeof streamLoaders };
@@ -174,7 +174,7 @@ const streamCache = new Map<string, StreamParser<unknown>>();
 async function getLezer(key: keyof typeof loaders): Promise<Language> {
   const hit = lezerCache.get(key);
   if (hit) return hit;
-  const lang = await loaders[key]!();
+  const lang = await loaders[key]();
   lezerCache.set(key, lang);
   return lang;
 }
@@ -184,7 +184,7 @@ async function getStream(
 ): Promise<StreamParser<unknown>> {
   const hit = streamCache.get(key);
   if (hit) return hit;
-  const parser = await streamLoaders[key]!();
+  const parser = await streamLoaders[key]();
   streamCache.set(key, parser);
   return parser;
 }

@@ -7,7 +7,7 @@
 - Terax 是面向 macOS、Linux、Windows 的 AI 原生终端，当前优先开发桌面应用。
 - 依赖管理只使用 pnpm。检查命令和验证范围见 [测试](docs/contributing/testing.md)。
 - Markdown 使用 UTF-8；新增或更新的代码注释使用中文。代码、注释、提交和文档不使用 emoji 或 em dash。
-- 前端跨模块导入使用 `@/...`。`src/components/ui/` 和 `src/components/ai-elements/` 由注册表管理，不手工修改。
+- 前端跨模块导入使用 `@/...`。`src/components/ui/` 和 `src/components/ai-elements/` 保留注册表组件，不手工修改；通过属性、组合或业务包装扩展，需要深度定制的实现迁入所属业务模块，由项目维护。
 - 所有用户可见文本同步提供 `en` 与 `zh-CN` 翻译；`language` 设置是唯一语言状态来源。
 - 当前开发阶段不要求兼容旧功能、旧配置或旧持久化格式，不为它们增加迁移、双写或回退层。跨平台支持、当前跨进程协议和明确承诺的公共接口仍须保持约定。
 - Alpha 功能、集成和专用基础设施使用 Conventional Commit 的 `alpha` scope，并与公共改动拆为独立提交。

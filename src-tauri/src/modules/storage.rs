@@ -136,8 +136,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("value.json");
         write_atomic(&path, b"old").unwrap();
-        write_atomic(&path, b"new").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        write_atomic(&path, "名称,值\nTerax,1".as_bytes()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "名称,值\nTerax,1");
+    }
+
+    #[test]
+    fn atomic_write_failure_preserves_destination_and_removes_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("existing");
+        std::fs::create_dir(&destination).unwrap();
+        let child = destination.join("keep.txt");
+        std::fs::write(&child, b"old").unwrap();
+        assert!(write_atomic(&destination, b"new").is_err());
+        assert_eq!(std::fs::read(&child).unwrap(), b"old");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

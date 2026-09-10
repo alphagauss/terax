@@ -7,7 +7,7 @@
 
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
-import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
+import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import {
   Tooltip,
   TooltipContent,
@@ -29,8 +29,8 @@ import {
   useState,
 } from "react";
 import { Streamdown } from "streamdown";
-import { ChatStreamingProvider } from "./chat-code";
-import { MarkdownCode } from "./markdown-code";
+import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
+import { MarkdownCode } from "@/modules/markdown/markdown-code";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];

@@ -9,6 +9,40 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
+/// 将前端生成的文本另存到用户选择的本机位置，取消时不写入。
+#[tauri::command]
+pub async fn text_save_as(
+    content: String,
+    filename: String,
+    extension: String,
+    title: String,
+    file_filter: String,
+    window: tauri::WebviewWindow,
+) -> Result<bool, String> {
+    if content.len() > 20 * 1024 * 1024 {
+        return Err("text export exceeds the 20 MB limit".into());
+    }
+    let destination = window
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title(title)
+        .set_file_name(filename)
+        .add_filter(file_filter, &[&extension])
+        .blocking_save_file();
+    let Some(destination) = destination else {
+        return Ok(false);
+    };
+    let destination = destination.into_path().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::modules::storage::write_atomic(&destination, content.as_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 /// 选择本机保存位置；本机原子复制，WSL 与 SSH 使用已有后台下载队列。
 #[tauri::command]
 pub async fn file_save_as(

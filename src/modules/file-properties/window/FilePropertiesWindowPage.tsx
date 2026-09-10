@@ -19,11 +19,11 @@ import {
   scanDirectoryProperties,
 } from "@/modules/file-properties/native";
 import {
-  CheckmarkCircle01Icon,
-  CopyIcon,
+  Copy01Icon,
   File02Icon,
   Folder01Icon,
   Refresh01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -291,7 +291,7 @@ export function FilePropertiesWindowPage() {
                       }
                     >
                       <HugeiconsIcon
-                        icon={pathCopied ? CheckmarkCircle01Icon : CopyIcon}
+                        icon={pathCopied ? Tick02Icon : Copy01Icon}
                         size={11}
                         strokeWidth={1.75}
                       />

@@ -24,5 +24,23 @@
   "imageCopied": "Image copied",
   "imageSaved": "Image saved",
   "imageCopyFailed": "Could not copy image: {{message}}",
-  "imageSaveFailed": "Could not save image: {{message}}"
+  "imageSaveFailed": "Could not save image: {{message}}",
+  "table": {
+    "copy": "Copy table",
+    "download": "Download table",
+    "save": "Save table as…",
+    "viewFullscreen": "View fullscreen",
+    "exitFullscreen": "Exit fullscreen",
+    "downloaded": "Table downloaded",
+    "downloadFailed": "Could not download table: {{message}}",
+    "copied": "Table copied",
+    "copyFailed": "Could not copy table: {{message}}",
+    "clipboardUnavailable": "Clipboard is unavailable",
+    "notFound": "Table not found",
+    "format": {
+      "markdown": "Markdown",
+      "csv": "CSV",
+      "tsv": "TSV"
+    }
+  }
 }
