@@ -10,6 +10,11 @@ import { ModelCatalog } from "@/modules/ai/lib/modelCatalog";
 import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { transcribeAudio } from "@/modules/ai/lib/stt";
 import {
+  buildParameterOptions,
+  type ParameterAssignment,
+} from "@/modules/ai/lib/modelParameters";
+import { requestCompletion } from "@/modules/editor/lib/autocomplete/provider";
+import {
   buildLanguageModel,
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
@@ -62,6 +67,90 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("provider native transport", () => {
+  it.each(["deepseek", "openai-compatible"] as const)(
+    "serializes %s parameter selections through the real SDK",
+    async (provider) => {
+      native.status = 200;
+      native.body = JSON.stringify({
+        id: "completion",
+        created: 1,
+        model: "model",
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: "return a + b" },
+            finish_reason: "stop",
+          },
+        ],
+      });
+      const connection = createProviderConnection({
+        provider,
+        instanceId: "test:parameters",
+        credentialValue: "test-key",
+        baseURL: "http://127.0.0.1:1234/v1",
+      });
+      const parameters: ParameterAssignment[] = [
+        {
+          target: "provider",
+          path:
+            provider === "deepseek"
+              ? "thinking.type"
+              : "chat_template_kwargs.enable_thinking",
+          value: provider === "deepseek" ? "disabled" : false,
+        },
+        { target: "provider", path: "reasoning_effort", value: "medium" },
+        { target: "provider", path: "parallel_tool_calls", value: false },
+        { target: "standard", path: "temperature", value: 0.7 },
+        {
+          target: "provider",
+          path: "custom_options.optional_value",
+          value: null,
+        },
+      ];
+      const model = await buildLanguageModel(connection, "model");
+      await generateText({
+        model,
+        prompt: "hello",
+        ...buildParameterOptions(
+          parameters,
+          connection.runtime.adapter,
+          provider,
+        ),
+        maxRetries: 0,
+      });
+      expect(
+        await requestCompletion(
+          {
+            prefix: "def add(a, b):\n    ",
+            suffix: "",
+            filename: "test.py",
+            language: "python",
+            indentUnit: "    ",
+          },
+          { connection, modelId: "model", parameters },
+          new AbortController().signal,
+        ),
+      ).toBe("return a + b");
+      for (const [, args] of native.invoke.mock.calls) {
+        const body = JSON.parse(
+          new TextDecoder().decode(Uint8Array.from(args.body)),
+        );
+        expect(body.reasoning_effort).toBe("medium");
+        expect(body).not.toHaveProperty("reasoningEffort");
+        expect(body.parallel_tool_calls).toBe(false);
+        expect(body).not.toHaveProperty("parallelToolCalls");
+        expect(body.temperature).toBe(0.7);
+        expect(body.custom_options).toEqual({ optional_value: null });
+        expect(
+          provider === "deepseek" ? body.thinking : body.chat_template_kwargs,
+        ).toEqual(
+          provider === "deepseek"
+            ? { type: "disabled" }
+            : { enable_thinking: false },
+        );
+      }
+    },
+  );
   it("preserves multipart audio and the speech service route across native IPC", async () => {
     native.status = 200;
     native.body = "transcript";

@@ -38,6 +38,16 @@ import {
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { DEFAULT_THEME_ID } from "@/modules/theme/types";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import {
+  type ModelParameter,
+  type ModelParameterDefinitions,
+  type ModelParameterSelections,
+  type ParameterSelections,
+  readModelParameters,
+  readParameterSelections,
+  validateModelParameters,
+} from "@/modules/ai/lib/modelParameters";
+import { modelRefKey } from "@/modules/ai/config";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -166,6 +176,8 @@ export type Preferences = {
   autocompleteTrigger: AutocompleteTrigger;
   autocompleteModel: ModelRef | null;
   providerModels: ProviderModels;
+  modelParameters: ModelParameterDefinitions;
+  completionParameterSelections: ModelParameterSelections;
   providerBaseURLs: ProviderBaseURLs;
   customProviders: ProviderInstance[];
   sttProvider: SttProvider;
@@ -250,6 +262,8 @@ const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
 const KEY_AUTOCOMPLETE_TRIGGER = "autocompleteTrigger";
 const KEY_AUTOCOMPLETE_MODEL = "autocompleteModel";
 const KEY_PROVIDER_MODELS = "providerModels";
+const MODEL_PARAMETERS_PREFIX = "modelParameters:";
+const COMPLETION_PARAMETERS_PREFIX = "completionParameters:";
 const KEY_PROVIDER_BASE_URLS = "providerBaseURLs";
 const KEY_CUSTOM_PROVIDERS = "customProviders";
 const KEY_STT_PROVIDER = "sttProvider";
@@ -328,6 +342,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   autocompleteTrigger: "auto",
   autocompleteModel: null,
   providerModels: {},
+  modelParameters: {},
+  completionParameterSelections: {},
   providerBaseURLs: {},
   customProviders: [],
   sttProvider: DEFAULT_STT_PROVIDER,
@@ -366,6 +382,23 @@ export const DEFAULT_PREFERENCES: Preferences = {
 
 async function writePref<T>(key: string, value: T): Promise<void> {
   await setSharedStoreKey("settings", key, value);
+}
+
+/** 按模型独立写入，避免设置窗口覆盖其他模型或补全的并发修改。 */
+export async function setModelParameters(
+  ref: ModelRef,
+  parameters: ModelParameter[],
+): Promise<void> {
+  const error = validateModelParameters(parameters);
+  if (error) throw new Error(error);
+  await writePref(MODEL_PARAMETERS_PREFIX + modelRefKey(ref), parameters);
+}
+
+export async function setCompletionParameterSelections(
+  ref: ModelRef,
+  selections: ParameterSelections,
+): Promise<void> {
+  await writePref(COMPLETION_PARAMETERS_PREFIX + modelRefKey(ref), selections);
 }
 
 export type ModelSettingsPatch = Partial<
@@ -436,6 +469,17 @@ export async function loadPreferences(): Promise<Preferences> {
   // Single IPC roundtrip; fetching keys individually fans out to one
   // `plugin:store|get` per setting and is the dominant boot cost.
   const values = await readSharedStore("settings");
+  const modelParameters: ModelParameterDefinitions = {};
+  const completionParameterSelections: ModelParameterSelections = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (key.startsWith(MODEL_PARAMETERS_PREFIX))
+      modelParameters[key.slice(MODEL_PARAMETERS_PREFIX.length)] =
+        readModelParameters(value);
+    if (key.startsWith(COMPLETION_PARAMETERS_PREFIX))
+      completionParameterSelections[
+        key.slice(COMPLETION_PARAMETERS_PREFIX.length)
+      ] = readParameterSelections(value);
+  }
   const get = <T>(k: string): T | undefined => values[k] as T | undefined;
   const storedProviders = get<unknown>(KEY_CUSTOM_PROVIDERS);
   const seenProviderIds = new Set<string>();
@@ -549,6 +593,8 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.autocompleteTrigger,
     autocompleteModel: readModelRef(KEY_AUTOCOMPLETE_MODEL),
     providerModels,
+    modelParameters,
+    completionParameterSelections,
     providerBaseURLs,
     customProviders,
     sttProvider:
@@ -992,6 +1038,8 @@ export async function onPreferencesChange(
     [KEY_AUTOCOMPLETE_TRIGGER]: "autocompleteTrigger",
     [KEY_AUTOCOMPLETE_MODEL]: "autocompleteModel",
     [KEY_PROVIDER_MODELS]: "providerModels",
+    [MODEL_PARAMETERS_PREFIX]: "modelParameters",
+    [COMPLETION_PARAMETERS_PREFIX]: "completionParameterSelections",
     [KEY_PROVIDER_BASE_URLS]: "providerBaseURLs",
     [KEY_CUSTOM_PROVIDERS]: "customProviders",
     [KEY_STT_PROVIDER]: "sttProvider",

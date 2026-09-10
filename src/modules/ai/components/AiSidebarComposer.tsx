@@ -57,6 +57,7 @@ import { getAvailableModelRefs } from "@/modules/ai/lib/modelAvailability";
 import { toggleFavoriteModel } from "@/modules/ai/lib/modelPrefs";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { AiComposerInput } from "@/modules/ai/components/AiComposerInput";
+import { ModelParametersPopover } from "@/modules/ai/components/ModelParametersPopover";
 import "@/modules/ai/components/ai-sidebar-composer.css";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 
@@ -177,6 +178,7 @@ export function AiSidebarComposer() {
 
           <PermissionModeDropdown />
           <ModelDropdown />
+          <ModelParametersPopover />
           <span className="min-w-1 flex-1" />
 
           {guiding ? (

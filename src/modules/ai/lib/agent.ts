@@ -62,7 +62,15 @@ import {
 } from "ai";
 import { createContextUsage } from "@/modules/ai/lib/contextUsage";
 
+import {
+  buildParameterOptions,
+  type ParameterAssignment,
+} from "@/modules/ai/lib/modelParameters";
+import { getProvider } from "@/modules/ai/providerRegistry";
+
 export type RunAgentOptions = {
+  modelParameters?: ParameterAssignment[];
+  subagentParameters?: ParameterAssignment[];
   keys: ProviderKeys;
   model: ModelRef;
   systemPrompt: string;
@@ -287,6 +295,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
               let reasoningStartedAt: number | undefined;
               let cycleSteps = 0;
               const result = streamText({
+                ...buildParameterOptions(
+                  opts.modelParameters ?? [],
+                  getProvider(provider).runtime.adapter,
+                  provider,
+                ),
                 prepareStep: contextUsage.prepareStep,
                 model,
                 experimental_download: createProviderDownload(
@@ -507,13 +520,14 @@ function buildSubagentTaskRunner({
       customProviders: opts.customProviders,
       providerInstanceKeys: opts.providerInstanceKeys,
     });
+    const provider = resolveModel(model, {
+      customProviders: opts.customProviders,
+      providerBaseURLs: opts.providerBaseURLs,
+    }).provider;
     const prompt = prepareAgentPrompt(
       `${opts.systemPrompt}\n\n${SUBAGENT_PROMPT}`,
       [{ role: "user", content: task }],
-      resolveModel(model, {
-        customProviders: opts.customProviders,
-        providerBaseURLs: opts.providerBaseURLs,
-      }).provider,
+      provider,
     );
     const tools = buildTools(
       {
@@ -540,6 +554,11 @@ function buildSubagentTaskRunner({
       tools,
     });
     const result = streamText({
+      ...buildParameterOptions(
+        opts.subagentParameters ?? [],
+        getProvider(provider).runtime.adapter,
+        provider,
+      ),
       prepareStep: contextUsage.prepareStep,
       model: childModel,
       experimental_download: createProviderDownload(

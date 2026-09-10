@@ -30,6 +30,7 @@ vi.mock("./projectInstructions", () => ({
 import type { ToolContext } from "../tools/context";
 import type { AgentConfiguration } from "./agentConfiguration";
 import { createSessionTransport } from "./transport";
+import type { ParameterAssignment } from "./modelParameters";
 
 const environment = {
   platform: "Windows",
@@ -130,6 +131,9 @@ describe("session transport", () => {
   it("freezes approval continuations and reloads settings and files on the next turn", async () => {
     let turnId = "turn-1";
     let modelId = "model-a";
+    const parameters: ParameterAssignment[] = [
+      { target: "provider", path: "reasoning_effort", value: "low" },
+    ];
     let customInstructions = "First preference";
     let agent: AgentConfiguration = {
       revision: 1,
@@ -145,6 +149,7 @@ describe("session transport", () => {
       getKeys: () => ({}) as never,
       toolContext,
       getModel: () => modelRefForProvider("openai", modelId),
+      getModelParameters: (_model, subagent) => (subagent ? [] : parameters),
       ...subagentDeps,
       getTurnId: () => turnId,
       getCustomInstructions: () => customInstructions,
@@ -160,8 +165,10 @@ describe("session transport", () => {
       },
     ];
 
-    await transport.sendMessages({ messages });
+    const firstSend = transport.sendMessages({ messages });
     modelId = "model-b";
+    parameters[0].value = "high";
+    await firstSend;
     customInstructions = "Second preference";
     agent = {
       revision: 2,
@@ -182,8 +189,14 @@ describe("session transport", () => {
     const firstPrompt = mocks.runAgentStream.mock.calls[0][0].systemPrompt;
     const secondPrompt = mocks.runAgentStream.mock.calls[1][0].systemPrompt;
     expect(secondPrompt).toBe(firstPrompt);
+    expect(mocks.runAgentStream.mock.calls[0][0].modelParameters[0].value).toBe(
+      "low",
+    );
+    expect(mocks.runAgentStream.mock.calls[1][0].modelParameters[0].value).toBe(
+      "low",
+    );
     expect(mocks.runAgentStream.mock.calls[1][0].model).toEqual(
-      modelRefForProvider("openai", "model-b"),
+      modelRefForProvider("openai", "model-a"),
     );
     expect(firstPrompt).toContain("Project instructions");
     expect(firstPrompt).toContain("First agent");
@@ -198,6 +211,8 @@ describe("session transport", () => {
     turnId = "turn-2";
     await transport.sendMessages({ messages });
     const next = mocks.runAgentStream.mock.calls[2][0];
+    expect(next.model).toEqual(modelRefForProvider("openai", "model-b"));
+    expect(next.modelParameters[0].value).toBe("high");
     expect(next.systemPrompt).toContain("Second agent");
     expect(next.systemPrompt).toContain("Second preference");
     expect(next.systemPrompt).toContain("Changed project instructions");

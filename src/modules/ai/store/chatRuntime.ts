@@ -16,6 +16,11 @@ import {
   providerFromBuiltinId,
 } from "@/modules/ai/config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { modelRefKey } from "@/modules/ai/config";
+import {
+  type ParameterAssignment,
+  resolveModelParameters,
+} from "@/modules/ai/lib/modelParameters";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { Chat, type UIMessage } from "@ai-sdk/react";
 import {
@@ -41,10 +46,19 @@ import {
   releaseUnusedChats,
   startingSessionIds,
   useChatStore,
+  getSessionParameterSelections,
 } from "@/modules/ai/store/chatStore";
 
-/** 保存本轮显式模型，Channel 不读取界面的模型选择。 */
-const runModels = new WeakMap<Chat<UIMessage>, ModelRef>();
+/** 发送入口冻结模型和参数，异步加载或审批续跑不再读取界面选项。 */
+const runConfigurations = new WeakMap<
+  Chat<UIMessage>,
+  {
+    model: ModelRef;
+    subagentModel: ModelRef | null;
+    parameters: ParameterAssignment[];
+    subagentParameters: ParameterAssignment[];
+  }
+>();
 
 /** 根据会话来源解析权限，Channel 的完全访问不修改桌面全局设置。 */
 function sessionPermission(sessionId: string) {
@@ -89,19 +103,32 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getKeys: () => useChatStore.getState().apiKeys,
     toolContext,
     getModel: () => {
-      const state = useChatStore.getState();
-      const cachedChat = chats.get(sessionId);
-      const model = state.sessions.find((item) => item.id === sessionId)
-        ?.channelId
-        ? cachedChat
-          ? runModels.get(cachedChat)
-          : undefined
-        : state.selectedModel;
+      const chat = chats.get(sessionId);
+      const model = chat && runConfigurations.get(chat)?.model;
       if (!model) throw new Error("No AI model is selected");
       return model;
     },
-    getDefaultSubagentModel: () =>
-      usePreferencesStore.getState().defaultSubagentModel,
+    getModelParameters: (_model, subagent) => {
+      const chat = chats.get(sessionId);
+      const config = chat && runConfigurations.get(chat);
+      return config
+        ? subagent
+          ? config.subagentParameters
+          : config.parameters
+        : [];
+    },
+    onModelSnapshot: (snapshot) => {
+      useChatStore.setState((state) => ({
+        modelSnapshotsBySession: {
+          ...state.modelSnapshotsBySession,
+          [sessionId]: snapshot,
+        },
+      }));
+    },
+    getDefaultSubagentModel: () => {
+      const chat = chats.get(sessionId);
+      return chat ? (runConfigurations.get(chat)?.subagentModel ?? null) : null;
+    },
     getMaxConcurrentSubagents: () =>
       usePreferencesStore.getState().maxConcurrentSubagents,
     getCustomInstructions: () =>
@@ -307,6 +334,28 @@ export async function startChatMessage(
 ): Promise<boolean> {
   if (startingSessionIds.has(sessionId)) return false;
   startingSessionIds.add(sessionId);
+  const submissionState = useChatStore.getState();
+  const prefs = usePreferencesStore.getState();
+  const submittedModel = channel?.model ?? submissionState.selectedModel;
+  const submittedConfig = submittedModel
+    ? structuredClone({
+        model: submittedModel,
+        subagentModel: prefs.defaultSubagentModel,
+        parameters: resolveModelParameters(
+          prefs.modelParameters[modelRefKey(submittedModel)] ?? [],
+          channel
+            ? {}
+            : getSessionParameterSelections(sessionId)[
+                modelRefKey(submittedModel)
+              ],
+        ),
+        subagentParameters: resolveModelParameters(
+          prefs.modelParameters[
+            modelRefKey(prefs.defaultSubagentModel ?? submittedModel)
+          ] ?? [],
+        ),
+      })
+    : null;
   try {
     const chat = await loadChat(sessionId);
     const state = useChatStore.getState();
@@ -322,7 +371,7 @@ export async function startChatMessage(
       (state.draftSessionId === sessionId && state.draftExternalAgentId
         ? { agentId: state.draftExternalAgentId, sessionId: null }
         : null);
-    const selectedModel = channel?.model ?? state.selectedModel;
+    const selectedModel = submittedModel;
     if (!externalAgent && !selectedModel) return false;
     const provider =
       selectedModel && providerFromBuiltinId(selectedModel.providerId);
@@ -343,7 +392,7 @@ export async function startChatMessage(
       return false;
     if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
     state.patchAgentMeta(sessionId, { cancelled: false });
-    if (channel) runModels.set(chat, channel.model);
+    if (submittedConfig) runConfigurations.set(chat, submittedConfig);
     if (isUserSubmission(message)) {
       state.promoteSession(sessionId, messagesForPromotion(message), cwd);
     }
