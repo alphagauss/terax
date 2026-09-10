@@ -24,5 +24,23 @@
   "imageCopied": "图片已复制",
   "imageSaved": "图片已保存",
   "imageCopyFailed": "无法复制图片:{{message}}",
-  "imageSaveFailed": "无法保存图片:{{message}}"
+  "imageSaveFailed": "无法保存图片:{{message}}",
+  "table": {
+    "copy": "复制表格",
+    "download": "下载表格",
+    "save": "表格另存为…",
+    "viewFullscreen": "全屏查看",
+    "exitFullscreen": "退出全屏",
+    "downloaded": "表格已下载",
+    "downloadFailed": "无法下载表格:{{message}}",
+    "copied": "表格已复制",
+    "copyFailed": "无法复制表格:{{message}}",
+    "clipboardUnavailable": "剪贴板不可用",
+    "notFound": "未找到表格",
+    "format": {
+      "markdown": "Markdown",
+      "csv": "CSV",
+      "tsv": "TSV"
+    }
+  }
 }

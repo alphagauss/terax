@@ -5,10 +5,11 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
-import { MarkdownCode } from "@/components/ai-elements/markdown-code";
-import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
+import { MarkdownCode } from "@/modules/markdown/markdown-code";
+import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import { cn } from "@/lib/utils";
 import { MARKDOWN_CONTENT_CHANGE_EVENT } from "@/modules/markdown/lib/anchor";
+import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
 import type {
   MarkdownDocument,
   MarkdownDocumentBlock,
@@ -220,6 +221,7 @@ const markdownComponents = {
   a: MarkdownPreviewLink,
   code: MarkdownPreviewCode,
   img: MarkdownPreviewImage,
+  table: MarkdownTable,
 };
 
 export function initialMarkdownBlockCount(

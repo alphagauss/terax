@@ -1,4 +1,4 @@
-import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
+import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";

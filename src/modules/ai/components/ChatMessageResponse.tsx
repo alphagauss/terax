@@ -1,8 +1,8 @@
 /** 会话正文的业务渲染入口，连接文件引用菜单与宿主导航。 */
 import { Hint } from "@/components/controls/tooltip";
-import { ChatStreamingProvider } from "@/components/ai-elements/chat-code";
-import { MarkdownCode } from "@/components/ai-elements/markdown-code";
-import { streamdownPlugins } from "@/components/ai-elements/streamdown-plugins";
+import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
+import { MarkdownCode } from "@/modules/markdown/markdown-code";
+import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -10,6 +10,7 @@ import {
 } from "@/components/menu/context-menu";
 import { cn } from "@/lib/utils";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
+import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import {
   resolveFileReference,
@@ -152,7 +153,7 @@ function ChatFileLink({
   );
 }
 
-const components = { code: MarkdownCode, a: ChatLink };
+const components = { code: MarkdownCode, a: ChatLink, table: MarkdownTable };
 export const ChatMessageResponse = memo(function ChatMessageResponse({
   children,
   className,

@@ -7,15 +7,14 @@
 "use client";
 
 import { Hint } from "@/components/controls/tooltip";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/modules/theme";
 import type { MermaidConfig } from "@streamdown/mermaid";
 import {
   ArrowAllDirectionIcon,
-  CheckmarkCircle01Icon,
-  CopyIcon,
+  Copy01Icon,
   FitToScreenIcon,
+  Tick02Icon,
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
 } from "@hugeicons/core-free-icons";
@@ -23,7 +22,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { useIsCodeFenceIncomplete } from "streamdown";
 
-import { Shimmer } from "./shimmer";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
 
 // True while the parent message is still streaming from the model. We hide
@@ -228,6 +227,7 @@ function MermaidCode({
           role="img"
           aria-label="Mermaid diagram"
           className="flex min-h-32 justify-center overflow-auto bg-background/40 p-4"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG 由启用 strict 安全模式的 Mermaid 生成。
           dangerouslySetInnerHTML={{ __html: state.svg }}
         />
       ) : state.kind === "error" ? (
@@ -366,6 +366,7 @@ function MermaidViewport({ svg }: { svg: string }) {
           style={{
             transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})`,
           }}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: SVG 由启用 strict 安全模式的 Mermaid 生成。
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
@@ -487,10 +488,10 @@ const HighlightedPre = memo(function HighlightedPre({
     <pre className="m-0 px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-foreground">
       {nodes.map((node, i) =>
         node.kind === "break" ? (
-          // eslint-disable-next-line react/no-array-index-key
+          // biome-ignore lint/suspicious/noArrayIndexKey: 高亮节点是无状态文本，随整段代码重新生成。
           <span key={i}>{"\n"}</span>
         ) : (
-          // eslint-disable-next-line react/no-array-index-key
+          // biome-ignore lint/suspicious/noArrayIndexKey: 高亮节点是无状态文本，随整段代码重新生成。
           <span key={i} className={node.cls || undefined}>
             {node.value}
           </span>
@@ -511,26 +512,23 @@ function CopyButton({ text }: { text: string }) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      tRef.current = window.setTimeout(() => setCopied(false), 1500);
+      tRef.current = window.setTimeout(() => setCopied(false), 2_000);
     } catch {
       /* swallow */
     }
   };
 
   return (
-    <Button
-      type="button"
-      size="icon"
-      variant="ghost"
-      onClick={onCopy}
-      className="size-5 shrink-0 text-muted-foreground hover:text-foreground"
+    <button
       aria-label="Copy code"
+      className="cursor-pointer p-1 text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+      onClick={onCopy}
+      type="button"
     >
       <HugeiconsIcon
-        icon={copied ? CheckmarkCircle01Icon : CopyIcon}
-        size={11}
-        strokeWidth={1.75}
+        icon={copied ? Tick02Icon : Copy01Icon}
+        size={14}
       />
-    </Button>
+    </button>
   );
 }
