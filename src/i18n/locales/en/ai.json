@@ -109,7 +109,8 @@
     "channelReadOnly": "This session receives messages from its Channel.",
     "channelBound": "This conversation is bound to a Channel. Remove its connection in Settings before deleting the conversation.",
     "pendingSteering": "Awaiting guidance: {{count}}",
-    "sendFailed": "The message could not be sent. Please try again."
+    "sendFailed": "The message could not be sent. Please try again.",
+    "remoteAttachments": "Upload files to this environment first, then attach them from the file tree."
   },
   "statusBar": {
     "openAiAgent": "Open AI agent",
@@ -291,5 +292,20 @@
   "whisper": {
     "transcriptionFailed": "Transcription failed",
     "microphoneAccessFailed": "Microphone access failed"
+  },
+  "attachments": {
+    "image": "Image",
+    "preview": "Preview {{name}}",
+    "viewSnapshot": "View sent content",
+    "sourceFile": "Source file",
+    "snapshot": "Content captured when this message was sent.",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "copyImage": "Copy image",
+    "copied": "Copied",
+    "failed": "Unable to copy image",
+    "saveSnapshot": "Save sent content as…",
+    "textFile": "Text file",
+    "saveFailed": "Unable to save attachment"
   }
 }

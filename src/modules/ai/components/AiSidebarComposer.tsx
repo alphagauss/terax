@@ -52,7 +52,7 @@ import {
   EXTERNAL_AGENTS,
   parseExternalAgentBinding,
 } from "@/modules/ai/external-agents/runtime";
-import { ACCEPTED_FILES, useComposer } from "@/modules/ai/lib/composer";
+import { useComposer } from "@/modules/ai/lib/composer";
 import { getAvailableModelRefs } from "@/modules/ai/lib/modelAvailability";
 import { toggleFavoriteModel } from "@/modules/ai/lib/modelPrefs";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
@@ -77,7 +77,6 @@ export function AiSidebarComposer() {
         ? "statusBar.steer"
         : "statusBar.send",
   );
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const workingDirectoryContent = c.workingDirectory ? (
     <>
       <HugeiconsIcon
@@ -93,19 +92,6 @@ export function AiSidebarComposer() {
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
       <div className="flex flex-col gap-2 rounded-2xl border border-border bg-background p-2.5 shadow-sm">
-        <input
-          ref={fileInputRef}
-          type="file"
-          disabled={c.readOnly}
-          multiple
-          accept={ACCEPTED_FILES}
-          className="hidden"
-          onChange={(e) => {
-            void c.addFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-
         <ChipsRow
           files={c.files}
           onRemoveFile={c.removeFile}
@@ -132,9 +118,15 @@ export function AiSidebarComposer() {
 
         <div className="terax-ai-composer-toolbar flex min-w-0 items-center gap-0.5">
           <IconBtn
-            title={t("statusBar.attachFileOrImage")}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={c.readOnly || (c.isBusy && !c.canSteer)}
+            title={t(
+              c.canPickFiles
+                ? "statusBar.attachFileOrImage"
+                : "composer.remoteAttachments",
+            )}
+            onClick={() => void c.pickFiles()}
+            disabled={
+              !c.canPickFiles || c.readOnly || (c.isBusy && !c.canSteer)
+            }
           >
             <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
           </IconBtn>

@@ -7,7 +7,15 @@ import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime"
 import { sessionMetadata } from "@/modules/ai/store/chatStore";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  pickNativeAttachments,
+  readPathAttachment,
+  readAsDataURL,
+} from "@/modules/ai/lib/attachmentFiles";
+import {
+  appendTextAttachment,
+  type AttachmentDisplay,
+} from "@/modules/ai/lib/messageAttachments";
 import {
   createContext,
   useCallback,
@@ -43,6 +51,8 @@ export type FileAttachment = {
   url?: string;
   text?: string;
   size: number;
+  sourcePath?: string;
+  environmentKey?: string;
   /** For kind === "selection": which surface it came from. */
   source?: "terminal" | "editor";
 };
@@ -52,25 +62,6 @@ type MessagePart =
   | { type: "file"; mediaType: string; url: string; filename?: string };
 
 export const MAX_TEXT_INLINE = 200_000;
-export const ACCEPTED_FILES =
-  "image/*,.txt,.md,.json,.yaml,.yml,.toml,.sh,.zsh,.bash,.py,.js,.jsx,.ts,.tsx,.rs,.go,.java,.c,.cpp,.h,.hpp,.html,.css,.csv,.log,.env,.config,.conf,.ini,Dockerfile,.dockerfile";
-
-const IMAGE_MEDIA_TYPES: Record<string, string> = {
-  avif: "image/avif",
-  bmp: "image/bmp",
-  gif: "image/gif",
-  heic: "image/heic",
-  heif: "image/heif",
-  ico: "image/x-icon",
-  jfif: "image/jpeg",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  png: "image/png",
-  svg: "image/svg+xml",
-  tif: "image/tiff",
-  tiff: "image/tiff",
-  webp: "image/webp",
-};
 
 type Voice = ReturnType<typeof useWhisperRecording>;
 type ComposerFiles = FileList | readonly File[];
@@ -80,6 +71,8 @@ type ComposerCtx = {
   value: string;
   setValue: React.Dispatch<React.SetStateAction<string>>;
   files: FileAttachment[];
+  canPickFiles: boolean;
+  pickFiles: () => Promise<void>;
   addFiles: (list: ComposerFiles | null) => Promise<void>;
   /** 按绝对路径附加文件，供文件管理器的“附加到 Agent”操作使用。 */
   attachFileByPath: (path: string) => Promise<void>;
@@ -207,16 +200,11 @@ export function AiComposerProvider({ children }: ProviderProps) {
         const workspace = currentWorkspaceEnv();
         const name = basename(path);
         const id = `path-${path}`;
-        type ReadResult =
-          | { kind: "text"; content: string; size: number }
-          | { kind: "binary"; size: number }
-          | { kind: "toolarge"; size: number; limit: number };
-        const result = await invoke<ReadResult>("fs_read_file", {
-          path,
-          workspace,
-        });
-
-        if (result.kind === "toolarge") {
+        const result = await readPathAttachment(path, workspace);
+        if (
+          result.kind === "toolarge" ||
+          (result.kind === "text" && result.size > MAX_TEXT_INLINE)
+        ) {
           toast.error(
             t("composer.fileTooLarge", {
               name,
@@ -225,69 +213,60 @@ export function AiComposerProvider({ children }: ProviderProps) {
           );
           return;
         }
-
-        const mediaType = imageMediaTypeForPath(path);
-        if (mediaType) {
-          const binary = await invoke<{ bytes: number[]; size: number }>(
-            "fs_read_binary",
-            { path, workspace },
-          );
-          const url = await readAsDataURL(
-            new Blob([new Uint8Array(binary.bytes)], { type: mediaType }),
-          );
-          setFiles((prev) => {
-            if (prev.some((f) => f.id === id)) return prev;
-            return [
-              ...prev,
-              {
-                id,
-                name,
-                kind: "image",
-                mediaType,
-                url,
-                size: binary.size,
-              },
-            ];
-          });
-          useChatStore.getState().focusInput();
+        if (result.kind !== "image" && result.kind !== "text") {
+          toast.error(t("composer.unsupportedFile", { name }));
           return;
         }
-
-        if (result.kind === "text") {
-          if (result.size > MAX_TEXT_INLINE) {
-            toast.error(
-              t("composer.fileTooLarge", {
-                name,
-                size: formatBytes(result.size),
-              }),
-            );
-            return;
-          }
-          setFiles((prev) => {
-            if (prev.some((f) => f.id === id)) return prev;
-            return [
-              ...prev,
-              {
-                id,
-                name,
-                kind: "text",
-                mediaType: "text/plain",
-                text: result.content,
-                size: result.size,
-              },
-            ];
-          });
-          useChatStore.getState().focusInput();
-          return;
-        }
-
-        toast.error(t("composer.unsupportedFile", { name }));
+        setFiles((prev) =>
+          prev.some((f) => f.id === id)
+            ? prev
+            : [
+                ...prev,
+                {
+                  id,
+                  name,
+                  kind: result.kind,
+                  size: result.size,
+                  sourcePath: path,
+                  environmentKey: currentWorkspaceBootstrap().environmentKey,
+                  ...(result.kind === "image"
+                    ? { mediaType: result.mediaType, url: result.url }
+                    : { mediaType: "text/plain", text: result.content }),
+                },
+              ],
+        );
+        useChatStore.getState().focusInput();
       } catch (e) {
         toast.error(t("composer.attachFailed", { error: String(e) }));
       }
     },
     [readOnly, t],
   );
+
+  const canPickFiles = currentWorkspaceEnv().kind === "local";
+  const pickingFilesRef = useRef(false);
+  /** 原生选择器只读取本机文件；远端文件由对应环境的文件树附加。 */
+  const pickFiles = async () => {
+    if (
+      !canPickFiles ||
+      readOnly ||
+      (isBusy && !canSteer) ||
+      pickingFilesRef.current
+    )
+      return;
+    pickingFilesRef.current = true;
+    try {
+      await pickNativeAttachments(
+        currentWorkspaceEnv(),
+        t("statusBar.attachFileOrImage"),
+        attachFileByPath,
+      );
+    } catch (error) {
+      toast.error(t("composer.attachFailed", { error: String(error) }));
+    } finally {
+      pickingFilesRef.current = false;
+    }
+  };
 
   const focusSignal = useChatStore((s) => s.focusSignal);
   const pendingPrefill = useChatStore((s) => s.pendingPrefill);
@@ -355,7 +334,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     },
   });
 
-  /** 将文件选择或剪贴板中的文件转换为 Composer 附件。 */
+  /** 将剪贴板中的内存文件转换为 Composer 附件，不推断磁盘路径。 */
   const addFiles = async (list: ComposerFiles | null) => {
     if (!list || readOnly) return;
     const next: FileAttachment[] = [];
@@ -423,12 +402,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     }
 
     const parts: MessagePart[] = [];
-    const fileBlocks = files
-      .filter((f) => f.kind === "text")
-      .map(
-        (f) =>
-          `<file name="${f.name}" mediaType="${f.mediaType}">\n${f.text ?? ""}\n</file>`,
-      );
+    const attachments: AttachmentDisplay[] = [];
     const selectionBlocks = files
       .filter((f) => f.kind === "selection")
       .map(
@@ -452,19 +426,33 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (m) seenHandles.add(m[1]);
       allSnippetBlocks.push(block);
     }
-    const composed = [
+    let composed = [
       commandMarker ?? "",
       allSnippetBlocks.join("\n\n"),
       selectionBlocks.join("\n\n"),
-      fileBlocks.join("\n\n"),
-      bodyAfterTokens,
     ]
       .filter(Boolean)
       .join("\n\n");
+    for (const file of files) {
+      if (file.kind !== "text") continue;
+      const appended = appendTextAttachment(composed, file);
+      composed = appended.text;
+      attachments.push(appended.attachment);
+    }
+    composed = [composed, bodyAfterTokens].filter(Boolean).join("\n\n");
     if (composed) parts.push({ type: "text", text: composed });
 
+    let mediaIndex = 0;
     for (const f of files) {
       if (f.kind === "image" && f.url) {
+        attachments.push({
+          kind: "image",
+          name: f.name,
+          size: f.size,
+          sourcePath: f.sourcePath,
+          environmentKey: f.environmentKey,
+          mediaIndex: mediaIndex++,
+        });
         parts.push({
           type: "file",
           mediaType: f.mediaType,
@@ -498,7 +486,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
         const sent = await sendChatMessage(sessionId, {
           role: "user",
           parts,
-          metadata: { createdAt: Date.now() },
+          metadata: { createdAt: Date.now(), attachments },
         });
         if (!sent) {
           toast.info(t("composer.sessionBusy"));
@@ -543,6 +531,8 @@ export function AiComposerProvider({ children }: ProviderProps) {
     setValue,
     files,
     addFiles,
+    canPickFiles,
+    pickFiles,
     attachFileByPath,
     removeFile,
     pickedSnippets,
@@ -599,23 +589,8 @@ function basename(path: string): string {
   return parts.length > 0 ? parts[parts.length - 1] : path;
 }
 
-function imageMediaTypeForPath(path: string): string | null {
-  const name = basename(path).toLowerCase();
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? null : (IMAGE_MEDIA_TYPES[name.slice(dot + 1)] ?? null);
-}
-
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.ceil(size / 1024)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function readAsDataURL(file: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }

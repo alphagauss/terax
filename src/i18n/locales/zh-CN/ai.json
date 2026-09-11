@@ -109,7 +109,8 @@
     "channelReadOnly": "此会话通过 Channel 接收消息",
     "channelBound": "此会话已绑定 Channel，请先在设置中移除连接，再删除会话。",
     "pendingSteering": "待引导：{{count}} 条",
-    "sendFailed": "消息未能发送，请重试。"
+    "sendFailed": "消息未能发送，请重试。",
+    "remoteAttachments": "请先将文件上传到当前环境，再从文件树附加。"
   },
   "statusBar": {
     "openAiAgent": "打开 AI agent",
@@ -291,5 +292,20 @@
   "whisper": {
     "transcriptionFailed": "转写失败",
     "microphoneAccessFailed": "麦克风访问失败"
+  },
+  "attachments": {
+    "image": "图片",
+    "preview": "预览 {{name}}",
+    "viewSnapshot": "查看发送内容",
+    "sourceFile": "源文件",
+    "snapshot": "此处显示发送这条消息时的内容。",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "copyImage": "复制图片",
+    "copied": "已复制",
+    "failed": "无法复制图片",
+    "saveSnapshot": "发送内容另存为…",
+    "textFile": "文本文件",
+    "saveFailed": "无法保存附件"
   }
 }
