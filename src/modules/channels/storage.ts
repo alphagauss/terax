@@ -3,6 +3,8 @@
  * 会话正文仍归 sessions，凭据仍归系统密钥存储。
  */
 
+import { channelModelUsageId } from "@/modules/ai/lib/modelUsage";
+import { deleteModelUsage } from "@/modules/settings/store";
 import {
   deleteSharedStoreKey,
   deleteSharedStoreState,
@@ -48,6 +50,7 @@ export function saveConnection(connection: ChannelConnection): Promise<void> {
 export async function removeConnection(id: string): Promise<void> {
   await deleteSharedStoreState(`channels-state:${id}`);
   await deleteSharedStoreKey("settings", `network.channel:${id}`);
+  await deleteModelUsage(channelModelUsageId(id));
   await deleteSharedStoreKey("channels", id);
 }
 

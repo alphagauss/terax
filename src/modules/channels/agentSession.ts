@@ -3,6 +3,12 @@
  * 不修改活动聊天、输入草稿或全局模型权限；结果只在本轮持久化完成后交给适配器。
  */
 
+import { isModelRefAvailable } from "@/modules/ai/config";
+import {
+  channelModelUsageId,
+  getModelUsage,
+  resolveModelUsage,
+} from "@/modules/ai/lib/modelUsage";
 import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import i18n from "@/i18n";
 import { CHANNEL_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
@@ -92,8 +98,17 @@ export async function runChannelTurn(
   ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
 ): Promise<string | null> {
   signal.throwIfAborted();
-  const model = usePreferencesStore.getState().defaultModel;
-  if (!model) throw new ChannelError("model");
+  const prefs = usePreferencesStore.getState();
+  const config = resolveModelUsage(
+    getModelUsage(prefs.modelUsages, channelModelUsageId(connection.id)),
+    prefs.modelParameters,
+    prefs.defaultModel,
+  );
+  if (
+    !config ||
+    !isModelRefAvailable(config.model, prefs.providerModels, prefs)
+  )
+    throw new ChannelError("model");
   await ensureChannelSession(connection);
   signal.throwIfAborted();
   let chat = await loadChat(connection.sessionId);
@@ -121,7 +136,7 @@ export async function runChannelTurn(
       parts: [{ type: "text", text: message.text }],
       metadata: { createdAt: message.receivedAt },
     },
-    { id: connection.id, model },
+    { id: connection.id, ...config },
   );
   if (!accepted) throw new ChannelError("model");
   ready((input) =>

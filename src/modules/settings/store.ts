@@ -418,6 +418,21 @@ export async function setModelUsageParameters(
   );
 }
 
+/** 移除应用实例的模型引用与参数覆盖，不影响其他应用实例。 */
+export async function deleteModelUsage(id: ModelUsageId): Promise<void> {
+  const values = await readSharedStore("settings");
+  const modelKey = modelUsageModelKey(id);
+  const prefix = modelUsageParametersPrefix(id);
+  const keys = Object.keys(values).filter(
+    (key) => key === modelKey || key.startsWith(prefix),
+  );
+  if (keys.length)
+    await mutateSharedStore(
+      "settings",
+      keys.map((key) => ({ kind: "delete", key })),
+    );
+}
+
 export type ModelSettingsPatch = Partial<
   Pick<
     Preferences,

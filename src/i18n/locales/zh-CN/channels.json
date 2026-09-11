@@ -1,7 +1,13 @@
 {
+  "model": {
+    "title": "模型配置",
+    "default": "使用全局默认模型 · {{model}}",
+    "none": "未配置",
+    "help": "自动保存到当前连接，修改用于下一轮 Agent 任务。"
+  },
   "title": "Channels",
   "description": "通过即时通信应用与 Terax 聊天。",
-  "defaults": "每个连接独占一个会话，工作目录为 ~/.terax/workspace，使用主 Agent、默认模型和完全访问权限。聊天记录可在 AI 侧栏查看。",
+  "defaults": "每个连接使用 ~/.terax/workspace 中的独立会话、Channel 智能体和完全访问权限，模型与参数按连接配置。可在 AI 侧栏查看会话历史。",
   "localOnly": "连接由 Local 永久主窗口统一管理。",
   "openLocal": "打开 Local 主窗口",
   "loading": "正在连接 Local 主窗口…",
@@ -46,7 +52,7 @@
     "protocol": "微信返回了暂不支持的响应，请尝试重新登录。",
     "storage": "无法保存或加载 Channel 数据，请检查本地数据目录。",
     "configuration": "Channel 配置格式无效，请检查 ~/.terax/channels/config.json 中的记录是否符合当前配置格式。",
-    "model": "请在设置中配置可用的默认模型及其凭据。",
+    "model": "请为当前连接选择可用模型，并在设置中配置该模型的凭据。",
     "agent": "Agent 执行失败，请打开会话查看详情。",
     "queue-full": "消息队列已满，新请求正在等待空位。",
     "interrupted": "部分消息在连接停止时被中断，未自动重新执行，请重新发送。",

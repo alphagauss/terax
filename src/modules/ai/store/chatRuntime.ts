@@ -333,7 +333,7 @@ export function steerChatMessage(
 export async function startChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
-  channel?: { id: string; model: ModelRef },
+  channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
 ): Promise<boolean> {
   if (startingSessionIds.has(sessionId)) return false;
   startingSessionIds.add(sessionId);
@@ -343,14 +343,14 @@ export async function startChatMessage(
   const submittedConfig = submittedModel
     ? structuredClone({
         model: submittedModel,
-        parameters: resolveModelParameters(
-          prefs.modelParameters[modelRefKey(submittedModel)] ?? [],
-          channel
-            ? {}
-            : getSessionParameterSelections(sessionId)[
+        parameters: channel
+          ? channel.parameters
+          : resolveModelParameters(
+              prefs.modelParameters[modelRefKey(submittedModel)] ?? [],
+              getSessionParameterSelections(sessionId)[
                 modelRefKey(submittedModel)
               ],
-        ),
+            ),
       })
     : null;
   try {
