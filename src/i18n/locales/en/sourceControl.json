@@ -5,6 +5,7 @@
   "branch": {
     "loading": "Loading branches…",
     "localBranches": "Local Branches",
+    "remoteBranches": "Remote Branches",
     "worktrees": "Worktrees",
     "noBranches": "No branches found."
   },

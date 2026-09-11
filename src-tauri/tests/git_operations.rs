@@ -5,6 +5,7 @@
 mod common;
 
 use common::{GitRepoFixture, git_available};
+use std::process::Command;
 use tempfile::TempDir;
 use terax_lib::modules::fs::to_canon;
 use terax_lib::modules::git::errors::GitError;
@@ -885,16 +886,23 @@ fn checkout_branch_rejects_unsafe_names() {
     let fx = GitRepoFixture::new();
 
     let err_empty =
-        operations::checkout_branch(&fx.registry, &fx.repo_str(), "", &fx.workspace).unwrap_err();
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "", false, &fx.workspace)
+            .unwrap_err();
     assert!(matches!(err_empty, GitError::InvalidPath(p) if p.is_empty()));
 
     let err_dash =
-        operations::checkout_branch(&fx.registry, &fx.repo_str(), "-f", &fx.workspace).unwrap_err();
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "-f", false, &fx.workspace)
+            .unwrap_err();
     assert!(matches!(err_dash, GitError::InvalidPath(p) if p == "-f"));
 
-    let err_dash_long =
-        operations::checkout_branch(&fx.registry, &fx.repo_str(), "--detach", &fx.workspace)
-            .unwrap_err();
+    let err_dash_long = operations::checkout_branch(
+        &fx.registry,
+        &fx.repo_str(),
+        "--detach",
+        false,
+        &fx.workspace,
+    )
+    .unwrap_err();
     assert!(matches!(err_dash_long, GitError::InvalidPath(p) if p == "--detach"));
 }
 
@@ -941,4 +949,136 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     assert_eq!(feature[0].kind, "worktree");
     assert!(!feature[0].is_head);
     assert!(feature[0].worktree_path.is_some());
+}
+
+#[test]
+fn list_branches_includes_remote_refs_and_commit_times() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "init"]);
+    fx.run_git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repo.git",
+    ]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+    fx.run_git(&["update-ref", "refs/remotes/upstream/feature", "HEAD"]);
+    fx.run_git(&[
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+    ]);
+
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("list_branches");
+
+    let main = result
+        .branches
+        .iter()
+        .find(|branch| branch.name == "main")
+        .expect("main branch present");
+    assert_eq!(main.kind, "local");
+    assert!(main.timestamp_secs.is_some());
+
+    let remote = result
+        .branches
+        .iter()
+        .find(|branch| branch.name == "origin/feature")
+        .expect("remote branch present");
+    assert_eq!(remote.kind, "remote");
+    assert!(remote.timestamp_secs.is_some());
+    assert!(!result
+        .branches
+        .iter()
+        .any(|branch| branch.name == "origin"));
+    assert!(!result
+        .branches
+        .iter()
+        .any(|branch| branch.name.starts_with("upstream/")));
+}
+
+#[test]
+fn list_branches_sorts_local_and_remote_by_commit_time() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "newer"]);
+
+    let tree = Command::new("git")
+        .args(["rev-parse", "HEAD^{tree}"])
+        .current_dir(&fx.repo_path)
+        .output()
+        .expect("resolve tree");
+    assert!(tree.status.success());
+    let tree = String::from_utf8(tree.stdout).expect("tree output");
+    let older = Command::new("git")
+        .args(["commit-tree", tree.trim(), "-m", "older"])
+        .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z")
+        .current_dir(&fx.repo_path)
+        .output()
+        .expect("create older commit");
+    assert!(older.status.success());
+    let older = String::from_utf8(older.stdout).expect("older commit output");
+    let older = older.trim();
+    fx.run_git(&["branch", "older", older]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/older", older]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/newer", "HEAD"]);
+
+    let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("list_branches");
+    let local: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|branch| branch.kind == "local")
+        .map(|branch| branch.name.as_str())
+        .collect();
+    let remote: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|branch| branch.kind == "remote")
+        .map(|branch| branch.name.as_str())
+        .collect();
+
+    assert_eq!(local, ["main", "older"]);
+    assert_eq!(remote, ["origin/newer", "origin/older"]);
+}
+
+#[test]
+fn checkout_remote_branch_creates_a_tracking_branch() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "init"]);
+    fx.run_git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://example.invalid/repo.git",
+    ]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+
+    operations::checkout_branch(
+        &fx.registry,
+        &fx.repo_str(),
+        "origin/feature",
+        true,
+        &fx.workspace,
+    )
+    .expect("checkout remote branch");
+
+    let current = fx.repo_path.join(".git").join("HEAD");
+    let head = std::fs::read_to_string(current).expect("read HEAD");
+    assert_eq!(head.trim(), "ref: refs/heads/feature");
 }

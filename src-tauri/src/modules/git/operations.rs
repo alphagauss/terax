@@ -1332,6 +1332,7 @@ pub fn list_branches(
     ensure_git_available(&repo_root.workspace)?;
 
     let mut branches: Vec<GitBranchEntry> = Vec::new();
+    let mut branch_timestamps: HashMap<String, i64> = HashMap::new();
 
     let current_branch = git_stdout_line_opt(
         &repo_root.workspace,
@@ -1345,20 +1346,44 @@ pub fn list_branches(
     if let Ok(lines) = git_stdout_lines(
         &repo_root.workspace,
         &repo_root.git_path,
-        ["branch", "--format=%(refname:short)%00%(HEAD)"],
+        [
+            "for-each-ref",
+            "--format=%(refname)%00%(refname:short)%00%(committerdate:unix)%00%(HEAD)",
+            "refs/heads",
+            "refs/remotes",
+        ],
     ) {
         for line in &lines {
             let mut parts = line.split('\0');
+            let refname = parts.next().unwrap_or("");
             let name = parts.next().unwrap_or("").to_string();
+            let timestamp_secs = parts.next().and_then(|value| value.parse::<i64>().ok());
             let head_marker = parts.next().unwrap_or("");
             let is_head = head_marker == "*";
-            if !name.is_empty() {
+            if refname.starts_with("refs/heads/") && !name.is_empty() {
+                if let Some(timestamp_secs) = timestamp_secs {
+                    branch_timestamps.insert(name.clone(), timestamp_secs);
+                }
                 branches.push(GitBranchEntry {
                     name,
                     kind: "local".into(),
                     worktree_path: None,
                     is_head,
                     is_detached: is_head && is_detached_head,
+                    timestamp_secs,
+                });
+            } else if refname.starts_with("refs/remotes/")
+                && !name.is_empty()
+                && !refname.ends_with("/HEAD")
+                && !refname.starts_with("refs/remotes/upstream/")
+            {
+                branches.push(GitBranchEntry {
+                    name,
+                    kind: "remote".into(),
+                    worktree_path: None,
+                    is_head: false,
+                    is_detached: false,
+                    timestamp_secs,
                 });
             }
         }
@@ -1379,6 +1404,7 @@ pub fn list_branches(
                     if !worktree_bare {
                         push_worktree(
                             &mut branches,
+                            &branch_timestamps,
                             wt_path,
                             worktree_branch.take(),
                             head_sha.take(),
@@ -1402,6 +1428,7 @@ pub fn list_branches(
             if !worktree_bare {
                 push_worktree(
                     &mut branches,
+                    &branch_timestamps,
                     wt_path,
                     worktree_branch.take(),
                     head_sha.take(),
@@ -1436,9 +1463,20 @@ pub fn list_branches(
     }
 
     deduped.sort_by(|a, b| {
-        let kind_ord = |k: &str| if k == "local" { 0u8 } else { 1u8 };
+        let kind_ord = |k: &str| match k {
+            "local" => 0u8,
+            "remote" => 1u8,
+            _ => 2u8,
+        };
         kind_ord(&a.kind)
             .cmp(&kind_ord(&b.kind))
+            .then_with(|| {
+                if matches!(a.kind.as_str(), "local" | "remote") {
+                    b.timestamp_secs.cmp(&a.timestamp_secs)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
             .then_with(|| a.name.cmp(&b.name))
     });
 
@@ -1447,6 +1485,7 @@ pub fn list_branches(
 
 fn push_worktree(
     branches: &mut Vec<GitBranchEntry>,
+    branch_timestamps: &HashMap<String, i64>,
     path: String,
     branch: Option<String>,
     head_sha: Option<String>,
@@ -1470,6 +1509,9 @@ fn push_worktree(
         worktree_path: Some(path),
         is_head: false,
         is_detached: branch.is_none(),
+        timestamp_secs: branch
+            .as_ref()
+            .and_then(|branch| branch_timestamps.get(branch).copied()),
     });
 }
 
@@ -1477,6 +1519,7 @@ pub fn checkout_branch(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     branch_name: &str,
+    track_remote: bool,
     workspace: &WorkspaceEnv,
 ) -> Result<()> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
@@ -1484,13 +1527,22 @@ pub fn checkout_branch(
     if branch_name.starts_with('-') || branch_name.is_empty() {
         return Err(GitError::InvalidPath(branch_name.into()));
     }
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        ["checkout", branch_name],
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git checkout failed")
+    let output = if track_remote {
+        run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["switch", "--track", branch_name],
+            DEFAULT_TIMEOUT_SECS,
+        )?
+    } else {
+        run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["switch", branch_name],
+            DEFAULT_TIMEOUT_SECS,
+        )?
+    };
+    ensure_success(&output, "git switch failed")
 }
 
 #[cfg(test)]

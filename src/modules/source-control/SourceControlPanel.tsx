@@ -82,6 +82,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { GraphSection } from "@/modules/source-control/GraphSection";
 import type { GitDiffSide } from "@/modules/source-control/gitTypes";
+import { relativeTime } from "@/modules/source-control/relativeTime";
 import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
 import {
   type CheckState,
@@ -224,12 +225,12 @@ function BranchDropdown({
   }, [open, loadBranches]);
 
   const handleCheckout = useCallback(
-    async (branch: string) => {
+    async (branch: GitBranchEntry, trackRemote = false) => {
       if (!repoRoot || checkoutInFlight.current) return;
       checkoutInFlight.current = true;
       setCheckingOut(true);
       try {
-        await native.gitCheckoutBranch(repoRoot, branch);
+        await native.gitCheckoutBranch(repoRoot, branch.name, trackRemote);
         setBranches([]);
         setOpen(false);
         onRefresh();
@@ -251,6 +252,25 @@ function BranchDropdown({
     () => branches.filter((b) => b.kind === "worktree"),
     [branches],
   );
+  const remoteBranches = useMemo(
+    () => branches.filter((b) => b.kind === "remote"),
+    [branches],
+  );
+
+  const checkoutTarget = useCallback(
+    (branch: GitBranchEntry) => {
+      if (branch.kind !== "remote") {
+        void handleCheckout(branch);
+        return;
+      }
+      const localName = branch.name.split("/").slice(1).join("/");
+      const localBranch = localBranches.find(
+        (local) => local.name === localName,
+      );
+      void handleCheckout(localBranch ?? branch, !localBranch);
+    },
+    [handleCheckout, localBranches],
+  );
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -269,7 +289,7 @@ function BranchDropdown({
           <span className="max-w-35 truncate">{repoLabel}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" className="w-72">
         {loading ? (
           <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
             <Spinner className="size-3" />
@@ -290,7 +310,7 @@ function BranchDropdown({
                   {localBranches.map((b) => (
                     <DropdownMenuItem
                       key={b.name}
-                      onSelect={() => void handleCheckout(b.name)}
+                      onSelect={() => checkoutTarget(b)}
                       className="flex cursor-pointer items-center gap-2 text-[12px]"
                     >
                       {b.isHead ? (
@@ -304,6 +324,33 @@ function BranchDropdown({
                         <span className="w-3.5 shrink-0" />
                       )}
                       <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                      <BranchTimestamp timestampSecs={b.timestampSecs} />
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </>
+            )}
+            {remoteBranches.length > 0 && (
+              <>
+                {localBranches.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  {t("branch.remoteBranches")}
+                </DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  {remoteBranches.map((b) => (
+                    <DropdownMenuItem
+                      key={b.name}
+                      onSelect={() => checkoutTarget(b)}
+                      className="flex cursor-pointer items-center gap-2 text-[12px]"
+                    >
+                      <HugeiconsIcon
+                        icon={FolderCloudIcon}
+                        size={14}
+                        strokeWidth={1.5}
+                        className="shrink-0 text-muted-foreground"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                      <BranchTimestamp timestampSecs={b.timestampSecs} />
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
@@ -311,7 +358,9 @@ function BranchDropdown({
             )}
             {worktrees.length > 0 && (
               <>
-                {localBranches.length > 0 && <DropdownMenuSeparator />}
+                {(localBranches.length > 0 || remoteBranches.length > 0) && (
+                  <DropdownMenuSeparator />
+                )}
                 <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {t("branch.worktrees")}
                 </DropdownMenuLabel>
@@ -332,7 +381,7 @@ function BranchDropdown({
                         strokeWidth={1.5}
                         className="shrink-0 text-muted-foreground"
                       />
-                      <div className="flex min-w-0 flex-col">
+                      <div className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate">{b.name}</span>
                         {b.worktreePath && (
                           <span className="truncate text-[10px] text-muted-foreground">
@@ -340,6 +389,7 @@ function BranchDropdown({
                           </span>
                         )}
                       </div>
+                      <BranchTimestamp timestampSecs={b.timestampSecs} />
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
@@ -354,6 +404,14 @@ function BranchDropdown({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function BranchTimestamp({ timestampSecs }: { timestampSecs: number | null }) {
+  return (
+    <span className="w-7 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
+      {timestampSecs === null ? "" : relativeTime(timestampSecs)}
+    </span>
   );
 }
 

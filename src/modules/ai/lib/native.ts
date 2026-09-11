@@ -258,10 +258,11 @@ export type GitDiscardEntry = {
 
 export type GitBranchEntry = {
   name: string;
-  kind: "local" | "worktree";
+  kind: "local" | "remote" | "worktree";
   worktreePath: string | null;
   isHead: boolean;
   isDetached: boolean;
+  timestampSecs: number | null;
 };
 
 export type GitBranchListResult = {
@@ -520,9 +521,10 @@ export const native = {
     invoke<GitBranchListResult>("git_list_branches", {
       repoRoot,
     }),
-  gitCheckoutBranch: (repoRoot: string, branch: string) =>
+  gitCheckoutBranch: (repoRoot: string, branch: string, trackRemote = false) =>
     invoke<void>("git_checkout_branch", {
       repoRoot,
       branch,
+      trackRemote,
     }),
 };
