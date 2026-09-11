@@ -802,19 +802,12 @@ function SourceControlViewContainerComponent({
                               scm.setCommitMessage(event.target.value)
                             }
                             onKeyDown={handleCommitShortcut}
-                            placeholder="Commit message"
-                            rows={3}
-                            className="min-h-[72px] border-border resize-none bg-transparent pb-7 shadow-none"
+                            placeholder={t("commit.placeholder", {
+                              shortcut: commitShortcut,
+                            })}
+                            rows={1}
+                            className="min-h-0 border-border resize-none bg-transparent pr-9 shadow-none"
                           />
-                          <div className="pointer-events-none absolute inset-x-3 bottom-1.5 flex items-center justify-between p-1 gap-2 text-[10px] tabular-nums text-muted-foreground">
-                            {scm.commitMessage.length > 0 ? (
-                              <span>Ch: {scm.commitMessage.length}</span>
-                            ) : (
-                              <span className="flex gap-2 items-center">
-                                {commitShortcut} <p>to commit</p>
-                              </span>
-                            )}
-                          </div>
                           <div className="absolute right-1 top-1">
                             <Tooltip>
                               <TooltipTrigger asChild>

@@ -13,9 +13,7 @@
     "stageToEnable": "Stage changes to enable commit.",
     "enterMessage": "Enter a commit message to enable commit.",
     "hint": "Commit with {{shortcut}}.",
-    "placeholder": "Commit message",
-    "charCount": "Ch: {{count}}",
-    "toCommit": "to commit",
+    "placeholder": "Message ({{shortcut}} to commit)",
     "button": "Commit",
     "committing": "Committing…"
   },
