@@ -3,7 +3,11 @@
  * 禁用时保留配置可见；参数定义与当前模型的对应关系由调用方保证。
  */
 import { type ComponentProps, useLayoutEffect, useRef } from "react";
-import { modelRefKey, modelRefsEqual } from "@/modules/ai/config";
+import {
+  modelRefKey,
+  modelRefsEqual,
+  type ModelRef,
+} from "@/modules/ai/config";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
 import { ModelPicker } from "@/modules/ai/components/ModelPicker";
@@ -17,8 +21,11 @@ export function ModelRequestSettings({
   parameters,
   selections,
   onParametersChange,
+  inheritedModel,
   ...picker
 }: ComponentProps<typeof ModelPicker> & {
+  /** 未指定模型时由入口解析的实际默认模型，只用于展示与参数编辑。 */
+  inheritedModel?: ModelRef | null;
   parameters: readonly ModelParameter[];
   selections: ParameterSelections;
   onParametersChange: (selections: ParameterSelections) => void;
@@ -28,7 +35,7 @@ export function ModelRequestSettings({
   const contentRef = useRef<HTMLDivElement>(null);
   const heightAnimationRef = useRef<Animation | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const effectiveModel = picker.model;
+  const effectiveModel = picker.model ?? inheritedModel;
   const modelKey = effectiveModel ? modelRefKey(effectiveModel) : null;
   const previous = useRef<{ model: string | null; height: number } | null>(
     null,

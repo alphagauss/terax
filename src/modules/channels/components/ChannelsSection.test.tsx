@@ -12,13 +12,24 @@ import { useChannelsView, type ChannelAction } from "@/modules/channels/client";
 import { ChannelsSection } from "@/modules/channels/components/ChannelsSection";
 import type { ChannelSnapshot } from "@/modules/channels/types";
 
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { DEFAULT_PREFERENCES } from "@/modules/settings/store";
+import { modelRefKey } from "@/modules/ai/config";
+
 const io = vi.hoisted(() => ({
   request: vi.fn(),
   route: vi.fn(),
   login: vi.fn(),
+  model: vi.fn(),
+  parameters: vi.fn(),
   network: { values: {} as Record<string, unknown>, ready: true, error: false },
 }));
 
+vi.mock("@/modules/settings/store", async (original) => ({
+  ...(await original<typeof import("@/modules/settings/store")>()),
+  setModelUsageModel: io.model,
+  setModelUsageParameters: io.parameters,
+}));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: async () => ({ isPrimary: true, env: { kind: "local" } }),
 }));
@@ -59,6 +70,10 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(async () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  usePreferencesStore.setState(DEFAULT_PREFERENCES);
+  io.model.mockReset().mockResolvedValue(undefined);
+  io.parameters.mockReset().mockResolvedValue(undefined);
   (
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -109,6 +124,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
   (
     globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = false;
@@ -228,4 +244,77 @@ it("打开平台菜单不创建实例，选择平台后自动命名并授权，�
   expect(nameInput().value).toBe("WeChat 1");
   expect(container.textContent).toContain("errors.network");
   expect(button("login").disabled).toBe(false);
+});
+
+it("忙碌连接的模型参数即时独立保存，不提交连接草稿或触发重连", async () => {
+  const ref = { providerId: "builtin:deepseek", modelId: "test-model" };
+  await act(async () => {
+    usePreferencesStore.setState({
+      defaultModel: ref,
+      providerModels: {
+        [ref.providerId]: [
+          { id: ref.modelId, source: "manual", contextWindow: 128000 },
+        ],
+      },
+      modelParameters: {
+        [modelRefKey(ref)]: [
+          {
+            id: "effort",
+            label: "Effort",
+            target: "provider",
+            path: "reasoning_effort",
+            valueType: "string",
+            options: [
+              { id: "low", label: "Low", value: "low" },
+              { id: "high", label: "High", value: "high" },
+            ],
+            defaultOption: "low",
+            showInSummary: true,
+          },
+        ],
+      },
+    });
+    useChannelsView.setState({
+      snapshots: useChannelsView
+        .getState()
+        .snapshots.map((item) => ({ ...item, busy: true })),
+    });
+  });
+  await enterName("Unsaved name");
+  const modelButton = container.querySelector<HTMLButtonElement>(
+    '[aria-label="models.parameters.model"]',
+  );
+  expect(modelButton?.disabled).toBe(false);
+  expect(modelButton?.closest("form")).toBeNull();
+  await act(async () =>
+    modelButton?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    ),
+  );
+  await act(async () => {
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find((item) => item.textContent === ref.modelId)
+      ?.click();
+  });
+  expect(io.model).toHaveBeenCalledWith("channel:a", ref);
+  expect(io.request).not.toHaveBeenCalled();
+  await act(async () => button("Beta").click());
+  await act(async () =>
+    container
+      .querySelector('[aria-label="Effort"]')
+      ?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+      ),
+  );
+  await act(async () => {
+    [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((item) => item.textContent === "High")
+      ?.click();
+  });
+  expect(io.parameters).toHaveBeenCalledWith("channel:b", ref, {
+    effort: "high",
+  });
+  expect(io.request).not.toHaveBeenCalled();
+  await act(async () => button("Alpha").click());
+  expect(nameInput().value).toBe("Unsaved name");
 });

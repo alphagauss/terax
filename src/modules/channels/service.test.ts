@@ -80,6 +80,9 @@ vi.mock("@/lib/sharedStore", () => ({
   deleteSharedStoreKey: async (store: string, key: string) => {
     delete io.stores.get(store)?.[key];
   },
+  mutateSharedStore: async (store: string, changes: { key: string }[]) => {
+    for (const change of changes) delete io.stores.get(store)?.[change.key];
+  },
   deleteSharedStoreState: io.deleteState,
 }));
 vi.mock("@/modules/channels/agentSession", () => ({
@@ -224,12 +227,18 @@ it("验证码请求短暂断网后自动重试并继续登录", async () => {
   }
 });
 
-it("删除清理失败时保留可重试连接，重试后清除其状态与路由", async () => {
+it("删除清理失败时保留可重试连接，重试后清除其状态、路由与模型配置", async () => {
   io.stores.set("channels", {
     [io.connection.id]: { ...io.connection, enabled: false },
   });
   io.stores.set("settings", {
     [`network.channel:${io.connection.id}`]: "direct",
+    [`modelUsage:channel:${io.connection.id}:model`]: {
+      providerId: "builtin:deepseek",
+      modelId: "test",
+    },
+    [`modelUsage:channel:${io.connection.id}:parameters:["builtin:deepseek","test"]`]:
+      { effort: "low" },
     theme: "dark",
   });
   io.deleteState.mockRejectedValueOnce(new Error("state is busy"));

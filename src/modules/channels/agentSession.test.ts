@@ -3,7 +3,10 @@
  * 只投递最后一步的公开正文，保存失败必须结束等待而不发送未落盘的回复。
  */
 
-import { startChatMessage } from "@/modules/ai/store/chatRuntime";
+import {
+  startChatMessage,
+  steerChatMessage,
+} from "@/modules/ai/store/chatRuntime";
 import { chats, useChatStore } from "@/modules/ai/store/chatStore";
 import {
   channelReplyText,
@@ -11,8 +14,14 @@ import {
   runChannelTurn,
 } from "@/modules/channels/agentSession";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { modelRefKey } from "@/modules/ai/config";
+import {
+  readModelUsages,
+  channelModelUsageId,
+} from "@/modules/ai/lib/modelUsage";
+import type { ModelParameter } from "@/modules/ai/lib/modelParameters";
 import type { UIMessage } from "ai";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { commitSession } from "@/modules/ai/lib/sessions";
 vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -28,7 +37,22 @@ vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 vi.mock("@/modules/ai/store/chatRuntime", () => ({
   loadChat: async (id: string) => chats.get(id),
   startChatMessage: vi.fn(),
+  steerChatMessage: vi.fn(),
 }));
+
+beforeEach(() => {
+  vi.mocked(startChatMessage).mockReset();
+  vi.mocked(steerChatMessage).mockReset();
+  usePreferencesStore.setState({
+    modelUsages: readModelUsages({}),
+    modelParameters: {},
+    providerModels: {
+      "builtin:deepseek": [
+        { id: "deepseek-chat", source: "manual", contextWindow: 128000 },
+      ],
+    },
+  });
+});
 
 it("delivers only the final assistant step even when hidden events follow", () => {
   const messages: UIMessage[] = [
@@ -199,4 +223,141 @@ it("creates a Channel identity without persisting mutable prompts and tools", as
       },
     }),
   );
+});
+
+it("freezes each Channel task independently while steering keeps the current snapshot", async () => {
+  const connection = {
+    id: "a",
+    sessionId: "session-a",
+    kind: "weixin" as const,
+    name: "A",
+    enabled: true,
+    accountId: "owner",
+    busyMessageMode: "steer" as const,
+  };
+  const model = { providerId: "builtin:deepseek", modelId: "deepseek-chat" };
+  const other = { ...model, modelId: "other" };
+  const parameter: ModelParameter = {
+    id: "temperature",
+    label: "Temperature",
+    target: "standard",
+    path: "temperature",
+    valueType: "number",
+    options: [
+      { id: "low", label: "Low", value: 0.1 },
+      { id: "high", label: "High", value: 0.9 },
+    ],
+    defaultOption: "low",
+    showInSummary: true,
+  };
+  const usages = readModelUsages({});
+  usages[channelModelUsageId("a")] = {
+    model: null,
+    parameterSelections: { [modelRefKey(model)]: { temperature: "high" } },
+  };
+  usages[channelModelUsageId("b")] = { model: other, parameterSelections: {} };
+  usePreferencesStore.setState({
+    defaultModel: model,
+    modelUsages: usages,
+    modelParameters: {
+      [modelRefKey(model)]: [parameter],
+      [modelRefKey(other)]: [parameter],
+    },
+    providerModels: {
+      [model.providerId]: [model, other].map((ref) => ({
+        id: ref.modelId,
+        source: "manual",
+        contextWindow: 128000,
+      })),
+    },
+  });
+  const chat = { status: "ready", messages: [] as UIMessage[] };
+  chats.set(connection.sessionId, chat as never);
+  useChatStore.setState({
+    sessions: [
+      {
+        id: connection.sessionId,
+        channelId: connection.id,
+        environmentKey: "local",
+      } as never,
+    ],
+    agentMetaBySession: {},
+    runLockSessionIds: {},
+  });
+  const input = {
+    id: "input",
+    senderId: "owner",
+    text: "hello",
+    receivedAt: 1,
+    replyContext: "context",
+  };
+  vi.mocked(startChatMessage).mockImplementation(async () => {
+    chat.messages.push({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    });
+    return true;
+  });
+  const task = runChannelTurn(
+    connection,
+    input,
+    new AbortController().signal,
+    (steer) => {
+      steer({ ...input, id: "guide" });
+    },
+  );
+  // 在异步会话准备期间修改全局默认和该连接配置，不得改变已发起任务。
+  usePreferencesStore.setState({
+    defaultModel: other,
+    modelUsages: {
+      ...usages,
+      [channelModelUsageId("a")]: { model: other, parameterSelections: {} },
+    },
+  });
+  await expect(task).resolves.toBe("done");
+  expect(startChatMessage).toHaveBeenCalledTimes(1);
+  const first = vi.mocked(startChatMessage).mock.calls[0][2];
+  expect(first).toEqual({
+    id: "a",
+    model,
+    parameters: [{ target: "standard", path: "temperature", value: 0.9 }],
+  });
+  expect(steerChatMessage).toHaveBeenCalledWith(
+    connection.sessionId,
+    expect.objectContaining({ role: "user" }),
+    "a",
+  );
+  await runChannelTurn(
+    connection,
+    input,
+    new AbortController().signal,
+    () => {},
+  );
+  expect(vi.mocked(startChatMessage).mock.calls[1][2]).toEqual({
+    id: "a",
+    model: other,
+    parameters: [{ target: "standard", path: "temperature", value: 0.1 }],
+  });
+  expect(first?.model).toEqual(model);
+  chats.clear();
+});
+
+it("does not replace an explicitly unavailable Channel model with the global default", async () => {
+  const model = { providerId: "builtin:deepseek", modelId: "removed" };
+  usePreferencesStore.setState({
+    modelUsages: {
+      ...readModelUsages({}),
+      "channel:a": { model, parameterSelections: {} },
+    },
+  });
+  await expect(
+    runChannelTurn(
+      { id: "a" } as never,
+      {} as never,
+      new AbortController().signal,
+      () => {},
+    ),
+  ).rejects.toMatchObject({ issue: "model" });
+  expect(startChatMessage).not.toHaveBeenCalled();
 });

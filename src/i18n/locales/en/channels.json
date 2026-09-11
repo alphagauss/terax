@@ -1,7 +1,13 @@
 {
+  "model": {
+    "title": "Model configuration",
+    "default": "Use default model · {{model}}",
+    "none": "Not configured",
+    "help": "Saved automatically for this connection. Changes apply to the next Agent task."
+  },
   "title": "Channels",
   "description": "Chat with Terax through messaging apps.",
-  "defaults": "Each connection has its own session in ~/.terax/workspace, using the main Agent, default model and full access. Conversation history is available in the AI sidebar.",
+  "defaults": "Each connection has its own session in ~/.terax/workspace, using the Channel Agent, independently configured model options and full access. Conversation history is available in the AI sidebar.",
   "localOnly": "Connections are managed by the permanent Local window.",
   "openLocal": "Open Local window",
   "loading": "Connecting to the Local window…",
@@ -46,7 +52,7 @@
     "protocol": "WeChat returned an unsupported response. Try signing in again.",
     "storage": "Channel data could not be saved or loaded. Check the local data directory.",
     "configuration": "Channel configuration is invalid. Check the records in ~/.terax/channels/config.json against the current configuration format.",
-    "model": "Configure an available default model and its credentials in Settings.",
+    "model": "Choose an available model for this connection and configure its credentials in Settings.",
     "agent": "The Agent run failed. Open the conversation for details.",
     "queue-full": "The message queue is full. New requests are waiting for space.",
     "interrupted": "Some messages were interrupted when the connection stopped. They were not run again automatically; please resend them.",

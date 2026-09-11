@@ -4,11 +4,12 @@ import type { ModelParameter } from "@/modules/ai/lib/modelParameters";
 const storage = vi.hoisted(() => ({
   values: {} as Record<string, unknown>,
   set: vi.fn(),
+  mutate: vi.fn(),
 }));
 vi.mock("@/lib/sharedStore", () => ({
   readSharedStore: async () => storage.values,
   setSharedStoreKey: storage.set,
-  mutateSharedStore: vi.fn(),
+  mutateSharedStore: storage.mutate,
   onSharedStoreChange: vi.fn(),
 }));
 import {
@@ -16,6 +17,7 @@ import {
   setModelUsageParameters,
   setModelUsageModel,
   setModelParameters,
+  deleteModelUsage,
 } from "./store";
 
 const ref = { providerId: "builtin:deepseek", modelId: "model" };
@@ -31,6 +33,9 @@ const parameter: ModelParameter = {
 };
 beforeEach(() => {
   storage.values = {};
+  storage.mutate.mockReset().mockImplementation(async (_store, changes) => {
+    for (const change of changes) delete storage.values[change.key];
+  });
   storage.set.mockReset();
   storage.set.mockImplementation(async (_store, key, value) => {
     storage.values[key] = structuredClone(value);
@@ -79,6 +84,29 @@ describe("model parameter persistence", () => {
         [modelRefKey(other)]: { thinking: "off" },
       },
     });
+  });
+  it("isolates Channel connection choices and removes only the deleted connection's records", async () => {
+    await Promise.all([
+      setModelUsageModel("channel:a", ref),
+      setModelUsageParameters("channel:a", ref, { thinking: "off" }),
+      setModelUsageModel("channel:ab", ref),
+      setModelUsageParameters("channel:ab", ref, { thinking: "on" }),
+      setModelUsageParameters("completion", ref, { thinking: "off" }),
+    ]);
+    const before = await loadPreferences();
+    expect(
+      before.modelUsages["channel:a"]?.parameterSelections[modelRefKey(ref)],
+    ).toEqual({ thinking: "off" });
+    expect(
+      before.modelUsages["channel:ab"]?.parameterSelections[modelRefKey(ref)],
+    ).toEqual({ thinking: "on" });
+    await deleteModelUsage("channel:a");
+    const after = await loadPreferences();
+    expect(after.modelUsages["channel:a"]).toBeUndefined();
+    expect(after.modelUsages["channel:ab"]).toEqual(
+      before.modelUsages["channel:ab"],
+    );
+    expect(after.modelUsages.completion).toEqual(before.modelUsages.completion);
   });
   it("rejects invalid definitions before touching the shared store", async () => {
     await expect(

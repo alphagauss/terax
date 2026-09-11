@@ -3,6 +3,7 @@
  * 草稿由父页面按实例保留；配置和网络路由分别提交，二维码库仅在授权时加载。
  */
 
+import { ChannelModelSettings } from "@/modules/channels/components/ChannelModelSettings";
 import { Hint } from "@/components/controls/tooltip";
 import { FormField } from "@/components/layout/FormField";
 import {
@@ -296,6 +297,11 @@ export function ChannelConnectionEditor({
           </Button>
         </ConnectionSettingsActions>
       </form>
+      <ChannelModelSettings
+        key={connection.id}
+        connectionId={connection.id}
+        disabled={disabled}
+      />
     </>
   );
 }
