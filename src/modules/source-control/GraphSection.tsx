@@ -575,6 +575,7 @@ function GitRefBadge({
     ref.kind === "remote"
       ? {
           icon: CloudIcon,
+          iconClassName: "scale-[1.2]",
           className:
             "border-violet-500 bg-violet-500 text-white dark:text-black",
         }
@@ -585,6 +586,7 @@ function GitRefBadge({
           }
         : {
             icon: GitBranchIcon,
+            iconClassName: "scale-[1.2]",
             className: "border-blue-500 bg-blue-500 text-white dark:text-black",
           };
 
@@ -600,7 +602,7 @@ function GitRefBadge({
           icon={appearance.icon}
           size={13}
           strokeWidth={1.8}
-          className="shrink-0"
+          className={cn("shrink-0", appearance.iconClassName)}
         />
         {iconOnly ? (
           <span className="sr-only">{ref.label}</span>
