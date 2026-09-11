@@ -13,14 +13,15 @@ use crate::modules::git::process::{
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
-    DEFAULT_TIMEOUT_SECS, DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange,
-    GitCommitResult, GitDiffContentResult, GitDiffResult, GitDiffSide, GitLogEntry, GitLogRef,
-    GitLogRefKind, GitOutput, GitPanelSnapshot, GitPushResult, GitQuickDiffBaseline, GitRepoInfo,
-    GitStatusSnapshot, MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS, TextSource,
+    DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
+    GitDiffContentResult, GitDiffResult, GitDiffSide, GitLineStats, GitLogEntry, GitLogRef,
+    GitLogRefKind, GitOutput, GitPanelDiffStats, GitPanelSnapshot, GitPushResult,
+    GitQuickDiffBaseline, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
+    MAX_FILE_BYTES, NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
-    ResolvedGitDirectory, authorized_repo_root, canonical_dir, is_safe_pathspec,
-    resolve_within_repo, split_upstream,
+    authorized_repo_root, canonical_dir, is_safe_pathspec, resolve_within_repo, split_upstream,
+    ResolvedGitDirectory,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
@@ -113,6 +114,7 @@ pub fn panel_snapshot(
     ensure_git_available(&cwd.workspace)?;
     let Some(canonical_root) = resolve_repo_root_in_authorized(registry, &cwd)? else {
         return Ok(GitPanelSnapshot {
+            diff_stats: None,
             repo: None,
             status: None,
         });
@@ -124,10 +126,119 @@ pub fn panel_snapshot(
         upstream: status.upstream.clone(),
         is_detached: status.is_detached,
     };
+    let diff_stats = GitPanelDiffStats {
+        worktree: panel_line_stats(&canonical_root, &status, false).ok(),
+        index: panel_line_stats(&canonical_root, &status, true).ok(),
+    };
     Ok(GitPanelSnapshot {
+        diff_stats: Some(diff_stats),
         repo: Some(repo),
         status: Some(status),
     })
+}
+
+/// 每侧只读取紧凑统计；未跟踪文本按新增计入，不改动真实索引。
+fn panel_line_stats(
+    repo_root: &ResolvedGitDirectory,
+    status: &GitStatusSnapshot,
+    staged: bool,
+) -> Result<GitLineStats> {
+    let mut args = vec![
+        "diff",
+        "--numstat",
+        "-z",
+        "--find-renames=50%",
+        "--no-ext-diff",
+        "--no-textconv",
+    ];
+    if staged {
+        args.push("--cached");
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git diff statistics failed")?;
+    // 截断输出不能当作完整统计，避免展示误导性的精确数字。
+    if output.truncated {
+        return Err(GitError::command("git diff statistics", "output truncated"));
+    }
+    let mut stats = sum_numstat(&output.stdout)?;
+    // 未合并的索引缺少普通比较基线，不能将 Git 输出当作完整的两侧统计。
+    stats.incomplete = status.truncated
+        || status.changed_files.iter().any(|file| {
+            matches!(
+                (file.index_status.as_str(), file.worktree_status.as_str()),
+                ("U", _) | (_, "U") | ("A", "A") | ("D", "D")
+            )
+        });
+    if !staged {
+        for file in status.changed_files.iter().filter(|file| file.untracked) {
+            if !is_safe_pathspec(&file.path) {
+                stats.incomplete = true;
+                continue;
+            }
+            // 校验路径不越界，同时保留末级符号链接供读取器拒绝跟随。
+            let local_path = repo_root.local_path.join(&file.path);
+            if !repo_root.remote && resolve_within_repo(&repo_root.local_path, &file.path).is_err()
+            {
+                stats.incomplete = true;
+                continue;
+            }
+            match read_worktree_text(repo_root, &file.path, &local_path) {
+                Ok(TextSource::Text(text)) => {
+                    stats.added += text.bytes().filter(|byte| *byte == b'\n').count() as u64
+                        + u64::from(!text.is_empty() && !text.ends_with('\n'));
+                }
+                Ok(TextSource::Binary) => {}
+                Ok(TextSource::Missing) | Err(_) => stats.incomplete = true,
+            }
+        }
+    }
+    Ok(stats)
+}
+
+/// 按 NUL 边界跳过重命名的双路径，文件名中的制表符和换行不参与统计解析。
+fn sum_numstat(bytes: &[u8]) -> Result<GitLineStats> {
+    let invalid = || GitError::command("git diff statistics", "invalid numstat output");
+    let mut stats = GitLineStats::default();
+    let mut records = bytes.split(|byte| *byte == 0);
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let mut columns = record.splitn(3, |byte| *byte == b'\t');
+        let added = columns.next().ok_or_else(invalid)?;
+        let removed = columns.next().ok_or_else(invalid)?;
+        let path = columns.next().ok_or_else(invalid)?;
+        if path.is_empty() {
+            for _ in 0..2 {
+                if records.next().filter(|path| !path.is_empty()).is_none() {
+                    return Err(invalid());
+                }
+            }
+        }
+        if added == b"-" && removed == b"-" {
+            continue;
+        }
+        let number = |raw| {
+            std::str::from_utf8(raw)
+                .ok()
+                .and_then(|text| text.parse::<u64>().ok())
+                .ok_or_else(invalid)
+        };
+        stats.added = stats
+            .added
+            .checked_add(number(added)?)
+            .ok_or_else(invalid)?;
+        stats.removed = stats
+            .removed
+            .checked_add(number(removed)?)
+            .ok_or_else(invalid)?;
+    }
+    Ok(stats)
 }
 
 pub fn status(
@@ -1548,6 +1659,14 @@ pub fn checkout_branch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_stats_parser_handles_rename_binary_and_unusual_paths() {
+        let stats = sum_numstat(b"3\t1\t\0old\tname\0new\nname\0-\t-\tbinary\0").unwrap();
+        assert_eq!((stats.added, stats.removed), (3, 1));
+        assert!(sum_numstat(b"3\t1\t\0old\0").is_err());
+        assert!(sum_numstat(b"x\t1\tfile\0").is_err());
+    }
 
     #[test]
     fn quick_diff_path_helpers_accept_both_separators() {

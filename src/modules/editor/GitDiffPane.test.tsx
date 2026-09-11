@@ -71,6 +71,7 @@ function repositoryController(revision: number): RepositoryController {
       isDetached: false,
     },
     status: null,
+    diffStats: null,
     changedCount: 0,
     upstream: null,
     ahead: 0,

@@ -29,6 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/controls/alert-dialog";
+import { RepositoryDiffStats } from "./RepositoryDiffStats";
 import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
@@ -812,6 +813,12 @@ function SourceControlViewContainerComponent({
                         ) : null}
                       </div>
                     ) : null}
+                    {scm.repo && (
+                      <RepositoryDiffStats
+                        key={scm.repo.repoRoot}
+                        stats={scm.diffStats}
+                      />
+                    )}
                     {scm.status?.isDetached ? (
                       <span className="rounded bg-muted/55 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
                         detached

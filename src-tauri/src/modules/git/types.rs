@@ -50,8 +50,25 @@ pub struct GitStatusSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPanelSnapshot {
+    pub diff_stats: Option<GitPanelDiffStats>,
     pub repo: Option<GitRepoInfo>,
     pub status: Option<GitStatusSnapshot>,
+}
+
+/// 面板两侧独立统计，失败不影响仓库状态快照。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPanelDiffStats {
+    pub worktree: Option<GitLineStats>,
+    pub index: Option<GitLineStats>,
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitLineStats {
+    pub added: u64,
+    pub removed: u64,
+    pub incomplete: bool,
 }
 
 #[derive(serde::Deserialize)]

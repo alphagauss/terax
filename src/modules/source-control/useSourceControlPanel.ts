@@ -13,6 +13,7 @@ import {
   type GitDiscardEntry,
   type GitRepoInfo,
   type GitStatusSnapshot,
+  type GitPanelDiffStats,
   native,
 } from "@/modules/ai/lib/native";
 import { isProviderConnectionReady } from "@/modules/ai/providerRegistry";
@@ -62,6 +63,7 @@ type SourceControlPanelState = {
   panelState: PanelState;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
+  diffStats: GitPanelDiffStats | null;
   commitMessage: string;
   actionBusy: string | null;
   statusError: string | null;
@@ -525,6 +527,7 @@ export function useSourceControlPanel(
 
   return {
     panelState,
+    diffStats: controller.diffStats,
     repo,
     status,
     commitMessage,

@@ -246,7 +246,18 @@ export type GitCommitFileChange = {
   isBinary: boolean;
 };
 
+export type GitLineStats = {
+  added: number;
+  removed: number;
+  incomplete: boolean;
+};
+export type GitPanelDiffStats = {
+  worktree: GitLineStats | null;
+  index: GitLineStats | null;
+};
+
 export type GitPanelSnapshot = {
+  diffStats: GitPanelDiffStats | null;
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
 };

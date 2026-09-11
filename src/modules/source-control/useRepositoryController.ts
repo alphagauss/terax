@@ -4,6 +4,7 @@
  */
 
 import {
+  type GitPanelDiffStats,
   type GitRepoInfo,
   type GitStatusSnapshot,
   native,
@@ -31,6 +32,7 @@ type RepositoryRemoteActionResult = {
 export type RepositoryController = {
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
+  diffStats: GitPanelDiffStats | null;
   changedCount: number;
   upstream: string | null;
   ahead: number;
@@ -51,6 +53,7 @@ export type RepositoryController = {
 type RepositoryControllerState = {
   repo: GitRepoInfo | null;
   status: GitStatusSnapshot | null;
+  diffStats: GitPanelDiffStats | null;
   isLoading: boolean;
   localError: string | null;
   busyAction: RepositoryRemoteAction | null;
@@ -91,6 +94,7 @@ export function useRepositoryController(
   const [state, setState] = useState<RepositoryControllerState>({
     repo: null,
     status: null,
+    diffStats: null,
     isLoading: false,
     localError: null,
     busyAction: null,
@@ -131,6 +135,7 @@ export function useRepositoryController(
     updateState({
       repo: null,
       status: null,
+      diffStats: null,
       isLoading: false,
       localError: null,
       busyAction: null,
@@ -154,6 +159,7 @@ export function useRepositoryController(
       updateState({
         repo: null,
         status: null,
+        diffStats: null,
         isLoading: false,
         localError: null,
         busyAction: null,
@@ -177,6 +183,7 @@ export function useRepositoryController(
           ...current,
           repo: null,
           status: null,
+          diffStats: null,
           isLoading: false,
           localError: null,
         }));
@@ -191,6 +198,7 @@ export function useRepositoryController(
         ...current,
         repo,
         status,
+        diffStats: snapshot.diffStats,
         revision: current.revision + 1,
         isLoading: false,
         localError: null,
@@ -203,6 +211,7 @@ export function useRepositoryController(
         ...current,
         repo: null,
         status: null,
+        diffStats: null,
         isLoading: false,
         localError: normalizeError(error),
       }));
@@ -271,6 +280,7 @@ export function useRepositoryController(
       updateState({
         repo: null,
         status: null,
+        diffStats: null,
         isLoading: false,
         localError: null,
         busyAction: null,
@@ -351,6 +361,7 @@ export function useRepositoryController(
     () => ({
       repo: state.repo,
       status: state.status,
+      diffStats: state.diffStats,
       changedCount: state.status?.changedFiles.length ?? 0,
       upstream: state.status?.upstream ?? state.repo?.upstream ?? null,
       ahead: state.status?.ahead ?? 0,

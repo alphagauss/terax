@@ -57,6 +57,7 @@ function repositorySnapshot(repoRoot: string): GitPanelSnapshot {
       isDetached: status.isDetached,
     },
     status,
+    diffStats: null,
   };
 }
 
