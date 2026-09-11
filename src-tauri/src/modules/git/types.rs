@@ -166,10 +166,11 @@ pub struct GitPushResult {
 #[serde(rename_all = "camelCase")]
 pub struct GitBranchEntry {
     pub name: String,
-    pub kind: String, // "local" | "worktree"
+    pub kind: String, // "local" | "remote" | "worktree"
     pub worktree_path: Option<String>,
     pub is_head: bool,
     pub is_detached: bool,
+    pub timestamp_secs: Option<i64>,
 }
 
 #[derive(Serialize)]

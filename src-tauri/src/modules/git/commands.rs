@@ -348,12 +348,14 @@ pub async fn git_list_branches(
 pub async fn git_checkout_branch(
     repo_root: String,
     branch: String,
+    track_remote: bool,
     workspace: Option<WorkspaceEnv>,
     app: AppHandle,
 ) -> Result<(), String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     blocking(app, move |r| {
-        operations::checkout_branch(r, &repo_root, &branch, &workspace).map_err(Into::into)
+        operations::checkout_branch(r, &repo_root, &branch, track_remote, &workspace)
+            .map_err(Into::into)
     })
     .await
 }

@@ -29,6 +29,7 @@ import {
 } from "@/modules/git-history/CommitDetail";
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
+import { relativeTime } from "@/modules/source-control/relativeTime";
 import {
   CloudIcon,
   GitBranchIcon,
@@ -90,16 +91,6 @@ function normalizeError(error: unknown): string {
     if (typeof message === "string") return message;
   }
   return "Unknown Git error";
-}
-
-function relativeTime(timestampSecs: number): string {
-  const delta = Math.max(0, Math.floor(Date.now() / 1000) - timestampSecs);
-  if (delta < 60) return "now";
-  if (delta < 3600) return `${Math.floor(delta / 60)}m`;
-  if (delta < 86400) return `${Math.floor(delta / 3600)}h`;
-  if (delta < 86400 * 30) return `${Math.floor(delta / 86400)}d`;
-  if (delta < 86400 * 365) return `${Math.floor(delta / (86400 * 30))}mo`;
-  return `${Math.floor(delta / (86400 * 365))}y`;
 }
 
 function withFilesEntry(
