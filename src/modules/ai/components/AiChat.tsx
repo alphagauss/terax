@@ -5,6 +5,8 @@
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
 
+import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
+import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
 import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
 import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
@@ -293,12 +295,10 @@ type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
 type ContextChip =
   | { kind: "selection"; source: "terminal" | "editor"; lines: number }
-  | { kind: "file"; name: string; lines: number }
   | { kind: "snippet"; name: string };
 
 const SELECTION_RE =
   /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const FILE_RE = /<file\s+name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/file>/g;
 const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
 
 function countLines(s: string): number {
@@ -320,10 +320,6 @@ function stripUserContextBlocks(text: string): {
       source: source === "editor" ? "editor" : "terminal",
       lines: countLines(body),
     });
-    return "";
-  });
-  out = out.replace(FILE_RE, (_m, name: string, body: string) => {
-    chips.push({ kind: "file", name, lines: countLines(body) });
     return "";
   });
   out = out.replace(SNIPPET_RE, (_m, name: string) => {
@@ -366,9 +362,6 @@ function chipIcon(c: ContextChip) {
       />
     );
   }
-  if (c.kind === "file") {
-    return <HugeiconsIcon icon={File01Icon} size={10} strokeWidth={1.75} />;
-  }
   return <HugeiconsIcon icon={HashtagIcon} size={10} strokeWidth={1.75} />;
 }
 
@@ -378,7 +371,6 @@ function chipLabel(c: ContextChip): string {
       ? i18n.t("ai:chat.editorSelection")
       : i18n.t("ai:chat.terminalSelection");
   }
-  if (c.kind === "file") return c.name;
   return `#${c.name}`;
 }
 type AnyPart = UIMessagePart<Record<string, never>, Record<string, never>>;
@@ -609,10 +601,7 @@ const RenderedMessage = memo(function RenderedMessage({
     [sessionId, fileEdits?.calls],
   );
   if (message.role === "user") {
-    const rawText = message.parts
-      .filter((p): p is { type: "text"; text: string } => p.type === "text")
-      .map((p) => p.text)
-      .join("\n");
+    const rawText = messageTextWithoutAttachments(message);
 
     const cmdMatch = rawText.match(TERAX_CMD_RE);
     const commandName = cmdMatch?.[1] ?? null;
@@ -625,22 +614,28 @@ const RenderedMessage = memo(function RenderedMessage({
         data-conversation-message-id={message.id}
         className="group/message"
       >
-        <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
-          {messageMetadata(message).guided ? (
-            <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
-              {t("chat.guided")}
-            </span>
-          ) : null}
-          {commandName ? <CommandSnippet name={commandName} /> : null}
-          {stripped.chips.length > 0 ? (
-            <ContextChips chips={stripped.chips} />
-          ) : null}
-          {stripped.text ? (
-            <p className="whitespace-pre-wrap wrap-break-word">
-              {stripped.text}
-            </p>
-          ) : null}
-        </MessageContent>
+        <MessageAttachments message={message} />
+        {stripped.text ||
+        stripped.chips.length ||
+        commandName ||
+        messageMetadata(message).guided ? (
+          <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
+            {messageMetadata(message).guided ? (
+              <span className="mb-1 inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
+                {t("chat.guided")}
+              </span>
+            ) : null}
+            {commandName ? <CommandSnippet name={commandName} /> : null}
+            {stripped.chips.length > 0 ? (
+              <ContextChips chips={stripped.chips} />
+            ) : null}
+            {stripped.text ? (
+              <p className="whitespace-pre-wrap wrap-break-word">
+                {stripped.text}
+              </p>
+            ) : null}
+          </MessageContent>
+        ) : null}
         <MessageMeta timestamp={timestamp} copyText={copyText} />
       </Message>
     );
@@ -790,14 +785,16 @@ function useMessageTimestamp(message: UIMessage): number {
 
 /** 提取用户或助手可见的正文，复制时不包含注入的终端、选区和文件上下文。 */
 function messageTextForCopy(message: UIMessage): string {
-  const text = message.parts
-    .filter(
-      (part): part is { type: "text"; text: string } => part.type === "text",
-    )
-    .map((part) => part.text)
-    .join("\n");
-  if (message.role !== "user") return text;
-  const withoutCommand = text.replace(TERAX_CMD_RE, "");
+  if (message.role !== "user") {
+    return message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n");
+  }
+  const withoutCommand = messageTextWithoutAttachments(message).replace(
+    TERAX_CMD_RE,
+    "",
+  );
   return stripUserContextBlocks(withoutCommand).text;
 }
 

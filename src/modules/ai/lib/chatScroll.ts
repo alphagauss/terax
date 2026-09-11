@@ -4,10 +4,10 @@
  */
 
 import type { UIMessage } from "ai";
+import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
 import { TERAX_CMD_RE } from "./slashCommands";
 
-const USER_CONTEXT_BLOCK_RE =
-  /<(selection|file|snippet)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const USER_CONTEXT_BLOCK_RE = /<(selection|snippet)\b[^>]*>[\s\S]*?<\/\1>/gi;
 
 export interface UserMessageAnchor {
   id: string;
@@ -37,13 +37,7 @@ export function shouldShowChatScrollControls(isAtBottom: boolean): boolean {
 }
 
 function userMessageText(message: UIMessage): string {
-  const rawText = message.parts
-    .filter(
-      (part): part is Extract<typeof part, { type: "text" }> =>
-        part.type === "text",
-    )
-    .map((part) => part.text)
-    .join("\n");
+  const rawText = messageTextWithoutAttachments(message);
   const commandMatch = rawText.match(TERAX_CMD_RE);
   const withoutCommand = commandMatch
     ? rawText.slice(commandMatch[0].length)

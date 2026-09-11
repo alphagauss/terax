@@ -14,6 +14,8 @@ const composer = vi.hoisted(() => ({
   canSend: false,
   canSteer: true,
   readOnly: false,
+  canPickFiles: true,
+  pickFiles: vi.fn(),
   pendingSteering: 0,
   workingDirectory: null,
   files: [],
@@ -24,7 +26,6 @@ const composer = vi.hoisted(() => ({
   submit: vi.fn(),
 }));
 vi.mock("@/modules/ai/lib/composer", () => ({
-  ACCEPTED_FILES: "",
   useComposer: () => composer,
 }));
 vi.mock("@/modules/ai/components/AiComposerInput", () => ({
@@ -65,6 +66,39 @@ it("运行中从中止切为引导，提交后恢复中止并显示待接入状�
       "Awaiting guidance: 1",
     );
   } finally {
+    act(() => root.unmount());
+    environment.IS_REACT_ACT_ENVIRONMENT = false;
+  }
+});
+
+it("远端禁用原生文件选择入口，本机点击调用选择器", async () => {
+  await preloadEn();
+  const environment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT: boolean;
+  };
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    composer.canPickFiles = false;
+    act(() => root.render(<AiSidebarComposer />));
+    const remote = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Upload files to this environment first, then attach them from the file tree."]',
+    );
+    expect(remote?.disabled).toBe(true);
+    act(() => remote?.click());
+    expect(composer.pickFiles).not.toHaveBeenCalled();
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    composer.canPickFiles = true;
+    act(() => root.render(<AiSidebarComposer />));
+    const local = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Attach file or image"]',
+    );
+    expect(local?.disabled).toBe(false);
+    act(() => local?.click());
+    expect(composer.pickFiles).toHaveBeenCalledTimes(1);
+  } finally {
+    composer.canPickFiles = true;
     act(() => root.unmount());
     environment.IS_REACT_ACT_ENVIRONMENT = false;
   }

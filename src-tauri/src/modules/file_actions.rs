@@ -14,7 +14,7 @@ use tauri_plugin_dialog::DialogExt;
 pub async fn text_save_as(
     content: String,
     filename: String,
-    extension: String,
+    extension: Option<String>,
     title: String,
     file_filter: String,
     window: tauri::WebviewWindow,
@@ -22,14 +22,17 @@ pub async fn text_save_as(
     if content.len() > 20 * 1024 * 1024 {
         return Err("text export exceeds the 20 MB limit".into());
     }
-    let destination = window
+    let mut dialog = window
         .dialog()
         .file()
         .set_parent(&window)
         .set_title(title)
-        .set_file_name(filename)
-        .add_filter(file_filter, &[&extension])
-        .blocking_save_file();
+        .set_file_name(filename);
+    // 无扩展名附件不设置过滤器，避免原生对话框强制补上后缀。
+    if let Some(extension) = extension {
+        dialog = dialog.add_filter(file_filter, &[&extension]);
+    }
+    let destination = dialog.blocking_save_file();
     let Some(destination) = destination else {
         return Ok(false);
     };

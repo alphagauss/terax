@@ -14,6 +14,7 @@ import {
   type FileEditSnapshot,
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
+import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
@@ -44,6 +45,7 @@ export type SessionMessage = {
       guided?: boolean;
       message_id?: string;
       media?: SessionMedia[];
+      attachments?: AttachmentDisplay[];
     }
   | {
       role: "assistant";
@@ -116,6 +118,7 @@ export type SteeringEvent = { event: "user_steering"; message: UIMessage };
 export type TurnEvent = SteeringEvent | SubagentResultEvent;
 
 type ConversationMetadata = {
+  attachments?: AttachmentDisplay[];
   turnId?: string;
   fileEdits?: TurnFileEdits;
   fileEditsSummary?: boolean;
@@ -465,6 +468,11 @@ export function projectSessionMessages(
           ? {}
           : { metadata: { createdAt: timestamp } }),
       };
+      if (record.attachments)
+        projected.metadata = {
+          ...messageMetadata(projected),
+          attachments: record.attachments,
+        };
       if (record.role === "user" && record.guided) {
         ensureAssistant(index, record.turn_id, timestamp).push(
           conversationEventPart({ event: "user_steering", message: projected }),
@@ -645,6 +653,9 @@ function serializeUiMessage(
         timestamp: messageOptions.timestamp,
         turn_id: messageOptions.turnId,
         ...(media.length > 0 ? { media } : {}),
+        ...(messageMetadata(message).attachments?.length
+          ? { attachments: messageMetadata(message).attachments }
+          : {}),
       },
     ];
   }
