@@ -1,6 +1,7 @@
 /**
- * 为补全、提交信息等轻量任务提供统一文本请求入口。
+ * 为补全、提交信息等直接生成任务提供模型请求入口。
  * 创建任务时冻结连接与参数；同一任务的修复请求复用模型，不拥有业务提示词或历史。
+ * 当前提供非流式文本生成，不承担 Agent 编排，也尚未接入用量记录。
  */
 import { generateText } from "ai";
 import { buildLanguageModel } from "@/modules/ai/lib/providerRuntime";
