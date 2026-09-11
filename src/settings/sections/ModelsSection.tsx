@@ -475,6 +475,12 @@ export function ModelsSection() {
         customProviders={customProviders}
       />
 
+      <CommitMessageCard
+        models={availableModels}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+      />
+
       <ModelParametersCard
         models={savedModels}
         providerModels={providerModels}
@@ -776,6 +782,65 @@ function SubagentCard({
         <p className="text-xs text-muted-foreground">
           {t("models.subagent.followHelp")}
         </p>
+        {error && (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** 提交信息使用独立模型配置，未指定时跟随全局默认模型。 */
+function CommitMessageCard({
+  models,
+  providerBaseURLs,
+  customProviders,
+}: {
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
+  customProviders: readonly ProviderInstance[];
+}) {
+  const { t } = useTranslation();
+  const usage = usePreferencesStore((s) => s.modelUsages.commitMessage);
+  const definitions = usePreferencesStore((s) => s.modelParameters);
+  const defaultModel = usePreferencesStore((s) => s.defaultModel);
+  const [error, setError] = useState<string | null>(null);
+  const model = usage.model ?? defaultModel;
+  return (
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.commitMessage.title")}</SectionHeading>
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <ModelRequestSettings
+          model={usage.model}
+          inheritedModel={defaultModel}
+          models={models}
+          providerBaseURLs={providerBaseURLs}
+          customProviders={customProviders}
+          inheritLabel={t("models.commitMessage.defaultModel", {
+            model: defaultModel?.modelId ?? t("models.commitMessage.none"),
+          })}
+          parameters={model ? (definitions[modelRefKey(model)] ?? []) : []}
+          selections={
+            model ? (usage.parameterSelections[modelRefKey(model)] ?? {}) : {}
+          }
+          onSelect={(selected) => {
+            setError(null);
+            void setModelUsageModel("commitMessage", selected).catch((e) =>
+              setError(String(e)),
+            );
+          }}
+          onParametersChange={(selections) => {
+            if (!model) return;
+            setError(null);
+            void setModelUsageParameters(
+              "commitMessage",
+              model,
+              selections,
+            ).catch((e) => setError(String(e)));
+          }}
+        />
         {error && (
           <p role="alert" className="text-xs text-destructive">
             {error}
