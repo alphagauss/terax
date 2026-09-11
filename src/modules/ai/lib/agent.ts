@@ -70,12 +70,13 @@ import { getProvider } from "@/modules/ai/providerRegistry";
 
 export type RunAgentOptions = {
   modelParameters?: ParameterAssignment[];
-  subagentParameters?: ParameterAssignment[];
+  getSubagentConfiguration?: (
+    parentModel: ModelRef,
+  ) => SubagentModelConfiguration;
   keys: ProviderKeys;
   model: ModelRef;
   systemPrompt: string;
   allowedTools: readonly AgentToolId[];
-  defaultSubagentModel?: ModelRef | null;
   maxConcurrentSubagents: number;
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
@@ -98,6 +99,18 @@ export type RunAgentOptions = {
   uiMessages: UIMessage[];
   abortSignal?: AbortSignal;
 };
+
+/** 子任务发起时读取的模型配置，不包含父任务的权限与执行上下文。 */
+export type SubagentModelConfiguration = Pick<
+  RunAgentOptions,
+  | "model"
+  | "modelParameters"
+  | "keys"
+  | "providerBaseURLs"
+  | "providerModels"
+  | "customProviders"
+  | "providerInstanceKeys"
+>;
 
 /**
  * 使用冻结配置启动一次可跨多个 provider 请求的 Agent turn。
@@ -128,7 +141,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
     providerInstanceKeys: opts.providerInstanceKeys,
   });
 
-  const subagentModel = opts.defaultSubagentModel ?? modelRef;
   const coordinator = opts.turnCoordinator;
   const rootTools = buildTools(
     opts.toolContext,
@@ -145,7 +157,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
         onDisplay: opts.onSubagentDisplay,
         run: buildSubagentTaskRunner({
           opts,
-          model: subagentModel,
           permissionMode,
         }),
       });
@@ -500,11 +511,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
 /** 按启动时权限快照创建一个不含递归能力的 Subagent runner。 */
 function buildSubagentTaskRunner({
   opts,
-  model,
   permissionMode,
 }: {
   opts: RunAgentOptions;
-  model: ModelRef;
   permissionMode: "ask" | "full-access";
 }): SubagentTaskRunner {
   const allowedTools = resolveSubagentTools(opts.allowedTools, permissionMode);
@@ -515,14 +524,26 @@ function buildSubagentTaskRunner({
     supportsApprovals: false,
   };
   return async ({ taskId, task, abortSignal, onProgress }) => {
-    const childModel = await buildConfiguredLanguageModel(model, opts.keys, {
-      providerBaseURLs: opts.providerBaseURLs,
-      customProviders: opts.customProviders,
-      providerInstanceKeys: opts.providerInstanceKeys,
+    // 通过并发检查后的每次任务启动读取一次；首次 await 前冻结，后续步骤保持不变。
+    const config: SubagentModelConfiguration = structuredClone(
+      opts.getSubagentConfiguration?.(opts.model) ?? {
+        model: opts.model,
+        keys: opts.keys,
+        providerBaseURLs: opts.providerBaseURLs,
+        providerModels: opts.providerModels,
+        customProviders: opts.customProviders,
+        providerInstanceKeys: opts.providerInstanceKeys,
+      },
+    );
+    const model = config.model;
+    const childModel = await buildConfiguredLanguageModel(model, config.keys, {
+      providerBaseURLs: config.providerBaseURLs,
+      customProviders: config.customProviders,
+      providerInstanceKeys: config.providerInstanceKeys,
     });
     const provider = resolveModel(model, {
-      customProviders: opts.customProviders,
-      providerBaseURLs: opts.providerBaseURLs,
+      customProviders: config.customProviders,
+      providerBaseURLs: config.providerBaseURLs,
     }).provider;
     const prompt = prepareAgentPrompt(
       `${opts.systemPrompt}\n\n${SUBAGENT_PROMPT}`,
@@ -549,13 +570,13 @@ function buildSubagentTaskRunner({
       turnId: opts.turnId,
       taskId,
       model,
-      contextWindow: getModelContextWindow(model, opts.providerModels ?? {}),
+      contextWindow: getModelContextWindow(model, config.providerModels ?? {}),
       instructions: prompt.instructions,
       tools,
     });
     const result = streamText({
       ...buildParameterOptions(
-        opts.subagentParameters ?? [],
+        config.modelParameters ?? [],
         getProvider(provider).runtime.adapter,
         provider,
       ),

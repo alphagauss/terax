@@ -418,7 +418,13 @@
         "save": "无法保存模型配置。"
       }
     },
+    "subagent": {
+      "unavailable": "子智能体模型不可用，请在设置中重新选择模型。",
+      "title": "子智能体",
+      "followHelp": "运行时按上方选择确定模型，再读取该模型在下方保存的参数。"
+    },
     "requestParameters": {
+      "unavailableModel": "模型 {{model}} 不可用，请重新选择模型。",
       "defaultConfiguration": "使用模型默认请求配置",
       "title": "请求参数",
       "add": "添加参数",

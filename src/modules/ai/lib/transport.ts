@@ -91,9 +91,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
   let modelTurnId: string | null = null;
   let modelSnapshot: {
     model: ModelRef;
-    defaultSubagentModel: ModelRef | null;
     modelParameters: ParameterAssignment[];
-    subagentParameters: ParameterAssignment[];
   } | null = null;
   let runtimeTask: Promise<{
     systemPrompt: string;
@@ -172,13 +170,9 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     const turnId = deps.getTurnId();
     if (!modelSnapshot || modelTurnId !== turnId) {
       const model = deps.getModel();
-      const defaultSubagentModel = deps.getDefaultSubagentModel();
       modelSnapshot = structuredClone({
         model,
-        defaultSubagentModel,
         modelParameters: deps.getModelParameters?.(model, false) ?? [],
-        subagentParameters:
-          deps.getModelParameters?.(defaultSubagentModel ?? model, true) ?? [],
       });
       modelTurnId = turnId;
       deps.onModelSnapshot?.({
@@ -191,6 +185,18 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     const result = await runAgentStream({
       keys: deps.getKeys(),
       ...frozenModel,
+      getSubagentConfiguration: (parentModel) => {
+        const model = deps.getDefaultSubagentModel() ?? parentModel;
+        return {
+          model,
+          modelParameters: deps.getModelParameters?.(model, true) ?? [],
+          keys: deps.getKeys(),
+          providerBaseURLs: deps.getProviderBaseURLs?.(),
+          providerModels: deps.getProviderModels?.(),
+          customProviders: deps.getCustomProviders?.(),
+          providerInstanceKeys: deps.getProviderInstanceKeys?.(),
+        };
+      },
       maxConcurrentSubagents: deps.getMaxConcurrentSubagents(),
       turnCoordinator: getAgentTurnCoordinator(deps.toolContext.getSessionId()),
       systemPrompt,

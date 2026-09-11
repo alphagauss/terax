@@ -3,6 +3,8 @@
  * 命令行选择只作用于本次运行，不修改桌面的全局默认模型或权限。
  */
 
+import { readModelUsages } from "@/modules/ai/lib/modelUsage";
+
 import { createInstance } from "i18next";
 import { invokeNative } from "@/lib/nativeHost";
 import {
@@ -120,10 +122,7 @@ export async function loadTerminalSettings(modelOption?: string) {
         typeof settings.customInstructions === "string"
           ? settings.customInstructions
           : "",
-      getDefaultSubagentModel: () =>
-        isModelRef(settings.defaultSubagentModel)
-          ? settings.defaultSubagentModel
-          : null,
+      getDefaultSubagentModel: () => readModelUsages(settings).subagent.model,
       getMaxConcurrentSubagents: () => concurrency,
       getProviderBaseURLs: () => providerBaseURLs,
       getProviderModels: () => providerModels,

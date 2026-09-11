@@ -134,6 +134,9 @@ describe("session transport", () => {
     const parameters: ParameterAssignment[] = [
       { target: "provider", path: "reasoning_effort", value: "low" },
     ];
+    const subagentParameters: ParameterAssignment[] = [
+      { target: "provider", path: "reasoning_effort", value: "medium" },
+    ];
     let customInstructions = "First preference";
     let agent: AgentConfiguration = {
       revision: 1,
@@ -149,7 +152,8 @@ describe("session transport", () => {
       getKeys: () => ({}) as never,
       toolContext,
       getModel: () => modelRefForProvider("openai", modelId),
-      getModelParameters: (_model, subagent) => (subagent ? [] : parameters),
+      getModelParameters: (_model, subagent) =>
+        subagent ? subagentParameters : parameters,
       ...subagentDeps,
       getTurnId: () => turnId,
       getCustomInstructions: () => customInstructions,
@@ -168,6 +172,7 @@ describe("session transport", () => {
     const firstSend = transport.sendMessages({ messages });
     modelId = "model-b";
     parameters[0].value = "high";
+    subagentParameters[0].value = "low";
     await firstSend;
     customInstructions = "Second preference";
     agent = {
@@ -185,6 +190,15 @@ describe("session transport", () => {
     ]);
     await transport.sendMessages({ messages });
 
+    const firstRun = mocks.runAgentStream.mock.calls[0][0];
+    const childConfig = firstRun.getSubagentConfiguration(firstRun.model);
+    expect(childConfig.model).toEqual(modelRefForProvider("openai", "model-a"));
+    expect(childConfig.modelParameters[0].value).toBe("low");
+    subagentParameters[0].value = "high";
+    expect(
+      firstRun.getSubagentConfiguration(firstRun.model).modelParameters[0]
+        .value,
+    ).toBe("high");
     expect(mocks.readWorkspaceInstructions).toHaveBeenCalledTimes(1);
     const firstPrompt = mocks.runAgentStream.mock.calls[0][0].systemPrompt;
     const secondPrompt = mocks.runAgentStream.mock.calls[1][0].systemPrompt;

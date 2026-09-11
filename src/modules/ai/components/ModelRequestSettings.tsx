@@ -3,7 +3,7 @@
  * 禁用时保留配置可见；参数定义与当前模型的对应关系由调用方保证。
  */
 import { type ComponentProps, useLayoutEffect, useRef } from "react";
-import { modelRefKey } from "@/modules/ai/config";
+import { modelRefKey, modelRefsEqual } from "@/modules/ai/config";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/controls/button";
 import { ModelPicker } from "@/modules/ai/components/ModelPicker";
@@ -28,7 +28,8 @@ export function ModelRequestSettings({
   const contentRef = useRef<HTMLDivElement>(null);
   const heightAnimationRef = useRef<Animation | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const modelKey = picker.model ? modelRefKey(picker.model) : null;
+  const effectiveModel = picker.model;
+  const modelKey = effectiveModel ? modelRefKey(effectiveModel) : null;
   const previous = useRef<{ model: string | null; height: number } | null>(
     null,
   );
@@ -106,9 +107,19 @@ export function ModelRequestSettings({
           <ModelPicker {...picker} ariaLabel={t("models.parameters.model")} />
         </div>
       </div>
+      {picker.model &&
+        !picker.models.some(
+          (model) => picker.model && modelRefsEqual(model, picker.model),
+        ) && (
+          <p role="alert" className="text-xs text-destructive">
+            {t("models.requestParameters.unavailableModel", {
+              model: picker.model.modelId,
+            })}
+          </p>
+        )}
       <div ref={shellRef} className="min-w-0">
         <div ref={contentRef}>
-          {picker.model && (
+          {effectiveModel && (
             <div className="ml-2 flex min-w-0 flex-col gap-2 border-l border-border/60 pl-3 @min-[30rem]:ml-[7.75rem]">
               {parameters.length ? (
                 <>

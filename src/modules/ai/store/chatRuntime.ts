@@ -3,6 +3,8 @@
  * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
+import i18n from "@/i18n";
+
 import {
   getAgentTurnCoordinator,
   clearAgentTurnCoordinator,
@@ -12,6 +14,7 @@ import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
 import { HOST_PLATFORM } from "@/lib/platform";
 import {
   type ModelRef,
+  isModelRefAvailable,
   modelRequiresCredential,
   providerFromBuiltinId,
 } from "@/modules/ai/config";
@@ -54,9 +57,7 @@ const runConfigurations = new WeakMap<
   Chat<UIMessage>,
   {
     model: ModelRef;
-    subagentModel: ModelRef | null;
     parameters: ParameterAssignment[];
-    subagentParameters: ParameterAssignment[];
   }
 >();
 
@@ -108,14 +109,18 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       if (!model) throw new Error("No AI model is selected");
       return model;
     },
-    getModelParameters: (_model, subagent) => {
+    getModelParameters: (model, subagent) => {
+      if (subagent) {
+        const prefs = usePreferencesStore.getState();
+        if (!isModelRefAvailable(model, prefs.providerModels, prefs))
+          throw new Error(i18n.t("settings:models.subagent.unavailable"));
+        return resolveModelParameters(
+          prefs.modelParameters[modelRefKey(model)] ?? [],
+          prefs.modelUsages.subagent.parameterSelections[modelRefKey(model)],
+        );
+      }
       const chat = chats.get(sessionId);
-      const config = chat && runConfigurations.get(chat);
-      return config
-        ? subagent
-          ? config.subagentParameters
-          : config.parameters
-        : [];
+      return (chat && runConfigurations.get(chat)?.parameters) ?? [];
     },
     onModelSnapshot: (snapshot) => {
       useChatStore.setState((state) => ({
@@ -125,10 +130,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
         },
       }));
     },
-    getDefaultSubagentModel: () => {
-      const chat = chats.get(sessionId);
-      return chat ? (runConfigurations.get(chat)?.subagentModel ?? null) : null;
-    },
+    getDefaultSubagentModel: () =>
+      usePreferencesStore.getState().modelUsages.subagent.model,
     getMaxConcurrentSubagents: () =>
       usePreferencesStore.getState().maxConcurrentSubagents,
     getCustomInstructions: () =>
@@ -340,7 +343,6 @@ export async function startChatMessage(
   const submittedConfig = submittedModel
     ? structuredClone({
         model: submittedModel,
-        subagentModel: prefs.defaultSubagentModel,
         parameters: resolveModelParameters(
           prefs.modelParameters[modelRefKey(submittedModel)] ?? [],
           channel
@@ -348,11 +350,6 @@ export async function startChatMessage(
             : getSessionParameterSelections(sessionId)[
                 modelRefKey(submittedModel)
               ],
-        ),
-        subagentParameters: resolveModelParameters(
-          prefs.modelParameters[
-            modelRefKey(prefs.defaultSubagentModel ?? submittedModel)
-          ] ?? [],
         ),
       })
     : null;

@@ -16,11 +16,7 @@ const RECENTS_MAX = 5;
 
 type ModelReferenceState = Pick<
   Preferences,
-  | "defaultModel"
-  | "defaultSubagentModel"
-  | "autocompleteModel"
-  | "favoriteModels"
-  | "recentModels"
+  "defaultModel" | "favoriteModels" | "recentModels"
 >;
 
 /** 生成模型移除所需的引用补丁，默认项回退但收藏和最近记录直接清理。 */
@@ -32,12 +28,6 @@ export function buildModelReferencePatch(
   const patch: ModelSettingsPatch = {};
   if (state.defaultModel && matches(state.defaultModel)) {
     patch.defaultModel = replacement;
-  }
-  if (state.defaultSubagentModel && matches(state.defaultSubagentModel)) {
-    patch.defaultSubagentModel = replacement;
-  }
-  if (state.autocompleteModel && matches(state.autocompleteModel)) {
-    patch.autocompleteModel = replacement;
   }
 
   const replaceList = (models: ModelRef[]): ModelRef[] => {

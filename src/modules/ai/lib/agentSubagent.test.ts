@@ -5,7 +5,10 @@
 
 import { AgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import { modelRefForProvider } from "@/modules/ai/config";
-import { runAgentStream } from "@/modules/ai/lib/agent";
+import {
+  runAgentStream,
+  type SubagentModelConfiguration,
+} from "@/modules/ai/lib/agent";
 import {
   activityDurationFromPart,
   serializeSessionMessages,
@@ -21,10 +24,12 @@ import { readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
+
 let activeModel: MockLanguageModelV4;
 
 vi.mock("@/modules/ai/lib/providerRuntime", () => ({
-  buildConfiguredLanguageModel: async () => activeModel,
+  buildConfiguredLanguageModel: vi.fn(async () => activeModel),
   createProviderDownload: () => undefined,
 }));
 
@@ -146,6 +151,84 @@ function mockModel(options: {
 }
 
 describe.sequential("Agent background subagents", () => {
+  it("每个子任务读取新配置，同一子任务的工具循环保持模型参数快照", async () => {
+    const parent = modelRefForProvider("lmstudio", "parent");
+    const config: SubagentModelConfiguration = {
+      model: modelRefForProvider("lmstudio", "first-child"),
+      keys: EMPTY_PROVIDER_KEYS,
+      modelParameters: [
+        { target: "standard", path: "temperature", value: 0.1 },
+      ],
+    };
+    const childTemperatures: (number | undefined)[] = [];
+    const readConfig = vi.fn(() => config);
+    const factoryStart = vi.mocked(buildConfiguredLanguageModel).mock.calls
+      .length;
+    activeModel = mockModel({
+      doStream: () =>
+        rootCalls().length <= 2
+          ? toolCallsStream([
+              {
+                id: `spawn-${rootCalls().length}`,
+                name: "run_subagent",
+                input: { task: "Inspect", wait: true },
+              },
+            ])
+          : textStream("Done"),
+      childStream: (call) => {
+        childTemperatures.push(call.temperature);
+        if (childTemperatures.length === 1) {
+          config.model.modelId = "second-child";
+          config.modelParameters = [
+            { target: "standard", path: "temperature", value: 0.9 },
+          ];
+          return terminalToolStream();
+        }
+        return textStream("Child done");
+      },
+    });
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: parent,
+      getSubagentConfiguration: readConfig,
+      systemPrompt: "Stable parent prompt",
+      allowedTools: ["run_subagent", "get_terminal_output"],
+      maxConcurrentSubagents: 1,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getCwd: () => "/workspace",
+        getSessionId: () => "child-config-snapshot",
+        getPermissionMode: () => "ask",
+        supportsApprovals: true,
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+      },
+      uiMessages: [
+        {
+          id: "user",
+          role: "user",
+          parts: [{ type: "text", text: "Inspect twice" }],
+        },
+      ],
+      onCheckpoint: async () => {},
+    });
+    expect(readConfig).not.toHaveBeenCalled();
+    for await (const _chunk of result.toUIMessageStream()) {
+      /* 消费完整工具循环。 */
+    }
+    expect(readConfig).toHaveBeenCalledTimes(2);
+    expect(readConfig).toHaveBeenNthCalledWith(1, parent);
+    expect(readConfig).toHaveBeenNthCalledWith(2, parent);
+    expect(childTemperatures).toEqual([0.1, 0.1, 0.9]);
+    expect(
+      vi
+        .mocked(buildConfiguredLanguageModel)
+        .mock.calls.slice(factoryStart)
+        .map(([model]) => model.modelId),
+    ).toEqual(["parent", "first-child", "second-child"]);
+  });
+
   it("Subagent 参数流实时发布编辑预估，提交事实归属父会话且不泄露子任务正文流", async () => {
     const sessionId = "stream-file-edit";
     const preview = vi.spyOn(native, "agentPrepareMutation").mockResolvedValue({

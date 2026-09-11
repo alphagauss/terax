@@ -372,7 +372,7 @@ class CompletionDriver implements PluginValue {
   }
 
   private async fire(isManual: boolean) {
-    const prefs = this.ctx.getPrefs();
+    const prefs = structuredClone(this.ctx.getPrefs());
     const state = this.view.state;
     if (!shouldTrigger(state, prefs, isManual)) return;
 
@@ -428,12 +428,8 @@ class CompletionDriver implements PluginValue {
       this.inflightKey = null;
     }
 
-    const currentPrefs = this.ctx.getPrefs();
-    if (
-      !currentPrefs.enabled ||
-      completionConfigKey(currentPrefs) !== configKey
-    )
-      return;
+    // 开关可以停止展示；模型或参数变化只影响下一次请求，结果仍归属原缓存键。
+    if (!this.ctx.getPrefs().enabled || this.view.state.doc !== doc) return;
     const cursorLine = doc.lineAt(cursor);
     const lineSoFar = doc.sliceString(cursorLine.from, cursor);
     const lineSuffix = doc.sliceString(cursor, cursorLine.to);

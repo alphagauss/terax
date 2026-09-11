@@ -71,17 +71,18 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
 import { ModelPicker } from "@/modules/ai/components/ModelPicker";
 import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
-import { setCompletionParameterSelections } from "@/modules/settings/store";
+import {
+  setModelUsageParameters,
+  setModelUsageModel,
+} from "@/modules/settings/store";
 import {
   type AutocompleteTrigger,
   MAX_CONCURRENT_SUBAGENTS_MAX,
   MAX_CONCURRENT_SUBAGENTS_MIN,
   type ModelSettingsPatch,
   setAutocompleteEnabled,
-  setAutocompleteModel,
   setAutocompleteTrigger,
   setDefaultModel,
-  setDefaultSubagentModel,
   setGroqSttModel,
   setMaxConcurrentSubagents,
   setModelSettings,
@@ -137,12 +138,6 @@ export function ModelsSection() {
   const [adding, setAdding] = useState<Set<ProviderId>>(new Set());
 
   const defaultModel = usePreferencesStore((s) => s.defaultModel);
-  const defaultSubagentModel = usePreferencesStore(
-    (s) => s.defaultSubagentModel,
-  );
-  const maxConcurrentSubagents = usePreferencesStore(
-    (s) => s.maxConcurrentSubagents,
-  );
   const providerModels = usePreferencesStore((s) => s.providerModels);
   const providerBaseURLs = usePreferencesStore((s) => s.providerBaseURLs);
   const customProviders = usePreferencesStore((s) => s.customProviders);
@@ -463,8 +458,12 @@ export function ModelsSection() {
 
       <DefaultsBlock
         defaultModel={defaultModel}
-        defaultSubagentModel={defaultSubagentModel}
-        maxConcurrentSubagents={maxConcurrentSubagents}
+        models={availableModels}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+      />
+
+      <SubagentCard
         models={availableModels}
         providerBaseURLs={providerBaseURLs}
         customProviders={customProviders}
@@ -635,15 +634,11 @@ function ProviderMenuItem({
 
 function DefaultsBlock({
   defaultModel,
-  defaultSubagentModel,
-  maxConcurrentSubagents,
   models,
   providerBaseURLs,
   customProviders,
 }: {
   defaultModel: ModelRef | null;
-  defaultSubagentModel: ModelRef | null;
-  maxConcurrentSubagents: number;
   models: readonly ModelRef[];
   providerBaseURLs: Readonly<ProviderBaseURLs>;
   customProviders: readonly ProviderInstance[];
@@ -662,16 +657,42 @@ function DefaultsBlock({
             onSelect={(model) => void setDefaultModel(model)}
           />
         </FieldRow>
-        <FieldRow label={t("models.defaults.subagentModel")}>
-          <ModelPicker
-            model={defaultSubagentModel}
-            models={models}
-            providerBaseURLs={providerBaseURLs}
-            customProviders={customProviders}
-            inheritLabel={t("models.defaults.followChatModel")}
-            onSelect={(model) => void setDefaultSubagentModel(model)}
-          />
-        </FieldRow>
+      </div>
+    </div>
+  );
+}
+
+/** 运行模型选择与参数编辑独立；编辑其他模型的参数不改变 Subagent 的运行选择。 */
+function SubagentCard({
+  models,
+  providerBaseURLs,
+  customProviders,
+}: {
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
+  customProviders: readonly ProviderInstance[];
+}) {
+  const { t } = useTranslation();
+  const usage = usePreferencesStore((s) => s.modelUsages.subagent);
+  const definitions = usePreferencesStore((s) => s.modelParameters);
+  const defaultModel = usePreferencesStore((s) => s.defaultModel);
+  const maxConcurrentSubagents = usePreferencesStore(
+    (s) => s.maxConcurrentSubagents,
+  );
+  const [previewModel, setPreviewModel] = useState<ModelRef | null>(
+    () => usage.model ?? defaultModel ?? models[0] ?? null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const parameterModel =
+    models.find(
+      (model) => previewModel && modelRefsEqual(model, previewModel),
+    ) ??
+    models[0] ??
+    null;
+  return (
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.subagent.title")}</SectionHeading>
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
         <FieldRow label={t("models.defaults.subagentConcurrency")}>
           <Select
             value={String(maxConcurrentSubagents)}
@@ -699,6 +720,67 @@ function DefaultsBlock({
             </SelectContent>
           </Select>
         </FieldRow>
+
+        <FieldRow label={t("models.defaults.subagentModel")}>
+          <ModelPicker
+            model={usage.model}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
+            customProviders={customProviders}
+            inheritLabel={t("models.defaults.followChatModel")}
+            ariaLabel={t("models.defaults.subagentModel")}
+            onSelect={(model) => {
+              setError(null);
+              void setModelUsageModel("subagent", model).catch((e) =>
+                setError(String(e)),
+              );
+            }}
+          />
+        </FieldRow>
+        {usage.model &&
+          !models.some(
+            (model) => usage.model && modelRefsEqual(model, usage.model),
+          ) && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("models.subagent.unavailable")}
+            </p>
+          )}
+        <div className="border-t border-border/60 pt-3">
+          <ModelRequestSettings
+            model={parameterModel}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
+            customProviders={customProviders}
+            parameters={
+              parameterModel
+                ? (definitions[modelRefKey(parameterModel)] ?? [])
+                : []
+            }
+            selections={
+              parameterModel
+                ? (usage.parameterSelections[modelRefKey(parameterModel)] ?? {})
+                : {}
+            }
+            onSelect={setPreviewModel}
+            onParametersChange={(selections) => {
+              if (!parameterModel) return;
+              setError(null);
+              void setModelUsageParameters(
+                "subagent",
+                parameterModel,
+                selections,
+              ).catch((e) => setError(String(e)));
+            }}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t("models.subagent.followHelp")}
+        </p>
+        {error && (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -868,13 +950,12 @@ function AutocompleteCard({
   const { t } = useTranslation();
   const enabled = usePreferencesStore((state) => state.autocompleteEnabled);
   const trigger = usePreferencesStore((state) => state.autocompleteTrigger);
-  const model = usePreferencesStore((state) => state.autocompleteModel);
+  const usage = usePreferencesStore((state) => state.modelUsages.completion);
+  const model = usage.model;
   const parameterDefinitions = usePreferencesStore(
     (state) => state.modelParameters,
   );
-  const completionSelections = usePreferencesStore(
-    (state) => state.completionParameterSelections,
-  );
+  const completionSelections = usage.parameterSelections;
   const [parameterError, setParameterError] = useState<string | null>(null);
   const userShortcuts = usePreferencesStore((state) => state.shortcuts);
   const currentModel = tryResolveModel(model, {
@@ -892,7 +973,7 @@ function AutocompleteCard({
     if (next && !model) {
       const first = models[0];
       if (!first) return;
-      await setAutocompleteModel(first);
+      await setModelUsageModel("completion", first);
     }
     await setAutocompleteEnabled(next);
   };
@@ -953,14 +1034,14 @@ function AutocompleteCard({
             }
             onSelect={(next) => {
               setParameterError(null);
-              void setAutocompleteModel(next).catch((error) =>
+              void setModelUsageModel("completion", next).catch((error) =>
                 setParameterError(String(error)),
               );
             }}
             onParametersChange={(next) => {
               if (!model) return;
               setParameterError(null);
-              void setCompletionParameterSelections(model, next).catch(
+              void setModelUsageParameters("completion", model, next).catch(
                 (error) => setParameterError(String(error)),
               );
             }}
