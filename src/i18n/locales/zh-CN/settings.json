@@ -418,6 +418,11 @@
         "save": "无法保存模型配置。"
       }
     },
+    "commitMessage": {
+      "title": "提交信息",
+      "defaultModel": "使用全局默认模型 · {{model}}",
+      "none": "未配置"
+    },
     "subagent": {
       "unavailable": "子智能体模型不可用，请在设置中重新选择模型。",
       "title": "子智能体",

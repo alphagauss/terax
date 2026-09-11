@@ -3,13 +3,9 @@
  * 不推断模型能力，也不为缺失配置选择代码内默认模型。
  */
 
-import { buildLanguageModel } from "@/modules/ai/lib/providerRuntime";
+import { createTextGenerationTask } from "@/modules/ai/lib/textGeneration";
 import type { ResolvedProviderConnection } from "@/modules/ai/providerRegistry";
-import { generateText } from "ai";
-import {
-  buildParameterOptions,
-  type ParameterAssignment,
-} from "@/modules/ai/lib/modelParameters";
+import type { ParameterAssignment } from "@/modules/ai/lib/modelParameters";
 import {
   buildUserPrompt,
   COMPLETION_SYSTEM_PROMPT,
@@ -22,8 +18,6 @@ export type CompletionDeps = {
   parameters?: ParameterAssignment[];
 };
 
-const MAX_OUTPUT_TOKENS = 1024;
-
 export async function requestCompletion(
   req: CompletionRequest,
   deps: CompletionDeps,
@@ -33,20 +27,16 @@ export async function requestCompletion(
   if (!modelId || !deps.connection) {
     throw new Error("No autocomplete model is configured.");
   }
-  const model = await buildLanguageModel(deps.connection, modelId);
-
-  const { text } = await generateText({
-    model,
+  const task = createTextGenerationTask(
+    { ...deps, modelId, connection: deps.connection },
+    {
+      maxRetries: 0,
+      signal,
+    },
+  );
+  const text = await task.generate({
     instructions: COMPLETION_SYSTEM_PROMPT,
     prompt: buildUserPrompt(req),
-    maxOutputTokens: MAX_OUTPUT_TOKENS,
-    ...buildParameterOptions(
-      deps.parameters ?? [],
-      deps.connection.runtime.adapter,
-      deps.connection.provider,
-    ),
-    maxRetries: 0,
-    abortSignal: signal,
   });
 
   return cleanCompletion(text);

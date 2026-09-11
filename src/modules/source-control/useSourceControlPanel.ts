@@ -3,7 +3,11 @@
  * 仓库数据只来自 Repository Controller，所有修改完成后重新读取真实 Git 状态。
  */
 
-import { resolveProviderInstance, tryResolveModel } from "@/modules/ai/config";
+import {
+  isModelRefAvailable,
+  resolveProviderInstance,
+  tryResolveModel,
+} from "@/modules/ai/config";
 import {
   type GitChangedFile,
   type GitDiscardEntry,
@@ -12,10 +16,17 @@ import {
   native,
 } from "@/modules/ai/lib/native";
 import { isProviderConnectionReady } from "@/modules/ai/providerRegistry";
+import { useChatStore } from "@/modules/ai/store/chatStore";
+import { useStore } from "zustand";
+import { useTranslation } from "react-i18next";
+import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import {
-  selectActiveAgentMeta,
-  useChatStore,
-} from "@/modules/ai/store/chatStore";
+  commitMessageStore,
+  EMPTY_COMMIT_MESSAGE,
+  generateRepositoryCommitMessage,
+  setCommitMessageDraft,
+  type CommitMessageEntry,
+} from "@/modules/source-control/commitMessage";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useCallback, useMemo, useState } from "react";
 import type { GitDiffSide } from "./gitTypes";
@@ -23,20 +34,6 @@ import { openSourceControlFileDiff } from "./openFileDiff";
 import type { RepositoryController } from "./useRepositoryController";
 
 type PanelState = "closed" | "loading" | "no-repo" | "ready" | "error";
-
-const COMMIT_DIFF_CHAR_LIMIT = 60_000;
-const COMMIT_MESSAGE_MAX_OUTPUT_TOKENS = 1024;
-const CONVENTIONAL_PREFIX =
-  /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?: .+/;
-const COMMIT_MESSAGE_SYSTEM_PROMPT =
-  "You write concise Conventional Commit subject lines in English. Return exactly one complete line, with no markdown, no quotes, no body, and no explanation.";
-
-type SourceControlEntry = {
-  path: string;
-  statusCode: string;
-  originalPath: string | null;
-  untracked: boolean;
-};
 
 /** 文件暂存复选框的三态值。 */
 export type CheckState = "checked" | "indeterminate" | "unchecked";
@@ -71,8 +68,8 @@ type SourceControlPanelState = {
   actionError: string | null;
   remoteError: string | null;
   actionMessage: string | null;
-  stagedEntries: SourceControlEntry[];
-  unstagedEntries: SourceControlEntry[];
+  stagedEntries: CommitMessageEntry[];
+  unstagedEntries: CommitMessageEntry[];
   fileEntries: SourceControlFileEntry[];
   headerCheckState: CheckState;
   allClean: boolean;
@@ -139,90 +136,13 @@ function statusCodeForSide(side: GitDiffSide, file: GitChangedFile): string {
 function makeEntry(
   file: GitChangedFile,
   side: GitDiffSide,
-): SourceControlEntry {
+): CommitMessageEntry {
   return {
     path: file.path,
     statusCode: statusCodeForSide(side, file),
     originalPath: file.originalPath,
     untracked: file.untracked,
   };
-}
-
-function stagedFilesSummary(entries: SourceControlEntry[]): string {
-  return entries
-    .map((entry) => {
-      const status = entry.originalPath
-        ? `R ${entry.originalPath} -> ${entry.path}`
-        : `${entry.statusCode} ${entry.path}`;
-      return `- ${status}`;
-    })
-    .join("\n");
-}
-
-function truncateDiff(diff: string): { text: string; truncated: boolean } {
-  if (diff.length <= COMMIT_DIFF_CHAR_LIMIT) {
-    return { text: diff, truncated: false };
-  }
-  return { text: diff.slice(0, COMMIT_DIFF_CHAR_LIMIT), truncated: true };
-}
-
-function cleanCommitMessage(raw: string): string {
-  let text = raw.trim();
-  const fence = text.match(/^```[a-zA-Z0-9_-]*\n([\s\S]*?)\n```\s*$/);
-  if (fence) text = fence[1].trim();
-  const firstLine = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find(Boolean);
-  if (!firstLine) return "";
-  return firstLine.replace(/^["'`]+|["'`]+$/g, "").trim();
-}
-
-function isValidCommitMessage(message: string): boolean {
-  return CONVENTIONAL_PREFIX.test(message);
-}
-
-function buildCommitMessagePrompt(
-  entries: SourceControlEntry[],
-  diffText: string,
-  truncated: boolean,
-): string {
-  return [
-    "Generate one complete commit message for the staged changes only.",
-    "Format: type(scope): subject",
-    "Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.",
-    "Examples:",
-    "- feat(source-control): generate commit messages",
-    "- fix(git): handle staged diff errors",
-    "- chore: update project metadata",
-    "Use a short lowercase subject in imperative mood. Omit the scope if it would be vague.",
-    "Do not stop after the type or an opening parenthesis; the line must include a subject after ': '.",
-    truncated
-      ? "The diff below was truncated; infer from the visible staged changes only."
-      : "The full staged diff is included below.",
-    "",
-    "Staged files:",
-    stagedFilesSummary(entries),
-    "",
-    "Staged diff:",
-    diffText || "(No textual diff available.)",
-  ].join("\n");
-}
-
-function buildRepairCommitMessagePrompt(
-  invalidMessage: string,
-  entries: SourceControlEntry[],
-): string {
-  return [
-    "Repair this invalid Conventional Commit subject line.",
-    `Invalid line: ${invalidMessage || "(empty)"}`,
-    "Return exactly one complete valid line in this format: type(scope): subject",
-    "Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.",
-    "If the scope is unclear, omit it and use: type: subject",
-    "",
-    "Staged files:",
-    stagedFilesSummary(entries),
-  ].join("\n");
 }
 
 /**
@@ -242,12 +162,15 @@ export function useSourceControlPanel(
       }) => void)
     | null,
 ): SourceControlPanelState {
-  const selectedModelRef = useChatStore((state) => state.selectedModel);
+  const { t } = useTranslation("sourceControl");
+  const selectedModelRef = usePreferencesStore(
+    (state) => state.modelUsages.commitMessage.model ?? state.defaultModel,
+  );
+  const providerModels = usePreferencesStore((state) => state.providerModels);
   const customProviders = usePreferencesStore((state) => state.customProviders);
   const providerBaseURLs = usePreferencesStore(
     (state) => state.providerBaseURLs,
   );
-  const agentStatus = useChatStore(selectActiveAgentMeta).status;
   const apiKeys = useChatStore((state) => state.apiKeys);
   const providerInstanceKeys = useChatStore(
     (state) => state.providerInstanceKeys,
@@ -263,13 +186,24 @@ export function useSourceControlPanel(
         : repo && status
           ? "ready"
           : "no-repo";
-  const [commitMessage, setCommitMessage] = useState("");
+  const messageState = useStore(commitMessageStore, (state) =>
+    repo
+      ? (state[repo.repoRoot] ?? EMPTY_COMMIT_MESSAGE)
+      : EMPTY_COMMIT_MESSAGE,
+  );
+  const commitMessage = messageState.text;
+  const setCommitMessage = useCallback(
+    (text: string) => {
+      if (repo) setCommitMessageDraft(repo.repoRoot, text);
+    },
+    [repo],
+  );
   const [localActionBusy, setLocalActionBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingDiscard, setPendingDiscard] = useState<
-    | { scope: "single"; entry: SourceControlEntry }
-    | { scope: "all"; entries: SourceControlEntry[] }
+    | { scope: "single"; entry: CommitMessageEntry }
+    | { scope: "all"; entries: CommitMessageEntry[] }
     | null
   >(null);
   const stagedEntries = useMemo(
@@ -328,10 +262,17 @@ export function useSourceControlPanel(
 
   const allClean = stagedEntries.length === 0 && unstagedEntries.length === 0;
   const canPush = !!status?.upstream && status.behind === 0;
-  const selectedModel = tryResolveModel(selectedModelRef, {
-    customProviders,
-    providerBaseURLs,
-  });
+  const selectedModel =
+    selectedModelRef &&
+    isModelRefAvailable(selectedModelRef, providerModels, {
+      customProviders,
+      providerBaseURLs,
+    })
+      ? tryResolveModel(selectedModelRef, {
+          customProviders,
+          providerBaseURLs,
+        })
+      : null;
   const providerReady = selectedModel
     ? isProviderConnectionReady(
         resolveProviderInstance(selectedModel.providerId, {
@@ -342,25 +283,26 @@ export function useSourceControlPanel(
         }),
       )
     : false;
-  const aiBusy = agentStatus !== "idle" && agentStatus !== "error";
   const anyActionBusy =
-    localActionBusy !== null || controller.busyAction !== null;
+    localActionBusy !== null ||
+    controller.busyAction !== null ||
+    messageState.running;
   const aiUnavailableReason = useMemo(() => {
     if (stagedEntries.length === 0) {
-      return "Stage changes to generate a commit message";
+      return t("generation.stageFirst");
     }
     if (!selectedModel || !providerReady) {
-      return "Connect an AI provider to generate commit messages";
+      return t("generation.configureModel");
     }
     return null;
-  }, [providerReady, selectedModel, stagedEntries.length]);
+  }, [providerReady, selectedModel, stagedEntries.length, t]);
   const canGenerateCommitMessage =
-    stagedEntries.length > 0 && !anyActionBusy && !aiBusy && !!repo;
-  const generateCommitMessageHint = aiUnavailableReason
-    ? aiUnavailableReason
-    : aiBusy
-      ? "Wait for the current AI action to finish"
-      : "Generate commit message";
+    stagedEntries.length > 0 &&
+    !anyActionBusy &&
+    !aiUnavailableReason &&
+    !!repo;
+  const generateCommitMessageHint =
+    aiUnavailableReason ?? t("generation.generate");
   const pushHint = useMemo(() => {
     if (!status) return null;
     if (!status.upstream) {
@@ -494,69 +436,42 @@ export function useSourceControlPanel(
   );
 
   const generateCommitMessage = useCallback(async () => {
-    if (!repo || stagedEntries.length === 0 || !selectedModelRef) return;
-    if (aiBusy) {
-      setActionError("Wait for the current AI action to finish");
+    if (!repo || !stagedEntries.length || anyActionBusy) return;
+    const prefs = usePreferencesStore.getState();
+    const config = resolveModelUsage(
+      prefs.modelUsages.commitMessage,
+      prefs.modelParameters,
+      prefs.defaultModel,
+    );
+    if (
+      !config ||
+      !isModelRefAvailable(config.model, prefs.providerModels, prefs)
+    ) {
+      setActionError(t("generation.configureModel"));
       return;
     }
-    if (aiUnavailableReason) {
-      setActionError(aiUnavailableReason);
+    const keys = useChatStore.getState();
+    const connection = resolveProviderInstance(config.model.providerId, {
+      customProviders: prefs.customProviders,
+      providerBaseURLs: prefs.providerBaseURLs,
+      providerCredentials: keys.apiKeys,
+      providerInstanceCredentials: keys.providerInstanceKeys,
+    });
+    if (!isProviderConnectionReady(connection)) {
+      setActionError(t("generation.configureModel"));
       return;
     }
-    setLocalActionBusy("generate-message");
     setActionMessage(null);
     setActionError(null);
-    try {
-      const [{ buildConfiguredLanguageModel }, { generateText }, diff] =
-        await Promise.all([
-          import("@/modules/ai/lib/providerRuntime"),
-          import("ai"),
-          native.gitDiff(repo.repoRoot, null, "index"),
-        ]);
-      const { text: diffText, truncated } = truncateDiff(diff.diffText);
-      const chatState = useChatStore.getState();
-      const prefs = usePreferencesStore.getState();
-      const model = await buildConfiguredLanguageModel(
-        selectedModelRef,
-        chatState.apiKeys,
-        {
-          providerBaseURLs: prefs.providerBaseURLs,
-          customProviders: prefs.customProviders,
-          providerInstanceKeys: chatState.providerInstanceKeys,
-        },
-      );
-      const result = await generateText({
-        model,
-        system: COMMIT_MESSAGE_SYSTEM_PROMPT,
-        prompt: buildCommitMessagePrompt(stagedEntries, diffText, truncated),
-        maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-      });
-      let message = cleanCommitMessage(result.text);
-      if (!isValidCommitMessage(message)) {
-        const repair = await generateText({
-          model,
-          system: COMMIT_MESSAGE_SYSTEM_PROMPT,
-          prompt: buildRepairCommitMessagePrompt(message, stagedEntries),
-          maxOutputTokens: COMMIT_MESSAGE_MAX_OUTPUT_TOKENS,
-        });
-        message = cleanCommitMessage(repair.text);
-      }
-      if (!isValidCommitMessage(message)) {
-        throw new Error(
-          "AI returned an invalid commit message. Try again or switch models.",
-        );
-      }
-      setCommitMessage(message);
-      setActionMessage(null);
-    } catch (error) {
-      setActionError(normalizeError(error));
-    } finally {
-      setLocalActionBusy(null);
-    }
-  }, [aiUnavailableReason, aiBusy, repo, selectedModelRef, stagedEntries]);
+    await generateRepositoryCommitMessage(repo.repoRoot, stagedEntries, {
+      connection,
+      modelId: config.model.modelId,
+      parameters: config.parameters,
+    });
+  }, [anyActionBusy, repo, stagedEntries, t]);
 
   const commit = useCallback(async () => {
-    if (!repo || controller.busyAction) return;
+    if (!repo || controller.busyAction || messageState.running) return;
     setLocalActionBusy("commit");
     setActionMessage(null);
     setActionError(null);
@@ -572,7 +487,7 @@ export function useSourceControlPanel(
     } finally {
       setLocalActionBusy(null);
     }
-  }, [commitMessage, controller, repo]);
+  }, [commitMessage, controller, repo, messageState.running, setCommitMessage]);
 
   const push = useCallback(async () => {
     if (!repo) return;
@@ -613,9 +528,15 @@ export function useSourceControlPanel(
     repo,
     status,
     commitMessage,
-    actionBusy: localActionBusy ?? controller.busyAction,
+    actionBusy: messageState.running
+      ? "generate-message"
+      : (localActionBusy ?? controller.busyAction),
     statusError: controller.localError,
-    actionError,
+    actionError:
+      actionError ??
+      (messageState.error?.kind === "invalid"
+        ? t("generation.invalid")
+        : (messageState.error?.message ?? null)),
     remoteError: controller.lastRemoteError,
     actionMessage,
     stagedEntries,

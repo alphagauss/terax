@@ -1,4 +1,10 @@
 {
+  "generation": {
+    "stageFirst": "Stage changes to generate a commit message",
+    "configureModel": "Configure an available commit message model and its credentials in Settings",
+    "generate": "Generate commit message",
+    "invalid": "AI returned an invalid commit message. Try again or switch models."
+  },
   "noUpstream": "No upstream",
   "sourceControl": "Source Control",
   "detached": "detached",

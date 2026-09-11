@@ -10,7 +10,11 @@ import {
   type ModelParameterSelections,
 } from "@/modules/ai/lib/modelParameters";
 
-export const MODEL_USAGE_IDS = ["completion", "subagent"] as const;
+export const MODEL_USAGE_IDS = [
+  "completion",
+  "subagent",
+  "commitMessage",
+] as const;
 export type ModelUsageId =
   | (typeof MODEL_USAGE_IDS)[number]
   | `channel:${string}`;

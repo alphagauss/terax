@@ -1,4 +1,10 @@
 {
+  "generation": {
+    "stageFirst": "请先暂存更改，再生成提交信息",
+    "configureModel": "请在设置中配置可用的提交信息模型及其凭据",
+    "generate": "生成提交信息",
+    "invalid": "AI 返回的提交信息格式无效，请重试或切换模型。"
+  },
   "noUpstream": "无上游分支",
   "sourceControl": "源代码管理",
   "detached": "游离",
