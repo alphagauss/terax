@@ -17,7 +17,6 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle02Icon,
-  Loading03Icon,
   RobotIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -366,14 +365,7 @@ function StatusIcon({ status }: { status: SubagentDisplayStatus }) {
       />
     );
   }
-  return (
-    <HugeiconsIcon
-      icon={Loading03Icon}
-      size={12}
-      strokeWidth={2}
-      className="shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
-    />
-  );
+  return <span className="size-1.5 shrink-0 rounded-full bg-warning" />;
 }
 
 function StepStatus({ status }: { status: SubagentDisplayStep["status"] }) {
