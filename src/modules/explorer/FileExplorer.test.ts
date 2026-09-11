@@ -14,6 +14,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   environmentKind: "local",
+  empty: false,
+  pasteFiles: vi.fn(),
   rootStatus: "loaded",
   remoteReady: true,
   runtimePhase: "idle",
@@ -22,6 +24,8 @@ const mocks = vi.hoisted(() => ({
 afterEach(() => {
   vi.unstubAllGlobals();
   mocks.environmentKind = "local";
+  mocks.empty = false;
+  mocks.pasteFiles.mockClear();
   mocks.rootStatus = "loaded";
   mocks.remoteReady = true;
   mocks.runtimePhase = "idle";
@@ -163,7 +167,10 @@ vi.mock("./lib/useExplorerDnd", () => ({
   }),
 }));
 vi.mock("./lib/useExplorerFileDrop", () => ({
-  useExplorerFileDrop: () => ({ externalTargetDir: null }),
+  useExplorerFileDrop: () => ({
+    externalTargetDir: null,
+    pasteFiles: mocks.pasteFiles,
+  }),
 }));
 vi.mock("./lib/useGitStatus", () => ({
   useGitStatus: () => ({ lookup: () => null }),
@@ -187,7 +194,9 @@ vi.mock("./lib/useFileTree", () => ({
     nodes: {
       "/home/remote": {
         status: mocks.rootStatus,
-        entries: [{ name: "file.txt", kind: "file", gitignored: false }],
+        entries: mocks.empty
+          ? []
+          : [{ name: "file.txt", kind: "file", gitignored: false }],
       },
     },
     pendingCreate: null,
@@ -548,4 +557,35 @@ describe("file opening render path", () => {
     expect(source).toContain("transferNative.enqueue");
     act(() => root.unmount());
   });
+});
+
+it("空目录也能粘贴，目标与顶部新建按钮一致", () => {
+  mocks.empty = true;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    act(() =>
+      root.render(
+        createElement(FileExplorer, {
+          rootPath: "/home/remote",
+          onOpenFile: vi.fn(),
+        }),
+      ),
+    );
+    const tree = container.querySelector('[role="tree"]');
+    const event = new KeyboardEvent("keydown", {
+      key: "v",
+      code: "KeyV",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => tree?.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true);
+    expect(mocks.pasteFiles).toHaveBeenCalledWith(
+      resolveToolbarCreateParent("/home/remote", null, undefined),
+    );
+  } finally {
+    act(() => root.unmount());
+  }
 });

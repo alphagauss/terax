@@ -4,6 +4,7 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import {
@@ -826,6 +827,16 @@ export const FileExplorer = memo(
         target.isContentEditable
       )
         return;
+      const isPaste =
+        !e.altKey &&
+        (((e.ctrlKey || e.metaKey) &&
+          (e.code === "KeyV" || e.key.toLowerCase() === "v")) ||
+          (e.shiftKey && e.key === "Insert"));
+      if (isPaste) {
+        e.preventDefault();
+        void fileDrop.pasteFiles(toolbarCreateParent);
+        return;
+      }
       if (entryPaths.length === 0) return;
 
       const currentIdx = selectedPath ? entryPaths.indexOf(selectedPath) : -1;
@@ -997,6 +1008,7 @@ export const FileExplorer = memo(
           : null;
       setContextMenuPath(target?.path ?? null);
       setMenuTarget(target);
+      setSelectedPath(target?.path ?? null);
       setDeleteConfirm(false);
       menuSourcePointRef.current =
         e.clientX === 0 && e.clientY === 0
@@ -1177,8 +1189,7 @@ export const FileExplorer = memo(
                   tabIndex={0}
                   className={cn(
                     "app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
-                    rootIsDropTarget &&
-                      "rounded-sm ring-1 ring-inset ring-primary/50",
+                    rootIsDropTarget && FILE_DROP_TARGET_CLASS,
                   )}
                   onPointerDown={dnd.onPointerDown}
                   onClickCapture={dnd.onClickCapture}
@@ -1307,6 +1318,11 @@ export const FileExplorer = memo(
                 ) : null}
                 <ContextMenuSeparator />
                 <ContextMenuItem
+                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
+                >
+                  {t("menu.paste")}
+                </ContextMenuItem>
+                <ContextMenuItem
                   onSelect={() =>
                     tree.beginCreate(
                       menuTarget.isDir
@@ -1402,6 +1418,11 @@ export const FileExplorer = memo(
                     ))
                   : null}
                 <ContextMenuSeparator />
+                <ContextMenuItem
+                  onSelect={() => void fileDrop.pasteFiles(toolbarCreateParent)}
+                >
+                  {t("menu.paste")}
+                </ContextMenuItem>
                 <ContextMenuItem
                   onSelect={() => tree.beginCreate(rootPath, "file")}
                 >

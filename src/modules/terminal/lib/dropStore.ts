@@ -1,16 +1,20 @@
 import { create } from "zustand";
 
+export type TerminalDropSurface = "pane" | "input";
+
 type TerminalDropState = {
   targetTerminalId: number | null;
-  setTarget: (terminalId: number | null) => void;
+  targetSurface: TerminalDropSurface;
+  setTarget: (terminalId: number | null, surface?: TerminalDropSurface) => void;
 };
 
 export const useTerminalDropStore = create<TerminalDropState>((set) => ({
   targetTerminalId: null,
-  setTarget: (terminalId) =>
+  targetSurface: "pane",
+  setTarget: (terminalId, surface = "pane") =>
     set((state) =>
-      state.targetTerminalId === terminalId
+      state.targetTerminalId === terminalId && state.targetSurface === surface
         ? state
-        : { targetTerminalId: terminalId },
+        : { targetTerminalId: terminalId, targetSurface: surface },
     ),
 }));

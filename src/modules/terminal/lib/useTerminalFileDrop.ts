@@ -3,32 +3,33 @@
  * DOM 标记保存终端标签 ID，路径格式化后再写入对应输入流。
  */
 
+import { nativeDropElementAt } from "@/lib/nativeFileDrop";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useEffect } from "react";
-import { useTerminalDropStore } from "./dropStore";
-import { formatDroppedPaths } from "./quoteShellPath";
+import { useTerminalDropStore, type TerminalDropSurface } from "./dropStore";
+import { terminalFilePaths } from "@/modules/terminal/lib/terminalClipboard";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import { pasteIntoTerminal } from "./rendererPool";
 
-// Tauri reports the drop point in physical pixels on some platforms and logical
-// on others; only scale down when it overflows the logical viewport.
-function terminalIdAt(x: number, y: number): number | null {
-  let lx = x;
-  let ly = y;
-  if (x > window.innerWidth || y > window.innerHeight) {
-    const dpr = window.devicePixelRatio || 1;
-    lx = x / dpr;
-    ly = y / dpr;
-  }
-  const el = document.elementFromPoint(lx, ly);
+/** 根据原生拖放位置查找对应终端，其他接收区不处理。 */
+function terminalTargetAt(
+  x: number,
+  y: number,
+): { id: number; surface: TerminalDropSurface } | null {
+  const el = nativeDropElementAt(x, y);
   const terminal = el?.closest<HTMLElement>("[data-terminal-id]");
   if (!terminal) return null;
   const id = Number(terminal.dataset.terminalId);
-  return Number.isFinite(id) ? id : null;
+  return Number.isFinite(id)
+    ? {
+        id,
+        surface:
+          terminal.dataset.terminalDropSurface === "input" ? "input" : "pane",
+      }
+    : null;
 }
 
-/** Wires native OS file drops into the terminal under the cursor: shows a drop
- * overlay while dragging and bracketed-pastes the shell-quoted paths on drop.
- * Drops outside a terminal are ignored. */
+/** 只有本机终端展示接收边框；远端命中时提示拒绝，离开终端不处理。 */
 export function useTerminalFileDrop(): void {
   useEffect(() => {
     let disposed = false;
@@ -37,9 +38,14 @@ export function useTerminalFileDrop(): void {
 
     void getCurrentWebview()
       .onDragDropEvent((e) => {
+        if (disposed) return;
         const p = e.payload;
         if (p.type === "enter" || p.type === "over") {
-          setTarget(terminalIdAt(p.position.x, p.position.y));
+          const target =
+            currentWorkspaceEnv().kind === "local"
+              ? terminalTargetAt(p.position.x, p.position.y)
+              : null;
+          setTarget(target?.id ?? null, target?.surface);
           return;
         }
         if (p.type === "leave") {
@@ -49,9 +55,10 @@ export function useTerminalFileDrop(): void {
         if (p.type === "drop") {
           setTarget(null);
           if (!p.paths.length) return;
-          const terminalId = terminalIdAt(p.position.x, p.position.y);
-          if (terminalId !== null) {
-            pasteIntoTerminal(terminalId, formatDroppedPaths(p.paths));
+          const target = terminalTargetAt(p.position.x, p.position.y);
+          if (target !== null) {
+            const text = terminalFilePaths(p.paths);
+            if (text) pasteIntoTerminal(target.id, text);
           }
         }
       })

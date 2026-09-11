@@ -6680,6 +6680,7 @@ dependencies = [
 name = "terax"
 version = "0.8.2"
 dependencies = [
+ "arboard",
  "bytes",
  "dirs 6.0.0",
  "filetime",

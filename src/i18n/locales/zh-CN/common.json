@@ -47,6 +47,8 @@
     "reveal": "在系统文件管理器中显示",
     "failed": "文件操作失败",
     "binary": "二进制文件无法作为文本复制。",
-    "toolarge": "文件超过文本复制的 10 MB 上限。"
+    "toolarge": "文件超过文本复制的 10 MB 上限。",
+    "remoteFileInputRejected": "在 WSL 和 SSH 窗口中，请将文件粘贴或拖入文件管理器上传。",
+    "clipboardReadFailed": "无法读取剪贴板文件，请重试。"
   }
 }

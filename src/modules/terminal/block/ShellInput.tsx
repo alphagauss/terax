@@ -3,11 +3,14 @@
  * 输入草稿与焦点状态按终端 ID 隔离，提交仍写入对应 PTY。
  */
 
+import { readTerminalClipboard } from "@/modules/terminal/lib/terminalClipboard";
+import { FileDropOutline } from "@/components/controls/file-drop-outline";
+import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import { resolveFontFamily } from "@/lib/fonts";
 import { fmtShortcut, MOD_KEY } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   clearTerminalBlockSelection,
   getTerminalDraft,
@@ -15,6 +18,7 @@ import {
   setTerminalDraft,
   setTerminalInputActivity,
   setTerminalInputFocus,
+  setTerminalInputPaste,
 } from "../lib/useTerminalSession";
 import {
   historyCommands,
@@ -107,10 +111,26 @@ export default function ShellInput({
     };
   }, []);
 
+  const insertText = useCallback((text: string): boolean => {
+    const view = handleRef.current?.view;
+    if (!text || !view || !focusableRef.current) return false;
+    view.dispatch({
+      ...view.state.replaceSelection(text),
+      userEvent: "input.paste",
+      scrollIntoView: true,
+    });
+    view.focus();
+    return true;
+  }, []);
+
   // 单个编辑器随活动终端切换焦点回调和草稿，使每个终端保留各自未发送的命令。
   // 新建或切换标签后，光标直接落入输入框。
   useEffect(() => {
     setTerminalInputFocus(terminalId, () => handleRef.current?.focus());
+    setTerminalInputPaste(
+      terminalId,
+      (text) => terminalIdRef.current === terminalId && insertText(text),
+    );
     handleRef.current?.setValue(getTerminalDraft(terminalId));
     requestAnimationFrame(() => {
       if (focusableRef.current && terminalIdRef.current === terminalId) {
@@ -122,8 +142,9 @@ export default function ShellInput({
       setTerminalDraft(terminalId, value);
       setTerminalInputActivity(terminalId, value.length > 0);
       setTerminalInputFocus(terminalId, null);
+      setTerminalInputPaste(terminalId, null);
     };
-  }, [terminalId]);
+  }, [terminalId, insertText]);
 
   useEffect(() => {
     void themeKey;
@@ -152,11 +173,44 @@ export default function ShellInput({
     e.clipboardData.setData("text/plain", sel);
   };
 
+  const dropActive = useTerminalDropStore(
+    (state) =>
+      state.targetTerminalId === terminalId && state.targetSurface === "input",
+  );
+  const pasteClipboard = async () => {
+    const id = terminalIdRef.current;
+    const text = await readTerminalClipboard();
+    if (id === terminalIdRef.current) insertText(text);
+  };
+
   return (
     <div
-      className={cn("flex items-start gap-2", !atPrompt && "opacity-45")}
+      className={cn(
+        "relative flex items-start gap-2",
+        !atPrompt && "opacity-45",
+      )}
+      data-terminal-id={atPrompt ? terminalId : undefined}
+      data-terminal-drop-surface="input"
+      onKeyDownCapture={(event) => {
+        if (!atPrompt || event.altKey) return;
+        if (
+          ((event.metaKey || event.ctrlKey) &&
+            (event.code === "KeyV" || event.key.toLowerCase() === "v")) ||
+          (event.shiftKey && event.key === "Insert")
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          void pasteClipboard();
+        }
+      }}
+      onPasteCapture={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (atPrompt) void pasteClipboard();
+      }}
       onCopyCapture={onCopyCapture}
     >
+      {dropActive ? <FileDropOutline /> : null}
       <span
         className="select-none pt-px text-primary/80"
         style={{ fontFamily, fontSize: `${fontSize}px`, lineHeight: 1.5 }}

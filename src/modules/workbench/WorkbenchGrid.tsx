@@ -3,6 +3,8 @@
  * Space 没有标签时直接展示基础启动页，不创建或伪装成标签页。
  */
 
+import { FileDropOutline } from "@/components/controls/file-drop-outline";
+import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -116,6 +118,15 @@ function WorkbenchGroup({
     .map((id) => tabs[id])
     .filter((tab): tab is Tab => tab !== undefined);
   const active = group.id === activeGroupId;
+  const activeTab =
+    group.activeTabId == null ? undefined : tabs[group.activeTabId];
+  const terminalId = activeTab?.kind === "terminal" ? activeTab.id : undefined;
+  const fileDropActive = useTerminalDropStore(
+    (state) =>
+      terminalId !== undefined &&
+      state.targetTerminalId === terminalId &&
+      state.targetSurface === "pane",
+  );
   return (
     <section
       data-workbench-group={group.id}
@@ -155,6 +166,7 @@ function WorkbenchGroup({
       ) : null}
       <div
         data-workbench-drop-surface={group.id}
+        data-terminal-id={terminalId}
         className="relative min-h-0 flex-1 overflow-hidden"
       >
         <div
@@ -172,6 +184,7 @@ function WorkbenchGroup({
           />
         ) : null}
         <WorkbenchDropOverlay groupId={group.id} />
+        {fileDropActive ? <FileDropOutline /> : null}
       </div>
     </section>
   );

@@ -40,6 +40,9 @@
     "propertiesOpenFailed": "无法打开属性窗口：{{error}}",
     "deletePermanentlyTitle": "永久删除？",
     "deletePermanentlyDescription": "{{name}} 无法移动到回收站。确定要永久删除吗？",
-    "deletePermanently": "永久删除"
+    "deletePermanently": "永久删除",
+    "paste": "粘贴",
+    "noClipboardFiles": "剪贴板中没有带路径的文件。",
+    "pasteFailed": "粘贴文件失败：{{error}}"
   }
 }

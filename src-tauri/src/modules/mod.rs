@@ -11,6 +11,8 @@ pub mod app_data;
 #[cfg(feature = "desktop")]
 pub mod auxiliary_window;
 #[cfg(feature = "desktop")]
+pub mod clipboard_files;
+#[cfg(feature = "desktop")]
 pub mod external_agent;
 #[cfg(feature = "desktop")]
 pub mod file_actions;

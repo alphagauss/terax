@@ -28,6 +28,9 @@ const composer = vi.hoisted(() => ({
 vi.mock("@/modules/ai/lib/composer", () => ({
   useComposer: () => composer,
 }));
+vi.mock("@/modules/ai/hooks/useComposerDrop", () => ({
+  useComposerDrop: () => ({ ref: { current: null }, active: false, label: "" }),
+}));
 vi.mock("@/modules/ai/components/AiComposerInput", () => ({
   AiComposerInput: () => null,
 }));

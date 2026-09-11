@@ -80,14 +80,29 @@ export type TerminalClipboardOptions = {
 /**
  * 判断按键是否应由终端剪贴板处理。
  *
- * macOS 保留原生 Cmd+C/V 和 Ctrl+C 中断语义。其他平台始终支持
+ * macOS 保留 Cmd+C 和 Ctrl+C，中转 Cmd+V 以识别文件路径。其他平台始终支持
  * Ctrl+Shift+C/V；智能模式还会让有选区的 Ctrl+C 复制，并让 Ctrl+V 粘贴。
  */
 export function terminalClipboardIntent(
   event: TerminalKeyEvent,
   opts: TerminalClipboardOptions,
 ): TerminalClipboardIntent | null {
-  if (opts.isMac) return null;
+  if (opts.isMac) {
+    return event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      (event.code === "KeyV" || event.key.toLowerCase() === "v")
+      ? "paste"
+      : null;
+  }
+  if (
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    event.key === "Insert"
+  )
+    return "paste";
   if (!event.ctrlKey || event.altKey || event.metaKey) return null;
 
   // 同时匹配物理键位和字符，保证非拉丁键盘布局仍可使用通用组合键。

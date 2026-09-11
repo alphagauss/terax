@@ -40,6 +40,9 @@
     "propertiesOpenFailed": "Could not open properties: {{error}}",
     "deletePermanentlyTitle": "Delete permanently?",
     "deletePermanentlyDescription": "{{name}} cannot be moved to the Recycle Bin. Permanently delete it?",
-    "deletePermanently": "Delete permanently"
+    "deletePermanently": "Delete permanently",
+    "paste": "Paste",
+    "noClipboardFiles": "The clipboard contains no files with paths.",
+    "pasteFailed": "Could not paste files: {{error}}"
   }
 }

@@ -3,6 +3,7 @@
  * 条目行负责展示选择、重命名、Git 装饰和删除中的不可交互状态。
  */
 
+import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
@@ -141,8 +142,7 @@ function EntryRowImpl(props: EntryRowProps) {
           : isSelected
             ? "bg-primary/12 ring-1 ring-inset ring-primary/70 hover:bg-primary/12"
             : null,
-        isDropTarget &&
-          "bg-primary/10 ring-1 ring-inset ring-primary/60 hover:bg-primary/10",
+        isDropTarget && FILE_DROP_TARGET_CLASS,
       )}
       style={{ paddingLeft }}
     >

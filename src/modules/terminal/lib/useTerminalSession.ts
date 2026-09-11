@@ -97,6 +97,7 @@ type Session = {
   blockDecorations: BlockDecorations | null;
   // 由块终端输入框注册，在 xterm 网格抢走焦点时将输入焦点拉回输入栏。
   inputFocus: (() => void) | null;
+  inputPaste: ((text: string) => boolean) | null;
   // 每个终端独立保存未发送的输入，工作区单一输入栏在焦点变化时切换草稿。
   inputDraft: string;
   // Live "input has text" flag from the block shell-input (gates the watermark).
@@ -278,6 +279,15 @@ export function setTerminalInputFocus(
   if (s) s.inputFocus = fn;
 }
 
+/** 块终端输入栏按终端注册粘贴入口，解绑后不能接收其他标签的文本。 */
+export function setTerminalInputPaste(
+  terminalId: number,
+  paste: ((text: string) => boolean) | null,
+): void {
+  const session = sessions.get(terminalId);
+  if (session) session.inputPaste = paste;
+}
+
 export function focusTerminalInput(terminalId: number): void {
   sessions.get(terminalId)?.inputFocus?.();
 }
@@ -427,6 +437,14 @@ ensureAgentActivityListener((ptyId) => {
 });
 
 configureRendererPool({
+  pasteIntoInput(terminalId, text) {
+    const session = sessions.get(terminalId);
+    return Boolean(
+      session?.blocks &&
+        session.blockMode === "prompt" &&
+        session.inputPaste?.(text),
+    );
+  },
   resolveTerminal(terminalId) {
     const s = sessions.get(terminalId);
     if (!s) return null;
@@ -521,6 +539,7 @@ function ensureSession(
     blockListeners: new Set(),
     blockDecorations: null,
     inputFocus: null,
+    inputPaste: null,
     inputDraft: "",
     inputActive: false,
     everSubmitted: false,
