@@ -5,7 +5,6 @@ import {
   memo,
   useCallback,
   useContext,
-  useState,
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,7 +16,7 @@ import type {
   FileEditCall,
   FileEditStats as Stats,
 } from "@/modules/ai/lib/fileEdits";
-import "./FileEditStats.css";
+import { AnimatedDiffStats } from "@/components/controls/animated-diff-stats";
 
 export const FileEditContext = createContext<{
   sessionId: string;
@@ -84,59 +83,7 @@ export function DiffStats({
   const { t } = useTranslation("ai");
   return (
     <Hint content={approximate ? t("chat.fileEdits.estimate") : undefined}>
-      <span className="inline-flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums">
-        <RollingNumber
-          value={stats.added}
-          direction="up"
-          prefix="+"
-          animate={animate}
-        />
-        <RollingNumber
-          value={stats.removed}
-          direction="down"
-          prefix="-"
-          animate={animate}
-        />
-      </span>
+      <AnimatedDiffStats stats={stats} animate={animate} />
     </Hint>
-  );
-}
-
-function RollingNumber({
-  value,
-  direction,
-  prefix,
-  animate,
-}: {
-  value: number;
-  direction: "up" | "down";
-  prefix: string;
-  animate: boolean;
-}) {
-  const [pair, setPair] = useState({ previous: value, current: value });
-  if (pair.current !== value)
-    setPair({ previous: pair.current, current: value });
-  const moving = animate && pair.previous !== pair.current;
-  return (
-    <span
-      className={`file-edit-number ${direction === "up" ? "text-success" : "text-destructive"}`}
-      data-direction={direction}
-    >
-      <span
-        key={value}
-        className={moving ? "file-edit-number-motion" : undefined}
-      >
-        {moving && (
-          <span aria-hidden className="file-edit-number-old">
-            {prefix}
-            {pair.previous}
-          </span>
-        )}
-        <span className="file-edit-number-new">
-          {prefix}
-          {value}
-        </span>
-      </span>
-    </span>
   );
 }

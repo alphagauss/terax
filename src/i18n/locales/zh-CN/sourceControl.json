@@ -1,4 +1,13 @@
 {
+  "lineStats": {
+    "modified": "已修改",
+    "staged": "已暂存",
+    "showModified": "点击查看未暂存的增删行数",
+    "showStaged": "点击查看已暂存的增删行数",
+    "unavailable": "暂不可用",
+    "incomplete": "行数统计不完整：部分文件无法统计。",
+    "description": "文本新增和删除行数，包含注释与空行。已修改包含未跟踪的文本文件。"
+  },
   "generation": {
     "stageFirst": "请先暂存更改，再生成提交信息",
     "configureModel": "请在设置中配置可用的提交信息模型及其凭据",

@@ -40,6 +40,7 @@ const controller: RepositoryController = {
     truncated: false,
     changedFiles: [],
   },
+  diffStats: null,
   changedCount: 0,
   upstream: null,
   ahead: 0,

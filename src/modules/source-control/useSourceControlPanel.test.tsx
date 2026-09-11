@@ -70,6 +70,7 @@ it("can generate with its own model while chat is running and keeps drafts scope
         },
       ],
     },
+    diffStats: null,
     changedCount: 1,
     upstream: null,
     ahead: 0,

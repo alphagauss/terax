@@ -1,4 +1,13 @@
 {
+  "lineStats": {
+    "modified": "Modified",
+    "staged": "Staged",
+    "showModified": "Click to show unstaged line changes",
+    "showStaged": "Click to show staged line changes",
+    "unavailable": "Unavailable",
+    "incomplete": "Incomplete line counts: some files could not be counted.",
+    "description": "Added and deleted text lines, including comments and blank lines. Modified includes untracked text files."
+  },
   "generation": {
     "stageFirst": "Stage changes to generate a commit message",
     "configureModel": "Configure an available commit message model and its credentials in Settings",
