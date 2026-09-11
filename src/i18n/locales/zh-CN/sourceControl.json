@@ -13,9 +13,7 @@
     "stageToEnable": "暂存更改以启用提交。",
     "enterMessage": "请输入提交信息以启用提交。",
     "hint": "使用 {{shortcut}} 提交。",
-    "placeholder": "提交信息",
-    "charCount": "字数：{{count}}",
-    "toCommit": "提交",
+    "placeholder": "消息（{{shortcut}} 提交）",
     "button": "提交",
     "committing": "正在提交…"
   },
