@@ -244,13 +244,34 @@ describe("terminalClipboardIntent", () => {
     ).toBeNull();
   });
 
-  it("does not intercept clipboard keys on macOS", () => {
+  it("does not intercept Ctrl-based clipboard keys on macOS", () => {
     expect(
       terminalClipboardIntent(
         evt({ ctrlKey: true, shiftKey: true, code: "KeyC", key: "c" }),
         options({ isMac: true, hasSelection: true }),
       ),
     ).toBeNull();
+  });
+
+  it("Cmd+V 和 Shift+Insert 进入统一粘贴，Cmd+C 保留原生复制", () => {
+    expect(
+      terminalClipboardIntent(
+        evt({ metaKey: true, code: "KeyV", key: "v" }),
+        options({ isMac: true }),
+      ),
+    ).toBe("paste");
+    expect(
+      terminalClipboardIntent(
+        evt({ metaKey: true, code: "KeyC", key: "c" }),
+        options({ isMac: true }),
+      ),
+    ).toBeNull();
+    expect(
+      terminalClipboardIntent(
+        evt({ shiftKey: true, key: "Insert" }),
+        options({ smartCopyPaste: false }),
+      ),
+    ).toBe("paste");
   });
 
   it("supports uppercase and non-Latin keyboard layouts", () => {

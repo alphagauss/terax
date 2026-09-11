@@ -3,6 +3,7 @@
  * 负责输入、上下文标签、模型筛选和发送控制。
  */
 
+import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
@@ -59,6 +60,7 @@ import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { AiComposerInput } from "@/modules/ai/components/AiComposerInput";
 import { ModelParametersPopover } from "@/modules/ai/components/ModelParametersPopover";
 import "@/modules/ai/components/ai-sidebar-composer.css";
+import { useComposerDrop } from "@/modules/ai/hooks/useComposerDrop";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 
 /**
@@ -68,6 +70,7 @@ import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 export function AiSidebarComposer() {
   const { t } = useTranslation("ai");
   const c = useComposer();
+  const drop = useComposerDrop(c);
   const guiding = c.isBusy && c.canSend;
   const stopping = c.isBusy && !guiding;
   const submitLabel = t(
@@ -91,7 +94,12 @@ export function AiSidebarComposer() {
 
   return (
     <div className="relative z-10 shrink-0 px-3 pb-3">
-      <div className="flex flex-col gap-2 rounded-2xl border border-border bg-background p-2.5 shadow-sm">
+      <div
+        ref={drop.ref}
+        className="relative flex flex-col gap-2 rounded-2xl border border-border bg-background p-2.5 shadow-sm"
+      >
+        {drop.active ? <FileDropOutline /> : null}
+
         <ChipsRow
           files={c.files}
           onRemoveFile={c.removeFile}

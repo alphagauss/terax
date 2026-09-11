@@ -1,16 +1,14 @@
 /**
- * 本文件把 Workbench 终端标签连接到终端视图和文件拖放反馈。
+ * 本文件把 Workbench 终端标签连接到终端视图并注册对应句柄。
  * 标签 ID 直接作为前端终端运行时的唯一身份。
  */
 
-import { useTerminalDropStore } from "@/modules/terminal/lib/dropStore";
 import {
   TerminalPane,
   type TerminalPaneHandle,
 } from "@/modules/terminal/TerminalPane";
 import type { TerminalTab } from "@/modules/workbench";
 import { useCallback } from "react";
-import { useTranslation } from "react-i18next";
 
 type Props = {
   tab: TerminalTab;
@@ -38,7 +36,7 @@ export function TerminalView({
     [registerHandle, tab.id],
   );
   return (
-    <div data-terminal-id={tab.id} className="relative h-full w-full">
+    <div className="relative h-full w-full">
       <TerminalPane
         ref={setRef}
         terminalId={tab.id}
@@ -49,20 +47,6 @@ export function TerminalView({
         onCwd={onCwd}
         onExit={onExit}
       />
-      <TerminalDropOverlay terminalId={tab.id} />
-    </div>
-  );
-}
-
-function TerminalDropOverlay({ terminalId }: { terminalId: number }) {
-  const { t } = useTranslation("terminal");
-  const active = useTerminalDropStore(
-    (state) => state.targetTerminalId === terminalId,
-  );
-  if (!active) return null;
-  return (
-    <div className="pointer-events-none absolute inset-2 grid place-items-center rounded-lg border border-primary/45 bg-background/70 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm">
-      {t("dropFilePathHere")}
     </div>
   );
 }

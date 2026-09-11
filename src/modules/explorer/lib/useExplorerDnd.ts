@@ -4,6 +4,11 @@
  */
 
 import {
+  resourceDropTargetAt,
+  finishResourceDrop,
+  type ResourceDropTarget,
+} from "@/modules/file-actions/resourceDrop";
+import {
   beginWorkbenchDrag,
   finishWorkbenchDrag,
   updateWorkbenchDrag,
@@ -11,6 +16,7 @@ import {
 } from "@/modules/workbench/dragSession";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parentDir } from "./watch";
 
 type Options = {
   rootPath: string;
@@ -20,11 +26,6 @@ type Options = {
 };
 
 const THRESHOLD = 5;
-
-function parentDir(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i > 0 ? path.slice(0, i) : path;
-}
 
 /**
  * 管理资源管理器的指针拖放会话。
@@ -81,6 +82,7 @@ export function useExplorerDnd({
       const sy = e.clientY;
       const sourceIsFile = sourceKind === false;
       let active = false;
+      let resourceTarget: ResourceDropTarget | null = null;
 
       const move = (ev: PointerEvent) => {
         if (!active) {
@@ -101,20 +103,33 @@ export function useExplorerDnd({
           }
         }
         placeGhost(ev.clientX, ev.clientY);
+        const nextResourceTarget = sourceIsFile
+          ? resourceDropTargetAt(ev.clientX, ev.clientY)
+          : null;
+        if (nextResourceTarget !== resourceTarget) {
+          resourceTarget?.hover(false);
+          resourceTarget = nextResourceTarget;
+          resourceTarget?.hover(true);
+        }
         const workbenchTarget = sourceIsFile
-          ? updateWorkbenchDrag(ev.clientX, ev.clientY)
+          ? updateWorkbenchDrag(
+              resourceTarget ? -1 : ev.clientX,
+              resourceTarget ? -1 : ev.clientY,
+            )
           : null;
         const { rootPath, isDir } = optsRef.current;
-        const hit = document
-          .elementFromPoint(ev.clientX, ev.clientY)
-          ?.closest<HTMLElement>("[data-fs-path]");
+        const pointerHit = document.elementFromPoint(ev.clientX, ev.clientY);
+        const hit = pointerHit?.closest<HTMLElement>("[data-fs-path]");
         const p = hit?.getAttribute("data-fs-path");
         const kind = p ? isDir(p) : undefined;
-        let target: string | null = rootPath;
+        let target: string | null = pointerHit?.closest("[data-explorer-drop]")
+          ? rootPath
+          : null;
         if (p && kind === true) target = p;
         else if (p && kind === false) target = parentDir(p);
         else if (p) target = null;
         const valid =
+          !resourceTarget &&
           !workbenchTarget &&
           target !== null &&
           target !== source &&
@@ -131,16 +146,25 @@ export function useExplorerDnd({
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", cancel);
+        resourceTarget?.hover(false);
         cleanupRef.current = null;
       };
       const end = (commit: boolean) => {
         detach();
         if (!active) return;
+        const droppedOnResource = resourceTarget !== null;
+        if (resourceTarget) finishResourceDrop(resourceTarget, source, commit);
+        resourceTarget = null;
         const droppedInWorkbench = ownsWorkbenchDragRef.current
           ? finishWorkbenchDrag(commit)
           : false;
         ownsWorkbenchDragRef.current = false;
-        if (commit && !droppedInWorkbench && dropTargetRef.current)
+        if (
+          commit &&
+          !droppedOnResource &&
+          !droppedInWorkbench &&
+          dropTargetRef.current
+        )
           optsRef.current.onMove(source, dropTargetRef.current);
         suppressClickRef.current = true;
         setTimeout(() => {
@@ -150,7 +174,11 @@ export function useExplorerDnd({
         setDragLabel(null);
         setDropTargetDir(null);
       };
-      const up = () => end(true);
+      const up = (ev: PointerEvent) => {
+        // 松开前可能没有最后一次移动事件，提交必须按实际落点重新命中。
+        if (active) move(ev);
+        end(true);
+      };
       const cancel = () => end(false);
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);

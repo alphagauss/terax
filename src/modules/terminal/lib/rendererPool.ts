@@ -16,10 +16,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { type FontWeight, Terminal } from "@xterm/xterm";
 import { shouldCursorBlink } from "./cursorBlink";
-import {
-  terminalClipboardIntent,
-  terminalReadlineSequence,
-} from "./keymap";
+import { terminalClipboardIntent, terminalReadlineSequence } from "./keymap";
 import {
   shouldUseLocalTerminalMouse,
   terminalMouseOverrideHeld,
@@ -38,6 +35,7 @@ const SNAPSHOT_SCROLLBACK_CAP = 5_000;
 
 export type SlotAdapter = {
   resolveTerminal(terminalId: number): TerminalBridge | null;
+  pasteIntoInput?(terminalId: number, text: string): boolean;
   evictTerminal(terminalId: number): void;
   isTerminalFocused(terminalId: number): boolean;
   isTerminalBlocks(terminalId: number): boolean;
@@ -154,9 +152,9 @@ export function poolSlotStats(): PoolSlotStat[] {
   }));
 }
 
-// Bracketed paste via xterm, so an app that enabled it (Claude Code) treats a
-// dropped path as a real paste while a plain shell gets the literal text.
+/** 编辑状态优先写入块终端输入栏，其他状态通过 xterm 保持 bracketed paste 语义。 */
 export function pasteIntoTerminal(terminalId: number, text: string): boolean {
+  if (adapter?.pasteIntoInput?.(terminalId, text)) return true;
   const slot = slots.find((s) => s.currentTerminalId === terminalId);
   if (!slot) return false;
   slot.term.paste(text);
@@ -375,6 +373,19 @@ function createSlot(): Slot {
     }
     return true;
   });
+
+  // 捕获 xterm 的 DOM 粘贴入口，右键和浏览器粘贴也遵循同一文件策略。
+  host.addEventListener(
+    "paste",
+    (event) => {
+      const terminalId = slot.currentTerminalId;
+      if (terminalId === null) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pasteClipboardIntoTerminal(terminalId);
+    },
+    true,
+  );
 
   term.onData((data) => {
     const terminalId = slot.currentTerminalId;

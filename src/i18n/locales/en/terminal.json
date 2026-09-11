@@ -28,6 +28,5 @@
   "runtime": {
     "shellStartFailed": "failed to start shell: {{detail}}",
     "pressEnterToRetry": "press Enter to retry"
-  },
-  "dropFilePathHere": "Drop file path here"
+  }
 }

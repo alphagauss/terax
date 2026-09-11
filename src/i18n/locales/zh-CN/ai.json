@@ -110,7 +110,9 @@
     "channelBound": "此会话已绑定 Channel，请先在设置中移除连接，再删除会话。",
     "pendingSteering": "待引导：{{count}} 条",
     "sendFailed": "消息未能发送，请重试。",
-    "remoteAttachments": "请先将文件上传到当前环境，再从文件树附加。"
+    "remoteAttachments": "请先将文件上传到当前环境，再从文件树附加。",
+    "clipboardFailed": "无法读取剪贴板文件，请重试。",
+    "clipboardFilesUnavailable": "未能取得可读取的文件路径，请通过文件选择器或文件树附加。"
   },
   "statusBar": {
     "openAiAgent": "打开 AI agent",

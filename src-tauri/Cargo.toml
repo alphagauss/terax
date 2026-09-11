@@ -23,6 +23,7 @@ desktop = [
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-clipboard-manager",
+    "dep:arboard",
     "dep:tauri-plugin-global-shortcut",
     "dep:xcap",
     "dep:image",
@@ -74,6 +75,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { optional = true, version = "2", features = [] }
 
 [dependencies]
+arboard = { version = "3.6.1", optional = true, default-features = false, features = ["wayland-data-control"] }
 tauri = { optional = true, version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }

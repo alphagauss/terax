@@ -28,6 +28,5 @@
   "runtime": {
     "shellStartFailed": "Shell 启动失败：{{detail}}",
     "pressEnterToRetry": "按回车键重试"
-  },
-  "dropFilePathHere": "将文件路径拖放到这里"
+  }
 }

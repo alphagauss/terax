@@ -1,7 +1,7 @@
 /**
  * 本文件实现 Agent Composer 的文本输入和触发器选择。
  *
- * 负责命令、片段、文件提示与剪贴板图片附件，不持久化 Composer 状态。
+ * 负责命令、片段、文件提示与剪贴板附件，不持久化 Composer 状态。
  */
 
 import { Popover, PopoverAnchor } from "@/components/ui/popover";
@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
-import { clipboardImageFiles } from "../lib/clipboardImages";
+import { useComposerClipboard } from "@/modules/ai/hooks/useComposerClipboard";
 import { useComposer } from "../lib/composer";
 import { SLASH_COMMANDS } from "../lib/slashCommands";
 import { sessionMetadata, useChatStore } from "../store/chatStore";
@@ -70,11 +70,12 @@ function detectFileTrigger(value: string, caret: number): FileTrigger | null {
 /**
  * Agent 主输入框。
  *
- * 除键盘触发器外，粘贴图片会复用 Composer 的标准附件读取流程。
+ * 除键盘触发器外，系统文件与内存图片粘贴复用 Composer 的标准附件流程。
  */
 export function AiComposerInput() {
   const { t } = useTranslation("ai");
   const c = useComposer();
+  const clipboard = useComposerClipboard(c);
   const activeSessionId = useChatStore((state) => state.activeSessionId);
   const draftSessionId = useChatStore((state) => state.draftSessionId);
   const draftExternalAgentId = useChatStore(
@@ -249,13 +250,9 @@ export function AiComposerInput() {
               onKeyUp={updateTrigger}
               onClick={updateTrigger}
               onSelect={updateTrigger}
-              onPaste={(event) => {
-                const images = clipboardImageFiles(event.clipboardData);
-                if (images.length === 0) return;
-                event.preventDefault();
-                void c.addFiles(images);
-              }}
+              onPaste={clipboard.onPaste}
               onKeyDown={(e) => {
+                clipboard.onKeyDown(e);
                 if (pickerOpen) {
                   const items = fileTrigger ? filteredFiles : filteredItems;
                   if (e.key === "ArrowDown") {

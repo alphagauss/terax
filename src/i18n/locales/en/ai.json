@@ -110,7 +110,9 @@
     "channelBound": "This conversation is bound to a Channel. Remove its connection in Settings before deleting the conversation.",
     "pendingSteering": "Awaiting guidance: {{count}}",
     "sendFailed": "The message could not be sent. Please try again.",
-    "remoteAttachments": "Upload files to this environment first, then attach them from the file tree."
+    "remoteAttachments": "Upload files to this environment first, then attach them from the file tree.",
+    "clipboardFailed": "Unable to read clipboard files. Please try again.",
+    "clipboardFilesUnavailable": "No readable file paths were found. Attach files using the file picker or file tree."
   },
   "statusBar": {
     "openAiAgent": "Open AI agent",
