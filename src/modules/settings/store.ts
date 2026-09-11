@@ -4,6 +4,15 @@
  */
 
 import {
+  MODEL_USAGE_PREFIX,
+  modelUsageModelKey,
+  modelUsageParametersPrefix,
+  readModelUsages,
+  type ModelUsageId,
+  type ModelUsages,
+} from "@/modules/ai/lib/modelUsage";
+
+import {
   clampMaxConcurrentSubagents,
   MAX_CONCURRENT_SUBAGENTS_DEFAULT,
 } from "@/modules/ai/config";
@@ -42,10 +51,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   type ModelParameter,
   type ModelParameterDefinitions,
-  type ModelParameterSelections,
   type ParameterSelections,
   readModelParameters,
-  readParameterSelections,
   validateModelParameters,
 } from "@/modules/ai/lib/modelParameters";
 import { modelRefKey } from "@/modules/ai/config";
@@ -165,7 +172,6 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   defaultModel: ModelRef | null;
-  defaultSubagentModel: ModelRef | null;
   maxConcurrentSubagents: number;
   editorTheme: EditorThemePref;
   editorFontSize: number;
@@ -175,10 +181,9 @@ export type Preferences = {
   workspaceWindowMode: WorkspaceWindowMode;
   autocompleteEnabled: boolean;
   autocompleteTrigger: AutocompleteTrigger;
-  autocompleteModel: ModelRef | null;
   providerModels: ProviderModels;
   modelParameters: ModelParameterDefinitions;
-  completionParameterSelections: ModelParameterSelections;
+  modelUsages: ModelUsages;
   providerBaseURLs: ProviderBaseURLs;
   customProviders: ProviderInstance[];
   sttProvider: SttProvider;
@@ -249,7 +254,6 @@ const KEY_BG_IMAGE_ID = "backgroundImageId";
 const KEY_BG_OPACITY = "backgroundOpacity";
 const KEY_BG_BLUR = "backgroundBlur";
 const KEY_DEFAULT_MODEL = "defaultModel";
-const KEY_DEFAULT_SUBAGENT_MODEL = "defaultSubagentModel";
 const KEY_MAX_CONCURRENT_SUBAGENTS = "maxConcurrentSubagents";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
@@ -261,10 +265,8 @@ export type AutocompleteTrigger = "auto" | "manual";
 
 const KEY_AUTOCOMPLETE_ENABLED = "autocompleteEnabled";
 const KEY_AUTOCOMPLETE_TRIGGER = "autocompleteTrigger";
-const KEY_AUTOCOMPLETE_MODEL = "autocompleteModel";
 const KEY_PROVIDER_MODELS = "providerModels";
 const MODEL_PARAMETERS_PREFIX = "modelParameters:";
-const COMPLETION_PARAMETERS_PREFIX = "completionParameters:";
 const KEY_PROVIDER_BASE_URLS = "providerBaseURLs";
 const KEY_CUSTOM_PROVIDERS = "customProviders";
 const KEY_STT_PROVIDER = "sttProvider";
@@ -331,7 +333,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundOpacity: 0.5,
   backgroundBlur: 0,
   defaultModel: null,
-  defaultSubagentModel: null,
   maxConcurrentSubagents: MAX_CONCURRENT_SUBAGENTS_DEFAULT,
   editorTheme: EDITOR_THEME_AUTO,
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
@@ -341,10 +342,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   workspaceWindowMode: "single",
   autocompleteEnabled: false,
   autocompleteTrigger: "auto",
-  autocompleteModel: null,
   providerModels: {},
   modelParameters: {},
-  completionParameterSelections: {},
+  modelUsages: readModelUsages({}),
   providerBaseURLs: {},
   customProviders: [],
   sttProvider: DEFAULT_STT_PROVIDER,
@@ -398,19 +398,30 @@ export async function setModelParameters(
   await writePref(MODEL_PARAMETERS_PREFIX + modelRefKey(ref), parameters);
 }
 
-export async function setCompletionParameterSelections(
+/** 只写本模块的模型引用，不触碰已保存的参数覆盖。 */
+export async function setModelUsageModel(
+  id: ModelUsageId,
+  model: ModelRef | null,
+): Promise<void> {
+  await writePref(modelUsageModelKey(id), model);
+}
+
+/** 按模块和模型精确写入，跨窗口保存不能覆盖其他模块或模型。 */
+export async function setModelUsageParameters(
+  id: ModelUsageId,
   ref: ModelRef,
   selections: ParameterSelections,
 ): Promise<void> {
-  await writePref(COMPLETION_PARAMETERS_PREFIX + modelRefKey(ref), selections);
+  await writePref(
+    modelUsageParametersPrefix(id) + modelRefKey(ref),
+    selections,
+  );
 }
 
 export type ModelSettingsPatch = Partial<
   Pick<
     Preferences,
     | "defaultModel"
-    | "defaultSubagentModel"
-    | "autocompleteModel"
     | "providerModels"
     | "providerBaseURLs"
     | "customProviders"
@@ -421,8 +432,6 @@ export type ModelSettingsPatch = Partial<
 
 const MODEL_SETTING_KEYS: Record<keyof ModelSettingsPatch, string> = {
   defaultModel: KEY_DEFAULT_MODEL,
-  defaultSubagentModel: KEY_DEFAULT_SUBAGENT_MODEL,
-  autocompleteModel: KEY_AUTOCOMPLETE_MODEL,
   providerModels: KEY_PROVIDER_MODELS,
   providerBaseURLs: KEY_PROVIDER_BASE_URLS,
   customProviders: KEY_CUSTOM_PROVIDERS,
@@ -438,7 +447,7 @@ export async function setModelSettings(
     (
       entry,
     ): entry is [
-      keyof ModelSettingsPatch,
+      keyof typeof MODEL_SETTING_KEYS,
       Exclude<(typeof entry)[1], undefined>,
     ] => entry[1] !== undefined,
   );
@@ -474,15 +483,10 @@ export async function loadPreferences(): Promise<Preferences> {
   // `plugin:store|get` per setting and is the dominant boot cost.
   const values = await readSharedStore("settings");
   const modelParameters: ModelParameterDefinitions = {};
-  const completionParameterSelections: ModelParameterSelections = {};
   for (const [key, value] of Object.entries(values)) {
     if (key.startsWith(MODEL_PARAMETERS_PREFIX))
       modelParameters[key.slice(MODEL_PARAMETERS_PREFIX.length)] =
         readModelParameters(value);
-    if (key.startsWith(COMPLETION_PARAMETERS_PREFIX))
-      completionParameterSelections[
-        key.slice(COMPLETION_PARAMETERS_PREFIX.length)
-      ] = readParameterSelections(value);
   }
   const get = <T>(k: string): T | undefined => values[k] as T | undefined;
   const storedProviders = get<unknown>(KEY_CUSTOM_PROVIDERS);
@@ -564,7 +568,6 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_BG_BLUR) ?? DEFAULT_PREFERENCES.backgroundBlur,
     ),
     defaultModel: readModelRef(KEY_DEFAULT_MODEL),
-    defaultSubagentModel: readModelRef(KEY_DEFAULT_SUBAGENT_MODEL),
     maxConcurrentSubagents: clampMaxConcurrentSubagents(
       get<number>(KEY_MAX_CONCURRENT_SUBAGENTS) ??
         DEFAULT_PREFERENCES.maxConcurrentSubagents,
@@ -595,10 +598,9 @@ export async function loadPreferences(): Promise<Preferences> {
     autocompleteTrigger:
       get<AutocompleteTrigger>(KEY_AUTOCOMPLETE_TRIGGER) ??
       DEFAULT_PREFERENCES.autocompleteTrigger,
-    autocompleteModel: readModelRef(KEY_AUTOCOMPLETE_MODEL),
     providerModels,
     modelParameters,
-    completionParameterSelections,
+    modelUsages: readModelUsages(values),
     providerBaseURLs,
     customProviders,
     sttProvider:
@@ -774,12 +776,6 @@ export async function setDefaultModel(value: ModelRef | null): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
 }
 
-export async function setDefaultSubagentModel(
-  value: ModelRef | null,
-): Promise<void> {
-  await writePref(KEY_DEFAULT_SUBAGENT_MODEL, value);
-}
-
 export async function setMaxConcurrentSubagents(value: number): Promise<void> {
   await writePref(
     KEY_MAX_CONCURRENT_SUBAGENTS,
@@ -829,12 +825,6 @@ export async function setAutocompleteTrigger(
 
 export async function setAutocompleteEnabled(value: boolean): Promise<void> {
   await writePref(KEY_AUTOCOMPLETE_ENABLED, value);
-}
-
-export async function setAutocompleteModel(
-  value: ModelRef | null,
-): Promise<void> {
-  await writePref(KEY_AUTOCOMPLETE_MODEL, value);
 }
 
 export async function setSttProvider(value: SttProvider): Promise<void> {
@@ -1030,7 +1020,6 @@ export async function onPreferencesChange(
     [KEY_BG_OPACITY]: "backgroundOpacity",
     [KEY_BG_BLUR]: "backgroundBlur",
     [KEY_DEFAULT_MODEL]: "defaultModel",
-    [KEY_DEFAULT_SUBAGENT_MODEL]: "defaultSubagentModel",
     [KEY_MAX_CONCURRENT_SUBAGENTS]: "maxConcurrentSubagents",
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
@@ -1040,10 +1029,9 @@ export async function onPreferencesChange(
     [KEY_WORKSPACE_WINDOW_MODE]: "workspaceWindowMode",
     [KEY_AUTOCOMPLETE_ENABLED]: "autocompleteEnabled",
     [KEY_AUTOCOMPLETE_TRIGGER]: "autocompleteTrigger",
-    [KEY_AUTOCOMPLETE_MODEL]: "autocompleteModel",
     [KEY_PROVIDER_MODELS]: "providerModels",
     [MODEL_PARAMETERS_PREFIX]: "modelParameters",
-    [COMPLETION_PARAMETERS_PREFIX]: "completionParameterSelections",
+    [MODEL_USAGE_PREFIX]: "modelUsages",
     [KEY_PROVIDER_BASE_URLS]: "providerBaseURLs",
     [KEY_CUSTOM_PROVIDERS]: "customProviders",
     [KEY_STT_PROVIDER]: "sttProvider",

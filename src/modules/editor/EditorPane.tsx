@@ -15,8 +15,8 @@ import { createProviderConnection } from "@/modules/ai/providerRegistry";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { modelRefKey } from "@/modules/ai/config";
-import { resolveModelParameters } from "@/modules/ai/lib/modelParameters";
+import { isModelRefAvailable } from "@/modules/ai/config";
+import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import { onKeysChanged } from "@/modules/settings/store";
 import { matchBinding, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
@@ -273,7 +273,7 @@ export const EditorCore = memo(
       let cancelled = false;
       const refresh = async () => {
         const s = usePreferencesStore.getState();
-        const model = s.autocompleteModel;
+        const model = s.modelUsages.completion.model;
         if (!model) {
           apiKeyRef.current = null;
           return;
@@ -292,11 +292,14 @@ export const EditorCore = memo(
       });
       const unsubPrefs = usePreferencesStore.subscribe((state, prev) => {
         if (
-          (state.autocompleteModel === null) !==
-            (prev.autocompleteModel === null) ||
-          (state.autocompleteModel !== null &&
-            prev.autocompleteModel !== null &&
-            !modelRefsEqual(state.autocompleteModel, prev.autocompleteModel)) ||
+          (state.modelUsages.completion.model === null) !==
+            (prev.modelUsages.completion.model === null) ||
+          (state.modelUsages.completion.model !== null &&
+            prev.modelUsages.completion.model !== null &&
+            !modelRefsEqual(
+              state.modelUsages.completion.model,
+              prev.modelUsages.completion.model,
+            )) ||
           state.customProviders !== prev.customProviders
         ) {
           void refresh();
@@ -538,21 +541,23 @@ export const EditorCore = memo(
         inlineCompletion({
           getPrefs: () => {
             const s = usePreferencesStore.getState();
-            const configuredModel = tryResolveModel(s.autocompleteModel, {
-              customProviders: s.customProviders,
-              providerBaseURLs: s.providerBaseURLs,
-            });
+            const selected = s.modelUsages.completion.model;
+            const configuredModel =
+              selected && isModelRefAvailable(selected, s.providerModels, s)
+                ? tryResolveModel(selected, {
+                    customProviders: s.customProviders,
+                    providerBaseURLs: s.providerBaseURLs,
+                  })
+                : null;
             return {
               enabled: s.autocompleteEnabled && !!configuredModel,
               trigger: s.autocompleteTrigger,
-              parameters: s.autocompleteModel
-                ? resolveModelParameters(
-                    s.modelParameters[modelRefKey(s.autocompleteModel)] ?? [],
-                    s.completionParameterSelections[
-                      modelRefKey(s.autocompleteModel)
-                    ],
-                  )
-                : [],
+              parameters:
+                resolveModelUsage(
+                  s.modelUsages.completion,
+                  s.modelParameters,
+                  null,
+                )?.parameters ?? [],
               connection: configuredModel
                 ? createProviderConnection({
                     instanceId: configuredModel.providerId,

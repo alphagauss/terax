@@ -18,7 +18,7 @@ afterEach(() => {
 });
 
 describe("completion parameter changes", () => {
-  it("discards an old in-flight result and does not reuse another selection's cache", async () => {
+  it("keeps in-flight configuration and results while new requests use independent caches", async () => {
     vi.useFakeTimers();
     let finish!: (text: string) => void;
     vi.mocked(requestCompletion).mockImplementationOnce(
@@ -45,10 +45,7 @@ describe("completion parameter changes", () => {
       selection: { anchor: 15 },
       extensions: [
         inlineCompletion({
-          getPrefs: () => ({
-            ...prefs,
-            parameters: structuredClone(prefs.parameters),
-          }),
+          getPrefs: () => prefs,
           getPath: () => "test.ts",
           getLanguage: () => "typescript",
         }),
@@ -59,7 +56,10 @@ describe("completion parameter changes", () => {
     prefs.parameters[0].value = "high";
     finish("42");
     await vi.advanceTimersByTimeAsync(1);
-    expect(view.dom.querySelector(".cm-ai-ghost")).toBeNull();
+    expect(view.dom.querySelector(".cm-ai-ghost")?.textContent).toBe("42");
+    expect(
+      vi.mocked(requestCompletion).mock.calls[0][1].parameters?.[0].value,
+    ).toBe("low");
     vi.mocked(requestCompletion).mockResolvedValue("43");
     triggerInlineCompletion(view);
     await vi.advanceTimersByTimeAsync(1);
@@ -67,6 +67,25 @@ describe("completion parameter changes", () => {
     prefs.parameters[0].value = "low";
     triggerInlineCompletion(view);
     await vi.advanceTimersByTimeAsync(1);
-    expect(requestCompletion).toHaveBeenCalledTimes(3);
+    expect(requestCompletion).toHaveBeenCalledTimes(2);
+    expect(view.dom.querySelector(".cm-ai-ghost")?.textContent).toBe("42");
+    expect(
+      vi.mocked(requestCompletion).mock.calls[1][1].parameters?.[0].value,
+    ).toBe("high");
+
+    // 模型变化不能作废请求，但文档变化即使保持光标位置也必须丢弃旧结果。
+    prefs.modelId = "another-model";
+    vi.mocked(requestCompletion).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    triggerInlineCompletion(view);
+    await vi.advanceTimersByTimeAsync(1);
+    view.dispatch({ changes: { from: 0, to: 1, insert: "C" } });
+    finish("stale");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(view.dom.querySelector(".cm-ai-ghost")).toBeNull();
   });
 });

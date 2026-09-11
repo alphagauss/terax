@@ -115,8 +115,10 @@ describe("buildModelReferencePatch", () => {
   const otherModel = ref("other-model");
   const state = {
     defaultModel: oldModel,
-    defaultSubagentModel: oldModel,
-    autocompleteModel: oldModel,
+    modelUsages: {
+      completion: { model: oldModel, parameterSelections: {} },
+      subagent: { model: oldModel, parameterSelections: {} },
+    },
     favoriteModels: [oldModel, newModel, otherModel],
     recentModels: [oldModel, otherModel, newModel],
   };
@@ -130,8 +132,6 @@ describe("buildModelReferencePatch", () => {
       ),
     ).toEqual({
       defaultModel: newModel,
-      defaultSubagentModel: newModel,
-      autocompleteModel: newModel,
       favoriteModels: [otherModel],
       recentModels: [otherModel],
     });
@@ -146,8 +146,6 @@ describe("buildModelReferencePatch", () => {
       ),
     ).toEqual({
       defaultModel: null,
-      defaultSubagentModel: null,
-      autocompleteModel: null,
       favoriteModels: [otherModel],
       recentModels: [otherModel],
     });

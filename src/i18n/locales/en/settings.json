@@ -418,7 +418,13 @@
         "save": "Could not save the model configuration."
       }
     },
+    "subagent": {
+      "unavailable": "The Subagent model is unavailable. Select a model in settings.",
+      "title": "Subagent",
+      "followHelp": "At runtime, the model selected above uses its own saved parameters from below."
+    },
     "requestParameters": {
+      "unavailableModel": "Model {{model}} is unavailable. Select another model.",
       "defaultConfiguration": "Uses the model’s default request configuration.",
       "title": "Request parameters",
       "add": "Add parameter",

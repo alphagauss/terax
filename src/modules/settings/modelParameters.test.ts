@@ -13,7 +13,8 @@ vi.mock("@/lib/sharedStore", () => ({
 }));
 import {
   loadPreferences,
-  setCompletionParameterSelections,
+  setModelUsageParameters,
+  setModelUsageModel,
   setModelParameters,
 } from "./store";
 
@@ -41,16 +42,43 @@ describe("model parameter persistence", () => {
     await Promise.all([
       setModelParameters(ref, [parameter]),
       setModelParameters(other, [{ ...parameter, label: "Other" }]),
-      setCompletionParameterSelections(ref, { thinking: "off" }),
+      setModelUsageParameters("completion", ref, { thinking: "off" }),
     ]);
     expect(new Set(storage.set.mock.calls.map((call) => call[1])).size).toBe(3);
     const prefs = await loadPreferences();
     expect(prefs.modelParameters[modelRefKey(ref)]).toEqual([parameter]);
     expect(prefs.modelParameters[modelRefKey(other)][0].label).toBe("Other");
-    expect(prefs.completionParameterSelections[modelRefKey(ref)]).toEqual({
+    expect(
+      prefs.modelUsages.completion.parameterSelections[modelRefKey(ref)],
+    ).toEqual({
       thinking: "off",
     });
     expect(prefs.modelParameters[modelRefKey(ref)][0].defaultOption).toBeNull();
+  });
+  it("isolates application models and per-model choices across independent writes", async () => {
+    const other = { ...ref, providerId: "builtin:openai" };
+    await Promise.all([
+      setModelUsageModel("completion", ref),
+      setModelUsageModel("subagent", other),
+      setModelUsageParameters("completion", ref, { thinking: "off" }),
+      setModelUsageParameters("subagent", ref, { thinking: "on" }),
+      setModelUsageParameters("subagent", other, { thinking: "off" }),
+    ]);
+    expect(new Set(storage.set.mock.calls.map((call) => call[1])).size).toBe(5);
+    await setModelUsageModel("subagent", null);
+    await setModelUsageParameters("completion", ref, {});
+    const { modelUsages } = await loadPreferences();
+    expect(modelUsages.completion).toEqual({
+      model: ref,
+      parameterSelections: { [modelRefKey(ref)]: {} },
+    });
+    expect(modelUsages.subagent).toEqual({
+      model: null,
+      parameterSelections: {
+        [modelRefKey(ref)]: { thinking: "on" },
+        [modelRefKey(other)]: { thinking: "off" },
+      },
+    });
   });
   it("rejects invalid definitions before touching the shared store", async () => {
     await expect(
