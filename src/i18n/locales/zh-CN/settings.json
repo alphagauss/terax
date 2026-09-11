@@ -419,6 +419,7 @@
       }
     },
     "requestParameters": {
+      "defaultConfiguration": "使用模型默认请求配置",
       "title": "请求参数",
       "add": "添加参数",
       "empty": "此模型尚未配置请求参数。",

@@ -30,7 +30,6 @@ import {
   builtinProviderId,
   type ConfiguredModel,
   DEFAULT_MODEL_CONTEXT_WINDOW,
-  getProvider,
   type ModelRef,
   modelRefKey,
   modelRefsEqual,
@@ -42,9 +41,7 @@ import {
   type ProviderInfo,
   type ProviderInstance,
   type ProviderModels,
-  type ResolvedModel,
   providerHasEditableBaseURL,
-  resolveModel,
   resolveProviderBaseURL,
   resolveProviderInstance,
   STT_PROVIDER_LABELS,
@@ -72,7 +69,8 @@ import {
 import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
-import { ModelParameterFields } from "@/modules/ai/components/ModelParameterFields";
+import { ModelPicker } from "@/modules/ai/components/ModelPicker";
+import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
 import { setCompletionParameterSelections } from "@/modules/settings/store";
 import {
   type AutocompleteTrigger,
@@ -472,6 +470,12 @@ export function ModelsSection() {
         customProviders={customProviders}
       />
 
+      <AutocompleteCard
+        models={availableModels}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+      />
+
       <ModelParametersCard
         models={savedModels}
         providerModels={providerModels}
@@ -629,45 +633,6 @@ function ProviderMenuItem({
   );
 }
 
-type ModelOption = { ref: ModelRef; info: ResolvedModel };
-type ModelOptionGroup = {
-  id: string;
-  label: string;
-  provider: ProviderId;
-  options: ModelOption[];
-};
-
-/** 按 Provider 实例分组模型，避免多个自定义端点因共享协议而合并。 */
-function resolveModelOptionGroups(
-  models: readonly ModelRef[],
-  providerBaseURLs: Readonly<ProviderBaseURLs>,
-  customProviders: readonly ProviderInstance[],
-  customFallbackLabel: string,
-): ModelOptionGroup[] {
-  const customById = new Map(
-    customProviders.map((provider) => [provider.id, provider]),
-  );
-  const groups = new Map<string, ModelOptionGroup>();
-  for (const ref of models) {
-    const info = resolveModel(ref, { customProviders, providerBaseURLs });
-    let group = groups.get(ref.providerId);
-    if (!group) {
-      const custom = customById.get(ref.providerId);
-      group = {
-        id: ref.providerId,
-        label: custom
-          ? custom.name.trim() || customFallbackLabel
-          : getProvider(info.provider).label,
-        provider: info.provider,
-        options: [],
-      };
-      groups.set(ref.providerId, group);
-    }
-    group.options.push({ ref, info });
-  }
-  return [...groups.values()];
-}
-
 function DefaultsBlock({
   defaultModel,
   defaultSubagentModel,
@@ -734,119 +699,8 @@ function DefaultsBlock({
             </SelectContent>
           </Select>
         </FieldRow>
-        <AutocompleteRow
-          models={models}
-          providerBaseURLs={providerBaseURLs}
-          customProviders={customProviders}
-        />
       </div>
     </div>
-  );
-}
-
-/** 渲染按 Provider 分组的模型选择器，候选集合由调用方决定。 */
-function ModelPicker({
-  model,
-  models,
-  providerBaseURLs,
-  customProviders,
-  inheritLabel,
-  onSelect,
-}: {
-  model: ModelRef | null;
-  models: readonly ModelRef[];
-  providerBaseURLs: Readonly<ProviderBaseURLs>;
-  customProviders: readonly ProviderInstance[];
-  inheritLabel?: string;
-  onSelect: (model: ModelRef | null) => void;
-}) {
-  const { t } = useTranslation();
-  const groups = useMemo(
-    () =>
-      resolveModelOptionGroups(
-        models,
-        providerBaseURLs,
-        customProviders,
-        t("models.providers.openaiCompatible"),
-      ),
-    [customProviders, models, providerBaseURLs, t],
-  );
-  const current = tryResolveModel(model, {
-    customProviders,
-    providerBaseURLs,
-  });
-  const hasAny = inheritLabel !== undefined || groups.length > 0;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          disabled={!hasAny}
-          className="flex-1 justify-between px-2.5"
-        >
-          <span className="flex items-center gap-2 truncate">
-            {current ? (
-              <ProviderIcon provider={current.provider} size={13} />
-            ) : null}
-            <span className="truncate">
-              {current?.label ??
-                inheritLabel ??
-                t("models.defaults.selectModel")}
-            </span>
-          </span>
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={11}
-            strokeWidth={2}
-            className="opacity-70"
-          />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        side="bottom"
-        sideOffset={6}
-        collisionPadding={12}
-        className="min-w-70 p-1"
-      >
-        <div className="max-h-72 overflow-y-auto overscroll-contain pr-1">
-          {inheritLabel ? (
-            <DropdownMenuItem
-              onSelect={() => onSelect(null)}
-              className={cn(
-                "text-[12px]",
-                model === null && "bg-interactive-active",
-              )}
-            >
-              {inheritLabel}
-            </DropdownMenuItem>
-          ) : null}
-          {groups.map((group) => (
-            <div key={group.id} className="px-1 pt-1.5 first:pt-1">
-              <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                <ProviderIcon provider={group.provider} size={11} />
-                <span>{group.label}</span>
-              </div>
-              {group.options.map(({ ref, info }) => (
-                <DropdownMenuItem
-                  key={modelRefKey(ref)}
-                  onSelect={() => onSelect(ref)}
-                  className={cn(
-                    "text-[12px]",
-                    model &&
-                      modelRefsEqual(ref, model) &&
-                      "bg-interactive-active",
-                  )}
-                >
-                  <span>{info.label}</span>
-                </DropdownMenuItem>
-              ))}
-            </div>
-          ))}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 
@@ -1001,7 +855,8 @@ function ModelParametersCard({
   );
 }
 
-function AutocompleteRow({
+/** 独立配置编辑器补全，行为设置在前，模型与请求参数在后。 */
+function AutocompleteCard({
   models,
   providerBaseURLs,
   customProviders,
@@ -1022,20 +877,6 @@ function AutocompleteRow({
   );
   const [parameterError, setParameterError] = useState<string | null>(null);
   const userShortcuts = usePreferencesStore((state) => state.shortcuts);
-  const groups = useMemo(
-    () =>
-      resolveModelOptionGroups(
-        models,
-        providerBaseURLs,
-        customProviders,
-        t("models.providers.openaiCompatible"),
-      ),
-    [customProviders, models, providerBaseURLs, t],
-  );
-  const items = useMemo(
-    () => groups.flatMap((group) => group.options),
-    [groups],
-  );
   const currentModel = tryResolveModel(model, {
     customProviders,
     providerBaseURLs,
@@ -1049,7 +890,7 @@ function AutocompleteRow({
   }, [userShortcuts]);
   const toggleEnabled = async (next: boolean) => {
     if (next && !model) {
-      const first = items[0]?.ref;
+      const first = models[0];
       if (!first) return;
       await setAutocompleteModel(first);
     }
@@ -1057,77 +898,31 @@ function AutocompleteRow({
   };
 
   return (
-    <>
-      <FieldRow label={t("models.defaults.autocomplete")}>
-        <div className="flex flex-1 items-center gap-2">
-          <Switch
-            checked={enabled && currentModel !== null}
-            disabled={items.length === 0}
-            onCheckedChange={(value) => void toggleEnabled(value)}
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                disabled={!enabled || items.length === 0}
-                className="flex-1 justify-between px-2.5"
-              >
-                <span className="flex items-center gap-2 truncate">
-                  {currentModel ? (
-                    <ProviderIcon provider={currentModel.provider} size={12} />
-                  ) : null}
-                  <span className="truncate">
-                    {currentModel?.label ?? t("models.defaults.selectModel")}
-                  </span>
-                </span>
-                <HugeiconsIcon
-                  icon={ArrowDown01Icon}
-                  size={11}
-                  strokeWidth={2}
-                  className="opacity-70"
-                />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              collisionPadding={12}
-              className="max-h-72 min-w-70 overflow-y-auto"
-            >
-              {groups.map((group) => (
-                <div key={group.id} className="px-1 pt-1.5 first:pt-1">
-                  <div className="mb-0.5 flex items-center gap-1.5 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                    <ProviderIcon provider={group.provider} size={11} />
-                    <span>{group.label}</span>
-                  </div>
-                  {group.options.map(({ ref, info }) => (
-                    <DropdownMenuItem
-                      key={modelRefKey(ref)}
-                      onSelect={() => void setAutocompleteModel(ref)}
-                      className={cn(
-                        "text-xs",
-                        model &&
-                          modelRefsEqual(ref, model) &&
-                          "bg-interactive-active",
-                      )}
-                    >
-                      <span>{info.label}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </div>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </FieldRow>
-      {enabled && currentModel ? (
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.defaults.autocomplete")}</SectionHeading>
+      <div className="flex flex-col gap-field rounded-lg border border-border/60 bg-card/60 px-3 py-2.5">
+        <FieldRow label={t("models.defaults.autocomplete")}>
+          <div className="flex flex-1 justify-end">
+            <Switch
+              aria-label={t("models.defaults.autocomplete")}
+              checked={enabled && currentModel !== null}
+              disabled={models.length === 0}
+              onCheckedChange={(value) => void toggleEnabled(value)}
+            />
+          </div>
+        </FieldRow>
         <FieldRow label={t("models.defaults.trigger.label")}>
           <Select
+            disabled={!enabled || !currentModel}
             value={trigger}
             onValueChange={(value) =>
               void setAutocompleteTrigger(value as AutocompleteTrigger)
             }
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger
+              className="w-full"
+              aria-label={t("models.defaults.trigger.label")}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1143,51 +938,41 @@ function AutocompleteRow({
             </SelectContent>
           </Select>
         </FieldRow>
-      ) : null}
-      {enabled &&
-        model &&
-        (parameterDefinitions[modelRefKey(model)]?.length ?? 0) > 0 && (
-          <FieldRow label={t("models.requestParameters.completion")}>
-            <div className="flex flex-1 flex-col gap-field">
-              <ModelParameterFields
-                parameters={parameterDefinitions[modelRefKey(model)]}
-                selections={completionSelections[modelRefKey(model)] ?? {}}
-                onChange={(next) => {
-                  setParameterError(null);
-                  void setCompletionParameterSelections(model, next).catch(
-                    (error) => setParameterError(String(error)),
-                  );
-                }}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("models.requestParameters.completionHelp")}
-              </p>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="self-end"
-                disabled={
-                  !Object.keys(completionSelections[modelRefKey(model)] ?? {})
-                    .length
-                }
-                onClick={() => {
-                  setParameterError(null);
-                  void setCompletionParameterSelections(model, {}).catch(
-                    (error) => setParameterError(String(error)),
-                  );
-                }}
-              >
-                {t("models.requestParameters.reset")}
-              </Button>
-              {parameterError && (
-                <p role="alert" className="text-xs text-destructive">
-                  {parameterError}
-                </p>
-              )}
-            </div>
-          </FieldRow>
-        )}
-    </>
+        <div className="border-t border-border/60 pt-3">
+          <ModelRequestSettings
+            model={model}
+            models={models}
+            providerBaseURLs={providerBaseURLs}
+            customProviders={customProviders}
+            disabled={!enabled}
+            parameters={
+              model ? (parameterDefinitions[modelRefKey(model)] ?? []) : []
+            }
+            selections={
+              model ? (completionSelections[modelRefKey(model)] ?? {}) : {}
+            }
+            onSelect={(next) => {
+              setParameterError(null);
+              void setAutocompleteModel(next).catch((error) =>
+                setParameterError(String(error)),
+              );
+            }}
+            onParametersChange={(next) => {
+              if (!model) return;
+              setParameterError(null);
+              void setCompletionParameterSelections(model, next).catch(
+                (error) => setParameterError(String(error)),
+              );
+            }}
+          />
+          {parameterError && (
+            <p role="alert" className="text-xs text-destructive">
+              {parameterError}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 /** 展示内置连接的地址、统一出口和模型目录。 */

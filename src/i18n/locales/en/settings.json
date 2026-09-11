@@ -419,6 +419,7 @@
       }
     },
     "requestParameters": {
+      "defaultConfiguration": "Uses the model’s default request configuration.",
       "title": "Request parameters",
       "add": "Add parameter",
       "empty": "No request parameters configured for this model.",
