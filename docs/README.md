@@ -18,6 +18,7 @@
 - [网络与代理](architecture/network.md)
 - [Channels](architecture/channels.md)
 - [外部 CLI Agent](architecture/external-agent-runtime.md)
+- [桌面通知](architecture/notifications.md)
 
 ## Alpha
 

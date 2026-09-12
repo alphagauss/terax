@@ -8,7 +8,7 @@ import { showAgentToast } from "../components/AgentToast";
 import { useAgentStore } from "../store/agentStore";
 import { resolveAgentNotificationDelivery } from "./delivery";
 import { createAgentNotificationGate } from "./notificationGate";
-import { osNotify } from "./notify";
+import { osNotify } from "@/modules/notifications/client";
 import type { AgentSource, NotificationKind } from "./types";
 
 const shouldDeliver = createAgentNotificationGate();
@@ -59,7 +59,15 @@ export function routeAgentNotification({
   if (!usePreferencesStore.getState().agentNotifications) return;
 
   if (delivery === "native") {
-    void osNotify(title, body ?? agent);
+    void osNotify(title, body ?? agent, {
+      window: "main",
+      target:
+        source === "terminal"
+          ? { module: "terminal", tabId }
+          : sessionId
+            ? { module: "ai", sessionId }
+            : { module: "workspace" },
+    });
     return;
   }
   if (delivery === "toast") {

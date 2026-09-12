@@ -8,8 +8,8 @@ use crate::{fullscreen, menu, modules};
 use modules::screenshots;
 use modules::{
     agent, ai_sessions, alpha, app_data, auxiliary_window, external_agent, fs, git, history, lsp,
-    markdown_images, net, open_with, pty, python, remote, secrets, shell, transfers, workspace,
-    workspace_process, workspace_runtime,
+    markdown_images, net, notifications, open_with, pty, python, remote, secrets, shell, transfers,
+    workspace, workspace_process, workspace_runtime,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -108,7 +108,6 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(tauri_plugin_log::log::LevelFilter::Info)
@@ -145,6 +144,7 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(workspace_process)
         .manage(auxiliary_window::AuxiliaryWindowState::default())
+        .manage(notifications::NotificationState::default())
         .manage(screenshots::ScreenshotState::default())
         .manage(ai_sessions::AiSessionsState::default())
         .manage(net::HttpState::default())
@@ -332,6 +332,10 @@ pub fn run() {
             auxiliary_window::open_auxiliary_window,
             auxiliary_window::get_auxiliary_window_request,
             agent::agent_enable_hooks,
+            notifications::notification_prepare,
+            notifications::notification_send,
+            notifications::notification_get_activation,
+            notifications::notification_ack_activation,
             agent::agent_disable_hooks,
             agent::agent_hooks_status,
             commands::secrets::secrets_get,

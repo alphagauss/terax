@@ -1,13 +1,19 @@
 /**
- * 本文件封装 Tauri 系统通知权限检查和投递结果。
+ * 本文件提供主窗口、辅助窗口与业务模块共用的系统通知协议。
  * 保留具体错误，并等待原生发送结果；请求成功不代表系统已展示通知。
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import {
-  isPermissionGranted,
-  requestPermission,
-} from "@tauri-apps/plugin-notification";
+import type { AuxiliaryWindowOpenRequest } from "@/auxiliary/openAuxiliaryWindow";
+
+export type MainNotificationTarget =
+  | { module: "workspace" }
+  | { module: "terminal"; tabId: number }
+  | { module: "ai"; sessionId: string };
+
+export type NotificationTarget =
+  | { window: "main"; target: MainNotificationTarget }
+  | { window: "auxiliary"; request: AuxiliaryWindowOpenRequest };
 
 type NotificationFailure = { status: "failed"; error: string };
 export type OsNotificationResult =
@@ -27,22 +33,21 @@ export async function prepareOsNotification(): Promise<
   { status: "ready" | "denied" } | NotificationFailure
 > {
   try {
-    const granted =
-      (await isPermissionGranted()) ||
-      (await requestPermission()) === "granted";
+    const granted = await invoke<boolean>("notification_prepare");
     return { status: granted ? "ready" : "denied" };
   } catch (error) {
     return failed(error);
   }
 }
 
-/** 权限准备完成后发送通知，直接等待插件 IPC，捕获异步原生错误。 */
+/** 发送到本进程所属的窗口和模块，并等待原生发送 API 返回。 */
 export async function sendOsNotification(
   title: string,
   body: string,
+  target: NotificationTarget,
 ): Promise<OsNotificationResult> {
   try {
-    await invoke("plugin:notification|notify", { options: { title, body } });
+    await invoke("notification_send", { request: { title, body, target } });
     return { status: "requested" };
   } catch (error) {
     return failed(error);
@@ -53,9 +58,10 @@ export async function sendOsNotification(
 export async function osNotify(
   title: string,
   body: string,
+  target: NotificationTarget,
 ): Promise<OsNotificationResult> {
   const permission = await prepareOsNotification();
   if (permission.status === "failed") return permission;
   if (permission.status === "denied") return { status: "denied" };
-  return sendOsNotification(title, body);
+  return sendOsNotification(title, body, target);
 }

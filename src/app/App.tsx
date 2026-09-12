@@ -19,6 +19,7 @@ import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
 import { AgentNotificationsBridge, nextAttentionTabId } from "@/modules/agents";
+import { NotificationNavigationBridge } from "@/modules/notifications/NotificationNavigationBridge";
 import {
   AiSidebarPanel,
   ApprovalToastHost,
@@ -2156,6 +2157,26 @@ export default function App() {
             tabs={tabs}
             activeId={activeId}
             onActivate={onActivateAgent}
+          />
+          <NotificationNavigationBridge
+            onActivate={(target) => {
+              if (target.module === "terminal") {
+                if (
+                  tabsRef.current.some(
+                    (tab) => tab.id === target.tabId && tab.kind === "terminal",
+                  )
+                ) {
+                  onActivateAgent(target.tabId);
+                }
+              } else if (
+                target.module === "ai" &&
+                useChatStore
+                  .getState()
+                  .sessions.some((session) => session.id === target.sessionId)
+              ) {
+                onActivateLocalAgent(target.sessionId);
+              }
+            }}
           />
           <HostKeyDialog prompt={hostPrompt} onResolved={clearHostPrompt} />
           <SshConnectionDialog
