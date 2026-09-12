@@ -76,5 +76,6 @@
   "refreshQr": "Refresh QR code",
   "removeConfirm": "Remove “{{name}}”? Existing chat history will be kept.",
   "preparingQr": "Getting QR code…",
-  "attachmentInstruction": "Receiving an attachment alone does not mean the user wants it read or analyzed immediately. Decide whether to process it based on the preceding user request. If there is no clear task, briefly acknowledge receipt and wait for further instructions. Later messages may refer to previously received attachments."
+  "attachmentInstruction": "Receiving an attachment alone does not mean the user wants it read or analyzed immediately. Decide whether to process it based on the preceding user request. If there is no clear task, briefly acknowledge receipt and wait for further instructions. Later messages may refer to previously received attachments.",
+  "imageAttachmentSummary": "This message includes {{count}} image(s). Saved image paths: {{paths}}. Images that failed to download: {{failed}}."
 }

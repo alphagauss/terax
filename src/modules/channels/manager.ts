@@ -16,6 +16,11 @@ import {
 
 type Dependencies = {
   adapter: (connection: ChannelConnection) => Promise<ChannelAdapter>;
+  materialize?: (
+    connection: ChannelConnection,
+    message: ChannelInbound,
+    signal: AbortSignal,
+  ) => Promise<ChannelInbound>;
   run: (
     connection: ChannelConnection,
     message: ChannelInbound,
@@ -227,6 +232,10 @@ export class ChannelManager {
           // 中止还覆盖已经登记身份、但仍在等待写盘的入站消息。
           if (generation !== runtime.generation) return;
           if (materialize) message = await materialize();
+          signal.throwIfAborted();
+          if (generation !== runtime.generation) return;
+          if (this.deps.materialize)
+            message = await this.deps.materialize(connection, message, signal);
           signal.throwIfAborted();
           if (generation !== runtime.generation) return;
           runtime.queue.push(message);

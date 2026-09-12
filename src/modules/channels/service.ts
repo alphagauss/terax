@@ -75,6 +75,10 @@ export async function startChannelsService(
     emptyReply: () => i18n.t("channels:emptyReply"),
     adapter: async (connection) =>
       channelPlatform(connection.kind).create(connection),
+    materialize: async (connection, message, signal) =>
+      (
+        await import("@/modules/channels/inbound")
+      ).materializeChannelInbound(connection, message, signal),
     changed: (value) => {
       snapshots = value;
       publish();

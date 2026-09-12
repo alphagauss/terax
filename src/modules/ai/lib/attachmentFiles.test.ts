@@ -52,3 +52,38 @@ it("图片只读取一次二进制，特殊扩展名走文本读取，原生错�
   ).rejects.toThrow("file is too large");
   expect(invoke).toHaveBeenCalledTimes(3);
 });
+
+it.each([
+  ["default.jpg", [0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10], "image/png"],
+  ["wrong.png", [0xff, 0xd8, 0xff], "image/jpeg"],
+  [
+    "image",
+    Array.from("RIFF0000WEBP", (char) => char.charCodeAt(0)),
+    "image/webp",
+  ],
+  ["image", Array.from("GIF89a", (char) => char.charCodeAt(0)), "image/gif"],
+  [
+    "image",
+    Array.from("0000ftypavif", (char) => char.charCodeAt(0)),
+    "image/avif",
+  ],
+] as const)("按字节识别 %s 的图片类型 %s", async (path, bytes, mediaType) => {
+  invoke.mockResolvedValueOnce({ bytes, size: bytes.length });
+  const result = await readPathAttachment(
+    path,
+    { kind: "local" },
+    { image: true },
+  );
+  expect(result).toMatchObject({
+    kind: "image",
+    mediaType,
+    url: expect.stringContaining(`data:${mediaType};base64,`),
+  });
+});
+
+it("无扩展名的未知内容不伪装为图片", async () => {
+  invoke.mockResolvedValueOnce({ bytes: [1, 2, 3], size: 3 });
+  expect(
+    await readPathAttachment("image", { kind: "local" }, { image: true }),
+  ).toEqual({ kind: "binary", size: 3 });
+});
