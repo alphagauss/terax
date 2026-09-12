@@ -63,7 +63,7 @@ function StatusRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-accent"
     >
       <AgentIcon
         agent={agent}
@@ -105,7 +105,7 @@ function HookAgentRow({
 }) {
   const { t } = useTranslation("agents");
   return (
-    <div className="flex items-center gap-2 px-2 py-1">
+    <div className="flex items-center gap-1.5 px-1 py-1">
       <AgentIcon
         agent={id}
         size={14}
@@ -115,7 +115,7 @@ function HookAgentRow({
         {label}
       </span>
       {ready ? (
-        <span className="flex items-center gap-1 text-[11px] font-medium text-primary">
+        <span className="flex w-14 shrink-0 items-center justify-center gap-1 text-[11px] font-medium text-primary">
           <HugeiconsIcon
             icon={CheckmarkCircle02Icon}
             size={13}
@@ -130,7 +130,7 @@ function HookAgentRow({
           onClick={onToggle}
           disabled={disabled}
           aria-label={`${label}: ${t(ready ? "hook.disable" : "hook.enable")}`}
-          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+          className="flex w-14 shrink-0 items-center justify-center gap-1 rounded-md py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
         >
           {installing ? (
             <HugeiconsIcon
@@ -161,7 +161,7 @@ function NotificationRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-accent"
+      className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-accent"
     >
       <span className="flex w-4 shrink-0 items-center justify-center">
         {n.kind === "finished" ? (
@@ -309,9 +309,9 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
       <PopoverContent
         align="end"
         sideOffset={8}
-        className="w-80 overflow-hidden p-0 gap-0.5"
+        className="w-76 overflow-hidden gap-0.5 p-0"
       >
-        <div className="flex h-10 items-center gap-2 px-3 pt-0.5">
+        <div className="flex h-9 items-center gap-2 px-2.5 pt-0.5">
           <span className="flex gap-1 text-[13px] text-foreground">
             {t("bell.heading")}
           </span>
@@ -358,7 +358,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
               />
             ))}
             {activeCount > 0 && notifications.length > 0 ? (
-              <div className="mx-2 my-1 h-px bg-border/50" />
+              <div className="mx-1.5 my-0.5 h-px bg-border/50" />
             ) : null}
             {notifications.map((n) => (
               <NotificationRow
