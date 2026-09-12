@@ -5,13 +5,24 @@
 
 import { requestChannels, useChannelsView } from "@/modules/channels/client";
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
+import { Button } from "@/components/controls/button";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-/** 展示当前 Local 主窗口持有的连接，未配置时不占据弹层空间。 */
+/** 展示当前 Local 主窗口持有的连接，并提供不离开面板的启用或停用入口。 */
 export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
   const { t } = useTranslation("channels");
   const snapshots = useChannelsView((state) => state.snapshots);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const toggle = (id: string, enabled: boolean) => {
+    if (pendingId) return;
+    setPendingId(id);
+    void requestChannels({ action: "enable", id, enabled })
+      .catch(() => toast.error(t("errors.unavailable")))
+      .finally(() => setPendingId(null));
+  };
+
   if (!snapshots.length) return null;
   return (
     <div className="border-b border-border/50 pb-1">
@@ -19,21 +30,49 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
         {t("title")}
       </div>
       {snapshots.map((snapshot) => (
-        <button
+        <div
           key={snapshot.connection.id}
-          type="button"
-          className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left hover:bg-accent"
-          onClick={() => {
-            void requestChannels({ action: "open", id: snapshot.connection.id })
-              .then(onActivate)
-              .catch(() => toast.error(t("errors.unavailable")));
-          }}
+          className="flex min-w-0 items-center gap-1 px-1"
         >
-          <span className="min-w-0 truncate text-xs">
-            {snapshot.connection.name}
-          </span>
-          <ConnectionStatus snapshot={snapshot} />
-        </button>
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1 py-2 text-left hover:bg-accent"
+            onClick={() => {
+              void requestChannels({
+                action: "open",
+                id: snapshot.connection.id,
+              })
+                .then(onActivate)
+                .catch(() => toast.error(t("errors.unavailable")));
+            }}
+          >
+            <span className="min-w-0 truncate text-xs">
+              {snapshot.connection.name}
+            </span>
+            <ConnectionStatus
+              snapshot={snapshot}
+              className="w-28 shrink-0 justify-end"
+            />
+          </button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="w-14 shrink-0 justify-center"
+            disabled={pendingId !== null || !snapshot.connection.accountId}
+            aria-label={t(
+              snapshot.connection.enabled ? "disconnect" : "connect",
+              { name: snapshot.connection.name },
+            )}
+            onClick={() =>
+              toggle(snapshot.connection.id, !snapshot.connection.enabled)
+            }
+          >
+            {pendingId === snapshot.connection.id
+              ? t("busy")
+              : t(snapshot.connection.enabled ? "disconnect" : "connect")}
+          </Button>
+        </div>
       ))}
     </div>
   );

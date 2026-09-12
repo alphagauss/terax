@@ -8,10 +8,21 @@ import type { ChannelSnapshot } from "@/modules/channels/types";
 import { useTranslation } from "react-i18next";
 
 /** 在设置和通知入口使用相同描述，未绑定账号的实例明确提示需要登录。 */
-export function ConnectionStatus({ snapshot }: { snapshot: ChannelSnapshot }) {
+export function ConnectionStatus({
+  snapshot,
+  className,
+}: {
+  snapshot: ChannelSnapshot;
+  className?: string;
+}) {
   const { t } = useTranslation("channels");
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+    <span
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+        className,
+      )}
+    >
       <span
         className={cn(
           "size-1.5 shrink-0 rounded-full",
@@ -22,7 +33,7 @@ export function ConnectionStatus({ snapshot }: { snapshot: ChannelSnapshot }) {
               : "bg-muted-foreground/50",
         )}
       />
-      <span>
+      <span className="min-w-0 truncate">
         {t(
           `status.${snapshot.connection.accountId ? snapshot.status : "login-required"}`,
         )}

@@ -16,6 +16,8 @@
   "defaultName": "微信 {{number}}",
   "weixin": "个人微信",
   "enable": "启用 {{name}}",
+  "connect": "连接",
+  "disconnect": "断开",
   "login": "扫码连接",
   "loginAgain": "重新登录",
   "openSession": "查看会话",

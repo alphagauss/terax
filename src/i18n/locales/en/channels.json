@@ -16,6 +16,8 @@
   "defaultName": "WeChat {{number}}",
   "weixin": "Personal WeChat",
   "enable": "Enable {{name}}",
+  "connect": "Connect",
+  "disconnect": "Disconnect",
   "login": "Scan to connect",
   "loginAgain": "Sign in again",
   "openSession": "View conversation",
