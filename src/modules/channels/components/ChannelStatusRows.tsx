@@ -25,8 +25,8 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
 
   if (!snapshots.length) return null;
   return (
-    <div className="border-b border-border/50 pb-1">
-      <div className="px-2 py-1 text-[10px] text-muted-foreground">
+    <div>
+      <div className="px-2 pt-1 pb-0.5 text-[10px] font-medium text-muted-foreground">
         {t("title")}
       </div>
       {snapshots.map((snapshot) => (
@@ -36,7 +36,7 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
         >
           <button
             type="button"
-            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1 py-2 text-left hover:bg-accent"
+            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-1 py-1 text-left hover:bg-accent"
             onClick={() => {
               void requestChannels({
                 action: "open",
@@ -46,12 +46,12 @@ export function ChannelStatusRows({ onActivate }: { onActivate: () => void }) {
                 .catch(() => toast.error(t("errors.unavailable")));
             }}
           >
-            <span className="min-w-0 truncate text-xs">
+            <span className="min-w-0 truncate text-[12px] text-muted-foreground">
               {snapshot.connection.name}
             </span>
             <ConnectionStatus
               snapshot={snapshot}
-              className="w-28 shrink-0 justify-end"
+              className="w-24 shrink-0 justify-end"
             />
           </button>
           <Button
