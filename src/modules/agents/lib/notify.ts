@@ -1,38 +1,61 @@
 /**
  * 本文件封装 Tauri 系统通知权限检查和投递结果。
- * 只缓存已授予状态，拒绝或失败后仍允许用户修改系统设置并再次尝试。
+ * 保留具体错误，并等待原生发送结果；请求成功不代表系统已展示通知。
  */
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   isPermissionGranted,
   requestPermission,
-  sendNotification,
 } from "@tauri-apps/plugin-notification";
 
-export type OsNotificationResult = "requested" | "denied" | "failed";
+type NotificationFailure = { status: "failed"; error: string };
+export type OsNotificationResult =
+  | { status: "requested" | "denied" }
+  | NotificationFailure;
 
-let granted = false;
-
-async function ensurePermission(): Promise<boolean> {
-  // 只缓存成功结果，使系统设置中的后续授权可以在下一次尝试时生效。
-  if (granted) return true;
-  let ok = await isPermissionGranted();
-  if (!ok) ok = (await requestPermission()) === "granted";
-  granted = ok;
-  return ok;
+function failed(error: unknown): NotificationFailure {
+  console.warn("[terax] os notification failed:", error);
+  return {
+    status: "failed",
+    error: error instanceof Error ? error.message : String(error),
+  };
 }
 
-/** 请求发送系统通知，并区分权限拒绝与调用失败。 */
-export async function osNotify(
+/** 在倒计时前处理权限；每次重新检查，以反映用户修改的系统设置。 */
+export async function prepareOsNotification(): Promise<
+  { status: "ready" | "denied" } | NotificationFailure
+> {
+  try {
+    const granted =
+      (await isPermissionGranted()) ||
+      (await requestPermission()) === "granted";
+    return { status: granted ? "ready" : "denied" };
+  } catch (error) {
+    return failed(error);
+  }
+}
+
+/** 权限准备完成后发送通知，直接等待插件 IPC，捕获异步原生错误。 */
+export async function sendOsNotification(
   title: string,
   body: string,
 ): Promise<OsNotificationResult> {
   try {
-    if (!(await ensurePermission())) return "denied";
-    sendNotification({ title, body });
-    return "requested";
-  } catch (e) {
-    console.warn("[terax] os notification failed:", e);
-    return "failed";
+    await invoke("plugin:notification|notify", { options: { title, body } });
+    return { status: "requested" };
+  } catch (error) {
+    return failed(error);
   }
+}
+
+/** 为业务通知串联权限检查和原生投递。 */
+export async function osNotify(
+  title: string,
+  body: string,
+): Promise<OsNotificationResult> {
+  const permission = await prepareOsNotification();
+  if (permission.status === "failed") return permission;
+  if (permission.status === "denied") return { status: "denied" };
+  return sendOsNotification(title, body);
 }

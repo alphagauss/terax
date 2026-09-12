@@ -24,7 +24,8 @@ import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import {
-  osNotify,
+  prepareOsNotification,
+  sendOsNotification,
   type OsNotificationResult,
 } from "@/modules/agents/lib/notify";
 import { usePreferencesStore } from "@/modules/settings/preferences";
@@ -62,7 +63,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { NetworkSettings } from "@/settings/components/NetworkSettings";
@@ -98,8 +99,9 @@ const ZOOM_STEP = 0.05;
 const NOTIFICATION_TEST_DELAY_MS = 2_000;
 
 type NotificationTestState =
-  | OsNotificationResult
+  | OsNotificationResult["status"]
   | "idle"
+  | "preparing"
   | "waiting"
   | "sending";
 
@@ -141,25 +143,72 @@ export function GeneralSection() {
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
   const [notificationTest, setNotificationTest] =
     useState<NotificationTestState>("idle");
+  const [notificationError, setNotificationError] = useState("");
+  const notificationTestRun = useRef(0);
+  const notificationTestTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const notificationTestPending =
-    notificationTest === "waiting" || notificationTest === "sending";
+    notificationTest === "preparing" ||
+    notificationTest === "waiting" ||
+    notificationTest === "sending";
   const [openWithAction, setOpenWithAction] = useState<
     "register" | "remove" | null
   >(null);
 
-  /** 延迟发送测试通知，给用户留出切换到其他应用的时间。 */
+  /** 关闭提醒或离开设置时取消尚未发送的测试，并忽略过期回调。 */
+  useEffect(() => {
+    if (!agentNotifications) {
+      setNotificationTest("idle");
+      setNotificationError("");
+    }
+    return () => {
+      ++notificationTestRun.current;
+      if (notificationTestTimer.current !== null) {
+        clearTimeout(notificationTestTimer.current);
+        notificationTestTimer.current = null;
+      }
+    };
+  }, [agentNotifications]);
+
+  /** 先处理权限，再留两秒切换应用；失败原因直接显示在设置中。 */
   const testNotification = async () => {
+    const run = ++notificationTestRun.current;
+    setNotificationError("");
+    setNotificationTest("preparing");
+    const permission = await prepareOsNotification();
+    if (
+      run !== notificationTestRun.current ||
+      !usePreferencesStore.getState().agentNotifications
+    )
+      return;
+    if (permission.status !== "ready") {
+      setNotificationTest(permission.status);
+      if (permission.status === "failed")
+        setNotificationError(permission.error);
+      return;
+    }
     setNotificationTest("waiting");
-    await new Promise((resolve) =>
-      setTimeout(resolve, NOTIFICATION_TEST_DELAY_MS),
-    );
-    setNotificationTest("sending");
-    setNotificationTest(
-      await osNotify(
+    notificationTestTimer.current = setTimeout(async () => {
+      notificationTestTimer.current = null;
+      if (
+        run !== notificationTestRun.current ||
+        !usePreferencesStore.getState().agentNotifications
+      )
+        return;
+      setNotificationTest("sending");
+      const result = await sendOsNotification(
         t("general.agents.notifications.test.notificationTitle"),
         t("general.agents.notifications.test.notificationBody"),
-      ),
-    );
+      );
+      if (
+        run !== notificationTestRun.current ||
+        !usePreferencesStore.getState().agentNotifications
+      )
+        return;
+      setNotificationTest(result.status);
+      if (result.status === "failed") setNotificationError(result.error);
+    }, NOTIFICATION_TEST_DELAY_MS);
   };
 
   useEffect(() => {
@@ -558,14 +607,31 @@ export function GeneralSection() {
             </Hint>
             <Switch
               checked={agentNotifications}
-              disabled={notificationTestPending}
               onCheckedChange={(value) => {
                 setNotificationTest("idle");
+                setNotificationError("");
+                if (!value) {
+                  ++notificationTestRun.current;
+                  if (notificationTestTimer.current !== null) {
+                    clearTimeout(notificationTestTimer.current);
+                    notificationTestTimer.current = null;
+                  }
+                }
                 void setAgentNotifications(value);
               }}
             />
           </div>
         </SettingRow>
+        {notificationError ? (
+          <p
+            role="alert"
+            className="px-4 pb-3 text-xs text-destructive break-words select-text"
+          >
+            {t("general.agents.notifications.test.error", {
+              message: notificationError,
+            })}
+          </p>
+        ) : null}
       </SettingGroup>
 
       <SettingGroup title={t("general.startup.label")}>

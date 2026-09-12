@@ -17,7 +17,11 @@
   "hook": {
     "enabled": "已启用",
     "enabling": "启用中",
-    "enable": "启用"
+    "enable": "启用",
+    "disable": "关闭",
+    "disabling": "关闭中",
+    "hint": "接收此 Agent 的终端通知。若更改未生效，请重启正在运行的 Agent。",
+    "updateFailed": "无法更新 Agent 通知"
   },
   "bell": {
     "title": "Agent 与 Channels",

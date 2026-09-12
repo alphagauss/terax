@@ -1,3 +1,5 @@
+//! 管理本机 CLI Agent 的通知 Hook，只移除 Terax 自有命令并保留其他配置。
+
 use serde_json::{json, Value};
 
 // How a given agent's hook delivers our OSC 777 marker into the terminal.
@@ -176,6 +178,33 @@ fn existing_config(contents: Option<&str>, path: &std::path::Path) -> Result<Val
     }
 }
 
+/// 逐条移除自有命令，避免误删同一组内的第三方 Hook。
+fn remove_hooks(root: &mut Value) -> bool {
+    let Some(events) = root.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    let mut changed = false;
+    for groups in events.values_mut().filter_map(Value::as_array_mut) {
+        groups.retain_mut(|group| {
+            if !is_ours(group) {
+                return true;
+            }
+            let hooks = group["hooks"].as_array_mut().unwrap();
+            hooks.retain(|hook| {
+                !hook
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| {
+                        OWNED_MARKERS.iter().any(|marker| command.contains(marker))
+                    })
+            });
+            changed = true;
+            !hooks.is_empty()
+        });
+    }
+    changed
+}
+
 fn settings_path(spec: &AgentSpec) -> Result<std::path::PathBuf, String> {
     Ok(dirs::home_dir()
         .ok_or_else(|| "could not resolve home dir".to_string())?
@@ -197,13 +226,32 @@ pub fn agent_enable_hooks(agent: String) -> Result<(), String> {
     };
 
     let merged = merge_hooks(existing, spec);
-    let out = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
+    write_config(&path, &merged)
+}
 
-    // Write to a sibling temp file then rename so a crash mid-write can't leave
-    // a truncated config.
+/// 关闭通知集成，不终止 CLI，也不改动其他 Hook 或设置。
+#[tauri::command]
+pub fn agent_disable_hooks(agent: String) -> Result<(), String> {
+    let path = settings_path(find(&agent)?)?;
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("read {}: {e}", path.display())),
+    };
+    let mut root = existing_config(Some(&contents), &path)?;
+    if remove_hooks(&mut root) {
+        write_config(&path, &root)?;
+    }
+    Ok(())
+}
+
+fn write_config(path: &std::path::Path, root: &Value) -> Result<(), String> {
+    let out = serde_json::to_string_pretty(root).map_err(|e| e.to_string())?;
+
+    // 同目录临时文件写入后替换，避免中途退出留下截断的配置。
     let tmp = path.with_extension("terax-tmp");
     std::fs::write(&tmp, out).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &path).map_err(|e| {
+    std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("rename into {}: {e}", path.display())
     })?;
@@ -383,5 +431,51 @@ mod tests {
             existing_config(Some(r#"{"permissions":{}}"#), p).unwrap(),
             json!({ "permissions": {} })
         );
+    }
+
+    #[test]
+    fn disable_removes_owned_hooks_and_preserves_mixed_groups() {
+        for agent in ["claude", "codex", "gemini"] {
+            let mut root = merge_hooks(json!({ "theme": "dark" }), spec(agent));
+            root["hooks"]["CustomEvent"] = json!([
+                { "matcher": "custom", "hooks": [
+                    { "type": "command", "command": "echo keep" },
+                    { "type": "command", "command": hook_command(spec(agent), "attention") }
+                ] },
+                { "hooks": [] }
+            ]);
+            assert!(remove_hooks(&mut root));
+            let expected = json!([
+                { "matcher": "custom", "hooks": [
+                    { "type": "command", "command": "echo keep" }
+                ] },
+                { "hooks": [] }
+            ]);
+            assert_eq!(root["hooks"]["CustomEvent"], expected);
+            assert_eq!(root["theme"], "dark");
+            for (event, _) in spec(agent).events {
+                assert_eq!(hook_count(&root, event), 0);
+            }
+            let disabled = root.clone();
+            assert!(!remove_hooks(&mut root));
+            assert_eq!(root, disabled);
+            let enabled = merge_hooks(root, spec(agent));
+            for (event, _) in spec(agent).events {
+                assert_eq!(hook_count(&enabled, event), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn disable_leaves_unrelated_config_untouched() {
+        for mut root in [
+            json!({}),
+            json!({ "hooks": { "Stop": "custom" } }),
+            json!([]),
+        ] {
+            let before = root.clone();
+            assert!(!remove_hooks(&mut root));
+            assert_eq!(root, before);
+        }
     }
 }

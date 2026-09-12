@@ -22,8 +22,9 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { AgentIcon } from "@/modules/agents/lib/agentIcon";
 import { displayAgent } from "@/modules/agents/lib/format";
 import type {
@@ -92,13 +93,15 @@ function HookAgentRow({
   label,
   ready,
   installing,
-  onEnable,
+  disabled,
+  onToggle,
 }: {
   id: string;
   label: string;
   ready: boolean;
   installing: boolean;
-  onEnable: () => void;
+  disabled: boolean;
+  onToggle: () => void;
 }) {
   const { t } = useTranslation("agents");
   return (
@@ -120,11 +123,13 @@ function HookAgentRow({
           />
           {t("hook.enabled")}
         </span>
-      ) : (
+      ) : null}
+      <Hint content={t("hook.hint")}>
         <button
           type="button"
-          onClick={onEnable}
-          disabled={installing}
+          onClick={onToggle}
+          disabled={disabled}
+          aria-label={`${label}: ${t(ready ? "hook.disable" : "hook.enable")}`}
           className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
         >
           {installing ? (
@@ -135,9 +140,11 @@ function HookAgentRow({
               className="animate-spin"
             />
           ) : null}
-          {installing ? t("hook.enabling") : t("hook.enable")}
+          {installing
+            ? t(ready ? "hook.disabling" : "hook.enabling")
+            : t(ready ? "hook.disable" : "hook.enable")}
         </button>
-      )}
+      </Hint>
     </div>
   );
 }
@@ -190,6 +197,8 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const [open, setOpen] = useState(false);
   const [hooks, setHooks] = useState<Record<string, boolean>>({});
   const [installing, setInstalling] = useState<string | null>(null);
+  const hookRevision = useRef(0);
+  const hookPending = useRef(false);
   const channels = useChannelsView((state) => state.snapshots);
   const sessions = useAgentStore((s) => s.sessions);
   const localAgent = useAgentStore((s) => s.localAgent);
@@ -215,10 +224,16 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
     ).length;
 
   const refreshHooks = () => {
+    if (hookPending.current) return;
+    const revision = ++hookRevision.current;
     for (const id of HOOK_AGENTS) {
       invoke<boolean>("agent_hooks_status", { agent: id })
-        .then((ok) => setHooks((h) => ({ ...h, [id]: ok })))
-        .catch(() => setHooks((h) => ({ ...h, [id]: false })));
+        .then((ok) => {
+          if (hookRevision.current === revision) {
+            setHooks((h) => ({ ...h, [id]: ok }));
+          }
+        })
+        .catch(() => {});
     }
   };
 
@@ -230,15 +245,23 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
     }
   };
 
-  const enableHooks = async (id: string) => {
+  const toggleHooks = async (id: string) => {
+    if (hookPending.current) return;
+    hookPending.current = true;
+    ++hookRevision.current;
+    const enabled = hooks[id] === true;
     setInstalling(id);
     try {
-      await invoke("agent_enable_hooks", { agent: id });
-      setHooks((h) => ({ ...h, [id]: true }));
-    } catch {
-      setHooks((h) => ({ ...h, [id]: false }));
+      await invoke(enabled ? "agent_disable_hooks" : "agent_enable_hooks", {
+        agent: id,
+      });
+      setHooks((h) => ({ ...h, [id]: !enabled }));
+    } catch (error) {
+      toast.error(t("hook.updateFailed"), { description: String(error) });
     } finally {
+      hookPending.current = false;
       setInstalling(null);
+      refreshHooks();
     }
   };
 
@@ -363,7 +386,8 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
               label={displayAgent(id)}
               ready={hooks[id] === true}
               installing={installing === id}
-              onEnable={() => enableHooks(id)}
+              disabled={installing !== null || hooks[id] === undefined}
+              onToggle={() => void toggleHooks(id)}
             />
           ))}
         </div>

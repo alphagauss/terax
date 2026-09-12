@@ -331,6 +331,7 @@ pub fn run() {
             auxiliary_window::open_auxiliary_window,
             auxiliary_window::get_auxiliary_window_request,
             agent::agent_enable_hooks,
+            agent::agent_disable_hooks,
             agent::agent_hooks_status,
             commands::secrets::secrets_get,
             commands::secrets::secrets_set,
