@@ -211,10 +211,56 @@ async fn ensure_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> 
         .inner_size(800.0, 600.0)
         .build()
         .map_err(|error| error.to_string());
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        if let Ok(window) = &result {
+            if let Err(error) = disable_window_transitions(window) {
+                log::warn!("screenshot window transitions: {error}");
+            }
+        }
         let _ = sender.send(result);
     })
     .map_err(|error| error.to_string())?;
     receiver.await.map_err(|error| error.to_string())?
+}
+
+/// 在首次显示前仅禁用截图窗口的系统过渡，避免冻结桌面随窗口缩放。
+#[cfg(target_os = "windows")]
+fn disable_window_transitions(window: &WebviewWindow) -> Result<(), String> {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED,
+    };
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?.0;
+    let disabled: i32 = 1;
+    // DWM 要求传入四字节 BOOL；窗口仍存活，属性值在同步调用期间有效。
+    let result = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            (&disabled as *const i32).cast(),
+            std::mem::size_of_val(&disabled) as u32,
+        )
+    };
+    if result < 0 {
+        return Err(format!("DwmSetWindowAttribute failed: {result:#010x}"));
+    }
+    Ok(())
+}
+
+/// 仅在创建窗口的主线程调用，在首次显示前关闭 AppKit 自动进出动画。
+#[cfg(target_os = "macos")]
+fn disable_window_transitions(window: &WebviewWindow) -> Result<(), String> {
+    use objc2::{msg_send, runtime::AnyObject};
+
+    let ns_window = window.ns_window().map_err(|error| error.to_string())?;
+    // NSWindowAnimationBehaviorNone = 2，底层类型 NSInteger 与 isize 对应。
+    const ANIMATION_BEHAVIOR_NONE: isize = 2;
+    // Tauri 返回存活的 NSWindow；当前仍在创建窗口的主线程闭包内。
+    unsafe {
+        let _: () =
+            msg_send![ns_window.cast::<AnyObject>(), setAnimationBehavior: ANIMATION_BEHAVIOR_NONE];
+    }
+    Ok(())
 }
 
 fn language() -> String {
