@@ -43,7 +43,6 @@ export function routeAgentNotification({
   sessionId,
   onActivate,
 }: RouteArgs): void {
-  if (!usePreferencesStore.getState().agentNotifications) return;
   const delivery = resolveAgentNotificationDelivery({
     focused,
     visible,
@@ -55,6 +54,9 @@ export function routeAgentNotification({
   useAgentStore
     .getState()
     .pushNotification({ source, agent, kind, tabId, sessionId });
+
+  // 总开关只控制主动提醒，铃铛记录仍供用户主动查看。
+  if (!usePreferencesStore.getState().agentNotifications) return;
 
   if (delivery === "native") {
     void osNotify(title, body ?? agent);

@@ -126,13 +126,15 @@
     "agents": {
       "label": "Agents",
       "notifications": {
-        "title": "Coding agent notifications",
-        "description": "Alert when a coding agent needs your input or finishes. Native notification when Terax is unfocused, in-app otherwise.",
+        "title": "Agent alerts",
+        "description": "Alert when built-in or terminal agents need attention. Turning this off keeps bell history and terminal notification integrations.",
         "test": {
-          "notificationTitle": "Terax notifications are working",
-          "notificationBody": "You will be notified when an agent needs your attention.",
+          "notificationTitle": "Terax system notification test",
+          "notificationBody": "If you can see this message, the system notification was displayed successfully.",
+          "error": "System notification failed: {{message}}",
           "label": {
             "idle": "Test in 2s",
+            "preparing": "Checking permission...",
             "waiting": "Switch apps...",
             "sending": "Sending...",
             "requested": "Requested",
@@ -140,10 +142,11 @@
             "failed": "Failed"
           },
           "hint": {
-            "idle": "Send a native test notification after two seconds",
+            "idle": "Send a system notification two seconds after permission is granted; does not test agent integrations",
+            "preparing": "Checking or requesting system notification permission",
             "waiting": "Switch to another app to verify native delivery",
             "sending": "Requesting a native notification",
-            "requested": "The native notification was requested",
+            "requested": "Notification requested; confirm whether the system displayed it",
             "denied": "Notifications are disabled by the system",
             "failed": "Terax could not request a native notification"
           }

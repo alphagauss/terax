@@ -17,7 +17,11 @@
   "hook": {
     "enabled": "enabled",
     "enabling": "Enabling",
-    "enable": "Enable"
+    "enable": "Enable",
+    "disable": "Disable",
+    "disabling": "Disabling",
+    "hint": "Receive terminal alerts from this agent. Restart a running agent if changes do not take effect.",
+    "updateFailed": "Could not update agent alerts"
   },
   "bell": {
     "title": "Agents & Channels",
