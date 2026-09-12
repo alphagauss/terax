@@ -1,6 +1,6 @@
 /**
  * 本文件将连接消息接入现有 AI 会话运行链。
- * 不修改活动聊天、输入草稿或全局模型权限；结果只在本轮持久化完成后交给适配器。
+ * 不修改活动聊天、输入草稿或全局模型权限；最终回复只在本轮持久化完成后交给投递出口。
  */
 
 import { isModelRefAvailable } from "@/modules/ai/config";
@@ -10,7 +10,6 @@ import {
   resolveModelUsage,
 } from "@/modules/ai/lib/modelUsage";
 import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
-import i18n from "@/i18n";
 import { CHANNEL_AGENT, snapshotAgent } from "@/modules/ai/lib/agents";
 import { commitSession } from "@/modules/ai/lib/sessions";
 import {
@@ -29,13 +28,15 @@ import {
   type ChannelInbound,
 } from "@/modules/channels/types";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { prepareDefaultWorkspaceRoot } from "@/modules/workspace";
+import { prepareChannelWorkspace } from "@/modules/channels/workspace";
+import { channelInputText } from "@/modules/channels/messages";
 import type { UIMessage } from "ai";
 
 /** 准备固定 Channel 会话，现有会话只恢复，不抢占桌面草稿。 */
 export async function ensureChannelSession(
   connection: ChannelConnection,
 ): Promise<void> {
+  const cwd = await prepareChannelWorkspace(connection);
   const state = useChatStore.getState();
   const existing = state.sessions.find(
     (item) => item.id === connection.sessionId,
@@ -43,12 +44,12 @@ export async function ensureChannelSession(
   if (existing) {
     if (
       existing.channelId !== connection.id ||
-      existing.environmentKey !== "local"
+      existing.environmentKey !== "local" ||
+      existing.cwd !== cwd
     )
       throw new ChannelError("storage");
     return;
   }
-  const cwd = await prepareDefaultWorkspaceRoot();
   const now = Date.now();
   const metadata = {
     title: connection.name,
@@ -133,7 +134,7 @@ export async function runChannelTurn(
     connection.sessionId,
     {
       role: "user",
-      parts: [{ type: "text", text: message.text }],
+      parts: [{ type: "text", text: channelInputText(message) }],
       metadata: { createdAt: message.receivedAt },
     },
     { id: connection.id, ...config },
@@ -145,7 +146,7 @@ export async function runChannelTurn(
       {
         id: crypto.randomUUID(),
         role: "user",
-        parts: [{ type: "text", text: input.text }],
+        parts: [{ type: "text", text: channelInputText(input) }],
         metadata: { createdAt: input.receivedAt },
       },
       connection.id,
@@ -187,10 +188,7 @@ export async function runChannelTurn(
         .cancelled
     )
       return null;
-    return (
-      channelReplyText(chat.messages.slice(offset)) ||
-      i18n.t("channels:emptyReply")
-    );
+    return channelReplyText(chat.messages.slice(offset));
   } finally {
     cleanup();
   }

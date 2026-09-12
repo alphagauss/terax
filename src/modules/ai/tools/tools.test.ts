@@ -31,7 +31,10 @@ function hasDeclaredJsonType(schema: unknown): boolean {
 }
 
 describe("AI tool provider schemas", () => {
-  const tools = buildTools(context);
+  const tools = buildTools({
+    ...context,
+    getMessageSender: () => async () => ({ status: "accepted", parts: [] }),
+  });
   const requiredParameters = {
     read_file: ["path"],
     write_file: ["path", "content"],
@@ -44,6 +47,7 @@ describe("AI tool provider schemas", () => {
     shell_list: [],
     run_subagent: ["task"],
     get_terminal_output: [],
+    message: [],
   } satisfies Record<keyof typeof tools, readonly string[]>;
   const toolSchemas = Object.entries(tools).map(
     ([name, definition]) =>
@@ -72,6 +76,7 @@ describe("AI tool provider schemas", () => {
   );
 
   it("only exposes tools allowed by the session Agent snapshot", () => {
+    expect(buildTools(context, ["message"])).not.toHaveProperty("message");
     expect(Object.keys(buildTools(context, ["read_file", "grep"]))).toEqual([
       "read_file",
       "grep",

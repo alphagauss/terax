@@ -15,6 +15,7 @@ export const AGENT_TOOL_IDS = [
   "shell_list",
   "get_terminal_output",
   "run_subagent",
+  "message",
 ] as const;
 
 export type AgentToolId = (typeof AGENT_TOOL_IDS)[number];
@@ -40,6 +41,7 @@ export const AGENT_TOOL_GROUPS = [
     id: "subagents",
     tools: ["run_subagent"],
   },
+  { id: "channels", tools: ["message"] },
 ] as const satisfies readonly {
   id: string;
   tools: readonly AgentToolId[];
@@ -84,8 +86,8 @@ export function setAgentToolEnabled(
 
 /** Channel 没有活动桌面终端，不能通过配置启用该能力。 */
 export function availableAgentTools(channel: boolean): AgentToolId[] {
-  return AGENT_TOOL_IDS.filter(
-    (id) => !channel || id !== "get_terminal_output",
+  return AGENT_TOOL_IDS.filter((id) =>
+    channel ? id !== "get_terminal_output" : id !== "message",
   );
 }
 
@@ -102,6 +104,7 @@ export function resolveSubagentTools(
   return normalizeAgentTools(parentTools).filter(
     (tool) =>
       tool !== "run_subagent" &&
+      tool !== "message" &&
       (permissionMode === "full-access" || SUBAGENT_READ_ONLY_TOOLS.has(tool)),
   );
 }

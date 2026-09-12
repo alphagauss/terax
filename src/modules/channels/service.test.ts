@@ -18,6 +18,7 @@ const io = vi.hoisted(() => ({
   poll: vi.fn(),
   deleteState: vi.fn(),
   stores: new Map<string, Record<string, unknown>>(),
+  files: new Map<string, string>(),
   checkpoint: {
     cursor: "old-cursor",
     cursorScope: "old-bot",
@@ -83,34 +84,62 @@ vi.mock("@/lib/sharedStore", () => ({
   mutateSharedStore: async (store: string, changes: { key: string }[]) => {
     for (const change of changes) delete io.stores.get(store)?.[change.key];
   },
-  deleteSharedStoreState: io.deleteState,
+}));
+vi.mock("@/lib/nativeHost", () => ({
+  invokeNative: async (command: string, args: Record<string, unknown>) => {
+    const path = args.path as string;
+    if (command === "workspace_prepare_default_root") return "/state";
+    if (command === "fs_stat")
+      return io.files.has(path) ? { kind: "file" } : null;
+    if (command === "fs_read_file")
+      return { kind: "text", content: io.files.get(path) };
+    if (command === "fs_write_file") {
+      io.files.set(path, args.content as string);
+      return 0;
+    }
+    if (command === "fs_delete") return io.deleteState(path);
+    throw new Error(`Unexpected command: ${command}`);
+  },
 }));
 vi.mock("@/modules/channels/agentSession", () => ({
   ensureChannelSession: vi.fn(),
 }));
-vi.mock("@/modules/channels/adapters/weixin", () => ({
-  loadWeixinCredentials: async () => ({ userId: "owner", botId: "old-bot" }),
-  saveWeixinCredentials: io.saveCredentials,
-  deleteWeixinCredentials: vi.fn(),
-  beginWeixinLogin: async () => ({
-    qrContent: "scan",
-    poll: io.poll,
+vi.mock("@/modules/channels/adapters/registry", () => ({
+  channelPlatform: () => ({
+    create: async () => ({
+      cursorScope: "old-bot",
+      async receive(context: {
+        signal: AbortSignal;
+        status: (status: string) => void;
+      }) {
+        context.status("online");
+        await new Promise<void>((resolve) =>
+          context.signal.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+      },
+      async send() {},
+    }),
+    async login(id: string) {
+      return {
+        qrContent: "scan",
+        async poll(code?: string) {
+          const result = await io.poll(code);
+          return {
+            state: result.state,
+            authorization: result.credentials
+              ? {
+                  accountId: result.credentials.userId,
+                  save: () => io.saveCredentials(id, result.credentials),
+                }
+              : undefined,
+          };
+        },
+      };
+    },
+    removeCredentials: vi.fn(),
   }),
-  WeixinAdapter: class {
-    cursorScope = "old-bot";
-    async receive(context: {
-      signal: AbortSignal;
-      status: (status: string) => void;
-    }) {
-      context.status("online");
-      await new Promise<void>((resolve) =>
-        context.signal.addEventListener("abort", () => resolve(), {
-          once: true,
-        }),
-      );
-    }
-    async send() {}
-  },
 }));
 
 beforeEach(() => {
@@ -118,12 +147,14 @@ beforeEach(() => {
   io.stores.set("channels", {
     [io.connection.id]: structuredClone(io.connection),
   });
-  io.stores.set(`channels-state:${io.connection.id}`, {
-    checkpoint: structuredClone(io.checkpoint),
-  });
+  io.files.clear();
+  io.files.set(
+    `/state/${io.connection.id}.json`,
+    JSON.stringify(io.checkpoint),
+  );
   io.saveCredentials.mockReset();
-  io.deleteState.mockReset().mockImplementation(async (store: string) => {
-    io.stores.delete(store);
+  io.deleteState.mockReset().mockImplementation(async (path: string) => {
+    io.files.delete(path);
   });
   io.poll.mockReset().mockResolvedValue({
     state: "scanned",
@@ -153,7 +184,7 @@ it("restores the configured connection when replacing its credentials fails", as
       }),
     );
     expect(
-      io.stores.get(`channels-state:${io.connection.id}`)?.checkpoint,
+      JSON.parse(io.files.get(`/state/${io.connection.id}.json`) ?? "null"),
     ).toMatchObject({ cursor: "old-cursor" });
     expect(useChannelsView.getState().snapshots).toHaveLength(1);
     const view = await requestChannels({
@@ -189,6 +220,25 @@ it("配置无效时拒绝新增且不写入，修正当前记录后可正常新�
     expect(view.error).toBeNull();
     expect(view.snapshots).toHaveLength(2);
     expect(Object.keys(io.stores.get("channels") ?? {})).toHaveLength(2);
+  } finally {
+    await dispose();
+  }
+});
+
+it("拒绝同一账号的重复配置，避免两个运行实例共享账号 cwd", async () => {
+  const duplicate = {
+    ...io.connection,
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    sessionId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  };
+  io.stores.set("channels", {
+    [io.connection.id]: io.connection,
+    [duplicate.id]: duplicate,
+  });
+  const dispose = await startChannelsService(() => {});
+  try {
+    expect(useChannelsView.getState().error).toBe("configuration");
+    expect(useChannelsView.getState().snapshots).toEqual([]);
   } finally {
     await dispose();
   }
@@ -256,7 +306,7 @@ it("删除清理失败时保留可重试连接，重试后清除其状态、路�
       id: io.connection.id,
     });
     expect(view.snapshots).toEqual([]);
-    expect(io.stores.has(`channels-state:${io.connection.id}`)).toBe(false);
+    expect(io.files.has(`/state/${io.connection.id}.json`)).toBe(false);
     expect(io.stores.get("settings")).toEqual({ theme: "dark" });
     expect(io.stores.get("channels")).toEqual({});
   } finally {

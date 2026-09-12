@@ -6,7 +6,7 @@ use crate::modules::shared_store::{self as service, SharedStoreMutation, StoreEv
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use service::{state_id, store_dir, STORES};
+use service::{store_dir, STORES};
 use std::{fs, sync::Mutex};
 use tauri::{AppHandle, Emitter};
 
@@ -22,11 +22,8 @@ struct SharedStoreChanged {
     revision: String,
 }
 
-/// 广播配置修订，不广播仅用于恢复协议的状态记录。
+/// 广播共享配置修订。
 fn emit_changed(app: &AppHandle, store: &str) -> Result<(), String> {
-    if state_id(store)?.is_some() {
-        return Ok(());
-    }
     app.emit(
         "terax://shared-store-changed",
         SharedStoreChanged {
@@ -110,12 +107,6 @@ pub fn shared_store_set(
 #[tauri::command]
 pub fn shared_store_delete(app: AppHandle, store: String, key: String) -> Result<(), String> {
     service::shared_store_delete(app, store, key)
-}
-
-/// 将桌面请求交给共享配置服务。
-#[tauri::command]
-pub fn shared_store_delete_state(store: String) -> Result<(), String> {
-    service::shared_store_delete_state(store)
 }
 
 /// 将桌面请求交给共享配置服务。

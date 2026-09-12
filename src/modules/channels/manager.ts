@@ -4,6 +4,7 @@
  */
 
 import type { SteeringReceipt } from "@/modules/ai/lib/turnInbox";
+import { bindChannelDelivery } from "@/modules/channels/delivery";
 import {
   type ChannelAdapter,
   type ChannelCheckpoint,
@@ -24,6 +25,7 @@ type Dependencies = {
   load: (id: string) => Promise<ChannelCheckpoint>;
   save: (id: string, checkpoint: ChannelCheckpoint) => Promise<void>;
   failureText: () => string;
+  emptyReply: () => string;
   changed: (snapshots: ChannelSnapshot[]) => void;
 };
 
@@ -195,7 +197,7 @@ export class ChannelManager {
           runtime.checkpoint.cursor = cursor;
           await this.persist(runtime);
         },
-        receive: async (message) => {
+        receive: async (message, materialize) => {
           signal.throwIfAborted();
           if (runtime.checkpoint.recentIds.includes(message.id)) return;
           const generation = runtime.generation;
@@ -223,6 +225,9 @@ export class ChannelManager {
           await this.persist(runtime);
           signal.throwIfAborted();
           // 中止还覆盖已经登记身份、但仍在等待写盘的入站消息。
+          if (generation !== runtime.generation) return;
+          if (materialize) message = await materialize();
+          signal.throwIfAborted();
           if (generation !== runtime.generation) return;
           runtime.queue.push(message);
           this.publish();
@@ -289,6 +294,13 @@ export class ChannelManager {
   ): Promise<void> {
     const signal = runtime.abort.signal;
     let delivering = false;
+    if (!runtime.adapter) return;
+    const delivery = bindChannelDelivery(
+      runtime.snapshot.connection.sessionId,
+      runtime.adapter,
+      message,
+      signal,
+    );
     try {
       const text = await this.deps.run(
         runtime.snapshot.connection,
@@ -309,8 +321,13 @@ export class ChannelManager {
         return;
       }
       delivering = true;
-      await runtime.adapter?.send(message, text, signal);
-      runtime.snapshot.issue = null;
+      if (text || !delivery.accepted) {
+        const result = await delivery.send({
+          text: text || this.deps.emptyReply(),
+        });
+        if (result.status !== "accepted") throw new ChannelError("delivery");
+      }
+      runtime.snapshot.issue = delivery.failed ? "delivery" : null;
     } catch (error) {
       if (!signal.aborted) {
         if (error instanceof ChannelError && error.issue === "storage") {
@@ -321,17 +338,18 @@ export class ChannelManager {
           error instanceof ChannelError ? error.issue : "agent";
         if (!delivering) {
           try {
-            await runtime.adapter?.send(
-              message,
-              this.deps.failureText(),
-              signal,
-            );
+            const result = await delivery.send({
+              text: this.deps.failureText(),
+            });
+            if (result.status !== "accepted")
+              runtime.snapshot.issue = "delivery";
           } catch {
             if (!signal.aborted) runtime.snapshot.issue = "delivery";
           }
         }
       }
     } finally {
+      await delivery.close();
       runtime.steer = null;
       if (!signal.aborted) {
         runtime.checkpoint.pendingIds = runtime.checkpoint.pendingIds.filter(

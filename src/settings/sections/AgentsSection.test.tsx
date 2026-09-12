@@ -61,7 +61,7 @@ it("shows ordered prompt sections without loading a workspace and uses individua
   expect(document.querySelector("#agent-tool-workspaceRead")).toBeNull();
   expect(
     document.querySelectorAll('[id^="agent-tool-"][role="checkbox"]'),
-  ).toHaveLength(11);
+  ).toHaveLength(12);
 });
 
 it("saves an explicitly empty prompt and only the necessary dependency, preserving edits on failure", async () => {

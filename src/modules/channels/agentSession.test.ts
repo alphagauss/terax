@@ -27,9 +27,8 @@ vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
   ...(await importOriginal()),
   commitSession: vi.fn(),
 }));
-vi.mock("@/modules/workspace", async (importOriginal) => ({
-  ...(await importOriginal()),
-  prepareDefaultWorkspaceRoot: async () => "D:/workspace",
+vi.mock("@/modules/channels/workspace", () => ({
+  prepareChannelWorkspace: async () => "D:/workspace",
 }));
 
 vi.mock("@/lib/platform", () => ({ HOST_PLATFORM: "windows" }));
@@ -99,6 +98,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
         id: connection.sessionId,
         channelId: connection.id,
         environmentKey: "local",
+        cwd: "D:/workspace",
       } as never,
     ],
     agentMetaBySession: {},
@@ -112,6 +112,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
       senderId: "owner",
       text: "hello",
       receivedAt: 1,
+      attachments: [],
       replyContext: "context",
     },
     new AbortController().signal,
@@ -147,6 +148,7 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
         id: connection.sessionId,
         channelId: connection.id,
         environmentKey: "local",
+        cwd: "D:/workspace",
       } as never,
     ],
     agentMetaBySession: {},
@@ -187,6 +189,7 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
           senderId: "owner",
           text: "hello",
           receivedAt: 1,
+          attachments: [],
           replyContext: "context",
         },
         new AbortController().signal,
@@ -279,6 +282,7 @@ it("freezes each Channel task independently while steering keeps the current sna
         id: connection.sessionId,
         channelId: connection.id,
         environmentKey: "local",
+        cwd: "D:/workspace",
       } as never,
     ],
     agentMetaBySession: {},
@@ -289,6 +293,7 @@ it("freezes each Channel task independently while steering keeps the current sna
     senderId: "owner",
     text: "hello",
     receivedAt: 1,
+    attachments: [],
     replyContext: "context",
   };
   vi.mocked(startChatMessage).mockImplementation(async () => {

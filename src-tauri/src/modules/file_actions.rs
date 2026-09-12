@@ -56,7 +56,9 @@ pub async fn file_save_as(
     transfers: tauri::State<'_, TransferState>,
 ) -> Result<Option<String>, String> {
     let env = workspace.bootstrap().env.clone();
-    let stat = file::fs_stat(path.clone(), Some(env.clone())).await?;
+    let stat = file::fs_stat(path.clone(), Some(env.clone()), false)
+        .await?
+        .ok_or("file not found")?;
     if !matches!(stat.kind, file::StatKind::File) {
         return Err("source is not a regular file".into());
     }

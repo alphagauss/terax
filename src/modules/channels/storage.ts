@@ -1,16 +1,16 @@
 /**
- * 本文件通过既有白名单存储保存连接配置与有界协议检查点。
- * 会话正文仍归 sessions，凭据仍归系统密钥存储。
+ * 连接配置使用共享存储；检查点由唯一连接宿主经普通文件接口原子保存。
+ * 检查点的串行写入和退出等待归连接运行时，会话正文与凭据分别归 sessions 和秘密存储。
  */
 
 import { channelModelUsageId } from "@/modules/ai/lib/modelUsage";
 import { deleteModelUsage } from "@/modules/settings/store";
 import {
   deleteSharedStoreKey,
-  deleteSharedStoreState,
   readSharedStore,
   setSharedStoreKey,
 } from "@/lib/sharedStore";
+import { invokeNative } from "@/lib/nativeHost";
 import {
   type ChannelCheckpoint,
   type ChannelConnection,
@@ -23,6 +23,7 @@ import {
 export async function loadConnections(): Promise<ChannelConnection[]> {
   const values = await readSharedStore("channels");
   const ids = new Set<string>();
+  const accounts = new Set<string>();
   const connections = Object.entries(values).map(([id, value]) => {
     const result = connectionSchema.safeParse(value);
     if (
@@ -32,6 +33,11 @@ export async function loadConnections(): Promise<ChannelConnection[]> {
     )
       throw new ChannelError("configuration");
     ids.add(result.data.sessionId);
+    if (result.data.accountId) {
+      const account = JSON.stringify([result.data.kind, result.data.accountId]);
+      if (accounts.has(account)) throw new ChannelError("configuration");
+      accounts.add(account);
+    }
     return result.data;
   });
   return connections;
@@ -48,7 +54,9 @@ export function saveConnection(connection: ChannelConnection): Promise<void> {
 
 /** 先清理协议状态和网络设置，最后删除配置引用；中途失败时保留可重试的连接。 */
 export async function removeConnection(id: string): Promise<void> {
-  await deleteSharedStoreState(`channels-state:${id}`);
+  const path = await checkpointPath(id);
+  if (await checkpointExists(path))
+    await invokeNative("fs_delete", { path, workspace: { kind: "local" } });
   await deleteSharedStoreKey("settings", `network.channel:${id}`);
   await deleteModelUsage(channelModelUsageId(id));
   await deleteSharedStoreKey("channels", id);
@@ -56,22 +64,55 @@ export async function removeConnection(id: string): Promise<void> {
 
 /** 读取单连接检查点；没有文件表示尚未开始接收。 */
 export async function loadCheckpoint(id: string): Promise<ChannelCheckpoint> {
-  const value = (await readSharedStore(`channels-state:${id}`)).checkpoint;
-  if (value === undefined)
-    return { cursor: "", cursorScope: "", recentIds: [], pendingIds: [] };
-  const parsed = checkpointSchema.safeParse(value);
-  if (!parsed.success) throw new ChannelError("storage");
-  return parsed.data;
+  try {
+    const path = await checkpointPath(id);
+    if (!(await checkpointExists(path)))
+      return { cursor: "", cursorScope: "", recentIds: [], pendingIds: [] };
+    const result = await invokeNative<{ kind: string; content?: string }>(
+      "fs_read_file",
+      { path, workspace: { kind: "local" } },
+    );
+    if (result.kind !== "text" || typeof result.content !== "string")
+      throw new ChannelError("storage");
+    return checkpointSchema.parse(JSON.parse(result.content));
+  } catch {
+    throw new ChannelError("storage");
+  }
 }
 
 /** 检查点只记录消息身份，不把平台回复令牌或聊天正文写入状态文件。 */
-export function saveCheckpoint(
+export async function saveCheckpoint(
   id: string,
   checkpoint: ChannelCheckpoint,
 ): Promise<void> {
-  return setSharedStoreKey(
-    `channels-state:${id}`,
-    "checkpoint",
-    checkpointSchema.parse(checkpoint),
-  );
+  try {
+    const path = await checkpointPath(id);
+    await invokeNative("fs_write_file", {
+      path,
+      content: JSON.stringify(checkpointSchema.parse(checkpoint)),
+      workspace: { kind: "local" },
+    });
+  } catch {
+    throw new ChannelError("storage");
+  }
+}
+
+/** 路径由 TS 业务定义，原生只准备应用数据目录，UUID 校验阻止路径注入。 */
+async function checkpointPath(id: string): Promise<string> {
+  const key = connectionSchema.shape.id.parse(id);
+  const root = await invokeNative<string>("workspace_prepare_default_root", {
+    appSubdir: "channels/state",
+  });
+  return `${root}/${key}.json`;
+}
+
+async function checkpointExists(path: string): Promise<boolean> {
+  const stat = await invokeNative<{ kind: string } | null>("fs_stat", {
+    path,
+    workspace: { kind: "local" },
+    missingOk: true,
+  });
+  if (stat === null) return false;
+  if (stat.kind !== "file") throw new ChannelError("storage");
+  return true;
 }

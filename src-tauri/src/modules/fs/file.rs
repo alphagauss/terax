@@ -2,7 +2,7 @@
 //!
 //! 编辑器和 AI 文件工具以内容摘要作为磁盘版本，并通过条件写入避免静默覆盖外部修改。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use std::{fs, io::Read, io::Write};
 
@@ -18,6 +18,107 @@ const MAX_READ_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
 /// 显式强制打开的上限，与前端 `FORCE_READ_LIMIT` 保持一致。
 const FORCE_MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
+
+/// 在指定根内逐级创建真实目录；相对路径不能通过链接、设备名或父路径改变归属。
+pub fn prepare_relative_directory(root: &Path, relative: &str) -> Result<PathBuf, String> {
+    let mut current = root.to_path_buf();
+    for segment in relative.split('/') {
+        validate_relative_component(segment)?;
+        current.push(segment);
+        match fs::create_dir(&current) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        let metadata = fs::symlink_metadata(&current).map_err(|e| e.to_string())?;
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err("directory must not be a link".into());
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if metadata.file_attributes() & 0x400 != 0 {
+                return Err("directory must not be a reparse point".into());
+            }
+        }
+    }
+    Ok(current)
+}
+
+fn validate_relative_component(value: &str) -> Result<(), String> {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul" | "clock$")
+        || stem
+            .strip_prefix("com")
+            .or_else(|| stem.strip_prefix("lpt"))
+            .is_some_and(|n| n.len() == 1 && matches!(n.as_bytes()[0], b'1'..=b'9'));
+    if value.is_empty()
+        || matches!(value, "." | "..")
+        || value.ends_with(['.', ' '])
+        || reserved
+        || value
+            .chars()
+            .any(|c| c.is_control() || "<>:\"\\|?*".contains(c))
+    {
+        return Err("invalid relative path component".into());
+    }
+    Ok(())
+}
+
+/// 将网络文件原子发布到授权根内；调用方可选择重名时追加序号，始终禁止覆盖。
+pub fn create_downloaded_file(
+    root: &Path,
+    relative: &str,
+    bytes: &[u8],
+    rename_on_conflict: bool,
+) -> Result<String, String> {
+    if relative.starts_with('/') || relative.contains('\\') {
+        return Err("download path must be relative".into());
+    }
+    let (parent, name) = relative.rsplit_once('/').unwrap_or(("", relative));
+    validate_relative_component(name)?;
+    let directory = if parent.is_empty() {
+        root.to_path_buf()
+    } else {
+        prepare_relative_directory(root, parent)?
+    };
+    let (stem, extension) = name
+        .rsplit_once('.')
+        .filter(|(stem, _)| !stem.is_empty())
+        .map_or((name, String::new()), |(stem, extension)| {
+            (stem, format!(".{extension}"))
+        });
+    for index in 0..=10_000 {
+        if index > 0 && !rename_on_conflict {
+            break;
+        }
+        let candidate = if index == 0 {
+            name.to_string()
+        } else {
+            format!("{stem}({index}){extension}")
+        };
+        let target = directory.join(&candidate);
+        if target.try_exists().map_err(|e| e.to_string())? {
+            continue;
+        }
+        // 预检查只跳过已知重名；并发下载的最终归属仍由缺失条件原子写入决定。
+        if matches!(
+            missing_write_sync(&target, bytes)?,
+            CheckedWriteResult::Written { .. }
+        ) {
+            return Ok(if parent.is_empty() {
+                candidate
+            } else {
+                format!("{parent}/{candidate}")
+            });
+        }
+    }
+    Err("download destination already exists or name limit reached".into())
+}
 
 #[cfg(windows)]
 const WSL_ATOMIC_WRITE_SCRIPT: &str =
@@ -1029,8 +1130,12 @@ pub async fn fs_canonicalize(
     Ok(super::to_canon(&canon))
 }
 
-/// 在指定工作区执行操作，状态由调用者持有。
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
+/// 查询文件属性；调用方显式允许时仅将路径缺失返回为 None，其他错误继续传播。
+pub async fn fs_stat(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    missing_ok: bool,
+) -> Result<Option<FileStat>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
     if let Some(profile_id) = workspace.ssh_profile_id() {
         #[cfg(not(feature = "desktop"))]
@@ -1043,42 +1148,130 @@ pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<Fi
             let workspace = remote::manager::global_manager()?
                 .workspace(profile_id)
                 .await?;
+            if missing_ok && !remote::sftp::exists(&workspace, &path).await? {
+                return Ok(None);
+            }
             let meta = remote::sftp::stat(&workspace, &path).await?;
             let kind = match meta.kind {
                 remote::sftp::RemoteEntryKind::File => StatKind::File,
                 remote::sftp::RemoteEntryKind::Dir => StatKind::Dir,
                 remote::sftp::RemoteEntryKind::Symlink => StatKind::Symlink,
             };
-            return Ok(FileStat {
+            return Ok(Some(FileStat {
                 size: meta.size,
                 mtime: meta.mtime,
                 kind,
-            });
+            }));
         }
     }
     let p = resolve_path(&path, &workspace);
+    let link = match std::fs::symlink_metadata(&p) {
+        Ok(meta) => meta,
+        Err(error) if missing_ok && error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None)
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
-    // fs::metadata follows symlinks, so the link check needs symlink_metadata.
-    let kind = if std::fs::symlink_metadata(&p)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
+    let kind = if link.file_type().is_symlink() {
         StatKind::Symlink
     } else if meta.is_dir() {
         StatKind::Dir
     } else {
         StatKind::File
     };
-    Ok(FileStat {
+    Ok(Some(FileStat {
         size: meta.len(),
         mtime: mtime_millis(&meta),
         kind,
-    })
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn optional_stat_only_suppresses_missing_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root
+            .path()
+            .join("state.json")
+            .to_string_lossy()
+            .into_owned();
+        assert!(fs_stat(path.clone(), None, true).await.unwrap().is_none());
+        assert!(fs_stat(path.clone(), None, false).await.is_err());
+        fs::write(&path, b"data").unwrap();
+        let stat = fs_stat(path, None, true).await.unwrap().unwrap();
+        assert_eq!(stat.size, 4);
+        assert!(matches!(stat.kind, StatKind::File));
+        assert!(
+            fs_stat(format!("{}\0invalid", root.path().display()), None, true)
+                .await
+                .is_err()
+        );
+    }
+    #[test]
+    fn concurrent_downloads_keep_original_names_and_allocate_unique_suffixes() {
+        let root = tempfile::tempdir().unwrap();
+        create_downloaded_file(root.path(), "attachments/report.pdf", b"original", true).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(4));
+        let jobs: Vec<_> = (0..4)
+            .map(|index| {
+                let root = root.path().to_path_buf();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let path =
+                        create_downloaded_file(&root, "attachments/report.pdf", &[index], true)
+                            .unwrap();
+                    assert_eq!(fs::read(root.join(&path)).unwrap(), vec![index]);
+                    path
+                })
+            })
+            .collect();
+        let paths: std::collections::HashSet<_> =
+            jobs.into_iter().map(|job| job.join().unwrap()).collect();
+        for index in 1..=4 {
+            assert!(paths.contains(&format!("attachments/report({index}).pdf")));
+        }
+        assert_eq!(
+            fs::read(root.path().join("attachments/report.pdf")).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            create_downloaded_file(root.path(), "attachments/no-extension", b"a", true).unwrap(),
+            "attachments/no-extension"
+        );
+        assert_eq!(
+            create_downloaded_file(root.path(), "attachments/no-extension", b"b", true).unwrap(),
+            "attachments/no-extension(1)"
+        );
+    }
+    #[test]
+    fn download_paths_cannot_escape_overwrite_or_follow_directory_links() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        create_downloaded_file(root.path(), "downloads/a", b"first", false).unwrap();
+        assert!(create_downloaded_file(root.path(), "downloads/a", b"second", false).is_err());
+        assert_eq!(fs::read(root.path().join("downloads/a")).unwrap(), b"first");
+        for path in [
+            "../outside",
+            "/absolute",
+            "a/../../outside",
+            "NUL",
+            "a:stream",
+            "x\\y",
+            "downloads/../outside",
+        ] {
+            assert!(create_downloaded_file(root.path(), path, b"x", false).is_err());
+        }
+        #[cfg(windows)]
+        junction::create(outside.path(), root.path().join("linked")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+        assert!(create_downloaded_file(root.path(), "linked/outside", b"x", false).is_err());
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
 
     fn version(path: &Path, content: &[u8]) -> FileVersion {
         let metadata = fs::metadata(path).unwrap();

@@ -4,6 +4,10 @@
  */
 
 export type ToolContext = {
+  /** 只由 Channel 主运行提供，不向 Subagent 传播发送能力。 */
+  getMessageSender?: () =>
+    | import("@/modules/channels/types").ChannelMessageSender
+    | undefined;
   /** 当前会话固定 cwd，用于解析所有相对路径。 */
   getCwd: () => string;
   /** 读取活动非隐私终端的尾部缓冲区，没有可读终端时返回 null。 */

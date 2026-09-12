@@ -360,6 +360,57 @@ struct AgentPathContext<'a> {
     permission_mode: AgentPermissionMode,
 }
 
+/// 原生文件传输复用 owner、cwd、权限模式和普通文件校验，取得大小有界的字节快照。
+#[allow(clippy::too_many_arguments)]
+pub async fn agent_file_snapshot(
+    state: &AgentFileState,
+    registry: &WorkspaceRegistry,
+    owner: &str,
+    root: &str,
+    path: &str,
+    permission_mode: AgentPermissionMode,
+    max_bytes: usize,
+) -> Result<(String, Vec<u8>), String> {
+    use tokio::io::AsyncReadExt;
+    validate_owner(owner)?;
+    let workspace = WorkspaceEnv::Local;
+    let authorized =
+        authorize_path(registry, root, path, &workspace, permission_mode, true).await?;
+    state.bind_scope(owner, &authorized, &workspace)?;
+    ensure_regular_file(&authorized.io_path, &workspace).await?;
+    let file = tokio::fs::File::open(&authorized.io_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    let before = file.metadata().await.map_err(|e| e.to_string())?;
+    if !before.is_file() || before.len() > max_bytes as u64 {
+        return Err("file exceeds size limits".into());
+    }
+    let mut reader = file.take(max_bytes as u64 + 1);
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    let after = reader
+        .get_ref()
+        .metadata()
+        .await
+        .map_err(|e| e.to_string())?;
+    if bytes.len() > max_bytes
+        || before.len() != after.len()
+        || before.modified().ok() != after.modified().ok()
+        || bytes.len() as u64 != after.len()
+    {
+        return Err("file changed while reading or exceeds size limits".into());
+    }
+    let name = Path::new(&authorized.io_path)
+        .file_name()
+        .ok_or("missing file name")?
+        .to_string_lossy()
+        .into_owned();
+    Ok((name, bytes))
+}
+
 /// 读取当前工作区内的普通 UTF-8 文件，并记录聊天级文件版本。
 pub async fn agent_file_read(
     state: &AgentFileState,

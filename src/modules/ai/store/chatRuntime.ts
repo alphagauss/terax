@@ -4,6 +4,7 @@
  */
 
 import i18n from "@/i18n";
+import { getChannelMessageSender } from "@/modules/channels/delivery";
 
 import {
   getAgentTurnCoordinator,
@@ -80,6 +81,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     return cwd;
   };
   const toolContext: ToolContext = {
+    getMessageSender: () => getChannelMessageSender(sessionId),
     getCwd: getSessionCwd,
     getTerminalContext: () => {
       const state = useChatStore.getState();

@@ -1,14 +1,24 @@
 /**
- * 本文件实现个人微信 iLink 的扫码授权、HTTP 长轮询和文本回复。
+ * 本文件实现个人微信 iLink 的扫码授权、HTTP 长轮询和文本与附件收发。
  * 协议参考 nanobot 与腾讯插件；只接受扫码账号本人私聊，令牌始终留在适配器或密钥存储。
  */
 
 import i18n from "@/i18n";
+import type { HttpFileContext } from "@/lib/httpFiles";
+import {
+  parseWeixinMedia,
+  downloadWeixinMedia,
+  uploadWeixinMedia,
+  weixinMediaUrl,
+  type WeixinMedia,
+} from "@/modules/channels/adapters/weixinMedia";
 import { createHttpFetch } from "@/lib/http";
 import {
   type ChannelAdapter,
   ChannelError,
   type ChannelInbound,
+  type ChannelOutbound,
+  type ChannelDeliveryResult,
   type ChannelSnapshot,
   channelDelay,
   type ReceiveContext,
@@ -33,21 +43,8 @@ type Payload = Record<string, unknown>;
 
 /** 平台返回的地址也必须验证，防止授权头被送到任意主机。 */
 export function weixinBaseUrl(value: string): string {
-  const url = new URL(value);
-  if (
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.port ||
-    !(
-      url.hostname === "ilinkai.weixin.qq.com" ||
-      url.hostname.endsWith(".weixin.qq.com")
-    ) ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  )
-    throw new ChannelError("protocol");
+  const url = new URL(weixinMediaUrl(value));
+  if (url.pathname !== "/" || url.search) throw new ChannelError("protocol");
   return url.origin;
 }
 
@@ -127,12 +124,19 @@ async function request(
   } catch {
     throw new ChannelError("protocol");
   }
-  const errors = [data.ret, data.errcode].filter(
-    (code) => typeof code === "number" && code !== 0,
-  );
+  const codes = [data.ret, data.errcode].filter((code) => code !== undefined);
+  if (
+    codes.some((code) => typeof code !== "number" || !Number.isInteger(code)) ||
+    (endpoint === "sendmessage" && !codes.length)
+  )
+    throw new ChannelError("protocol");
+  const errors = codes.filter((code) => code !== 0);
   if (errors.includes(-14)) throw new ChannelError("auth");
   if (errors.includes(-2)) throw new ChannelError("delivery");
-  if (errors.length) throw new ChannelError("protocol");
+  if (errors.length)
+    throw new ChannelError(
+      endpoint === "sendmessage" ? "delivery" : "protocol",
+    );
   return data;
 }
 
@@ -233,11 +237,11 @@ export async function beginWeixinLogin(
   };
 }
 
-/** 只归一化已授权对端的完成态私聊文本，其他消息不会进入 Agent。 */
+/** 只归一化已授权对端的完成态私聊，身份过滤先于任何媒体副作用。 */
 export function parseWeixinMessage(
   value: unknown,
   userId: string,
-): ChannelInbound | null {
+): (ChannelInbound & { media: WeixinMedia[] }) | null {
   const data = record(value);
   if (
     data.message_type !== 1 ||
@@ -248,17 +252,34 @@ export function parseWeixinMessage(
     return null;
   if (data.message_state !== undefined && data.message_state !== 2) return null;
   if (!Array.isArray(data.item_list)) return null;
+  if (data.item_list.length > 16) throw new ChannelError("protocol");
+  const media = data.item_list.flatMap((item) => {
+    const parsed = parseWeixinMedia(record(item));
+    return parsed ? [parsed] : [];
+  });
   const text = data.item_list
     .flatMap((item) => {
       const value = record(item);
-      if (value.type !== 1 || !value.text_item) return [];
-      const text = record(value.text_item).text;
+      const body =
+        value.type === 1
+          ? value.text_item
+          : value.type === 3
+            ? value.voice_item
+            : null;
+      if (!body) return [];
+      const text = record(body).text;
+      if (value.type === 3 && text === undefined) return [];
       if (typeof text !== "string" || text.length > 32000)
         throw new ChannelError("protocol");
       return [text];
     })
     .join("\n");
-  if (!text.trim() || text.length > 32000 || !data.context_token) return null;
+  if (
+    (!text.trim() && !media.length) ||
+    text.length > 32000 ||
+    !data.context_token
+  )
+    return null;
   const identity = data.message_id ?? data.seq;
   if (
     (typeof identity !== "string" && typeof identity !== "number") ||
@@ -269,6 +290,11 @@ export function parseWeixinMessage(
     id: `${userId}:${identity}:${String(data.create_time_ms ?? "")}`,
     senderId: userId,
     text,
+    media,
+    attachments: media.map(({ attachment }) => ({
+      ...attachment,
+      status: "failed",
+    })),
     receivedAt: Date.now(),
     replyContext: requiredText(data.context_token),
   };
@@ -290,6 +316,7 @@ export class WeixinAdapter implements ChannelAdapter {
   constructor(
     private readonly credentials: WeixinCredentials,
     private readonly connectionId: string,
+    private readonly files: HttpFileContext,
     private readonly fetchImpl?: typeof fetch,
   ) {
     this.cursorScope = credentials.botId;
@@ -330,8 +357,23 @@ export class WeixinAdapter implements ChannelAdapter {
       const messages = data.msgs ?? [];
       if (!Array.isArray(messages)) throw new ChannelError("protocol");
       for (const raw of messages) {
-        const message = parseWeixinMessage(raw, this.credentials.userId);
-        if (message) await context.receive(message);
+        const parsed = parseWeixinMessage(raw, this.credentials.userId);
+        if (parsed) {
+          const { media, ...message } = parsed;
+          await context.receive(message, async () => {
+            const attachments = [];
+            for (const item of media)
+              attachments.push(
+                await downloadWeixinMedia(
+                  item,
+                  this.connectionId,
+                  this.files,
+                  context.signal,
+                ),
+              );
+            return { ...message, attachments };
+          });
+        }
       }
       const nextCursor = data.get_updates_buf ?? cursor;
       if (typeof nextCursor !== "string" || nextCursor.length > 262144)
@@ -344,57 +386,102 @@ export class WeixinAdapter implements ChannelAdapter {
 
   async send(
     message: ChannelInbound,
-    text: string,
+    content: ChannelOutbound,
     signal: AbortSignal,
-  ): Promise<void> {
-    let contextToken = message.replyContext;
-    // 长任务先刷新原对端的回复上下文，绝不改用另一个入站消息的目标。
-    if (Date.now() - message.receivedAt > 60_000) {
-      const config = await this.call(
-        "getconfig",
-        { ilink_user_id: message.senderId, context_token: contextToken },
-        signal,
-      );
-      if (typeof config.context_token === "string" && config.context_token)
-        contextToken = config.context_token;
+  ): Promise<ChannelDeliveryResult> {
+    let contextToken: string;
+    try {
+      signal.throwIfAborted();
+      contextToken = requiredText(message.replyContext);
+      // 刷新失败时尚未发送任何消息，应报告失败而不是不确定的投递结果。
+      if (Date.now() - message.receivedAt > 60_000) {
+        const config = await this.call(
+          "getconfig",
+          { ilink_user_id: message.senderId, context_token: contextToken },
+          signal,
+        );
+        if (typeof config.context_token === "string" && config.context_token)
+          contextToken = config.context_token;
+      }
+    } catch {
+      signal.throwIfAborted();
+      return { status: "failed", parts: [] };
     }
-    const chunks = splitWeixinText(text);
+    const chunks = splitWeixinText(content.text ?? "");
     if (chunks.length > 8) {
       chunks.length = 8;
       chunks[7] = `${Array.from(chunks[7]).slice(0, 1500).join("")}\n${i18n.t("channels:longReply")}`;
     }
     const deliveryId = `terax-${crypto.randomUUID()}`;
-    for (let index = 0; index < chunks.length; index++) {
-      for (let attempt = 0; ; attempt++) {
+    const parts: ChannelDeliveryResult["parts"] = [];
+    const attachments = content.attachments ?? [];
+    const count = attachments.length + chunks.length;
+    for (let index = 0; index < count; index++) {
+      let item: Payload;
+      if (index < attachments.length) {
         try {
-          await this.call(
-            "sendmessage",
-            {
-              msg: {
-                from_user_id: "",
-                to_user_id: message.senderId,
-                client_id: `${deliveryId}-${index}`,
-                message_type: 2,
-                message_state: 2,
-                context_token: contextToken,
-                item_list: [{ type: 1, text_item: { text: chunks[index] } }],
-              },
-            },
+          item = await uploadWeixinMedia(
+            attachments[index],
+            this.files,
+            this.connectionId,
+            message.senderId,
             signal,
+            (body) => this.call("getuploadurl", body, signal),
           );
-          break;
-        } catch (error) {
+        } catch {
           signal.throwIfAborted();
-          if (
-            !(error instanceof ChannelError) ||
-            error.issue !== "network" ||
-            attempt >= 2
-          )
-            throw new ChannelError("delivery");
-          await channelDelay(1000 * 2 ** attempt, signal);
+          parts.push({ index, status: "failed" });
+          break;
         }
+      } else {
+        item = {
+          type: 1,
+          text_item: { text: chunks[index - attachments.length] },
+        };
+      }
+      try {
+        await this.call(
+          "sendmessage",
+          {
+            msg: {
+              from_user_id: "",
+              to_user_id: message.senderId,
+              client_id: `${deliveryId}-${index}`,
+              message_type: 2,
+              message_state: 2,
+              context_token: contextToken,
+              item_list: [item],
+            },
+          },
+          signal,
+        );
+        parts.push({ index, status: "accepted" });
+      } catch (error) {
+        signal.throwIfAborted();
+        // 网络错误无法确定平台是否已收取消息，不能自动重发整个文件或文本。
+        parts.push({
+          index,
+          status:
+            error instanceof ChannelError &&
+            (error.issue === "network" || error.issue === "protocol")
+              ? "unknown"
+              : "failed",
+        });
+        break;
       }
     }
+    return {
+      status: parts.some((part) => part.status === "unknown")
+        ? "unknown"
+        : count > 0 &&
+            parts.length === count &&
+            parts.every((part) => part.status === "accepted")
+          ? "accepted"
+          : parts.some((part) => part.status === "accepted")
+            ? "partial"
+            : "failed",
+      parts,
+    };
   }
 
   private call(
