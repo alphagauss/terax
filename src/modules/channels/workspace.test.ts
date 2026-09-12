@@ -14,7 +14,7 @@ vi.mock("@/lib/nativeHost", () => ({
   getNativeHost: async () => ({ invoke: io.invoke }),
 }));
 
-it("derives a stable account directory without sending account rules to Rust", async () => {
+it("derives a stable short account directory without sending account rules to Rust", async () => {
   const first = await prepareChannelWorkspace({
     kind: "weixin",
     accountId: "owner",
@@ -27,22 +27,24 @@ it("derives a stable account directory without sending account rules to Rust", a
   expect(
     await prepareChannelWorkspace({ kind: "weixin", accountId: "other" }),
   ).not.toBe(first);
-  expect(channelAccountKey("another", "owner")).not.toBe(
-    channelAccountKey("weixin", "owner"),
-  );
+  const key = await channelAccountKey("weixin", "owner");
+  expect(key).toMatch(/^weixin-[A-Za-z0-9_-]{11}$/);
+  expect(await channelAccountKey("another", "owner")).not.toBe(key);
   expect(io.invoke).toHaveBeenCalledWith("workspace_prepare_default_root", {
-    appSubdir: "channels/weixin-owner",
+    appSubdir: `channels/${key}`,
   });
 });
 
-it("preserves readable accounts and portable original filenames", () => {
-  expect(channelAccountKey("weixin", "owner@im.wechat")).toBe(
-    "weixin-owner@im.wechat",
+it("uses a portable fixed-length account hash and preserves original filenames", async () => {
+  const email = await channelAccountKey("weixin", "owner@im.wechat");
+  expect(email).toMatch(/^weixin-[A-Za-z0-9_-]{11}$/);
+  expect(email).not.toMatch(/[@.%]/);
+  expect(await channelAccountKey("weixin", "a/b")).not.toBe(
+    await channelAccountKey("weixin", "a%2Fb"),
   );
-  expect(channelAccountKey("weixin", "a/b")).not.toBe(
-    channelAccountKey("weixin", "a%2Fb"),
+  expect(await channelAccountKey("weixin", "a".repeat(256))).toHaveLength(
+    "weixin-".length + 11,
   );
-  expect(channelAccountKey("weixin", "a*.")).toBe("weixin-a%2A%2E");
   expect(channelAttachmentPath("../../CON.txt")).toBe("attachments/_CON.txt");
   expect(channelAttachmentPath("a:b?.pdf")).toBe("attachments/a_b_.pdf");
   expect(channelAttachmentPath("a\u0085b.pdf")).toBe("attachments/a_b.pdf");
