@@ -26,6 +26,8 @@ pub mod markdown_images;
 pub mod net;
 pub mod network_proxy;
 #[cfg(feature = "desktop")]
+pub mod notifications;
+#[cfg(feature = "desktop")]
 pub mod open_with;
 pub mod proc;
 #[cfg(feature = "desktop")]

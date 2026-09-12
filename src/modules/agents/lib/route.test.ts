@@ -16,7 +16,7 @@ vi.mock("../store/agentStore", () => ({
   useAgentStore: { getState: () => ({ pushNotification: mocks.push }) },
 }));
 vi.mock("../components/AgentToast", () => ({ showAgentToast: mocks.toast }));
-vi.mock("./notify", () => ({ osNotify: mocks.native }));
+vi.mock("@/modules/notifications/client", () => ({ osNotify: mocks.native }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -47,5 +47,20 @@ it.each([true, false])(
     mocks.enabled = true;
     routeAgentNotification({ ...event, tabId: 2 });
     expect(focused ? mocks.toast : mocks.native).toHaveBeenCalledOnce();
+    if (!focused) {
+      expect(mocks.native).toHaveBeenCalledWith("需要输入", "claude", {
+        window: "main",
+        target: { module: "terminal", tabId: 2 },
+      });
+      routeAgentNotification({
+        ...event,
+        source: "local",
+        sessionId: "session-7",
+      });
+      expect(mocks.native).toHaveBeenLastCalledWith("需要输入", "claude", {
+        window: "main",
+        target: { module: "ai", sessionId: "session-7" },
+      });
+    }
   },
 );

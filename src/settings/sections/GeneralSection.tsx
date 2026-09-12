@@ -27,7 +27,7 @@ import {
   prepareOsNotification,
   sendOsNotification,
   type OsNotificationResult,
-} from "@/modules/agents/lib/notify";
+} from "@/modules/notifications/client";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   type Language,
@@ -200,6 +200,7 @@ export function GeneralSection() {
       const result = await sendOsNotification(
         t("general.agents.notifications.test.notificationTitle"),
         t("general.agents.notifications.test.notificationBody"),
+        { window: "auxiliary", request: { kind: "settings", tab: "general" } },
       );
       if (
         run !== notificationTestRun.current ||

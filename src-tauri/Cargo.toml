@@ -20,7 +20,9 @@ desktop = [
     "dep:tauri-plugin-os",
     "dep:tauri-plugin-store",
     "dep:tauri-plugin-process",
-    "dep:tauri-plugin-notification",
+    "dep:notify-rust",
+    "dep:tauri-winrt-notification",
+    "dep:mac-usernotifications",
     "dep:tauri-plugin-dialog",
     "dep:tauri-plugin-clipboard-manager",
     "dep:arboard",
@@ -94,7 +96,6 @@ tauri-plugin-log = { version = "2", optional = true }
 tauri-plugin-os = { version = "2", optional = true }
 tauri-plugin-store = { version = "2", optional = true }
 tauri-plugin-process = { version = "2", optional = true }
-tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-clipboard-manager = { version = "2", optional = true }
 tauri-plugin-global-shortcut = { version = "2", optional = true }
@@ -151,6 +152,7 @@ tempfile = "3"
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+mac-usernotifications = { version = "0.3.1", optional = true }
 keyring = { version = "3.6", default-features = false, features = [
 	"apple-native",
 ] }
@@ -159,9 +161,11 @@ objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] 
 
 # Linux 桌面还使用 D-Bus；图片剪贴板由三端共享的原生插件提供。
 [target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = { version = "4.18", optional = true }
 zbus = { version = "5.19", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+tauri-winrt-notification = { version = "0.7.3", optional = true }
 keyring = { version = "3.6", default-features = false, features = [
 	"windows-native",
 ] }

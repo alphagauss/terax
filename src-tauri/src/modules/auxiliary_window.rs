@@ -13,6 +13,10 @@ pub const AUXILIARY_OPEN_EVENT: &str = "terax:auxiliary-open";
 
 const SETTINGS_LABEL: &str = "auxiliary-settings";
 const FILE_PROPERTIES_LABEL: &str = "auxiliary-file-properties";
+/// 判断调用窗口是否属于封闭辅助窗口注册表。
+pub fn is_registered_label(label: &str) -> bool {
+    matches!(label, SETTINGS_LABEL | FILE_PROPERTIES_LABEL)
+}
 const AUXILIARY_ENTRY: &str = "auxiliary.html";
 const SOURCE_POINT_OFFSET: f64 = 16.0;
 const MONITOR_EDGE_MARGIN: i32 = 12;
