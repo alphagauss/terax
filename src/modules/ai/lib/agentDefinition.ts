@@ -4,7 +4,6 @@
  */
 
 import {
-  AGENT_TOOL_IDS,
   type AgentToolId,
   normalizeAgentTools,
   availableAgentTools,
@@ -42,7 +41,7 @@ export const MAIN_AGENT: Readonly<Agent> = {
   instructions: DESKTOP_PROMPT.trim(),
   workspaceFiles: ["AGENTS.md"],
   icon: "coder",
-  tools: [...AGENT_TOOL_IDS],
+  tools: availableAgentTools(false),
 };
 
 export const CHANNEL_AGENT_ID = "builtin:channel";

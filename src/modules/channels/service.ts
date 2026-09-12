@@ -4,6 +4,10 @@
  */
 
 import i18n from "@/i18n";
+import {
+  channelPlatform,
+  type ChannelLogin,
+} from "@/modules/channels/adapters/registry";
 import { onSharedStoreChange } from "@/lib/sharedStore";
 import {
   actionSchema,
@@ -68,15 +72,9 @@ export async function startChannelsService(
     run: async (...args) =>
       (await import("@/modules/channels/agentSession")).runChannelTurn(...args),
     failureText: () => i18n.t("channels:runFailed"),
-    adapter: async (connection) => {
-      const { loadWeixinCredentials, WeixinAdapter } = await import(
-        "@/modules/channels/adapters/weixin"
-      );
-      const credentials = await loadWeixinCredentials(connection.id);
-      if (credentials.userId !== connection.accountId)
-        throw new ChannelError("account-mismatch");
-      return new WeixinAdapter(credentials, connection.id);
-    },
+    emptyReply: () => i18n.t("channels:emptyReply"),
+    adapter: async (connection) =>
+      channelPlatform(connection.kind).create(connection),
     changed: (value) => {
       snapshots = value;
       publish();
@@ -140,12 +138,12 @@ export async function startChannelsService(
     const login: Login = { abort: new AbortController(), code: "" };
     logins.set(id, login);
     loginErrors.delete(id);
-    const { beginWeixinLogin, saveWeixinCredentials } = await import(
-      "@/modules/channels/adapters/weixin"
-    );
-    let flow: Awaited<ReturnType<typeof beginWeixinLogin>>;
+    let flow: ChannelLogin;
     try {
-      flow = await beginWeixinLogin(id, login.abort.signal);
+      flow = await channelPlatform(connection(id).kind).login(
+        id,
+        login.abort.signal,
+      );
     } catch (error) {
       logins.delete(id);
       throw error;
@@ -174,25 +172,28 @@ export async function startChannelsService(
         login.abort.signal.throwIfAborted();
         login.snapshot = { qrContent: flow.qrContent, state: result.state };
         publish();
-        const credentials = result.credentials;
+        const credentials = result.authorization;
         if (credentials) {
           await enqueue(async () => {
             login.abort.signal.throwIfAborted();
             const existing = connection(id);
-            if (existing.accountId && existing.accountId !== credentials.userId)
+            if (
+              existing.accountId &&
+              existing.accountId !== credentials.accountId
+            )
               throw new ChannelError("account-mismatch");
             if (
               connections.some(
                 (item) =>
                   item.id !== id &&
                   item.kind === existing.kind &&
-                  item.accountId === credentials.userId,
+                  item.accountId === credentials.accountId,
               )
             )
               throw new ChannelError("duplicate-account");
             const updated = {
               ...existing,
-              accountId: credentials.userId,
+              accountId: credentials.accountId,
               enabled: true,
             };
             try {
@@ -203,7 +204,7 @@ export async function startChannelsService(
                 connections.filter((item) => item.id !== id),
               );
               try {
-                await saveWeixinCredentials(id, credentials);
+                await credentials.save();
                 await saveConnection(updated);
                 logins.delete(id);
               } finally {
@@ -298,11 +299,8 @@ export async function startChannelsService(
         await manager.configure(
           connections.filter((item) => item.id !== target.id),
         );
-        const { deleteWeixinCredentials } = await import(
-          "@/modules/channels/adapters/weixin"
-        );
         try {
-          await deleteWeixinCredentials(target.id);
+          await channelPlatform(target.kind).removeCredentials(target.id);
           await removeConnection(target.id);
         } finally {
           // 清理失败时配置仍存在，重新展示连接以允许用户重试删除。

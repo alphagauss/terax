@@ -4,6 +4,7 @@
  */
 
 import { buildFsTools } from "./fs";
+import { buildMessageTools } from "@/modules/ai/tools/message";
 import { buildPatchTools } from "./patch";
 import { buildSearchTools } from "./search";
 import { buildShellTools } from "./shell";
@@ -30,6 +31,7 @@ export function buildTools(
   startSubagent?: SubagentStarter,
 ) {
   const all = {
+    ...buildMessageTools(ctx),
     ...buildFsTools(ctx),
     ...buildPatchTools(ctx),
     ...buildSearchTools(ctx),
@@ -39,7 +41,11 @@ export function buildTools(
   } as const;
   const allowed = new Set(normalizeAgentTools(allowedTools));
   return Object.fromEntries(
-    AGENT_TOOL_IDS.filter((id) => allowed.has(id)).map((id) => [id, all[id]]),
+    AGENT_TOOL_IDS.filter(
+      (id) =>
+        allowed.has(id) &&
+        (id !== "message" || Boolean(ctx.getMessageSender?.())),
+    ).map((id) => [id, all[id]]),
   ) as Partial<typeof all>;
 }
 

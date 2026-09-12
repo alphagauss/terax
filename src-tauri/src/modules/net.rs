@@ -16,6 +16,7 @@ use reqwest::header::{ACCEPT, LOCATION, USER_AGENT};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
+pub mod files;
 
 const HEADER_BLOCKLIST: &[&str] = &[
     "host",
@@ -439,6 +440,7 @@ pub enum HttpRedirectMode {
 #[derive(Default)]
 pub struct HttpState {
     requests: Mutex<HashMap<(String, String), CancellationToken>>,
+    pub files: files::PreparedFiles,
 }
 
 /// 请求退出时释放登记；取消会丢弃整个网络 future，包括等待响应头的阶段。
@@ -457,10 +459,36 @@ impl Drop for RequestGuard<'_> {
 }
 
 impl HttpState {
+    /// 为原生复合传输登记一次取消身份，整个操作共享启动确认与总时限。
+    pub async fn operation<T>(
+        &self,
+        owner: &str,
+        id: &str,
+        events: impl HttpEventSink,
+        timeout_ms: u64,
+        work: impl std::future::Future<Output = Result<T, String>>,
+    ) -> Result<T, String> {
+        if timeout_ms == 0 || timeout_ms > 600_000 {
+            return Err("HTTP timeout is out of range".into());
+        }
+        let request = self.begin(owner, id)?;
+        events.send(HttpEvent::Started)?;
+        let result = run_request(&request.token, Some(timeout_ms), work).await;
+        if result.is_err() || request.token.is_cancelled() {
+            self.files.release(owner, id);
+        }
+        if request.token.is_cancelled() {
+            return Err("HTTP request cancelled".into());
+        }
+        result
+    }
     /// 在发送启动确认前登记请求，同一窗口不能重复使用正在运行的请求 ID。
     fn begin(&self, owner: &str, id: &str) -> Result<RequestGuard<'_>, String> {
         if uuid::Uuid::parse_str(id).is_err() {
             return Err("HTTP request ID must be a UUID".into());
+        }
+        if self.files.contains(owner, id) {
+            return Err("request ID belongs to a prepared file".into());
         }
         let key = (owner.to_string(), id.to_string());
         let mut requests = self.requests.lock().map_err(|error| error.to_string())?;
@@ -478,6 +506,7 @@ impl HttpState {
 
     /// 窗口销毁时取消它拥有的全部请求，不影响其他 WebView。
     pub fn cancel_owner(&self, owner: &str) {
+        self.files.clear_owner(owner);
         if let Ok(requests) = self.requests.lock() {
             for ((window, _), token) in requests.iter() {
                 if window == owner {
@@ -532,11 +561,46 @@ pub async fn http_request(
     max_response_bytes: usize,
     on_event: impl HttpEventSink,
 ) -> Result<(), String> {
-    if max_response_bytes == 0 || max_response_bytes > HTTP_RESPONSE_MAX_BYTES {
-        return Err("HTTP response limit is out of range".into());
-    }
     if timeout_ms.is_some_and(|value| value == 0 || value > 600_000) {
         return Err("HTTP timeout must be between 1 and 600000 milliseconds".into());
+    }
+    let request = state.begin(owner, &request_id)?;
+    on_event.send(HttpEvent::Started)?;
+    run_request(
+        &request.token,
+        timeout_ms,
+        exchange(
+            secrets,
+            url,
+            method,
+            redirect,
+            headers,
+            body,
+            allow_private_network,
+            network_target,
+            max_response_bytes,
+            on_event,
+        ),
+    )
+    .await
+}
+
+/// 统一 HTTP 传输内核；调用方拥有取消与总时限，正文出口可以是 WebView 或原生文件。
+#[allow(clippy::too_many_arguments)]
+async fn exchange(
+    secrets: &crate::modules::secrets::SecretsState,
+    url: String,
+    method: String,
+    redirect: Option<HttpRedirectMode>,
+    headers: Option<HashMap<String, String>>,
+    body: Option<Vec<u8>>,
+    allow_private_network: Option<bool>,
+    network_target: NetworkTarget,
+    max_response_bytes: usize,
+    on_event: impl HttpEventSink,
+) -> Result<(), String> {
+    if max_response_bytes == 0 || max_response_bytes > HTTP_RESPONSE_MAX_BYTES {
+        return Err("HTTP response limit is out of range".into());
     }
     if body
         .as_ref()
@@ -544,57 +608,50 @@ pub async fn http_request(
     {
         return Err("HTTP request body is too large".into());
     }
-    let request = state.begin(owner, &request_id)?;
-    on_event
-        .send(HttpEvent::Started)
+    let parsed = validate_url(&url)?;
+    let host = parsed.host_str().ok_or("missing host")?.to_string();
+    let allow_private = allow_private_network.unwrap_or(false);
+    let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
+    let proxy = network_proxy::resolve(secrets, &network_target)?;
+    let client = build_safe_client(
+        allow_private,
+        &[(host, safe_ips)],
+        proxy.as_ref(),
+        redirect.unwrap_or_default(),
+    )?;
+    let response = build_request(&client, &method, parsed, headers, body)?
+        .send()
+        .await
         .map_err(|error| error.to_string())?;
-    let work = async {
-        let parsed = validate_url(&url)?;
-        let host = parsed.host_str().ok_or("missing host")?.to_string();
-        let allow_private = allow_private_network.unwrap_or(false);
-        let safe_ips = classify_and_collect_safe_ips(&host, allow_private).await?;
-        let proxy = network_proxy::resolve(secrets, &network_target)?;
-        let client = build_safe_client(
-            allow_private,
-            &[(host, safe_ips)],
-            proxy.as_ref(),
-            redirect.unwrap_or_default(),
-        )?;
-        let response = build_request(&client, &method, parsed, headers, body)?
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        if response
-            .content_length()
-            .is_some_and(|length| length > max_response_bytes as u64)
-        {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_response_bytes as u64)
+    {
+        return Err("HTTP response is too large".into());
+    }
+    on_event
+        .send(HttpEvent::Headers {
+            status: response.status().as_u16(),
+            headers: header_map_to_strings(response.headers()),
+        })
+        .map_err(|error| error.to_string())?;
+    let mut size = 0usize;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|error| error.to_string())?;
+        size = size.saturating_add(bytes.len());
+        if size > max_response_bytes {
             return Err("HTTP response is too large".into());
         }
         on_event
-            .send(HttpEvent::Headers {
-                status: response.status().as_u16(),
-                headers: header_map_to_strings(response.headers()),
+            .send(HttpEvent::Chunk {
+                bytes: bytes.to_vec(),
             })
             .map_err(|error| error.to_string())?;
-        let mut size = 0usize;
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let bytes = chunk.map_err(|error| error.to_string())?;
-            size = size.saturating_add(bytes.len());
-            if size > max_response_bytes {
-                return Err("HTTP response is too large".into());
-            }
-            on_event
-                .send(HttpEvent::Chunk {
-                    bytes: bytes.to_vec(),
-                })
-                .map_err(|error| error.to_string())?;
-        }
-        on_event
-            .send(HttpEvent::End)
-            .map_err(|error| error.to_string())
-    };
-    run_request(&request.token, timeout_ms, work).await
+    }
+    on_event
+        .send(HttpEvent::End)
+        .map_err(|error| error.to_string())
 }
 
 /// 等待完整请求的取消或总超时，返回时网络 future 已释放。

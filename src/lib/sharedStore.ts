@@ -8,7 +8,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type SharedStoreName =
   | "channels"
-  | `channels-state:${string}`
   | "settings"
   | "ssh-profiles"
   | "custom-themes"
@@ -48,13 +47,6 @@ export function deleteSharedStoreKey(
   key: string,
 ): Promise<void> {
   return trackSharedStoreWrite(invoke("shared_store_delete", { store, key }));
-}
-
-/** 删除封闭 UUID 状态记录，普通配置不能通过此入口整表删除。 */
-export function deleteSharedStoreState(
-  store: Extract<SharedStoreName, `channels-state:${string}`>,
-): Promise<void> {
-  return trackSharedStoreWrite(invoke("shared_store_delete_state", { store }));
 }
 
 export type SharedStoreMutation =

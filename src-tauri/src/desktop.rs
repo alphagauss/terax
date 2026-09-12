@@ -177,6 +177,9 @@ pub fn run() {
         .manage(LaunchFiles(Mutex::new(launch_files)))
         .manage(fullscreen::FullscreenState::default())
         .invoke_handler(tauri::generate_handler![
+            commands::net::http_prepare_file,
+            commands::net::http_file_request,
+            commands::net::http_release_file,
             screenshots::screenshot_status,
             screenshots::screenshot_configure,
             screenshots::screenshot_start,
@@ -319,7 +322,6 @@ pub fn run() {
             commands::store::shared_store_read,
             commands::store::shared_store_set,
             commands::store::shared_store_delete,
-            commands::store::shared_store_delete_state,
             commands::store::shared_store_mutate,
             commands::store::shared_store_revision,
             open_with::open_with_register,

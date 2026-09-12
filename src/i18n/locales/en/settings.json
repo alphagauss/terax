@@ -516,7 +516,7 @@
       "toolsDescription": "Select tools individually. write_file and apply_patch require read_file; deselecting read_file also deselects both editing tools. Tool permissions still apply.",
       "nextTurn": "Saved changes apply to the next turn in new and existing conversations. A running turn keeps its current configuration.",
       "resetTools": "Restore default tools",
-      "unavailable": "Unavailable in Channels: requires an active desktop terminal.",
+      "unavailable": "Unavailable for this agent or conversation.",
       "saveFailed": "Could not save the agent. Your edits have been kept."
     },
     "tools": {
@@ -534,6 +534,9 @@
       },
       "subagents": {
         "label": "Subagents"
+      },
+      "channels": {
+        "label": "Channel messages"
       }
     },
     "delete": {
@@ -587,7 +590,8 @@
       "shell_process": "Read output, send input, or stop a managed process.",
       "shell_list": "List managed shell processes.",
       "get_terminal_output": "Read the active non-private terminal scrollback.",
-      "run_subagent": "Delegate a task to a subagent."
+      "run_subagent": "Delegate a task to a subagent.",
+      "message": "Send text and attachments to the current channel."
     }
   },
   "remote": {

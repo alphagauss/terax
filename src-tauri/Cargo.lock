@@ -6688,6 +6688,7 @@ dependencies = [
 name = "terax"
 version = "0.8.2"
 dependencies = [
+ "aes",
  "arboard",
  "bytes",
  "dirs 6.0.0",
@@ -6706,6 +6707,7 @@ dependencies = [
  "libc",
  "log",
  "mac-usernotifications",
+ "md5",
  "notify",
  "notify-rust",
  "nucleo-matcher",

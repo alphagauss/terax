@@ -516,7 +516,7 @@
       "toolsDescription": "逐项选择工具。write_file 和 apply_patch 依赖 read_file；取消 read_file 会同时取消这两个编辑工具。工具授权规则仍然生效。",
       "nextTurn": "保存后，新会话和既有会话的下一轮生效；正在执行的一轮保持当前配置。",
       "resetTools": "恢复默认工具",
-      "unavailable": "Channels 不支持此工具：需要活动桌面终端。",
+      "unavailable": "当前智能体或会话不支持此工具。",
       "saveFailed": "智能体保存失败，已保留编辑内容。"
     },
     "tools": {
@@ -534,6 +534,9 @@
       },
       "subagents": {
         "label": "子智能体"
+      },
+      "channels": {
+        "label": "Channel 消息"
       }
     },
     "delete": {
@@ -587,7 +590,8 @@
       "shell_process": "读取受管进程输出、发送输入或停止进程。",
       "shell_list": "列出受管 Shell 进程。",
       "get_terminal_output": "读取活动非隐私终端的历史输出。",
-      "run_subagent": "将任务委派给子智能体。"
+      "run_subagent": "将任务委派给子智能体。",
+      "message": "向当前 Channel 发送文本与附件。"
     }
   },
   "remote": {

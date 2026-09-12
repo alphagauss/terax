@@ -260,6 +260,18 @@ pub async fn workspace_prepare_default_root(
     }
 }
 
+/// 宿主提供应用数据根，业务只选择相对目录；规则复用文件服务的目录边界。
+pub fn workspace_prepare_app_root(
+    relative: &str,
+    registry: &WorkspaceRegistry,
+) -> Result<String, String> {
+    let base = crate::modules::app_data::root()?;
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    let path = crate::modules::fs::file::prepare_relative_directory(&base, relative)?;
+    let canonical = registry.authorize(path).map_err(|e| e.to_string())?;
+    Ok(crate::modules::fs::to_canon(&canonical))
+}
+
 /// 在指定工作区执行操作，状态由调用者持有。
 pub async fn workspace_current_dir(registry: &WorkspaceRegistry) -> Result<String, String> {
     let launch = resolve_launch_dir();

@@ -73,8 +73,12 @@ pub async fn fs_canonicalize(
 
 /// 将桌面上下文交给共享服务。
 #[tauri::command]
-pub async fn fs_stat(path: String, workspace: Option<WorkspaceEnv>) -> Result<FileStat, String> {
-    service::fs_stat(path, workspace).await
+pub async fn fs_stat(
+    path: String,
+    workspace: Option<WorkspaceEnv>,
+    missing_ok: Option<bool>,
+) -> Result<Option<FileStat>, String> {
+    service::fs_stat(path, workspace, missing_ok.unwrap_or(false)).await
 }
 
 impl FileEvents for tauri::AppHandle {

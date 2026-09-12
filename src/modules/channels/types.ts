@@ -12,7 +12,7 @@ export const connectionSchema = z
     name: z.string().trim().min(1).max(80),
     sessionId: z.uuid().refine((value) => value === value.toLowerCase()),
     enabled: z.boolean(),
-    accountId: z.string().max(256).nullable(),
+    accountId: z.string().min(1).max(256).nullable(),
     busyMessageMode: z.enum(["steer", "queue"]),
   })
   .strict();
@@ -52,8 +52,36 @@ export type ChannelInbound = {
   senderId: string;
   text: string;
   receivedAt: number;
-  replyContext: string;
+  replyContext: unknown;
+  attachments: ChannelAttachment[];
 };
+
+/** 附件原件属于账号 cwd；失败记录保留名称，不能伪装为可读文件。 */
+export type ChannelAttachment = {
+  id: string;
+  name: string;
+  kind: "file" | "image" | "video" | "audio";
+} & ({ status: "ready"; path: string; size: number } | { status: "failed" });
+
+/** 出站只表达内容与展示意图，目标由当前运行绑定，平台负责协议编码。 */
+export type ChannelOutbound = {
+  text?: string;
+  attachments?: Array<{
+    path: string;
+    presentation: "file" | "image" | "video" | "audio";
+  }>;
+};
+
+export type ChannelDeliveryResult = {
+  status: "accepted" | "partial" | "failed" | "unknown";
+  parts: Array<{ index: number; status: "accepted" | "failed" | "unknown" }>;
+};
+
+/** 由主运行绑定目标的发送能力，工具层只消费这一份投递契约。 */
+export type ChannelMessageSender = (
+  input: ChannelOutbound,
+  signal?: AbortSignal,
+) => Promise<ChannelDeliveryResult>;
 
 export const checkpointSchema = z
   .object({
@@ -80,7 +108,10 @@ export type ChannelSnapshot = {
 export type ReceiveContext = {
   signal: AbortSignal;
   cursor: string;
-  receive: (message: ChannelInbound) => Promise<void>;
+  receive: (
+    message: ChannelInbound,
+    materialize?: () => Promise<ChannelInbound>,
+  ) => Promise<void>;
   checkpoint: (cursor: string) => Promise<void>;
   status: (status: ChannelStatus) => void;
 };
@@ -91,9 +122,9 @@ export type ChannelAdapter = {
   receive: (context: ReceiveContext) => Promise<void>;
   send: (
     message: ChannelInbound,
-    text: string,
+    content: ChannelOutbound,
     signal: AbortSignal,
-  ) => Promise<void>;
+  ) => Promise<ChannelDeliveryResult>;
 };
 
 /** 可取消等待只用于协议退避，取消后立即清理 timer 和监听器。 */

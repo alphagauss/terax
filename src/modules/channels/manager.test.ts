@@ -12,7 +12,8 @@ import type {
   ChannelSnapshot,
   ReceiveContext,
 } from "@/modules/channels/types";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
+import { getChannelMessageSender } from "@/modules/channels/delivery";
 
 const connection = (id: string): ChannelConnection => ({
   id,
@@ -27,6 +28,7 @@ const message = (id: string): ChannelInbound => ({
   id,
   text: id,
   senderId: id,
+  attachments: [],
   replyContext: id,
   receivedAt: 1,
 });
@@ -39,7 +41,10 @@ function harness() {
   const gates: Array<() => void> = [];
   const calls: string[] = [];
   let snapshots: ChannelSnapshot[] = [];
-  const send = vi.fn(async () => {});
+  const send = vi.fn(async () => ({
+    status: "accepted" as const,
+    parts: [{ index: 0, status: "accepted" as const }],
+  }));
   const save = vi.fn(async (id: string, checkpoint: ChannelCheckpoint) => {
     disk.set(id, structuredClone(checkpoint));
   });
@@ -97,6 +102,7 @@ function harness() {
       return input.text;
     },
     failureText: () => "Failed",
+    emptyReply: () => "Empty",
     changed: (value) => {
       snapshots = value;
     },
@@ -118,6 +124,56 @@ function harness() {
 }
 
 describe("ChannelManager", () => {
+  it("附件工具成功投递后没有最终正文时不补发空回复", async () => {
+    const h = harness();
+    await h.manager.configure([connection("a")]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    await h.receivers.get("a")?.receive({ ...message("file-only"), text: "" });
+    const send = getChannelMessageSender("session-a");
+    assert(send);
+    await send({ attachments: [{ path: "file.pdf", presentation: "file" }] });
+    h.gates[0]();
+    await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
+    expect(h.send).toHaveBeenCalledTimes(1);
+    await h.manager.dispose();
+  });
+  it("去重与检查点先于附件下载，下载期间不启动 Agent", async () => {
+    const h = harness();
+    await h.manager.configure([connection("media")]);
+    await vi.waitFor(() => expect(h.receivers.has("media")).toBe(true));
+    const receiver = h.receivers.get("media");
+    assert(receiver);
+    let finish!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const materialize = vi.fn(async () => {
+      expect(h.disk.get("media")?.recentIds).toContain("file");
+      await ready;
+      return {
+        ...message("file"),
+        attachments: [
+          {
+            id: "asset",
+            name: "file.pdf",
+            kind: "file" as const,
+            status: "ready" as const,
+            path: "attachments/asset/file.pdf",
+            size: 10,
+          },
+        ],
+      };
+    });
+    const receiving = receiver.receive(message("file"), materialize);
+    await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
+    expect(h.calls).toEqual([]);
+    await receiver.receive(message("file"), materialize);
+    expect(materialize).toHaveBeenCalledTimes(1);
+    finish();
+    await receiving;
+    expect(h.calls).toEqual(["media:file"]);
+    await h.manager.dispose();
+  });
   it("在线改名保留接收任务、当前执行和待处理消息", async () => {
     const h = harness();
     const original = connection("a");
