@@ -29,7 +29,7 @@ import {
 } from "@/modules/channels/types";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { prepareChannelWorkspace } from "@/modules/channels/workspace";
-import { channelInputText } from "@/modules/channels/messages";
+import { channelUserMessage } from "@/modules/channels/messages";
 import type { UIMessage } from "ai";
 
 /** 准备固定 Channel 会话，现有会话只恢复，不抢占桌面草稿。 */
@@ -132,23 +132,14 @@ export async function runChannelTurn(
   const offset = chat.messages.length;
   const accepted = await startChatMessage(
     connection.sessionId,
-    {
-      role: "user",
-      parts: [{ type: "text", text: channelInputText(message) }],
-      metadata: { createdAt: message.receivedAt },
-    },
+    channelUserMessage(message),
     { id: connection.id, ...config },
   );
   if (!accepted) throw new ChannelError("model");
   ready((input) =>
     steerChatMessage(
       connection.sessionId,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        parts: [{ type: "text", text: channelInputText(input) }],
-        metadata: { createdAt: input.receivedAt },
-      },
+      channelUserMessage(input),
       connection.id,
     ),
   );

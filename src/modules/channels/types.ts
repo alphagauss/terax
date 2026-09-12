@@ -3,6 +3,7 @@
  * 平台身份、投递上下文与 AI 消息分离，每个连接独占一个固定会话。
  */
 
+import type { FileUIPart } from "ai";
 import { z } from "zod";
 
 export const connectionSchema = z
@@ -54,6 +55,8 @@ export type ChannelInbound = {
   receivedAt: number;
   replyContext: unknown;
   attachments: ChannelAttachment[];
+  /** 已物化为模型通用文件输入的图片，不包含平台下载凭据或远程地址。 */
+  modelMedia?: FileUIPart[];
 };
 
 /** 附件原件属于账号 cwd；失败记录保留名称，不能伪装为可读文件。 */

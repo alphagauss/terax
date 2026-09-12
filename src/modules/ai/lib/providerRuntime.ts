@@ -22,6 +22,7 @@ import type {
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
 import { createHttpFetch } from "@/lib/http";
+import { withVisualInputFallback } from "@/modules/ai/lib/visualInput";
 
 /** SDK 需要本地下载远端附件时沿用 Provider 出口，但不继承模型服务器的私网权限。 */
 export function createProviderDownload(
@@ -55,7 +56,7 @@ type RuntimeFactory = (
   modelId: string,
   apiKey: string | undefined,
   fetch: typeof globalThis.fetch,
-) => Promise<LanguageModel>;
+) => Promise<Exclude<LanguageModel, string>>;
 
 const RUNTIME_FACTORIES: Record<RuntimeAdapterId, RuntimeFactory> = {
   openai: async (connection, modelId, apiKey, fetch) => {
@@ -111,7 +112,7 @@ const RUNTIME_FACTORIES: Record<RuntimeAdapterId, RuntimeFactory> = {
 export function buildLanguageModel(
   connection: ResolvedProviderConnection,
   modelId: string,
-): Promise<LanguageModel> {
+): Promise<Exclude<LanguageModel, string>> {
   const id = normalizeModelId(modelId);
   if (!id) throw new Error("Model ID is invalid");
   if (!isProviderConnectionReady(connection)) {
@@ -147,7 +148,7 @@ export type RuntimeProviderConfig = {
 };
 
 /** 解析模型引用和对应凭据后创建语言模型。 */
-export function buildConfiguredLanguageModel(
+export async function buildConfiguredLanguageModel(
   modelRef: ModelRef,
   keys: ProviderKeys,
   config: RuntimeProviderConfig = {},
@@ -158,5 +159,6 @@ export function buildConfiguredLanguageModel(
     providerCredentials: keys,
     providerInstanceCredentials: config.providerInstanceKeys,
   });
-  return buildLanguageModel(connection, modelRef.modelId);
+  const model = await buildLanguageModel(connection, modelRef.modelId);
+  return withVisualInputFallback(model);
 }

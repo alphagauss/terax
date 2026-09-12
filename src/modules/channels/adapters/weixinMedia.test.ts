@@ -17,7 +17,14 @@ vi.mock("@/lib/httpFiles", () => ({
   httpFileRequest: vi.fn(),
   withPreparedHttpFile: vi.fn(),
 }));
-vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
+vi.mock("@/i18n", () => ({
+  default: {
+    t: (key: string, values?: Record<string, unknown>) =>
+      key === "channels:imageAttachmentSummary"
+        ? `images ${values?.paths}`
+        : key,
+  },
+}));
 const files = {
   root: "/account",
   ownerSessionId: "session",
