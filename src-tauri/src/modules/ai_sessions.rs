@@ -44,7 +44,6 @@ pub fn release(state: &AiSessionsState, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
 use std::time::Duration;
 use std::time::UNIX_EPOCH;
 use uuid::Uuid;
@@ -125,6 +124,33 @@ fn session_path(root: &Path, id: Uuid) -> PathBuf {
 /// 生成不进入会话正文的跨进程锁文件路径。
 fn lock_path(root: &Path, id: Uuid) -> PathBuf {
     root.join(format!("{id}.lock"))
+}
+
+/// 串行化会话锁文件的打开与删除，不覆盖会话运行期；此固定锁文件不得删除。
+fn lock_session_lifecycle(root: &Path) -> Result<FileLock, String> {
+    FileLock::acquire(&root.join("sessions.lock"), Duration::from_secs(5))
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "session lock management is busy".to_string())
+}
+
+fn try_session_lock(root: &Path, id: Uuid) -> Result<Option<FileLock>, String> {
+    let _lifecycle = lock_session_lifecycle(root)?;
+    FileLock::try_acquire(&lock_path(root, id)).map_err(|error| error.to_string())
+}
+
+/// 调用方须持有生命周期锁，防止关闭句柄后其他进程打开即将删除的锁文件。
+fn remove_session_files(root: &Path, id: Uuid, lock: FileLock) -> Result<(), String> {
+    remove_if_present(&session_path(root, id))?;
+    drop(lock);
+    remove_if_present(&lock_path(root, id))
+}
+
+fn remove_if_present(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// 校验会话文件的文件级字段和 JSONL 记录形状。
@@ -500,8 +526,7 @@ fn commit_with_run_lock(
         return commit_session(root, session, environment_key);
     }
     drop(run_locks);
-    let _lock = FileLock::try_acquire(&lock_path(root, id))
-        .map_err(|error| error.to_string())?
+    let _lock = try_session_lock(root, id)?
         .ok_or_else(|| "session is running in another window".to_string())?;
     commit_session(root, session, environment_key)
 }
@@ -534,8 +559,10 @@ pub fn commit(
 
 /// 删除指定会话文件，运行中的会话不可删除。
 pub fn ai_session_delete(state: &AiSessionsState, id: String) -> Result<(), String> {
-    let id = strict_uuid(&id)?;
-    let root = sessions_dir()?;
+    delete_session(&sessions_dir()?, state, strict_uuid(&id)?)
+}
+
+fn delete_session(root: &Path, state: &AiSessionsState, id: Uuid) -> Result<(), String> {
     if state
         .run_locks
         .lock()
@@ -544,10 +571,11 @@ pub fn ai_session_delete(state: &AiSessionsState, id: String) -> Result<(), Stri
     {
         return Err("cannot delete a running session".to_string());
     }
-    let _lock = FileLock::try_acquire(&lock_path(&root, id))
+    let _lifecycle = lock_session_lifecycle(root)?;
+    let lock = FileLock::try_acquire(&lock_path(root, id))
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "session is running in another window".to_string())?;
-    let path = session_path(&root, id);
+    let path = session_path(root, id);
     if path.exists() {
         let header = read_header(&path, id)?;
         if let Some(channel_id) = header.metadata.get("channelId").and_then(Value::as_str) {
@@ -556,11 +584,7 @@ pub fn ai_session_delete(state: &AiSessionsState, id: String) -> Result<(), Stri
             }
         }
     }
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.to_string()),
-    }
+    remove_session_files(root, id, lock)
 }
 
 /// 删除指定 Custom Agent 拥有的全部会话。
@@ -586,6 +610,7 @@ fn delete_sessions_by_agent(
     }
     drop(run_locks);
 
+    let _lifecycle = lock_session_lifecycle(root)?;
     let mut file_locks = Vec::with_capacity(ids.len());
     for id in &ids {
         let Some(lock) =
@@ -596,14 +621,9 @@ fn delete_sessions_by_agent(
         file_locks.push(lock);
     }
 
-    for id in &ids {
-        match fs::remove_file(session_path(root, *id)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.to_string()),
-        }
+    for (id, lock) in ids.iter().zip(file_locks) {
+        remove_session_files(root, *id, lock)?;
     }
-    drop(file_locks);
     Ok(ids.into_iter().map(|id| id.to_string()).collect())
 }
 
@@ -638,9 +658,7 @@ fn acquire_session_run(
         return Ok(true);
     }
     fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    let Some(lock) =
-        FileLock::try_acquire(&lock_path(root, id)).map_err(|error| error.to_string())?
-    else {
+    let Some(lock) = try_session_lock(root, id)? else {
         return Ok(false);
     };
     let path = session_path(root, id);
@@ -893,6 +911,46 @@ mod tests {
         expected.sort();
         assert_eq!(deleted, expected);
         assert!(session_path(dir.path(), main).exists());
+        for id in [first, second] {
+            assert!(!session_path(dir.path(), id).exists());
+            assert!(!lock_path(dir.path(), id).exists());
+        }
+    }
+
+    #[test]
+    fn deletion_cleans_lock_and_preserves_files_when_running_or_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let state = AiSessionsState::default();
+        commit_with_run_lock(dir.path(), &state, id, &session(id, "saved"), "local").unwrap();
+        let lock = try_session_lock(dir.path(), id).unwrap().unwrap();
+        state.run_locks.lock().unwrap().insert(id, lock);
+        assert!(delete_session(dir.path(), &state, id).is_err());
+        assert!(session_path(dir.path(), id).exists());
+        assert!(lock_path(dir.path(), id).exists());
+        release(&state, &id.to_string()).unwrap();
+
+        delete_session(dir.path(), &state, id).unwrap();
+        delete_session(dir.path(), &state, id).unwrap();
+        assert!(!session_path(dir.path(), id).exists());
+        assert!(!lock_path(dir.path(), id).exists());
+
+        fs::write(session_path(dir.path(), id), b"invalid").unwrap();
+        assert!(delete_session(dir.path(), &state, id).is_err());
+        assert!(session_path(dir.path(), id).exists());
+        assert!(lock_path(dir.path(), id).exists());
+
+        // 数据删除失败时保留锁文件，且管理锁和会话锁均能重新取得。
+        let lifecycle = lock_session_lifecycle(dir.path()).unwrap();
+        let lock = FileLock::try_acquire(&lock_path(dir.path(), id))
+            .unwrap()
+            .unwrap();
+        fs::remove_file(session_path(dir.path(), id)).unwrap();
+        fs::create_dir(session_path(dir.path(), id)).unwrap();
+        assert!(remove_session_files(dir.path(), id, lock).is_err());
+        assert!(lock_path(dir.path(), id).exists());
+        drop(lifecycle);
+        assert!(try_session_lock(dir.path(), id).unwrap().is_some());
     }
 
     #[test]
@@ -1080,9 +1138,15 @@ mod tests {
         let id = Uuid::parse_str(&std::env::var("TERAX_SESSION_TEST_ID").unwrap()).unwrap();
         let ready = PathBuf::from(std::env::var_os("TERAX_SESSION_TEST_READY").unwrap());
         let release = PathBuf::from(std::env::var_os("TERAX_SESSION_TEST_RELEASE").unwrap());
-        let _lock = FileLock::try_acquire(&lock_path(Path::new(&root), id))
-            .unwrap()
-            .unwrap();
+        if let Some(blocked) = std::env::var_os("TERAX_SESSION_TEST_BLOCKED") {
+            assert!(
+                FileLock::try_acquire(&Path::new(&root).join("sessions.lock"))
+                    .unwrap()
+                    .is_none()
+            );
+            fs::write(blocked, b"blocked").unwrap();
+        }
+        let _lock = try_session_lock(Path::new(&root), id).unwrap().unwrap();
         fs::write(&ready, b"ready").unwrap();
         wait_for(&release);
     }
@@ -1108,6 +1172,8 @@ mod tests {
         let state = AiSessionsState::default();
         let value = session(id, "locked");
         assert!(commit_with_run_lock(dir.path(), &state, id, &value, "local").is_err());
+        assert!(delete_session(dir.path(), &state, id).is_err());
+        assert!(lock_path(dir.path(), id).exists());
         fs::write(&release, b"release").unwrap();
         assert!(child.wait().unwrap().success());
 
@@ -1116,5 +1182,47 @@ mod tests {
             read_session(dir.path(), id).unwrap().metadata["title"],
             "locked"
         );
+        delete_session(dir.path(), &state, id).unwrap();
+        assert!(!lock_path(dir.path(), id).exists());
+    }
+
+    #[test]
+    fn lifecycle_lock_blocks_other_process_until_session_lock_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4();
+        let ready = dir.path().join("ready");
+        let release = dir.path().join("release");
+        let blocked = dir.path().join("blocked");
+        let lifecycle = lock_session_lifecycle(dir.path()).unwrap();
+        let lock = FileLock::try_acquire(&lock_path(dir.path(), id))
+            .unwrap()
+            .unwrap();
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("modules::ai_sessions::tests::subprocess_session_lock_helper")
+            .arg("--nocapture")
+            .env("TERAX_SESSION_TEST_ROOT", dir.path())
+            .env("TERAX_SESSION_TEST_ID", id.to_string())
+            .env("TERAX_SESSION_TEST_READY", &ready)
+            .env("TERAX_SESSION_TEST_RELEASE", &release)
+            .env("TERAX_SESSION_TEST_BLOCKED", &blocked)
+            .spawn()
+            .unwrap();
+        wait_for(&blocked);
+        remove_session_files(dir.path(), id, lock).unwrap();
+        assert!(!ready.exists());
+        assert!(!lock_path(dir.path(), id).exists());
+        drop(lifecycle);
+
+        wait_for(&ready);
+        assert!(try_session_lock(dir.path(), id).unwrap().is_none());
+        // 管理锁不覆盖运行期，其他会话仍可独立取得运行锁。
+        assert!(try_session_lock(dir.path(), Uuid::new_v4())
+            .unwrap()
+            .is_some());
+        fs::write(&release, b"release").unwrap();
+        assert!(child.wait().unwrap().success());
+        delete_session(dir.path(), &AiSessionsState::default(), id).unwrap();
+        assert!(!lock_path(dir.path(), id).exists());
     }
 }
