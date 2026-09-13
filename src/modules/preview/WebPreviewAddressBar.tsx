@@ -129,7 +129,7 @@ export const WebPreviewAddressBar = forwardRef<
             variant="ghost"
             size="icon-sm"
             onClick={onReload}
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0"
           >
             <HugeiconsIcon
               icon={ArrowReloadHorizontalIcon}
@@ -146,7 +146,7 @@ export const WebPreviewAddressBar = forwardRef<
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="shrink-0 gap-1 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="shrink-0 gap-1 px-1.5"
               >
                 <HugeiconsIcon
                   icon={Globe02Icon}
@@ -211,7 +211,7 @@ export const WebPreviewAddressBar = forwardRef<
             onClick={() => {
               if (url) void openUrl(url).catch(console.error);
             }}
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0"
             disabled={!url}
           >
             <HugeiconsIcon

@@ -1269,12 +1269,12 @@ function CustomProviderCard({
           <Button
             aria-label={t("models.card.removeEndpoint")}
             size="icon-sm"
-            variant="ghost"
+            variant="ghost-destructive-hover"
             onClick={(e) => {
               e.stopPropagation();
               onRemove();
             }}
-            className="ml-auto text-muted-foreground hover:text-destructive"
+            className="ml-auto"
           >
             <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
           </Button>
@@ -1336,9 +1336,8 @@ function CustomProviderCard({
                   <Button
                     aria-label={t("models.card.removeKey")}
                     size="icon-sm"
-                    variant="ghost"
+                    variant="ghost-destructive-hover"
                     onClick={() => void onClearKey()}
-                    className="text-muted-foreground hover:text-destructive"
                   >
                     <HugeiconsIcon
                       icon={Cancel01Icon}

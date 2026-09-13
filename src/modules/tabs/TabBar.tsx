@@ -703,7 +703,7 @@ export function TabBar({
                 aria-label={tr("newTab")}
                 variant="ghost"
                 size="icon-sm"
-                className="sticky right-0 z-10 shrink-0 bg-card text-muted-foreground hover:bg-accent hover:text-foreground"
+                className="sticky right-0 z-10 shrink-0 bg-card"
               >
                 <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
               </Button>

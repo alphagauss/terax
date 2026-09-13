@@ -448,7 +448,6 @@ function ToolbarButton({
         aria-label={label}
         disabled={disabled}
         onClick={onClick}
-        className="text-muted-foreground hover:text-foreground"
       >
         {children}
       </Button>

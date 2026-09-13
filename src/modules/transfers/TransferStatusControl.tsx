@@ -198,7 +198,6 @@ function TransferStatusPanel() {
                 aria-label={t("transfers.clearCompleted")}
                 disabled={completedCount === 0 || clearing !== null}
                 onClick={() => void clearTasks("completed")}
-                className="text-muted-foreground hover:text-foreground"
               >
                 <HugeiconsIcon icon={CleanIcon} size={13} strokeWidth={1.8} />
               </Button>
@@ -206,12 +205,11 @@ function TransferStatusPanel() {
             <Hint content={t("transfers.clearAll")}>
               <Button
                 type="button"
-                variant="ghost"
+                variant="ghost-destructive-hover"
                 size="icon-xs"
                 aria-label={t("transfers.clearAll")}
                 disabled={clearableCount === 0 || clearing !== null}
                 onClick={() => setConfirmClearAllOpen(true)}
-                className="text-muted-foreground hover:text-destructive"
               >
                 <HugeiconsIcon
                   icon={Delete02Icon}
@@ -684,7 +682,6 @@ function TaskButton({
         aria-label={label}
         onClick={onClick}
         disabled={disabled}
-        className="text-muted-foreground"
       >
         <HugeiconsIcon icon={icon} size={11} strokeWidth={1.9} />
       </Button>

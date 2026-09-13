@@ -258,8 +258,7 @@ export function AgentsSection() {
                   <Button
                     aria-label={t("common.delete")}
                     size="icon-sm"
-                    variant="ghost"
-                    className="text-muted-foreground hover:text-destructive"
+                    variant="ghost-destructive-hover"
                     onClick={() => removeSnippet(s.id)}
                   >
                     <HugeiconsIcon
@@ -391,8 +390,7 @@ function AgentCard({
               <Button
                 aria-label={t("common.delete")}
                 size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
+                variant="ghost-destructive-hover"
                 onClick={onDelete}
               >
                 <HugeiconsIcon

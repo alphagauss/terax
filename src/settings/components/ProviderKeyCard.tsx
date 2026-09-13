@@ -125,9 +125,8 @@ export function ProviderKeyCard({
           <Button
             aria-label={t("models.card.removeProvider")}
             size="icon-sm"
-            variant="ghost"
+            variant="ghost-destructive-hover"
             onClick={onRemove}
-            className="text-muted-foreground hover:text-destructive"
           >
             <HugeiconsIcon icon={Cancel01Icon} size={12} strokeWidth={1.75} />
           </Button>

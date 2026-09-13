@@ -22,7 +22,6 @@ export function RepositoryDiffStats({
         <Button
           variant="ghost"
           size="xs"
-          className="text-muted-foreground"
           aria-pressed={staged}
           onClick={() => setStaged(!staged)}
         >

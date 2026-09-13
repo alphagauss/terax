@@ -360,8 +360,7 @@ export function ThemesSection() {
             {backgroundKind === "image" && backgroundImageId ? (
               <Button
                 size="sm"
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
+                variant="ghost-destructive-hover"
                 onClick={() => void onRemoveBackground()}
               >
                 {t("themes.background.remove")}

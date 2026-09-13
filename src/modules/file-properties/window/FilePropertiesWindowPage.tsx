@@ -224,7 +224,6 @@ export function FilePropertiesWindowPage() {
             <Button
               variant="ghost"
               size="icon-xs"
-              className="text-muted-foreground"
               disabled={!target || loading || scan.status === "loading"}
               onClick={refreshProperties}
               aria-label={t("common:refresh")}
@@ -285,7 +284,7 @@ export function FilePropertiesWindowPage() {
                       size="icon-xs"
                       variant="ghost"
                       onClick={() => void copyPath()}
-                      className="shrink-0 text-muted-foreground hover:text-foreground"
+                      className="shrink-0"
                       aria-label={
                         pathCopied ? t("common:copied") : t("common:copy")
                       }

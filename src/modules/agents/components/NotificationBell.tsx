@@ -125,12 +125,14 @@ function HookAgentRow({
         </span>
       ) : null}
       <Hint content={t("hook.hint")}>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="xs"
           onClick={onToggle}
           disabled={disabled}
           aria-label={`${label}: ${t(ready ? "hook.disable" : "hook.enable")}`}
-          className="flex w-14 shrink-0 items-center justify-center gap-1 rounded-md py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-60"
+          className="w-14"
         >
           {installing ? (
             <HugeiconsIcon
@@ -143,7 +145,7 @@ function HookAgentRow({
           {installing
             ? t(ready ? "hook.disabling" : "hook.enabling")
             : t(ready ? "hook.disable" : "hook.enable")}
-        </button>
+        </Button>
       </Hint>
     </div>
   );
@@ -291,7 +293,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
             aria-label={t("bell.title")}
             variant="ghost"
             size="icon-sm"
-            className="relative shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="relative shrink-0"
           >
             <HugeiconsIcon
               icon={Notification01Icon}
@@ -322,13 +324,14 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
               </span>
             ) : null}
             {notifications.length > 0 ? (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 onClick={clearNotifications}
-                className="rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 {t("bell.clear")}
-              </button>
+              </Button>
             ) : null}
           </div>
         </div>

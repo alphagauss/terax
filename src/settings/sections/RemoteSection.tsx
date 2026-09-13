@@ -963,8 +963,7 @@ export function RemoteSection() {
           <ConnectionSettingsActions>
             {selected ? (
               <Button
-                variant="ghost"
-                className="text-muted-foreground hover:text-destructive"
+                variant="ghost-destructive-hover"
                 disabled={busy}
                 onClick={() => void remove()}
               >

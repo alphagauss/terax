@@ -327,7 +327,7 @@ export function SidebarSectionAction({
           aria-label={label}
           disabled={disabled}
           onClick={onClick}
-          className="cursor-pointer text-muted-foreground hover:text-foreground disabled:cursor-not-allowed"
+          className="cursor-pointer disabled:cursor-not-allowed"
         >
           {children}
         </Button>
