@@ -204,7 +204,6 @@ export default function App() {
     openFileEditsTab,
     setAiDiffStatus,
     openGitDiffTab,
-    openCommitHistoryTab,
     openCommitFileDiffTab,
     closeTab,
     updateTab,
@@ -276,7 +275,6 @@ export default function App() {
   const explorerReturnFocusRef = useRef<HTMLElement | null>(null);
   const [activeEditorHandle, setActiveEditorHandle] =
     useState<EditorPaneHandle | null>(null);
-  const gitHistoryRefs = useRef(new Map<number, FindHandle>());
   const { zoomIn, zoomOut, zoomReset } = useZoom();
   useTerminalFileDrop();
   const explorerRef = useRef<FileExplorerHandle>(null);
@@ -441,7 +439,6 @@ export default function App() {
   const isEditorTab =
     activeTab?.kind === "editor" ||
     (activeTab?.kind === "markdown" && activeEditorHandle !== null);
-  const isGitHistoryTab = activeTab?.kind === "git-history";
 
   useEditorFileSync({ tabs, tabsRef, editorRefs });
   useThemeFileEditing({ tabsRef, openFileTab });
@@ -504,7 +501,6 @@ export default function App() {
       markdownNavigationRefs.current.delete(id);
       pendingContentNavigation.current.delete(id);
       webPreviewRefs.current.delete(id);
-      gitHistoryRefs.current.delete(id);
     },
     [closeTab],
   );
@@ -716,9 +712,6 @@ export default function App() {
     const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
     if (tab?.kind === "terminal") {
       return terminalRefs.current.get(tab.id) ?? null;
-    }
-    if (tab?.kind === "git-history") {
-      return gitHistoryRefs.current.get(tabId) ?? null;
     }
     return null;
   }, []);
@@ -1014,7 +1007,7 @@ export default function App() {
   const toggleSourceControl = useCallback(() => {
     sidebar.toggleContainer("source-control");
   }, [sidebar.toggleContainer]);
-  const { sourceControl, openGitGraphFromContext } = useSourceControlContext({
+  const { sourceControl } = useSourceControlContext({
     activeTab,
     tabs,
     activeTerminalCwd,
@@ -1023,8 +1016,6 @@ export default function App() {
     launchCwdResolved: spaceTabs.length > 0 && launchCwdResolved,
     home,
     sourceControlVisible: sidebar.isVisible("source-control"),
-    openCommitHistoryTab,
-    closeTab,
   });
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
@@ -1464,7 +1455,7 @@ export default function App() {
         ? createCommandItems({
             tabs,
             activeId,
-            canFind: isTerminalTab || isEditorTab || isGitHistoryTab,
+            canFind: isTerminalTab || isEditorTab,
             explorerRoot,
             home,
             openNewWindow,
@@ -1474,7 +1465,6 @@ export default function App() {
             openNewPrivate: openNewPrivateTab,
             openNewEditor: () => void openNewEditor(),
             openNewWebPreview: () => openWebPreviewTab(""),
-            openGitGraph: openGitGraphFromContext,
             toggleSourceControl,
             closeActiveTab: handleCloseActiveTab,
             splitGroupRight: () => splitActiveTab("right"),
@@ -1503,7 +1493,6 @@ export default function App() {
       activeId,
       isTerminalTab,
       isEditorTab,
-      isGitHistoryTab,
       explorerRoot,
       home,
       openNewWindow,
@@ -1513,7 +1502,6 @@ export default function App() {
       openNewEditor,
       openNewPrivateTab,
       openWebPreviewTab,
-      openGitGraphFromContext,
       toggleSourceControl,
       handleCloseActiveTab,
       splitActiveTab,
@@ -1645,10 +1633,6 @@ export default function App() {
         setActiveGroup(groupId);
         void openNewEditor();
       },
-      newGitGraph: (groupId) => {
-        setActiveGroup(groupId);
-        openGitGraphFromContext();
-      },
       closeTab: (tabId) => void handleClose(tabId),
       runPythonFile: pythonRunner.runTab,
       attachFileToAgent: handleAttachFileToAgent,
@@ -1668,7 +1652,6 @@ export default function App() {
       groupCwd,
       openNewEditor,
       openTerminalPage,
-      openGitGraphFromContext,
       openWebPreviewTab,
       pinTab,
       resizeSplit,
@@ -1678,14 +1661,6 @@ export default function App() {
       splitTab,
       workspacePageHandoff,
     ],
-  );
-
-  const registerGitHistoryHandle = useCallback(
-    (tabId: number, handle: FindHandle | null) => {
-      if (handle) gitHistoryRefs.current.set(tabId, handle);
-      else gitHistoryRefs.current.delete(tabId);
-    },
-    [],
   );
 
   const workbenchServices = useMemo<WorkbenchViewServices>(
@@ -1706,17 +1681,13 @@ export default function App() {
       onAiDiffReject: (key) => {
         if (respondApproval(key, false)) setAiDiffStatus(key, "rejected");
       },
-      onOpenCommitFile: openCommitFileDiffTab,
-      onGitHistoryFindHandle: registerGitHistoryHandle,
     }),
     [
       handleEditorDirty,
       handleWebPreviewUrl,
       handleTerminalCwd,
       handleTerminalExit,
-      openCommitFileDiffTab,
       registerEditorHandle,
-      registerGitHistoryHandle,
       registerMarkdownNavigationHandle,
       registerWebPreviewHandle,
       registerTerminalHandle,
@@ -1823,8 +1794,6 @@ export default function App() {
           open={sidebar.isVisible("source-control")}
           sourceControl={sourceControl}
           onOpenDiff={openGitDiffTab}
-          onOpenGitGraph={openGitGraphFromContext}
-          fullGraphOpen={activeTab?.kind === "git-history"}
           onOpenCommitFile={openCommitFileDiffTab}
           onOpenFile={handleOpenFile}
           onNavigateToPath={cdInNewTab}

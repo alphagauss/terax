@@ -1,0 +1,537 @@
+// @vitest-environment happy-dom
+
+import {
+  type GitCommitFileChange,
+  type GitLogEntry,
+  native,
+} from "@/modules/ai/lib/native";
+import { GraphSection } from "@/modules/source-control/GraphSection";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { act, StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+vi.mock("@/modules/ai/lib/native", () => ({
+  native: {
+    gitLog: vi.fn(),
+    gitCommitFiles: vi.fn(),
+    gitCommitMessage: vi.fn(),
+    gitRemoteUrl: vi.fn(),
+  },
+}));
+vi.mock("@/modules/explorer/lib/iconResolver", () => ({
+  fileIconUrl: () => null,
+}));
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),
+}));
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: (options: {
+    count: number;
+    estimateSize: () => number;
+    getItemKey: (index: number) => string;
+  }) => ({
+    getTotalSize: () => options.count * options.estimateSize(),
+    getVirtualItems: () =>
+      Array.from({ length: options.count }, (_, index) => ({
+        index,
+        key: options.getItemKey(index),
+        start: index * options.estimateSize(),
+        size: options.estimateSize(),
+      })),
+  }),
+}));
+
+const commit = (sha: string, parents: string[]): GitLogEntry => ({
+  sha,
+  shortSha: sha,
+  subject: `Commit ${sha}`,
+  author: "Author",
+  authorEmail: "author@example.com",
+  timestampSecs: 1,
+  parents,
+  refs: [],
+  filesChanged: 1,
+  insertions: 12,
+  deletions: 3,
+});
+const files: GitCommitFileChange[] = [
+  {
+    path: "src/new.ts",
+    originalPath: "src/old.ts",
+    status: "R",
+    statusLabel: "Renamed",
+    added: 12,
+    removed: 3,
+    isBinary: false,
+  },
+];
+let container: HTMLDivElement;
+let root: ReturnType<typeof createRoot>;
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValue([commit("a", ["b", "c"]), commit("b", ["c"])]);
+  vi.mocked(native.gitCommitFiles).mockReset().mockResolvedValue(files);
+  vi.mocked(native.gitCommitMessage).mockResolvedValue("Full message");
+  vi.mocked(native.gitRemoteUrl).mockReset().mockResolvedValue("");
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.useRealTimers();
+});
+const wait = async (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
+const renderSearch = (
+  props: {
+    expanded?: boolean;
+    searchOpen?: boolean;
+    onCloseSearch?: () => void;
+    onOpenCommitFile?: React.ComponentProps<
+      typeof GraphSection
+    >["onOpenCommitFile"];
+  } = {},
+) =>
+  root.render(
+    <GraphSection
+      repoRoot="/repo"
+      headSha="a"
+      expanded
+      refreshToken={0}
+      showUndoCommit={false}
+      mayHavePushedHead={false}
+      onDidUndo={() => {}}
+      searchOpen
+      {...props}
+    />,
+  );
+
+async function search(query: string) {
+  const input = container.querySelector("input");
+  const setValue = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  if (!input || !setValue) throw new Error("Missing search input");
+  await act(async () => {
+    setValue.call(input, query);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+async function selectSearchField(field: string) {
+  const trigger = container.querySelector('[aria-label="searchCategory"]');
+  await act(async () =>
+    trigger?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }),
+    ),
+  );
+  const option = [...document.querySelectorAll('[role="menuitemradio"]')].find(
+    (item) => item.textContent === `searchFields.${field}`,
+  );
+  if (!(option instanceof HTMLElement))
+    throw new Error("Missing category option");
+  await act(async () => option.click());
+  await wait(1);
+  expect(document.activeElement).toBe(container.querySelector("input"));
+}
+
+it("搜索加载较老的多分支提交不会撑宽已有提交或其展开文件，关闭搜索也无需刷新", async () => {
+  const first = Array.from({ length: 40 }, (_, i) => ({
+    ...commit(`first${i}`, [`first${i + 1}`]),
+    subject: `needle ${i}`,
+  }));
+  const branch = commit("first40", ["p1", "p2", "p3", "p4", "p5", "p6"]);
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce(first)
+    .mockResolvedValueOnce([branch]);
+  await act(async () => renderSearch());
+  const row = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="first0 needle 0"]',
+  );
+  if (!row) throw new Error("Missing first commit");
+  const width = row.querySelector("svg")?.getAttribute("width");
+  await act(async () => row.click());
+  await search("needle");
+  await wait(20);
+  expect(row.querySelector("svg")?.getAttribute("width")).toBe(width);
+  const file = [...container.querySelectorAll("button")].find((item) =>
+    item.textContent?.includes("new.ts"),
+  );
+  expect(
+    file?.parentElement?.parentElement
+      ?.querySelector("svg")
+      ?.getAttribute("width"),
+  ).toBe(width);
+  await act(async () => renderSearch({ searchOpen: false }));
+  expect(row.querySelector("svg")?.getAttribute("width")).toBe(width);
+  const merge = container.querySelector(
+    'button[aria-label="first40 Commit first40"] svg',
+  );
+  expect(Number(merge?.getAttribute("width"))).toBeGreaterThan(Number(width));
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+});
+
+it("提交说明搜索高亮全部匹配片段，切换类别后不误高亮标题", async () => {
+  const subject = "Alpha: fix alpha and ALPHA";
+  vi.mocked(native.gitLog).mockResolvedValue([
+    { ...commit("a", []), subject, author: "alpha" },
+    { ...commit("b", []), author: "alpha" },
+  ]);
+  const open = vi.fn();
+  await act(async () => renderSearch({ onOpenCommitFile: open }));
+  await search("alpha");
+  expect(
+    [...container.querySelectorAll("mark")].map((mark) => mark.textContent),
+  ).toEqual(["Alpha", "alpha", "ALPHA"]);
+  const row = container.querySelector<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  await act(async () => row?.click());
+  const file = [...container.querySelectorAll("button")].find((item) =>
+    item.textContent?.includes("new.ts"),
+  );
+  await act(async () => file?.click());
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ subject }));
+  await selectSearchField("author");
+  expect(
+    container.querySelectorAll("button[aria-expanded]:not([aria-haspopup])"),
+  ).toHaveLength(2);
+  expect(container.querySelectorAll("mark")).toHaveLength(0);
+  await selectSearchField("subject");
+  await search("");
+  expect(container.querySelectorAll("mark")).toHaveLength(0);
+});
+
+it("搜索继续读取历史分页，找到旧提交后仍可展开并打开 Diff", async () => {
+  const first = Array.from({ length: 40 }, (_, i) => commit(`first${i}`, []));
+  const next = Array.from({ length: 200 }, (_, i) => commit(`next${i}`, []));
+  const target = { ...commit("old", []), subject: "needle" };
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce(first)
+    .mockResolvedValueOnce(next)
+    .mockResolvedValueOnce([target]);
+  const open = vi.fn();
+  await act(async () => renderSearch({ onOpenCommitFile: open }));
+  expect(document.activeElement).toBe(container.querySelector("input"));
+  await search("needle");
+  await wait(20);
+  await wait(20);
+  expect(native.gitLog).toHaveBeenNthCalledWith(2, "/repo", {
+    limit: 200,
+    beforeSha: "first39",
+  });
+  expect(native.gitLog).toHaveBeenNthCalledWith(3, "/repo", {
+    limit: 200,
+    beforeSha: "next199",
+  });
+  const matches = container.querySelectorAll<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  expect(matches).toHaveLength(1);
+  expect(matches[0].textContent).toContain("needle");
+  expect(container.textContent).not.toContain("searchingHistory");
+  await act(async () => matches[0].click());
+  const file = [...container.querySelectorAll("button")].find((button) =>
+    button.textContent?.includes("new.ts"),
+  );
+  await act(async () => file?.click());
+  expect(open).toHaveBeenCalledWith(
+    expect.objectContaining({ sha: "old", path: "src/new.ts" }),
+  );
+});
+
+it("作者、邮箱和完整 SHA 均可匹配，关闭搜索恢复列表和展开项", async () => {
+  vi.mocked(native.gitLog).mockResolvedValue([
+    {
+      ...commit("abcdef123456", []),
+      shortSha: "abcdef",
+      author: "Alice",
+      authorEmail: "alice@example.org",
+    },
+    { ...commit("other", []), author: "Bob" },
+  ]);
+  const close = vi.fn();
+  await act(async () => renderSearch({ onCloseSearch: close }));
+  const row = container.querySelector<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  await act(async () => row?.click());
+  await search("ALICE");
+  expect(
+    container.querySelectorAll("button[aria-expanded]:not([aria-haspopup])"),
+  ).toHaveLength(0);
+  for (const [field, query] of [
+    ["author", "ALICE"],
+    ["authorEmail", "example.org"],
+    ["sha", "123456"],
+  ]) {
+    await selectSearchField(field);
+    await search(query);
+    expect(
+      container.querySelectorAll("button[aria-expanded]:not([aria-haspopup])"),
+    ).toHaveLength(1);
+  }
+  await search("missing");
+  expect(container.textContent).toContain("noSearchResults");
+  await act(async () =>
+    container
+      .querySelector("input")
+      ?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      ),
+  );
+  expect(close).toHaveBeenCalledOnce();
+  await act(async () => renderSearch({ searchOpen: false }));
+  expect(
+    container.querySelectorAll("button[aria-expanded]:not([aria-haspopup])"),
+  ).toHaveLength(2);
+  expect(
+    container
+      .querySelector("button[aria-expanded]:not([aria-haspopup])")
+      ?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  await act(async () => renderSearch());
+  expect(container.querySelector("input")?.value).toBe("");
+});
+
+it("搜索分页失败后等待手动重试，不循环请求或误报搜索结束", async () => {
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce(
+      Array.from({ length: 40 }, (_, i) => commit(String(i), [])),
+    )
+    .mockRejectedValueOnce(new Error("page failed"))
+    .mockResolvedValueOnce([{ ...commit("old", []), subject: "needle" }]);
+  await act(async () => renderSearch());
+  await search("needle");
+  await wait(20);
+  expect(container.textContent).toContain("page failed");
+  expect(container.textContent).not.toContain("noSearchResults");
+  await wait(1000);
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  const retry = [...container.querySelectorAll("button")].find((button) =>
+    button.textContent?.includes("Retry"),
+  );
+  await act(async () => retry?.click());
+  expect(container.textContent).toContain("needle");
+});
+
+it("隐藏 Graph 时暂停继续搜索，重新显示才恢复分页", async () => {
+  let finish!: (entries: GitLogEntry[]) => void;
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce(
+      Array.from({ length: 40 }, (_, i) => commit(String(i), [])),
+    )
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockResolvedValueOnce([]);
+  await act(async () => renderSearch());
+  await search("needle");
+  await wait(5);
+  await act(async () => renderSearch({ expanded: false }));
+  await act(async () =>
+    finish(Array.from({ length: 200 }, (_, i) => commit(`next${i}`, []))),
+  );
+  await wait(20);
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  await act(async () => renderSearch());
+  await wait(20);
+  expect(native.gitLog).toHaveBeenCalledTimes(3);
+});
+
+it("侧边栏详情可打开当前提交的远端链接", async () => {
+  vi.mocked(native.gitRemoteUrl).mockResolvedValue(
+    "git@github.com:owner/repo.git",
+  );
+  await act(async () => renderSearch({ searchOpen: false }));
+  const row = container.querySelector(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  await act(async () =>
+    row?.dispatchEvent(
+      new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }),
+    ),
+  );
+  await wait(800);
+  const remote = [...document.querySelectorAll('[role="dialog"] button')].find(
+    (button) => button.textContent === "viewOn",
+  );
+  if (!(remote instanceof HTMLButtonElement))
+    throw new Error("Missing remote action");
+  await act(async () => remote.click());
+  expect(openUrl).toHaveBeenLastCalledWith(
+    "https://github.com/owner/repo/commit/a",
+  );
+});
+
+it("侧边栏重复挂载检查仍能完成加载，折叠分组后保留提交展开状态", async () => {
+  const render = (expanded: boolean) =>
+    root.render(
+      <StrictMode>
+        <GraphSection
+          repoRoot="/repo"
+          headSha="a"
+          expanded={expanded}
+          refreshToken={0}
+          showUndoCommit={false}
+          mayHavePushedHead={false}
+          onDidUndo={() => {}}
+        />
+      </StrictMode>,
+    );
+  await act(async () => render(true));
+  const row = container.querySelector<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  if (!row) throw new Error("Missing commit row");
+  await act(async () => row.click());
+  await act(async () => render(false));
+  await act(async () => render(true));
+  expect(
+    container
+      .querySelector("button[aria-expanded]:not([aria-haspopup])")
+      ?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(native.gitCommitFiles).toHaveBeenCalledTimes(1);
+});
+
+it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async () => {
+  const open = vi.fn();
+  await act(async () =>
+    root.render(
+      <GraphSection
+        repoRoot="/repo"
+        headSha="a"
+        expanded
+        refreshToken={0}
+        showUndoCommit={false}
+        mayHavePushedHead={false}
+        onDidUndo={() => {}}
+        onOpenCommitFile={open}
+      />,
+    ),
+  );
+  const rows = () => [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      "button[aria-expanded]:not([aria-haspopup])",
+    ),
+  ];
+  await act(async () =>
+    rows()[0].dispatchEvent(
+      new PointerEvent("pointerover", {
+        bubbles: true,
+        pointerType: "mouse",
+      }),
+    ),
+  );
+  await wait(799);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  await wait(1);
+  const panel = document.querySelector('[role="dialog"]');
+  expect(panel?.textContent).toContain("Full message");
+  expect(panel?.textContent).toContain("+12");
+  expect(panel?.textContent).toContain("−3");
+  if (!panel) throw new Error("Missing commit details");
+  const floatingFile = [...panel.querySelectorAll("button")].find((button) =>
+    button.textContent?.includes("new.ts"),
+  );
+  if (!floatingFile) throw new Error("Missing file in details");
+  await act(async () => floatingFile.click());
+  expect(open).toHaveBeenLastCalledWith({
+    repoRoot: "/repo",
+    sha: "a",
+    shortSha: "a",
+    subject: "Commit a",
+    path: "src/new.ts",
+    originalPath: "src/old.ts",
+  });
+  await act(async () => {
+    rows()[0].click();
+    rows()[1].click();
+  });
+  expect(rows().map((row) => row.getAttribute("aria-expanded"))).toEqual([
+    "true",
+    "true",
+  ]);
+  const expandedFiles = [...container.querySelectorAll("button")].filter(
+    (button) => button.textContent?.includes("new.ts"),
+  );
+  expect(expandedFiles).toHaveLength(2);
+  expect(expandedFiles[0].textContent).toContain("src/old.ts → src/new.ts");
+  expect(expandedFiles[0].textContent).toContain("R");
+  expect(expandedFiles[0].textContent).not.toContain("+12");
+  expect(expandedFiles[0].textContent).not.toContain("−3");
+  await act(async () => expandedFiles[0].click());
+  expect(open.mock.calls[1]).toEqual(open.mock.calls[0]);
+  expect(native.gitCommitFiles).toHaveBeenCalledTimes(2);
+  // 合并提交展开区域延续两个底部轨道，且不重复绘制节点。
+  const continuation =
+    expandedFiles[0].parentElement?.parentElement?.querySelector("svg");
+  expect(continuation?.querySelectorAll("line")).toHaveLength(2);
+  expect(continuation?.querySelector("circle")).toBeNull();
+  await act(async () => rows()[0].click());
+  expect(rows().map((row) => row.getAttribute("aria-expanded"))).toEqual([
+    "false",
+    "true",
+  ]);
+});
+
+it("键盘可展开文件、进入悬停详情，并用 Esc 返回提交行", async () => {
+  await act(async () =>
+    root.render(
+      <GraphSection
+        repoRoot="/repo"
+        headSha="a"
+        expanded
+        refreshToken={0}
+        showUndoCommit={false}
+        mayHavePushedHead={false}
+        onDidUndo={() => {}}
+      />,
+    ),
+  );
+  const row = container.querySelector<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  if (!row) throw new Error("Missing commit row");
+  await act(async () => {
+    row.focus();
+    row.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+    );
+  });
+  expect(row.getAttribute("aria-expanded")).toBe("true");
+  await act(async () =>
+    row.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F2", bubbles: true }),
+    ),
+  );
+  await wait(1);
+  const panel = document.querySelector('[role="dialog"]');
+  expect(panel?.contains(document.activeElement)).toBe(true);
+  await act(async () =>
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    ),
+  );
+  expect(document.activeElement).toBe(row);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});

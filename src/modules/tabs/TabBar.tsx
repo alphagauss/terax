@@ -45,9 +45,7 @@ import { currentWorkspaceEnv } from "@/modules/workspace";
 import { workspacePageFromTab } from "@/modules/workspace-handoff";
 import {
   Cancel01Icon,
-  Clock01Icon,
   ComputerTerminal02Icon,
-  GitBranchIcon,
   GitCompareIcon,
   Globe02Icon,
   IncognitoIcon,
@@ -77,7 +75,6 @@ type Props = {
   onNewPrivate: () => void;
   onNewWebPreview: () => void;
   onNewEditor: () => void;
-  onNewGitGraph: () => void;
   onClose: (id: number) => void;
   onRunPythonFile: (id: number, groupId: number) => void;
   onAttachFileToAgent: (path: string) => void;
@@ -113,7 +110,6 @@ export function TabBar({
   onNewPrivate,
   onNewWebPreview,
   onNewEditor,
-  onNewGitGraph,
   onClose,
   onRunPythonFile,
   onAttachFileToAgent,
@@ -775,14 +771,6 @@ export function TabBar({
                 {newWebPreviewShortcut}
               </span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => onNewGitGraph()}>
-              <HugeiconsIcon
-                icon={GitBranchIcon}
-                size={14}
-                strokeWidth={1.75}
-              />
-              <span className="flex-1">{tr("gitGraph")}</span>
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -850,16 +838,6 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <HugeiconsIcon
         icon={GitCompareIcon}
-        size={14}
-        strokeWidth={2}
-        className="shrink-0"
-      />
-    );
-  }
-  if (tab.kind === "git-history") {
-    return (
-      <HugeiconsIcon
-        icon={Clock01Icon}
         size={14}
         strokeWidth={2}
         className="shrink-0"

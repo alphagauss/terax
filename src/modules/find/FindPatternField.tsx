@@ -75,6 +75,7 @@ type Props = {
   invalid?: boolean;
   autoFocus?: boolean;
   placeholder?: string;
+  trailingContent?: ReactNode;
   className?: string;
 };
 
@@ -89,6 +90,7 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
       invalid = false,
       autoFocus = false,
       placeholder,
+      trailingContent,
       className,
     },
     ref,
@@ -143,6 +145,11 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
           onChange={(event) => onQueryChange(event.target.value)}
           className="h-full min-w-10 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/65"
         />
+        {trailingContent ? (
+          <div className="flex shrink-0 items-center pr-0.5">
+            {trailingContent}
+          </div>
+        ) : null}
         {options && onOptionsChange ? (
           <div className="flex shrink-0 items-center pr-0.5">
             <FindControlButton

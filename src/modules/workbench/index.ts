@@ -14,7 +14,6 @@ export {
   type EditorTab,
   type GitCommitFileDiffTab,
   type GitDiffTab,
-  type GitHistoryTab,
   type MarkdownTab,
   type SpaceWorkbench,
   type Tab,

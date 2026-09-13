@@ -35,7 +35,6 @@ export type WorkbenchChromeActions = {
   newPrivate: (groupId: number) => void;
   newWebPreview: (groupId: number) => void;
   newEditor: (groupId: number) => void;
-  newGitGraph: (groupId: number) => void;
   closeTab: (tabId: number) => void;
   runPythonFile: (tabId: number, groupId: number) => void;
   attachFileToAgent: (path: string) => void;
@@ -150,7 +149,6 @@ function WorkbenchGroup({
             onNewPrivate={() => actions.newPrivate(group.id)}
             onNewWebPreview={() => actions.newWebPreview(group.id)}
             onNewEditor={() => actions.newEditor(group.id)}
-            onNewGitGraph={() => actions.newGitGraph(group.id)}
             onClose={actions.closeTab}
             onRunPythonFile={actions.runPythonFile}
             onAttachFileToAgent={actions.attachFileToAgent}
@@ -180,7 +178,6 @@ function WorkbenchGroup({
             onNewPrivate={() => actions.newPrivate(group.id)}
             onNewEditor={() => actions.newEditor(group.id)}
             onNewWebPreview={() => actions.newWebPreview(group.id)}
-            onNewGitGraph={() => actions.newGitGraph(group.id)}
           />
         ) : null}
         <WorkbenchDropOverlay groupId={group.id} />

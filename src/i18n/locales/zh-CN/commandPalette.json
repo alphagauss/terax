@@ -23,7 +23,6 @@
     "tab.close": "关闭标签页",
     "workbench.splitRight": "向右拆分工作组",
     "workbench.splitDown": "向下拆分工作组",
-    "git.graph": "打开 Git 图谱",
     "git.source": "切换源代码管理",
     "search.content": "在文件中查找内容",
     "history.open": "搜索命令历史",

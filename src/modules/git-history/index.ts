@@ -1,1 +1,0 @@
-export { GitHistoryView } from "./GitHistoryViewLazy";

@@ -14,8 +14,6 @@ import {
   EditorView,
   GitDiffView,
 } from "@/modules/editor";
-import type { FindHandle } from "@/modules/find";
-import { GitHistoryView } from "@/modules/git-history";
 import { MarkdownView } from "@/modules/markdown";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
@@ -28,15 +26,6 @@ const FileEditsView = lazy(() =>
     default: module.FileEditsView,
   })),
 );
-
-type CommitFileDiffOpenInput = {
-  repoRoot: string;
-  sha: string;
-  shortSha: string;
-  subject: string;
-  path: string;
-  originalPath: string | null;
-};
 
 export type WorkbenchViewServices = {
   registerTerminalHandle: (
@@ -63,8 +52,6 @@ export type WorkbenchViewServices = {
   onWebPreviewUrlChange: (tabId: number, url: string) => void;
   onAiDiffAccept: (requestKey: string) => void;
   onAiDiffReject: (requestKey: string) => void;
-  onOpenCommitFile: (input: CommitFileDiffOpenInput) => void;
-  onGitHistoryFindHandle: (tabId: number, handle: FindHandle | null) => void;
 };
 
 type Props = {
@@ -113,7 +100,6 @@ export function WorkbenchRegisteredView({
         tab.kind === "terminal" &&
           "workspace-terminal-surface pt-2 pr-0 pb-2 pl-3",
         tab.kind !== "terminal" &&
-          tab.kind !== "git-history" &&
           "pt-2 pr-0 pb-2 pl-3",
       )}
     >
@@ -170,14 +156,6 @@ export function WorkbenchRegisteredView({
       )}
       {(tab.kind === "git-diff" || tab.kind === "git-commit-file") && (
         <GitDiffView tab={tab} visible={visible} />
-      )}
-      {tab.kind === "git-history" && (
-        <GitHistoryView
-          tab={tab}
-          visible={visible}
-          onOpenCommitFile={services.onOpenCommitFile}
-          onFindHandle={services.onGitHistoryFindHandle}
-        />
       )}
     </div>
   );

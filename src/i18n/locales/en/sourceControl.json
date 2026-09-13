@@ -92,5 +92,9 @@
     "copyAbsolutePath": "Copy Absolute Path",
     "revealInFinder": "Reveal in Finder",
     "revealInFileManager": "Reveal in File Manager"
+  },
+  "graph": {
+    "search": "Search history",
+    "refresh": "Refresh graph"
   }
 }

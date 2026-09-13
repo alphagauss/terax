@@ -23,7 +23,6 @@
     "tab.close": "Close tab",
     "workbench.splitRight": "Split Workbench right",
     "workbench.splitDown": "Split Workbench down",
-    "git.graph": "Open git graph",
     "git.source": "Toggle source control",
     "search.content": "Find content in files",
     "history.open": "Search command history",
