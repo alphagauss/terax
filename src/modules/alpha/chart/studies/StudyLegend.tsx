@@ -172,8 +172,7 @@ export function StudyLegend({
               <Button
                 type="button"
                 size="icon-xs"
-                variant="ghost"
-                className="text-destructive"
+                variant="ghost-destructive"
                 aria-label={t("data.chart.studies.actions.remove")}
                 onClick={() => onRemove(instance.instanceId)}
               >

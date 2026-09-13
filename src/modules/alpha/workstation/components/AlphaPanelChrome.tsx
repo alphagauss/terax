@@ -102,9 +102,9 @@ export function AlphaPanelChrome({
       <Hint content={t("workstation.panel.remove")}>
         <Button
           type="button"
-          variant="ghost"
+          variant="ghost-destructive-hover"
           size="icon-xs"
-          className="shrink-0 text-muted-foreground hover:text-destructive"
+          className="shrink-0"
           aria-label={t("workstation.panel.remove")}
           onClick={onRemove}
         >

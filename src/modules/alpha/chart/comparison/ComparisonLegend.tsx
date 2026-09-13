@@ -138,8 +138,7 @@ export function ComparisonLegend({
             <Button
               type="button"
               size="icon-xs"
-              variant="ghost"
-              className="text-destructive"
+              variant="ghost-destructive"
               aria-label={t("data.chart.comparisons.actions.remove")}
               onClick={() => onRemove(comparison.vtSymbol)}
             >
