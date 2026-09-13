@@ -92,5 +92,9 @@
     "copyAbsolutePath": "复制绝对路径",
     "revealInFinder": "在访达中显示",
     "revealInFileManager": "在文件管理器中显示"
+  },
+  "graph": {
+    "search": "搜索提交历史",
+    "refresh": "刷新图谱"
   }
 }

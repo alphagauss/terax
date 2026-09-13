@@ -14,9 +14,21 @@ import {
   AlertDialogTitle,
 } from "@/components/controls/alert-dialog";
 import { Button } from "@/components/controls/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/menu/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { type GitLogEntry, native } from "@/modules/ai/lib/native";
+import {
+  FindControlButton,
+  FindPatternField,
+  type FindPatternFieldHandle,
+} from "@/modules/find";
 import { CommitDetail } from "@/modules/git-history/CommitDetail";
 import {
   CommitHoverCard,
@@ -26,17 +38,26 @@ import {
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
 import {
+  commitWebUrl,
+  hostLabel,
+  parseRemoteWebUrl,
+  type RemoteWebInfo,
+} from "@/modules/git-history/lib/remoteWebUrl";
+import {
   flattenCommitRows,
   useCommitGraph,
 } from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import {
+  ArrowDown01Icon,
+  Cancel01Icon,
   CloudIcon,
   GitBranchIcon,
   Tag01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   memo,
   type ReactNode,
@@ -46,11 +67,38 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 40;
+// 与原生 git-log 的单页上限一致，搜索按页继续扫描历史。
+const SEARCH_PAGE_SIZE = 200;
 const ROW_HEIGHT = 24;
 const NEAR_BOTTOM_PX = 180;
+const SEARCH_FIELDS = ["subject", "author", "authorEmail", "sha"] as const;
+type SearchField = (typeof SEARCH_FIELDS)[number];
+
+/** 只装饰提交说明中的匹配片段，保留原始文本与文件打开协议。 */
+function highlightSubject(subject: string, query: string): ReactNode {
+  if (!query) return subject;
+  const text = subject.toLowerCase();
+  const pattern = query.toLowerCase();
+  const parts: ReactNode[] = [];
+  let offset = 0;
+  let index = text.indexOf(pattern);
+  while (index !== -1) {
+    parts.push(subject.slice(offset, index));
+    parts.push(
+      <mark key={index} className="rounded-sm bg-primary/20 text-foreground">
+        {subject.slice(index, index + query.length)}
+      </mark>,
+    );
+    offset = index + query.length;
+    index = text.indexOf(pattern, offset);
+  }
+  parts.push(subject.slice(offset));
+  return parts;
+}
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -70,6 +118,8 @@ type Props = {
   mayHavePushedHead: boolean;
   onDidUndo: () => void;
   onOpenCommitFile?: (input: CommitFileDiffOpenInput) => void;
+  searchOpen?: boolean;
+  onCloseSearch?: () => void;
 };
 
 type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
@@ -96,7 +146,15 @@ export const GraphSection = memo(function GraphSection({
   mayHavePushedHead,
   onDidUndo,
   onOpenCommitFile,
+  searchOpen = false,
+  onCloseSearch,
 }: Props) {
+  const { t } = useTranslation("gitHistory");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchField, setSearchField] = useState<SearchField>("subject");
+  const searchFieldRef = useRef<FindPatternFieldHandle>(null);
+  const activeSearch = searchOpen ? searchInput.trim() : "";
+  const [remoteWeb, setRemoteWeb] = useState<RemoteWebInfo | null>(null);
   const [commits, setCommits] = useState<GitLogEntry[]>([]);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +176,25 @@ export const GraphSection = memo(function GraphSection({
   const refreshKey = repoRoot
     ? `${repoRoot}:${headSha ?? ""}:${refreshToken}`
     : null;
+
+  useEffect(() => {
+    if (!searchOpen) setSearchInput("");
+  }, [searchOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRemoteWeb(null);
+    if (repoRoot)
+      void native
+        .gitRemoteUrl(repoRoot)
+        .then((url) => {
+          if (!cancelled) setRemoteWeb(parseRemoteWebUrl(url));
+        })
+        .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [repoRoot]);
 
   const loadInitial = useCallback(async () => {
     if (!repoRoot || !expanded) return;
@@ -175,9 +252,10 @@ export const GraphSection = memo(function GraphSection({
     loadingMoreRef.current = true;
     setLoadStatus("more");
     setError(null);
+    const limit = activeSearch ? SEARCH_PAGE_SIZE : PAGE_SIZE;
     try {
       const next = await native.gitLog(repoRoot, {
-        limit: PAGE_SIZE,
+        limit,
         beforeSha: cursor,
       });
       if (request !== requestRef.current) return;
@@ -185,7 +263,7 @@ export const GraphSection = memo(function GraphSection({
         const known = new Set(current.map((commit) => commit.sha));
         return current.concat(next.filter((commit) => !known.has(commit.sha)));
       });
-      setEndReached(next.length < PAGE_SIZE);
+      setEndReached(next.length < limit);
       setLoadStatus("idle");
     } catch (loadError) {
       if (request !== requestRef.current) return;
@@ -194,21 +272,25 @@ export const GraphSection = memo(function GraphSection({
     } finally {
       if (request === requestRef.current) loadingMoreRef.current = false;
     }
-  }, [commits, endReached, expanded, loadStatus, repoRoot]);
+  }, [activeSearch, commits, endReached, expanded, loadStatus, repoRoot]);
 
+  // 每行仅为自身轨道留白，追加历史中的复杂分支不能推移已有提交。
   const { rows: graphRows } = useMemo(() => layoutGraph(commits), [commits]);
   const graphBySha = useMemo(
     () => new Map(graphRows.map((row) => [row.sha, row])),
     [graphRows],
   );
-  const maxLaneCount = useMemo(
-    () => Math.max(1, ...graphRows.map((row) => row.laneCount)),
-    [graphRows],
-  );
 
+  const filtered = useMemo(() => {
+    const query = activeSearch.toLowerCase();
+    if (!query) return commits;
+    return commits.filter((commit) =>
+      commit[searchField].toLowerCase().includes(query),
+    );
+  }, [activeSearch, commits, searchField]);
   const items = useMemo(
-    () => flattenCommitRows(commits, graph.expanded, filesBySha),
-    [commits, graph.expanded, filesBySha],
+    () => flattenCommitRows(filtered, graph.expanded, filesBySha),
+    [filtered, graph.expanded, filesBySha],
   );
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -221,10 +303,14 @@ export const GraphSection = memo(function GraphSection({
   useEffect(() => {
     if (!expanded || loadStatus !== "idle" || endReached) return;
     const scroll = scrollRef.current;
-    if (scroll && scroll.scrollHeight <= scroll.clientHeight + NEAR_BOTTOM_PX) {
-      void loadMore();
+    if (
+      activeSearch ||
+      (scroll && scroll.scrollHeight <= scroll.clientHeight + NEAR_BOTTOM_PX)
+    ) {
+      const timer = window.setTimeout(() => void loadMore(), 0);
+      return () => window.clearTimeout(timer);
     }
-  }, [endReached, expanded, loadMore, loadStatus]);
+  }, [activeSearch, endReached, expanded, loadMore, loadStatus]);
 
   const confirmUndo = useCallback(async () => {
     if (!repoRoot || !pendingUndo) return;
@@ -259,6 +345,97 @@ export const GraphSection = memo(function GraphSection({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar [contain:layout_style]">
+      {searchOpen && expanded ? (
+        <form
+          aria-label={t("searchHistory")}
+          onSubmit={(event) => event.preventDefault()}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              onCloseSearch?.();
+            }
+          }}
+          className="flex shrink-0 flex-col gap-1 border-b border-border/50 p-1.5"
+        >
+          <div className="flex items-center gap-1">
+            <FindPatternField
+              ref={searchFieldRef}
+              query={searchInput}
+              autoFocus
+              placeholder={t("searchPlaceholder", {
+                field: t(`searchFields.${searchField}`),
+              })}
+              trailingContent={
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      aria-label={t("searchCategory")}
+                      className="gap-1 whitespace-nowrap"
+                    >
+                      {t(`searchFields.${searchField}`)}
+                      <HugeiconsIcon icon={ArrowDown01Icon} size={11} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault();
+                      searchFieldRef.current?.focus();
+                    }}
+                  >
+                    <DropdownMenuRadioGroup
+                      value={searchField}
+                      onValueChange={(value) => {
+                        const field = SEARCH_FIELDS.find(
+                          (candidate) => candidate === value,
+                        );
+                        if (!field) return;
+                        closePopover();
+                        setSearchField(field);
+                        scrollRef.current?.scrollTo({ top: 0 });
+                      }}
+                    >
+                      {SEARCH_FIELDS.map((field) => (
+                        <DropdownMenuRadioItem key={field} value={field}>
+                          {t(`searchFields.${field}`)}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              }
+              onQueryChange={(value) => {
+                closePopover();
+                setSearchInput(value);
+                scrollRef.current?.scrollTo({ top: 0 });
+              }}
+            />
+            <FindControlButton
+              label={t("closeSearch")}
+              onClick={() => onCloseSearch?.()}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} size={13} />
+            </FindControlButton>
+          </div>
+          {activeSearch ? (
+            <div
+              role="status"
+              className="px-1 text-[10.5px] text-muted-foreground"
+            >
+              {t("searchResults", { count: filtered.length })}
+              {!endReached &&
+              loadStatus !== "more-error" &&
+              loadStatus !== "initial-error"
+                ? ` · ${t("searchingHistory")}`
+                : ""}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
       {loadStatus === "initial" && commits.length === 0 ? (
         <GraphPlaceholder>
           <Spinner className="size-3.5" /> Loading commits…
@@ -287,6 +464,11 @@ export const GraphSection = memo(function GraphSection({
           }}
           className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
         >
+          {activeSearch && filtered.length === 0 && endReached ? (
+            <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
+              {t("noSearchResults")}
+            </div>
+          ) : null}
           <div
             style={{
               height: virtualizer.getTotalSize(),
@@ -312,7 +494,7 @@ export const GraphSection = memo(function GraphSection({
                     <ExpandedCommitRow
                       item={item}
                       row={graphRow}
-                      maxLaneCount={maxLaneCount}
+                      maxLaneCount={graphRow.laneCount}
                       rowHeight={ROW_HEIGHT}
                       onRetry={() => void fetchFiles(commit.sha, true)}
                       onOpen={() => {
@@ -351,11 +533,16 @@ export const GraphSection = memo(function GraphSection({
                   <GraphRail
                     row={graphRow}
                     rowHeight={ROW_HEIGHT}
-                    maxLaneCount={maxLaneCount}
+                    maxLaneCount={graphRow.laneCount}
                     active={graph.expanded.has(commit.sha)}
                   />
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                    {commit.subject || "(no subject)"}
+                    {commit.subject
+                      ? highlightSubject(
+                          commit.subject,
+                          searchField === "subject" ? activeSearch : "",
+                        )
+                      : t("noSubject")}
                   </span>
                   {refs.map((ref) => (
                     <GitRefBadge
@@ -402,6 +589,17 @@ export const GraphSection = memo(function GraphSection({
             key={selectedCommit.sha}
             commit={selectedCommit}
             filesEntry={selectedFiles}
+            remoteAction={
+              remoteWeb
+                ? {
+                    label: t("viewOn", { host: hostLabel(remoteWeb) }),
+                    onClick: () =>
+                      void openUrl(
+                        commitWebUrl(remoteWeb, selectedCommit.sha),
+                      ).catch(console.error),
+                  }
+                : undefined
+            }
             onUndo={
               showUndoCommit &&
               selectedCommit.sha === headSha &&

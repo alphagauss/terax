@@ -72,11 +72,6 @@ export type GitDiffTab = TabBase & {
   originalPath: string | null;
 };
 
-export type GitHistoryTab = TabBase & {
-  kind: "git-history";
-  repoRoot: string;
-};
-
 export type GitCommitFileDiffTab = TabBase & {
   kind: "git-commit-file";
   repoRoot: string;
@@ -111,7 +106,6 @@ export type Tab =
   | AiDiffTab
   | FileEditsTab
   | GitDiffTab
-  | GitHistoryTab
   | GitCommitFileDiffTab
   | AlphaDataTab
   | AlphaBacktestsTab

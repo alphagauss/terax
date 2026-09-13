@@ -79,16 +79,7 @@ describe("filePathFor", () => {
     ]);
   });
 
-  it("does not expose terminal or Git history context paths", () => {
+  it("does not expose terminal context paths", () => {
     expect(filePathFor(terminalTab({ cwd: "/workspace" }))).toBeUndefined();
-    expect(
-      filePathFor({
-        id: 4,
-        kind: "git-history",
-        spaceId: "default",
-        title: "Git History",
-        repoRoot: "/workspace",
-      }),
-    ).toBeUndefined();
   });
 });

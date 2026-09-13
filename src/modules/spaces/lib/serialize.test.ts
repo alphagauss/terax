@@ -315,9 +315,12 @@ describe("Workbench Space serialization", () => {
     };
     const transient: Tab = {
       id: 2,
-      kind: "git-history",
+      kind: "git-diff",
       spaceId: "default",
-      title: "Git History",
+      title: "Git Diff",
+      path: "file.ts",
+      side: "worktree",
+      originalPath: null,
       repoRoot: "/work",
     };
     const last: Tab = {

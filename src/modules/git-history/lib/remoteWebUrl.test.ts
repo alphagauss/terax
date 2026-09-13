@@ -99,8 +99,8 @@ describe("hostLabel", () => {
     const bitbucket = parseRemoteWebUrl("https://bitbucket.org/team/app.git");
     if (!github || !gitlab || !bitbucket) throw new Error("expected parses");
 
-    expect(hostLabel(github)).toBe("View on GitHub");
-    expect(hostLabel(gitlab)).toBe("View on GitLab");
-    expect(hostLabel(bitbucket)).toBe("View on Bitbucket");
+    expect(hostLabel(github)).toBe("GitHub");
+    expect(hostLabel(gitlab)).toBe("GitLab");
+    expect(hostLabel(bitbucket)).toBe("Bitbucket");
   });
 });

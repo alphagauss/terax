@@ -33,7 +33,6 @@ import {
   type EditorTab,
   type GitCommitFileDiffTab,
   type GitDiffTab,
-  type GitHistoryTab,
   type MarkdownTab,
   type SpaceWorkbench,
   type Tab,
@@ -646,30 +645,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     [addPage, allocId, revealTab],
   );
 
-  const openCommitHistoryTab = useCallback(
-    (input: { repoRoot: string; branch?: string | null }) => {
-      const title = input.branch ? `History · ${input.branch}` : "Git History";
-      const existing = Object.values(stateRef.current.tabs).find(
-        (tab) => tab.kind === "git-history" && tab.repoRoot === input.repoRoot,
-      );
-      if (existing) {
-        revealTab(existing.id, { title });
-        return existing.id;
-      }
-      const id = allocId();
-      const tab: GitHistoryTab = {
-        id,
-        kind: "git-history",
-        spaceId: activeSpaceIdRef.current,
-        title,
-        repoRoot: input.repoRoot,
-      };
-      addPage(tab);
-      return id;
-    },
-    [addPage, allocId, revealTab],
-  );
-
   const openCommitFileDiffTab = useCallback(
     (input: {
       repoRoot: string;
@@ -1009,7 +984,6 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     openAiDiffTab,
     openFileEditsTab,
     openGitDiffTab,
-    openCommitHistoryTab,
     openCommitFileDiffTab,
     openAlphaWorkstationTab,
     openAlphaDataTab,

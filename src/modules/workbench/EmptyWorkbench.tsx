@@ -6,7 +6,6 @@
 import { Button } from "@/components/controls/button";
 import {
   ComputerTerminal02Icon,
-  GitBranchIcon,
   Globe02Icon,
   IncognitoIcon,
   PencilEdit02Icon,
@@ -20,7 +19,6 @@ type Props = {
   onNewPrivate: () => void;
   onNewEditor: () => void;
   onNewWebPreview: () => void;
-  onNewGitGraph: () => void;
 };
 
 /**
@@ -34,7 +32,6 @@ export function EmptyWorkbench({
   onNewPrivate,
   onNewEditor,
   onNewWebPreview,
-  onNewGitGraph,
 }: Props) {
   const { t } = useTranslation("tabs");
   const actions = [
@@ -43,7 +40,6 @@ export function EmptyWorkbench({
     [t("privacy"), IncognitoIcon, onNewPrivate],
     [t("editor"), PencilEdit02Icon, onNewEditor],
     [t("webPreview"), Globe02Icon, onNewWebPreview],
-    [t("gitGraph"), GitBranchIcon, onNewGitGraph],
   ] as const;
 
   return (

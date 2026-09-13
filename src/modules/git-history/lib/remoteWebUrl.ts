@@ -73,10 +73,10 @@ export function commitWebUrl(info: RemoteWebInfo, sha: string): string {
 export function hostLabel(info: RemoteWebInfo): string {
   switch (info.host) {
     case "github":
-      return "View on GitHub";
+      return "GitHub";
     case "gitlab":
-      return "View on GitLab";
+      return "GitLab";
     case "bitbucket":
-      return "View on Bitbucket";
+      return "Bitbucket";
   }
 }

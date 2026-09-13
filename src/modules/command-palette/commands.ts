@@ -54,7 +54,6 @@ export type CommandPaletteActionContext = {
   openNewPrivate: () => void;
   openNewEditor: () => void;
   openNewWebPreview: () => void;
-  openGitGraph: () => void;
   toggleSourceControl: () => void;
   closeActiveTab: () => void;
   splitGroupRight: () => void;
@@ -242,14 +241,6 @@ export function createCommandItems(
       shortcutId: "workbench.splitDown",
       disabledReason: splitDisabled,
       run: ctx.splitGroupDown,
-    },
-    {
-      id: "git.graph",
-      title: t("cmd.git.graph"),
-      group: "Git",
-      keywords: ["git", "graph", "history", "log", "commits"],
-      icon: SourceCodeIcon,
-      run: ctx.openGitGraph,
     },
     {
       id: "git.source",

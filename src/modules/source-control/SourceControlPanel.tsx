@@ -4,6 +4,24 @@
  */
 
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/controls/alert-dialog";
+import { Button } from "@/components/controls/button";
+import { Textarea } from "@/components/controls/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/controls/tooltip";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -19,27 +37,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/controls/alert-dialog";
-import { RepositoryDiffStats } from "./RepositoryDiffStats";
-import { Button } from "@/components/controls/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/controls/textarea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/controls/tooltip";
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
@@ -51,11 +50,19 @@ import { fileIconUrl } from "@/modules/explorer/lib/iconResolver";
 import { joinPath } from "@/modules/explorer/lib/useFileTree";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { SidebarSectionAction, SidebarSectionGroup } from "@/modules/sidebar";
+import { GraphSection } from "@/modules/source-control/GraphSection";
+import type { GitDiffSide } from "@/modules/source-control/gitTypes";
+import { relativeTime } from "@/modules/source-control/relativeTime";
+import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
+import {
+  type CheckState,
+  type SourceControlFileEntry,
+  useSourceControlPanel,
+} from "@/modules/source-control/useSourceControlPanel";
 import {
   AiContentGenerator02Icon,
   Alert02Icon,
   ArrowDown01Icon,
-  ArrowRight01Icon,
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
   Download01Icon,
@@ -64,6 +71,7 @@ import {
   FolderGitTwoIcon,
   Refresh01Icon,
   RemoveSquareIcon,
+  Search01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -81,21 +89,11 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { GraphSection } from "@/modules/source-control/GraphSection";
-import type { GitDiffSide } from "@/modules/source-control/gitTypes";
-import { relativeTime } from "@/modules/source-control/relativeTime";
-import type { RepositoryController } from "@/modules/source-control/useRepositoryController";
-import {
-  type CheckState,
-  type SourceControlFileEntry,
-  useSourceControlPanel,
-} from "@/modules/source-control/useSourceControlPanel";
+import { RepositoryDiffStats } from "./RepositoryDiffStats";
 
 type Props = {
   open: boolean;
   sourceControl: RepositoryController;
-  onOpenGitGraph?: () => void;
-  fullGraphOpen?: boolean;
   onOpenCommitFile?: (input: {
     repoRoot: string;
     sha: string;
@@ -419,8 +417,6 @@ function BranchTimestamp({ timestampSecs }: { timestampSecs: number | null }) {
 function SourceControlViewContainerComponent({
   open,
   sourceControl,
-  onOpenGitGraph,
-  fullGraphOpen = false,
   onOpenCommitFile,
   onOpenDiff,
   onOpenFile,
@@ -434,6 +430,7 @@ function SourceControlViewContainerComponent({
   const containerRef = useRef<HTMLDivElement>(null);
   const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
   const [graphRefreshToken, setGraphRefreshToken] = useState(0);
+  const [graphSearchOpen, setGraphSearchOpen] = useState(false);
   const showUndoCommit = usePreferencesStore(
     (state) => state.sourceControlShowUndoCommit,
   );
@@ -1043,10 +1040,24 @@ function SourceControlViewContainerComponent({
               title: "Graph",
               defaultSize: 300,
               minSize: 120,
-              actions: (
+              actions: ({ expanded, toggle }) => (
                 <>
                   <SidebarSectionAction
-                    label="Refresh graph"
+                    label={t("graph.search")}
+                    disabled={!scm.repo}
+                    onClick={() => {
+                      if (!expanded) toggle();
+                      setGraphSearchOpen((current) => !expanded || !current);
+                    }}
+                  >
+                    <HugeiconsIcon
+                      icon={Search01Icon}
+                      size={13}
+                      strokeWidth={1.9}
+                    />
+                  </SidebarSectionAction>
+                  <SidebarSectionAction
+                    label={t("graph.refresh")}
                     onClick={() => setGraphRefreshToken((value) => value + 1)}
                   >
                     <HugeiconsIcon
@@ -1055,20 +1066,6 @@ function SourceControlViewContainerComponent({
                       strokeWidth={1.9}
                     />
                   </SidebarSectionAction>
-                  {onOpenGitGraph ? (
-                    <SidebarSectionAction
-                      label={
-                        fullGraphOpen ? "Close full graph" : "Open full graph"
-                      }
-                      onClick={onOpenGitGraph}
-                    >
-                      <HugeiconsIcon
-                        icon={ArrowRight01Icon}
-                        size={13}
-                        strokeWidth={2}
-                      />
-                    </SidebarSectionAction>
-                  ) : null}
                 </>
               ),
               render: ({ expanded }) => (
@@ -1076,7 +1073,9 @@ function SourceControlViewContainerComponent({
                   key={scm.repo?.repoRoot ?? "no-repository"}
                   repoRoot={scm.repo?.repoRoot ?? null}
                   headSha={scm.status?.headSha ?? null}
-                  expanded={expanded}
+                  expanded={open && expanded}
+                  searchOpen={graphSearchOpen}
+                  onCloseSearch={() => setGraphSearchOpen(false)}
                   refreshToken={graphRefreshToken}
                   showUndoCommit={showUndoCommit}
                   mayHavePushedHead={

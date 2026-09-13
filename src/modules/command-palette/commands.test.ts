@@ -24,7 +24,6 @@ function context(): CommandPaletteActionContext {
     openNewPrivate: noop,
     openNewEditor: noop,
     openNewWebPreview: noop,
-    openGitGraph: noop,
     toggleSourceControl: noop,
     closeActiveTab: noop,
     splitGroupRight: noop,

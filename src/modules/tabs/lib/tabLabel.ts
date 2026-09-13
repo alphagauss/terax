@@ -17,7 +17,6 @@ export function labelFor(t: Tab): string {
   if (t.kind === "ai-diff") return t.title;
   if (t.kind === "file-edits") return t.title;
   if (t.kind === "git-diff") return t.title;
-  if (t.kind === "git-history") return t.title;
   if (t.kind === "git-commit-file") return t.title;
   if (t.kind === "alpha-workstation") return t.title;
   if (t.kind === "alpha-data") return t.title;

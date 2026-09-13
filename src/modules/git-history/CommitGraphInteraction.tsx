@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 
 type Controller = ReturnType<typeof useCommitGraph>;
 
-/** 两处入口使用相同触发规则；F2 可将键盘焦点移入详情。 */
+/** 提交行统一使用悬停与展开规则；F2 可将键盘焦点移入详情。 */
 export function commitRowInteraction(graph: Controller, sha: string) {
   return {
     "aria-expanded": graph.expanded.has(sha),

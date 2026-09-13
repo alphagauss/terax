@@ -3,9 +3,8 @@
  * 控制器常驻工作区根部，不依赖 Source Control 面板是否可见。
  */
 
-import { native } from "@/modules/ai/lib/native";
 import type { Tab } from "@/modules/workbench";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useRepositoryController } from "./useRepositoryController";
 
 function dirname(path: string | null): string | null {
@@ -25,11 +24,6 @@ type Params = {
   launchCwdResolved: boolean;
   home: string | null;
   sourceControlVisible: boolean;
-  openCommitHistoryTab: (args: {
-    repoRoot: string;
-    branch: string | null;
-  }) => void;
-  closeTab: (id: number) => void;
 };
 
 /**
@@ -46,8 +40,6 @@ export function useSourceControlContext({
   launchCwdResolved,
   home,
   sourceControlVisible,
-  openCommitHistoryTab,
-  closeTab,
 }: Params) {
   const workspaceFallbackPath = launchCwdResolved
     ? (launchCwd ?? home ?? null)
@@ -59,17 +51,11 @@ export function useSourceControlContext({
     if (activeTab?.kind === "editor") return dirname(activeTab.path);
     if (activeTab?.kind === "git-diff") return activeTab.repoRoot;
     if (activeTab?.kind === "git-commit-file") return activeTab.repoRoot;
-    if (activeTab?.kind === "git-history") return activeTab.repoRoot;
     return explorerRoot ?? workspaceFallbackPath;
   })();
   const hasOpenGitTab = useMemo(
     () =>
-      tabs.some(
-        (t) =>
-          t.kind === "git-diff" ||
-          t.kind === "git-history" ||
-          t.kind === "git-commit-file",
-      ),
+      tabs.some((t) => t.kind === "git-diff" || t.kind === "git-commit-file"),
     [tabs],
   );
   const sourceControlActive = hasOpenGitTab || sourceControlVisible;
@@ -81,46 +67,5 @@ export function useSourceControlContext({
     : badgeContextPath;
   const sourceControl = useRepositoryController(sourceControlPath, true);
 
-  const openGitGraphFromContext = useCallback(async () => {
-    const known = sourceControl.hasRepo ? sourceControl.repo : null;
-    if (known) {
-      if (
-        activeTab?.kind === "git-history" &&
-        activeTab.repoRoot === known.repoRoot
-      ) {
-        closeTab(activeTab.id);
-        return;
-      }
-      openCommitHistoryTab({
-        repoRoot: known.repoRoot,
-        branch: sourceControl.status?.branch ?? null,
-      });
-      return;
-    }
-    if (!sourceControlContextPath) return;
-    try {
-      const repo = await native.gitResolveRepo(sourceControlContextPath);
-      if (!repo) return;
-      if (
-        activeTab?.kind === "git-history" &&
-        activeTab.repoRoot === repo.repoRoot
-      ) {
-        closeTab(activeTab.id);
-        return;
-      }
-      openCommitHistoryTab({ repoRoot: repo.repoRoot, branch: repo.branch });
-    } catch {
-      /* noop */
-    }
-  }, [
-    activeTab,
-    closeTab,
-    openCommitHistoryTab,
-    sourceControl.hasRepo,
-    sourceControl.repo,
-    sourceControl.status?.branch,
-    sourceControlContextPath,
-  ]);
-
-  return { sourceControl, openGitGraphFromContext };
+  return { sourceControl };
 }
