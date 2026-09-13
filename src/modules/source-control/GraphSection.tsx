@@ -1,9 +1,8 @@
 /**
  * 本文件实现 Source Control 的提交图谱区域。
- * 负责提交列表、分页加载和选中提交详情展示。
+ * 负责提交列表与分页，复用悬停详情及多提交文件展开交互。
  */
 
-import { Hint } from "@/components/controls/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,20 +14,21 @@ import {
   AlertDialogTitle,
 } from "@/components/controls/alert-dialog";
 import { Button } from "@/components/controls/button";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { type GitLogEntry, native } from "@/modules/ai/lib/native";
+import { CommitDetail } from "@/modules/git-history/CommitDetail";
 import {
-  CommitDetail,
-  type CommitDetailFilesEntry,
-} from "@/modules/git-history/CommitDetail";
+  CommitHoverCard,
+  commitRowInteraction,
+  ExpandedCommitRow,
+} from "@/modules/git-history/CommitGraphInteraction";
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
+import {
+  flattenCommitRows,
+  useCommitGraph,
+} from "@/modules/git-history/useCommitGraph";
 import { relativeTime } from "@/modules/source-control/relativeTime";
 import {
   CloudIcon,
@@ -46,13 +46,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 40;
 const ROW_HEIGHT = 24;
 const NEAR_BOTTOM_PX = 180;
-const FILES_CACHE_LIMIT = 16;
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -75,15 +73,6 @@ type Props = {
 };
 
 type LoadStatus = "idle" | "initial" | "more" | "initial-error" | "more-error";
-type FilesEntry = CommitDetailFilesEntry;
-type Anchor = {
-  sha: string;
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-};
-
 function normalizeError(error: unknown): string {
   if (typeof error === "string") return error;
   if (error && typeof error === "object" && "message" in error) {
@@ -91,22 +80,6 @@ function normalizeError(error: unknown): string {
     if (typeof message === "string") return message;
   }
   return "Unknown Git error";
-}
-
-function withFilesEntry(
-  current: Map<string, FilesEntry>,
-  sha: string,
-  entry: FilesEntry,
-): Map<string, FilesEntry> {
-  const next = new Map(current);
-  next.delete(sha);
-  next.set(sha, entry);
-  while (next.size > FILES_CACHE_LIMIT) {
-    const oldest = next.keys().next().value;
-    if (oldest === undefined) break;
-    next.delete(oldest);
-  }
-  return next;
 }
 
 /**
@@ -128,17 +101,20 @@ export const GraphSection = memo(function GraphSection({
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [endReached, setEndReached] = useState(false);
-  const [openAnchor, setOpenAnchor] = useState<Anchor | null>(null);
-  const [filesBySha, setFilesBySha] = useState<Map<string, FilesEntry>>(
-    () => new Map(),
-  );
+  const graph = useCommitGraph(repoRoot, expanded);
+  const {
+    anchor: openAnchor,
+    files: filesBySha,
+    fetchFiles,
+    close: closePopover,
+    reset,
+  } = graph;
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef(0);
   const loadingMoreRef = useRef(false);
-  const filesInflightRef = useRef(new Set<string>());
-  const openSequenceRef = useRef(0);
+  const loadedKeyRef = useRef<string | null>(null);
   const refreshKey = repoRoot
     ? `${repoRoot}:${headSha ?? ""}:${refreshToken}`
     : null;
@@ -147,16 +123,13 @@ export const GraphSection = memo(function GraphSection({
     if (!repoRoot || !expanded) return;
     const request = ++requestRef.current;
     loadingMoreRef.current = false;
-    filesInflightRef.current.clear();
     setLoadStatus("initial");
     setError(null);
     setEndReached(false);
-    openSequenceRef.current += 1;
-    setOpenAnchor(null);
-    setFilesBySha(new Map());
     try {
       const next = await native.gitLog(repoRoot, { limit: PAGE_SIZE });
       if (request !== requestRef.current) return;
+      loadedKeyRef.current = refreshKey;
       setCommits(next);
       setEndReached(next.length < PAGE_SIZE);
       setLoadStatus("idle");
@@ -166,12 +139,14 @@ export const GraphSection = memo(function GraphSection({
       setError(normalizeError(loadError));
       setLoadStatus("initial-error");
     }
-  }, [expanded, repoRoot]);
+  }, [expanded, repoRoot, refreshKey]);
 
   useEffect(() => {
     if (!expanded || !refreshKey) return;
+    if (loadedKeyRef.current === refreshKey) return;
+    reset();
     void loadInitial();
-  }, [expanded, loadInitial, refreshKey]);
+  }, [expanded, loadInitial, refreshKey, reset]);
 
   useEffect(() => {
     setPendingUndo((current) => (current?.sha === headSha ? current : null));
@@ -231,12 +206,16 @@ export const GraphSection = memo(function GraphSection({
     [graphRows],
   );
 
+  const items = useMemo(
+    () => flattenCommitRows(commits, graph.expanded, filesBySha),
+    [commits, graph.expanded, filesBySha],
+  );
   const virtualizer = useVirtualizer({
-    count: commits.length,
+    count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
-    getItemKey: (index) => commits[index]?.sha ?? index,
+    getItemKey: (index) => items[index]?.key ?? index,
   });
 
   useEffect(() => {
@@ -246,73 +225,6 @@ export const GraphSection = memo(function GraphSection({
       void loadMore();
     }
   }, [endReached, expanded, loadMore, loadStatus]);
-
-  const fetchFiles = useCallback(
-    async (sha: string) => {
-      if (!repoRoot || filesInflightRef.current.has(sha)) return;
-      const request = requestRef.current;
-      filesInflightRef.current.add(sha);
-      setFilesBySha((current) =>
-        withFilesEntry(current, sha, { state: "loading" }),
-      );
-      try {
-        const [files, message] = await Promise.all([
-          native.gitCommitFiles(repoRoot, sha),
-          native.gitCommitMessage(repoRoot, sha),
-        ]);
-        if (request !== requestRef.current) return;
-        setFilesBySha((current) =>
-          withFilesEntry(current, sha, {
-            state: "loaded",
-            files,
-            message,
-          }),
-        );
-      } catch (filesError) {
-        if (request !== requestRef.current) return;
-        setFilesBySha((current) =>
-          withFilesEntry(current, sha, {
-            state: "error",
-            error: normalizeError(filesError),
-          }),
-        );
-      } finally {
-        if (request === requestRef.current) {
-          filesInflightRef.current.delete(sha);
-        }
-      }
-    },
-    [repoRoot],
-  );
-
-  const closePopover = useCallback(() => {
-    openSequenceRef.current += 1;
-    setOpenAnchor(null);
-  }, []);
-
-  const openCommit = useCallback(
-    (commit: GitLogEntry, element: HTMLElement) => {
-      if (openAnchor?.sha === commit.sha) {
-        closePopover();
-        return;
-      }
-      const rect = element.getBoundingClientRect();
-      const nextAnchor = {
-        sha: commit.sha,
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height,
-      };
-      const sequence = ++openSequenceRef.current;
-      setOpenAnchor(null);
-      window.setTimeout(() => {
-        if (sequence === openSequenceRef.current) setOpenAnchor(nextAnchor);
-      }, 0);
-      if (!filesBySha.has(commit.sha)) void fetchFiles(commit.sha);
-    },
-    [closePopover, fetchFiles, filesBySha, openAnchor?.sha],
-  );
 
   const confirmUndo = useCallback(async () => {
     if (!repoRoot || !pendingUndo) return;
@@ -364,7 +276,7 @@ export const GraphSection = memo(function GraphSection({
         <div
           ref={scrollRef}
           onScroll={(event) => {
-            if (openAnchor) closePopover();
+            closePopover();
             const target = event.currentTarget;
             if (
               target.scrollHeight - target.scrollTop - target.clientHeight <
@@ -383,51 +295,79 @@ export const GraphSection = memo(function GraphSection({
             }}
           >
             {virtualizer.getVirtualItems().map((virtualRow) => {
-              const commit = commits[virtualRow.index];
+              const item = items[virtualRow.index];
+              const commit = item?.commit;
               const graphRow = commit ? graphBySha.get(commit.sha) : null;
-              if (!commit || !graphRow) return null;
-              const refs = commit.refs.slice(0, 2);
-              const hasLocalRef = refs.some((ref) => ref.kind === "local");
-              return (
-                <Hint
-                  content={`${commit.shortSha} ${commit.subject}`}
-                  key={virtualRow.key}
-                >
-                  <button
-                    aria-label={`${commit.shortSha} ${commit.subject}`}
-                    type="button"
-                    onClick={(event) => openCommit(commit, event.currentTarget)}
-                    className={cn(
-                      "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
-                      openAnchor?.sha === commit.sha &&
-                        "bg-interactive-active hover:bg-interactive-active",
-                    )}
+              if (!item || !commit || !graphRow) return null;
+              if (item.kind !== "commit")
+                return (
+                  <div
+                    key={virtualRow.key}
+                    className="absolute left-0 w-full"
                     style={{
                       height: virtualRow.size,
                       transform: `translateY(${virtualRow.start}px)`,
                     }}
                   >
-                    <GraphRail
+                    <ExpandedCommitRow
+                      item={item}
                       row={graphRow}
-                      rowHeight={ROW_HEIGHT}
                       maxLaneCount={maxLaneCount}
-                      active={openAnchor?.sha === commit.sha}
+                      rowHeight={ROW_HEIGHT}
+                      onRetry={() => void fetchFiles(commit.sha, true)}
+                      onOpen={() => {
+                        if (item.kind === "file")
+                          onOpenCommitFile?.({
+                            repoRoot,
+                            sha: commit.sha,
+                            shortSha: commit.shortSha,
+                            subject: commit.subject,
+                            path: item.file.path,
+                            originalPath: item.file.originalPath,
+                          });
+                      }}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-                      {commit.subject || "(no subject)"}
-                    </span>
-                    {refs.map((ref) => (
-                      <GitRefBadge
-                        key={`${ref.kind}:${ref.label}`}
-                        ref={ref}
-                        iconOnly={hasLocalRef && ref.kind === "remote"}
-                      />
-                    ))}
-                    <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
-                      {relativeTime(commit.timestampSecs)}
-                    </span>
-                  </button>
-                </Hint>
+                  </div>
+                );
+              const refs = commit.refs.slice(0, 2);
+              const hasLocalRef = refs.some((ref) => ref.kind === "local");
+              return (
+                <button
+                  key={virtualRow.key}
+                  {...commitRowInteraction(graph, commit.sha)}
+                  aria-label={`${commit.shortSha} ${commit.subject}`}
+                  type="button"
+                  onClick={() => graph.toggle(commit.sha)}
+                  className={cn(
+                    "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
+                    graph.expanded.has(commit.sha) &&
+                      "bg-interactive-active hover:bg-interactive-active",
+                  )}
+                  style={{
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <GraphRail
+                    row={graphRow}
+                    rowHeight={ROW_HEIGHT}
+                    maxLaneCount={maxLaneCount}
+                    active={graph.expanded.has(commit.sha)}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+                    {commit.subject || "(no subject)"}
+                  </span>
+                  {refs.map((ref) => (
+                    <GitRefBadge
+                      key={`${ref.kind}:${ref.label}`}
+                      ref={ref}
+                      iconOnly={hasLocalRef && ref.kind === "remote"}
+                    />
+                  ))}
+                  <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
+                    {relativeTime(commit.timestampSecs)}
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -456,68 +396,35 @@ export const GraphSection = memo(function GraphSection({
         </div>
       )}
 
-      <Popover
-        open={!!openAnchor}
-        onOpenChange={(next) => {
-          if (!next) closePopover();
-        }}
-      >
-        {typeof document !== "undefined"
-          ? createPortal(
-              <PopoverAnchor asChild>
-                <div
-                  aria-hidden
-                  style={{
-                    position: "fixed",
-                    top: openAnchor?.top ?? -9999,
-                    left: openAnchor?.left ?? -9999,
-                    width: openAnchor?.width ?? 0,
-                    height: openAnchor?.height ?? 0,
-                    pointerEvents: "none",
-                  }}
-                />
-              </PopoverAnchor>,
-              document.body,
-            )
-          : null}
-        <PopoverContent
-          side="right"
-          align="start"
-          sideOffset={6}
-          collisionPadding={12}
-          avoidCollisions
-          onOpenAutoFocus={(event) => event.preventDefault()}
-          className="flex w-[390px] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden rounded-lg p-0 shadow-xl"
-        >
-          {selectedCommit ? (
-            <CommitDetail
-              key={selectedCommit.sha}
-              commit={selectedCommit}
-              filesEntry={selectedFiles}
-              onUndo={
-                showUndoCommit &&
-                selectedCommit.sha === headSha &&
-                selectedCommit.parents.length > 0
-                  ? () => setPendingUndo(selectedCommit)
-                  : undefined
-              }
-              onRetry={() => void fetchFiles(selectedCommit.sha)}
-              onOpenFile={(file) => {
-                if (!onOpenCommitFile) return;
-                onOpenCommitFile({
-                  repoRoot,
-                  sha: selectedCommit.sha,
-                  shortSha: selectedCommit.shortSha,
-                  subject: selectedCommit.subject,
-                  path: file.path,
-                  originalPath: file.originalPath,
-                });
-                closePopover();
-              }}
-            />
-          ) : null}
-        </PopoverContent>
-      </Popover>
+      <CommitHoverCard graph={graph} side="right">
+        {selectedCommit ? (
+          <CommitDetail
+            key={selectedCommit.sha}
+            commit={selectedCommit}
+            filesEntry={selectedFiles}
+            onUndo={
+              showUndoCommit &&
+              selectedCommit.sha === headSha &&
+              selectedCommit.parents.length > 0
+                ? () => setPendingUndo(selectedCommit)
+                : undefined
+            }
+            onRetry={() => void fetchFiles(selectedCommit.sha, true)}
+            onOpenFile={(file) => {
+              if (!onOpenCommitFile) return;
+              onOpenCommitFile({
+                repoRoot,
+                sha: selectedCommit.sha,
+                shortSha: selectedCommit.shortSha,
+                subject: selectedCommit.subject,
+                path: file.path,
+                originalPath: file.originalPath,
+              });
+              closePopover();
+            }}
+          />
+        ) : null}
+      </CommitHoverCard>
 
       <AlertDialog
         open={!!pendingUndo}
@@ -573,7 +480,8 @@ function GitRefBadge({
       : ref.kind === "tag"
         ? {
             icon: Tag01Icon,
-            className: "border-amber-600 bg-amber-600 text-white dark:text-black",
+            className:
+              "border-amber-600 bg-amber-600 text-white dark:text-black",
           }
         : {
             icon: GitBranchIcon,
@@ -582,26 +490,24 @@ function GitRefBadge({
           };
 
   return (
-    <Hint content={ref.label}>
-      <span
-        className={cn(
-          "ml-1 inline-flex h-5 max-w-28 shrink-0 items-center gap-1 truncate rounded border px-1.5 text-[11px] font-medium",
-          appearance.className,
-        )}
-      >
-        <HugeiconsIcon
-          icon={appearance.icon}
-          size={13}
-          strokeWidth={1.8}
-          className={cn("shrink-0", appearance.iconClassName)}
-        />
-        {iconOnly ? (
-          <span className="sr-only">{ref.label}</span>
-        ) : (
-          <span className="truncate">{ref.label}</span>
-        )}
-      </span>
-    </Hint>
+    <span
+      className={cn(
+        "ml-1 inline-flex h-5 max-w-28 shrink-0 items-center gap-1 truncate rounded border px-1.5 text-[11px] font-medium",
+        appearance.className,
+      )}
+    >
+      <HugeiconsIcon
+        icon={appearance.icon}
+        size={13}
+        strokeWidth={1.8}
+        className={cn("shrink-0", appearance.iconClassName)}
+      />
+      {iconOnly ? (
+        <span className="sr-only">{ref.label}</span>
+      ) : (
+        <span className="truncate">{ref.label}</span>
+      )}
+    </span>
   );
 }
 

@@ -3,15 +3,9 @@
  * 密集的提交元信息使用清晰的语义文字颜色，不额外降低小字号透明度。
  */
 
-import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-} from "@/components/ui/popover";
-import { Spinner } from "@/components/ui/spinner";
 import { TooltipProvider } from "@/components/controls/tooltip";
+import { Spinner } from "@/components/ui/spinner";
 import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import {
@@ -25,25 +19,12 @@ import {
   FindWidget,
   type FindWidgetHandle,
 } from "@/modules/find";
-import { File02Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { CommitDetail } from "@/modules/git-history/CommitDetail";
 import {
-  memo,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
-import {
-  CommitDetail,
-  type CommitDetailFilesEntry,
-} from "@/modules/git-history/CommitDetail";
+  CommitHoverCard,
+  commitRowInteraction,
+  ExpandedCommitRow,
+} from "@/modules/git-history/CommitGraphInteraction";
 import {
   GraphRail,
   MAX_VISIBLE_LANES,
@@ -61,6 +42,24 @@ import {
   parseRemoteWebUrl,
   type RemoteWebInfo,
 } from "@/modules/git-history/lib/remoteWebUrl";
+import {
+  flattenCommitRows,
+  useCommitGraph,
+} from "@/modules/git-history/useCommitGraph";
+import { File02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
 
 const RAIL_RESERVED_PX = railWidth(MAX_VISIBLE_LANES);
 // rail | sha | subject(capped) | spacer(absorbs slack) | author(hugs) | date | changes
@@ -72,7 +71,6 @@ const SEARCH_PAGE_SIZE = 200;
 const ROW_HEIGHT = 32;
 const TABLE_HEADER_HEIGHT = 24;
 const NEAR_BOTTOM_PX = 240;
-const FILES_CACHE_LIMIT = 16;
 
 type CommitFileDiffOpenInput = {
   repoRoot: string;
@@ -122,22 +120,6 @@ export function shouldContinueGitHistorySearch(input: {
     !input.endReached &&
     Boolean(input.activeSearch)
   );
-}
-
-type FilesEntry = CommitDetailFilesEntry;
-
-function setFilesCacheEntry(
-  cache: Map<string, FilesEntry>,
-  sha: string,
-  entry: FilesEntry,
-) {
-  cache.delete(sha);
-  cache.set(sha, entry);
-  while (cache.size > FILES_CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
 }
 
 function normalizeError(error: unknown): string {
@@ -242,24 +224,19 @@ export function GitHistoryPane({
   useEffect(() => {
     if (!findPresence.mounted) setSearchInput("");
   }, [findPresence.mounted]);
-  const [openAnchor, setOpenAnchor] = useState<{
-    sha: string;
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-  } | null>(null);
+  const graph = useCommitGraph(repoRoot, visible);
+  const {
+    anchor: openAnchor,
+    files,
+    fetchFiles,
+    close: closePopover,
+    reset,
+  } = graph;
   const [remoteWeb, setRemoteWeb] = useState<RemoteWebInfo | null>(null);
-  const filesCacheRef = useRef(new Map<string, FilesEntry>());
-  const [, setFilesTick] = useState(0);
-  const bumpFiles = useCallback(() => setFilesTick((n) => n + 1), []);
 
   const requestIdRef = useRef(0);
   const inflightMoreRef = useRef(false);
-  const filesRequestIdRef = useRef(0);
-  const filesInflightRef = useRef(new Set<string>());
   const scrollRef = useRef<HTMLDivElement>(null);
-  const openSequenceRef = useRef(0);
   const graphCacheRef = useRef<{
     rows: GraphRow[];
     byCommit: Map<string, GraphRow>;
@@ -337,19 +314,22 @@ export function GitHistoryPane({
     });
   }, [commits, activeSearch]);
 
+  const items = useMemo(
+    () => flattenCommitRows(filtered, graph.expanded, files),
+    [filtered, graph.expanded, files],
+  );
   const virtualizer = useVirtualizer({
-    count: filtered.length,
+    count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 8,
-    getItemKey: (index) => filtered[index]?.sha ?? index,
+    getItemKey: (index) => items[index]?.key ?? index,
   });
 
   const loadInitial = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     inflightMoreRef.current = false;
-    openSequenceRef.current += 1;
-    setOpenAnchor(null);
+    closePopover();
     setLoadStatus("initial");
     setError(null);
     setEndReached(false);
@@ -364,7 +344,7 @@ export function GitHistoryPane({
       setError(normalizeError(err));
       setLoadStatus("initial-error");
     }
-  }, [repoRoot]);
+  }, [repoRoot, closePopover]);
 
   const loadMore = useCallback(async () => {
     if (!visible) return;
@@ -403,15 +383,11 @@ export function GitHistoryPane({
   }, [activeSearch, commits, endReached, loadStatus, repoRoot, visible]);
 
   useEffect(() => {
-    filesRequestIdRef.current += 1;
-    filesInflightRef.current.clear();
-    filesCacheRef.current.clear();
-    bumpFiles();
+    reset();
     setCommits([]);
-    openSequenceRef.current += 1;
-    setOpenAnchor(null);
+    closePopover();
     void loadInitial();
-  }, [bumpFiles, loadInitial]);
+  }, [reset, loadInitial, closePopover]);
 
   useEffect(() => {
     let cancelled = false;
@@ -434,14 +410,13 @@ export function GitHistoryPane({
     if (!visible) return;
     const el = scrollRef.current;
     if (!el) return;
-    openSequenceRef.current += 1;
-    setOpenAnchor((prev) => (prev ? null : prev));
+    closePopover();
     if (activeSearch) return;
     const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (remaining < NEAR_BOTTOM_PX) {
       void loadMore();
     }
-  }, [activeSearch, loadMore, visible]);
+  }, [activeSearch, loadMore, visible, closePopover]);
 
   // Auto-fill: if the list doesn't fill the viewport (no scroll possible)
   // after a load, keep pulling pages until it does or the end is reached.
@@ -484,84 +459,12 @@ export function GitHistoryPane({
   }, [activeSearch, endReached, loadMore, loadStatus, visible]);
 
   const handleRefresh = useCallback(() => {
-    filesRequestIdRef.current += 1;
-    filesInflightRef.current.clear();
-    filesCacheRef.current.clear();
-    bumpFiles();
+    reset();
     void loadInitial();
-  }, [bumpFiles, loadInitial]);
-
-  const fetchFiles = useCallback(
-    async (sha: string) => {
-      if (filesInflightRef.current.has(sha)) return;
-      const cache = filesCacheRef.current;
-      const existing = cache.get(sha);
-      if (existing && existing.state !== "error") return;
-      const requestId = filesRequestIdRef.current;
-      filesInflightRef.current.add(sha);
-      setFilesCacheEntry(cache, sha, { state: "loading" });
-      bumpFiles();
-      try {
-        const [files, message] = await Promise.all([
-          native.gitCommitFiles(repoRoot, sha),
-          native.gitCommitMessage(repoRoot, sha),
-        ]);
-        if (requestId !== filesRequestIdRef.current) return;
-        setFilesCacheEntry(cache, sha, { state: "loaded", files, message });
-        bumpFiles();
-      } catch (err) {
-        if (requestId !== filesRequestIdRef.current) return;
-        setFilesCacheEntry(cache, sha, {
-          state: "error",
-          error: normalizeError(err),
-        });
-        bumpFiles();
-      } finally {
-        if (requestId === filesRequestIdRef.current) {
-          filesInflightRef.current.delete(sha);
-        }
-      }
-    },
-    [bumpFiles, repoRoot],
-  );
-
-  const handleRowClick = useCallback(
-    (sha: string, event: React.MouseEvent<HTMLElement>) => {
-      if (openAnchor?.sha === sha) {
-        openSequenceRef.current += 1;
-        setOpenAnchor(null);
-        return;
-      }
-      // Anchor at the cursor so the popover opens where the user clicked,
-      // but clamp X so it never gets pushed off-screen on the right.
-      const POPOVER_WIDTH = 420;
-      const PADDING = 16;
-      const maxLeft = window.innerWidth - POPOVER_WIDTH - PADDING;
-      const left = Math.max(PADDING, Math.min(event.clientX, maxLeft));
-      const nextAnchor = {
-        sha,
-        top: event.clientY,
-        left,
-        width: 1,
-        height: 1,
-      };
-      const sequence = ++openSequenceRef.current;
-      setOpenAnchor(null);
-      window.setTimeout(() => {
-        if (sequence === openSequenceRef.current) setOpenAnchor(nextAnchor);
-      }, 0);
-      void fetchFiles(sha);
-    },
-    [fetchFiles, openAnchor?.sha],
-  );
-
-  const closePopover = useCallback(() => {
-    openSequenceRef.current += 1;
-    setOpenAnchor(null);
-  }, []);
+  }, [reset, loadInitial]);
 
   const openFilesEntry = openAnchor
-    ? (filesCacheRef.current.get(openAnchor.sha) ?? null)
+    ? (files.get(openAnchor.sha) ?? null)
     : null;
 
   const handleFileOpen = useCallback(
@@ -574,9 +477,9 @@ export function GitHistoryPane({
         path: file.path,
         originalPath: file.originalPath,
       });
-      setOpenAnchor(null);
+      closePopover();
     },
-    [onOpenCommitFile, repoRoot],
+    [onOpenCommitFile, repoRoot, closePopover],
   );
 
   return (
@@ -662,8 +565,9 @@ export function GitHistoryPane({
                 }}
               >
                 {virtualizer.getVirtualItems().map((virtualRow) => {
-                  const commit = filtered[virtualRow.index];
-                  if (!commit) return null;
+                  const item = items[virtualRow.index];
+                  const commit = item?.commit;
+                  if (!commit || !item) return null;
                   return (
                     <div
                       key={virtualRow.key}
@@ -676,15 +580,31 @@ export function GitHistoryPane({
                         transform: `translateY(${virtualRow.start}px)`,
                       }}
                     >
-                      <CommitRow
-                        commit={commit}
-                        query={activeSearch}
-                        active={openAnchor?.sha === commit.sha}
-                        graphRow={graphByCommit.get(commit.sha) ?? null}
-                        maxLaneCount={maxLaneCount}
-                        gridTemplate={GRID_TEMPLATE}
-                        onClick={handleRowClick}
-                      />
+                      {item.kind !== "commit" ? (
+                        <ExpandedCommitRow
+                          item={item}
+                          row={graphByCommit.get(commit.sha) ?? null}
+                          maxLaneCount={maxLaneCount}
+                          railSpace={RAIL_RESERVED_PX + 18}
+                          rowHeight={ROW_HEIGHT}
+                          onRetry={() => void fetchFiles(commit.sha, true)}
+                          onOpen={() => {
+                            if (item.kind === "file")
+                              handleFileOpen(commit, item.file);
+                          }}
+                        />
+                      ) : (
+                        <CommitRow
+                          commit={commit}
+                          graph={graph}
+                          query={activeSearch}
+                          active={graph.expanded.has(commit.sha)}
+                          graphRow={graphByCommit.get(commit.sha) ?? null}
+                          maxLaneCount={maxLaneCount}
+                          gridTemplate={GRID_TEMPLATE}
+                          onClick={(sha) => graph.toggle(sha)}
+                        />
+                      )}
                     </div>
                   );
                 })}
@@ -724,68 +644,34 @@ export function GitHistoryPane({
           </>
         )}
 
-        <Popover
-          open={!!openAnchor}
-          onOpenChange={(next) => {
-            if (!next) closePopover();
-          }}
-        >
-          {typeof document !== "undefined"
-            ? createPortal(
-                <PopoverAnchor asChild>
-                  <div
-                    aria-hidden
-                    style={{
-                      position: "fixed",
-                      top: openAnchor?.top ?? -9999,
-                      left: openAnchor?.left ?? -9999,
-                      width: openAnchor?.width ?? 0,
-                      height: openAnchor?.height ?? 0,
-                      pointerEvents: "none",
-                    }}
+        <CommitHoverCard graph={graph} side="bottom">
+          {openAnchor
+            ? (() => {
+                const commit = commits.find((c) => c.sha === openAnchor.sha);
+                if (!commit) return null;
+                return (
+                  <CommitDetail
+                    key={commit.sha}
+                    commit={commit}
+                    filesEntry={openFilesEntry}
+                    remoteAction={
+                      remoteWeb
+                        ? {
+                            label: hostLabel(remoteWeb),
+                            onClick: () =>
+                              void openUrl(
+                                commitWebUrl(remoteWeb, commit.sha),
+                              ).catch(console.error),
+                          }
+                        : undefined
+                    }
+                    onOpenFile={(file) => void handleFileOpen(commit, file)}
+                    onRetry={() => void fetchFiles(openAnchor.sha, true)}
                   />
-                </PopoverAnchor>,
-                document.body,
-              )
+                );
+              })()
             : null}
-          <PopoverContent
-            side="bottom"
-            align="start"
-            sideOffset={4}
-            alignOffset={0}
-            collisionPadding={16}
-            avoidCollisions
-            onOpenAutoFocus={(e) => e.preventDefault()}
-            className="flex w-[420px] max-w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 shadow-xl"
-          >
-            {openAnchor
-              ? (() => {
-                  const commit = commits.find((c) => c.sha === openAnchor.sha);
-                  if (!commit) return null;
-                  return (
-                    <CommitDetail
-                      key={commit.sha}
-                      commit={commit}
-                      filesEntry={openFilesEntry}
-                      remoteAction={
-                        remoteWeb
-                          ? {
-                              label: hostLabel(remoteWeb),
-                              onClick: () =>
-                                void openUrl(
-                                  commitWebUrl(remoteWeb, commit.sha),
-                                ).catch(console.error),
-                            }
-                          : undefined
-                      }
-                      onOpenFile={(file) => void handleFileOpen(commit, file)}
-                      onRetry={() => void fetchFiles(openAnchor.sha)}
-                    />
-                  );
-                })()
-              : null}
-          </PopoverContent>
-        </Popover>
+        </CommitHoverCard>
       </div>
     </TooltipProvider>
   );
@@ -800,6 +686,7 @@ function CenterPlaceholder({ children }: { children: ReactNode }) {
 }
 
 type CommitRowProps = {
+  graph: ReturnType<typeof useCommitGraph>;
   commit: GitLogEntry;
   query: string;
   active: boolean;
@@ -810,6 +697,7 @@ type CommitRowProps = {
 };
 
 const CommitRow = memo(function CommitRow({
+  graph,
   commit,
   query,
   active,
@@ -824,6 +712,7 @@ const CommitRow = memo(function CommitRow({
   const totalStat = commit.insertions + commit.deletions;
   return (
     <button
+      {...commitRowInteraction(graph, commit.sha)}
       type="button"
       onClick={(event) => onClick(commit.sha, event)}
       className={cn(
@@ -862,39 +751,33 @@ const CommitRow = memo(function CommitRow({
         )}
       </span>
       <span aria-hidden />
-      <Hint content={commit.authorEmail || commit.author}>
-        <span className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground">
-          <span
-            className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] font-mono text-[8.5px] font-bold uppercase tabular-nums text-background"
-            style={{
-              backgroundColor: authorTint(commit.authorEmail || commit.author),
-            }}
-          >
-            {initials}
-          </span>
-          <span className="min-w-0 truncate">
-            {commit.author
-              ? highlight(commit.author, query)
-              : t("unknownAuthor")}
-          </span>
+      <span className="ml-2 inline-flex h-[18px] max-w-full min-w-0 items-center gap-1.5 justify-self-start self-center overflow-hidden rounded-md bg-foreground/6 pl-1 pr-1.5 text-[10.5px] font-medium text-foreground">
+        <span
+          className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-[3px] font-mono text-[8.5px] font-bold uppercase tabular-nums text-background"
+          style={{
+            backgroundColor: authorTint(commit.authorEmail || commit.author),
+          }}
+        >
+          {initials}
         </span>
-      </Hint>
+        <span className="min-w-0 truncate">
+          {commit.author ? highlight(commit.author, query) : t("unknownAuthor")}
+        </span>
+      </span>
       <span className="text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">
         {date}
       </span>
       <span className="flex min-w-0 items-center justify-end gap-1.5 font-mono text-[10px] tabular-nums">
         {commit.filesChanged > 0 ? (
-          <Hint content={t("filesChanged", { count: commit.filesChanged })}>
-            <span className="inline-flex items-center gap-1 text-muted-foreground">
-              <HugeiconsIcon
-                icon={File02Icon}
-                size={10.5}
-                strokeWidth={1.7}
-                className="opacity-70"
-              />
-              <span className="font-medium">{commit.filesChanged}</span>
-            </span>
-          </Hint>
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <HugeiconsIcon
+              icon={File02Icon}
+              size={10.5}
+              strokeWidth={1.7}
+              className="opacity-70"
+            />
+            <span className="font-medium">{commit.filesChanged}</span>
+          </span>
         ) : null}
         {commit.filesChanged > 0 && totalStat > 0 ? (
           <span

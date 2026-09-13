@@ -11,19 +11,25 @@ import {
 import { cn } from "@/lib/utils";
 import { Slot } from "radix-ui";
 import {
-  createContext,
-  useContext,
   type ComponentProps,
+  createContext,
   type ReactElement,
   type ReactNode,
+  useContext,
 } from "react";
 
 const TooltipGroup = createContext(false);
 
+export const TOOLTIP_DELAY_MS = 800;
+export const TOOLTIP_SKIP_DELAY_MS = 500;
+
 export function TooltipProvider({ children }: { children: ReactNode }) {
   return (
     <TooltipGroup value={true}>
-      <BaseTooltipProvider delayDuration={800} skipDelayDuration={500}>
+      <BaseTooltipProvider
+        delayDuration={TOOLTIP_DELAY_MS}
+        skipDelayDuration={TOOLTIP_SKIP_DELAY_MS}
+      >
         {children}
       </BaseTooltipProvider>
     </TooltipGroup>
