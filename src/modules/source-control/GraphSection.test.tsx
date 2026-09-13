@@ -11,6 +11,8 @@ import { act, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+const virtualRange = vi.hoisted(() => ({ limit: Number.POSITIVE_INFINITY }));
+
 vi.mock("@/modules/ai/lib/native", () => ({
   native: {
     gitLog: vi.fn(),
@@ -36,12 +38,15 @@ vi.mock("@tanstack/react-virtual", () => ({
   }) => ({
     getTotalSize: () => options.count * options.estimateSize(),
     getVirtualItems: () =>
-      Array.from({ length: options.count }, (_, index) => ({
-        index,
-        key: options.getItemKey(index),
-        start: index * options.estimateSize(),
-        size: options.estimateSize(),
-      })),
+      Array.from(
+        { length: Math.min(options.count, virtualRange.limit) },
+        (_, index) => ({
+          index,
+          key: options.getItemKey(index),
+          start: index * options.estimateSize(),
+          size: options.estimateSize(),
+        }),
+      ),
   }),
 }));
 
@@ -72,6 +77,7 @@ const files: GitCommitFileChange[] = [
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 beforeEach(() => {
+  virtualRange.limit = Number.POSITIVE_INFINITY;
   vi.useFakeTimers();
   vi.mocked(native.gitLog)
     .mockReset()
@@ -87,6 +93,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
+  Reflect.deleteProperty(HTMLElement.prototype, "animate");
 });
 const wait = async (ms: number) =>
   act(async () => {
@@ -96,6 +103,7 @@ const wait = async (ms: number) =>
 const renderSearch = (
   props: {
     expanded?: boolean;
+    present?: boolean;
     searchOpen?: boolean;
     onCloseSearch?: () => void;
     onOpenCommitFile?: React.ComponentProps<
@@ -534,4 +542,103 @@ it("键盘可展开文件、进入悬停详情，并用 Esc 返回提交行", as
   );
   expect(document.activeElement).toBe(row);
   expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it.each(["click", "keyboard"])(
+  "大提交通过 %s 收起时，新进入视口的标题接续动画",
+  async (interaction) => {
+    virtualRange.limit = 6;
+    vi.mocked(native.gitCommitFiles).mockResolvedValue(
+      Array.from({ length: 30 }, (_, index) => ({
+        ...files[0],
+        path: `file-${index}`,
+      })),
+    );
+    await act(async () => renderSearch({ searchOpen: false }));
+    const trigger = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="a Commit a"]',
+    );
+    if (!trigger) throw new Error("缺少提交入口");
+    const scroll = trigger.closest(".app-scrollbar");
+    Object.defineProperty(scroll, "clientHeight", { value: 240 });
+    await act(async () => trigger.click());
+    await wait(1);
+    expect(container.querySelector('[data-commit-row="b"]')).toBeNull();
+    const file = container.querySelector('[data-commit-row="a:file:file-0"]');
+    const starts = new Map<HTMLElement, Keyframe[]>();
+    const animations: Animation[] = [];
+    HTMLElement.prototype.animate = function (frames) {
+      starts.set(this, frames as Keyframe[]);
+      const animation = {
+        cancel: vi.fn(),
+        onfinish: null,
+        oncancel: null,
+      } as unknown as Animation;
+      animations.push(animation);
+      return animation;
+    };
+    await act(async () =>
+      interaction === "click"
+        ? trigger.click()
+        : trigger.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }),
+          ),
+    );
+    const next = container.querySelector<HTMLElement>('[data-commit-row="b"]');
+    expect(next).not.toBeNull();
+    expect(starts.get(next as HTMLElement)?.[0].translate).toBe("0 240px");
+    expect(
+      container.querySelectorAll("[data-commit-row]").length,
+    ).toBeLessThanOrEqual(8);
+    expect(file?.isConnected && file.hasAttribute("inert")).toBe(true);
+    await act(async () => trigger.click());
+    expect(container.querySelector('[data-commit-row="a:file:file-0"]')).toBe(
+      file,
+    );
+    expect(file?.hasAttribute("inert")).toBe(false);
+    await act(async () => trigger.click());
+    act(() => {
+      const animation = animations.find((item) => item.onfinish);
+      animation?.onfinish?.call(animation, {} as AnimationPlaybackEvent);
+      // 在 React 提交卸载之前检查：动画清理不能让退出内容重新可见。
+      expect((file as HTMLElement).style.height).toBe("0px");
+      expect((file as HTMLElement).style.overflow).toBe("");
+    });
+    expect(file?.isConnected).toBe(false);
+    expect(native.gitCommitFiles).toHaveBeenCalledTimes(1);
+  },
+);
+
+it("分组退出后释放展示树，重新展开复用提交和文件缓存", async () => {
+  await act(async () => renderSearch({ searchOpen: false }));
+  const trigger = container.querySelector<HTMLButtonElement>(
+    'button[aria-label="a Commit a"]',
+  );
+  if (!trigger) throw new Error("缺少提交入口");
+  await act(async () => trigger.click());
+  await wait(1);
+  const scroll = trigger.closest<HTMLElement>(".app-scrollbar");
+  if (!scroll) throw new Error("缺少滚动视口");
+  await act(async () => {
+    scroll.scrollTop = 48;
+    scroll.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  const calls = vi.mocked(native.gitLog).mock.calls.length;
+  await act(async () =>
+    renderSearch({ expanded: false, present: true, searchOpen: false }),
+  );
+  expect(container.querySelector("[data-commit-row]")).not.toBeNull();
+  await act(async () =>
+    renderSearch({ expanded: false, present: false, searchOpen: false }),
+  );
+  expect(container.childElementCount).toBe(0);
+  await act(async () => renderSearch({ searchOpen: false }));
+  expect(
+    container.querySelector('[data-commit-row="a:file:src/new.ts"]'),
+  ).not.toBeNull();
+  expect(
+    container.querySelector<HTMLElement>(".app-scrollbar")?.scrollTop,
+  ).toBe(48);
+  expect(native.gitLog).toHaveBeenCalledTimes(calls);
+  expect(native.gitCommitFiles).toHaveBeenCalledTimes(1);
 });

@@ -2,8 +2,14 @@
  * 分组真实尺寸一次提交，固定尺寸的裁剪外壳与内容反向移动完成视觉过渡。
  * 不缩放或复制内容，尺寸观测只在切换边界发生；再次切换从当前视觉位置接续。
  */
-import { readMotionDurationMs, readMotionEasing } from "@/lib/motion";
-import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";
+import { RevealMotion } from "@/lib/revealMotion";
+import {
+  type RefObject,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 type Snapshot = {
   element: HTMLElement;
@@ -16,8 +22,9 @@ type Snapshot = {
 export function useSectionLayoutAnimation(
   groupRef: RefObject<HTMLDivElement | null>,
 ) {
+  const [animating, setAnimating] = useState(false);
   const pendingRef = useRef<Snapshot[] | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const cleanupRef = useRef<((notify?: boolean) => void) | null>(null);
 
   const finish = useCallback(() => {
     pendingRef.current = null;
@@ -43,23 +50,19 @@ export function useSectionLayoutAnimation(
         contentHeight: rect.height,
       };
     });
-    finish();
+    cleanupRef.current?.(false);
     pendingRef.current = snapshots;
-  }, [finish, groupRef]);
+    setAnimating(true);
+  }, [groupRef]);
 
   useLayoutEffect(() => {
     const snapshots = pendingRef.current;
     pendingRef.current = null;
     if (!snapshots) return;
-    const duration = readMotionDurationMs("--dur-pane", 150);
-    if (duration <= 0) return;
-    const options = {
-      duration,
-      easing: readMotionEasing("--ease-standard", "ease"),
-      fill: "both" as const,
-    };
-    const animations: Animation[] = [];
-    const viewports: HTMLElement[] = [];
+    const motion = new RevealMotion(() => {
+      cleanupRef.current = null;
+      setAnimating(false);
+    }, true);
     // 先批量测量最终布局，再设置临时外壳，避免读写交错强制布局。
     const targets = snapshots.map((snapshot) => ({
       ...snapshot,
@@ -75,52 +78,18 @@ export function useSectionLayoutAnimation(
       );
       if (viewport) {
         const content = viewport.firstElementChild as HTMLElement;
-        const fixedHeight = Math.max(contentHeight, rect.height);
-        const from = fixedHeight - height;
-        const to = fixedHeight - rect.height;
-        viewport.style.height = `${fixedHeight}px`;
-        viewports.push(viewport);
-        animations.push(
-          viewport.animate(
-            [
-              { transform: `translateY(${offset - from}px)` },
-              { transform: `translateY(${-to}px)` },
-            ],
-            options,
-          ),
-          content.animate(
-            [
-              { transform: `translateY(${from}px)` },
-              { transform: `translateY(${to}px)` },
-            ],
-            options,
-          ),
-        );
+        motion.reveal(viewport, content, {
+          fromHeight: height,
+          toHeight: rect.height,
+          contentHeight,
+          offset,
+        });
       } else {
-        animations.push(
-          element.animate(
-            [
-              { transform: `translateY(${offset}px)` },
-              { transform: "translateY(0)" },
-            ],
-            options,
-          ),
-        );
+        motion.move(element, offset);
       }
     }
-    if (animations.length === 0) return;
-    const cleanup = () => {
-      for (const animation of animations) {
-        animation.onfinish = null;
-        animation.oncancel = null;
-        animation.cancel();
-      }
-      for (const viewport of viewports) viewport.style.removeProperty("height");
-      cleanupRef.current = null;
-    };
-    cleanupRef.current = cleanup;
-    for (const animation of animations) animation.oncancel = cleanup;
-    animations[0].onfinish = cleanup;
+    cleanupRef.current = (notify) => motion.finish(notify);
+    motion.start();
   });
 
   useLayoutEffect(() => {
@@ -149,9 +118,9 @@ export function useSectionLayoutAnimation(
       observer.disconnect();
       group.removeEventListener("pointerdown", handleInteraction, true);
       group.removeEventListener("keydown", handleInteraction, true);
-      finish();
+      cleanupRef.current?.(false);
     };
   }, [finish, groupRef]);
 
-  return capture;
+  return { capture, animating };
 }

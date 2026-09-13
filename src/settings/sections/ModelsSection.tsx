@@ -70,6 +70,7 @@ import { useChatStore } from "@/modules/ai/store/chatStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
 import { ModelPicker } from "@/modules/ai/components/ModelPicker";
+import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
 import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
 import {
   setModelUsageParameters,
@@ -450,7 +451,10 @@ export function ModelsSection() {
   };
 
   return (
-    <div className="@container flex min-w-0 flex-col gap-section">
+    <div
+      data-reveal-boundary
+      className="@container flex min-w-0 flex-col gap-section"
+    >
       <PageHeader
         title={t("models.header.title")}
         description={t("models.header.description")}
@@ -989,14 +993,19 @@ function ModelParametersCard({
         <p className="@min-[30rem]:pl-31 text-[11px] leading-4 text-muted-foreground">
           {t("models.parameters.description")}
         </p>
-        {selectedModel && (
-          <div className="border-t border-border/60 pt-3">
-            <ModelParameterEditor
-              key={modelRefKey(selectedModel)}
-              model={selectedModel}
-            />
-          </div>
-        )}
+        <ModelParameterReveal
+          open={!!selectedModel}
+          transitionKey={selectedModel ? modelRefKey(selectedModel) : null}
+        >
+          {selectedModel && (
+            <div className="border-t border-border/60 pt-3">
+              <ModelParameterEditor
+                key={modelRefKey(selectedModel)}
+                model={selectedModel}
+              />
+            </div>
+          )}
+        </ModelParameterReveal>
       </div>
     </div>
   );

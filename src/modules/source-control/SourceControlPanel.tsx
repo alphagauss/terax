@@ -776,264 +776,272 @@ function SourceControlViewContainerComponent({
                   </IconActionButton>
                 </>
               ),
-              render: () => (
-                <div className="flex h-full min-h-0 flex-col">
-                  <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/40 px-2.5">
-                    <BranchDropdown
-                      repoRoot={scm.repo?.repoRoot ?? null}
-                      repoLabel={repoLabel}
-                      onNavigateToPath={onNavigateToPath}
-                      onRefresh={handleRefresh}
-                    />
-                    {scm.status &&
-                    (scm.status.ahead > 0 || scm.status.behind > 0) ? (
-                      <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground">
-                        {scm.status.ahead > 0 ? (
-                          <span className="inline-flex items-center gap-0.5 rounded-md border border-border/60 px-1 py-0.5">
-                            <HugeiconsIcon
-                              icon={ArrowUp01Icon}
-                              size={9}
-                              strokeWidth={2.2}
-                            />
-                            {scm.status.ahead}
-                          </span>
-                        ) : null}
-                        {scm.status.behind > 0 ? (
-                          <span className="inline-flex items-center gap-0.5 rounded-md border border-border/60 px-1 py-0.5">
-                            <HugeiconsIcon
-                              icon={ArrowDown01Icon}
-                              size={9}
-                              strokeWidth={2.2}
-                            />
-                            {scm.status.behind}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {scm.repo && (
-                      <RepositoryDiffStats
-                        key={scm.repo.repoRoot}
-                        stats={scm.diffStats}
+              render: ({ present }) =>
+                present ? (
+                  <div className="flex h-full min-h-0 flex-col">
+                    <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border/40 px-2.5">
+                      <BranchDropdown
+                        repoRoot={scm.repo?.repoRoot ?? null}
+                        repoLabel={repoLabel}
+                        onNavigateToPath={onNavigateToPath}
+                        onRefresh={handleRefresh}
                       />
-                    )}
-                    {scm.status?.isDetached ? (
-                      <span className="rounded bg-muted/55 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
-                        detached
-                      </span>
+                      {scm.status &&
+                      (scm.status.ahead > 0 || scm.status.behind > 0) ? (
+                        <div className="flex shrink-0 items-center gap-0.5 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground">
+                          {scm.status.ahead > 0 ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-md border border-border/60 px-1 py-0.5">
+                              <HugeiconsIcon
+                                icon={ArrowUp01Icon}
+                                size={9}
+                                strokeWidth={2.2}
+                              />
+                              {scm.status.ahead}
+                            </span>
+                          ) : null}
+                          {scm.status.behind > 0 ? (
+                            <span className="inline-flex items-center gap-0.5 rounded-md border border-border/60 px-1 py-0.5">
+                              <HugeiconsIcon
+                                icon={ArrowDown01Icon}
+                                size={9}
+                                strokeWidth={2.2}
+                              />
+                              {scm.status.behind}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {scm.repo && (
+                        <RepositoryDiffStats
+                          key={scm.repo.repoRoot}
+                          stats={scm.diffStats}
+                        />
+                      )}
+                      {scm.status?.isDetached ? (
+                        <span className="rounded bg-muted/55 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wider text-muted-foreground">
+                          detached
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {scm.panelState === "loading" ? (
+                      <PanelCenter title="Loading repository" />
                     ) : null}
-                  </div>
 
-                  {scm.panelState === "loading" ? (
-                    <PanelCenter title="Loading repository" />
-                  ) : null}
+                    {scm.panelState === "no-repo" ? (
+                      <PanelCenter
+                        title="No repository"
+                        body="The active workspace is not inside a Git repository."
+                      />
+                    ) : null}
 
-                  {scm.panelState === "no-repo" ? (
-                    <PanelCenter
-                      title="No repository"
-                      body="The active workspace is not inside a Git repository."
-                    />
-                  ) : null}
+                    {scm.panelState === "error" ? (
+                      <PanelCenter
+                        title="Source control error"
+                        body={scm.statusError ?? "Unknown source control error"}
+                        action={
+                          <Button size="sm" onClick={() => void scm.refresh()}>
+                            Retry
+                          </Button>
+                        }
+                      />
+                    ) : null}
 
-                  {scm.panelState === "error" ? (
-                    <PanelCenter
-                      title="Source control error"
-                      body={scm.statusError ?? "Unknown source control error"}
-                      action={
-                        <Button size="sm" onClick={() => void scm.refresh()}>
-                          Retry
-                        </Button>
-                      }
-                    />
-                  ) : null}
+                    {scm.panelState === "ready" && scm.status ? (
+                      <>
+                        <div className="relative shrink-0 space-y-2 border-b border-border/40 bg-gradient-to-b from-card/65 to-card/30 px-2.5 pb-2.5 pt-2.5">
+                          <div
+                            className={cn(
+                              "relative rounded-lg border bg-background/95 shadow-sm transition-colors",
+                              scm.commitMessage.length > 0
+                                ? "border-border/70"
+                                : "border-border/45",
+                              "focus-within:border-primary/45 focus-within:shadow-md focus-within:shadow-primary/5",
+                            )}
+                          >
+                            <Textarea
+                              value={scm.commitMessage}
+                              onChange={(event) =>
+                                scm.setCommitMessage(event.target.value)
+                              }
+                              onKeyDown={handleCommitShortcut}
+                              placeholder={t("commit.placeholder", {
+                                shortcut: commitShortcut,
+                              })}
+                              rows={1}
+                              className="min-h-0 border-border resize-none bg-transparent pr-9 shadow-none"
+                            />
+                            <div className="absolute right-1 top-1">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    aria-label={`${scm.generateCommitMessageHint} (${generateShortcut})`}
+                                    disabled={!scm.canGenerateCommitMessage}
+                                    onClick={() =>
+                                      void scm.generateCommitMessage()
+                                    }
+                                    className={cn(
+                                      "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors",
+                                      "hover:bg-interactive-hover hover:text-foreground",
+                                      "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+                                    )}
+                                  >
+                                    {scm.actionBusy === "generate-message" ? (
+                                      <Spinner className="size-3" />
+                                    ) : (
+                                      <HugeiconsIcon
+                                        icon={AiContentGenerator02Icon}
+                                        size={14}
+                                        strokeWidth={1.75}
+                                      />
+                                    )}
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="left">
+                                  {`${scm.generateCommitMessageHint} (${generateShortcut})`}
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
 
-                  {scm.panelState === "ready" && scm.status ? (
-                    <>
-                      <div className="relative shrink-0 space-y-2 border-b border-border/40 bg-gradient-to-b from-card/65 to-card/30 px-2.5 pb-2.5 pt-2.5">
-                        <div
-                          className={cn(
-                            "relative rounded-lg border bg-background/95 shadow-sm transition-colors",
-                            scm.commitMessage.length > 0
-                              ? "border-border/70"
-                              : "border-border/45",
-                            "focus-within:border-primary/45 focus-within:shadow-md focus-within:shadow-primary/5",
-                          )}
-                        >
-                          <Textarea
-                            value={scm.commitMessage}
-                            onChange={(event) =>
-                              scm.setCommitMessage(event.target.value)
-                            }
-                            onKeyDown={handleCommitShortcut}
-                            placeholder={t("commit.placeholder", {
-                              shortcut: commitShortcut,
-                            })}
-                            rows={1}
-                            className="min-h-0 border-border resize-none bg-transparent pr-9 shadow-none"
-                          />
-                          <div className="absolute right-1 top-1">
+                          <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                            <span
+                              className={cn(
+                                "size-1.5 shrink-0 rounded-full transition-colors",
+                                canCommit
+                                  ? "bg-foreground/80"
+                                  : stagedCount > 0
+                                    ? "bg-muted-foreground/60"
+                                    : "bg-muted-foreground/30",
+                              )}
+                            />
+                            <span className="truncate font-medium text-foreground">
+                              {stagedCount === 0
+                                ? "Nothing staged"
+                                : `${stagedCount} ${stagedCount === 1 ? "file" : "files"} staged`}
+                            </span>
+                            <span className="ml-auto shrink-0 truncate text-muted-foreground">
+                              {pushStatusLabel}
+                            </span>
+                          </div>
+
+                          <div className="grid w-full grid-cols-2 gap-1.5">
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <button
-                                  type="button"
-                                  aria-label={`${scm.generateCommitMessageHint} (${generateShortcut})`}
-                                  disabled={!scm.canGenerateCommitMessage}
-                                  onClick={() =>
-                                    void scm.generateCommitMessage()
-                                  }
-                                  className={cn(
-                                    "inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors",
-                                    "hover:bg-interactive-hover hover:text-foreground",
-                                    "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
-                                  )}
+                                <Button
+                                  size="sm"
+                                  className="cursor-pointer font-semibold tracking-tight shadow-sm disabled:cursor-not-allowed disabled:shadow-none"
+                                  disabled={!canCommit}
+                                  onClick={() => void scm.commit()}
                                 >
-                                  {scm.actionBusy === "generate-message" ? (
-                                    <Spinner className="size-3" />
-                                  ) : (
-                                    <HugeiconsIcon
-                                      icon={AiContentGenerator02Icon}
-                                      size={14}
-                                      strokeWidth={1.75}
-                                    />
-                                  )}
-                                </button>
+                                  {scm.actionBusy === "commit"
+                                    ? "Committing…"
+                                    : "Commit"}
+                                </Button>
                               </TooltipTrigger>
-                              <TooltipContent side="left">
-                                {`${scm.generateCommitMessageHint} (${generateShortcut})`}
+                              <TooltipContent side="bottom">
+                                {commitHint}
+                              </TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  className="cursor-pointer font-medium disabled:cursor-not-allowed"
+                                  disabled={!scm.canPush || !!scm.actionBusy}
+                                  onClick={() => void scm.push()}
+                                >
+                                  {scm.actionBusy === "push"
+                                    ? "Pushing…"
+                                    : "Push"}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent
+                                side="bottom"
+                                className="max-w-64"
+                              >
+                                {pushDisabledReason}
                               </TooltipContent>
                             </Tooltip>
                           </div>
+
+                          <CommitFeedback feedback={footerFeedback} />
                         </div>
 
-                        <div className="flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
-                          <span
-                            className={cn(
-                              "size-1.5 shrink-0 rounded-full transition-colors",
-                              canCommit
-                                ? "bg-foreground/80"
-                                : stagedCount > 0
-                                  ? "bg-muted-foreground/60"
-                                  : "bg-muted-foreground/30",
-                            )}
-                          />
-                          <span className="truncate font-medium text-foreground">
-                            {stagedCount === 0
-                              ? "Nothing staged"
-                              : `${stagedCount} ${stagedCount === 1 ? "file" : "files"} staged`}
-                          </span>
-                          <span className="ml-auto shrink-0 truncate text-muted-foreground">
-                            {pushStatusLabel}
-                          </span>
-                        </div>
-
-                        <div className="grid w-full grid-cols-2 gap-1.5">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                className="cursor-pointer font-semibold tracking-tight shadow-sm disabled:cursor-not-allowed disabled:shadow-none"
-                                disabled={!canCommit}
-                                onClick={() => void scm.commit()}
-                              >
-                                {scm.actionBusy === "commit"
-                                  ? "Committing…"
-                                  : "Commit"}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom">
-                              {commitHint}
-                            </TooltipContent>
-                          </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className="cursor-pointer font-medium disabled:cursor-not-allowed"
-                                disabled={!scm.canPush || !!scm.actionBusy}
-                                onClick={() => void scm.push()}
-                              >
-                                {scm.actionBusy === "push"
-                                  ? "Pushing…"
-                                  : "Push"}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-64">
-                              {pushDisabledReason}
-                            </TooltipContent>
-                          </Tooltip>
-                        </div>
-
-                        <CommitFeedback feedback={footerFeedback} />
-                      </div>
-
-                      {scm.allClean ? (
-                        <CleanTreeHint repoLabel={repoLabel} />
-                      ) : (
-                        <div
-                          ref={containerRef}
-                          tabIndex={0}
-                          role="listbox"
-                          aria-label="Changed files"
-                          aria-activedescendant={
-                            focusedRowKey
-                              ? `scm-row-${focusedRowKey}`
-                              : undefined
-                          }
-                          onKeyDown={handlePanelKeyDown}
-                          className="relative min-h-0 flex-1 outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
-                        >
+                        {scm.allClean ? (
+                          <CleanTreeHint repoLabel={repoLabel} />
+                        ) : (
                           <div
-                            ref={scrollRef}
-                            className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+                            ref={containerRef}
+                            tabIndex={0}
+                            role="listbox"
+                            aria-label="Changed files"
+                            aria-activedescendant={
+                              focusedRowKey
+                                ? `scm-row-${focusedRowKey}`
+                                : undefined
+                            }
+                            onKeyDown={handlePanelKeyDown}
+                            className="relative min-h-0 flex-1 outline-none focus-visible:ring-1 focus-visible:ring-primary/30"
                           >
                             <div
-                              style={{
-                                height: virtualizer.getTotalSize(),
-                                position: "relative",
-                                width: "100%",
-                              }}
+                              ref={scrollRef}
+                              className="app-scrollbar h-full overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
                             >
-                              {virtualizer
-                                .getVirtualItems()
-                                .map((virtualRow) => {
-                                  const row = rows[virtualRow.index];
-                                  if (!row) return null;
-                                  return (
-                                    <div
-                                      key={virtualRow.key}
-                                      style={{
-                                        position: "absolute",
-                                        top: 0,
-                                        left: 0,
-                                        width: "100%",
-                                        height: virtualRow.size,
-                                        transform: `translateY(${virtualRow.start}px)`,
-                                      }}
-                                    >
-                                      <RowRenderer
-                                        row={row}
-                                        focused={focusedRowKey === row.key}
-                                        actionBusy={scm.actionBusy}
-                                        headerCheckState={scm.headerCheckState}
-                                        repoRoot={scm.repo?.repoRoot ?? null}
-                                        onFocusRow={setFocusedRowKey}
-                                        onToggleAll={scm.toggleAll}
-                                        onOpenFileDiff={scm.openFileDiff}
-                                        onToggleStageFile={scm.toggleStageFile}
-                                        onDiscardFile={scm.requestDiscardFile}
-                                        onOpenFile={onOpenFile}
-                                      />
-                                    </div>
-                                  );
-                                })}
+                              <div
+                                style={{
+                                  height: virtualizer.getTotalSize(),
+                                  position: "relative",
+                                  width: "100%",
+                                }}
+                              >
+                                {virtualizer
+                                  .getVirtualItems()
+                                  .map((virtualRow) => {
+                                    const row = rows[virtualRow.index];
+                                    if (!row) return null;
+                                    return (
+                                      <div
+                                        key={virtualRow.key}
+                                        style={{
+                                          position: "absolute",
+                                          top: 0,
+                                          left: 0,
+                                          width: "100%",
+                                          height: virtualRow.size,
+                                          transform: `translateY(${virtualRow.start}px)`,
+                                        }}
+                                      >
+                                        <RowRenderer
+                                          row={row}
+                                          focused={focusedRowKey === row.key}
+                                          actionBusy={scm.actionBusy}
+                                          headerCheckState={
+                                            scm.headerCheckState
+                                          }
+                                          repoRoot={scm.repo?.repoRoot ?? null}
+                                          onFocusRow={setFocusedRowKey}
+                                          onToggleAll={scm.toggleAll}
+                                          onOpenFileDiff={scm.openFileDiff}
+                                          onToggleStageFile={
+                                            scm.toggleStageFile
+                                          }
+                                          onDiscardFile={scm.requestDiscardFile}
+                                          onOpenFile={onOpenFile}
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      )}
-                    </>
-                  ) : null}
-                </div>
-              ),
+                        )}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null,
             },
             {
               id: "graph",
@@ -1068,12 +1076,13 @@ function SourceControlViewContainerComponent({
                   </SidebarSectionAction>
                 </>
               ),
-              render: ({ expanded }) => (
+              render: ({ expanded, present }) => (
                 <GraphSection
                   key={scm.repo?.repoRoot ?? "no-repository"}
                   repoRoot={scm.repo?.repoRoot ?? null}
                   headSha={scm.status?.headSha ?? null}
                   expanded={open && expanded}
+                  present={open && present}
                   searchOpen={graphSearchOpen}
                   onCloseSearch={() => setGraphSearchOpen(false)}
                   refreshToken={graphRefreshToken}

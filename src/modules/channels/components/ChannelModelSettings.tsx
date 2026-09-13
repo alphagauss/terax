@@ -47,7 +47,10 @@ export function ChannelModelSettings({
       ),
   );
   return (
-    <section className="@container mt-5 flex flex-col gap-field border-t border-border/60 pt-4">
+    <section
+      data-reveal-boundary
+      className="@container mt-5 flex flex-col gap-field border-t border-border/60 pt-4"
+    >
       <SectionHeading>{t("model.title")}</SectionHeading>
       <ModelRequestSettings
         model={usage.model}
