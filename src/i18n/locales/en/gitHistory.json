@@ -21,5 +21,10 @@
   "loadingFiles": "Loading files…",
   "noFileChanges": "No file changes.",
   "filesHeading": "Files",
-  "binary": "binary"
+  "binary": "binary",
+  "commitDetails": "Commit details",
+  "copied": "Copied",
+  "undo": "Undo",
+  "insertions": "{{count}} insertions(+)",
+  "deletions": "{{count}} deletions(-)"
 }

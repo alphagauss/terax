@@ -1,5 +1,5 @@
+import type { GraphEdge, GraphRow } from "@/modules/git-history/lib/graph";
 import { memo, type ReactElement } from "react";
-import type { GraphEdge, GraphRow } from "./lib/graph";
 
 export const LANE_WIDTH = 14;
 export const RAIL_PADDING_X = 8;
@@ -15,6 +15,33 @@ function laneX(lane: number): number {
 export function railWidth(maxLane: number): number {
   const visible = Math.min(maxLane, MAX_VISIBLE_LANES);
   return RAIL_PADDING_X * 2 + Math.max(0, visible - 1) * LANE_WIDTH + 6;
+}
+
+/** 展开的文件行延续提交底部各轨道，不重复绘制提交节点或分叉。 */
+export function GraphContinuation({ row, rowHeight, maxLaneCount }: Props) {
+  return (
+    <svg
+      width={railWidth(maxLaneCount)}
+      height={rowHeight}
+      aria-hidden
+      className="shrink-0 overflow-visible"
+    >
+      {row.bottomEdges.map((edge) => {
+        const lane = edge.kind === "straight" ? edge.lane : edge.toLane;
+        return (
+          <line
+            key={`${lane}:${edge.color}`}
+            x1={laneX(lane)}
+            x2={laneX(lane)}
+            y1={0}
+            y2={rowHeight}
+            stroke={edge.color}
+            strokeWidth={STRAIGHT_WIDTH}
+          />
+        );
+      })}
+    </svg>
+  );
 }
 
 type Props = {

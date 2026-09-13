@@ -3,8 +3,8 @@
  * 提交说明、作者信息和文件路径需在紧凑布局下保持可读。
  */
 
-import { Hint } from "@/components/controls/tooltip";
 import { Button } from "@/components/controls/button";
+import { Hint } from "@/components/controls/tooltip";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import type { GitCommitFileChange, GitLogEntry } from "@/modules/ai/lib/native";
@@ -17,6 +17,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export type CommitDetailFilesEntry =
   | { state: "loading" }
@@ -83,6 +84,7 @@ export function CommitDetail({
   onUndo,
   remoteAction,
 }: Props) {
+  const { t, i18n } = useTranslation("gitHistory");
   const [copiedSha, setCopiedSha] = useState<string | null>(null);
   const body =
     filesEntry?.state === "loaded"
@@ -104,7 +106,7 @@ export function CommitDetail({
           </span>
           <div className="min-w-0 flex-1 text-[12.5px] font-semibold leading-snug text-foreground">
             {commit.subject || (
-              <span className="text-muted-foreground">(no subject)</span>
+              <span className="text-muted-foreground">{t("noSubject")}</span>
             )}
           </div>
         </div>
@@ -114,7 +116,9 @@ export function CommitDetail({
           </div>
         ) : null}
         <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <span className="truncate">{commit.author || "Unknown"}</span>
+          <span className="truncate">
+            {commit.author || t("unknownAuthor")}
+          </span>
           {commit.authorEmail ? (
             <>
               <span className="text-muted-foreground/45">·</span>
@@ -125,7 +129,9 @@ export function CommitDetail({
           ) : null}
           <span className="text-muted-foreground/45">·</span>
           <span className="shrink-0 tabular-nums">
-            {new Date(commit.timestampSecs * 1000).toLocaleString()}
+            {new Date(commit.timestampSecs * 1000).toLocaleString(
+              i18n.language,
+            )}
           </span>
         </div>
         <div className="mt-2 flex items-center gap-1">
@@ -145,7 +151,7 @@ export function CommitDetail({
               size={11}
               strokeWidth={1.9}
             />
-            {copiedSha === commit.sha ? "Copied" : "Copy SHA"}
+            {copiedSha === commit.sha ? t("copied") : t("copySha")}
           </Button>
           {onUndo ? (
             <Button
@@ -155,7 +161,7 @@ export function CommitDetail({
               onClick={onUndo}
             >
               <HugeiconsIcon icon={Undo02Icon} size={11} strokeWidth={1.9} />
-              Undo
+              {t("undo")}
             </Button>
           ) : null}
           {remoteAction ? (
@@ -175,16 +181,15 @@ export function CommitDetail({
           ) : null}
         </div>
         <div className="mt-2 border-t border-border/40 pt-2 text-[10.5px] tabular-nums text-muted-foreground">
-          Changed {commit.filesChanged}{" "}
-          {commit.filesChanged === 1 ? "file" : "files"}
+          {t("filesChanged", { count: commit.filesChanged })}
           {commit.insertions > 0 ? (
             <span className="ml-1.5 font-semibold text-success">
-              {commit.insertions} insertions(+)
+              {t("insertions", { count: commit.insertions })}
             </span>
           ) : null}
           {commit.deletions > 0 ? (
             <span className="ml-1.5 font-semibold text-destructive">
-              {commit.deletions} deletions(-)
+              {t("deletions", { count: commit.deletions })}
             </span>
           ) : null}
         </div>
@@ -193,18 +198,18 @@ export function CommitDetail({
       <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">
         {!filesEntry || filesEntry.state === "loading" ? (
           <div className="flex items-center gap-2 px-2 py-2 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" /> Loading files…
+            <Spinner className="size-3" /> {t("loadingFiles")}
           </div>
         ) : filesEntry.state === "error" ? (
           <div className="flex items-center justify-between gap-2 px-2 py-2 text-[11px] text-destructive">
             <span className="truncate">{filesEntry.error}</span>
             <Button size="xs" variant="ghost" onClick={onRetry}>
-              Retry
+              {t("retry")}
             </Button>
           </div>
         ) : filesEntry.files.length === 0 ? (
           <div className="px-2 py-2 text-[11px] text-muted-foreground">
-            No file changes.
+            {t("noFileChanges")}
           </div>
         ) : (
           filesEntry.files.map((file) => (
@@ -220,13 +225,16 @@ export function CommitDetail({
   );
 }
 
-function CommitFileRow({
+export function CommitFileRow({
   file,
   onOpen,
+  showStats = true,
 }: {
   file: GitCommitFileChange;
   onOpen: () => void;
+  showStats?: boolean;
 }) {
+  const { t } = useTranslation("gitHistory");
   const name = basename(file.path);
   const pathLabel = file.originalPath
     ? `${file.originalPath} → ${file.path}`
@@ -236,7 +244,10 @@ function CommitFileRow({
     <button
       type="button"
       onClick={onOpen}
-      className="flex h-7 w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left hover:bg-interactive-hover"
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left hover:bg-interactive-hover",
+        showStats ? "h-7" : "h-6",
+      )}
     >
       {iconUrl ? (
         <img src={iconUrl} alt="" className="size-3.5 shrink-0" />
@@ -261,16 +272,18 @@ function CommitFileRow({
           {file.status.toUpperCase()}
         </span>
       </Hint>
-      {file.isBinary ? (
-        <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
-          binary
-        </span>
-      ) : (
-        <span className="flex w-16 shrink-0 justify-end gap-1.5 text-[10px] tabular-nums">
-          <span className="text-success">+{file.added}</span>
-          <span className="text-destructive">−{file.removed}</span>
-        </span>
-      )}
+      {showStats ? (
+        file.isBinary ? (
+          <span className="w-16 shrink-0 text-right text-[10px] text-muted-foreground">
+            {t("binary")}
+          </span>
+        ) : (
+          <span className="flex w-16 shrink-0 justify-end gap-1.5 text-[10px] tabular-nums">
+            <span className="text-success">+{file.added}</span>
+            <span className="text-destructive">−{file.removed}</span>
+          </span>
+        )
+      ) : null}
     </button>
   );
 }
