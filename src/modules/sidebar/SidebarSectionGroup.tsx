@@ -36,6 +36,8 @@ import type {
 
 export type SidebarSectionRenderState = {
   expanded: boolean;
+  /** 展开或退出过渡期间保留展示；关闭完成后由宿主释放展示树。 */
+  present: boolean;
   toggle: () => void;
 };
 
@@ -95,7 +97,9 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
     () => new Set(collapsedRef.current),
   );
   const groupElementRef = useRef<HTMLDivElement>(null);
-  const captureLayout = useSectionLayoutAnimation(groupElementRef);
+  const { capture: captureLayout, animating } =
+    useSectionLayoutAnimation(groupElementRef);
+  const retainedSections = useRef(new Set<string>());
 
   const persistLayout = useCallback(() => {
     const next: SidebarSectionLayout = { version: 1, sections: {} };
@@ -141,6 +145,15 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
     (section: SidebarSectionDefinition) => {
       const panel = panelRefs.current.get(section.id);
       if (!panel) return;
+      retainedSections.current = new Set(
+        sections
+          .filter(
+            (item) =>
+              !collapsedRef.current.has(item.id) ||
+              (animating && retainedSections.current.has(item.id)),
+          )
+          .map((item) => item.id),
+      );
       captureLayout();
       const wasCollapsed = collapsedRef.current.has(section.id);
       if (!wasCollapsed) {
@@ -158,7 +171,13 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
         );
       } else panel.collapse();
     },
-    [captureLayout, persistLayout, replaceCollapsedSections],
+    [
+      animating,
+      sections,
+      captureLayout,
+      persistLayout,
+      replaceCollapsedSections,
+    ],
   );
 
   return (
@@ -173,6 +192,9 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
         const collapsed = collapsedSections.has(section.id);
         const state: SidebarSectionRenderState = {
           expanded: !collapsed,
+          present:
+            !collapsed ||
+            (animating && retainedSections.current.has(section.id)),
           toggle: () => toggleSection(section),
         };
         const saved = initialLayout.sections[section.id];
@@ -222,10 +244,8 @@ export function SidebarSectionGroup({ id, sections, className }: Props) {
                     aria-hidden={collapsed}
                     inert={collapsed}
                     className={cn(
-                      "min-h-0 flex-1 overflow-hidden transition-opacity duration-pane ease-standard motion-reduce:transition-none",
-                      collapsed
-                        ? "pointer-events-none opacity-0"
-                        : "opacity-100",
+                      "min-h-0 flex-1 overflow-hidden",
+                      collapsed && "pointer-events-none",
                     )}
                   >
                     {section.render(state)}

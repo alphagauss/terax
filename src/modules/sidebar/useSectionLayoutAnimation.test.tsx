@@ -19,9 +19,10 @@ function setup() {
   let capture = () => {};
   let revision = 0;
   function Harness({ version }: { version: number }) {
-    capture = useSectionLayoutAnimation(group);
+    const motion = useSectionLayoutAnimation(group);
+    capture = motion.capture;
     return (
-      <div ref={group} data-version={version}>
+      <div ref={group} data-version={version} data-animating={motion.animating}>
         <div data-panel>
           <div data-section-viewport>
             <div>Content</div>
@@ -42,9 +43,10 @@ function setup() {
     bottom: 300,
     contentHeight: 300,
     targetHeight: 300,
+    targetTop: 0,
   };
   vi.spyOn(panel, "getBoundingClientRect").mockImplementation(
-    () => new DOMRect(0, 0, 200, geometry.targetHeight),
+    () => new DOMRect(0, geometry.targetTop, 200, geometry.targetHeight),
   );
   vi.spyOn(content, "getBoundingClientRect").mockImplementation(
     () => new DOMRect(0, geometry.top, 200, geometry.contentHeight),
@@ -98,14 +100,8 @@ it("continues a reversed transition from its visible position without replacing 
   for (const animation of previous)
     expect(animation.cancel).toHaveBeenCalledOnce();
   expect(test.animate.mock.calls.slice(-2)).toEqual([
-    [
-      [{ transform: "translateY(-130px)" }, { transform: "translateY(0px)" }],
-      expect.anything(),
-    ],
-    [
-      [{ transform: "translateY(180px)" }, { transform: "translateY(0px)" }],
-      expect.anything(),
-    ],
+    [[{ translate: "0 -130px" }, { translate: "0 0px" }], expect.anything()],
+    [[{ translate: "0 180px" }, { translate: "0 0px" }], expect.anything()],
   ]);
   expect(test.host.querySelector("[data-section-viewport]")).toBe(
     test.viewport,
@@ -118,7 +114,9 @@ it.each(["finish", "cancel", "drag", "unmount"])(
     const test = setup();
     test.capture();
     test.geometry.targetHeight = 30;
+    test.geometry.targetTop = 270;
     test.render();
+    expect(test.viewport.style.getPropertyValue("translate")).toBe("0 -270px");
     if (reason === "finish")
       test.animations[0].onfinish?.call(
         test.animations[0],
@@ -135,6 +133,7 @@ it.each(["finish", "cancel", "drag", "unmount"])(
         ?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     if (reason === "unmount") test.unmount();
     expect(test.viewport.style.height).toBe("");
+    expect(test.viewport.style.getPropertyValue("translate")).toBe("");
     for (const animation of test.animations) {
       expect(animation.cancel).toHaveBeenCalledOnce();
       expect(animation.onfinish).toBeNull();
@@ -142,3 +141,23 @@ it.each(["finish", "cancel", "drag", "unmount"])(
     }
   },
 );
+
+it("退出展示仅保留到动画结束，无动效时同次提交释放", () => {
+  const test = setup();
+  test.capture();
+  test.geometry.targetHeight = 30;
+  test.render();
+  expect(test.host.querySelector("[data-animating=true]")).not.toBeNull();
+  act(() =>
+    test.animations[0].onfinish?.call(
+      test.animations[0],
+      {} as AnimationPlaybackEvent,
+    ),
+  );
+  expect(test.host.querySelector("[data-animating=true]")).toBeNull();
+  test.geometry.bottom = 30;
+  test.geometry.contentHeight = 30;
+  test.capture();
+  test.render();
+  expect(test.host.querySelector("[data-animating=true]")).toBeNull();
+});

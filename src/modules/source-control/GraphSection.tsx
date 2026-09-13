@@ -35,6 +35,7 @@ import {
   commitRowInteraction,
   ExpandedCommitRow,
 } from "@/modules/git-history/CommitGraphInteraction";
+import { useCommitRowReveal } from "@/modules/git-history/useCommitRowReveal";
 import { GraphRail } from "@/modules/git-history/GraphRail";
 import { layoutGraph } from "@/modules/git-history/lib/graph";
 import {
@@ -113,6 +114,8 @@ type Props = {
   repoRoot: string | null;
   headSha: string | null;
   expanded: boolean;
+  /** 展示退出结束后释放 DOM 和虚拟器观测，控制层保留提交状态。 */
+  present?: boolean;
   refreshToken: number;
   showUndoCommit: boolean;
   mayHavePushedHead: boolean;
@@ -141,6 +144,7 @@ export const GraphSection = memo(function GraphSection({
   repoRoot,
   headSha,
   expanded,
+  present = expanded,
   refreshToken,
   showUndoCommit,
   mayHavePushedHead,
@@ -170,6 +174,11 @@ export const GraphSection = memo(function GraphSection({
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTop = useRef(0);
+  const attachScroll = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element;
+    if (element) element.scrollTop = scrollTop.current;
+  }, []);
   const requestRef = useRef(0);
   const loadingMoreRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
@@ -293,12 +302,51 @@ export const GraphSection = memo(function GraphSection({
     [filtered, graph.expanded, filesBySha],
   );
   const virtualizer = useVirtualizer({
+    enabled: present,
+    initialOffset: () => scrollTop.current,
     count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
     getItemKey: (index) => items[index]?.key ?? index,
   });
+
+  const reveal = useCommitRowReveal(
+    items,
+    virtualizer.getVirtualItems(),
+    scrollRef,
+    ROW_HEIGHT,
+    `${repoRoot}:${activeSearch}:${searchField}`,
+    expanded,
+  );
+  const toggleCommit = (sha: string) => {
+    reveal.capture(sha);
+    graph.toggle(sha);
+  };
+  const renderRow = (row: (typeof reveal.rows)[number], content: ReactNode) => (
+    <div
+      key={row.item.key}
+      data-commit-row={row.item.key}
+      ref={(element) => {
+        if (element) reveal.elements.current.set(row.item.key, element);
+        else reveal.elements.current.delete(row.item.key);
+      }}
+      inert={row.exiting}
+      aria-hidden={row.exiting || undefined}
+      className="pointer-events-none absolute left-0 w-full overflow-hidden"
+      style={{
+        height: row.exiting ? 0 : row.size,
+        transform: `translateY(${row.start}px)`,
+      }}
+    >
+      <div
+        className="pointer-events-none overflow-hidden"
+        style={{ height: row.size }}
+      >
+        <div className="pointer-events-auto h-full">{content}</div>
+      </div>
+    </div>
+  );
 
   useEffect(() => {
     if (!expanded || loadStatus !== "idle" || endReached) return;
@@ -338,6 +386,8 @@ export const GraphSection = memo(function GraphSection({
   const selectedFiles = selectedCommit
     ? (filesBySha.get(selectedCommit.sha) ?? null)
     : null;
+
+  if (!present) return null;
 
   if (!repoRoot) {
     return <GraphPlaceholder>No Git repository.</GraphPlaceholder>;
@@ -451,10 +501,31 @@ export const GraphSection = memo(function GraphSection({
         <GraphPlaceholder>No commits yet.</GraphPlaceholder>
       ) : (
         <div
-          ref={scrollRef}
+          ref={attachScroll}
+          onWheel={reveal.releaseScrollSpace}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget)
+              reveal.releaseScrollSpace();
+          }}
+          onKeyDown={(event) => {
+            if (
+              [
+                "ArrowUp",
+                "ArrowDown",
+                "PageUp",
+                "PageDown",
+                "Home",
+                "End",
+                " ",
+              ].includes(event.key)
+            )
+              reveal.releaseScrollSpace();
+          }}
           onScroll={(event) => {
+            reveal.finish();
             closePopover();
             const target = event.currentTarget;
+            if (expanded) scrollTop.current = target.scrollTop;
             if (
               target.scrollHeight - target.scrollTop - target.clientHeight <
               NEAR_BOTTOM_PX
@@ -462,7 +533,7 @@ export const GraphSection = memo(function GraphSection({
               void loadMore();
             }
           }}
-          className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+          className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] [overflow-anchor:none]"
         >
           {activeSearch && filtered.length === 0 && endReached ? (
             <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
@@ -472,63 +543,60 @@ export const GraphSection = memo(function GraphSection({
           <div
             style={{
               height: virtualizer.getTotalSize(),
+              minHeight: reveal.minimumHeight,
               position: "relative",
               width: "100%",
             }}
           >
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const item = items[virtualRow.index];
+            <div
+              ref={reveal.boundaryRef}
+              aria-hidden
+              className="pointer-events-none absolute left-0 h-0 w-0"
+            />
+            {reveal.rows.map((virtualRow) => {
+              const item = virtualRow.item;
               const commit = item?.commit;
               const graphRow = commit ? graphBySha.get(commit.sha) : null;
               if (!item || !commit || !graphRow) return null;
               if (item.kind !== "commit")
-                return (
-                  <div
-                    key={virtualRow.key}
-                    className="absolute left-0 w-full"
-                    style={{
-                      height: virtualRow.size,
-                      transform: `translateY(${virtualRow.start}px)`,
+                return renderRow(
+                  virtualRow,
+                  <ExpandedCommitRow
+                    item={item}
+                    row={graphRow}
+                    maxLaneCount={graphRow.laneCount}
+                    rowHeight={ROW_HEIGHT}
+                    onRetry={() => void fetchFiles(commit.sha, true)}
+                    onOpen={() => {
+                      if (item.kind === "file")
+                        onOpenCommitFile?.({
+                          repoRoot,
+                          sha: commit.sha,
+                          shortSha: commit.shortSha,
+                          subject: commit.subject,
+                          path: item.file.path,
+                          originalPath: item.file.originalPath,
+                        });
                     }}
-                  >
-                    <ExpandedCommitRow
-                      item={item}
-                      row={graphRow}
-                      maxLaneCount={graphRow.laneCount}
-                      rowHeight={ROW_HEIGHT}
-                      onRetry={() => void fetchFiles(commit.sha, true)}
-                      onOpen={() => {
-                        if (item.kind === "file")
-                          onOpenCommitFile?.({
-                            repoRoot,
-                            sha: commit.sha,
-                            shortSha: commit.shortSha,
-                            subject: commit.subject,
-                            path: item.file.path,
-                            originalPath: item.file.originalPath,
-                          });
-                      }}
-                    />
-                  </div>
+                  />,
                 );
               const refs = commit.refs.slice(0, 2);
               const hasLocalRef = refs.some((ref) => ref.kind === "local");
-              return (
+              return renderRow(
+                virtualRow,
                 <button
-                  key={virtualRow.key}
-                  {...commitRowInteraction(graph, commit.sha)}
+                  {...commitRowInteraction(
+                    { ...graph, toggle: toggleCommit },
+                    commit.sha,
+                  )}
                   aria-label={`${commit.shortSha} ${commit.subject}`}
                   type="button"
-                  onClick={() => graph.toggle(commit.sha)}
+                  onClick={() => toggleCommit(commit.sha)}
                   className={cn(
-                    "group absolute left-0 flex w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
+                    "group flex h-full w-full cursor-pointer items-center pr-2 text-left transition-colors hover:bg-interactive-hover",
                     graph.expanded.has(commit.sha) &&
                       "bg-interactive-active hover:bg-interactive-active",
                   )}
-                  style={{
-                    height: virtualRow.size,
-                    transform: `translateY(${virtualRow.start}px)`,
-                  }}
                 >
                   <GraphRail
                     row={graphRow}
@@ -554,7 +622,7 @@ export const GraphSection = memo(function GraphSection({
                   <span className="ml-1.5 w-6 shrink-0 text-right font-mono text-[9.5px] tabular-nums text-muted-foreground">
                     {relativeTime(commit.timestampSecs)}
                   </span>
-                </button>
+                </button>,
               );
             })}
           </div>
