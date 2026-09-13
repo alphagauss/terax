@@ -236,7 +236,7 @@ function Header({
             size="icon-sm"
             variant="ghost"
             onClick={() => void openSettingsWindow("models")}
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0"
             aria-label={t("miniWindow.aiSettings")}
           >
             <HugeiconsIcon icon={Wrench01Icon} size={15} strokeWidth={1.75} />
@@ -248,7 +248,7 @@ function Header({
             size="icon-sm"
             variant="ghost"
             onClick={() => newSession()}
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0"
             aria-label={t("miniWindow.newSession")}
           >
             <HugeiconsIcon

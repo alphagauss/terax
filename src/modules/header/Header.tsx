@@ -51,7 +51,7 @@ export function Header({
         aria-label={t("settings")}
         variant="ghost"
         size="icon-sm"
-        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="shrink-0"
         onClick={onOpenSettings}
       >
         <HugeiconsIcon icon={Settings01Icon} size={15} strokeWidth={1.75} />
@@ -64,7 +64,7 @@ export function Header({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="shrink-0"
         onClick={onToggleSecondarySidebar}
         aria-label={t("toggleSecondarySidebar")}
         aria-pressed={secondarySidebarOpen}
@@ -79,7 +79,7 @@ export function Header({
       <Button
         variant="ghost"
         size="icon-sm"
-        className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+        className="shrink-0"
         onClick={() => setMode(resolvedMode === "dark" ? "light" : "dark")}
         aria-label={t("toggleTheme")}
       >
@@ -106,7 +106,7 @@ export function Header({
             onClick={onToggleSidebar}
             variant="ghost"
             size="icon-sm"
-            className="shrink-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0"
           >
             <HugeiconsIcon
               icon={SidebarLeftIcon}
@@ -122,7 +122,7 @@ export function Header({
             size="icon-sm"
             variant="ghost"
             onClick={onOpenCommandPalette}
-            className="shrink-0 gap-1.5 px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="shrink-0 gap-1.5 px-1.5"
           >
             <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.75} />
           </Button>

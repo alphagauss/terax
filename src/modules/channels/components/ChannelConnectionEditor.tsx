@@ -283,8 +283,7 @@ export function ChannelConnectionEditor({
             <Button
               aria-label={t("removeHint")}
               type="button"
-              variant="ghost"
-              className="text-muted-foreground hover:text-destructive"
+              variant="ghost-destructive-hover"
               disabled={disabled || connection.enabled || snapshot.busy}
               onClick={remove}
             >

@@ -1470,10 +1470,7 @@ function IconActionButton({
         <Button
           size="icon-sm"
           variant="ghost"
-          className={cn(
-            "text-muted-foreground hover:text-foreground disabled:cursor-not-allowed",
-            className,
-          )}
+          className={cn("disabled:cursor-not-allowed", className)}
           aria-label={label}
           disabled={disabled}
           onClick={onClick}

@@ -260,14 +260,9 @@ function PermissionModeDropdown() {
           <Button
             type="button"
             disabled={readOnly}
-            variant="ghost"
+            variant={mode === "full-access" ? "ghost-warning" : "ghost"}
             size="sm"
-            className={cn(
-              "my-1 shrink-0 hover:bg-accent",
-              mode === "full-access"
-                ? "text-amber-600! hover:text-amber-700! dark:text-amber-400! dark:hover:text-amber-300!"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            className="my-1 shrink-0"
             aria-label={t(`statusBar.permissionMode.${mode}`)}
           >
             <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
@@ -481,10 +476,7 @@ function ModelDropdown() {
                 !currentExternal &&
                 availableExternalAgents.length === 0)
             }
-            className={cn(
-              "my-1 min-w-0 shrink hover:bg-accent hover:text-foreground",
-              "text-muted-foreground",
-            )}
+            className="my-1 min-w-0 shrink"
           >
             <span className="truncate">
               {currentExternal?.label ??
@@ -857,7 +849,7 @@ function IconBtn({
         size="icon-sm"
         onClick={onClick}
         disabled={disabled}
-        className={cn("text-muted-foreground hover:text-foreground", className)}
+        className={className}
       >
         {children}
       </Button>

@@ -1064,7 +1064,6 @@ export const FileExplorer = memo(
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        className="text-muted-foreground hover:text-foreground"
                         onClick={onOpenFolder}
                         aria-label={t("openFolder")}
                       >
@@ -1081,7 +1080,6 @@ export const FileExplorer = memo(
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
                       onClick={() => setIsSearchOpen((v) => !v)}
                       aria-label={t("searchFiles")}
                     >
@@ -1098,7 +1096,6 @@ export const FileExplorer = memo(
                       aria-label={t("newFile")}
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
                       onClick={() =>
                         tree.beginCreate(toolbarCreateParent, "file")
                       }
@@ -1115,7 +1112,6 @@ export const FileExplorer = memo(
                       aria-label={t("newFolder")}
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
                       onClick={() =>
                         tree.beginCreate(toolbarCreateParent, "dir")
                       }
@@ -1131,7 +1127,6 @@ export const FileExplorer = memo(
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
                       onClick={() => tree.refresh(rootPath)}
                       aria-label={t("menu.refresh")}
                     >
@@ -1146,7 +1141,6 @@ export const FileExplorer = memo(
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      className="text-muted-foreground hover:text-foreground"
                       onClick={tree.collapseAll}
                       aria-label={t("workspaceSearch:collapseAll")}
                     >

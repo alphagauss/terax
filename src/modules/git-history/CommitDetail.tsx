@@ -138,7 +138,7 @@ export function CommitDetail({
           <Button
             size="xs"
             variant="ghost"
-            className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
+            className="cursor-pointer gap-1.5"
             onClick={() => {
               void navigator.clipboard
                 .writeText(commit.sha)
@@ -157,7 +157,7 @@ export function CommitDetail({
             <Button
               size="xs"
               variant="ghost"
-              className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
+              className="cursor-pointer gap-1.5"
               onClick={onUndo}
             >
               <HugeiconsIcon icon={Undo02Icon} size={11} strokeWidth={1.9} />
@@ -168,7 +168,7 @@ export function CommitDetail({
             <Button
               size="xs"
               variant="ghost"
-              className="cursor-pointer gap-1.5 text-muted-foreground hover:text-foreground"
+              className="cursor-pointer gap-1.5"
               onClick={remoteAction.onClick}
             >
               <HugeiconsIcon

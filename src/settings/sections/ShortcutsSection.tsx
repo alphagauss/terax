@@ -256,7 +256,6 @@ function ShortcutRow({
                     aria-label={t("shortcuts.resetToDefault")}
                     variant="ghost"
                     size="icon-sm"
-                    className="text-muted-foreground hover:text-foreground"
                     onClick={onReset}
                   >
                     <HugeiconsIcon icon={ArrowTurnBackwardIcon} size={12} />
@@ -266,9 +265,9 @@ function ShortcutRow({
               <Hint content={t("shortcuts.clearShortcut")}>
                 <Button
                   aria-label={t("shortcuts.clearShortcut")}
-                  variant="ghost"
+                  variant="ghost-destructive-hover"
                   size="icon-sm"
-                  className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 group-focus-within:opacity-100"
+                  className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                   onClick={onClear}
                 >
                   <HugeiconsIcon icon={Delete02Icon} size={12} />

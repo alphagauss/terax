@@ -67,7 +67,7 @@ export function ModelParametersPopover() {
           disabled={readOnly}
           size="sm"
           variant="ghost"
-          className="my-1 min-w-0 max-w-44 shrink text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="my-1 min-w-0 max-w-44 shrink"
           aria-label={text("sessionTitle")}
         >
           <span className="truncate">
