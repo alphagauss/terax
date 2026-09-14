@@ -26,7 +26,7 @@ const adapters = {
         throw new ChannelError("account-mismatch");
       return new WeixinAdapter(credentials, connection.id, {
         root: await prepareChannelWorkspace(connection),
-        ownerSessionId: connection.sessionId,
+        ownerSessionId: connection.id,
         permissionMode: "full-access",
       });
     },

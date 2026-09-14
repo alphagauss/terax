@@ -2,6 +2,10 @@
  * 本文件验证微信授权边界、扫码返回地址和投递结果。
  * 平台回包不能改变请求对端，不确定的发送不能自动重试。
  */
+import {
+  withWeixinInbound,
+  receiveWeixinContext,
+} from "@/modules/channels/adapters/weixinTestHelpers";
 
 import {
   beginWeixinLogin,
@@ -37,18 +41,28 @@ describe("personal WeChat", () => {
           ownerSessionId: "session",
           permissionMode: "full-access",
         },
-        fetch,
+        withWeixinInbound(fetch),
       );
       expect(
         await adapter.send(
-          {
-            id: "id",
-            senderId: "owner",
-            text: "",
-            attachments: [],
-            replyContext: "context",
-            receivedAt: Date.now(),
-          },
+          { kind: "direct", id: "owner" },
+          { text: "before inbound" },
+          new AbortController().signal,
+        ),
+      ).toEqual({ status: "failed", parts: [] });
+      expect(fetch).not.toHaveBeenCalled();
+      await receiveWeixinContext(adapter);
+      expect(
+        await adapter.send(
+          { kind: "direct", id: "stranger" },
+          { text: "wrong target" },
+          new AbortController().signal,
+        ),
+      ).toEqual({ status: "failed", parts: [] });
+      expect(fetch).not.toHaveBeenCalled();
+      expect(
+        await adapter.send(
+          { kind: "direct", id: "owner" },
           { text: "reply" },
           new AbortController().signal,
         ),
@@ -56,6 +70,43 @@ describe("personal WeChat", () => {
       expect(fetch).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("长正文完整分段发送，不静默截断", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      Response.json({ ret: 0 }),
+    );
+    const adapter = new WeixinAdapter(
+      {
+        token: "secret",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        botId: "bot",
+        userId: "owner",
+      },
+      "connection",
+      {
+        root: "/account",
+        ownerSessionId: "session",
+        permissionMode: "full-access",
+      },
+      withWeixinInbound(fetch),
+    );
+    await receiveWeixinContext(adapter);
+    const text = "正文".repeat(9000);
+    const result = await adapter.send(
+      { kind: "direct", id: "owner" },
+      { text },
+      new AbortController().signal,
+    );
+    expect(result.status).toBe("accepted");
+    expect(
+      fetch.mock.calls
+        .map(
+          (call) =>
+            JSON.parse(String(call[1]?.body)).msg.item_list[0].text_item.text,
+        )
+        .join(""),
+    ).toBe(text);
+  });
 
   it("reports failed context refresh before dispatch and preserves cancellation", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => {
@@ -74,16 +125,11 @@ describe("personal WeChat", () => {
         ownerSessionId: "session",
         permissionMode: "full-access",
       },
-      fetch,
+      withWeixinInbound(fetch),
     );
-    const message = {
-      id: "id",
-      senderId: "owner",
-      text: "",
-      attachments: [],
-      replyContext: "context",
-      receivedAt: Date.now() - 61_000,
-    };
+    const message = { kind: "direct" as const, id: "owner" };
+    await receiveWeixinContext(adapter);
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 61_000);
     expect(
       await adapter.send(
         message,
@@ -97,6 +143,7 @@ describe("personal WeChat", () => {
       adapter.send(message, { text: "reply" }, AbortSignal.abort()),
     ).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(1);
+    vi.restoreAllMocks();
   });
 
   it("admits only complete private text from the QR-authorized account", () => {
@@ -147,7 +194,7 @@ describe("personal WeChat", () => {
     const flow = await beginWeixinLogin(
       "connection",
       new AbortController().signal,
-      fetch,
+      withWeixinInbound(fetch),
     );
     await expect(flow.poll()).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -184,17 +231,11 @@ describe("personal WeChat", () => {
           ownerSessionId: "session",
           permissionMode: "full-access",
         },
-        fetch,
+        withWeixinInbound(fetch),
       );
+      await receiveWeixinContext(adapter);
       const sending = adapter.send(
-        {
-          id: "input",
-          senderId: "owner",
-          text: "question",
-          attachments: [],
-          replyContext: "original",
-          receivedAt: Date.now(),
-        },
+        { kind: "direct", id: "owner" },
         { text: `${"a".repeat(1800)}tail` },
         new AbortController().signal,
       );
@@ -217,7 +258,7 @@ describe("personal WeChat", () => {
         messages.every(
           (message) =>
             message.to_user_id === "owner" &&
-            message.context_token === "original",
+            message.context_token === "context",
         ),
       ).toBe(true);
     } finally {

@@ -2,6 +2,7 @@
  * 本文件协调 Terax 主窗口的工作区、终端、侧栏和全局交互状态。
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
+import { ChannelsPanel } from "@/modules/channels/components/lazy";
 
 import { ToastDismissOnClick } from "@/components/ToastDismissOnClick";
 import {
@@ -398,8 +399,14 @@ export default function App() {
   const showAlphaInRemote = useAlphaShowInRemote();
   const alphaAvailable = workspaceEnv.kind === "local" || showAlphaInRemote;
   const unavailableSidebarContainerIds = useMemo(
-    () => (alphaAvailable ? [] : (["alpha"] as const)),
-    [alphaAvailable],
+    () => [
+      ...(!alphaAvailable ? ["alpha" as const] : []),
+      ...(!currentWorkspaceBootstrap().isPrimary ||
+      workspaceEnv.kind !== "local"
+        ? ["channels" as const]
+        : []),
+    ],
+    [alphaAvailable, workspaceEnv.kind],
   );
   const sidebar = useSidebarLayout(
     unavailableSidebarContainerIds,
@@ -1327,7 +1334,11 @@ export default function App() {
     [openAiPanel],
   );
 
-  useChannelsHost(onActivateLocalAgent, keysLoaded);
+  const onActivateChannel = useCallback((sessionId?: string) => {
+    if (sessionId) onActivateLocalAgent(sessionId);
+    else sidebar.openContainer("channels");
+  }, [onActivateLocalAgent, sidebar.openContainer]);
+  useChannelsHost(onActivateChannel, keysLoaded);
 
   const handleTerminalExit = useCallback(
     (tabId: number, _code: number) => {
@@ -1845,6 +1856,12 @@ export default function App() {
           },
         ]
       : []),
+    {
+      id: "channels",
+      content: (
+        <ChannelsPanel visible={sidebar.isVisible("channels") && !zenMode} />
+      ),
+    },
     {
       id: "ai",
       content: (

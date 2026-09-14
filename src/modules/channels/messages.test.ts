@@ -19,7 +19,7 @@ it("adds attachment guidance to each attachment input and retains the actual sav
     id: "message",
     senderId: "sender",
     text: "",
-    replyContext: "secret",
+    target: { kind: "direct" as const, id: "owner" },
     receivedAt: 1,
     attachments: [
       {
@@ -39,6 +39,14 @@ it("adds attachment guidance to each attachment input and retains the actual sav
   expect(channelInputText({ ...message, text: "hello", attachments: [] })).toBe(
     "hello",
   );
+  expect(
+    channelInputText({
+      ...message,
+      target: { kind: "group", id: "room" },
+      text: "hello",
+      attachments: [],
+    }),
+  ).toBe('[Sender: "sender"]\nhello');
   expect(prompt).not.toContain("Receiving an attachment alone");
 });
 
@@ -47,7 +55,7 @@ it("uses one image summary and ordered generic file parts for a media batch", ()
     id: "batch",
     senderId: "sender",
     text: "compare these",
-    replyContext: "secret",
+    target: { kind: "direct" as const, id: "owner" },
     receivedAt: 42,
     attachments: [
       {

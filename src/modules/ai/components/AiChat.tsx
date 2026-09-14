@@ -4,6 +4,11 @@
  * 内部结果、展示耗时和 Subagent 展示事件不参与普通分组。
  * 历史消息和已完成工具保持稳定且默认折叠。
  */
+import { DeliveryCard } from "@/modules/channels/components/DeliveryCard";
+import {
+  EMPTY_DELIVERIES,
+  useDeliveryHistory,
+} from "@/modules/channels/history";
 
 import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
 import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
@@ -380,6 +385,19 @@ export function AiChatView({
   const commands = useCommandStore(
     (state) => state.sessions[sessionId] ?? EMPTY_COMMANDS,
   );
+  const deliveries = useDeliveryHistory(
+    (state) => state.sessions[sessionId] ?? EMPTY_DELIVERIES,
+  );
+  const activities = [
+    ...commands.map((command) => ({
+      ...command,
+      element: <CommandCard key={command.id} command={command} />,
+    })),
+    ...deliveries.map((entry) => ({
+      ...entry,
+      element: <DeliveryCard key={entry.id} entry={entry} />,
+    })),
+  ].sort((a, b) => a.timestamp - b.timestamp);
   const lastMessage = messages[messages.length - 1];
   const showPendingResponse =
     isBusy &&
@@ -414,7 +432,11 @@ export function AiChatView({
     [],
   );
 
-  if (messages.length === 0 && commands.length === 0) {
+  if (
+    messages.length === 0 &&
+    commands.length === 0 &&
+    deliveries.length === 0
+  ) {
     return (
       <Conversation
         contextRef={scrollMemory.contextRef}
@@ -444,17 +466,15 @@ export function AiChatView({
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
       >
         <div ref={setToolDetailsWheelScope} className="contents">
-          {commands
+          {activities
             .filter(
-              (command) =>
-                !command.afterMessageId ||
+              (entry) =>
+                !entry.afterMessageId ||
                 !messages.some(
-                  (message) => message.id === command.afterMessageId,
+                  (message) => message.id === entry.afterMessageId,
                 ),
             )
-            .map((command) => (
-              <CommandCard key={command.id} command={command} />
-            ))}
+            .map((entry) => entry.element)}
           {messages.map((m) => (
             <Fragment key={m.id}>
               {m.id !== pendingAssistantMessageId &&
@@ -465,11 +485,9 @@ export function AiChatView({
                   streaming={m.id === streamingMessageId}
                 />
               ) : null}
-              {commands
-                .filter((command) => command.afterMessageId === m.id)
-                .map((command) => (
-                  <CommandCard key={command.id} command={command} />
-                ))}
+              {activities
+                .filter((entry) => entry.afterMessageId === m.id)
+                .map((entry) => entry.element)}
             </Fragment>
           ))}
         </div>

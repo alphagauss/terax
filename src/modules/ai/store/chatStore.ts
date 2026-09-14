@@ -2,6 +2,11 @@
  * 本文件管理按会话隔离的 AI 与 Subagent 展示状态、窗口级恢复和增量持久化。
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
+import {
+  applyDeliveryRecord,
+  projectDeliveries,
+  setDeliveryHistory,
+} from "@/modules/channels/history";
 
 import {
   peekFileEditRuntime,
@@ -48,6 +53,7 @@ import {
   materializeFileEditParts,
   materializeTurnMetadata,
   projectSessionMessages,
+  type SessionMessage,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import {
@@ -287,20 +293,20 @@ function sessionRunOutcome(id: string): SessionRunOutcome {
     : "completed";
 }
 
-const commandWrites = new Map<string, Promise<void>>();
-const pendingCommandSaves = new Map<
+const displayWrites = new Map<string, Promise<void>>();
+const pendingDisplaySaves = new Map<
   string,
   {
-    content: CommandRecord;
-    display: CommandDisplay;
+    record: Extract<SessionMessage, { role: "command" | "delivery" }>;
+    display?: CommandDisplay;
     release: boolean;
     saved?: boolean;
   }
 >();
 
 /** 只补交记录与释放锁，不持有或重跑命令处理函数。 */
-async function flushCommandSave(id: string, release = true): Promise<void> {
-  const pending = pendingCommandSaves.get(id);
+async function flushDisplaySave(id: string, release = true): Promise<void> {
+  const pending = pendingDisplaySaves.get(id);
   if (!pending) return;
   if (!pending.saved) {
     const meta = useChatStore
@@ -314,19 +320,11 @@ async function flushCommandSave(id: string, release = true): Promise<void> {
       cwd: meta.cwd,
       metadata: sessionMetadata.get(id) ?? {},
       updatedAt: Date.now(),
-      messages: [
-        {
-          role: "command",
-          content: pending.content,
-          timestamp: new Date(
-            pending.content.phase === "invocation"
-              ? pending.display.timestamp
-              : Date.now(),
-          ).toISOString(),
-        },
-      ],
+      messages: [pending.record],
     });
-    updateCommand(id, pending.display);
+    if (pending.display) updateCommand(id, pending.display);
+    if (pending.record.role === "delivery")
+      applyDeliveryRecord(id, pending.record);
     useChatStore.setState((state) => ({
       sessions: state.sessions.map((item) =>
         item.id === id ? committed : item,
@@ -342,20 +340,41 @@ async function flushCommandSave(id: string, release = true): Promise<void> {
       return { runLockSessionIds };
     });
   }
-  pendingCommandSaves.delete(id);
+  pendingDisplaySaves.delete(id);
 }
 
-/** 命令与 Agent 共用会话所有权；终态等待在途写入，之后的命令重新取得锁。 */
-export async function appendSessionCommand(
+/** 命令保留即时展示状态，持久化与人工发送共用追加入口。 */
+export function appendSessionCommand(
   id: string,
   content: CommandRecord,
   display: CommandDisplay,
   channelId?: string,
 ): Promise<void> {
+  return appendSessionDisplay(
+    id,
+    {
+      role: "command",
+      content,
+      timestamp: new Date(
+        content.phase === "invocation" ? display.timestamp : Date.now(),
+      ).toISOString(),
+    },
+    channelId,
+    display,
+  );
+}
+
+/** 展示记录与 Agent 共用所有权；失败只补交记录，不重跑外部副作用。 */
+export async function appendSessionDisplay(
+  id: string,
+  record: Extract<SessionMessage, { role: "command" | "delivery" }>,
+  channelId?: string,
+  display?: CommandDisplay,
+): Promise<void> {
   while (sessionCommits.has(id)) await sessionCommits.get(id);
-  const writing = (commandWrites.get(id) ?? Promise.resolve()).then(
+  const writing = (displayWrites.get(id) ?? Promise.resolve()).then(
     async () => {
-      await flushCommandSave(id);
+      await flushDisplaySave(id);
       if (
         !sessionMetadata.has(id) &&
         useChatStore.getState().sessions.some((item) => item.id === id)
@@ -376,27 +395,27 @@ export async function appendSessionCommand(
         id,
         [
           {
-            id: display.id,
+            id: record.content.id,
             role: "user",
-            parts: [{ type: "text", text: display.input }],
+            parts: [{ type: "text", text: display?.input ?? "" }],
           },
         ],
         cwd,
       );
-      pendingCommandSaves.set(id, { content, display, release });
-      await flushCommandSave(id);
+      pendingDisplaySaves.set(id, { record, display, release });
+      await flushDisplaySave(id);
     },
   );
-  commandWrites.set(id, writing);
+  displayWrites.set(id, writing);
   try {
     await writing;
     useChatStore.getState().patchAgentMeta(id, { commitError: undefined });
   } catch (error) {
-    display.pending = undefined;
+    if (display) display.pending = undefined;
     useChatStore.getState().patchAgentMeta(id, { commitError: String(error) });
     throw error;
   } finally {
-    if (commandWrites.get(id) === writing) commandWrites.delete(id);
+    if (displayWrites.get(id) === writing) displayWrites.delete(id);
   }
 }
 
@@ -411,8 +430,8 @@ export function releaseUnusedChats() {
       startingSessionIds.has(id) ||
       acquiringSessionRuns.has(id) ||
       sessionCommits.has(id) ||
-      commandWrites.has(id) ||
-      pendingCommandSaves.has(id) ||
+      displayWrites.has(id) ||
+      pendingDisplaySaves.has(id) ||
       chat?.status === "submitted" ||
       chat?.status === "streaming" ||
       (chat && hasPendingApproval(chat.messages))
@@ -420,6 +439,7 @@ export function releaseUnusedChats() {
       continue;
     chats.delete(id);
     clearSessionCommands(id);
+    setDeliveryHistory(id);
     releaseUsage(id);
     seedMessages.delete(id);
     sessionMetadata.delete(id);
@@ -495,6 +515,7 @@ export async function seedSession(id: string): Promise<void> {
   if (chats.has(id)) return;
   const messages = projectSessionMessages(id, session.messages);
   setSessionCommands(id, projectCommands(session.messages));
+  setDeliveryHistory(id, projectDeliveries(session.messages));
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
@@ -1040,11 +1061,21 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const channelId = get().sessions.find(
           (session) => session.id === id,
         )?.channelId;
-        if (
-          channelId &&
-          (await readSharedStore("channels"))[channelId] !== undefined
-        ) {
-          throw new Error(i18n.t("ai:composer.channelBound"));
+        if (channelId) {
+          const { channelOwnerId } = await import(
+            "@/modules/channels/identity"
+          );
+          const { connectionSchema } = await import("@/modules/channels/types");
+          const owners = await Promise.all(
+            Object.values(await readSharedStore("channels")).map(
+              async (value) => {
+                const connection = connectionSchema.parse(value);
+                return connection.accountId ? channelOwnerId(connection) : null;
+              },
+            ),
+          );
+          if (owners.includes(channelId))
+            throw new Error(i18n.t("ai:composer.channelBound"));
         }
         await clearAgentTurnCoordinator(id);
         await clearSessionProcesses(id);
@@ -1064,6 +1095,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         await chats.get(id)?.stop();
         chats.delete(id);
         clearSessionCommands(id);
+        setDeliveryHistory(id);
         releaseUsage(id);
         releaseFileEditRuntime(id);
         seedMessages.delete(id);
@@ -1129,8 +1161,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
 
     const commit = (async () => {
-      await commandWrites.get(id);
-      await flushCommandSave(id, false);
+      await displayWrites.get(id);
+      await flushDisplaySave(id, false);
       const sessions = get().sessions;
       const meta = sessions.find((s) => s.id === id);
       if (!meta) return;

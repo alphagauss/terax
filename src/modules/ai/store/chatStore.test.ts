@@ -2,6 +2,11 @@
  * 本文件验证 AI 会话的窗口级恢复、多进程同步、运行锁和两阶段发布。
  * 测试锁定临时窗口与失效选择回退草稿，以及运行和持久化的关键顺序。
  */
+import { appendSessionDisplay } from "@/modules/ai/store/chatStore";
+import {
+  projectDeliveries,
+  useDeliveryHistory,
+} from "@/modules/channels/history";
 
 import {
   clearAgentTurnCoordinator,
@@ -250,6 +255,58 @@ describe("chat store multi-process lifecycle", () => {
       messages: [],
     } as never);
   }
+
+  it("投递回执保存失败可补交，恢复历史不生成模型消息", async () => {
+    openCommandSession();
+    const records: SessionMessage[] = [];
+    io.commit.mockImplementation(async (file) => {
+      records.push(...file.messages);
+      return first;
+    });
+    const timestamp = new Date().toISOString();
+    await appendSessionDisplay(first.id, {
+      role: "delivery",
+      timestamp,
+      content: {
+        id: "send",
+        phase: "request",
+        target: { kind: "direct", id: "owner" },
+        content: {
+          text: "notice",
+          attachments: [{ path: "/report.pdf", presentation: "file" }],
+        },
+      },
+    });
+    io.commit.mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      appendSessionDisplay(first.id, {
+        role: "delivery",
+        timestamp,
+        content: {
+          id: "send",
+          phase: "result",
+          result: {
+            status: "accepted",
+            parts: [{ index: 0, status: "accepted" }],
+          },
+        },
+      }),
+    ).rejects.toThrow("disk full");
+    await useChatStore.getState().commitMessages(first.id, []);
+    expect(records.filter((record) => record.role === "delivery")).toHaveLength(
+      2,
+    );
+    expect(projectDeliveries(records)[0].result?.status).toBe("accepted");
+    expect(
+      useDeliveryHistory.getState().sessions[first.id]?.[0].result?.status,
+    ).toBe("accepted");
+    expect(
+      await convertToAgentModelMessages(
+        projectSessionMessages(first.id, records),
+      ),
+    ).toEqual([]);
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
 
   it("首次帮助无需模型，创建会话但不创建模型消息", async () => {
     useChatStore.setState({
@@ -1230,6 +1287,31 @@ describe("chat store multi-process lifecycle", () => {
     resolve(true);
     expect(await acquiring).toBe(true);
     expect(chats.get(first.id)).toBe(chat);
+  });
+
+  it("账号重新配置实例后仍保护原历史，移除账号配置后允许删除", async () => {
+    const { channelOwnerId } = await import("@/modules/channels/identity");
+    const connection = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      kind: "weixin" as const,
+      accountId: "owner",
+      name: "replacement",
+      enabled: false,
+      busyMessageMode: "queue",
+    };
+    useChatStore.setState({
+      sessions: [{ ...first, channelId: await channelOwnerId(connection) }],
+      activeSessionId: first.id,
+    });
+    io.sharedRead.mockResolvedValue({ [connection.id]: connection });
+    useChatStore.getState().deleteSession(first.id);
+    await vi.waitFor(() =>
+      expect(useChatStore.getState().sessionSyncError).toBeTruthy(),
+    );
+    expect(io.remove).not.toHaveBeenCalled();
+    io.sharedRead.mockResolvedValue({});
+    useChatStore.getState().deleteSession(first.id);
+    await vi.waitFor(() => expect(io.remove).toHaveBeenCalledWith(first.id));
   });
 
   it("opens a draft after deleting the active session", async () => {

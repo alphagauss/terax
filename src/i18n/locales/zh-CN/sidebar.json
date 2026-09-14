@@ -23,5 +23,6 @@
   "size": {
     "default": "默认",
     "compact": "压缩"
-  }
+  },
+  "channels": "消息通道"
 }

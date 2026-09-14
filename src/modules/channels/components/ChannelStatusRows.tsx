@@ -1,6 +1,6 @@
 /**
  * 本文件将消息连接加入既有 Agent 状态入口。
- * 点击通过服务打开固定会话，不另建聊天窗口。
+ * 点击通过服务打开该实例的对话列表，不另建聊天窗口。
  */
 
 import { requestChannels, useChannelsView } from "@/modules/channels/client";

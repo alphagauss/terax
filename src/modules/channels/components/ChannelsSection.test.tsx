@@ -56,7 +56,7 @@ const snapshot = (id: string, name: string): ChannelSnapshot => ({
     id,
     name,
     kind: "weixin",
-    sessionId: `session-${id}`,
+
     enabled: false,
     accountId: null,
     busyMessageMode: "steer",
@@ -65,6 +65,7 @@ const snapshot = (id: string, name: string): ChannelSnapshot => ({
   issue: null,
   busy: false,
   queued: 0,
+  conversations: [],
 });
 let root: Root;
 let container: HTMLDivElement;

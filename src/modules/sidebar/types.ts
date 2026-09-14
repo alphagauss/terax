@@ -12,7 +12,8 @@ export type SidebarContainerId =
   | "search"
   | "source-control"
   | "alpha"
-  | "ai";
+  | "ai"
+  | "channels";
 
 export type ActivityBarPosition = "default" | "top" | "bottom" | "hidden";
 
@@ -26,7 +27,7 @@ export type ActivityBarSettings = {
 
 export type SidebarContainerDefinition = {
   id: SidebarContainerId;
-  titleKey: "files" | "search" | "sourceControl" | "alpha" | "ai";
+  titleKey: "files" | "search" | "sourceControl" | "alpha" | "ai" | "channels";
   icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
   defaultLocation: SidebarLocation;
   defaultOrder: number;

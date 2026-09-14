@@ -20,7 +20,7 @@
   "disconnect": "Disconnect",
   "login": "Scan to connect",
   "loginAgain": "Sign in again",
-  "openSession": "View conversation",
+  "openSession": "View conversations",
   "reconnect": "Reconnect",
   "remove": "Remove",
   "removeHint": "Disable the connection before removing it. Conversation history is kept.",
@@ -31,7 +31,6 @@
   "busy": "Processing",
   "queued": "{{count}} queued",
   "emptyReply": "The Agent finished without a text reply. View the conversation in Terax for details.",
-  "longReply": "The reply continues in Terax. Open the Channel conversation to read the complete result.",
   "runFailed": "Terax could not complete this request. Check the Channel status in Terax and send a new message when it is ready.",
   "status": {
     "disabled": "Disabled",
@@ -77,5 +76,36 @@
   "removeConfirm": "Remove “{{name}}”? Existing chat history will be kept.",
   "preparingQr": "Getting QR code…",
   "attachmentInstruction": "Receiving an attachment alone does not mean the user wants it read or analyzed immediately. Decide whether to process it based on the preceding user request. If there is no clear task, briefly acknowledge receipt and wait for further instructions. Later messages may refer to previously received attachments.",
-  "imageAttachmentSummary": "This message includes {{count}} image(s). Saved image paths: {{paths}}. Images that failed to download: {{failed}}."
+  "imageAttachmentSummary": "This message includes {{count}} image(s). Saved image paths: {{paths}}. Images that failed to download: {{failed}}.",
+  "outbound": {
+    "label": "Application send",
+    "accepted": "Platform accepted",
+    "partial": "Partially accepted",
+    "failed": "Failed",
+    "unknown": "Result unknown",
+    "unconfirmed": "Result unconfirmed",
+    "parts": "Accepted parts: {{count}}",
+    "instance": "Connection",
+    "target": "Target: {{id}}",
+    "noTarget": "Start a conversation with the bot in your messaging app first.",
+    "text": "Message text",
+    "remove": "Remove",
+    "addFiles": "Add files",
+    "send": "Send",
+    "sendFailed": "Could not confirm submission. Check history before sending again.",
+    "fileFailed": "Could not select files.",
+    "roles": {
+      "user": "Received",
+      "assistant": "Agent",
+      "system": "System",
+      "command": "Command"
+    },
+    "sending": "Sending",
+    "tooManyFiles": "Send at most 16 files at a time.",
+    "conversation": "Conversation",
+    "direct": "Private chat",
+    "group": "Group / room",
+    "unavailable": "Connect this instance to send. If already connected, send a new message from your messaging app to refresh the conversation context.",
+    "openInAgent": "View in Agent panel"
+  }
 }

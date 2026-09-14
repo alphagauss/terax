@@ -3,6 +3,8 @@
  * 检查点的串行写入和退出等待归连接运行时，会话正文与凭据分别归 sessions 和秘密存储。
  */
 
+import { prepareChannelWorkspace } from "@/modules/channels/workspace";
+import { channelSessionId } from "@/modules/channels/identity";
 import { channelModelUsageId } from "@/modules/ai/lib/modelUsage";
 import { deleteModelUsage } from "@/modules/settings/store";
 import {
@@ -16,23 +18,18 @@ import {
   type ChannelConnection,
   ChannelError,
   checkpointSchema,
+  protocolCheckpointSchema,
   connectionSchema,
 } from "@/modules/channels/types";
 
-/** 严格读取当前配置，拒绝重复会话绑定和损坏记录。 */
+/** 严格读取当前配置，拒绝重复账号和损坏记录。 */
 export async function loadConnections(): Promise<ChannelConnection[]> {
   const values = await readSharedStore("channels");
-  const ids = new Set<string>();
   const accounts = new Set<string>();
   const connections = Object.entries(values).map(([id, value]) => {
     const result = connectionSchema.safeParse(value);
-    if (
-      !result.success ||
-      result.data.id !== id ||
-      ids.has(result.data.sessionId)
-    )
+    if (!result.success || result.data.id !== id)
       throw new ChannelError("configuration");
-    ids.add(result.data.sessionId);
     if (result.data.accountId) {
       const account = JSON.stringify([result.data.kind, result.data.accountId]);
       if (accounts.has(account)) throw new ChannelError("configuration");
@@ -62,39 +59,70 @@ export async function removeConnection(id: string): Promise<void> {
   await deleteSharedStoreKey("channels", id);
 }
 
-/** 读取单连接检查点；没有文件表示尚未开始接收。 */
-export async function loadCheckpoint(id: string): Promise<ChannelCheckpoint> {
+/** 协议状态归实例，可读对话索引归账号；移除实例不删除索引。 */
+export async function loadCheckpoint(
+  connection: ChannelConnection,
+): Promise<ChannelCheckpoint> {
   try {
-    const path = await checkpointPath(id);
-    if (!(await checkpointExists(path)))
-      return { cursor: "", cursorScope: "", recentIds: [], pendingIds: [] };
-    const result = await invokeNative<{ kind: string; content?: string }>(
-      "fs_read_file",
-      { path, workspace: { kind: "local" } },
-    );
-    if (result.kind !== "text" || typeof result.content !== "string")
-      throw new ChannelError("storage");
-    return checkpointSchema.parse(JSON.parse(result.content));
+    const protocol = await readJson(await checkpointPath(connection.id));
+    const index = connection.accountId
+      ? await readJson(
+          `${await prepareChannelWorkspace(connection)}/conversations.json`,
+        )
+      : undefined;
+    const conversations = index === undefined ? [] : index;
+    const checkpoint = checkpointSchema.parse({
+      ...protocolCheckpointSchema.parse(
+        protocol === undefined
+          ? { cursor: "", cursorScope: "", recentIds: [], pendingIds: [] }
+          : protocol,
+      ),
+      conversations,
+    });
+    for (const item of checkpoint.conversations) {
+      if (item.sessionId !== (await channelSessionId(connection, item.target)))
+        throw new ChannelError("storage");
+    }
+    return checkpoint;
   } catch {
     throw new ChannelError("storage");
   }
 }
 
-/** 检查点只记录消息身份，不把平台回复令牌或聊天正文写入状态文件。 */
+/** 索引先落盘，随后推进协议身份；失败不执行 Agent，重试只补写事实。 */
 export async function saveCheckpoint(
-  id: string,
+  connection: ChannelConnection,
   checkpoint: ChannelCheckpoint,
 ): Promise<void> {
   try {
-    const path = await checkpointPath(id);
-    await invokeNative("fs_write_file", {
-      path,
-      content: JSON.stringify(checkpointSchema.parse(checkpoint)),
-      workspace: { kind: "local" },
-    });
+    connectionSchema.parse(connection);
+    const { conversations, ...protocol } = checkpointSchema.parse(checkpoint);
+    await writeJson(
+      `${await prepareChannelWorkspace(connection)}/conversations.json`,
+      conversations,
+    );
+    await writeJson(await checkpointPath(connection.id), protocol);
   } catch {
     throw new ChannelError("storage");
   }
+}
+
+async function readJson(path: string): Promise<unknown | undefined> {
+  if (!(await checkpointExists(path))) return undefined;
+  const result = await invokeNative<{ kind: string; content?: string }>(
+    "fs_read_file",
+    { path, workspace: { kind: "local" } },
+  );
+  if (result.kind !== "text" || typeof result.content !== "string")
+    throw new ChannelError("storage");
+  return JSON.parse(result.content);
+}
+async function writeJson(path: string, content: unknown): Promise<void> {
+  await invokeNative("fs_write_file", {
+    path,
+    content: JSON.stringify(content),
+    workspace: { kind: "local" },
+  });
 }
 
 /** 路径由 TS 业务定义，原生只准备应用数据目录，UUID 校验阻止路径注入。 */

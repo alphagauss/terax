@@ -15,6 +15,7 @@ import {
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
 import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
+import type { DeliveryRecord } from "@/modules/channels/history";
 import type { CommandRecord } from "@/modules/ai/commands/records";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
 
@@ -70,6 +71,7 @@ export type SessionMessage = {
       approval_reason?: string;
       approval_signature?: string;
     }
+  | { role: "delivery"; content: DeliveryRecord }
   | { role: "command"; content: CommandRecord }
   | { role: "usage"; content: UsageRecord }
   | { role: "event"; content: SubagentResultEvent }
@@ -418,7 +420,12 @@ export function projectSessionMessages(
   };
 
   records.forEach((record, index) => {
-    if (record.role === "usage" || record.role === "command") return;
+    if (
+      record.role === "usage" ||
+      record.role === "command" ||
+      record.role === "delivery"
+    )
+      return;
     const timestamp = parseRecordedTimestamp(record.timestamp);
     if (record.role === "display") {
       if (

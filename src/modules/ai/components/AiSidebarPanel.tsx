@@ -2,6 +2,7 @@
  * 本文件实现 AI 侧边栏的会话外壳、上下文指标和空状态入口。
  * 流式消息更新在此合并提交，避免头部统计和聊天正文按每个 delta 重渲染。
  */
+import { useDeliveryHistory } from "@/modules/channels/history";
 
 import { useCommandStore } from "@/modules/ai/commands/store";
 import { Hint } from "@/components/controls/tooltip";
@@ -158,6 +159,9 @@ function Body({
   chat: Chat<UIMessage>;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
+  const hasDeliveries = useDeliveryHistory((state) =>
+    Boolean(state.sessions[sessionId]?.length),
+  );
   const hasCommands = useCommandStore((state) =>
     Boolean(state.sessions[sessionId]?.length),
   );
@@ -179,7 +183,7 @@ function Body({
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {helpers.messages.length === 0 && !hasCommands ? (
+        {helpers.messages.length === 0 && !hasCommands && !hasDeliveries ? (
           <EmptyState onPick={focusInput} disabled={readOnly} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">

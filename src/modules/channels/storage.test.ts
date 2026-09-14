@@ -1,3 +1,4 @@
+import { channelSessionId } from "@/modules/channels/identity";
 /** 检查点复用普通文件接口，缺失、损坏与 I/O 失败必须具有不同语义。 */
 import { beforeEach, expect, it, vi } from "vitest";
 import {
@@ -22,14 +23,35 @@ vi.mock("@/modules/settings/store", () => ({ deleteModelUsage: vi.fn() }));
 
 const a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const b = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const connection = (id: string) => ({
+  id,
+  kind: "weixin" as const,
+  name: "test",
+  accountId: "owner",
+  enabled: true,
+  busyMessageMode: "queue" as const,
+});
+vi.mock("@/modules/channels/workspace", () => ({
+  prepareChannelWorkspace: async () => "/account",
+}));
 const checkpoint = {
+  conversations: [
+    {
+      sessionId: b,
+      target: { kind: "group" as const, id: "room", threadId: "topic" },
+    },
+  ],
   cursor: "cursor",
   cursorScope: "account",
   recentIds: ["message"],
   pendingIds: [],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  checkpoint.conversations[0].sessionId = await channelSessionId(
+    connection(a),
+    checkpoint.conversations[0].target,
+  );
   io.files.clear();
   io.sharedSet.mockClear();
   io.sharedDelete.mockClear();
@@ -59,18 +81,28 @@ beforeEach(() => {
 });
 
 it("writes complete per-connection JSON through the atomic file interface", async () => {
-  expect(await loadCheckpoint(a)).toEqual({
+  expect(await loadCheckpoint(connection(a))).toEqual({
+    conversations: [],
     cursor: "",
     cursorScope: "",
     recentIds: [],
     pendingIds: [],
   });
-  await saveCheckpoint(a, checkpoint);
-  await saveCheckpoint(b, { ...checkpoint, cursor: "other" });
-  expect(JSON.parse(io.files.get(`/state/${a}.json`) ?? "null")).toEqual(
-    checkpoint,
-  );
-  expect(await loadCheckpoint(a)).toEqual(checkpoint);
+  await saveCheckpoint(connection(a), checkpoint);
+  await saveCheckpoint(connection(b), { ...checkpoint, cursor: "other" });
+  expect(JSON.parse(io.files.get(`/state/${a}.json`) ?? "null")).toEqual({
+    cursor: checkpoint.cursor,
+    cursorScope: checkpoint.cursorScope,
+    recentIds: checkpoint.recentIds,
+    pendingIds: checkpoint.pendingIds,
+  });
+  expect(await loadCheckpoint(connection(a))).toEqual(checkpoint);
+  await expect(
+    saveCheckpoint(connection(a), {
+      ...checkpoint,
+      conversations: [...checkpoint.conversations, ...checkpoint.conversations],
+    }),
+  ).rejects.toThrow("storage");
   expect(io.sharedSet).not.toHaveBeenCalled();
   expect(io.invoke).toHaveBeenCalledWith("workspace_prepare_default_root", {
     appSubdir: "channels/state",
@@ -84,11 +116,23 @@ it("writes complete per-connection JSON through the atomic file interface", asyn
   await removeConnection(a);
   expect(io.files.has(`/state/${a}.json`)).toBe(false);
   expect(io.files.has(`/state/${b}.json`)).toBe(true);
+  expect((await loadCheckpoint(connection(a))).conversations).toEqual(
+    checkpoint.conversations,
+  );
+  expect(
+    JSON.parse(io.files.get("/account/conversations.json") ?? "null"),
+  ).toEqual(checkpoint.conversations);
 });
 
 it("reports corrupt checkpoints but permits their removal without parsing", async () => {
   io.files.set(`/state/${a}.json`, "broken json");
-  await expect(loadCheckpoint(a)).rejects.toMatchObject({ issue: "storage" });
+  await expect(loadCheckpoint(connection(a))).rejects.toMatchObject({
+    issue: "storage",
+  });
+  io.files.set(`/state/${a}.json`, "null");
+  await expect(loadCheckpoint(connection(a))).rejects.toMatchObject({
+    issue: "storage",
+  });
   await removeConnection(a);
   expect(io.files.size).toBe(0);
 });
@@ -98,7 +142,9 @@ it("does not disguise stat errors or a directory as an absent checkpoint", async
     if (command === "workspace_prepare_default_root") return "/state";
     throw new Error("permission denied");
   });
-  await expect(loadCheckpoint(a)).rejects.toMatchObject({ issue: "storage" });
+  await expect(loadCheckpoint(connection(a))).rejects.toMatchObject({
+    issue: "storage",
+  });
   io.invoke.mockImplementation(async (command: string) =>
     command === "workspace_prepare_default_root" ? "/state" : { kind: "dir" },
   );
@@ -110,7 +156,9 @@ it("does not disguise stat errors or a directory as an absent checkpoint", async
 });
 
 it("rejects path injection before native access and propagates write failures", async () => {
-  await expect(saveCheckpoint("../outside", checkpoint)).rejects.toMatchObject({
+  await expect(
+    saveCheckpoint(connection("../outside"), checkpoint),
+  ).rejects.toMatchObject({
     issue: "storage",
   });
   expect(io.invoke).not.toHaveBeenCalled();
@@ -118,7 +166,9 @@ it("rejects path injection before native access and propagates write failures", 
     if (command === "workspace_prepare_default_root") return "/state";
     throw new Error("disk full");
   });
-  await expect(saveCheckpoint(a, checkpoint)).rejects.toMatchObject({
-    issue: "storage",
-  });
+  await expect(saveCheckpoint(connection(a), checkpoint)).rejects.toMatchObject(
+    {
+      issue: "storage",
+    },
+  );
 });

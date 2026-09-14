@@ -5,6 +5,7 @@
 
 import {
   AiChat01Icon,
+  Message01Icon,
   ChartCandlestickIcon,
   FolderGitTwoIcon,
   FolderTreeIcon,
@@ -55,6 +56,15 @@ export const SIDEBAR_CONTAINERS = [
     icon: AiChat01Icon,
     defaultLocation: "secondary",
     defaultOrder: 0,
+    allowedLocations: ["primary", "secondary"],
+    minimumWidth: 280,
+  },
+  {
+    id: "channels",
+    titleKey: "channels",
+    icon: Message01Icon,
+    defaultLocation: "secondary",
+    defaultOrder: 1,
     allowedLocations: ["primary", "secondary"],
     minimumWidth: 280,
   },
