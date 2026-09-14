@@ -6,12 +6,14 @@
 import { PopoverContent } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
-import type { SlashCommandMeta } from "../lib/slashCommands";
+import type { CommandDefinition } from "@/modules/ai/commands/registry";
+import { useTranslation } from "react-i18next";
+import { CommandLineIcon } from "@hugeicons/core-free-icons";
 import type { Snippet } from "../lib/snippets";
 
 export type PickerItem =
   | { kind: "snippet"; snippet: Snippet }
-  | { kind: "command"; command: SlashCommandMeta };
+  | { kind: "command"; command: CommandDefinition };
 
 type Props = {
   items: readonly PickerItem[];
@@ -26,6 +28,7 @@ export function SnippetPickerContent({
   onPick,
   onHover,
 }: Props) {
+  const { t } = useTranslation("ai");
   const commands = items.filter((it) => it.kind === "command");
   const snippets = items.filter((it) => it.kind === "snippet");
   let cursor = -1;
@@ -48,7 +51,7 @@ export function SnippetPickerContent({
         <div className="max-h-64 overflow-y-auto py-1">
           {commands.length > 0 && (
             <>
-              <SectionHeader label="Pre-built snippets" />
+              <SectionHeader label={t("commands.label")} />
               <ul>
                 {commands.map((it) => {
                   cursor += 1;
@@ -69,7 +72,7 @@ export function SnippetPickerContent({
                         )}
                       >
                         <HugeiconsIcon
-                          icon={c.icon}
+                          icon={CommandLineIcon}
                           size={13}
                           strokeWidth={1.75}
                           className="text-muted-foreground"
@@ -77,9 +80,11 @@ export function SnippetPickerContent({
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="flex items-center gap-1.5">
                             <span className="font-mono text-muted-foreground">
-                              #{c.name}
+                              /{c.name}
                             </span>
-                            <span className="font-medium">{c.label}</span>
+                            <span className="font-medium">
+                              {t(c.descriptionKey)}
+                            </span>
                           </span>
                         </span>
                       </button>

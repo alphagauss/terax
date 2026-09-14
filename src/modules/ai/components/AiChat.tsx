@@ -53,7 +53,8 @@ import {
   reasoningDurationFromPart,
 } from "@/modules/ai/lib/conversation";
 import { formatMessageTimestamp } from "@/modules/ai/lib/messageTimestamp";
-import { SLASH_COMMANDS, TERAX_CMD_RE } from "@/modules/ai/lib/slashCommands";
+import { EMPTY_COMMANDS, useCommandStore } from "@/modules/ai/commands/store";
+import type { CommandDisplay } from "@/modules/ai/commands/records";
 import { sendMessage } from "@/modules/ai/store/chatRuntime";
 import {
   getAgentMetaForSession,
@@ -78,6 +79,7 @@ import type {
   UIMessagePart,
 } from "ai";
 import {
+  Fragment,
   memo,
   lazy,
   Suspense,
@@ -264,33 +266,6 @@ function findConversationMessage(
   );
 }
 
-function CommandSnippet({ name }: { name: string }) {
-  const meta = SLASH_COMMANDS[name];
-  if (!meta) {
-    return (
-      <div className="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/40 px-2 py-1 font-mono text-[11px]">
-        /{name}
-      </div>
-    );
-  }
-  return (
-    <div className="inline-flex max-w-full items-center gap-2 rounded-md border border-border/50 bg-muted/40 px-2 py-1">
-      <HugeiconsIcon
-        icon={meta.icon}
-        size={12}
-        strokeWidth={1.75}
-        className="shrink-0 text-foreground"
-      />
-      <span className="font-mono text-[11px] text-foreground">
-        {meta.invocation}
-      </span>
-      <span className="truncate text-[11px] text-muted-foreground">
-        {meta.label}
-      </span>
-    </div>
-  );
-}
-
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
 type ContextChip =
@@ -402,6 +377,9 @@ export function AiChatView({
     () => projectConversationDisplay(sourceMessages),
     [sourceMessages],
   );
+  const commands = useCommandStore(
+    (state) => state.sessions[sessionId] ?? EMPTY_COMMANDS,
+  );
   const lastMessage = messages[messages.length - 1];
   const showPendingResponse =
     isBusy &&
@@ -436,7 +414,7 @@ export function AiChatView({
     [],
   );
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && commands.length === 0) {
     return (
       <Conversation
         contextRef={scrollMemory.contextRef}
@@ -466,16 +444,34 @@ export function AiChatView({
         scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
       >
         <div ref={setToolDetailsWheelScope} className="contents">
-          {messages.map((m) =>
-            m.id === pendingAssistantMessageId ? null : (
-              <RenderedMessage
-                key={m.id}
-                sessionId={sessionId}
-                message={m}
-                streaming={m.id === streamingMessageId}
-              />
-            ),
-          )}
+          {commands
+            .filter(
+              (command) =>
+                !command.afterMessageId ||
+                !messages.some(
+                  (message) => message.id === command.afterMessageId,
+                ),
+            )
+            .map((command) => (
+              <CommandCard key={command.id} command={command} />
+            ))}
+          {messages.map((m) => (
+            <Fragment key={m.id}>
+              {m.id !== pendingAssistantMessageId &&
+              !messageMetadata(m).commandId ? (
+                <RenderedMessage
+                  sessionId={sessionId}
+                  message={m}
+                  streaming={m.id === streamingMessageId}
+                />
+              ) : null}
+              {commands
+                .filter((command) => command.afterMessageId === m.id)
+                .map((command) => (
+                  <CommandCard key={command.id} command={command} />
+                ))}
+            </Fragment>
+          ))}
         </div>
         {compactionNotice && (
           <CompactionNotice
@@ -522,6 +518,59 @@ export function AiChatView({
       </ConversationContent>
       <AiChatScrollControls messages={messages} running={isBusy} />
     </Conversation>
+  );
+}
+
+/** 命令卡只展示持久化操作和回执，不提供模型轮次操作。 */
+function CommandCard({ command }: { command: CommandDisplay }) {
+  const { t } = useTranslation("ai");
+  const status = command.result
+    ? command.result.status === "error"
+      ? t("commands.failed")
+      : t(
+          command.result.taskMessageId
+            ? "commands.submitted"
+            : "commands.completed",
+        )
+    : t(
+        command.pending === "waiting"
+          ? "commands.waiting"
+          : command.pending === "running"
+            ? "commands.running"
+            : "commands.unconfirmed",
+      );
+  return (
+    <div
+      data-conversation-message-id={command.id}
+      className="group/message rounded-md border border-border bg-muted/30 px-3 py-2 text-xs"
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">{t("commands.label")}</span>
+        <code className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+          {command.input}
+        </code>
+        <span
+          className={
+            command.result?.status === "error"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }
+        >
+          {status}
+        </span>
+      </div>
+      {command.result ? (
+        <p className="mt-2 whitespace-pre-wrap break-words">
+          {command.result.text}
+        </p>
+      ) : null}
+      <MessageMeta
+        timestamp={command.timestamp}
+        copyText={[command.input, command.result?.text]
+          .filter(Boolean)
+          .join("\n")}
+      />
+    </div>
   );
 }
 
@@ -603,10 +652,7 @@ const RenderedMessage = memo(function RenderedMessage({
   if (message.role === "user") {
     const rawText = messageTextWithoutAttachments(message);
 
-    const cmdMatch = rawText.match(TERAX_CMD_RE);
-    const commandName = cmdMatch?.[1] ?? null;
-    const withoutCmd = cmdMatch ? rawText.slice(cmdMatch[0].length) : rawText;
-    const stripped = stripUserContextBlocks(withoutCmd);
+    const stripped = stripUserContextBlocks(rawText);
 
     return (
       <Message
@@ -617,7 +663,6 @@ const RenderedMessage = memo(function RenderedMessage({
         <MessageAttachments message={message} />
         {stripped.text ||
         stripped.chips.length ||
-        commandName ||
         messageMetadata(message).guided ? (
           <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
             {messageMetadata(message).guided ? (
@@ -625,7 +670,6 @@ const RenderedMessage = memo(function RenderedMessage({
                 {t("chat.guided")}
               </span>
             ) : null}
-            {commandName ? <CommandSnippet name={commandName} /> : null}
             {stripped.chips.length > 0 ? (
               <ContextChips chips={stripped.chips} />
             ) : null}
@@ -791,11 +835,7 @@ function messageTextForCopy(message: UIMessage): string {
       .map((part) => part.text)
       .join("\n");
   }
-  const withoutCommand = messageTextWithoutAttachments(message).replace(
-    TERAX_CMD_RE,
-    "",
-  );
-  return stripUserContextBlocks(withoutCommand).text;
+  return stripUserContextBlocks(messageTextWithoutAttachments(message)).text;
 }
 
 /** 消息底部的时间、复制操作与最终回答的本轮统计入口。 */

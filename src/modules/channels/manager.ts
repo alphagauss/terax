@@ -27,6 +27,11 @@ type Dependencies = {
     signal: AbortSignal,
     ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
   ) => Promise<string | null>;
+  command?: (
+    connection: ChannelConnection,
+    message: ChannelInbound,
+    signal: AbortSignal,
+  ) => Promise<string | null>;
   load: (id: string) => Promise<ChannelCheckpoint>;
   save: (id: string, checkpoint: ChannelCheckpoint) => Promise<void>;
   failureText: () => string;
@@ -45,6 +50,7 @@ type Runtime = {
   adapter: ChannelAdapter | null;
   wake: (() => void) | null;
   steer: ((message: ChannelInbound) => SteeringReceipt | null) | null;
+  command: ((message: ChannelInbound) => Promise<boolean>) | null;
   groupedIds: string[];
   generation: number;
 };
@@ -97,6 +103,7 @@ export class ChannelManager {
         adapter: null,
         wake: null,
         steer: null,
+        command: null,
         groupedIds: [],
         generation: 0,
       };
@@ -238,6 +245,7 @@ export class ChannelManager {
             message = await this.deps.materialize(connection, message, signal);
           signal.throwIfAborted();
           if (generation !== runtime.generation) return;
+          if (runtime.command && (await runtime.command(message))) return;
           runtime.queue.push(message);
           this.publish();
           this.guide(runtime);
@@ -310,6 +318,34 @@ export class ChannelManager {
       message,
       signal,
     );
+    let commandTask: Promise<boolean> | undefined;
+    let commandDeliveryFailed = false;
+    const handleCommand = async (input: ChannelInbound): Promise<boolean> => {
+      if (!this.deps.command) return false;
+      const text = await this.deps.command(
+        runtime.snapshot.connection,
+        input,
+        signal,
+      );
+      if (text === null) return false;
+      signal.throwIfAborted();
+      const result = await delivery.reply(input, text);
+      if (result.status !== "accepted") {
+        commandDeliveryFailed = true;
+        runtime.snapshot.issue = "delivery";
+      }
+      runtime.checkpoint.pendingIds = runtime.checkpoint.pendingIds.filter(
+        (id) => id !== input.id,
+      );
+      runtime.wake?.();
+      await this.persist(runtime);
+      this.publish();
+      return true;
+    };
+    runtime.command = (input) => {
+      commandTask = handleCommand(input);
+      return commandTask;
+    };
     try {
       const text = await this.deps.run(
         runtime.snapshot.connection,
@@ -321,6 +357,8 @@ export class ChannelManager {
         },
       );
       runtime.steer = null;
+      runtime.command = null;
+      await commandTask;
       signal.throwIfAborted();
       if (text === null) {
         runtime.generation++;
@@ -336,7 +374,8 @@ export class ChannelManager {
         });
         if (result.status !== "accepted") throw new ChannelError("delivery");
       }
-      runtime.snapshot.issue = delivery.failed ? "delivery" : null;
+      runtime.snapshot.issue =
+        delivery.failed || commandDeliveryFailed ? "delivery" : null;
     } catch (error) {
       if (!signal.aborted) {
         if (error instanceof ChannelError && error.issue === "storage") {
@@ -358,6 +397,8 @@ export class ChannelManager {
         }
       }
     } finally {
+      runtime.command = null;
+      await commandTask?.catch(() => undefined);
       await delivery.close();
       runtime.steer = null;
       if (!signal.aborted) {

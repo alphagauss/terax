@@ -359,7 +359,7 @@ it("does not replace an explicitly unavailable Channel model with the global def
   await expect(
     runChannelTurn(
       { id: "a" } as never,
-      {} as never,
+      { text: "hello" } as never,
       new AbortController().signal,
       () => {},
     ),

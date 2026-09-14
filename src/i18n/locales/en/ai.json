@@ -288,8 +288,28 @@
     "openAiSidebarRunning": "Open AI sidebar, AI sessions are running",
     "closeAiSidebarRunning": "Close AI sidebar, AI sessions are running"
   },
-  "slashCommands": {
-    "initLabel": "Initialize workspace"
+  "commands": {
+    "executionFailed": "Command execution failed.",
+    "submitted": "Submitted",
+    "send": "Run command",
+    "label": "Command",
+    "helpDescription": "List available commands",
+    "initDescription": "Scan the workspace and create or update AGENTS.md",
+    "supported": "Available commands:",
+    "invalidArguments": "Invalid arguments. Usage: {{usage}}",
+    "unknown": "Unknown command /{{name}}. Use /help to list available commands.",
+    "unavailable": "/{{name}} is unavailable in this conversation.",
+    "noAttachments": "This command does not accept attachments or snippets.",
+    "busy": "The conversation is busy. Try again shortly.",
+    "noWorkspace": "Choose a working directory first.",
+    "taskAccepted": "Initialization task submitted.",
+    "taskRejected": "Could not start the task. Check the model configuration and conversation status.",
+    "cancelled": "Command cancelled.",
+    "waiting": "Waiting",
+    "running": "Running",
+    "unconfirmed": "Result unconfirmed",
+    "failed": "Failed",
+    "completed": "Completed"
   },
   "whisper": {
     "transcriptionFailed": "Transcription failed",

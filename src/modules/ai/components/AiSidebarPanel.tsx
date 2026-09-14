@@ -3,6 +3,7 @@
  * 流式消息更新在此合并提交，避免头部统计和聊天正文按每个 delta 重渲染。
  */
 
+import { useCommandStore } from "@/modules/ai/commands/store";
 import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
@@ -157,6 +158,9 @@ function Body({
   chat: Chat<UIMessage>;
 }) {
   const focusInput = useChatStore((s) => s.focusInput);
+  const hasCommands = useCommandStore((state) =>
+    Boolean(state.sessions[sessionId]?.length),
+  );
   const helpers = useChat<UIMessage>({
     chat,
     experimental_throttle: STREAM_RENDER_INTERVAL_MS,
@@ -175,7 +179,7 @@ function Body({
       />
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {helpers.messages.length === 0 ? (
+        {helpers.messages.length === 0 && !hasCommands ? (
           <EmptyState onPick={focusInput} disabled={readOnly} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">

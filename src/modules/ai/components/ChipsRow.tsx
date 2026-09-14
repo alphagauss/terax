@@ -14,15 +14,11 @@ import type { FileAttachment } from "../lib/composer";
 import type { Snippet } from "../lib/snippets";
 import { Chip } from "./Chip";
 
-type CommandChip = { name: string; label: string; icon: typeof HashtagIcon };
-
 type Props = {
   files: FileAttachment[];
   onRemoveFile: (id: string) => void;
   snippets: Snippet[];
   onRemoveSnippet: (id: string) => void;
-  commands: CommandChip[];
-  onRemoveCommand: (name: string) => void;
   /** Passive chips rendered before the attachment chips (e.g. cwd + branch). */
   leading?: ReactNode;
 };
@@ -32,27 +28,13 @@ export function ChipsRow({
   onRemoveFile,
   snippets,
   onRemoveSnippet,
-  commands,
-  onRemoveCommand,
   leading,
 }: Props) {
-  const hasAttachments =
-    files.length > 0 || snippets.length > 0 || commands.length > 0;
+  const hasAttachments = files.length > 0 || snippets.length > 0;
   if (!leading && !hasAttachments) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {leading}
-      {commands.map((cmd) => (
-        <Chip
-          key={`cmd-${cmd.name}`}
-          icon={cmd.icon}
-          title={cmd.label}
-          onRemove={() => onRemoveCommand(cmd.name)}
-          removeLabel="Remove command"
-        >
-          #{cmd.name}
-        </Chip>
-      ))}
       {snippets.map((s) => (
         <Chip
           key={`snip-${s.id}`}

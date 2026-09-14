@@ -288,8 +288,28 @@
     "openAiSidebarRunning": "打开 AI 侧栏，有 AI 会话正在运行",
     "closeAiSidebarRunning": "关闭 AI 侧栏，有 AI 会话正在运行"
   },
-  "slashCommands": {
-    "initLabel": "初始化工作区"
+  "commands": {
+    "executionFailed": "命令执行失败。",
+    "submitted": "已提交",
+    "send": "执行命令",
+    "label": "命令",
+    "helpDescription": "列出可用命令",
+    "initDescription": "扫描工作区，创建或更新 AGENTS.md",
+    "supported": "可用命令：",
+    "invalidArguments": "参数不正确。用法：{{usage}}",
+    "unknown": "未知命令 /{{name}}。输入 /help 查看可用命令。",
+    "unavailable": "当前会话不支持 /{{name}}。",
+    "noAttachments": "此命令不接受附件或片段。",
+    "busy": "会话正忙，请稍后重试。",
+    "noWorkspace": "请先选择工作目录。",
+    "taskAccepted": "已提交初始化任务。",
+    "taskRejected": "无法启动任务，请检查模型配置和会话状态。",
+    "cancelled": "命令已取消。",
+    "waiting": "等待执行",
+    "running": "执行中",
+    "unconfirmed": "执行结果未确认",
+    "failed": "失败",
+    "completed": "已完成"
   },
   "whisper": {
     "transcriptionFailed": "转写失败",

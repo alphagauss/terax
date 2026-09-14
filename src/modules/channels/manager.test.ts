@@ -33,7 +33,13 @@ const message = (id: string): ChannelInbound => ({
   receivedAt: 1,
 });
 
-function harness() {
+function harness(
+  command?: (
+    connection: ChannelConnection,
+    message: ChannelInbound,
+    signal: AbortSignal,
+  ) => Promise<string | null>,
+) {
   let cancelled = false;
   const inboxes = new Map<string, TurnInbox>();
   const receivers = new Map<string, ReceiveContext>();
@@ -49,6 +55,7 @@ function harness() {
     disk.set(id, structuredClone(checkpoint));
   });
   const manager = new ChannelManager({
+    command,
     adapter: async (connection) => ({
       cursorScope: connection.accountId ?? "",
       receive: async (context) => {
@@ -124,6 +131,38 @@ function harness() {
 }
 
 describe("ChannelManager", () => {
+  it("即时命令在任务期间独立回复原消息，不引导模型且不混入最终回复身份", async () => {
+    const command = vi.fn(
+      async (_connection: ChannelConnection, input: ChannelInbound) =>
+        input.text === "/h" ? "Help" : null,
+    );
+    const h = harness(command);
+    await h.manager.configure([
+      { ...connection("a"), busyMessageMode: "steer" },
+    ]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    await h.receivers.get("a")?.receive(message("task"));
+    h.send.mockResolvedValueOnce({ status: "failed" as never, parts: [] });
+    await h.receivers.get("a")?.receive({ ...message("help"), text: "/h" });
+    expect(h.calls).toEqual(["a:task"]);
+    expect(h.inboxes.get("a")?.hasPending).toBe(false);
+    expect(h.send).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "help" }),
+      { text: "Help" },
+      expect.any(AbortSignal),
+    );
+    expect(h.disk.get("a")?.pendingIds).toEqual(["task"]);
+    h.gates[0]();
+    await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
+    expect(h.send).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "task" }),
+      { text: "task" },
+      expect.any(AbortSignal),
+    );
+    expect(h.snapshots()[0].issue).toBe("delivery");
+    await h.manager.dispose();
+  });
+
   it("附件工具成功投递后没有最终正文时不补发空回复", async () => {
     const h = harness();
     await h.manager.configure([connection("a")]);

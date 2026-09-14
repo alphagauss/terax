@@ -15,6 +15,7 @@ import {
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
 import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
+import type { CommandRecord } from "@/modules/ai/commands/records";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
@@ -44,11 +45,13 @@ export type SessionMessage = {
       content: string;
       guided?: boolean;
       message_id?: string;
+      command_id?: string;
       media?: SessionMedia[];
       attachments?: AttachmentDisplay[];
     }
   | {
       role: "assistant";
+      message_id?: string;
       content: string;
       reasoning_content?: string;
       reasoning_duration_ms?: number;
@@ -67,6 +70,7 @@ export type SessionMessage = {
       approval_reason?: string;
       approval_signature?: string;
     }
+  | { role: "command"; content: CommandRecord }
   | { role: "usage"; content: UsageRecord }
   | { role: "event"; content: SubagentResultEvent }
   | { role: "display"; content: SubagentDisplaySnapshot | FileEditSnapshot }
@@ -76,6 +80,7 @@ type AppendOptions = {
   timestamp: string;
   turnId: string;
   turnStatus?: string;
+  messageId?: string;
 };
 
 type ToolPart = {
@@ -119,6 +124,7 @@ export type TurnEvent = SteeringEvent | SubagentResultEvent;
 
 type ConversationMetadata = {
   attachments?: AttachmentDisplay[];
+  commandId?: string;
   turnId?: string;
   fileEdits?: TurnFileEdits;
   fileEditsSummary?: boolean;
@@ -359,7 +365,7 @@ export function activityDurationFromPart(value: unknown): number | undefined {
  * 将持久化记录投影为 AI SDK UIMessage。
  *
  * 多条 assistant 和 tool 记录会合并为一个 UI assistant 消息，并用 step-start
- * 保留模型调用步骤。普通消息 ID 由记录位置生成，引导消息保留稳定 ID 以维持活动分段。
+ * 保留模型调用步骤。持久化消息 ID 维持命令定位与引导活动分段，不随命令记录的插入变化。
  */
 export function projectSessionMessages(
   sessionId: string,
@@ -368,19 +374,21 @@ export function projectSessionMessages(
   const messages: UIMessage[] = [];
   let assistantParts: UIMessage["parts"] | null = null;
   let assistantStart = -1;
+  let assistantId: string | undefined;
   let assistantTurnId: string | undefined;
   let assistantTimestamp: number | undefined;
 
   const flushAssistant = () => {
     if (!assistantParts) return;
     messages.push({
-      id: `${sessionId}:assistant:${assistantStart}`,
+      id: assistantId ?? `${sessionId}:assistant:${assistantStart}`,
       role: "assistant",
       parts: assistantParts,
       metadata: { createdAt: assistantTimestamp, turnId: assistantTurnId },
     });
     assistantParts = null;
     assistantStart = -1;
+    assistantId = undefined;
     assistantTurnId = undefined;
     assistantTimestamp = undefined;
   };
@@ -401,6 +409,8 @@ export function projectSessionMessages(
     if (!assistantParts) {
       assistantParts = [];
       assistantStart = index;
+      const record = records[index];
+      assistantId = record.role === "assistant" ? record.message_id : undefined;
       assistantTurnId = turnId;
       assistantTimestamp = timestamp;
     }
@@ -408,7 +418,7 @@ export function projectSessionMessages(
   };
 
   records.forEach((record, index) => {
-    if (record.role === "usage") return;
+    if (record.role === "usage" || record.role === "command") return;
     const timestamp = parseRecordedTimestamp(record.timestamp);
     if (record.role === "display") {
       if (
@@ -468,6 +478,11 @@ export function projectSessionMessages(
           ? {}
           : { metadata: { createdAt: timestamp } }),
       };
+      if (record.command_id)
+        projected.metadata = {
+          ...messageMetadata(projected),
+          commandId: record.command_id,
+        };
       if (record.attachments)
         projected.metadata = {
           ...messageMetadata(projected),
@@ -624,6 +639,7 @@ function serializeUiMessage(
   const messageOptions = {
     ...options,
     timestamp: timestampFromMessage(message, options.timestamp),
+    messageId: message.id,
   };
   if (message.role === "user" || message.role === "system") {
     const content = message.parts
@@ -646,8 +662,10 @@ function serializeUiMessage(
     return [
       {
         role: message.role,
-        ...(messageMetadata(message).guided
-          ? { guided: true, message_id: message.id }
+        message_id: message.id,
+        ...(messageMetadata(message).guided ? { guided: true } : {}),
+        ...(messageMetadata(message).commandId
+          ? { command_id: messageMetadata(message).commandId }
           : {}),
         content,
         timestamp: messageOptions.timestamp,
@@ -856,6 +874,7 @@ function serializeAssistantBlock(
   }));
   const assistant: SessionMessage = {
     role: "assistant",
+    message_id: options.messageId,
     content: block.content.join(""),
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     ...(block.reasoning.length > 0

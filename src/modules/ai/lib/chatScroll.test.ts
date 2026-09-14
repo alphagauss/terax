@@ -31,7 +31,7 @@ describe("chat scroll controls", () => {
         parts: [
           {
             type: "text",
-            text: '<terax-command name="plan" state="on" />\nInspect this\n<selection source="terminal">\nsecret output\n</selection>',
+            text: 'Inspect this\n<selection source="terminal">\nsecret output\n</selection>',
           },
         ],
       },

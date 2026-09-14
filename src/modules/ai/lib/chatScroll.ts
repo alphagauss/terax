@@ -5,7 +5,7 @@
 
 import type { UIMessage } from "ai";
 import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
-import { TERAX_CMD_RE } from "./slashCommands";
+import { messageMetadata } from "@/modules/ai/lib/conversation";
 
 const USER_CONTEXT_BLOCK_RE = /<(selection|snippet)\b[^>]*>[\s\S]*?<\/\1>/gi;
 
@@ -38,11 +38,7 @@ export function shouldShowChatScrollControls(isAtBottom: boolean): boolean {
 
 function userMessageText(message: UIMessage): string {
   const rawText = messageTextWithoutAttachments(message);
-  const commandMatch = rawText.match(TERAX_CMD_RE);
-  const withoutCommand = commandMatch
-    ? rawText.slice(commandMatch[0].length)
-    : rawText;
-  return withoutCommand.replace(USER_CONTEXT_BLOCK_RE, "").trim();
+  return rawText.replace(USER_CONTEXT_BLOCK_RE, "").trim();
 }
 
 /**
@@ -56,7 +52,7 @@ export function buildUserMessageAnchors(
 ): UserMessageAnchor[] {
   const anchors: UserMessageAnchor[] = [];
   for (const message of messages) {
-    if (message.role !== "user") {
+    if (message.role !== "user" || messageMetadata(message).commandId) {
       continue;
     }
     anchors.push({

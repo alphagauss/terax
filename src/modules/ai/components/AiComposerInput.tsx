@@ -14,7 +14,7 @@ import { parseExternalAgentBinding } from "../external-agents/runtime";
 import { useWorkspaceFiles } from "../hooks/useWorkspaceFiles";
 import { useComposerClipboard } from "@/modules/ai/hooks/useComposerClipboard";
 import { useComposer } from "../lib/composer";
-import { SLASH_COMMANDS } from "../lib/slashCommands";
+import { availableCommands } from "@/modules/ai/commands/registry";
 import { sessionMetadata, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
 import { AgentSwitcher } from "./AgentSwitcher";
@@ -42,7 +42,8 @@ function detectSnippetTrigger(
     const ch = value[i];
     if (ch === "#" || ch === "/") {
       const prev = i === 0 ? " " : value[i - 1];
-      if (!/\s/.test(prev)) return null;
+      if (!/\s/.test(prev) || (ch === "/" && value.slice(0, i).trim()))
+        return null;
       const slice = value.slice(i + 1, caret);
       if (!/^[a-z0-9-]*$/i.test(slice)) return null;
       return { start: i, end: caret, query: slice.toLowerCase(), char: ch };
@@ -132,9 +133,15 @@ export function AiComposerInput() {
   const filteredItems = useMemo<PickerItem[]>(() => {
     if (!trigger) return [];
     const q = trigger.query;
-    const cmdItems: PickerItem[] = Object.values(SLASH_COMMANDS)
+    const cmdItems: PickerItem[] = (
+      usesExternalAgent ? [] : availableCommands({ kind: "desktop" })
+    )
       .filter(
-        (c) => !q || c.name.includes(q) || c.label.toLowerCase().includes(q),
+        (c) =>
+          !q ||
+          c.name.includes(q) ||
+          c.aliases.some((alias) => alias.includes(q)) ||
+          t(c.descriptionKey).toLowerCase().includes(q),
       )
       .map((command) => ({ kind: "command", command }));
     if (trigger.char === "/") return cmdItems;
@@ -147,8 +154,8 @@ export function AiComposerInput() {
           s.description.toLowerCase().includes(q),
       )
       .map((snippet) => ({ kind: "snippet", snippet }));
-    return [...cmdItems, ...snipItems];
-  }, [trigger, snippets]);
+    return snipItems;
+  }, [trigger, snippets, usesExternalAgent, t]);
 
   const FILE_PICKER_CAP = 30;
   const filteredFiles = useMemo<string[]>(() => {
@@ -183,7 +190,7 @@ export function AiComposerInput() {
       insert = `#${item.snippet.handle}${needsSpace ? " " : ""}`;
       c.addSnippet(item.snippet);
     } else {
-      c.addCommand(item.command);
+      insert = `/${item.command.name} `;
     }
     const after =
       item.kind === "command" ? afterRaw.replace(/^\s+/, "") : afterRaw;
