@@ -1241,6 +1241,7 @@ function CustomProviderCard({
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
         className="flex items-center gap-2 px-3 py-2 text-left"
       >
         <HugeiconsIcon
@@ -1248,7 +1249,7 @@ function CustomProviderCard({
           size={12}
           strokeWidth={2}
           className={cn(
-            "shrink-0 text-muted-foreground transition-transform",
+            "shrink-0 text-muted-foreground transition-transform duration-control ease-emphasized",
             !expanded && "-rotate-90",
           )}
         />
@@ -1290,7 +1291,7 @@ function CustomProviderCard({
         </Hint>
       </button>
 
-      {expanded && (
+      <ModelParameterReveal open={expanded} transitionKey={provider.id}>
         <div className="flex flex-col gap-field border-t border-border/40 px-3 py-2.5">
           <FieldRow label={t("models.card.name")}>
             <Input
@@ -1381,7 +1382,7 @@ function CustomProviderCard({
             )}
           </FieldRow>
         </div>
-      )}
+      </ModelParameterReveal>
     </div>
   );
 }
