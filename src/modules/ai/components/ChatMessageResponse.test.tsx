@@ -42,6 +42,30 @@ beforeEach(() => {
 });
 
 describe("chat file references", () => {
+  it.each([false, true])(
+    "preserves prices alongside TeX math (streaming=%s)",
+    async (streaming) => {
+      const container = document.createElement("div");
+      const root = createRoot(container);
+      try {
+        await act(async () =>
+          root.render(
+            <ChatMessageResponse streaming={streaming}>
+              {'4. **货币为 "$"（加元）**，标价 `$16.95`。\n\n公式 \\(x^2\\)。'}
+            </ChatMessageResponse>,
+          ),
+        );
+        expect(container.querySelector("li")?.textContent?.trim()).toBe(
+          '货币为 "$"（加元），标价 $16.95。',
+        );
+        expect(container.querySelector("code")?.textContent).toBe("$16.95");
+        expect(container.querySelectorAll(".katex")).toHaveLength(1);
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
   it("uses the table-style copy control for fenced code", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);

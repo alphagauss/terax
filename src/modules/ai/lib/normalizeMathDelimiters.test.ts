@@ -6,7 +6,7 @@ describe("normalizeMathDelimiters", () => {
     const source = "inline \\(x^2\\)\n\\[\ny = x^2\n\\]";
 
     expect(normalizeMathDelimiters(source)).toBe(
-      "inline $x^2$\n$$\ny = x^2\n$$",
+      "inline $$x^2$$\n$$\ny = x^2\n$$",
     );
   });
 

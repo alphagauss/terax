@@ -53,12 +53,12 @@ function normalizeInlineMath(line: string): string {
 
     const delimiter = line.slice(index, index + 2);
     if (delimiter === "\\(") {
-      result += "$";
+      result += "$$";
       index += 2;
       continue;
     }
     if (delimiter === "\\)") {
-      result += "$";
+      result += "$$";
       index += 2;
       continue;
     }
@@ -80,10 +80,8 @@ function normalizeInlineMath(line: string): string {
   return result;
 }
 
-export function normalizeMathDelimiters(
-  content: string | undefined,
-): string | undefined {
-  if (content === undefined) return undefined;
+export function normalizeMathDelimiters(content: string): string {
+  if (!/\\[()[\]]/.test(content)) return content;
 
   const parts = content.split(/(\r\n|\n|\r)/);
   let fence: Fence | null = null;

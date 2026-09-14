@@ -1,6 +1,74 @@
-import type { MarkdownDocumentBlock } from "@/modules/markdown/lib/document";
-import { initialMarkdownBlockCount } from "@/modules/markdown/MarkdownDocumentRenderer";
+import {
+  prepareMarkdownDocument,
+  type MarkdownDocumentBlock,
+} from "@/modules/markdown/lib/document";
+import {
+  initialMarkdownBlockCount,
+  MarkdownDocumentRenderer,
+} from "@/modules/markdown/MarkdownDocumentRenderer";
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Window } from "happy-dom";
+
+it.each([false, true])(
+  "renders TeX math without changing code or source lines (large=%s)",
+  (large) => {
+    const source = [
+      '4. **货币为 "$"（加元）**，标价 `$16.95`。',
+      "",
+      "Inline \\(x^2\\).",
+      "",
+      "\\[",
+      "x +",
+      "",
+      "y",
+      "\\]",
+      "",
+      "`\\(literal\\)`",
+      "",
+      "```text",
+      "\\[literal code\\]",
+      "```",
+      "",
+      "## After",
+      "",
+      large ? "Padding text. ".repeat(42_000) : "End.",
+    ].join("\n");
+    const model = prepareMarkdownDocument(source);
+    const document = new Window().document;
+    document.body.innerHTML = renderToStaticMarkup(
+      createElement(MarkdownDocumentRenderer, {
+        document: model,
+        documentPath: "D:/formula.md",
+        visible: false,
+        scrollContainer: document.createElement(
+          "div",
+        ) as unknown as HTMLElement,
+        onFragmentNavigate: () => {},
+      }),
+    );
+    expect(model.progressive).toBe(large);
+    expect(document.querySelector("li")?.textContent?.trim()).toBe(
+      '货币为 "$"（加元），标价 $16.95。',
+    );
+    expect(
+      document.querySelector('[data-streamdown="strong"]')?.textContent,
+    ).toBe('货币为 "$"（加元）');
+    expect(document.querySelectorAll(".katex")).toHaveLength(2);
+    expect(document.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(
+      [...document.querySelectorAll("code")].map((node) =>
+        node.textContent?.trim(),
+      ),
+    ).toEqual(
+      expect.arrayContaining(["$16.95", "\\(literal\\)", "\\[literal code\\]"]),
+    );
+    expect(
+      document.querySelector("h2")?.getAttribute("data-markdown-source-line"),
+    ).toBe(String(source.split("\n").indexOf("## After") + 1));
+  },
+);
 
 function blocks(...heights: number[]): MarkdownDocumentBlock[] {
   return heights.map((estimatedHeight, index) => ({
