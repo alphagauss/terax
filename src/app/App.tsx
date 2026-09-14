@@ -308,6 +308,11 @@ export default function App() {
     focusWorkbench: focusActiveWorkbench,
   });
 
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-zen-mode", zenMode);
+    return () => document.documentElement.removeAttribute("data-zen-mode");
+  }, [zenMode]);
+
   // Session disposal follows stable terminal ids, not React lifecycles.
   const liveTerminalIdsRef = useRef<Set<number>>(new Set());
 

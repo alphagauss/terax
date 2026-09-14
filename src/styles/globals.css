@@ -335,6 +335,24 @@ html[data-chrome="borderless"] #auxiliary-root {
   border: 1px solid var(--border);
   background: var(--background);
 }
+html[data-chrome="borderless"]:is(
+  [data-window-maximized],
+  [data-window-fullscreen],
+  [data-zen-mode]
+) .terax-bg-surface,
+html[data-chrome="borderless"]:is(
+  [data-window-maximized],
+  [data-window-fullscreen],
+  [data-zen-mode]
+) #root,
+html[data-chrome="borderless"]:is(
+  [data-window-maximized],
+  [data-window-fullscreen],
+  [data-zen-mode]
+) #auxiliary-root {
+  border: 0;
+  border-radius: 0;
+}
 
 .xterm,
 .xterm-screen,
