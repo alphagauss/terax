@@ -6,6 +6,7 @@
 
 import { Lexer, type Token, type Tokens } from "marked";
 import { parseMarkdownIntoBlocks } from "streamdown";
+import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 
 export const MARKDOWN_PROGRESSIVE_CHARACTER_THRESHOLD = 512 * 1024;
 
@@ -227,7 +228,10 @@ function progressiveBlockContents(source: string): string[] | null {
 
 /** 解析 Markdown，并生成渲染分块、全局唯一标题锚点和源码导航信息。 */
 export function prepareMarkdownDocument(source: string): MarkdownDocument {
-  const normalizedSource = source.replace(/\r\n?/g, "\n");
+  // 分块前复用会话的公式转换；定界符等长替换，不改变源码行号。
+  const normalizedSource = normalizeMathDelimiters(
+    source.replace(/\r\n?/g, "\n"),
+  );
   const progressiveContents = progressiveBlockContents(normalizedSource);
   const blocks = makeBlocks(
     progressiveContents ?? (normalizedSource ? [normalizedSource] : []),
