@@ -42,6 +42,8 @@ describe("WindowControls", () => {
     root = null;
     container?.remove();
     container = null;
+    document.documentElement.removeAttribute("data-window-maximized");
+    document.documentElement.removeAttribute("data-window-fullscreen");
     nativeWindow.resizeListener = undefined;
     vi.clearAllMocks();
   });
@@ -80,6 +82,22 @@ describe("WindowControls", () => {
       fullscreen: false,
     });
     expect(nativeWindow.toggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it("marks the document when the window is fullscreen", async () => {
+    await renderControls({ maximized: false, fullscreen: true });
+
+    expect(document.documentElement.hasAttribute("data-window-fullscreen")).toBe(
+      true,
+    );
+  });
+
+  it("marks the document when the window is maximized", async () => {
+    await renderControls({ maximized: true, fullscreen: false });
+
+    expect(document.documentElement.hasAttribute("data-window-maximized")).toBe(
+      true,
+    );
   });
 
   it("maximizes a restored window", async () => {

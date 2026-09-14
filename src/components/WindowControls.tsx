@@ -51,6 +51,14 @@ export function WindowControls({
       if (disposed || revision !== syncRevision) return;
       setMaximized(nextMaximized);
       setFullscreen(nextFullscreen);
+      document.documentElement.toggleAttribute(
+        "data-window-maximized",
+        nextMaximized,
+      );
+      document.documentElement.toggleAttribute(
+        "data-window-fullscreen",
+        nextFullscreen,
+      );
     };
     const requestWindowStateSync = () => {
       void syncWindowState().catch((error) => {
@@ -70,6 +78,8 @@ export function WindowControls({
     return () => {
       disposed = true;
       unlisten?.();
+      document.documentElement.removeAttribute("data-window-maximized");
+      document.documentElement.removeAttribute("data-window-fullscreen");
     };
   }, [maximizable]);
 
