@@ -1,3 +1,4 @@
+import { channelOwnerId, channelSessionId } from "@/modules/channels/identity";
 /**
  * 本文件验证 Channel 回复投影与会话终态保存的失败边界。
  * 只投递最后一步的公开正文，保存失败必须结束等待而不发送未落盘的回复。
@@ -81,6 +82,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
   const connection = {
     id: "channel",
     sessionId: "session",
+    target: { kind: "direct" as const, id: "owner" },
     kind: "weixin" as const,
     name: "WeChat",
     enabled: true,
@@ -96,7 +98,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
     sessions: [
       {
         id: connection.sessionId,
-        channelId: connection.id,
+        channelId: await channelOwnerId(connection),
         environmentKey: "local",
         cwd: "D:/workspace",
       } as never,
@@ -113,7 +115,7 @@ it("ends the Channel wait on a terminal save failure without sending an unpersis
       text: "hello",
       receivedAt: 1,
       attachments: [],
-      replyContext: "context",
+      target: { kind: "direct" as const, id: "owner" },
     },
     new AbortController().signal,
     () => {},
@@ -134,6 +136,7 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
   const connection = {
     id: "retry-channel",
     sessionId: "retry-session",
+    target: { kind: "direct" as const, id: "owner" },
     kind: "weixin" as const,
     name: "Retry",
     enabled: true,
@@ -146,7 +149,7 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
     sessions: [
       {
         id: connection.sessionId,
-        channelId: connection.id,
+        channelId: await channelOwnerId(connection),
         environmentKey: "local",
         cwd: "D:/workspace",
       } as never,
@@ -190,7 +193,7 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
           text: "hello",
           receivedAt: 1,
           attachments: [],
-          replyContext: "context",
+          target: { kind: "direct" as const, id: "owner" },
         },
         new AbortController().signal,
         () => {},
@@ -202,26 +205,83 @@ it("reads the new Chat response after retrying a previous terminal commit", asyn
   }
 });
 
-it("creates a Channel identity without persisting mutable prompts and tools", async () => {
-  useChatStore.setState({ sessions: [] });
-  vi.mocked(commitSession).mockResolvedValue({
-    id: "channel-session",
-  } as never);
-  await ensureChannelSession({
-    id: "connection",
-    sessionId: "channel-session",
-    kind: "weixin",
-    name: "WeChat",
+it("重建同账号实例可以恢复原会话，其他账号不能取得归属", async () => {
+  const account = { kind: "weixin" as const, accountId: "owner" };
+  const target = { kind: "direct" as const, id: "peer" };
+  const sessionId = await channelSessionId(account, target);
+  const connection = {
+    ...account,
+    id: "replacement",
+    name: "New instance",
     enabled: true,
-    accountId: "owner",
-    busyMessageMode: "queue",
+    busyMessageMode: "queue" as const,
+    sessionId,
+    target,
+  };
+  useChatStore.setState({
+    sessions: [
+      {
+        id: sessionId,
+        agentId: "builtin:channel",
+        agentName: "Channel",
+        agentIcon: "spark",
+        channelId: await channelOwnerId(account),
+        cwd: "D:/workspace",
+        environmentKey: "local",
+        createdAt: 1,
+        updatedAt: 1,
+        title: "peer",
+      },
+    ],
   });
+  vi.mocked(commitSession).mockClear();
+  await ensureChannelSession(connection);
+  expect(commitSession).not.toHaveBeenCalled();
+  await expect(
+    ensureChannelSession({ ...connection, accountId: "another" }),
+  ).rejects.toMatchObject({ issue: "storage" });
+});
+
+it("并发入口只创建一次 Channel 会话，不持久化可变提示词与工具", async () => {
+  useChatStore.setState({ sessions: [] });
+  let release!: () => void;
+  vi.mocked(commitSession)
+    .mockReset()
+    .mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return {
+        id: "channel-session",
+        channelId: await channelOwnerId({ kind: "weixin", accountId: "owner" }),
+        environmentKey: "local",
+        cwd: "D:/workspace",
+      } as never;
+    });
+  const creating = Promise.all(
+    [0, 1].map(() =>
+      ensureChannelSession({
+        id: "connection",
+        sessionId: "channel-session",
+        target: { kind: "direct" as const, id: "owner" },
+        kind: "weixin",
+        name: "WeChat",
+        enabled: true,
+        accountId: "owner",
+        busyMessageMode: "queue",
+      }),
+    ),
+  );
+  await vi.waitFor(() => expect(release).toBeDefined());
+  release();
+  await creating;
+  expect(commitSession).toHaveBeenCalledTimes(1);
   expect(commitSession).toHaveBeenCalledWith(
     expect.objectContaining({
       cwd: "D:/workspace",
       metadata: {
-        title: "WeChat",
-        channelId: "connection",
+        title: "owner",
+        channelId: await channelOwnerId({ kind: "weixin", accountId: "owner" }),
         agent: { id: "builtin:channel", name: "Channel", icon: "spark" },
       },
     }),
@@ -232,6 +292,7 @@ it("freezes each Channel task independently while steering keeps the current sna
   const connection = {
     id: "a",
     sessionId: "session-a",
+    target: { kind: "direct" as const, id: "owner" },
     kind: "weixin" as const,
     name: "A",
     enabled: true,
@@ -280,7 +341,7 @@ it("freezes each Channel task independently while steering keeps the current sna
     sessions: [
       {
         id: connection.sessionId,
-        channelId: connection.id,
+        channelId: await channelOwnerId(connection),
         environmentKey: "local",
         cwd: "D:/workspace",
       } as never,
@@ -294,7 +355,7 @@ it("freezes each Channel task independently while steering keeps the current sna
     text: "hello",
     receivedAt: 1,
     attachments: [],
-    replyContext: "context",
+    target: { kind: "direct" as const, id: "owner" },
   };
   vi.mocked(startChatMessage).mockImplementation(async () => {
     chat.messages.push({
@@ -309,6 +370,14 @@ it("freezes each Channel task independently while steering keeps the current sna
     input,
     new AbortController().signal,
     (steer) => {
+      expect(
+        steer({
+          ...input,
+          id: "command",
+          text: "/init",
+          target: { kind: "group", id: "room" },
+        }),
+      ).toBeNull();
       steer({ ...input, id: "guide" });
     },
   );
@@ -324,14 +393,14 @@ it("freezes each Channel task independently while steering keeps the current sna
   expect(startChatMessage).toHaveBeenCalledTimes(1);
   const first = vi.mocked(startChatMessage).mock.calls[0][2];
   expect(first).toEqual({
-    id: "a",
+    id: await channelOwnerId(connection),
     model,
     parameters: [{ target: "standard", path: "temperature", value: 0.9 }],
   });
   expect(steerChatMessage).toHaveBeenCalledWith(
     connection.sessionId,
     expect.objectContaining({ role: "user" }),
-    "a",
+    await channelOwnerId(connection),
   );
   await runChannelTurn(
     connection,
@@ -340,7 +409,7 @@ it("freezes each Channel task independently while steering keeps the current sna
     () => {},
   );
   expect(vi.mocked(startChatMessage).mock.calls[1][2]).toEqual({
-    id: "a",
+    id: await channelOwnerId(connection),
     model: other,
     parameters: [{ target: "standard", path: "temperature", value: 0.1 }],
   });

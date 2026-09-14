@@ -13,7 +13,7 @@ let lifecycle: Promise<void> = Promise.resolve();
 
 /** 仅应用根部调用，设置和聊天面板不拥有连接。 */
 export function useChannelsHost(
-  activate: (sessionId: string) => void,
+  activate: (sessionId?: string) => void,
   keysLoaded: boolean,
 ): void {
   const sessionsReady = useChatStore((state) => state.sessionsHydrated);

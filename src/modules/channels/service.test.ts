@@ -3,16 +3,24 @@
  * 使用真实 Manager 和设置请求链，只替换平台、密钥和磁盘边界。
  */
 
-import { requestChannels, useChannelsView } from "@/modules/channels/client";
+import {
+  requestChannels,
+  sendChannelContent,
+  useChannelsView,
+} from "@/modules/channels/client";
 import { startChannelsService } from "@/modules/channels/service";
 import {
   ChannelError,
   type ChannelCheckpoint,
   type ChannelConnection,
+  type ReceiveContext,
+  type ChannelDeliveryResult,
 } from "@/modules/channels/types";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
+  receive: null as ReceiveContext | null,
+  send: vi.fn(),
   listeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
   saveCredentials: vi.fn(),
   poll: vi.fn(),
@@ -20,6 +28,7 @@ const io = vi.hoisted(() => ({
   stores: new Map<string, Record<string, unknown>>(),
   files: new Map<string, string>(),
   checkpoint: {
+    conversations: [],
     cursor: "old-cursor",
     cursorScope: "old-bot",
     recentIds: [],
@@ -27,7 +36,7 @@ const io = vi.hoisted(() => ({
   } as ChannelCheckpoint,
   connection: {
     id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+
     kind: "weixin",
     name: "WeChat",
     accountId: "owner",
@@ -101,17 +110,27 @@ vi.mock("@/lib/nativeHost", () => ({
     throw new Error(`Unexpected command: ${command}`);
   },
 }));
+vi.mock("@/modules/channels/workspace", () => ({
+  prepareChannelWorkspace: async () => "/account",
+}));
 vi.mock("@/modules/channels/agentSession", () => ({
   ensureChannelSession: vi.fn(),
+  runChannelTurn: async () => null,
+}));
+vi.mock("@/modules/channels/outbound", () => ({
+  beginChannelSend: async (
+    _connection: unknown,
+    _content: unknown,
+    send: () => Promise<ChannelDeliveryResult>,
+  ) => ({ completed: send().then(() => {}) }),
 }));
 vi.mock("@/modules/channels/adapters/registry", () => ({
   channelPlatform: () => ({
     create: async () => ({
+      canSend: () => true,
       cursorScope: "old-bot",
-      async receive(context: {
-        signal: AbortSignal;
-        status: (status: string) => void;
-      }) {
+      async receive(context: ReceiveContext) {
+        io.receive = context;
         context.status("online");
         await new Promise<void>((resolve) =>
           context.signal.addEventListener("abort", () => resolve(), {
@@ -119,7 +138,7 @@ vi.mock("@/modules/channels/adapters/registry", () => ({
           }),
         );
       },
-      async send() {},
+      send: io.send,
     }),
     async login(id: string) {
       return {
@@ -143,6 +162,8 @@ vi.mock("@/modules/channels/adapters/registry", () => ({
 }));
 
 beforeEach(() => {
+  io.receive = null;
+  io.send.mockReset().mockResolvedValue({ status: "accepted", parts: [] });
   io.stores.clear();
   io.stores.set("channels", {
     [io.connection.id]: structuredClone(io.connection),
@@ -150,7 +171,12 @@ beforeEach(() => {
   io.files.clear();
   io.files.set(
     `/state/${io.connection.id}.json`,
-    JSON.stringify(io.checkpoint),
+    JSON.stringify({
+      cursor: io.checkpoint.cursor,
+      cursorScope: io.checkpoint.cursorScope,
+      recentIds: io.checkpoint.recentIds,
+      pendingIds: io.checkpoint.pendingIds,
+    }),
   );
   io.saveCredentials.mockReset();
   io.deleteState.mockReset().mockImplementation(async (path: string) => {
@@ -177,7 +203,6 @@ it("restores the configured connection when replacing its credentials fails", as
       expect(useChannelsView.getState().snapshots[0]).toMatchObject({
         connection: {
           id: io.connection.id,
-          sessionId: io.connection.sessionId,
         },
         status: "online",
         issue: "storage",
@@ -229,7 +254,6 @@ it("拒绝同一账号的重复配置，避免两个运行实例共享账号 cwd
   const duplicate = {
     ...io.connection,
     id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    sessionId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   };
   io.stores.set("channels", {
     [io.connection.id]: io.connection,
@@ -312,4 +336,51 @@ it("删除清理失败时保留可重试连接，重试后清除其状态、路�
   } finally {
     await dispose();
   }
+});
+
+it("发送请求校验内容并保持指定目标，受理后不等待上传才响应界面", async () => {
+  const stop = await startChannelsService(() => {});
+  await vi.waitFor(() => expect(io.receive).not.toBeNull());
+  const target = { kind: "direct" as const, id: "owner" };
+  await io.receive?.receive({
+    id: "inbound",
+    senderId: "owner",
+    target,
+    text: "hello",
+    attachments: [],
+    receivedAt: Date.now(),
+  });
+  await vi.waitFor(() =>
+    expect(useChannelsView.getState().snapshots[0].busy).toBe(false),
+  );
+  const request = {
+    connectionId: io.connection.id,
+    sessionId:
+      useChannelsView.getState().snapshots[0].conversations[0].sessionId,
+    content: { text: "manual" },
+  };
+  await expect(
+    sendChannelContent({ ...request, content: {} }),
+  ).rejects.toThrow();
+  await expect(
+    sendChannelContent({ ...request, sessionId: crypto.randomUUID() }),
+  ).rejects.toThrow("delivery");
+  expect(io.send).not.toHaveBeenCalled();
+  let finish!: () => void;
+  io.send.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve({ status: "accepted", parts: [] });
+      }),
+  );
+  await sendChannelContent(request);
+  await requestChannels({ action: "snapshot" });
+  expect(io.send).toHaveBeenCalledWith(
+    target,
+    request.content,
+    expect.any(AbortSignal),
+  );
+  expect(io.send).toHaveBeenCalledTimes(1);
+  finish();
+  await stop();
 });

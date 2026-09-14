@@ -1,7 +1,7 @@
-/** 当前运行独占的投递出口；工具与最终回复共用队列，不等待 Agent 终态才消费。 */
+/** 当前运行的目标绑定与回执统计；实际投递顺序由实例运行时统一管理。 */
 import type {
   ChannelAdapter,
-  ChannelInbound,
+  ChannelTarget,
   ChannelOutbound,
   ChannelDeliveryResult,
   ChannelMessageSender,
@@ -18,21 +18,20 @@ export function getChannelMessageSender(
 /** 每轮绑定不可变目标；释放时等待在途发送，旧工具闭包永久失效。 */
 export function bindChannelDelivery(
   sessionId: string,
-  adapter: ChannelAdapter,
-  target: ChannelInbound,
+  dispatch: ChannelAdapter["send"],
+  target: ChannelTarget,
   signal: AbortSignal,
 ) {
   let active = true;
   let accepted = false;
   let failed = false;
-  let tail = Promise.resolve();
+  const pending = new Set<Promise<ChannelDeliveryResult>>();
   const sendTo = (
-    replyTarget: ChannelInbound,
     input: ChannelOutbound,
     callSignal?: AbortSignal,
     countAsAgentDelivery = true,
   ): Promise<ChannelDeliveryResult> => {
-    const sending = tail.then(async () => {
+    const sending = (async () => {
       const combined = callSignal
         ? AbortSignal.any([signal, callSignal])
         : signal;
@@ -40,7 +39,7 @@ export function bindChannelDelivery(
         throw new DOMException("Delivery cancelled", "AbortError");
       let result: ChannelDeliveryResult;
       try {
-        result = await adapter.send(replyTarget, input, combined);
+        result = await dispatch(target, input, combined);
       } catch {
         combined.throwIfAborted();
         result = { status: "unknown", parts: [] };
@@ -52,20 +51,17 @@ export function bindChannelDelivery(
         accepted = true;
       if (countAsAgentDelivery && result.status !== "accepted") failed = true;
       return result;
-    });
-    tail = sending.then(
-      () => undefined,
-      () => undefined,
-    );
+    })();
+    pending.add(sending);
+    void sending.finally(() => pending.delete(sending)).catch(() => {});
     return sending;
   };
   const send: ChannelMessageSender = (input, callSignal) =>
-    sendTo(target, input, callSignal);
+    sendTo(input, callSignal);
   senders.set(sessionId, send);
   return {
     send,
-    reply: (replyTarget: ChannelInbound, text: string) =>
-      sendTo(replyTarget, { text }, undefined, false),
+    reply: (text: string) => sendTo({ text }, undefined, false),
     get accepted() {
       return accepted;
     },
@@ -75,7 +71,7 @@ export function bindChannelDelivery(
     async close() {
       active = false;
       if (senders.get(sessionId) === send) senders.delete(sessionId);
-      await tail;
+      await Promise.allSettled([...pending]);
     },
   };
 }

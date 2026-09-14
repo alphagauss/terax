@@ -3,6 +3,7 @@
  * 不修改活动聊天、输入草稿或全局模型权限；最终回复只在本轮持久化完成后交给投递出口。
  */
 
+import { channelOwnerId } from "@/modules/channels/identity";
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
 import { parseCommand } from "@/modules/ai/commands/registry";
 import { isModelRefAvailable } from "@/modules/ai/config";
@@ -25,27 +26,33 @@ import {
   useChatStore,
 } from "@/modules/ai/store/chatStore";
 import {
-  type ChannelConnection,
+  type ChannelSession,
   ChannelError,
   type ChannelInbound,
+  channelTargetLabel,
 } from "@/modules/channels/types";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { prepareChannelWorkspace } from "@/modules/channels/workspace";
 import { channelUserMessage } from "@/modules/channels/messages";
 import type { UIMessage } from "ai";
 
-/** 准备固定 Channel 会话，现有会话只恢复，不抢占桌面草稿。 */
+const sessionCreations = new Map<string, Promise<void>>();
+
+/** 准备目标的 Channel 会话，现有会话只恢复，不抢占桌面草稿。 */
 export async function ensureChannelSession(
-  connection: ChannelConnection,
+  connection: ChannelSession,
 ): Promise<void> {
+  const ownerId = await channelOwnerId(connection);
   const cwd = await prepareChannelWorkspace(connection);
+  const pending = sessionCreations.get(connection.sessionId);
+  if (pending) await pending;
   const state = useChatStore.getState();
   const existing = state.sessions.find(
     (item) => item.id === connection.sessionId,
   );
   if (existing) {
     if (
-      existing.channelId !== connection.id ||
+      existing.channelId !== ownerId ||
       existing.environmentKey !== "local" ||
       existing.cwd !== cwd
     )
@@ -54,11 +61,11 @@ export async function ensureChannelSession(
   }
   const now = Date.now();
   const metadata = {
-    title: connection.name,
-    channelId: connection.id,
+    title: channelTargetLabel(connection.target),
+    channelId: ownerId,
     agent: snapshotAgent(CHANNEL_AGENT),
   };
-  const meta = await commitSession({
+  const creating = commitSession({
     id: connection.sessionId,
     createdAt: now,
     updatedAt: now,
@@ -66,10 +73,20 @@ export async function ensureChannelSession(
     cwd,
     metadata,
     messages: [],
+  }).then((meta) => {
+    useChatStore.setState((current) => ({
+      sessions: [
+        meta,
+        ...current.sessions.filter((item) => item.id !== meta.id),
+      ],
+    }));
   });
-  useChatStore.setState((current) => ({
-    sessions: [meta, ...current.sessions.filter((item) => item.id !== meta.id)],
-  }));
+  sessionCreations.set(connection.sessionId, creating);
+  try {
+    await creating;
+  } finally {
+    sessionCreations.delete(connection.sessionId);
+  }
 }
 
 /** 只提取本轮最后一步的 Assistant 可见正文，不回传推理、工具或内部事件。 */
@@ -93,9 +110,9 @@ export function channelReplyText(messages: readonly UIMessage[]): string {
     .trim();
 }
 
-/** 忙碌时只接收即时命令，其余输入继续沿用连接队列。 */
+/** 忙碌时只接收即时命令，其余输入继续沿用对话队列。 */
 export async function runChannelCommand(
-  connection: ChannelConnection,
+  connection: ChannelSession,
   message: ChannelInbound,
   signal: AbortSignal,
 ): Promise<string | null> {
@@ -107,7 +124,7 @@ export async function runChannelCommand(
 
 /** 命令先于模型配置检查；命令和 Agent 启动都返回独立的完成结果。 */
 export async function runChannelTurn(
-  connection: ChannelConnection,
+  connection: ChannelSession,
   message: ChannelInbound,
   signal: AbortSignal,
   ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
@@ -123,7 +140,7 @@ export async function runChannelTurn(
       sessionId: connection.sessionId,
       command,
       source: { kind: "channel", platform: connection.kind },
-      channelId: connection.id,
+      channelId: await channelOwnerId(connection),
       hasAttachments: message.attachments.length > 0,
       signal,
       startTask: async (input) => {
@@ -150,7 +167,7 @@ export async function runChannelTurn(
 
 /** 执行一个外部输入，并等待既有 Bridge 完成提交与释放运行锁。 */
 async function startChannelAgentTurn(
-  connection: ChannelConnection,
+  connection: ChannelSession,
   message: ChannelInbound,
   signal: AbortSignal,
   ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
@@ -188,18 +205,21 @@ async function startChannelAgentTurn(
   }
   signal.throwIfAborted();
   const offset = chat.messages.length;
+  const ownerId = await channelOwnerId(connection);
   const accepted = await startChatMessage(
     connection.sessionId,
     taskMessage ?? channelUserMessage(message),
-    { id: connection.id, ...config },
+    { id: ownerId, ...config },
   );
   if (!accepted) throw new ChannelError("model");
   ready((input) =>
-    steerChatMessage(
-      connection.sessionId,
-      channelUserMessage(input),
-      connection.id,
-    ),
+    parseCommand(input.text)
+      ? null
+      : steerChatMessage(
+          connection.sessionId,
+          channelUserMessage(input),
+          ownerId,
+        ),
   );
   const completed = (async () => {
     let cleanup = () => {};

@@ -22,5 +22,6 @@
   "size": {
     "default": "Default",
     "compact": "Compact"
-  }
+  },
+  "channels": "Channels"
 }

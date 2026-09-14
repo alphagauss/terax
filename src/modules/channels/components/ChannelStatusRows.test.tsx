@@ -28,7 +28,7 @@ const snapshot = (
     id,
     name: "WeChat",
     kind: "weixin",
-    sessionId: `session-${id}`,
+
     enabled,
     accountId,
     busyMessageMode: "steer",
@@ -37,6 +37,7 @@ const snapshot = (
   issue: null,
   busy: false,
   queued: 0,
+  conversations: [],
 });
 
 let root: Root;

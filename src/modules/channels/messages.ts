@@ -4,7 +4,11 @@ import type { ChannelInbound } from "@/modules/channels/types";
 import i18n from "@/i18n";
 
 export function channelInputText(message: ChannelInbound): string {
-  if (!message.attachments.length) return message.text;
+  const text =
+    message.target.kind === "group"
+      ? `[Sender: ${JSON.stringify(message.senderId)}]\n${message.text}`
+      : message.text;
+  if (!message.attachments.length) return text;
   const images = message.attachments.filter(
     (attachment) => attachment.kind === "image",
   );
@@ -22,7 +26,7 @@ export function channelInputText(message: ChannelInbound): string {
         : `[Attachment: name=${attachment.name}; kind=${attachment.kind}; status=failed]`,
     );
   return [
-    message.text,
+    text,
     images.length
       ? i18n.t("channels:imageAttachmentSummary", {
           count: images.length,

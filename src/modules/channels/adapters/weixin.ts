@@ -3,7 +3,6 @@
  * 协议参考 nanobot 与腾讯插件；只接受扫码账号本人私聊，令牌始终留在适配器或密钥存储。
  */
 
-import i18n from "@/i18n";
 import type { HttpFileContext } from "@/lib/httpFiles";
 import {
   parseWeixinMedia,
@@ -22,6 +21,7 @@ import {
   type ChannelSnapshot,
   channelDelay,
   type ReceiveContext,
+  type ChannelTarget,
 } from "@/modules/channels/types";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
@@ -241,7 +241,7 @@ export async function beginWeixinLogin(
 export function parseWeixinMessage(
   value: unknown,
   userId: string,
-): (ChannelInbound & { media: WeixinMedia[] }) | null {
+): (ChannelInbound & { replyContext: string; media: WeixinMedia[] }) | null {
   const data = record(value);
   if (
     data.message_type !== 1 ||
@@ -289,6 +289,7 @@ export function parseWeixinMessage(
   return {
     id: `${userId}:${identity}:${String(data.create_time_ms ?? "")}`,
     senderId: userId,
+    target: { kind: "direct" as const, id: userId },
     text,
     media,
     attachments: media.map(({ attachment }) => ({
@@ -312,6 +313,10 @@ export function splitWeixinText(text: string): string[] {
 /** 一个账号的独立适配器，接收与回复共用凭据但不共用取消控制器。 */
 export class WeixinAdapter implements ChannelAdapter {
   readonly cursorScope: string;
+  private readonly contexts = new Map<
+    string,
+    { token: string; receivedAt: number }
+  >();
 
   constructor(
     private readonly credentials: WeixinCredentials,
@@ -320,6 +325,14 @@ export class WeixinAdapter implements ChannelAdapter {
     private readonly fetchImpl?: typeof fetch,
   ) {
     this.cursorScope = credentials.botId;
+  }
+
+  canSend(target: ChannelTarget): boolean {
+    return (
+      target.kind === "direct" &&
+      !target.threadId &&
+      this.contexts.has(target.id)
+    );
   }
 
   async receive(context: ReceiveContext): Promise<void> {
@@ -359,7 +372,11 @@ export class WeixinAdapter implements ChannelAdapter {
       for (const raw of messages) {
         const parsed = parseWeixinMessage(raw, this.credentials.userId);
         if (parsed) {
-          const { media, ...message } = parsed;
+          const { media, replyContext, ...message } = parsed;
+          this.contexts.set(message.target.id, {
+            token: replyContext,
+            receivedAt: message.receivedAt,
+          });
           await context.receive(message, async () => {
             const attachments = [];
             for (const item of media)
@@ -385,33 +402,38 @@ export class WeixinAdapter implements ChannelAdapter {
   }
 
   async send(
-    message: ChannelInbound,
+    target: ChannelTarget,
     content: ChannelOutbound,
     signal: AbortSignal,
   ): Promise<ChannelDeliveryResult> {
     let contextToken: string;
     try {
       signal.throwIfAborted();
-      contextToken = requiredText(message.replyContext);
+      const context = this.contexts.get(target.id);
+      if (target.kind !== "direct" || target.threadId || !context)
+        return { status: "failed", parts: [] };
+      contextToken = context.token;
       // 刷新失败时尚未发送任何消息，应报告失败而不是不确定的投递结果。
-      if (Date.now() - message.receivedAt > 60_000) {
+      if (Date.now() - context.receivedAt > 60_000) {
         const config = await this.call(
           "getconfig",
-          { ilink_user_id: message.senderId, context_token: contextToken },
+          { ilink_user_id: target.id, context_token: contextToken },
           signal,
         );
-        if (typeof config.context_token === "string" && config.context_token)
+        if (typeof config.context_token === "string" && config.context_token) {
           contextToken = config.context_token;
+          if (this.contexts.get(target.id) === context)
+            this.contexts.set(target.id, {
+              token: contextToken,
+              receivedAt: Date.now(),
+            });
+        }
       }
     } catch {
       signal.throwIfAborted();
       return { status: "failed", parts: [] };
     }
     const chunks = splitWeixinText(content.text ?? "");
-    if (chunks.length > 8) {
-      chunks.length = 8;
-      chunks[7] = `${Array.from(chunks[7]).slice(0, 1500).join("")}\n${i18n.t("channels:longReply")}`;
-    }
     const deliveryId = `terax-${crypto.randomUUID()}`;
     const parts: ChannelDeliveryResult["parts"] = [];
     const attachments = content.attachments ?? [];
@@ -424,7 +446,7 @@ export class WeixinAdapter implements ChannelAdapter {
             attachments[index],
             this.files,
             this.connectionId,
-            message.senderId,
+            target.id,
             signal,
             (body) => this.call("getuploadurl", body, signal),
           );
@@ -445,7 +467,7 @@ export class WeixinAdapter implements ChannelAdapter {
           {
             msg: {
               from_user_id: "",
-              to_user_id: message.senderId,
+              to_user_id: target.id,
               client_id: `${deliveryId}-${index}`,
               message_type: 2,
               message_state: 2,

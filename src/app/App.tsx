@@ -2,6 +2,7 @@
  * 本文件协调 Terax 主窗口的工作区、终端、侧栏和全局交互状态。
  * 具体业务逻辑由对应模块持有，主窗口只负责组合页面和连接跨模块事件。
  */
+import { ChannelsPanel } from "@/modules/channels/components/lazy";
 
 import {
   ResizableHandle,
@@ -391,8 +392,17 @@ export default function App() {
     [activeSpaceId, workbenchState],
   );
 
+  const unavailableSidebarContainerIds = useMemo(
+    () => [
+      ...(!currentWorkspaceBootstrap().isPrimary ||
+      workspaceEnv.kind !== "local"
+        ? ["channels" as const]
+        : []),
+    ],
+    [workspaceEnv.kind],
+  );
   const sidebar = useSidebarLayout(
-    undefined,
+    unavailableSidebarContainerIds,
     zenMode,
     !currentWorkspaceBootstrap().isPrimary,
   );
@@ -1302,7 +1312,11 @@ export default function App() {
     [openAiPanel],
   );
 
-  useChannelsHost(onActivateLocalAgent, keysLoaded);
+  const onActivateChannel = useCallback((sessionId?: string) => {
+    if (sessionId) onActivateLocalAgent(sessionId);
+    else sidebar.openContainer("channels");
+  }, [onActivateLocalAgent, sidebar.openContainer]);
+  useChannelsHost(onActivateChannel, keysLoaded);
 
   const handleTerminalExit = useCallback(
     (tabId: number, _code: number) => {
@@ -1803,6 +1817,12 @@ export default function App() {
           onOpenFile={handleOpenFile}
           onNavigateToPath={cdInNewTab}
         />
+      ),
+    },
+    {
+      id: "channels",
+      content: (
+        <ChannelsPanel visible={sidebar.isVisible("channels") && !zenMode} />
       ),
     },
     {

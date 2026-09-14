@@ -16,10 +16,43 @@ export const CHANNEL_SNAPSHOT = "terax://channels-snapshot";
 export const actionSchema = z.discriminatedUnion("action", [
   z
     .object({
+      action: z.literal("send"),
+      id: z.uuid(),
+      sessionId: z.uuid(),
+      content: z
+        .object({
+          text: z.string().max(32000).optional(),
+          attachments: z
+            .array(
+              z
+                .object({
+                  path: z.string().min(1),
+                  presentation: z.enum(["file", "image", "video", "audio"]),
+                })
+                .strict(),
+            )
+            .max(16)
+            .optional(),
+        })
+        .strict()
+        .refine((value) =>
+          Boolean(value.text?.trim() || value.attachments?.length),
+        ),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("update"),
       id: z.uuid(),
       name: z.string().trim().min(1).max(80),
       mode: z.enum(["steer", "queue"]),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("open"),
+      id: z.uuid(),
+      sessionId: z.uuid().optional(),
     })
     .strict(),
   z.object({ action: z.literal("snapshot") }).strict(),
@@ -35,7 +68,7 @@ export const actionSchema = z.discriminatedUnion("action", [
     .strict(),
   z
     .object({
-      action: z.enum(["login", "cancel-login", "reconnect", "open", "remove"]),
+      action: z.enum(["login", "cancel-login", "reconnect", "remove"]),
       id: z.uuid(),
     })
     .strict(),
@@ -120,3 +153,19 @@ export async function subscribeChannelsView(): Promise<() => void> {
   }
   return unlisten;
 }
+
+/** 应用发送只等待请求保存和受理，平台完成状态由会话历史呈现。 */
+export async function sendChannelContent(
+  request: { connectionId: string } & Omit<
+    Extract<ChannelAction, { action: "send" }>,
+    "action" | "id"
+  >,
+): Promise<void> {
+  const { connectionId, ...content } = request;
+  await requestChannels({ action: "send", id: connectionId, ...content });
+}
+
+/** 设置页和状态入口只切换面板选择，不改变 Agent 当前会话。 */
+export const useChannelSelection = create<{ connectionId: string }>(() => ({
+  connectionId: "",
+}));

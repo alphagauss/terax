@@ -3,51 +3,40 @@ import {
   bindChannelDelivery,
   getChannelMessageSender,
 } from "@/modules/channels/delivery";
-import type { ChannelAdapter, ChannelInbound } from "@/modules/channels/types";
+import type { ChannelAdapter, ChannelTarget } from "@/modules/channels/types";
 
-const target = (id: string): ChannelInbound => ({
-  id,
-  senderId: id,
-  text: "",
-  attachments: [],
-  receivedAt: 1,
-  replyContext: { token: id },
-});
+const target = (id: string): ChannelTarget => ({ kind: "direct", id });
 const accepted = {
   status: "accepted" as const,
   parts: [{ index: 0, status: "accepted" as const }],
 };
 
 describe("run-scoped Channel delivery", () => {
-  it("serializes a target without blocking another instance and invalidates old tool closures", async () => {
+  it("binds targets independently and invalidates old tool closures", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => {
       release = resolve;
     });
     const calls: string[] = [];
-    const adapter: ChannelAdapter = {
-      cursorScope: "account",
-      receive: async () => {},
-      send: async (target, input) => {
-        calls.push(`${target.senderId}:${input.text}`);
-        if (input.text === "first") await blocked;
-        return accepted;
-      },
+    const send: ChannelAdapter["send"] = async (target, input) => {
+      calls.push(`${target.id}:${input.text}`);
+      if (input.text === "first") await blocked;
+      return accepted;
     };
     const signal = new AbortController().signal;
-    const a = bindChannelDelivery("a", adapter, target("a"), signal);
-    const b = bindChannelDelivery("b", adapter, target("b"), signal);
+    const a = bindChannelDelivery("a", send, target("a"), signal);
+    const b = bindChannelDelivery("b", send, target("b"), signal);
     const old = getChannelMessageSender("a");
     assert(old);
     const first = a.send({ text: "first" });
     const second = a.send({ text: "second" });
     await b.send({ text: "other" });
-    expect(calls).toEqual(["a:first", "b:other"]);
+    expect(calls).toEqual(["a:first", "a:second", "b:other"]);
     release();
     await Promise.all([first, second]);
-    expect(calls).toEqual(["a:first", "b:other", "a:second"]);
+    expect(calls).toEqual(["a:first", "a:second", "b:other"]);
     await a.close();
-    const next = bindChannelDelivery("a", adapter, target("new"), signal);
+    const next = bindChannelDelivery("a", send, target("new"), signal);
     await expect(old({ text: "late" })).rejects.toThrow("cancelled");
     expect(getChannelMessageSender("a")).not.toBe(old);
     await next.close();
@@ -65,7 +54,7 @@ describe("run-scoped Channel delivery", () => {
     }));
     const delivery = bindChannelDelivery(
       "partial",
-      { cursorScope: "x", receive: async () => {}, send },
+      send,
       target("x"),
       controller.signal,
     );

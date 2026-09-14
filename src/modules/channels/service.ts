@@ -16,6 +16,7 @@ import {
   CHANNEL_SNAPSHOT,
   type ChannelAction,
   useChannelsView,
+  useChannelSelection,
 } from "@/modules/channels/client";
 import { ChannelManager } from "@/modules/channels/manager";
 import {
@@ -53,7 +54,7 @@ type Login = {
 
 /** 启动唯一服务，返回同步解除监听、异步清理运行资源的释放函数。 */
 export async function startChannelsService(
-  activate: (sessionId: string) => void,
+  activate: (sessionId?: string) => void,
 ): Promise<() => Promise<void>> {
   const bootstrap = currentWorkspaceBootstrap();
   if (!bootstrap.isPrimary || bootstrap.env.kind !== "local")
@@ -63,6 +64,7 @@ export async function startChannelsService(
   let connections: ChannelConnection[] = [];
   let snapshots: ChannelSnapshot[] = [];
   let serial = Promise.resolve();
+  const deliveries = new Map<Promise<void>, string>();
   const logins = new Map<string, Login>();
   const loginErrors = new Map<string, ChannelIssue>();
   let serviceError: string | null = null;
@@ -70,7 +72,9 @@ export async function startChannelsService(
     load: loadCheckpoint,
     save: saveCheckpoint,
     command: async (...args) =>
-      (await import("@/modules/channels/agentSession")).runChannelCommand(...args),
+      (await import("@/modules/channels/agentSession")).runChannelCommand(
+        ...args,
+      ),
     run: async (...args) =>
       (await import("@/modules/channels/agentSession")).runChannelTurn(...args),
     failureText: () => i18n.t("channels:runFailed"),
@@ -78,9 +82,11 @@ export async function startChannelsService(
     adapter: async (connection) =>
       channelPlatform(connection.kind).create(connection),
     materialize: async (connection, message, signal) =>
-      (
-        await import("@/modules/channels/inbound")
-      ).materializeChannelInbound(connection, message, signal),
+      (await import("@/modules/channels/inbound")).materializeChannelInbound(
+        connection,
+        message,
+        signal,
+      ),
     changed: (value) => {
       snapshots = value;
       publish();
@@ -203,9 +209,6 @@ export async function startChannelsService(
               enabled: true,
             };
             try {
-              await (
-                await import("@/modules/channels/agentSession")
-              ).ensureChannelSession(updated);
               await manager.configure(
                 connections.filter((item) => item.id !== id),
               );
@@ -249,7 +252,6 @@ export async function startChannelsService(
       await reload();
       const created: ChannelConnection = {
         id: crypto.randomUUID(),
-        sessionId: crypto.randomUUID(),
         kind: action.kind,
         name: action.name,
         enabled: false,
@@ -264,6 +266,30 @@ export async function startChannelsService(
     }
     const target = connection(action.id);
     switch (action.action) {
+      case "send": {
+        const snapshot = snapshots.find(
+          (item) => item.connection.id === target.id,
+        );
+        if (!target.enabled || snapshot?.status !== "online")
+          throw new ChannelError("delivery");
+        const conversation = snapshot.conversations.find(
+          (item) => item.sessionId === action.sessionId,
+        );
+        if (!conversation?.canSend) throw new ChannelError("delivery");
+        const { beginChannelSend } = await import(
+          "@/modules/channels/outbound"
+        );
+        const { completed } = await beginChannelSend(
+          { ...target, ...conversation },
+          action.content,
+          () => manager.send(target.id, conversation.target, action.content),
+        );
+        deliveries.set(completed, target.id);
+        void completed
+          .catch(() => publish("storage"))
+          .finally(() => deliveries.delete(completed));
+        break;
+      }
       case "update":
         await saveConnection({
           ...target,
@@ -292,20 +318,33 @@ export async function startChannelsService(
       case "reconnect":
         await manager.restart(target.id);
         break;
-      case "open":
-        await (
-          await import("@/modules/channels/agentSession")
-        ).ensureChannelSession(target);
-        activate(target.sessionId);
+      case "open": {
+        useChannelSelection.setState({ connectionId: target.id });
+        if (action.sessionId) {
+          const conversation = snapshots
+            .find((item) => item.connection.id === target.id)
+            ?.conversations.find((item) => item.sessionId === action.sessionId);
+          if (!conversation) throw new ChannelError("configuration");
+          await (
+            await import("@/modules/channels/agentSession")
+          ).ensureChannelSession({ ...target, ...conversation });
+        }
+        activate(action.sessionId);
         await getCurrentWindow().show();
         await getCurrentWindow().setFocus();
         break;
+      }
       case "remove": {
         cancelLogin(target.id);
         await manager.configure(
           connections.filter((item) => item.id !== target.id),
         );
         try {
+          await Promise.all(
+            [...deliveries]
+              .filter(([, id]) => id === target.id)
+              .map(([task]) => task),
+          );
           await channelPlatform(target.kind).removeCredentials(target.id);
           await removeConnection(target.id);
         } finally {
@@ -351,6 +390,7 @@ export async function startChannelsService(
     for (const login of logins.values()) login.abort.abort();
     await serial;
     await manager.dispose();
+    await Promise.allSettled([...deliveries.keys()]);
     await Promise.allSettled([...logins.values()].map((login) => login.task));
   };
 }

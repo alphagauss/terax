@@ -28,7 +28,7 @@ describe("normalizeSidebarPlacementState", () => {
       version: 1,
       placements: {
         primary: ["ai", "search", "source-control"],
-        secondary: ["explorer"],
+        secondary: ["explorer", "channels"],
       },
       activityBar: {
         position: "default",
@@ -89,7 +89,7 @@ describe("moveSidebarContainer", () => {
 
     expect(placements).toEqual({
       primary: ["explorer", "search"],
-      secondary: ["source-control", "ai"],
+      secondary: ["source-control", "ai", "channels"],
     });
     expect(findSidebarContainerLocation(placements, "source-control")).toBe(
       "secondary",
@@ -159,7 +159,7 @@ describe("normalizeSidebarRuntimeState", () => {
       normalizeSidebarRuntimeState(
         DEFAULT_SIDEBAR_RUNTIME_STATE,
         DEFAULT_SIDEBAR_PLACEMENT_STATE.placements,
-        ["explorer", "ai"],
+        ["explorer", "ai", "channels"],
       ),
     ).toMatchObject({
       primary: { activeId: "search", collapsed: false },

@@ -5,6 +5,7 @@
 
 import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 import { ChannelManager } from "@/modules/channels/manager";
+import { ChannelError } from "@/modules/channels/types";
 import type {
   ChannelCheckpoint,
   ChannelConnection,
@@ -17,7 +18,7 @@ import { getChannelMessageSender } from "@/modules/channels/delivery";
 
 const connection = (id: string): ChannelConnection => ({
   id,
-  sessionId: `session-${id}`,
+
   kind: "weixin",
   name: id,
   enabled: true,
@@ -29,9 +30,13 @@ const message = (id: string): ChannelInbound => ({
   text: id,
   senderId: id,
   attachments: [],
-  replyContext: id,
+  target: { kind: "direct" as const, id: "owner" },
   receivedAt: 1,
 });
+
+function identity(id: string) {
+  return JSON.stringify([JSON.stringify(["direct", "owner", null]), id]);
+}
 
 function harness(
   command?: (
@@ -41,6 +46,7 @@ function harness(
   ) => Promise<string | null>,
 ) {
   let cancelled = false;
+  const cancelledSessions = new Set<string>();
   const inboxes = new Map<string, TurnInbox>();
   const receivers = new Map<string, ReceiveContext>();
   const disk = new Map<string, ChannelCheckpoint>();
@@ -51,12 +57,15 @@ function harness(
     status: "accepted" as const,
     parts: [{ index: 0, status: "accepted" as const }],
   }));
-  const save = vi.fn(async (id: string, checkpoint: ChannelCheckpoint) => {
-    disk.set(id, structuredClone(checkpoint));
-  });
+  const save = vi.fn(
+    async (connection: ChannelConnection, checkpoint: ChannelCheckpoint) => {
+      disk.set(connection.id, structuredClone(checkpoint));
+    },
+  );
   const manager = new ChannelManager({
     command,
     adapter: async (connection) => ({
+      canSend: () => true,
       cursorScope: connection.accountId ?? "",
       receive: async (context) => {
         receivers.set(connection.id, context);
@@ -69,9 +78,10 @@ function harness(
       },
       send,
     }),
-    load: async (id) =>
+    load: async (connection) =>
       structuredClone(
-        disk.get(id) ?? {
+        disk.get(connection.id) ?? {
+          conversations: [],
           cursor: "",
           cursorScope: "",
           recentIds: [],
@@ -97,7 +107,7 @@ function harness(
       });
       signal.throwIfAborted();
       inbox.close();
-      if (cancelled) {
+      if (cancelled || cancelledSessions.has(connection.sessionId)) {
         inbox.cancel();
         return null;
       }
@@ -117,8 +127,9 @@ function harness(
   return {
     manager,
     inboxes,
-    cancel: () => {
-      cancelled = true;
+    cancel: (sessionId?: string) => {
+      if (sessionId) cancelledSessions.add(sessionId);
+      else cancelled = true;
     },
     receivers,
     disk,
@@ -143,19 +154,23 @@ describe("ChannelManager", () => {
     await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
     await h.receivers.get("a")?.receive(message("task"));
     h.send.mockResolvedValueOnce({ status: "failed" as never, parts: [] });
-    await h.receivers.get("a")?.receive({ ...message("help"), text: "/h" });
+    await h.receivers.get("a")?.receive({
+      ...message("help"),
+      target: { kind: "direct", id: "owner" },
+      text: "/h",
+    });
     expect(h.calls).toEqual(["a:task"]);
     expect(h.inboxes.get("a")?.hasPending).toBe(false);
     expect(h.send).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "help" }),
+      { kind: "direct", id: "owner" },
       { text: "Help" },
       expect.any(AbortSignal),
     );
-    expect(h.disk.get("a")?.pendingIds).toEqual(["task"]);
+    expect(h.disk.get("a")?.pendingIds).toEqual([identity("task")]);
     h.gates[0]();
     await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
     expect(h.send).toHaveBeenLastCalledWith(
-      expect.objectContaining({ id: "task" }),
+      { kind: "direct", id: "owner" },
       { text: "task" },
       expect.any(AbortSignal),
     );
@@ -163,12 +178,147 @@ describe("ChannelManager", () => {
     await h.manager.dispose();
   });
 
+  it("同实例不同对话和话题独立运行，取消不清空其他对话，重启复用绑定", async () => {
+    const h = harness();
+    await h.manager.configure([connection("a")]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    const receiver = h.receivers.get("a");
+    assert(receiver);
+    const receive = receiver.receive;
+    const group = { kind: "group" as const, id: "room" };
+    const topic = { ...group, threadId: "topic" };
+    await Promise.all([
+      receive({ ...message("same"), target: group, senderId: "alice" }),
+      receive({ ...message("same"), target: group, senderId: "alice" }),
+    ]);
+    await receive({ ...message("same"), target: topic, senderId: "bob" });
+    const bindings = h.snapshots()[0].conversations;
+    expect(bindings).toHaveLength(2);
+    expect(new Set(bindings.map((item) => item.sessionId)).size).toBe(2);
+    expect(bindings.every((item) => item.busy)).toBe(true);
+    expect(h.calls).toHaveLength(2);
+    expect(h.disk.get("a")?.pendingIds).toHaveLength(2);
+    await receive({ ...message("queued-a"), target: group, senderId: "bob" });
+    await receive({ ...message("queued-b"), target: topic, senderId: "alice" });
+    h.cancel(bindings[0].sessionId);
+    h.gates[0]();
+    await vi.waitFor(() =>
+      expect(h.snapshots()[0].conversations[0].busy).toBe(false),
+    );
+    expect(h.snapshots()[0].conversations[1]).toMatchObject({
+      busy: true,
+      queued: 1,
+    });
+    expect(h.disk.get("a")?.pendingIds).toHaveLength(2);
+    h.gates[1]();
+    await vi.waitFor(() => expect(h.gates).toHaveLength(3));
+    h.gates[2]();
+    await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
+    expect(h.calls).toEqual(["a:same", "a:same", "a:queued-b"]);
+    await h.manager.dispose();
+    h.receivers.clear();
+    await h.manager.configure([{ ...connection("a"), enabled: false }]);
+    await vi.waitFor(() =>
+      expect(h.snapshots()[0].conversations).toHaveLength(2),
+    );
+    expect(
+      h.snapshots()[0].conversations.map((item) => item.sessionId),
+    ).toEqual(bindings.map((item) => item.sessionId));
+    expect(h.snapshots()[0].conversations.every((item) => !item.canSend)).toBe(
+      true,
+    );
+    expect(h.receivers.size).toBe(0);
+    await h.manager.dispose();
+  });
+
+  it("一个对话的命令保存失败不停止其他对话或连接接收", async () => {
+    const h = harness(async (_connection, message) => {
+      if (message.text === "/h") throw new ChannelError("storage");
+      return null;
+    });
+    await h.manager.configure([connection("a")]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    const receiver = h.receivers.get("a");
+    assert(receiver);
+    await receiver.receive(message("task"));
+    await receiver.receive({
+      ...message("other"),
+      target: { kind: "group", id: "room" },
+    });
+    await receiver.receive({ ...message("help"), text: "/h" });
+    expect(receiver.signal.aborted).toBe(false);
+    h.gates[0]();
+    h.gates[1]();
+    await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
+    expect(h.snapshots()[0].issue).toBe("storage");
+    expect(h.send).toHaveBeenCalledWith(
+      { kind: "group", id: "room" },
+      { text: "other" },
+      expect.any(AbortSignal),
+    );
+    await h.manager.dispose();
+  });
+
+  it("人工发送与工具回复共用队列，目标固定且不阻塞其他实例", async () => {
+    const h = harness();
+    await h.manager.configure([connection("a"), connection("b")]);
+    await vi.waitFor(() => expect(h.receivers.size).toBe(2));
+    let release!: () => void;
+    h.send.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              status: "accepted",
+              parts: [{ index: 0, status: "accepted" }],
+            });
+        }),
+    );
+    const target = { kind: "group" as const, id: "group", threadId: "topic" };
+    const first = h.manager.send("a", target, { text: "manual" });
+    target.id = "changed";
+    await h.receivers.get("a")?.receive(message("task"));
+    const sender = getChannelMessageSender(
+      h.snapshots().find((item) => item.connection.id === "a")?.conversations[0]
+        .sessionId ?? "",
+    );
+    assert(sender);
+    const tool = sender({ text: "tool" });
+    await h.manager.send(
+      "b",
+      { kind: "direct", id: "other" },
+      { text: "independent" },
+    );
+    expect(h.send.mock.calls).toHaveLength(2);
+    expect(h.send).toHaveBeenNthCalledWith(
+      1,
+      { kind: "group", id: "group", threadId: "topic" },
+      { text: "manual" },
+      expect.any(AbortSignal),
+    );
+    release();
+    await Promise.all([first, tool]);
+    expect(h.send).toHaveBeenLastCalledWith(
+      { kind: "direct", id: "owner" },
+      { text: "tool" },
+      expect.any(AbortSignal),
+    );
+    h.gates[0]();
+    await h.manager.dispose();
+    await expect(
+      h.manager.send("a", target, { text: "late" }),
+    ).rejects.toThrow();
+  });
+
   it("附件工具成功投递后没有最终正文时不补发空回复", async () => {
     const h = harness();
     await h.manager.configure([connection("a")]);
     await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
     await h.receivers.get("a")?.receive({ ...message("file-only"), text: "" });
-    const send = getChannelMessageSender("session-a");
+    const send = getChannelMessageSender(
+      h.snapshots().find((item) => item.connection.id === "a")?.conversations[0]
+        .sessionId ?? "",
+    );
     assert(send);
     await send({ attachments: [{ path: "file.pdf", presentation: "file" }] });
     h.gates[0]();
@@ -187,7 +337,7 @@ describe("ChannelManager", () => {
       finish = resolve;
     });
     const materialize = vi.fn(async () => {
-      expect(h.disk.get("media")?.recentIds).toContain("file");
+      expect(h.disk.get("media")?.recentIds).toContain(identity("file"));
       await ready;
       return {
         ...message("file"),
@@ -206,11 +356,29 @@ describe("ChannelManager", () => {
     const receiving = receiver.receive(message("file"), materialize);
     await vi.waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
     expect(h.calls).toEqual([]);
-    await receiver.receive(message("file"), materialize);
+    const duplicate = receiver.receive(message("file"), materialize);
     expect(materialize).toHaveBeenCalledTimes(1);
     finish();
-    await receiving;
+    await Promise.all([receiving, duplicate]);
+    expect(materialize).toHaveBeenCalledTimes(1);
     expect(h.calls).toEqual(["media:file"]);
+    await expect(
+      receiver.receive(message("broken"), async () => {
+        throw new ChannelError("storage");
+      }),
+    ).resolves.toBeUndefined();
+    expect(receiver.signal.aborted).toBe(false);
+    expect(h.disk.get("media")?.pendingIds).not.toContain(identity("broken"));
+    await receiver.receive({
+      ...message("other"),
+      target: { kind: "group", id: "room" },
+    });
+    expect(h.calls).toEqual(["media:file", "media:other"]);
+    h.gates[0]();
+    await vi.waitFor(() =>
+      expect(h.snapshots()[0].conversations[0].busy).toBe(false),
+    );
+    expect(h.snapshots()[0].issue).toBe("storage");
     await h.manager.dispose();
   });
   it("在线改名保留接收任务、当前执行和待处理消息", async () => {
@@ -249,7 +417,10 @@ describe("ChannelManager", () => {
     await h.receivers.get("a")?.receive(message("supplement"));
     expect(h.calls).toEqual(["a:first"]);
     expect(h.inboxes.get("a")?.pendingUsers).toBe(1);
-    expect(h.disk.get("a")?.pendingIds).toEqual(["first", "supplement"]);
+    expect(h.disk.get("a")?.pendingIds).toEqual([
+      identity("first"),
+      identity("supplement"),
+    ]);
     h.gates[0]();
     await vi.waitFor(() => expect(h.disk.get("a")?.pendingIds).toEqual([]));
     expect(h.send).toHaveBeenCalledTimes(1);
@@ -262,25 +433,19 @@ describe("ChannelManager", () => {
     await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
     await h.receivers.get("a")?.receive(message("first"));
     await h.receivers.get("a")?.receive(message("queued"));
-    for (let index = 0; index < 13; index++)
+    for (let index = 0; index < 14; index++)
       await h.receivers.get("a")?.receive(message(`queued-${index}`));
-    let releaseAdmission!: () => void;
-    h.save.mockImplementationOnce(async () => {
-      await new Promise<void>((resolve) => {
-        releaseAdmission = resolve;
-      });
-    });
-    const admitting = h.receivers.get("a")?.receive(message("admitting"));
-    await vi.waitFor(() => expect(releaseAdmission).toBeDefined());
     const waiting = h.receivers
       .get("a")
       ?.receive(message("waiting-for-capacity"));
-    expect(h.snapshots()[0].issue).toBe("queue-full");
+    const alsoWaiting = h.receivers
+      .get("a")
+      ?.receive(message("another-waiter"));
+    await vi.waitFor(() => expect(h.snapshots()[0].issue).toBe("queue-full"));
     h.cancel();
     h.gates[0]();
     await vi.waitFor(() => expect(h.snapshots()[0].queued).toBe(0));
-    releaseAdmission();
-    await Promise.all([admitting, waiting]);
+    await Promise.all([waiting, alsoWaiting]);
     await vi.waitFor(() => expect(h.disk.get("a")?.pendingIds).toEqual([]));
     expect(h.calls).toEqual(["a:first"]);
     expect(h.send).not.toHaveBeenCalled();
@@ -289,7 +454,7 @@ describe("ChannelManager", () => {
       expect(h.receivers.get("a")?.signal.aborted).toBe(false),
     );
     await h.receivers.get("a")?.receive(message("queued"));
-    await h.receivers.get("a")?.receive(message("admitting"));
+    await h.receivers.get("a")?.receive(message("another-waiter"));
     await h.receivers.get("a")?.receive(message("waiting-for-capacity"));
     expect(h.calls).toEqual(["a:first"]);
     await h.manager.dispose();
@@ -303,7 +468,7 @@ describe("ChannelManager", () => {
     await h.receivers.get("a")?.receive(message("next"));
     await h.receivers.get("b")?.receive(message("second"));
     expect(h.calls).toEqual(["a:first", "b:second"]);
-    expect(h.disk.get("b")?.pendingIds).toEqual(["second"]);
+    expect(h.disk.get("b")?.pendingIds).toEqual([identity("second")]);
     h.gates[0]();
     await vi.waitFor(() =>
       expect(h.calls).toEqual(["a:first", "b:second", "a:next"]),
@@ -326,10 +491,11 @@ describe("ChannelManager", () => {
   it("reports interrupted admissions without replaying their Agent turns", async () => {
     const h = harness();
     h.disk.set("a", {
+      conversations: [],
       cursor: "saved",
       cursorScope: "a",
-      recentIds: ["started"],
-      pendingIds: ["started"],
+      recentIds: [identity("started")],
+      pendingIds: [identity("started")],
     });
     await h.manager.configure([connection("a")]);
     await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
@@ -357,16 +523,20 @@ describe("ChannelManager", () => {
       queued: 0,
       busy: false,
     });
-    expect(h.disk.get("a")?.pendingIds).toEqual(["active", "queued"]);
+    expect(h.disk.get("a")?.pendingIds).toEqual([
+      identity("active"),
+      identity("queued"),
+    ]);
     await h.manager.dispose();
   });
 
   it("discards a replaced login's cursor while preserving admitted message identities", async () => {
     const h = harness();
     h.disk.set("a", {
+      conversations: [],
       cursor: "old-cursor",
       cursorScope: "old-bot",
-      recentIds: ["seen"],
+      recentIds: [identity("seen")],
       pendingIds: [],
     });
     await h.manager.configure([connection("a")]);
@@ -374,7 +544,7 @@ describe("ChannelManager", () => {
     expect(h.receivers.get("a")?.cursor).toBe("");
     expect(h.disk.get("a")).toMatchObject({
       cursorScope: "a",
-      recentIds: ["seen"],
+      recentIds: [identity("seen")],
     });
     await h.receivers.get("a")?.receive(message("seen"));
     expect(h.calls).toEqual([]);

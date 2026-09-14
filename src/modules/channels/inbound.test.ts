@@ -39,7 +39,7 @@ it("materializes only ready images into reusable generic model media", async () 
     senderId: "owner",
     text: "look",
     receivedAt: 1,
-    replyContext: "secret",
+    target: { kind: "direct" as const, id: "owner" },
     attachments: [
       {
         id: "jpg",

@@ -1,3 +1,7 @@
+import {
+  withWeixinInbound,
+  receiveWeixinContext,
+} from "@/modules/channels/adapters/weixinTestHelpers";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   parseWeixinMessage,
@@ -248,17 +252,11 @@ describe("WeChat attachment protocol", () => {
       },
       "connection",
       files,
-      fetch,
+      withWeixinInbound(fetch),
     );
+    await receiveWeixinContext(adapter);
     const result = await adapter.send(
-      {
-        id: "id",
-        senderId: "owner",
-        receivedAt: Date.now(),
-        replyContext: "context",
-        text: "",
-        attachments: [],
-      },
+      { kind: "direct", id: "owner" },
       {
         attachments: [
           { path: "first.pdf", presentation: "file" },
