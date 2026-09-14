@@ -69,6 +69,8 @@ export async function startChannelsService(
   const manager = new ChannelManager({
     load: loadCheckpoint,
     save: saveCheckpoint,
+    command: async (...args) =>
+      (await import("@/modules/channels/agentSession")).runChannelCommand(...args),
     run: async (...args) =>
       (await import("@/modules/channels/agentSession")).runChannelTurn(...args),
     failureText: () => i18n.t("channels:runFailed"),

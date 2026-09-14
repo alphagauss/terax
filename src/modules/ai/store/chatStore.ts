@@ -7,6 +7,16 @@ import {
   peekFileEditRuntime,
   releaseFileEditRuntime,
 } from "@/modules/ai/lib/fileEditRuntime";
+import {
+  type CommandRecord,
+  type CommandDisplay,
+  projectCommands,
+} from "@/modules/ai/commands/records";
+import {
+  clearSessionCommands,
+  setSessionCommands,
+  updateCommand,
+} from "@/modules/ai/commands/store";
 import i18n from "@/i18n";
 import { cancelAgentRun } from "@/modules/ai/lib/runLifecycle";
 import {
@@ -64,6 +74,7 @@ import {
   newSessionId,
   readSession,
   releaseSessionRun,
+  resolveSessionCwd,
   type SessionData,
   type SessionMeta,
 } from "@/modules/ai/lib/sessions";
@@ -276,6 +287,119 @@ function sessionRunOutcome(id: string): SessionRunOutcome {
     : "completed";
 }
 
+const commandWrites = new Map<string, Promise<void>>();
+const pendingCommandSaves = new Map<
+  string,
+  {
+    content: CommandRecord;
+    display: CommandDisplay;
+    release: boolean;
+    saved?: boolean;
+  }
+>();
+
+/** 只补交记录与释放锁，不持有或重跑命令处理函数。 */
+async function flushCommandSave(id: string, release = true): Promise<void> {
+  const pending = pendingCommandSaves.get(id);
+  if (!pending) return;
+  if (!pending.saved) {
+    const meta = useChatStore
+      .getState()
+      .sessions.find((item) => item.id === id);
+    if (!meta) throw new Error("Command session is unavailable");
+    const committed = await commitSession({
+      id,
+      createdAt: meta.createdAt,
+      environmentKey: meta.environmentKey,
+      cwd: meta.cwd,
+      metadata: sessionMetadata.get(id) ?? {},
+      updatedAt: Date.now(),
+      messages: [
+        {
+          role: "command",
+          content: pending.content,
+          timestamp: new Date(
+            pending.content.phase === "invocation"
+              ? pending.display.timestamp
+              : Date.now(),
+          ).toISOString(),
+        },
+      ],
+    });
+    updateCommand(id, pending.display);
+    useChatStore.setState((state) => ({
+      sessions: state.sessions.map((item) =>
+        item.id === id ? committed : item,
+      ),
+    }));
+    pending.saved = true;
+  }
+  if (pending.release && release) {
+    await releaseSessionRun(id);
+    useChatStore.setState((state) => {
+      const runLockSessionIds = { ...state.runLockSessionIds };
+      delete runLockSessionIds[id];
+      return { runLockSessionIds };
+    });
+  }
+  pendingCommandSaves.delete(id);
+}
+
+/** 命令与 Agent 共用会话所有权；终态等待在途写入，之后的命令重新取得锁。 */
+export async function appendSessionCommand(
+  id: string,
+  content: CommandRecord,
+  display: CommandDisplay,
+  channelId?: string,
+): Promise<void> {
+  while (sessionCommits.has(id)) await sessionCommits.get(id);
+  const writing = (commandWrites.get(id) ?? Promise.resolve()).then(
+    async () => {
+      await flushCommandSave(id);
+      if (
+        !sessionMetadata.has(id) &&
+        useChatStore.getState().sessions.some((item) => item.id === id)
+      )
+        await seedSession(id);
+      const state = useChatStore.getState();
+      const cwd = resolveSessionCwd(
+        id,
+        state.draftSessionId,
+        state.sessions,
+        state.live.draftCwd,
+      );
+      if (!cwd) throw new Error(i18n.t("ai:commands.noWorkspace"));
+      const release = !state.runLockSessionIds[id];
+      if (release && !(await state.beginSessionRun(id, channelId)))
+        throw new Error(i18n.t("ai:commands.busy"));
+      state.promoteSession(
+        id,
+        [
+          {
+            id: display.id,
+            role: "user",
+            parts: [{ type: "text", text: display.input }],
+          },
+        ],
+        cwd,
+      );
+      pendingCommandSaves.set(id, { content, display, release });
+      await flushCommandSave(id);
+    },
+  );
+  commandWrites.set(id, writing);
+  try {
+    await writing;
+    useChatStore.getState().patchAgentMeta(id, { commitError: undefined });
+  } catch (error) {
+    display.pending = undefined;
+    useChatStore.getState().patchAgentMeta(id, { commitError: String(error) });
+    throw error;
+  } finally {
+    if (commandWrites.get(id) === writing) commandWrites.delete(id);
+  }
+}
+
 /** 只保留前台展示和未提交的业务运行；已完成的后台会话下次从磁盘恢复。 */
 export function releaseUnusedChats() {
   const state = useChatStore.getState();
@@ -287,12 +411,15 @@ export function releaseUnusedChats() {
       startingSessionIds.has(id) ||
       acquiringSessionRuns.has(id) ||
       sessionCommits.has(id) ||
+      commandWrites.has(id) ||
+      pendingCommandSaves.has(id) ||
       chat?.status === "submitted" ||
       chat?.status === "streaming" ||
       (chat && hasPendingApproval(chat.messages))
     )
       continue;
     chats.delete(id);
+    clearSessionCommands(id);
     releaseUsage(id);
     seedMessages.delete(id);
     sessionMetadata.delete(id);
@@ -367,6 +494,7 @@ export async function seedSession(id: string): Promise<void> {
   // 较早发起的磁盘读取不能覆盖随后已经创建的运行实例与提交游标。
   if (chats.has(id)) return;
   const messages = projectSessionMessages(id, session.messages);
+  setSessionCommands(id, projectCommands(session.messages));
   persistedMessageCounts.set(id, messages.length);
   seedMessages.set(id, messages);
   sessionMetadata.set(id, session.metadata);
@@ -935,6 +1063,7 @@ export const useChatStore = create<StoreState>((set, get) => ({
         const remaining = get().sessions.filter((session) => session.id !== id);
         await chats.get(id)?.stop();
         chats.delete(id);
+        clearSessionCommands(id);
         releaseUsage(id);
         releaseFileEditRuntime(id);
         seedMessages.delete(id);
@@ -1000,6 +1129,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
     }
 
     const commit = (async () => {
+      await commandWrites.get(id);
+      await flushCommandSave(id, false);
       const sessions = get().sessions;
       const meta = sessions.find((s) => s.id === id);
       if (!meta) return;

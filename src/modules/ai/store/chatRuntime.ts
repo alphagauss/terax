@@ -3,6 +3,8 @@
  * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
+import { submitSessionCommand } from "@/modules/ai/commands/runtime";
+import { parseCommand } from "@/modules/ai/commands/registry";
 import i18n from "@/i18n";
 import { getChannelMessageSender } from "@/modules/channels/delivery";
 
@@ -251,12 +253,39 @@ export async function sendMessage(text: string): Promise<boolean> {
 /** 发送完整用户消息；消息被运行时接受后立即返回，不等待流式回复完成。 */
 export async function sendChatMessage(
   sessionId: string,
-  message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
+  message: Omit<UIMessage, "id" | "role"> & { id?: string; role: "user" },
+  hasAttachments = false,
 ): Promise<boolean> {
   if (!isSessionWritable(sessionId)) return false;
+  await loadChat(sessionId);
+  const state = useChatStore.getState();
+  const external =
+    parseExternalAgentBinding(sessionMetadata.get(sessionId)) ||
+    (state.draftSessionId === sessionId && state.draftExternalAgentId);
+  const command =
+    !external &&
+    parseCommand(
+      message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n"),
+    );
+  if (command) {
+    const { completed } = await submitSessionCommand({
+      sessionId,
+      command,
+      source: { kind: "desktop" },
+      hasAttachments:
+        hasAttachments || message.parts.some((part) => part.type === "file"),
+      startTask: (task) => startChatMessage(sessionId, task),
+    });
+    void completed.catch((error) =>
+      useChatStore.setState({ sessionSyncError: String(error) }),
+    );
+    return true;
+  }
   const chat = chats.get(sessionId);
   if (chat && useChatStore.getState().runLockSessionIds[sessionId]) {
-    if (!message || !("parts" in message) || !message.parts) return false;
     const receipt = steerChatMessage(sessionId, {
       ...message,
       id: message.id ?? crypto.randomUUID(),
@@ -304,6 +333,15 @@ export function steerChatMessage(
 ): SteeringReceipt | null {
   const state = useChatStore.getState();
   const session = state.sessions.find((item) => item.id === sessionId);
+  if (
+    parseCommand(
+      message.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n"),
+    )
+  )
+    return null;
   if (
     !state.runLockSessionIds[sessionId] ||
     (channelId

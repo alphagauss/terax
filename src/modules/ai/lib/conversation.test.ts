@@ -15,6 +15,7 @@ import {
   serializeSubagentResultEvent,
   TOOL_APPROVAL_DENIED_REASON,
 } from "@/modules/ai/lib/conversation";
+import { projectCommands } from "@/modules/ai/commands/records";
 import type { UIMessage } from "@ai-sdk/react";
 import { describe, expect, it } from "vitest";
 
@@ -31,6 +32,53 @@ function jsonlRoundTrip(records: SessionMessage[]): SessionMessage[] {
 }
 
 describe("AI session message conversion", () => {
+  it("命令独立恢复，关联任务的正文仍进入模型上下文", async () => {
+    const task = { ...user("task"), metadata: { commandId: "init" } };
+    const messages: UIMessage[] = [
+      task,
+      {
+        id: "answer",
+        role: "assistant",
+        parts: [{ type: "text", text: "Done" }],
+      },
+    ];
+    const invocation: SessionMessage = {
+      role: "command",
+      timestamp,
+      content: {
+        id: "init",
+        phase: "invocation",
+        name: "init",
+        input: "/init",
+      },
+    };
+    const records: SessionMessage[] = [
+      invocation,
+      ...serializeSessionMessages(messages, { timestamp, turnId: "turn" }),
+      {
+        role: "command",
+        timestamp,
+        content: {
+          id: "init",
+          phase: "result",
+          text: "Task accepted",
+          status: "success",
+          taskMessageId: "task",
+        },
+      },
+    ];
+    const restored = projectSessionMessages("session", jsonlRoundTrip(records));
+    expect(restored.map((message) => message.id)).toEqual(["task", "answer"]);
+    expect(restored[0].metadata).toHaveProperty("commandId", "init");
+    expect(await convertToAgentModelMessages(restored)).toEqual(
+      await convertToAgentModelMessages(messages),
+    );
+    expect(projectCommands(records)[0]).toMatchObject({
+      input: "/init",
+      result: { text: "Task accepted" },
+    });
+    expect(projectCommands([invocation])[0].result).toBeUndefined();
+  });
   it("serializes a simple turn as readable role/content records", () => {
     const messages: UIMessage[] = [
       { id: "user-1", role: "user", parts: [{ type: "text", text: "你好" }] },
@@ -53,12 +101,14 @@ describe("AI session message conversion", () => {
     expect(records).toEqual([
       {
         role: "user",
+        message_id: "user-1",
         content: "你好",
         timestamp,
         turn_id: "turn-1",
       },
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "你好！",
         reasoning_content: "用户正在问候。",
         timestamp,
@@ -68,6 +118,7 @@ describe("AI session message conversion", () => {
     ]);
     expect(Object.keys(records[1])).toEqual([
       "role",
+      "message_id",
       "content",
       "reasoning_content",
       "timestamp",
@@ -251,12 +302,14 @@ describe("AI session message conversion", () => {
     expect(records).toEqual([
       {
         role: "user",
+        message_id: "user-1",
         content: "读取文件",
         timestamp,
         turn_id: "turn-1",
       },
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "",
         tool_calls: [
           {
@@ -282,6 +335,7 @@ describe("AI session message conversion", () => {
       },
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "读取完成。",
         timestamp,
         turn_id: "turn-1",
@@ -290,6 +344,7 @@ describe("AI session message conversion", () => {
     ]);
     expect(Object.keys(records[1])).toEqual([
       "role",
+      "message_id",
       "content",
       "tool_calls",
       "reasoning_content",
@@ -467,6 +522,7 @@ describe("AI session message conversion", () => {
     const records: SessionMessage[] = [
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "",
         tool_calls: [
           {
@@ -570,6 +626,7 @@ describe("AI session message conversion", () => {
     expect(records).toEqual([
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "Persisted prefix",
         timestamp,
         turn_id: "turn-1",
@@ -578,6 +635,7 @@ describe("AI session message conversion", () => {
       { role: "event", content: event, timestamp, turn_id: "turn-1" },
       {
         role: "assistant",
+        message_id: "assistant-1",
         content: "Terminal tail",
         timestamp,
         turn_id: "turn-1",

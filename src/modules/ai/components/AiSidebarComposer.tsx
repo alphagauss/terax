@@ -76,9 +76,11 @@ export function AiSidebarComposer() {
   const submitLabel = t(
     stopping
       ? "statusBar.stop"
-      : guiding
-        ? "statusBar.steer"
-        : "statusBar.send",
+      : c.isCommand
+        ? "commands.send"
+        : guiding
+          ? "statusBar.steer"
+          : "statusBar.send",
   );
   const workingDirectoryContent = c.workingDirectory ? (
     <>
@@ -113,8 +115,6 @@ export function AiSidebarComposer() {
               value.replace(pattern, (_match, lead: string) => lead),
             );
           }}
-          commands={c.pickedCommands}
-          onRemoveCommand={c.removeCommand}
         />
 
         <AiComposerInput />

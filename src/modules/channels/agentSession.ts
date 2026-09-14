@@ -3,6 +3,8 @@
  * 不修改活动聊天、输入草稿或全局模型权限；最终回复只在本轮持久化完成后交给投递出口。
  */
 
+import { submitSessionCommand } from "@/modules/ai/commands/runtime";
+import { parseCommand } from "@/modules/ai/commands/registry";
 import { isModelRefAvailable } from "@/modules/ai/config";
 import {
   channelModelUsageId,
@@ -91,13 +93,69 @@ export function channelReplyText(messages: readonly UIMessage[]): string {
     .trim();
 }
 
-/** 执行一个外部输入，并等待既有 Bridge 完成提交与释放运行锁。 */
+/** 忙碌时只接收即时命令，其余输入继续沿用连接队列。 */
+export async function runChannelCommand(
+  connection: ChannelConnection,
+  message: ChannelInbound,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const command = parseCommand(message.text);
+  return command && command.definition?.scheduling !== "idle"
+    ? runChannelTurn(connection, message, signal, () => {})
+    : null;
+}
+
+/** 命令先于模型配置检查；命令和 Agent 启动都返回独立的完成结果。 */
 export async function runChannelTurn(
   connection: ChannelConnection,
   message: ChannelInbound,
   signal: AbortSignal,
   ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
 ): Promise<string | null> {
+  const command = parseCommand(message.text);
+  if (!command)
+    return (await startChannelAgentTurn(connection, message, signal, ready))
+      .completed;
+  await ensureChannelSession(connection);
+  let task: Promise<string | null> | undefined;
+  try {
+    const { completed } = await submitSessionCommand({
+      sessionId: connection.sessionId,
+      command,
+      source: { kind: "channel", platform: connection.kind },
+      channelId: connection.id,
+      hasAttachments: message.attachments.length > 0,
+      signal,
+      startTask: async (input) => {
+        task = (
+          await startChannelAgentTurn(connection, message, signal, ready, input)
+        ).completed;
+        return true;
+      },
+    });
+    const result = await completed;
+    const reply = await task;
+    return reply === null
+      ? null
+      : [result.text, reply].filter(Boolean).join("\n\n");
+  } catch (error) {
+    if (
+      getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
+        .commitError
+    )
+      throw new ChannelError("storage");
+    throw error;
+  }
+}
+
+/** 执行一个外部输入，并等待既有 Bridge 完成提交与释放运行锁。 */
+async function startChannelAgentTurn(
+  connection: ChannelConnection,
+  message: ChannelInbound,
+  signal: AbortSignal,
+  ready: (steer: (message: ChannelInbound) => SteeringReceipt | null) => void,
+  taskMessage?: UIMessage,
+): Promise<{ completed: Promise<string | null> }> {
   signal.throwIfAborted();
   const prefs = usePreferencesStore.getState();
   const config = resolveModelUsage(
@@ -132,7 +190,7 @@ export async function runChannelTurn(
   const offset = chat.messages.length;
   const accepted = await startChatMessage(
     connection.sessionId,
-    channelUserMessage(message),
+    taskMessage ?? channelUserMessage(message),
     { id: connection.id, ...config },
   );
   if (!accepted) throw new ChannelError("model");
@@ -143,44 +201,49 @@ export async function runChannelTurn(
       connection.id,
     ),
   );
-  let cleanup = () => {};
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const stop = () => {
-        void stopSession(connection.sessionId).catch(reject);
-      };
-      const check = () => {
-        const state = useChatStore.getState();
-        if (getAgentMetaForSession(state, connection.sessionId).commitError) {
-          reject(new ChannelError("storage"));
-          return;
-        }
-        if (!state.runLockSessionIds[connection.sessionId]) {
-          resolve();
-        }
-      };
-      const unsubscribe = useChatStore.subscribe(check);
-      signal.addEventListener("abort", stop, { once: true });
-      cleanup = () => {
-        unsubscribe();
-        signal.removeEventListener("abort", stop);
-      };
-      check();
-      if (signal.aborted) stop();
-    });
-    signal.throwIfAborted();
-    if (
-      getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
-        .status === "error"
-    )
-      throw new ChannelError("agent");
-    if (
-      getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
-        .cancelled
-    )
-      return null;
-    return channelReplyText(chat.messages.slice(offset));
-  } finally {
-    cleanup();
-  }
+  const completed = (async () => {
+    let cleanup = () => {};
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const stop = () => {
+          void stopSession(connection.sessionId).catch(reject);
+        };
+        const check = () => {
+          const state = useChatStore.getState();
+          if (getAgentMetaForSession(state, connection.sessionId).commitError) {
+            reject(new ChannelError("storage"));
+            return;
+          }
+          if (!state.runLockSessionIds[connection.sessionId]) {
+            resolve();
+          }
+        };
+        const unsubscribe = useChatStore.subscribe(check);
+        signal.addEventListener("abort", stop, { once: true });
+        cleanup = () => {
+          unsubscribe();
+          signal.removeEventListener("abort", stop);
+        };
+        check();
+        if (signal.aborted) stop();
+      });
+      signal.throwIfAborted();
+      if (
+        getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
+          .status === "error"
+      )
+        throw new ChannelError("agent");
+      if (
+        getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
+          .cancelled
+      )
+        return null;
+      return channelReplyText(chat.messages.slice(offset));
+    } finally {
+      cleanup();
+    }
+  })();
+  // 调用方可能先保存命令回执，提前挂接拒绝处理，完成结果仍由调用方消费。
+  void completed.catch(() => undefined);
+  return { completed };
 }

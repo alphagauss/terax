@@ -26,9 +26,11 @@ export function bindChannelDelivery(
   let accepted = false;
   let failed = false;
   let tail = Promise.resolve();
-  const send = (
+  const sendTo = (
+    replyTarget: ChannelInbound,
     input: ChannelOutbound,
     callSignal?: AbortSignal,
+    countAsAgentDelivery = true,
   ): Promise<ChannelDeliveryResult> => {
     const sending = tail.then(async () => {
       const combined = callSignal
@@ -38,14 +40,17 @@ export function bindChannelDelivery(
         throw new DOMException("Delivery cancelled", "AbortError");
       let result: ChannelDeliveryResult;
       try {
-        result = await adapter.send(target, input, combined);
+        result = await adapter.send(replyTarget, input, combined);
       } catch {
         combined.throwIfAborted();
         result = { status: "unknown", parts: [] };
       }
-      if (result.parts.some((part) => part.status === "accepted"))
+      if (
+        countAsAgentDelivery &&
+        result.parts.some((part) => part.status === "accepted")
+      )
         accepted = true;
-      if (result.status !== "accepted") failed = true;
+      if (countAsAgentDelivery && result.status !== "accepted") failed = true;
       return result;
     });
     tail = sending.then(
@@ -54,9 +59,13 @@ export function bindChannelDelivery(
     );
     return sending;
   };
+  const send: ChannelMessageSender = (input, callSignal) =>
+    sendTo(target, input, callSignal);
   senders.set(sessionId, send);
   return {
     send,
+    reply: (replyTarget: ChannelInbound, text: string) =>
+      sendTo(replyTarget, { text }, undefined, false),
     get accepted() {
       return accepted;
     },

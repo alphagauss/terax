@@ -31,6 +31,7 @@ vi.mock("./AiChat", () => ({
 vi.mock("./AiSidebarComposer", () => ({ AiSidebarComposer: () => null }));
 vi.mock("./AiInputBar", () => ({ AiInputBarConnect: () => null }));
 
+import { useCommandStore } from "@/modules/ai/commands/store";
 import { useChatStore } from "../store/chatStore";
 import { AiSidebarPanel } from "./AiSidebarPanel";
 
@@ -50,10 +51,27 @@ function chat(messages: UIMessage[]): Chat<UIMessage> {
 
 afterEach(() => {
   runtime.chat = null;
+  useCommandStore.setState({ sessions: {} });
   document.body.replaceChildren();
 });
 
 describe("AI sidebar chat subscription", () => {
+  it("只有命令记录时也挂载会话时间线", async () => {
+    runtime.chat = chat([]);
+    useChatStore.setState({
+      activeSessionId: sessionId,
+      sessions: [],
+      runLockSessionIds: {},
+    });
+    useCommandStore.setState({
+      sessions: { [sessionId]: [{ id: "help", input: "/help", timestamp: 0 }] },
+    });
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => root.render(<AiSidebarPanel hasComposer visible />));
+    expect(container.querySelector('[data-testid="messages"]')).not.toBeNull();
+    await act(async () => root.unmount());
+  });
   it("unsubscribes hidden messages and resumes the same running Chat", async () => {
     const current = chat([message("m1", "first")]);
     runtime.chat = current;

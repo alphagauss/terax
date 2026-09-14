@@ -38,10 +38,7 @@ import {
   canRevealSessionCwd,
   resolveSessionCwd,
 } from "@/modules/ai/lib/sessions";
-import {
-  type SlashCommandMeta,
-  tryRunSlashCommand,
-} from "@/modules/ai/lib/slashCommands";
+import { parseCommand } from "@/modules/ai/commands/registry";
 
 export type FileAttachment = {
   id: string;
@@ -80,9 +77,7 @@ type ComposerCtx = {
   pickedSnippets: Snippet[];
   addSnippet: (s: Snippet) => void;
   removeSnippet: (id: string) => void;
-  pickedCommands: SlashCommandMeta[];
-  addCommand: (c: SlashCommandMeta) => void;
-  removeCommand: (name: string) => void;
+  isCommand: boolean;
   isBusy: boolean;
   pendingSteering: number;
   canSteer: boolean;
@@ -155,9 +150,13 @@ export function AiComposerProvider({ children }: ProviderProps) {
     );
   });
   const isBusy = runLocked || status === "thinking" || status === "streaming";
-  const canSteer = !parseExternalAgentBinding(
-    sessionId ? sessionMetadata.get(sessionId) : undefined,
+  const draftExternalAgentId = useChatStore((s) => s.draftExternalAgentId);
+  const usesExternalAgent = Boolean(
+    parseExternalAgentBinding(
+      sessionId ? sessionMetadata.get(sessionId) : undefined,
+    ) || draftExternalAgentId,
   );
+  const canSteer = !usesExternalAgent;
   const pendingSteering = useChatStore(
     (state) => getAgentMetaForSession(state, sessionId).pendingSteering,
   );
@@ -165,7 +164,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [pickedSnippets, setPickedSnippets] = useState<Snippet[]>([]);
-  const [pickedCommands, setPickedCommands] = useState<SlashCommandMeta[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
   const revealingWorkingDirectoryRef = useRef(false);
@@ -355,13 +353,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const removeSnippet = (id: string) =>
     setPickedSnippets((prev) => prev.filter((s) => s.id !== id));
 
-  const addCommand = (cmd: SlashCommandMeta) =>
-    setPickedCommands((prev) =>
-      prev.some((p) => p.name === cmd.name) ? prev : [...prev, cmd],
-    );
-  const removeCommand = (name: string) =>
-    setPickedCommands((prev) => prev.filter((c) => c.name !== name));
-
   /** 空闲时发送新轮次，内置 Agent 运行中则提交引导；成功接收后才清理草稿。 */
   const submit = () => {
     if (
@@ -372,34 +363,9 @@ export function AiComposerProvider({ children }: ProviderProps) {
     )
       return;
     const trimmed = value.trim();
-    if (
-      !trimmed &&
-      files.length === 0 &&
-      pickedSnippets.length === 0 &&
-      pickedCommands.length === 0
-    )
-      return;
+    if (!trimmed && files.length === 0 && pickedSnippets.length === 0) return;
 
-    // `/init` 改写为生成 AGENTS.md 的扫描提示词，其余命令交给模型处理。
-    let effectiveText = trimmed;
-    let commandMarker: string | null = null;
-    let commandSource = trimmed;
-    if (
-      pickedCommands.length > 0 &&
-      !trimmed.startsWith("/") &&
-      !trimmed.startsWith("#")
-    ) {
-      commandSource = `#${pickedCommands[0].name} ${trimmed}`.trim();
-    }
-    if (commandSource.startsWith("/") || commandSource.startsWith("#")) {
-      const outcome = tryRunSlashCommand(commandSource);
-      if (outcome.kind === "send-prompt") {
-        effectiveText = outcome.prompt;
-        if (outcome.commandName) {
-          commandMarker = `<terax-command name="${outcome.commandName}" />`;
-        }
-      }
-    }
+    const isCommand = !usesExternalAgent && Boolean(parseCommand(trimmed));
 
     const parts: MessagePart[] = [];
     const attachments: AttachmentDisplay[] = [];
@@ -410,7 +376,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
           `<selection source="${f.source ?? "terminal"}">\n${f.text ?? ""}\n</selection>`,
       );
     const { body: bodyAfterTokens, blocks: snippetBlocks } =
-      expandSnippetTokens(effectiveText, useSnippetsStore.getState().snippets);
+      expandSnippetTokens(trimmed, useSnippetsStore.getState().snippets);
     const seenHandles = new Set<string>();
     const allSnippetBlocks: string[] = [];
     for (const s of pickedSnippets) {
@@ -426,11 +392,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
       if (m) seenHandles.add(m[1]);
       allSnippetBlocks.push(block);
     }
-    let composed = [
-      commandMarker ?? "",
-      allSnippetBlocks.join("\n\n"),
-      selectionBlocks.join("\n\n"),
-    ]
+    let composed = [allSnippetBlocks.join("\n\n"), selectionBlocks.join("\n\n")]
       .filter(Boolean)
       .join("\n\n");
     for (const file of files) {
@@ -468,9 +430,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
     const submittedSnippetIds = new Set(
       pickedSnippets.map((snippet) => snippet.id),
     );
-    const submittedCommandNames = new Set(
-      pickedCommands.map((command) => command.name),
-    );
     const store = useChatStore.getState();
     store.patchAgentMeta(sessionId, {
       hitStepCap: false,
@@ -483,11 +442,18 @@ export function AiComposerProvider({ children }: ProviderProps) {
         const { sendChatMessage } = await import(
           "@/modules/ai/store/chatRuntime"
         );
-        const sent = await sendChatMessage(sessionId, {
-          role: "user",
-          parts,
-          metadata: { createdAt: Date.now(), attachments },
-        });
+        const sent = await sendChatMessage(
+          sessionId,
+          {
+            role: "user",
+            parts: isCommand ? [{ type: "text", text: trimmed }] : parts,
+            metadata: {
+              createdAt: Date.now(),
+              attachments,
+            },
+          },
+          files.length > 0 || pickedSnippets.length > 0,
+        );
         if (!sent) {
           toast.info(t("composer.sessionBusy"));
           return;
@@ -498,9 +464,6 @@ export function AiComposerProvider({ children }: ProviderProps) {
         );
         setPickedSnippets((current) =>
           current.filter((snippet) => !submittedSnippetIds.has(snippet.id)),
-        );
-        setPickedCommands((current) =>
-          current.filter((command) => !submittedCommandNames.has(command.name)),
         );
         requestAnimationFrame(() => textareaRef.current?.focus());
       } catch {
@@ -519,10 +482,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
   const canSend =
     (!isBusy || canSteer) &&
     !readOnly &&
-    (value.trim().length > 0 ||
-      files.length > 0 ||
-      pickedSnippets.length > 0 ||
-      pickedCommands.length > 0);
+    (value.trim().length > 0 || files.length > 0 || pickedSnippets.length > 0);
   const canSubmit = canSend && Boolean(workingDirectory?.trim());
 
   const ctx: ComposerCtx = {
@@ -538,9 +498,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     pickedSnippets,
     addSnippet,
     removeSnippet,
-    pickedCommands,
-    addCommand,
-    removeCommand,
+    isCommand: !usesExternalAgent && Boolean(parseCommand(value)),
     isBusy,
     canSteer,
     pendingSteering,

@@ -15,12 +15,13 @@ import {
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import {
+  sendChatMessage,
   loadChat,
   startChatMessage,
   steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
 import type { UIMessage } from "ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
   acquire: vi.fn(),
@@ -82,6 +83,9 @@ import {
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
+import { submitSessionCommand } from "@/modules/ai/commands/runtime";
+import { parseCommand } from "@/modules/ai/commands/registry";
+import { useCommandStore } from "@/modules/ai/commands/store";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
@@ -153,6 +157,7 @@ describe("chat store multi-process lifecycle", () => {
     persistedMessageCounts.clear();
     sessionMetadata.clear();
     pendingTurns.clear();
+    useCommandStore.setState({ sessions: {} });
     useAgentsStore.setState({
       agents: [],
       draftAgentId: MAIN_AGENT_ID,
@@ -218,6 +223,152 @@ describe("chat store multi-process lifecycle", () => {
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  function commandRequest(
+    text = "/help",
+    startTask = vi.fn(async (_message: UIMessage) => false),
+  ) {
+    const command = parseCommand(text);
+    assert(command);
+    return {
+      sessionId: first.id,
+      command,
+      source: { kind: "desktop" as const },
+      startTask,
+    };
+  }
+  function openCommandSession(running = false) {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      runLockSessionIds: running ? { [first.id]: true } : {},
+    });
+    sessionMetadata.set(first.id, sessionFile(first).metadata);
+    chats.set(first.id, {
+      status: running ? "streaming" : "ready",
+      messages: [],
+    } as never);
+  }
+
+  it("首次帮助无需模型，创建会话但不创建模型消息", async () => {
+    useChatStore.setState({
+      draftSessionId: first.id,
+      activeSessionId: first.id,
+      selectedModel: null,
+      draftExternalAgentId: null,
+      live: { ...useChatStore.getState().live, draftCwd: first.cwd },
+    });
+    expect(
+      await sendChatMessage(first.id, {
+        role: "user",
+        parts: [{ type: "text", text: "/h" }],
+      }),
+    ).toBe(true);
+    await vi.waitFor(() =>
+      expect(
+        useCommandStore.getState().sessions[first.id]?.[0].result?.status,
+      ).toBe("success"),
+    );
+    expect(
+      io.commit.mock.calls
+        .flatMap(([file]) => file.messages)
+        .map((record) => record.role),
+    ).toEqual(["command", "command"]);
+    expect(chats.get(first.id)?.messages).toEqual([]);
+    expect(useChatStore.getState().draftSessionId).toBeNull();
+    expect(useChatStore.getState().sessions[0].cwd).toBe(first.cwd);
+  });
+
+  it("忙碌时帮助不进入引导，终态等待其在途写入再释放锁", async () => {
+    openCommandSession(true);
+    let finish!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    io.commit.mockImplementationOnce(async () => {
+      await blocked;
+      return first;
+    });
+    const help = submitSessionCommand(commandRequest());
+    await vi.waitFor(() => expect(io.commit).toHaveBeenCalledTimes(1));
+    const terminal = useChatStore.getState().commitMessages(first.id, []);
+    expect(io.release).not.toHaveBeenCalled();
+    expect(chats.get(first.id)?.messages).toEqual([]);
+    finish();
+    await (await help).completed;
+    await terminal;
+    expect(persistedMessageCounts.get(first.id)).toBe(0);
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it.each(["commit", "release"] as const)(
+    "初始化回执 %s 失败后只补交，不重跑任务或重复追加",
+    async (failure) => {
+      openCommandSession();
+      const startTask = vi.fn(async (message: UIMessage) => {
+        expect(io.commit.mock.calls).toHaveLength(1);
+        expect(message.parts).toEqual([
+          { type: "text", text: expect.stringContaining("AGENTS.md") },
+        ]);
+        expect(message.metadata).toHaveProperty("commandId");
+        io[failure].mockRejectedValueOnce(new Error("storage failure"));
+        return true;
+      });
+      const receipt = await submitSessionCommand(
+        commandRequest("/init", startTask),
+      );
+      await expect(receipt.completed).rejects.toThrow("storage failure");
+      expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+      await useChatStore.getState().commitMessages(first.id, []);
+      expect(startTask).toHaveBeenCalledTimes(1);
+      const writes = io.commit.mock.calls
+        .flatMap(([file]) => file.messages)
+        .filter(
+          (record) =>
+            record.role === "command" && record.content.phase === "result",
+        );
+      expect(writes).toHaveLength(failure === "commit" ? 2 : 1);
+      expect(
+        useCommandStore.getState().sessions[first.id][0].result?.status,
+      ).toBe("success");
+      expect(
+        useChatStore.getState().runLockSessionIds[first.id],
+      ).toBeUndefined();
+    },
+  );
+
+  it("多个初始化按接收顺序执行，中止当前任务同时取消剩余等待", async () => {
+    openCommandSession(true);
+    const started: number[] = [];
+    const requests = [];
+    for (let index = 0; index < 3; index++) {
+      requests.push(
+        await submitSessionCommand(
+          commandRequest(
+            "/init",
+            vi.fn(async () => {
+              started.push(index);
+              useChatStore.setState({
+                runLockSessionIds: { [first.id]: true },
+              });
+              return true;
+            }),
+          ),
+        ),
+      );
+    }
+    expect(started).toEqual([]);
+    useChatStore.setState({ runLockSessionIds: {} });
+    await requests[0].completed;
+    expect(started).toEqual([0]);
+    useChatStore.setState({ runLockSessionIds: {} });
+    await requests[1].completed;
+    expect(started).toEqual([0, 1]);
+    useChatStore.getState().patchAgentMeta(first.id, { cancelled: true });
+    useChatStore.setState({ runLockSessionIds: {} });
+    expect((await requests[2].completed).status).toBe("error");
+    expect(started).toEqual([0, 1]);
   });
 
   it("isolates parameter selections by session and model and restores their scalar choices", async () => {

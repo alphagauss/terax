@@ -20,7 +20,6 @@ const composer = vi.hoisted(() => ({
   workingDirectory: null,
   files: [],
   pickedSnippets: [],
-  pickedCommands: [],
   voice: { supported: false },
   stop: vi.fn(),
   submit: vi.fn(),
