@@ -133,6 +133,8 @@ type Props = {
   rootPending?: "connection" | "loading";
   remotePollingEnabled?: boolean;
   onOpenFolder?: () => void;
+  openFolderLabel?: string;
+  onOpenInNewSpace?: (path: string) => void;
   onOpenHome?: () => void;
   onOpenPath?: (path: string) => void;
   onReconnect?: () => void;
@@ -408,6 +410,8 @@ export const FileExplorer = memo(
       rootPending,
       remotePollingEnabled,
       onOpenFolder,
+      openFolderLabel,
+      onOpenInNewSpace,
       onOpenHome,
       onOpenPath,
       onReconnect,
@@ -751,7 +755,7 @@ export const FileExplorer = memo(
           <div className="text-xs text-muted-foreground">
             {t("noCurrentDirectory")}
           </div>
-          {onOpenFolder ? (
+          {onOpenFolder && !onOpenPath ? (
             <Button
               variant="outline"
               size="sm"
@@ -759,7 +763,7 @@ export const FileExplorer = memo(
               onClick={onOpenFolder}
             >
               <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
-              {t("openFolder")}
+              {openFolderLabel ?? t("openFolder")}
             </Button>
           ) : null}
           {onOpenHome ? (
@@ -790,7 +794,7 @@ export const FileExplorer = memo(
                 className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
               />
               <Button type="submit" variant="outline" size="sm">
-                {t("openPath")}
+                {openFolderLabel ?? t("openPath")}
               </Button>
             </form>
           ) : null}
@@ -1060,12 +1064,12 @@ export const FileExplorer = memo(
 
                 <div className="ml-0.5 flex shrink-0 items-center gap-0">
                   {onOpenFolder ? (
-                    <Hint content={t("openFolder")}>
+                    <Hint content={openFolderLabel ?? t("openFolder")}>
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         onClick={onOpenFolder}
-                        aria-label={t("openFolder")}
+                        aria-label={openFolderLabel ?? t("openFolder")}
                       >
                         <HugeiconsIcon
                           icon={FolderOpenIcon}
@@ -1258,6 +1262,7 @@ export const FileExplorer = memo(
             {menuTarget ? (
               <>
                 <FileActionItems
+                  onOpenDirectory={onOpenInNewSpace}
                   target={menuTarget}
                   onOpen={(path) => onOpenFile(path, false)}
                 />
@@ -1386,6 +1391,7 @@ export const FileExplorer = memo(
             ) : (
               <>
                 <FileActionItems
+                  onOpenDirectory={onOpenInNewSpace}
                   target={{ path: rootPath, isDir: true }}
                   onOpen={(path) => onOpenFile(path, false)}
                 />

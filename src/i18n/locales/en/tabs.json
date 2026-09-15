@@ -34,5 +34,6 @@
     "down": "Split Down",
     "left": "Split Left",
     "right": "Split Right"
-  }
+  },
+  "startFromDirectory": "Start from {{name}}"
 }

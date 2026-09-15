@@ -15,16 +15,15 @@ import {
 import {
   type LoadedSpaces,
   loadAll,
-  type SpaceMeta,
   saveActiveId,
   saveSpacesList,
 } from "@/modules/spaces/lib/store";
-import { useSpaces } from "@/modules/spaces/lib/useSpaces";
 import {
-  DEFAULT_SPACE_ID,
-  type Tab,
-  type WorkbenchState,
-} from "@/modules/workbench/types";
+  createDefaultSpace,
+  withDefaultSpace,
+  useSpaces,
+} from "@/modules/spaces/lib/useSpaces";
+import type { Tab, WorkbenchState } from "@/modules/workbench/types";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { useEffect, useRef } from "react";
@@ -47,9 +46,12 @@ function discardOrphanedStates(loaded: LoadedSpaces): LoadedSpaces {
   return states.size === loaded.states.size ? loaded : { ...loaded, states };
 }
 
-/** 判断有效持久化状态中是否存在需要恢复的页面。 */
+/** 页面或锁定目录需要准备环境，解锁空态不主动访问保存的旧根。 */
 function restoredPagesNeedEnvironment(loaded: LoadedSpaces): boolean {
-  return [...loaded.states.values()].some((state) => state.workbench !== null);
+  return (
+    loaded.spaces.some((space) => space.rootLocked && space.root) ||
+    [...loaded.states.values()].some((state) => state.workbench !== null)
+  );
 }
 
 /** 返回序列化布局中显式激活的可恢复标签。 */
@@ -85,13 +87,16 @@ export function foregroundIntentForLoadedSpaces(
   loaded: LoadedSpaces,
 ): RemoteForegroundIntent {
   const activeSpaceId =
-    loaded.activeId && loaded.states.has(loaded.activeId)
+    loaded.activeId &&
+    loaded.spaces.some((space) => space.id === loaded.activeId)
       ? loaded.activeId
       : loaded.spaces[0]?.id;
   const workbench = activeSpaceId
     ? loaded.states.get(activeSpaceId)?.workbench
     : null;
-  if (!workbench) return { kind: "none" };
+  const space = loaded.spaces.find((item) => item.id === activeSpaceId);
+  if (!workbench)
+    return { kind: space?.rootLocked && space.root ? "explorer" : "none" };
   const tab =
     explicitlyActiveSerializedTab(workbench) ?? firstSerializedTab(workbench);
   return tab?.kind === "terminal"
@@ -104,9 +109,9 @@ export function foregroundIntentForLoadedSpaces(
 }
 
 /**
- * 先读取本地 Space 布局，仅在恢复远端页面需要 Home 时等待环境就绪。
+ * 先读取本地 Space 状态，恢复远端页面或锁定目录时等待环境就绪。
  *
- * 空的远端 Workspace 可直接恢复默认首页；SSH 的后台连接由环境 Hook 独立管理。
+ * 没有目录与页面的远端 Workspace 直接恢复默认首页；SSH 后台连接由环境 Hook 独立管理。
  */
 export async function prepareWorkspaceBoot(
   env: ReturnType<typeof currentWorkspaceEnv>,
@@ -186,19 +191,15 @@ export function useSpacesBoot({
             env,
             currentWorkspaceBootstrap().launchDir,
           );
-          const meta: SpaceMeta = {
-            id: DEFAULT_SPACE_ID,
-            name: "Default",
-            root,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          };
+          const meta = createDefaultSpace(root);
           spaces = [meta];
           createdSpaceId = meta.id;
           activeSpaceId = meta.id;
-          await saveSpacesList(spaces);
           await saveActiveId(meta.id);
         }
+
+        spaces = withDefaultSpace(spaces);
+        await saveSpacesList(spaces);
 
         const active =
           activeSpaceId && spaces.some((space) => space.id === activeSpaceId)
@@ -225,9 +226,14 @@ export function useSpacesBoot({
         }
 
         await Promise.allSettled(
-          uniqueCwds(Object.values(state.tabs)).map((cwd) =>
-            native.workspaceAuthorize(cwd),
-          ),
+          [
+            ...new Set([
+              ...uniqueCwds(Object.values(state.tabs)),
+              ...spaces.flatMap((space) =>
+                space.rootLocked && space.root ? [space.root] : [],
+              ),
+            ]),
+          ].map((cwd) => native.workspaceAuthorize(cwd)),
         );
 
         useSpaces.getState().hydrate(spaces, active);

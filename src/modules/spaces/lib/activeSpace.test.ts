@@ -12,6 +12,8 @@ function space(over: Partial<SpaceMeta>): SpaceMeta {
     id: "s1",
     name: "Space",
     root: null,
+    rootLocked: false,
+    autoName: false,
     createdAt: 0,
     updatedAt: 0,
     ...over,

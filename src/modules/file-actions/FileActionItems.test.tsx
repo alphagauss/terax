@@ -15,6 +15,21 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 describe("shared file menu capabilities", () => {
+  it.each(["local", "wsl", "ssh"])(
+    "offers new Space as the first directory action in %s",
+    (kind) => {
+      mocks.kind = kind;
+      const html = renderToStaticMarkup(
+        <FileActionItems
+          target={{ path: "/project", isDir: true }}
+          onOpen={vi.fn()}
+          onOpenDirectory={vi.fn()}
+        />,
+      );
+      expect(html).toMatch(/^<button[^>]*>spaces:openInNewSpace<\/button>/);
+      expect(html).not.toContain("fileActions.openDirectory");
+    },
+  );
   it.each(["local", "ssh", "wsl"])(
     "limits %s menus to supported operations",
     (kind) => {

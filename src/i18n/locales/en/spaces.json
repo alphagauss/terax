@@ -10,5 +10,18 @@
   "deleteSpace": "Delete space",
   "dropToMoveHere": "Drop to move here",
   "noTabs": "No tabs",
-  "closeTab": "Close tab"
+  "closeTab": "Close tab",
+  "defaultSpace": "Default",
+  "untitledSpace": "Space {{number}}",
+  "newFromDirectory": "New space from folder",
+  "changeDirectory": "Change space folder",
+  "openInNewSpace": "Open in new space",
+  "lockDirectory": "Lock space directory",
+  "unlockDirectory": "Unlock and follow directory",
+  "directoryPending": "Waiting for a directory",
+  "directoryFailed": "Could not open folder",
+  "directoryDescription": "Enter a folder path in the current environment.",
+  "directoryPlaceholder": "Folder path",
+  "openDirectory": "Open",
+  "directoryInvalid": "The selected path is not a folder."
 }

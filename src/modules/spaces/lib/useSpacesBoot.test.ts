@@ -23,6 +23,8 @@ function loaded(
             id: "default",
             name: "Default",
             root: null,
+            rootLocked: false,
+            autoName: false,
             createdAt: 0,
             updatedAt: 0,
           },
@@ -40,6 +42,34 @@ const terminalWorkbench: SerializedWorkbenchNode = {
 };
 
 describe("prepareWorkspaceBoot", () => {
+  it("prepares a locked remote root without restoring or creating a terminal", async () => {
+    const state = loaded(null);
+    state.spaces[0].root = "/project";
+    state.spaces[0].rootLocked = true;
+    const ready = vi.fn(async () => "/home");
+    expect(
+      await prepareWorkspaceBoot(
+        { kind: "ssh", profileId: "server" },
+        null,
+        ready,
+        async () => state,
+      ),
+    ).toBe(state);
+    expect(ready).toHaveBeenCalledOnce();
+    expect(foregroundIntentForLoadedSpaces(state)).toEqual({
+      kind: "explorer",
+    });
+    state.spaces[0].rootLocked = false;
+    ready.mockClear();
+    await prepareWorkspaceBoot(
+      { kind: "ssh", profileId: "server" },
+      null,
+      ready,
+      async () => state,
+    );
+    expect(ready).not.toHaveBeenCalled();
+    expect(foregroundIntentForLoadedSpaces(state)).toEqual({ kind: "none" });
+  });
   it("restores an empty remote Workspace without waiting for its environment", async () => {
     const order: string[] = [];
     const ensureReady = vi.fn(async () => {
