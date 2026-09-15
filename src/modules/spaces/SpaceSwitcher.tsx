@@ -3,6 +3,8 @@
  * 负责 Space 的选择、重命名、拖拽和标签导航。
  */
 
+import { Button } from "@/components/controls/button";
+import { DEFAULT_SPACE_ID } from "@/modules/workbench/types";
 import { Hint } from "@/components/controls/tooltip";
 import { Kbd } from "@/components/ui/kbd";
 import {
@@ -19,6 +21,9 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   Delete02Icon,
+  FolderOpenIcon,
+  SquareLock01Icon,
+  SquareUnlock01Icon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -37,6 +42,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   tabs: Tab[];
   onNewSpace: () => void;
+  onNewSpaceFromDirectory: () => void;
+  onToggleRootLock: (id: string) => void;
   onDeleteSpace: (id: string) => void;
   onNewTabInSpace: (spaceId: string) => void;
   onJumpTab: (id: number) => void;
@@ -89,6 +96,8 @@ export function SpaceSwitcher({
   onOpenChange,
   tabs,
   onNewSpace,
+  onNewSpaceFromDirectory,
+  onToggleRootLock,
   onDeleteSpace,
   onNewTabInSpace,
   onJumpTab,
@@ -185,6 +194,7 @@ export function SpaceSwitcher({
   const onPointerMove = (e: React.PointerEvent) => {
     const st = drag.current;
     if (!st || st.pointerId !== e.pointerId) return;
+    if (st.kind === "space" && st.id === DEFAULT_SPACE_ID) return;
     if (!st.active) {
       if (Math.hypot(e.clientX - st.startX, e.clientY - st.startY) < 5) return;
       st.active = true;
@@ -210,7 +220,7 @@ export function SpaceSwitcher({
     if (st.kind === "space") {
       if (kind === "space") {
         const spaceId = hit.getAttribute("data-space-id");
-        if (spaceId && spaceId !== st.id)
+        if (spaceId && spaceId !== st.id && spaceId !== DEFAULT_SPACE_ID)
           next = { kind: "space", spaceId, edge };
       }
     } else if (kind === "tab") {
@@ -265,7 +275,9 @@ export function SpaceSwitcher({
             className="flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
           >
             <span className="max-w-36 truncate text-xs font-medium">
-              {current.name}
+              {current.id === DEFAULT_SPACE_ID
+                ? t("defaultSpace")
+                : current.name}
             </span>
             <HugeiconsIcon
               icon={ArrowRight01Icon}
@@ -292,7 +304,7 @@ export function SpaceSwitcher({
               space={sp}
               tabs={tabsBySpace.get(sp.id) ?? []}
               isActive={sp.id === activeId}
-              canDelete={spaces.length > 1}
+              canDelete={sp.id !== DEFAULT_SPACE_ID}
               expanded={expanded.has(sp.id)}
               editing={editingId === sp.id}
               dragging={dragging}
@@ -308,6 +320,7 @@ export function SpaceSwitcher({
                 setActive(sp.id);
                 onOpenChange(false);
               }}
+              onToggleRootLock={() => onToggleRootLock(sp.id)}
               onStartRename={() => setEditingId(sp.id)}
               onCommitRename={(name) => {
                 const v = name.trim();
@@ -322,15 +335,29 @@ export function SpaceSwitcher({
             />
           ))}
         </div>
-        <div className="mt-1.5 border-t border-border/60 pt-1.5">
-          <button
-            type="button"
+        <div className="mt-1.5 grid grid-cols-2 gap-1 border-t border-border/60 pt-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-auto min-h-7 min-w-0 justify-start py-1.5"
+            onClick={onNewSpaceFromDirectory}
+          >
+            <HugeiconsIcon icon={FolderOpenIcon} size={14} strokeWidth={1.75} />
+            <span className="min-w-0 whitespace-normal text-left">
+              {t("newFromDirectory")}
+            </span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-auto min-h-7 min-w-0 justify-start py-1.5"
             onClick={onNewSpace}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground"
           >
             <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={1.75} />
-            <span className="flex-1">{t("newSpace")}</span>
-          </button>
+            <span className="min-w-0 whitespace-normal text-left">
+              {t("newSpace")}
+            </span>
+          </Button>
         </div>
       </PopoverContent>
       {overlay &&
@@ -374,6 +401,7 @@ type SpaceRowProps = {
   onPointerUp: (e: React.PointerEvent, onActivate?: () => void) => void;
   onToggle: () => void;
   onSwitch: () => void;
+  onToggleRootLock: () => void;
   onStartRename: () => void;
   onCommitRename: (name: string) => void;
   onCancelRename: () => void;
@@ -398,6 +426,7 @@ function SpaceRow({
   onPointerUp,
   onToggle,
   onSwitch,
+  onToggleRootLock,
   onStartRename,
   onCommitRename,
   onCancelRename,
@@ -428,7 +457,7 @@ function SpaceRow({
         onPointerUp={editing ? undefined : (e) => onPointerUp(e, onSwitch)}
         onPointerCancel={(e) => onPointerUp(e)}
         onKeyDown={(e) => {
-          if (editing) return;
+          if (editing || e.target !== e.currentTarget) return;
           if (e.key === "Enter") {
             e.preventDefault();
             onSwitch();
@@ -459,48 +488,92 @@ function SpaceRow({
             strokeWidth={2}
           />
         </button>
-        <SpaceAvatar space={space} size="sm" active={isActive} />
+        <SpaceAvatar
+          space={
+            space.id === DEFAULT_SPACE_ID
+              ? { ...space, name: t("defaultSpace") }
+              : space
+          }
+          size="sm"
+          active={isActive}
+        />
         {editing ? (
           <InlineRename
-            initial={space.name}
+            initial={
+              space.id === DEFAULT_SPACE_ID ? t("defaultSpace") : space.name
+            }
             onCommit={onCommitRename}
             onCancel={onCancelRename}
             className="ml-0.5"
           />
         ) : (
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-            {space.name}
+            {space.id === DEFAULT_SPACE_ID ? t("defaultSpace") : space.name}
           </span>
         )}
         {!editing && (
-          <>
-            <span className="shrink-0 px-1 text-[10px] tabular-nums text-muted-foreground group-hover:hidden">
-              {tabs.length}
-            </span>
-            <div
-              data-no-drag
-              className="hidden shrink-0 items-center gap-0.5 group-hover:flex"
-            >
-              <RowAction
-                icon={PencilEdit02Icon}
-                label={t("renameSpace")}
-                onClick={onStartRename}
-              />
+          <div data-no-drag className="flex shrink-0 items-center gap-0.5">
+            <div className="invisible flex items-center gap-0.5 group-hover:visible group-focus-within:visible">
+              {space.id !== DEFAULT_SPACE_ID && (
+                <RowAction
+                  icon={PencilEdit02Icon}
+                  label={t("renameSpace")}
+                  onClick={onStartRename}
+                />
+              )}
               <RowAction
                 icon={PlusSignIcon}
                 label={t("newTab")}
                 onClick={onNewTab}
               />
-              {canDelete && (
-                <RowAction
-                  icon={Delete02Icon}
-                  label={t("deleteSpace")}
-                  destructive
-                  onClick={onDelete}
+            </div>
+            <Hint
+              content={`${t(space.rootLocked ? "unlockDirectory" : "lockDirectory")}: ${space.root ?? t("directoryPending")}`}
+            >
+              <Button
+                data-no-drag
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t(
+                  space.rootLocked ? "unlockDirectory" : "lockDirectory",
+                )}
+                aria-pressed={space.rootLocked}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleRootLock();
+                }}
+              >
+                <HugeiconsIcon
+                  icon={
+                    space.rootLocked ? SquareLock01Icon : SquareUnlock01Icon
+                  }
+                  size={13}
+                  strokeWidth={1.75}
                 />
+              </Button>
+            </Hint>
+            <div className="relative flex h-6 min-w-6 items-center justify-center">
+              <span
+                className={cn(
+                  "px-1 text-[10px] tabular-nums text-muted-foreground",
+                  canDelete &&
+                    "group-hover:invisible group-focus-within:invisible",
+                )}
+              >
+                {tabs.length}
+              </span>
+              {canDelete && (
+                <div className="invisible absolute inset-0 flex items-center justify-center group-hover:visible group-focus-within:visible">
+                  <RowAction
+                    icon={Delete02Icon}
+                    label={t("deleteSpace")}
+                    destructive
+                    onClick={onDelete}
+                  />
+                </div>
               )}
             </div>
-          </>
+          </div>
         )}
       </div>
 
@@ -573,6 +646,7 @@ function TabRow({
         onPointerUp={(e) => onPointerUp(e, onJump)}
         onPointerCancel={(e) => onPointerUp(e)}
         onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter") {
             e.preventDefault();
             onJump();

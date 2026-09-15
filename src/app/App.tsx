@@ -141,7 +141,8 @@ import {
   useWorkspacePageHandoff,
 } from "@/modules/workspace-handoff";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
+import { useSpaceDirectories } from "@/modules/spaces/lib/useSpaceDirectories";
+import { SpaceDirectoryDialog } from "@/modules/spaces/components/SpaceDirectoryDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Layout, LayoutChangedMeta } from "react-resizable-panels";
@@ -166,7 +167,7 @@ function parentDirectory(path: string): string | null {
 /**
  * Terax 主窗口组件。
  *
- * 负责组合工作区、终端和侧栏。空 Space 不启动终端，目录入口只把当前环境内用户明确选择的路径传给新终端。
+ * 负责组合工作区、终端和侧栏。Space 目录独立于工作页，目录选择不创建终端。
  */
 export default function App() {
   const { t } = useTranslation("common");
@@ -321,7 +322,6 @@ export default function App() {
   const workspaceWindowMode = usePreferencesStore((s) => s.workspaceWindowMode);
   const {
     home,
-    launchCwd,
     launchCwdResolved,
     environmentError,
     remoteEventsReady,
@@ -465,9 +465,13 @@ export default function App() {
   useEditorFileSync({ tabs, tabsRef, editorRefs });
   useThemeFileEditing({ tabsRef, openFileTab });
 
-  const { explorerRoot: resolvedExplorerRoot, inheritedCwdForNewTab } =
-    useWorkspaceCwd(activeTab, tabs, home);
-  const explorerRoot = spaceTabs.length === 0 ? null : resolvedExplorerRoot;
+  const {
+    explorerRoot,
+    inheritedCwdForNewTab,
+    cwdForNewTabInSpace,
+    rootForSpace,
+  } = useWorkspaceCwd(workbenchState, activeSpaceId, home);
+  const directories = useSpaceDirectories(createSpace, ensureWorkspaceReady);
   const updatePythonRunTitle = useCallback(
     (tabId: number, title: string) => updateTab(tabId, { title }),
     [updateTab],
@@ -786,55 +790,21 @@ export default function App() {
     setNewEditorOpen(true);
   }, [ensureWorkspaceReady]);
 
-  /**
-   * 通过原生目录选择器在当前 Local 工作区打开一个终端标签页。
-   *
-   * 选择器返回宿主机路径，因此 WSL 和 SSH 进程不得调用。路径统一为正斜杠，保持前端工作区路径约定。
-   */
-  const openFolder = useCallback(async () => {
-    if (workspaceEnv.kind !== "local") return;
-
-    try {
-      const selected = await openFolderDialog({
-        directory: true,
-        multiple: false,
-        title: t("openFolder"),
-      });
-      if (typeof selected === "string") {
-        newTab(selected.replace(/\\/g, "/"));
-      }
-    } catch {
-      toast.error(t("openFolderFailed"));
-    }
-  }, [newTab, t, workspaceEnv.kind]);
+  /** 目录选择绑定发起操作时的 Space；Default 的选择始终创建项目 Space。 */
+  const openFolder = useCallback(
+    () => directories.chooseDirectory(activeSpaceId),
+    [directories.chooseDirectory, activeSpaceId],
+  );
 
   const openEnvironmentHome = useCallback(async () => {
+    const target = activeSpaceId;
     const readyHome = await ensureWorkspaceReady();
-    if (readyHome) newTab(readyHome);
-  }, [ensureWorkspaceReady, newTab]);
+    if (readyHome) await directories.openDirectory(readyHome, target);
+  }, [activeSpaceId, ensureWorkspaceReady, directories.openDirectory]);
 
-  /**
-   * 校验当前 WSL 或 SSH 环境中的目录并在该目录创建普通终端。
-   *
-   * 路径只在用户显式提交时访问，空 Workbench 本身不会触发远端文件请求。
-   */
   const openEnvironmentPath = useCallback(
-    async (path: string) => {
-      if (workspaceEnv.kind === "local") return;
-      try {
-        if (!(await ensureWorkspaceReady())) return;
-        const canonical = await native.canonicalize(path);
-        const stat = await invoke<{ kind: string }>("fs_stat", {
-          path: canonical,
-          workspace: workspaceEnv,
-        });
-        if (stat.kind !== "dir") throw new Error(t("folderPathInvalid"));
-        newTab(canonical);
-      } catch {
-        toast.error(t("folderPathInvalid"));
-      }
-    },
-    [ensureWorkspaceReady, newTab, t, workspaceEnv],
+    (path: string) => directories.openDirectory(path, activeSpaceId),
+    [activeSpaceId, directories.openDirectory],
   );
 
   const openNewPrivateTab = useCallback(
@@ -1044,16 +1014,7 @@ export default function App() {
   const toggleSourceControl = useCallback(() => {
     sidebar.toggleContainer("source-control");
   }, [sidebar.toggleContainer]);
-  const { sourceControl } = useSourceControlContext({
-    activeTab,
-    tabs,
-    activeTerminalCwd,
-    explorerRoot,
-    launchCwd,
-    launchCwdResolved: spaceTabs.length > 0 && launchCwdResolved,
-    home,
-    sourceControlVisible: sidebar.isVisible("source-control"),
-  });
+  const { sourceControl } = useSourceControlContext(explorerRoot);
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
@@ -1361,19 +1322,11 @@ export default function App() {
 
   const activeCwd = activeTerminalCwd;
 
-  const handleNewSpace = useCallback(() => {
-    const { spaces, create, setActive } = useSpaces.getState();
-    const meta = create({
-      name: `Space ${spaces.length + 1}`,
-      root: null,
-    });
-    createSpace(meta.id);
-    setActive(meta.id);
-    return meta.id;
-  }, [createSpace]);
+  const handleNewSpace = directories.createSpace;
 
   const deleteSpace = useCallback(
     (id: string) => {
+      if (id === DEFAULT_SPACE_ID) return;
       const workspace = currentWorkspaceEnv();
       const { discardPaths } = spaceDeleteDocuments(
         tabsRef.current,
@@ -1398,6 +1351,7 @@ export default function App() {
 
   const handleDeleteSpace = useCallback(
     async (id: string) => {
+      if (id === DEFAULT_SPACE_ID) return;
       const terminalTabs = tabsRef.current.filter(
         (tab): tab is TerminalTab =>
           tab.spaceId === id && tab.kind === "terminal",
@@ -1455,12 +1409,11 @@ export default function App() {
     async (spaceId: string) => {
       const readyHome = await ensureWorkspaceReady();
       if (!readyHome) return;
-      const root = useSpaces
-        .getState()
-        .spaces.find((s) => s.id === spaceId)?.root;
-      newTabInSpace(spaceId, root ?? readyHome);
+      if (!useSpaces.getState().spaces.some((space) => space.id === spaceId))
+        return;
+      newTabInSpace(spaceId, cwdForNewTabInSpace(spaceId) ?? readyHome);
     },
-    [ensureWorkspaceReady, newTabInSpace],
+    [ensureWorkspaceReady, newTabInSpace, cwdForNewTabInSpace],
   );
 
   const jumpToTab = useCallback(
@@ -1480,6 +1433,19 @@ export default function App() {
       onOpenChange={setSwitcherOpen}
       tabs={tabs}
       onNewSpace={() => void handleNewSpace()}
+      onNewSpaceFromDirectory={() => {
+        setSwitcherOpen(false);
+        void directories.chooseDirectory(null);
+      }}
+      onToggleRootLock={(id) => {
+        const space = useSpaces
+          .getState()
+          .spaces.find((item) => item.id === id);
+        if (space)
+          useSpaces
+            .getState()
+            .setRootLocked(id, !space.rootLocked, rootForSpace(id));
+      }}
       onDeleteSpace={handleDeleteSpace}
       onNewTabInSpace={handleNewTabInSpace}
       onJumpTab={jumpToTab}
@@ -1521,7 +1487,13 @@ export default function App() {
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
-            spaces: useSpaces.getState().spaces,
+            spaces: useSpaces
+              .getState()
+              .spaces.map((space) =>
+                space.id === DEFAULT_SPACE_ID
+                  ? { ...space, name: t("spaces:defaultSpace") }
+                  : space,
+              ),
             activeSpaceId,
             openSpacesOverview: () => setSwitcherOpen(true),
             newSpace: () => void handleNewSpace(),
@@ -1529,6 +1501,7 @@ export default function App() {
           })
         : [],
     [
+      t,
       commandPaletteOpen,
       tabs,
       activeId,
@@ -1790,7 +1763,15 @@ export default function App() {
                 : "loading"
               : undefined
           }
-          onOpenFolder={workspaceEnv.kind === "local" ? openFolder : undefined}
+          onOpenFolder={openFolder}
+          openFolderLabel={t(
+            activeSpaceId === DEFAULT_SPACE_ID
+              ? "spaces:newFromDirectory"
+              : "spaces:changeDirectory",
+          )}
+          onOpenInNewSpace={(path) => {
+            void directories.openDirectory(path, null);
+          }}
           onOpenHome={
             workspaceEnv.kind === "local" ? undefined : openEnvironmentHome
           }
@@ -1876,6 +1857,18 @@ export default function App() {
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
+        {directories.request && (
+          <SpaceDirectoryDialog
+            title={t(
+              directories.request.spaceId &&
+                directories.request.spaceId !== DEFAULT_SPACE_ID
+                ? "spaces:changeDirectory"
+                : "spaces:newFromDirectory",
+            )}
+            onClose={directories.closeDialog}
+            onSubmit={directories.submitDialog}
+          />
+        )}
         <div className="relative flex h-screen flex-col overflow-hidden bg-background text-foreground">
           {!zenMode && (
             <Header
@@ -1925,9 +1918,7 @@ export default function App() {
                     ? "0px"
                     : `${sidebar.minimumWidth("primary")}px`
                 }
-                maxSize={
-                  sidebar.runtime.secondaryMaximized ? "0px" : undefined
-                }
+                maxSize={sidebar.runtime.secondaryMaximized ? "0px" : undefined}
                 collapsible
                 collapsedSize={0}
               >
@@ -1994,9 +1985,7 @@ export default function App() {
                     ? "0px"
                     : `${WORKSPACE_MIN_WIDTH}px`
                 }
-                maxSize={
-                  sidebar.runtime.secondaryMaximized ? "0px" : undefined
-                }
+                maxSize={sidebar.runtime.secondaryMaximized ? "0px" : undefined}
                 collapsible={sidebar.runtime.secondaryMaximized}
                 collapsedSize={0}
               >

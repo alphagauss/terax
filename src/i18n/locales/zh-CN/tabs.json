@@ -38,5 +38,6 @@
     "down": "向下拆分",
     "left": "向左拆分",
     "right": "向右拆分"
-  }
+  },
+  "startFromDirectory": "从 {{name}} 启动"
 }

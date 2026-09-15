@@ -17,6 +17,8 @@ export type SpaceMeta = {
   id: string;
   name: string;
   root: string | null;
+  rootLocked: boolean;
+  autoName: boolean;
   color?: number;
   createdAt: number;
   updatedAt: number;

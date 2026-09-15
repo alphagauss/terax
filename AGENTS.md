@@ -24,7 +24,7 @@
 
 ## 跨模块边界
 
-- Rust 拥有操作系统访问，WebView 通过原生接口调用。每个完整 Workspace 窗口是独立应用进程，启动环境不可变；Space 只保存 UI 分组。详见 [进程与共享状态](docs/architecture/two-process-model.md)。
+- Rust 拥有操作系统访问，WebView 通过原生接口调用。每个完整 Workspace 窗口是独立应用进程，启动环境不可变；Space 保存 UI 分组和项目根目录。详见 [进程与共享状态](docs/architecture/two-process-model.md)。
 - 执行、审批、持久化、取消和资源清理由业务运行时拥有，不随 UI 挂载而启停。共享业务不依赖 React、DOM 或 Tauri 窗口对象；宿主提供配置、通信和原生能力。
 - 现有模块随实际功能逐步解耦，不为实验性 TUI 或假设中的前端提前全面重构。`terax agent` 暂停主动开发，范围见 [终端宿主](docs/architecture/terminal-agent.md)。
 - 页面移动、分割或隐藏不得重建终端和其他后台运行实例。派生展示数据不得进入模型请求或下游业务协议。

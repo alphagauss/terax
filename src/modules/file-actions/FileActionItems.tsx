@@ -16,11 +16,13 @@ import { toast } from "sonner";
 export function FileActionItems({
   target,
   onOpen,
+  onOpenDirectory,
   resolve,
 }: {
   target: FileTarget;
   onOpen: (path: string, line?: number) => void | Promise<void>;
   resolve?: () => Promise<FileTarget>;
+  onOpenDirectory?: (path: string) => void | Promise<void>;
 }) {
   const { t } = useTranslation("common");
   const local = currentWorkspaceEnv().kind === "local";
@@ -39,19 +41,27 @@ export function FileActionItems({
   };
   return (
     <>
-      {(!target.isDir || local) && (
+      {(!target.isDir || local || onOpenDirectory) && (
         <ContextMenuItem
           onSelect={() =>
             run((file) =>
               file.isDir
-                ? local
-                  ? openSystemFile(file.path)
-                  : undefined
+                ? onOpenDirectory
+                  ? onOpenDirectory(file.path)
+                  : local
+                    ? openSystemFile(file.path)
+                    : undefined
                 : onOpen(file.path, file.line),
             )
           }
         >
-          {t(target.isDir ? "fileActions.openDirectory" : "fileActions.open")}
+          {t(
+            target.isDir
+              ? onOpenDirectory
+                ? "spaces:openInNewSpace"
+                : "fileActions.openDirectory"
+              : "fileActions.open",
+          )}
         </ContextMenuItem>
       )}
       {local && !target.isDir && (

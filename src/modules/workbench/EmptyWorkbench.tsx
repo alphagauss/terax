@@ -3,6 +3,9 @@
  * 页面只复用现有新建标签动作，不保存状态，也不作为 Workbench 标签存在。
  */
 
+import { pathBasename } from "@/lib/utils";
+import { useSpaces } from "@/modules/spaces/lib/useSpaces";
+import { DEFAULT_SPACE_ID } from "@/modules/workbench/types";
 import { Button } from "@/components/controls/button";
 import {
   ComputerTerminal02Icon,
@@ -34,6 +37,11 @@ export function EmptyWorkbench({
   onNewWebPreview,
 }: Props) {
   const { t } = useTranslation("tabs");
+  const spaceRoot = useSpaces((state) =>
+    state.activeId !== DEFAULT_SPACE_ID
+      ? state.spaces.find((space) => space.id === state.activeId)?.root
+      : null,
+  );
   const actions = [
     [t("terminal"), ComputerTerminal02Icon, onNewTerminal],
     [t("blocks"), ComputerTerminal02Icon, onNewBlock],
@@ -45,8 +53,10 @@ export function EmptyWorkbench({
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-background px-8 py-12">
       <section className="w-full max-w-md">
-        <h1 className="mb-4 text-lg font-medium text-foreground">
-          {t("start")}
+        <h1 className="mb-4 break-words text-lg font-medium text-foreground">
+          {spaceRoot
+            ? t("startFromDirectory", { name: pathBasename(spaceRoot) })
+            : t("start")}
         </h1>
         <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
           {actions.map(([label, icon, action]) => (

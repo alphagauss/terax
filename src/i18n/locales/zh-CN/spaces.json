@@ -10,5 +10,18 @@
   "deleteSpace": "删除 space",
   "dropToMoveHere": "拖放到此处以移动",
   "noTabs": "暂无标签页",
-  "closeTab": "关闭标签页"
+  "closeTab": "关闭标签页",
+  "defaultSpace": "默认",
+  "untitledSpace": "Space {{number}}",
+  "newFromDirectory": "从文件夹新建 Space",
+  "changeDirectory": "切换 Space 目录",
+  "openInNewSpace": "在新 Space 中打开",
+  "lockDirectory": "锁定 Space 目录",
+  "unlockDirectory": "解锁并跟随目录",
+  "directoryPending": "等待设置目录",
+  "directoryFailed": "无法打开文件夹",
+  "directoryDescription": "输入当前环境中的文件夹路径。",
+  "directoryPlaceholder": "文件夹路径",
+  "openDirectory": "打开",
+  "directoryInvalid": "所选路径不是文件夹。"
 }
