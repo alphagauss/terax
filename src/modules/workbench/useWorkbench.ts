@@ -64,14 +64,27 @@ function firstGroupId(space: SpaceWorkbench): number {
   return groupIds(space.root)[0];
 }
 
-type PreviewDocumentTab = EditorTab | MarkdownTab;
+type PreviewTab =
+  | EditorTab
+  | MarkdownTab
+  | GitDiffTab
+  | GitCommitFileDiffTab;
 
-/** 用新的编辑器或 Markdown 页面原位替换当前分组中的临时预览。 */
-function replaceDocumentPreview(
+function isPreviewTab(tab: Tab | undefined): tab is PreviewTab {
+  return (
+    tab?.kind === "editor" ||
+    tab?.kind === "markdown" ||
+    tab?.kind === "git-diff" ||
+    tab?.kind === "git-commit-file"
+  );
+}
+
+/** 用新的文件或 Git 差异页面原位替换当前分组中的临时预览。 */
+function replacePreview(
   state: WorkbenchState,
   groupId: number,
   previousId: number,
-  tab: PreviewDocumentTab,
+  tab: PreviewTab,
 ): WorkbenchState {
   const owner = findGroupForTab(state, previousId);
   if (!owner || owner.group.id !== groupId) return state;
@@ -105,6 +118,10 @@ function cloneForSplit(tab: Tab, id: number): Tab | null {
     case "editor":
       return { ...tab, id, preview: false, cold: false };
     case "markdown":
+      return { ...tab, id, preview: false, cold: false };
+    case "git-diff":
+      return { ...tab, id, preview: false, cold: false };
+    case "git-commit-file":
       return { ...tab, id, preview: false, cold: false };
     case "ai-diff":
       return null;
@@ -357,11 +374,8 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
     (id: number) =>
       commit((current) => {
         const tab = current.tabs[id];
-        if (
-          (tab?.kind !== "editor" && tab?.kind !== "markdown") ||
-          !tab.preview
-        )
-          return current;
+        if (!isPreviewTab(tab)) return current;
+        if (!tab.preview) return current;
         return {
           ...current,
           tabs: { ...current.tabs, [id]: { ...tab, preview: false } },
@@ -383,13 +397,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
       if (!group) return null;
-      const documentTabs = group.tabIds
+      const previewTabs = group.tabIds
         .map((id) => stateRef.current.tabs[id])
-        .filter(
-          (tab): tab is PreviewDocumentTab =>
-            tab?.kind === "editor" || tab?.kind === "markdown",
-        );
-      const editorTabs = documentTabs.filter(
+        .filter(isPreviewTab);
+      const editorTabs = previewTabs.filter(
         (tab): tab is EditorTab => tab.kind === "editor",
       );
       const workspace = currentWorkspaceEnv();
@@ -418,10 +429,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         ...(explorerRoot !== undefined && { explorerRoot }),
       };
       if (!pin && !forceNew) {
-        const preview = documentTabs.find((candidate) => candidate.preview);
+        const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
           commit((current) =>
-            replaceDocumentPreview(current, target, preview.id, tab),
+            replacePreview(current, target, preview.id, tab),
           );
           return id;
         }
@@ -446,17 +457,14 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       if (target === null) return null;
       const group = stateRef.current.spaces[spaceId]?.groups[target];
       if (!group) return null;
-      const documentTabs = group.tabIds
+      const previewTabs = group.tabIds
         .map((id) => stateRef.current.tabs[id])
-        .filter(
-          (tab): tab is PreviewDocumentTab =>
-            tab?.kind === "editor" || tab?.kind === "markdown",
-        );
+        .filter(isPreviewTab);
       const workspace = currentWorkspaceEnv();
       const resourcePath = documentPathIdentity(workspace, path);
       const existing = forceNew
         ? undefined
-        : documentTabs.find((tab): tab is MarkdownTab =>
+        : previewTabs.find((tab): tab is MarkdownTab =>
             Boolean(
               tab?.kind === "markdown" &&
                 documentPathIdentity(workspace, tab.path) === resourcePath,
@@ -481,10 +489,10 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         ...(explorerRoot !== undefined && { explorerRoot }),
       };
       if (!pin && !forceNew) {
-        const preview = documentTabs.find((candidate) => candidate.preview);
+        const preview = previewTabs.find((candidate) => candidate.preview);
         if (preview) {
           commit((current) =>
-            replaceDocumentPreview(current, target, preview.id, tab),
+            replacePreview(current, target, preview.id, tab),
           );
           return id;
         }
@@ -610,6 +618,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       originalPath?: string | null;
       title?: string;
     }) => {
+      const spaceId = activeSpaceIdRef.current;
+      const target = targetGroup(spaceId);
+      if (target === null) return null;
+      const group = stateRef.current.spaces[spaceId]?.groups[target];
+      if (!group) return null;
       const existing = Object.values(stateRef.current.tabs).find(
         (tab) =>
           tab.kind === "git-diff" &&
@@ -630,7 +643,7 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const tab: GitDiffTab = {
         id,
         kind: "git-diff",
-        spaceId: activeSpaceIdRef.current,
+        spaceId,
         title:
           input.title ??
           `${pathBasename(input.path)} (${input.side === "worktree" ? "W" : "I"})`,
@@ -638,11 +651,21 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
         repoRoot: input.repoRoot,
         side: input.side,
         originalPath: input.originalPath ?? null,
+        preview: true,
       };
-      addPage(tab);
+      const preview = group.tabIds
+        .map((tabId) => stateRef.current.tabs[tabId])
+        .find((candidate): candidate is PreviewTab =>
+          Boolean(isPreviewTab(candidate) && candidate.preview),
+        );
+      if (preview) {
+        commit((current) => replacePreview(current, target, preview.id, tab));
+        return id;
+      }
+      addPage(tab, target);
       return id;
     },
-    [addPage, allocId, revealTab],
+    [addPage, allocId, commit, revealTab, targetGroup],
   );
 
   const openCommitFileDiffTab = useCallback(
@@ -654,6 +677,11 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       path: string;
       originalPath: string | null;
     }) => {
+      const spaceId = activeSpaceIdRef.current;
+      const target = targetGroup(spaceId);
+      if (target === null) return null;
+      const group = stateRef.current.spaces[spaceId]?.groups[target];
+      if (!group) return null;
       const existing = Object.values(stateRef.current.tabs).find(
         (tab) =>
           tab.kind === "git-commit-file" &&
@@ -674,14 +702,24 @@ export function useWorkbench(onRevealSpace?: (spaceId: string) => void) {
       const tab: GitCommitFileDiffTab = {
         id,
         kind: "git-commit-file",
-        spaceId: activeSpaceIdRef.current,
+        spaceId,
         title: `${pathBasename(input.path)} @ ${input.shortSha}`,
+        preview: true,
         ...input,
       };
-      addPage(tab);
+      const preview = group.tabIds
+        .map((tabId) => stateRef.current.tabs[tabId])
+        .find((candidate): candidate is PreviewTab =>
+          Boolean(isPreviewTab(candidate) && candidate.preview),
+        );
+      if (preview) {
+        commit((current) => replacePreview(current, target, preview.id, tab));
+        return id;
+      }
+      addPage(tab, target);
       return id;
     },
-    [addPage, allocId, revealTab],
+    [addPage, allocId, commit, revealTab, targetGroup],
   );
 
   /**

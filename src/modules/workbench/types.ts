@@ -70,6 +70,7 @@ export type GitDiffTab = TabBase & {
   repoRoot: string;
   side: GitDiffSide;
   originalPath: string | null;
+  preview: boolean;
 };
 
 export type GitCommitFileDiffTab = TabBase & {
@@ -80,6 +81,7 @@ export type GitCommitFileDiffTab = TabBase & {
   subject: string;
   path: string;
   originalPath: string | null;
+  preview: boolean;
 };
 
 export type AlphaSettingsTab = TabBase & {
