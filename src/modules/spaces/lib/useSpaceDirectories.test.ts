@@ -173,3 +173,11 @@ describe("Space directory actions", () => {
     expect(mocks.authorize).toHaveBeenCalledWith("/home/me/project");
   });
 });
+
+it("uses the native canonical path when opening a home-relative Space", async () => {
+  mocks.env = { kind: "ssh", profileId: "remote" };
+  mocks.canonicalize.mockResolvedValue("/home/login/project");
+  expect(await prepareSpaceDirectory("~/project")).toBe("/home/login/project");
+  expect(mocks.canonicalize).toHaveBeenCalledWith("~/project");
+  expect(mocks.authorize).toHaveBeenCalledWith("/home/login/project");
+});

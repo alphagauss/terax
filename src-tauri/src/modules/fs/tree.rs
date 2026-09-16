@@ -268,6 +268,7 @@ pub async fn list_subdirs(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<Vec<String>, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    let path = crate::modules::workspace::expand_user_path(path, &workspace).await?;
     if let Some(profile_id) = workspace.ssh_profile_id() {
         #[cfg(not(feature = "desktop"))]
         {
@@ -291,27 +292,31 @@ pub async fn list_subdirs(
             return Ok(dirs);
         }
     }
-    let root = resolve_path(&path, &workspace);
-    let read = std::fs::read_dir(&root).map_err(|e| {
-        log::debug!("list_subdirs({}) read_dir failed: {e}", root.display());
-        e.to_string()
-    })?;
+    tokio::task::spawn_blocking(move || {
+        let root = resolve_path(&path, &workspace);
+        let read = std::fs::read_dir(&root).map_err(|e| {
+            log::debug!("list_subdirs({}) read_dir failed: {e}", root.display());
+            e.to_string()
+        })?;
 
-    let mut dirs: Vec<String> = read
-        .filter_map(Result::ok)
-        .filter(|entry| match entry.file_type() {
-            Ok(t) if t.is_dir() => true,
-            Ok(t) if t.is_symlink() => std::fs::metadata(entry.path())
-                .map(|m| m.is_dir())
-                .unwrap_or(false),
-            _ => false,
-        })
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| show_hidden || !name.starts_with('.'))
-        .collect();
+        let mut dirs: Vec<String> = read
+            .filter_map(Result::ok)
+            .filter(|entry| match entry.file_type() {
+                Ok(t) if t.is_dir() => true,
+                Ok(t) if t.is_symlink() => std::fs::metadata(entry.path())
+                    .map(|m| m.is_dir())
+                    .unwrap_or(false),
+                _ => false,
+            })
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| show_hidden || !name.starts_with('.'))
+            .collect();
 
-    sort_names(&mut dirs);
-    Ok(dirs)
+        sort_names(&mut dirs);
+        Ok(dirs)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[cfg(test)]
@@ -322,6 +327,39 @@ mod tests {
     fn sorted(mut names: Vec<&str>) -> Vec<&str> {
         names.sort_by(|a, b| natural_cmp(a, b));
         names
+    }
+
+    #[tokio::test]
+    async fn subdirs_only_reads_one_level_and_preserves_errors() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("folder/nested")).unwrap();
+        std::fs::create_dir(root.path().join(".hidden")).unwrap();
+        std::fs::write(root.path().join("file"), "text").unwrap();
+        let path = root.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::list_subdirs(path.clone(), false, None)
+                .await
+                .unwrap(),
+            vec!["folder"]
+        );
+        assert_eq!(
+            super::list_subdirs(path, true, None).await.unwrap(),
+            vec![".hidden", "folder"]
+        );
+        assert!(super::list_subdirs(
+            root.path().join("file").to_string_lossy().into_owned(),
+            true,
+            None
+        )
+        .await
+        .is_err());
+        assert!(super::list_subdirs(
+            root.path().join("missing").to_string_lossy().into_owned(),
+            true,
+            None
+        )
+        .await
+        .is_err());
     }
 
     #[test]

@@ -1111,6 +1111,7 @@ pub async fn fs_canonicalize(
     workspace: Option<WorkspaceEnv>,
 ) -> Result<String, String> {
     let workspace = WorkspaceEnv::from_option(workspace);
+    let path = crate::modules::workspace::expand_user_path(path, &workspace).await?;
     if let Some(profile_id) = workspace.ssh_profile_id() {
         #[cfg(not(feature = "desktop"))]
         {

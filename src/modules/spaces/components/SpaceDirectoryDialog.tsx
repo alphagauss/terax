@@ -1,6 +1,6 @@
 /** WSL 与 SSH 使用当前环境路径输入，不调用宿主系统目录选择器。 */
 import { Button } from "@/components/controls/button";
-import { Input } from "@/components/controls/input";
+import { DirectoryPathInput } from "@/modules/workspace/DirectoryPathInput";
 import {
   Dialog,
   DialogContent,
@@ -45,10 +45,10 @@ export function SpaceDirectoryDialog({
             void onSubmit(path.trim()).finally(() => setPending(false));
           }}
         >
-          <Input
+          <DirectoryPathInput
             autoFocus
             value={path}
-            onChange={(event) => setPath(event.target.value)}
+            onValueChange={setPath}
             placeholder={t("directoryPlaceholder")}
             aria-label={t("directoryPlaceholder")}
           />

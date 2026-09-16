@@ -198,6 +198,44 @@ pub async fn workspace_authorize(
     Ok(crate::modules::fs::to_canon(&canonical))
 }
 
+/// 目录选择边界展开当前用户的 ~，SSH 使用登录家目录而非项目根。
+pub async fn expand_user_path(path: String, workspace: &WorkspaceEnv) -> Result<String, String> {
+    if path != "~" && !path.starts_with("~/") {
+        return Ok(path);
+    }
+    let home: Result<String, String> = match workspace {
+        WorkspaceEnv::Local => dirs::home_dir()
+            .map(|path| crate::modules::fs::to_canon(&path))
+            .ok_or_else(|| "home directory is unavailable".into()),
+        WorkspaceEnv::Wsl { distro } => {
+            let distro = distro.clone();
+            tokio::task::spawn_blocking(move || wsl_home(distro))
+                .await
+                .map_err(|error| error.to_string())?
+        }
+        WorkspaceEnv::Ssh { profile_id } => {
+            #[cfg(feature = "desktop")]
+            {
+                let workspace = crate::modules::remote::manager::global_manager()?
+                    .workspace(profile_id)
+                    .await?;
+                Ok(workspace.login_home().await)
+            }
+            #[cfg(not(feature = "desktop"))]
+            {
+                let _ = profile_id;
+                Err("SSH requires a desktop workspace in this build".into())
+            }
+        }
+    };
+    let home = home?;
+    Ok(if path == "~" {
+        home
+    } else {
+        format!("{}{}", home.trim_end_matches('/'), &path[1..])
+    })
+}
+
 /// 幂等创建并授权本机可访问的默认工作目录。
 ///
 /// 返回物理规范路径，确保后续 Agent owner 只能绑定到这个精确根目录。
@@ -1226,5 +1264,59 @@ mod appimage_tests {
             "FONTCONFIG_FILE"
         )
         .is_none());
+    }
+}
+
+#[cfg(test)]
+mod user_path_tests {
+    use super::{expand_user_path, WorkspaceEnv};
+
+    #[tokio::test]
+    async fn expands_only_current_user_home_without_shell_evaluation() {
+        let home = crate::modules::fs::to_canon(&dirs::home_dir().unwrap());
+        let expected = format!("{}/project", home.trim_end_matches('/'));
+        assert_eq!(
+            expand_user_path("~/project".into(), &WorkspaceEnv::Local)
+                .await
+                .unwrap(),
+            expected
+        );
+        for path in ["/absolute", "~other/project", "$HOME/project", "relative"] {
+            assert_eq!(
+                expand_user_path(path.into(), &WorkspaceEnv::Local)
+                    .await
+                    .unwrap(),
+                path
+            );
+        }
+        // 绝对路径不要求 SSH 连接，也不触发家目录探测。
+        assert_eq!(
+            expand_user_path(
+                "/project".into(),
+                &WorkspaceEnv::Ssh {
+                    profile_id: "offline".into()
+                }
+            )
+            .await
+            .unwrap(),
+            "/project"
+        );
+        let canonical =
+            crate::modules::fs::file::fs_canonicalize("~".into(), Some(WorkspaceEnv::Local))
+                .await
+                .unwrap();
+        assert_eq!(
+            canonical,
+            crate::modules::fs::to_canon(
+                &std::fs::canonicalize(dirs::home_dir().unwrap()).unwrap()
+            )
+        );
+        assert!(crate::modules::fs::tree::list_subdirs(
+            "~".into(),
+            false,
+            Some(WorkspaceEnv::Local)
+        )
+        .await
+        .is_ok());
     }
 }

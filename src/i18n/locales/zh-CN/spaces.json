@@ -1,4 +1,9 @@
 {
+  "directorySuggestions": "文件夹",
+  "directoryNoMatches": "没有匹配的文件夹",
+  "directoryDisconnected": "连接后可加载文件夹",
+  "directoryListFailed": "无法读取文件夹：{{error}}",
+
   "titleWithShortcut": "Spaces · {{shortcut}}",
   "title": "Spaces",
   "heading": "Spaces",
