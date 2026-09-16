@@ -1,5 +1,6 @@
 import { channelOwnerId } from "@/modules/channels/identity";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { projectDeliveries } from "@/modules/channels/history";
 import { beginChannelSend } from "@/modules/channels/outbound";
 import { appendSessionDisplay } from "@/modules/ai/store/chatStore";
 import type { ChannelSession } from "@/modules/channels/types";
@@ -25,6 +26,31 @@ const connection: ChannelSession = {
 };
 beforeEach(() => vi.resetAllMocks());
 describe("application Channel send", () => {
+  it.each(["application", "agent", "command", "tool"] as const)(
+    "%s 保存通用投递结果，历史可恢复原因且不重发",
+    async (source) => {
+      const records: Parameters<typeof appendSessionDisplay>[1][] = [];
+      vi.mocked(appendSessionDisplay).mockImplementation(
+        async (_id, record) => {
+          records.push(record);
+        },
+      );
+      const result = {
+        status: "unknown" as const,
+        parts: [{ index: 0, status: "unknown" as const }],
+        reason: "network" as const,
+        total: 1,
+      };
+      const send = vi.fn(async () => result);
+      expect(
+        await (
+          await beginChannelSend(connection, { text: "hello" }, send, source)
+        ).completed,
+      ).toEqual(result);
+      expect(projectDeliveries(records)).toMatchObject([{ source, result }]);
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each(["request", "result"])("%s 保存失败不重跑投递", async (phase) => {
     const send = vi.fn(async () => ({
       status: "partial" as const,

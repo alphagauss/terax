@@ -63,6 +63,7 @@ function harness(
     },
   );
   const manager = new ChannelManager({
+    deliver: (_connection, _content, send) => send(),
     command,
     adapter: async (connection) => ({
       canSend: () => true,
@@ -167,6 +168,10 @@ describe("ChannelManager", () => {
       expect.any(AbortSignal),
     );
     expect(h.disk.get("a")?.pendingIds).toEqual([identity("task")]);
+    expect(h.snapshots()[0]).toMatchObject({
+      status: "online",
+      issue: "delivery",
+    });
     h.gates[0]();
     await vi.waitFor(() => expect(h.snapshots()[0].busy).toBe(false));
     expect(h.send).toHaveBeenLastCalledWith(
@@ -174,7 +179,7 @@ describe("ChannelManager", () => {
       { text: "task" },
       expect.any(AbortSignal),
     );
-    expect(h.snapshots()[0].issue).toBe("delivery");
+    expect(h.snapshots()[0].issue).toBeNull();
     await h.manager.dispose();
   });
 

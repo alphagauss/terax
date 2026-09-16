@@ -57,11 +57,12 @@
     "agent": "The Agent run failed. Open the conversation for details.",
     "queue-full": "The message queue is full. New requests are waiting for space.",
     "interrupted": "Some messages were interrupted when the connection stopped. They were not run again automatically; please resend them.",
-    "delivery": "The reply could not be delivered. The result is available in the Channel conversation.",
+    "delivery": "A message failed or was only partly sent. View its result in Channels.",
     "account-mismatch": "This connection belongs to a different WeChat account. Create another connection for a new account.",
     "duplicate-account": "This WeChat account already has a connection.",
     "name": "Use a name between 1 and 80 characters.",
-    "route-save": "The network route could not be saved. Other submitted settings have been kept. Please retry saving."
+    "route-save": "The network route could not be saved. Other submitted settings have been kept. Please retry saving.",
+    "delivery-unknown": "Sending was interrupted or the response was invalid. Check the message in your messaging app."
   },
   "busyMessageMode": {
     "label": "Messages received while running",
@@ -79,12 +80,12 @@
   "imageAttachmentSummary": "This message includes {{count}} image(s). Saved image paths: {{paths}}. Images that failed to download: {{failed}}.",
   "outbound": {
     "label": "Application send",
-    "accepted": "Platform accepted",
+    "accepted": "Sent",
     "partial": "Partially accepted",
-    "failed": "Failed",
-    "unknown": "Result unknown",
+    "failed": "Delivery failed",
+    "unknown": "Delivery unconfirmed",
     "unconfirmed": "Result unconfirmed",
-    "parts": "Accepted parts: {{count}}",
+    "parts": "{{accepted}} confirmed, {{failed}} failed, {{unknown}} unconfirmed, {{unsent}} not sent",
     "instance": "Connection",
     "target": "Target: {{id}}",
     "noTarget": "Start a conversation with the bot in your messaging app first.",
@@ -106,6 +107,22 @@
     "direct": "Private chat",
     "group": "Group / room",
     "unavailable": "Connect this instance to send. If already connected, send a new message from your messaging app to refresh the conversation context.",
-    "openInAgent": "View in Agent panel"
+    "openInAgent": "View in Agent panel",
+    "unknownHelp": "The message may have arrived, but delivery could not be confirmed. Check your messaging app before sending again.",
+    "sources": {
+      "application": "App send",
+      "agent": "Agent reply",
+      "command": "Command reply",
+      "tool": "Tool send"
+    },
+    "reasons": {
+      "network": "The network request or response read failed.",
+      "protocol": "The platform response could not be interpreted.",
+      "rejected": "The platform rejected this message.",
+      "auth": "Platform authorization expired. Sign in again.",
+      "context": "No sending context is available. Send a message from your messaging app first.",
+      "upload": "Attachment preparation or upload failed.",
+      "interrupted": "Sending was interrupted before a complete acknowledgement was received."
+    }
   }
 }

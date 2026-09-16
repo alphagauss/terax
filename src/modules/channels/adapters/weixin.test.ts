@@ -19,15 +19,25 @@ vi.mock("@/i18n", () => ({ default: { t: (key: string) => key } }));
 
 describe("personal WeChat", () => {
   it.each([
-    [{}, "unknown"],
-    [{ ret: "0" }, "unknown"],
-    [{ ret: 0, errcode: null }, "unknown"],
-    [{ ret: 0, errcode: -14 }, "failed"],
-    [{ errcode: 0 }, "accepted"],
+    [{}, "accepted", undefined],
+    ["", "accepted", undefined],
+    [null, "accepted", undefined],
+    [{ ret: 0 }, "accepted", undefined],
+    [{ ret: "0" }, "unknown", "protocol"],
+    [{ ret: 0, errcode: null }, "accepted", undefined],
+    [{ ret: 0, errcode: -14 }, "failed", "auth"],
+    [{ ret: -2 }, "failed", "rejected"],
+    [{ errcode: 0 }, "accepted", undefined],
   ])(
-    "requires an explicit valid send acknowledgement: %j",
-    async (response, status) => {
-      const fetch = vi.fn(async () => Response.json(response));
+    "按微信协议接受空对象成功回执，保留明确错误和格式异常：%j",
+    async (response, status, reason) => {
+      const fetch = vi.fn(async () =>
+        response === null
+          ? new Response(null, { status: 204 })
+          : response === ""
+            ? new Response("")
+            : Response.json(response),
+      );
       const adapter = new WeixinAdapter(
         {
           token: "secret",
@@ -49,7 +59,7 @@ describe("personal WeChat", () => {
           { text: "before inbound" },
           new AbortController().signal,
         ),
-      ).toEqual({ status: "failed", parts: [] });
+      ).toEqual({ status: "failed", parts: [], total: 1, reason: "context" });
       expect(fetch).not.toHaveBeenCalled();
       await receiveWeixinContext(adapter);
       expect(
@@ -58,7 +68,7 @@ describe("personal WeChat", () => {
           { text: "wrong target" },
           new AbortController().signal,
         ),
-      ).toEqual({ status: "failed", parts: [] });
+      ).toEqual({ status: "failed", parts: [], total: 1, reason: "context" });
       expect(fetch).not.toHaveBeenCalled();
       expect(
         await adapter.send(
@@ -66,15 +76,18 @@ describe("personal WeChat", () => {
           { text: "reply" },
           new AbortController().signal,
         ),
-      ).toEqual({ status, parts: [{ index: 0, status }] });
+      ).toEqual({
+        status,
+        parts: [{ index: 0, status }],
+        total: 1,
+        ...(reason ? { reason } : {}),
+      });
       expect(fetch).toHaveBeenCalledTimes(1);
     },
   );
 
   it("长正文完整分段发送，不静默截断", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ ret: 0 }),
-    );
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({}));
     const adapter = new WeixinAdapter(
       {
         token: "secret",
@@ -136,7 +149,7 @@ describe("personal WeChat", () => {
         { text: "reply" },
         new AbortController().signal,
       ),
-    ).toEqual({ status: "failed", parts: [] });
+    ).toEqual({ status: "failed", parts: [], total: 1, reason: "network" });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toContain("/getconfig");
     await expect(
@@ -242,6 +255,8 @@ describe("personal WeChat", () => {
       await vi.runAllTimersAsync();
       expect(await sending).toEqual({
         status: "unknown",
+        reason: "network",
+        total: 2,
         parts: [
           { index: 0, status: "accepted" },
           { index: 1, status: "unknown" },

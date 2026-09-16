@@ -64,11 +64,22 @@ export async function startChannelsService(
   let connections: ChannelConnection[] = [];
   let snapshots: ChannelSnapshot[] = [];
   let serial = Promise.resolve();
-  const deliveries = new Map<Promise<void>, string>();
+  const deliveries = new Map<Promise<unknown>, string>();
   const logins = new Map<string, Login>();
   const loginErrors = new Map<string, ChannelIssue>();
   let serviceError: string | null = null;
   const manager = new ChannelManager({
+    deliver: async (connection, content, send, source) => {
+      try {
+        const { beginChannelSend } = await import(
+          "@/modules/channels/outbound"
+        );
+        return await (await beginChannelSend(connection, content, send, source))
+          .completed;
+      } catch {
+        throw new ChannelError("storage");
+      }
+    },
     load: loadCheckpoint,
     save: saveCheckpoint,
     command: async (...args) =>

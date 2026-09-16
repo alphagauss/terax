@@ -36,6 +36,7 @@ export type ChannelIssue =
   | "queue-full"
   | "interrupted"
   | "delivery"
+  | "delivery-unknown"
   | "account-mismatch"
   | "duplicate-account";
 
@@ -103,9 +104,25 @@ export type ChannelOutbound = {
   }>;
 };
 
+export type ChannelDeliverySource =
+  | "application"
+  | "agent"
+  | "command"
+  | "tool";
+
+/** 平台适配器输出通用投递事实，原因不包含平台正文或凭据。 */
 export type ChannelDeliveryResult = {
   status: "accepted" | "partial" | "failed" | "unknown";
   parts: Array<{ index: number; status: "accepted" | "failed" | "unknown" }>;
+  reason?:
+    | "network"
+    | "protocol"
+    | "rejected"
+    | "auth"
+    | "context"
+    | "upload"
+    | "interrupted";
+  total?: number;
 };
 
 /** 由主运行绑定目标的发送能力，工具层只消费这一份投递契约。 */

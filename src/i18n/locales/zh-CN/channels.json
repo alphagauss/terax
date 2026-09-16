@@ -57,11 +57,12 @@
     "agent": "Agent 执行失败，请打开会话查看详情。",
     "queue-full": "消息队列已满，新请求正在等待空位。",
     "interrupted": "部分消息在连接停止时被中断，未自动重新执行，请重新发送。",
-    "delivery": "回复发送失败，完整结果仍可在 Channel 会话中查看。",
+    "delivery": "消息发送失败或部分成功，请在消息通道中查看具体结果。",
     "account-mismatch": "此连接已绑定另一个微信账号，请为新账号创建连接。",
     "duplicate-account": "此微信账号已存在连接。",
     "name": "名称需为 1–80 个字符。",
-    "route-save": "网络路由保存失败，其他已提交配置已保留。请重试保存。"
+    "route-save": "网络路由保存失败，其他已提交配置已保留。请重试保存。",
+    "delivery-unknown": "发送请求中断或响应异常，请检查通讯软件中的实际消息。"
   },
   "busyMessageMode": {
     "label": "运行中收到消息时",
@@ -79,12 +80,12 @@
   "imageAttachmentSummary": "本条消息包含 {{count}} 张图片。已保存图片路径：{{paths}}。下载失败的图片：{{failed}}。",
   "outbound": {
     "label": "应用发送",
-    "accepted": "平台已接受",
+    "accepted": "已发送",
     "partial": "部分成功",
-    "failed": "失败",
-    "unknown": "结果不确定",
+    "failed": "发送失败",
+    "unknown": "发送结果未确认",
     "unconfirmed": "结果未确认",
-    "parts": "已接受项数：{{count}}",
+    "parts": "已确认 {{accepted}} 项，失败 {{failed}} 项，未确认 {{unknown}} 项，未发送 {{unsent}} 项",
     "instance": "连接实例",
     "target": "发送目标：{{id}}",
     "noTarget": "请先在通讯软件中向机器人发起私聊，或在群组中发送符合接收规则的消息。",
@@ -106,6 +107,22 @@
     "direct": "私聊",
     "group": "群组 / 房间",
     "unavailable": "请先连接此实例；若已连接，请在通讯软件中再次发送消息以更新对话上下文。",
-    "openInAgent": "在 Agent 面板查看"
+    "openInAgent": "在 Agent 面板查看",
+    "unknownHelp": "可能已送达，但应用未能确认发送结果。请先检查通讯软件，避免重复发送。",
+    "sources": {
+      "application": "应用发送",
+      "agent": "Agent 回复",
+      "command": "命令回复",
+      "tool": "工具发送"
+    },
+    "reasons": {
+      "network": "网络请求或响应读取失败。",
+      "protocol": "平台响应无法解析。",
+      "rejected": "平台拒绝发送。",
+      "auth": "平台授权已失效，请重新登录。",
+      "context": "缺少可用的发送上下文，请先从通讯软件发来消息。",
+      "upload": "附件准备或上传失败。",
+      "interrupted": "发送过程已中断，未获得完整回执。"
+    }
   }
 }
