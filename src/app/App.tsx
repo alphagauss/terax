@@ -239,6 +239,7 @@ export default function App() {
 
   const terminalRefs = useRef<Map<number, TerminalPaneHandle>>(new Map());
   const editorRefs = useRef<Map<number, EditorPaneHandle>>(new Map());
+  const findRefs = useRef<Map<number, FindHandle>>(new Map());
   const markdownNavigationRefs = useRef(
     new Map<number, MarkdownPreviewPaneHandle>(),
   );
@@ -455,6 +456,13 @@ export default function App() {
   const isEditorTab =
     activeTab?.kind === "editor" ||
     (activeTab?.kind === "markdown" && activeEditorHandle !== null);
+  const isFindableTab =
+    activeTab?.kind === "terminal" ||
+    activeTab?.kind === "editor" ||
+    activeTab?.kind === "markdown" ||
+    activeTab?.kind === "git-diff" ||
+    activeTab?.kind === "git-commit-file" ||
+    activeTab?.kind === "ai-diff";
 
   useEditorFileSync({ tabs, tabsRef, editorRefs });
   useThemeFileEditing({ tabsRef, openFileTab });
@@ -519,6 +527,7 @@ export default function App() {
       // explicit cleanup here.
       editorRefs.current.delete(id);
       markdownNavigationRefs.current.delete(id);
+      findRefs.current.delete(id);
       pendingContentNavigation.current.delete(id);
       webPreviewRefs.current.delete(id);
     },
@@ -727,6 +736,8 @@ export default function App() {
 
   const activeFindHandle = useCallback((): FindHandle | null => {
     const tabId = activeIdRef.current;
+    const registered = findRefs.current.get(tabId);
+    if (registered) return registered;
     const editor = editorRefs.current.get(tabId);
     if (editor) return editor;
     const tab = tabsRef.current.find((candidate) => candidate.id === tabId);
@@ -1222,6 +1233,14 @@ export default function App() {
     [applyPendingContentNavigation],
   );
 
+  const registerFindHandle = useCallback(
+    (id: number, handle: FindHandle | null) => {
+      if (handle) findRefs.current.set(id, handle);
+      else findRefs.current.delete(id);
+    },
+    [],
+  );
+
   const registerMarkdownNavigationHandle = useCallback(
     (id: number, handle: MarkdownPreviewPaneHandle | null) => {
       if (handle) {
@@ -1441,7 +1460,7 @@ export default function App() {
         ? createCommandItems({
             tabs,
             activeId,
-            canFind: isTerminalTab || isEditorTab,
+            canFind: isFindableTab,
             explorerRoot,
             home,
             openNewWindow,
@@ -1484,8 +1503,7 @@ export default function App() {
       commandPaletteOpen,
       tabs,
       activeId,
-      isTerminalTab,
-      isEditorTab,
+      isFindableTab,
       explorerRoot,
       home,
       openNewWindow,
@@ -1664,6 +1682,7 @@ export default function App() {
       onFocusTab: setActiveId,
       registerEditorHandle,
       registerMarkdownNavigationHandle,
+      registerFindHandle,
       onEditorDirtyChange: handleEditorDirty,
       onEditorCloseTab: requestEditorClose,
       registerWebPreviewHandle,
@@ -1681,6 +1700,7 @@ export default function App() {
       handleTerminalCwd,
       handleTerminalExit,
       registerEditorHandle,
+      registerFindHandle,
       registerMarkdownNavigationHandle,
       registerWebPreviewHandle,
       registerTerminalHandle,

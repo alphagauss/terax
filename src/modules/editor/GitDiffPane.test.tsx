@@ -35,6 +35,7 @@ vi.mock("./lib/languageResolver", () => ({
 vi.mock("./lib/extensions", () => ({
   buildSharedExtensions: () => [],
   DEFAULT_INDENT: [],
+  FOCUSABLE_READONLY_EXTENSIONS: [],
   languageCompartment: { of: () => [] },
   READONLY_EXTENSIONS: [],
 }));

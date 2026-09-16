@@ -1,4 +1,5 @@
-import { type ComponentProps, lazy, Suspense } from "react";
+import type { FindHandle } from "@/modules/find";
+import { type ComponentProps, forwardRef, lazy, Suspense } from "react";
 import type { GitDiffView as GitDiffViewType } from "./GitDiffView";
 
 const GitDiffViewInner = lazy(() =>
@@ -7,10 +8,12 @@ const GitDiffViewInner = lazy(() =>
 
 type Props = ComponentProps<typeof GitDiffViewType>;
 
-export function GitDiffView(props: Props) {
-  return (
-    <Suspense fallback={null}>
-      <GitDiffViewInner {...props} />
-    </Suspense>
-  );
-}
+export const GitDiffView = forwardRef<FindHandle, Props>(
+  function GitDiffView(props, ref) {
+    return (
+      <Suspense fallback={null}>
+        <GitDiffViewInner {...props} ref={ref} />
+      </Suspense>
+    );
+  },
+);

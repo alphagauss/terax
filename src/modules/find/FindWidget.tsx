@@ -58,6 +58,7 @@ type FindSelection = {
 type FindWidgetProps = {
   query: string;
   onQueryChange: (query: string) => void;
+  onQueryCommit?: (query: string) => void;
   onClose: () => void;
   state?: "open" | "closed";
   onNext?: () => void;
@@ -103,6 +104,7 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
     {
       query,
       onQueryChange,
+      onQueryCommit,
       onClose,
       state = "open",
       onNext,
@@ -249,6 +251,7 @@ const FindWidgetBase = forwardRef<FindWidgetHandle, FindWidgetBaseProps>(
             ref={patternRef}
             query={query}
             onQueryChange={onQueryChange}
+            onQueryCommit={onQueryCommit}
             options={options}
             onOptionsChange={onOptionsChange}
             invalid={invalid}

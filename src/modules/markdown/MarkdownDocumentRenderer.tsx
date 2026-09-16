@@ -330,6 +330,7 @@ const MemoizedProgressiveMarkdownBlock = memo(ProgressiveMarkdownBlock);
 
 export type MarkdownDocumentRendererHandle = {
   ensureBlock: (index: number) => void;
+  ensureAllBlocks: () => void;
   findBlockElement: (index: number) => HTMLElement | null;
 };
 
@@ -474,6 +475,9 @@ export const MarkdownDocumentRenderer = forwardRef<
     () => ({
       ensureBlock: (index) => {
         if (progressive) store.mountAround(index, BLOCK_PREFETCH_RADIUS);
+      },
+      ensureAllBlocks: () => {
+        if (progressive) store.mountNext(store.blockCount);
       },
       findBlockElement: (index) => blockElementsRef.current.get(index) ?? null,
     }),
