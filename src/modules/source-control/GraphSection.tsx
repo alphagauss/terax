@@ -118,6 +118,7 @@ type Props = {
   /** 展示退出结束后释放 DOM 和虚拟器观测，控制层保留提交状态。 */
   present?: boolean;
   refreshToken: number;
+  graphRevision: string;
   showUndoCommit: boolean;
   mayHavePushedHead: boolean;
   onDidUndo: () => void;
@@ -148,6 +149,7 @@ export const GraphSection = memo(function GraphSection({
   expanded,
   present = expanded,
   refreshToken,
+  graphRevision,
   showUndoCommit,
   mayHavePushedHead,
   onDidUndo,
@@ -189,7 +191,7 @@ export const GraphSection = memo(function GraphSection({
   const loadingMoreRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
   const refreshKey = repoRoot
-    ? `${repoRoot}:${headBranch ?? ""}:${headSha ?? ""}:${refreshToken}`
+    ? `${repoRoot}:${headBranch ?? ""}:${headSha ?? ""}:${graphRevision}:${refreshToken}`
     : null;
 
   useEffect(() => {

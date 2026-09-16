@@ -51,6 +51,7 @@ const controller: RepositoryController = {
   busyAction: null,
   lastRemoteError: null,
   revision: 1,
+  graphRevision: null,
   refresh: vi.fn(),
   runRemoteAction: vi.fn(),
 };
