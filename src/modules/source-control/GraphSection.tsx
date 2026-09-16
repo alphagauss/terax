@@ -112,6 +112,7 @@ type CommitFileDiffOpenInput = {
 
 type Props = {
   repoRoot: string | null;
+  headBranch: string | null;
   headSha: string | null;
   expanded: boolean;
   /** 展示退出结束后释放 DOM 和虚拟器观测，控制层保留提交状态。 */
@@ -142,6 +143,7 @@ function normalizeError(error: unknown): string {
  */
 export const GraphSection = memo(function GraphSection({
   repoRoot,
+  headBranch,
   headSha,
   expanded,
   present = expanded,
@@ -187,7 +189,7 @@ export const GraphSection = memo(function GraphSection({
   const loadingMoreRef = useRef(false);
   const loadedKeyRef = useRef<string | null>(null);
   const refreshKey = repoRoot
-    ? `${repoRoot}:${headSha ?? ""}:${refreshToken}`
+    ? `${repoRoot}:${headBranch ?? ""}:${headSha ?? ""}:${refreshToken}`
     : null;
 
   useEffect(() => {

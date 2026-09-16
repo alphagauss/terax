@@ -1081,6 +1081,7 @@ function SourceControlViewContainerComponent({
                 <GraphSection
                   key={scm.repo?.repoRoot ?? "no-repository"}
                   repoRoot={scm.repo?.repoRoot ?? null}
+                  headBranch={scm.status?.branch ?? null}
                   headSha={scm.status?.headSha ?? null}
                   expanded={open && expanded}
                   present={open && present}

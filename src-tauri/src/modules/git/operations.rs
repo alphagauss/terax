@@ -777,11 +777,25 @@ pub fn log(
     let count_arg = format!("--max-count={bounded}");
     let skip_arg = format!("--skip={skip}");
     let format_arg = format!("--format={LOG_FORMAT}");
-    let upstream = git_stdout_line_opt(
+    let current_branch = git_stdout_line_opt(
         &repo_root.workspace,
         &repo_root.git_path,
-        ["rev-parse", "--verify", "@{upstream}^{commit}"],
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
     )?;
+    let upstream_ref = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--symbolic-full-name", "@{upstream}"],
+    )?;
+    let upstream_label = upstream_ref
+        .as_deref()
+        .map(|refname| {
+            refname
+                .strip_prefix("refs/remotes/")
+                .or_else(|| refname.strip_prefix("refs/heads/"))
+                .unwrap_or(refname)
+        })
+        .map(str::to_string);
     let mut args: Vec<OsString> = vec![
         OsString::from("log"),
         OsString::from("--no-color"),
@@ -793,8 +807,8 @@ pub fn log(
         OsString::from(format_arg),
         OsString::from("HEAD"),
     ];
-    if let Some(upstream) = upstream {
-        args.push(OsString::from(upstream));
+    if let Some(upstream_ref) = upstream_ref {
+        args.push(OsString::from(upstream_ref));
     }
     let output = run_git(
         &repo_root.workspace,
@@ -844,7 +858,12 @@ pub fn log(
                 .split_ascii_whitespace()
                 .map(|s| s.to_string())
                 .collect();
-            let refs = parse_log_refs(fields.next().unwrap_or(""), &remote_names);
+            let refs = parse_log_refs(
+                fields.next().unwrap_or(""),
+                &remote_names,
+                current_branch.as_deref(),
+                upstream_label.as_deref(),
+            );
             let subject = fields.next().unwrap_or("").to_string();
             let short_sha = sha.chars().take(7).collect::<String>();
             entries.push(GitLogEntry {
@@ -874,8 +893,13 @@ pub fn log(
     Ok(entries)
 }
 
-/// 将 `git log --decorate` 的文本装饰转换为可供界面稳定着色的引用类别。
-fn parse_log_refs(decorations: &str, remote_names: &HashSet<String>) -> Vec<GitLogRef> {
+/// 将提交装饰转换为稳定类别；已检出分支只保留当前分支、upstream 与标签。
+fn parse_log_refs(
+    decorations: &str,
+    remote_names: &HashSet<String>,
+    current_branch: Option<&str>,
+    upstream: Option<&str>,
+) -> Vec<GitLogRef> {
     decorations
         .split(',')
         .map(str::trim)
@@ -901,13 +925,25 @@ fn parse_log_refs(decorations: &str, remote_names: &HashSet<String>) -> Vec<GitL
             {
                 return None;
             }
+            let kind = if remote_name.is_some_and(|name| remote_names.contains(name)) {
+                GitLogRefKind::Remote
+            } else {
+                GitLogRefKind::Local
+            };
+            if current_branch.is_some()
+                && match &kind {
+                    GitLogRefKind::Remote => Some(source) != upstream,
+                    GitLogRefKind::Local => {
+                        Some(source) != current_branch && Some(source) != upstream
+                    }
+                    GitLogRefKind::Tag => false,
+                }
+            {
+                return None;
+            }
             Some(GitLogRef {
                 label: source.to_string(),
-                kind: if remote_name.is_some_and(|name| remote_names.contains(name)) {
-                    GitLogRefKind::Remote
-                } else {
-                    GitLogRefKind::Local
-                },
+                kind,
             })
         })
         .collect()
@@ -1750,8 +1786,10 @@ mod tests {
 
         assert_eq!(
             parse_log_refs(
-                "HEAD -> main, origin/main, fork/HEAD -> fork/main, tag: v1.0.0",
+                "HEAD -> main, nightly, origin/main, origin/nightly, fork/HEAD -> fork/main, tag: v1.0.0",
                 &remote_names,
+                Some("main"),
+                Some("origin/main"),
             ),
             vec![
                 GitLogRef {

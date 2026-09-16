@@ -103,6 +103,7 @@ const wait = async (ms: number) =>
 const renderSearch = (
   props: {
     expanded?: boolean;
+    headBranch?: string;
     present?: boolean;
     refreshToken?: number;
     searchOpen?: boolean;
@@ -115,6 +116,7 @@ const renderSearch = (
   root.render(
     <GraphSection
       repoRoot="/repo"
+      headBranch="main"
       headSha="a"
       expanded
       refreshToken={0}
@@ -206,6 +208,25 @@ it("刷新令牌变化后重新读取提交图", async () => {
 
   expect(native.gitLog).toHaveBeenCalledTimes(2);
   expect(container.textContent).toContain("Commit remote");
+});
+
+it("同一提交切换分支后重新读取引用", async () => {
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce([
+      { ...commit("a", []), refs: [{ kind: "local", label: "nightly" }] },
+    ])
+    .mockResolvedValueOnce([
+      { ...commit("a", []), refs: [{ kind: "local", label: "master" }] },
+    ]);
+  await act(async () => renderSearch({ headBranch: "nightly", searchOpen: false }));
+  expect(container.textContent).toContain("nightly");
+
+  await act(async () => renderSearch({ headBranch: "master", searchOpen: false }));
+
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain("master");
+  expect(container.textContent).not.toContain("nightly");
 });
 
 it("提交说明搜索高亮全部匹配片段，切换类别后不误高亮标题", async () => {
@@ -412,6 +433,7 @@ it("侧边栏重复挂载检查仍能完成加载，折叠分组后保留提交�
       <StrictMode>
         <GraphSection
           repoRoot="/repo"
+          headBranch="main"
           headSha="a"
           expanded={expanded}
           refreshToken={0}
@@ -443,6 +465,7 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
     root.render(
       <GraphSection
         repoRoot="/repo"
+        headBranch="main"
         headSha="a"
         expanded
         refreshToken={0}
@@ -558,6 +581,7 @@ it("键盘可展开文件、进入悬停详情，并用 Esc 返回提交行", as
     root.render(
       <GraphSection
         repoRoot="/repo"
+        headBranch="main"
         headSha="a"
         expanded
         refreshToken={0}
