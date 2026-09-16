@@ -195,6 +195,7 @@ describe("Workbench Space serialization", () => {
       side: "worktree",
       originalPath: null,
       repoRoot: "/work",
+      preview: true,
     };
     const last: Tab = {
       id: 3,

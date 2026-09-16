@@ -58,6 +58,7 @@ export function patchTab(
   } else if (tab.kind === "git-diff") {
     next = {
       ...tab,
+      ...(patch.preview !== undefined && { preview: patch.preview }),
       ...(patch.title !== undefined && { title: patch.title }),
       ...(patch.originalPath !== undefined && {
         originalPath: patch.originalPath,
@@ -66,6 +67,7 @@ export function patchTab(
   } else if (tab.kind === "git-commit-file") {
     next = {
       ...tab,
+      ...(patch.preview !== undefined && { preview: patch.preview }),
       ...(patch.title !== undefined && { title: patch.title }),
       ...(patch.originalPath !== undefined && {
         originalPath: patch.originalPath,

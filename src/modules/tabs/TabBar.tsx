@@ -290,7 +290,11 @@ export function TabBar({
             />
             {tabs.map((t, i) => {
               const isPreview =
-                (t.kind === "editor" || t.kind === "markdown") && t.preview;
+                (t.kind === "editor" ||
+                  t.kind === "markdown" ||
+                  t.kind === "git-diff" ||
+                  t.kind === "git-commit-file") &&
+                t.preview;
               const isActive = t.id === activeId;
               const isNew = !firstRender && !seen.has(t.id);
               const dirty =

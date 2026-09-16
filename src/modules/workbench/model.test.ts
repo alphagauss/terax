@@ -229,16 +229,19 @@ describe("workbench model", () => {
       repoRoot: "/work",
       side: "worktree",
       originalPath: "old.ts",
+      preview: true,
     };
     const state = { ...current, tabs: { 2: diff } };
     const next = patchTab(state, 2, {
       title: "renamed.ts (W)",
       originalPath: "renamed.ts",
+      preview: false,
     });
     expect(next.tabs[2]).toMatchObject({
       id: 2,
       title: "renamed.ts (W)",
       originalPath: "renamed.ts",
+      preview: false,
     });
   });
 
@@ -255,6 +258,7 @@ describe("workbench model", () => {
       subject: "old subject",
       path: "main.ts",
       originalPath: null,
+      preview: true,
     };
     const state = { ...current, tabs: { 2: diff } };
     const next = patchTab(state, 2, {
