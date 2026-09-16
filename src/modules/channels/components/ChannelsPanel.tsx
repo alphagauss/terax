@@ -1,10 +1,6 @@
 /** Channel 人工发送入口；面板只持有草稿和历史投影，关闭不会停止投递。 */
-import { useEffect, useState } from "react";
-import type { Chat, UIMessage } from "@ai-sdk/react";
-import { useTranslation } from "react-i18next";
-import { open } from "@tauri-apps/plugin-dialog";
+
 import { Button } from "@/components/controls/button";
-import { Textarea } from "@/components/controls/textarea";
 import {
   Select,
   SelectContent,
@@ -12,22 +8,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
-import {
-  sendChannelContent,
-  useChannelsView,
-  useChannelSelection,
-  requestChannels,
-} from "@/modules/channels/client";
-import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
-import { ChannelConversation } from "@/modules/channels/components/ChannelConversation";
+import { Hint } from "@/components/controls/tooltip";
 import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
   chats,
-  retainSessionView,
   releaseUnusedChats,
+  retainSessionView,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
+import {
+  requestChannels,
+  sendChannelContent,
+  useChannelSelection,
+  useChannelsView,
+} from "@/modules/channels/client";
+import { ChannelConversation } from "@/modules/channels/components/ChannelConversation";
+import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
 import { channelTargetLabel } from "@/modules/channels/types";
+import type { Chat, UIMessage } from "@ai-sdk/react";
+import { Add01Icon, ArrowUp02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 type Draft = { text: string; paths: string[] };
 const EMPTY_DRAFT: Draft = { text: "", paths: [] };
@@ -89,9 +92,16 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
   }, [viewing, sessionMeta?.fingerprint, registered]);
   const updateDraft = (value: Draft) =>
     setDrafts((current) => ({ ...current, [draftKey]: value }));
+  const canSend = Boolean(
+    !pending &&
+      draft.paths.length <= 16 &&
+      conversation &&
+      snapshot.status === "online" &&
+      (draft.text.trim() || draft.paths.length),
+  );
 
   const submit = async () => {
-    if (!conversation || snapshot.status !== "online" || pending) return;
+    if (!canSend || !conversation) return;
     setPending(true);
     setError("");
     try {
@@ -205,17 +215,6 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
                 : t(`errors.${serviceError}`))}
           </p>
         )}
-        <Textarea
-          value={draft.text}
-          disabled={pending || !sessionId}
-          maxLength={32000}
-          rows={3}
-          aria-label={t("outbound.text")}
-          placeholder={t("outbound.text")}
-          onChange={(event) =>
-            updateDraft({ ...draft, text: event.target.value })
-          }
-        />
         {draft.paths.length > 16 && (
           <p role="alert" className="text-destructive">
             {t("outbound.tooManyFiles")}
@@ -240,41 +239,64 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
             </Button>
           </div>
         ))}
-        <div className="flex justify-between gap-2">
-          <Button
+        <form
+          className="flex items-center gap-1 rounded-2xl border border-border bg-background p-1.5 shadow-sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <Hint content={t("outbound.addFiles")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("outbound.addFiles")}
+              disabled={pending || !sessionId}
+              onClick={() => {
+                void open({ multiple: true, directory: false })
+                  .then((paths) => {
+                    if (paths)
+                      setDrafts((current) => {
+                        const previous = current[draftKey] ?? EMPTY_DRAFT;
+                        const next = [
+                          ...new Set([...previous.paths, ...paths]),
+                        ];
+                        return {
+                          ...current,
+                          [draftKey]: { ...previous, paths: next },
+                        };
+                      });
+                  })
+                  .catch(() => setError(t("outbound.fileFailed")));
+              }}
+            >
+              <HugeiconsIcon icon={Add01Icon} size={13} strokeWidth={2} />
+            </Button>
+          </Hint>
+          <input
+            value={draft.text}
             disabled={pending || !sessionId}
-            onClick={() => {
-              void open({ multiple: true, directory: false })
-                .then((paths) => {
-                  if (paths)
-                    setDrafts((current) => {
-                      const previous = current[draftKey] ?? EMPTY_DRAFT;
-                      const next = [...new Set([...previous.paths, ...paths])];
-                      return {
-                        ...current,
-                        [draftKey]: { ...previous, paths: next },
-                      };
-                    });
-                })
-                .catch(() => setError(t("outbound.fileFailed")));
-            }}
-          >
-            {t("outbound.addFiles")}
-          </Button>
-          <Button
-            variant="default"
-            disabled={
-              pending ||
-              draft.paths.length > 16 ||
-              !conversation ||
-              snapshot.status !== "online" ||
-              (!draft.text.trim() && !draft.paths.length)
+            maxLength={32000}
+            aria-label={t("outbound.text")}
+            placeholder={t("outbound.placeholder")}
+            className="h-7 min-w-0 flex-1 bg-transparent px-1 text-[13px] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            onChange={(event) =>
+              updateDraft({ ...draft, text: event.target.value })
             }
-            onClick={() => void submit()}
-          >
-            {t("outbound.send")}
-          </Button>
-        </div>
+          />
+          <Hint content={t("outbound.send")}>
+            <Button
+              type="submit"
+              size="icon-sm"
+              aria-label={t("outbound.send")}
+              disabled={!canSend}
+              className="rounded-full bg-foreground text-background transition-[background-color,color,opacity,transform] duration-control hover:bg-foreground/85"
+            >
+              <HugeiconsIcon icon={ArrowUp02Icon} size={14} strokeWidth={2} />
+            </Button>
+          </Hint>
+        </form>
       </div>
     </div>
   );
