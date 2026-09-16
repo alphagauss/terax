@@ -335,8 +335,9 @@ export const GraphSection = memo(function GraphSection({
       aria-hidden={row.exiting || undefined}
       className="pointer-events-none absolute left-0 w-full overflow-hidden"
       style={{
+        // 基础位置使用布局坐标，展开动画继续使用独立的 translate。
+        top: row.start,
         height: row.exiting ? 0 : row.size,
-        transform: `translateY(${row.start}px)`,
       }}
     >
       <div

@@ -217,8 +217,11 @@ export function DirectoryPathInput({
                     id={`${id}-${row.index}`}
                     role="option"
                     aria-selected={selected === row.index}
-                    className={`absolute left-0 top-0 flex h-7 w-full cursor-default items-center truncate rounded-sm px-2 ${selected === row.index ? "bg-accent text-accent-foreground" : "hover:bg-accent"}`}
-                    style={{ transform: `translateY(${row.start}px)` }}
+                    className={`absolute left-0 flex h-7 w-full cursor-default items-center truncate rounded-sm px-2 ${selected === row.index ? "bg-accent text-accent-foreground" : "hover:bg-accent"}`}
+                    style={{
+                      // 避免 WebView 恢复显示时漏绘 transform 定位的虚拟行。
+                      top: row.start,
+                    }}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => choose(names[row.index])}
                   >
