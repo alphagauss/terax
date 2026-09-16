@@ -112,6 +112,7 @@ export function ExpandedCommitRow({
   rowHeight,
   onOpen,
   onRetry,
+  selected = false,
 }: {
   item: Exclude<CommitGraphItem, { kind: "commit" }>;
   row: GraphRow | null;
@@ -120,6 +121,7 @@ export function ExpandedCommitRow({
   rowHeight: number;
   onOpen: () => void;
   onRetry: () => void;
+  selected?: boolean;
 }) {
   const { t } = useTranslation("gitHistory");
   return (
@@ -138,7 +140,12 @@ export function ExpandedCommitRow({
       </div>
       <div className="min-w-0 flex-1 pr-2">
         {item.kind === "file" ? (
-          <CommitFileRow file={item.file} onOpen={onOpen} showStats={false} />
+          <CommitFileRow
+            file={item.file}
+            onOpen={onOpen}
+            showStats={false}
+            selected={selected}
+          />
         ) : (
           <div className="flex items-center gap-2 px-1.5 text-[11px] text-muted-foreground">
             {item.entry?.state === "error" ? (
