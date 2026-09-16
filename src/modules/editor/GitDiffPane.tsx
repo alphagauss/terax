@@ -181,9 +181,15 @@ function DiffContent({ path, state }: { path: string; state: LoadState }) {
     (loaded?.isBinary ?? false) ||
     originalContent.length > LARGE_FILE_THRESHOLD ||
     modifiedContent.length > LARGE_FILE_THRESHOLD;
+  const effectiveDiffViewMode =
+    loaded &&
+    diffViewMode === "split" &&
+    (originalContent.length === 0 || modifiedContent.length === 0)
+      ? "inline"
+      : diffViewMode;
   const extensions = useMemo(
     () =>
-      diffViewMode === "split"
+      effectiveDiffViewMode === "split"
         ? []
         : [
             ...SHARED_EXT,
@@ -200,7 +206,7 @@ function DiffContent({ path, state }: { path: string; state: LoadState }) {
             gitChangeOverview,
             UNIFIED_DIFF_THEME,
           ],
-    [diffViewMode, loaded?.langExt, originalContent],
+    [effectiveDiffViewMode, loaded?.langExt, originalContent],
   );
 
   return (
@@ -221,7 +227,7 @@ function DiffContent({ path, state }: { path: string; state: LoadState }) {
               {fallbackPatch || t("diff.unavailable")}
             </pre>
           </ScrollArea>
-        ) : diffViewMode === "split" ? (
+        ) : effectiveDiffViewMode === "split" ? (
           <SplitDiffView
             original={originalContent}
             modified={modifiedContent}

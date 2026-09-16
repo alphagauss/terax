@@ -39,6 +39,13 @@ vi.mock("./lib/extensions", () => ({
   READONLY_EXTENSIONS: [],
 }));
 vi.mock("./lib/useEditorThemeExt", () => ({ useEditorThemeExt: () => [] }));
+vi.mock("@uiw/react-codemirror", () => ({
+  default: ({ value }: { value: string }) => (
+    <div data-testid="inline-diff" data-value={value}>
+      {value}
+    </div>
+  ),
+}));
 vi.mock("./SplitDiffView", () => ({
   SplitDiffView: ({
     original,
@@ -190,5 +197,40 @@ describe("WorkingGitDiffPane", () => {
     await vi.waitFor(() =>
       expect(mocks.gitDiffContent).toHaveBeenCalledTimes(2),
     );
+  });
+
+  it("uses the inline view when either side of a text diff is empty", async () => {
+    mocks.gitDiffContent
+      .mockResolvedValueOnce({
+        ...diffResult("added"),
+        originalContent: "",
+      })
+      .mockResolvedValueOnce({
+        ...diffResult("deleted"),
+        modifiedContent: "",
+      });
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => renderPane(1, true));
+    await vi.waitFor(() =>
+      expect(
+        container
+          .querySelector('[data-testid="inline-diff"]')
+          ?.getAttribute("data-value"),
+      ).toBe("after added"),
+    );
+    expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
+
+    await act(async () => renderPane(2, true));
+    await vi.waitFor(() =>
+      expect(
+        container
+          .querySelector('[data-testid="inline-diff"]')
+          ?.getAttribute("data-value"),
+      ).toBe(""),
+    );
+    expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
   });
 });
