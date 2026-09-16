@@ -90,6 +90,7 @@
     "target": "Target: {{id}}",
     "noTarget": "Start a conversation with the bot in your messaging app first.",
     "text": "Message text",
+    "placeholder": "Send to messaging app",
     "remove": "Remove",
     "addFiles": "Add files",
     "send": "Send",
