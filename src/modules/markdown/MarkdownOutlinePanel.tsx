@@ -80,11 +80,11 @@ export function MarkdownOutlinePanel({ items, activeId, onSelect }: Props) {
                 key={virtualRow.key}
                 style={{
                   position: "absolute",
-                  top: 0,
+                  // 避免 WebView 恢复显示时漏绘 transform 定位的虚拟行。
+                  top: virtualRow.start,
                   left: 0,
                   width: "100%",
                   height: virtualRow.size,
-                  transform: `translateY(${virtualRow.start}px)`,
                 }}
               >
                 <Hint content={item.title}>
