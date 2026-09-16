@@ -104,6 +104,7 @@ const renderSearch = (
   props: {
     expanded?: boolean;
     present?: boolean;
+    refreshToken?: number;
     searchOpen?: boolean;
     onCloseSearch?: () => void;
     onOpenCommitFile?: React.ComponentProps<
@@ -192,6 +193,21 @@ it("搜索加载较老的多分支提交不会撑宽已有提交或其展开文�
   expect(native.gitLog).toHaveBeenCalledTimes(2);
 });
 
+it("刷新令牌变化后重新读取提交图", async () => {
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce([commit("local", [])])
+    .mockResolvedValueOnce([commit("remote", ["local"]), commit("local", [])]);
+  await act(async () => renderSearch({ searchOpen: false }));
+  expect(container.textContent).toContain("Commit local");
+  expect(container.textContent).not.toContain("Commit remote");
+
+  await act(async () => renderSearch({ searchOpen: false, refreshToken: 1 }));
+
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain("Commit remote");
+});
+
 it("提交说明搜索高亮全部匹配片段，切换类别后不误高亮标题", async () => {
   const subject = "Alpha: fix alpha and ALPHA";
   vi.mocked(native.gitLog).mockResolvedValue([
@@ -240,11 +256,11 @@ it("搜索继续读取历史分页，找到旧提交后仍可展开并打开 Dif
   await wait(20);
   expect(native.gitLog).toHaveBeenNthCalledWith(2, "/repo", {
     limit: 200,
-    beforeSha: "first39",
+    skip: 40,
   });
   expect(native.gitLog).toHaveBeenNthCalledWith(3, "/repo", {
     limit: 200,
-    beforeSha: "next199",
+    skip: 240,
   });
   const matches = container.querySelectorAll<HTMLButtonElement>(
     "button[aria-expanded]:not([aria-haspopup])",

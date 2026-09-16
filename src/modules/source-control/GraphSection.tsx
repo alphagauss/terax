@@ -260,8 +260,6 @@ export const GraphSection = memo(function GraphSection({
     ) {
       return;
     }
-    const cursor = commits[commits.length - 1]?.sha;
-    if (!cursor) return;
     const request = requestRef.current;
     loadingMoreRef.current = true;
     setLoadStatus("more");
@@ -270,7 +268,7 @@ export const GraphSection = memo(function GraphSection({
     try {
       const next = await native.gitLog(repoRoot, {
         limit,
-        beforeSha: cursor,
+        skip: commits.length,
       });
       if (request !== requestRef.current) return;
       setCommits((current) => {

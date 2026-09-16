@@ -21,6 +21,20 @@ fn skip_if_no_git() -> bool {
     false
 }
 
+fn git_stdout(fx: &GitRepoFixture, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(&fx.repo_path)
+        .output()
+        .expect("git on PATH");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 #[test]
 fn resolve_repo_returns_none_outside_repo() {
     if skip_if_no_git() {
@@ -261,8 +275,7 @@ fn stage_then_commit_produces_log_entry() {
     assert_eq!(commit.summary, "add a");
     assert_eq!(commit.commit_sha.len(), 40);
 
-    let entries =
-        operations::log(&fx.registry, &fx.repo_str(), 10, None, &fx.workspace).expect("log");
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).expect("log");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sha, commit.commit_sha);
     assert_eq!(entries[0].subject, "add a");
@@ -286,14 +299,14 @@ fn undo_commit_moves_head_and_keeps_changes_staged() {
     fx.write_file("a.txt", "v1\n");
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "v1"]);
-    let first = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let first = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
 
     fx.write_file("a.txt", "v2\n");
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "v2"]);
-    let second = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let second = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
 
@@ -322,7 +335,7 @@ fn undo_commit_rejects_a_stale_expected_head() {
         fx.run_git(&["add", "a.txt"]);
         fx.run_git(&["commit", "-q", "-m", &format!("v{version}")]);
     }
-    let entries = operations::log(&fx.registry, &fx.repo_str(), 3, None, &fx.workspace).unwrap();
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 3, 0, &fx.workspace).unwrap();
     let current = entries[0].sha.clone();
     let stale = entries[1].sha.clone();
 
@@ -353,7 +366,7 @@ fn undo_commit_rejects_the_root_commit() {
     fx.write_file("a.txt", "root\n");
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "root"]);
-    let root = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let root = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
 
@@ -420,8 +433,7 @@ fn log_on_empty_repo_returns_empty_list() {
         return;
     }
     let fx = GitRepoFixture::new();
-    let entries =
-        operations::log(&fx.registry, &fx.repo_str(), 10, None, &fx.workspace).expect("log");
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).expect("log");
     assert!(entries.is_empty());
 }
 
@@ -565,7 +577,7 @@ fn show_commit_diff_returns_patch_for_known_sha() {
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "seed"]);
 
-    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, None, &fx.workspace).unwrap();
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
     let sha = &entries[0].sha;
 
     let diff = operations::show_commit_diff(&fx.registry, &fx.repo_str(), sha, &fx.workspace)
@@ -588,7 +600,7 @@ fn show_commit_diff_rejects_invalid_sha() {
 }
 
 #[test]
-fn log_paginates_with_before_sha_cursor() {
+fn log_paginates_with_offset() {
     if skip_if_no_git() {
         return;
     }
@@ -599,43 +611,102 @@ fn log_paginates_with_before_sha_cursor() {
         fx.run_git(&["commit", "-q", "-m", &format!("c{i}")]);
     }
 
-    let first_page = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap();
+    let first_page = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap();
     assert_eq!(first_page.len(), 1);
     let cursor = first_page[0].sha.clone();
 
-    let second_page = operations::log(
-        &fx.registry,
-        &fx.repo_str(),
-        10,
-        Some(&cursor),
-        &fx.workspace,
-    )
-    .unwrap();
+    let second_page = operations::log(&fx.registry, &fx.repo_str(), 10, 1, &fx.workspace).unwrap();
     assert!(second_page.iter().all(|e| e.sha != cursor));
     assert_eq!(second_page.len(), 2);
 }
 
 #[test]
-fn log_with_invalid_cursor_sha_errors() {
+fn log_offset_pages_cover_diverged_head_and_upstream_once() {
     if skip_if_no_git() {
         return;
     }
     let fx = GitRepoFixture::new();
-    fx.write_file("a.txt", "x\n");
-    fx.run_git(&["add", "a.txt"]);
-    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    fx.write_file("base.txt", "base\n");
+    fx.run_git(&["add", "base.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "base"]);
+    fx.run_git(&["remote", "add", "origin", "https://example.com/repo.git"]);
+    fx.run_git(&["config", "branch.main.remote", "origin"]);
+    fx.run_git(&["config", "branch.main.merge", "refs/heads/main"]);
+    let base = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&["checkout", "-q", "--detach", &base]);
+    fx.write_file("remote.txt", "remote\n");
+    fx.run_git(&["add", "remote.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "remote"]);
+    let remote_head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/main", &remote_head]);
+    fx.run_git(&["checkout", "-q", "main"]);
+    fx.write_file("main.txt", "main\n");
+    fx.run_git(&["add", "main.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "main"]);
 
-    match operations::log(
-        &fx.registry,
-        &fx.repo_str(),
-        10,
-        Some("not-hex"),
-        &fx.workspace,
-    ) {
-        Err(GitError::CommandFailed { .. }) => {}
-        Err(other) => panic!("expected CommandFailed, got {other}"),
-        Ok(_) => panic!("expected error for bad cursor"),
+    let all = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
+    assert_eq!(all.len(), 3);
+    let paged: Vec<_> = (0..all.len())
+        .map(|skip| {
+            operations::log(&fx.registry, &fx.repo_str(), 1, skip as u32, &fx.workspace).unwrap()[0]
+                .sha
+                .clone()
+        })
+        .collect();
+
+    assert_eq!(
+        paged,
+        all.iter()
+            .map(|entry| entry.sha.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn log_includes_current_upstream_and_excludes_unrelated_refs() {
+    if skip_if_no_git() {
+        return;
     }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "base\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "base"]);
+    fx.run_git(&["remote", "add", "origin", "https://example.com/repo.git"]);
+    fx.run_git(&["config", "branch.main.remote", "origin"]);
+    fx.run_git(&["config", "branch.main.merge", "refs/heads/main"]);
+    let local_head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&["checkout", "-q", "--detach"]);
+    fx.write_file("a.txt", "remote\n");
+    fx.run_git(&["add", "a.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "remote"]);
+    let remote_head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&["update-ref", "refs/remotes/origin/main", &remote_head]);
+    fx.run_git(&["checkout", "-q", "--detach", &local_head]);
+    fx.write_file("other.txt", "other\n");
+    fx.run_git(&["add", "other.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "other"]);
+    let unrelated_head = git_stdout(&fx, &["rev-parse", "HEAD"]);
+    fx.run_git(&[
+        "update-ref",
+        "refs/remotes/origin/other",
+        &unrelated_head,
+    ]);
+    fx.run_git(&["update-ref", "refs/heads/feature", &unrelated_head]);
+    fx.run_git(&["checkout", "-q", "main"]);
+
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
+
+    assert_eq!(git_stdout(&fx, &["rev-parse", "HEAD"]), local_head);
+    assert_eq!(entries[0].sha, remote_head);
+    let remote = entries
+        .iter()
+        .find(|entry| entry.sha == remote_head)
+        .expect("remote-only commit present");
+    assert!(remote.refs.iter().any(|reference| {
+        reference.label == "origin/main"
+            && reference.kind == terax_lib::modules::git::types::GitLogRefKind::Remote
+    }));
+    assert!(entries.iter().all(|entry| entry.sha != unrelated_head));
 }
 
 #[test]
@@ -652,7 +723,7 @@ fn commit_files_reports_added_and_modified() {
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "modify"]);
 
-    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, None, &fx.workspace).unwrap();
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
     let head = &entries[0].sha;
 
     let files =
@@ -676,7 +747,7 @@ fn commit_files_reports_files_from_the_root_commit() {
     fx.run_git(&["add", "root.txt"]);
     fx.run_git(&["commit", "-q", "-m", "root"]);
 
-    let root = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let root = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
     let files = operations::commit_files(&fx.registry, &fx.repo_str(), &root, &fx.workspace)
@@ -709,7 +780,7 @@ fn commit_files_reports_a_merge_relative_to_its_first_parent() {
     fx.run_git(&["commit", "-q", "-m", "main"]);
     fx.run_git(&["merge", "-q", "--no-ff", "feature", "-m", "merge"]);
 
-    let merge = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let merge = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
     let files = operations::commit_files(&fx.registry, &fx.repo_str(), &merge, &fx.workspace)
@@ -738,7 +809,7 @@ fn commit_files_merges_status_and_numstat_for_added_modified_and_deleted() {
     fx.run_git(&["add", "-A"]);
     fx.run_git(&["commit", "-q", "-m", "mixed"]);
 
-    let head = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let head = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
     let files = operations::commit_files(&fx.registry, &fx.repo_str(), &head, &fx.workspace)
@@ -783,7 +854,7 @@ fn commit_message_returns_subject_and_body() {
         "-m",
         "body line one\nbody line two",
     ]);
-    let head = operations::log(&fx.registry, &fx.repo_str(), 1, None, &fx.workspace).unwrap()[0]
+    let head = operations::log(&fx.registry, &fx.repo_str(), 1, 0, &fx.workspace).unwrap()[0]
         .sha
         .clone();
 
@@ -805,7 +876,7 @@ fn commit_file_diff_returns_original_and_modified_text() {
     fx.run_git(&["add", "a.txt"]);
     fx.run_git(&["commit", "-q", "-m", "v2"]);
 
-    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, None, &fx.workspace).unwrap();
+    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
     let head = &entries[0].sha;
 
     let diff = operations::commit_file_diff(

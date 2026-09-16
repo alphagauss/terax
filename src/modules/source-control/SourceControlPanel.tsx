@@ -532,8 +532,9 @@ function SourceControlViewContainerComponent({
     });
   }, [refreshSourceControl]);
 
-  const handleFetch = useCallback(() => {
-    void sourceControl.runRemoteAction("fetch");
+  const handleFetch = useCallback(async () => {
+    const result = await sourceControl.runRemoteAction("fetch");
+    if (result.ok) setGraphRefreshToken((value) => value + 1);
   }, [sourceControl]);
 
   const handlePull = useCallback(() => {
