@@ -272,7 +272,8 @@
     "scrollNavigation": "Conversation navigation",
     "scrollToLatest": "Go to the latest response and follow",
     "userMessageFallback": "[Attachment or context]",
-    "guided": "Guided"
+    "guided": "Guided",
+    "runFailed": "The model request failed and this turn did not complete: {{error}}"
   },
   "filePicker": {
     "workspaceFiles": "Workspace files",

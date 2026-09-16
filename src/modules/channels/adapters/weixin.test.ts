@@ -31,7 +31,7 @@ describe("personal WeChat", () => {
   ])(
     "按微信协议接受空对象成功回执，保留明确错误和格式异常：%j",
     async (response, status, reason) => {
-      const fetch = vi.fn(async () =>
+      const fetch = vi.fn<typeof globalThis.fetch>(async () =>
         response === null
           ? new Response(null, { status: 204 })
           : response === ""
@@ -55,20 +55,11 @@ describe("personal WeChat", () => {
       );
       expect(
         await adapter.send(
-          { kind: "direct", id: "owner" },
-          { text: "before inbound" },
-          new AbortController().signal,
-        ),
-      ).toEqual({ status: "failed", parts: [], total: 1, reason: "context" });
-      expect(fetch).not.toHaveBeenCalled();
-      await receiveWeixinContext(adapter);
-      expect(
-        await adapter.send(
           { kind: "direct", id: "stranger" },
           { text: "wrong target" },
           new AbortController().signal,
         ),
-      ).toEqual({ status: "failed", parts: [], total: 1, reason: "context" });
+      ).toEqual({ status: "failed", parts: [], total: 1, reason: "target" });
       expect(fetch).not.toHaveBeenCalled();
       expect(
         await adapter.send(
@@ -83,6 +74,9 @@ describe("personal WeChat", () => {
         ...(reason ? { reason } : {}),
       });
       expect(fetch).toHaveBeenCalledTimes(1);
+      expect(
+        JSON.parse(String(fetch.mock.calls[0][1]?.body)).msg.context_token,
+      ).toBeUndefined();
     },
   );
 
@@ -121,7 +115,7 @@ describe("personal WeChat", () => {
     ).toBe(text);
   });
 
-  it("reports failed context refresh before dispatch and preserves cancellation", async () => {
+  it("复用入站上下文且不额外刷新，发送网络异常仍保留取消语义", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => {
       throw new TypeError("offline");
     });
@@ -149,9 +143,17 @@ describe("personal WeChat", () => {
         { text: "reply" },
         new AbortController().signal,
       ),
-    ).toEqual({ status: "failed", parts: [], total: 1, reason: "network" });
+    ).toEqual({
+      status: "unknown",
+      parts: [{ index: 0, status: "unknown" }],
+      total: 1,
+      reason: "network",
+    });
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toContain("/getconfig");
+    expect(fetch.mock.calls[0][0]).toContain("/sendmessage");
+    expect(
+      JSON.parse(String(fetch.mock.calls[0][1]?.body)).msg.context_token,
+    ).toBeDefined();
     await expect(
       adapter.send(message, { text: "reply" }, AbortSignal.abort()),
     ).rejects.toThrow();

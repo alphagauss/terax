@@ -32,6 +32,7 @@ import {
   materializeFileEditParts,
   materializeTurnMetadata,
   projectSessionMessages,
+  materializeRunFailure,
 } from "@/modules/ai/lib/conversation";
 import {
   cancelAgentRun,
@@ -207,6 +208,15 @@ export async function createAgentSession(options: {
           Date.now(),
         ),
       );
+      if (outcome === "error") {
+        messages = materializeRunFailure(
+          materializeTurnMetadata(messages, cursor.turnId),
+          cursor.turnId,
+          chat.error,
+          Date.now(),
+        );
+        chat.messages = messages;
+      }
       await persistCompletedTurn(
         record(),
         cursor,

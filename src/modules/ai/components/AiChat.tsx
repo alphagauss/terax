@@ -388,25 +388,13 @@ export function AiChatView({
   const deliveries = useDeliveryHistory(
     (state) => state.sessions[sessionId] ?? EMPTY_DELIVERIES,
   );
-  const attachedDeliveries = deliveries.filter(
-    (entry) =>
-      entry.source === "agent" &&
-      messages.some(
-        (message) =>
-          message.id === entry.afterMessageId &&
-          message.role === "assistant" &&
-          message.parts
-            .flatMap((part) => (part.type === "text" ? [part.text] : []))
-            .join("\n") === entry.content.text,
-      ),
-  );
   const activities = [
     ...commands.map((command) => ({
       ...command,
       element: <CommandCard key={command.id} command={command} />,
     })),
     ...deliveries
-      .filter((entry) => !attachedDeliveries.includes(entry))
+      .filter((entry) => entry.source === "application")
       .map((entry) => ({
         ...entry,
         element: <DeliveryCard key={entry.id} entry={entry} />,
@@ -499,11 +487,6 @@ export function AiChatView({
                   streaming={m.id === streamingMessageId}
                 />
               ) : null}
-              {attachedDeliveries
-                .filter((entry) => entry.afterMessageId === m.id)
-                .map((entry) => (
-                  <DeliveryCard key={entry.id} entry={entry} compact />
-                ))}
               {activities
                 .filter((entry) => entry.afterMessageId === m.id)
                 .map((entry) => entry.element)}
@@ -535,7 +518,7 @@ export function AiChatView({
             }}
           />
         )}
-        {error && (
+        {error && !(lastMessage && messageMetadata(lastMessage).runFailure) && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">{t("chat.somethingWentWrong")}</div>
             <div className="mt-0.5 leading-relaxed">
@@ -686,6 +669,19 @@ const RenderedMessage = memo(function RenderedMessage({
     () => ({ sessionId, calls: fileEdits?.calls }),
     [sessionId, fileEdits?.calls],
   );
+  const failure = messageMetadata(message).runFailure;
+  if (failure) {
+    const text = t("chat.runFailed", { error: failure.error });
+    return (
+      <div
+        data-conversation-message-id={message.id}
+        className="group/message text-xs text-destructive"
+      >
+        <p className="whitespace-pre-wrap break-words">{text}</p>
+        <MessageMeta timestamp={timestamp} copyText={text} />
+      </div>
+    );
+  }
   if (message.role === "user") {
     const rawText = messageTextWithoutAttachments(message);
 

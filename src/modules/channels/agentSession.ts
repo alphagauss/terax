@@ -35,6 +35,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { prepareChannelWorkspace } from "@/modules/channels/workspace";
 import { channelUserMessage } from "@/modules/channels/messages";
 import type { UIMessage } from "ai";
+import { formatAiError } from "@/modules/ai/lib/errors";
 
 const sessionCreations = new Map<string, Promise<void>>();
 
@@ -248,16 +249,13 @@ async function startChannelAgentTurn(
         if (signal.aborted) stop();
       });
       signal.throwIfAborted();
-      if (
-        getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
-          .status === "error"
-      )
-        throw new ChannelError("agent");
-      if (
-        getAgentMetaForSession(useChatStore.getState(), connection.sessionId)
-          .cancelled
-      )
-        return null;
+      const meta = getAgentMetaForSession(
+        useChatStore.getState(),
+        connection.sessionId,
+      );
+      if (meta.cancelled) return null;
+      if (meta.status === "error")
+        throw new ChannelError("agent", formatAiError(meta.error));
       return channelReplyText(chat.messages.slice(offset));
     } finally {
       cleanup();

@@ -63,10 +63,9 @@ function harness(
     },
   );
   const manager = new ChannelManager({
-    deliver: (_connection, _content, send) => send(),
+    deliver: (_connection, _content, send) => send(crypto.randomUUID()),
     command,
     adapter: async (connection) => ({
-      canSend: () => true,
       cursorScope: connection.accountId ?? "",
       receive: async (context) => {
         receivers.set(connection.id, context);
@@ -143,6 +142,23 @@ function harness(
 }
 
 describe("ChannelManager", () => {
+  it("处理旧通知不清除后来发生的新发送错误", async () => {
+    const h = harness();
+    await h.manager.configure([connection("a")]);
+    await vi.waitFor(() => expect(h.receivers.has("a")).toBe(true));
+    const input = message("task");
+    await h.receivers.get("a")?.receive(input);
+    for (const id of ["old", "new"]) {
+      h.send.mockResolvedValueOnce({ status: "unknown" as never, parts: [] });
+      await h.manager.send("a", input.target, { text: id }, undefined, id);
+    }
+    h.manager.dismissDeliveryIssues("a", input.target, ["old"]);
+    expect(h.snapshots()[0].issue).toBe("delivery-unknown");
+    h.manager.dismissDeliveryIssues("a", input.target, ["new"]);
+    expect(h.snapshots()[0].issue).toBeNull();
+    h.gates[0]();
+    await h.manager.dispose();
+  });
   it("即时命令在任务期间独立回复原消息，不引导模型且不混入最终回复身份", async () => {
     const command = vi.fn(
       async (_connection: ChannelConnection, input: ChannelInbound) =>
@@ -229,9 +245,7 @@ describe("ChannelManager", () => {
     expect(
       h.snapshots()[0].conversations.map((item) => item.sessionId),
     ).toEqual(bindings.map((item) => item.sessionId));
-    expect(h.snapshots()[0].conversations.every((item) => !item.canSend)).toBe(
-      true,
-    );
+    expect(h.snapshots()[0].status).toBe("disabled");
     expect(h.receivers.size).toBe(0);
     await h.manager.dispose();
   });

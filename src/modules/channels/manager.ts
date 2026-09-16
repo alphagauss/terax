@@ -27,7 +27,7 @@ type Dependencies = {
   deliver: (
     connection: ChannelSession,
     content: ChannelOutbound,
-    send: () => Promise<ChannelDeliveryResult>,
+    send: (deliveryId: string) => Promise<ChannelDeliveryResult>,
     source: ChannelDeliverySource,
   ) => Promise<ChannelDeliveryResult>;
   adapter: (connection: ChannelConnection) => Promise<ChannelAdapter>;
@@ -52,7 +52,7 @@ type Dependencies = {
     connection: ChannelConnection,
     checkpoint: ChannelCheckpoint,
   ) => Promise<void>;
-  failureText: () => string;
+  failureText: (error: unknown) => string;
   emptyReply: () => string;
   changed: (snapshots: ChannelSnapshot[]) => void;
 };
@@ -62,7 +62,10 @@ type ConversationRuntime = {
   queue: ChannelInbound[];
   busy: boolean;
   issue: ChannelIssue | null;
-  deliveryIssue: "delivery" | "delivery-unknown" | null;
+  deliveryIssue: {
+    id?: string;
+    status: "delivery" | "delivery-unknown";
+  } | null;
   blocked: boolean;
   active: Promise<void> | null;
   steer: ((message: ChannelInbound) => SteeringReceipt | null) | null;
@@ -187,6 +190,7 @@ export class ChannelManager {
     target: ChannelTarget,
     content: ChannelOutbound,
     signal?: AbortSignal,
+    deliveryId?: string,
   ): Promise<ChannelDeliveryResult> {
     const runtime = this.runtimes.get(id);
     if (!runtime?.adapter || runtime.abort.signal.aborted)
@@ -213,9 +217,11 @@ export class ChannelManager {
         conversation.deliveryIssue =
           result.status === "accepted"
             ? null
-            : result.status === "unknown"
-              ? "delivery-unknown"
-              : "delivery";
+            : {
+                id: deliveryId,
+                status:
+                  result.status === "unknown" ? "delivery-unknown" : "delivery",
+              };
         this.publish();
       }
       return result;
@@ -225,6 +231,24 @@ export class ChannelManager {
       () => {},
     );
     return sending;
+  }
+
+  /** 只清除被处理记录的当前提示，不能误清发送期间产生的新问题。 */
+  dismissDeliveryIssues(
+    id: string,
+    target: ChannelTarget,
+    deliveryIds: readonly string[],
+  ) {
+    const conversation = this.runtimes
+      .get(id)
+      ?.conversations.get(channelTargetKey(target));
+    if (
+      conversation?.deliveryIssue?.id &&
+      deliveryIds.includes(conversation.deliveryIssue.id)
+    ) {
+      conversation.deliveryIssue = null;
+      this.publish();
+    }
   }
 
   private async stop(runtime: Runtime): Promise<void> {
@@ -253,7 +277,7 @@ export class ChannelManager {
             runtime.snapshot.issue ??
             conversations.find((conversation) => conversation.issue)?.issue ??
             conversations.find((conversation) => conversation.deliveryIssue)
-              ?.deliveryIssue ??
+              ?.deliveryIssue?.status ??
             null,
           busy: conversations.some((conversation) => conversation.busy),
           queued: conversations.reduce(
@@ -264,9 +288,6 @@ export class ChannelManager {
             ...conversation.binding,
             busy: conversation.busy,
             queued: conversation.queue.length,
-            canSend:
-              runtime.snapshot.status === "online" &&
-              Boolean(runtime.adapter?.canSend(conversation.binding.target)),
           })),
         };
       }),
@@ -501,12 +522,13 @@ export class ChannelManager {
         this.deps.deliver(
           { ...runtime.snapshot.connection, ...conversation.binding },
           content,
-          () =>
+          (deliveryId) =>
             this.send(
               runtime.snapshot.connection.id,
               target,
               content,
               callSignal,
+              deliveryId,
             ),
           source,
         ),
@@ -555,9 +577,9 @@ export class ChannelManager {
         return;
       }
       delivering = true;
-      if (text || !delivery.accepted) {
-        await delivery.final(text || this.deps.emptyReply());
-      }
+      if (text) await delivery.final(text);
+      else if (!delivery.accepted)
+        await delivery.failure(this.deps.emptyReply());
       if (runtime.snapshot.issue === "interrupted")
         runtime.snapshot.issue = null;
       if (!conversation.blocked) conversation.issue = null;
@@ -572,7 +594,7 @@ export class ChannelManager {
           error instanceof ChannelError ? error.issue : "agent";
         if (!delivering) {
           try {
-            await delivery.final(this.deps.failureText());
+            await delivery.failure(this.deps.failureText(error));
           } catch (error) {
             if (
               !signal.aborted &&

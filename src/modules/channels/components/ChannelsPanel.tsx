@@ -1,5 +1,6 @@
 /** Channel 人工发送入口；面板只持有草稿和历史投影，关闭不会停止投递。 */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import type { Chat, UIMessage } from "@ai-sdk/react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/controls/button";
@@ -18,27 +19,16 @@ import {
   requestChannels,
 } from "@/modules/channels/client";
 import { ConnectionStatus } from "@/modules/channels/components/ConnectionStatus";
-import { DeliveryCard } from "@/modules/channels/components/DeliveryCard";
+import { ChannelConversation } from "@/modules/channels/components/ChannelConversation";
+import { loadChat } from "@/modules/ai/store/chatRuntime";
 import {
-  projectDeliveries,
-  type DeliveryDisplay,
-} from "@/modules/channels/history";
-import { projectCommands } from "@/modules/ai/commands/records";
-import {
-  messageMetadata,
-  projectSessionMessages,
-} from "@/modules/ai/lib/conversation";
-import { readSession } from "@/modules/ai/lib/sessions";
-import { useChatStore } from "@/modules/ai/store/chatStore";
+  chats,
+  retainSessionView,
+  releaseUnusedChats,
+  useChatStore,
+} from "@/modules/ai/store/chatStore";
 import { channelTargetLabel } from "@/modules/channels/types";
 
-type HistoryEntry = {
-  id: string;
-  timestamp: number;
-  text: string;
-  role: string;
-  delivery?: DeliveryDisplay;
-};
 type Draft = { text: string; paths: string[] };
 const EMPTY_DRAFT: Draft = { text: "", paths: [] };
 
@@ -46,9 +36,6 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
   const { t } = useTranslation("channels");
   const snapshots = useChannelsView((state) => state.snapshots);
   const serviceError = useChannelsView((state) => state.error);
-  const scroll = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
-  const scrollSession = useRef<string | undefined>(undefined);
   const selected = useChannelSelection((state) => state.connectionId);
   const setSelected = (connectionId: string) =>
     useChannelSelection.setState({ connectionId });
@@ -71,87 +58,40 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
   const draft = drafts[draftKey] ?? EMPTY_DRAFT;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<{
-    sessionId: string;
-    entries: HistoryEntry[];
-  }>();
-  const updateDraft = (value: Draft) =>
-    setDrafts((current) => ({ ...current, [draftKey]: value }));
-
+  const [chat, setChat] = useState<Chat<UIMessage>>();
+  const [historyError, setHistoryError] = useState(false);
+  // 注册表失效时立即停止展示旧实例，随后复用现有冷加载入口。
+  const registered = useChatStore(() =>
+    sessionId ? chats.get(sessionId) : undefined,
+  );
+  const viewing = visible && sessionMeta ? sessionId : undefined;
+  useEffect(
+    () => (viewing ? retainSessionView(viewing) : undefined),
+    [viewing],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 文件版本或注册实例失效时需要重新加载。
   useEffect(() => {
-    if (!visible || !sessionId || !sessionMeta) return;
+    setHistoryError(false);
+    if (!viewing) return;
     let active = true;
-    void readSession(sessionId)
-      .then((session) => {
-        if (!active) return;
-        const entries: HistoryEntry[] = projectSessionMessages(
-          sessionId,
-          session.messages,
-        )
-          .filter((message) => !messageMetadata(message).commandId)
-          .map((message) => ({
-            id: message.id,
-            timestamp: messageMetadata(message).createdAt ?? 0,
-            role: message.role,
-            text: message.parts
-              .flatMap((part) => (part.type === "text" ? [part.text] : []))
-              .join("\n"),
-          }))
-          .filter((entry) => entry.text);
-        for (const command of projectCommands(session.messages))
-          entries.push({
-            id: command.id,
-            timestamp: command.timestamp,
-            role: "command",
-            text: [command.input, command.result?.text]
-              .filter(Boolean)
-              .join("\n"),
-          });
-        for (const delivery of projectDeliveries(session.messages)) {
-          const reply =
-            delivery.source === "agent"
-              ? entries.find(
-                  (entry) =>
-                    entry.id === delivery.afterMessageId &&
-                    entry.role === "assistant" &&
-                    entry.text === delivery.content.text,
-                )
-              : undefined;
-          if (reply) {
-            reply.delivery = delivery;
-            continue;
-          }
-          entries.push({
-            id: delivery.id,
-            timestamp: delivery.timestamp,
-            role: "delivery",
-            text: "",
-            delivery,
-          });
-        }
-        setHistory({
-          sessionId,
-          entries: entries.sort((a, b) => a.timestamp - b.timestamp),
-        });
-      })
-      .catch(() => {
-        if (active) setError(t("errors.storage"));
-      });
+    void loadChat(viewing).then(
+      (loaded) => {
+        if (active) setChat(loaded);
+        else releaseUnusedChats();
+      },
+      () => {
+        if (active) setHistoryError(true);
+      },
+    );
     return () => {
       active = false;
     };
-  }, [visible, sessionId, sessionMeta, t]);
-
-  useLayoutEffect(() => {
-    const element = scroll.current;
-    if (!visible || !element || history?.sessionId !== sessionId) return;
-    if (follow.current || scrollSession.current !== sessionId)
-      element.scrollTop = element.scrollHeight;
-    scrollSession.current = sessionId;
-  }, [history, visible, sessionId]);
+  }, [viewing, sessionMeta?.fingerprint, registered]);
+  const updateDraft = (value: Draft) =>
+    setDrafts((current) => ({ ...current, [draftKey]: value }));
 
   const submit = async () => {
-    if (!conversation?.canSend || pending) return;
+    if (!conversation || snapshot.status !== "online" || pending) return;
     setPending(true);
     setError("");
     try {
@@ -228,60 +168,41 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
             {snapshot && <ConnectionStatus snapshot={snapshot} />}
           </div>
         )}
-        {conversation && !conversation.canSend && (
+        {conversation && snapshot.status !== "online" && (
           <p className="text-muted-foreground">{t("outbound.unavailable")}</p>
         )}
-        {snapshot?.issue && (
-          <p
-            role="alert"
-            className={
-              snapshot.issue === "delivery-unknown"
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-destructive"
-            }
-          >
-            {t(`errors.${snapshot.issue}`)}
-          </p>
-        )}
+        {snapshot?.issue &&
+          snapshot.issue !== "delivery" &&
+          snapshot.issue !== "delivery-unknown" && (
+            <p role="alert" className="text-destructive">
+              {t(`errors.${snapshot.issue}`)}
+            </p>
+          )}
         <div className="break-all text-muted-foreground">
           {conversation
             ? t("outbound.target", { id: conversation.target.id })
             : t("outbound.noTarget")}
         </div>
       </div>
-      <div
-        ref={scroll}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          follow.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight <
-            48;
-        }}
-        className="app-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
-      >
-        {visible &&
-          history &&
-          history.sessionId === sessionId &&
-          history.entries.map((entry) =>
-            entry.delivery && entry.role === "delivery" ? (
-              <DeliveryCard key={entry.id} entry={entry.delivery} />
-            ) : (
-              <div key={entry.id} className="rounded-md bg-secondary p-3">
-                <div className="mb-1 text-muted-foreground">
-                  {t(`outbound.roles.${entry.role}`)}
-                </div>
-                <p className="whitespace-pre-wrap break-words">{entry.text}</p>
-                {entry.delivery && (
-                  <DeliveryCard entry={entry.delivery} compact />
-                )}
-              </div>
-            ),
-          )}
-      </div>
+      {viewing && chat?.id === viewing && chat === registered ? (
+        <ChannelConversation
+          key={viewing}
+          chat={chat}
+          sessionId={viewing}
+          connectionId={id}
+          canRetry={snapshot?.status === "online"}
+          onError={setError}
+        />
+      ) : (
+        <div className="min-h-0 flex-1" />
+      )}
       <div className="space-y-2 border-t border-border p-3">
-        {(error || serviceError) && (
+        {(error || serviceError || historyError) && (
           <p role="alert" className="text-destructive">
-            {error || t(`errors.${serviceError}`)}
+            {error ||
+              (historyError
+                ? t("errors.storage")
+                : t(`errors.${serviceError}`))}
           </p>
         )}
         <Textarea
@@ -345,7 +266,7 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
             disabled={
               pending ||
               draft.paths.length > 16 ||
-              !conversation?.canSend ||
+              !conversation ||
               snapshot.status !== "online" ||
               (!draft.text.trim() && !draft.paths.length)
             }

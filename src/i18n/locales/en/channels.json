@@ -106,23 +106,33 @@
     "conversation": "Conversation",
     "direct": "Private chat",
     "group": "Group / room",
-    "unavailable": "Connect this instance to send. If already connected, send a new message from your messaging app to refresh the conversation context.",
+    "unavailable": "Connect this instance to send to the selected conversation.",
     "openInAgent": "View in Agent panel",
     "unknownHelp": "The message may have arrived, but delivery could not be confirmed. Check your messaging app before sending again.",
     "sources": {
       "application": "App send",
       "agent": "Agent reply",
       "command": "Command reply",
-      "tool": "Tool send"
+      "tool": "Tool send",
+      "system": "System notification"
     },
     "reasons": {
       "network": "The network request or response read failed.",
       "protocol": "The platform response could not be interpreted.",
       "rejected": "The platform rejected this message.",
       "auth": "Platform authorization expired. Sign in again.",
-      "context": "No sending context is available. Send a message from your messaging app first.",
+      "target": "This connection does not support sending to this target.",
       "upload": "Attachment preparation or upload failed.",
       "interrupted": "Sending was interrupted before a complete acknowledgement was received."
-    }
+    },
+    "ignored": "Issue ignored",
+    "retried": "Resent",
+    "ignore": "Ignore issue",
+    "retry": "Resend",
+    "ignoreAll": "Ignore all",
+    "issues": "{{count}} messages need attention. Click to view",
+    "viewIssue": "View message",
+    "retryWarning": "Resending may duplicate content already delivered.",
+    "handleFailed": "The operation did not complete. Check the message history before trying again."
   }
 }

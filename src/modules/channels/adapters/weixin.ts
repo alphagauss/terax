@@ -312,10 +312,7 @@ export function splitWeixinText(text: string): string[] {
 /** 一个账号的独立适配器，接收与回复共用凭据但不共用取消控制器。 */
 export class WeixinAdapter implements ChannelAdapter {
   readonly cursorScope: string;
-  private readonly contexts = new Map<
-    string,
-    { token: string; receivedAt: number }
-  >();
+  private readonly contexts = new Map<string, string>();
 
   constructor(
     private readonly credentials: WeixinCredentials,
@@ -324,14 +321,6 @@ export class WeixinAdapter implements ChannelAdapter {
     private readonly fetchImpl?: typeof fetch,
   ) {
     this.cursorScope = credentials.botId;
-  }
-
-  canSend(target: ChannelTarget): boolean {
-    return (
-      target.kind === "direct" &&
-      !target.threadId &&
-      this.contexts.has(target.id)
-    );
   }
 
   async receive(context: ReceiveContext): Promise<void> {
@@ -372,10 +361,7 @@ export class WeixinAdapter implements ChannelAdapter {
         const parsed = parseWeixinMessage(raw, this.credentials.userId);
         if (parsed) {
           const { media, replyContext, ...message } = parsed;
-          this.contexts.set(message.target.id, {
-            token: replyContext,
-            receivedAt: message.receivedAt,
-          });
+          this.contexts.set(message.target.id, replyContext);
           await context.receive(message, async () => {
             const attachments = [];
             for (const item of media)
@@ -409,38 +395,14 @@ export class WeixinAdapter implements ChannelAdapter {
     const chunks = splitWeixinText(content.text ?? "");
     const attachments = content.attachments ?? [];
     const total = attachments.length + chunks.length;
-    let contextToken: string;
-    try {
-      signal.throwIfAborted();
-      const context = this.contexts.get(target.id);
-      if (target.kind !== "direct" || target.threadId || !context)
-        return { status: "failed", parts: [], reason: "context", total };
-      contextToken = context.token;
-      // 刷新失败时尚未发送任何消息，应报告失败而不是不确定的投递结果。
-      if (Date.now() - context.receivedAt > 60_000) {
-        const config = await this.call(
-          "getconfig",
-          { ilink_user_id: target.id, context_token: contextToken },
-          signal,
-        );
-        if (typeof config.context_token === "string" && config.context_token) {
-          contextToken = config.context_token;
-          if (this.contexts.get(target.id) === context)
-            this.contexts.set(target.id, {
-              token: contextToken,
-              receivedAt: Date.now(),
-            });
-        }
-      }
-    } catch (error) {
-      signal.throwIfAborted();
-      return {
-        status: "failed",
-        parts: [],
-        reason: deliveryReason(error),
-        total,
-      };
-    }
+    signal.throwIfAborted();
+    if (
+      target.kind !== "direct" ||
+      target.threadId ||
+      target.id !== this.credentials.userId
+    )
+      return { status: "failed", parts: [], reason: "target", total };
+    const contextToken = this.contexts.get(target.id);
     const deliveryId = `terax-${crypto.randomUUID()}`;
     const parts: ChannelDeliveryResult["parts"] = [];
     let reason: ChannelDeliveryResult["reason"];
@@ -478,7 +440,7 @@ export class WeixinAdapter implements ChannelAdapter {
               client_id: `${deliveryId}-${index}`,
               message_type: 2,
               message_state: 2,
-              context_token: contextToken,
+              ...(contextToken ? { context_token: contextToken } : {}),
               item_list: [item],
             },
           },

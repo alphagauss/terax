@@ -21,6 +21,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 const io = vi.hoisted(() => ({
   receive: null as ReceiveContext | null,
   send: vi.fn(),
+  dismiss: vi.fn(),
+  retry: vi.fn(),
   listeners: new Map<string, Set<(event: { payload: unknown }) => void>>(),
   saveCredentials: vi.fn(),
   poll: vi.fn(),
@@ -119,16 +121,17 @@ vi.mock("@/modules/channels/agentSession", () => ({
   runChannelTurn: async () => null,
 }));
 vi.mock("@/modules/channels/outbound", () => ({
+  dismissChannelDeliveries: io.dismiss,
+  retryChannelDelivery: io.retry,
   beginChannelSend: async (
     _connection: unknown,
     _content: unknown,
-    send: () => Promise<ChannelDeliveryResult>,
-  ) => ({ completed: send() }),
+    send: (id: string) => Promise<ChannelDeliveryResult>,
+  ) => ({ completed: send(crypto.randomUUID()) }),
 }));
 vi.mock("@/modules/channels/adapters/registry", () => ({
   channelPlatform: () => ({
     create: async () => ({
-      canSend: () => true,
       cursorScope: "old-bot",
       async receive(context: ReceiveContext) {
         io.receive = context;
@@ -163,6 +166,8 @@ vi.mock("@/modules/channels/adapters/registry", () => ({
 }));
 
 beforeEach(() => {
+  io.dismiss.mockReset().mockResolvedValue([]);
+  io.retry.mockReset();
   io.receive = null;
   io.send.mockReset().mockResolvedValue({ status: "accepted", parts: [] });
   io.stores.clear();
@@ -360,6 +365,20 @@ it("发送请求校验内容并保持指定目标，受理后不等待上传才�
       useChannelsView.getState().snapshots[0].conversations[0].sessionId,
     content: { text: "manual" },
   };
+  await requestChannels({ action: "reconnect", id: io.connection.id });
+  await vi.waitFor(() =>
+    expect(useChannelsView.getState().snapshots[0].status).toBe("online"),
+  );
+  const deliveryId = crypto.randomUUID();
+  await expect(
+    requestChannels({
+      action: "dismiss-deliveries",
+      id: io.connection.id,
+      sessionId: crypto.randomUUID(),
+      deliveryIds: [deliveryId],
+    }),
+  ).rejects.toThrow("delivery");
+  expect(io.dismiss).not.toHaveBeenCalled();
   await expect(
     sendChannelContent({ ...request, content: {} }),
   ).rejects.toThrow();
@@ -383,5 +402,35 @@ it("发送请求校验内容并保持指定目标，受理后不等待上传才�
   );
   expect(io.send).toHaveBeenCalledTimes(1);
   finish();
+  await requestChannels({
+    action: "enable",
+    id: io.connection.id,
+    enabled: false,
+  });
+  await vi.waitFor(() =>
+    expect(useChannelsView.getState().snapshots[0].conversations).toHaveLength(
+      1,
+    ),
+  );
+  await requestChannels({
+    action: "dismiss-deliveries",
+    id: io.connection.id,
+    sessionId: request.sessionId,
+    deliveryIds: [deliveryId],
+  });
+  expect(io.dismiss).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionId: request.sessionId, target }),
+    [deliveryId],
+    expect.any(Function),
+  );
+  await expect(
+    requestChannels({
+      action: "retry-delivery",
+      id: io.connection.id,
+      sessionId: request.sessionId,
+      deliveryId,
+    }),
+  ).rejects.toThrow("delivery");
+  expect(io.retry).not.toHaveBeenCalled();
   await stop();
 });

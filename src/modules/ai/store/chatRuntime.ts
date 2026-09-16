@@ -222,16 +222,21 @@ export function loadChat(sessionId: string): Promise<Chat<UIMessage>> {
   const pending = loadingChats.get(sessionId);
   if (pending) return pending;
   const task = (async () => {
-    if (
-      !seedMessages.has(sessionId) &&
-      useChatStore
+    // 冷读取期间会话可能被其他页面移除或被磁盘新版本替换。
+    for (;;) {
+      const before = useChatStore
         .getState()
-        .sessions.some((session) => session.id === sessionId)
-    )
-      await seedSession(sessionId);
-    const chat = chats.get(sessionId) ?? makeChat(sessionId);
-    chats.set(sessionId, chat);
-    return chat;
+        .sessions.find((item) => item.id === sessionId);
+      if (before && !seedMessages.has(sessionId)) await seedSession(sessionId);
+      const after = useChatStore
+        .getState()
+        .sessions.find((item) => item.id === sessionId);
+      if (before && !after) throw new Error("Session is no longer available");
+      if (before?.fingerprint !== after?.fingerprint) continue;
+      const chat = chats.get(sessionId) ?? makeChat(sessionId);
+      chats.set(sessionId, chat);
+      return chat;
+    }
   })();
   loadingChats.set(sessionId, task);
   void task.finally(() => loadingChats.delete(sessionId)).catch(() => {});

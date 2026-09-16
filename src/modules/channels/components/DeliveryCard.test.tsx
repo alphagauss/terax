@@ -79,7 +79,8 @@ it("回复回执保留异常，省略已展示正文；多项统计包含未发�
     />,
   );
   expect(html).not.toContain("hello");
-  expect(html).toContain("outbound.sources.agent");
+  expect(html).not.toContain("outbound.sources.agent");
+  expect(html).not.toContain("rounded-md border");
   expect(html).toContain("outbound.partial");
   expect(html).toContain('"unsent":1');
 });
