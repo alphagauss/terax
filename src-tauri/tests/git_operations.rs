@@ -692,6 +692,12 @@ fn log_includes_current_upstream_and_excludes_unrelated_refs() {
         &unrelated_head,
     ]);
     fx.run_git(&["update-ref", "refs/heads/feature", &unrelated_head]);
+    fx.run_git(&["update-ref", "refs/heads/nightly", &local_head]);
+    fx.run_git(&[
+        "update-ref",
+        "refs/remotes/origin/nightly",
+        &local_head,
+    ]);
     fx.run_git(&["checkout", "-q", "main"]);
 
     let entries = operations::log(&fx.registry, &fx.repo_str(), 10, 0, &fx.workspace).unwrap();
@@ -705,6 +711,14 @@ fn log_includes_current_upstream_and_excludes_unrelated_refs() {
     assert!(remote.refs.iter().any(|reference| {
         reference.label == "origin/main"
             && reference.kind == terax_lib::modules::git::types::GitLogRefKind::Remote
+    }));
+    let local = entries
+        .iter()
+        .find(|entry| entry.sha == local_head)
+        .expect("local HEAD present");
+    assert!(local.refs.iter().any(|reference| reference.label == "main"));
+    assert!(local.refs.iter().all(|reference| {
+        reference.label != "nightly" && reference.label != "origin/nightly"
     }));
     assert!(entries.iter().all(|entry| entry.sha != unrelated_head));
 }
