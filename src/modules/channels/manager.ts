@@ -20,9 +20,16 @@ import {
   type ChannelTarget,
   type ChannelOutbound,
   type ChannelDeliveryResult,
+  type ChannelDeliverySource,
 } from "@/modules/channels/types";
 
 type Dependencies = {
+  deliver: (
+    connection: ChannelSession,
+    content: ChannelOutbound,
+    send: () => Promise<ChannelDeliveryResult>,
+    source: ChannelDeliverySource,
+  ) => Promise<ChannelDeliveryResult>;
   adapter: (connection: ChannelConnection) => Promise<ChannelAdapter>;
   materialize?: (
     connection: ChannelConnection,
@@ -55,6 +62,7 @@ type ConversationRuntime = {
   queue: ChannelInbound[];
   busy: boolean;
   issue: ChannelIssue | null;
+  deliveryIssue: "delivery" | "delivery-unknown" | null;
   blocked: boolean;
   active: Promise<void> | null;
   steer: ((message: ChannelInbound) => SteeringReceipt | null) | null;
@@ -84,6 +92,7 @@ function conversationRuntime(
     queue: [],
     busy: false,
     issue: null,
+    deliveryIssue: null,
     blocked: false,
     active: null,
     steer: null,
@@ -190,12 +199,26 @@ export class ChannelManager {
         ? AbortSignal.any([signal, runtime.abort.signal])
         : runtime.abort.signal;
       combined.throwIfAborted();
+      let result: ChannelDeliveryResult;
       try {
-        return await adapter.send(destination, input, combined);
+        result = await adapter.send(destination, input, combined);
       } catch {
         combined.throwIfAborted();
-        return { status: "unknown" as const, parts: [] };
+        result = { status: "unknown", parts: [] };
       }
+      const conversation = runtime.conversations.get(
+        channelTargetKey(destination),
+      );
+      if (conversation) {
+        conversation.deliveryIssue =
+          result.status === "accepted"
+            ? null
+            : result.status === "unknown"
+              ? "delivery-unknown"
+              : "delivery";
+        this.publish();
+      }
+      return result;
     });
     runtime.sends = sending.then(
       () => {},
@@ -229,6 +252,8 @@ export class ChannelManager {
           issue:
             runtime.snapshot.issue ??
             conversations.find((conversation) => conversation.issue)?.issue ??
+            conversations.find((conversation) => conversation.deliveryIssue)
+              ?.deliveryIssue ??
             null,
           busy: conversations.some((conversation) => conversation.busy),
           queued: conversations.reduce(
@@ -472,13 +497,23 @@ export class ChannelManager {
     if (!runtime.adapter) return;
     const delivery = bindChannelDelivery(
       conversation.binding.sessionId,
-      (target, content, callSignal) =>
-        this.send(runtime.snapshot.connection.id, target, content, callSignal),
+      (target, content, callSignal, source) =>
+        this.deps.deliver(
+          { ...runtime.snapshot.connection, ...conversation.binding },
+          content,
+          () =>
+            this.send(
+              runtime.snapshot.connection.id,
+              target,
+              content,
+              callSignal,
+            ),
+          source,
+        ),
       conversation.binding.target,
       signal,
     );
     let commandTask: Promise<boolean> | undefined;
-    let commandDeliveryFailed = false;
     const handleCommand = async (input: ChannelInbound): Promise<boolean> => {
       if (!this.deps.command) return false;
       const text = await this.deps.command(
@@ -488,11 +523,7 @@ export class ChannelManager {
       );
       if (text === null) return false;
       signal.throwIfAborted();
-      const result = await delivery.reply(text);
-      if (result.status !== "accepted") {
-        commandDeliveryFailed = true;
-        conversation.issue = "delivery";
-      }
+      await delivery.reply(text);
       await this.completeMessages(runtime, conversation, [
         messageIdentity(input),
       ]);
@@ -525,16 +556,11 @@ export class ChannelManager {
       }
       delivering = true;
       if (text || !delivery.accepted) {
-        const result = await delivery.send({
-          text: text || this.deps.emptyReply(),
-        });
-        if (result.status !== "accepted") throw new ChannelError("delivery");
+        await delivery.final(text || this.deps.emptyReply());
       }
       if (runtime.snapshot.issue === "interrupted")
         runtime.snapshot.issue = null;
-      if (!conversation.blocked)
-        conversation.issue =
-          delivery.failed || commandDeliveryFailed ? "delivery" : null;
+      if (!conversation.blocked) conversation.issue = null;
     } catch (error) {
       if (!signal.aborted) {
         if (error instanceof ChannelError && error.issue === "storage") {
@@ -546,12 +572,16 @@ export class ChannelManager {
           error instanceof ChannelError ? error.issue : "agent";
         if (!delivering) {
           try {
-            const result = await delivery.send({
-              text: this.deps.failureText(),
-            });
-            if (result.status !== "accepted") conversation.issue = "delivery";
-          } catch {
-            if (!signal.aborted) conversation.issue = "delivery";
+            await delivery.final(this.deps.failureText());
+          } catch (error) {
+            if (
+              !signal.aborted &&
+              error instanceof ChannelError &&
+              error.issue === "storage"
+            ) {
+              conversation.issue = "storage";
+              conversation.blocked = true;
+            }
           }
         }
       }

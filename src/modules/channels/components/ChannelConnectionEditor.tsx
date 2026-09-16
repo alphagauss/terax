@@ -153,7 +153,7 @@ export function ChannelConnectionEditor({
       {message ? (
         <p
           role="alert"
-          className="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-[12px] text-destructive"
+          className={`mb-4 rounded-md px-3 py-2 text-[12px] ${message === "delivery-unknown" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : "bg-destructive/10 text-destructive"}`}
         >
           {t(`errors.${message}`, { defaultValue: t("errors.unavailable") })}
         </p>

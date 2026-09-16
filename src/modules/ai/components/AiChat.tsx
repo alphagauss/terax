@@ -388,15 +388,29 @@ export function AiChatView({
   const deliveries = useDeliveryHistory(
     (state) => state.sessions[sessionId] ?? EMPTY_DELIVERIES,
   );
+  const attachedDeliveries = deliveries.filter(
+    (entry) =>
+      entry.source === "agent" &&
+      messages.some(
+        (message) =>
+          message.id === entry.afterMessageId &&
+          message.role === "assistant" &&
+          message.parts
+            .flatMap((part) => (part.type === "text" ? [part.text] : []))
+            .join("\n") === entry.content.text,
+      ),
+  );
   const activities = [
     ...commands.map((command) => ({
       ...command,
       element: <CommandCard key={command.id} command={command} />,
     })),
-    ...deliveries.map((entry) => ({
-      ...entry,
-      element: <DeliveryCard key={entry.id} entry={entry} />,
-    })),
+    ...deliveries
+      .filter((entry) => !attachedDeliveries.includes(entry))
+      .map((entry) => ({
+        ...entry,
+        element: <DeliveryCard key={entry.id} entry={entry} />,
+      })),
   ].sort((a, b) => a.timestamp - b.timestamp);
   const lastMessage = messages[messages.length - 1];
   const showPendingResponse =
@@ -485,6 +499,11 @@ export function AiChatView({
                   streaming={m.id === streamingMessageId}
                 />
               ) : null}
+              {attachedDeliveries
+                .filter((entry) => entry.afterMessageId === m.id)
+                .map((entry) => (
+                  <DeliveryCard key={entry.id} entry={entry} compact />
+                ))}
               {activities
                 .filter((entry) => entry.afterMessageId === m.id)
                 .map((entry) => entry.element)}

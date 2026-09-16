@@ -1,4 +1,4 @@
-/** 应用主动发送先记录请求，完成后保存回执；记录失败重试不再次投递。 */
+/** 所有发送入口先记录请求，完成后保存回执；记录失败重试不再次投递。 */
 import { channelOwnerId } from "@/modules/channels/identity";
 import { ensureChannelSession } from "@/modules/channels/agentSession";
 import {
@@ -13,13 +13,15 @@ import type {
   ChannelSession,
   ChannelOutbound,
   ChannelDeliveryResult,
+  ChannelDeliverySource,
 } from "@/modules/channels/types";
 
 export async function beginChannelSend(
   connection: ChannelSession,
   content: ChannelOutbound,
   send: () => Promise<ChannelDeliveryResult>,
-): Promise<{ completed: Promise<void> }> {
+  source: ChannelDeliverySource = "application",
+): Promise<{ completed: Promise<ChannelDeliveryResult> }> {
   await ensureChannelSession(connection);
   const sessionId = connection.sessionId;
   const ownerId = await channelOwnerId(connection);
@@ -29,28 +31,34 @@ export async function beginChannelSend(
     chats.get(sessionId)?.messages ?? seedMessages.get(sessionId) ?? [],
   );
   const id = crypto.randomUUID();
-  await appendSessionDisplay(
-    sessionId,
-    {
-      role: "delivery",
-      timestamp: new Date().toISOString(),
-      content: {
-        id,
-        phase: "request",
-        target: connection.target,
-        content,
-        afterMessageId: messages[messages.length - 1]?.id,
-      },
-    },
-    ownerId,
-  );
   setDeliveryPending(id, true);
+  try {
+    await appendSessionDisplay(
+      sessionId,
+      {
+        role: "delivery",
+        timestamp: new Date().toISOString(),
+        content: {
+          id,
+          phase: "request",
+          source,
+          target: connection.target,
+          content,
+          afterMessageId: messages[messages.length - 1]?.id,
+        },
+      },
+      ownerId,
+    );
+  } catch (error) {
+    setDeliveryPending(id, false);
+    throw error;
+  }
   const completed = (async () => {
     let result: ChannelDeliveryResult;
     try {
       result = await send();
     } catch {
-      result = { status: "unknown", parts: [] };
+      result = { status: "unknown", parts: [], reason: "interrupted" };
     }
     await appendSessionDisplay(
       sessionId,
@@ -61,6 +69,7 @@ export async function beginChannelSend(
       },
       ownerId,
     );
+    return result;
   })().finally(() => setDeliveryPending(id, false));
   return { completed };
 }

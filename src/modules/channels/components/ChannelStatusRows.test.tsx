@@ -95,3 +95,17 @@ it("未启用的已登录连接显示连接按钮，未登录连接不可操作"
     ].find((button) => button.disabled)?.disabled,
   ).toBe(true);
 });
+
+it("对话错误不覆盖在线连接的绿色状态点", async () => {
+  useChannelsView.setState({
+    snapshots: [{ ...snapshot("enabled", true), issue: "delivery" }],
+  });
+  await act(async () =>
+    root.render(<ChannelStatusRows onActivate={vi.fn()} />),
+  );
+  expect(container.querySelector(".bg-emerald-500")).not.toBeNull();
+  expect(container.querySelector(".bg-destructive")).toBeNull();
+  expect(
+    container.querySelector('[aria-label="errors.delivery"]'),
+  ).not.toBeNull();
+});

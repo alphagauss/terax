@@ -119,16 +119,15 @@ async function request(
     throw new ChannelError("network");
   }
   let data: Payload;
+  // 微信没有额外的送达确认；成功空响应与空对象都表示本次发送已完成。
+  if (endpoint === "sendmessage" && !body.trim()) return {};
   try {
     data = record(JSON.parse(body));
   } catch {
     throw new ChannelError("protocol");
   }
-  const codes = [data.ret, data.errcode].filter((code) => code !== undefined);
-  if (
-    codes.some((code) => typeof code !== "number" || !Number.isInteger(code)) ||
-    (endpoint === "sendmessage" && !codes.length)
-  )
+  const codes = [data.ret, data.errcode].filter((code) => code != null);
+  if (codes.some((code) => typeof code !== "number" || !Number.isInteger(code)))
     throw new ChannelError("protocol");
   const errors = codes.filter((code) => code !== 0);
   if (errors.includes(-14)) throw new ChannelError("auth");
@@ -406,12 +405,16 @@ export class WeixinAdapter implements ChannelAdapter {
     content: ChannelOutbound,
     signal: AbortSignal,
   ): Promise<ChannelDeliveryResult> {
+    // iLink 允许成功响应省略 ret；request 仍校验显式错误码和 JSON 格式。
+    const chunks = splitWeixinText(content.text ?? "");
+    const attachments = content.attachments ?? [];
+    const total = attachments.length + chunks.length;
     let contextToken: string;
     try {
       signal.throwIfAborted();
       const context = this.contexts.get(target.id);
       if (target.kind !== "direct" || target.threadId || !context)
-        return { status: "failed", parts: [] };
+        return { status: "failed", parts: [], reason: "context", total };
       contextToken = context.token;
       // 刷新失败时尚未发送任何消息，应报告失败而不是不确定的投递结果。
       if (Date.now() - context.receivedAt > 60_000) {
@@ -429,16 +432,19 @@ export class WeixinAdapter implements ChannelAdapter {
             });
         }
       }
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
-      return { status: "failed", parts: [] };
+      return {
+        status: "failed",
+        parts: [],
+        reason: deliveryReason(error),
+        total,
+      };
     }
-    const chunks = splitWeixinText(content.text ?? "");
     const deliveryId = `terax-${crypto.randomUUID()}`;
     const parts: ChannelDeliveryResult["parts"] = [];
-    const attachments = content.attachments ?? [];
-    const count = attachments.length + chunks.length;
-    for (let index = 0; index < count; index++) {
+    let reason: ChannelDeliveryResult["reason"];
+    for (let index = 0; index < total; index++) {
       let item: Payload;
       if (index < attachments.length) {
         try {
@@ -453,6 +459,7 @@ export class WeixinAdapter implements ChannelAdapter {
         } catch {
           signal.throwIfAborted();
           parts.push({ index, status: "failed" });
+          reason = "upload";
           break;
         }
       } else {
@@ -480,6 +487,7 @@ export class WeixinAdapter implements ChannelAdapter {
         parts.push({ index, status: "accepted" });
       } catch (error) {
         signal.throwIfAborted();
+        reason = deliveryReason(error);
         // 网络错误无法确定平台是否已收取消息，不能自动重发整个文件或文本。
         parts.push({
           index,
@@ -495,14 +503,16 @@ export class WeixinAdapter implements ChannelAdapter {
     return {
       status: parts.some((part) => part.status === "unknown")
         ? "unknown"
-        : count > 0 &&
-            parts.length === count &&
+        : total > 0 &&
+            parts.length === total &&
             parts.every((part) => part.status === "accepted")
           ? "accepted"
           : parts.some((part) => part.status === "accepted")
             ? "partial"
             : "failed",
       parts,
+      ...(reason ? { reason } : {}),
+      total,
     };
   }
 
@@ -520,4 +530,20 @@ export class WeixinAdapter implements ChannelAdapter {
       fetch: this.fetchImpl,
     });
   }
+}
+
+/** 微信错误在适配器边界转换为跨平台原因，界面不解释协议错误码。 */
+function deliveryReason(
+  error: unknown,
+): NonNullable<ChannelDeliveryResult["reason"]> {
+  if (error instanceof ChannelError) {
+    if (
+      error.issue === "auth" ||
+      error.issue === "network" ||
+      error.issue === "protocol"
+    )
+      return error.issue;
+    if (error.issue === "delivery") return "rejected";
+  }
+  return "protocol";
 }

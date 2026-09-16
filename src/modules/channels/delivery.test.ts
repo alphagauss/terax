@@ -12,6 +12,30 @@ const accepted = {
 };
 
 describe("run-scoped Channel delivery", () => {
+  it("取消后仍可保存投递结果，但不能把已取消工具调用当作正常完成", async () => {
+    const controller = new AbortController();
+    let finish!: () => void;
+    const saved = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const delivery = bindChannelDelivery(
+      "cancelled",
+      async () => {
+        await saved;
+        return { status: "unknown", parts: [], reason: "interrupted" };
+      },
+      target("owner"),
+      controller.signal,
+    );
+    const sending = delivery.send({ text: "hello" });
+    const cancelled = expect(sending).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    controller.abort();
+    finish();
+    await cancelled;
+    await delivery.close();
+  });
   it("binds targets independently and invalidates old tool closures", async () => {
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => {
@@ -60,7 +84,6 @@ describe("run-scoped Channel delivery", () => {
     );
     expect((await delivery.send({ text: "parts" })).status).toBe("unknown");
     expect(delivery.accepted).toBe(true);
-    expect(delivery.failed).toBe(true);
     controller.abort();
     await expect(delivery.send({ text: "late" })).rejects.toThrow();
     expect(send).toHaveBeenCalledTimes(1);

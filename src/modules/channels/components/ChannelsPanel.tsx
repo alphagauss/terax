@@ -107,7 +107,20 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
               .filter(Boolean)
               .join("\n"),
           });
-        for (const delivery of projectDeliveries(session.messages))
+        for (const delivery of projectDeliveries(session.messages)) {
+          const reply =
+            delivery.source === "agent"
+              ? entries.find(
+                  (entry) =>
+                    entry.id === delivery.afterMessageId &&
+                    entry.role === "assistant" &&
+                    entry.text === delivery.content.text,
+                )
+              : undefined;
+          if (reply) {
+            reply.delivery = delivery;
+            continue;
+          }
           entries.push({
             id: delivery.id,
             timestamp: delivery.timestamp,
@@ -115,6 +128,7 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
             text: "",
             delivery,
           });
+        }
         setHistory({
           sessionId,
           entries: entries.sort((a, b) => a.timestamp - b.timestamp),
@@ -198,20 +212,36 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
             ))}
           </SelectContent>
         </Select>
-        {sessionId && (
-          <Button
-            onClick={() =>
-              void requestChannels({ action: "open", id, sessionId }).catch(
-                () => setError(t("errors.storage")),
-              )
-            }
-          >
-            {t("outbound.openInAgent")}
-          </Button>
+        {(sessionId || snapshot) && (
+          <div className="flex items-center gap-3">
+            {sessionId && (
+              <Button
+                onClick={() =>
+                  void requestChannels({ action: "open", id, sessionId }).catch(
+                    () => setError(t("errors.storage")),
+                  )
+                }
+              >
+                {t("outbound.openInAgent")}
+              </Button>
+            )}
+            {snapshot && <ConnectionStatus snapshot={snapshot} />}
+          </div>
         )}
-        {snapshot && <ConnectionStatus snapshot={snapshot} />}
         {conversation && !conversation.canSend && (
           <p className="text-muted-foreground">{t("outbound.unavailable")}</p>
+        )}
+        {snapshot?.issue && (
+          <p
+            role="alert"
+            className={
+              snapshot.issue === "delivery-unknown"
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-destructive"
+            }
+          >
+            {t(`errors.${snapshot.issue}`)}
+          </p>
         )}
         <div className="break-all text-muted-foreground">
           {conversation
@@ -233,7 +263,7 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
           history &&
           history.sessionId === sessionId &&
           history.entries.map((entry) =>
-            entry.delivery ? (
+            entry.delivery && entry.role === "delivery" ? (
               <DeliveryCard key={entry.id} entry={entry.delivery} />
             ) : (
               <div key={entry.id} className="rounded-md bg-secondary p-3">
@@ -241,6 +271,9 @@ export function ChannelsPanel({ visible }: { visible: boolean }) {
                   {t(`outbound.roles.${entry.role}`)}
                 </div>
                 <p className="whitespace-pre-wrap break-words">{entry.text}</p>
+                {entry.delivery && (
+                  <DeliveryCard entry={entry.delivery} compact />
+                )}
               </div>
             ),
           )}

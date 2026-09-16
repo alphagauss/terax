@@ -123,7 +123,7 @@ vi.mock("@/modules/channels/outbound", () => ({
     _connection: unknown,
     _content: unknown,
     send: () => Promise<ChannelDeliveryResult>,
-  ) => ({ completed: send().then(() => {}) }),
+  ) => ({ completed: send() }),
 }));
 vi.mock("@/modules/channels/adapters/registry", () => ({
   channelPlatform: () => ({

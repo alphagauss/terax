@@ -1,15 +1,17 @@
-/** 人工投递的展示事实；与 Agent 共用会话文件，但不构造模型消息。 */
+/** 所有出口的投递展示事实；与 Agent 共用会话文件，但不构造模型消息。 */
 import { create } from "zustand";
 import type { SessionMessage } from "@/modules/ai/lib/conversation";
 import type {
   ChannelTarget,
   ChannelOutbound,
   ChannelDeliveryResult,
+  ChannelDeliverySource,
 } from "@/modules/channels/types";
 
 export type DeliveryRecord = { id: string } & (
   | {
       phase: "request";
+      source?: ChannelDeliverySource;
       target: ChannelTarget;
       content: ChannelOutbound;
       afterMessageId?: string;

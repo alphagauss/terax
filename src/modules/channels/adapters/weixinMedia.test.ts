@@ -268,6 +268,8 @@ describe("WeChat attachment protocol", () => {
     );
     expect(result).toEqual({
       status: "partial",
+      reason: "upload",
+      total: 3,
       parts: [
         { index: 0, status: "accepted" },
         { index: 1, status: "failed" },
