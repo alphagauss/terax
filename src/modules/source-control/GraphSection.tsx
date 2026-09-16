@@ -508,6 +508,7 @@ export const GraphSection = memo(function GraphSection({
       ) : commits.length === 0 ? (
         <GraphPlaceholder>No commits yet.</GraphPlaceholder>
       ) : (
+        /* biome-ignore lint/a11y/noStaticElementInteractions: 容器只观察滚动和后代交互以释放虚拟列表预留空间，不是独立控件。 */
         <div
           ref={attachScroll}
           onWheel={reveal.releaseScrollSpace}
