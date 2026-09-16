@@ -771,7 +771,7 @@ export const FileExplorer = memo(
             <Button
               variant="outline"
               size="sm"
-              className="mt-1"
+              className="mt-1 w-full max-w-64"
               onClick={onOpenHome}
             >
               <HugeiconsIcon icon={FolderOpenIcon} size={13} strokeWidth={2} />
@@ -780,23 +780,39 @@ export const FileExplorer = memo(
           ) : null}
           {onOpenPath ? (
             <form
-              className="mt-1 flex w-full max-w-64 gap-1.5"
+              className="mt-1 flex w-full max-w-64 flex-col gap-1.5 text-left"
               onSubmit={(event) => {
                 event.preventDefault();
                 const path = emptyPath.trim();
                 if (path) onOpenPath(path);
               }}
             >
-              <DirectoryPathInput
-                value={emptyPath}
-                onValueChange={setEmptyPath}
-                placeholder={t("pathPlaceholder")}
-                aria-label={t("pathPlaceholder")}
-                className="h-7 min-w-0 flex-1"
-              />
-              <Button type="submit" variant="outline" size="sm">
+              <h3 className="text-xs text-muted-foreground">
                 {openFolderLabel ?? t("openPath")}
-              </Button>
+              </h3>
+              <div className="flex gap-1.5">
+                <DirectoryPathInput
+                  value={emptyPath}
+                  onValueChange={setEmptyPath}
+                  placeholder={t("pathPlaceholder")}
+                  aria-label={t("pathPlaceholder")}
+                  className="h-7 min-w-0 flex-1"
+                />
+                <Hint content={openFolderLabel ?? t("openPath")}>
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label={openFolderLabel ?? t("openPath")}
+                  >
+                    <HugeiconsIcon
+                      icon={FolderAddIcon}
+                      size={13}
+                      strokeWidth={2}
+                    />
+                  </Button>
+                </Hint>
+              </div>
             </form>
           ) : null}
         </div>
