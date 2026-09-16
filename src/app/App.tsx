@@ -20,6 +20,7 @@ import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
 import { AgentNotificationsBridge, nextAttentionTabId } from "@/modules/agents";
+import { useAgentStore } from "@/modules/agents/store/agentStore";
 import { NotificationNavigationBridge } from "@/modules/notifications/NotificationNavigationBridge";
 import {
   AiSidebarPanel,
@@ -2141,6 +2142,10 @@ export default function App() {
           <NotificationNavigationBridge
             onActivate={(target) => {
               if (target.module === "terminal") {
+                useAgentStore.getState().dismissNotificationsForTarget({
+                  source: "terminal",
+                  tabId: target.tabId,
+                });
                 if (
                   tabsRef.current.some(
                     (tab) => tab.id === target.tabId && tab.kind === "terminal",
@@ -2148,13 +2153,18 @@ export default function App() {
                 ) {
                   onActivateAgent(target.tabId);
                 }
-              } else if (
-                target.module === "ai" &&
-                useChatStore
-                  .getState()
-                  .sessions.some((session) => session.id === target.sessionId)
-              ) {
-                onActivateLocalAgent(target.sessionId);
+              } else if (target.module === "ai") {
+                useAgentStore.getState().dismissNotificationsForTarget({
+                  source: "local",
+                  sessionId: target.sessionId,
+                });
+                if (
+                  useChatStore
+                    .getState()
+                    .sessions.some((session) => session.id === target.sessionId)
+                ) {
+                  onActivateLocalAgent(target.sessionId);
+                }
               }
             }}
           />

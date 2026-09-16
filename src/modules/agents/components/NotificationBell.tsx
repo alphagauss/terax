@@ -171,7 +171,7 @@ function NotificationRow({
             icon={CheckmarkCircle02Icon}
             size={15}
             strokeWidth={1.75}
-            className="text-muted-foreground"
+            className="text-success"
           />
         ) : (
           <span
@@ -205,10 +205,17 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   const sessions = useAgentStore((s) => s.sessions);
   const localAgent = useAgentStore((s) => s.localAgent);
   const notifications = useAgentStore((s) => s.notifications);
+  const dismissNotification = useAgentStore((s) => s.dismissNotification);
   const markAllRead = useAgentStore((s) => s.markAllRead);
   const clearNotifications = useAgentStore((s) => s.clearNotifications);
 
   const active = useMemo(() => Object.values(sessions), [sessions]);
+  const localNotifications = notifications.filter(
+    (notification) => notification.source === "local",
+  );
+  const terminalNotifications = notifications.filter(
+    (notification) => notification.source === "terminal",
+  );
   const activeCount = active.length + (localAgent ? 1 : 0);
   const waitingCount =
     active.filter((s) => s.status === "waiting").length +
@@ -278,6 +285,7 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
   };
 
   const activateNotification = (n: AgentNotification) => {
+    dismissNotification(n.id);
     if (n.source === "local") activateLocal(n.sessionId);
     else activate(n.tabId);
   };
@@ -344,6 +352,13 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
           </div>
         ) : (
           <div className="max-h-80 overflow-y-auto border-t border-border/60 p-1">
+            {localNotifications.map((notification) => (
+              <NotificationRow
+                key={notification.id}
+                n={notification}
+                onClick={() => activateNotification(notification)}
+              />
+            ))}
             <ChannelStatusRows onActivate={() => setOpen(false)} />
             {localAgent ? (
               <StatusRow
@@ -360,14 +375,14 @@ export function NotificationBell({ onActivate, onActivateLocal }: Props) {
                 onClick={() => activate(s.tabId)}
               />
             ))}
-            {activeCount > 0 && notifications.length > 0 ? (
+            {activeCount > 0 && terminalNotifications.length > 0 ? (
               <div className="mx-1.5 my-0.5 h-px bg-border/50" />
             ) : null}
-            {notifications.map((n) => (
+            {terminalNotifications.map((notification) => (
               <NotificationRow
-                key={n.id}
-                n={n}
-                onClick={() => activateNotification(n)}
+                key={notification.id}
+                n={notification}
+                onClick={() => activateNotification(notification)}
               />
             ))}
           </div>
