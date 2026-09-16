@@ -4,6 +4,7 @@
  * 空态目录动作由上层按 Local、WSL 或 SSH 环境提供。
  */
 
+import { DirectoryPathInput } from "@/modules/workspace/DirectoryPathInput";
 import { FILE_DROP_TARGET_CLASS } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
@@ -786,12 +787,12 @@ export const FileExplorer = memo(
                 if (path) onOpenPath(path);
               }}
             >
-              <input
+              <DirectoryPathInput
                 value={emptyPath}
-                onChange={(event) => setEmptyPath(event.target.value)}
+                onValueChange={setEmptyPath}
                 placeholder={t("pathPlaceholder")}
                 aria-label={t("pathPlaceholder")}
-                className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground outline-none focus:border-ring"
+                className="h-7 min-w-0 flex-1"
               />
               <Button type="submit" variant="outline" size="sm">
                 {openFolderLabel ?? t("openPath")}

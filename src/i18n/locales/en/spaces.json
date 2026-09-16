@@ -1,4 +1,9 @@
 {
+  "directorySuggestions": "Folders",
+  "directoryNoMatches": "No matching folders",
+  "directoryDisconnected": "Connect to load folders",
+  "directoryListFailed": "Unable to list folders: {{error}}",
+
   "titleWithShortcut": "Spaces · {{shortcut}}",
   "title": "Spaces",
   "heading": "Spaces",
