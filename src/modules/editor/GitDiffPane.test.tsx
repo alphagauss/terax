@@ -89,6 +89,7 @@ function repositoryController(revision: number): RepositoryController {
     busyAction: null,
     lastRemoteError: null,
     revision,
+    graphRevision: null,
     refresh: vi.fn(),
     runRemoteAction: vi.fn(),
   };

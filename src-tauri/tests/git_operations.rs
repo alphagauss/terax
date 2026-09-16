@@ -230,6 +230,40 @@ fn status_on_empty_repo_has_no_files() {
 }
 
 #[test]
+fn graph_revision_ignores_worktree_and_tracks_graph_inputs() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    let empty = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("empty graph revision");
+
+    fx.write_file("untracked.txt", "worktree only\n");
+    let worktree = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("worktree graph revision");
+    assert_eq!(worktree, empty);
+
+    fx.run_git(&["add", "untracked.txt"]);
+    fx.run_git(&["commit", "-q", "-m", "seed"]);
+    let committed = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("committed graph revision");
+    assert_ne!(committed, empty);
+
+    fx.run_git(&["branch", "other"]);
+    let before_checkout = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("pre-checkout graph revision");
+    fx.run_git(&["checkout", "-q", "other"]);
+    let after_checkout = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("post-checkout graph revision");
+    assert_ne!(after_checkout, before_checkout);
+
+    fx.run_git(&["tag", "v1"]);
+    let tagged = operations::graph_revision(&fx.registry, &fx.repo_str(), &fx.workspace)
+        .expect("tagged graph revision");
+    assert_ne!(tagged, after_checkout);
+}
+
+#[test]
 fn status_lists_untracked_file() {
     if skip_if_no_git() {
         return;

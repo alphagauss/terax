@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
+use sha2::{Digest, Sha256};
+
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::parse_porcelain_v2;
 use crate::modules::git::process::{
@@ -26,6 +28,46 @@ use crate::modules::git::utils::{
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
 
 const DIFF_VIEW_TEXT_LIMIT: usize = 256 * 1024;
+
+/// 返回所有可见引用、当前分支及 upstream 的轻量摘要，不扫描工作树或提交历史。
+pub fn graph_revision(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<String> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["show-ref", "--head", "--dereference"],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git show-ref"));
+    }
+    // 空仓库没有引用，show-ref 以 1 退出；空摘要仍是有效 revision。
+    if output.exit_code != Some(0) && !(output.exit_code == Some(1) && output.stdout.is_empty()) {
+        ensure_success(&output, "git show-ref failed")?;
+    }
+    // show-ref 不区分指向同一提交的当前分支，也不记录当前选择的 upstream。
+    // rev-parse 在没有 upstream 时会非零退出，但仍先输出 HEAD，因此这里只取 stdout。
+    let symbolic = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["rev-parse", "--symbolic-full-name", "HEAD", "@{upstream}"],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if symbolic.timed_out {
+        return Err(GitError::TimedOut("git rev-parse"));
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(&output.stdout);
+    hasher.update([0]);
+    hasher.update(&symbolic.stdout);
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
 
 pub fn resolve_repo(
     registry: &WorkspaceRegistry,

@@ -6,12 +6,14 @@
 // @vitest-environment happy-dom
 
 import type { GitPanelSnapshot } from "@/modules/ai/lib/native";
+import { notifyTerminalCommandFinished } from "@/modules/terminal/lib/commandCompletion";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   gitPanelSnapshot: vi.fn(),
+  gitGraphRevision: vi.fn(),
   gitStatus: vi.fn(),
   listen: vi.fn(async () => vi.fn()),
 }));
@@ -19,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/modules/ai/lib/native", () => ({
   native: {
     gitPanelSnapshot: mocks.gitPanelSnapshot,
+    gitGraphRevision: mocks.gitGraphRevision,
     gitStatus: mocks.gitStatus,
   },
 }));
@@ -71,6 +74,10 @@ function deferred<T>() {
 
 let root: Root | null = null;
 let controller: RepositoryController | null = null;
+
+beforeEach(() => {
+  mocks.gitGraphRevision.mockResolvedValue("refs-1");
+});
 
 function Probe({ contextPath }: { contextPath: string }) {
   controller = useRepositoryController(contextPath);
@@ -138,5 +145,27 @@ describe("useRepositoryController", () => {
       expect(container.textContent).toBe("C:/outer/nested:1"),
     );
     expect(mocks.gitStatus).not.toHaveBeenCalled();
+  });
+
+  it("only advances graph revision when a command in the repository changes refs", async () => {
+    mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/repo"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await vi.waitFor(() => expect(mocks.gitGraphRevision).toHaveBeenCalledOnce());
+
+    notifyTerminalCommandFinished("C:/other");
+    await act(async () => Promise.resolve());
+    expect(mocks.gitGraphRevision).toHaveBeenCalledOnce();
+
+    mocks.gitGraphRevision.mockResolvedValue("refs-2");
+    notifyTerminalCommandFinished("C:/repo/packages/app");
+    await vi.waitFor(() => expect(controller?.graphRevision).toBe("refs-2"));
+
+    notifyTerminalCommandFinished("C:/repo");
+    await vi.waitFor(() => expect(mocks.gitGraphRevision).toHaveBeenCalledTimes(3));
+    expect(controller?.graphRevision).toBe("refs-2");
   });
 });

@@ -39,6 +39,7 @@ import {
   setTerminalCommandState,
   terminalCommandState,
 } from "./commandState";
+import { notifyTerminalCommandFinished } from "./commandCompletion";
 import {
   acquireSlot,
   applyBackgroundActive,
@@ -410,9 +411,11 @@ async function terminalHasForegroundJob(terminalId: number): Promise<boolean> {
 function onTerminalCommandState(terminalId: number, running: boolean): void {
   const s = sessions.get(terminalId);
   if (!s) return;
+  const finished = s.commandRunning && !running;
   s.commandRunning = running;
   setTerminalCommandState(terminalId, running ? "running" : "idle");
   if (!running) {
+    if (finished) notifyTerminalCommandFinished(s.lastCwd);
     scheduleHiddenRelease(terminalId, s);
     return;
   }
@@ -735,8 +738,10 @@ async function openPtyForSession(
 function applyBlockMode(terminalId: number, mode: BlockMode): void {
   const s = sessions.get(terminalId);
   if (!s) return;
+  const finished = s.commandRunning && mode === "prompt";
   s.blockMode = mode;
   s.commandRunning = mode !== "prompt";
+  if (finished) notifyTerminalCommandFinished(s.lastCwd);
   const slot = getSlotForTerminal(terminalId);
   if (slot) {
     const prompt = mode === "prompt";

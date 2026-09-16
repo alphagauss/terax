@@ -52,6 +52,19 @@ pub async fn git_panel_snapshot(
 }
 
 #[tauri::command]
+pub async fn git_graph_revision(
+    repo_root: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::graph_revision(r, &repo_root, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_status(
     repo_root: String,
     workspace: Option<WorkspaceEnv>,

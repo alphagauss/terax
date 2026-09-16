@@ -1,6 +1,6 @@
 /**
  * 本文件维护工作区当前 Git 仓库的唯一控制器。
- * 所有调用方共享真实快照与单调 revision，文件事件和 Git 操作只进入同一刷新队列。
+ * 所有调用方共享真实快照与单调 revision；工作区状态与 Git 引用分别合并刷新。
  */
 
 import {
@@ -9,7 +9,13 @@ import {
   type GitStatusSnapshot,
   native,
 } from "@/modules/ai/lib/native";
-import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
+import { documentPathIdentity } from "@/lib/pathIdentity";
+import { subscribeTerminalCommandFinished } from "@/modules/terminal/lib/commandCompletion";
+import {
+  type WorkspaceEnv,
+  useWorkspaceEnvStore,
+  workspaceScopeKey,
+} from "@/modules/workspace";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRepositoryRefreshQueue } from "./repositoryRefresh";
@@ -44,6 +50,8 @@ export type RepositoryController = {
   lastRemoteError: string | null;
   /** 每次成功读取真实仓库快照后递增，供可见派生视图重新加载。 */
   revision: number;
+  /** Git 引用摘要；首次 probe 完成前为空，避免加载存在竞态的提交图。 */
+  graphRevision: string | null;
   refresh: () => Promise<void>;
   runRemoteAction: (
     mode?: RepositoryRemoteActionMode,
@@ -59,7 +67,19 @@ type RepositoryControllerState = {
   busyAction: RepositoryRemoteAction | null;
   lastRemoteError: string | null;
   revision: number;
+  graphRevision: string | null;
 };
+
+function isPathInsideRepository(
+  cwd: string | null,
+  repoRoot: string,
+  workspace: WorkspaceEnv,
+): boolean {
+  if (!cwd) return false;
+  const current = documentPathIdentity(workspace, cwd).replace(/\/$/, "");
+  const root = documentPathIdentity(workspace, repoRoot).replace(/\/$/, "");
+  return current === root || current.startsWith(`${root}/`);
+}
 
 function normalizeError(error: unknown): string {
   if (typeof error === "string") return error;
@@ -83,7 +103,7 @@ function getContextualAction(
 /**
  * 维护当前工作区上下文对应的唯一 Git 仓库快照。
  *
- * 本地事件和 Git 操作共用串行刷新队列；刷新期间发生的新失效会在当前请求结束后再次读取真实状态。
+ * 本地事件和 Git 操作共用状态刷新队列；引用 probe 独立合并，避免普通文件事件重读提交图。
  */
 export function useRepositoryController(
   contextPath: string | null,
@@ -100,6 +120,7 @@ export function useRepositoryController(
     busyAction: null,
     lastRemoteError: null,
     revision: 0,
+    graphRevision: null,
   });
   const stateRef = useRef(state);
   const requestIdRef = useRef(0);
@@ -141,6 +162,7 @@ export function useRepositoryController(
       busyAction: null,
       lastRemoteError: null,
       revision: 0,
+      graphRevision: null,
     });
   }, [updateState, workspaceKey]);
 
@@ -165,6 +187,7 @@ export function useRepositoryController(
         busyAction: null,
         lastRemoteError: null,
         revision: stateRef.current.revision,
+        graphRevision: stateRef.current.graphRevision,
       });
       return;
     }
@@ -200,6 +223,10 @@ export function useRepositoryController(
         status,
         diffStats: snapshot.diffStats,
         revision: current.revision + 1,
+        graphRevision:
+          current.repo?.repoRoot === repo.repoRoot
+            ? current.graphRevision
+            : null,
         isLoading: false,
         localError: null,
       }));
@@ -226,6 +253,49 @@ export function useRepositoryController(
   );
 
   const refresh = useCallback(() => refreshQueue.request(), [refreshQueue]);
+
+  const probeGraphRevision = useCallback(async (): Promise<void> => {
+    const repoRoot = stateRef.current.repo?.repoRoot;
+    const requestedWorkspace = workspaceKeyRef.current;
+    if (!enabledRef.current || !repoRoot) return;
+    try {
+      const signature = await native.gitGraphRevision(repoRoot);
+      if (
+        !enabledRef.current ||
+        stateRef.current.repo?.repoRoot !== repoRoot ||
+        workspaceKeyRef.current !== requestedWorkspace
+      ) {
+        return;
+      }
+      updateState((current) =>
+        current.graphRevision === signature
+          ? current
+          : { ...current, graphRevision: signature },
+      );
+    } catch {
+      // 首次 probe 失败也允许 Graph 加载；后续语义事件会再次校验。
+      if (
+        enabledRef.current &&
+        stateRef.current.repo?.repoRoot === repoRoot &&
+        workspaceKeyRef.current === requestedWorkspace &&
+        stateRef.current.graphRevision === null
+      ) {
+        updateState((current) => ({
+          ...current,
+          graphRevision: "unavailable",
+        }));
+      }
+    }
+  }, [updateState]);
+
+  const graphProbeQueue = useMemo(
+    () => createRepositoryRefreshQueue(probeGraphRevision),
+    [probeGraphRevision],
+  );
+  const probeGraph = useCallback(
+    () => graphProbeQueue.request(),
+    [graphProbeQueue],
+  );
 
   const runRemoteAction = useCallback(
     async (
@@ -257,6 +327,7 @@ export function useRepositoryController(
         }
         updateState((current) => ({ ...current, lastRemoteError: null }));
         await refresh();
+        await probeGraph();
         return { ok: true, action };
       } catch (error) {
         const message = normalizeError(error);
@@ -265,13 +336,20 @@ export function useRepositoryController(
           lastRemoteError: message,
         }));
         await refresh().catch(() => {});
+        await probeGraph();
         return { ok: false, action, error: message };
       } finally {
         updateState((current) => ({ ...current, busyAction: null }));
       }
     },
-    [refresh, updateState],
+    [probeGraph, refresh, updateState],
   );
+
+  const repoRoot = state.repo?.repoRoot ?? null;
+  useEffect(() => {
+    if (!repoRoot) return;
+    void probeGraph();
+  }, [probeGraph, repoRoot]);
 
   useEffect(() => {
     void workspaceKey;
@@ -286,6 +364,7 @@ export function useRepositoryController(
         busyAction: null,
         lastRemoteError: null,
         revision: 0,
+        graphRevision: null,
       });
       return;
     }
@@ -325,6 +404,7 @@ export function useRepositoryController(
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         timer = 0;
+        void probeGraph();
         const elapsed = Date.now() - lastRefreshAtRef.current;
         if (elapsed < FOCUS_REFRESH_MIN_INTERVAL_MS) return;
         void refresh();
@@ -335,7 +415,20 @@ export function useRepositoryController(
       window.removeEventListener("focus", onFocus);
       if (timer) window.clearTimeout(timer);
     };
-  }, [refresh, enabled]);
+  }, [refresh, probeGraph, enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeTerminalCommandFinished((cwd) => {
+      const currentRepoRoot = stateRef.current.repo?.repoRoot;
+      if (
+        currentRepoRoot &&
+        isPathInsideRepository(cwd, currentRepoRoot, workspaceEnv)
+      ) {
+        void probeGraph();
+      }
+    });
+  }, [enabled, probeGraph, workspaceEnv]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -372,6 +465,7 @@ export function useRepositoryController(
       busyAction: state.busyAction,
       lastRemoteError: state.lastRemoteError,
       revision: state.revision,
+      graphRevision: state.graphRevision,
       refresh,
       runRemoteAction,
     }),

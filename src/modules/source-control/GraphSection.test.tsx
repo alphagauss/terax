@@ -105,6 +105,7 @@ const renderSearch = (
     expanded?: boolean;
     headBranch?: string;
     present?: boolean;
+    graphRevision?: string;
     refreshToken?: number;
     searchOpen?: boolean;
     onCloseSearch?: () => void;
@@ -119,6 +120,7 @@ const renderSearch = (
       headBranch="main"
       headSha="a"
       expanded
+      graphRevision="refs-1"
       refreshToken={0}
       showUndoCommit={false}
       mayHavePushedHead={false}
@@ -208,6 +210,21 @@ it("刷新令牌变化后重新读取提交图", async () => {
 
   expect(native.gitLog).toHaveBeenCalledTimes(2);
   expect(container.textContent).toContain("Commit remote");
+});
+
+it("引用 revision 变化后重新读取提交图", async () => {
+  vi.mocked(native.gitLog)
+    .mockReset()
+    .mockResolvedValueOnce([commit("before", [])])
+    .mockResolvedValueOnce([commit("after", ["before"]), commit("before", [])]);
+
+  await act(async () => renderSearch({ searchOpen: false }));
+  await act(async () =>
+    renderSearch({ graphRevision: "refs-2", searchOpen: false }),
+  );
+
+  expect(native.gitLog).toHaveBeenCalledTimes(2);
+  expect(container.textContent).toContain("Commit after");
 });
 
 it("同一提交切换分支后重新读取引用", async () => {
@@ -436,6 +453,7 @@ it("侧边栏重复挂载检查仍能完成加载，折叠分组后保留提交�
           headBranch="main"
           headSha="a"
           expanded={expanded}
+          graphRevision="refs-1"
           refreshToken={0}
           showUndoCommit={false}
           mayHavePushedHead={false}
@@ -468,6 +486,7 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
         headBranch="main"
         headSha="a"
         expanded
+        graphRevision="refs-1"
         refreshToken={0}
         showUndoCommit={false}
         mayHavePushedHead={false}
@@ -584,6 +603,7 @@ it("键盘可展开文件、进入悬停详情，并用 Esc 返回提交行", as
         headBranch="main"
         headSha="a"
         expanded
+        graphRevision="refs-1"
         refreshToken={0}
         showUndoCommit={false}
         mayHavePushedHead={false}

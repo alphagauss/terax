@@ -533,8 +533,7 @@ function SourceControlViewContainerComponent({
   }, [refreshSourceControl]);
 
   const handleFetch = useCallback(async () => {
-    const result = await sourceControl.runRemoteAction("fetch");
-    if (result.ok) setGraphRefreshToken((value) => value + 1);
+    await sourceControl.runRemoteAction("fetch");
   }, [sourceControl]);
 
   const handlePull = useCallback(() => {
@@ -1083,11 +1082,14 @@ function SourceControlViewContainerComponent({
                   repoRoot={scm.repo?.repoRoot ?? null}
                   headBranch={scm.status?.branch ?? null}
                   headSha={scm.status?.headSha ?? null}
-                  expanded={open && expanded}
+                  expanded={
+                    open && expanded && sourceControl.graphRevision !== null
+                  }
                   present={open && present}
                   searchOpen={graphSearchOpen}
                   onCloseSearch={() => setGraphSearchOpen(false)}
                   refreshToken={graphRefreshToken}
+                  graphRevision={sourceControl.graphRevision ?? ""}
                   showUndoCommit={showUndoCommit}
                   mayHavePushedHead={
                     !!scm.status?.upstream && (scm.status?.ahead ?? 0) === 0

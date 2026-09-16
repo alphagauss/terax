@@ -428,6 +428,8 @@ export const native = {
     invoke<GitPanelSnapshot>("git_panel_snapshot", {
       cwd,
     }),
+  gitGraphRevision: (repoRoot: string) =>
+    invoke<string>("git_graph_revision", { repoRoot }),
   gitStatus: (repoRoot: string) =>
     invoke<GitStatusSnapshot>("git_status", {
       repoRoot,
