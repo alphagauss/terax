@@ -54,6 +54,73 @@ beforeEach(() => {
   });
 });
 
+it.each([false, true])(
+  "模型错误保留具体原因，取消=%s 时不发送失败通知",
+  async (cancelled) => {
+    const connection = {
+      id: "channel",
+      sessionId: "failed-session",
+      target: { kind: "direct" as const, id: "owner" },
+      kind: "weixin" as const,
+      name: "WeChat",
+      enabled: true,
+      accountId: "owner",
+      busyMessageMode: "queue" as const,
+    };
+    const chat = { status: "ready", messages: [] as UIMessage[] };
+    chats.set(connection.sessionId, chat as never);
+    usePreferencesStore.setState({
+      defaultModel: {
+        providerId: "builtin:deepseek",
+        modelId: "deepseek-chat",
+      },
+    });
+    useChatStore.setState({
+      sessions: [
+        {
+          id: connection.sessionId,
+          channelId: await channelOwnerId(connection),
+          environmentKey: "local",
+          cwd: "D:/workspace",
+        } as never,
+      ],
+      agentMetaBySession: {},
+      runLockSessionIds: {},
+    });
+    vi.mocked(startChatMessage).mockImplementation(async () => {
+      useChatStore.getState().patchAgentMeta(connection.sessionId, {
+        status: "error",
+        error: "connection reset",
+        cancelled,
+      });
+      return true;
+    });
+    try {
+      const result = runChannelTurn(
+        connection,
+        {
+          id: "input",
+          senderId: "owner",
+          text: "hello",
+          receivedAt: 1,
+          attachments: [],
+          target: connection.target,
+        },
+        new AbortController().signal,
+        () => {},
+      );
+      if (cancelled) await expect(result).resolves.toBeNull();
+      else
+        await expect(result).rejects.toMatchObject({
+          issue: "agent",
+          detail: "connection reset",
+        });
+    } finally {
+      chats.clear();
+    }
+  },
+);
+
 it("delivers only the final assistant step even when hidden events follow", () => {
   const messages: UIMessage[] = [
     {

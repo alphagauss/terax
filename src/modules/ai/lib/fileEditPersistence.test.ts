@@ -11,6 +11,7 @@ import {
   projectConversationDisplay,
   projectSessionMessages,
   type SessionMessage,
+  materializeRunFailure,
 } from "@/modules/ai/lib/conversation";
 import {
   persistCompletedTurn,
@@ -53,6 +54,29 @@ afterEach(() => {
 });
 
 describe("文件改动的保存与恢复", async () => {
+  it("模型失败事件不会切断本轮已完成工具的展示快照归属", async () => {
+    const runtime = getFileEditRuntime(session.id);
+    await runtime.complete("edit", undefined, [file("before", "after")]);
+    commit.mockResolvedValue(undefined);
+    await persistCompletedTurn(
+      session,
+      cursor(),
+      materializeRunFailure([message], "turn-1", "connection reset", 2000),
+      "error",
+      [],
+    );
+    const records = commit.mock.lastCall?.[0].messages as SessionMessage[];
+    const display = projectConversationDisplay(
+      projectSessionMessages(session.id, records),
+    );
+    const assistant = display.find((item) => item.role === "assistant");
+    expect(assistant && messageMetadata(assistant).fileEdits?.files).toEqual([
+      file("before", "after"),
+    ]);
+    expect(messageMetadata(display[display.length - 1]).runFailure?.error).toBe(
+      "connection reset",
+    );
+  });
   it("保存失败保留事实，取消终态等待已开始的原生编辑返回", async () => {
     const runtime = getFileEditRuntime(session.id);
     let finish!: () => void;

@@ -272,7 +272,8 @@
     "scrollNavigation": "会话导航",
     "scrollToLatest": "前往最新输出并恢复跟随",
     "userMessageFallback": "[附件或上下文]",
-    "guided": "已引导"
+    "guided": "已引导",
+    "runFailed": "模型请求失败，本轮未正常完成：{{error}}"
   },
   "filePicker": {
     "workspaceFiles": "工作区文件",

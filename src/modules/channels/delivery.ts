@@ -71,6 +71,7 @@ export function bindChannelDelivery(
     send,
     reply: (text: string) => sendTo({ text }, undefined, "command"),
     final: (text: string) => sendTo({ text }, undefined, "agent"),
+    failure: (text: string) => sendTo({ text }, undefined, "system"),
     get accepted() {
       return accepted;
     },

@@ -16,6 +16,22 @@ export const CHANNEL_SNAPSHOT = "terax://channels-snapshot";
 export const actionSchema = z.discriminatedUnion("action", [
   z
     .object({
+      action: z.literal("dismiss-deliveries"),
+      id: z.uuid(),
+      sessionId: z.uuid(),
+      deliveryIds: z.array(z.uuid()).min(1),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal("retry-delivery"),
+      id: z.uuid(),
+      sessionId: z.uuid(),
+      deliveryId: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal("send"),
       id: z.uuid(),
       sessionId: z.uuid(),

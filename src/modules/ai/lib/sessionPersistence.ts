@@ -118,17 +118,22 @@ export async function persistCompletedTurn(
     turnId: cursor.turnId,
     turnStatus: outcome,
   };
+  const terminal = serializeSessionMessages(
+    uncommittedConversationMessages(
+      messages.slice(cursor.persistedMessages),
+      cursor.committedParts,
+    ),
+    options,
+  );
+  const failures = terminal.filter(
+    (record) =>
+      record.role === "event" && record.content.event === "run_failure",
+  );
   const result = await commitSession({
     ...session,
     messages: [
       ...usage,
-      ...serializeSessionMessages(
-        uncommittedConversationMessages(
-          messages.slice(cursor.persistedMessages),
-          cursor.committedParts,
-        ),
-        options,
-      ),
+      ...terminal.filter((record) => !failures.includes(record)),
       ...serializeSubagentDisplaySnapshots(snapshots, options),
       ...(edits?.snapshot.calls.length
         ? [
@@ -140,6 +145,8 @@ export async function persistCompletedTurn(
             },
           ]
         : []),
+      // 失败事件结束本轮展示分组，必须先保存属于 Assistant 的工具快照。
+      ...failures,
     ],
   });
   acknowledgeUsage(session.id, usage.length);

@@ -42,7 +42,10 @@ export type ChannelIssue =
 
 /** 可向界面投影的稳定错误类别，不携带 token 或平台原始响应。 */
 export class ChannelError extends Error {
-  constructor(readonly issue: ChannelIssue) {
+  constructor(
+    readonly issue: ChannelIssue,
+    readonly detail?: string,
+  ) {
     super(issue);
     this.name = "ChannelError";
   }
@@ -108,6 +111,7 @@ export type ChannelDeliverySource =
   | "application"
   | "agent"
   | "command"
+  | "system"
   | "tool";
 
 /** 平台适配器输出通用投递事实，原因不包含平台正文或凭据。 */
@@ -119,7 +123,7 @@ export type ChannelDeliveryResult = {
     | "protocol"
     | "rejected"
     | "auth"
-    | "context"
+    | "target"
     | "upload"
     | "interrupted";
   total?: number;
@@ -156,9 +160,7 @@ export type ChannelSnapshot = {
   issue: ChannelIssue | null;
   queued: number;
   busy: boolean;
-  conversations: Array<
-    ChannelConversation & { busy: boolean; queued: number; canSend: boolean }
-  >;
+  conversations: Array<ChannelConversation & { busy: boolean; queued: number }>;
   login?: {
     qrContent: string;
     state: "waiting" | "scanned" | "verify" | "expired";
@@ -178,8 +180,6 @@ export type ReceiveContext = {
 };
 
 export type ChannelAdapter = {
-  /** 平台判断目标所需协议上下文是否可用，不代表投递一定成功。 */
-  canSend: (target: ChannelTarget) => boolean;
   /** 游标所属的平台连接资源；重新登录换资源后不能继续使用旧游标。 */
   cursorScope: string;
   receive: (context: ReceiveContext) => Promise<void>;

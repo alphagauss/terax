@@ -88,7 +88,10 @@ export async function startChannelsService(
       ),
     run: async (...args) =>
       (await import("@/modules/channels/agentSession")).runChannelTurn(...args),
-    failureText: () => i18n.t("channels:runFailed"),
+    failureText: (error) =>
+      error instanceof ChannelError && error.detail
+        ? i18n.t("ai:chat.runFailed", { error: error.detail })
+        : i18n.t("channels:runFailed"),
     emptyReply: () => i18n.t("channels:emptyReply"),
     adapter: async (connection) =>
       channelPlatform(connection.kind).create(connection),
@@ -277,24 +280,64 @@ export async function startChannelsService(
     }
     const target = connection(action.id);
     switch (action.action) {
-      case "send": {
+      case "send":
+      case "retry-delivery":
+      case "dismiss-deliveries": {
         const snapshot = snapshots.find(
           (item) => item.connection.id === target.id,
         );
-        if (!target.enabled || snapshot?.status !== "online")
-          throw new ChannelError("delivery");
-        const conversation = snapshot.conversations.find(
+        const conversation = snapshot?.conversations.find(
           (item) => item.sessionId === action.sessionId,
         );
-        if (!conversation?.canSend) throw new ChannelError("delivery");
-        const { beginChannelSend } = await import(
-          "@/modules/channels/outbound"
-        );
-        const { completed } = await beginChannelSend(
-          { ...target, ...conversation },
-          action.content,
-          () => manager.send(target.id, conversation.target, action.content),
-        );
+        if (!conversation) throw new ChannelError("delivery");
+        const {
+          beginChannelSend,
+          dismissChannelDeliveries,
+          retryChannelDelivery,
+        } = await import("@/modules/channels/outbound");
+        if (action.action === "dismiss-deliveries") {
+          await dismissChannelDeliveries(
+            { ...target, ...conversation },
+            action.deliveryIds,
+            (id) =>
+              manager.dismissDeliveryIssues(target.id, conversation.target, [
+                id,
+              ]),
+          );
+          break;
+        }
+        if (!target.enabled || snapshot?.status !== "online")
+          throw new ChannelError("delivery");
+        const { completed } =
+          action.action === "retry-delivery"
+            ? await retryChannelDelivery(
+                { ...target, ...conversation },
+                action.deliveryId,
+                (content, deliveryId) =>
+                  manager.send(
+                    target.id,
+                    conversation.target,
+                    content,
+                    undefined,
+                    deliveryId,
+                  ),
+              )
+            : await beginChannelSend(
+                { ...target, ...conversation },
+                action.content,
+                (deliveryId) =>
+                  manager.send(
+                    target.id,
+                    conversation.target,
+                    action.content,
+                    undefined,
+                    deliveryId,
+                  ),
+              );
+        if (action.action === "retry-delivery")
+          manager.dismissDeliveryIssues(target.id, conversation.target, [
+            action.deliveryId,
+          ]);
         deliveries.set(completed, target.id);
         void completed
           .catch(() => publish("storage"))

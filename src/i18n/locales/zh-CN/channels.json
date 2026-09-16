@@ -106,23 +106,33 @@
     "conversation": "对话",
     "direct": "私聊",
     "group": "群组 / 房间",
-    "unavailable": "请先连接此实例；若已连接，请在通讯软件中再次发送消息以更新对话上下文。",
+    "unavailable": "请先连接此实例，再向所选会话发送消息。",
     "openInAgent": "在 Agent 面板查看",
     "unknownHelp": "可能已送达，但应用未能确认发送结果。请先检查通讯软件，避免重复发送。",
     "sources": {
       "application": "应用发送",
       "agent": "Agent 回复",
       "command": "命令回复",
-      "tool": "工具发送"
+      "tool": "工具发送",
+      "system": "系统通知"
     },
     "reasons": {
       "network": "网络请求或响应读取失败。",
       "protocol": "平台响应无法解析。",
       "rejected": "平台拒绝发送。",
       "auth": "平台授权已失效，请重新登录。",
-      "context": "缺少可用的发送上下文，请先从通讯软件发来消息。",
+      "target": "此连接不支持向该目标发送消息。",
       "upload": "附件准备或上传失败。",
       "interrupted": "发送过程已中断，未获得完整回执。"
-    }
+    },
+    "ignored": "错误已忽略",
+    "retried": "已重新发送",
+    "ignore": "忽略问题",
+    "retry": "重新发送",
+    "ignoreAll": "忽略全部",
+    "issues": "有 {{count}} 条消息需要处理，点击查看",
+    "viewIssue": "查看问题消息",
+    "retryWarning": "重新发送可能重复已送达的内容。",
+    "handleFailed": "操作未完成，请检查消息记录后重试。"
   }
 }

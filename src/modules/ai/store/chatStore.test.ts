@@ -85,6 +85,7 @@ import {
   seedSession,
   getSessionParameterSelections,
   releaseUnusedChats,
+  retainSessionView,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
@@ -256,6 +257,52 @@ describe("chat store multi-process lifecycle", () => {
     } as never);
   }
 
+  it.each([false, true])(
+    "终态保存真实模型错误且解锁重试不重复，用户取消=%s 不记为模型失败",
+    async (cancelled) => {
+      openCommandSession(true);
+      const chat = {
+        status: "error",
+        messages: [
+          {
+            id: "input",
+            role: "user",
+            parts: [{ type: "text", text: "hello" }],
+          },
+        ] as UIMessage[],
+      };
+      chats.set(first.id, chat as never);
+      useChatStore.getState().patchAgentMeta(first.id, {
+        status: "error",
+        error: "connection reset",
+        cancelled,
+      });
+      const records: SessionMessage[] = [];
+      io.commit.mockImplementation(async (file) => {
+        records.push(...file.messages);
+        return first;
+      });
+      io.release.mockRejectedValueOnce(new Error("unlock failed"));
+      await expect(
+        useChatStore.getState().commitMessages(first.id, chat.messages),
+      ).rejects.toThrow("unlock failed");
+      await useChatStore.getState().commitMessages(first.id, chat.messages);
+      const failures = records.filter(
+        (record) =>
+          record.role === "event" && record.content.event === "run_failure",
+      );
+      expect(failures).toHaveLength(cancelled ? 0 : 1);
+      if (!cancelled) {
+        expect(failures[0]).toMatchObject({
+          content: { error: "connection reset" },
+        });
+        expect(
+          JSON.stringify(await convertToAgentModelMessages(chat.messages)),
+        ).toContain("previous model request failed");
+      }
+    },
+  );
+
   it("投递回执保存失败可补交，恢复历史不生成模型消息", async () => {
     openCommandSession();
     const records: SessionMessage[] = [];
@@ -270,6 +317,7 @@ describe("chat store multi-process lifecycle", () => {
       content: {
         id: "send",
         phase: "request",
+        source: "application",
         target: { kind: "direct", id: "owner" },
         content: {
           text: "notice",
@@ -1194,6 +1242,92 @@ describe("chat store multi-process lifecycle", () => {
     expect(left).toBe(right);
     expect(left).not.toBe(initial);
     expect(io.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("多个页面共用实例，关闭 AI 页面不会回收仍被消息通道观察的会话", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    const releaseOne = retainSessionView(first.id);
+    const releaseTwo = retainSessionView(first.id);
+    try {
+      const chat = await loadChat(first.id);
+      useChatStore.getState().setChatViewVisible(false);
+      releaseOne();
+      expect(chats.get(first.id)).toBe(chat);
+      expect(await loadChat(first.id)).toBe(chat);
+      expect(io.read).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseTwo();
+    }
+    expect(chats.has(first.id)).toBe(false);
+  });
+
+  it("冷读取期间删除会话不会重新创建旧实例或恢复旧展示记录", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    let resolve!: (value: ReturnType<typeof sessionFile>) => void;
+    io.read.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const loading = loadChat(first.id);
+    const failed = expect(loading).rejects.toThrow("no longer available");
+    useChatStore.setState({ sessions: [], activeSessionId: null });
+    resolve(sessionFile(first));
+    await failed;
+    expect(chats.has(first.id)).toBe(false);
+    expect(seedMessages.has(first.id)).toBe(false);
+  });
+
+  it("冷读取遇到新文件版本只恢复最新内容", async () => {
+    useChatStore.setState({ sessions: [first], activeSessionId: first.id });
+    let resolve!: (value: ReturnType<typeof sessionFile>) => void;
+    io.read.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const loading = loadChat(first.id);
+    const updated = { ...first, fingerprint: "new-version" };
+    useChatStore.setState({ sessions: [updated] });
+    io.read.mockResolvedValue({
+      ...sessionFile(updated),
+      messages: [
+        {
+          role: "user",
+          message_id: "latest",
+          timestamp: new Date().toISOString(),
+          content: "latest text",
+        },
+      ],
+    });
+    resolve(sessionFile(first));
+    const chat = await loading;
+    expect(chat.messages[0]).toMatchObject({
+      id: "latest",
+      parts: [{ type: "text", text: "latest text" }],
+    });
+    expect(io.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("外部会话替换使消息、命令和投递展示缓存一并失效", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      chatViewVisible: false,
+    });
+    const release = retainSessionView(first.id);
+    try {
+      await loadChat(first.id);
+      useDeliveryHistory.setState({ sessions: { [first.id]: [] } });
+      useCommandStore.setState({ sessions: { [first.id]: [] } });
+      io.list.mockResolvedValue([{ ...first, fingerprint: "changed" }]);
+      await useChatStore.getState().refreshSessions();
+      expect(chats.has(first.id)).toBe(false);
+      expect(useDeliveryHistory.getState().sessions[first.id]).toBeUndefined();
+      expect(useCommandStore.getState().sessions[first.id]).toBeUndefined();
+    } finally {
+      release();
+    }
   });
 
   it("does not project hidden history during hydration or selection", async () => {

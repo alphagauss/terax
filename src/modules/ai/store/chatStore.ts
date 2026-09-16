@@ -55,6 +55,7 @@ import {
   projectSessionMessages,
   type SessionMessage,
   type TurnEvent,
+  materializeRunFailure,
 } from "@/modules/ai/lib/conversation";
 import {
   EMPTY_PROVIDER_KEYS,
@@ -419,6 +420,19 @@ export async function appendSessionDisplay(
   }
 }
 
+const sessionViews = new Map<string, number>();
+
+/** 多个页面可以观察同一实例；释放展示引用不取消业务运行。 */
+export function retainSessionView(id: string): () => void {
+  sessionViews.set(id, (sessionViews.get(id) ?? 0) + 1);
+  return () => {
+    const remaining = (sessionViews.get(id) ?? 1) - 1;
+    if (remaining) sessionViews.set(id, remaining);
+    else sessionViews.delete(id);
+    releaseUnusedChats();
+  };
+}
+
 /** 只保留前台展示和未提交的业务运行；已完成的后台会话下次从磁盘恢复。 */
 export function releaseUnusedChats() {
   const state = useChatStore.getState();
@@ -426,6 +440,7 @@ export function releaseUnusedChats() {
     const chat = chats.get(id);
     if (
       (state.chatViewVisible && id === state.activeSessionId) ||
+      sessionViews.has(id) ||
       state.runLockSessionIds[id] ||
       startingSessionIds.has(id) ||
       acquiringSessionRuns.has(id) ||
@@ -510,9 +525,19 @@ export function getSessionParameterSelections(
 
 /** 读取磁盘记录，同时准备 UI 消息和完整会话 metadata。 */
 export async function seedSession(id: string): Promise<void> {
+  const before = useChatStore
+    .getState()
+    .sessions.find((session) => session.id === id);
   const session = await readSession(id);
+  const after = useChatStore
+    .getState()
+    .sessions.find((session) => session.id === id);
   // 较早发起的磁盘读取不能覆盖随后已经创建的运行实例与提交游标。
-  if (chats.has(id)) return;
+  if (
+    chats.has(id) ||
+    (before && (!after || before.fingerprint !== after.fingerprint))
+  )
+    return;
   const messages = projectSessionMessages(id, session.messages);
   setSessionCommands(id, projectCommands(session.messages));
   setDeliveryHistory(id, projectDeliveries(session.messages));
@@ -738,6 +763,8 @@ export const useChatStore = create<StoreState>((set, get) => ({
         }
         await chats.get(session.id)?.stop();
         chats.delete(session.id);
+        clearSessionCommands(session.id);
+        setDeliveryHistory(session.id);
         releaseUsage(session.id);
         seedMessages.delete(session.id);
         persistedMessageCounts.delete(session.id);
@@ -1185,6 +1212,16 @@ export const useChatStore = create<StoreState>((set, get) => ({
       }
       const updatedAt = Date.now();
       const cursor = sessionCommitCursor(id);
+      if (outcome === "error") {
+        messages = materializeRunFailure(
+          materializeTurnMetadata(messages, cursor.turnId),
+          cursor.turnId,
+          getAgentMetaForSession(get(), id).error,
+          updatedAt,
+        );
+        const chat = chats.get(id);
+        if (chat) chat.messages = messages;
+      }
       const title =
         !meta.title || meta.title === "New chat"
           ? deriveTitle(messages)
