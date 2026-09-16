@@ -1,4 +1,5 @@
 import type { EditorPaneHandle } from "@/modules/editor/EditorPane";
+import type { FindHandle } from "@/modules/find";
 import type { MarkdownTab } from "@/modules/workbench";
 import {
   MarkdownPreviewPane,
@@ -14,6 +15,7 @@ type Props = {
     id: number,
     handle: MarkdownPreviewPaneHandle | null,
   ) => void;
+  registerFindHandle: (id: number, handle: FindHandle | null) => void;
   onDirtyChange: (id: number, dirty: boolean) => void;
   onCloseTab: (id: number) => void;
 };
@@ -24,6 +26,7 @@ export function MarkdownView({
   focused,
   registerEditorHandle,
   registerNavigationHandle,
+  registerFindHandle,
   onDirtyChange,
   onCloseTab,
 }: Props) {
@@ -35,6 +38,7 @@ export function MarkdownView({
       focused={focused}
       registerEditorHandle={registerEditorHandle}
       registerNavigationHandle={registerNavigationHandle}
+      registerFindHandle={registerFindHandle}
       onDirtyChange={onDirtyChange}
       onCloseTab={onCloseTab}
     />

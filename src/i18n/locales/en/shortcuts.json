@@ -40,7 +40,7 @@
     "space.prev": "Previous space",
     "space.overview": "Open spaces",
     "explorer.search": "Search files",
-    "search.focus": "Find in terminal",
+    "search.focus": "Find in current tab",
     "ai.toggle": "Toggle AI agent",
     "ai.askSelection": "Ask AI about selection",
     "agent.focusAttention": "Jump to agent needing attention",

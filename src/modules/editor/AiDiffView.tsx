@@ -3,8 +3,9 @@
  * 接受或拒绝通过跨会话唯一请求键路由，不直接写入文件。
  */
 
+import type { FindHandle } from "@/modules/find";
 import type { AiDiffTab } from "@/modules/workbench";
-import { useCallback } from "react";
+import { forwardRef, useCallback } from "react";
 import { AiDiffPane } from "./AiDiffPane";
 
 type Props = {
@@ -14,7 +15,10 @@ type Props = {
 };
 
 /** 将审批请求键绑定到 diff 页面的接受和拒绝操作。 */
-export function AiDiffView({ tab, onAccept, onReject }: Props) {
+export const AiDiffView = forwardRef<FindHandle, Props>(function AiDiffView(
+  { tab, onAccept, onReject },
+  ref,
+) {
   const handleAccept = useCallback(
     () => onAccept(tab.requestKey),
     [onAccept, tab.requestKey],
@@ -27,6 +31,7 @@ export function AiDiffView({ tab, onAccept, onReject }: Props) {
   return (
     <div className="h-full w-full">
       <AiDiffPane
+        ref={ref}
         path={tab.path}
         originalContent={tab.originalContent}
         proposedContent={tab.proposedContent}
@@ -37,4 +42,4 @@ export function AiDiffView({ tab, onAccept, onReject }: Props) {
       />
     </div>
   );
-}
+});

@@ -70,6 +70,7 @@ export function FindControlButton({
 type Props = {
   query: string;
   onQueryChange: (query: string) => void;
+  onQueryCommit?: (query: string) => void;
   options?: FindOptions;
   onOptionsChange?: (options: FindOptions) => void;
   invalid?: boolean;
@@ -85,6 +86,7 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
     {
       query,
       onQueryChange,
+      onQueryCommit,
       options,
       onOptionsChange,
       invalid = false,
@@ -97,6 +99,8 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
   ) {
     const { t } = useTranslation("find");
     const inputRef = useRef<HTMLInputElement>(null);
+    const composingRef = useRef(false);
+    const committedQueryRef = useRef(query);
 
     const focus = useCallback((select = false) => {
       const input = inputRef.current;
@@ -121,6 +125,12 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
       focus(false);
     };
 
+    const commitQuery = (value: string) => {
+      if (!onQueryCommit || committedQueryRef.current === value) return;
+      committedQueryRef.current = value;
+      onQueryCommit(value);
+    };
+
     const hasQuery = query.length > 0;
     return (
       <div
@@ -142,7 +152,23 @@ export const FindPatternField = forwardRef<FindPatternFieldHandle, Props>(
           aria-label={t("findLabel")}
           aria-invalid={invalid && hasQuery}
           placeholder={placeholder ?? t("findPlaceholder")}
-          onChange={(event) => onQueryChange(event.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={(event) => {
+            composingRef.current = false;
+            commitQuery(event.currentTarget.value);
+          }}
+          onChange={(event) => {
+            const value = event.target.value;
+            onQueryChange(value);
+            if (
+              !composingRef.current &&
+              !(event.nativeEvent as InputEvent).isComposing
+            ) {
+              commitQuery(value);
+            }
+          }}
           className="h-full min-w-10 flex-1 bg-transparent px-2 text-xs outline-none placeholder:text-muted-foreground/65"
         />
         {trailingContent ? (

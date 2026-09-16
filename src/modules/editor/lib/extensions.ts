@@ -10,7 +10,7 @@ import { indentUnit } from "@codemirror/language";
 import { lintGutter } from "@codemirror/lint";
 import { search } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin } from "@codemirror/view";
+import { drawSelection, EditorView, ViewPlugin } from "@codemirror/view";
 import { chromeTheme } from "./chromeTheme";
 import { createEditorFindPanel } from "./find/editorFindPanel";
 import { indentGuides } from "./indentGuides";
@@ -20,6 +20,12 @@ export const languageCompartment = new Compartment();
 export const READONLY_EXTENSIONS: Extension[] = [
   EditorState.readOnly.of(true),
   EditorView.editable.of(false),
+];
+/** 让只读 Diff 保留可聚焦的静态光标，以承接当前视图的查找快捷键。 */
+export const FOCUSABLE_READONLY_EXTENSIONS: Extension[] = [
+  ...READONLY_EXTENSIONS,
+  EditorView.contentAttributes.of({ tabindex: "0" }),
+  drawSelection({ cursorBlinkRate: 0 }),
 ];
 export const readOnlyCompartment = new Compartment();
 export const wrapCompartment = new Compartment();

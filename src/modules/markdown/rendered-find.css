@@ -1,0 +1,9 @@
+::highlight(terax-markdown-find-matches) {
+  background-color: color-mix(in srgb, var(--primary) 20%, transparent);
+  color: inherit;
+}
+
+::highlight(terax-markdown-find-current) {
+  background-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: inherit;
+}

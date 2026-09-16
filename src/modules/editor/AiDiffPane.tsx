@@ -3,16 +3,17 @@
  * 页面只响应整次工具审批，不直接执行或持久化文件修改。
  */
 
+import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/controls/button";
+import { computeLineStats } from "@/modules/ai/lib/fileEditDiff";
+import { ReadonlyDiff } from "@/modules/editor/ReadonlyDiff";
+import type { FindHandle } from "@/modules/find";
 import type { AiDiffStatus } from "@/modules/workbench";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo } from "react";
+import { forwardRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { computeLineStats } from "@/modules/ai/lib/fileEditDiff";
-import { ReadonlyDiff } from "@/modules/editor/ReadonlyDiff";
 
 type Props = {
   path: string;
@@ -40,15 +41,18 @@ const STATUS_BADGE: Record<
 };
 
 /** 渲染一次文件工具调用的只读差异及整体审批操作。 */
-export function AiDiffPane({
-  path,
-  originalContent,
-  proposedContent,
-  status,
-  isNewFile,
-  onAccept,
-  onReject,
-}: Props) {
+export const AiDiffPane = forwardRef<FindHandle, Props>(function AiDiffPane(
+  {
+    path,
+    originalContent,
+    proposedContent,
+    status,
+    isNewFile,
+    onAccept,
+    onReject,
+  },
+  ref,
+) {
   const { t } = useTranslation("editor");
   const stats = useMemo(
     () => computeLineStats(originalContent, proposedContent),
@@ -96,11 +100,13 @@ export function AiDiffPane({
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <ReadonlyDiff
+          ref={ref}
           path={path}
           before={originalContent}
           after={proposedContent}
+          focusable
         />
       </div>
     </div>
   );
-}
+});

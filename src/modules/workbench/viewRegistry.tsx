@@ -4,8 +4,6 @@
  * 冷启动页面不会提前挂载昂贵内容，仅为前台终端保留轻量加载反馈。
  */
 
-import { useTranslation } from "react-i18next";
-import { lazy, Suspense } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AlphaBacktestsPage } from "@/modules/alpha/pages/AlphaBacktestsPageLazy";
@@ -18,12 +16,15 @@ import {
   EditorView,
   GitDiffView,
 } from "@/modules/editor";
+import type { FindHandle } from "@/modules/find";
 import { MarkdownView } from "@/modules/markdown";
 import type { MarkdownPreviewPaneHandle } from "@/modules/markdown/MarkdownPreviewPane";
 import { type WebPreviewPaneHandle, WebPreviewView } from "@/modules/preview";
 import { type TerminalPaneHandle, TerminalView } from "@/modules/terminal";
 import type { Tab } from "@/modules/workbench/types";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { lazy, Suspense, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 
 const FileEditsView = lazy(() =>
   import("@/modules/ai/components/FileEditsView").then((module) => ({
@@ -47,6 +48,7 @@ export type WorkbenchViewServices = {
     tabId: number,
     handle: MarkdownPreviewPaneHandle | null,
   ) => void;
+  registerFindHandle: (tabId: number, handle: FindHandle | null) => void;
   onEditorDirtyChange: (tabId: number, dirty: boolean) => void;
   onEditorCloseTab: (tabId: number) => void;
   registerWebPreviewHandle: (
@@ -77,6 +79,10 @@ export function WorkbenchRegisteredView({
   services,
 }: Props) {
   const { t } = useTranslation("common");
+  const registerFindHandle = useCallback(
+    (handle: FindHandle | null) => services.registerFindHandle(tab.id, handle),
+    [services.registerFindHandle, tab.id],
+  );
 
   if (tab.cold) {
     if (
@@ -138,6 +144,7 @@ export function WorkbenchRegisteredView({
           focused={focused}
           registerEditorHandle={services.registerEditorHandle}
           registerNavigationHandle={services.registerMarkdownNavigationHandle}
+          registerFindHandle={services.registerFindHandle}
           onDirtyChange={services.onEditorDirtyChange}
           onCloseTab={services.onEditorCloseTab}
         />
@@ -152,6 +159,7 @@ export function WorkbenchRegisteredView({
       )}
       {tab.kind === "ai-diff" && (
         <AiDiffView
+          ref={registerFindHandle}
           tab={tab}
           onAccept={services.onAiDiffAccept}
           onReject={services.onAiDiffReject}
@@ -163,7 +171,7 @@ export function WorkbenchRegisteredView({
         </Suspense>
       )}
       {(tab.kind === "git-diff" || tab.kind === "git-commit-file") && (
-        <GitDiffView tab={tab} visible={visible} />
+        <GitDiffView ref={registerFindHandle} tab={tab} visible={visible} />
       )}
       {tab.kind === "alpha-workstation" && (
         <AlphaWorkstationPage visible={visible} />

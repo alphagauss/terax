@@ -40,7 +40,7 @@
     "space.prev": "上一个空间",
     "space.overview": "打开空间",
     "explorer.search": "搜索文件",
-    "search.focus": "在终端中查找",
+    "search.focus": "在当前标签页查找",
     "ai.toggle": "切换 AI 智能体",
     "ai.askSelection": "就选中内容询问 AI",
     "agent.focusAttention": "跳到需要关注的智能体",

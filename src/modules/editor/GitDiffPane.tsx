@@ -3,24 +3,33 @@
  * 两类资源使用独立生命周期，工作区 diff 按 revision 后台刷新并保留旧内容，提交 diff 仅按不可变资源身份加载。
  */
 
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
 import { native } from "@/modules/ai/lib/native";
+import type { FindHandle } from "@/modules/find";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import type { GitDiffResource } from "@/modules/source-control/gitTypes";
 import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContext";
 import { unifiedMergeView } from "@codemirror/merge";
 import type { Extension } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { UNIFIED_DIFF_THEME } from "./lib/diffTheme";
 import {
   buildSharedExtensions,
   DEFAULT_INDENT,
+  FOCUSABLE_READONLY_EXTENSIONS,
   languageCompartment,
-  READONLY_EXTENSIONS,
 } from "./lib/extensions";
+import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { gitChangeOverview } from "./lib/gitGutter";
 import { resolveLanguage } from "./lib/languageResolver";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
@@ -62,13 +71,13 @@ function workingSourceKey(source: GitDiffResource): string {
 }
 
 /** 可见时按 revision 去重并后台刷新工作区差异，隐藏期间不发起读取。 */
-export function WorkingGitDiffPane({
-  source,
-  active,
-}: {
-  source: GitDiffResource;
-  active: boolean;
-}) {
+export const WorkingGitDiffPane = forwardRef<
+  FindHandle,
+  {
+    source: GitDiffResource;
+    active: boolean;
+  }
+>(function WorkingGitDiffPane({ source, active }, ref) {
   const repository = useRepositorySnapshot();
   const { repoRoot, path, side, originalPath } = source;
   const revision =
@@ -130,11 +139,14 @@ export function WorkingGitDiffPane({
         ? state
         : { kind: "loading" as const }
       : state;
-  return <DiffContent path={path} state={visibleState} />;
-}
+  return <DiffContent ref={ref} path={path} state={visibleState} />;
+});
 
 /** 按不可变提交资源身份读取一次历史差异。 */
-export function CommitGitDiffPane({ source }: { source: CommitDiffResource }) {
+export const CommitGitDiffPane = forwardRef<
+  FindHandle,
+  { source: CommitDiffResource }
+>(function CommitGitDiffPane({ source }, ref) {
   const { repoRoot, sha, path, originalPath } = source;
   const [state, setState] = useState<LoadState>({ kind: "loading" });
 
@@ -165,92 +177,128 @@ export function CommitGitDiffPane({ source }: { source: CommitDiffResource }) {
     };
   }, [originalPath, path, repoRoot, sha]);
 
-  return <DiffContent path={path} state={state} />;
-}
+  return <DiffContent ref={ref} path={path} state={state} />;
+});
 
 /** 渲染已加载的统一或左右分栏差异内容。 */
-function DiffContent({ path, state }: { path: string; state: LoadState }) {
-  const { t } = useTranslation("editor");
-  const themeExt = useEditorThemeExt();
-  const diffViewMode = usePreferencesStore((current) => current.diffViewMode);
-  const loaded = state.kind === "loaded" ? state : null;
-  const originalContent = loaded?.originalContent ?? "";
-  const modifiedContent = loaded?.modifiedContent ?? "";
-  const fallbackPatch = loaded?.fallbackPatch ?? "";
-  const useFallback =
-    (loaded?.isBinary ?? false) ||
-    originalContent.length > LARGE_FILE_THRESHOLD ||
-    modifiedContent.length > LARGE_FILE_THRESHOLD;
-  const effectiveDiffViewMode =
-    loaded &&
-    diffViewMode === "split" &&
-    (originalContent.length === 0 || modifiedContent.length === 0)
-      ? "inline"
-      : diffViewMode;
-  const extensions = useMemo(
-    () =>
-      effectiveDiffViewMode === "split"
-        ? []
-        : [
-            ...SHARED_EXT,
-            DEFAULT_INDENT,
-            languageCompartment.of(loaded?.langExt ?? []),
-            ...READONLY_EXTENSIONS,
-            unifiedMergeView({
-              original: originalContent,
-              mergeControls: false,
-              highlightChanges: true,
-              gutter: true,
-              syntaxHighlightDeletions: true,
-            }),
-            gitChangeOverview,
-            UNIFIED_DIFF_THEME,
-          ],
-    [effectiveDiffViewMode, loaded?.langExt, originalContent],
-  );
+const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
+  function DiffContent({ path, state }, ref) {
+    const { t } = useTranslation("editor");
+    const themeExt = useEditorThemeExt();
+    const diffViewMode = usePreferencesStore((current) => current.diffViewMode);
+    const loaded = state.kind === "loaded" ? state : null;
+    const originalContent = loaded?.originalContent ?? "";
+    const modifiedContent = loaded?.modifiedContent ?? "";
+    const fallbackPatch = loaded?.fallbackPatch ?? "";
+    const editorRef = useRef<EditorView | null>(null);
+    const splitRef = useRef<FindHandle>(null);
+    const useFallback =
+      (loaded?.isBinary ?? false) ||
+      originalContent.length > LARGE_FILE_THRESHOLD ||
+      modifiedContent.length > LARGE_FILE_THRESHOLD;
+    const effectiveDiffViewMode =
+      loaded &&
+      diffViewMode === "split" &&
+      (originalContent.length === 0 || modifiedContent.length === 0)
+        ? "inline"
+        : diffViewMode;
+    const extensions = useMemo(
+      () =>
+        effectiveDiffViewMode === "split"
+          ? []
+          : [
+              ...SHARED_EXT,
+              DEFAULT_INDENT,
+              languageCompartment.of(loaded?.langExt ?? []),
+              ...FOCUSABLE_READONLY_EXTENSIONS,
+              unifiedMergeView({
+                original: originalContent,
+                mergeControls: false,
+                highlightChanges: true,
+                gutter: true,
+                syntaxHighlightDeletions: true,
+              }),
+              gitChangeOverview,
+              UNIFIED_DIFF_THEME,
+            ],
+      [effectiveDiffViewMode, loaded?.langExt, originalContent],
+    );
+    const fallbackExtensions = useMemo(
+      () => [...SHARED_EXT, DEFAULT_INDENT, ...FOCUSABLE_READONLY_EXTENSIONS],
+      [],
+    );
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {state.kind === "loading" ? (
-          <div className="flex h-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" />
-            {t("diff.loading")}
-          </div>
-        ) : state.kind === "error" ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-[11.5px] text-destructive">
-            {state.message}
-          </div>
-        ) : useFallback ? (
-          <ScrollArea className="h-full">
-            <pre className="min-h-full whitespace-pre-wrap wrap-break-word p-4 font-mono text-[12px] leading-relaxed text-muted-foreground">
-              {fallbackPatch || t("diff.unavailable")}
-            </pre>
-          </ScrollArea>
-        ) : effectiveDiffViewMode === "split" ? (
-          <SplitDiffView
-            original={originalContent}
-            modified={modifiedContent}
-            path={path}
-          />
-        ) : (
-          <CodeMirror
-            value={modifiedContent}
-            theme={themeExt}
-            extensions={extensions}
-            editable={false}
-            height="100%"
-            className="h-full"
-            basicSetup={{
-              lineNumbers: true,
-              foldGutter: true,
-              highlightActiveLine: false,
-              highlightActiveLineGutter: false,
-              searchKeymap: true,
-            }}
-          />
-        )}
+    useImperativeHandle(ref, () => ({
+      open: () => {
+        if (!loaded) return;
+        if (effectiveDiffViewMode === "split" && !useFallback) {
+          splitRef.current?.open();
+          return;
+        }
+        if (editorRef.current) openEditorFindPanel(editorRef.current);
+      },
+    }));
+
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-background">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {state.kind === "loading" ? (
+            <div className="flex h-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
+              <Spinner className="size-3" />
+              {t("diff.loading")}
+            </div>
+          ) : state.kind === "error" ? (
+            <div className="flex h-full items-center justify-center px-6 text-center text-[11.5px] text-destructive">
+              {state.message}
+            </div>
+          ) : useFallback ? (
+            <CodeMirror
+              value={fallbackPatch || t("diff.unavailable")}
+              theme={themeExt}
+              extensions={fallbackExtensions}
+              editable={false}
+              height="100%"
+              className="h-full"
+              onCreateEditor={(view) => {
+                editorRef.current = view;
+              }}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: false,
+                highlightActiveLine: false,
+                highlightActiveLineGutter: false,
+                searchKeymap: true,
+              }}
+            />
+          ) : effectiveDiffViewMode === "split" ? (
+            <SplitDiffView
+              ref={splitRef}
+              original={originalContent}
+              modified={modifiedContent}
+              path={path}
+            />
+          ) : (
+            <CodeMirror
+              value={modifiedContent}
+              theme={themeExt}
+              extensions={extensions}
+              editable={false}
+              height="100%"
+              className="h-full"
+              onCreateEditor={(view) => {
+                editorRef.current = view;
+              }}
+              basicSetup={{
+                lineNumbers: true,
+                foldGutter: true,
+                highlightActiveLine: false,
+                highlightActiveLineGutter: false,
+                searchKeymap: true,
+              }}
+            />
+          )}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  },
+);

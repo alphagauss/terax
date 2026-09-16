@@ -4,12 +4,20 @@
  * 文件内容由共享文档模型提供，标签页隐藏时保持挂载，避免丢失滚动和编辑状态。
  */
 
+import { usePresence } from "@/lib/usePresence";
 import { cn } from "@/lib/utils";
 import type {
   EditorPaneHandle,
   EditorSourceSelection,
 } from "@/modules/editor/EditorPane";
 import { useDocument } from "@/modules/editor/lib/useDocument";
+import {
+  FIND_PRESENCE_MS,
+  type FindHandle,
+  type FindResult,
+  FindWidget,
+  type FindWidgetHandle,
+} from "@/modules/find";
 import {
   MARKDOWN_ACTIVATION_OFFSET,
   MARKDOWN_CONTENT_CHANGE_EVENT,
@@ -27,6 +35,18 @@ import {
 } from "@/modules/markdown/lib/document";
 import { findActiveOutlineId } from "@/modules/markdown/lib/outline";
 import {
+  type BrowserFindWindow,
+  clearRenderedFindHighlights,
+  collectRenderedFindSession,
+  emptyRenderedFindSession,
+  navigateRenderedFindSession,
+  type RenderedFindHighlights,
+  type RenderedFindSession,
+  revealRenderedFindRange,
+  selectionBelongsTo,
+  setRenderedFindHighlights,
+} from "@/modules/markdown/lib/renderedFind";
+import {
   MarkdownDocumentRenderer,
   type MarkdownDocumentRendererHandle,
 } from "@/modules/markdown/MarkdownDocumentRenderer";
@@ -41,6 +61,7 @@ import {
 } from "@/modules/markdown/MarkdownViewToggle";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import "./rendered-find.css";
 
 type ViewMode = "rendered" | "raw";
 
@@ -65,6 +86,7 @@ type Props = {
     id: number,
     handle: MarkdownPreviewPaneHandle | null,
   ) => void;
+  registerFindHandle: (id: number, handle: FindHandle | null) => void;
   onDirtyChange: (id: number, dirty: boolean) => void;
   onCloseTab: (id: number) => void;
 };
@@ -83,6 +105,7 @@ export function MarkdownPreviewPane({
   focused,
   registerEditorHandle,
   registerNavigationHandle,
+  registerFindHandle,
   onDirtyChange,
   onCloseTab,
 }: Props) {
@@ -94,6 +117,9 @@ export function MarkdownPreviewPane({
     document: MarkdownDocument;
   } | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findResult, setFindResult] = useState<FindResult>();
   const [outlineAvailable, setOutlineAvailable] = useState(true);
   const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
@@ -106,6 +132,12 @@ export function MarkdownPreviewPane({
   const contentRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<MarkdownDocumentRendererHandle>(null);
   const editorRef = useRef<EditorPaneHandle>(null);
+  const findWidgetRef = useRef<FindWidgetHandle>(null);
+  const findQueryRef = useRef("");
+  const findSessionRef = useRef<RenderedFindSession>(
+    emptyRenderedFindSession(),
+  );
+  const findHighlightsRef = useRef<RenderedFindHighlights | null>(null);
   const viewToggleRef = useRef<MarkdownViewToggleHandle>(null);
   const navigationFrameRef = useRef(0);
   const pendingRawSourceLineRef = useRef<number | null>(null);
@@ -122,6 +154,7 @@ export function MarkdownPreviewPane({
   });
   callbackRef.current = { registerEditorHandle, onDirtyChange, onCloseTab };
   const outlineId = `${useId()}-markdown-outline`;
+  const findPresence = usePresence(findOpen, FIND_PRESENCE_MS);
   const handleDirtyChange = useCallback(
     (nextDirty: boolean) => callbackRef.current.onDirtyChange(id, nextDirty),
     [id],
@@ -147,9 +180,134 @@ export function MarkdownPreviewPane({
   useEffect(
     () => () => {
       cancelPendingNavigation();
+      clearRenderedFindHighlights(findHighlightsRef.current);
     },
     [cancelPendingNavigation],
   );
+
+  const applyRenderedFindSession = useCallback(
+    (session: RenderedFindSession) => {
+      const root = contentRef.current;
+      const scroll = scrollRef.current;
+      if (!root || !scroll || viewMode !== "rendered") return;
+      clearRenderedFindHighlights(findHighlightsRef.current);
+      findHighlightsRef.current = null;
+      findSessionRef.current = session;
+      setFindResult(
+        session.query
+          ? {
+              current:
+                session.active && session.current !== null
+                  ? session.current + 1
+                  : session.active
+                    ? 0
+                    : undefined,
+              total: session.ranges.length,
+              limited: session.limited,
+            }
+          : undefined,
+      );
+      if (visible) {
+        findHighlightsRef.current = setRenderedFindHighlights(
+          root.ownerDocument.defaultView ?? window,
+          session.ranges,
+          session.active,
+        );
+        revealRenderedFindRange(scroll, session.active);
+        findWidgetRef.current?.focus(false);
+      }
+    },
+    [viewMode, visible],
+  );
+
+  // 浏览器负责匹配并返回 Range；查询变化时枚举一次，导航只切换缓存索引。
+  const rebuildRenderedFind = useCallback(
+    (query: string) => {
+      const root = contentRef.current;
+      if (!root || viewMode !== "rendered") return;
+      applyRenderedFindSession(collectRenderedFindSession(root, query));
+    },
+    [applyRenderedFindSession, viewMode],
+  );
+
+  const navigateRenderedFind = useCallback(
+    (backwards: boolean) => {
+      const root = contentRef.current;
+      const query = findQueryRef.current;
+      if (!root || !query || viewMode !== "rendered") return;
+      const current = findSessionRef.current;
+      const session =
+        current.query === query
+          ? navigateRenderedFindSession(root, current, backwards)
+          : collectRenderedFindSession(root, query);
+      applyRenderedFindSession(session);
+    },
+    [applyRenderedFindSession, viewMode],
+  );
+
+  const closeRenderedFind = useCallback(() => {
+    clearRenderedFindHighlights(findHighlightsRef.current);
+    findHighlightsRef.current = null;
+    findSessionRef.current = emptyRenderedFindSession();
+    setFindResult(undefined);
+    const root = contentRef.current;
+    const selection = root?.ownerDocument.getSelection();
+    if (root && selectionBelongsTo(root)) selection?.removeAllRanges();
+    setFindOpen(false);
+    scrollRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const openFind = useCallback(() => {
+    if (viewMode === "raw") {
+      editorRef.current?.open();
+      return;
+    }
+    rendererRef.current?.ensureAllBlocks();
+    setFindOpen(true);
+    requestAnimationFrame(() => findWidgetRef.current?.focus(true));
+  }, [viewMode]);
+
+  useEffect(() => {
+    const browserFind = (window as BrowserFindWindow).find;
+    if (viewMode === "rendered" && typeof browserFind !== "function") {
+      registerFindHandle(id, null);
+      return;
+    }
+    const handle: FindHandle = { open: openFind };
+    registerFindHandle(id, handle);
+    return () => registerFindHandle(id, null);
+  }, [id, openFind, registerFindHandle, viewMode]);
+
+  useEffect(() => {
+    if (viewMode === "rendered") return;
+    clearRenderedFindHighlights(findHighlightsRef.current);
+    findHighlightsRef.current = null;
+    findSessionRef.current = emptyRenderedFindSession();
+    setFindResult(undefined);
+    setFindOpen(false);
+  }, [viewMode]);
+
+  useEffect(() => {
+    clearRenderedFindHighlights(findHighlightsRef.current);
+    findHighlightsRef.current = null;
+    if (!visible || viewMode !== "rendered") return;
+    const root = contentRef.current;
+    if (!root) return;
+    const session = findSessionRef.current;
+    findHighlightsRef.current = setRenderedFindHighlights(
+      root.ownerDocument.defaultView ?? window,
+      session.ranges,
+      session.active,
+    );
+  }, [viewMode, visible]);
+
+  useEffect(() => {
+    if (findPresence.mounted) return;
+    findQueryRef.current = "";
+    findSessionRef.current = emptyRenderedFindSession();
+    setFindQuery("");
+    setFindResult(undefined);
+  }, [findPresence.mounted]);
 
   useEffect(() => {
     if (doc.status !== "ready" || !visible || viewMode !== "rendered") return;
@@ -168,6 +326,17 @@ export function MarkdownPreviewPane({
       ? preparedDocument.document
       : null;
   const hasOutline = Boolean(document?.outline.length);
+
+  useEffect(() => {
+    clearRenderedFindHighlights(findHighlightsRef.current);
+    findHighlightsRef.current = null;
+    const query = findQueryRef.current;
+    findSessionRef.current = emptyRenderedFindSession(query);
+    setFindResult(undefined);
+    if (!findOpen || !query || !document || viewMode !== "rendered") return;
+    const frame = requestAnimationFrame(() => rebuildRenderedFind(query));
+    return () => cancelAnimationFrame(frame);
+  }, [document, findOpen, rebuildRenderedFind, viewMode]);
 
   useEffect(() => {
     // 目录隐藏时停止高亮定位；重新打开后立即同步当前阅读位置。
@@ -506,6 +675,37 @@ export function MarkdownPreviewPane({
         }
       >
         <div className="relative flex h-full min-w-0 flex-col">
+          {findPresence.mounted && viewMode === "rendered" ? (
+            <div className="pointer-events-none absolute top-1 right-6 left-2 z-30 flex justify-end">
+              <FindWidget
+                ref={findWidgetRef}
+                className="pointer-events-auto"
+                state={findPresence.state}
+                query={findQuery}
+                result={findResult}
+                onQueryChange={(query) => {
+                  findQueryRef.current = query;
+                  clearRenderedFindHighlights(findHighlightsRef.current);
+                  findHighlightsRef.current = null;
+                  findSessionRef.current = emptyRenderedFindSession(query);
+                  setFindResult(undefined);
+                  setFindQuery(query);
+                  if (!query) {
+                    const root = contentRef.current;
+                    const selection = root?.ownerDocument.getSelection();
+                    if (root && selectionBelongsTo(root))
+                      selection?.removeAllRanges();
+                  }
+                }}
+                onQueryCommit={(query) => {
+                  if (query) rebuildRenderedFind(query);
+                }}
+                onPrevious={() => navigateRenderedFind(true)}
+                onNext={() => navigateRenderedFind(false)}
+                onClose={closeRenderedFind}
+              />
+            </div>
+          ) : null}
           {hasOutline && (
             <MarkdownOutlineToggle
               expanded={outlineOpen && outlineAvailable}
@@ -536,6 +736,7 @@ export function MarkdownPreviewPane({
           ) : (
             <div
               ref={handleScrollRef}
+              tabIndex={-1}
               className="app-scrollbar min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable]"
             >
               <div
