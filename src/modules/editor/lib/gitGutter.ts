@@ -92,11 +92,17 @@ export function renderGitChangeOverview(
     const lastBlock = view.lineBlockAt(lastLine.to);
     const top = (firstBlock.top / contentHeight) * 100;
     const bottom = ((lastBlock.top + lastBlock.height) / contentHeight) * 100;
-    const marker = document.createElement("span");
-    marker.className = `cm-changeOverview-${range.kind}`;
-    marker.style.top = `${top}%`;
-    marker.style.height = `${Math.max(0, bottom - top)}%`;
-    rail.append(marker);
+    const kinds =
+      range.kind === "modified"
+        ? (["deleted", "added"] as const)
+        : ([range.kind] as const);
+    for (const kind of kinds) {
+      const marker = document.createElement("span");
+      marker.className = `cm-changeOverview-${kind}`;
+      marker.style.top = `${top}%`;
+      marker.style.height = `${Math.max(0, bottom - top)}%`;
+      rail.append(marker);
+    }
   }
 }
 

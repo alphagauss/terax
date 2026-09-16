@@ -555,32 +555,28 @@ html *::-webkit-scrollbar {
 .cm-changeOverview {
   position: absolute;
   top: 2px;
-  right: 1px;
+  right: 0;
   bottom: 2px;
   z-index: 1;
-  width: 6px;
+  width: var(--scrollbar-size);
   pointer-events: none;
 }
 
 .cm-changeOverview-added,
-.cm-changeOverview-modified,
 .cm-changeOverview-deleted {
   position: absolute;
-  right: 1px;
-  left: 1px;
+  width: 50%;
   min-height: 2px;
   border-radius: 0;
 }
 
 .cm-changeOverview-added {
+  right: 0;
   background-color: var(--editor-git-added);
 }
 
-.cm-changeOverview-modified {
-  background-color: var(--editor-git-modified);
-}
-
 .cm-changeOverview-deleted {
+  left: 0;
   background-color: var(--editor-git-deleted);
 }
 

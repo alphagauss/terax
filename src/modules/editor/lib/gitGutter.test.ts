@@ -6,10 +6,14 @@
 
 // @vitest-environment happy-dom
 
-import { EditorState } from "@codemirror/state";
+import { EditorState, Text } from "@codemirror/state";
 import { EditorView, highlightActiveLineGutter } from "@codemirror/view";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitChangeGutter, setQuickDiffBaseline } from "./gitGutter";
+import {
+  gitChangeGutter,
+  renderGitChangeOverview,
+  setQuickDiffBaseline,
+} from "./gitGutter";
 
 let view: EditorView | null = null;
 
@@ -65,5 +69,30 @@ describe("gitChangeGutter", () => {
     expect(
       gutterElement?.classList.contains(`cm-change-${testCase.kind}`),
     ).toBe(false);
+  });
+
+  it("renders modified overview ranges as adjacent deletion and addition lanes", () => {
+    const rail = document.createElement("div");
+    const scrollElement = document.createElement("div");
+    Object.defineProperties(scrollElement, {
+      scrollHeight: { value: 200 },
+      clientHeight: { value: 100 },
+    });
+    const overviewView = {
+      contentHeight: 100,
+      state: { doc: Text.of(["one", "changed", "three"]) },
+      lineBlockAt: () => ({ top: 20, height: 10 }),
+    } as unknown as EditorView;
+
+    renderGitChangeOverview(
+      overviewView,
+      rail,
+      [{ kind: "modified", fromLine: 2, toLine: 2 }],
+      scrollElement,
+    );
+
+    expect(rail.querySelector(".cm-changeOverview-deleted")).not.toBeNull();
+    expect(rail.querySelector(".cm-changeOverview-added")).not.toBeNull();
+    expect(rail.querySelector(".cm-changeOverview-modified")).toBeNull();
   });
 });
