@@ -763,7 +763,7 @@ pub fn log(
     registry: &WorkspaceRegistry,
     repo_root: &str,
     limit: u32,
-    before_sha: Option<&str>,
+    skip: u32,
     workspace: &WorkspaceEnv,
 ) -> Result<Vec<GitLogEntry>> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
@@ -775,25 +775,26 @@ pub fn log(
             .filter(|name| !name.is_empty())
             .collect();
     let count_arg = format!("--max-count={bounded}");
+    let skip_arg = format!("--skip={skip}");
     let format_arg = format!("--format={LOG_FORMAT}");
-    let cursor = match before_sha {
-        Some(sha) if !sha.is_empty() => {
-            if !sha_is_safe(sha) {
-                return Err(GitError::command("git log", "invalid cursor sha"));
-            }
-            Some(format!("{sha}^"))
-        }
-        _ => None,
-    };
-    let mut args: Vec<&OsStr> = vec![
-        OsStr::new("log"),
-        OsStr::new("--no-color"),
-        OsStr::new("--shortstat"),
-        OsStr::new(&count_arg),
-        OsStr::new(&format_arg),
+    let upstream = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--verify", "@{upstream}^{commit}"],
+    )?;
+    let mut args: Vec<OsString> = vec![
+        OsString::from("log"),
+        OsString::from("--no-color"),
+        OsString::from("--shortstat"),
+        OsString::from("--topo-order"),
+        OsString::from("--ignore-missing"),
+        OsString::from(count_arg),
+        OsString::from(skip_arg),
+        OsString::from(format_arg),
+        OsString::from("HEAD"),
     ];
-    if let Some(spec) = cursor.as_deref() {
-        args.push(OsStr::new(spec));
+    if let Some(upstream) = upstream {
+        args.push(OsString::from(upstream));
     }
     let output = run_git(
         &repo_root.workspace,

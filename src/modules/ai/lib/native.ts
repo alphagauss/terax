@@ -487,14 +487,11 @@ export const native = {
     invoke<GitPushResult>("git_push", {
       repoRoot,
     }),
-  gitLog: (
-    repoRoot: string,
-    options?: { limit?: number; beforeSha?: string },
-  ) =>
+  gitLog: (repoRoot: string, options?: { limit?: number; skip?: number }) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
       limit: options?.limit ?? null,
-      beforeSha: options?.beforeSha ?? null,
+      skip: options?.skip ?? null,
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
     invoke<GitDiffResult>("git_show_commit", {
