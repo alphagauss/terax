@@ -502,6 +502,41 @@ it("悬停完整详情与展开精简文件共享内容和 Diff 入口", async (
   ]);
 });
 
+it("点击历史提交文件后保留唯一选中状态", async () => {
+  const nextFile: GitCommitFileChange = {
+    ...files[0],
+    path: "src/next.ts",
+    originalPath: null,
+    status: "M",
+    statusLabel: "Modified",
+  };
+  vi.mocked(native.gitCommitFiles).mockResolvedValue([files[0], nextFile]);
+  const open = vi.fn();
+  await act(async () => renderSearch({ onOpenCommitFile: open }));
+  const commitRow = container.querySelector<HTMLButtonElement>(
+    "button[aria-expanded]:not([aria-haspopup])",
+  );
+  await act(async () => commitRow?.click());
+
+  const fileRows = [...container.querySelectorAll<HTMLButtonElement>("button")]
+    .filter((button) =>
+      ["new.ts", "next.ts"].some((name) => button.textContent?.includes(name)),
+    )
+    .slice(-2);
+  expect(fileRows).toHaveLength(2);
+
+  await act(async () => fileRows[0].click());
+  expect(fileRows[0].getAttribute("aria-current")).toBe("true");
+  expect(fileRows[1].hasAttribute("aria-current")).toBe(false);
+
+  await act(async () => fileRows[1].click());
+  expect(fileRows[0].hasAttribute("aria-current")).toBe(false);
+  expect(fileRows[1].getAttribute("aria-current")).toBe("true");
+  expect(open).toHaveBeenLastCalledWith(
+    expect.objectContaining({ sha: "a", path: "src/next.ts" }),
+  );
+});
+
 it("键盘可展开文件、进入悬停详情，并用 Esc 返回提交行", async () => {
   await act(async () =>
     root.render(

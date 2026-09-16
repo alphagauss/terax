@@ -173,6 +173,10 @@ export const GraphSection = memo(function GraphSection({
   } = graph;
   const [pendingUndo, setPendingUndo] = useState<GitLogEntry | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<{
+    sha: string;
+    path: string;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTop = useRef(0);
   const attachScroll = useCallback((element: HTMLDivElement | null) => {
@@ -230,6 +234,7 @@ export const GraphSection = memo(function GraphSection({
   useEffect(() => {
     if (!expanded || !refreshKey) return;
     if (loadedKeyRef.current === refreshKey) return;
+    setSelectedFile(null);
     reset();
     void loadInitial();
   }, [expanded, loadInitial, refreshKey, reset]);
@@ -321,6 +326,8 @@ export const GraphSection = memo(function GraphSection({
   );
   const toggleCommit = (sha: string) => {
     reveal.capture(sha);
+    if (graph.expanded.has(sha) && selectedFile?.sha === sha)
+      setSelectedFile(null);
     graph.toggle(sha);
   };
   const renderRow = (row: (typeof reveal.rows)[number], content: ReactNode) => (
@@ -567,9 +574,18 @@ export const GraphSection = memo(function GraphSection({
                     row={graphRow}
                     maxLaneCount={graphRow.laneCount}
                     rowHeight={ROW_HEIGHT}
+                    selected={
+                      item.kind === "file" &&
+                      selectedFile?.sha === commit.sha &&
+                      selectedFile.path === item.file.path
+                    }
                     onRetry={() => void fetchFiles(commit.sha, true)}
                     onOpen={() => {
-                      if (item.kind === "file")
+                      if (item.kind === "file") {
+                        setSelectedFile({
+                          sha: commit.sha,
+                          path: item.file.path,
+                        });
                         onOpenCommitFile?.({
                           repoRoot,
                           sha: commit.sha,
@@ -578,6 +594,7 @@ export const GraphSection = memo(function GraphSection({
                           path: item.file.path,
                           originalPath: item.file.originalPath,
                         });
+                      }
                     }}
                   />,
                 );
@@ -679,6 +696,7 @@ export const GraphSection = memo(function GraphSection({
             onRetry={() => void fetchFiles(selectedCommit.sha, true)}
             onOpenFile={(file) => {
               if (!onOpenCommitFile) return;
+              setSelectedFile({ sha: selectedCommit.sha, path: file.path });
               onOpenCommitFile({
                 repoRoot,
                 sha: selectedCommit.sha,

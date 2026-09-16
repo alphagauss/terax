@@ -229,10 +229,12 @@ export function CommitFileRow({
   file,
   onOpen,
   showStats = true,
+  selected = false,
 }: {
   file: GitCommitFileChange;
   onOpen: () => void;
   showStats?: boolean;
+  selected?: boolean;
 }) {
   const { t } = useTranslation("gitHistory");
   const name = basename(file.path);
@@ -244,8 +246,12 @@ export function CommitFileRow({
     <button
       type="button"
       onClick={onOpen}
+      aria-current={selected ? "true" : undefined}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left hover:bg-interactive-hover",
+        "flex w-full cursor-pointer items-center gap-2 rounded px-1.5 text-left",
+        selected
+          ? "bg-interactive-active hover:bg-interactive-active"
+          : "hover:bg-interactive-hover",
         showStats ? "h-7" : "h-6",
       )}
     >
