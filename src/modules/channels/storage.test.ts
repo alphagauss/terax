@@ -1,11 +1,11 @@
 import { channelSessionId } from "@/modules/channels/identity";
-/** 检查点复用普通文件接口，缺失、损坏与 I/O 失败必须具有不同语义。 */
-import { beforeEach, expect, it, vi } from "vitest";
 import {
   loadCheckpoint,
-  saveCheckpoint,
   removeConnection,
+  saveCheckpoint,
 } from "@/modules/channels/storage";
+/** 检查点复用普通文件接口，缺失、损坏与 I/O 失败必须具有不同语义。 */
+import { beforeEach, expect, it, vi } from "vitest";
 
 const io = vi.hoisted(() => ({
   files: new Map<string, string>(),
@@ -32,7 +32,8 @@ const connection = (id: string) => ({
   busyMessageMode: "queue" as const,
 });
 vi.mock("@/modules/channels/workspace", () => ({
-  prepareChannelWorkspace: async () => "/account",
+  channelAccountKey: async (kind: string, accountId: string) =>
+    `${kind}-${accountId}`,
 }));
 const checkpoint = {
   conversations: [
@@ -120,8 +121,18 @@ it("writes complete per-connection JSON through the atomic file interface", asyn
     checkpoint.conversations,
   );
   expect(
-    JSON.parse(io.files.get("/account/conversations.json") ?? "null"),
+    JSON.parse(
+      io.files.get("/state/weixin-owner.conversations.json") ?? "null",
+    ),
   ).toEqual(checkpoint.conversations);
+});
+
+it("does not read the former Agent cwd conversation index", async () => {
+  io.files.set(
+    "/account/conversations.json",
+    JSON.stringify(checkpoint.conversations),
+  );
+  expect((await loadCheckpoint(connection(a))).conversations).toEqual([]);
 });
 
 it("reports corrupt checkpoints but permits their removal without parsing", async () => {

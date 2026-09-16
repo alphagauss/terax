@@ -10,11 +10,11 @@ import {
 } from "@/modules/channels/client";
 import { startChannelsService } from "@/modules/channels/service";
 import {
-  ChannelError,
   type ChannelCheckpoint,
   type ChannelConnection,
-  type ReceiveContext,
   type ChannelDeliveryResult,
+  ChannelError,
+  type ReceiveContext,
 } from "@/modules/channels/types";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -111,7 +111,8 @@ vi.mock("@/lib/nativeHost", () => ({
   },
 }));
 vi.mock("@/modules/channels/workspace", () => ({
-  prepareChannelWorkspace: async () => "/account",
+  channelAccountKey: async (kind: string, accountId: string) =>
+    `${kind}-${accountId}`,
 }));
 vi.mock("@/modules/channels/agentSession", () => ({
   ensureChannelSession: vi.fn(),

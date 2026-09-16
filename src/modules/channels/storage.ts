@@ -3,24 +3,24 @@
  * 检查点的串行写入和退出等待归连接运行时，会话正文与凭据分别归 sessions 和秘密存储。
  */
 
-import { prepareChannelWorkspace } from "@/modules/channels/workspace";
-import { channelSessionId } from "@/modules/channels/identity";
-import { channelModelUsageId } from "@/modules/ai/lib/modelUsage";
-import { deleteModelUsage } from "@/modules/settings/store";
+import { invokeNative } from "@/lib/nativeHost";
 import {
   deleteSharedStoreKey,
   readSharedStore,
   setSharedStoreKey,
 } from "@/lib/sharedStore";
-import { invokeNative } from "@/lib/nativeHost";
+import { channelModelUsageId } from "@/modules/ai/lib/modelUsage";
+import { channelSessionId } from "@/modules/channels/identity";
 import {
   type ChannelCheckpoint,
   type ChannelConnection,
   ChannelError,
   checkpointSchema,
-  protocolCheckpointSchema,
   connectionSchema,
+  protocolCheckpointSchema,
 } from "@/modules/channels/types";
+import { channelAccountKey } from "@/modules/channels/workspace";
+import { deleteModelUsage } from "@/modules/settings/store";
 
 /** 严格读取当前配置，拒绝重复账号和损坏记录。 */
 export async function loadConnections(): Promise<ChannelConnection[]> {
@@ -66,9 +66,7 @@ export async function loadCheckpoint(
   try {
     const protocol = await readJson(await checkpointPath(connection.id));
     const index = connection.accountId
-      ? await readJson(
-          `${await prepareChannelWorkspace(connection)}/conversations.json`,
-        )
+      ? await readJson(await conversationIndexPath(connection))
       : undefined;
     const conversations = index === undefined ? [] : index;
     const checkpoint = checkpointSchema.parse({
@@ -97,10 +95,7 @@ export async function saveCheckpoint(
   try {
     connectionSchema.parse(connection);
     const { conversations, ...protocol } = checkpointSchema.parse(checkpoint);
-    await writeJson(
-      `${await prepareChannelWorkspace(connection)}/conversations.json`,
-      conversations,
-    );
+    await writeJson(await conversationIndexPath(connection), conversations);
     await writeJson(await checkpointPath(connection.id), protocol);
   } catch {
     throw new ChannelError("storage");
@@ -132,6 +127,18 @@ async function checkpointPath(id: string): Promise<string> {
     appSubdir: "channels/state",
   });
   return `${root}/${key}.json`;
+}
+
+/** 账号索引与连接检查点同属控制面，避免出现在 Agent 工作目录。 */
+async function conversationIndexPath(
+  connection: Pick<ChannelConnection, "kind" | "accountId">,
+): Promise<string> {
+  if (!connection.accountId) throw new ChannelError("storage");
+  const key = await channelAccountKey(connection.kind, connection.accountId);
+  const root = await invokeNative<string>("workspace_prepare_default_root", {
+    appSubdir: "channels/state",
+  });
+  return `${root}/${key}.conversations.json`;
 }
 
 async function checkpointExists(path: string): Promise<boolean> {
