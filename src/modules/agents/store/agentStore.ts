@@ -15,6 +15,12 @@ const MAX_NOTIFICATIONS = 50;
 
 let notifSeq = 0;
 
+type AgentNotificationTarget = {
+  source: AgentNotification["source"];
+  tabId?: number;
+  sessionId?: string;
+};
+
 type AgentStoreState = {
   sessions: Record<number, AgentSession>;
   localAgent: LocalAgentState;
@@ -26,9 +32,21 @@ type AgentStoreState = {
   pushNotification: (
     n: Omit<AgentNotification, "id" | "at" | "read">,
   ) => void;
+  dismissNotification: (id: string) => void;
+  dismissNotificationsForTarget: (target: AgentNotificationTarget) => void;
   markAllRead: () => void;
   clearNotifications: () => void;
 };
+
+function hasSameTarget(
+  notification: AgentNotification,
+  target: AgentNotificationTarget,
+): boolean {
+  if (notification.source !== target.source) return false;
+  return target.source === "terminal"
+    ? notification.tabId === target.tabId
+    : notification.sessionId === target.sessionId;
+}
 
 export const useAgentStore = create<AgentStoreState>((set) => ({
   sessions: {},
@@ -93,8 +111,24 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
     set((s) => ({
       notifications: [
         { ...n, id: `n${++notifSeq}`, at: Date.now(), read: false },
-        ...s.notifications,
+        ...s.notifications.filter(
+          (notification) => !hasSameTarget(notification, n),
+        ),
       ].slice(0, MAX_NOTIFICATIONS),
+    })),
+
+  dismissNotification: (id) =>
+    set((s) => ({
+      notifications: s.notifications.filter(
+        (notification) => notification.id !== id,
+      ),
+    })),
+
+  dismissNotificationsForTarget: (target) =>
+    set((s) => ({
+      notifications: s.notifications.filter(
+        (notification) => !hasSameTarget(notification, target),
+      ),
     })),
 
   markAllRead: () =>

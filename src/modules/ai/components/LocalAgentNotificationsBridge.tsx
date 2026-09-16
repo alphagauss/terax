@@ -1,6 +1,7 @@
 /**
  * 本文件把内置 AI 会话的可见性和运行结果接入关注状态及统一通知系统。
- * 后台提示只存在于内存，完成通知在会话结果提交并释放运行锁后发送。
+ * 后台提示只存在于内存，普通会话完成通知在结果提交并释放运行锁后发送；
+ * Channel 完成状态由 Channels 入口负责，不进入统一通知列表。
  */
 
 import { routeAgentNotification } from "@/modules/agents/lib/route";
@@ -125,15 +126,17 @@ export function LocalAgentNotificationsBridge({
 
   useEffect(() => {
     if (pendingCompletionCount === 0) return;
-    const completions = useSessionAttentionStore
-      .getState()
-      .takePendingCompletions();
+    const attention = useSessionAttentionStore.getState();
+    const completions = attention.takePendingCompletions();
     for (const completion of completions) {
-      const sessionTitle =
-        useChatStore
-          .getState()
-          .sessions.find((session) => session.id === completion.sessionId)
-          ?.title || t("miniWindow.newChat");
+      const session = useChatStore
+        .getState()
+        .sessions.find((candidate) => candidate.id === completion.sessionId);
+      if (session?.channelId) {
+        attention.markViewed(completion.sessionId);
+        continue;
+      }
+      const sessionTitle = session?.title || t("miniWindow.newChat");
       const error =
         useChatStore.getState().agentMetaBySession[completion.sessionId]?.error;
       routeAgentNotification({

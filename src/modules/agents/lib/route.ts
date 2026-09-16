@@ -71,6 +71,16 @@ export function routeAgentNotification({
     return;
   }
   if (delivery === "toast") {
-    showAgentToast({ agent, title, body, onActivate });
+    showAgentToast({
+      agent,
+      title,
+      body,
+      onActivate: () => {
+        useAgentStore
+          .getState()
+          .dismissNotificationsForTarget({ source, tabId, sessionId });
+        onActivate();
+      },
+    });
   }
 }
