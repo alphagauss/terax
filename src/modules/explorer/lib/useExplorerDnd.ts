@@ -16,7 +16,7 @@ import {
 } from "@/modules/workbench/dragSession";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { parentDir } from "./watch";
+import { parentDirectory } from "@/modules/filesystem";
 
 type Options = {
   rootPath: string;
@@ -126,7 +126,7 @@ export function useExplorerDnd({
           ? rootPath
           : null;
         if (p && kind === true) target = p;
-        else if (p && kind === false) target = parentDir(p);
+        else if (p && kind === false) target = parentDirectory(p);
         else if (p) target = null;
         const valid =
           !resourceTarget &&
@@ -134,7 +134,7 @@ export function useExplorerDnd({
           target !== null &&
           target !== source &&
           !target.startsWith(`${source}/`) &&
-          parentDir(source) !== target
+          parentDirectory(source) !== target
             ? target
             : null;
         if (dropTargetRef.current !== valid) {

@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   gitPanelSnapshot: vi.fn(),
   gitGraphRevision: vi.fn(),
   gitStatus: vi.fn(),
-  listen: vi.fn(async () => vi.fn()),
+  resumeListeners: new Set<() => void>(),
 }));
 
 vi.mock("@/modules/ai/lib/native", () => ({
@@ -31,8 +31,12 @@ vi.mock("@/modules/workspace", () => ({
   ) => select({ env: { kind: "local" } }),
   workspaceScopeKey: () => "local",
 }));
-vi.mock("@tauri-apps/api/webviewWindow", () => ({
-  getCurrentWebviewWindow: () => ({ listen: mocks.listen }),
+vi.mock("@/modules/filesystem", () => ({
+  subscribeFileSystemChanges: vi.fn(() => vi.fn()),
+  subscribeWorkspaceResume: vi.fn((listener: () => void) => {
+    mocks.resumeListeners.add(listener);
+    return () => mocks.resumeListeners.delete(listener);
+  }),
 }));
 
 import {
@@ -92,11 +96,50 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   root = null;
   controller = null;
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   document.body.replaceChildren();
 });
 
 describe("useRepositoryController", () => {
+  it("polls while unfocused, pauses while hidden and keeps one loop across resumes", async () => {
+    vi.useFakeTimers();
+    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("visible");
+    mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/repo"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<Probe contextPath="C:/repo" />));
+    await act(async () => vi.advanceTimersByTimeAsync(600));
+    mocks.gitPanelSnapshot.mockClear();
+
+    focus.mockReturnValue(false);
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+    mocks.gitPanelSnapshot.mockClear();
+
+    visibility.mockReturnValue("hidden");
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    expect(mocks.gitPanelSnapshot).not.toHaveBeenCalled();
+
+    const pending = deferred<GitPanelSnapshot>();
+    mocks.gitPanelSnapshot.mockReturnValueOnce(pending.promise);
+    visibility.mockReturnValue("visible");
+    await act(async () => {
+      for (const listener of mocks.resumeListeners) listener();
+      for (const listener of mocks.resumeListeners) listener();
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(1);
+    await act(async () => pending.resolve(repositorySnapshot("C:/repo")));
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    expect(mocks.gitPanelSnapshot).toHaveBeenCalledTimes(2);
+  });
+
   it("advances revision after repeated real snapshots with identical status", async () => {
     mocks.gitPanelSnapshot.mockResolvedValue(repositorySnapshot("C:/repo"));
     const container = document.createElement("div");
@@ -154,7 +197,9 @@ describe("useRepositoryController", () => {
     root = createRoot(container);
 
     await act(async () => root?.render(<Probe contextPath="C:/repo" />));
-    await vi.waitFor(() => expect(mocks.gitGraphRevision).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.gitGraphRevision).toHaveBeenCalledOnce(),
+    );
 
     notifyTerminalCommandFinished("C:/other");
     await act(async () => Promise.resolve());
@@ -165,7 +210,9 @@ describe("useRepositoryController", () => {
     await vi.waitFor(() => expect(controller?.graphRevision).toBe("refs-2"));
 
     notifyTerminalCommandFinished("C:/repo");
-    await vi.waitFor(() => expect(mocks.gitGraphRevision).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() =>
+      expect(mocks.gitGraphRevision).toHaveBeenCalledTimes(3),
+    );
     expect(controller?.graphRevision).toBe("refs-2");
   });
 });

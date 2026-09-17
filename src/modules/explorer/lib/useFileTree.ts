@@ -8,6 +8,11 @@ import {
   readCachedDirectory,
   writeCachedDirectory,
 } from "@/modules/explorer/lib/directoryCache";
+import {
+  retainDirectoryWatch,
+  subscribeFileSystemChanges,
+  subscribeWorkspaceResume,
+} from "@/modules/filesystem";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useRemoteRuntimeStore } from "@/modules/remote";
 import {
@@ -18,7 +23,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isCurrentTreeRequest } from "./requestGuard";
-import { listenFsChanged, watchAdd, watchRemove } from "./watch";
+import { documentPathIdentity } from "@/lib/pathIdentity";
 
 export type { DirEntry } from "@/modules/explorer/lib/directoryCache";
 
@@ -133,7 +138,7 @@ function sameDirListing(a: DirEntry[], b: DirEntry[]): boolean {
 type Options = {
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
-  remotePollingEnabled?: boolean;
+  active?: boolean;
 };
 
 export const REMOTE_DIRECTORY_POLL_DELAY_MS = 3_000;
@@ -176,7 +181,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       ? runtime.epoch
       : null;
   const remoteReady = workspace.kind !== "ssh" || remoteEpoch !== null;
-  const remotePollingEnabled = options?.remotePollingEnabled ?? true;
+  const active = options?.active ?? true;
   const { expansionScope, treeScope } = fileTreeScopes(
     workspace,
     rootPath,
@@ -198,10 +203,11 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   const nodesRef = useRef(nodes);
   const deletingPathsRef = useRef(deletingPaths);
   const deletionTokensRef = useRef(new Map<string, symbol>());
-  const watchedRef = useRef<Set<string>>(new Set());
+  const watchedRef = useRef<Map<string, () => void>>(new Map());
   const requestGenerationRef = useRef(0);
   const requestIdRef = useRef(0);
   const inFlightRef = useRef(new Map<string, number>());
+  const pendingRefreshRef = useRef(new Set<string>());
   const activeTreeScopeRef = useRef(treeScope);
   const nodesScopeRef = useRef(treeScope);
   activeTreeScopeRef.current = treeScope;
@@ -228,17 +234,20 @@ export function useFileTree(rootPath: string | null, options?: Options) {
 
   const addWatch = useCallback(
     (path: string) => {
-      if (workspace.kind === "ssh" || watchedRef.current.has(path)) return;
-      watchedRef.current.add(path);
-      watchAdd([path]);
+      if (workspace.kind === "ssh" || !active || watchedRef.current.has(path))
+        return;
+      watchedRef.current.set(path, retainDirectoryWatch(workspace, path));
     },
-    [workspace.kind],
+    [active, workspace],
   );
 
   const removeWatch = useCallback(
     (path: string) => {
-      if (workspace.kind === "ssh" || !watchedRef.current.delete(path)) return;
-      watchRemove([path]);
+      if (workspace.kind === "ssh") return;
+      const release = watchedRef.current.get(path);
+      if (!release) return;
+      watchedRef.current.delete(path);
+      release();
     },
     [workspace.kind],
   );
@@ -248,7 +257,10 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       if (!remoteReady) return;
       if (treeScope !== activeTreeScopeRef.current) return;
       if (isPathDeleting(path, deletingPathsRef.current)) return;
-      if (inFlightRef.current.has(path)) return;
+      if (inFlightRef.current.has(path)) {
+        pendingRefreshRef.current.add(path);
+        return;
+      }
       const generation = requestGenerationRef.current;
       const requestId = ++requestIdRef.current;
       const request = { scope: treeScope, generation, id: requestId };
@@ -308,7 +320,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
           const candidates = new Set<string>([
             ...Object.keys(nodesRef.current),
             ...expandedRef.current,
-            ...watchedRef.current,
+            ...watchedRef.current.keys(),
           ]);
           for (const k of candidates) {
             if (removedRoots.some((r) => isUnder(k, r))) dead.add(k);
@@ -329,10 +341,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
             for (const d of dead) if (n.delete(d)) changed = true;
             return changed ? n : c;
           });
-          const toUnwatch: string[] = [];
-          for (const d of dead)
-            if (watchedRef.current.delete(d)) toUnwatch.push(d);
-          watchRemove(toUnwatch);
+          for (const d of dead) removeWatch(d);
         }
       } catch (e) {
         if (
@@ -353,10 +362,12 @@ export function useFileTree(rootPath: string | null, options?: Options) {
       } finally {
         if (inFlightRef.current.get(path) === requestId) {
           inFlightRef.current.delete(path);
+          // 读取期间的变更不能被吞掉，完成后合并补读一次。
+          if (pendingRefreshRef.current.delete(path)) void fetchChildren(path);
         }
       }
     },
-    [remoteReady, treeScope, workspace],
+    [remoteReady, removeWatch, treeScope, workspace],
   );
 
   // Root change → restore the cached expansion for this root, re-scope watches,
@@ -364,6 +375,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
   useEffect(() => {
     requestGenerationRef.current += 1;
     inFlightRef.current.clear();
+    pendingRefreshRef.current.clear();
     nodesScopeRef.current = treeScope;
     if (!rootPath) {
       setNodes({});
@@ -403,7 +415,7 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     // changes rapidly (e.g. switching folders in quick succession).
     nodesRef.current = cachedNodes;
 
-    if (!remoteReady) {
+    if (!remoteReady || !active) {
       return () => {
         rememberExpansion(expansionScope, expandedRef.current);
       };
@@ -413,68 +425,73 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     for (const d of restored) void fetchChildren(d);
     if (workspace.kind !== "ssh") {
       const toWatch = [rootPath, ...restored];
-      for (const p of toWatch) watchedRef.current.add(p);
-      watchAdd(toWatch);
+      for (const path of toWatch) addWatch(path);
     }
 
     return () => {
       rememberExpansion(expansionScope, expandedRef.current);
-      if (watchedRef.current.size > 0) {
-        watchRemove([...watchedRef.current]);
-        watchedRef.current.clear();
-      }
+      requestGenerationRef.current += 1;
+      inFlightRef.current.clear();
+      pendingRefreshRef.current.clear();
+      for (const release of watchedRef.current.values()) release();
+      watchedRef.current.clear();
     };
   }, [
     expansionScope,
     fetchChildren,
     remoteReady,
+    active,
     rootPath,
     treeScope,
+    addWatch,
     workspace,
   ]);
 
   useEffect(() => {
-    if (workspace.kind === "ssh") return;
-    let alive = true;
-    let unlisten: (() => void) | undefined;
-    void listenFsChanged((paths) => {
-      const current = nodesRef.current;
+    if (workspace.kind === "ssh" || !active || !rootPath) return;
+    return subscribeFileSystemChanges(workspace, (paths) => {
       const dirs = new Set<string>();
       for (const p of paths) {
-        const parent = dirname(p);
-        if (current[parent]?.status === "loaded") dirs.add(parent);
-        if (current[p]?.status === "loaded") dirs.add(p);
+        dirs.add(documentPathIdentity(workspace, dirname(p)));
+        dirs.add(documentPathIdentity(workspace, p));
       }
-      for (const d of dirs) void fetchChildren(d);
-    }).then((un) => {
-      if (alive) unlisten = un;
-      else un();
+      for (const path of remoteDirectoryPollPaths(
+        rootPath,
+        expandedRef.current,
+      )) {
+        if (dirs.has(documentPathIdentity(workspace, path))) {
+          void fetchChildren(path);
+        }
+      }
     });
-    return () => {
-      alive = false;
-      unlisten?.();
-    };
-  }, [fetchChildren, workspace.kind]);
+  }, [active, fetchChildren, rootPath, workspace]);
+
+  useEffect(() => {
+    if (!active || !rootPath || workspace.kind === "ssh") return;
+    return subscribeWorkspaceResume(() => {
+      for (const path of remoteDirectoryPollPaths(
+        rootPath,
+        expandedRef.current,
+      )) {
+        void fetchChildren(path);
+      }
+    });
+  }, [active, fetchChildren, rootPath, workspace.kind]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is intentionally omitted so ordinary tree edits do not refetch every expanded directory.
   useEffect(() => {
-    if (!rootPath) return;
+    if (!rootPath || !active) return;
     const loadedPaths = Object.entries(nodes)
       .filter(([, state]) => state.status === "loaded")
       .map(([path]) => path);
     for (const path of loadedPaths) void fetchChildren(path);
     // Re-list loaded directories when visibility or git-decoration prefs change.
-  }, [showHidden, gitDecorations, rootPath, fetchChildren]);
+  }, [showHidden, gitDecorations, rootPath, fetchChildren, active]);
 
   // SFTP 没有通用的服务端推送监听。仅在 Explorer 可见时轮询已展示目录，并从上一轮
   // 完成后再计算等待时间，避免高延迟连接形成持续堆积的请求。
   useEffect(() => {
-    if (
-      workspace.kind !== "ssh" ||
-      !rootPath ||
-      !remoteReady ||
-      !remotePollingEnabled
-    )
+    if (workspace.kind !== "ssh" || !rootPath || !remoteReady || !active)
       return;
     let disposed = false;
     let running = false;
@@ -500,40 +517,25 @@ export function useFileTree(rootPath: string | null, options?: Options) {
         const requests = remoteDirectoryPollPaths(
           rootPath,
           expandedRef.current,
-        ).flatMap((path) => {
-          const state = nodesRef.current[path];
-          return state?.status === "loaded" &&
-            !isPathDeleting(path, deletingPathsRef.current)
-            ? [fetchChildren(path)]
-            : [];
-        });
+        ).map((path) => fetchChildren(path));
         await Promise.all(requests);
       } finally {
         running = false;
         schedule();
       }
     };
-    const onVisibilityChange = () => {
+    const unsubscribeResume = subscribeWorkspaceResume(() => {
       clearTimer();
-      if (document.visibilityState === "visible") {
-        void refreshVisibleDirectories();
-      }
-    };
+      void refreshVisibleDirectories();
+    });
 
-    document.addEventListener("visibilitychange", onVisibilityChange);
     schedule();
     return () => {
       disposed = true;
       clearTimer();
-      document.removeEventListener("visibilitychange", onVisibilityChange);
+      unsubscribeResume();
     };
-  }, [
-    workspace.kind,
-    rootPath,
-    remoteReady,
-    remotePollingEnabled,
-    fetchChildren,
-  ]);
+  }, [workspace.kind, rootPath, remoteReady, active, fetchChildren]);
 
   const toggle = useCallback(
     (path: string) => {
@@ -586,12 +588,11 @@ export function useFileTree(rootPath: string | null, options?: Options) {
     expandedRef.current = new Set();
     setExpanded(new Set());
 
-    const toUnwatch = [...watchedRef.current].filter(
+    const toUnwatch = [...watchedRef.current.keys()].filter(
       (path) => path !== rootPath,
     );
-    for (const path of toUnwatch) watchedRef.current.delete(path);
-    watchRemove(toUnwatch);
-  }, [rootPath]);
+    for (const path of toUnwatch) removeWatch(path);
+  }, [removeWatch, rootPath]);
 
   // --- mutations ---
 

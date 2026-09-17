@@ -91,23 +91,12 @@ type Listener = () => void;
 type ReloadMode = "none" | "probe" | "full";
 
 const REMOTE_POLL_MS = 3000;
-const REMOTE_BACKGROUND_POLL_MS = 15_000;
 const REMOTE_DIGEST_POLL_MS = 30_000;
 const MODEL_DISPOSE_DELAY_MS = 30_000;
 const REMOTE_POLL_CONCURRENCY = 8;
-
-/** 返回可见或后台 SSH 文档的元数据轮询周期。 */
-export function remoteDocumentPollInterval(active: boolean): number {
-  return active ? REMOTE_POLL_MS : REMOTE_BACKGROUND_POLL_MS;
-}
-
-/** 返回元数据未变化时触发摘要兜底所需的轮询次数。 */
-export function remoteDocumentDigestPollCount(active: boolean): number {
-  return Math.max(
-    1,
-    Math.ceil(REMOTE_DIGEST_POLL_MS / remoteDocumentPollInterval(active)),
-  );
-}
+const REMOTE_DIGEST_POLL_COUNT = Math.ceil(
+  REMOTE_DIGEST_POLL_MS / REMOTE_POLL_MS,
+);
 
 /** 组合 Quick Diff 基线的仓库与提交身份，避免相同 SHA 的不同仓库共享缓存。 */
 function gitBaselineKey(repoRoot: string, headSha: string | null): string {
@@ -238,6 +227,7 @@ class SharedDocumentModel {
   private reloadPromise: Promise<void> | null = null;
   private unchangedRemotePolls = 0;
   private lastRemotePollAt = 0;
+  private activationCheckPending = false;
   private readonly remotePollOwners = new Map<symbol, boolean>();
   private gitBaselineGeneration = 0;
   private gitBaselineLoadedKey: string | null = null;
@@ -328,6 +318,16 @@ class SharedDocumentModel {
   /** 先在数据源端核对摘要，只有内容变化时才读取正文。 */
   checkForChanges = (): void =>
     this.requestReload(this.base ? "probe" : "full");
+
+  /** 前台激活或窗口恢复后核对磁盘；初次读取期间的请求在读取完成后补做。 */
+  revalidateAfterActivation = (): void => {
+    if (this.snapshot.doc.status === "loading") {
+      this.activationCheckPending = true;
+      return;
+    }
+    this.activationCheckPending = false;
+    this.checkForChanges();
+  };
 
   /** 合并并串行执行协调请求，完整读取优先于仅探测版本。 */
   private requestReload(mode: Exclude<ReloadMode, "none">): void {
@@ -494,6 +494,11 @@ class SharedDocumentModel {
         dirty: false,
         baselineContent: this.snapshot.baselineContent,
       });
+    } finally {
+      if (generation === this.readGeneration && this.activationCheckPending) {
+        this.activationCheckPending = false;
+        this.checkForChanges();
+      }
     }
   }
 
@@ -748,7 +753,11 @@ class SharedDocumentModel {
 
   /** 返回当前模型是否仍有需要远端一致性的订阅者。 */
   hasRemoteSubscribers(): boolean {
-    return this.workspace.kind === "ssh" && this.listeners.size > 0;
+    return (
+      this.workspace.kind === "ssh" &&
+      this.listeners.size > 0 &&
+      [...this.remotePollOwners.values()].some(Boolean)
+    );
   }
 
   /** 更新一个视图是否处于前台，多个可见视图共享最高轮询优先级。 */
@@ -762,11 +771,10 @@ class SharedDocumentModel {
     syncRemotePolling();
   }
 
-  /** 按前台或后台周期判断本轮是否需要探测远端。 */
+  /** 仅为前台订阅者按固定周期探测远端。 */
   shouldPollRemote(now: number): boolean {
     if (!this.hasRemoteSubscribers()) return false;
-    const interval = remoteDocumentPollInterval(this.isRemotePollingActive());
-    return now - this.lastRemotePollAt >= interval;
+    return now - this.lastRemotePollAt >= REMOTE_POLL_MS;
   }
 
   /** 使用元数据快路径轮询远端，并以低频摘要兜底秒级时间戳碰撞。 */
@@ -787,11 +795,7 @@ class SharedDocumentModel {
         return;
       }
       this.unchangedRemotePolls += 1;
-      if (
-        this.unchangedRemotePolls <
-        remoteDocumentDigestPollCount(this.isRemotePollingActive())
-      )
-        return;
+      if (this.unchangedRemotePolls < REMOTE_DIGEST_POLL_COUNT) return;
     }
     this.unchangedRemotePolls = 0;
     if (unchanged) this.checkForChanges();
@@ -812,13 +816,6 @@ class SharedDocumentModel {
       this.autoSaveTimer = null;
       void this.save().catch((error) => console.error("[autosave]", error));
     }, preferences.editorAutoSaveDelay);
-  }
-
-  private isRemotePollingActive(): boolean {
-    return (
-      this.remotePollOwners.size === 0 ||
-      [...this.remotePollOwners.values()].some(Boolean)
-    );
   }
 
   private clearAutoSaveTimer(): void {

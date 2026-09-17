@@ -2,6 +2,6 @@
 import { useRepositoryController } from "./useRepositoryController";
 
 export function useSourceControlContext(explorerRoot: string | null) {
-  const sourceControl = useRepositoryController(explorerRoot, true);
+  const sourceControl = useRepositoryController(explorerRoot);
   return { sourceControl };
 }

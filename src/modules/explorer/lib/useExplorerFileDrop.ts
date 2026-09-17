@@ -14,7 +14,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { parentDir } from "./watch";
+import { parentDirectory } from "@/modules/filesystem";
 
 type Options = {
   rootPath: string | null;
@@ -41,7 +41,7 @@ function dirAt(
     const p = row.getAttribute("data-fs-path") as string;
     const kind = isDir(p);
     if (kind === undefined) return null;
-    return kind ? p : parentDir(p);
+    return kind ? p : parentDirectory(p);
   }
   if (el.closest("[data-explorer-drop]")) return rootPath;
   return null;
