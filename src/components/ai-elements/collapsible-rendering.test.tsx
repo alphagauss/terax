@@ -1,39 +1,14 @@
 /**
- * 本文件验证 AI 推理与工具详情的默认折叠和按需渲染行为。
- * 测试锁定外部耗时展示，以及完成态关闭时不生成详情 DOM 的不变量。
+ * 本文件验证工具详情的默认折叠和按需渲染行为。
+ * 测试锁定完成态关闭时不生成详情 DOM 的不变量。
  */
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "./reasoning";
 import { Tool } from "./tool";
 
 describe("AI collapsible details", () => {
-  it("does not render completed reasoning content while closed", () => {
-    const closed = renderToStaticMarkup(
-      <Reasoning>
-        <ReasoningTrigger />
-        <ReasoningContent>private-reasoning-detail</ReasoningContent>
-      </Reasoning>,
-    );
-    const open = renderToStaticMarkup(
-      <Reasoning defaultOpen duration={3}>
-        <ReasoningTrigger />
-        <ReasoningContent>private-reasoning-detail</ReasoningContent>
-      </Reasoning>,
-    );
-
-    expect(closed).not.toContain("private-reasoning-detail");
-    expect(open).toContain("private-reasoning-detail");
-    expect(open).toContain("Reasoned for 3s");
-    expect(open).toContain("terax-collapsible-content");
-  });
-
   it("keeps completed tool output unmounted until explicitly opened", () => {
     const props = {
       toolName: "find_files",

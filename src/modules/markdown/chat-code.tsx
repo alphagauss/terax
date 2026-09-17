@@ -22,7 +22,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { createContext, memo, useContext, useEffect, useRef, useState } from "react";
 import { useIsCodeFenceIncomplete } from "streamdown";
 
-import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Shimmer } from "@/components/controls/shimmer";
 import { highlight, isHighlightable, type HighlightedNode } from "./chat-code-lezer";
 
 // True while the parent message is still streaming from the model. We hide
@@ -162,7 +162,7 @@ function GeneratingPlaceholder({ label }: { label: string }) {
   return (
     <div className="not-prose my-2 flex items-center gap-2 rounded-lg border border-border/50 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
       <span className="inline-block size-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
-      <Shimmer sweepDuration={1.2} pauseDuration={0.6}>
+      <Shimmer as="span">
         {label === "text" ? "Generating code…" : `Generating ${label}…`}
       </Shimmer>
     </div>
