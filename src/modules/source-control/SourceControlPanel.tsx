@@ -1,6 +1,7 @@
 /**
  * 本文件实现 Source Control 面板及其仓库、变更和提交操作界面。
  * 密集的文件路径与状态信息需在明暗主题下保持清晰可读。
+ * 面板首次激活后保留展示树，隐藏时由 open 停止数据活动和图谱展示。
  */
 
 import {
@@ -692,8 +693,6 @@ function SourceControlViewContainerComponent({
     },
     [focusedEntry, handleRefresh, moveFocus, scm],
   );
-
-  if (!open) return null;
 
   const fetchBusy = sourceControl.busyAction === "fetch";
   const pullBusy = sourceControl.busyAction === "pull";

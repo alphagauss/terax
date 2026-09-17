@@ -1,11 +1,10 @@
 /**
  * 本文件为已激活的侧边栏容器提供稳定 React 和 DOM 所有权。
- * 容器切换或跨位置移动时只重挂宿主节点，不重新创建面板业务状态。
+ * 普通切换只改变可见性，只有跨位置移动时才重挂宿主节点。
  */
 
 import {
   type ReactNode,
-  type RefObject,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -38,12 +37,10 @@ export function SidebarViewPool({
   runtime,
   temporarilyHidden,
 }: Props) {
-  const depotRef = useRef<HTMLDivElement>(null);
   const activatedRef = useRef(new Set<SidebarContainerId>());
 
   return (
     <>
-      <div ref={depotRef} className="hidden" aria-hidden />
       {views.map((view) => {
         const location = findSidebarContainerLocation(placements, view.id);
         const visible =
@@ -59,7 +56,6 @@ export function SidebarViewPool({
             view={view}
             location={location}
             visible={visible}
-            depotRef={depotRef}
           />
         );
       })}
@@ -71,12 +67,10 @@ function PooledSidebarView({
   view,
   location,
   visible,
-  depotRef,
 }: {
   view: SidebarPooledView;
   location: "primary" | "secondary";
   visible: boolean;
-  depotRef: RefObject<HTMLDivElement | null>;
 }) {
   const [container] = useState(() => {
     const element = document.createElement("div");
@@ -89,15 +83,14 @@ function PooledSidebarView({
     const host = document.querySelector<HTMLElement>(
       `[data-sidebar-view-host="${location}"]`,
     );
-    const target = visible ? host : depotRef.current;
-    if (target && container.parentNode !== target) {
-      target.appendChild(container);
+    if (host && container.parentNode !== host) {
+      host.appendChild(container);
     }
     container.style.visibility = visible ? "visible" : "hidden";
     container.style.pointerEvents = visible ? "auto" : "none";
     container.inert = !visible;
     container.setAttribute("aria-hidden", String(!visible));
-  }, [container, depotRef, location, visible]);
+  }, [container, location, visible]);
 
   useEffect(
     () => () => {
