@@ -9,7 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentDisplayState } from "../agents/subagentDisplay";
-import { restoreUsage, releaseUsage } from "../lib/usageRuntime";
+import { releaseUsage, restoreUsage } from "../lib/usageRuntime";
 import { SubagentCard } from "./SubagentCard";
 
 const part = {
@@ -110,6 +110,7 @@ describe("SubagentCard", () => {
       root.render(<SubagentCard part={part as never} display={display()} />);
     });
     expect(container.textContent).toContain("Thinking");
+    const shimmer = container.querySelector(".ai-shimmer");
 
     const toolDisplay = display({
       phase: "tool",
@@ -126,6 +127,7 @@ describe("SubagentCard", () => {
       root.render(<SubagentCard part={part as never} display={toolDisplay} />);
     });
     expect(container.textContent).toContain("Reading src/file.ts");
+    expect(container.querySelector(".ai-shimmer")).toBe(shimmer);
 
     await act(async () => {
       root.render(
