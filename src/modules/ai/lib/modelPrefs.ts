@@ -16,7 +16,11 @@ const RECENTS_MAX = 5;
 
 type ModelReferenceState = Pick<
   Preferences,
-  "defaultModel" | "favoriteModels" | "recentModels"
+  | "defaultModel"
+  | "desktopModel"
+  | "desktopModelParameterSelections"
+  | "favoriteModels"
+  | "recentModels"
 >;
 
 /** 生成模型移除所需的引用补丁，默认项回退但收藏和最近记录直接清理。 */
@@ -28,6 +32,10 @@ export function buildModelReferencePatch(
   const patch: ModelSettingsPatch = {};
   if (state.defaultModel && matches(state.defaultModel)) {
     patch.defaultModel = replacement;
+  }
+  if (state.desktopModel && matches(state.desktopModel)) {
+    patch.desktopModel = replacement;
+    patch.desktopModelParameterSelections = {};
   }
 
   const replaceList = (models: ModelRef[]): ModelRef[] => {

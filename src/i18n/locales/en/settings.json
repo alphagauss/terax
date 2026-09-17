@@ -321,10 +321,12 @@
     "defaults": {
       "label": "Defaults",
       "chatModel": "Chat model",
+      "agentSteps": "Main Agent steps per turn",
       "selectModel": "Select a model",
       "subagentModel": "Subagent model",
       "followChatModel": "Follow chat model",
       "subagentConcurrency": "Concurrent subagents per chat",
+      "subagentSteps": "Subagent steps per task",
       "autocomplete": "Autocomplete",
       "notConnectedHint": "{{provider}} isn't connected - add it below.",
       "trigger": {

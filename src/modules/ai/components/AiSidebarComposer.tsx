@@ -3,6 +3,7 @@
  * 负责输入、上下文标签、模型筛选和发送控制。
  */
 
+import { Button } from "@/components/controls/button";
 import { FileDropOutline } from "@/components/controls/file-drop-outline";
 import { Hint } from "@/components/controls/tooltip";
 import {
@@ -11,32 +12,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/controls/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { AgentIcon } from "@/modules/agents/lib/agentIcon";
+import { AiComposerInput } from "@/modules/ai/components/AiComposerInput";
+import { ModelParametersPopover } from "@/modules/ai/components/ModelParametersPopover";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import {
-  Add01Icon,
-  AiBookIcon,
-  ArrowDown01Icon,
-  ArrowUp02Icon,
-  Clock01Icon,
-  FavouriteIcon,
-  Folder01Icon,
-  HandIcon,
-  Mic01Icon,
-  PlugIcon,
-  Search01Icon,
-  SecurityWarningIcon,
-  StarIcon,
-  Tick01Icon,
-  Tick02Icon,
-} from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
   type ModelRef,
   modelRefKey,
@@ -57,11 +38,31 @@ import { useComposer } from "@/modules/ai/lib/composer";
 import { getAvailableModelRefs } from "@/modules/ai/lib/modelAvailability";
 import { toggleFavoriteModel } from "@/modules/ai/lib/modelPrefs";
 import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
-import { AiComposerInput } from "@/modules/ai/components/AiComposerInput";
-import { ModelParametersPopover } from "@/modules/ai/components/ModelParametersPopover";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setDesktopPermissionMode } from "@/modules/settings/store";
+import {
+  Add01Icon,
+  AiBookIcon,
+  ArrowDown01Icon,
+  ArrowUp02Icon,
+  Clock01Icon,
+  FavouriteIcon,
+  Folder01Icon,
+  HandIcon,
+  Mic01Icon,
+  PlugIcon,
+  Search01Icon,
+  SecurityWarningIcon,
+  StarIcon,
+  Tick01Icon,
+  Tick02Icon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import "@/modules/ai/components/ai-sidebar-composer.css";
-import { useComposerDrop } from "@/modules/ai/hooks/useComposerDrop";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
+import { useComposerDrop } from "@/modules/ai/hooks/useComposerDrop";
 
 /**
  * AI 侧栏输入组件。
@@ -245,12 +246,13 @@ const PERMISSION_MODES = [
 function PermissionModeDropdown() {
   const { t } = useTranslation("ai");
   const { readOnly } = useComposer();
-  const mode = useChatStore((s) =>
-    s.sessions.find((session) => session.id === s.activeSessionId)?.channelId
-      ? "full-access"
-      : s.permissionMode,
+  const isChannel = useChatStore((s) =>
+    Boolean(
+      s.sessions.find((session) => session.id === s.activeSessionId)?.channelId,
+    ),
   );
-  const setMode = useChatStore((s) => s.setPermissionMode);
+  const desktopMode = usePreferencesStore((s) => s.desktopPermissionMode);
+  const mode = isChannel ? "full-access" : desktopMode;
   const activeIcon = mode === "ask" ? HandIcon : SecurityWarningIcon;
 
   return (
@@ -259,7 +261,7 @@ function PermissionModeDropdown() {
         <Hint content={t(`statusBar.permissionMode.${mode}`)}>
           <Button
             type="button"
-            disabled={readOnly}
+            disabled={readOnly || isChannel}
             variant={mode === "full-access" ? "ghost-warning" : "ghost"}
             size="sm"
             className="my-1 shrink-0"
@@ -276,7 +278,7 @@ function PermissionModeDropdown() {
         {PERMISSION_MODES.map((item) => (
           <DropdownMenuItem
             key={item.id}
-            onSelect={() => setMode(item.id)}
+            onSelect={() => void setDesktopPermissionMode(item.id)}
             className={
               item.id === "full-access"
                 ? "text-amber-600! **:text-amber-600! dark:text-amber-400! dark:**:text-amber-400!"
@@ -472,6 +474,7 @@ function ModelDropdown() {
             size="sm"
             disabled={
               readOnly ||
+              Boolean(channelId) ||
               (!current &&
                 !currentExternal &&
                 availableExternalAgents.length === 0)

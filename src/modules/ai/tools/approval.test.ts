@@ -5,7 +5,6 @@
 
 import { asSchema, type ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import { buildShellTools } from "./shell";
 import { buildToolApproval } from "./approval";
@@ -24,12 +23,14 @@ const toolOptions: ToolExecutionOptions<never> = {
   context: undefined as never,
 };
 
+let permissionMode: "ask" | "full-access" = "ask";
+
 const context: ToolContext = {
   getCwd: () => "/workspace",
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
-  getPermissionMode: () => useChatStore.getState().permissionMode,
+  getPermissionMode: () => permissionMode,
   supportsApprovals: true,
 };
 
@@ -38,7 +39,7 @@ describe("AI tool approval mode", () => {
     nativeMock.shellExec.mockReset();
     nativeMock.shellProcess.mockReset();
     nativeMock.shellList.mockReset();
-    useChatStore.setState({ permissionMode: "ask" });
+    permissionMode = "ask";
   });
 
   it("auto-runs workspace commands and approves external access", () => {
@@ -48,7 +49,7 @@ describe("AI tool approval mode", () => {
     expect(approval({ command: "curl https://example.com" })).toBe(
       "user-approval",
     );
-    useChatStore.setState({ permissionMode: "full-access" });
+    permissionMode = "full-access";
     expect(approval({ command: "echo safe" })).toBe("not-applicable");
     expect(approval({ command: "curl https://example.com" })).toBe(
       "not-applicable",
@@ -68,7 +69,7 @@ describe("AI tool approval mode", () => {
   });
 
   it("passes full access to the native Shell boundary", async () => {
-    useChatStore.setState({ permissionMode: "full-access" });
+    permissionMode = "full-access";
     nativeMock.shellExec.mockResolvedValue({ status: "exited", stdout: "" });
     const tools = buildShellTools(context);
     const execute = tools.shell_exec.execute;

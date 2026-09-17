@@ -3,7 +3,8 @@
  * 负责绑定偏好与密钥状态，并在模型或 Provider 配置变化时同步关联引用。
  */
 
-import { Hint } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
+import { Input } from "@/components/controls/input";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/controls/select";
+import { Hint } from "@/components/controls/tooltip";
+import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,12 +22,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/controls/button";
-import { Input } from "@/components/controls/input";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
-import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
 import { deleteSharedStoreKey } from "@/lib/sharedStore";
+import { cn } from "@/lib/utils";
+import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
+import { ModelPicker } from "@/modules/ai/components/ModelPicker";
+import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
 import { ProviderIcon } from "@/modules/ai/components/ProviderIcon";
 import {
   builtinProviderId,
@@ -34,13 +37,13 @@ import {
   modelRefKey,
   modelRefsEqual,
   normalizeConfiguredModels,
-  parseModelContextWindow,
   PROVIDERS,
   type ProviderBaseURLs,
   type ProviderId,
   type ProviderInfo,
   type ProviderInstance,
   type ProviderModels,
+  parseModelContextWindow,
   providerHasEditableBaseURL,
   resolveProviderBaseURL,
   resolveProviderInstance,
@@ -67,30 +70,35 @@ import {
   type ResolvedProviderConnection,
 } from "@/modules/ai/providerRegistry";
 import { useChatStore } from "@/modules/ai/store/chatStore";
+import { NetworkRouteSelect } from "@/modules/network/NetworkRouteSelect";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
-import { ModelPicker } from "@/modules/ai/components/ModelPicker";
-import { ModelParameterReveal } from "@/modules/ai/components/ModelParameterReveal";
-import { ModelRequestSettings } from "@/modules/ai/components/ModelRequestSettings";
 import {
-  setModelUsageParameters,
-  setModelUsageModel,
-} from "@/modules/settings/store";
-import {
+  AGENT_STEPS_MAX,
+  AGENT_STEPS_MIN,
   type AutocompleteTrigger,
+  clampAgentSteps,
+  MAX_AGENT_STEPS_DEFAULT,
   MAX_CONCURRENT_SUBAGENTS_MAX,
   MAX_CONCURRENT_SUBAGENTS_MIN,
+  MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelSettingsPatch,
   setAutocompleteEnabled,
   setAutocompleteTrigger,
   setDefaultModel,
   setGroqSttModel,
+  setMaxAgentSteps,
   setMaxConcurrentSubagents,
+  setMaxSubagentSteps,
   setModelSettings,
+  setModelUsageModel,
+  setModelUsageParameters,
   setSttProvider,
   setWhispercppBaseURL,
 } from "@/modules/settings/store";
 import { getBindingTokens, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
+import { ModelParameterEditor } from "@/settings/components/ModelParameterEditor";
+import { ProviderKeyCard } from "@/settings/components/ProviderKeyCard";
+import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
 import {
   Add01Icon,
   ArrowDown01Icon,
@@ -102,9 +110,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ProviderKeyCard } from "@/settings/components/ProviderKeyCard";
-import { ProviderModelPicker } from "@/settings/components/ProviderModelPicker";
-import { PageHeader, SectionHeading } from "@/components/layout/PageHeader";
 
 type KeysMap = Record<ProviderId, string | null>;
 type ProviderInstanceUpdate = Partial<
@@ -654,6 +659,7 @@ function DefaultsBlock({
   customProviders: readonly ProviderInstance[];
 }) {
   const { t } = useTranslation();
+  const maxAgentSteps = usePreferencesStore((s) => s.maxAgentSteps);
   return (
     <div className="flex flex-col gap-field">
       <SectionHeading>{t("models.defaults.label")}</SectionHeading>
@@ -665,6 +671,13 @@ function DefaultsBlock({
             providerBaseURLs={providerBaseURLs}
             customProviders={customProviders}
             onSelect={(model) => void setDefaultModel(model)}
+          />
+        </FieldRow>
+        <FieldRow label={t("models.defaults.agentSteps")}>
+          <AgentStepLimitInput
+            value={maxAgentSteps}
+            fallback={MAX_AGENT_STEPS_DEFAULT}
+            onChange={setMaxAgentSteps}
           />
         </FieldRow>
       </div>
@@ -689,6 +702,7 @@ function SubagentCard({
   const maxConcurrentSubagents = usePreferencesStore(
     (s) => s.maxConcurrentSubagents,
   );
+  const maxSubagentSteps = usePreferencesStore((s) => s.maxSubagentSteps);
   const [previewModel, setPreviewModel] = useState<ModelRef | null>(
     () => usage.model ?? defaultModel ?? models[0] ?? null,
   );
@@ -729,6 +743,14 @@ function SubagentCard({
               ))}
             </SelectContent>
           </Select>
+        </FieldRow>
+
+        <FieldRow label={t("models.defaults.subagentSteps")}>
+          <AgentStepLimitInput
+            value={maxSubagentSteps}
+            fallback={MAX_SUBAGENT_STEPS_DEFAULT}
+            onChange={setMaxSubagentSteps}
+          />
         </FieldRow>
 
         <FieldRow label={t("models.defaults.subagentModel")}>
@@ -793,6 +815,45 @@ function SubagentCard({
         )}
       </div>
     </div>
+  );
+}
+
+/** 延迟到失焦时保存，避免输入中的临时空值进入共享设置。 */
+function AgentStepLimitInput({
+  value,
+  fallback,
+  onChange,
+}: {
+  value: number;
+  fallback: number;
+  onChange: (value: number) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const next = clampAgentSteps(
+      draft.trim() === "" ? fallback : Number(draft),
+      fallback,
+    );
+    setDraft(String(next));
+    if (next !== value) void onChange(next);
+  };
+
+  return (
+    <Input
+      type="number"
+      min={AGENT_STEPS_MIN}
+      max={AGENT_STEPS_MAX}
+      step={1}
+      value={draft}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+      className="w-24 border border-border bg-background px-2.5 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
   );
 }
 

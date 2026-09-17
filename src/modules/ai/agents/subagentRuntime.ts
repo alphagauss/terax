@@ -12,7 +12,7 @@ import { TurnInbox } from "@/modules/ai/lib/turnInbox";
 export type SubagentTaskResult = {
   taskId: string;
   label: string;
-  status: "completed" | "failed";
+  status: "completed" | "incomplete" | "failed";
   result?: string;
   error?: string;
   durationMs: number;

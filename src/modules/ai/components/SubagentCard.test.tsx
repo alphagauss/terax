@@ -182,4 +182,26 @@ describe("SubagentCard", () => {
     await act(async () => resultTab?.click());
     expect(container.textContent).toContain("Final result");
   });
+
+  it("shows a distinct incomplete state at the Subagent step limit", async () => {
+    await act(async () => {
+      root.render(
+        <SubagentCard
+          part={part as never}
+          display={display({
+            status: "incomplete",
+            durationMs: 500,
+            error:
+              "Subagent reached its step limit before completing the task.",
+          })}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Paused at the step limit");
+    await act(async () => container.querySelector("button")?.click());
+    expect(container.textContent).toContain(
+      "The Subagent reached its step limit before completing the task.",
+    );
+  });
 });

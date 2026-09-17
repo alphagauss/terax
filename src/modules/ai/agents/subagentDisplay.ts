@@ -8,6 +8,7 @@ import { redactSensitive } from "../lib/redact";
 export type SubagentDisplayStatus =
   | "running"
   | "completed"
+  | "incomplete"
   | "failed"
   | "cancelled";
 
@@ -185,7 +186,12 @@ export function isSubagentDisplaySnapshot(
 function isTerminalStatus(
   value: unknown,
 ): value is Exclude<SubagentDisplayStatus, "running"> {
-  return value === "completed" || value === "failed" || value === "cancelled";
+  return (
+    value === "completed" ||
+    value === "incomplete" ||
+    value === "failed" ||
+    value === "cancelled"
+  );
 }
 
 function isDisplayStep(value: unknown): value is SubagentDisplaySnapshotStep {
@@ -199,6 +205,7 @@ function isDisplayStep(value: unknown): value is SubagentDisplaySnapshotStep {
       (typeof step.summary === "string" &&
         step.summary.length <= SUMMARY_LIMIT)) &&
     (step.status === "completed" ||
+      step.status === "incomplete" ||
       step.status === "failed" ||
       step.status === "cancelled")
   );

@@ -97,7 +97,16 @@ export function buildShellTools(ctx: ToolContext) {
           .max(32 * 1024)
           .nullable()
           .optional(),
-        timeout_secs: z.number().int().min(1).max(3600).nullable().optional(),
+        timeout_secs: z
+          .number()
+          .int()
+          .min(1)
+          .max(3600)
+          .nullable()
+          .optional()
+          .describe(
+            "Process timeout in seconds. Defaults to 300; use null to disable the automatic timeout.",
+          ),
         yield_time_ms: z.number().int().min(0).max(30_000).optional(),
         max_output_bytes: z
           .number()

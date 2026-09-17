@@ -69,7 +69,7 @@ function sessionPermission(sessionId: string) {
   return useChatStore.getState().sessions.find((item) => item.id === sessionId)
     ?.channelId
     ? ("full-access" as const)
-    : useChatStore.getState().permissionMode;
+    : usePreferencesStore.getState().desktopPermissionMode;
 }
 
 /** 创建会话 Chat，并保持桌面与 Channel 共用执行和持久化数据流。 */
@@ -138,6 +138,8 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       usePreferencesStore.getState().modelUsages.subagent.model,
     getMaxConcurrentSubagents: () =>
       usePreferencesStore.getState().maxConcurrentSubagents,
+    getMaxAgentSteps: () => usePreferencesStore.getState().maxAgentSteps,
+    getMaxSubagentSteps: () => usePreferencesStore.getState().maxSubagentSteps,
     getCustomInstructions: () =>
       usePreferencesStore.getState().customInstructions,
     getTurnId: () => pendingTurn(sessionId).id,

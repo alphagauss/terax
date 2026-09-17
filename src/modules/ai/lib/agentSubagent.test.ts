@@ -860,4 +860,124 @@ describe.sequential("Agent background subagents", () => {
     await vi.waitFor(() => expect(coordinator.inbox.hasPending).toBe(true));
     await coordinator.cancelAll();
   });
+
+  it("forces a tool-free final response when the main Agent reaches its step limit", async () => {
+    const finishMeta = vi.fn();
+    activeModel = mockModel({
+      doStream: () =>
+        rootCalls().length <= 8
+          ? toolCallsStream([
+              {
+                id: `terminal-${rootCalls().length}`,
+                name: "get_terminal_output",
+                input: {},
+              },
+            ])
+          : textStream("Paused with a progress summary."),
+    });
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "main-step-limit"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["get_terminal_output"],
+      maxAgentSteps: 8,
+      maxConcurrentSubagents: 1,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getCwd: () => "/workspace",
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "main-step-limit",
+        getPermissionMode: () => "ask",
+        supportsApprovals: true,
+      },
+      uiMessages: [
+        {
+          id: "user",
+          role: "user",
+          parts: [{ type: "text", text: "Inspect" }],
+        },
+      ],
+      onFinishMeta: finishMeta,
+      onCheckpoint: async () => {},
+    });
+
+    const chunks: Array<{ type?: string; delta?: string }> = [];
+    for await (const chunk of result.toUIMessageStream()) chunks.push(chunk);
+
+    expect(rootCalls()).toHaveLength(9);
+    expect(chunks).toContainEqual(
+      expect.objectContaining({
+        type: "text-delta",
+        delta: "Paused with a progress summary.",
+      }),
+    );
+    expect(finishMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ hitStepCap: true }),
+    );
+  });
+
+  it("marks a Subagent as incomplete when it reaches its own step limit", async () => {
+    const displays = vi.fn();
+    let childCalls = 0;
+    activeModel = mockModel({
+      doStream: () =>
+        rootCalls().length === 1
+          ? toolCallsStream([
+              {
+                id: "limited-child",
+                name: "run_subagent",
+                input: { task: "Inspect deeply", wait: true },
+              },
+            ])
+          : textStream("Parent handled the incomplete result."),
+      childStream: () =>
+        toolCallsStream([
+          {
+            id: `child-terminal-${++childCalls}`,
+            name: "get_terminal_output",
+            input: {},
+          },
+        ]),
+    });
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "subagent-step-limit"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["run_subagent", "get_terminal_output"],
+      maxSubagentSteps: 8,
+      maxConcurrentSubagents: 1,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getCwd: () => "/workspace",
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "subagent-step-limit",
+        getPermissionMode: () => "ask",
+        supportsApprovals: true,
+      },
+      uiMessages: [
+        {
+          id: "user",
+          role: "user",
+          parts: [{ type: "text", text: "Delegate" }],
+        },
+      ],
+      onSubagentDisplay: displays,
+      onCheckpoint: async () => {},
+    });
+
+    for await (const _chunk of result.toUIMessageStream()) {
+      /* 消费完整父子工具循环。 */
+    }
+
+    expect(
+      displays.mock.calls[displays.mock.calls.length - 1]?.[0],
+    ).toMatchObject({
+      status: "incomplete",
+      error: "Subagent reached its step limit before completing the task.",
+    });
+  });
 });
