@@ -200,14 +200,14 @@ describe("ChatActivityBlock", () => {
       text: "src/app.tsx",
     } as const;
     renderBlock(root, headline, true);
-    const shimmer = container.querySelector(".ai-shimmer");
+    const shimmer = container.querySelector(".terax-shimmer");
     const action = container.querySelector(".shrink-0.whitespace-nowrap");
     const summary = container.querySelector(".truncate.font-mono");
-    expect(container.querySelectorAll(".ai-shimmer")).toHaveLength(1);
+    expect(container.querySelectorAll(".terax-shimmer")).toHaveLength(1);
     expect(action?.textContent).toBe("Read");
     expect(summary?.textContent).toBe("src/app.tsx");
     renderBlock(root, { ...headline, action: "Write" }, true);
-    expect(container.querySelector(".ai-shimmer")).toBe(shimmer);
+    expect(container.querySelector(".terax-shimmer")).toBe(shimmer);
     expect(
       container.querySelector(".shrink-0.whitespace-nowrap")?.textContent,
     ).toBe("Write");

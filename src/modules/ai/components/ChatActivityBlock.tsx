@@ -3,6 +3,7 @@
  * 不同工具的标题切换至少间隔一秒，同一调用的摘要立即更新；活动结束立即完成并收起一次。
  */
 
+import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
   CollapsibleContent,
@@ -10,7 +11,6 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
-import { Shimmer } from "@/modules/ai/components/Shimmer";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";

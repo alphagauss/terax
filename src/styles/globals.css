@@ -710,56 +710,6 @@ html *::-webkit-scrollbar {
   transition: none;
 }
 
-/* 文字流光在字形内移动圆形前景聚光，每轮由实例分别控制扫光和末尾停顿时长。 */
-@keyframes terax-shimmer {
-  from {
-    background-position:
-      calc(0px - var(--shimmer-spread) - var(--shimmer-spread)) center,
-      0 0;
-  }
-  to {
-    background-position:
-      calc(100% + var(--shimmer-spread) + var(--shimmer-spread)) center,
-      0 0;
-  }
-}
-
-.terax-shimmer {
-  --shimmer-highlight: color-mix(
-    in oklab,
-    var(--color-foreground) 30%,
-    var(--color-primary-foreground)
-  );
-  background-repeat: no-repeat;
-  background-size:
-    calc(var(--shimmer-spread) + var(--shimmer-spread))
-      calc(var(--shimmer-spread) + var(--shimmer-spread)),
-    100% 100%;
-  background-image:
-    radial-gradient(
-      circle,
-      var(--shimmer-highlight) 0%,
-      color-mix(
-          in oklab,
-          var(--shimmer-highlight) 80%,
-          var(--color-muted-foreground)
-        )
-        54%,
-      transparent 70%
-    ),
-    linear-gradient(
-      var(--color-muted-foreground),
-      var(--color-muted-foreground)
-    );
-  animation-name: terax-shimmer;
-  animation-duration: var(--shimmer-cycle-duration, 1.8s);
-  animation-timing-function: linear(
-    0,
-    1 var(--shimmer-sweep-end, 66.6667%),
-    1
-  );
-  animation-iteration-count: infinite;
-}
 
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -782,14 +732,5 @@ html *::-webkit-scrollbar {
   }
   .terax-reveal {
     transition: none;
-  }
-  .terax-shimmer {
-    animation: none;
-    background-image: linear-gradient(
-      var(--color-muted-foreground),
-      var(--color-muted-foreground)
-    );
-    background-position: 0 0;
-    background-size: 100% 100%;
   }
 }

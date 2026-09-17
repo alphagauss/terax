@@ -110,7 +110,7 @@ describe("SubagentCard", () => {
       root.render(<SubagentCard part={part as never} display={display()} />);
     });
     expect(container.textContent).toContain("Thinking");
-    const shimmer = container.querySelector(".ai-shimmer");
+    const shimmer = container.querySelector(".terax-shimmer");
 
     const toolDisplay = display({
       phase: "tool",
@@ -127,7 +127,7 @@ describe("SubagentCard", () => {
       root.render(<SubagentCard part={part as never} display={toolDisplay} />);
     });
     expect(container.textContent).toContain("Reading src/file.ts");
-    expect(container.querySelector(".ai-shimmer")).toBe(shimmer);
+    expect(container.querySelector(".terax-shimmer")).toBe(shimmer);
 
     await act(async () => {
       root.render(

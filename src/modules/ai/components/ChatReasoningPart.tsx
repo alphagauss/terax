@@ -3,7 +3,7 @@
  * 推理结束后保留展开内容，直到后继可见输出出现或整条消息结束，再立即收起一次。
  */
 
-import { Shimmer } from "@/modules/ai/components/Shimmer";
+import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
   CollapsibleContent,

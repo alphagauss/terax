@@ -6,7 +6,7 @@
 import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
-import { Shimmer } from "@/modules/ai/components/Shimmer";
+import { Shimmer } from "@/components/controls/shimmer";
 import {
   Collapsible,
   CollapsibleContent,
