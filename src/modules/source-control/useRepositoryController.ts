@@ -9,6 +9,10 @@ import {
   type GitStatusSnapshot,
   native,
 } from "@/modules/ai/lib/native";
+import {
+  subscribeFileSystemChanges,
+  subscribeWorkspaceResume,
+} from "@/modules/filesystem";
 import { documentPathIdentity } from "@/lib/pathIdentity";
 import { subscribeTerminalCommandFinished } from "@/modules/terminal/lib/commandCompletion";
 import {
@@ -16,13 +20,12 @@ import {
   useWorkspaceEnvStore,
   workspaceScopeKey,
 } from "@/modules/workspace";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRepositoryRefreshQueue } from "./repositoryRefresh";
 
-const FOCUS_REFRESH_MIN_INTERVAL_MS = 1500;
 // 相同上下文在短时间内复用快照；路径一旦变化就重新发现仓库，避免漏掉嵌套仓库。
 const SC_STATUS_TTL_MS = 2000;
+const FOREGROUND_REFRESH_MS = 3000;
 
 type RepositoryRemoteAction = "fetch" | "pull" | "push";
 type RepositoryRemoteActionMode = "contextual" | RepositoryRemoteAction;
@@ -399,26 +402,6 @@ export function useRepositoryController(
 
   useEffect(() => {
     if (!enabled) return;
-    let timer = 0;
-    const onFocus = () => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = 0;
-        void probeGraph();
-        const elapsed = Date.now() - lastRefreshAtRef.current;
-        if (elapsed < FOCUS_REFRESH_MIN_INTERVAL_MS) return;
-        void refresh();
-      }, 400);
-    };
-    window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [refresh, probeGraph, enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
     return subscribeTerminalCommandFinished((cwd) => {
       const currentRepoRoot = stateRef.current.repo?.repoRoot;
       if (
@@ -426,9 +409,10 @@ export function useRepositoryController(
         isPathInsideRepository(cwd, currentRepoRoot, workspaceEnv)
       ) {
         void probeGraph();
+        void refresh();
       }
     });
-  }, [enabled, probeGraph, workspaceEnv]);
+  }, [enabled, probeGraph, refresh, workspaceEnv]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -440,15 +424,50 @@ export function useRepositoryController(
         void refresh();
       }, 120);
     };
-    const windowHandle = getCurrentWebviewWindow();
-    const written = windowHandle.listen("fs:file-written", schedule);
-    const changed = windowHandle.listen("fs:changed", schedule);
+    const unsubscribe = subscribeFileSystemChanges(workspaceEnv, schedule);
     return () => {
       window.clearTimeout(timer);
-      void written.then((unlisten) => unlisten());
-      void changed.then((unlisten) => unlisten());
+      unsubscribe();
     };
-  }, [enabled, refresh]);
+  }, [enabled, refresh, workspaceEnv]);
+
+  useEffect(() => {
+    if (!enabled || !contextPath) return;
+    let disposed = false;
+    let running = false;
+    let timer = 0;
+    const canRefresh = () => !disposed && document.visibilityState !== "hidden";
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = 0;
+      if (!canRefresh()) return;
+      timer = window.setTimeout(() => {
+        timer = 0;
+        void run();
+      }, FOREGROUND_REFRESH_MS);
+    };
+    const run = async () => {
+      if (!canRefresh() || running) return;
+      running = true;
+      try {
+        await Promise.all([refresh(), probeGraph()]);
+      } finally {
+        running = false;
+        schedule();
+      }
+    };
+    const unsubscribeResume = subscribeWorkspaceResume(() => {
+      window.clearTimeout(timer);
+      timer = 0;
+      void run();
+    });
+    schedule();
+    return () => {
+      disposed = true;
+      if (timer) window.clearTimeout(timer);
+      unsubscribeResume();
+    };
+  }, [contextPath, enabled, probeGraph, refresh]);
 
   return useMemo<RepositoryController>(
     () => ({

@@ -132,7 +132,7 @@ function TransferStrategyMenu({
 type Props = {
   rootPath: string | null;
   rootPending?: "connection" | "loading";
-  remotePollingEnabled?: boolean;
+  active?: boolean;
   onOpenFolder?: () => void;
   openFolderLabel?: string;
   onOpenInNewSpace?: (path: string) => void;
@@ -409,7 +409,7 @@ export const FileExplorer = memo(
     {
       rootPath,
       rootPending,
-      remotePollingEnabled,
+      active,
       onOpenFolder,
       openFolderLabel,
       onOpenInNewSpace,
@@ -432,7 +432,7 @@ export const FileExplorer = memo(
     const tree = useFileTree(rootPath, {
       onPathRenamed,
       onPathDeleted,
-      remotePollingEnabled,
+      active,
     });
     const workspaceEnv = useWorkspaceEnvStore((state) => state.env);
     const runtime = useRemoteRuntimeStore((state) => state.snapshot);

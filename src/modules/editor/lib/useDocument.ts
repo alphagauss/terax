@@ -5,6 +5,10 @@
  */
 
 import { documentPathIdentity } from "@/lib/pathIdentity";
+import {
+  subscribeActiveFile,
+  subscribeWorkspaceResume,
+} from "@/modules/filesystem";
 import { useRepositorySnapshot } from "@/modules/source-control/RepositoryContext";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
@@ -43,8 +47,17 @@ export function useDocument({ path, active = true, onDirtyChange }: Options) {
   useEffect(() => {
     const owner = remotePollingOwnerRef.current;
     model.setRemotePollingActive(owner, active);
-    return () => model.clearRemotePollingOwner(owner);
-  }, [active, model]);
+    if (!active) return () => model.clearRemotePollingOwner(owner);
+
+    const revalidate = () => model.revalidateAfterActivation();
+    const unsubscribeFile = subscribeActiveFile(workspace, path, revalidate);
+    const unsubscribeResume = subscribeWorkspaceResume(revalidate);
+    return () => {
+      unsubscribeFile();
+      unsubscribeResume();
+      model.clearRemotePollingOwner(owner);
+    };
+  }, [active, model, path, workspace]);
 
   useEffect(() => {
     if (

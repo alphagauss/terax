@@ -44,17 +44,13 @@ import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import {
   type EditorPaneHandle,
   type EditorSourceSelection,
+  discardSharedDocumentModel,
   hasOtherDocumentView,
   isDocumentTab,
   NewEditorDialog,
   saveAutoSaveDocumentsBeforeClose,
-  useEditorFileSync,
 } from "@/modules/editor";
-import {
-  FileExplorer,
-  type FileExplorerHandle,
-  useExplorerDirectoryPrefetch,
-} from "@/modules/explorer";
+import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
 import type { FindHandle } from "@/modules/find";
 import { Header } from "@/modules/header";
 import { setLspNavigator } from "@/modules/lsp";
@@ -464,7 +460,6 @@ export default function App() {
     activeTab?.kind === "git-commit-file" ||
     activeTab?.kind === "ai-diff";
 
-  useEditorFileSync({ tabs, tabsRef, editorRefs });
   useThemeFileEditing({ tabsRef, openFileTab });
 
   const {
@@ -497,12 +492,6 @@ export default function App() {
     warmTabInBackground,
   });
 
-  useExplorerDirectoryPrefetch({
-    enabled: workbenchBooted && spacesHydrated,
-    tabs,
-    currentRoot: explorerRoot,
-  });
-
   useWindowTitle(activeTab);
 
   useEffect(() => {
@@ -514,14 +503,13 @@ export default function App() {
       const closing = tabsRef.current.find((tab) => tab.id === id);
       const next = closeTab(id);
       if (next.tabs[id]) return;
-      if (closing && isDocumentTab(closing)) {
-        if (!hasOtherDocumentView(Object.values(next.tabs), closing)) {
-          const workspace = currentWorkspaceEnv();
-          void import("@/modules/editor/lib/documentModel").then(
-            ({ discardSharedDocumentModel }) =>
-              discardSharedDocumentModel(workspace, closing.path),
-          );
-        }
+      if (
+        closing &&
+        isDocumentTab(closing) &&
+        !hasOtherDocumentView(Object.values(next.tabs), closing)
+      ) {
+        // 最后一个视图确认关闭即释放缓冲区，避免重新打开时恢复已放弃的编辑。
+        discardSharedDocumentModel(currentWorkspaceEnv(), closing.path);
       }
       // Terminal-id maps are pruned by the effect below; tab-id handles need
       // explicit cleanup here.
@@ -1004,10 +992,10 @@ export default function App() {
   const toggleSourceControl = useCallback(() => {
     sidebar.toggleContainer("source-control");
   }, [sidebar.toggleContainer]);
-  const { sourceControl } = useSourceControlContext(explorerRoot);
   const explorerGitDecorations = usePreferencesStore(
     (s) => s.explorerGitDecorations,
   );
+  const { sourceControl } = useSourceControlContext(explorerRoot);
 
   const openWebPreviewTab = useCallback(
     (url: string, groupId?: number) => {
@@ -1293,10 +1281,13 @@ export default function App() {
     [openAiPanel],
   );
 
-  const onActivateChannel = useCallback((sessionId?: string) => {
-    if (sessionId) onActivateLocalAgent(sessionId);
-    else sidebar.openContainer("channels");
-  }, [onActivateLocalAgent, sidebar.openContainer]);
+  const onActivateChannel = useCallback(
+    (sessionId?: string) => {
+      if (sessionId) onActivateLocalAgent(sessionId);
+      else sidebar.openContainer("channels");
+    },
+    [onActivateLocalAgent, sidebar.openContainer],
+  );
   useChannelsHost(onActivateChannel, keysLoaded);
 
   const handleTerminalExit = useCallback(
@@ -1754,7 +1745,7 @@ export default function App() {
         <FileExplorer
           ref={explorerRef}
           rootPath={explorerRoot}
-          remotePollingEnabled={sidebar.isVisible("explorer") && !zenMode}
+          active={sidebar.isVisible("explorer") && !zenMode}
           rootPending={
             workspaceBootPending
               ? workspaceEnv.kind === "ssh"

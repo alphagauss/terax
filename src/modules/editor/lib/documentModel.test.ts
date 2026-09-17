@@ -32,22 +32,11 @@ import {
   discardSharedDocumentModel,
   documentResourceKey,
   getSharedDocumentModel,
-  remoteDocumentDigestPollCount,
-  remoteDocumentPollInterval,
   resetSharedDocumentModelsForTests,
   saveAutoSaveDocumentsBeforeClose,
 } from "./documentModel";
 
 const local = { kind: "local" } satisfies WorkspaceEnv;
-
-describe("remote document polling", () => {
-  it("keeps visible documents responsive while backing off hidden views", () => {
-    expect(remoteDocumentPollInterval(true)).toBe(3_000);
-    expect(remoteDocumentPollInterval(false)).toBe(15_000);
-    expect(remoteDocumentDigestPollCount(true)).toBe(10);
-    expect(remoteDocumentDigestPollCount(false)).toBe(2);
-  });
-});
 
 function text(content: string, revision = `revision:${content}`, mtime = 1) {
   return {
@@ -122,6 +111,24 @@ describe("shared document model", () => {
     expect(documentResourceKey(local, "C:\\work\\file.ts")).toBe(
       documentResourceKey(local, "c:/work/file.ts"),
     );
+  });
+
+  it("polls SSH documents only while at least one view is visible", () => {
+    const model = getSharedDocumentModel(
+      { kind: "ssh", profileId: "dev" },
+      "/work/file.ts",
+    );
+    const foreground = Symbol("foreground");
+    const background = Symbol("background");
+    const unsubscribe = model.subscribe(() => {});
+
+    model.setRemotePollingActive(background, false);
+    expect(model.hasRemoteSubscribers()).toBe(false);
+    model.setRemotePollingActive(foreground, true);
+    expect(model.hasRemoteSubscribers()).toBe(true);
+    model.clearRemotePollingOwner(foreground);
+    expect(model.hasRemoteSubscribers()).toBe(false);
+    unsubscribe();
   });
 
   it("publishes one buffer and dirty state to every subscribed view", async () => {
@@ -768,6 +775,8 @@ describe("shared document model", () => {
       "/work/file.ts",
     );
     const unsubscribe = model.subscribe(() => {});
+    const owner = Symbol("foreground");
+    model.setRemotePollingActive(owner, true);
     await vi.waitFor(() =>
       expect(model.getSnapshot().doc.status).toBe("ready"),
     );
@@ -786,6 +795,7 @@ describe("shared document model", () => {
         ([command]) => command === "fs_file_version",
       ),
     ).toHaveLength(0);
+    model.clearRemotePollingOwner(owner);
     unsubscribe();
   });
 
@@ -796,6 +806,10 @@ describe("shared document model", () => {
     const second = getSharedDocumentModel(workspace, "/work/second.ts");
     const unsubscribeFirst = first.subscribe(() => {});
     const unsubscribeSecond = second.subscribe(() => {});
+    const firstOwner = Symbol("first");
+    const secondOwner = Symbol("second");
+    first.setRemotePollingActive(firstOwner, true);
+    second.setRemotePollingActive(secondOwner, true);
     await vi.waitFor(() => {
       expect(first.getSnapshot().doc.status).toBe("ready");
       expect(second.getSnapshot().doc.status).toBe("ready");
@@ -803,6 +817,8 @@ describe("shared document model", () => {
 
     expect(vi.getTimerCount()).toBe(1);
 
+    first.clearRemotePollingOwner(firstOwner);
+    second.clearRemotePollingOwner(secondOwner);
     unsubscribeFirst();
     unsubscribeSecond();
   });
@@ -824,6 +840,8 @@ describe("shared document model", () => {
       "/work/file.ts",
     );
     const unsubscribe = model.subscribe(() => {});
+    const owner = Symbol("foreground");
+    model.setRemotePollingActive(owner, true);
     await vi.waitFor(() =>
       expect(model.getSnapshot().doc.status).toBe("ready"),
     );
@@ -838,6 +856,7 @@ describe("shared document model", () => {
     expect(
       mocks.invoke.mock.calls.filter(([command]) => command === "fs_read_file"),
     ).toHaveLength(1);
+    model.clearRemotePollingOwner(owner);
     unsubscribe();
   });
 
