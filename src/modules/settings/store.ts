@@ -9,6 +9,7 @@ import {
   MAX_AGENT_STEPS_DEFAULT,
   MAX_CONCURRENT_SUBAGENTS_DEFAULT,
   MAX_SUBAGENT_STEPS_DEFAULT,
+  normalizeMainAgentSteps,
 } from "@/modules/ai/config";
 import {
   MODEL_USAGE_PREFIX,
@@ -29,6 +30,7 @@ export {
   MAX_CONCURRENT_SUBAGENTS_MAX,
   MAX_CONCURRENT_SUBAGENTS_MIN,
   MAX_SUBAGENT_STEPS_DEFAULT,
+  normalizeMainAgentSteps,
 } from "@/modules/ai/config";
 
 import {
@@ -183,7 +185,7 @@ export type Preferences = {
   defaultModel: ModelRef | null;
   desktopModel: ModelRef | null;
   desktopModelParameterSelections: ParameterSelections;
-  maxAgentSteps: number;
+  maxAgentSteps: number | null;
   maxSubagentSteps: number;
   maxConcurrentSubagents: number;
   desktopPermissionMode: "ask" | "full-access";
@@ -616,9 +618,8 @@ export async function loadPreferences(): Promise<Preferences> {
     desktopModelParameterSelections: readParameterSelections(
       get(KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS),
     ),
-    maxAgentSteps: clampAgentSteps(
-      get<number>(KEY_MAX_AGENT_STEPS) ?? DEFAULT_PREFERENCES.maxAgentSteps,
-      MAX_AGENT_STEPS_DEFAULT,
+    maxAgentSteps: normalizeMainAgentSteps(
+      get<number | null>(KEY_MAX_AGENT_STEPS) ?? null,
     ),
     maxSubagentSteps: clampAgentSteps(
       get<number>(KEY_MAX_SUBAGENT_STEPS) ??
@@ -859,11 +860,8 @@ export async function setMaxConcurrentSubagents(value: number): Promise<void> {
   );
 }
 
-export async function setMaxAgentSteps(value: number): Promise<void> {
-  await writePref(
-    KEY_MAX_AGENT_STEPS,
-    clampAgentSteps(value, MAX_AGENT_STEPS_DEFAULT),
-  );
+export async function setMaxAgentSteps(value: number | null): Promise<void> {
+  await writePref(KEY_MAX_AGENT_STEPS, normalizeMainAgentSteps(value));
 }
 
 export async function setMaxSubagentSteps(value: number): Promise<void> {

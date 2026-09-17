@@ -11,13 +11,14 @@ import {
   DEFAULT_PREFERENCES,
   MAX_CONCURRENT_SUBAGENTS_MAX,
   MAX_CONCURRENT_SUBAGENTS_MIN,
+  normalizeMainAgentSteps,
 } from "./store";
 
 describe("Subagent settings", () => {
   it("defaults to following the chat model with three concurrent tasks", () => {
     expect(DEFAULT_PREFERENCES.modelUsages.subagent.model).toBeNull();
     expect(DEFAULT_PREFERENCES.maxConcurrentSubagents).toBe(3);
-    expect(DEFAULT_PREFERENCES.maxAgentSteps).toBe(64);
+    expect(DEFAULT_PREFERENCES.maxAgentSteps).toBeNull();
     expect(DEFAULT_PREFERENCES.maxSubagentSteps).toBe(32);
     expect(DEFAULT_PREFERENCES.desktopPermissionMode).toBe("ask");
     expect(DEFAULT_PREFERENCES.desktopModel).toBeNull();
@@ -29,6 +30,13 @@ describe("Subagent settings", () => {
     expect(clampAgentSteps(999, 64)).toBe(AGENT_STEPS_MAX);
     expect(clampAgentSteps(31.6, 64)).toBe(32);
     expect(clampAgentSteps(Number.NaN, 64)).toBe(64);
+  });
+
+  it("uses null for an unlimited main Agent and clamps finite limits", () => {
+    expect(normalizeMainAgentSteps(null)).toBeNull();
+    expect(normalizeMainAgentSteps(0)).toBeNull();
+    expect(normalizeMainAgentSteps(7)).toBe(AGENT_STEPS_MIN);
+    expect(normalizeMainAgentSteps(999)).toBe(AGENT_STEPS_MAX);
   });
 
   it("clamps invalid concurrency values to the supported range", () => {

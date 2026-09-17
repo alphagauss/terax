@@ -13,18 +13,17 @@ import {
   activityDurationFromPart,
   serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
-import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
-import { native } from "@/modules/ai/lib/native";
 import {
   getFileEditRuntime,
   releaseFileEditRuntime,
 } from "@/modules/ai/lib/fileEditRuntime";
+import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
+import { native } from "@/modules/ai/lib/native";
+import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
 import type { UIMessage } from "@ai-sdk/react";
 import { readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
-
-import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
 
 let activeModel: MockLanguageModelV4;
 
@@ -918,6 +917,58 @@ describe.sequential("Agent background subagents", () => {
     );
   });
 
+  it("keeps the main Agent running without a step cap when configured as unlimited", async () => {
+    const finishMeta = vi.fn();
+    activeModel = mockModel({
+      doStream: () =>
+        rootCalls().length <= 9
+          ? toolCallsStream([
+              {
+                id: `unlimited-terminal-${rootCalls().length}`,
+                name: "get_terminal_output",
+                input: {},
+              },
+            ])
+          : textStream("Completed after continued tool use."),
+    });
+    const result = await runAgentStream({
+      turnId: crypto.randomUUID(),
+      keys: EMPTY_PROVIDER_KEYS,
+      model: modelRefForProvider("lmstudio", "main-unlimited"),
+      systemPrompt: "Stable prompt",
+      allowedTools: ["get_terminal_output"],
+      maxAgentSteps: null,
+      maxConcurrentSubagents: 1,
+      turnCoordinator: new AgentTurnCoordinator(),
+      toolContext: {
+        getCwd: () => "/workspace",
+        getTerminalContext: () => "terminal output",
+        isActiveTerminalPrivate: () => false,
+        getSessionId: () => "main-unlimited",
+        getPermissionMode: () => "ask",
+        supportsApprovals: true,
+      },
+      uiMessages: [
+        {
+          id: "user",
+          role: "user",
+          parts: [{ type: "text", text: "Inspect until complete" }],
+        },
+      ],
+      onFinishMeta: finishMeta,
+      onCheckpoint: async () => {},
+    });
+
+    for await (const _chunk of result.toUIMessageStream()) {
+      /* 消费完整无限步骤工具循环。 */
+    }
+
+    expect(rootCalls()).toHaveLength(10);
+    expect(finishMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ hitStepCap: false }),
+    );
+  });
+
   it("marks a Subagent as incomplete when it reaches its own step limit", async () => {
     const displays = vi.fn();
     let childCalls = 0;
@@ -933,13 +984,17 @@ describe.sequential("Agent background subagents", () => {
             ])
           : textStream("Parent handled the incomplete result."),
       childStream: () =>
-        toolCallsStream([
-          {
-            id: `child-terminal-${++childCalls}`,
-            name: "get_terminal_output",
-            input: {},
-          },
-        ]),
+        ++childCalls <= 8
+          ? toolCallsStream([
+              {
+                id: `child-terminal-${childCalls}`,
+                name: "get_terminal_output",
+                input: {},
+              },
+            ])
+          : textStream(
+              "Incomplete: inspected the available output; further checks remain.",
+            ),
     });
     const result = await runAgentStream({
       turnId: crypto.randomUUID(),
@@ -979,5 +1034,18 @@ describe.sequential("Agent background subagents", () => {
       status: "incomplete",
       error: "Subagent reached its step limit before completing the task.",
     });
+    expect(childCalls).toBe(9);
+    const summaryCall = activeModel.doStreamCalls
+      .filter((call) =>
+        JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),
+      )
+      .slice(-1)[0];
+    expect(JSON.stringify(summaryCall?.prompt)).toContain(
+      "reached its tool-step limit",
+    );
+    expect(summaryCall?.tools).toBeUndefined();
+    expect(JSON.stringify(rootCalls().slice(-1)[0]?.prompt)).toContain(
+      "Incomplete: inspected the available output; further checks remain.",
+    );
   });
 });

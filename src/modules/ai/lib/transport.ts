@@ -16,15 +16,14 @@ import type {
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
 import { runAgentStream } from "@/modules/ai/lib/agent";
-import type { ParameterAssignment } from "@/modules/ai/lib/modelParameters";
-import type { AgentConfiguration } from "./agentConfiguration";
+import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
-import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
+import type { ParameterAssignment } from "@/modules/ai/lib/modelParameters";
 import { readWorkspaceInstructions } from "@/modules/ai/lib/projectInstructions";
 import {
   type AgentExecutionEnvironment,
@@ -32,6 +31,7 @@ import {
 } from "@/modules/ai/lib/prompt";
 import type { ToolContext } from "@/modules/ai/tools/tools";
 import type { UIMessage } from "@ai-sdk/react";
+import type { AgentConfiguration } from "./agentConfiguration";
 
 export type SessionTransportDependencies = {
   getKeys: () => ProviderKeys;
@@ -39,7 +39,7 @@ export type SessionTransportDependencies = {
   getModel: () => ModelRef;
   getDefaultSubagentModel: () => ModelRef | null;
   getMaxConcurrentSubagents: () => number;
-  getMaxAgentSteps: () => number;
+  getMaxAgentSteps: () => number | null;
   getMaxSubagentSteps: () => number;
   getCustomInstructions: () => string;
   getAgent: () => AgentConfiguration | Promise<AgentConfiguration>;
@@ -94,7 +94,7 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
   let modelSnapshot: {
     model: ModelRef;
     modelParameters: ParameterAssignment[];
-    maxAgentSteps: number;
+    maxAgentSteps: number | null;
     maxSubagentSteps: number;
   } | null = null;
   let runtimeTask: Promise<{
