@@ -313,7 +313,7 @@ export const DEFAULT_STT_PROVIDER: SttProvider = "openai";
 export const WHISPERCPP_DEFAULT_BASE_URL = "http://127.0.0.1:8080";
 export const TERMINAL_BUFFER_LINES = 300;
 
-export const MAX_AGENT_STEPS_DEFAULT = 64;
+export const MAX_AGENT_STEPS_DEFAULT: number | null = null;
 export const MAX_SUBAGENT_STEPS_DEFAULT = 32;
 export const AGENT_STEPS_MIN = 8;
 export const AGENT_STEPS_MAX = 256;
@@ -325,6 +325,16 @@ export function clampAgentSteps(value: number, fallback: number): number {
     AGENT_STEPS_MAX,
     Math.max(AGENT_STEPS_MIN, Math.round(value)),
   );
+}
+
+/** 主 Agent 使用 null 表示无限，数值模式与 Subagent 共用范围约束。 */
+export function normalizeMainAgentSteps(
+  value: number | null,
+  fallback: number | null = MAX_AGENT_STEPS_DEFAULT,
+): number | null {
+  if (value === null || value === 0) return null;
+  if (!Number.isFinite(value)) return fallback;
+  return clampAgentSteps(value, AGENT_STEPS_MIN);
 }
 
 export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;

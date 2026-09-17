@@ -322,11 +322,13 @@
       "label": "默认设置",
       "chatModel": "对话模型",
       "agentSteps": "主 Agent 每轮最大步骤",
+      "agentStepsRange": "0 表示无限，8–256",
       "selectModel": "选择模型",
       "subagentModel": "Subagent 模型",
       "followChatModel": "跟随对话模型",
       "subagentConcurrency": "每个聊天并发 Subagent",
       "subagentSteps": "Subagent 每个任务最大步骤",
+      "subagentStepsRange": "8–256，之后总结",
       "autocomplete": "自动补全",
       "notConnectedHint": "{{provider}} 尚未连接，请在下方添加。",
       "trigger": {

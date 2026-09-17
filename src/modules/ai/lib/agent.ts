@@ -3,7 +3,6 @@
  * 它协调多段流、活动耗时、后台结果 checkpoint、工具权限和同一 turn 的最终收敛。
  */
 
-import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
 import {
   isSubagentToolErrorOutput,
   type SubagentDisplayState,
@@ -20,16 +19,18 @@ import {
   MAX_AGENT_STEPS_DEFAULT,
   MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelRef,
+  normalizeMainAgentSteps,
   type ProviderBaseURLs,
   type ProviderInstance,
   type ProviderModels,
   resolveModel,
 } from "@/modules/ai/config";
-import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import {
   type AgentToolId,
   resolveSubagentTools,
 } from "@/modules/ai/lib/agentTools";
+import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
+import { createContextUsage } from "@/modules/ai/lib/contextUsage";
 import {
   ACTIVITY_DURATION_PART_TYPE,
   conversationEventPart,
@@ -37,18 +38,24 @@ import {
   REASONING_DURATION_PART_TYPE,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
+import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import type {
   ProviderInstanceKeys,
   ProviderKeys,
 } from "@/modules/ai/lib/keyring";
+import {
+  buildParameterOptions,
+  type ParameterAssignment,
+} from "@/modules/ai/lib/modelParameters";
 import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
 import {
   buildConfiguredLanguageModel,
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
+import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
+import { getProvider } from "@/modules/ai/providerRegistry";
 import { buildToolApproval } from "@/modules/ai/tools/approval";
 import { buildTools, type ToolContext } from "@/modules/ai/tools/tools";
-import { peekFileEditRuntime } from "@/modules/ai/lib/fileEditRuntime";
 import {
   createUIMessageStream,
   type FinishReason,
@@ -62,13 +69,6 @@ import {
   type UIMessageStreamOutcome,
   type UIMessageStreamWriter,
 } from "ai";
-import { createContextUsage } from "@/modules/ai/lib/contextUsage";
-
-import {
-  buildParameterOptions,
-  type ParameterAssignment,
-} from "@/modules/ai/lib/modelParameters";
-import { getProvider } from "@/modules/ai/providerRegistry";
 
 export type RunAgentOptions = {
   modelParameters?: ParameterAssignment[];
@@ -79,7 +79,7 @@ export type RunAgentOptions = {
   model: ModelRef;
   systemPrompt: string;
   allowedTools: readonly AgentToolId[];
-  maxAgentSteps?: number;
+  maxAgentSteps?: number | null;
   maxSubagentSteps?: number;
   maxConcurrentSubagents: number;
   turnCoordinator: AgentTurnCoordinator;
@@ -116,6 +116,8 @@ export type SubagentModelConfiguration = Pick<
   | "providerInstanceKeys"
 >;
 
+const SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT = `The Subagent has reached its tool-step limit. Do not call any more tools. Based only on the task, conversation, and tool results already available, provide a concise partial report with: completed work, confirmed findings or evidence, unresolved items, and recommended next steps. Clearly state that the task is incomplete and do not claim full completion.`;
+
 /**
  * 使用冻结配置启动一次可跨多个 provider 请求的 Agent turn。
  *
@@ -123,9 +125,10 @@ export type SubagentModelConfiguration = Pick<
  * 和该提示词；后台 Subagent 结果也会在恢复模型循环前 checkpoint。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
-  const maxAgentSteps = clampAgentSteps(
-    opts.maxAgentSteps ?? MAX_AGENT_STEPS_DEFAULT,
-    MAX_AGENT_STEPS_DEFAULT,
+  const maxAgentSteps = normalizeMainAgentSteps(
+    opts.maxAgentSteps === undefined
+      ? MAX_AGENT_STEPS_DEFAULT
+      : opts.maxAgentSteps,
   );
   const modelRef = opts.model;
   const providerConfig = {
@@ -277,7 +280,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
               : appendPendingEvents();
             if (initialAppend) await initialAppend;
 
-            while (stepsSeen < maxAgentSteps || finalizationOnly) {
+            const reachedStepCap = () =>
+              maxAgentSteps !== null && stepsSeen >= maxAgentSteps;
+            while (!reachedStepCap() || finalizationOnly) {
               contextUsage = await createContextUsage({
                 sessionId: opts.toolContext.getSessionId(),
                 turnId: opts.turnId,
@@ -332,7 +337,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 stopWhen: finalizationOnly
                   ? isStepCount(1)
                   : ({ steps }) =>
-                      stepsSeen + steps.length >= maxAgentSteps ||
+                      (maxAgentSteps !== null &&
+                        stepsSeen + steps.length >= maxAgentSteps) ||
                       coordinator.inbox.hasPending,
                 abortSignal: opts.abortSignal,
                 onLanguageModelCallEnd: (event) =>
@@ -451,7 +457,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               const mustDrainBackground =
                 !approvalPending &&
                 coordinator.runningCount > 0 &&
-                (reachedCandidateEnd || stepsSeen >= maxAgentSteps);
+                (reachedCandidateEnd || reachedStepCap());
               if (mustDrainBackground) {
                 await coordinator.inbox.waitUntil(coordinator.waitForAll());
               }
@@ -473,13 +479,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
               if (approvalPending) break;
               if (completed) {
-                finalizationOnly = stepsSeen >= maxAgentSteps;
+                finalizationOnly = reachedStepCap();
                 continue;
               }
-              if (
-                stepsSeen >= maxAgentSteps &&
-                resultFinishReason === "tool-calls"
-              ) {
+              if (reachedStepCap() && resultFinishReason === "tool-calls") {
                 finalizationOnly = true;
                 continue;
               }
@@ -494,7 +497,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               finishReason,
             });
             opts.onFinishMeta?.({
-              hitStepCap: stepsSeen >= maxAgentSteps,
+              hitStepCap: reachedStepCap(),
               finishReason,
             });
             if (!approvalPending) {
@@ -659,16 +662,63 @@ function buildSubagentTaskRunner({
         }
       }
       abortSignal.throwIfAborted();
-      const [text, finishReason] = await Promise.all([
+      const [text, finishReason, responseMessages] = await Promise.all([
         result.text,
         result.finishReason,
+        result.responseMessages,
       ]);
       if (finishReason === "tool-calls") {
-        return {
-          status: "incomplete",
-          ...(text ? { result: text } : {}),
-          error: "Subagent reached its step limit before completing the task.",
-        };
+        onProgress({ type: "thinking" });
+        const summaryUsage = await createContextUsage({
+          sessionId: opts.toolContext.getSessionId(),
+          turnId: opts.turnId,
+          taskId,
+          model,
+          contextWindow: getModelContextWindow(
+            model,
+            config.providerModels ?? {},
+          ),
+          instructions: prompt.instructions,
+        });
+        const summary = streamText({
+          ...buildParameterOptions(
+            config.modelParameters ?? [],
+            getProvider(provider).runtime.adapter,
+            provider,
+          ),
+          prepareStep: summaryUsage.prepareStep,
+          model: childModel,
+          experimental_download: createProviderDownload(
+            model.providerId,
+            abortSignal,
+          ),
+          instructions: prompt.instructions,
+          messages: [
+            ...prompt.messages,
+            ...responseMessages,
+            { role: "user", content: SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT },
+          ],
+          stopWhen: isStepCount(1),
+          abortSignal,
+          onLanguageModelCallEnd: (event) =>
+            summaryUsage.finish(event.usage, event.content, event.performance),
+        });
+        try {
+          for await (const chunk of summary.stream) {
+            summaryUsage.observe(chunk);
+            if (chunk.type === "error") throw chunk.error;
+          }
+          abortSignal.throwIfAborted();
+          const summaryText = await summary.text;
+          return {
+            status: "incomplete",
+            ...(summaryText || text ? { result: summaryText || text } : {}),
+            error:
+              "Subagent reached its step limit before completing the task.",
+          };
+        } finally {
+          summaryUsage.finish();
+        }
       }
       return {
         status: "completed",

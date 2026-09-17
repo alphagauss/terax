@@ -29,8 +29,8 @@ vi.mock("./projectInstructions", () => ({
 
 import type { ToolContext } from "../tools/context";
 import type { AgentConfiguration } from "./agentConfiguration";
-import { createSessionTransport } from "./transport";
 import type { ParameterAssignment } from "./modelParameters";
+import { createSessionTransport } from "./transport";
 
 const environment = {
   platform: "Windows",
@@ -51,7 +51,7 @@ const subagentDeps = {
   getTurnId: () => "turn-1",
   getDefaultSubagentModel: () => null,
   getMaxConcurrentSubagents: () => 3,
-  getMaxAgentSteps: () => 64,
+  getMaxAgentSteps: () => null,
   getMaxSubagentSteps: () => 32,
   onCheckpoint: vi.fn(),
 };
@@ -124,7 +124,7 @@ describe("session transport", () => {
         ),
         uiMessages: messages,
         providerModels,
-        maxAgentSteps: 64,
+        maxAgentSteps: null,
         maxSubagentSteps: 32,
       }),
     );

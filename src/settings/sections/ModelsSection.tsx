@@ -82,6 +82,7 @@ import {
   MAX_CONCURRENT_SUBAGENTS_MIN,
   MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelSettingsPatch,
+  normalizeMainAgentSteps,
   setAutocompleteEnabled,
   setAutocompleteTrigger,
   setDefaultModel,
@@ -677,6 +678,8 @@ function DefaultsBlock({
           <AgentStepLimitInput
             value={maxAgentSteps}
             fallback={MAX_AGENT_STEPS_DEFAULT}
+            allowUnlimited
+            help={t("models.defaults.agentStepsRange")}
             onChange={setMaxAgentSteps}
           />
         </FieldRow>
@@ -749,7 +752,10 @@ function SubagentCard({
           <AgentStepLimitInput
             value={maxSubagentSteps}
             fallback={MAX_SUBAGENT_STEPS_DEFAULT}
-            onChange={setMaxSubagentSteps}
+            help={t("models.defaults.subagentStepsRange")}
+            onChange={(value) =>
+              setMaxSubagentSteps(value ?? MAX_SUBAGENT_STEPS_DEFAULT)
+            }
           />
         </FieldRow>
 
@@ -822,38 +828,47 @@ function SubagentCard({
 function AgentStepLimitInput({
   value,
   fallback,
+  allowUnlimited = false,
+  help,
   onChange,
 }: {
-  value: number;
-  fallback: number;
-  onChange: (value: number) => Promise<void>;
+  value: number | null;
+  fallback: number | null;
+  allowUnlimited?: boolean;
+  help: string;
+  onChange: (value: number | null) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => setDraft(String(value)), [value]);
+  const [draft, setDraft] = useState(String(value ?? 0));
+  useEffect(() => setDraft(String(value ?? 0)), [value]);
 
   const commit = () => {
-    const next = clampAgentSteps(
-      draft.trim() === "" ? fallback : Number(draft),
-      fallback,
-    );
-    setDraft(String(next));
+    const raw = draft.trim() === "" ? fallback : Number(draft);
+    const next = allowUnlimited
+      ? normalizeMainAgentSteps(raw)
+      : clampAgentSteps(raw ?? MAX_SUBAGENT_STEPS_DEFAULT, fallback ?? 32);
+    setDraft(String(next ?? 0));
     if (next !== value) void onChange(next);
   };
 
   return (
-    <Input
-      type="number"
-      min={AGENT_STEPS_MIN}
-      max={AGENT_STEPS_MAX}
-      step={1}
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-      }}
-      className="w-24 border border-border bg-background px-2.5 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-    />
+    <div className="flex w-full min-w-0 items-center gap-2">
+      <Input
+        type="number"
+        min={allowUnlimited ? 0 : AGENT_STEPS_MIN}
+        max={AGENT_STEPS_MAX}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+        className="min-w-0 flex-1 border border-border bg-background px-2.5 text-right tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <span className="w-44 shrink-0 whitespace-nowrap text-[11px] leading-4 text-muted-foreground">
+        {help}
+      </span>
+    </div>
   );
 }
 

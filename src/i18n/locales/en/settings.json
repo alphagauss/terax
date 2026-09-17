@@ -322,11 +322,13 @@
       "label": "Defaults",
       "chatModel": "Chat model",
       "agentSteps": "Main Agent steps per turn",
+      "agentStepsRange": "0 = Unlimited; 8–256",
       "selectModel": "Select a model",
       "subagentModel": "Subagent model",
       "followChatModel": "Follow chat model",
       "subagentConcurrency": "Concurrent subagents per chat",
       "subagentSteps": "Subagent steps per task",
+      "subagentStepsRange": "8–256; then summarize",
       "autocomplete": "Autocomplete",
       "notConnectedHint": "{{provider}} isn't connected - add it below.",
       "trigger": {
