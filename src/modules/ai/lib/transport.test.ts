@@ -51,6 +51,8 @@ const subagentDeps = {
   getTurnId: () => "turn-1",
   getDefaultSubagentModel: () => null,
   getMaxConcurrentSubagents: () => 3,
+  getMaxAgentSteps: () => 64,
+  getMaxSubagentSteps: () => 32,
   onCheckpoint: vi.fn(),
 };
 
@@ -122,6 +124,8 @@ describe("session transport", () => {
         ),
         uiMessages: messages,
         providerModels,
+        maxAgentSteps: 64,
+        maxSubagentSteps: 32,
       }),
     );
     expect(mocks.runAgentStream.mock.calls[0][0].uiMessages).toBe(messages);

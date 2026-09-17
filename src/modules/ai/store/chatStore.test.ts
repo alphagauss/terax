@@ -2,16 +2,12 @@
  * 本文件验证 AI 会话的窗口级恢复、多进程同步、运行锁和两阶段发布。
  * 测试锁定临时窗口与失效选择回退草稿，以及运行和持久化的关键顺序。
  */
-import { appendSessionDisplay } from "@/modules/ai/store/chatStore";
-import {
-  projectDeliveries,
-  useDeliveryHistory,
-} from "@/modules/channels/history";
 
 import {
   clearAgentTurnCoordinator,
   getAgentTurnCoordinator,
 } from "@/modules/ai/agents/subagentRuntime";
+import { modelRefKey } from "@/modules/ai/config";
 import {
   conversationEventPart,
   convertToAgentModelMessages,
@@ -20,11 +16,16 @@ import {
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
 import {
-  sendChatMessage,
   loadChat,
+  sendChatMessage,
   startChatMessage,
   steerChatMessage,
 } from "@/modules/ai/store/chatRuntime";
+import { appendSessionDisplay } from "@/modules/ai/store/chatStore";
+import {
+  projectDeliveries,
+  useDeliveryHistory,
+} from "@/modules/channels/history";
 import type { UIMessage } from "ai";
 import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,11 +42,13 @@ const io = vi.hoisted(() => ({
   workspaceDelete: vi.fn(),
   isPrimary: true,
   sharedRead: vi.fn(),
+  sharedMutate: vi.fn(),
 }));
 
 vi.mock("@/lib/sharedStore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sharedStore")>()),
   readSharedStore: io.sharedRead,
+  mutateSharedStore: io.sharedMutate,
 }));
 
 vi.mock("@/modules/ai/lib/sessions", async (importOriginal) => ({
@@ -72,27 +75,28 @@ vi.mock("@/modules/workspace-process", () => ({
 
 vi.mock("@/modules/ai/lib/modelPrefs", () => ({ pushRecentModel: vi.fn() }));
 
+import { parseCommand } from "@/modules/ai/commands/registry";
+import { submitSessionCommand } from "@/modules/ai/commands/runtime";
+import { useCommandStore } from "@/modules/ai/commands/store";
 import { MAIN_AGENT_ID } from "@/modules/ai/lib/agents";
 import type { SessionMeta } from "@/modules/ai/lib/sessions";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import {
   chats,
   flushCompletedSessionRuns,
+  getSessionParameterSelections,
   isSessionWritable,
   pendingTurns,
   persistedMessageCounts,
-  seedMessages,
-  seedSession,
-  getSessionParameterSelections,
   releaseUnusedChats,
   retainSessionView,
+  seedMessages,
+  seedSession,
   sessionMetadata,
   useChatStore,
 } from "@/modules/ai/store/chatStore";
-import { submitSessionCommand } from "@/modules/ai/commands/runtime";
-import { parseCommand } from "@/modules/ai/commands/registry";
-import { useCommandStore } from "@/modules/ai/commands/store";
 import { useSessionAttentionStore } from "@/modules/ai/store/sessionAttentionStore";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 
 const realRefreshSessions = useChatStore.getState().refreshSessions;
 const realCommitMessages = useChatStore.getState().commitMessages;
@@ -174,6 +178,7 @@ describe("chat store multi-process lifecycle", () => {
       pendingCompletions: [],
     });
     io.sharedRead.mockResolvedValue({});
+    io.sharedMutate.mockResolvedValue(undefined);
     io.acquire.mockResolvedValue(true);
     io.release.mockResolvedValue(undefined);
     io.list.mockResolvedValue([]);
@@ -222,6 +227,7 @@ describe("chat store multi-process lifecycle", () => {
       subagentDisplaysBySession: {},
       sessionAgentFilter: null,
       sessionSyncError: null,
+      selectedModel: null,
       parameterSelectionsBySession: {},
       modelSnapshotsBySession: {},
       refreshSessions: realRefreshSessions,
@@ -819,6 +825,41 @@ describe("chat store multi-process lifecycle", () => {
       useChatStore.getState().activeSessionId,
     );
     expect(io.workspaceSet).not.toHaveBeenCalled();
+  });
+
+  it("seeds a new draft with the recent desktop model parameters", () => {
+    const model = { providerId: "openai", modelId: "gpt-5" };
+    usePreferencesStore.setState({
+      desktopModel: model,
+      desktopModelParameterSelections: { reasoning: "high" },
+    });
+
+    const draftId = useChatStore.getState().newSession();
+
+    expect(
+      useChatStore.getState().parameterSelectionsBySession[draftId],
+    ).toEqual({
+      [modelRefKey(model)]: { reasoning: "high" },
+    });
+  });
+
+  it("persists the active desktop model and parameter selection atomically", async () => {
+    const model = { providerId: "openai", modelId: "gpt-5" };
+    const draftId = useChatStore.getState().newSession();
+    useChatStore.setState({ selectedModel: model });
+
+    await useChatStore
+      .getState()
+      .setParameterSelections(draftId, model, { reasoning: "high" });
+
+    expect(io.sharedMutate).toHaveBeenLastCalledWith("settings", [
+      { kind: "set", key: "desktopModel", value: model },
+      {
+        kind: "set",
+        key: "desktopModelParameterSelections",
+        value: { reasoning: "high" },
+      },
+    ]);
   });
 
   it("allows leaving a running session but prevents deleting that session", async () => {

@@ -74,6 +74,8 @@ type Configuration = Pick<
   | "getCustomInstructions"
   | "getDefaultSubagentModel"
   | "getMaxConcurrentSubagents"
+  | "getMaxAgentSteps"
+  | "getMaxSubagentSteps"
   | "getProviderBaseURLs"
   | "getProviderModels"
   | "getCustomProviders"

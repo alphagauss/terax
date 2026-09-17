@@ -311,8 +311,21 @@ export const STT_PROVIDER_LABELS: Record<SttProvider, string> = {
 
 export const DEFAULT_STT_PROVIDER: SttProvider = "openai";
 export const WHISPERCPP_DEFAULT_BASE_URL = "http://127.0.0.1:8080";
-export const MAX_AGENT_STEPS = 24;
 export const TERMINAL_BUFFER_LINES = 300;
+
+export const MAX_AGENT_STEPS_DEFAULT = 64;
+export const MAX_SUBAGENT_STEPS_DEFAULT = 32;
+export const AGENT_STEPS_MIN = 8;
+export const AGENT_STEPS_MAX = 256;
+
+/** 将 Agent 步数限制约束到设置界面允许的范围。 */
+export function clampAgentSteps(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(
+    AGENT_STEPS_MAX,
+    Math.max(AGENT_STEPS_MIN, Math.round(value)),
+  );
+}
 
 export const MAX_CONCURRENT_SUBAGENTS_DEFAULT = 3;
 export const MAX_CONCURRENT_SUBAGENTS_MIN = 1;

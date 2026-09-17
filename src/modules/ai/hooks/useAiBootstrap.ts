@@ -9,7 +9,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { modelRefsEqual } from "../config";
+import { modelRefKey, modelRefsEqual } from "../config";
 import {
   listExternalAgents,
   parseExternalAgentBinding,
@@ -112,22 +112,46 @@ export function useAiBootstrap(): {
     };
   }, [setApiKeys, setProviderInstanceKeys, prefsHydrated]);
 
-  // 初始化跨窗口偏好，并让聊天下拉框反映设置页保存的默认模型。
+  // 初始化跨窗口偏好，并优先恢复桌面最近一次选择的完整模型身份。
   const initPrefs = usePreferencesStore((s) => s.init);
   const prefDefaultModel = usePreferencesStore((s) => s.defaultModel);
+  const prefDesktopModel = usePreferencesStore((s) => s.desktopModel);
+  const prefDesktopModelParameterSelections = usePreferencesStore(
+    (s) => s.desktopModelParameterSelections,
+  );
   useEffect(() => {
     void initPrefs();
   }, [initPrefs]);
   useEffect(() => {
     if (!prefsHydrated) return;
-    setSelectedModel(prefDefaultModel, false);
-  }, [prefsHydrated, prefDefaultModel, setSelectedModel]);
+    setSelectedModel(prefDesktopModel ?? prefDefaultModel, false);
+  }, [prefsHydrated, prefDefaultModel, prefDesktopModel, setSelectedModel]);
+
+  useEffect(() => {
+    if (!prefsHydrated || !sessionsHydrated || !prefDesktopModel) return;
+    const { draftSessionId, parameterSelectionsBySession } =
+      useChatStore.getState();
+    if (!draftSessionId || parameterSelectionsBySession[draftSessionId]) return;
+    useChatStore.setState({
+      parameterSelectionsBySession: {
+        ...parameterSelectionsBySession,
+        [draftSessionId]: {
+          [modelRefKey(prefDesktopModel)]: prefDesktopModelParameterSelections,
+        },
+      },
+    });
+  }, [
+    prefDesktopModel,
+    prefDesktopModelParameterSelections,
+    prefsHydrated,
+    sessionsHydrated,
+  ]);
 
   useEffect(() => {
     if (!prefsHydrated || !keysLoaded) return;
     const replacement = selectAvailableModel(
       selectedModel,
-      prefDefaultModel,
+      prefDesktopModel ?? prefDefaultModel,
       availableModels,
     );
     if (
@@ -143,6 +167,7 @@ export function useAiBootstrap(): {
     availableModels,
     keysLoaded,
     prefDefaultModel,
+    prefDesktopModel,
     prefsHydrated,
     selectedModel,
     setSelectedModel,

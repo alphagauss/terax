@@ -2,34 +2,8 @@
  * 本文件管理按会话隔离的 AI 与 Subagent 展示状态、窗口级恢复和增量持久化。
  * 首次发送冻结 cwd 与 Agent 快照，运行中 checkpoint 不释放会话运行锁。
  */
-import {
-  applyDeliveryRecord,
-  projectDeliveries,
-  setDeliveryHistory,
-} from "@/modules/channels/history";
 
-import {
-  peekFileEditRuntime,
-  releaseFileEditRuntime,
-} from "@/modules/ai/lib/fileEditRuntime";
-import {
-  type CommandRecord,
-  type CommandDisplay,
-  projectCommands,
-} from "@/modules/ai/commands/records";
-import {
-  clearSessionCommands,
-  setSessionCommands,
-  updateCommand,
-} from "@/modules/ai/commands/store";
 import i18n from "@/i18n";
-import { cancelAgentRun } from "@/modules/ai/lib/runLifecycle";
-import {
-  persistSubmittedTurn,
-  persistTurnCheckpoint,
-  persistCompletedTurn,
-  type SessionCommitCursor,
-} from "@/modules/ai/lib/sessionPersistence";
 import { readSharedStore } from "@/lib/sharedStore";
 import {
   type SubagentDisplayState,
@@ -37,7 +11,18 @@ import {
 } from "@/modules/ai/agents/subagentDisplay";
 import { clearAgentTurnCoordinator } from "@/modules/ai/agents/subagentRuntime";
 import {
+  type CommandDisplay,
+  type CommandRecord,
+  projectCommands,
+} from "@/modules/ai/commands/records";
+import {
+  clearSessionCommands,
+  setSessionCommands,
+  updateCommand,
+} from "@/modules/ai/commands/store";
+import {
   type ModelRef,
+  modelRefKey,
   type ProviderId,
   providerFromBuiltinId,
   providerRequiresCredential,
@@ -49,27 +34,37 @@ import type {
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
-  materializeSubagentDisplayParts,
   materializeFileEditParts,
+  materializeRunFailure,
+  materializeSubagentDisplayParts,
   materializeTurnMetadata,
   projectSessionMessages,
   type SessionMessage,
   type TurnEvent,
-  materializeRunFailure,
 } from "@/modules/ai/lib/conversation";
+import {
+  peekFileEditRuntime,
+  releaseFileEditRuntime,
+} from "@/modules/ai/lib/fileEditRuntime";
 import {
   EMPTY_PROVIDER_KEYS,
   type ProviderInstanceKeys,
   type ProviderKeys,
 } from "@/modules/ai/lib/keyring";
-import { pushRecentModel } from "@/modules/ai/lib/modelPrefs";
-import { modelRefKey } from "@/modules/ai/config";
 import {
   type ModelParameterSelections,
-  type ParameterSelections,
   type ParameterAssignment,
+  type ParameterSelections,
   readParameterSelections,
 } from "@/modules/ai/lib/modelParameters";
+import { pushRecentModel } from "@/modules/ai/lib/modelPrefs";
+import { cancelAgentRun } from "@/modules/ai/lib/runLifecycle";
+import {
+  persistCompletedTurn,
+  persistSubmittedTurn,
+  persistTurnCheckpoint,
+  type SessionCommitCursor,
+} from "@/modules/ai/lib/sessionPersistence";
 import {
   acquireSessionRun,
   clearSessionProcesses,
@@ -85,11 +80,19 @@ import {
   type SessionData,
   type SessionMeta,
 } from "@/modules/ai/lib/sessions";
+import { releaseUsage, restoreUsage } from "@/modules/ai/lib/usageRuntime";
 import { useAgentsStore } from "@/modules/ai/store/agentsStore";
 import {
   type SessionRunOutcome,
   useSessionAttentionStore,
 } from "@/modules/ai/store/sessionAttentionStore";
+import {
+  applyDeliveryRecord,
+  projectDeliveries,
+  setDeliveryHistory,
+} from "@/modules/channels/history";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { setDesktopModelSelection } from "@/modules/settings/store";
 import {
   currentWorkspaceBootstrap,
   deleteWorkspaceValue,
@@ -98,7 +101,6 @@ import {
 } from "@/modules/workspace-process";
 import type { Chat, UIMessage } from "@ai-sdk/react";
 import { create } from "zustand";
-import { releaseUsage, restoreUsage } from "@/modules/ai/lib/usageRuntime";
 
 export type Live = {
   openFileReference?: (path: string, line?: number) => void | Promise<void>;
@@ -155,8 +157,6 @@ export type PendingFileAttachment = {
   path: string;
 };
 
-export type AiPermissionMode = "ask" | "full-access";
-
 type StoreState = {
   live: Live;
   setLive: (live: Live) => void;
@@ -186,9 +186,6 @@ type StoreState = {
   ) => void;
   draftExternalAgentId: ExternalAgentId | null;
   setDraftExternalAgent: (agentId: ExternalAgentId | null) => void;
-
-  permissionMode: AiPermissionMode;
-  setPermissionMode: (mode: AiPermissionMode) => void;
 
   focusSignal: number;
   pendingPrefill: string | null;
@@ -272,6 +269,28 @@ const sessionCommits = new Map<string, Promise<void>>();
 let sessionSwitchSequence = 0;
 let activeSessionPersistence = Promise.resolve();
 let parameterSelectionPersistence = Promise.resolve();
+let desktopSelectionPersistence = Promise.resolve();
+
+/** 串行保存最近桌面模型及参数，确保快速操作时最后一次选择最终落盘。 */
+function persistDesktopSelection(
+  model: ModelRef,
+  selections: ParameterSelections,
+): Promise<void> {
+  const write = desktopSelectionPersistence.then(() =>
+    setDesktopModelSelection(model, selections),
+  );
+  desktopSelectionPersistence = write.catch(() => undefined);
+  return write;
+}
+
+/** 最近桌面参数只作为新草稿初值，不覆盖已存在会话的独立选择。 */
+function desktopDraftParameterSelections(): ModelParameterSelections {
+  const { desktopModel, desktopModelParameterSelections } =
+    usePreferencesStore.getState();
+  return desktopModel
+    ? { [modelRefKey(desktopModel)]: desktopModelParameterSelections }
+    : {};
+}
 
 /** 串行保存主窗口的活动会话选择，空值表示下次启动进入新草稿。 */
 function persistActiveSession(id: string | null): Promise<void> {
@@ -596,11 +615,29 @@ export const useChatStore = create<StoreState>((set, get) => ({
       setWorkspaceValue(`ai:parameters:${sessionId}`, next),
     );
     parameterSelectionPersistence = write.catch(() => undefined);
-    await write;
+    const state = get();
+    const isActiveDesktopModel =
+      state.activeSessionId === sessionId &&
+      !state.sessions.find((session) => session.id === sessionId)?.channelId &&
+      state.selectedModel !== null &&
+      modelRefKey(state.selectedModel) === modelRefKey(model);
+    await Promise.all([
+      write,
+      ...(isActiveDesktopModel
+        ? [persistDesktopSelection(model, selections)]
+        : []),
+    ]);
   },
   setSelectedModel: (model, recordRecent = true) => {
     set({ selectedModel: model });
-    if (model && recordRecent) void pushRecentModel(model);
+    if (model && recordRecent) {
+      const sessionId = get().activeSessionId;
+      const selections = sessionId
+        ? (getSessionParameterSelections(sessionId)[modelRefKey(model)] ?? {})
+        : {};
+      void persistDesktopSelection(model, selections).catch(() => undefined);
+      void pushRecentModel(model).catch(() => undefined);
+    }
   },
   externalAgentAvailability: null,
   setExternalAgentAvailability: (externalAgentAvailability) =>
@@ -610,9 +647,6 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (draftExternalAgentId) useAgentsStore.getState().resetDraftAgent();
     set({ draftExternalAgentId });
   },
-
-  permissionMode: "ask",
-  setPermissionMode: (permissionMode) => set({ permissionMode }),
 
   focusSignal: 0,
   pendingPrefill: null,
@@ -893,6 +927,10 @@ export const useChatStore = create<StoreState>((set, get) => ({
     set({
       draftSessionId: id,
       activeSessionId: id,
+      parameterSelectionsBySession: {
+        ...get().parameterSelectionsBySession,
+        [id]: desktopDraftParameterSelections(),
+      },
     });
     void persistActiveSession(null);
     return id;

@@ -1,6 +1,6 @@
 /**
- * 本文件测试 AI 模型收藏、最近使用和模型身份替换规则。
- * 锁定去重、顺序、数量上限、空模型回退及持久化失败传播。
+ * 本文件测试桌面模型、收藏、最近使用和模型身份替换规则。
+ * 锁定完整模型引用更新、去重、数量上限及持久化失败传播。
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -115,6 +115,8 @@ describe("buildModelReferencePatch", () => {
   const otherModel = ref("other-model");
   const state = {
     defaultModel: oldModel,
+    desktopModel: oldModel,
+    desktopModelParameterSelections: { reasoning: "high" },
     modelUsages: {
       completion: { model: oldModel, parameterSelections: {} },
       subagent: { model: oldModel, parameterSelections: {} },
@@ -132,6 +134,8 @@ describe("buildModelReferencePatch", () => {
       ),
     ).toEqual({
       defaultModel: newModel,
+      desktopModel: newModel,
+      desktopModelParameterSelections: {},
       favoriteModels: [otherModel],
       recentModels: [otherModel],
     });
@@ -146,6 +150,8 @@ describe("buildModelReferencePatch", () => {
       ),
     ).toEqual({
       defaultModel: null,
+      desktopModel: null,
+      desktopModelParameterSelections: {},
       favoriteModels: [otherModel],
       recentModels: [otherModel],
     });

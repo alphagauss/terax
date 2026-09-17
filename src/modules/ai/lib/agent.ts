@@ -15,8 +15,10 @@ import {
   type SubagentTaskRunner,
 } from "@/modules/ai/agents/subagentRuntime";
 import {
+  clampAgentSteps,
   getModelContextWindow,
-  MAX_AGENT_STEPS,
+  MAX_AGENT_STEPS_DEFAULT,
+  MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelRef,
   type ProviderBaseURLs,
   type ProviderInstance,
@@ -77,6 +79,8 @@ export type RunAgentOptions = {
   model: ModelRef;
   systemPrompt: string;
   allowedTools: readonly AgentToolId[];
+  maxAgentSteps?: number;
+  maxSubagentSteps?: number;
   maxConcurrentSubagents: number;
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
@@ -119,6 +123,10 @@ export type SubagentModelConfiguration = Pick<
  * 和该提示词；后台 Subagent 结果也会在恢复模型循环前 checkpoint。
  */
 export async function runAgentStream(opts: RunAgentOptions) {
+  const maxAgentSteps = clampAgentSteps(
+    opts.maxAgentSteps ?? MAX_AGENT_STEPS_DEFAULT,
+    MAX_AGENT_STEPS_DEFAULT,
+  );
   const modelRef = opts.model;
   const providerConfig = {
     customProviders: opts.customProviders,
@@ -269,7 +277,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               : appendPendingEvents();
             if (initialAppend) await initialAppend;
 
-            while (stepsSeen < MAX_AGENT_STEPS || finalizationOnly) {
+            while (stepsSeen < maxAgentSteps || finalizationOnly) {
               contextUsage = await createContextUsage({
                 sessionId: opts.toolContext.getSessionId(),
                 turnId: opts.turnId,
@@ -324,7 +332,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 stopWhen: finalizationOnly
                   ? isStepCount(1)
                   : ({ steps }) =>
-                      stepsSeen + steps.length >= MAX_AGENT_STEPS ||
+                      stepsSeen + steps.length >= maxAgentSteps ||
                       coordinator.inbox.hasPending,
                 abortSignal: opts.abortSignal,
                 onLanguageModelCallEnd: (event) =>
@@ -443,7 +451,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               const mustDrainBackground =
                 !approvalPending &&
                 coordinator.runningCount > 0 &&
-                (reachedCandidateEnd || stepsSeen >= MAX_AGENT_STEPS);
+                (reachedCandidateEnd || stepsSeen >= maxAgentSteps);
               if (mustDrainBackground) {
                 await coordinator.inbox.waitUntil(coordinator.waitForAll());
               }
@@ -465,7 +473,14 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
               if (approvalPending) break;
               if (completed) {
-                finalizationOnly = stepsSeen >= MAX_AGENT_STEPS;
+                finalizationOnly = stepsSeen >= maxAgentSteps;
+                continue;
+              }
+              if (
+                stepsSeen >= maxAgentSteps &&
+                resultFinishReason === "tool-calls"
+              ) {
+                finalizationOnly = true;
                 continue;
               }
               break;
@@ -479,7 +494,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
               finishReason,
             });
             opts.onFinishMeta?.({
-              hitStepCap: stepsSeen >= MAX_AGENT_STEPS,
+              hitStepCap: stepsSeen >= maxAgentSteps,
               finishReason,
             });
             if (!approvalPending) {
@@ -516,6 +531,10 @@ function buildSubagentTaskRunner({
   opts: RunAgentOptions;
   permissionMode: "ask" | "full-access";
 }): SubagentTaskRunner {
+  const maxSubagentSteps = clampAgentSteps(
+    opts.maxSubagentSteps ?? MAX_SUBAGENT_STEPS_DEFAULT,
+    MAX_SUBAGENT_STEPS_DEFAULT,
+  );
   const allowedTools = resolveSubagentTools(opts.allowedTools, permissionMode);
   const toolContext: ToolContext = {
     ...opts.toolContext,
@@ -590,7 +609,7 @@ function buildSubagentTaskRunner({
       messages: prompt.messages,
       tools,
       toolApproval: buildToolApproval(toolContext),
-      stopWhen: isStepCount(MAX_AGENT_STEPS),
+      stopWhen: isStepCount(maxSubagentSteps),
       abortSignal,
       onStepStart: () => {
         onProgress({ type: "thinking" });
@@ -640,11 +659,20 @@ function buildSubagentTaskRunner({
         }
       }
       abortSignal.throwIfAborted();
+      const [text, finishReason] = await Promise.all([
+        result.text,
+        result.finishReason,
+      ]);
+      if (finishReason === "tool-calls") {
+        return {
+          status: "incomplete",
+          ...(text ? { result: text } : {}),
+          error: "Subagent reached its step limit before completing the task.",
+        };
+      }
       return {
         status: "completed",
-        result:
-          (await result.text) ||
-          "Task completed but no final response was generated.",
+        result: text || "Task completed but no final response was generated.",
       };
     } finally {
       contextUsage.finish();

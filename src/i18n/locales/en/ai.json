@@ -234,6 +234,8 @@
       "completedSummary_one": "Completed · {{count}} tool call · {{duration}}s",
       "completedSummary_other": "Completed · {{count}} tool calls · {{duration}}s",
       "failed": "Failed",
+      "stepLimit": "Paused at the step limit",
+      "stepLimitResult": "The Subagent reached its step limit before completing the task.",
       "cancelled": "Cancelled",
       "waitingResult": "Waiting for the Subagent to finish.",
       "cancelledResult": "The Subagent was cancelled and returned no result.",

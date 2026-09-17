@@ -4,23 +4,31 @@
  */
 
 import {
+  clampAgentSteps,
+  clampMaxConcurrentSubagents,
+  MAX_AGENT_STEPS_DEFAULT,
+  MAX_CONCURRENT_SUBAGENTS_DEFAULT,
+  MAX_SUBAGENT_STEPS_DEFAULT,
+} from "@/modules/ai/config";
+import {
   MODEL_USAGE_PREFIX,
+  type ModelUsageId,
+  type ModelUsages,
   modelUsageModelKey,
   modelUsageParametersPrefix,
   readModelUsages,
-  type ModelUsageId,
-  type ModelUsages,
 } from "@/modules/ai/lib/modelUsage";
 
-import {
-  clampMaxConcurrentSubagents,
-  MAX_CONCURRENT_SUBAGENTS_DEFAULT,
-} from "@/modules/ai/config";
 export {
+  AGENT_STEPS_MAX,
+  AGENT_STEPS_MIN,
+  clampAgentSteps,
   clampMaxConcurrentSubagents,
+  MAX_AGENT_STEPS_DEFAULT,
   MAX_CONCURRENT_SUBAGENTS_DEFAULT,
-  MAX_CONCURRENT_SUBAGENTS_MIN,
   MAX_CONCURRENT_SUBAGENTS_MAX,
+  MAX_CONCURRENT_SUBAGENTS_MIN,
+  MAX_SUBAGENT_STEPS_DEFAULT,
 } from "@/modules/ai/config";
 
 import {
@@ -35,27 +43,28 @@ import {
   isModelRefAvailable,
   isProviderInstance,
   type ModelRef,
+  modelRefKey,
+  normalizeConfiguredModels,
   PROVIDERS,
   type ProviderBaseURLs,
   type ProviderInstance,
   type ProviderModels,
-  normalizeConfiguredModels,
   providerFromBuiltinId,
   resolveProviderInstance,
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
-import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
-import { DEFAULT_THEME_ID } from "@/modules/theme/types";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   type ModelParameter,
   type ModelParameterDefinitions,
   type ParameterSelections,
   readModelParameters,
+  readParameterSelections,
   validateModelParameters,
 } from "@/modules/ai/lib/modelParameters";
-import { modelRefKey } from "@/modules/ai/config";
+import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
+import { DEFAULT_THEME_ID } from "@/modules/theme/types";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 
 export type ThemePref = "system" | "light" | "dark";
 
@@ -172,7 +181,12 @@ export type Preferences = {
   backgroundOpacity: number;
   backgroundBlur: number;
   defaultModel: ModelRef | null;
+  desktopModel: ModelRef | null;
+  desktopModelParameterSelections: ParameterSelections;
+  maxAgentSteps: number;
+  maxSubagentSteps: number;
   maxConcurrentSubagents: number;
+  desktopPermissionMode: "ask" | "full-access";
   editorTheme: EditorThemePref;
   editorFontSize: number;
   customInstructions: string;
@@ -254,7 +268,13 @@ const KEY_BG_IMAGE_ID = "backgroundImageId";
 const KEY_BG_OPACITY = "backgroundOpacity";
 const KEY_BG_BLUR = "backgroundBlur";
 const KEY_DEFAULT_MODEL = "defaultModel";
+const KEY_DESKTOP_MODEL = "desktopModel";
+const KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS =
+  "desktopModelParameterSelections";
+const KEY_MAX_AGENT_STEPS = "maxAgentSteps";
+const KEY_MAX_SUBAGENT_STEPS = "maxSubagentSteps";
 const KEY_MAX_CONCURRENT_SUBAGENTS = "maxConcurrentSubagents";
+const KEY_DESKTOP_PERMISSION_MODE = "desktopPermissionMode";
 const KEY_EDITOR_THEME = "editorTheme";
 const KEY_EDITOR_FONT_SIZE = "editorFontSize";
 const KEY_CUSTOM_INSTRUCTIONS = "customInstructions";
@@ -333,7 +353,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
   backgroundOpacity: 0.5,
   backgroundBlur: 0,
   defaultModel: null,
+  desktopModel: null,
+  desktopModelParameterSelections: {},
+  maxAgentSteps: MAX_AGENT_STEPS_DEFAULT,
+  maxSubagentSteps: MAX_SUBAGENT_STEPS_DEFAULT,
   maxConcurrentSubagents: MAX_CONCURRENT_SUBAGENTS_DEFAULT,
+  desktopPermissionMode: "ask",
   editorTheme: EDITOR_THEME_AUTO,
   editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
   customInstructions: "",
@@ -437,6 +462,8 @@ export type ModelSettingsPatch = Partial<
   Pick<
     Preferences,
     | "defaultModel"
+    | "desktopModel"
+    | "desktopModelParameterSelections"
     | "providerModels"
     | "providerBaseURLs"
     | "customProviders"
@@ -447,6 +474,8 @@ export type ModelSettingsPatch = Partial<
 
 const MODEL_SETTING_KEYS: Record<keyof ModelSettingsPatch, string> = {
   defaultModel: KEY_DEFAULT_MODEL,
+  desktopModel: KEY_DESKTOP_MODEL,
+  desktopModelParameterSelections: KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS,
   providerModels: KEY_PROVIDER_MODELS,
   providerBaseURLs: KEY_PROVIDER_BASE_URLS,
   customProviders: KEY_CUSTOM_PROVIDERS,
@@ -583,10 +612,27 @@ export async function loadPreferences(): Promise<Preferences> {
       get<number>(KEY_BG_BLUR) ?? DEFAULT_PREFERENCES.backgroundBlur,
     ),
     defaultModel: readModelRef(KEY_DEFAULT_MODEL),
+    desktopModel: readModelRef(KEY_DESKTOP_MODEL),
+    desktopModelParameterSelections: readParameterSelections(
+      get(KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS),
+    ),
+    maxAgentSteps: clampAgentSteps(
+      get<number>(KEY_MAX_AGENT_STEPS) ?? DEFAULT_PREFERENCES.maxAgentSteps,
+      MAX_AGENT_STEPS_DEFAULT,
+    ),
+    maxSubagentSteps: clampAgentSteps(
+      get<number>(KEY_MAX_SUBAGENT_STEPS) ??
+        DEFAULT_PREFERENCES.maxSubagentSteps,
+      MAX_SUBAGENT_STEPS_DEFAULT,
+    ),
     maxConcurrentSubagents: clampMaxConcurrentSubagents(
       get<number>(KEY_MAX_CONCURRENT_SUBAGENTS) ??
         DEFAULT_PREFERENCES.maxConcurrentSubagents,
     ),
+    desktopPermissionMode:
+      get<string>(KEY_DESKTOP_PERMISSION_MODE) === "full-access"
+        ? "full-access"
+        : "ask",
     editorTheme: ((): EditorThemePref => {
       const stored = get<string>(KEY_EDITOR_THEME);
       if (stored === EDITOR_THEME_AUTO || isEditorThemeId(stored))
@@ -791,11 +837,47 @@ export async function setDefaultModel(value: ModelRef | null): Promise<void> {
   await writePref(KEY_DEFAULT_MODEL, value);
 }
 
+/** 原子保存桌面模型的完整身份及其最近请求参数选择。 */
+export async function setDesktopModelSelection(
+  model: ModelRef,
+  parameterSelections: ParameterSelections,
+): Promise<void> {
+  await mutateSharedStore("settings", [
+    { kind: "set", key: KEY_DESKTOP_MODEL, value: model },
+    {
+      kind: "set",
+      key: KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS,
+      value: readParameterSelections(parameterSelections),
+    },
+  ]);
+}
+
 export async function setMaxConcurrentSubagents(value: number): Promise<void> {
   await writePref(
     KEY_MAX_CONCURRENT_SUBAGENTS,
     clampMaxConcurrentSubagents(value),
   );
+}
+
+export async function setMaxAgentSteps(value: number): Promise<void> {
+  await writePref(
+    KEY_MAX_AGENT_STEPS,
+    clampAgentSteps(value, MAX_AGENT_STEPS_DEFAULT),
+  );
+}
+
+export async function setMaxSubagentSteps(value: number): Promise<void> {
+  await writePref(
+    KEY_MAX_SUBAGENT_STEPS,
+    clampAgentSteps(value, MAX_SUBAGENT_STEPS_DEFAULT),
+  );
+}
+
+/** 仅记录桌面会话最近选择；Channel 运行时使用独立固定权限。 */
+export async function setDesktopPermissionMode(
+  value: Preferences["desktopPermissionMode"],
+): Promise<void> {
+  await writePref(KEY_DESKTOP_PERMISSION_MODE, value);
 }
 
 export async function setEditorTheme(value: EditorThemePref): Promise<void> {
@@ -1035,7 +1117,12 @@ export async function onPreferencesChange(
     [KEY_BG_OPACITY]: "backgroundOpacity",
     [KEY_BG_BLUR]: "backgroundBlur",
     [KEY_DEFAULT_MODEL]: "defaultModel",
+    [KEY_DESKTOP_MODEL]: "desktopModel",
+    [KEY_DESKTOP_MODEL_PARAMETER_SELECTIONS]: "desktopModelParameterSelections",
+    [KEY_MAX_AGENT_STEPS]: "maxAgentSteps",
+    [KEY_MAX_SUBAGENT_STEPS]: "maxSubagentSteps",
     [KEY_MAX_CONCURRENT_SUBAGENTS]: "maxConcurrentSubagents",
+    [KEY_DESKTOP_PERMISSION_MODE]: "desktopPermissionMode",
     [KEY_EDITOR_THEME]: "editorTheme",
     [KEY_EDITOR_FONT_SIZE]: "editorFontSize",
     [KEY_CUSTOM_INSTRUCTIONS]: "customInstructions",

@@ -116,7 +116,7 @@ export type SubagentResultEvent = {
   results: Array<{
     taskId: string;
     label: string;
-    status: "completed" | "failed";
+    status: "completed" | "incomplete" | "failed";
     result?: string;
     error?: string;
   }>;
@@ -1097,7 +1097,9 @@ export function isSubagentResultEvent(
     return (
       typeof result.taskId === "string" &&
       typeof result.label === "string" &&
-      (result.status === "completed" || result.status === "failed") &&
+      (result.status === "completed" ||
+        result.status === "incomplete" ||
+        result.status === "failed") &&
       (result.result === undefined || typeof result.result === "string") &&
       (result.error === undefined || typeof result.error === "string")
     );

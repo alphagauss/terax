@@ -234,6 +234,8 @@
       "completedSummary_one": "完成 · {{count}} 次工具调用 · {{duration}} 秒",
       "completedSummary_other": "完成 · {{count}} 次工具调用 · {{duration}} 秒",
       "failed": "失败",
+      "stepLimit": "已在步骤上限暂停",
+      "stepLimitResult": "Subagent 在完成任务前达到了步骤上限。",
       "cancelled": "已取消",
       "waitingResult": "正在等待 Subagent 完成。",
       "cancelledResult": "Subagent 已取消，没有返回结果。",

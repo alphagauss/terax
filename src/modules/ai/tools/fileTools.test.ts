@@ -5,7 +5,6 @@
 
 import type { ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useChatStore } from "../store/chatStore";
 import type { ToolContext } from "./context";
 import {
   getFileEditRuntime,
@@ -33,12 +32,14 @@ const options: ToolExecutionOptions<never> = {
   context: undefined as never,
 };
 
+let permissionMode: "ask" | "full-access" = "ask";
+
 const context: ToolContext = {
   getCwd: () => "/workspace",
   getTerminalContext: () => null,
   isActiveTerminalPrivate: () => false,
   getSessionId: () => "00000000-0000-4000-8000-000000000001",
-  getPermissionMode: () => useChatStore.getState().permissionMode,
+  getPermissionMode: () => permissionMode,
   supportsApprovals: true,
 };
 
@@ -46,7 +47,7 @@ describe("AI file tools", () => {
   beforeEach(() => {
     releaseFileEditRuntime(context.getSessionId());
     vi.clearAllMocks();
-    useChatStore.setState({ permissionMode: "ask" });
+    permissionMode = "ask";
     nativeMock.agentFileRead.mockResolvedValue({ content: "1| text" });
     nativeMock.agentPrepareMutation.mockResolvedValue({ files: [] });
     nativeMock.agentCommitMutation.mockResolvedValue({ files: [] });
@@ -111,7 +112,7 @@ describe("AI file tools", () => {
         content: "text",
       }),
     ).toBe("user-approval");
-    useChatStore.setState({ permissionMode: "full-access" });
+    permissionMode = "full-access";
     expect(
       buildToolApproval(context).write_file({ path: "a.txt", content: "text" }),
     ).toBe("not-applicable");

@@ -35,7 +35,7 @@ type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 type Display = SubagentDisplayState | SubagentDisplaySnapshot;
 
 export type SubagentResultView = {
-  status: "completed" | "failed";
+  status: "completed" | "incomplete" | "failed";
   result?: string;
   error?: string;
 };
@@ -314,6 +314,13 @@ function ResultPanel({
       </div>
     );
   }
+  if (status === "incomplete" && !result?.result) {
+    return (
+      <div className="rounded-md border border-warning/30 bg-warning/5 px-2 py-1.5 text-[11px] text-muted-foreground">
+        {t("chat.subagent.stepLimitResult")}
+      </div>
+    );
+  }
   const content =
     result?.result ??
     (result?.error?.includes(CONTEXT_BUDGET_ERROR)
@@ -351,6 +358,9 @@ function StatusIcon({ status }: { status: SubagentDisplayStatus }) {
         className="shrink-0 text-emerald-500"
       />
     );
+  }
+  if (status === "incomplete") {
+    return <span className="size-2 shrink-0 rounded-full bg-warning" />;
   }
   if (status === "failed" || status === "cancelled") {
     return (
@@ -486,6 +496,7 @@ function resolveStatus(
   const output = objectValue("output" in part ? part.output : undefined);
   const outputStatus = stringValue(output?.status);
   if (outputStatus === "completed") return "completed";
+  if (outputStatus === "incomplete") return "incomplete";
   if (outputStatus === "failed" || outputStatus === "rejected") return "failed";
   if (part.state === "output-error" || part.state === "output-denied") {
     return "failed";
@@ -498,10 +509,16 @@ function liveResult(
 ): SubagentResultView | undefined {
   if (!display || !("phase" in display)) return undefined;
   if (display.result !== undefined) {
-    return { status: "completed", result: display.result };
+    return {
+      status: display.status === "incomplete" ? "incomplete" : "completed",
+      result: display.result,
+    };
   }
   if (display.error !== undefined) {
-    return { status: "failed", error: display.error };
+    return {
+      status: display.status === "incomplete" ? "incomplete" : "failed",
+      error: display.error,
+    };
   }
   return undefined;
 }
@@ -510,11 +527,21 @@ function resultFromObject(
   output: Record<string, unknown> | undefined,
 ): SubagentResultView | undefined {
   const status = stringValue(output?.status);
-  if (status !== "completed" && status !== "failed" && status !== "rejected") {
+  if (
+    status !== "completed" &&
+    status !== "incomplete" &&
+    status !== "failed" &&
+    status !== "rejected"
+  ) {
     return undefined;
   }
   return {
-    status: status === "completed" ? "completed" : "failed",
+    status:
+      status === "completed"
+        ? "completed"
+        : status === "incomplete"
+          ? "incomplete"
+          : "failed",
     ...(stringValue(output?.result) === undefined
       ? {}
       : { result: stringValue(output?.result) }),
@@ -549,6 +576,7 @@ function terminalSummary(
 ): string {
   if (status === "failed") return t("chat.subagent.failed");
   if (status === "cancelled") return t("chat.subagent.cancelled");
+  if (status === "incomplete") return t("chat.subagent.stepLimit");
   const duration = display?.durationMs;
   return duration === undefined
     ? t("chat.subagent.completedCalls", { count: stepCount })

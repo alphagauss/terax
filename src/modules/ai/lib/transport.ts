@@ -39,6 +39,8 @@ export type SessionTransportDependencies = {
   getModel: () => ModelRef;
   getDefaultSubagentModel: () => ModelRef | null;
   getMaxConcurrentSubagents: () => number;
+  getMaxAgentSteps: () => number;
+  getMaxSubagentSteps: () => number;
   getCustomInstructions: () => string;
   getAgent: () => AgentConfiguration | Promise<AgentConfiguration>;
   getTurnId: () => string;
@@ -92,6 +94,8 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
   let modelSnapshot: {
     model: ModelRef;
     modelParameters: ParameterAssignment[];
+    maxAgentSteps: number;
+    maxSubagentSteps: number;
   } | null = null;
   let runtimeTask: Promise<{
     systemPrompt: string;
@@ -173,6 +177,8 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       modelSnapshot = structuredClone({
         model,
         modelParameters: deps.getModelParameters?.(model, false) ?? [],
+        maxAgentSteps: deps.getMaxAgentSteps(),
+        maxSubagentSteps: deps.getMaxSubagentSteps(),
       });
       modelTurnId = turnId;
       deps.onModelSnapshot?.({
@@ -184,7 +190,10 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
     const { systemPrompt, agent } = await getRuntime();
     const result = await runAgentStream({
       keys: deps.getKeys(),
-      ...frozenModel,
+      model: frozenModel.model,
+      modelParameters: frozenModel.modelParameters,
+      maxAgentSteps: frozenModel.maxAgentSteps,
+      maxSubagentSteps: frozenModel.maxSubagentSteps,
       getSubagentConfiguration: (parentModel) => {
         const model = deps.getDefaultSubagentModel() ?? parentModel;
         return {
