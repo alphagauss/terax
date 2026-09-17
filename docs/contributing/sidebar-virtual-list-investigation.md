@@ -26,6 +26,7 @@
 - 普通行高误差或 overscan 太小不能解释真实滚动在顶部时稳定缺少最前面的行。
 - 当前生产 bundle 直接调用 `getVirtualItems()`，没有把结果按稳定 virtualizer 实例缓存，因此 React Compiler 不是首要候选。
 - Changes 分区动画可能造成其独立故障，但文件树不经过这套动画，不能单独解释两处现象。
+- Explorer 的活动文件定位只接收普通编辑器和 Markdown 页面路径；单纯浏览 Git diff 或历史文件页面不会通过此入口触发文件树自动滚动。
 
 ## 调整前的高风险生命周期
 
@@ -42,18 +43,26 @@ Changes 还有另一条生命周期：Source Control 关闭时组件在所有 Ho
 1. 侧边栏视图首次激活后，容器长期留在所属的 primary 或 secondary 真实 host。
 2. 普通视图切换只更新 `visibility`、`pointer-events`、`inert` 和 `aria-hidden`，不移动 DOM。
 3. 只有用户明确把容器移到另一侧栏时，才将容器重挂到另一个真实 host。
-4. Source Control 首次激活后保留展示树；`open` 继续停止隐藏期间的数据刷新和 Graph 展示，不再销毁 Changes 滚动节点。
+4. Source Control 的数据状态与可见性分离；仓库、变更数据和分区状态不变时，普通侧栏切换不再销毁 Changes 滚动节点和提交输入节点。`open` 继续控制面板手动刷新以及 Graph 活动、展示；共享仓库控制器仍运行，为文件装饰等功能提供数据。
 5. 虚拟行继续使用 `top: start`。没有增加 `measure()`、滚动补偿、伪造滚动事件、额外 rAF 或扩大 overscan。
 
 相关实现位于：
 
 - `src/modules/sidebar/SidebarViewPool.tsx`
 - `src/modules/source-control/SourceControlPanel.tsx`
+- `src/modules/source-control/useSourceControlPanel.ts`
 - `src/modules/sidebar/SidebarViewPool.test.tsx`
+- `src/modules/source-control/SourceControlPanel.test.tsx`
 
-回归测试锁定两项行为：普通切换保持容器 DOM 身份和父宿主不变；只有 primary/secondary 位置实际变化时才移动容器。
+`5c364334` 删除了面板外层的 `return null`，但遗漏了 Hook 中的 `closed` 状态：隐藏时仍退出 `ready` 分支并销毁 Changes 滚动节点。后续修正移除可见性对数据状态的影响，补齐上述第 4 项。
 
-调整时没有启动应用或调试进程。验证结果为：侧边栏与 Source Control 的 14 个测试文件共 62 项测试通过，TypeScript 检查通过，改动文件的 Biome lint 和格式检查通过；全库 lint 仅报告已有警告。
+保活约束针对普通侧栏切换，不要求冻结真实业务变化。Explorer 内部搜索、项目根或连接状态变化，以及 Changes 分区折叠、clean/dirty 切换仍可能改变展示树；Graph 保留现有启停和滚动恢复逻辑，不在本次调整中统一改造。
+
+回归测试覆盖容器 DOM 身份和父宿主，以及真实 Changes 面板在隐藏期间和恢复后的滚动节点、提交输入节点身份与输入选区。Changes 测试在修正前因隐藏时滚动节点被卸载而失败；这类组件测试验证生命周期，不证明真实 WebView 的缺行已经修复。
+
+首次结构调整时没有启动应用或调试进程。当时验证结果为：侧边栏与 Source Control 的 14 个测试文件共 62 项测试通过，TypeScript 检查通过，改动文件的 Biome lint 和格式检查通过；全库 lint 仅报告已有警告。
+
+补齐 Changes 保活后，侧边栏与 Source Control 的 15 个测试文件共 63 项测试通过，TypeScript 检查及改动代码的 Biome lint、格式检查通过。本次仍未启动应用或调试进程，偶发缺行是否消失仍待实际使用验证。
 
 ## 上游与 VS Code 对照
 

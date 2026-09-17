@@ -34,7 +34,7 @@ import type { GitDiffSide } from "./gitTypes";
 import { openSourceControlFileDiff } from "./openFileDiff";
 import type { RepositoryController } from "./useRepositoryController";
 
-type PanelState = "closed" | "loading" | "no-repo" | "ready" | "error";
+type PanelState = "loading" | "no-repo" | "ready" | "error";
 
 /** 文件暂存复选框的三态值。 */
 export type CheckState = "checked" | "indeterminate" | "unchecked";
@@ -179,9 +179,9 @@ export function useSourceControlPanel(
   );
   const repo = controller.repo;
   const status = controller.status;
-  const panelState: PanelState = !isOpen
-    ? "closed"
-    : controller.localError && !status
+  // 可见性不改变数据状态，避免普通侧栏切换卸载 Changes 滚动节点。
+  const panelState: PanelState =
+    controller.localError && !status
       ? "error"
       : controller.isLoading && !status
         ? "loading"
