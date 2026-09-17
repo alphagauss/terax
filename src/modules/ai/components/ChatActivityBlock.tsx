@@ -3,14 +3,14 @@
  * 不同工具的标题切换至少间隔一秒，同一调用的摘要立即更新；活动结束立即完成并收起一次。
  */
 
-import { Shimmer } from "@/modules/ai/components/Shimmer";
-import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { FileEditStats } from "@/modules/ai/components/FileEditStats";
+import { Shimmer } from "@/modules/ai/components/Shimmer";
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
@@ -73,22 +73,26 @@ export function ChatActivityBlock({
       onOpenChange={setOpen}
     >
       <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-1.5 text-[14px] leading-[22px] text-muted-foreground transition-colors duration-control hover:text-foreground">
-        {running && shownHeadline?.kind === "tool" && shownHeadline.action && (
-          <Shimmer as="span" className="shrink-0 whitespace-nowrap">
-            {shownHeadline.action}
-          </Shimmer>
-        )}
         {running ? (
           <Shimmer
             as="span"
-            className={cn(
-              "min-w-0 truncate text-left",
-              shownHeadline?.kind === "tool" &&
-                shownHeadline.action &&
-                "font-mono",
-            )}
+            className="min-w-0 text-left"
+            text={
+              shownHeadline?.kind === "tool" && shownHeadline.action
+                ? `${shownHeadline.action} ${title}`
+                : title
+            }
           >
-            {title}
+            {shownHeadline?.kind === "tool" && shownHeadline.action ? (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 whitespace-nowrap">
+                  {shownHeadline.action}
+                </span>
+                <span className="min-w-0 truncate font-mono">{title}</span>
+              </span>
+            ) : (
+              title
+            )}
           </Shimmer>
         ) : (
           <span className="min-w-0 truncate text-left">{title}</span>
