@@ -1,5 +1,5 @@
 /**
- * 会话拥有的文件编辑展示通道。每 200ms 只发布最新预估，最终事实不经过节流。
+ * 会话拥有的文件编辑展示通道。每 500ms 只发布最新预估，最终事实不经过节流。
  * checkpoint 只追加尚未保存的批次，保存成功后确认；UI 订阅不控制采集生命周期。
  */
 import {
@@ -25,6 +25,7 @@ type InputState = {
 export type LiveFileEdit = FileEditCall & { approximate: boolean };
 const runtimes = new Map<string, FileEditRuntime>();
 const listeners = new Map<string, Set<() => void>>();
+const ESTIMATE_INTERVAL_MS = 500;
 
 function notify(sessionId: string): void {
   for (const listener of listeners.get(sessionId) ?? []) {
@@ -147,7 +148,7 @@ export class FileEditRuntime {
     this.timer = setTimeout(() => {
       this.timer = undefined;
       void this.sample();
-    }, 200);
+    }, ESTIMATE_INTERVAL_MS);
   }
 
   private async sample(): Promise<void> {

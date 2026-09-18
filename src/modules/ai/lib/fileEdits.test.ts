@@ -19,7 +19,7 @@ const file = (before: string, after: string): FileEditSegment => ({
 afterEach(() => vi.useRealTimers());
 
 describe("文件编辑展示事实", async () => {
-  it("200ms 内合并预估，最终结果立即取代预估且迟到解析不能覆盖它", async () => {
+  it("500ms 内合并预估，最终结果立即取代预估且迟到解析不能覆盖它", async () => {
     vi.useFakeTimers();
     const publish = vi.fn();
     const runtime = new FileEditRuntime(publish);
@@ -31,7 +31,7 @@ describe("文件编辑展示事实", async () => {
     );
     runtime.input("write", undefined, "write_file", "two\\n");
     expect(publish).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(500);
     await vi.dynamicImportSettled();
     expect(runtime.getCall("write")).toMatchObject({
       added: 2,
@@ -40,7 +40,7 @@ describe("文件编辑展示事实", async () => {
     });
     expect(publish).toHaveBeenCalledTimes(1);
     runtime.input("write", undefined, "write_file", 'three\\n"}');
-    vi.advanceTimersByTime(200);
+    vi.advanceTimersByTime(500);
     await runtime.complete("write", undefined, [
       file("one\ntwo\n", "one\nchanged\n"),
     ]);
@@ -92,7 +92,7 @@ describe("文件编辑展示事实", async () => {
       "apply_patch",
       '{"files":[{"path":"a.ts","edits":[{"old_text":"a\\nb","new_text":"c',
     );
-    vi.advanceTimersByTime(200);
+    vi.advanceTimersByTime(500);
     runtime.fail("patch");
     await vi.runAllTimersAsync();
     expect(runtime.getCall("patch")).toBeUndefined();
@@ -162,7 +162,7 @@ describe("文件编辑展示事实", async () => {
       content: "parent",
     });
     await runtime.complete("done", "child", [file("a\n", "b\n")]);
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(500);
     runtime.finishTask("child");
     expect(runtime.getCall("pending", "child")).toBeUndefined();
     expect(runtime.getCall("done", "child")?.approximate).toBe(false);
