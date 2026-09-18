@@ -216,6 +216,9 @@ describe("文件改动展示", async () => {
     expect(
       document.querySelector('[data-testid="diff"]')?.textContent,
     ).toContain("old\nnew\nextra");
+    const preview = document.querySelector('[data-slot="tooltip-content"]');
+    expect(preview?.className).toContain("flex-col");
+    expect(preview?.className).toContain("items-stretch");
     act(() => first.click());
     expect(openFileEdits).toHaveBeenCalledWith({
       sessionId,
