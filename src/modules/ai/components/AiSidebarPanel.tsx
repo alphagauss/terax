@@ -21,15 +21,12 @@ import {
 import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
-import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { type Chat, type UIMessage, useChat } from "@ai-sdk/react";
 import {
-  AlertCircleIcon,
   ArrowDown01Icon,
   Delete02Icon,
   FilterIcon,
   PencilEdit02Icon,
-  TerminalIcon,
   Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -57,21 +54,6 @@ import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
 import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
 import { ContextIndicator } from "@/modules/ai/components/ContextIndicator";
 
-const SUGGESTIONS = [
-  {
-    translationKey: "explainError",
-    icon: AlertCircleIcon,
-  },
-  {
-    translationKey: "generateCommand",
-    icon: TerminalIcon,
-  },
-  {
-    translationKey: "summarizeBuffer",
-    icon: FilterIcon,
-  },
-] as const;
-
 /**
  * AI 侧边栏主面板。
  *
@@ -90,13 +72,6 @@ export function AiSidebarPanel({
     useChatStore.getState().setChatViewVisible(visible);
     return () => useChatStore.getState().setChatViewVisible(false);
   }, [visible]);
-  const readOnly = useChatStore((s) => {
-    const session = s.sessions.find((item) => item.id === s.activeSessionId);
-    return (
-      session !== undefined &&
-      session.environmentKey !== currentWorkspaceBootstrap().environmentKey
-    );
-  });
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background text-[12px] dark:bg-sidebar">
       {visible &&
@@ -104,7 +79,6 @@ export function AiSidebarPanel({
           <SessionBody
             key={`${sessionId}:${revision}`}
             sessionId={sessionId}
-            readOnly={readOnly}
           />
         ) : (
           <EmptyShell />
@@ -121,10 +95,8 @@ export function AiSidebarPanel({
 /** 展示加载与业务运行解耦，隐藏时卸载订阅，重新显示时冷恢复已释放的历史。 */
 function SessionBody({
   sessionId,
-  readOnly,
 }: {
   sessionId: string;
-  readOnly: boolean;
 }) {
   const [chat, setChat] = useState<Chat<UIMessage> | null>(null);
   useEffect(() => {
@@ -143,7 +115,7 @@ function SessionBody({
     };
   }, [sessionId]);
   return chat ? (
-    <Body sessionId={sessionId} readOnly={readOnly} chat={chat} />
+    <Body sessionId={sessionId} chat={chat} />
   ) : (
     <EmptyShell />
   );
@@ -151,14 +123,11 @@ function SessionBody({
 
 function Body({
   sessionId,
-  readOnly,
   chat,
 }: {
   sessionId: string;
-  readOnly: boolean;
   chat: Chat<UIMessage>;
 }) {
-  const focusInput = useChatStore((s) => s.focusInput);
   const hasDeliveries = useDeliveryHistory((state) =>
     Boolean(state.sessions[sessionId]?.length),
   );
@@ -184,7 +153,7 @@ function Body({
 
       <div className="flex min-h-0 flex-1 flex-col">
         {helpers.messages.length === 0 && !hasCommands && !hasDeliveries ? (
-          <EmptyState onPick={focusInput} disabled={readOnly} />
+          <EmptyState />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col [&_.text-sm]:text-[12px] [&_p]:leading-relaxed">
             <AiChatView
@@ -506,13 +475,7 @@ function SessionAttentionIndicator({
   );
 }
 
-function EmptyState({
-  onPick,
-  disabled,
-}: {
-  onPick: (text: string) => void;
-  disabled: boolean;
-}) {
+function EmptyState() {
   const { t } = useTranslation("ai");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-8 py-10 text-center">
@@ -524,35 +487,6 @@ function EmptyState({
         <p className="max-w-[18rem] text-[11.5px] leading-relaxed text-muted-foreground">
           {t("miniWindow.empty.description")}
         </p>
-      </div>
-      <div className="flex w-full flex-col gap-2.5">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.translationKey}
-            type="button"
-            disabled={disabled}
-            onClick={() =>
-              onPick(t(`miniWindow.suggestions.${s.translationKey}.text`))
-            }
-            className={cn(
-              "group flex items-center gap-2.5 bg-card/70 rounded-lg px-2.5 py-2 border border-border text-left",
-              "transition-colors hover:bg-interactive-hover hover:text-foreground",
-              "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-card/70 disabled:hover:text-inherit",
-            )}
-          >
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/70 text-muted-foreground transition-colors group-hover:bg-interactive-active group-hover:text-foreground">
-              <HugeiconsIcon icon={s.icon} size={13} strokeWidth={1.75} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-foreground">
-                {t(`miniWindow.suggestions.${s.translationKey}.label`)}
-              </div>
-              <div className="text-[10.5px] text-muted-foreground">
-                {t(`miniWindow.suggestions.${s.translationKey}.hint`)}
-              </div>
-            </div>
-          </button>
-        ))}
       </div>
     </div>
   );
