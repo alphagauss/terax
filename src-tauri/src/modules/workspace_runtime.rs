@@ -4,9 +4,7 @@
 //! 原子替换保护，窗口存活状态以既有 Workspace OS 锁为准，不建立心跳或进程间 RPC。
 
 use crate::modules::storage::{write_atomic, FileLock};
-use crate::modules::workspace_process::{
-    self, WindowGeometry, WorkspaceProcessState, WorkspaceWindowMode,
-};
+use crate::modules::workspace_process::{self, WorkspaceProcessState, WorkspaceWindowMode};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
@@ -591,9 +589,9 @@ pub fn workspace_runtime_send_page(
 /// 进程稍后异常退出时则由消息过期清理收敛，源页面始终保持不变。
 #[tauri::command]
 pub fn workspace_runtime_spawn_with_page(
+    app: AppHandle,
     state: tauri::State<'_, WorkspaceProcessState>,
     page: WorkspacePage,
-    window_geometry: Option<WindowGeometry>,
 ) -> Result<String, String> {
     ensure_page_sender(&state)?;
     let root = runtime_root()?;
@@ -611,9 +609,11 @@ pub fn workspace_runtime_spawn_with_page(
         )
     })?;
 
-    if let Err(error) =
-        workspace_process::spawn_temporary_workspace_process(&state, target_id, window_geometry)
-    {
+    if let Err(error) = workspace_process::spawn_temporary_workspace_process(
+        &state,
+        target_id,
+        workspace_process::next_main_window_geometry(&app),
+    ) {
         let _ = mutate_document(&root, |document| {
             document.messages.retain(|message| message.id != message_id);
             Ok(())

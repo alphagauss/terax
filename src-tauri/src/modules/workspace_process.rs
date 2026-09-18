@@ -20,6 +20,7 @@ const GEOMETRY_ARG: &str = "--terax-window-geometry";
 const TEMPORARY_ID_ARG: &str = "--terax-temporary-workspace-id";
 const REGISTRY_LOCK: &str = "terax-workspace-registry.lock";
 const WINDOW_MODE_KEY: &str = "workspaceWindowMode";
+const MONITOR_EDGE_MARGIN: i32 = 16;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -791,11 +792,86 @@ fn cascaded_window_geometry(width: u32, height: u32, x: i32, y: i32) -> WindowGe
     }
 }
 
+/// 将新窗口限制在源窗口所在显示器的可用工作区内。
+fn constrain_window_geometry(
+    mut geometry: WindowGeometry,
+    area_x: i32,
+    area_y: i32,
+    area_width: u32,
+    area_height: u32,
+) -> WindowGeometry {
+    let margin = MONITOR_EDGE_MARGIN as u32;
+    geometry.width = geometry
+        .width
+        .min(area_width.saturating_sub(margin.saturating_mul(2)).max(1));
+    geometry.height = geometry
+        .height
+        .min(area_height.saturating_sub(margin.saturating_mul(2)).max(1));
+
+    let min_x = area_x.saturating_add(MONITOR_EDGE_MARGIN);
+    let min_y = area_y.saturating_add(MONITOR_EDGE_MARGIN);
+    let max_x = area_x
+        .saturating_add_unsigned(area_width)
+        .saturating_sub_unsigned(geometry.width)
+        .saturating_sub(MONITOR_EDGE_MARGIN);
+    let max_y = area_y
+        .saturating_add_unsigned(area_height)
+        .saturating_sub_unsigned(geometry.height)
+        .saturating_sub(MONITOR_EDGE_MARGIN);
+    geometry.x = geometry.x.clamp(min_x, max_x.max(min_x));
+    geometry.y = geometry.y.clamp(min_y, max_y.max(min_y));
+    geometry
+}
+
+/// 使用窗口当前位置所在显示器的可用工作区约束窗口几何信息。
+fn constrain_geometry_to_window_monitor(
+    window: &tauri::WebviewWindow,
+    source_position: tauri::PhysicalPosition<i32>,
+    geometry: WindowGeometry,
+) -> WindowGeometry {
+    let Ok(monitors) = window.available_monitors() else {
+        return geometry;
+    };
+    let Some(monitor) = monitors.iter().find(|monitor| {
+        let area = monitor.work_area();
+        source_position.x >= area.position.x
+            && source_position.y >= area.position.y
+            && source_position.x < area.position.x.saturating_add_unsigned(area.size.width)
+            && source_position.y < area.position.y.saturating_add_unsigned(area.size.height)
+    }) else {
+        return geometry;
+    };
+    let area = monitor.work_area();
+    constrain_window_geometry(
+        geometry,
+        area.position.x,
+        area.position.y,
+        area.size.width,
+        area.size.height,
+    )
+}
+
+/// 读取并约束窗口当前几何信息，供无持久化状态的首次启动窗口使用。
+pub(crate) fn fitted_window_geometry(window: &tauri::WebviewWindow) -> Option<WindowGeometry> {
+    let size = window.outer_size().ok()?;
+    let position = window.outer_position().ok()?;
+    Some(constrain_geometry_to_window_monitor(
+        window,
+        position,
+        WindowGeometry {
+            width: size.width,
+            height: size.height,
+            x: position.x,
+            y: position.y,
+        },
+    ))
+}
+
 /// 尝试读取当前进程主 Workspace 窗口的几何信息。
 ///
 /// 几何信息只用于改善新窗口的初始位置。主窗口最大化、窗口不存在或原生读取失败时
 /// 返回 `None`，不得因此阻止 Workspace 子进程启动。
-fn next_main_window_geometry(app: &tauri::AppHandle) -> Option<WindowGeometry> {
+pub(crate) fn next_main_window_geometry(app: &tauri::AppHandle) -> Option<WindowGeometry> {
     let Some(main) = app.get_webview_window("main") else {
         log::warn!("cannot inherit Workspace geometry: main window is unavailable");
         return None;
@@ -822,11 +898,9 @@ fn next_main_window_geometry(app: &tauri::AppHandle) -> Option<WindowGeometry> {
             return None;
         }
     };
-    Some(cascaded_window_geometry(
-        size.width,
-        size.height,
-        position.x,
-        position.y,
+    let geometry = cascaded_window_geometry(size.width, size.height, position.x, position.y);
+    Some(constrain_geometry_to_window_monitor(
+        &main, position, geometry,
     ))
 }
 
@@ -1003,6 +1077,54 @@ mod tests {
                 height: 700,
                 x: i32::MAX,
                 y: i32::MAX,
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_window_geometry_stays_within_the_monitor_work_area() {
+        assert_eq!(
+            constrain_window_geometry(
+                WindowGeometry {
+                    width: 1200,
+                    height: 900,
+                    x: 1032,
+                    y: 732,
+                },
+                0,
+                0,
+                1920,
+                1080,
+            ),
+            WindowGeometry {
+                width: 1200,
+                height: 900,
+                x: 704,
+                y: 164,
+            }
+        );
+    }
+
+    #[test]
+    fn workspace_window_geometry_shrinks_to_the_monitor_work_area() {
+        assert_eq!(
+            constrain_window_geometry(
+                WindowGeometry {
+                    width: 1200,
+                    height: 900,
+                    x: 32,
+                    y: 32,
+                },
+                0,
+                0,
+                1024,
+                768,
+            ),
+            WindowGeometry {
+                width: 992,
+                height: 736,
+                x: 16,
+                y: 16,
             }
         );
     }

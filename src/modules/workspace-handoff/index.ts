@@ -5,10 +5,7 @@
 
 import type { Tab } from "@/modules/workbench";
 import type { WorkspaceWindowMode } from "@/modules/settings/store";
-import {
-  currentWorkspaceBootstrap,
-  nextWorkspaceWindowGeometry,
-} from "@/modules/workspace-process";
+import { currentWorkspaceBootstrap } from "@/modules/workspace-process";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -110,10 +107,8 @@ export function sendWorkspacePage(
 export async function spawnWorkspaceWindowWithPage(
   page: WorkspacePage,
 ): Promise<string> {
-  const windowGeometry = await nextWorkspaceWindowGeometry();
   return invoke("workspace_runtime_spawn_with_page", {
     page,
-    windowGeometry,
   });
 }
 

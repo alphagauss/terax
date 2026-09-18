@@ -7,7 +7,6 @@
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 export type WorkspaceBootstrap = {
@@ -103,24 +102,6 @@ export async function spawnWorkspaceProcess(
     policy,
     launchDir: launchDir ?? null,
   });
-}
-
-/** 计算新 Workspace 窗口相对当前窗口错开的初始几何信息。 */
-export async function nextWorkspaceWindowGeometry(): Promise<WindowGeometry | null> {
-  const window = getCurrentWindow();
-  const [size, position, maximized] = await Promise.all([
-    window.outerSize(),
-    window.outerPosition(),
-    window.isMaximized(),
-  ]);
-  return maximized
-    ? null
-    : {
-        width: size.width,
-        height: size.height,
-        x: position.x + 32,
-        y: position.y + 32,
-      };
 }
 
 export function sameWorkspaceEnv(
