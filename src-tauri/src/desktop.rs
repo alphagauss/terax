@@ -89,6 +89,7 @@ pub fn run() {
             std::process::exit(2);
         });
     }
+    let has_window_state = window_state_path.exists();
     workspace::init_launch_cwd(cli_dir.as_deref());
 
     let builder = tauri::Builder::default();
@@ -382,6 +383,13 @@ pub fn run() {
                     if let Some(geometry) = window_geometry {
                         let _ = main.set_size(PhysicalSize::new(geometry.width, geometry.height));
                         let _ = main.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+                    } else if !has_window_state {
+                        if let Some(geometry) = workspace_process::fitted_window_geometry(&main) {
+                            let _ =
+                                main.set_size(PhysicalSize::new(geometry.width, geometry.height));
+                            let _ =
+                                main.set_position(PhysicalPosition::new(geometry.x, geometry.y));
+                        }
                     }
                     if show_loading_window {
                         let _ = main.show();
