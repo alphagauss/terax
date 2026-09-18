@@ -401,6 +401,28 @@ export function AiChatView({
       })),
   ].sort((a, b) => a.timestamp - b.timestamp);
   const lastMessage = messages[messages.length - 1];
+  const latestUserMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message.role === "user" && !messageMetadata(message).commandId) {
+        return message.id;
+      }
+    }
+    return undefined;
+  }, [messages]);
+  // 当前会话新增用户消息时恢复到底部跟随，首次挂载历史记录不触发跳转。
+  const previousUserMessageIdRef = useRef(latestUserMessageId);
+  useLayoutEffect(() => {
+    const previousUserMessageId = previousUserMessageIdRef.current;
+    previousUserMessageIdRef.current = latestUserMessageId;
+    if (!latestUserMessageId || latestUserMessageId === previousUserMessageId) {
+      return;
+    }
+    void scrollMemory.contextRef.current?.scrollToBottom({
+      animation: CHAT_SCROLL_SPRING,
+      ignoreEscapes: true,
+    });
+  }, [latestUserMessageId, scrollMemory.contextRef]);
   const showPendingResponse =
     isBusy &&
     (lastMessage?.role === "user" ||
@@ -410,6 +432,13 @@ export function AiChatView({
     showPendingResponse && lastMessage?.role === "assistant"
       ? lastMessage.id
       : null;
+  const appearingUserMessageId = isBusy
+    ? lastMessage?.role === "user"
+      ? lastMessage.id
+      : pendingAssistantMessageId
+        ? messages[messages.length - 2]?.id
+        : null
+    : null;
   const streamingMessageId =
     status === "streaming" && lastMessage?.role === "assistant"
       ? lastMessage.id
@@ -464,8 +493,8 @@ export function AiChatView({
     >
       <ChatCollapsibleScrollGuard />
       <ConversationContent
-        className="gap-4 p-3"
-        scrollClassName="app-scrollbar [scrollbar-gutter:stable]"
+        className="gap-4 px-3 pt-3 pb-[10cqh]"
+        scrollClassName="app-scrollbar [container-type:size] [scrollbar-gutter:stable]"
       >
         <div ref={setToolDetailsWheelScope} className="contents">
           {activities
@@ -485,6 +514,7 @@ export function AiChatView({
                   sessionId={sessionId}
                   message={m}
                   streaming={m.id === streamingMessageId}
+                  appearing={m.id === appearingUserMessageId}
                 />
               ) : null}
               {activities
@@ -645,10 +675,12 @@ const RenderedMessage = memo(function RenderedMessage({
   sessionId,
   message,
   streaming,
+  appearing,
 }: {
   sessionId: string;
   message: UIMessage;
   streaming: boolean;
+  appearing: boolean;
 }) {
   const { t } = useTranslation("ai");
   // AI SDK 只会继续修改末尾 part；更早的正文和推理块已经终结，
@@ -691,7 +723,11 @@ const RenderedMessage = memo(function RenderedMessage({
       <Message
         from="user"
         data-conversation-message-id={message.id}
-        className="group/message"
+        className={cn(
+          "group/message",
+          appearing &&
+            "animate-in fade-in-0 slide-in-from-bottom-1 duration-control ease-emphasized",
+        )}
       >
         <MessageAttachments message={message} />
         {stripped.text ||
