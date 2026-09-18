@@ -149,6 +149,15 @@ export function indentExtension(unit: string): Extension {
 
 export const DEFAULT_INDENT: Extension = indentExtension("  ");
 
+/** 更新现有 CodeMirror 视图的自动换行状态。 */
+export function reconfigureWordWrap(view: EditorView, enabled: boolean): void {
+  view.dispatch({
+    effects: wrapCompartment.reconfigure(
+      enabled ? EditorView.lineWrapping : [],
+    ),
+  });
+}
+
 // Only what basicSetup doesn't already cover, to avoid duplicate extensions.
 // basicSetup gives us line numbers, fold gutter, history, indentOnInput,
 // bracketMatching, closeBrackets, autocompletion, highlightActiveLine,

@@ -22,9 +22,21 @@ vi.mock("@/modules/ai/lib/native", () => ({
   },
 }));
 vi.mock("@/modules/settings/preferences", () => ({
-  usePreferencesStore: (
-    select: (state: { diffViewMode: "split" }) => unknown,
-  ) => select({ diffViewMode: "split" }),
+  usePreferencesStore: Object.assign(
+    (
+      select: (state: {
+        diffViewMode: "split";
+        editorWordWrap: false;
+      }) => unknown,
+    ) => select({ diffViewMode: "split", editorWordWrap: false }),
+    {
+      getState: () => ({
+        diffViewMode: "split",
+        editorWordWrap: false,
+        shortcuts: {},
+      }),
+    },
+  ),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -38,6 +50,8 @@ vi.mock("./lib/extensions", () => ({
   FOCUSABLE_READONLY_EXTENSIONS: [],
   languageCompartment: { of: () => [] },
   READONLY_EXTENSIONS: [],
+  reconfigureWordWrap: vi.fn(),
+  wrapCompartment: { of: () => [], reconfigure: () => [] },
 }));
 vi.mock("./lib/useEditorThemeExt", () => ({ useEditorThemeExt: () => [] }));
 vi.mock("@uiw/react-codemirror", () => ({
@@ -51,11 +65,17 @@ vi.mock("./SplitDiffView", () => ({
   SplitDiffView: ({
     original,
     modified,
+    wordWrap,
   }: {
     original: string;
     modified: string;
+    wordWrap: boolean;
   }) => (
-    <div data-testid="split-diff" data-original={original}>
+    <div
+      data-testid="split-diff"
+      data-original={original}
+      data-word-wrap={wordWrap}
+    >
       {modified}
     </div>
   ),
@@ -234,5 +254,35 @@ describe("WorkingGitDiffPane", () => {
       ).toBe(""),
     );
     expect(container.querySelector('[data-testid="split-diff"]')).toBeNull();
+  });
+
+  it("temporarily toggles word wrap for the current diff", async () => {
+    mocks.gitDiffContent.mockResolvedValue(diffResult("current"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => renderPane(1, true));
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector('[data-testid="split-diff"]'),
+      ).not.toBeNull(),
+    );
+
+    const diff = container.querySelector('[data-testid="split-diff"]');
+    expect(diff?.getAttribute("data-word-wrap")).toBe("false");
+    await act(async () => {
+      diff?.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "z",
+          code: "KeyZ",
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect(diff?.getAttribute("data-word-wrap")).toBe("true");
   });
 });
