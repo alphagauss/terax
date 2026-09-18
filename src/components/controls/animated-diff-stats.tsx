@@ -1,5 +1,5 @@
-/** 共用增删行数展示，数字变化时沿用文件编辑工具的上下滚动动画。 */
-import { useState } from "react";
+/** 共用增删行数展示，数字变化时使用短距离滚动动画。 */
+import { useLayoutEffect, useState } from "react";
 import "./animated-diff-stats.css";
 
 export function AnimatedDiffStats({
@@ -39,8 +39,13 @@ function RollingNumber({
   animate: boolean;
 }) {
   const [pair, setPair] = useState({ previous: value, current: value });
-  if (pair.current !== value)
-    setPair({ previous: pair.current, current: value });
+  useLayoutEffect(() => {
+    setPair((current) =>
+      current.current === value
+        ? current
+        : { previous: current.current, current: value },
+    );
+  }, [value]);
   const moving = animate && pair.previous !== pair.current;
   return (
     <span
@@ -50,6 +55,13 @@ function RollingNumber({
       <span
         key={value}
         className={moving ? "file-edit-number-motion" : undefined}
+        onAnimationEnd={() =>
+          setPair((current) =>
+            current.current !== value || current.previous === current.current
+              ? current
+              : { previous: value, current: value },
+          )
+        }
       >
         {moving && (
           <span aria-hidden className="file-edit-number-old">
