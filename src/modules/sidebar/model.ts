@@ -19,6 +19,7 @@ import type {
   SidebarPlacementState,
   SidebarPlacements,
   SidebarRuntimeState,
+  SecondarySidebarMode,
 } from "./types";
 
 export const SIDEBAR_LOCATIONS = ["primary", "secondary"] as const;
@@ -48,8 +49,12 @@ export const DEFAULT_SIDEBAR_RUNTIME_STATE: SidebarRuntimeState = {
     collapsed: true,
     width: SECONDARY_SIDEBAR_DEFAULT_WIDTH,
   },
-  secondaryMaximized: false,
+  secondaryMode: "normal",
 };
+
+function isSecondarySidebarMode(value: unknown): value is SecondarySidebarMode {
+  return value === "normal" || value === "expanded" || value === "maximized";
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -213,8 +218,10 @@ export function normalizeSidebarRuntimeState(
     version: 1,
     primary: readRuntimeLocation(record.primary, "primary", placements, hidden),
     secondary,
-    secondaryMaximized:
-      record.secondaryMaximized === true && !secondary.collapsed,
+    secondaryMode:
+      !secondary.collapsed && isSecondarySidebarMode(record.secondaryMode)
+        ? record.secondaryMode
+        : "normal",
   };
 }
 

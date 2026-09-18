@@ -6,6 +6,7 @@
   "moveToPrimary": "移到主侧边栏",
   "moveToSecondary": "移到副侧边栏",
   "resetLocation": "重置位置",
+  "expandSecondary": "放大副侧边栏（保留主侧边栏）",
   "maximizeSecondary": "最大化副侧边栏",
   "restoreSecondary": "还原副侧边栏",
   "closeSecondary": "关闭副侧边栏",

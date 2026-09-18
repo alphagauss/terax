@@ -150,7 +150,7 @@ describe("normalizeSidebarRuntimeState", () => {
         collapsed: false,
         width: 280,
       },
-      secondaryMaximized: false,
+      secondaryMode: "normal",
     });
   });
 
@@ -167,7 +167,7 @@ describe("normalizeSidebarRuntimeState", () => {
     });
   });
 
-  it("keeps maximization only while the secondary sidebar is open", () => {
+  it("keeps a presentation mode only while the secondary sidebar is open", () => {
     const open = normalizeSidebarRuntimeState(
       {
         ...DEFAULT_SIDEBAR_RUNTIME_STATE,
@@ -175,20 +175,20 @@ describe("normalizeSidebarRuntimeState", () => {
           ...DEFAULT_SIDEBAR_RUNTIME_STATE.secondary,
           collapsed: false,
         },
-        secondaryMaximized: true,
+        secondaryMode: "expanded",
       },
       DEFAULT_SIDEBAR_PLACEMENT_STATE.placements,
     );
-    expect(open.secondaryMaximized).toBe(true);
+    expect(open.secondaryMode).toBe("expanded");
     expect(
       normalizeSidebarRuntimeState(
         {
           ...DEFAULT_SIDEBAR_RUNTIME_STATE,
-          secondaryMaximized: true,
+          secondaryMode: "maximized",
         },
         DEFAULT_SIDEBAR_PLACEMENT_STATE.placements,
-      ).secondaryMaximized,
-    ).toBe(false);
+      ).secondaryMode,
+    ).toBe("normal");
   });
 });
 
@@ -240,7 +240,7 @@ describe("runtimeAfterSidebarContainerMove", () => {
         collapsed: false,
         width: 360,
       },
-      secondaryMaximized: false,
+      secondaryMode: "normal",
     });
   });
 });

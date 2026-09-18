@@ -36,4 +36,5 @@ export type {
   SidebarLocation,
   SidebarPlacements,
   SidebarRuntimeState,
+  SecondarySidebarMode,
 } from "./types";
