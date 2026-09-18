@@ -1187,7 +1187,7 @@ const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
   get_terminal_output: () => i18n.t("ai:chat.activity.activeTerminal"),
 };
 
-/** 仅为展示压缩摘要；参数未提供可读内容时不生成标题，不改写工具输入。 */
+/** 仅为展示压缩摘要；摘要尚未形成时回退到工具动作，不改写工具输入。 */
 export function activityHeadline(
   part: AnyPart,
   thinkingText: string,
@@ -1230,29 +1230,19 @@ export function activityHeadline(
     toolName,
     (part as { input?: unknown }).input,
   );
-  const needsSummary = [
-    "read_file",
-    "write_file",
-    "file_operation",
-    "find_files",
-    "apply_patch",
-    "shell_exec",
-    "shell_process",
-    "grep",
-  ].includes(toolName);
+  const readableSummary = summary?.trim() ? summary : null;
   const defaultFind =
     toolName === "find_files" &&
     (part as { state?: string }).state !== "input-streaming";
-  if (needsSummary && !summary?.trim() && !defaultFind) {
-    return null;
-  }
   const actionOnly =
     toolName === "shell_process" || toolName === "get_terminal_output";
   return {
     kind: "tool",
     key: toolCallIdFromPart(part) || toolName,
-    text: compactActivityText(summary || (defaultFind ? "." : label)),
-    ...(!actionOnly && (summary || defaultFind) ? { action: label } : {}),
+    text: compactActivityText(readableSummary || (defaultFind ? "." : label)),
+    ...(!actionOnly && (readableSummary || defaultFind)
+      ? { action: label }
+      : {}),
   };
 }
 
