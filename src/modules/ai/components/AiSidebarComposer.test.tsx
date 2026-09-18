@@ -31,10 +31,10 @@ vi.mock("@/modules/ai/hooks/useComposerDrop", () => ({
   useComposerDrop: () => ({ ref: { current: null }, active: false, label: "" }),
 }));
 vi.mock("@/modules/ai/components/AiComposerInput", () => ({
-  AiComposerInput: () => null,
+  AiComposerInput: () => <div data-testid="composer-input" />,
 }));
 
-it("运行中从中止切为引导，提交后恢复中止并显示待接入状态", async () => {
+it("运行中提交引导后在输入框上方显示待接入状态", async () => {
   await preloadEn();
   const environment = globalThis as typeof globalThis & {
     IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -64,8 +64,16 @@ it("运行中从中止切为引导，提交后恢复中止并显示待接入状�
     composer.pendingSteering = 1;
     render();
     expect(container.querySelector('button[aria-label="Stop"]')).not.toBeNull();
-    expect(container.querySelector('[role="status"]')?.textContent).toContain(
-      "Awaiting guidance: 1",
+    const status = container.querySelector<HTMLElement>('[role="status"]');
+    const input = container.querySelector<HTMLElement>(
+      '[data-testid="composer-input"]',
+    );
+    expect(status?.textContent).toContain("Awaiting guidance: 1");
+    expect(status?.parentElement).toBe(input?.parentElement);
+    expect(
+      [...(status?.parentElement?.children ?? [])].indexOf(status as Element),
+    ).toBeLessThan(
+      [...(input?.parentElement?.children ?? [])].indexOf(input as Element),
     );
   } finally {
     act(() => root.unmount());
