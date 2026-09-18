@@ -25,20 +25,32 @@ describe("activity headline summaries", () => {
       "Thinking",
     );
 
-  it("waits for meaningful fields but not for full tool parameters", () => {
-    expect(headline("shell_exec", {})).toBeNull();
-    expect(headline("shell_exec", { command: " \n " })).toBeNull();
+  it("shows the tool action before meaningful fields and then adds the summary", () => {
+    expect(headline("shell_exec", {})).toMatchObject({
+      kind: "tool",
+      text: "Running",
+    });
+    expect(headline("shell_exec", { command: " \n " })).toMatchObject({
+      kind: "tool",
+      text: "Running",
+    });
     expect(headline("shell_exec", { command: "Get-Date" })?.text).toBe(
       "Get-Date",
     );
     expect(headline("write_file", { path: "src/app.tsx" })?.text).toBe(
       "src/app.tsx",
     );
-    expect(headline("apply_patch", { files: [{}] })).toBeNull();
+    expect(headline("apply_patch", { files: [{}] })).toMatchObject({
+      kind: "tool",
+      text: "Editing",
+    });
     expect(headline("apply_patch", { files: [{ path: "a.ts" }] })?.text).toBe(
       "a.ts",
     );
-    expect(headline("find_files", {})).toBeNull();
+    expect(headline("find_files", {})).toMatchObject({
+      kind: "tool",
+      text: "Finding",
+    });
     expect(headline("find_files", {}, "input-available")?.text).toBe(".");
   });
 
