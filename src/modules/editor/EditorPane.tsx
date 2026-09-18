@@ -6,19 +6,18 @@
 
 import i18n from "@/i18n";
 import {
+  isModelRefAvailable,
   modelRefsEqual,
   providerFromBuiltinId,
   tryResolveModel,
 } from "@/modules/ai/config";
 import { getKey, getProviderInstanceKey } from "@/modules/ai/lib/keyring";
+import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import { createProviderConnection } from "@/modules/ai/providerRegistry";
 import type { FindHandle } from "@/modules/find";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { isModelRefAvailable } from "@/modules/ai/config";
-import { resolveModelUsage } from "@/modules/ai/lib/modelUsage";
 import { onKeysChanged } from "@/modules/settings/store";
-import { matchBinding, SHORTCUTS } from "@/modules/shortcuts/shortcuts";
 import { useWorkspaceEnvStore } from "@/modules/workspace";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
@@ -52,6 +51,7 @@ import {
   indentExtension,
   languageCompartment,
   lspCompartment,
+  reconfigureWordWrap,
   vimCompartment,
   wrapCompartment,
 } from "./lib/extensions";
@@ -65,6 +65,10 @@ import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { gitChangeGutter, setQuickDiffBaseline } from "./lib/gitGutter";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
+import {
+  matchesTemporaryWordWrapShortcut,
+  useTemporaryWordWrap,
+} from "./lib/temporaryWordWrap";
 import {
   type EditorDocument,
   FORCE_READ_LIMIT,
@@ -127,21 +131,6 @@ type CoreProps = Omit<Props, "onDirtyChange"> & {
 // parse tree and a didOpen of that size cost far more than they give.
 const SYNTAX_MAX_BYTES = 4 * 1024 * 1024;
 const VIEWPORT_SOURCE_LINE_OFFSET = 32;
-const TEMPORARY_WORD_WRAP_SHORTCUT = SHORTCUTS.find(
-  (shortcut) => shortcut.id === "editor.toggleWordWrap",
-);
-
-/** 判断键盘事件是否匹配用户为临时自动换行设置的绑定。 */
-function matchesTemporaryWordWrapShortcut(event: KeyboardEvent): boolean {
-  const bindings =
-    usePreferencesStore.getState().shortcuts["editor.toggleWordWrap"] ??
-    TEMPORARY_WORD_WRAP_SHORTCUT?.defaultBindings ??
-    [];
-  return bindings.some((binding) =>
-    matchBinding(event, binding, "editor.toggleWordWrap"),
-  );
-}
-
 function editorViewportSourceLine(view: EditorView): number {
   const scrollRect = view.scrollDOM.getBoundingClientRect();
   const viewportTop = Math.max(
@@ -231,23 +220,12 @@ export const EditorCore = memo(
     const themeExt = useEditorThemeExt();
     const vimMode = usePreferencesStore((s) => s.vimMode);
     const vimExtension = useVimExtension(vimMode);
-    const editorWordWrap = usePreferencesStore((s) => s.editorWordWrap);
-    // 覆盖值只存在于当前编辑器视图，关闭后不影响全局偏好或其他文件。
-    const [temporaryWordWrap, setTemporaryWordWrap] = useState<boolean | null>(
-      null,
-    );
+    const [wordWrap, toggleTemporaryWordWrap] = useTemporaryWordWrap();
     const workspace = useWorkspaceEnvStore((s) => s.env);
     const languageRef = useRef<string | null>(null);
     const [langId, setLangId] = useState<string | null>(null);
     const apiKeyRef = useRef<string | null>(null);
 
-    /** 切换当前编辑器视图的自动换行，不持久化到偏好设置。 */
-    const toggleTemporaryWordWrap = useCallback(() => {
-      setTemporaryWordWrap(
-        (current) =>
-          !(current ?? usePreferencesStore.getState().editorWordWrap),
-      );
-    }, []);
     const toggleTemporaryWordWrapRef = useRef(toggleTemporaryWordWrap);
     toggleTemporaryWordWrapRef.current = toggleTemporaryWordWrap;
 
@@ -600,12 +578,8 @@ export const EditorCore = memo(
     useEffect(() => {
       const view = cmRef.current?.view;
       if (!view) return;
-      view.dispatch({
-        effects: wrapCompartment.reconfigure(
-          (temporaryWordWrap ?? editorWordWrap) ? EditorView.lineWrapping : [],
-        ),
-      });
-    }, [editorWordWrap, temporaryWordWrap]);
+      reconfigureWordWrap(view, wordWrap);
+    }, [wordWrap]);
 
     useEffect(() => {
       if (doc.status !== "ready") return;

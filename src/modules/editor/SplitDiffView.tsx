@@ -23,6 +23,8 @@ import {
   DEFAULT_INDENT,
   FOCUSABLE_READONLY_EXTENSIONS,
   languageCompartment,
+  reconfigureWordWrap,
+  wrapCompartment,
 } from "./lib/extensions";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { renderGitChangeOverview } from "./lib/gitGutter";
@@ -38,6 +40,7 @@ type SplitDiffViewProps = {
   original: string;
   modified: string;
   path: string;
+  wordWrap: boolean;
 };
 
 function replaceDoc(view: EditorView, doc: string) {
@@ -93,7 +96,7 @@ function bindHorizontalScrollbar(
  * 左右分栏展示原始内容和修改后内容，并在可纵向滚动时显示 Git 变更概览。
  */
 export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
-  function SplitDiffView({ original, modified, path }, ref) {
+  function SplitDiffView({ original, modified, path, wordWrap }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const leftScrollbarRef = useRef<HTMLDivElement>(null);
     const rightScrollbarRef = useRef<HTMLDivElement>(null);
@@ -110,6 +113,8 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
     const themeExt = useEditorThemeExt();
     const themeRef = useRef(themeExt);
     themeRef.current = themeExt;
+    const wordWrapRef = useRef(wordWrap);
+    wordWrapRef.current = wordWrap;
     useEffect(() => {
       const parent = containerRef.current;
       if (!parent) return;
@@ -146,6 +151,7 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
         languageCompartment.of(language?.ext ?? []),
         themeCompartment.of(themeRef.current),
         ...FOCUSABLE_READONLY_EXTENSIONS,
+        wrapCompartment.of(wordWrapRef.current ? EditorView.lineWrapping : []),
         SPLIT_DIFF_THEME,
       ];
 
@@ -235,6 +241,16 @@ export const SplitDiffView = forwardRef<FindHandle, SplitDiffViewProps>(
         });
       }
     }, [themeExt]);
+
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+
+      for (const side of [view.a, view.b]) {
+        reconfigureWordWrap(side, wordWrap);
+      }
+      requestAnimationFrame(() => syncScrollbarsRef.current());
+    }, [wordWrap]);
 
     useImperativeHandle(ref, () => ({
       open: () => {

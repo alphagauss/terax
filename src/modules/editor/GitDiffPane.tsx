@@ -15,6 +15,8 @@ import type { EditorView } from "@codemirror/view";
 import CodeMirror from "@uiw/react-codemirror";
 import {
   forwardRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -28,10 +30,16 @@ import {
   DEFAULT_INDENT,
   FOCUSABLE_READONLY_EXTENSIONS,
   languageCompartment,
+  reconfigureWordWrap,
+  wrapCompartment,
 } from "./lib/extensions";
 import { openEditorFindPanel } from "./lib/find/editorFindPanel";
 import { gitChangeOverview } from "./lib/gitGutter";
 import { resolveLanguage } from "./lib/languageResolver";
+import {
+  matchesTemporaryWordWrapShortcut,
+  useTemporaryWordWrap,
+} from "./lib/temporaryWordWrap";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { SplitDiffView } from "./SplitDiffView";
 
@@ -186,6 +194,22 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
     const { t } = useTranslation("editor");
     const themeExt = useEditorThemeExt();
     const diffViewMode = usePreferencesStore((current) => current.diffViewMode);
+    const [wordWrap, toggleTemporaryWordWrap] = useTemporaryWordWrap();
+    const handleKeyDownCapture = useCallback(
+      (event: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (
+          event.nativeEvent.isComposing ||
+          event.nativeEvent.keyCode === 229 ||
+          !matchesTemporaryWordWrapShortcut(event.nativeEvent)
+        ) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        toggleTemporaryWordWrap();
+      },
+      [toggleTemporaryWordWrap],
+    );
     const loaded = state.kind === "loaded" ? state : null;
     const originalContent = loaded?.originalContent ?? "";
     const modifiedContent = loaded?.modifiedContent ?? "";
@@ -211,6 +235,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               DEFAULT_INDENT,
               languageCompartment.of(loaded?.langExt ?? []),
               ...FOCUSABLE_READONLY_EXTENSIONS,
+              wrapCompartment.of([]),
               unifiedMergeView({
                 original: originalContent,
                 mergeControls: false,
@@ -224,8 +249,31 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
       [effectiveDiffViewMode, loaded?.langExt, originalContent],
     );
     const fallbackExtensions = useMemo(
-      () => [...SHARED_EXT, DEFAULT_INDENT, ...FOCUSABLE_READONLY_EXTENSIONS],
+      () => [
+        ...SHARED_EXT,
+        DEFAULT_INDENT,
+        ...FOCUSABLE_READONLY_EXTENSIONS,
+        wrapCompartment.of([]),
+      ],
       [],
+    );
+
+    useEffect(() => {
+      if (effectiveDiffViewMode === "split" && !useFallback) {
+        editorRef.current = null;
+        return;
+      }
+      const view = editorRef.current;
+      if (!view) return;
+      reconfigureWordWrap(view, wordWrap);
+    }, [effectiveDiffViewMode, useFallback, wordWrap]);
+
+    const registerEditor = useCallback(
+      (view: EditorView) => {
+        editorRef.current = view;
+        reconfigureWordWrap(view, wordWrap);
+      },
+      [wordWrap],
     );
 
     useImperativeHandle(ref, () => ({
@@ -240,7 +288,10 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
     }));
 
     return (
-      <div className="flex h-full min-h-0 flex-col bg-background">
+      <div
+        className="flex h-full min-h-0 flex-col bg-background"
+        onKeyDownCapture={handleKeyDownCapture}
+      >
         <div className="min-h-0 flex-1 overflow-hidden">
           {state.kind === "loading" ? (
             <div className="flex h-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
@@ -259,9 +310,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               editable={false}
               height="100%"
               className="h-full"
-              onCreateEditor={(view) => {
-                editorRef.current = view;
-              }}
+              onCreateEditor={registerEditor}
               basicSetup={{
                 lineNumbers: true,
                 foldGutter: false,
@@ -276,6 +325,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               original={originalContent}
               modified={modifiedContent}
               path={path}
+              wordWrap={wordWrap}
             />
           ) : (
             <CodeMirror
@@ -285,9 +335,7 @@ const DiffContent = forwardRef<FindHandle, { path: string; state: LoadState }>(
               editable={false}
               height="100%"
               className="h-full"
-              onCreateEditor={(view) => {
-                editorRef.current = view;
-              }}
+              onCreateEditor={registerEditor}
               basicSetup={{
                 lineNumbers: true,
                 foldGutter: true,
