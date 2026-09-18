@@ -92,6 +92,7 @@ type ToolPart = {
   toolCallId: string;
   state: string;
   input?: unknown;
+  rawInput?: unknown;
   output?: unknown;
   errorText?: string;
   approval?: {
@@ -950,7 +951,7 @@ function serializeAssistantBlock(
     type: "function" as const,
     function: {
       name: toolName(tool),
-      arguments: stringifyToolArguments(tool.input),
+      arguments: stringifyToolArguments(toolArgumentsInput(tool)),
     },
   }));
   const assistant: SessionMessage = {
@@ -1037,6 +1038,13 @@ function toolName(tool: ToolPart): string {
   return tool.type === "dynamic-tool"
     ? (tool.toolName ?? "unknown")
     : tool.type.slice("tool-".length);
+}
+
+/** SDK 将静态工具的非法入参保存在 rawInput，持久化时不能退化为空对象。 */
+function toolArgumentsInput(tool: ToolPart): unknown {
+  return tool.state === "output-error" && tool.input === undefined
+    ? tool.rawInput
+    : tool.input;
 }
 
 /** 将工具输入序列化为 OpenAI function.arguments 要求的 JSON 字符串。 */

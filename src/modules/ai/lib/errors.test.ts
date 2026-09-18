@@ -1,6 +1,13 @@
-import { streamText, toUIMessageStream, type UIMessageChunk } from "ai";
+import {
+  InvalidToolInputError,
+  streamText,
+  toUIMessageStream,
+  TypeValidationError,
+  type UIMessageChunk,
+} from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { formatAiError } from "./errors";
 
 describe("formatAiError", () => {
@@ -55,6 +62,29 @@ describe("formatAiError", () => {
     expect(formatAiError({ unexpected: true })).toBe(
       "The AI provider rejected the request. Check the selected model and provider settings, then try again.",
     );
+  });
+
+  it("summarizes invalid tool input without echoing a large payload", () => {
+    const value = {
+      files: JSON.stringify([
+        {
+          path: "count_line.py",
+          edits: [{ old_text: "x".repeat(2_000), new_text: "new" }],
+        },
+      ]),
+    };
+    const parsed = z.object({ files: z.array(z.object({})) }).safeParse(value);
+    if (parsed.success) throw new Error("expected invalid test input");
+    const error = new InvalidToolInputError({
+      toolName: "apply_patch",
+      toolInput: JSON.stringify(value),
+      cause: new TypeValidationError({ value, cause: parsed.error }),
+    });
+
+    expect(formatAiError(error)).toBe(
+      "Invalid input for tool apply_patch: files: expected array, received string. Pass JSON arrays and objects directly, not as JSON-encoded strings. Call the tool again with input that matches the schema. The tool was not executed.",
+    );
+    expect(formatAiError(error)).not.toContain("count_line.py");
   });
 
   it("preserves provider details through the AI SDK UI stream", async () => {

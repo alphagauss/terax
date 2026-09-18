@@ -1,3 +1,5 @@
+import { InvalidToolInputError, TypeValidationError } from "ai";
+
 export const CONTEXT_BUDGET_ERROR =
   "The current request exceeds the available context budget. Reduce the input or use a model with a larger context window.";
 
@@ -11,12 +13,77 @@ const FALLBACK_ERROR =
   "The AI provider rejected the request. Check the selected model and provider settings, then try again.";
 
 export function formatAiError(error: unknown): string {
+  const toolInputError = formatInvalidToolInput(error);
+  if (toolInputError) return toolInputError;
   const details = extractErrorDetails(error);
   if (!details) return FALLBACK_ERROR;
   const message = sanitizeErrorMessage(details.message);
   if (!message) return FALLBACK_ERROR;
   const prefix = errorPrefix(details.code, message);
   return prefix ? `${prefix}: ${message}` : message;
+}
+
+/** 压缩工具 schema 错误，避免长参数正文遮蔽真正的字段问题。 */
+function formatInvalidToolInput(error: unknown): string | null {
+  if (!InvalidToolInputError.isInstance(error)) return null;
+  const validation = error.cause;
+  if (!TypeValidationError.isInstance(validation)) return null;
+  const issue = firstValidationIssue(validation.cause);
+  if (!issue) return null;
+  const path = Array.isArray(issue.path) ? issue.path : [];
+  const actual = valueAtPath(validation.value, path);
+  const detail =
+    issue.code === "invalid_type" && typeof issue.expected === "string"
+      ? `${formatIssuePath(path)}: expected ${issue.expected}, received ${valueType(actual)}`
+      : `${formatIssuePath(path)}: ${typeof issue.message === "string" ? issue.message : "invalid value"}`;
+  const encodedStructure =
+    typeof actual === "string" &&
+    (issue.expected === "array" || issue.expected === "object");
+  const retryHint = encodedStructure
+    ? " Pass JSON arrays and objects directly, not as JSON-encoded strings."
+    : "";
+  return `Invalid input for tool ${error.toolName}: ${detail}.${retryHint} Call the tool again with input that matches the schema. The tool was not executed.`;
+}
+
+type ValidationIssue = {
+  code?: unknown;
+  expected?: unknown;
+  message?: unknown;
+  path?: unknown;
+};
+
+function firstValidationIssue(value: unknown): ValidationIssue | null {
+  if (!value || typeof value !== "object") return null;
+  const issues = (value as { issues?: unknown }).issues;
+  const issue = Array.isArray(issues) ? issues[0] : undefined;
+  return issue && typeof issue === "object" ? issue : null;
+}
+
+function formatIssuePath(path: unknown[]): string {
+  if (!path.length) return "input";
+  return path
+    .map((part, index) =>
+      typeof part === "number"
+        ? `[${part}]`
+        : `${index === 0 ? "" : "."}${part}`,
+    )
+    .join("");
+}
+
+function valueAtPath(value: unknown, path: unknown[]): unknown {
+  let current = value;
+  for (const part of path) {
+    if (typeof part !== "string" && typeof part !== "number") return undefined;
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string | number, unknown>)[part];
+  }
+  return current;
+}
+
+function valueType(value: unknown): string {
+  if (Array.isArray(value)) return "array";
+  if (value === null) return "null";
+  return typeof value;
 }
 
 function extractErrorDetails(

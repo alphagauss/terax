@@ -3,7 +3,7 @@
  * 测试锁定固定会话根、动态审批、默认创建模式及统一原生调用边界。
  */
 
-import type { ToolExecutionOptions } from "ai";
+import { asSchema, type ToolExecutionOptions } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "./context";
 import {
@@ -81,6 +81,28 @@ describe("AI file tools", () => {
     ]) {
       expect(tools).not.toHaveProperty(name);
     }
+  });
+
+  it("describes apply_patch nested arrays and exact replacement fields", async () => {
+    const tool = buildPatchTools(context).apply_patch;
+    const schema = await asSchema(tool.inputSchema).jsonSchema;
+    const files = schema.properties?.files as {
+      description?: string;
+      items?: {
+        properties?: Record<string, { description?: string; items?: unknown }>;
+      };
+    };
+
+    expect(tool.description).toContain(
+      'Example: {"files":[{"path":"a.py","edits":',
+    );
+    expect(files.description).toContain("JSON array, not a string");
+    expect(files.items?.properties?.edits.description).toContain(
+      "Ordered exact-text replacements",
+    );
+    expect(files.items?.properties?.path.description).toContain(
+      "existing UTF-8 file",
+    );
   });
 
   it("reads through the owner-scoped native backend", async () => {
