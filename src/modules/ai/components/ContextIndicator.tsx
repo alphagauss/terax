@@ -1,4 +1,4 @@
-/** 轮末更新主 Agent 上下文和会话用量；运行中的预测仅由压缩逻辑使用。 */
+/** 随主 Agent 调用完成更新上下文用量；运行中的预测仅由压缩逻辑使用。 */
 
 import {
   Context,
@@ -39,7 +39,7 @@ export function ContextIndicator({
   );
   const draftSessionId = useChatStore((state) => state.draftSessionId);
   const providerModels = usePreferencesStore((state) => state.providerModels);
-  const records = useUsageRecords(sessionId ?? "", true);
+  const records = useUsageRecords(sessionId ?? "");
   const latest = [...records].reverse().find((record) => !record.taskId);
   const estimateRef = useRef({ id: sessionId, tokens: 0 });
   const estimate = useMemo(() => {

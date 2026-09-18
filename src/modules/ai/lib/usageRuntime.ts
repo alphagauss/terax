@@ -70,7 +70,7 @@ export function releaseUsage(id: string) {
   publish(id);
 }
 
-/** 轮末原子提交成功后才更新头部统计；切换视图不会丢失上一轮已完成的数据。 */
+/** 轮末原子提交成功后更新已结算快照，供最终回答的统计入口读取。 */
 export function settleUsage(id: string) {
   const state = sessions.get(id);
   if (state) {

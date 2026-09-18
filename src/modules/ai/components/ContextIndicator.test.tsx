@@ -7,7 +7,6 @@ import {
   recordUsage,
   releaseUsage,
   restoreUsage,
-  settleUsage,
 } from "../lib/usageRuntime";
 import type { UsageRecord } from "../lib/usage";
 
@@ -71,7 +70,7 @@ afterEach(async () => {
   root = createRoot(container);
 });
 
-it("keeps completed statistics across remounts and replaces only main context after a model switch", async () => {
+it("updates main context during a turn and preserves it across remounts without including subagents", async () => {
   restoreUsage(
     id,
     [
@@ -100,7 +99,7 @@ it("keeps completed statistics across remounts and replaces only main context af
   );
   await act(async () =>
     root.render(
-      <ContextIndicator sessionId={id} isBusy={false} messages={[]} />,
+      <ContextIndicator sessionId={id} isBusy messages={[]} />,
     ),
   );
   expect(
@@ -132,16 +131,28 @@ it("keeps completed statistics across remounts and replaces only main context af
   );
   expect(
     container.querySelector("button")?.getAttribute("aria-label"),
-  ).toContain("12K / 128K");
+  ).toContain("24K / 64K");
+  expect(document.body.textContent).toContain("24,000");
+  expect(document.body.textContent).not.toContain("9.7K / 81%");
+  await act(async () =>
+    recordUsage(
+      id,
+      record({
+        id: "next-child",
+        turnId: "next-turn",
+        taskId: "next-child",
+        values: { inputTokens: 90000, outputTokens: 50 },
+      }),
+    ),
+  );
+  expect(
+    container.querySelector("button")?.getAttribute("aria-label"),
+  ).toContain("24K / 64K");
   await act(async () => root.unmount());
   root = createRoot(container);
   await act(async () =>
     root.render(<ContextIndicator sessionId={id} isBusy messages={[]} />),
   );
-  expect(
-    container.querySelector("button")?.getAttribute("aria-label"),
-  ).toContain("12K / 128K");
-  await act(async () => settleUsage(id));
   expect(
     container.querySelector("button")?.getAttribute("aria-label"),
   ).toContain("24K / 64K");
