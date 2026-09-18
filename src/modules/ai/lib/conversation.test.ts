@@ -268,6 +268,49 @@ describe("AI session message conversion", () => {
     );
   });
 
+  it("persists the raw input of a tool call rejected by schema validation", async () => {
+    const rawInput = {
+      files: '[{"path":"a.py","edits":[]}]',
+    };
+    const live = [
+      {
+        id: "assistant-invalid-tool",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-apply_patch",
+            toolCallId: "invalid-patch",
+            state: "output-error",
+            input: undefined,
+            rawInput,
+            errorText: "files: expected array, received string",
+          },
+        ],
+      } as UIMessage,
+    ];
+    const records = serializeSessionMessages(live, {
+      timestamp,
+      turnId: "turn-invalid-tool",
+    });
+
+    expect(records[0]).toMatchObject({
+      role: "assistant",
+      tool_calls: [
+        {
+          function: {
+            name: "apply_patch",
+            arguments: JSON.stringify(rawInput),
+          },
+        },
+      ],
+    });
+    expect(
+      await convertToAgentModelMessages(
+        projectSessionMessages("session-1", jsonlRoundTrip(records)),
+      ),
+    ).toEqual(await convertToAgentModelMessages(live));
+  });
+
   it("uses the OpenAI function envelope and string arguments for tools", () => {
     const messages: UIMessage[] = [
       {
