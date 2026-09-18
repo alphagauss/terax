@@ -1,23 +1,6 @@
 {
   "selectionAsk": "Ask AI",
   "miniWindow": {
-    "suggestions": {
-      "explainError": {
-        "label": "解释上一个错误",
-        "hint": "读取终端缓冲区",
-        "text": "解释终端里的上一个错误。"
-      },
-      "generateCommand": {
-        "label": "生成命令",
-        "hint": "告诉我你想做什么",
-        "text": "给我一个命令，用来"
-      },
-      "summarizeBuffer": {
-        "label": "总结缓冲区",
-        "hint": "回顾最近的活动",
-        "text": "总结一下终端里刚刚发生了什么。"
-      }
-    },
     "loadingSessions": "正在加载会话…",
     "thinking": "思考中…",
     "closeTitle": "关闭 (Esc)",

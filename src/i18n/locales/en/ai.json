@@ -1,23 +1,6 @@
 {
   "selectionAsk": "Ask AI",
   "miniWindow": {
-    "suggestions": {
-      "explainError": {
-        "label": "Explain the last error",
-        "hint": "Read the terminal buffer",
-        "text": "Explain the last error in the terminal."
-      },
-      "generateCommand": {
-        "label": "Generate a command",
-        "hint": "Tell me what you want to do",
-        "text": "Give me a command to "
-      },
-      "summarizeBuffer": {
-        "label": "Summarize buffer",
-        "hint": "Recap recent activity",
-        "text": "Summarize what just happened in the terminal."
-      }
-    },
     "loadingSessions": "Loading sessions…",
     "thinking": "Thinking…",
     "closeTitle": "Close (Esc)",
