@@ -58,6 +58,31 @@ describe("文件编辑展示事实", async () => {
     runtime.dispose();
   });
 
+  it("完整参数在节流窗口结束前立即发布预估", () => {
+    vi.useFakeTimers();
+    const publish = vi.fn();
+    const runtime = new FileEditRuntime(publish);
+    runtime.input(
+      "write",
+      undefined,
+      "write_file",
+      '{"path":"a.ts","content":"one\\n',
+    );
+
+    runtime.input("write", undefined, "write_file", undefined, {
+      path: "a.ts",
+      content: "one\ntwo\n",
+    });
+
+    expect(runtime.getCall("write")).toMatchObject({
+      added: 2,
+      removed: 0,
+      approximate: true,
+    });
+    expect(publish).toHaveBeenCalledTimes(1);
+    runtime.dispose();
+  });
+
   it("失败会丢弃正在解析的预估，不保存未执行的内容", async () => {
     vi.useFakeTimers();
     const runtime = new FileEditRuntime(() => {});

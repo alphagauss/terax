@@ -134,6 +134,11 @@ export class FileEditRuntime {
     state.revision++;
     state.onInput = onInput;
     this.inputs.set(key, state);
+    if (input !== undefined) {
+      this.publishEstimate(key, state, input);
+      this.inputs.delete(key);
+      return;
+    }
     this.schedule();
   }
 
@@ -154,25 +159,30 @@ export class FileEditRuntime {
         (await (await import("ai")).parsePartialJson(state.text)).value;
       if (this.disposed || this.inputs.get(key) !== state) continue;
       state.sampled = revision;
-      state.onInput?.(state.toolCallId, state.toolName, input);
-      const stats = estimateFileEdit(state.toolName, input);
-      const previous = this.values.get(key);
-      if (
-        !previous ||
-        previous.added !== stats.added ||
-        previous.removed !== stats.removed
-      ) {
-        this.values.set(key, {
-          toolCallId: state.toolCallId,
-          taskId: state.taskId,
-          ...stats,
-          approximate: true,
-        });
-        this.publish();
-      }
+      this.publishEstimate(key, state, input);
       if (state.revision !== revision) this.schedule();
       else if (state.input !== undefined) this.inputs.delete(key);
     }
+  }
+
+  /** 完整参数在工具执行前立即发布，避免短调用被节流窗口吞掉。 */
+  private publishEstimate(key: string, state: InputState, input: unknown): void {
+    state.onInput?.(state.toolCallId, state.toolName, input);
+    const stats = estimateFileEdit(state.toolName, input);
+    const previous = this.values.get(key);
+    if (
+      previous &&
+      previous.added === stats.added &&
+      previous.removed === stats.removed
+    )
+      return;
+    this.values.set(key, {
+      toolCallId: state.toolCallId,
+      taskId: state.taskId,
+      ...stats,
+      approximate: true,
+    });
+    this.publish();
   }
 
   /** 提交返回后同步记事实，绝不重新读盘采集其他进程的修改。 */
