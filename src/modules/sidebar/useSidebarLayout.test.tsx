@@ -1,5 +1,5 @@
 /**
- * 本文件测试侧边栏布局 Hook 的临时隐藏、副侧栏最大化和窗口初始折叠行为。
+ * 本文件测试侧边栏布局 Hook 的临时隐藏、副侧栏展示模式和窗口初始折叠行为。
  * 重点锁定呈现模式恢复，并确保新建临时窗口默认关闭两侧面板。
  */
 
@@ -28,7 +28,7 @@ vi.mock("./persistence", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./persistence")>();
   return {
     ...actual,
-    persistSidebarPlacementState: vi.fn<() => Promise<void>>(),
+    persistSidebarPlacementState: vi.fn(async () => {}),
     subscribeSidebarPlacementState: vi.fn(async () => () => {}),
   };
 });
@@ -157,7 +157,7 @@ describe("useSidebarLayout temporary hiding", () => {
     );
   });
 
-  it("maximizes the secondary sidebar without losing the previous layout", async () => {
+  it("shares layout capture and restoration across secondary sidebar modes", async () => {
     workspaceStorage.get.mockReturnValue(undefined);
     workspaceStorage.set.mockResolvedValue();
     const root = createRoot(document.createElement("div"));
@@ -206,9 +206,78 @@ describe("useSidebarLayout temporary hiding", () => {
 
     await act(async () => current().openContainer("ai"));
     secondaryResize.mockClear();
-    await act(async () => current().toggleSecondaryMaximized());
+    await act(async () => current().toggleSecondaryMode("expanded"));
 
-    expect(current().runtime.secondaryMaximized).toBe(true);
+    expect(current().runtime.secondaryMode).toBe("expanded");
+    expect(current().runtime.primary.width).toBe(280);
+    expect(current().runtime.secondary.width).toBe(360);
+    expect(current().isVisible("explorer")).toBe(true);
+    expect(current().isVisible("ai")).toBe(true);
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 20,
+      workspace: 0,
+      "secondary-sidebar": 80,
+    });
+
+    await act(async () => current().toggleLocation("primary"));
+    expect(current().runtime.primary.collapsed).toBe(true);
+    expect(current().runtime.secondaryMode).toBe("expanded");
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 0,
+      workspace: 0,
+      "secondary-sidebar": 100,
+    });
+    await act(async () => current().toggleLocation("primary"));
+    expect(current().runtime.primary.collapsed).toBe(false);
+    expect(current().runtime.secondaryMode).toBe("expanded");
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 20,
+      workspace: 0,
+      "secondary-sidebar": 80,
+    });
+
+    setLayout.mockClear();
+    await act(async () => {
+      current().restoreSecondaryModeForContainer("explorer");
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.secondaryMode).toBe("normal");
+    expect(current().restoringSecondaryMode).toBeNull();
+    expect(current().runtime.secondary.collapsed).toBe(false);
+    expect(setLayout).toHaveBeenCalledWith(previousLayout);
+
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    await act(async () => current().toggleLocation("primary"));
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.primary.collapsed).toBe(true);
+    expect(primary.collapse).toHaveBeenCalled();
+
+    setLayout.mockClear();
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    expect(setLayout).toHaveBeenLastCalledWith({
+      "primary-sidebar": 0,
+      workspace: 0,
+      "secondary-sidebar": 100,
+    });
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    await act(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    });
+
+    await act(async () => current().openContainer("explorer"));
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    expect(current().restoreSecondaryModeForContainer("ai")).toBe(false);
+    expect(current().runtime.secondaryMode).toBe("expanded");
+
+    await act(async () => current().toggleSecondaryMode("maximized"));
+
+    expect(current().runtime.secondaryMode).toBe("maximized");
     expect(current().runtime.primary.width).toBe(280);
     expect(current().runtime.secondary.width).toBe(360);
     expect(current().isVisible("explorer")).toBe(false);
@@ -220,19 +289,20 @@ describe("useSidebarLayout temporary hiding", () => {
     });
 
     setLayout.mockClear();
-    await act(async () => current().toggleSecondaryMaximized());
     await act(async () => {
+      current().toggleSecondaryMode("maximized");
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
     });
-    expect(current().runtime.secondaryMaximized).toBe(false);
+    expect(current().runtime.secondaryMode).toBe("normal");
+    expect(current().restoringSecondaryMode).toBeNull();
     expect(setLayout).toHaveBeenCalledOnce();
     expect(setLayout).toHaveBeenCalledWith(previousLayout);
 
-    await act(async () => current().toggleSecondaryMaximized());
+    await act(async () => current().toggleSecondaryMode("maximized"));
     setLayout.mockClear();
     await act(async () => {
-      current().toggleSecondaryMaximized();
+      current().setSecondaryMode("normal");
       root.render(
         createElement(Harness, {
           temporarilyHidden: true,
@@ -266,5 +336,17 @@ describe("useSidebarLayout temporary hiding", () => {
       await new Promise(requestAnimationFrame);
     });
     expect(setLayout).toHaveBeenLastCalledWith(previousLayout);
+
+    await act(async () => current().toggleSecondaryMode("expanded"));
+    await act(async () => current().toggleContainerVisibility("ai"));
+    expect(current().runtime.secondaryMode).toBe("expanded");
+    await act(async () => {
+      current().toggleContainerVisibility("channels");
+      await new Promise(requestAnimationFrame);
+    });
+    expect(current().runtime.secondaryMode).toBe("normal");
+    expect(current().restoringSecondaryMode).toBeNull();
+    expect(current().runtime.secondary.collapsed).toBe(true);
+    expect(secondary.collapse).toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@
   "moveToPrimary": "Move to Primary Sidebar",
   "moveToSecondary": "Move to Secondary Sidebar",
   "resetLocation": "Reset Location",
+  "expandSecondary": "Expand Secondary Sidebar (Keep Primary Sidebar)",
   "maximizeSecondary": "Maximize Secondary Sidebar",
   "restoreSecondary": "Restore Secondary Sidebar",
   "closeSecondary": "Close Secondary Sidebar",

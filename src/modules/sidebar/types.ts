@@ -7,6 +7,8 @@ import type { HugeiconsIcon } from "@hugeicons/react";
 
 export type SidebarLocation = "primary" | "secondary";
 
+export type SecondarySidebarMode = "normal" | "expanded" | "maximized";
+
 export type SidebarContainerId =
   | "explorer"
   | "search"
@@ -47,7 +49,7 @@ export type SidebarRuntimeState = {
   version: 1;
   primary: SidebarLocationRuntime;
   secondary: SidebarLocationRuntime;
-  secondaryMaximized: boolean;
+  secondaryMode: SecondarySidebarMode;
 };
 
 export type SidebarPlacementState = {

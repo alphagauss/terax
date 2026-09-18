@@ -73,6 +73,7 @@ import {
 import {
   SecondarySidebarTabs,
   SidebarActivityBar,
+  type SidebarContainerId,
   type SidebarPooledView,
   SidebarViewPool,
   useSidebarLayout,
@@ -411,18 +412,40 @@ export default function App() {
     zenMode,
     !currentWorkspaceBootstrap().isPrimary,
   );
-  /** 禅模式独占工作区，进入前先结束与其冲突的副侧边栏最大化。 */
+  const secondaryMode = sidebar.runtime.secondaryMode;
+  const secondaryFocused = secondaryMode !== "normal";
+  const secondaryMaximized = secondaryMode === "maximized";
+  const secondaryRestoring = sidebar.restoringSecondaryMode !== null;
+  const secondaryPresentationActive =
+    secondaryFocused || secondaryRestoring;
+  const primaryPresentationMaximized =
+    secondaryMaximized || sidebar.restoringSecondaryMode === "maximized";
+  const initialSecondaryFocused =
+    sidebar.initialRuntime.secondaryMode !== "normal";
+  const initialSecondaryMaximized =
+    sidebar.initialRuntime.secondaryMode === "maximized";
+  /** 禅模式独占工作区，进入前先结束与其冲突的副侧边栏聚焦模式。 */
   const toggleZenMode = useCallback(() => {
-    if (!zenMode && sidebar.runtime.secondaryMaximized) {
-      sidebar.toggleSecondaryMaximized();
+    if (!zenMode && sidebar.runtime.secondaryMode !== "normal") {
+      sidebar.setSecondaryMode("normal");
     }
     toggleZenModeState();
   }, [
-    sidebar.runtime.secondaryMaximized,
-    sidebar.toggleSecondaryMaximized,
+    sidebar.runtime.secondaryMode,
+    sidebar.setSecondaryMode,
     toggleZenModeState,
     zenMode,
   ]);
+  const openWorkspaceFromSidebar = useCallback(
+    function openWorkspaceFromSidebar<Result>(
+      containerId: SidebarContainerId,
+      open: () => Result,
+    ): Result {
+      sidebar.restoreSecondaryModeForContainer(containerId);
+      return open();
+    },
+    [sidebar.restoreSecondaryModeForContainer],
+  );
   const toggleSidebar = useCallback(() => {
     sidebar.toggleLocation("primary");
   }, [sidebar.toggleLocation]);
@@ -1588,11 +1611,13 @@ export default function App() {
   );
 
   useAiLiveBridge({
-    openFileReference: (path, line) => {
-      if (line === undefined) handleOpenFile(path, false);
-      else openContentHit(path, line, undefined, { temporary: true });
-    },
-    openFileEdits: openFileEditsTab,
+    openFileReference: (path, line) =>
+      openWorkspaceFromSidebar("ai", () => {
+        if (line === undefined) handleOpenFile(path, false);
+        else openContentHit(path, line, undefined, { temporary: true });
+      }),
+    openFileEdits: (input) =>
+      openWorkspaceFromSidebar("ai", () => openFileEditsTab(input)),
     setLive,
     activeId,
     activeSpaceId,
@@ -1600,8 +1625,9 @@ export default function App() {
     explorerRoot,
     environmentHome: home,
     visible: sidebar.isVisible("ai"),
-    setActiveId,
-    newTab,
+    setActiveId: (tabId) =>
+      openWorkspaceFromSidebar("ai", () => setActiveId(tabId)),
+    newTab: (cwd) => openWorkspaceFromSidebar("ai", () => newTab(cwd)),
     ensureWorkspaceReady,
     terminalRefs,
   });
@@ -1793,12 +1819,20 @@ export default function App() {
           onReconnect={requestSshReconnect}
           gitStatus={explorerGitDecorations ? sourceControl.status : null}
           activeFilePath={explorerActiveFilePath}
-          onOpenFile={handleOpenFile}
+          onOpenFile={(path, pin) =>
+            openWorkspaceFromSidebar("explorer", () =>
+              handleOpenFile(path, pin),
+            )
+          }
           onPathRenamed={handlePathRenamed}
           onPathDeleted={handlePathDeleted}
-          onRevealInTerminal={cdInNewTab}
+          onRevealInTerminal={(path) =>
+            openWorkspaceFromSidebar("explorer", () => cdInNewTab(path))
+          }
           onRunPythonFile={(path, root) =>
-            void pythonRunner.runFile(path, root)
+            openWorkspaceFromSidebar("explorer", () => {
+              void pythonRunner.runFile(path, root);
+            })
           }
           onAttachToAgent={handleAttachFileToAgent}
           onDropToWorkbench={handleDropFileToWorkbench}
@@ -1813,10 +1847,12 @@ export default function App() {
           rootPath={explorerRoot}
           visible={sidebar.isVisible("search") && !zenMode}
           onOpenHit={(hit: ContentSearchHit) =>
-            openContentHit(hit.path, hit.line, hit.ranges[0], {
-              temporary: true,
-              markdownSource: true,
-            })
+            openWorkspaceFromSidebar("search", () =>
+              openContentHit(hit.path, hit.line, hit.ranges[0], {
+                temporary: true,
+                markdownSource: true,
+              }),
+            )
           }
         />
       ),
@@ -1827,10 +1863,24 @@ export default function App() {
         <SourceControlViewContainer
           open={sidebar.isVisible("source-control")}
           sourceControl={sourceControl}
-          onOpenDiff={openGitDiffTab}
-          onOpenCommitFile={openCommitFileDiffTab}
-          onOpenFile={handleOpenFile}
-          onNavigateToPath={cdInNewTab}
+          onOpenDiff={(path) =>
+            openWorkspaceFromSidebar("source-control", () =>
+              openGitDiffTab(path),
+            )
+          }
+          onOpenCommitFile={(...args) =>
+            openWorkspaceFromSidebar("source-control", () =>
+              openCommitFileDiffTab(...args),
+            )
+          }
+          onOpenFile={(path) =>
+            openWorkspaceFromSidebar("source-control", () =>
+              handleOpenFile(path),
+            )
+          }
+          onNavigateToPath={(path) =>
+            openWorkspaceFromSidebar("source-control", () => cdInNewTab(path))
+          }
         />
       ),
     },
@@ -1840,10 +1890,18 @@ export default function App() {
             id: "alpha" as const,
             content: (
               <AlphaSidebar
-                onOpenWorkstation={openAlphaWorkstationTab}
-                onOpenData={openAlphaDataTab}
-                onOpenBacktests={openAlphaBacktestsTab}
-                onOpenSettings={openAlphaSettingsTab}
+                onOpenWorkstation={() =>
+                  openWorkspaceFromSidebar("alpha", openAlphaWorkstationTab)
+                }
+                onOpenData={() =>
+                  openWorkspaceFromSidebar("alpha", openAlphaDataTab)
+                }
+                onOpenBacktests={() =>
+                  openWorkspaceFromSidebar("alpha", openAlphaBacktestsTab)
+                }
+                onOpenSettings={() =>
+                  openWorkspaceFromSidebar("alpha", openAlphaSettingsTab)
+                }
               />
             ),
           },
@@ -1920,29 +1978,31 @@ export default function App() {
                 panelRef={sidebar.panelRefs.primary}
                 groupResizeBehavior="preserve-pixel-size"
                 defaultSize={
-                  sidebar.initialRuntime.secondaryMaximized ||
+                  initialSecondaryMaximized ||
                   sidebar.initialRuntime.primary.collapsed
                     ? "0px"
                     : `${sidebar.initialRuntime.primary.width}px`
                 }
                 minSize={
-                  sidebar.runtime.secondaryMaximized
+                  secondaryMaximized ||
+                  (secondaryMode === "expanded" &&
+                    sidebar.runtime.primary.collapsed)
                     ? "0px"
                     : `${sidebar.minimumWidth("primary")}px`
                 }
-                maxSize={sidebar.runtime.secondaryMaximized ? "0px" : undefined}
+                maxSize={secondaryMaximized ? "0px" : undefined}
                 collapsible
                 collapsedSize={0}
               >
                 <div
                   data-sidebar-drop-zone="primary"
-                  inert={zenMode || sidebar.runtime.secondaryMaximized}
+                  inert={zenMode || primaryPresentationMaximized}
                   aria-hidden={
-                    zenMode || sidebar.runtime.secondaryMaximized || undefined
+                    zenMode || primaryPresentationMaximized || undefined
                   }
                   className={cn(
                     "sidebar-scrollbar-scope relative flex h-full min-h-0 flex-col border-r border-border/60 bg-sidebar transition-[opacity,translate] duration-pane ease-standard",
-                    sidebar.runtime.secondaryMaximized && "invisible",
+                    primaryPresentationMaximized && "invisible",
                     sidebar.runtime.primary.collapsed
                       ? "pointer-events-none -translate-x-1.5 opacity-0"
                       : "translate-x-0 opacity-100",
@@ -1979,34 +2039,26 @@ export default function App() {
               <ResizableHandle
                 withHandle
                 className={cn(
-                  (zenMode || sidebar.runtime.secondaryMaximized) && "hidden",
+                  (zenMode || secondaryPresentationActive) && "hidden",
                 )}
                 disabled={
                   zenMode ||
-                  sidebar.runtime.secondaryMaximized ||
+                  secondaryPresentationActive ||
                   sidebar.runtime.primary.collapsed
                 }
               />
               <ResizablePanel
                 id="workspace"
-                defaultSize={
-                  sidebar.initialRuntime.secondaryMaximized ? "0px" : "78%"
-                }
-                minSize={
-                  sidebar.runtime.secondaryMaximized
-                    ? "0px"
-                    : `${WORKSPACE_MIN_WIDTH}px`
-                }
-                maxSize={sidebar.runtime.secondaryMaximized ? "0px" : undefined}
-                collapsible={sidebar.runtime.secondaryMaximized}
-                collapsedSize={0}
+                defaultSize={initialSecondaryFocused ? "0px" : "78%"}
+                minSize={secondaryFocused ? "0px" : `${WORKSPACE_MIN_WIDTH}px`}
+                maxSize={secondaryFocused ? "0px" : undefined}
               >
                 <div
-                  inert={sidebar.runtime.secondaryMaximized}
-                  aria-hidden={sidebar.runtime.secondaryMaximized || undefined}
+                  inert={secondaryPresentationActive}
+                  aria-hidden={secondaryPresentationActive || undefined}
                   className={cn(
                     "flex h-full min-h-0 flex-col",
-                    sidebar.runtime.secondaryMaximized && "invisible",
+                    secondaryPresentationActive && "invisible",
                   )}
                 >
                   {workspaceBootPending ? (
@@ -2039,20 +2091,24 @@ export default function App() {
               <ResizableHandle
                 withHandle
                 className={cn(
-                  (zenMode || sidebar.runtime.secondaryMaximized) && "hidden",
+                  (zenMode || secondaryPresentationActive) && "hidden",
                 )}
                 disabled={
                   zenMode ||
-                  sidebar.runtime.secondaryMaximized ||
+                  secondaryPresentationActive ||
                   sidebar.runtime.secondary.collapsed
                 }
               />
               <ResizablePanel
                 id="secondary-sidebar"
                 panelRef={sidebar.panelRefs.secondary}
-                groupResizeBehavior="preserve-pixel-size"
+                groupResizeBehavior={
+                  secondaryPresentationActive
+                    ? "preserve-relative-size"
+                    : "preserve-pixel-size"
+                }
                 defaultSize={
-                  sidebar.initialRuntime.secondaryMaximized
+                  initialSecondaryFocused
                     ? "100%"
                     : sidebar.initialRuntime.secondary.collapsed
                       ? "0px"
@@ -2085,8 +2141,8 @@ export default function App() {
                         onActivate={sidebar.openContainer}
                         onMove={sidebar.moveContainer}
                         onReset={sidebar.resetContainerLocation}
-                        maximized={sidebar.runtime.secondaryMaximized}
-                        onToggleMaximized={sidebar.toggleSecondaryMaximized}
+                        secondaryMode={secondaryMode}
+                        onToggleMode={sidebar.toggleSecondaryMode}
                         onClose={() => sidebar.closeLocation("secondary")}
                       />
                     ) : null}
@@ -2103,8 +2159,8 @@ export default function App() {
                         onActivate={sidebar.openContainer}
                         onMove={sidebar.moveContainer}
                         onReset={sidebar.resetContainerLocation}
-                        maximized={sidebar.runtime.secondaryMaximized}
-                        onToggleMaximized={sidebar.toggleSecondaryMaximized}
+                        secondaryMode={secondaryMode}
+                        onToggleMode={sidebar.toggleSecondaryMode}
                         onClose={() => sidebar.closeLocation("secondary")}
                       />
                     ) : null}

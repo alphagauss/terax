@@ -16,7 +16,7 @@ function runtime(activeId: "explorer" | "source-control"): SidebarRuntimeState {
     version: 1,
     primary: { activeId, collapsed: false, width: 280 },
     secondary: { activeId: null, collapsed: true, width: 320 },
-    secondaryMaximized: false,
+    secondaryMode: "normal",
   };
 }
 

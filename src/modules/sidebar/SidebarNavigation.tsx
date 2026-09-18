@@ -22,11 +22,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/controls/tooltip";
+import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
+  FullScreenIcon,
   MaximizeScreenIcon,
-  MinimizeScreenIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type PointerEvent, type ReactNode, useEffect, useRef } from "react";
@@ -44,6 +45,7 @@ import type {
   SidebarContainerDefinition,
   SidebarContainerId,
   SidebarLocation,
+  SecondarySidebarMode,
 } from "./types";
 
 export const SIDEBAR_COMPOSITE_BAR_HEIGHT = 36;
@@ -655,22 +657,40 @@ export function SidebarActivityBar({
   );
 }
 
-/** 渲染与 Activity Bar 位置联动的副侧边栏导航及最大化、关闭操作。 */
+/** 渲染与 Activity Bar 位置联动的副侧边栏导航及展示、关闭操作。 */
 export function SecondarySidebarTabs({
   onClose,
-  onToggleMaximized,
-  maximized,
+  onToggleMode,
+  secondaryMode,
   activityBar,
   ...props
 }: SharedNavigationProps & {
   onClose: () => void;
-  onToggleMaximized: () => void;
-  maximized: boolean;
+  onToggleMode: (mode: Exclude<SecondarySidebarMode, "normal">) => void;
+  secondaryMode: SecondarySidebarMode;
 }) {
   const { t } = useTranslation("sidebar");
   if (activityBar.position === "hidden") return null;
   const bottom = activityBar.position === "bottom";
   const appearance = activityBar.position === "default" ? "tabs" : "icons";
+  const modeActions = [
+    {
+      mode: "expanded" as const,
+      active: secondaryMode === "expanded",
+      label:
+        secondaryMode === "expanded" ? "restoreSecondary" : "expandSecondary",
+      icon: MaximizeScreenIcon,
+    },
+    {
+      mode: "maximized" as const,
+      active: secondaryMode === "maximized",
+      label:
+        secondaryMode === "maximized"
+          ? "restoreSecondary"
+          : "maximizeSecondary",
+      icon: FullScreenIcon,
+    },
+  ];
   const bar = (
     <div
       data-sidebar-drop-location="secondary"
@@ -694,36 +714,36 @@ export function SecondarySidebarTabs({
           barPosition={activityBar.position}
         />
       </NavigationViewport>
+      {modeActions.map((action) => (
+        <Tooltip key={action.mode}>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant={action.active ? "secondary" : "ghost"}
+              size="icon-sm"
+              onClick={() => onToggleMode(action.mode)}
+              aria-label={t(action.label)}
+              aria-pressed={action.active}
+            >
+              <HugeiconsIcon icon={action.icon} size={14} strokeWidth={1.8} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side={bottom ? "top" : "bottom"} sideOffset={5}>
+            {t(action.label)}
+          </TooltipContent>
+        </Tooltip>
+      ))}
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
+          <Button
             type="button"
-            onClick={onToggleMaximized}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-control hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
-            aria-label={t(maximized ? "restoreSecondary" : "maximizeSecondary")}
-            aria-pressed={maximized}
-          >
-            <HugeiconsIcon
-              icon={maximized ? MinimizeScreenIcon : MaximizeScreenIcon}
-              size={14}
-              strokeWidth={1.8}
-            />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side={bottom ? "top" : "bottom"} sideOffset={5}>
-          {t(maximized ? "restoreSecondary" : "maximizeSecondary")}
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors duration-control hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/40 motion-reduce:transition-none"
             aria-label={t("closeSecondary")}
           >
             <HugeiconsIcon icon={Cancel01Icon} size={14} strokeWidth={1.8} />
-          </button>
+          </Button>
         </TooltipTrigger>
         <TooltipContent side={bottom ? "top" : "bottom"} sideOffset={5}>
           {t("closeSecondary")}

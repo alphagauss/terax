@@ -44,15 +44,17 @@ import type {
   SidebarLocation,
   SidebarPlacementState,
   SidebarRuntimeState,
+  SecondarySidebarMode,
 } from "./types";
 
 const RUNTIME_STORAGE_KEY = "sidebar-layout:runtime";
 
 type RuntimeUpdater = (current: SidebarRuntimeState) => SidebarRuntimeState;
+type FocusedSecondaryMode = Exclude<SecondarySidebarMode, "normal">;
 
 /**
  * 控制容器激活、位置移动、区域折叠和最终尺寸持久化。
- * 副侧边栏最大化只改变三栏呈现比例，不覆盖用户保存的侧边栏宽度和折叠状态。
+ * 副侧边栏放大和最大化只改变三栏呈现比例，不覆盖用户保存的侧边栏宽度和折叠状态。
  * 临时隐藏期间拒绝可见性操作且不改写持久状态，退出后按原状态恢复布局。
  * 新建临时窗口可在尚无运行时状态时折叠两侧，之后仍遵循窗口自身的持久状态。
  */
@@ -88,22 +90,28 @@ export function useSidebarLayout(
     };
   });
   const [runtime, setRuntime] = useState(initialRuntime);
+  const [restoringSecondaryMode, setRestoringSecondaryMode] =
+    useState<FocusedSecondaryMode | null>(null);
   const workbenchGroupRef = useRef<GroupImperativeHandle | null>(null);
-  const preMaximizedLayoutRef = useRef<Layout | null>(null);
+  const preSecondaryModeLayoutRef = useRef<Layout | null>(null);
   const pendingRestoreLayoutRef = useRef<Layout | null>(null);
+  const secondaryModeLayoutVersionRef = useRef(0);
   const primaryPanelRef = useRef<PanelImperativeHandle | null>(null);
   const secondaryPanelRef = useRef<PanelImperativeHandle | null>(null);
   const placementsRef = useRef(placementState.placements);
   const placementStateRef = useRef(placementState);
   const runtimeRef = useRef(runtime);
+  const restoringSecondaryModeRef = useRef(restoringSecondaryMode);
   const temporarilyHiddenRef = useRef(temporarilyHidden);
   const previousPresentationRef = useRef({
     temporarilyHidden: false,
-    secondaryMaximized: false,
+    secondaryMode: "normal" as SecondarySidebarMode,
+    expandedPrimaryCollapsed: null as boolean | null,
   });
   placementsRef.current = placementState.placements;
   placementStateRef.current = placementState;
   runtimeRef.current = runtime;
+  restoringSecondaryModeRef.current = restoringSecondaryMode;
   temporarilyHiddenRef.current = temporarilyHidden;
 
   const panelRefs = useMemo(
@@ -123,6 +131,23 @@ export function useSidebarLayout(
     setRuntime(next);
     void setWorkspaceValue(RUNTIME_STORAGE_KEY, next);
   }, []);
+
+  const updateRestoringSecondaryMode = useCallback(
+    (mode: FocusedSecondaryMode | null) => {
+      restoringSecondaryModeRef.current = mode;
+      setRestoringSecondaryMode(mode);
+    },
+    [],
+  );
+
+  /** 标记聚焦模式退出，并指定约束更新后要恢复的布局。 */
+  const stageSecondaryModeRestore = useCallback(
+    (mode: FocusedSecondaryMode, layout: Layout | null = null) => {
+      pendingRestoreLayoutRef.current = layout;
+      updateRestoringSecondaryMode(mode);
+    },
+    [updateRestoringSecondaryMode],
+  );
 
   const revealLocation = useCallback(
     (location: SidebarLocation, activeId?: SidebarContainerId) => {
@@ -159,36 +184,172 @@ export function useSidebarLayout(
     [panelRefs],
   );
 
-  /** 让副侧边栏独占可调整面板组，外层活动栏不受影响。 */
-  const maximizeSecondaryLayout = useCallback(() => {
-    workbenchGroupRef.current?.setLayout({
-      "primary-sidebar": 0,
-      workspace: 0,
-      "secondary-sidebar": 100,
-    });
-  }, []);
+  /** 隐藏工作区，并按展示模式决定是否保留主侧边栏。 */
+  const applySecondaryModeLayout = useCallback(
+    (mode: FocusedSecondaryMode) => {
+      const layoutVersion = ++secondaryModeLayoutVersionRef.current;
+      const group = workbenchGroupRef.current;
+      const primaryCollapsed = runtimeRef.current.primary.collapsed;
+      const referenceLayout =
+        preSecondaryModeLayoutRef.current ?? group?.getLayout();
+      const primarySize =
+        mode === "expanded" && !primaryCollapsed
+          ? Math.max(
+              0,
+              Math.min(
+                100,
+                referenceLayout?.["primary-sidebar"] ??
+                  panelRefs.primary.current?.getSize().asPercentage ??
+                  0,
+              ),
+            )
+          : 0;
+      group?.setLayout({
+        "primary-sidebar": primarySize,
+        workspace: 0,
+        "secondary-sidebar": 100 - primarySize,
+      });
+      if (mode === "expanded") {
+        // 面板库会在本次提交中刷新动态约束；微任务在首帧绘制前应用最终主侧栏尺寸。
+        queueMicrotask(() => {
+          if (
+            secondaryModeLayoutVersionRef.current !== layoutVersion ||
+            runtimeRef.current.secondaryMode !== "expanded"
+          ) {
+            return;
+          }
+          if (runtimeRef.current.primary.collapsed) {
+            panelRefs.primary.current?.collapse();
+          } else {
+            revealLocation("primary");
+          }
+        });
+      }
+    },
+    [panelRefs, revealLocation],
+  );
+
+  /** 在普通布局与两种副侧边栏聚焦模式之间共享捕获和恢复流程。 */
+  const setSecondaryMode = useCallback(
+    (mode: SecondarySidebarMode) => {
+      if (temporarilyHiddenRef.current) return false;
+      const current = runtimeRef.current;
+      if (current.secondaryMode === mode) return false;
+      if (mode !== "normal" && current.secondary.collapsed) return false;
+
+      const enteringFocusedMode =
+        current.secondaryMode === "normal" && mode !== "normal";
+      let captureWidths = false;
+      if (enteringFocusedMode) {
+        updateRestoringSecondaryMode(null);
+        if (!preSecondaryModeLayoutRef.current) {
+          const layout = workbenchGroupRef.current?.getLayout();
+          preSecondaryModeLayoutRef.current = layout ? { ...layout } : null;
+          captureWidths = true;
+        }
+        pendingRestoreLayoutRef.current = null;
+      } else if (
+        mode === "normal" &&
+        current.secondaryMode !== "normal"
+      ) {
+        stageSecondaryModeRestore(
+          current.secondaryMode,
+          preSecondaryModeLayoutRef.current,
+        );
+      }
+
+      replaceRuntime((previous) => {
+        const next: SidebarRuntimeState = {
+          ...previous,
+          primary: { ...previous.primary },
+          secondary: { ...previous.secondary },
+          secondaryMode: mode,
+        };
+        if (!captureWidths) return next;
+        for (const location of ["primary", "secondary"] as const) {
+          const size = panelRefs[location].current?.getSize().inPixels ?? 0;
+          if (size <= 0) continue;
+          const baseMin =
+            location === "primary"
+              ? PRIMARY_SIDEBAR_MIN_WIDTH
+              : SECONDARY_SIDEBAR_MIN_WIDTH;
+          next[location].width = clampPanelWidth(size, baseMin);
+        }
+        return next;
+      });
+      return true;
+    },
+    [
+      panelRefs,
+      replaceRuntime,
+      stageSecondaryModeRestore,
+      updateRestoringSecondaryMode,
+    ],
+  );
+
+  const toggleSecondaryMode = useCallback(
+    (mode: FocusedSecondaryMode) =>
+      setSecondaryMode(
+        runtimeRef.current.secondaryMode === mode ? "normal" : mode,
+      ),
+    [setSecondaryMode],
+  );
+
+  /** 主侧边栏内容打开工作区页面前，复用普通布局恢复动作。 */
+  const restoreSecondaryModeForContainer = useCallback(
+    (id: SidebarContainerId) => {
+      if (runtimeRef.current.secondaryMode !== "expanded") return false;
+      if (
+        findSidebarContainerLocation(placementsRef.current, id) !== "primary"
+      ) {
+        return false;
+      }
+      return setSecondaryMode("normal");
+    },
+    [setSecondaryMode],
+  );
 
   const closeLocation = useCallback(
     (location: SidebarLocation) => {
       if (temporarilyHiddenRef.current) return false;
-      if (location === "secondary") pendingRestoreLayoutRef.current = null;
-      panelRefs[location].current?.collapse();
+      if (
+        location === "secondary" &&
+        runtimeRef.current.secondaryMode !== "normal"
+      ) {
+        stageSecondaryModeRestore(runtimeRef.current.secondaryMode);
+      } else if (location === "secondary") {
+        pendingRestoreLayoutRef.current = null;
+      }
+      const deferExpandedPrimaryLayout =
+        location === "primary" &&
+        runtimeRef.current.secondaryMode === "expanded";
+      if (!deferExpandedPrimaryLayout) {
+        panelRefs[location].current?.collapse();
+      }
       replaceRuntime((current) => ({
         ...current,
         [location]: { ...current[location], collapsed: true },
-        secondaryMaximized:
-          location === "secondary" ? false : current.secondaryMaximized,
+        secondaryMode:
+          location === "secondary" ? "normal" : current.secondaryMode,
       }));
       return true;
     },
-    [panelRefs, replaceRuntime],
+    [panelRefs, replaceRuntime, stageSecondaryModeRestore],
   );
 
   const openContainer = useCallback(
     (id: SidebarContainerId) => {
       if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
-      if (location === "primary") pendingRestoreLayoutRef.current = null;
+      if (
+        location === "primary" &&
+        runtimeRef.current.secondaryMode === "maximized"
+      ) {
+        stageSecondaryModeRestore("maximized");
+      }
+      const deferExpandedPrimaryLayout =
+        location === "primary" &&
+        runtimeRef.current.secondaryMode === "expanded";
       replaceRuntime((current) => ({
         ...current,
         [location]: {
@@ -196,13 +357,15 @@ export function useSidebarLayout(
           activeId: id,
           collapsed: false,
         },
-        secondaryMaximized:
-          location === "primary" ? false : current.secondaryMaximized,
+        secondaryMode:
+          location === "primary" && current.secondaryMode === "maximized"
+            ? "normal"
+            : current.secondaryMode,
       }));
-      revealLocation(location, id);
+      if (!deferExpandedPrimaryLayout) revealLocation(location, id);
       return true;
     },
-    [replaceRuntime, revealLocation],
+    [replaceRuntime, revealLocation, stageSecondaryModeRestore],
   );
 
   const toggleContainer = useCallback(
@@ -210,7 +373,10 @@ export function useSidebarLayout(
       if (temporarilyHiddenRef.current) return false;
       const location = findSidebarContainerLocation(placementsRef.current, id);
       const current = runtimeRef.current[location];
-      if (location === "primary" && runtimeRef.current.secondaryMaximized) {
+      if (
+        location === "primary" &&
+        runtimeRef.current.secondaryMode === "maximized"
+      ) {
         return openContainer(id);
       }
       if (current.activeId === id && !current.collapsed) {
@@ -225,7 +391,10 @@ export function useSidebarLayout(
     (location: SidebarLocation) => {
       if (temporarilyHiddenRef.current) return false;
       const current = runtimeRef.current[location];
-      if (location === "primary" && runtimeRef.current.secondaryMaximized) {
+      if (
+        location === "primary" &&
+        runtimeRef.current.secondaryMode === "maximized"
+      ) {
         const activeId =
           current.activeId ?? placementsRef.current.primary[0] ?? null;
         return activeId ? openContainer(activeId) : false;
@@ -239,43 +408,6 @@ export function useSidebarLayout(
     },
     [closeLocation, openContainer],
   );
-
-  /** 捕获完整三栏比例，并在副侧边栏独占主区域和原布局之间切换。 */
-  const toggleSecondaryMaximized = useCallback(() => {
-    if (temporarilyHiddenRef.current) return false;
-    const current = runtimeRef.current;
-    if (current.secondary.collapsed) return false;
-    const maximizing = !current.secondaryMaximized;
-    if (maximizing) {
-      const layout = workbenchGroupRef.current?.getLayout();
-      preMaximizedLayoutRef.current = layout ? { ...layout } : null;
-      pendingRestoreLayoutRef.current = null;
-    } else {
-      pendingRestoreLayoutRef.current = preMaximizedLayoutRef.current;
-    }
-    replaceRuntime((previous) => {
-      if (!maximizing) {
-        return { ...previous, secondaryMaximized: false };
-      }
-      const next: SidebarRuntimeState = {
-        ...previous,
-        primary: { ...previous.primary },
-        secondary: { ...previous.secondary },
-        secondaryMaximized: true,
-      };
-      for (const location of ["primary", "secondary"] as const) {
-        const size = panelRefs[location].current?.getSize().inPixels ?? 0;
-        if (size <= 0) continue;
-        const baseMin =
-          location === "primary"
-            ? PRIMARY_SIDEBAR_MIN_WIDTH
-            : SECONDARY_SIDEBAR_MIN_WIDTH;
-        next[location].width = clampPanelWidth(size, baseMin);
-      }
-      return next;
-    });
-    return true;
-  }, [panelRefs, replaceRuntime]);
 
   const commitPlacementState = useCallback((next: SidebarPlacementState) => {
     placementStateRef.current = next;
@@ -319,9 +451,13 @@ export function useSidebarLayout(
         targetLocation,
         placementStateRef.current.activityBar.hiddenContainerIds,
       );
-      const nextRuntime = movedRuntime.secondaryMaximized
-        ? { ...movedRuntime, secondaryMaximized: false }
-        : movedRuntime;
+      if (movedRuntime.secondaryMode !== "normal") {
+        stageSecondaryModeRestore(movedRuntime.secondaryMode);
+      }
+      const nextRuntime =
+        movedRuntime.secondaryMode !== "normal"
+          ? { ...movedRuntime, secondaryMode: "normal" as const }
+          : movedRuntime;
       replaceRuntime(() => nextRuntime);
 
       if (nextRuntime[sourceLocation].collapsed) {
@@ -329,7 +465,13 @@ export function useSidebarLayout(
       }
       revealLocation(targetLocation, id);
     },
-    [commitPlacementState, panelRefs, replaceRuntime, revealLocation],
+    [
+      commitPlacementState,
+      panelRefs,
+      replaceRuntime,
+      revealLocation,
+      stageSecondaryModeRestore,
+    ],
   );
 
   const resetContainerLocation = useCallback(
@@ -374,6 +516,12 @@ export function useSidebarLayout(
         current.placements,
         effectiveHiddenIds(hiddenContainerIds),
       );
+      if (
+        runtimeRef.current.secondaryMode !== "normal" &&
+        nextRuntime.secondaryMode === "normal"
+      ) {
+        stageSecondaryModeRestore(runtimeRef.current.secondaryMode);
+      }
       replaceRuntime(() => nextRuntime);
       if (nextRuntime[location].collapsed) {
         panelRefs[location].current?.collapse();
@@ -387,6 +535,7 @@ export function useSidebarLayout(
       panelRefs,
       replaceRuntime,
       revealLocation,
+      stageSecondaryModeRestore,
     ],
   );
 
@@ -413,7 +562,10 @@ export function useSidebarLayout(
   );
 
   const commitLayout = useCallback(() => {
-    if (temporarilyHiddenRef.current || runtimeRef.current.secondaryMaximized) {
+    if (
+      temporarilyHiddenRef.current ||
+      runtimeRef.current.secondaryMode !== "normal"
+    ) {
       return;
     }
     replaceRuntime((current) => {
@@ -459,7 +611,7 @@ export function useSidebarLayout(
         id,
       );
       return (
-        (!runtime.secondaryMaximized || location === "secondary") &&
+        (runtime.secondaryMode !== "maximized" || location === "secondary") &&
         runtime[location].activeId === id &&
         !runtime[location].collapsed
       );
@@ -470,19 +622,26 @@ export function useSidebarLayout(
   useLayoutEffect(() => {
     const nextPresentation = {
       temporarilyHidden,
-      secondaryMaximized: runtime.secondaryMaximized,
+      secondaryMode: runtime.secondaryMode,
+      expandedPrimaryCollapsed:
+        runtime.secondaryMode === "expanded"
+          ? runtime.primary.collapsed
+          : null,
     };
     const previous = previousPresentationRef.current;
     if (
       previous.temporarilyHidden === nextPresentation.temporarilyHidden &&
-      previous.secondaryMaximized === nextPresentation.secondaryMaximized
+      previous.secondaryMode === nextPresentation.secondaryMode &&
+      previous.expandedPrimaryCollapsed ===
+        nextPresentation.expandedPrimaryCollapsed
     ) {
       return;
     }
     previousPresentationRef.current = nextPresentation;
     if (temporarilyHidden) {
-      if (previous.secondaryMaximized) {
-        // 与解除最大化同批进入禅模式时，等待动态约束更新后再让工作区独占布局。
+      secondaryModeLayoutVersionRef.current += 1;
+      if (previous.secondaryMode !== "normal") {
+        // 与退出聚焦模式同批进入禅模式时，等待动态约束更新后再让工作区独占布局。
         const frame = requestAnimationFrame(() => {
           workbenchGroupRef.current?.setLayout({
             "primary-sidebar": 0,
@@ -494,25 +653,54 @@ export function useSidebarLayout(
       }
       panelRefs.primary.current?.collapse();
       panelRefs.secondary.current?.collapse();
-    } else if (runtime.secondaryMaximized) {
-      maximizeSecondaryLayout();
+    } else if (runtime.secondaryMode !== "normal") {
+      applySecondaryModeLayout(runtime.secondaryMode);
     } else {
+      const restoreVersion = ++secondaryModeLayoutVersionRef.current;
       const capturedLayout = pendingRestoreLayoutRef.current;
       pendingRestoreLayoutRef.current = null;
-      preMaximizedLayoutRef.current = null;
       const restore = () => {
         if (capturedLayout) {
           workbenchGroupRef.current?.setLayout(capturedLayout);
+          if (runtimeRef.current.primary.collapsed) {
+            panelRefs.primary.current?.collapse();
+          } else if ((capturedLayout["primary-sidebar"] ?? 0) <= 0) {
+            revealLocation("primary");
+          }
         } else {
           restoreRuntimeLayout(runtimeRef.current);
+        }
+        preSecondaryModeLayoutRef.current = null;
+        if (restoringSecondaryModeRef.current !== null) {
+          queueMicrotask(() => {
+            if (runtimeRef.current.secondaryMode === "normal") {
+              updateRestoringSecondaryMode(null);
+            }
+          });
         }
       };
       if (
         !previous.temporarilyHidden &&
-        !previous.secondaryMaximized &&
+        previous.secondaryMode === "normal" &&
         !capturedLayout
       ) {
         restore();
+        return;
+      }
+
+      if (
+        !previous.temporarilyHidden &&
+        restoringSecondaryModeRef.current !== null
+      ) {
+        queueMicrotask(() => {
+          if (
+            secondaryModeLayoutVersionRef.current === restoreVersion &&
+            runtimeRef.current.secondaryMode === "normal" &&
+            !temporarilyHiddenRef.current
+          ) {
+            restore();
+          }
+        });
         return;
       }
 
@@ -527,11 +715,14 @@ export function useSidebarLayout(
       };
     }
   }, [
+    applySecondaryModeLayout,
     panelRefs,
-    maximizeSecondaryLayout,
+    revealLocation,
     restoreRuntimeLayout,
-    runtime.secondaryMaximized,
+    runtime.primary.collapsed,
+    runtime.secondaryMode,
     temporarilyHidden,
+    updateRestoringSecondaryMode,
   ]);
 
   useEffect(() => {
@@ -547,11 +738,22 @@ export function useSidebarLayout(
         next.placements,
         effectiveHiddenIds(next.activityBar.hiddenContainerIds),
       );
+      if (
+        runtimeRef.current.secondaryMode !== "normal" &&
+        nextRuntime.secondaryMode === "normal"
+      ) {
+        stageSecondaryModeRestore(runtimeRef.current.secondaryMode);
+      }
       replaceRuntime(() => nextRuntime);
       requestAnimationFrame(() => {
-        if (temporarilyHiddenRef.current) return;
-        if (nextRuntime.secondaryMaximized) {
-          maximizeSecondaryLayout();
+        if (
+          temporarilyHiddenRef.current ||
+          runtimeRef.current !== nextRuntime
+        ) {
+          return;
+        }
+        if (nextRuntime.secondaryMode !== "normal") {
+          applySecondaryModeLayout(nextRuntime.secondaryMode);
         } else {
           restoreRuntimeLayout(nextRuntime);
         }
@@ -565,10 +767,11 @@ export function useSidebarLayout(
       dispose?.();
     };
   }, [
+    applySecondaryModeLayout,
     effectiveHiddenIds,
-    maximizeSecondaryLayout,
     replaceRuntime,
     restoreRuntimeLayout,
+    stageSecondaryModeRestore,
   ]);
 
   useEffect(() => {
@@ -579,8 +782,14 @@ export function useSidebarLayout(
         placementStateRef.current.activityBar.hiddenContainerIds,
       ),
     );
+    if (
+      runtimeRef.current.secondaryMode !== "normal" &&
+      nextRuntime.secondaryMode === "normal"
+    ) {
+      stageSecondaryModeRestore(runtimeRef.current.secondaryMode);
+    }
     replaceRuntime(() => nextRuntime);
-  }, [effectiveHiddenIds, replaceRuntime]);
+  }, [effectiveHiddenIds, replaceRuntime, stageSecondaryModeRestore]);
 
   const availableContainers = useMemo(
     () =>
@@ -604,13 +813,16 @@ export function useSidebarLayout(
     placements: availablePlacements,
     activityBar: placementState.activityBar,
     runtime,
+    restoringSecondaryMode,
     initialRuntime,
     workbenchGroupRef,
     panelRefs,
     openContainer,
     toggleContainer,
     toggleLocation,
-    toggleSecondaryMaximized,
+    setSecondaryMode,
+    toggleSecondaryMode,
+    restoreSecondaryModeForContainer,
     closeLocation,
     moveContainer,
     resetContainerLocation,
