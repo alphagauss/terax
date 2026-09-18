@@ -118,12 +118,12 @@ export function AiSidebarComposer() {
           }}
         />
 
-        <AiComposerInput />
         {c.pendingSteering > 0 ? (
           <p role="status" className="px-1 text-xs text-muted-foreground">
             {t("composer.pendingSteering", { count: c.pendingSteering })}
           </p>
         ) : null}
+        <AiComposerInput />
 
         <div className="terax-ai-composer-toolbar flex min-w-0 items-center gap-0.5">
           <IconBtn
