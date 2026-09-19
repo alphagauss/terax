@@ -485,6 +485,11 @@ export function ModelsSection() {
         customProviders={customProviders}
       />
 
+      <CompactionCard
+        models={availableModels}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+      />
       <CommitMessageCard
         models={availableModels}
         providerBaseURLs={providerBaseURLs}
@@ -820,6 +825,71 @@ function SubagentCard({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 压缩默认跟随本轮模型和参数，运行选择与参数编辑分别保存。 */
+function CompactionCard({
+  models,
+  providerBaseURLs,
+  customProviders,
+}: {
+  models: readonly ModelRef[];
+  providerBaseURLs: Readonly<ProviderBaseURLs>;
+  customProviders: readonly ProviderInstance[];
+}) {
+  const { t } = useTranslation();
+  const usage = usePreferencesStore((state) => state.modelUsages.compaction);
+  const definitions = usePreferencesStore((state) => state.modelParameters);
+  const [preview, setPreview] = useState<ModelRef | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const model = preview ?? usage.model ?? models[0] ?? null;
+  return (
+    <div className="flex flex-col gap-field">
+      <SectionHeading>{t("models.compaction.title")}</SectionHeading>
+      <FieldRow label={t("models.parameters.model")}>
+        <ModelPicker
+          model={usage.model}
+          models={models}
+          providerBaseURLs={providerBaseURLs}
+          customProviders={customProviders}
+          inheritLabel={t("models.defaults.followChatModel")}
+          onSelect={(value) => {
+            setError(null);
+            void setModelUsageModel("compaction", value).catch((e) =>
+              setError(String(e)),
+            );
+          }}
+        />
+      </FieldRow>
+      <ModelRequestSettings
+        model={model}
+        models={models}
+        providerBaseURLs={providerBaseURLs}
+        customProviders={customProviders}
+        parameters={model ? (definitions[modelRefKey(model)] ?? []) : []}
+        selections={
+          model ? (usage.parameterSelections[modelRefKey(model)] ?? {}) : {}
+        }
+        onSelect={setPreview}
+        onParametersChange={(selections) => {
+          if (model) {
+            setError(null);
+            void setModelUsageParameters("compaction", model, selections).catch(
+              (e) => setError(String(e)),
+            );
+          }
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        {t("models.compaction.followHelp")}
+      </p>
+      {error && (
+        <p role="alert" className="text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

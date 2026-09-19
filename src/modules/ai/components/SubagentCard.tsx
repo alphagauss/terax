@@ -3,7 +3,6 @@
  * 卡片展示实时最新动作、任务入参、工具过程和最终结果，不渲染子智能体推理正文。
  */
 
-import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
 import { Shimmer } from "@/components/controls/shimmer";
@@ -321,12 +320,7 @@ function ResultPanel({
       </div>
     );
   }
-  const content =
-    result?.result ??
-    (result?.error?.includes(CONTEXT_BUDGET_ERROR)
-      ? t("chat.contextBudgetExceeded")
-      : result?.error) ??
-    "";
+  const content = result?.result ?? result?.error ?? "";
   if (!content) {
     return (
       <div className="rounded-md bg-muted/25 px-2 py-1.5 text-[11px] text-muted-foreground">

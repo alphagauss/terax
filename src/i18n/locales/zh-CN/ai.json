@@ -195,10 +195,9 @@
       "tool": "正在使用 {{tool}}"
     },
     "continuePrompt": "从你停下的地方继续。不要复述，直接接着做。",
-    "contextBudgetExceeded": "当前请求超出可用上下文预算。请减少输入内容，或选择上下文窗口更大的模型。",
     "somethingWentWrong": "出错了。",
     "dismiss": "忽略",
-    "contextCompacted": "上下文已压缩，较早的历史和工具结果已精简。",
+    "contextCompacted": "会话已压缩",
     "hitStepLimit": "已达到步数上限。继续以接着运行。",
     "continue": "继续",
     "copy": "复制消息",
@@ -258,7 +257,9 @@
     "scrollToLatest": "前往最新输出并恢复跟随",
     "userMessageFallback": "[附件或上下文]",
     "guided": "已引导",
-    "runFailed": "模型请求失败，本轮未正常完成：{{error}}"
+    "runFailed": "模型请求失败，本轮未正常完成：{{error}}",
+    "compacting": "会话压缩中",
+    "compactionFailed": "压缩未生成完整摘要，原有上下文已保留。"
   },
   "filePicker": {
     "workspaceFiles": "工作区文件",
@@ -295,7 +296,9 @@
     "running": "执行中",
     "unconfirmed": "执行结果未确认",
     "failed": "失败",
-    "completed": "已完成"
+    "completed": "已完成",
+    "compactDescription": "压缩会话上下文，可附加保留重点",
+    "compacted": "压缩处理完成；原始历史记录已保留。"
   },
   "whisper": {
     "transcriptionFailed": "转写失败",

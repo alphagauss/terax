@@ -433,7 +433,7 @@ export function AiComposerProvider({ children }: ProviderProps) {
     const store = useChatStore.getState();
     store.patchAgentMeta(sessionId, {
       hitStepCap: false,
-      compactionNotice: null,
+      compacting: false,
     });
     // 接入确认前禁止重复提交同一份草稿，运行中双击不能变成两条引导。
     submittingRef.current = true;

@@ -15,7 +15,7 @@ import type {
   ExternalAgentBinding,
   ExternalAgentId,
 } from "@/modules/ai/external-agents/runtime";
-import { runAgentStream } from "@/modules/ai/lib/agent";
+import { runAgentStream, type RunAgentOptions } from "@/modules/ai/lib/agent";
 import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import type { TurnEvent } from "@/modules/ai/lib/conversation";
 import { formatAiError } from "@/modules/ai/lib/errors";
@@ -60,7 +60,8 @@ export type SessionTransportDependencies = {
     model: ModelRef;
     parameters: ParameterAssignment[];
   }) => void;
-  onCompact?: (info: { droppedCount: number }) => void;
+  getCompactionConfiguration?: RunAgentOptions["getCompactionConfiguration"];
+  onCompacting?: (compacting: boolean) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onSubagentDisplay?: (state: SubagentDisplayState) => void;
   onSystemPrompt?: (
@@ -212,7 +213,13 @@ export function createSessionTransport(deps: SessionTransportDependencies) {
       allowedTools: agent.tools,
       toolContext: deps.toolContext,
       turnId,
-      onCompact: deps.onCompact,
+      getCompactionConfiguration: deps.getCompactionConfiguration,
+      onCompacting: deps.onCompacting,
+      compactOnly:
+        typeof (options.body as { compaction?: unknown } | undefined)
+          ?.compaction === "string"
+          ? (options.body as { compaction: string }).compaction
+          : undefined,
       onFinishMeta: deps.onFinishMeta,
       onSubagentDisplay: deps.onSubagentDisplay,
       onSystemPrompt: deps.onSystemPrompt,

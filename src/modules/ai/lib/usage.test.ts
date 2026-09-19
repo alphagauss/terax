@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { LanguageModelUsage, ModelMessage } from "ai";
 import { createContextUsage } from "./contextUsage";
 import { normalizeUsage, summarizeOutput } from "./usage";
@@ -208,28 +208,27 @@ describe("request usage", () => {
     ).toBeLessThan(1000);
   });
 
-  it("checks every step, preserves tool pairs when compacting and rejects oversized current input", async () => {
-    const onCompact = vi.fn();
+  it("records oversized requests without trimming or rejecting the context", async () => {
     const tracker = await createContextUsage({
       ...options,
       contextWindow: 2000,
-      onCompact,
     });
     const history: ModelMessage[] = [
       { role: "user", content: "旧问题" },
       { role: "assistant", content: "旧回答".repeat(1000) },
       { role: "user", content: "当前问题" },
     ];
-    const compact = await tracker.prepareStep({ messages: history });
-    expect(compact.messages).toEqual([history[2]]);
-    expect(onCompact).toHaveBeenCalled();
+    expect((await tracker.prepareStep({ messages: history })).messages).toBe(
+      history,
+    );
     tracker.finish(usage);
-    await expect(
-      tracker.prepareStep({
-        messages: [{ role: "user", content: "中文".repeat(3000) }],
-      }),
-    ).rejects.toThrow("context budget");
+    const oversized: ModelMessage[] = [
+      { role: "user", content: "中文".repeat(3000) },
+    ];
+    expect((await tracker.prepareStep({ messages: oversized })).messages).toBe(
+      oversized,
+    );
     tracker.finish();
-    expect(usageRecords(sessionId)).toHaveLength(1);
+    expect(usageRecords(sessionId)).toHaveLength(2);
   });
 });

@@ -1,113 +1,152 @@
-import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { compactModelMessagesDetailed, estimateMessageTokens } from "./compact";
+import type { UIMessage } from "ai";
+import { planCompaction, type CompactionEvent } from "@/modules/ai/lib/compact";
+import { appendTextAttachment } from "@/modules/ai/lib/messageAttachments";
+import {
+  convertToAgentModelMessages,
+  conversationEventPart,
+  expandConversationMessages,
+  projectSessionMessages,
+  serializeSessionMessages,
+} from "@/modules/ai/lib/conversation";
 
-const BIG = "x".repeat(2000);
+const user = (id: string): UIMessage => ({
+  id,
+  role: "user",
+  parts: [{ type: "text", text: id }],
+});
+const answer = (id: string): UIMessage => ({
+  id,
+  role: "assistant",
+  parts: [
+    { type: "step-start" },
+    { type: "reasoning", text: `thinking-${id}` },
+    {
+      type: "tool-read_file",
+      toolCallId: id,
+      state: "output-available",
+      input: { path: "a.ts" },
+      output: `code-${id}`,
+    },
+    { type: "step-start" },
+    { type: "text", text: `final-${id}` },
+  ],
+});
+const checkpoint = (
+  id: string,
+  throughUserMessageId: string,
+): CompactionEvent => ({
+  event: "compaction",
+  id,
+  throughUserMessageId,
+  summary: `handoff-${id}`,
+});
+const event = (value: CompactionEvent): UIMessage => ({
+  id: `event-${value.id}`,
+  role: "assistant",
+  parts: [conversationEventPart(value)],
+});
 
-function readCall(id: string, path: string): ModelMessage {
-  return {
-    role: "assistant",
-    content: [
+describe("compaction checkpoints", () => {
+  it("keeps original history, removes covered attachments/process only, and replays multiple summaries identically", async () => {
+    const attachment = appendTextAttachment("request", {
+      name: "a.txt",
+      mediaType: "text/plain",
+      size: 4,
+      text: "file-body",
+    });
+    const first = user("u1");
+    first.parts = [
+      { type: "text", text: attachment.text },
       {
-        type: "tool-call",
-        toolCallId: id,
-        toolName: "read_file",
-        input: { path },
-      },
-    ],
-  } as unknown as ModelMessage;
-}
-
-function readResult(id: string, value: string): ModelMessage {
-  return {
-    role: "tool",
-    content: [
-      { type: "tool-result", toolCallId: id, output: { type: "text", value } },
-    ],
-  } as unknown as ModelMessage;
-}
-
-function outputOf(message: ModelMessage): { __elided?: boolean } {
-  const parts = message.content as Array<{ output?: { __elided?: boolean } }>;
-  return parts[0].output ?? {};
-}
-
-function isElided(message: ModelMessage): boolean {
-  return outputOf(message).__elided === true;
-}
-
-describe("compactModelMessagesDetailed", () => {
-  it("does not count media encoding as text tokens", () => {
-    const image = (data: string): ModelMessage[] => [
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "中文" },
-          { type: "image", image: data },
-        ],
+        type: "file",
+        mediaType: "image/png",
+        url: "data:image/png;base64,YQ==",
       },
     ];
-    expect(estimateMessageTokens(image("a"))).toBe(
-      estimateMessageTokens(image("a".repeat(100000))),
-    );
-  });
-
-  it("preserves system instructions and complete current tool pairs when dropping old turns", () => {
-    const system: ModelMessage = { role: "system", content: "永久指令" };
-    const current: ModelMessage[] = [
-      { role: "user", content: "当前问题" },
-      readCall("new", "/new"),
-      readResult("new", "小结果"),
-    ];
-    const result = compactModelMessagesDetailed(
-      [
-        system,
-        { role: "user", content: BIG.repeat(5) },
-        { role: "assistant", content: "旧回答" },
-        ...current,
+    first.metadata = {
+      attachments: [
+        attachment.attachment,
+        { kind: "image", name: "image", size: 1, mediaIndex: 0 },
       ],
-      1500,
+    };
+    const original = [first, answer("a1"), user("u2"), answer("a2")];
+    const snapshot = structuredClone(original);
+    const plan = planCompaction(expandConversationMessages(original), true);
+    expect(plan?.throughUserMessageId).toBe("u1");
+    const firstPass = [...original, event(checkpoint("c1", "u1"))];
+    const context = JSON.stringify(
+      await convertToAgentModelMessages(firstPass),
     );
-    expect(result.messages).toEqual([system, ...current]);
+    expect(context).not.toContain("file-body");
+    expect(context).not.toContain("image/png");
+    expect(context).not.toContain("code-a1");
+    expect(context).toContain("final-a1");
+    expect(context).toContain("code-a2");
+    expect(
+      planCompaction(expandConversationMessages(firstPass), true),
+    ).toBeNull();
+    // 第二轮原先在摘要之前受到保护，下一次仍须压缩它。
+    const secondPass = [...firstPass, user("u3"), answer("a3")];
+    expect(
+      planCompaction(expandConversationMessages(secondPass), true)
+        ?.throughUserMessageId,
+    ).toBe("u2");
+    secondPass.push(event(checkpoint("c2", "u2")));
+    const model = await convertToAgentModelMessages(secondPass);
+    const text = JSON.stringify(model);
+    expect(text).toContain("handoff-c1");
+    expect(text).toContain("handoff-c2");
+    expect(text).not.toContain("code-a2");
+    expect(text).toContain("code-a3");
+    const records = secondPass.flatMap((message, index) =>
+      serializeSessionMessages([message], {
+        timestamp: "2026-09-19T00:00:00Z",
+        turnId: `turn-${index}`,
+      }),
+    );
+    expect(
+      await convertToAgentModelMessages(projectSessionMessages("s", records)),
+    ).toEqual(model);
+    expect(original).toEqual(snapshot);
+    expect(JSON.stringify(records)).toContain("file-body");
   });
 
-  it("returns the input untouched when it fits the context budget", () => {
-    const messages = [{ role: "user", content: "hi" }] as ModelMessage[];
-    const result = compactModelMessagesDetailed(messages, 6000);
-    expect(result.compacted).toBe(false);
-    expect(result.messages).toBe(messages);
-  });
-
-  it("elides older tool results only over budget and preserves recent reads even after writes", () => {
-    const messages: ModelMessage[] = [
-      { role: "user", content: "检查文件" },
-      readCall("c1", "/a.txt"),
-      readResult("c1", BIG.repeat(3)),
-      { role: "assistant", content: "已检查" },
-      {
-        role: "assistant",
-        content: [
+  it("protects the entire active turn including guidance and produces no checkpoint for plain conversation", () => {
+    const guide = { ...user("guide"), metadata: { guided: true } };
+    const messages = [
+      user("u1"),
+      answer("a1"),
+      user("u2"),
+      answer("a2"),
+      guide,
+      answer("a3"),
+    ];
+    expect(planCompaction(messages, true)?.throughUserMessageId).toBe("u1");
+    expect(
+      planCompaction(
+        [
+          user("u"),
           {
-            type: "tool-call",
-            toolCallId: "write",
-            toolName: "write_file",
-            input: { path: "/a.txt" },
+            id: "a",
+            role: "assistant",
+            parts: [{ type: "text", text: "answer" }],
           },
         ],
-      },
-      readResult("write", "written"),
-      readCall("c2", "/a.txt"),
-      readResult("c2", "最新内容"),
-    ];
-    expect(compactModelMessagesDetailed(messages, 10000).messages).toBe(
-      messages,
-    );
-    const once = compactModelMessagesDetailed(messages, 4000);
-    expect(isElided(once.messages[2])).toBe(true);
-    expect(once.messages.slice(-4)).toEqual(messages.slice(-4));
-    expect(messages[2]).toEqual(readResult("c1", BIG.repeat(3)));
-    const twice = compactModelMessagesDetailed(once.messages, 4000);
-    expect(twice.compacted).toBe(false);
-    expect(twice.messages).toBe(once.messages);
+        false,
+      ),
+    ).toBeNull();
+  });
+
+  it("does not summarize changes to plain user text part structure", () => {
+    const message: UIMessage = {
+      id: "multipart",
+      role: "user",
+      parts: [
+        { type: "text", text: "first", state: "done" },
+        { type: "text", text: "second" },
+      ],
+    };
+    expect(planCompaction([message], false)).toBeNull();
   });
 });

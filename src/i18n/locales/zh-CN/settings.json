@@ -483,6 +483,11 @@
       "sendMode": "发送方式",
       "sendValue": "发送值",
       "duplicateOmit": "每个参数最多添加一个“不发送”选项。"
+    },
+    "compaction": {
+      "title": "上下文压缩",
+      "followHelp": "默认跟随本轮对话的模型和参数；此处选值覆盖对应参数。更换模型或参数可能影响压缩请求的缓存命中。",
+      "unavailable": "压缩模型不可用，请在设置中重新选择。"
     }
   },
   "agents": {
