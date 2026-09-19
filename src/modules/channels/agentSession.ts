@@ -3,6 +3,8 @@
  * 不修改活动聊天、输入草稿或全局模型权限；最终回复只在本轮持久化完成后交给投递出口。
  */
 
+import { startChatCompaction } from "@/modules/ai/store/chatRuntime";
+
 import { channelOwnerId } from "@/modules/channels/identity";
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
 import { parseCommand } from "@/modules/ai/commands/registry";
@@ -144,6 +146,21 @@ export async function runChannelTurn(
       channelId: await channelOwnerId(connection),
       hasAttachments: message.attachments.length > 0,
       signal,
+      startCompaction: async (instructions) => {
+        const prefs = usePreferencesStore.getState();
+        const config = resolveModelUsage(
+          getModelUsage(prefs.modelUsages, channelModelUsageId(connection.id)),
+          prefs.modelParameters,
+          prefs.defaultModel,
+        );
+        if (!config) throw new ChannelError("model");
+        await startChatCompaction(
+          connection.sessionId,
+          instructions,
+          { id: await channelOwnerId(connection), ...config },
+          signal,
+        );
+      },
       startTask: async (input) => {
         task = (
           await startChannelAgentTurn(connection, message, signal, ready, input)

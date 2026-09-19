@@ -9,6 +9,11 @@ import {
 } from "@/modules/ai/agents/subagentDisplay";
 import type { ModelMessage, UIMessage } from "ai";
 import {
+  compactionSummaryText,
+  projectCompactedMessages,
+  type CompactionEvent,
+} from "@/modules/ai/lib/compact";
+import {
   isFileEditSnapshot,
   mergeFileEdits,
   type FileEditSnapshot,
@@ -75,7 +80,10 @@ export type SessionMessage = {
   | { role: "delivery"; content: DeliveryRecord }
   | { role: "command"; content: CommandRecord }
   | { role: "usage"; content: UsageRecord }
-  | { role: "event"; content: SubagentResultEvent | RunFailureEvent }
+  | {
+      role: "event";
+      content: SubagentResultEvent | RunFailureEvent | CompactionEvent;
+    }
   | { role: "display"; content: SubagentDisplaySnapshot | FileEditSnapshot }
 );
 
@@ -124,9 +132,10 @@ export type SubagentResultEvent = {
 };
 
 export type SteeringEvent = { event: "user_steering"; message: UIMessage };
-export type TurnEvent = SteeringEvent | SubagentResultEvent;
+export type TurnEvent = SteeringEvent | SubagentResultEvent | CompactionEvent;
 
 type ConversationMetadata = {
+  compaction?: CompactionEvent;
   runFailure?: RunFailureEvent;
   attachments?: AttachmentDisplay[];
   commandId?: string;
@@ -205,7 +214,10 @@ export function conversationEventPart(
   event: TurnEvent,
 ):
   | { type: "data-user-steering"; data: SteeringEvent }
-  | { type: "data-subagent-result"; data: { event: SubagentResultEvent } } {
+  | { type: "data-subagent-result"; data: { event: SubagentResultEvent } }
+  | { type: "data-compaction"; data: CompactionEvent } {
+  if (event.event === "compaction")
+    return { type: "data-compaction", data: event };
   return event.event === "user_steering"
     ? { type: "data-user-steering", data: event }
     : { type: "data-subagent-result", data: { event } };
@@ -226,7 +238,7 @@ function isSteeringPart(part: unknown): part is {
 }
 
 /** 按事件切开 SDK assistant；所有出口共享顺序与引导语义，空尾段仅供流式展示。 */
-function expandConversationMessages(
+export function expandConversationMessages(
   messages: readonly UIMessage[],
   includeResults = true,
 ): UIMessage[] {
@@ -236,30 +248,50 @@ function expandConversationMessages(
     let parts: UIMessage["parts"] = [];
     let id = message.id;
     for (const part of message.parts) {
-      if (!isSteeringPart(part) && !isSubagentResultDataPart(part)) {
+      if (
+        !isSteeringPart(part) &&
+        !isSubagentResultDataPart(part) &&
+        part.type !== "data-compaction"
+      ) {
         parts.push(part);
         continue;
       }
       if (!includeResults && isSubagentResultDataPart(part)) continue;
       if (parts.length) expanded.push({ ...message, id, parts });
-      if (isSteeringPart(part)) {
+      if (part.type === "data-compaction") {
+        const event = part.data as CompactionEvent;
+        expanded.push({
+          id: event.id,
+          role: "user",
+          parts: [],
+          metadata: { compaction: event },
+        });
+        id = `${message.id}:after:${event.id}`;
+      } else if (isSteeringPart(part)) {
         const user = part.data.message;
         expanded.push({
           ...user,
           metadata: { ...messageMetadata(user), guided: true },
         });
         id = `${message.id}:after:${user.id}`;
-      } else {
+      } else if (isSubagentResultDataPart(part)) {
         expanded.push({
           id: `${id}:result:${expanded.length}`,
           role: "user",
           parts: [],
-          metadata: { subagentResult: part.data.event },
+          metadata: {
+            subagentResult: part.data.event,
+          },
         });
       }
       parts = [];
     }
-    if (parts.length || !expanded.length || !includeResults)
+    if (
+      parts.length ||
+      !expanded.length ||
+      (!includeResults &&
+        message.parts[message.parts.length - 1]?.type !== "data-compaction")
+    )
       expanded.push({ ...message, id, parts });
     return expanded;
   });
@@ -270,8 +302,18 @@ export async function convertToAgentModelMessages(
   messages: readonly UIMessage[],
 ): Promise<ModelMessage[]> {
   const input: UIMessage[] = [];
-  for (const message of expandConversationMessages(messages)) {
+  for (const message of projectCompactedMessages(
+    expandConversationMessages(messages),
+  )) {
     const meta = messageMetadata(message);
+    if (meta.compaction) {
+      input.push({
+        id: message.id,
+        role: "user",
+        parts: [{ type: "text", text: compactionSummaryText(meta.compaction) }],
+      });
+      continue;
+    }
     if (meta.runFailure) {
       input.push({
         id: message.id,
@@ -332,6 +374,7 @@ export function projectConversationDisplay(
     if (
       !message.parts.some(
         (part) =>
+          part.type === "data-compaction" ||
           isSteeringPart(part) ||
           isSubagentResultDataPart(part) ||
           isSubagentDisplayDataPart(part) ||
@@ -507,6 +550,12 @@ export function projectSessionMessages(
       return;
     }
     if (record.role === "event") {
+      if (record.content.event === "compaction") {
+        ensureAssistant(index, record.turn_id, timestamp).push(
+          conversationEventPart(record.content),
+        );
+        return;
+      }
       if (record.content.event === "run_failure") {
         flushAssistant();
         messages.push(
@@ -696,6 +745,16 @@ export function serializeSessionMessages(
   options: AppendOptions,
 ): SessionMessage[] {
   return expandConversationMessages(messages).flatMap((message) => {
+    const compaction = messageMetadata(message).compaction;
+    if (compaction)
+      return [
+        {
+          role: "event" as const,
+          content: compaction,
+          timestamp: options.timestamp,
+          turn_id: options.turnId,
+        },
+      ];
     const failure = messageMetadata(message).runFailure;
     if (failure)
       return [

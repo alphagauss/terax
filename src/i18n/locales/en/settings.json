@@ -483,6 +483,11 @@
       "sendMode": "Send mode",
       "sendValue": "Send value",
       "duplicateOmit": "Each parameter can have at most one omitted option."
+    },
+    "compaction": {
+      "title": "Context compaction",
+      "followHelp": "Inherits the current conversation model and parameters unless overridden here. Changing them may reduce cache reuse for compaction.",
+      "unavailable": "The compaction model is unavailable. Select a model in settings."
     }
   },
   "agents": {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { modelRefKey } from "@/modules/ai/config";
 import type { ModelParameter } from "@/modules/ai/lib/modelParameters";
-import { readModelUsages, resolveModelUsage } from "./modelUsage";
+import {
+  readModelUsages,
+  resolveModelUsage,
+  resolveCompactionUsage,
+} from "./modelUsage";
 
 const model = { providerId: "builtin:openai", modelId: "test" };
 const other = { ...model, providerId: "builtin:deepseek" };
@@ -22,6 +26,33 @@ const parameter: ModelParameter = {
 };
 
 describe("model usage snapshots", () => {
+  it("压缩继承实际父参数，显式覆盖支持不发送，换模型不继承父参数", () => {
+    const usage = readModelUsages({}).compaction;
+    const definitions = {
+      [modelRefKey(model)]: [parameter],
+      [modelRefKey(other)]: [parameter],
+    };
+    const parent = [
+      { target: "provider" as const, path: "reasoning_effort", value: "low" },
+    ];
+    expect(
+      resolveCompactionUsage(usage, definitions, model, parent).parameters,
+    ).toEqual(parent);
+    usage.parameterSelections[modelRefKey(model)] = { effort: "omit" };
+    expect(
+      resolveCompactionUsage(usage, definitions, model, parent).parameters,
+    ).toEqual([]);
+    usage.parameterSelections[modelRefKey(model)] = { effort: "high" };
+    expect(
+      resolveCompactionUsage(usage, definitions, model, parent).parameters[0]
+        .value,
+    ).toBe("high");
+    usage.model = other;
+    expect(
+      resolveCompactionUsage(usage, definitions, model, parent),
+    ).toMatchObject({ model: other, parameters: [{ value: "high" }] });
+  });
+
   it("selects saved parameters using the actual followed or explicit model", () => {
     const usage = readModelUsages({}).subagent;
     const definitions = {

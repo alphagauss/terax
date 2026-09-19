@@ -1,12 +1,11 @@
-/** 每次模型请求前管理上下文预算，模型响应完成或中止时记录用量；不依赖展示生命周期。 */
+/** 每次模型请求记录输入基线，完成或中止时保存用量；不裁剪或拦截请求，不依赖展示生命周期。 */
 
-import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
 import type { ModelRef } from "@/modules/ai/config";
 import {
-  compactModelMessagesDetailed,
   estimateMessageTokens,
-} from "@/modules/ai/lib/compact";
-import { estimateTokens, normalizeUsage } from "@/modules/ai/lib/usage";
+  estimateTokens,
+  normalizeUsage,
+} from "@/modules/ai/lib/usage";
 import { recordUsage, usageRecords } from "@/modules/ai/lib/usageRuntime";
 import {
   asSchema,
@@ -24,7 +23,7 @@ export async function createContextUsage(options: {
   contextWindow: number;
   instructions: unknown;
   tools?: ToolSet;
-  onCompact?: (info: { droppedCount: number }) => void;
+  purpose?: "compaction";
 }) {
   const definitions = await Promise.all(
     Object.entries(options.tools ?? {}).map(async ([name, tool]) => ({
@@ -41,7 +40,10 @@ export async function createContextUsage(options: {
   const overheadHash = await fingerprint(overheadText);
   const previous = [...usageRecords(options.sessionId)]
     .reverse()
-    .find((record) => record.taskId === options.taskId);
+    .find(
+      (record) =>
+        record.taskId === options.taskId && record.purpose === options.purpose,
+    );
   let restored =
     previous?.model.providerId === options.model.providerId &&
     previous.model.modelId === options.model.modelId &&
@@ -109,6 +111,7 @@ export async function createContextUsage(options: {
       id: pending.id,
       turnId: options.turnId,
       taskId: options.taskId,
+      ...(options.purpose ? { purpose: options.purpose } : {}),
       model: options.model,
       contextWindow: options.contextWindow,
       ...normalized,
@@ -150,23 +153,17 @@ export async function createContextUsage(options: {
           };
         restored = undefined;
       }
-      // 输入预算之外保留输出空间；粗估另留余量，不能把 0.8 系数当作硬上限。
-      const budget = options.contextWindow * 0.8;
-      const compact = compactModelMessagesDetailed(messages, budget, estimate);
-      if (compact.compacted)
-        options.onCompact?.({ droppedCount: compact.droppedCount });
-      const input = estimate(compact.messages);
-      if (input >= budget) throw new Error(CONTEXT_BUDGET_ERROR);
+      const input = estimate(messages);
       pending = {
         id: crypto.randomUUID(),
-        messages: compact.messages,
+        messages,
         input,
         outputChars: 0,
         toolInputs: new Map(),
         toolCalls: new Set(),
-        prefixHash: await fingerprint(JSON.stringify(compact.messages)),
+        prefixHash: await fingerprint(JSON.stringify(messages)),
       };
-      return { messages: compact.messages };
+      return { messages };
     },
     observe(chunk: {
       type: string;

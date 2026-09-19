@@ -13,7 +13,7 @@ import {
 import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
 import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
 import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
-import { CONTEXT_BUDGET_ERROR } from "@/modules/ai/lib/errors";
+import { Shimmer } from "@/components/controls/shimmer";
 import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditContext } from "@/modules/ai/components/FileEditStats";
 import { FileEditTool } from "@/modules/ai/components/FileEditTool";
@@ -404,7 +404,11 @@ export function AiChatView({
   const latestUserMessageId = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
-      if (message.role === "user" && !messageMetadata(message).commandId) {
+      if (
+        message.role === "user" &&
+        !messageMetadata(message).commandId &&
+        !messageMetadata(message).compaction
+      ) {
         return message.id;
       }
     }
@@ -446,7 +450,7 @@ export function AiChatView({
   const meta = useChatStore((state) =>
     getAgentMetaForSession(state, sessionId),
   );
-  const { hitStepCap, compactionNotice } = meta;
+  const { hitStepCap, compacting } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
     !isBusy && hitStepCap && lastMessage?.role === "assistant";
@@ -513,7 +517,7 @@ export function AiChatView({
                 <RenderedMessage
                   sessionId={sessionId}
                   message={m}
-                  streaming={m.id === streamingMessageId}
+                  streaming={m.id === streamingMessageId && !compacting}
                   appearing={m.id === appearingUserMessageId}
                 />
               ) : null}
@@ -523,15 +527,12 @@ export function AiChatView({
             </Fragment>
           ))}
         </div>
-        {compactionNotice && (
-          <CompactionNotice
-            droppedCount={compactionNotice.droppedCount}
-            onDismiss={() =>
-              patchAgentMeta(sessionId, { compactionNotice: null })
-            }
-          />
+        {compacting && (
+          <div role="status" className="text-xs text-muted-foreground">
+            <Shimmer>{t("chat.compacting")}</Shimmer>
+          </div>
         )}
-        {showPendingResponse ? (
+        {showPendingResponse && !compacting ? (
           <div
             className="flex h-[22px] items-center text-foreground"
             role="status"
@@ -551,11 +552,7 @@ export function AiChatView({
         {error && !(lastMessage && messageMetadata(lastMessage).runFailure) && (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             <div className="font-medium">{t("chat.somethingWentWrong")}</div>
-            <div className="mt-0.5 leading-relaxed">
-              {error.message.includes(CONTEXT_BUDGET_ERROR)
-                ? t("chat.contextBudgetExceeded")
-                : error.message}
-            </div>
+            <div className="mt-0.5 leading-relaxed">{error.message}</div>
             <button
               type="button"
               onClick={clearError}
@@ -624,31 +621,6 @@ function CommandCard({ command }: { command: CommandDisplay }) {
   );
 }
 
-const CompactionNotice = memo(function CompactionNotice({
-  droppedCount,
-  onDismiss,
-}: {
-  droppedCount: number;
-  onDismiss: () => void;
-}) {
-  const { t } = useTranslation("ai");
-  return (
-    <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
-      <span className="size-1.5 shrink-0 rounded-full bg-warning/80" />
-      <span className="flex-1 truncate">
-        {t("chat.contextCompacted", { count: droppedCount })}
-      </span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        className="text-[10.5px] underline"
-      >
-        {t("chat.dismiss")}
-      </button>
-    </div>
-  );
-});
-
 const ContinueRow = memo(function ContinueRow({
   onContinue,
 }: {
@@ -701,6 +673,16 @@ const RenderedMessage = memo(function RenderedMessage({
     () => ({ sessionId, calls: fileEdits?.calls }),
     [sessionId, fileEdits?.calls],
   );
+  const compaction = messageMetadata(message).compaction;
+  if (compaction)
+    return (
+      <div
+        data-conversation-message-id={message.id}
+        className="text-xs text-muted-foreground"
+      >
+        {t("chat.contextCompacted")}
+      </div>
+    );
   const failure = messageMetadata(message).runFailure;
   if (failure) {
     const text = t("chat.runFailed", { error: failure.error });

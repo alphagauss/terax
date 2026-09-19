@@ -8,7 +8,8 @@ export type CommandTranslator = (
 ) => string;
 export type CommandOutcome =
   | { kind: "reply"; text: string; error?: boolean }
-  | { kind: "task"; prompt: string };
+  | { kind: "task"; prompt: string }
+  | { kind: "compact"; instructions: string };
 export type CommandContext = {
   sessionId: string;
   source: CommandSource;
@@ -55,6 +56,15 @@ function noArguments(
 }
 
 export const COMMANDS: readonly CommandDefinition[] = [
+  {
+    name: "compact",
+    aliases: [],
+    descriptionKey: "commands.compactDescription",
+    usage: "/compact [instructions]",
+    scheduling: "idle",
+    available: () => true,
+    execute: (args) => ({ kind: "compact", instructions: args.trim() }),
+  },
   {
     name: "help",
     aliases: ["h"],

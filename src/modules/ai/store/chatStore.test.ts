@@ -413,6 +413,35 @@ describe("chat store multi-process lifecycle", () => {
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
   });
 
+  it("压缩命令等待空闲，完成回执在摘要任务结束后写入且不产生普通用户输入", async () => {
+    openCommandSession(true);
+    let finish!: () => void;
+    const startCompaction = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const request = commandRequest("/compact preserve tests");
+    const receipt = await submitSessionCommand({ ...request, startCompaction });
+    expect(startCompaction).not.toHaveBeenCalled();
+    useChatStore.setState({ runLockSessionIds: {} });
+    await vi.waitFor(() =>
+      expect(startCompaction).toHaveBeenCalledWith("preserve tests"),
+    );
+    expect(
+      useCommandStore.getState().sessions[first.id][0].result,
+    ).toBeUndefined();
+    finish();
+    expect((await receipt.completed).status).toBe("success");
+    expect(request.startTask).not.toHaveBeenCalled();
+    expect(
+      io.commit.mock.calls
+        .flatMap(([file]) => file.messages)
+        .every((record) => record.role === "command"),
+    ).toBe(true);
+  });
+
   it.each(["commit", "release"] as const)(
     "初始化回执 %s 失败后只补交，不重跑任务或重复追加",
     async (failure) => {
@@ -582,6 +611,105 @@ describe("chat store multi-process lifecycle", () => {
       useChatStore.getState().agentMetaBySession[first.id]?.commitError,
     ).toBeUndefined();
     expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it("压缩检查点保存失败后只补交原摘要，失败期间保持运行锁", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      runLockSessionIds: { [first.id]: true },
+    });
+    sessionMetadata.set(first.id, { title: first.title });
+    persistedMessageCounts.set(first.id, 1);
+    const user: UIMessage = {
+      id: "u",
+      role: "user",
+      parts: [{ type: "text", text: "request" }],
+    };
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [{ type: "step-start" }, { type: "text", text: "prefix" }],
+    };
+    const event: TurnEvent = {
+      event: "compaction",
+      id: "checkpoint",
+      throughUserMessageId: "u",
+      summary: "saved handoff",
+    };
+    const writes: SessionMessage[] = [];
+    const chat = { status: "ready", messages: [user, assistant] };
+    chats.set(first.id, chat as never);
+    io.commit.mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      useChatStore
+        .getState()
+        .persistTurnCheckpoint(first.id, [assistant], event),
+    ).rejects.toThrow("disk full");
+    expect(pendingTurns.get(first.id)?.committedParts).toBe(0);
+    io.commit.mockRejectedValueOnce(new Error("still full"));
+    await expect(
+      useChatStore.getState().commitMessages(first.id, chat.messages),
+    ).rejects.toThrow("still full");
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBe(true);
+    expect(io.release).not.toHaveBeenCalled();
+    io.commit.mockImplementation(async (file) => {
+      writes.push(...file.messages);
+      return first;
+    });
+    await useChatStore.getState().commitMessages(first.id, chat.messages);
+    expect(
+      writes.filter(
+        (record) =>
+          record.role === "event" && record.content.event === "compaction",
+      ),
+    ).toEqual([expect.objectContaining({ content: event })]);
+    expect(writes.filter((record) => record.role === "assistant")).toHaveLength(
+      1,
+    );
+    expect(
+      JSON.stringify(await convertToAgentModelMessages(chat.messages)),
+    ).toContain("saved handoff");
+    expect(useChatStore.getState().runLockSessionIds[first.id]).toBeUndefined();
+  });
+
+  it("取消尚未保存的压缩候选时只保存原始历史", async () => {
+    useChatStore.setState({
+      sessions: [first],
+      activeSessionId: first.id,
+      runLockSessionIds: { [first.id]: true },
+    });
+    sessionMetadata.set(first.id, { title: first.title });
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [{ type: "text", text: "original" }],
+    };
+    io.commit.mockRejectedValueOnce(new Error("disk full"));
+    await expect(
+      useChatStore
+        .getState()
+        .persistTurnCheckpoint(first.id, [assistant], {
+          event: "compaction",
+          id: "cancelled",
+          throughUserMessageId: "u",
+          summary: "discarded",
+        }),
+    ).rejects.toThrow("disk full");
+    useChatStore.getState().patchAgentMeta(first.id, { cancelled: true });
+    const writes: SessionMessage[] = [];
+    io.commit.mockImplementation(async (file) => {
+      writes.push(...file.messages);
+      return first;
+    });
+    await useChatStore.getState().commitMessages(first.id, [assistant]);
+    expect(
+      writes.some(
+        (record) =>
+          record.role === "event" && record.content.event === "compaction",
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(writes)).toContain("original");
   });
 
   it("commits multiple checkpoints and the terminal tail exactly once, advancing only after success", async () => {

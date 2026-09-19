@@ -23,16 +23,27 @@ import {
   type ProviderBaseURLs,
   type ProviderInstance,
   type ProviderModels,
+  modelRefsEqual,
   resolveModel,
 } from "@/modules/ai/config";
 import {
   type AgentToolId,
   resolveSubagentTools,
 } from "@/modules/ai/lib/agentTools";
+import {
+  compactionInstruction,
+  planCompaction,
+} from "@/modules/ai/lib/compact";
+import {
+  generateCompaction,
+  compactionConfiguration,
+} from "@/modules/ai/lib/compactionRequest";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import { createContextUsage } from "@/modules/ai/lib/contextUsage";
 import {
   ACTIVITY_DURATION_PART_TYPE,
+  expandConversationMessages,
   conversationEventPart,
   convertToAgentModelMessages,
   REASONING_DURATION_PART_TYPE,
@@ -47,7 +58,10 @@ import {
   buildParameterOptions,
   type ParameterAssignment,
 } from "@/modules/ai/lib/modelParameters";
-import { prepareAgentPrompt } from "@/modules/ai/lib/prompt";
+import {
+  prepareAgentPrompt,
+  type PreparedAgentPrompt,
+} from "@/modules/ai/lib/prompt";
 import {
   buildConfiguredLanguageModel,
   createProviderDownload,
@@ -85,7 +99,12 @@ export type RunAgentOptions = {
   turnCoordinator: AgentTurnCoordinator;
   toolContext: ToolContext;
   turnId: string;
-  onCompact?: (info: { droppedCount: number }) => void;
+  compactOnly?: string;
+  getCompactionConfiguration?: (
+    model: ModelRef,
+    parameters: ParameterAssignment[],
+  ) => SubagentModelConfiguration;
+  onCompacting?: (compacting: boolean) => void;
   onFinishMeta?: (info: { hitStepCap: boolean; finishReason: string }) => void;
   onSubagentDisplay?: (state: SubagentDisplayState) => void;
   onSystemPrompt?: (
@@ -187,7 +206,10 @@ export async function runAgentStream(opts: RunAgentOptions) {
         onError,
         execute: async ({ writer }) => {
           const modelHistory: ModelMessage[] = [...prunedHistory];
-          const last = originalMessages[originalMessages.length - 1];
+          const last =
+            opts.compactOnly === undefined
+              ? originalMessages[originalMessages.length - 1]
+              : undefined;
           // 仅保留当前响应的完整 part 前缀，使 checkpoint 与最终 SDK 消息共用显式游标。
           let completedMessage = last?.role === "assistant" ? last : undefined;
           let stepsSeen = 0;
@@ -215,6 +237,73 @@ export async function runAgentStream(opts: RunAgentOptions) {
             return durationMs;
           };
 
+          const liveMessages = () => {
+            if (!completedMessage) return opts.uiMessages;
+            return opts.uiMessages[opts.uiMessages.length - 1]?.id ===
+              completedMessage.id
+              ? [...opts.uiMessages.slice(0, -1), completedMessage]
+              : [...opts.uiMessages, completedMessage];
+          };
+          let lastPrompt: PreparedAgentPrompt | undefined;
+          const compact = async (manual: boolean) => {
+            const plan = planCompaction(
+              expandConversationMessages(liveMessages()),
+              !manual,
+            );
+            if (!plan) return;
+            const configuration = compactionConfiguration(opts);
+            const durationMs = finishActivity();
+            if (durationMs !== undefined && completedMessage)
+              completedMessage.parts.push({
+                type: ACTIVITY_DURATION_PART_TYPE,
+                data: { durationMs },
+              });
+            opts.onCompacting?.(true);
+            try {
+              const summary = await generateCompaction({
+                configuration,
+                sessionId: opts.toolContext.getSessionId(),
+                turnId: opts.turnId,
+                systemPrompt: opts.systemPrompt,
+                messages: modelHistory,
+                cachedPrefix: modelRefsEqual(configuration.model, opts.model)
+                  ? lastPrompt
+                  : undefined,
+                tools: rootTools,
+                instruction: compactionInstruction(
+                  plan,
+                  opts.compactOnly ?? "",
+                ),
+                signal: opts.abortSignal,
+              });
+              opts.abortSignal?.throwIfAborted();
+              await appendEvent(completedMessage ? [completedMessage] : [], {
+                event: "compaction",
+                id: crypto.randomUUID(),
+                throughUserMessageId: plan.throughUserMessageId,
+                summary,
+              });
+              lastPrompt = undefined;
+              modelHistory.splice(
+                0,
+                modelHistory.length,
+                ...(await convertToAgentModelMessages(liveMessages())),
+              );
+            } finally {
+              opts.onCompacting?.(false);
+            }
+          };
+          const compactIfNeeded = async () => {
+            const previous = [...usageRecords(opts.toolContext.getSessionId())]
+              .reverse()
+              .find((record) => !record.taskId && !record.purpose);
+            if (
+              previous &&
+              previous.values.inputTokens + previous.values.outputTokens >=
+                getModelContextWindow(modelRef, opts.providerModels ?? {}) * 0.8
+            )
+              await compact(false);
+          };
           const appendEvent = async (
             completedMessages: UIMessage[],
             event: TurnEvent,
@@ -222,7 +311,12 @@ export async function runAgentStream(opts: RunAgentOptions) {
             opts.abortSignal?.throwIfAborted();
             await opts.onCheckpoint(completedMessages, event);
             if (!streamStarted) {
-              writer.write({ type: "start" });
+              writer.write({
+                type: "start",
+                ...(opts.compactOnly !== undefined
+                  ? { messageId: crypto.randomUUID() }
+                  : {}),
+              });
               streamStarted = true;
             }
             const part = conversationEventPart(event);
@@ -267,6 +361,18 @@ export async function runAgentStream(opts: RunAgentOptions) {
             | undefined;
           try {
             opts.abortSignal?.throwIfAborted();
+            if (opts.compactOnly !== undefined) {
+              await compact(true);
+              coordinator.inbox.close();
+              writer.setOutcome({ status: "completed" });
+              writer.write({ type: "finish", finishReason: "stop" });
+              coordinator.reset();
+              releaseAgentTurnCoordinator(
+                opts.toolContext.getSessionId(),
+                coordinator,
+              );
+              return;
+            }
             coordinator.inbox.open();
             // SDK 只从末尾 tool 消息收集审批响应；先插入引导会让批准或拒绝失效。
             let resolvingApprovals =
@@ -275,6 +381,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 (part) =>
                   "state" in part && part.state === "approval-responded",
               );
+            if (!resolvingApprovals) await compactIfNeeded();
             const initialAppend = resolvingApprovals
               ? null
               : appendPendingEvents();
@@ -297,7 +404,6 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   provider,
                 ).instructions,
                 tools: finalizationOnly ? undefined : rootTools,
-                onCompact: opts.onCompact,
               });
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。
@@ -311,6 +417,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 modelHistory,
                 provider,
               );
+              lastPrompt = prompt;
               const cycle: {
                 message?: UIMessage;
                 outcome: UIMessageStreamOutcome;
@@ -334,12 +441,8 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 messages: prompt.messages,
                 tools: finalizationOnly ? undefined : rootTools,
                 toolApproval: buildToolApproval(opts.toolContext),
-                stopWhen: finalizationOnly
-                  ? isStepCount(1)
-                  : ({ steps }) =>
-                      (maxAgentSteps !== null &&
-                        stepsSeen + steps.length >= maxAgentSteps) ||
-                      coordinator.inbox.hasPending,
+                // 每个完整工具步骤后返回运行时，由同一边界处理压缩、引导与步骤上限。
+                stopWhen: isStepCount(1),
                 abortSignal: opts.abortSignal,
                 onLanguageModelCallEnd: (event) =>
                   contextUsage?.finish(
@@ -462,6 +565,13 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 await coordinator.inbox.waitUntil(coordinator.waitForAll());
               }
 
+              if (
+                !approvalPending &&
+                resultFinishReason === "tool-calls" &&
+                !reachedStepCap()
+              ) {
+                await compactIfNeeded();
+              }
               let completed = false;
               if (!approvalPending && coordinator.inbox.hasPending) {
                 if (!completedMessage) {
@@ -482,10 +592,16 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 finalizationOnly = reachedStepCap();
                 continue;
               }
-              if (reachedStepCap() && resultFinishReason === "tool-calls") {
+              if (
+                !finalizationOnly &&
+                reachedStepCap() &&
+                resultFinishReason === "tool-calls"
+              ) {
                 finalizationOnly = true;
                 continue;
               }
+              if (!finalizationOnly && resultFinishReason === "tool-calls")
+                continue;
               break;
             }
 

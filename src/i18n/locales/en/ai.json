@@ -195,10 +195,9 @@
       "tool": "Using {{tool}}"
     },
     "continuePrompt": "Continue from where you stopped. Don't recap - just keep going.",
-    "contextBudgetExceeded": "The current request exceeds the available context budget. Reduce the input or select a model with a larger context window.",
     "somethingWentWrong": "Something went wrong.",
     "dismiss": "Dismiss",
-    "contextCompacted": "Context compacted: earlier history and tool results have been reduced.",
+    "contextCompacted": "Conversation compacted",
     "hitStepLimit": "Hit the step limit. Continue to keep going.",
     "continue": "Continue",
     "copy": "Copy message",
@@ -258,7 +257,9 @@
     "scrollToLatest": "Go to the latest response and follow",
     "userMessageFallback": "[Attachment or context]",
     "guided": "Guided",
-    "runFailed": "The model request failed and this turn did not complete: {{error}}"
+    "runFailed": "The model request failed and this turn did not complete: {{error}}",
+    "compacting": "Compacting conversation",
+    "compactionFailed": "Compaction did not produce a complete summary. The existing context is preserved."
   },
   "filePicker": {
     "workspaceFiles": "Workspace files",
@@ -295,7 +296,9 @@
     "running": "Running",
     "unconfirmed": "Result unconfirmed",
     "failed": "Failed",
-    "completed": "Completed"
+    "completed": "Completed",
+    "compactDescription": "Compact context, optionally specifying what to preserve",
+    "compacted": "Compaction finished; original history is preserved."
   },
   "whisper": {
     "transcriptionFailed": "Transcription failed",

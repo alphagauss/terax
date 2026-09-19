@@ -3,9 +3,6 @@
  * 工具参数错误按公开名称与字段识别，同样支持跨边界传递的普通对象。
  */
 
-export const CONTEXT_BUDGET_ERROR =
-  "The current request exceeds the available context budget. Reduce the input or use a model with a larger context window.";
-
 type ErrorDetails = {
   code: string | null;
   message: string;

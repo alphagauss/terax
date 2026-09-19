@@ -3,6 +3,8 @@
  * 用户消息成功进入 Chat 后才提升草稿，并把 Subagent 进度转发到会话展示状态。
  */
 
+import { resolveCompactionUsage } from "@/modules/ai/lib/modelUsage";
+
 import { submitSessionCommand } from "@/modules/ai/commands/runtime";
 import { parseCommand } from "@/modules/ai/commands/registry";
 import i18n from "@/i18n";
@@ -43,6 +45,7 @@ import { createSessionTransport } from "@/modules/ai/lib/transport";
 import type { ToolContext } from "@/modules/ai/tools/tools";
 import {
   chats,
+  stopSession,
   pendingTurn,
   getAgentMetaForSession,
   isSessionWritable,
@@ -172,11 +175,28 @@ function makeChat(sessionId: string): Chat<UIMessage> {
     getProviderModels: () => usePreferencesStore.getState().providerModels,
     getCustomProviders: () => usePreferencesStore.getState().customProviders,
     getProviderInstanceKeys: () => useChatStore.getState().providerInstanceKeys,
-    onCompact: (info) => {
-      useChatStore.getState().patchAgentMeta(sessionId, {
-        compactionNotice: { droppedCount: info.droppedCount, at: Date.now() },
-      });
+    getCompactionConfiguration: (parentModel, parentParameters) => {
+      const prefs = usePreferencesStore.getState();
+      const { model, parameters } = resolveCompactionUsage(
+        prefs.modelUsages.compaction,
+        prefs.modelParameters,
+        parentModel,
+        parentParameters,
+      );
+      if (!isModelRefAvailable(model, prefs.providerModels, prefs))
+        throw new Error(i18n.t("settings:models.compaction.unavailable"));
+      return {
+        model,
+        modelParameters: parameters,
+        keys: useChatStore.getState().apiKeys,
+        providerBaseURLs: prefs.providerBaseURLs,
+        providerModels: prefs.providerModels,
+        customProviders: prefs.customProviders,
+        providerInstanceKeys: useChatStore.getState().providerInstanceKeys,
+      };
     },
+    onCompacting: (compacting) =>
+      useChatStore.getState().patchAgentMeta(sessionId, { compacting }),
     onFinishMeta: (info) => {
       useChatStore
         .getState()
@@ -285,6 +305,8 @@ export async function sendChatMessage(
       hasAttachments:
         hasAttachments || message.parts.some((part) => part.type === "file"),
       startTask: (task) => startChatMessage(sessionId, task),
+      startCompaction: (instructions) =>
+        startChatCompaction(sessionId, instructions),
     });
     void completed.catch((error) =>
       useChatStore.setState({ sessionSyncError: String(error) }),
@@ -381,6 +403,7 @@ export async function startChatMessage(
   sessionId: string,
   message: Parameters<Chat<UIMessage>["sendMessage"]>[0],
   channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
+  compaction?: string,
 ): Promise<boolean> {
   if (startingSessionIds.has(sessionId)) return false;
   startingSessionIds.add(sessionId);
@@ -440,9 +463,13 @@ export async function startChatMessage(
     if (isUserSubmission(message)) {
       state.promoteSession(sessionId, messagesForPromotion(message), cwd);
     }
-    if (!externalAgent) getAgentTurnCoordinator(sessionId).inbox.open();
+    if (!externalAgent && compaction === undefined)
+      getAgentTurnCoordinator(sessionId).inbox.open();
     startDesktopRunLifecycle(sessionId, chat);
-    const sending = chat.sendMessage(message);
+    const sending = chat.sendMessage(
+      message,
+      compaction === undefined ? undefined : { body: { compaction } },
+    );
     void sending;
     return true;
   } finally {
@@ -483,4 +510,40 @@ function messagesForPromotion(
       parts: messageWithParts.parts,
     } as UIMessage,
   ];
+}
+
+/** 手动压缩借用同一会话运行锁及停止按钮；命令回执等待持久化完成。 */
+export async function startChatCompaction(
+  sessionId: string,
+  instructions: string,
+  channel?: { id: string; model: ModelRef; parameters: ParameterAssignment[] },
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  await loadChat(sessionId);
+  if (!(await startChatMessage(sessionId, undefined, channel, instructions)))
+    throw new Error(i18n.t("ai:commands.taskRejected"));
+  await new Promise<void>((resolve, reject) => {
+    const stop = () => {
+      void stopSession(sessionId).catch(reject);
+    };
+    const check = () => {
+      const state = useChatStore.getState();
+      const meta = getAgentMetaForSession(state, sessionId);
+      if (!meta.commitError && state.runLockSessionIds[sessionId]) return;
+      unsubscribe();
+      signal?.removeEventListener("abort", stop);
+      if (meta.commitError || meta.error || meta.cancelled || signal?.aborted)
+        reject(
+          new Error(
+            meta.commitError ?? meta.error ?? i18n.t("ai:commands.cancelled"),
+          ),
+        );
+      else resolve();
+    };
+    const unsubscribe = useChatStore.subscribe(check);
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
+    check();
+  });
 }

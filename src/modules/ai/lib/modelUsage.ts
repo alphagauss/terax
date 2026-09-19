@@ -2,18 +2,25 @@
  * 定义 AI 应用的模型使用配置、精确存储键和请求快照。
  * 模型定义全局共享，选值按模块和完整模型身份隔离；宿主显式提供跟随模型。
  */
-import { isModelRef, modelRefKey, type ModelRef } from "@/modules/ai/config";
+import {
+  isModelRef,
+  modelRefKey,
+  modelRefsEqual,
+  type ModelRef,
+} from "@/modules/ai/config";
 import {
   readParameterSelections,
   resolveModelParameters,
   type ModelParameterDefinitions,
   type ModelParameterSelections,
+  type ParameterAssignment,
 } from "@/modules/ai/lib/modelParameters";
 
 export const MODEL_USAGE_IDS = [
   "completion",
   "subagent",
   "commitMessage",
+  "compaction",
 ] as const;
 export type ModelUsageId =
   | (typeof MODEL_USAGE_IDS)[number]
@@ -92,5 +99,36 @@ export function resolveModelUsage(
       definitions[key] ?? [],
       usage.parameterSelections[key],
     ),
+  };
+}
+
+/** 压缩同模型时继承父轮实际参数，只覆盖显式选值；换模型时使用目标模型默认值。 */
+export function resolveCompactionUsage(
+  usage: ModelUsage,
+  definitions: ModelParameterDefinitions,
+  parentModel: ModelRef,
+  parentParameters: readonly ParameterAssignment[],
+) {
+  const model = usage.model ?? parentModel;
+  const selections = usage.parameterSelections[modelRefKey(model)] ?? {};
+  const parameters = definitions[modelRefKey(model)] ?? [];
+  const overrides = parameters.filter(
+    (parameter) => selections[parameter.id] !== undefined,
+  );
+  return {
+    model,
+    parameters: modelRefsEqual(model, parentModel)
+      ? [
+          ...parentParameters.filter(
+            (parameter) =>
+              !overrides.some(
+                (override) =>
+                  override.path === parameter.path &&
+                  override.target === parameter.target,
+              ),
+          ),
+          ...resolveModelParameters(overrides, selections),
+        ]
+      : resolveModelParameters(parameters, selections),
   };
 }

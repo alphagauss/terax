@@ -1,7 +1,7 @@
 /** 模型调用用量事实与汇总。未知细分项不视作零，本地估算只补输入与可见输出。 */
 
 import type { ModelRef } from "@/modules/ai/config";
-import type { LanguageModelUsage } from "ai";
+import type { ModelMessage, LanguageModelUsage } from "ai";
 
 type UsageField = "inputTokens" | "outputTokens";
 type UsageValues = {
@@ -13,6 +13,7 @@ export type UsageRecord = {
   id: string;
   turnId: string;
   taskId?: string;
+  purpose?: "compaction";
   model: ModelRef;
   contextWindow: number;
   values: UsageValues;
@@ -138,4 +139,20 @@ export function summarizePerformance(records: readonly UsageRecord[]) {
     tokensPerSecond: durationMs > 0 ? (tokens * 1000) / durationMs : undefined,
     partial: measured > 0 && measured < records.length,
   };
+}
+
+/** 仅用于缺失用量的展示估算，不据此删除消息或拒绝请求。 */
+export function estimateMessageTokens(
+  messages: readonly ModelMessage[],
+): number {
+  if (!messages.length) return 0;
+  return estimateTokens(
+    JSON.stringify(messages, (_key, value) =>
+      value &&
+      typeof value === "object" &&
+      (value.type === "image" || value.type === "file")
+        ? { type: value.type }
+        : value,
+    ),
+  );
 }

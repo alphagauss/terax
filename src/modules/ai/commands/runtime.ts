@@ -28,6 +28,7 @@ type CommandRequest = {
   channelId?: string;
   hasAttachments?: boolean;
   signal?: AbortSignal;
+  startCompaction?: (instructions: string) => Promise<void>;
   startTask: (message: UIMessage) => Promise<boolean>;
 };
 type CommandResult = Extract<CommandRecord, { phase: "result" }>;
@@ -121,7 +122,12 @@ export async function submitSessionCommand(
             text: outcome.text,
             status: outcome.error ? "error" : "success",
           };
-        else {
+        else if (outcome.kind === "compact") {
+          if (!request.startCompaction)
+            throw new Error("Compaction is unavailable");
+          await request.startCompaction(outcome.instructions);
+          reply = { text: t("commands.compacted"), status: "success" };
+        } else {
           const id = crypto.randomUUID();
           const started = await request.startTask({
             id,

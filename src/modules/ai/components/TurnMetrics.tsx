@@ -49,7 +49,7 @@ function TurnMetricsContent({
   turnId: string;
 }) {
   const records = useUsageRecords(sessionId, true).filter(
-    (record) => record.turnId === turnId && !record.taskId,
+    (record) => record.turnId === turnId && !record.taskId && !record.purpose,
   );
   const { t, i18n } = useTranslation("ai");
   const stats = summarizePerformance(records);

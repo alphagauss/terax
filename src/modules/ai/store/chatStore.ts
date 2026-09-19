@@ -34,6 +34,7 @@ import type {
 import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
 import { snapshotAgent } from "@/modules/ai/lib/agents";
 import {
+  conversationEventPart,
   materializeFileEditParts,
   materializeRunFailure,
   materializeSubagentDisplayParts,
@@ -129,7 +130,7 @@ export type AgentMeta = {
   /** 终态保存失败归属具体会话，后台调用方不能只等待运行锁释放。 */
   commitError?: string;
   hitStepCap: boolean;
-  compactionNotice: { droppedCount: number; at: number } | null;
+  compacting: boolean;
 };
 
 /** 创建独立的空闲运行状态，避免不同会话共享可变嵌套对象。 */
@@ -141,7 +142,7 @@ export function createIdleAgentMeta(): AgentMeta {
     approvalsPending: 0,
     error: null,
     hitStepCap: false,
-    compactionNotice: null,
+    compacting: false,
   };
 }
 
@@ -484,6 +485,12 @@ export function releaseUnusedChats() {
 // Initial messages for a session, populated at hydration time and consumed
 // when the matching Chat is constructed.
 export const seedMessages = new Map<string, UIMessage[]>();
+/** 只保留尚未落盘的压缩候选；保存重试不能再次请求摘要模型。 */
+const pendingCompactionCheckpoints = new Map<
+  string,
+  { messages: UIMessage[]; event: Extract<TurnEvent, { event: "compaction" }> }
+>();
+
 /** 记录磁盘已提交的 UI 消息数量，用于只转换本次新增 turn。 */
 export const persistedMessageCounts = new Map<string, number>();
 /** 缓存已实际读取会话的完整 metadata，列表轮询只维护轻量摘要。 */
@@ -1031,20 +1038,30 @@ export const useChatStore = create<StoreState>((set, get) => ({
     if (!meta) throw new Error("AI session metadata is unavailable");
     const updatedAt = Date.now();
     const cursor = sessionCommitCursor(id);
-    const committedMeta = await persistTurnCheckpoint(
-      {
-        id,
-        createdAt: meta.createdAt,
-        updatedAt,
-        environmentKey: currentWorkspaceBootstrap().environmentKey,
-        cwd: meta.cwd,
-        metadata: { ...(sessionMetadata.get(id) ?? {}), title: meta.title },
-        messages: [],
-      },
-      cursor,
-      completedMessages,
-      event,
-    );
+    let committedMeta: SessionMeta;
+    try {
+      committedMeta = await persistTurnCheckpoint(
+        {
+          id,
+          createdAt: meta.createdAt,
+          updatedAt,
+          environmentKey: currentWorkspaceBootstrap().environmentKey,
+          cwd: meta.cwd,
+          metadata: { ...(sessionMetadata.get(id) ?? {}), title: meta.title },
+          messages: [],
+        },
+        cursor,
+        completedMessages,
+        event,
+      );
+    } catch (error) {
+      if (event.event === "compaction")
+        pendingCompactionCheckpoints.set(id, {
+          messages: completedMessages,
+          event,
+        });
+      throw error;
+    }
     applySessionCommitCursor(id, cursor);
     set({
       sessions: get().sessions.map((session) =>
@@ -1247,6 +1264,33 @@ export const useChatStore = create<StoreState>((set, get) => ({
         delete subagentDisplaysBySession[id];
         set({ runLockSessionIds, subagentDisplaysBySession });
         return;
+      }
+      if (outcome === "cancelled") pendingCompactionCheckpoints.delete(id);
+      const pendingCompaction = pendingCompactionCheckpoints.get(id);
+      if (pendingCompaction) {
+        await get().persistTurnCheckpoint(
+          id,
+          pendingCompaction.messages,
+          pendingCompaction.event,
+        );
+        const part = conversationEventPart(pendingCompaction.event);
+        const offset = persistedMessageCounts.get(id) ?? 0;
+        const tail = messages.slice(offset);
+        if (tail[0]?.role === "assistant") {
+          messages = [
+            ...messages.slice(0, offset),
+            { ...tail[0], parts: [...tail[0].parts, part] },
+            ...tail.slice(1),
+          ];
+        } else {
+          messages = [
+            ...messages,
+            { id: crypto.randomUUID(), role: "assistant", parts: [part] },
+          ];
+        }
+        pendingCompactionCheckpoints.delete(id);
+        const chat = chats.get(id);
+        if (chat) chat.messages = messages;
       }
       const updatedAt = Date.now();
       const cursor = sessionCommitCursor(id);
