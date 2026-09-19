@@ -75,16 +75,51 @@ describe("formatAiError", () => {
     };
     const parsed = z.object({ files: z.array(z.object({})) }).safeParse(value);
     if (parsed.success) throw new Error("expected invalid test input");
+    const validation = new TypeValidationError({ value, cause: parsed.error });
     const error = new InvalidToolInputError({
       toolName: "apply_patch",
       toolInput: JSON.stringify(value),
-      cause: new TypeValidationError({ value, cause: parsed.error }),
+      cause: validation,
     });
-
-    expect(formatAiError(error)).toBe(
-      "Invalid input for tool apply_patch: files: expected array, received string. Pass JSON arrays and objects directly, not as JSON-encoded strings. Call the tool again with input that matches the schema. The tool was not executed.",
+    const transported = JSON.parse(
+      JSON.stringify({
+        name: error.name,
+        toolName: error.toolName,
+        cause: {
+          name: validation.name,
+          value,
+          cause: { issues: parsed.error.issues },
+        },
+      }),
     );
-    expect(formatAiError(error)).not.toContain("count_line.py");
+
+    for (const input of [error, transported]) {
+      expect(formatAiError(input)).toBe(
+        "Invalid input for tool apply_patch: files: expected array, received string. Pass JSON arrays and objects directly, not as JSON-encoded strings. Call the tool again with input that matches the schema. The tool was not executed.",
+      );
+      expect(formatAiError(input)).not.toContain("count_line.py");
+    }
+  });
+
+  it("does not treat incomplete error objects as validated tool failures", () => {
+    for (const error of [
+      {
+        name: "AI_InvalidToolInputError",
+        toolName: "apply_patch",
+        message: "incomplete",
+      },
+      {
+        name: "AI_InvalidToolInputError",
+        toolName: 123,
+        message: "incomplete",
+      },
+      {
+        name: "AI_InvalidToolInputError",
+        toolName: "apply_patch",
+        cause: { name: "AI_TypeValidationError", message: "incomplete" },
+      },
+    ])
+      expect(formatAiError(error)).toBe("incomplete");
   });
 
   it("preserves provider details through the AI SDK UI stream", async () => {

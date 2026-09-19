@@ -1,4 +1,7 @@
-import { InvalidToolInputError, TypeValidationError } from "ai";
+/**
+ * 提取可读的会话错误并脱敏；启动恢复也使用本模块，不加载模型 SDK。
+ * 工具参数错误按公开名称与字段识别，同样支持跨边界传递的普通对象。
+ */
 
 export const CONTEXT_BUDGET_ERROR =
   "The current request exceeds the available context budget. Reduce the input or use a model with a larger context window.";
@@ -25,9 +28,15 @@ export function formatAiError(error: unknown): string {
 
 /** 压缩工具 schema 错误，避免长参数正文遮蔽真正的字段问题。 */
 function formatInvalidToolInput(error: unknown): string | null {
-  if (!InvalidToolInputError.isInstance(error)) return null;
-  const validation = error.cause;
-  if (!TypeValidationError.isInstance(validation)) return null;
+  const input = errorRecord(error);
+  if (
+    input?.name !== "AI_InvalidToolInputError" ||
+    typeof input.toolName !== "string"
+  )
+    return null;
+  const validation = errorRecord(input.cause);
+  if (validation?.name !== "AI_TypeValidationError" || !("value" in validation))
+    return null;
   const issue = firstValidationIssue(validation.cause);
   if (!issue) return null;
   const path = Array.isArray(issue.path) ? issue.path : [];
@@ -42,7 +51,13 @@ function formatInvalidToolInput(error: unknown): string | null {
   const retryHint = encodedStructure
     ? " Pass JSON arrays and objects directly, not as JSON-encoded strings."
     : "";
-  return `Invalid input for tool ${error.toolName}: ${detail}.${retryHint} Call the tool again with input that matches the schema. The tool was not executed.`;
+  return `Invalid input for tool ${input.toolName}: ${detail}.${retryHint} Call the tool again with input that matches the schema. The tool was not executed.`;
+}
+
+function errorRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 type ValidationIssue = {
