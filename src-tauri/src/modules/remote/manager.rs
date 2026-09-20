@@ -16,7 +16,7 @@ use super::models::{
     ConnectRequest, ForegroundIntent, RemoteRuntimeSnapshot, SshCapabilitySnapshot,
     SshHealthSnapshot, SshTrafficSnapshot, TunnelConfig, TunnelEvent, TunnelEventKind, TunnelInfo,
 };
-use super::session::{ExecOutput, RemoteWorkspace, TransportProbeOutcome};
+use super::session::{ConnectFailure, ExecOutput, RemoteWorkspace, TransportProbeOutcome};
 use super::traffic::SshTrafficMeter;
 use super::tunnel::{TunnelFailure, TunnelManager};
 
@@ -157,12 +157,19 @@ impl RemoteManager {
         self.stop_current(&app).await;
         let result = self.connect_locked(request, &lifecycle, &app).await;
         if let Err(error) = &result {
-            if error != CONNECT_SUPERSEDED && self.is_lifecycle_current(lifecycle.id).await {
-                self.publish_disconnected(&app, &lifecycle, &profile_id, error.clone())
-                    .await;
+            if error.message != CONNECT_SUPERSEDED && self.is_lifecycle_current(lifecycle.id).await
+            {
+                self.publish_disconnected(
+                    &app,
+                    &lifecycle,
+                    &profile_id,
+                    error.message.clone(),
+                    error.credentials_required,
+                )
+                .await;
             }
         }
-        result
+        result.map_err(|error| error.message)
     }
 
     /// 结束仍是当前意图的预处理失败连接。
@@ -173,7 +180,7 @@ impl RemoteManager {
         error: String,
     ) {
         if self.is_lifecycle_current(reserved.lifecycle.id).await {
-            self.publish_disconnected(app, &reserved.lifecycle, &reserved.profile_id, error)
+            self.publish_disconnected(app, &reserved.lifecycle, &reserved.profile_id, error, false)
                 .await;
         }
     }
@@ -184,7 +191,7 @@ impl RemoteManager {
         request: ConnectRequest,
         lifecycle: &RuntimeLifecycle,
         app: &tauri::AppHandle,
-    ) -> Result<RemoteRuntimeSnapshot, String> {
+    ) -> Result<RemoteRuntimeSnapshot, ConnectFailure> {
         if !self.is_lifecycle_current(lifecycle.id).await {
             return Err(CONNECT_SUPERSEDED.into());
         }
@@ -495,8 +502,14 @@ impl RemoteManager {
             self.publish_reconnecting(app, &lifecycle, &profile_id)
                 .await
         } else {
-            self.publish_disconnected(app, &lifecycle, &profile_id, "SSH connection closed".into())
-                .await
+            self.publish_disconnected(
+                app,
+                &lifecycle,
+                &profile_id,
+                "SSH connection closed".into(),
+                false,
+            )
+            .await
         };
         if !published {
             return;
@@ -539,7 +552,7 @@ impl RemoteManager {
             };
             let result = match workspace.reconnect_request() {
                 Ok(request) => self.connect_locked(request, &lifecycle, app).await,
-                Err(error) => Err(error),
+                Err(error) => Err(error.into()),
             };
             drop(guard);
             if lifecycle.cancellation.is_cancelled() {
@@ -547,12 +560,18 @@ impl RemoteManager {
             }
             match result {
                 Ok(_) => return,
-                Err(error) if error == CONNECT_SUPERSEDED => return,
+                Err(error) if error.message == CONNECT_SUPERSEDED => return,
                 Err(error) => {
-                    log::warn!("SSH reconnect attempt {attempt} failed: {error}");
+                    log::warn!("SSH reconnect attempt {attempt} failed: {}", error.message);
                     if attempt == profile.reconnect_max_attempts {
-                        self.publish_disconnected(app, &lifecycle, &profile_id, error)
-                            .await;
+                        self.publish_disconnected(
+                            app,
+                            &lifecycle,
+                            &profile_id,
+                            error.message,
+                            error.credentials_required,
+                        )
+                        .await;
                     }
                 }
             }
@@ -660,11 +679,13 @@ impl RemoteManager {
         lifecycle: &RuntimeLifecycle,
         profile_id: &str,
         reason: String,
+        credentials_required: bool,
     ) -> bool {
         let snapshot = RemoteRuntimeSnapshot::Disconnected {
             version: self.version(),
             profile_id: profile_id.to_string(),
             reason,
+            credentials_required,
         };
         let published = {
             let mut runtime = self.runtime.write().await;

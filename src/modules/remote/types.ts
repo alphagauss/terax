@@ -73,6 +73,7 @@ export type RemoteRuntimeSnapshot =
       version: number;
       profileId: string;
       reason: string;
+      credentialsRequired: boolean;
     };
 
 export type SshTrafficSnapshot = {

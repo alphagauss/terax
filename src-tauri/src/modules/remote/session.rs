@@ -155,6 +155,36 @@ pub struct WorkspaceConnect {
     pub prepared_terminal: Option<super::terminal::PreparedTerminal>,
 }
 
+/// 建连失败原因及前端是否应立即请求新凭据。
+pub(crate) struct ConnectFailure {
+    pub message: String,
+    pub credentials_required: bool,
+}
+
+impl ConnectFailure {
+    fn credentials(message: String) -> Self {
+        Self {
+            message,
+            credentials_required: true,
+        }
+    }
+}
+
+impl From<String> for ConnectFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            credentials_required: false,
+        }
+    }
+}
+
+impl From<&str> for ConnectFailure {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
 impl RemoteWorkspace {
     /// 建立 SSH transport，并确认远端 Linux、bash 与 Workspace root。
     ///
@@ -167,7 +197,7 @@ impl RemoteWorkspace {
         foreground_intent: Arc<Mutex<Option<ForegroundIntent>>>,
         foreground_filesystem_priority: Arc<AtomicBool>,
         traffic: Arc<SshTrafficMeter>,
-    ) -> Result<WorkspaceConnect, String> {
+    ) -> Result<WorkspaceConnect, ConnectFailure> {
         let started_at = Instant::now();
         request.profile.validate()?;
         let profile = request.profile;
@@ -235,7 +265,16 @@ impl RemoteWorkspace {
         .await?;
         let transport_ready_at = Instant::now();
 
-        if authenticate_primary(&mut handle, &profile, secret.as_str()).await?
+        let accepts_secret = profile.auth_method != SshAuthMethod::Agent;
+        if authenticate_primary(&mut handle, &profile, secret.as_str())
+            .await
+            .map_err(|error| {
+                if accepts_secret {
+                    ConnectFailure::credentials(error)
+                } else {
+                    error.into()
+                }
+            })?
             == PrimaryAuthResult::KeyboardInteractiveRequired
         {
             // Several servers and russh versions do not reliably continue
@@ -261,9 +300,12 @@ impl RemoteWorkspace {
                 .await?
             };
             if !authenticate_keyboard_interactive(&mut handle, &profile.username, secret.as_str())
-                .await?
+                .await
+                .map_err(ConnectFailure::credentials)?
             {
-                return Err("SSH server rejected the supplied credentials".into());
+                return Err(ConnectFailure::credentials(
+                    "SSH server rejected the supplied credentials".into(),
+                ));
             }
         }
         let auth_ready_at = Instant::now();
@@ -348,7 +390,7 @@ impl RemoteWorkspace {
             Ok(foreground) => foreground,
             Err(error) => {
                 workspace.disconnect().await;
-                return Err(error);
+                return Err(error.into());
             }
         };
         let probe_elapsed = probe_started_at.elapsed();
