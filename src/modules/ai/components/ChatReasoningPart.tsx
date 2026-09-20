@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useProgressiveText } from "@/modules/ai/hooks/useProgressiveText";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { ChevronDown } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -56,7 +56,7 @@ export function ChatReasoningPart({
       open={isOpen}
       onOpenChange={setIsOpen}
     >
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-[12px] leading-4 italic text-muted-foreground transition-colors duration-control hover:text-foreground">
+      <CollapsibleTrigger className="group/ai-disclosure flex items-center gap-1.5 text-[12px] leading-4 italic text-muted-foreground transition-colors duration-control hover:text-foreground">
         {isStreaming ? (
           <Shimmer>{t("chat.reasoning.thinking")}</Shimmer>
         ) : (
@@ -69,12 +69,12 @@ export function ChatReasoningPart({
           </span>
         )}
         <HugeiconsIcon
-          icon={ArrowDown01Icon}
+          icon={ChevronDown}
           size={11}
           strokeWidth={1.75}
           className={cn(
-            "transition-transform duration-control ease-emphasized",
-            isOpen ? "rotate-180" : "rotate-0",
+            "shrink-0 opacity-0 transition-[opacity,transform] duration-control ease-emphasized group-hover/ai-disclosure:opacity-100 group-focus-visible/ai-disclosure:opacity-100",
+            isOpen ? "rotate-0 opacity-100" : "-rotate-90",
           )}
         />
       </CollapsibleTrigger>

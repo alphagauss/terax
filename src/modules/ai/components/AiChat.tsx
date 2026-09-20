@@ -753,7 +753,7 @@ const RenderedMessage = memo(function RenderedMessage({
         className="group/message gap-1"
       >
         <MessageContent>
-          <div className="flex flex-col gap-0.5 [&>div:has(.ai-activity-block)+div:has(.markdown-content)]:mt-4">
+          <div className="flex flex-col gap-2">
             {groups.map((g) => {
               if (g.kind === "activity") {
                 return (
