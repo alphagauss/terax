@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { LanguageModelUsage, ModelMessage } from "ai";
 import { createContextUsage } from "./contextUsage";
-import { normalizeUsage, summarizeOutput } from "./usage";
+import {
+  normalizeUsage,
+  summarizeOutput,
+  summarizeSessionUsage,
+  type UsageRecord,
+} from "./usage";
 import {
   acknowledgeUsage,
   pendingUsage,
@@ -44,6 +49,42 @@ const messages: ModelMessage[] = [{ role: "user", content: "请分析中文内�
 afterEach(() => releaseUsage(sessionId));
 
 describe("request usage", () => {
+  it("aggregates cached, uncached, and output tokens across a session", () => {
+    const record = (
+      values: UsageRecord["values"],
+      estimated: UsageRecord["estimated"] = [],
+    ): UsageRecord => ({
+      id: crypto.randomUUID(),
+      turnId: "turn",
+      model,
+      contextWindow: 100_000,
+      values,
+      estimated,
+      toolCalls: 0,
+    });
+    expect(
+      summarizeSessionUsage([
+        record({ inputTokens: 1000, cacheReadTokens: 700, outputTokens: 100 }),
+        record({ inputTokens: 2000, cacheReadTokens: 1800, outputTokens: 200 }),
+      ]),
+    ).toEqual({
+      cacheReadTokens: 2500,
+      noCacheTokens: 500,
+      outputTokens: 300,
+      outputEstimated: false,
+    });
+    expect(
+      summarizeSessionUsage([
+        record({ inputTokens: 1000, cacheReadTokens: 700, outputTokens: 100 }),
+        record({ inputTokens: 2000, outputTokens: 200 }),
+      ]),
+    ).toMatchObject({
+      cacheReadTokens: undefined,
+      noCacheTokens: undefined,
+      outputTokens: 300,
+    });
+  });
+
   it("retains supported fields without collecting cache writes or raw payloads", () => {
     expect(normalizeUsage(usage, 1, 2)).toMatchObject({
       estimated: [],

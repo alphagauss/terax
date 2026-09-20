@@ -12,7 +12,10 @@
       "noUsage": "No usage records. Context is estimated locally.",
       "taskUsage": "Usage",
       "inputTokens": "Context input",
-      "cacheReadTokens": "Cache hit"
+      "cacheReadTokens": "Cache hit",
+      "cacheInputTokens": "Cached input",
+      "uncachedInputTokens": "Uncached input",
+      "outputTokens": "Output"
     },
     "switchSession": "Switch session",
     "aiSettings": "AI settings",
@@ -143,6 +146,7 @@
       "firstToken": "First token latency",
       "speed": "Generation speed",
       "toolCalls": "Tool calls",
+      "latestRequestCache": "Last request cache in turn",
       "seconds": "{{value}} s",
       "tokensPerSecond": "{{value}} token/s",
       "partial": "Speed includes only calls with usable SDK timing and reported output."

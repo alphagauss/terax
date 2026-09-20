@@ -3,11 +3,7 @@ import { act, type ReactNode, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { ContextIndicator } from "./ContextIndicator";
-import {
-  recordUsage,
-  releaseUsage,
-  restoreUsage,
-} from "../lib/usageRuntime";
+import { recordUsage, releaseUsage, restoreUsage } from "../lib/usageRuntime";
 import type { UsageRecord } from "../lib/usage";
 
 vi.mock("@/components/ai-elements/context", async (importOriginal) => {
@@ -59,7 +55,7 @@ const record = (patch: Partial<UsageRecord> = {}): UsageRecord => ({
   turnId: "turn",
   model: { providerId: "test", modelId: "old" },
   contextWindow: 128000,
-  values: { inputTokens: 12000, outputTokens: 100 },
+  values: { inputTokens: 12000, cacheReadTokens: 9720, outputTokens: 100 },
   estimated: [],
   toolCalls: 0,
   ...patch,
@@ -77,11 +73,15 @@ it("updates main context during a turn and preserves it across remounts without 
       record({
         id: "old-turn",
         turnId: "old-turn",
-        values: { inputTokens: 1000, outputTokens: 777 },
+        values: { inputTokens: 1000, cacheReadTokens: 500, outputTokens: 777 },
       }),
       record({
         id: "earlier-call",
-        values: { inputTokens: 10000, outputTokens: 400 },
+        values: {
+          inputTokens: 10000,
+          cacheReadTokens: 8000,
+          outputTokens: 400,
+        },
       }),
       record({
         values: {
@@ -93,14 +93,16 @@ it("updates main context during a turn and preserves it across remounts without 
       record({
         id: "child",
         taskId: "child",
-        values: { inputTokens: 90000, outputTokens: 50 },
+        values: {
+          inputTokens: 90000,
+          cacheReadTokens: 80000,
+          outputTokens: 50,
+        },
       }),
     ].map((content) => ({ role: "usage", content, timestamp: "now" })),
   );
   await act(async () =>
-    root.render(
-      <ContextIndicator sessionId={id} isBusy messages={[]} />,
-    ),
+    root.render(<ContextIndicator sessionId={id} isBusy messages={[]} />),
   );
   expect(
     container.querySelector("button")?.getAttribute("aria-label"),
@@ -109,13 +111,14 @@ it("updates main context during a turn and preserves it across remounts without 
   expect(container.querySelector("button[title]")).toBeNull();
   expect(container.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
   expect(container.textContent).toContain("9.4%");
-  // 悬浮明细与圆形图表使用同一次主请求，不累加子任务或历史输入。
+  // 圆形图表与首行使用末次主请求，其余行累计会话中的全部调用。
   expect(document.body.textContent).toContain("12,000");
-  expect(document.body.textContent).not.toContain("102,000");
+  expect(document.body.textContent).toContain("98,220");
+  expect(document.body.textContent).toContain("14,780");
   expect(document.body.querySelector("button[aria-pressed]")).toBeNull();
   expect(document.body.textContent).not.toContain("500");
-  expect(document.body.textContent).toContain("9.7K / 81%");
-  expect(document.body.textContent).not.toContain("1,327");
+  expect(document.body.textContent).toContain("98.2K / 86.9%");
+  expect(document.body.textContent).toContain("1.3K");
 
   await act(async () =>
     recordUsage(
@@ -125,7 +128,11 @@ it("updates main context during a turn and preserves it across remounts without 
         turnId: "next-turn",
         model: { providerId: "test", modelId: "new" },
         contextWindow: 64000,
-        values: { inputTokens: 24000, outputTokens: 200 },
+        values: {
+          inputTokens: 24000,
+          cacheReadTokens: 20000,
+          outputTokens: 200,
+        },
       }),
     ),
   );
@@ -133,7 +140,7 @@ it("updates main context during a turn and preserves it across remounts without 
     container.querySelector("button")?.getAttribute("aria-label"),
   ).toContain("24K / 64K");
   expect(document.body.textContent).toContain("24,000");
-  expect(document.body.textContent).not.toContain("9.7K / 81%");
+  expect(document.body.textContent).toContain("118.2K / 86.3%");
   await act(async () =>
     recordUsage(
       id,
@@ -141,7 +148,11 @@ it("updates main context during a turn and preserves it across remounts without 
         id: "next-child",
         turnId: "next-turn",
         taskId: "next-child",
-        values: { inputTokens: 90000, outputTokens: 50 },
+        values: {
+          inputTokens: 90000,
+          cacheReadTokens: 85000,
+          outputTokens: 50,
+        },
       }),
     ),
   );
@@ -157,7 +168,7 @@ it("updates main context during a turn and preserves it across remounts without 
     container.querySelector("button")?.getAttribute("aria-label"),
   ).toContain("24K / 64K");
   expect(container.textContent).toContain("37.5%");
-  expect(document.body.textContent).not.toContain("200");
+  expect(document.body.textContent).toContain("203.2K / 89.5%");
 });
 
 it("uses the Chinese character estimate for a session without usage records", async () => {
