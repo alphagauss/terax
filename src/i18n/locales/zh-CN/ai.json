@@ -12,7 +12,10 @@
       "noUsage": "暂无用量记录，上下文使用本地预估。",
       "taskUsage": "用量统计",
       "inputTokens": "上下文输入",
-      "cacheReadTokens": "缓存命中"
+      "cacheReadTokens": "缓存命中",
+      "cacheInputTokens": "缓存输入",
+      "uncachedInputTokens": "未缓存输入",
+      "outputTokens": "输出"
     },
     "switchSession": "切换会话",
     "aiSettings": "AI 设置",
@@ -143,6 +146,7 @@
       "firstToken": "首 token 延迟",
       "speed": "生成速度",
       "toolCalls": "工具调用",
+      "latestRequestCache": "本轮末次请求缓存",
       "seconds": "{{value}} 秒",
       "tokensPerSecond": "{{value}} token/s",
       "partial": "生成速度仅统计具有有效 SDK 计时和实际输出量的调用。"

@@ -11,6 +11,7 @@ import {
 } from "@/components/controls/tooltip";
 import { summarizePerformance } from "@/modules/ai/lib/usage";
 import {
+  LatestRequestCacheDetails,
   OutputToolDetails,
   useUsageRecords,
 } from "@/modules/ai/components/UsageDetails";
@@ -79,6 +80,7 @@ function TurnMetricsContent({
   return (
     <div className="space-y-1 text-[11px]">
       <OutputToolDetails records={records} />
+      <LatestRequestCacheDetails records={records} />
       {rows.map(([key, value]) => (
         <div key={key} className="flex justify-between gap-3">
           <span>{t(`chat.metrics.${key}`)}</span>

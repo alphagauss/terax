@@ -112,6 +112,44 @@ export function summarizeOutput(records: readonly UsageRecord[]) {
   };
 }
 
+/** 汇总会话内全部模型调用；缓存字段不完整时不把未知值当作未命中。 */
+export function summarizeSessionUsage(records: readonly UsageRecord[]) {
+  if (!records.length)
+    return {
+      cacheReadTokens: undefined,
+      noCacheTokens: undefined,
+      outputTokens: undefined,
+      outputEstimated: false,
+    };
+  const inputTokens = records.reduce(
+    (sum, record) => sum + record.values.inputTokens,
+    0,
+  );
+  const cacheComplete = records.every(
+    (record) =>
+      record.values.cacheReadTokens != null &&
+      !record.estimated.includes("inputTokens"),
+  );
+  const cacheReadTokens = cacheComplete
+    ? records.reduce(
+        (sum, record) => sum + (record.values.cacheReadTokens ?? 0),
+        0,
+      )
+    : undefined;
+  return {
+    cacheReadTokens,
+    noCacheTokens:
+      cacheReadTokens == null ? undefined : inputTokens - cacheReadTokens,
+    outputTokens: records.reduce(
+      (sum, record) => sum + record.values.outputTokens,
+      0,
+    ),
+    outputEstimated: records.some((record) =>
+      record.estimated.includes("outputTokens"),
+    ),
+  };
+}
+
 /** 按同一轮或子任务聚合 SDK 指标，不自行计时，也不推测底层重试次数。 */
 export function summarizePerformance(records: readonly UsageRecord[]) {
   const firstOutputMs = records

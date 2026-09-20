@@ -7,7 +7,11 @@ import {
   type ModelRef,
 } from "@/modules/ai/config";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import { summarizeOutput, type UsageRecord } from "@/modules/ai/lib/usage";
+import {
+  summarizeOutput,
+  summarizeSessionUsage,
+  type UsageRecord,
+} from "@/modules/ai/lib/usage";
 import { subscribeUsage, usageRecords } from "@/modules/ai/lib/usageRuntime";
 import { useCallback, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
@@ -70,6 +74,97 @@ export function UsageDetails({ records }: { records: readonly UsageRecord[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** 当前上下文取末次主请求，会话用量累计主任务、子任务与压缩请求。 */
+export function SessionUsageDetails({
+  context,
+  records,
+}: {
+  context: UsageRecord;
+  records: readonly UsageRecord[];
+}) {
+  const { t } = useTranslation("ai");
+  const summary = summarizeSessionUsage(records);
+  const cacheRate =
+    summary.cacheReadTokens == null
+      ? undefined
+      : summary.cacheReadTokens /
+        (summary.cacheReadTokens + (summary.noCacheTokens ?? 0));
+  const rows = [
+    {
+      key: "inputTokens",
+      value: context.values.inputTokens,
+      estimated: context.estimated.includes("inputTokens"),
+    },
+    {
+      key: "cacheInputTokens",
+      value: summary.cacheReadTokens,
+      suffix:
+        cacheRate == null || !Number.isFinite(cacheRate)
+          ? undefined
+          : ` / ${(cacheRate * 100).toFixed(1)}%`,
+    },
+    { key: "uncachedInputTokens", value: summary.noCacheTokens },
+    {
+      key: "outputTokens",
+      value: summary.outputTokens,
+      estimated: summary.outputEstimated,
+    },
+  ];
+  return (
+    <div className="space-y-1 text-[11px]">
+      {rows.map(({ key, value, suffix, estimated }) => (
+        <div
+          key={key}
+          className="flex items-baseline justify-between gap-3 text-muted-foreground"
+        >
+          <span>{t(`miniWindow.context.${key}`)}</span>
+          <Hint content={value?.toLocaleString()}>
+            <span className="text-right font-mono text-foreground">
+              {value == null ? (
+                t("miniWindow.context.unavailable")
+              ) : (
+                <>
+                  {formatTokens(value)}
+                  {suffix}
+                  {estimated && ` · ${t("miniWindow.context.estimated")}`}
+                </>
+              )}
+            </span>
+          </Hint>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 每轮三点菜单展示该轮末次模型请求的缓存命中。 */
+export function LatestRequestCacheDetails({
+  records,
+}: {
+  records: readonly UsageRecord[];
+}) {
+  const { t } = useTranslation("ai");
+  const latest = records[records.length - 1];
+  const input = latest?.values.inputTokens;
+  const cached = latest?.values.cacheReadTokens;
+  const rate =
+    input && cached != null && !latest.estimated.includes("inputTokens")
+      ? cached / input
+      : undefined;
+  return (
+    <div className="flex justify-between gap-3">
+      <span>{t("chat.metrics.latestRequestCache")}</span>
+      <Hint content={cached?.toLocaleString()}>
+        <span className="font-mono">
+          {cached == null
+            ? t("miniWindow.context.unavailable")
+            : `${formatTokens(cached)}${rate == null ? "" : ` / ${(rate * 100).toFixed(1)}%`}`}
+        </span>
+      </Hint>
     </div>
   );
 }

@@ -31,7 +31,11 @@ it("opens saved statistics on focus and excludes other turns and subagents", asy
         taskId: item.taskId,
         model: { providerId: "test", modelId: "test" },
         contextWindow: 10000,
-        values: { inputTokens: 0, outputTokens: item.output },
+        values: {
+          inputTokens: 100,
+          cacheReadTokens: 80,
+          outputTokens: item.output,
+        },
         estimated: [],
         toolCalls: index === 0 ? 3 : 2,
         timing: { responseTimeMs: item.time, timeToFirstOutputMs: 1000 },
@@ -50,6 +54,9 @@ it("opens saved statistics on focus and excludes other turns and subagents", asy
     const panel = document.querySelector('[role="tooltip"]');
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(panel?.textContent).toContain("chat.metrics.output300");
+    expect(panel?.textContent).toContain(
+      "chat.metrics.latestRequestCache80 / 80.0%",
+    );
     expect(panel?.textContent).toContain("chat.metrics.firstToken1");
     expect(panel?.textContent).toContain("chat.metrics.speed60");
     expect(panel?.textContent).toContain("chat.metrics.toolCalls5");

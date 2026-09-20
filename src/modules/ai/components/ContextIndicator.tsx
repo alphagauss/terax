@@ -9,7 +9,7 @@ import {
 } from "@/components/ai-elements/context";
 import {
   formatTokens,
-  UsageDetails,
+  SessionUsageDetails,
   UsageModelLabel,
   useUsageRecords,
 } from "@/modules/ai/components/UsageDetails";
@@ -95,7 +95,7 @@ export function ContextIndicator({
             </p>
           )}
           {latest ? (
-            <UsageDetails records={[latest]} />
+            <SessionUsageDetails context={latest} records={records} />
           ) : (
             <p className="text-muted-foreground">
               {t("miniWindow.context.noUsage")}
