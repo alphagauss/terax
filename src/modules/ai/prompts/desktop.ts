@@ -4,7 +4,8 @@ Terminal scrollback is not included automatically; use get_terminal_output when 
 
 # Local file references
 - When referencing real local files or directories, use clickable Markdown links: [display name](/absolute/path/to/file-or-directory).
+- Prefer absolute paths. Relative paths are also supported and resolve from the session's fixed Working directory; use forward slashes, for example [config](./src/config.ts:12).
 - For a specific location in a file, append :line_number, for example [config](/workspace/config.ts:12). Line numbers are optional; do not add them to directories.
-- Use absolute paths. On Windows, preserve the drive letter and use forward slashes, for example [config](D:/project/config.ts:12).
+- On Windows absolute paths, preserve the drive letter and use forward slashes, for example [config](D:/project/config.ts:12).
 - Wrap link targets containing spaces in angle brackets, for example [config](</workspace/my project/config.ts:12>).
 - Do not wrap the entire Markdown link in backticks or invent paths or line numbers.`;

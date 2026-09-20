@@ -87,6 +87,8 @@ type Props = {
     handle: MarkdownPreviewPaneHandle | null,
   ) => void;
   registerFindHandle: (id: number, handle: FindHandle | null) => void;
+  onFileReferenceOpen: (path: string, line?: number) => void | Promise<void>;
+  onFileReferenceOpenDirectory: (path: string) => void | Promise<void>;
   onDirtyChange: (id: number, dirty: boolean) => void;
   onCloseTab: (id: number) => void;
 };
@@ -106,6 +108,8 @@ export function MarkdownPreviewPane({
   registerEditorHandle,
   registerNavigationHandle,
   registerFindHandle,
+  onFileReferenceOpen,
+  onFileReferenceOpenDirectory,
   onDirtyChange,
   onCloseTab,
 }: Props) {
@@ -779,6 +783,10 @@ export function MarkdownPreviewPane({
                       visible={visible}
                       scrollContainer={scrollContainer}
                       onFragmentNavigate={handleFragmentNavigate}
+                      onFileReferenceOpen={onFileReferenceOpen}
+                      onFileReferenceOpenDirectory={
+                        onFileReferenceOpenDirectory
+                      }
                     />
                   </MarkdownRenderErrorBoundary>
                 )}

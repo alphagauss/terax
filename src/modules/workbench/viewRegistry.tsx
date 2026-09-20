@@ -45,6 +45,8 @@ export type WorkbenchViewServices = {
     handle: MarkdownPreviewPaneHandle | null,
   ) => void;
   registerFindHandle: (tabId: number, handle: FindHandle | null) => void;
+  onFileReferenceOpen: (path: string, line?: number) => void | Promise<void>;
+  onFileReferenceOpenDirectory: (path: string) => void | Promise<void>;
   onEditorDirtyChange: (tabId: number, dirty: boolean) => void;
   onEditorCloseTab: (tabId: number) => void;
   registerWebPreviewHandle: (
@@ -137,6 +139,8 @@ export function WorkbenchRegisteredView({
           registerEditorHandle={services.registerEditorHandle}
           registerNavigationHandle={services.registerMarkdownNavigationHandle}
           registerFindHandle={services.registerFindHandle}
+          onFileReferenceOpen={services.onFileReferenceOpen}
+          onFileReferenceOpenDirectory={services.onFileReferenceOpenDirectory}
           onDirtyChange={services.onEditorDirtyChange}
           onCloseTab={services.onEditorCloseTab}
         />

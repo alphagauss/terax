@@ -23,6 +23,9 @@ describe("agent configuration", () => {
     expect(await loadAgents()).toEqual([MAIN_AGENT, CHANNEL_AGENT]);
     expect(shared.set).not.toHaveBeenCalled();
     expect(MAIN_AGENT.instructions).toContain(":line_number");
+    expect(MAIN_AGENT.instructions).toContain(
+      "Relative paths are also supported and resolve from the session's fixed Working directory",
+    );
     expect(CHANNEL_AGENT.instructions).not.toContain("# Local file references");
     expect(CHANNEL_AGENT.tools).not.toContain("get_terminal_output");
   });

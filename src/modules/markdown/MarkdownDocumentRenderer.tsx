@@ -5,6 +5,8 @@
  */
 
 import { Hint } from "@/components/controls/tooltip";
+import { FileReferenceLink } from "@/modules/file-actions/FileReferenceLink";
+import { decodeFileReference } from "@/modules/file-actions/references";
 import { MarkdownCode } from "@/modules/markdown/markdown-code";
 import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
 import { cn } from "@/lib/utils";
@@ -89,6 +91,10 @@ const MarkdownVisibilityContext = createContext(true);
 const MarkdownFragmentNavigationContext = createContext<
   (fragment: string) => void
 >(() => {});
+const MarkdownFileNavigationContext = createContext({
+  openFile: (_path: string, _line?: number): void | Promise<void> => {},
+  openDirectory: (_path: string): void | Promise<void> => {},
+});
 const ProgressiveBlockContext =
   createContext<ProgressiveBlockContextValue | null>(null);
 
@@ -183,6 +189,22 @@ function MarkdownPreviewLink({
   ...props
 }: MarkdownLinkProps) {
   const navigateToFragment = useContext(MarkdownFragmentNavigationContext);
+  const fileNavigation = useContext(MarkdownFileNavigationContext);
+  const reference = decodeFileReference(href ?? "");
+  if (reference && href) {
+    return (
+      <FileReferenceLink
+        {...props}
+        key={href}
+        href={href}
+        reference={reference}
+        onOpen={fileNavigation.openFile}
+        onOpenDirectory={fileNavigation.openDirectory}
+      >
+        {children}
+      </FileReferenceLink>
+    );
+  }
   const target = classifyMarkdownLink(href);
   if (target.kind === "blocked") {
     return (
@@ -340,6 +362,8 @@ type Props = {
   visible: boolean;
   scrollContainer: HTMLElement;
   onFragmentNavigate: (fragment: string) => void;
+  onFileReferenceOpen: (path: string, line?: number) => void | Promise<void>;
+  onFileReferenceOpenDirectory: (path: string) => void | Promise<void>;
 };
 
 /**
@@ -351,7 +375,15 @@ export const MarkdownDocumentRenderer = forwardRef<
   MarkdownDocumentRendererHandle,
   Props
 >(function MarkdownDocumentRenderer(
-  { document, documentPath, visible, scrollContainer, onFragmentNavigate },
+  {
+    document,
+    documentPath,
+    visible,
+    scrollContainer,
+    onFragmentNavigate,
+    onFileReferenceOpen,
+    onFileReferenceOpenDirectory,
+  },
   ref,
 ) {
   const progressive = document.progressive;
@@ -363,8 +395,8 @@ export const MarkdownDocumentRenderer = forwardRef<
     [document.outline],
   );
   const rehypePlugins = useMemo(
-    () => buildMarkdownRehypePlugins(headingSlugById),
-    [headingSlugById],
+    () => buildMarkdownRehypePlugins(headingSlugById, documentPath),
+    [documentPath, headingSlugById],
   );
   const store = useMemo(
     () =>
@@ -507,44 +539,51 @@ export const MarkdownDocumentRenderer = forwardRef<
 
   return (
     <MarkdownFragmentNavigationContext.Provider value={onFragmentNavigate}>
-      <MarkdownVisibilityContext.Provider value={visible}>
-        <MarkdownImageProvider
-          documentPath={documentPath}
-          scrollRoot={scrollContainer}
-          visible={visible}
-        >
-          {progressive ? (
-            <ProgressiveBlockContext.Provider value={progressiveContext}>
+      <MarkdownFileNavigationContext.Provider
+        value={{
+          openFile: onFileReferenceOpen,
+          openDirectory: onFileReferenceOpenDirectory,
+        }}
+      >
+        <MarkdownVisibilityContext.Provider value={visible}>
+          <MarkdownImageProvider
+            documentPath={documentPath}
+            scrollRoot={scrollContainer}
+            visible={visible}
+          >
+            {progressive ? (
+              <ProgressiveBlockContext.Provider value={progressiveContext}>
+                <Streamdown
+                  className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                  components={markdownComponents}
+                  plugins={streamdownPlugins}
+                  rehypePlugins={rehypePlugins}
+                  remarkPlugins={progressiveRemarkPlugins}
+                  mode="streaming"
+                  parseIncompleteMarkdown={false}
+                  isAnimating={false}
+                  BlockComponent={MemoizedProgressiveMarkdownBlock}
+                  parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocks}
+                >
+                  {document.source}
+                </Streamdown>
+              </ProgressiveBlockContext.Provider>
+            ) : (
               <Streamdown
                 className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
                 components={markdownComponents}
                 plugins={streamdownPlugins}
                 rehypePlugins={rehypePlugins}
-                remarkPlugins={progressiveRemarkPlugins}
-                mode="streaming"
+                mode="static"
                 parseIncompleteMarkdown={false}
                 isAnimating={false}
-                BlockComponent={MemoizedProgressiveMarkdownBlock}
-                parseMarkdownIntoBlocksFn={parseMarkdownIntoBlocks}
               >
                 {document.source}
               </Streamdown>
-            </ProgressiveBlockContext.Provider>
-          ) : (
-            <Streamdown
-              className="markdown-content select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-              components={markdownComponents}
-              plugins={streamdownPlugins}
-              rehypePlugins={rehypePlugins}
-              mode="static"
-              parseIncompleteMarkdown={false}
-              isAnimating={false}
-            >
-              {document.source}
-            </Streamdown>
-          )}
-        </MarkdownImageProvider>
-      </MarkdownVisibilityContext.Provider>
+            )}
+          </MarkdownImageProvider>
+        </MarkdownVisibilityContext.Provider>
+      </MarkdownFileNavigationContext.Provider>
     </MarkdownFragmentNavigationContext.Provider>
   );
 });

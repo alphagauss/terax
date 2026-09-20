@@ -23,7 +23,10 @@ function render(
         },
         mode: "static",
         parseIncompleteMarkdown: false,
-        rehypePlugins: buildMarkdownRehypePlugins(headingSlugById),
+        rehypePlugins: buildMarkdownRehypePlugins(
+          headingSlugById,
+          "D:/project/docs/current.md",
+        ),
       },
       markdown,
     ),
@@ -133,5 +136,28 @@ describe("Markdown rehype pipeline", () => {
     expect(html).toContain('href="#hello-world"');
     expect(html).toContain('id="user-content-hello-world"');
     expect(html).toContain('data-markdown-heading-id="markdown-heading-3"');
+  });
+
+  it("preserves absolute file references through the security pipeline", () => {
+    const html = render(
+      "[win](D:/project/config.ts:12) [unix](</workspace/my project/config.ts:5>)",
+    );
+
+    expect(html).toContain('href="terax-file:D%3A%2Fproject%2Fconfig.ts%3A12"');
+    expect(html).toContain(
+      'href="terax-file:%2Fworkspace%2Fmy%20project%2Fconfig.ts%3A5"',
+    );
+  });
+
+  it("resolves relative document links before link hardening", () => {
+    const html = render(
+      "[readme](../README.md) [source](./guide/config.ts:8#details)",
+    );
+
+    expect(html).toContain('href="terax-file:D%3A%2Fproject%2FREADME.md"');
+    expect(html).toContain(
+      'href="terax-file:D%3A%2Fproject%2Fdocs%2Fguide%2Fconfig.ts%3A8"',
+    );
+    expect(html).not.toContain("[blocked]");
   });
 });
