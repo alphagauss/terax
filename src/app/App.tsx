@@ -324,12 +324,16 @@ export default function App() {
     launchCwdResolved,
     environmentError,
     remoteEventsReady,
+    credentialsRequired,
     hostPrompt,
     clearHostPrompt,
     ensureWorkspaceReady,
     reconnectWorkspace,
   } = useWorkspaceEnvironment();
   const [sshConnectionOpen, setSshConnectionOpen] = useState(false);
+  useEffect(() => {
+    if (credentialsRequired) setSshConnectionOpen(true);
+  }, [credentialsRequired]);
   // 文件管理器、状态栏和凭据对话框共享 Hook 内的连接任务，避免并发替换 SSH Runtime。
   const requestSshReconnect = useCallback(() => {
     if (workspaceEnv.kind !== "ssh") return;

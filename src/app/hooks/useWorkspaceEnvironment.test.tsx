@@ -134,11 +134,13 @@ describe("useWorkspaceEnvironment", () => {
       version: 3,
       profileId: "server",
       reason: "authentication failed",
+      credentialsRequired: true,
     };
 
     await renderHarness();
 
     expect(mocks.connectRuntime).not.toHaveBeenCalled();
+    expect(latestEnvironment?.credentialsRequired).toBe(true);
   });
 
   it("asks Rust to verify a focused SSH window", async () => {

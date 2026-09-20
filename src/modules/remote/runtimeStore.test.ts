@@ -31,6 +31,7 @@ describe("Remote Runtime store", () => {
       version: 3,
       profileId: "server",
       reason: "late event",
+      credentialsRequired: false,
     });
 
     expect(useRemoteRuntimeStore.getState().snapshot).toMatchObject({
@@ -71,6 +72,7 @@ describe("Remote Runtime store", () => {
         version: 2,
         profileId: "server",
         reason: "closed",
+        credentialsRequired: false,
       }),
     ).toBeNull();
   });

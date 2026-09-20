@@ -329,6 +329,7 @@ pub enum RemoteRuntimeSnapshot {
         version: u64,
         profile_id: String,
         reason: String,
+        credentials_required: bool,
     },
 }
 
@@ -522,6 +523,23 @@ mod tests {
                 "phase": "reconnecting",
                 "version": 8,
                 "profileId": "server"
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(RemoteRuntimeSnapshot::Disconnected {
+                version: 9,
+                profile_id: "server".into(),
+                reason: "authentication failed".into(),
+                credentials_required: true,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "phase": "disconnected",
+                "version": 9,
+                "profileId": "server",
+                "reason": "authentication failed",
+                "credentialsRequired": true
             })
         );
     }

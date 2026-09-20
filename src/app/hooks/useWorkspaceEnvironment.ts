@@ -253,6 +253,11 @@ export function useWorkspaceEnvironment() {
     env.kind === "ssh" && runtimeSnapshot.phase === "disconnected"
       ? runtimeSnapshot.reason
       : null;
+  const credentialsRequired =
+    env.kind === "ssh" &&
+    runtimeSnapshot.phase === "disconnected" &&
+    runtimeSnapshot.profileId === env.profileId &&
+    runtimeSnapshot.credentialsRequired;
 
   return {
     home,
@@ -261,6 +266,7 @@ export function useWorkspaceEnvironment() {
     environmentError:
       remoteBridgeError ?? environmentActionError ?? runtimeError,
     remoteEventsReady,
+    credentialsRequired,
     hostPrompt,
     clearHostPrompt: () => setHostPrompt(null),
     ensureWorkspaceReady,
