@@ -17,7 +17,6 @@ import { useComposer } from "../lib/composer";
 import { availableCommands } from "@/modules/ai/commands/registry";
 import { sessionMetadata, useChatStore } from "../store/chatStore";
 import { useSnippetsStore } from "../store/snippetsStore";
-import { AgentSwitcher } from "./AgentSwitcher";
 import { FilePickerContent } from "./FilePicker";
 import { type PickerItem, SnippetPickerContent } from "./SnippetPicker";
 
@@ -248,7 +247,7 @@ export function AiComposerInput() {
     <>
       <Popover open={pickerOpen}>
         <PopoverAnchor asChild>
-          <div className="flex items-start gap-2">
+          <div className="flex items-start">
             <textarea
               ref={c.textareaRef}
               disabled={c.readOnly}
@@ -315,7 +314,6 @@ export function AiComposerInput() {
                 "disabled:cursor-not-allowed",
               )}
             />
-            {usesExternalAgent ? null : <AgentSwitcher />}
           </div>
         </PopoverAnchor>
         {fileTrigger ? (

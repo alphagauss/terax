@@ -48,7 +48,11 @@ import {
   type SessionAttention,
   useSessionAttentionStore,
 } from "@/modules/ai/store/sessionAttentionStore";
-import { AGENT_ICONS } from "@/modules/ai/components/AgentSwitcher";
+import {
+  AGENT_ICONS,
+  AgentPicker,
+  SessionAgentIdentity,
+} from "@/modules/ai/components/AgentSwitcher";
 import { AiChatView } from "@/modules/ai/components/AiChat";
 import { AiInputBarConnect } from "@/modules/ai/components/AiInputBar";
 import { AiSidebarComposer } from "@/modules/ai/components/AiSidebarComposer";
@@ -199,11 +203,14 @@ function Header({
       <div className="flex min-w-0 items-center gap-1.5">
         <SessionPicker />
         {messages !== undefined && (
-          <ContextIndicator
-            sessionId={sessionId}
-            isBusy={isBusy}
-            messages={messages}
-          />
+          <>
+            <ContextIndicator
+              sessionId={sessionId}
+              isBusy={isBusy}
+              messages={messages}
+            />
+            <SessionAgentIdentity sessionId={sessionId} />
+          </>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
@@ -488,6 +495,7 @@ function EmptyState() {
           {t("miniWindow.empty.description")}
         </p>
       </div>
+      <AgentPicker />
     </div>
   );
 }

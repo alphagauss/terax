@@ -32,7 +32,7 @@
     },
     "empty": {
       "title": "向 Terax 提问",
-      "description": "Terax 在文件管理器目录中工作，仅在需要时读取终端输出。"
+      "description": "Terax 在文件管理器目录中工作，需要时读取终端输出。"
     }
   },
   "toolApproval": {
