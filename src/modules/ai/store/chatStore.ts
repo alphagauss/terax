@@ -125,6 +125,8 @@ export type AgentMeta = {
   pendingSteering: number;
   cancelled: boolean;
   status: AgentRunStatus;
+  /** 当前活动块的纯内存计时起点，只用于恢复前台展示。 */
+  activityTiming?: { key: string; startedAt: number };
   approvalsPending: number;
   error: string | null;
   /** 终态保存失败归属具体会话，后台调用方不能只等待运行锁释放。 */

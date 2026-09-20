@@ -1,11 +1,12 @@
 /**
- * 本文件测试聊天活动块的本地折叠和标题稳定规则。
- * 测试锁定活动结束时只自动收起一次，以及运行中的工具标题至少保持一秒。
+ * 本文件测试聊天活动块的本地折叠、标题稳定和运行计时规则。
+ * 测试锁定活动结束时只自动收起一次、工具标题至少保持一秒，且计时可跨工具与重新挂载恢复。
  */
 
 // @vitest-environment happy-dom
 
 import { preloadEn } from "@/i18n";
+import { useChatStore } from "@/modules/ai/store/chatStore";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
@@ -29,7 +30,6 @@ const reactTestEnvironment = globalThis as typeof globalThis & {
 const thinking = {
   kind: "thinking",
   key: "thinking",
-  text: "Thinking",
 } as const;
 let container: HTMLDivElement;
 let root: Root;
@@ -45,6 +45,7 @@ describe("ChatActivityBlock", () => {
   });
 
   beforeEach(() => {
+    useChatStore.setState({ agentMetaBySession: {} });
     container = document.createElement("div");
     root = createRoot(container);
   });
@@ -136,7 +137,9 @@ describe("ChatActivityBlock", () => {
     renderBlock(root, thinking, true);
     renderBlock(root, null, true);
     act(() => vi.advanceTimersByTime(1200));
-    expect(container.querySelector("button")?.textContent).toBe("Thinking");
+    expect(container.querySelector("button")?.textContent).toContain(
+      "Thinking 2s",
+    );
     renderBlock(
       root,
       { kind: "tool", key: "shell", action: "Running", text: "pnpm test" },
@@ -212,6 +215,35 @@ describe("ChatActivityBlock", () => {
       container.querySelector(".shrink-0.whitespace-nowrap")?.textContent,
     ).toBe("Write");
   });
+
+  it("keeps the activity timer across tools and remounts within the session", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+
+    renderBlock(root, thinking, true);
+    expect(container.textContent).toContain("Thinking 1s");
+
+    act(() => vi.advanceTimersByTime(2000));
+    expect(container.textContent).toContain("Thinking 3s");
+
+    renderBlock(root, { kind: "tool", key: "shell", text: "pnpm test" }, true);
+    expect(container.textContent).toContain("pnpm test");
+    act(() => vi.advanceTimersByTime(3000));
+    renderBlock(root, thinking, true);
+    expect(container.textContent).toContain("Thinking 6s");
+
+    act(() => root.render(null));
+    renderBlock(root, thinking, true);
+    expect(container.textContent).toContain("Thinking 6s");
+
+    renderBlock(root, thinking, true, undefined, "next-activity");
+    expect(container.textContent).toContain("Thinking 1s");
+
+    renderBlock(root, thinking, false, 1000, "next-activity");
+    expect(
+      useChatStore.getState().agentMetaBySession.session?.activityTiming,
+    ).toBeUndefined();
+  });
 });
 
 function renderBlock(
@@ -219,10 +251,14 @@ function renderBlock(
   headline: ChatActivityHeadline,
   running: boolean,
   durationMs?: number,
+  activityKey = "activity",
 ) {
   act(() => {
     root.render(
       <ChatActivityBlock
+        key={activityKey}
+        sessionId="session"
+        activityKey={activityKey}
         durationMs={durationMs}
         headline={headline}
         running={running}

@@ -95,6 +95,8 @@ describe("文件改动展示", async () => {
         root.render(
           <FileEditContext.Provider value={context}>
             <ChatActivityBlock
+              sessionId={sessionId}
+              activityKey="file-edits"
               running={running}
               headline={{ kind: "tool", key, text: key }}
             >
