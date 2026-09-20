@@ -1,9 +1,9 @@
 /**
  * 本文件分发前端与 TUI 构建命令。
- * 默认通过 Node 顺序执行 TypeScript 检查和 Vite 构建，仅 TUI 构建需要 Bun。
+ * 默认通过 Node 并行执行 TypeScript 检查和 Vite 构建，仅 TUI 构建需要 Bun。
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,12 +25,40 @@ function run(command, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
+/** 并行执行相互独立的前端构建步骤，并在全部结束后传递失败退出码。 */
+async function runParallel(commands) {
+  const results = await Promise.all(
+    commands.map(
+      ([command, args]) =>
+        new Promise((resolve) => {
+          const child = spawn(command, args, {
+            cwd: root,
+            stdio: "inherit",
+            windowsHide: true,
+          });
+          child.once("error", (error) => {
+            process.stderr.write(`${error.message}\n`);
+            resolve(1);
+          });
+          child.once("close", (code) => resolve(code ?? 1));
+        }),
+    ),
+  );
+  const failure = results.find((code) => code !== 0);
+  if (failure !== undefined) process.exit(failure);
+}
+
 const args = process.argv.slice(2);
 if (args.length === 0) {
-  run(process.execPath, [require.resolve("typescript/bin/tsc")]);
-  run(process.execPath, [
-    join(dirname(require.resolve("vite/package.json")), "bin/vite.js"),
-    "build",
+  await runParallel([
+    [process.execPath, [require.resolve("typescript/bin/tsc")]],
+    [
+      process.execPath,
+      [
+        join(dirname(require.resolve("vite/package.json")), "bin/vite.js"),
+        "build",
+      ],
+    ],
   ]);
 } else if (args[0] === "tui") {
   run("bun", [join(root, "scripts/build-tui.ts"), ...args.slice(1)]);
