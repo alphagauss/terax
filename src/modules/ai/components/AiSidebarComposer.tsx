@@ -60,7 +60,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import "@/modules/ai/components/ai-sidebar-composer.css";
 import { ChipsRow } from "@/modules/ai/components/ChipsRow";
 import { useComposerDrop } from "@/modules/ai/hooks/useComposerDrop";
 
@@ -125,7 +124,7 @@ export function AiSidebarComposer() {
         ) : null}
         <AiComposerInput />
 
-        <div className="terax-ai-composer-toolbar flex min-w-0 items-center gap-0.5">
+        <div className="flex min-w-0 items-center gap-0.5">
           <IconBtn
             title={t(
               c.canPickFiles
@@ -268,7 +267,7 @@ function PermissionModeDropdown() {
             aria-label={t(`statusBar.permissionMode.${mode}`)}
           >
             <HugeiconsIcon icon={activeIcon} size={13} strokeWidth={1.75} />
-            <span className="terax-ai-permission-label">
+            <span className="hidden">
               {t(`statusBar.permissionMode.${mode}`)}
             </span>
           </Button>

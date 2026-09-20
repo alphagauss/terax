@@ -1,8 +1,9 @@
 /**
- * 本文件实现会话级 Agent 选择器。
+ * 本文件实现草稿 Agent 选择器和会话只读身份。
  * 空白草稿允许选择固定主 Agent 或 Custom Agent，首次发送后只展示冻结身份。
  */
 
+import { Button } from "@/components/controls/button";
 import { Hint } from "@/components/controls/tooltip";
 import {
   DropdownMenu,
@@ -11,8 +12,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
-import { Button } from "@/components/controls/button";
 import { cn } from "@/lib/utils";
+import { parseExternalAgentBinding } from "@/modules/ai/external-agents/runtime";
+import {
+  type AgentIconId,
+  agentDisplayDescription,
+  agentDisplayName,
+  CHANNEL_AGENT_ID,
+  findAgent,
+  MAIN_AGENT,
+} from "@/modules/ai/lib/agents";
+import { useAgentsStore } from "@/modules/ai/store/agentsStore";
+import { sessionMetadata, useChatStore } from "@/modules/ai/store/chatStore";
 import { openSettingsWindow } from "@/modules/settings/openSettingsWindow";
 import {
   AbsoluteIcon,
@@ -28,16 +39,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  type AgentIconId,
-  agentDisplayDescription,
-  agentDisplayName,
-  findAgent,
-  MAIN_AGENT,
-  CHANNEL_AGENT_ID,
-} from "@/modules/ai/lib/agents";
-import { useAgentsStore } from "@/modules/ai/store/agentsStore";
-import { useChatStore } from "@/modules/ai/store/chatStore";
 
 const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   coder: CodeIcon,
@@ -48,70 +49,54 @@ const ICONS: Record<AgentIconId, typeof CodeIcon> = {
   spark: SparklesIcon,
 };
 
-/** Agent 选择器；持久化会话只显示身份，会话中不允许切换智能体身份。 */
-export function AgentSwitcher() {
+/** 空白草稿的 Agent 选择器；会话开始后不再渲染。 */
+export function AgentPicker() {
   const { t } = useTranslation("aiAgents");
   const activeSessionId = useChatStore((state) => state.activeSessionId);
-  const session = useChatStore((state) =>
-    state.sessions.find((item) => item.id === state.activeSessionId),
+  const draftSessionId = useChatStore((state) => state.draftSessionId);
+  const draftExternalAgentId = useChatStore(
+    (state) => state.draftExternalAgentId,
+  );
+  const sessionExists = useChatStore((state) =>
+    state.sessions.some((item) => item.id === state.activeSessionId),
   );
   const definitions = useAgentsStore((state) => state.agents);
   const draftAgentId = useAgentsStore((state) => state.draftAgentId);
   const setDraftAgentId = useAgentsStore((state) => state.setDraftAgentId);
-  const draftAgent = findAgent(definitions, draftAgentId);
-  const isDraft = activeSessionId !== null && session === undefined;
-  const sessionAgent = definitions.find(
-    (agent) => agent.id === session?.agentId,
+  const usesExternalAgent = Boolean(
+    parseExternalAgentBinding(
+      activeSessionId ? sessionMetadata.get(activeSessionId) : undefined,
+    ) ?? (activeSessionId === draftSessionId ? draftExternalAgentId : null),
   );
-  const active = isDraft
-    ? draftAgent
-    : {
-        id: session?.agentId ?? MAIN_AGENT.id,
-        name: sessionAgent?.name ?? session?.agentName ?? MAIN_AGENT.name,
-        icon: sessionAgent?.icon ?? session?.agentIcon ?? MAIN_AGENT.icon,
-      };
+  const isDraft = activeSessionId !== null && !sessionExists;
+
+  if (!isDraft || usesExternalAgent) return null;
+
+  const active = findAgent(definitions, draftAgentId);
+  const activeName = agentDisplayName(active);
   const ActiveIcon = ICONS[active.icon] ?? SparklesIcon;
-  const triggerContent = (
-    <>
-      <HugeiconsIcon icon={ActiveIcon} size={11} strokeWidth={1.75} />
-      <span className="max-w-[7rem] truncate">{agentDisplayName(active)}</span>
-      {isDraft ? (
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          size={10}
-          strokeWidth={2}
-          className="opacity-70"
-        />
-      ) : null}
-    </>
-  );
-
-  if (!isDraft) {
-    return (
-      <Hint content={t("trigger.locked", { name: active.name })}>
-        <span className="flex h-6 items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 text-[10.5px] text-muted-foreground">
-          {triggerContent}
-        </span>
-      </Hint>
-    );
-  }
-
   const agents = definitions.filter((agent) => agent.id !== CHANNEL_AGENT_ID);
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Hint content={t("trigger.title", { name: agentDisplayName(active) })}>
-          <Button
-            aria-label={t("trigger.title", { name: agentDisplayName(active) })}
-            size="xs"
-            variant="outline"
-            className="flex items-center border border-border/60 bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
-          >
-            {triggerContent}
-          </Button>
-        </Hint>
+        <Button
+          aria-label={t("trigger.title", { name: activeName })}
+          size="sm"
+          variant="ghost"
+          className="max-w-full"
+        >
+          <HugeiconsIcon icon={ActiveIcon} size={13} strokeWidth={1.75} />
+          <span className="truncate">{activeName}</span>
+          <HugeiconsIcon
+            icon={ArrowDown01Icon}
+            size={11}
+            strokeWidth={2}
+            className="opacity-70"
+          />
+        </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-60">
+      <DropdownMenuContent align="center" className="min-w-60">
         {agents.map((agent, index) => {
           const Icon = ICONS[agent.icon] ?? SparklesIcon;
           return (
@@ -158,6 +143,53 @@ export function AgentSwitcher() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** 已开始会话的只读 Agent 身份，不提供切换入口。 */
+export function SessionAgentIdentity({
+  sessionId,
+}: {
+  sessionId: string | null;
+}) {
+  const { t } = useTranslation("aiAgents");
+  const session = useChatStore((state) =>
+    state.sessions.find((item) => item.id === sessionId),
+  );
+  const definitions = useAgentsStore((state) => state.agents);
+  if (
+    !session ||
+    parseExternalAgentBinding(
+      sessionId ? sessionMetadata.get(sessionId) : undefined,
+    )
+  )
+    return null;
+
+  const configured = definitions.find((agent) => agent.id === session.agentId);
+  const active = {
+    id: session.agentId ?? MAIN_AGENT.id,
+    name: configured?.name ?? session.agentName ?? MAIN_AGENT.name,
+    icon: configured?.icon ?? session.agentIcon ?? MAIN_AGENT.icon,
+  };
+  const activeName = agentDisplayName(active);
+  const ActiveIcon = ICONS[active.icon] ?? SparklesIcon;
+
+  return (
+    <Hint content={t("trigger.locked", { name: activeName })}>
+      <span
+        role="img"
+        aria-label={t("trigger.locked", { name: activeName })}
+        className="flex h-6 min-w-0 max-w-32 shrink items-center gap-1 px-1 text-[10.5px] text-muted-foreground"
+      >
+        <HugeiconsIcon
+          icon={ActiveIcon}
+          size={11}
+          strokeWidth={1.75}
+          className="shrink-0"
+        />
+        <span className="truncate">{activeName}</span>
+      </span>
+    </Hint>
   );
 }
 
