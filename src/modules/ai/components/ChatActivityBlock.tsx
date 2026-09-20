@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { FileEditStats } from "@/modules/ai/components/FileEditStats";
-import { ArrowDown01Icon } from "@hugeicons/core-free-icons";
+import { ChevronDown } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { useLayoutEffect, useRef, useState } from "react";
@@ -72,7 +72,7 @@ export function ChatActivityBlock({
       open={open}
       onOpenChange={setOpen}
     >
-      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-1.5 text-[14px] leading-[22px] text-muted-foreground transition-colors duration-control hover:text-foreground">
+      <CollapsibleTrigger className="group/ai-disclosure flex w-fit max-w-full min-w-0 items-center gap-1.5 text-[14px] leading-[22px] text-muted-foreground transition-colors duration-control hover:text-foreground">
         {running ? (
           <Shimmer
             as="span"
@@ -104,12 +104,12 @@ export function ChatActivityBlock({
           />
         )}
         <HugeiconsIcon
-          icon={ArrowDown01Icon}
+          icon={ChevronDown}
           size={11}
           strokeWidth={1.75}
           className={cn(
-            "shrink-0 transition-transform duration-control ease-emphasized",
-            open ? "rotate-180" : "rotate-0",
+            "shrink-0 opacity-0 transition-[opacity,transform] duration-control ease-emphasized group-hover/ai-disclosure:opacity-100 group-focus-visible/ai-disclosure:opacity-100",
+            open ? "rotate-0 opacity-100" : "-rotate-90",
           )}
         />
       </CollapsibleTrigger>
