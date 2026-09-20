@@ -3,10 +3,14 @@
  * 测试锁定工具调用、展示耗时、结果顺序、turn 分组及恢复后的 prompt cache 前缀。
  */
 
+import { projectCommands } from "@/modules/ai/commands/records";
 import {
+  approvalModelHistoryDelta,
+  conversationEventPart,
   convertToAgentModelMessages,
   formatSubagentResultEvent,
   messageMetadata,
+  modelHistoryPart,
   projectConversationDisplay,
   projectSessionMessages,
   type SessionMessage,
@@ -15,8 +19,9 @@ import {
   serializeSubagentResultEvent,
   TOOL_APPROVAL_DENIED_REASON,
 } from "@/modules/ai/lib/conversation";
-import { projectCommands } from "@/modules/ai/commands/records";
 import type { UIMessage } from "@ai-sdk/react";
+import { generateText, jsonSchema, type ModelMessage } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 const user = (id: string): UIMessage => ({
@@ -32,6 +37,241 @@ function jsonlRoundTrip(records: SessionMessage[]): SessionMessage[] {
 }
 
 describe("AI session message conversion", () => {
+  it("appends approval decisions without rewriting the signed model prefix", async () => {
+    const canonical: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call",
+            toolName: "read_file",
+            input: { path: "a" },
+            providerOptions: { test: { id: "call-id" } },
+          },
+          {
+            type: "tool-approval-request",
+            toolCallId: "call",
+            approvalId: "approval",
+            signature: "signature",
+          },
+        ],
+      },
+    ];
+    const restored = projectSessionMessages("session", [
+      { role: "model", content: canonical, timestamp, turn_id: "turn" },
+    ]);
+    const tool = restored[0].parts.find(
+      (part) => "toolCallId" in part,
+    ) as Extract<UIMessage["parts"][number], { type: `tool-${string}` }>;
+    Object.assign(tool, {
+      state: "approval-responded",
+      approval: {
+        id: "approval",
+        approved: true,
+        reason: "allowed",
+        signature: "signature",
+      },
+    });
+    const next = await convertToAgentModelMessages(restored);
+    expect(next.slice(0, canonical.length)).toEqual(canonical);
+    expect(next[1]).toMatchObject({
+      role: "tool",
+      content: [
+        {
+          type: "tool-approval-response",
+          approvalId: "approval",
+          approved: true,
+          reason: "allowed",
+        },
+      ],
+    });
+    const delta = approvalModelHistoryDelta(restored[0], next);
+    expect(delta).toEqual(next.slice(canonical.length));
+    restored[0].parts.push(modelHistoryPart(delta));
+    const materialized = await convertToAgentModelMessages(restored);
+    expect(materialized).toEqual(next);
+    expect(approvalModelHistoryDelta(restored[0], materialized)).toEqual([]);
+    const records = jsonlRoundTrip(
+      serializeSessionMessages(restored, { timestamp, turnId: "turn" }),
+    );
+    const projected = projectSessionMessages("restored", records);
+    expect(await convertToAgentModelMessages(projected)).toEqual(
+      JSON.parse(JSON.stringify(next)),
+    );
+    expect(
+      await convertToAgentModelMessages([...projected, user("continue")]),
+    ).toEqual([
+      ...JSON.parse(JSON.stringify(next)),
+      { role: "user", content: [{ type: "text", text: "continue" }] },
+    ]);
+  });
+
+  it("keeps canonical history in order around steering and background results", async () => {
+    const first: ModelMessage[] = [
+      { role: "assistant", content: [{ type: "text", text: "first" }] },
+    ];
+    const last: ModelMessage[] = [
+      { role: "assistant", content: [{ type: "text", text: "last" }] },
+    ];
+    const message: UIMessage = {
+      id: "reply",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        { type: "text", text: "first" },
+        modelHistoryPart(first),
+        conversationEventPart({
+          event: "user_steering",
+          message: user("guidance"),
+        }),
+        conversationEventPart({
+          version: 1,
+          event: "subagent_result",
+          results: [
+            {
+              taskId: "child",
+              label: "check",
+              status: "completed",
+              result: "found",
+            },
+          ],
+        }),
+        { type: "step-start" },
+        { type: "text", text: "last" },
+        modelHistoryPart(last),
+      ],
+    };
+    const live = await convertToAgentModelMessages([message]);
+    expect(live[0]).toEqual(first[0]);
+    expect(live[live.length - 1]).toEqual(last[0]);
+    expect(live.map((item) => item.role)).toEqual([
+      "assistant",
+      "user",
+      "user",
+      "assistant",
+    ]);
+    const records = jsonlRoundTrip(
+      serializeSessionMessages([message], { timestamp, turnId: "turn" }),
+    );
+    expect(
+      await convertToAgentModelMessages(
+        projectSessionMessages("session", records),
+      ),
+    ).toEqual(live);
+  });
+  it.each(['"{\\"files\\":[]}"', "null", "17", '{"files":"invalid"}'])(
+    "replays SDK invalid input %s identically in memory and after persistence",
+    async (input) => {
+      const result = await generateText({
+        model: new MockLanguageModelV4({
+          doGenerate: async () => ({
+            content: [
+              {
+                type: "reasoning",
+                text: "thinking",
+                providerMetadata: { test: { signature: "signed" } },
+              },
+              {
+                type: "text",
+                text: "first",
+                providerMetadata: { test: { id: "item-1" } },
+              },
+              {
+                type: "tool-call",
+                toolCallId: "call",
+                toolName: "patch",
+                input,
+              },
+              { type: "text", text: "second" },
+            ],
+            finishReason: { unified: "tool-calls", raw: "tool_calls" },
+            usage: {
+              inputTokens: {
+                total: 1,
+                noCache: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+              },
+              outputTokens: { total: 1, text: 1, reasoning: 0 },
+            },
+            warnings: [],
+          }),
+        }),
+        prompt: "patch",
+        tools: {
+          patch: {
+            inputSchema: jsonSchema({
+              type: "object",
+              properties: { files: { type: "array" } },
+              required: ["files"],
+            }),
+          },
+        },
+      });
+      const canonical = result.responseMessages;
+      const message: UIMessage = {
+        id: "reply",
+        role: "assistant",
+        parts: [
+          { type: "step-start" },
+          { type: "text", text: "display only" },
+          modelHistoryPart(canonical),
+        ],
+      };
+      expect(await convertToAgentModelMessages([message])).toEqual(canonical);
+      const records = jsonlRoundTrip(
+        serializeSessionMessages([message], { timestamp, turnId: "turn" }),
+      );
+      expect(records).toHaveLength(1);
+      expect(records[0].role).toBe("model");
+      expect(JSON.stringify(records)).not.toContain("display only");
+      const restored = projectSessionMessages("session", records);
+      expect(await convertToAgentModelMessages(restored)).toEqual(
+        JSON.parse(JSON.stringify(canonical)),
+      );
+      expect(
+        await convertToAgentModelMessages([...restored, user("next")]),
+      ).toEqual([
+        ...JSON.parse(JSON.stringify(canonical)),
+        { role: "user", content: [{ type: "text", text: "next" }] },
+      ]);
+    },
+  );
+
+  it("retains canonical steps across user turns", async () => {
+    const response: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "answer",
+            providerOptions: { test: { id: "id" } },
+          },
+        ],
+      },
+    ];
+    const message: UIMessage = {
+      id: "reply",
+      role: "assistant",
+      parts: [
+        { type: "step-start" },
+        { type: "text", text: "answer" },
+        modelHistoryPart(response),
+      ],
+    };
+    const original = [user("first"), message, user("second")];
+    const restored = projectSessionMessages(
+      "session",
+      jsonlRoundTrip(
+        serializeSessionMessages(original, { timestamp, turnId: "turn" }),
+      ),
+    );
+    expect(await convertToAgentModelMessages(restored)).toEqual(
+      await convertToAgentModelMessages(original),
+    );
+  });
   it("命令独立恢复，关联任务的正文仍进入模型上下文", async () => {
     const task = { ...user("task"), metadata: { commandId: "init" } };
     const messages: UIMessage[] = [
@@ -268,48 +508,65 @@ describe("AI session message conversion", () => {
     );
   });
 
-  it("persists the raw input of a tool call rejected by schema validation", async () => {
-    const rawInput = {
-      files: '[{"path":"a.py","edits":[]}]',
-    };
-    const live = [
-      {
-        id: "assistant-invalid-tool",
+  it.each([
+    {
+      kind: "object-shaped",
+      rawInput: { files: '[{"path":"a.py","edits":[]}]' },
+      modelInput: { files: '[{"path":"a.py","edits":[]}]' },
+    },
+    { kind: "scalar", rawInput: '{"files":[]}', modelInput: '{"files":[]}' },
+  ])(
+    "preserves received $kind input when a complete SDK step is unavailable",
+    async (sample) => {
+      const live = [
+        {
+          id: "assistant-invalid-tool",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-apply_patch",
+              toolCallId: "invalid-patch",
+              state: "output-error",
+              input: undefined,
+              rawInput: sample.rawInput,
+              errorText: "expected object, received string",
+            },
+          ],
+        } as UIMessage,
+      ];
+      const records = serializeSessionMessages(live, {
+        timestamp,
+        turnId: "turn-invalid-tool",
+      });
+
+      expect(records[0]).toMatchObject({
         role: "assistant",
-        parts: [
+        tool_calls: [
           {
-            type: "tool-apply_patch",
-            toolCallId: "invalid-patch",
-            state: "output-error",
-            input: undefined,
-            rawInput,
-            errorText: "files: expected array, received string",
+            function: {
+              name: "apply_patch",
+              arguments: JSON.stringify(sample.modelInput),
+            },
           },
         ],
-      } as UIMessage,
-    ];
-    const records = serializeSessionMessages(live, {
-      timestamp,
-      turnId: "turn-invalid-tool",
-    });
-
-    expect(records[0]).toMatchObject({
-      role: "assistant",
-      tool_calls: [
-        {
-          function: {
-            name: "apply_patch",
-            arguments: JSON.stringify(rawInput),
-          },
-        },
-      ],
-    });
-    expect(
-      await convertToAgentModelMessages(
-        projectSessionMessages("session-1", jsonlRoundTrip(records)),
-      ),
-    ).toEqual(await convertToAgentModelMessages(live));
-  });
+      });
+      const restored = projectSessionMessages(
+        "session-1",
+        jsonlRoundTrip(records),
+      );
+      const model = await convertToAgentModelMessages(restored);
+      expect(model[0]).toMatchObject({
+        role: "assistant",
+        content: [
+          expect.objectContaining({
+            type: "tool-call",
+            toolName: "apply_patch",
+            input: sample.modelInput,
+          }),
+        ],
+      });
+    },
+  );
 
   it("uses the OpenAI function envelope and string arguments for tools", () => {
     const messages: UIMessage[] = [

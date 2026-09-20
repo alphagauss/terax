@@ -11,6 +11,9 @@ import {
 } from "@/modules/ai/lib/agent";
 import {
   activityDurationFromPart,
+  convertToAgentModelMessages,
+  modelHistoryPart,
+  projectSessionMessages,
   serializeSessionMessages,
 } from "@/modules/ai/lib/conversation";
 import {
@@ -21,7 +24,7 @@ import { EMPTY_PROVIDER_KEYS } from "@/modules/ai/lib/keyring";
 import { native } from "@/modules/ai/lib/native";
 import { buildConfiguredLanguageModel } from "@/modules/ai/lib/providerRuntime";
 import type { UIMessage } from "@ai-sdk/react";
-import { readUIMessageStream } from "ai";
+import { type ModelMessage, readUIMessageStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,7 +69,7 @@ function textStream(text: string, reasoning?: string) {
 }
 
 function toolCallsStream(
-  calls: Array<{ id: string; name: string; input: Record<string, unknown> }>,
+  calls: Array<{ id: string; name: string; input: unknown }>,
   reasoning?: string,
 ) {
   return {
@@ -382,9 +385,21 @@ describe.sequential("Agent background subagents", () => {
   it.each([true, false])(
     "审批响应=%s 时先落实工具结果，再接入引导",
     async (approved) => {
-      const execute = vi
-        .spyOn(native, "shellExec")
-        .mockRejectedValue(new Error("test tool result"));
+      const execute = vi.spyOn(native, "shellExec").mockResolvedValue({
+        process_id: "approval-process",
+        status: "exited",
+        stdout: "test tool result",
+        stderr: "",
+        exit_code: 0,
+        elapsed_ms: 1,
+        truncated: false,
+        dropped_bytes: 0,
+        next_offset: 0,
+        available_from: 0,
+        cwd: "/workspace",
+        cwd_after: null,
+        wait_for_matched: null,
+      });
       const coordinator = new AgentTurnCoordinator();
       coordinator.inbox.open();
       const receipt = coordinator.inbox.steer({
@@ -393,6 +408,32 @@ describe.sequential("Agent background subagents", () => {
         parts: [{ type: "text", text: "New guidance" }],
       });
       const checkpoint = vi.fn();
+      const canonical: ModelMessage[] = [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "reasoning",
+              text: "Previous reasoning",
+              providerOptions: { test: { signature: "reasoning-signature" } },
+            },
+            { type: "text", text: "Request permission" },
+            {
+              type: "tool-call",
+              toolCallId: "shell-call",
+              toolName: "shell_exec",
+              input: { command: "curl https://example.com" },
+              providerOptions: { test: { id: "tool-call" } },
+            },
+            {
+              type: "tool-approval-request",
+              toolCallId: "shell-call",
+              approvalId: "permission",
+              signature: "approval-signature",
+            },
+          ],
+        },
+      ];
       const messages: UIMessage[] = [
         {
           id: "initial",
@@ -415,8 +456,10 @@ describe.sequential("Agent background subagents", () => {
                 id: "permission",
                 approved,
                 reason: approved ? undefined : "User denied this tool call.",
+                signature: "approval-signature",
               },
             },
+            modelHistoryPart(canonical),
           ],
         },
       ];
@@ -477,6 +520,27 @@ describe.sequential("Agent background subagents", () => {
         await expect(receipt).resolves.toBe("consumed");
         expect(rootCalls()).toHaveLength(2);
         expect(execute).toHaveBeenCalledTimes(approved ? 1 : 0);
+        expect(streamed).toBeDefined();
+        if (!streamed) throw new Error("Missing completed approval message");
+        const live = await convertToAgentModelMessages([messages[0], streamed]);
+        const records = JSON.parse(
+          JSON.stringify(
+            serializeSessionMessages([messages[0], streamed], options),
+          ),
+        );
+        const restored = await convertToAgentModelMessages(
+          projectSessionMessages("approval-restored", records),
+        );
+        expect(restored).toEqual(JSON.parse(JSON.stringify(live)));
+        expect(
+          restored.flatMap((item) =>
+            item.role === "tool"
+              ? item.content.filter(
+                  (part) => part.type === "tool-approval-response",
+                )
+              : [],
+          ),
+        ).toHaveLength(1);
       } finally {
         execute.mockRestore();
         await coordinator.cancelAll();
@@ -860,7 +924,7 @@ describe.sequential("Agent background subagents", () => {
     await coordinator.cancelAll();
   });
 
-  it("forces a tool-free final response when the main Agent reaches its step limit", async () => {
+  it("pauses without another request when the main Agent reaches its step limit", async () => {
     const finishMeta = vi.fn();
     activeModel = mockModel({
       doStream: () =>
@@ -869,12 +933,12 @@ describe.sequential("Agent background subagents", () => {
               {
                 id: `terminal-${rootCalls().length}`,
                 name: "get_terminal_output",
-                input: {},
+                input: rootCalls().length === 1 ? '{"invalid":true}' : {},
               },
             ])
           : textStream("Paused with a progress summary."),
     });
-    const result = await runAgentStream({
+    const opts: Parameters<typeof runAgentStream>[0] = {
       turnId: crypto.randomUUID(),
       keys: EMPTY_PROVIDER_KEYS,
       model: modelRefForProvider("lmstudio", "main-step-limit"),
@@ -900,21 +964,54 @@ describe.sequential("Agent background subagents", () => {
       ],
       onFinishMeta: finishMeta,
       onCheckpoint: async () => {},
-    });
+    };
+    const result = await runAgentStream(opts);
+    let completed: UIMessage | undefined;
+    for await (const update of readUIMessageStream({
+      stream: result.toUIMessageStream(),
+    }))
+      completed = update;
 
-    const chunks: Array<{ type?: string; delta?: string }> = [];
-    for await (const chunk of result.toUIMessageStream()) chunks.push(chunk);
-
-    expect(rootCalls()).toHaveLength(9);
-    expect(chunks).toContainEqual(
-      expect.objectContaining({
-        type: "text-delta",
-        delta: "Paused with a progress summary.",
-      }),
-    );
+    expect(rootCalls()).toHaveLength(8);
+    for (const call of rootCalls())
+      expect(call.tools).toEqual(rootCalls()[0].tools);
     expect(finishMeta).toHaveBeenCalledWith(
       expect.objectContaining({ hitStepCap: true }),
     );
+    expect(completed).toBeDefined();
+    if (!completed) throw new Error("Missing completed message");
+    const prefix = rootCalls()[7].prompt;
+    const history = [...opts.uiMessages, completed];
+    const nextUser: UIMessage = {
+      id: "next",
+      role: "user",
+      parts: [{ type: "text", text: "continue" }],
+    };
+    const runNext = async (messages: UIMessage[]) => {
+      const next = await runAgentStream({
+        ...opts,
+        turnId: crypto.randomUUID(),
+        turnCoordinator: new AgentTurnCoordinator(),
+        uiMessages: [...messages, nextUser],
+      });
+      for await (const _chunk of next.toUIMessageStream()) {
+        /* 消费续接请求。 */
+      }
+      return rootCalls()[rootCalls().length - 1];
+    };
+    const inMemory = await runNext(history);
+    expect(inMemory.prompt.slice(0, prefix.length)).toEqual(prefix);
+    const records = JSON.parse(
+      JSON.stringify(
+        serializeSessionMessages(history, {
+          turnId: opts.turnId,
+          timestamp: "2026-09-20T00:00:00Z",
+        }),
+      ),
+    );
+    const restored = await runNext(projectSessionMessages("restored", records));
+    expect(restored.prompt).toEqual(inMemory.prompt);
+    expect(restored.tools).toEqual(inMemory.tools);
   });
 
   it("keeps the main Agent running without a step cap when configured as unlimited", async () => {
@@ -969,83 +1066,116 @@ describe.sequential("Agent background subagents", () => {
     );
   });
 
-  it("marks a Subagent as incomplete when it reaches its own step limit", async () => {
-    const displays = vi.fn();
-    let childCalls = 0;
-    activeModel = mockModel({
-      doStream: () =>
-        rootCalls().length === 1
-          ? toolCallsStream([
-              {
-                id: "limited-child",
-                name: "run_subagent",
-                input: { task: "Inspect deeply", wait: true },
-              },
-            ])
-          : textStream("Parent handled the incomplete result."),
-      childStream: () =>
-        ++childCalls <= 8
-          ? toolCallsStream([
-              {
-                id: `child-terminal-${childCalls}`,
-                name: "get_terminal_output",
-                input: {},
-              },
-            ])
-          : textStream(
-              "Incomplete: inspected the available output; further checks remain.",
-            ),
-    });
-    const result = await runAgentStream({
-      turnId: crypto.randomUUID(),
-      keys: EMPTY_PROVIDER_KEYS,
-      model: modelRefForProvider("lmstudio", "subagent-step-limit"),
-      systemPrompt: "Stable prompt",
-      allowedTools: ["run_subagent", "get_terminal_output"],
-      maxSubagentSteps: 8,
-      maxConcurrentSubagents: 1,
-      turnCoordinator: new AgentTurnCoordinator(),
-      toolContext: {
-        getCwd: () => "/workspace",
-        getTerminalContext: () => "terminal output",
-        isActiveTerminalPrivate: () => false,
-        getSessionId: () => "subagent-step-limit",
-        getPermissionMode: () => "ask",
-        supportsApprovals: true,
-      },
-      uiMessages: [
-        {
-          id: "user",
-          role: "user",
-          parts: [{ type: "text", text: "Delegate" }],
+  it.each([false, true])(
+    "stops a limited Subagent with stable tools, including an unwanted summary tool call: %s",
+    async (summaryCallsTool) => {
+      const displays = vi.fn();
+      const terminalRead = vi.fn(() => "terminal output");
+      let childCalls = 0;
+      activeModel = mockModel({
+        doStream: () =>
+          rootCalls().length === 1
+            ? toolCallsStream([
+                {
+                  id: "limited-child",
+                  name: "run_subagent",
+                  input: { task: "Inspect deeply", wait: true },
+                },
+              ])
+            : textStream("Parent handled the incomplete result."),
+        childStream: () =>
+          ++childCalls <= 8
+            ? toolCallsStream([
+                {
+                  id: `child-terminal-${childCalls}`,
+                  name: "get_terminal_output",
+                  input: {},
+                },
+              ])
+            : summaryCallsTool
+              ? toolCallsStream([
+                  {
+                    id: "forbidden-summary-call",
+                    name: "get_terminal_output",
+                    input: {},
+                  },
+                ])
+              : textStream(
+                  "Incomplete: inspected the available output; further checks remain.",
+                ),
+      });
+      const result = await runAgentStream({
+        turnId: crypto.randomUUID(),
+        keys: EMPTY_PROVIDER_KEYS,
+        model: modelRefForProvider("anthropic", "subagent-step-limit"),
+        systemPrompt: "Stable prompt",
+        allowedTools: ["run_subagent", "get_terminal_output"],
+        maxSubagentSteps: 8,
+        maxConcurrentSubagents: 1,
+        turnCoordinator: new AgentTurnCoordinator(),
+        toolContext: {
+          getCwd: () => "/workspace",
+          getTerminalContext: terminalRead,
+          isActiveTerminalPrivate: () => false,
+          getSessionId: () => "subagent-step-limit",
+          getPermissionMode: () => "ask",
+          supportsApprovals: true,
         },
-      ],
-      onSubagentDisplay: displays,
-      onCheckpoint: async () => {},
-    });
+        uiMessages: [
+          {
+            id: "user",
+            role: "user",
+            parts: [{ type: "text", text: "Delegate" }],
+          },
+        ],
+        onSubagentDisplay: displays,
+        onCheckpoint: async () => {},
+      });
 
-    for await (const _chunk of result.toUIMessageStream()) {
-      /* 消费完整父子工具循环。 */
-    }
+      for await (const _chunk of result.toUIMessageStream()) {
+        /* 消费完整父子工具循环。 */
+      }
 
-    expect(
-      displays.mock.calls[displays.mock.calls.length - 1]?.[0],
-    ).toMatchObject({
-      status: "incomplete",
-      error: "Subagent reached its step limit before completing the task.",
-    });
-    expect(childCalls).toBe(9);
-    const summaryCall = activeModel.doStreamCalls
-      .filter((call) =>
+      expect(
+        displays.mock.calls[displays.mock.calls.length - 1]?.[0],
+      ).toMatchObject({
+        status: "incomplete",
+        error: "Subagent reached its step limit before completing the task.",
+      });
+      expect(childCalls).toBe(9);
+      expect(terminalRead).toHaveBeenCalledTimes(8);
+      const summaryCall = activeModel.doStreamCalls
+        .filter((call) =>
+          JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),
+        )
+        .slice(-1)[0];
+      expect(JSON.stringify(summaryCall?.prompt)).toContain(
+        "reached its tool-step limit",
+      );
+      const firstChild = activeModel.doStreamCalls.find((call) =>
         JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),
-      )
-      .slice(-1)[0];
-    expect(JSON.stringify(summaryCall?.prompt)).toContain(
-      "reached its tool-step limit",
-    );
-    expect(summaryCall?.tools).toBeUndefined();
-    expect(JSON.stringify(rootCalls().slice(-1)[0]?.prompt)).toContain(
-      "Incomplete: inspected the available output; further checks remain.",
-    );
-  });
+      );
+      expect(summaryCall?.tools).toEqual(firstChild?.tools);
+      expect(summaryCall?.toolChoice).toEqual(firstChild?.toolChoice);
+      const childRequests = activeModel.doStreamCalls.filter((call) =>
+        JSON.stringify(call.prompt).includes("## SUBAGENT ROLE"),
+      );
+      for (const call of childRequests.slice(0, -1)) {
+        expect(
+          call.prompt[call.prompt.length - 1]?.providerOptions,
+        ).toMatchObject({
+          anthropic: { cacheControl: { type: "ephemeral" } },
+        });
+        expect(call.tools).toEqual(firstChild?.tools);
+      }
+      const previous = childRequests[childRequests.length - 2];
+      expect(summaryCall?.prompt.slice(0, previous.prompt.length)).toEqual(
+        previous.prompt,
+      );
+      if (!summaryCallsTool)
+        expect(JSON.stringify(rootCalls().slice(-1)[0]?.prompt)).toContain(
+          "Incomplete: inspected the available output; further checks remain.",
+        );
+    },
+  );
 });

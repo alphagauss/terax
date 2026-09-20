@@ -28,6 +28,7 @@
 - 执行、审批、持久化、取消和资源清理由业务运行时拥有，不随 UI 挂载而启停。共享业务不依赖 React、DOM 或 Tauri 窗口对象；宿主提供配置、通信和原生能力。
 - 现有模块随实际功能逐步解耦，不为实验性 TUI 或假设中的前端提前全面重构。`terax agent` 暂停主动开发，范围见 [终端宿主](docs/architecture/terminal-agent.md)。
 - 页面移动、分割或隐藏不得重建终端和其他后台运行实例。派生展示数据不得进入模型请求或下游业务协议。
+- 上下文缓存命中是一等开发约束。涉及 AI 请求、历史、工具、持久化和压缩的任何修改，优先保持已有模型输入前缀稳定，并以回归测试验证；具体不变量见 [AI 会话与运行规则](docs/architecture/ai-subsystem.md)。
 - Terax 自有数据位于 `~/.terax`；跨进程共享配置经白名单存储加锁并精确修改，不能持久化过时的整表快照。
 - 内置 AI 工具的权限由 [安全模型](docs/architecture/security-model.md) 定义；外部 CLI Agent 使用独立权限边界，不能宣称受内置工具策略保护。
 - Alpha 的领域与权威数据属于 Python 服务；Rust 只管理生命周期和通用代理，页面与 Agent 共用 API。详见 [Alpha 集成](docs/architecture/alpha-integration.md)。
