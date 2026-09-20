@@ -14,7 +14,10 @@ import { MessageAttachments } from "@/modules/ai/components/MessageAttachments";
 import { messageTextWithoutAttachments } from "@/modules/ai/lib/messageAttachments";
 import { TurnMetrics } from "@/modules/ai/components/TurnMetrics";
 import { Shimmer } from "@/components/controls/shimmer";
-import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
+import {
+  ChatFileReferenceBaseProvider,
+  ChatMessageResponse,
+} from "@/modules/ai/components/ChatMessageResponse";
 import { FileEditContext } from "@/modules/ai/components/FileEditStats";
 import { FileEditTool } from "@/modules/ai/components/FileEditTool";
 import {
@@ -450,6 +453,10 @@ export function AiChatView({
   const meta = useChatStore((state) =>
     getAgentMetaForSession(state, sessionId),
   );
+  const sessionCwd = useChatStore(
+    (state) =>
+      state.sessions.find((session) => session.id === sessionId)?.cwd ?? null,
+  );
   const { hitStepCap, compacting } = meta;
   const patchAgentMeta = useChatStore((s) => s.patchAgentMeta);
   const showContinue =
@@ -500,33 +507,35 @@ export function AiChatView({
         className="gap-4 px-3 pt-3 pb-[10cqh]"
         scrollClassName="app-scrollbar [container-type:size] [scrollbar-gutter:stable]"
       >
-        <div ref={setToolDetailsWheelScope} className="contents">
-          {activities
-            .filter(
-              (entry) =>
-                !entry.afterMessageId ||
-                !messages.some(
-                  (message) => message.id === entry.afterMessageId,
-                ),
-            )
-            .map((entry) => entry.element)}
-          {messages.map((m) => (
-            <Fragment key={m.id}>
-              {m.id !== pendingAssistantMessageId &&
-              !messageMetadata(m).commandId ? (
-                <RenderedMessage
-                  sessionId={sessionId}
-                  message={m}
-                  streaming={m.id === streamingMessageId && !compacting}
-                  appearing={m.id === appearingUserMessageId}
-                />
-              ) : null}
-              {activities
-                .filter((entry) => entry.afterMessageId === m.id)
-                .map((entry) => entry.element)}
-            </Fragment>
-          ))}
-        </div>
+        <ChatFileReferenceBaseProvider baseDirectory={sessionCwd}>
+          <div ref={setToolDetailsWheelScope} className="contents">
+            {activities
+              .filter(
+                (entry) =>
+                  !entry.afterMessageId ||
+                  !messages.some(
+                    (message) => message.id === entry.afterMessageId,
+                  ),
+              )
+              .map((entry) => entry.element)}
+            {messages.map((m) => (
+              <Fragment key={m.id}>
+                {m.id !== pendingAssistantMessageId &&
+                !messageMetadata(m).commandId ? (
+                  <RenderedMessage
+                    sessionId={sessionId}
+                    message={m}
+                    streaming={m.id === streamingMessageId && !compacting}
+                    appearing={m.id === appearingUserMessageId}
+                  />
+                ) : null}
+                {activities
+                  .filter((entry) => entry.afterMessageId === m.id)
+                  .map((entry) => entry.element)}
+              </Fragment>
+            ))}
+          </div>
+        </ChatFileReferenceBaseProvider>
         {compacting && (
           <div role="status" className="text-xs text-muted-foreground">
             <Shimmer>{t("chat.compacting")}</Shimmer>

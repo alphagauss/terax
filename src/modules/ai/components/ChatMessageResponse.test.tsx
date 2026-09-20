@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
-import { ChatMessageResponse } from "@/modules/ai/components/ChatMessageResponse";
+import {
+  ChatFileReferenceBaseProvider,
+  ChatMessageResponse,
+} from "@/modules/ai/components/ChatMessageResponse";
 import { act } from "react";
 import { decodeFileReference } from "@/modules/file-actions/references";
 import { createRoot } from "react-dom/client";
@@ -351,6 +354,35 @@ describe("chat file references", () => {
     },
   );
 
+  it("resolves relative links from the session working directory", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <ChatFileReferenceBaseProvider baseDirectory="D:/workspace/project">
+          <ChatMessageResponse>
+            {"[config](./src/config.ts:12)"}
+          </ChatMessageResponse>
+        </ChatFileReferenceBaseProvider>,
+      ),
+    );
+
+    const link = container.querySelector("a");
+    expect(decodeFileReference(link?.getAttribute("href") ?? "")).toMatchObject(
+      {
+        path: "D:/workspace/project/src/config.ts",
+        line: 12,
+      },
+    );
+    mocks.invoke.mockResolvedValue({ kind: "file" });
+    await act(async () => link?.click());
+    expect(mocks.open).toHaveBeenCalledWith(
+      "D:/workspace/project/src/config.ts",
+      12,
+    );
+    await act(async () => root.unmount());
+  });
+
   it("does not activate incomplete links, code literals or unsafe protocols", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
@@ -358,7 +390,7 @@ describe("chat file references", () => {
       root.render(
         <ChatMessageResponse streaming>
           {
-            "`[code](D:/file.ts:2)`\n\n[bad](javascript:alert%281%29)\n\n[forged](terax-file:%2Ftmp%2Ffile)\n\n[unfinished](D:/file.ts:12"
+            "`[code](D:/file.ts:2)`\n\n[relative](src/file.ts:2)\n\n[bad](javascript:alert%281%29)\n\n[forged](terax-file:%2Ftmp%2Ffile)\n\n[unfinished](D:/file.ts:12"
           }
         </ChatMessageResponse>,
       ),

@@ -1,31 +1,25 @@
 /** 会话正文的业务渲染入口，连接文件引用菜单与宿主导航。 */
-import { Hint } from "@/components/controls/tooltip";
 import { ChatStreamingProvider } from "@/modules/markdown/chat-code";
 import { MarkdownCode } from "@/modules/markdown/markdown-code";
 import { streamdownPlugins } from "@/modules/markdown/streamdown-plugins";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-} from "@/components/menu/context-menu";
 import { cn } from "@/lib/utils";
 import { normalizeMathDelimiters } from "@/modules/ai/lib/normalizeMathDelimiters";
 import { MarkdownTable } from "@/modules/markdown/MarkdownTable";
 import { useChatStore } from "@/modules/ai/store/chatStore";
-import {
-  resolveFileReference,
-  type FileTarget,
-  openSystemFile,
-} from "@/modules/file-actions/actions";
-import { FileActionItems } from "@/modules/file-actions/FileActionItems";
+import { FileReferenceLink } from "@/modules/file-actions/FileReferenceLink";
 import {
   decodeFileReference,
   rehypeFileReferences,
-  type FileReference,
+  withFileReferenceProtocol,
 } from "@/modules/file-actions/references";
-import { currentWorkspaceEnv } from "@/modules/workspace";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { memo, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -38,21 +32,40 @@ const [sanitize, schema] = defaultRehypePlugins.sanitize as [
   unknown,
   { protocols?: Record<string, string[]> },
 ];
-const chatRehypePlugins = [
-  defaultRehypePlugins.raw,
-  rehypeFileReferences,
-  [
-    sanitize,
-    {
-      ...schema,
-      protocols: {
-        ...schema.protocols,
-        href: [...(schema.protocols?.href ?? []), "terax-file"],
+const ChatFileReferenceBaseContext = createContext<string | null>(null);
+
+/** 会话一旦发送首条消息，所有正文和 Subagent 结果共用冻结的 cwd。 */
+export function ChatFileReferenceBaseProvider({
+  baseDirectory,
+  children,
+}: {
+  baseDirectory: string | null;
+  children: ReactNode;
+}) {
+  return (
+    <ChatFileReferenceBaseContext.Provider value={baseDirectory}>
+      {children}
+    </ChatFileReferenceBaseContext.Provider>
+  );
+}
+
+function buildChatRehypePlugins(baseDirectory: string | null) {
+  return [
+    defaultRehypePlugins.raw,
+    [rehypeFileReferences, { baseDirectory: baseDirectory ?? undefined }],
+    [
+      sanitize,
+      {
+        ...schema,
+        protocols: {
+          ...schema.protocols,
+          href: withFileReferenceProtocol(schema.protocols?.href),
+        },
       },
-    },
-  ],
-  defaultRehypePlugins.harden,
-] as NonNullable<StreamdownProps["rehypePlugins"]>;
+    ],
+    defaultRehypePlugins.harden,
+  ] as NonNullable<StreamdownProps["rehypePlugins"]>;
+}
 
 /** 按目标隔离菜单状态，流式正文改写链接时不复用旧路径的异步结果。 */
 function ChatLink({ href, children }: React.ComponentProps<"a">) {
@@ -60,9 +73,19 @@ function ChatLink({ href, children }: React.ComponentProps<"a">) {
   const { t } = useTranslation("common");
   if (reference && href)
     return (
-      <ChatFileLink key={href} href={href} reference={reference}>
+      <FileReferenceLink
+        key={href}
+        href={href}
+        reference={reference}
+        onOpen={(path, line) =>
+          useChatStore.getState().live.openFileReference?.(path, line)
+        }
+        onOpenDirectory={(path) =>
+          useChatStore.getState().live.revealWorkingDirectory(path)
+        }
+      >
         {children}
-      </ChatFileLink>
+      </FileReferenceLink>
     );
   return href && /^(https?:|mailto:)/i.test(href) ? (
     <a
@@ -83,76 +106,6 @@ function ChatLink({ href, children }: React.ComponentProps<"a">) {
   );
 }
 
-function ChatFileLink({
-  href,
-  reference,
-  children,
-}: {
-  href: string;
-  reference: FileReference;
-  children: ReactNode;
-}) {
-  const [resolved, setResolved] = useState<FileTarget | null>(null);
-  const { t } = useTranslation("common");
-  const open = async (path: string, line?: number) => {
-    await useChatStore.getState().live.openFileReference?.(path, line);
-  };
-  const resolve = () => resolveFileReference(reference);
-  return (
-    <ContextMenu
-      onOpenChange={(isOpen) => {
-        if (isOpen)
-          void resolve()
-            .then(setResolved)
-            .catch(() => setResolved(null));
-      }}
-    >
-      <ContextMenuTrigger asChild>
-        <Hint content={reference.literalPath}>
-          <a
-            href={href}
-            data-streamdown="link"
-            onAuxClick={(event) => event.preventDefault()}
-            onClick={(event) => {
-              event.preventDefault();
-              void resolve()
-                .then((file) =>
-                  file.isDir
-                    ? currentWorkspaceEnv().kind === "local"
-                      ? openSystemFile(file.path)
-                      : useChatStore
-                          .getState()
-                          .live.revealWorkingDirectory(file.path)
-                    : open(file.path, file.line),
-                )
-                .catch((error) =>
-                  toast.error(t("fileActions.failed"), {
-                    description: String(error),
-                  }),
-                );
-            }}
-          >
-            {children}
-          </a>
-        </Hint>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <FileActionItems
-          target={
-            resolved ?? {
-              path: reference.path,
-              line: reference.line,
-              isDir: false,
-            }
-          }
-          resolve={resolve}
-          onOpen={open}
-        />
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
 const components = { code: MarkdownCode, a: ChatLink, table: MarkdownTable };
 export const ChatMessageResponse = memo(function ChatMessageResponse({
   children,
@@ -163,7 +116,12 @@ export const ChatMessageResponse = memo(function ChatMessageResponse({
   className?: string;
   streaming?: boolean;
 }) {
+  const baseDirectory = useContext(ChatFileReferenceBaseContext);
   const text = useMemo(() => normalizeMathDelimiters(children), [children]);
+  const rehypePlugins = useMemo(
+    () => buildChatRehypePlugins(baseDirectory),
+    [baseDirectory],
+  );
   return (
     <ChatStreamingProvider value={streaming}>
       <Streamdown
@@ -176,7 +134,7 @@ export const ChatMessageResponse = memo(function ChatMessageResponse({
         mode={streaming ? "streaming" : "static"}
         parseIncompleteMarkdown={false}
         components={components}
-        rehypePlugins={chatRehypePlugins}
+        rehypePlugins={rehypePlugins}
         plugins={streamdownPlugins}
       >
         {text}

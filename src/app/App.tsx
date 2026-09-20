@@ -1722,6 +1722,13 @@ export default function App() {
       registerEditorHandle,
       registerMarkdownNavigationHandle,
       registerFindHandle,
+      onFileReferenceOpen: (path, line) => {
+        if (line === undefined) handleOpenFile(path, false);
+        else openContentHit(path, line, undefined, { temporary: true });
+      },
+      onFileReferenceOpenDirectory: async (path) => {
+        await directories.openDirectory(path, null);
+      },
       onEditorDirtyChange: handleEditorDirty,
       onEditorCloseTab: requestEditorClose,
       registerWebPreviewHandle,
@@ -1735,9 +1742,11 @@ export default function App() {
     }),
     [
       handleEditorDirty,
+      handleOpenFile,
       handleWebPreviewUrl,
       handleTerminalCwd,
       handleTerminalExit,
+      directories.openDirectory,
       registerEditorHandle,
       registerFindHandle,
       registerMarkdownNavigationHandle,
@@ -1747,6 +1756,7 @@ export default function App() {
       respondApproval,
       setAiDiffStatus,
       setActiveId,
+      openContentHit,
     ],
   );
 

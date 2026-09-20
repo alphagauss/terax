@@ -46,6 +46,8 @@ it.each([false, true])(
           "div",
         ) as unknown as HTMLElement,
         onFragmentNavigate: () => {},
+        onFileReferenceOpen: () => {},
+        onFileReferenceOpenDirectory: () => {},
       }),
     );
     expect(model.progressive).toBe(large);

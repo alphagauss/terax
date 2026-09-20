@@ -4,6 +4,11 @@
  * 功能插件必须在 sanitizer 前运行，受控的源码定位属性在安全处理完成后添加。
  */
 
+import {
+  fileReferenceBaseDirectory,
+  rehypeFileReferences,
+  withFileReferenceProtocol,
+} from "@/modules/file-actions/references";
 import { rehypeMarkdownSourcePositions } from "@/modules/markdown/lib/anchor";
 import { rehypeGithubAlerts } from "@/modules/markdown/lib/githubAlerts";
 import { rehypeRelativeMarkdownImages } from "@/modules/markdown/lib/localImages";
@@ -26,6 +31,7 @@ export const markdownSanitizeSchema = {
   ...defaultSanitizeSchema,
   protocols: {
     ...defaultSanitizeSchema.protocols,
+    href: withFileReferenceProtocol(defaultSanitizeSchema.protocols?.href),
     src: [
       ...(defaultSanitizeSchema.protocols?.src ?? []),
       "terax-relative-image",
@@ -59,9 +65,12 @@ export const markdownSanitizeSchema = {
  */
 export function buildMarkdownRehypePlugins(
   headingSlugById: Record<string, string>,
+  documentPath: string,
 ): RehypePlugins {
+  const baseDirectory = fileReferenceBaseDirectory(documentPath) ?? undefined;
   return [
     defaultRehypePlugins.raw,
+    [rehypeFileReferences, { baseDirectory }],
     rehypeRelativeMarkdownImages,
     rehypeGithubAlerts,
     [rehypeSanitize, markdownSanitizeSchema],
