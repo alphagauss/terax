@@ -19,33 +19,34 @@ import {
   MAX_AGENT_STEPS_DEFAULT,
   MAX_SUBAGENT_STEPS_DEFAULT,
   type ModelRef,
+  modelRefsEqual,
   normalizeMainAgentSteps,
   type ProviderBaseURLs,
   type ProviderInstance,
   type ProviderModels,
-  modelRefsEqual,
   resolveModel,
 } from "@/modules/ai/config";
 import {
   type AgentToolId,
   resolveSubagentTools,
 } from "@/modules/ai/lib/agentTools";
+import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import {
   compactionInstruction,
   planCompaction,
 } from "@/modules/ai/lib/compact";
 import {
-  generateCompaction,
   compactionConfiguration,
+  generateCompaction,
 } from "@/modules/ai/lib/compactionRequest";
-import { usageRecords } from "@/modules/ai/lib/usageRuntime";
-import { coalesceStream } from "@/modules/ai/lib/coalesceStream";
 import { createContextUsage } from "@/modules/ai/lib/contextUsage";
 import {
   ACTIVITY_DURATION_PART_TYPE,
-  expandConversationMessages,
+  approvalModelHistoryDelta,
   conversationEventPart,
   convertToAgentModelMessages,
+  expandConversationMessages,
+  modelHistoryPart,
   REASONING_DURATION_PART_TYPE,
   type TurnEvent,
 } from "@/modules/ai/lib/conversation";
@@ -59,13 +60,14 @@ import {
   type ParameterAssignment,
 } from "@/modules/ai/lib/modelParameters";
 import {
-  prepareAgentPrompt,
   type PreparedAgentPrompt,
+  prepareAgentPrompt,
 } from "@/modules/ai/lib/prompt";
 import {
   buildConfiguredLanguageModel,
   createProviderDownload,
 } from "@/modules/ai/lib/providerRuntime";
+import { usageRecords } from "@/modules/ai/lib/usageRuntime";
 import SUBAGENT_PROMPT from "@/modules/ai/prompts/subagent";
 import { getProvider } from "@/modules/ai/providerRegistry";
 import { buildToolApproval } from "@/modules/ai/tools/approval";
@@ -212,11 +214,22 @@ export async function runAgentStream(opts: RunAgentOptions) {
               : undefined;
           // 仅保留当前响应的完整 part 前缀，使 checkpoint 与最终 SDK 消息共用显式游标。
           let completedMessage = last?.role === "assistant" ? last : undefined;
+          const approvalHistory = approvalModelHistoryDelta(
+            completedMessage,
+            modelHistory,
+          );
+          if (completedMessage && approvalHistory.length) {
+            const part = modelHistoryPart(approvalHistory);
+            completedMessage = {
+              ...completedMessage,
+              parts: [...completedMessage.parts, part],
+            };
+            writer.write(part as UIMessageChunk);
+          }
           let stepsSeen = 0;
           let streamStarted = false;
           let finishReason: FinishReason = "stop";
           let approvalPending = false;
-          let finalizationOnly = false;
           let activityStartedAt: number | undefined;
           const abort = () => void coordinator.cancelAll();
           opts.abortSignal?.addEventListener("abort", abort, { once: true });
@@ -389,7 +402,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
             const reachedStepCap = () =>
               maxAgentSteps !== null && stepsSeen >= maxAgentSteps;
-            while (!reachedStepCap() || finalizationOnly) {
+            while (!reachedStepCap()) {
               contextUsage = await createContextUsage({
                 sessionId: opts.toolContext.getSessionId(),
                 turnId: opts.turnId,
@@ -403,7 +416,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                   [],
                   provider,
                 ).instructions,
-                tools: finalizationOnly ? undefined : rootTools,
+                tools: rootTools,
               });
               // 最后一次空检查与 streamText 调用之间不能 await，否则刚完成的
               // 结果可能在微任务间隙越过本次 provider 请求边界。
@@ -439,7 +452,7 @@ export async function runAgentStream(opts: RunAgentOptions) {
                 ),
                 instructions: prompt.instructions,
                 messages: prompt.messages,
-                tools: finalizationOnly ? undefined : rootTools,
+                tools: rootTools,
                 toolApproval: buildToolApproval(opts.toolContext),
                 // 每个完整工具步骤后返回运行时，由同一边界处理压缩、引导与步骤上限。
                 stopWhen: isStepCount(1),
@@ -516,6 +529,11 @@ export async function runAgentStream(opts: RunAgentOptions) {
                       reasoningStartedAt = undefined;
                     }
                   }
+                  cycleWriter.write(
+                    modelHistoryPart(
+                      await result.responseMessages,
+                    ) as UIMessageChunk,
+                  );
                 },
               });
               await uiStream.pipeTo(
@@ -589,19 +607,9 @@ export async function runAgentStream(opts: RunAgentOptions) {
 
               if (approvalPending) break;
               if (completed) {
-                finalizationOnly = reachedStepCap();
                 continue;
               }
-              if (
-                !finalizationOnly &&
-                reachedStepCap() &&
-                resultFinishReason === "tool-calls"
-              ) {
-                finalizationOnly = true;
-                continue;
-              }
-              if (!finalizationOnly && resultFinishReason === "tool-calls")
-                continue;
+              if (resultFinishReason === "tool-calls") continue;
               break;
             }
 
@@ -712,13 +720,17 @@ function buildSubagentTaskRunner({
       instructions: prompt.instructions,
       tools,
     });
+    let lastChildMessages = prompt.messages;
     const result = streamText({
       ...buildParameterOptions(
         config.modelParameters ?? [],
         getProvider(provider).runtime.adapter,
         provider,
       ),
-      prepareStep: contextUsage.prepareStep,
+      prepareStep: ({ messages }) => {
+        lastChildMessages = prepareAgentPrompt("", messages, provider).messages;
+        return contextUsage.prepareStep({ messages: lastChildMessages });
+      },
       model: childModel,
       experimental_download: createProviderDownload(
         model.providerId,
@@ -795,6 +807,7 @@ function buildSubagentTaskRunner({
             config.providerModels ?? {},
           ),
           instructions: prompt.instructions,
+          tools,
         });
         const summary = streamText({
           ...buildParameterOptions(
@@ -810,10 +823,21 @@ function buildSubagentTaskRunner({
           ),
           instructions: prompt.instructions,
           messages: [
-            ...prompt.messages,
-            ...responseMessages,
+            ...lastChildMessages,
+            ...[...prompt.messages, ...responseMessages].slice(
+              lastChildMessages.length,
+            ),
             { role: "user", content: SUBAGENT_STEP_LIMIT_SUMMARY_PROMPT },
           ],
+          tools: Object.fromEntries(
+            Object.entries(tools).map(([name, definition]) => {
+              const { execute: _execute, ...tool } = definition;
+              delete tool.onInputStart;
+              delete tool.onInputDelta;
+              delete tool.onInputAvailable;
+              return [name, tool];
+            }),
+          ),
           stopWhen: isStepCount(1),
           abortSignal,
           onLanguageModelCallEnd: (event) =>

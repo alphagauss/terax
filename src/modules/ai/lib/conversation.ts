@@ -7,23 +7,23 @@ import {
   isSubagentDisplaySnapshot,
   type SubagentDisplaySnapshot,
 } from "@/modules/ai/agents/subagentDisplay";
-import type { ModelMessage, UIMessage } from "ai";
+import type { CommandRecord } from "@/modules/ai/commands/records";
 import {
+  type CompactionEvent,
   compactionSummaryText,
   projectCompactedMessages,
-  type CompactionEvent,
 } from "@/modules/ai/lib/compact";
+import { formatAiError } from "@/modules/ai/lib/errors";
 import {
+  type FileEditSnapshot,
   isFileEditSnapshot,
   mergeFileEdits,
-  type FileEditSnapshot,
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
 import type { AttachmentDisplay } from "@/modules/ai/lib/messageAttachments";
-import type { DeliveryRecord } from "@/modules/channels/history";
-import type { CommandRecord } from "@/modules/ai/commands/records";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
-import { formatAiError } from "@/modules/ai/lib/errors";
+import type { DeliveryRecord } from "@/modules/channels/history";
+import type { ModelMessage, UIMessage } from "ai";
 
 /** OpenAI-compatible function envelope 中的单次工具调用。 */
 export type SessionToolCall = {
@@ -81,6 +81,14 @@ export type SessionMessage = {
   | { role: "command"; content: CommandRecord }
   | { role: "usage"; content: UsageRecord }
   | {
+      role: "model";
+      content: ModelMessage[];
+      message_id?: string;
+      turn_status?: string;
+      reasoning_duration_ms?: number;
+      activity_duration_ms?: number;
+    }
+  | {
       role: "event";
       content: SubagentResultEvent | RunFailureEvent | CompactionEvent;
     }
@@ -112,12 +120,145 @@ type ToolPart = {
 };
 
 type AssistantBlock = {
+  model?: ModelMessage[];
   content: string[];
   reasoning: string[];
   reasoningDurationMs?: number;
   activityDurationMs?: number;
   tools: ToolPart[];
 };
+
+/** 完整步骤的模型协议事实；展示片段不再参与该步骤的历史重建。 */
+export function modelHistoryPart(
+  messages: ModelMessage[],
+): UIMessage["parts"][number] {
+  return { type: "data-model-history", data: messages };
+}
+
+function modelHistory(
+  part: UIMessage["parts"][number],
+): ModelMessage[] | undefined {
+  return part.type === "data-model-history"
+    ? (part.data as ModelMessage[])
+    : undefined;
+}
+
+function approvalResponseIds(messages: readonly ModelMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== "tool") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-approval-response") ids.add(part.approvalId);
+    }
+  }
+  return ids;
+}
+
+/** 取得本次审批续跑已由 SDK 生成、但尚未进入 canonical 记录的模型消息。 */
+export function approvalModelHistoryDelta(
+  message: UIMessage | undefined,
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  if (message?.role !== "assistant") return [];
+  const materialized = approvalResponseIds(
+    message.parts.flatMap((part) => modelHistory(part) ?? []),
+  );
+  const pending = new Set(
+    message.parts.flatMap((part) =>
+      "state" in part &&
+      part.state === "approval-responded" &&
+      "approval" in part &&
+      typeof part.approval?.id === "string" &&
+      !materialized.has(part.approval.id)
+        ? [part.approval.id]
+        : [],
+    ),
+  );
+  if (!pending.size) return [];
+  return messages.filter(
+    (item) =>
+      item.role === "tool" &&
+      item.content.some(
+        (part) =>
+          part.type === "tool-approval-response" &&
+          pending.has(part.approvalId),
+      ),
+  );
+}
+
+/** 展示从模型事实派生；协议字段只在原消息中保存一次。 */
+function modelDisplayParts(
+  messages: ModelMessage[],
+  parts: UIMessage["parts"],
+): void {
+  for (const message of messages) {
+    if (typeof message.content === "string") {
+      parts.push({ type: "text", text: message.content, state: "done" });
+      continue;
+    }
+    for (const part of message.content) {
+      if (part.type === "text" || part.type === "reasoning") {
+        parts.push({ type: part.type, text: part.text, state: "done" });
+      } else if (part.type === "tool-call") {
+        parts.push({
+          type: `tool-${part.toolName}`,
+          toolCallId: part.toolCallId,
+          state: "input-available",
+          input: part.input,
+        } as UIMessage["parts"][number]);
+      } else if (part.type === "tool-result") {
+        const index = parts.findIndex(
+          (item) => "toolCallId" in item && item.toolCallId === part.toolCallId,
+        );
+        if (index < 0) continue;
+        const output = part.output;
+        parts[index] = {
+          ...parts[index],
+          ...(output.type === "error-text" || output.type === "error-json"
+            ? {
+                state: "output-error",
+                errorText:
+                  typeof output.value === "string"
+                    ? output.value
+                    : JSON.stringify(output.value),
+              }
+            : {
+                state: "output-available",
+                output: "value" in output ? output.value : output,
+              }),
+        } as UIMessage["parts"][number];
+      } else if (part.type === "tool-approval-request") {
+        const index = parts.findIndex(
+          (item) => "toolCallId" in item && item.toolCallId === part.toolCallId,
+        );
+        if (index >= 0)
+          parts[index] = {
+            ...parts[index],
+            state: "approval-requested",
+            approval: {
+              id: part.approvalId,
+              ...(part.signature ? { signature: part.signature } : {}),
+            },
+          } as UIMessage["parts"][number];
+      } else if (part.type === "tool-approval-response") {
+        const index = parts.findIndex(
+          (item) => "approval" in item && item.approval?.id === part.approvalId,
+        );
+        if (index >= 0)
+          parts[index] = {
+            ...parts[index],
+            state: part.approved ? "approval-responded" : "output-denied",
+            approval: {
+              ...(parts[index] as ToolPart).approval,
+              id: part.approvalId,
+              approved: part.approved,
+              reason: part.reason,
+            },
+          } as UIMessage["parts"][number];
+      }
+    }
+  }
+}
 
 export type SubagentResultEvent = {
   version: 1;
@@ -340,6 +481,7 @@ export async function convertToAgentModelMessages(
             part.type === "reasoning" ||
             part.type === "file" ||
             part.type === "step-start" ||
+            part.type === "data-model-history" ||
             part.type === "dynamic-tool" ||
             part.type.startsWith("tool-"),
         );
@@ -357,7 +499,50 @@ export async function convertToAgentModelMessages(
   }
   // 历史列表会在启动时加载本模块，模型 SDK 仅在实际请求时加载。
   const { convertToModelMessages } = await import("ai");
-  return convertToModelMessages(input);
+  const result: ModelMessage[] = [];
+  for (const message of input) {
+    if (message.role !== "assistant") {
+      result.push(...(await convertToModelMessages([message])));
+      continue;
+    }
+    const materializedApprovals = approvalResponseIds(
+      message.parts.flatMap((part) => modelHistory(part) ?? []),
+    );
+    let parts: UIMessage["parts"] = [];
+    const flush = async () => {
+      const canonical = parts.flatMap((part) => modelHistory(part) ?? []);
+      result.push(
+        ...(canonical.length
+          ? canonical
+          : await convertToModelMessages([{ ...message, parts }])),
+      );
+      if (
+        canonical.length &&
+        parts.some(
+          (part) => "state" in part && part.state === "approval-responded",
+        )
+      ) {
+        const converted = await convertToModelMessages([{ ...message, parts }]);
+        for (const item of converted) {
+          if (item.role !== "tool") continue;
+          const responses = item.content.filter(
+            (part) =>
+              part.type === "tool-approval-response" &&
+              !materializedApprovals.has(part.approvalId),
+          );
+          if (responses.length)
+            result.push({ role: "tool", content: responses });
+        }
+      }
+      parts = [];
+    };
+    for (const part of message.parts) {
+      if (part.type === "step-start" && parts.length) await flush();
+      parts.push(part);
+    }
+    if (parts.length) await flush();
+  }
+  return result;
 }
 
 // React Chat 为变化消息发布新快照；弱引用缓存避免流式更新反复投影已完成历史。
@@ -509,7 +694,10 @@ export function projectSessionMessages(
       assistantParts = [];
       assistantStart = index;
       const record = records[index];
-      assistantId = record.role === "assistant" ? record.message_id : undefined;
+      assistantId =
+        record.role === "assistant" || record.role === "model"
+          ? record.message_id
+          : undefined;
       assistantTurnId = turnId;
       assistantTimestamp = timestamp;
     }
@@ -524,6 +712,23 @@ export function projectSessionMessages(
     )
       return;
     const timestamp = parseRecordedTimestamp(record.timestamp);
+    if (record.role === "model") {
+      const parts = ensureAssistant(index, record.turn_id, timestamp);
+      parts.push({ type: "step-start" });
+      modelDisplayParts(record.content, parts);
+      parts.push(modelHistoryPart(record.content));
+      if (record.reasoning_duration_ms !== undefined)
+        parts.push({
+          type: REASONING_DURATION_PART_TYPE,
+          data: { durationMs: record.reasoning_duration_ms },
+        });
+      if (record.activity_duration_ms !== undefined)
+        parts.push({
+          type: ACTIVITY_DURATION_PART_TYPE,
+          data: { durationMs: record.activity_duration_ms },
+        });
+      return;
+    }
     if (record.role === "display") {
       if (
         isFileEditSnapshot(record.content) &&
@@ -832,7 +1037,7 @@ function serializeUiMessage(
       : [];
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const record = records[index];
-    if (record.role !== "assistant") continue;
+    if (record.role !== "assistant" && record.role !== "model") continue;
     record.turn_status = options.turnStatus ?? "completed";
     break;
   }
@@ -971,7 +1176,10 @@ function splitAssistantBlocks(message: UIMessage): AssistantBlock[] {
   for (const part of message.parts) {
     const reasoningDurationMs = reasoningDurationFromPart(part);
     const activityDurationMs = activityDurationFromPart(part);
-    if (part.type === "step-start") {
+    const history = modelHistory(part);
+    if (history) {
+      current.model = [...(current.model ?? []), ...history];
+    } else if (part.type === "step-start") {
       flush();
     } else if (part.type === "text") {
       current.content.push(part.text);
@@ -1005,6 +1213,22 @@ function serializeAssistantBlock(
   block: AssistantBlock,
   options: AppendOptions,
 ): SessionMessage[] {
+  if (block.model)
+    return [
+      {
+        role: "model",
+        content: block.model,
+        message_id: options.messageId,
+        timestamp: options.timestamp,
+        turn_id: options.turnId,
+        ...(block.reasoningDurationMs === undefined
+          ? {}
+          : { reasoning_duration_ms: Math.round(block.reasoningDurationMs) }),
+        ...(block.activityDurationMs === undefined
+          ? {}
+          : { activity_duration_ms: Math.round(block.activityDurationMs) }),
+      },
+    ];
   const toolCalls = block.tools.map((tool) => ({
     id: tool.toolCallId,
     type: "function" as const,
@@ -1099,11 +1323,9 @@ function toolName(tool: ToolPart): string {
     : tool.type.slice("tool-".length);
 }
 
-/** SDK 将静态工具的非法入参保存在 rawInput，持久化时不能退化为空对象。 */
+/** 未形成完整模型步骤时保留已收到的工具输入，不猜测 SDK 的规范化结果。 */
 function toolArgumentsInput(tool: ToolPart): unknown {
-  return tool.state === "output-error" && tool.input === undefined
-    ? tool.rawInput
-    : tool.input;
+  return tool.input ?? tool.rawInput;
 }
 
 /** 将工具输入序列化为 OpenAI function.arguments 要求的 JSON 字符串。 */

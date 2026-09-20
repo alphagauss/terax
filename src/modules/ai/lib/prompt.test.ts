@@ -3,12 +3,12 @@
  * 重点锁定跨平台 Shell 语义、确定性文本和 Anthropic 缓存标记。
  */
 
-import { streamText, type ModelMessage } from "ai";
+import { type ModelMessage, streamText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import {
-  buildAgentSystemPrompt,
   buildAgentPromptSections,
+  buildAgentSystemPrompt,
   composeAgentPromptSections,
   prepareAgentPrompt,
   resolveAgentExecutionEnvironment,
@@ -138,6 +138,27 @@ describe("agent system prompt", () => {
 });
 
 describe("prepareAgentPrompt", () => {
+  it("preserves protocol options when adding an Anthropic cache breakpoint", () => {
+    const message: ModelMessage = {
+      role: "assistant",
+      content: [
+        {
+          type: "reasoning",
+          text: "thought",
+          providerOptions: { anthropic: { signature: "signed" } },
+        },
+      ],
+      providerOptions: { anthropic: { custom: "preserved" } },
+    };
+    const snapshot = JSON.stringify(message);
+    const prepared = prepareAgentPrompt("stable", [message], "anthropic");
+    expect(prepared.messages[0].providerOptions?.anthropic).toEqual({
+      custom: "preserved",
+      cacheControl: { type: "ephemeral" },
+    });
+    expect(prepared.messages[0].content).toEqual(message.content);
+    expect(JSON.stringify(message)).toBe(snapshot);
+  });
   it("keeps trusted instructions outside conversation messages", () => {
     const prompt = prepareAgentPrompt("Stable instructions", history, "openai");
 

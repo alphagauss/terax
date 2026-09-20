@@ -3,12 +3,11 @@
  * 执行环境和目录属于会话，指令在每轮开始时冻结，不持有 UI 或审批状态。
  */
 
-import type { ModelMessage, SystemModelMessage } from "ai";
 import type { HostPlatform } from "@/lib/platform";
 import type { ProviderId } from "@/modules/ai/config";
-import type { WorkspaceEnv } from "@/modules/workspace";
-
 import CORE_PROMPT from "@/modules/ai/prompts/core";
+import type { WorkspaceEnv } from "@/modules/workspace";
+import type { ModelMessage, SystemModelMessage } from "ai";
 import type { WorkspaceInstruction } from "./projectInstructions";
 
 export const PROMPT_SECTION_ORDER = [
@@ -182,7 +181,10 @@ function withAnthropicCacheMarker<T extends ModelMessage>(message: T): T {
     ...message,
     providerOptions: {
       ...(message.providerOptions ?? {}),
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      anthropic: {
+        ...message.providerOptions?.anthropic,
+        cacheControl: { type: "ephemeral" },
+      },
     },
   };
 }
