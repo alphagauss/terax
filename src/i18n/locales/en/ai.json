@@ -183,7 +183,7 @@
         "closeStdin": "Closing process input",
         "terminate": "Terminating process"
       },
-      "thinking": "Thinking",
+      "thinkingWithDuration": "Thinking {{duration}}s",
       "completed": "Processed",
       "completedWithDuration": "Processed for {{duration}}s"
     },

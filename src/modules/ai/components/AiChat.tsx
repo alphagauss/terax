@@ -759,11 +759,10 @@ const RenderedMessage = memo(function RenderedMessage({
                 return (
                   <PartAppear key={`${message.id}-${g.key}`}>
                     <ChatActivityBlock
+                      sessionId={sessionId}
+                      activityKey={`${message.id}-${g.key}`}
                       durationMs={g.durationMs}
-                      headline={activityHeadline(
-                        g.headlinePart,
-                        t("chat.activity.thinking"),
-                      )}
+                      headline={activityHeadline(g.headlinePart)}
                       running={streaming && !g.completed}
                     >
                       {g.groups.map((group) => (
@@ -1179,12 +1178,9 @@ const ACTIVITY_TOOL_LABELS: Record<string, () => string> = {
 };
 
 /** 仅为展示压缩摘要；摘要尚未形成时回退到工具动作，不改写工具输入。 */
-export function activityHeadline(
-  part: AnyPart,
-  thinkingText: string,
-): ChatActivityHeadline {
+export function activityHeadline(part: AnyPart): ChatActivityHeadline {
   if (partType(part) === "reasoning") {
-    return { kind: "thinking", key: "thinking", text: thinkingText };
+    return { kind: "thinking", key: "thinking" };
   }
   const toolName =
     partType(part) === "dynamic-tool"

@@ -14,16 +14,20 @@ import {
 
 describe("activity headline summaries", () => {
   beforeAll(() => preloadEn());
-  const headline = (tool: string, input: unknown, state = "input-streaming") =>
-    activityHeadline(
-      {
-        type: `tool-${tool}`,
-        toolCallId: "call",
-        state,
-        input,
-      } as Parameters<typeof activityHeadline>[0],
-      "Thinking",
-    );
+  const headline = (
+    tool: string,
+    input: unknown,
+    state = "input-streaming",
+  ) => {
+    const result = activityHeadline({
+      type: `tool-${tool}`,
+      toolCallId: "call",
+      state,
+      input,
+    } as Parameters<typeof activityHeadline>[0]);
+    if (result?.kind !== "tool") throw new Error("Expected a tool headline");
+    return result;
+  };
 
   it("shows the tool action before meaningful fields and then adds the summary", () => {
     expect(headline("shell_exec", {})).toMatchObject({

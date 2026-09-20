@@ -59,6 +59,9 @@ export function startDesktopRunLifecycle(
         status,
         approvalsPending,
         ...(status === "idle" ? { error: null } : {}),
+        ...(status === "idle" || status === "error"
+          ? { activityTiming: undefined }
+          : {}),
       }),
     onMessages: (messages) => clearTerminalFileMutations(sessionId, messages),
     commit: (messages) =>

@@ -230,6 +230,7 @@ function makeChat(sessionId: string): Chat<UIMessage> {
       useChatStore.getState().patchAgentMeta(sessionId, {
         status: "error",
         error: e instanceof Error ? e.message : String(e),
+        activityTiming: undefined,
       });
     },
   });
@@ -458,7 +459,10 @@ export async function startChatMessage(
     if (chat.status === "submitted" || chat.status === "streaming")
       return false;
     if (!(await state.beginSessionRun(sessionId, channel?.id))) return false;
-    state.patchAgentMeta(sessionId, { cancelled: false });
+    state.patchAgentMeta(sessionId, {
+      cancelled: false,
+      activityTiming: undefined,
+    });
     if (submittedConfig) runConfigurations.set(chat, submittedConfig);
     if (isUserSubmission(message)) {
       state.promoteSession(sessionId, messagesForPromotion(message), cwd);
