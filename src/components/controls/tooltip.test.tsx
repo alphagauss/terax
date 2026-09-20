@@ -1,20 +1,31 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react";
-import { createRoot } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
 import { Button } from "@/components/controls/button";
-import { Hint, TooltipProvider } from "@/components/controls/tooltip";
+import {
+  Hint,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/controls/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/menu/dropdown-menu";
+import { act, createRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
+const reactTestEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT: boolean;
+};
 
 beforeEach(() => {
+  reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   vi.useFakeTimers();
   container = document.createElement("div");
   document.body.append(container);
@@ -25,6 +36,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.useRealTimers();
+  reactTestEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
 });
 
 const tooltip = () => document.querySelector('[role="tooltip"]');
@@ -104,6 +116,84 @@ it("keeps separate groups independent and supports keyboard focus", async () => 
   expect(tooltip()).toBeNull();
   await wait(800);
   expect(tooltip()?.textContent).toBe("Two");
+});
+
+it("dismisses tooltips while the window is inactive and ignores restored focus", async () => {
+  await act(async () =>
+    root.render(
+      <TooltipProvider>
+        <Hint content="Actions">
+          <button type="button">Menu</button>
+        </Hint>
+      </TooltipProvider>,
+    ),
+  );
+  const button = container.querySelector("button") as HTMLButtonElement;
+
+  await act(async () => button.focus());
+  expect(tooltip()?.textContent).toBe("Actions");
+
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  expect(tooltip()).toBeNull();
+
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  });
+  expect(tooltip()).toBeNull();
+
+  await act(async () => {
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", bubbles: true }),
+    );
+    button.blur();
+    button.focus();
+  });
+  expect(tooltip()?.textContent).toBe("Actions");
+
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  expect(tooltip()).toBeNull();
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+  });
+
+  await wait(501);
+  await hover(button);
+  expect(tooltip()).toBeNull();
+  await wait(800);
+  expect(tooltip()?.textContent).toBe("Actions");
+});
+
+it("notifies controlled tooltips when the window becomes inactive", async () => {
+  const onOpenChange = vi.fn();
+  function ControlledTooltip() {
+    const [open, setOpen] = useState(true);
+    const handleOpenChange = (next: boolean) => {
+      onOpenChange(next);
+      setOpen(next);
+    };
+    return (
+      <Tooltip open={open} onOpenChange={handleOpenChange}>
+        <TooltipTrigger asChild>
+          <button type="button">Metrics</button>
+        </TooltipTrigger>
+        <TooltipContent>Details</TooltipContent>
+      </Tooltip>
+    );
+  }
+  await act(async () =>
+    root.render(
+      <TooltipProvider>
+        <ControlledTooltip />
+      </TooltipProvider>,
+    ),
+  );
+  expect(tooltip()?.textContent).toBe("Details");
+
+  await act(async () => window.dispatchEvent(new Event("blur")));
+  expect(tooltip()).toBeNull();
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 it("preserves refs and menu clicks through an asChild trigger", async () => {
