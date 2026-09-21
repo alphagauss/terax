@@ -20,7 +20,12 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { line?: number }) =>
+      key === "fileActions.lineReference"
+        ? `(line:${options?.line})`
+        : key,
+  }),
 }));
 
 beforeEach(() => {
@@ -57,6 +62,7 @@ describe("Markdown file references", () => {
     expect(link?.getAttribute("href")).toBe(
       "terax-file:D%3A%2Fproject%2Fconfig.ts%3A12",
     );
+    expect(link?.textContent).toBe("config (line:12)");
     await act(async () => link?.click());
     expect(onOpen).toHaveBeenCalledWith("D:/project/config.ts", 12);
 

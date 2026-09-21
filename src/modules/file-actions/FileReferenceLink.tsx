@@ -67,6 +67,12 @@ export function FileReferenceLink({
             }}
           >
             {children}
+            {reference.line !== undefined && (
+              <>
+                {" "}
+                {t("fileActions.lineReference", { line: reference.line })}
+              </>
+            )}
           </a>
         </Hint>
       </ContextMenuTrigger>
