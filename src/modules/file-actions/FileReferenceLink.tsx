@@ -6,13 +6,11 @@ import {
   ContextMenuTrigger,
 } from "@/components/menu/context-menu";
 import {
-  openSystemFile,
   resolveFileReference,
   type FileTarget,
 } from "@/modules/file-actions/actions";
 import { FileActionItems } from "@/modules/file-actions/FileActionItems";
 import type { FileReference } from "@/modules/file-actions/references";
-import { currentWorkspaceEnv } from "@/modules/workspace";
 import { useState, type ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -35,11 +33,7 @@ export function FileReferenceLink({
 }: Props) {
   const [resolved, setResolved] = useState<FileTarget | null>(null);
   const { t } = useTranslation("common");
-  const local = currentWorkspaceEnv().kind === "local";
   const resolve = () => resolveFileReference(reference);
-  const remoteOpenDirectory = local ? undefined : onOpenDirectory;
-  const openDirectory = (path: string) =>
-    local ? openSystemFile(path) : remoteOpenDirectory?.(path);
 
   return (
     <ContextMenu
@@ -62,7 +56,7 @@ export function FileReferenceLink({
               void resolve()
                 .then((file) =>
                   file.isDir
-                    ? openDirectory(file.path)
+                    ? onOpenDirectory?.(file.path)
                     : onOpen(file.path, file.line),
                 )
                 .catch((error) =>
@@ -87,7 +81,7 @@ export function FileReferenceLink({
           }
           resolve={resolve}
           onOpen={onOpen}
-          onOpenDirectory={remoteOpenDirectory}
+          onOpenDirectory={onOpenDirectory}
         />
       </ContextMenuContent>
     </ContextMenu>
