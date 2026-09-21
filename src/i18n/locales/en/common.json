@@ -45,6 +45,7 @@
     "copyPath": "Copy path",
     "copyContent": "Copy file contents",
     "reveal": "Show in file manager",
+    "lineReference": "(line:{{line}})",
     "failed": "File operation failed",
     "binary": "Binary file contents cannot be copied as text.",
     "toolarge": "The file exceeds the 10 MB text copy limit.",

@@ -39,7 +39,12 @@ vi.mock("@/modules/ai/store/chatStore", () => ({
 }));
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { line?: number }) =>
+      key === "fileActions.lineReference"
+        ? `(line:${options?.line})`
+        : key,
+  }),
 }));
 
 beforeEach(() => {
@@ -381,6 +386,7 @@ describe("chat file references", () => {
         line: 12,
       },
     );
+    expect(link?.textContent).toBe("config (line:12)");
     mocks.invoke.mockResolvedValue({ kind: "file" });
     await act(async () => link?.click());
     expect(mocks.open).toHaveBeenCalledWith(

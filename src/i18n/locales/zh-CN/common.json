@@ -45,6 +45,7 @@
     "copyPath": "复制路径",
     "copyContent": "复制文件内容",
     "reveal": "在系统文件管理器中显示",
+    "lineReference": "(第 {{line}} 行)",
     "failed": "文件操作失败",
     "binary": "二进制文件无法作为文本复制。",
     "toolarge": "文件超过文本复制的 10 MB 上限。",
