@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   open: vi.fn(),
+  openDirectory: vi.fn(),
+  openPath: vi.fn(),
   url: vi.fn(),
   copy: vi.fn(),
   success: vi.fn(),
@@ -22,12 +24,17 @@ vi.mock("sonner", () => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: mocks.url,
-  openPath: vi.fn(),
+  openPath: mocks.openPath,
   revealItemInDir: vi.fn(),
 }));
 vi.mock("@/modules/ai/store/chatStore", () => ({
   useChatStore: {
-    getState: () => ({ live: { openFileReference: mocks.open } }),
+    getState: () => ({
+      live: {
+        openFileReference: mocks.open,
+        revealWorkingDirectory: mocks.openDirectory,
+      },
+    }),
   },
 }));
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -381,6 +388,43 @@ describe("chat file references", () => {
       12,
     );
     await act(async () => root.unmount());
+  });
+
+  it("opens a local directory through workspace navigation from the link and context menu", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mocks.invoke.mockResolvedValue({ kind: "dir" });
+
+    await act(async () =>
+      root.render(
+        <ChatFileReferenceBaseProvider baseDirectory="D:/workspace/project">
+          <ChatMessageResponse>{"[docs](./docs)"}</ChatMessageResponse>
+        </ChatFileReferenceBaseProvider>,
+      ),
+    );
+
+    const link = container.querySelector("a");
+    await act(async () => link?.click());
+    expect(mocks.openDirectory).toHaveBeenCalledWith(
+      "D:/workspace/project/docs",
+    );
+
+    await act(async () =>
+      link?.dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, button: 2 }),
+      ),
+    );
+    const openDirectory = [
+      ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+    ].find((item) => item.textContent === "spaces:openInNewSpace");
+    expect(openDirectory).toBeDefined();
+    await act(async () => openDirectory?.click());
+    expect(mocks.openDirectory).toHaveBeenCalledTimes(2);
+    expect(mocks.openPath).not.toHaveBeenCalled();
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("does not activate incomplete links, code literals or unsafe protocols", async () => {
