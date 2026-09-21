@@ -264,7 +264,7 @@ export function MarkdownSplitLayout({
           className={cn(
             "flex h-full min-h-0 shrink-0",
             open
-              ? "relative"
+              ? "relative z-20 bg-sidebar"
               : "pointer-events-none absolute inset-y-0 left-0 z-0",
           )}
           style={{ width: renderedWidth + SEPARATOR_WIDTH }}
