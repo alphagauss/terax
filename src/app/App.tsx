@@ -739,19 +739,24 @@ export default function App() {
 
   const askFromSelection = useCallback(() => {
     const selection = captureActiveSelection();
-    if (!selection || !selection.trim()) {
+    if (!selection?.trim()) {
       openAiPanelAndFocus();
       return;
     }
-    const source: "terminal" | "editor" = isEditorTab ? "editor" : "terminal";
     if (!openAiPanel()) return;
-    attachSelection(selection, source);
+    const tab = tabs.find((item) => item.id === activeId);
+    if (tab?.kind === "editor" || tab?.kind === "markdown") {
+      attachSelection({ text: selection, source: "editor", path: tab.path });
+    } else {
+      attachSelection({ text: selection, source: "terminal" });
+    }
   }, [
     captureActiveSelection,
     openAiPanel,
     openAiPanelAndFocus,
     attachSelection,
-    isEditorTab,
+    activeId,
+    tabs,
   ]);
 
   const { askPopup, setAskPopup, onAskFromSelection } = useSelectionAskAi({

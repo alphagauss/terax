@@ -144,10 +144,7 @@ export function deriveTitle(messages: UIMessage[]): string {
     if (m.role !== "user") continue;
     for (const p of m.parts) {
       if (p.type !== "text") continue;
-      const text = (p as { text: string }).text
-        .replace(/<selection[\s\S]*?<\/selection>\s*/g, "")
-        .replace(/<file[\s\S]*?<\/file>\s*/g, "")
-        .trim();
+      const text = (p as { text: string }).text.trim();
       if (!text) continue;
       const first = text.split("\n")[0].trim();
       return first.length > 40 ? `${first.slice(0, 40)}…` : first;

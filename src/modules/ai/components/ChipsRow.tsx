@@ -10,6 +10,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { FileAttachment } from "../lib/composer";
 import type { Snippet } from "../lib/snippets";
 import { Chip } from "./Chip";
@@ -30,6 +31,7 @@ export function ChipsRow({
   onRemoveSnippet,
   leading,
 }: Props) {
+  const { t } = useTranslation("ai");
   const hasAttachments = files.length > 0 || snippets.length > 0;
   if (!leading && !hasAttachments) return null;
   return (
@@ -51,9 +53,18 @@ export function ChipsRow({
         <Chip
           key={f.id}
           iconNode={fileIcon(f)}
+          title={
+            f.kind === "selection" && f.source === "editor" ? f.path : undefined
+          }
           onRemove={() => onRemoveFile(f.id)}
         >
-          {f.name}
+          {f.kind === "selection"
+            ? t(
+                f.source === "editor"
+                  ? "chat.editorSelection"
+                  : "chat.terminalSelection",
+              )
+            : f.name}
           {f.kind === "selection" && f.text ? (
             <span className="ml-1 text-muted-foreground">
               · {selLineCount(f.text)}L

@@ -21,12 +21,17 @@ describe("chat scroll controls", () => {
       {
         id: "user-1",
         role: "user",
-        parts: [
-          {
-            type: "text",
-            text: 'Inspect this\n<selection source="terminal">\nsecret output\n</selection>',
-          },
-        ],
+        parts: [{ type: "text", text: "Inspect this" }],
+        metadata: {
+          attachments: [
+            {
+              kind: "selection",
+              id: "terminal-selection",
+              source: "terminal",
+              text: "secret output",
+            },
+          ],
+        },
       },
       {
         id: "assistant-1",
@@ -43,6 +48,12 @@ describe("chat scroll controls", () => {
               size: 10,
               path: "/work/a.ts",
               environmentKey: "local",
+            },
+            {
+              kind: "snippet",
+              id: "review",
+              handle: "review",
+              content: "large snippet",
             },
           ],
         },

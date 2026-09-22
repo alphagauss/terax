@@ -67,6 +67,19 @@ describe("compaction checkpoints", () => {
           path: "/work/a.txt",
           environmentKey: "local",
         },
+        {
+          kind: "selection",
+          id: "selection",
+          source: "editor",
+          path: "/work/a.txt",
+          text: "selected secret",
+        },
+        {
+          kind: "snippet",
+          id: "review",
+          handle: "review",
+          content: "snippet secret",
+        },
         { kind: "image", name: "image", size: 1, mediaIndex: 0 },
       ],
     };
@@ -79,6 +92,8 @@ describe("compaction checkpoints", () => {
       await convertToAgentModelMessages(firstPass),
     );
     expect(context).not.toContain("/work/a.txt");
+    expect(context).not.toContain("selected secret");
+    expect(context).not.toContain("snippet secret");
     expect(context).not.toContain("image/png");
     expect(context).not.toContain("code-a1");
     expect(context).toContain("final-a1");
@@ -158,11 +173,10 @@ describe("compaction checkpoints", () => {
       metadata: {
         attachments: [
           {
-            kind: "file",
-            name: "report.pdf",
-            size: 42,
-            path: "/work/report.pdf",
-            environmentKey: "local",
+            kind: "selection",
+            id: "terminal-selection",
+            source: "terminal",
+            text: "terminal output",
           },
         ],
       },
@@ -173,7 +187,7 @@ describe("compaction checkpoints", () => {
     const compacted = [message, event(checkpoint("only", message.id))];
     expect(
       JSON.stringify(await convertToAgentModelMessages(compacted)),
-    ).not.toContain("/work/report.pdf");
+    ).not.toContain("terminal output");
     expect(messageMetadata(message).attachments).toHaveLength(1);
   });
 });

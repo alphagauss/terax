@@ -238,7 +238,7 @@ function BlockMenu({ block, all, onSearch }: ChromeProps) {
   const attach = () => {
     const out = capAttachOutput(output());
     const text = out ? `$ ${block.command}\n${out}` : `$ ${block.command}`;
-    useChatStore.getState().attachSelection(text, "terminal");
+    useChatStore.getState().attachSelection({ text, source: "terminal" });
   };
   return (
     <DropdownMenu>

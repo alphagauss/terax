@@ -45,40 +45,55 @@ describe("expandSnippetTokens", () => {
     snippet({ id: "2", handle: "bye", content: "Goodbye" }),
   ];
 
-  it("replaces a known token and emits its block", () => {
-    const { body, blocks } = expandSnippetTokens("#greet now", snippets);
+  it("removes a known token and returns its snippet", () => {
+    const { body, snippets: matched } = expandSnippetTokens(
+      "#greet now",
+      snippets,
+    );
     expect(body).toBe("now");
-    expect(blocks).toEqual(['<snippet name="greet">\nHello\n</snippet>']);
+    expect(matched).toEqual([snippets[0]]);
   });
 
   it("matches handles case-insensitively", () => {
-    const { body, blocks } = expandSnippetTokens("do #GREET please", snippets);
+    const { body, snippets: matched } = expandSnippetTokens(
+      "do #GREET please",
+      snippets,
+    );
     expect(body).not.toContain("#GREET");
-    expect(blocks).toEqual(['<snippet name="greet">\nHello\n</snippet>']);
+    expect(matched).toEqual([snippets[0]]);
   });
 
   it("expands multiple distinct tokens in order", () => {
-    const { blocks } = expandSnippetTokens("#greet and #bye", snippets);
-    expect(blocks).toEqual([
-      '<snippet name="greet">\nHello\n</snippet>',
-      '<snippet name="bye">\nGoodbye\n</snippet>',
-    ]);
+    const { snippets: matched } = expandSnippetTokens(
+      "#greet and #bye",
+      snippets,
+    );
+    expect(matched).toEqual(snippets);
   });
 
   it("emits a repeated snippet only once", () => {
-    const { blocks } = expandSnippetTokens("#greet #greet", snippets);
-    expect(blocks).toHaveLength(1);
+    const { snippets: matched } = expandSnippetTokens(
+      "#greet #greet",
+      snippets,
+    );
+    expect(matched).toEqual([snippets[0]]);
   });
 
   it("leaves unknown tokens untouched", () => {
-    const { body, blocks } = expandSnippetTokens("say #missing ok", snippets);
+    const { body, snippets: matched } = expandSnippetTokens(
+      "say #missing ok",
+      snippets,
+    );
     expect(body).toBe("say #missing ok");
-    expect(blocks).toEqual([]);
+    expect(matched).toEqual([]);
   });
 
   it("does not expand a token glued to a preceding word", () => {
-    const { body, blocks } = expandSnippetTokens("email#greet", snippets);
+    const { body, snippets: matched } = expandSnippetTokens(
+      "email#greet",
+      snippets,
+    );
     expect(body).toBe("email#greet");
-    expect(blocks).toEqual([]);
+    expect(matched).toEqual([]);
   });
 });

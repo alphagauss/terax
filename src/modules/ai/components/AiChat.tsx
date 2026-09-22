@@ -277,12 +277,13 @@ function findConversationMessage(
 type AnyToolPart = ToolUIPart | DynamicToolUIPart;
 
 type ContextChip =
-  | { kind: "selection"; source: "terminal" | "editor"; lines: number }
-  | { kind: "snippet"; name: string };
-
-const SELECTION_RE =
-  /<selection\s+source="(terminal|editor)">\n?([\s\S]*?)\n?<\/selection>/g;
-const SNIPPET_RE = /<snippet\s+name="([^"]+)">\n?[\s\S]*?\n?<\/snippet>/g;
+  | {
+      kind: "selection";
+      id: string;
+      source: "terminal" | "editor";
+      lines: number;
+    }
+  | { kind: "snippet"; id: string; name: string };
 
 function countLines(s: string): number {
   if (!s) return 0;
@@ -291,25 +292,28 @@ function countLines(s: string): number {
   return trimmed.split("\n").length;
 }
 
-function stripUserContextBlocks(text: string): {
+function userContext(message: UIMessage): {
   text: string;
   chips: ContextChip[];
 } {
   const chips: ContextChip[] = [];
-  let out = text;
-  out = out.replace(SELECTION_RE, (_m, source: string, body: string) => {
-    chips.push({
-      kind: "selection",
-      source: source === "editor" ? "editor" : "terminal",
-      lines: countLines(body),
-    });
-    return "";
-  });
-  out = out.replace(SNIPPET_RE, (_m, name: string) => {
-    chips.push({ kind: "snippet", name });
-    return "";
-  });
-  return { text: out.trim(), chips };
+  for (const attachment of messageMetadata(message).attachments ?? []) {
+    if (attachment.kind === "selection") {
+      chips.push({
+        kind: "selection",
+        id: attachment.id,
+        source: attachment.source,
+        lines: countLines(attachment.text),
+      });
+    } else if (attachment.kind === "snippet") {
+      chips.push({
+        kind: "snippet",
+        id: attachment.id,
+        name: attachment.handle,
+      });
+    }
+  }
+  return { text: messageRawText(message).trim(), chips };
 }
 
 const ContextChips = memo(function ContextChips({
@@ -319,9 +323,9 @@ const ContextChips = memo(function ContextChips({
 }) {
   return (
     <div className="mb-1 flex flex-wrap gap-1">
-      {chips.map((c, i) => (
+      {chips.map((c) => (
         <span
-          key={i}
+          key={`${c.kind}:${c.id}`}
           className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-card/60 px-1.5 py-0.5 text-[10.5px] text-muted-foreground"
         >
           {chipIcon(c)}
@@ -706,9 +710,7 @@ const RenderedMessage = memo(function RenderedMessage({
     );
   }
   if (message.role === "user") {
-    const rawText = messageRawText(message);
-
-    const stripped = stripUserContextBlocks(rawText);
+    const context = userContext(message);
 
     return (
       <Message
@@ -721,8 +723,8 @@ const RenderedMessage = memo(function RenderedMessage({
         )}
       >
         <MessageAttachments message={message} />
-        {stripped.text ||
-        stripped.chips.length ||
+        {context.text ||
+        context.chips.length ||
         messageMetadata(message).guided ? (
           <MessageContent className="group-[.is-user]:bg-secondary group-[.is-user]:text-secondary-foreground">
             {messageMetadata(message).guided ? (
@@ -730,12 +732,12 @@ const RenderedMessage = memo(function RenderedMessage({
                 {t("chat.guided")}
               </span>
             ) : null}
-            {stripped.chips.length > 0 ? (
-              <ContextChips chips={stripped.chips} />
+            {context.chips.length > 0 ? (
+              <ContextChips chips={context.chips} />
             ) : null}
-            {stripped.text ? (
+            {context.text ? (
               <p className="whitespace-pre-wrap wrap-break-word">
-                {stripped.text}
+                {context.text}
               </p>
             ) : null}
           </MessageContent>
@@ -894,7 +896,7 @@ function messageTextForCopy(message: UIMessage): string {
       .map((part) => part.text)
       .join("\n");
   }
-  return stripUserContextBlocks(messageRawText(message)).text;
+  return userContext(message).text;
 }
 
 /** 消息底部的时间、复制操作与最终回答的本轮统计入口。 */

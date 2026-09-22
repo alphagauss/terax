@@ -51,18 +51,11 @@ export function isValidHandle(h: string): boolean {
   return HANDLE_RE.test(h);
 }
 
-/**
- * Replace `#handle` tokens in `text` with their snippet bodies, wrapped in
- * `<snippet name="…">…</snippet>` blocks, prepended to the message. Tokens that
- * don't match a known snippet are left as-is.
- *
- * Returns the rewritten body (with tokens stripped) and the list of expanded
- * snippet blocks to prepend.
- */
+/** 从正文移除已知 `#handle`，并按首次出现顺序返回对应片段。 */
 export function expandSnippetTokens(
   text: string,
   snippets: readonly Snippet[],
-): { body: string; blocks: string[] } {
+): { body: string; snippets: Snippet[] } {
   const byHandle = new Map(snippets.map((s) => [s.handle, s]));
   const matched = new Map<string, Snippet>();
   // (^|\s)#handle  — handle is [a-z0-9][a-z0-9-]*
@@ -74,8 +67,8 @@ export function expandSnippetTokens(
     matched.set(snip.id, snip);
     return lead;
   });
-  const blocks = Array.from(matched.values()).map(
-    (s) => `<snippet name="${s.handle}">\n${s.content}\n</snippet>`,
-  );
-  return { body: body.replace(/[ \t]+\n/g, "\n").trim(), blocks };
+  return {
+    body: body.replace(/[ \t]+\n/g, "\n").trim(),
+    snippets: [...matched.values()],
+  };
 }

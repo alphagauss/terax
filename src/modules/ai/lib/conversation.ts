@@ -21,8 +21,8 @@ import {
   type TurnFileEdits,
 } from "@/modules/ai/lib/fileEdits";
 import {
-  attachmentReferenceText,
-  type AttachmentDisplay,
+  attachmentContextText,
+  type MessageAttachment,
 } from "@/modules/ai/lib/messageAttachments";
 import type { UsageRecord } from "@/modules/ai/lib/usage";
 import type { DeliveryRecord } from "@/modules/channels/history";
@@ -57,7 +57,7 @@ export type SessionMessage = {
       message_id?: string;
       command_id?: string;
       media?: SessionMedia[];
-      attachments?: AttachmentDisplay[];
+      attachments?: MessageAttachment[];
     }
   | {
       role: "assistant";
@@ -281,7 +281,7 @@ export type TurnEvent = SteeringEvent | SubagentResultEvent | CompactionEvent;
 type ConversationMetadata = {
   compaction?: CompactionEvent;
   runFailure?: RunFailureEvent;
-  attachments?: AttachmentDisplay[];
+  attachments?: MessageAttachment[];
   commandId?: string;
   turnId?: string;
   fileEdits?: TurnFileEdits;
@@ -490,7 +490,7 @@ export async function convertToAgentModelMessages(
         );
     const attachmentText =
       message.role === "user"
-        ? attachmentReferenceText(meta.attachments ?? [])
+        ? attachmentContextText(meta.attachments ?? [])
         : "";
     if (attachmentText) {
       parts = [...parts];

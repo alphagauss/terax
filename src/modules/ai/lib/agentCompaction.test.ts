@@ -41,9 +41,22 @@ const attachment = {
   path: "/workspace/old.txt",
   environmentKey: "local",
 };
+const selection = {
+  kind: "selection" as const,
+  id: "editor-selection",
+  source: "editor" as const,
+  path: "/workspace/source.ts",
+  text: "selected source",
+};
+const snippet = {
+  kind: "snippet" as const,
+  id: "review",
+  handle: "review",
+  content: "review instructions",
+};
 function history(): UIMessage[] {
   const oldUser = user("old-user");
-  oldUser.metadata = { attachments: [attachment] };
+  oldUser.metadata = { attachments: [attachment, selection, snippet] };
   return [
     oldUser,
     {
@@ -185,12 +198,18 @@ describe("Agent compaction", () => {
     await chat.sendMessage({
       role: "user",
       parts: [],
-      metadata: { attachments: [attachment] },
+      metadata: { attachments: [attachment, selection, snippet] },
     });
     expect(chat.error).toBeUndefined();
     expect(submitted[submitted.length - 1]?.parts).toEqual([]);
     expect(JSON.stringify(activeModel.doStreamCalls[0].prompt)).toContain(
       attachment.path,
+    );
+    expect(JSON.stringify(activeModel.doStreamCalls[0].prompt)).toContain(
+      selection.path,
+    );
+    expect(JSON.stringify(activeModel.doStreamCalls[0].prompt)).toContain(
+      snippet.content,
     );
   });
 
@@ -205,7 +224,7 @@ describe("Agent compaction", () => {
         id: "attachment-only",
         role: "user",
         parts: [],
-        metadata: { attachments: [attachment] },
+        metadata: { attachments: [attachment, selection, snippet] },
       },
     ];
     const { errors } = await consume(opts);
@@ -214,6 +233,8 @@ describe("Agent compaction", () => {
     const first = activeModel.doStreamCalls[0].prompt;
     const second = activeModel.doStreamCalls[1].prompt;
     expect(JSON.stringify(first)).toContain(attachment.path);
+    expect(JSON.stringify(first)).toContain(selection.text);
+    expect(JSON.stringify(first)).toContain(snippet.content);
     expect(second.slice(0, first.length)).toEqual(first);
 
     const records = serializeSessionMessages(opts.uiMessages, {
@@ -257,6 +278,8 @@ describe("Agent compaction", () => {
     expect(request.prompt.slice(1, -1)).toEqual(prefix);
     expect(JSON.stringify(request.prompt)).toContain("old terminal output");
     expect(JSON.stringify(request.prompt)).toContain("/workspace/old.txt");
+    expect(JSON.stringify(request.prompt)).toContain(selection.text);
+    expect(JSON.stringify(request.prompt)).toContain(snippet.content);
     expect(request.tools?.map((tool) => tool.name)).toContain(
       "get_terminal_output",
     );
@@ -276,6 +299,8 @@ describe("Agent compaction", () => {
     expect(next).toContain("old final answer");
     expect(next).not.toContain("old terminal output");
     expect(next).not.toContain("/workspace/old.txt");
+    expect(next).not.toContain(selection.text);
+    expect(next).not.toContain(snippet.content);
     expect(next).toContain("correction");
     expect(message?.parts.some((part) => part.type === "data-compaction")).toBe(
       true,
@@ -307,10 +332,14 @@ describe("Agent compaction", () => {
       previous.prompt,
     );
     expect(JSON.stringify(previous.prompt)).toContain("/workspace/old.txt");
+    expect(JSON.stringify(previous.prompt)).toContain(selection.text);
+    expect(JSON.stringify(previous.prompt)).toContain(snippet.content);
     expect(summary.tools).toEqual(previous.tools);
     const finalPrompt = JSON.stringify(activeModel.doStreamCalls[1].prompt);
     expect(finalPrompt).not.toContain("old terminal output");
     expect(finalPrompt).not.toContain("/workspace/old.txt");
+    expect(finalPrompt).not.toContain(selection.text);
+    expect(finalPrompt).not.toContain(snippet.content);
     expect(finalPrompt).toContain("new terminal output");
     const parts = message?.parts ?? [];
     expect(

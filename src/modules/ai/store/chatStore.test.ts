@@ -230,11 +230,30 @@ describe("chat store multi-process lifecycle", () => {
       selectedModel: null,
       parameterSelectionsBySession: {},
       modelSnapshotsBySession: {},
+      pendingSelections: [],
+      pendingFileAttachments: [],
       refreshSessions: realRefreshSessions,
       commitMessages: realCommitMessages,
       persistSubmittedTurn: realPersistSubmittedTurn,
       persistTurnCheckpoint: realPersistTurnCheckpoint,
     });
+  });
+
+  it("keeps an editor selection path in the draft attachment", () => {
+    useChatStore.getState().attachSelection({
+      text: "  selected code  ",
+      source: "editor",
+      path: "D:/workspace/source.ts",
+    });
+    expect(useChatStore.getState().consumeSelections()).toEqual([
+      {
+        id: expect.stringMatching(/^sel-/),
+        text: "selected code",
+        source: "editor",
+        path: "D:/workspace/source.ts",
+      },
+    ]);
+    expect(useChatStore.getState().pendingSelections).toEqual([]);
   });
 
   function commandRequest(
@@ -687,14 +706,12 @@ describe("chat store multi-process lifecycle", () => {
     };
     io.commit.mockRejectedValueOnce(new Error("disk full"));
     await expect(
-      useChatStore
-        .getState()
-        .persistTurnCheckpoint(first.id, [assistant], {
-          event: "compaction",
-          id: "cancelled",
-          throughUserMessageId: "u",
-          summary: "discarded",
-        }),
+      useChatStore.getState().persistTurnCheckpoint(first.id, [assistant], {
+        event: "compaction",
+        id: "cancelled",
+        throughUserMessageId: "u",
+        summary: "discarded",
+      }),
     ).rejects.toThrow("disk full");
     useChatStore.getState().patchAgentMeta(first.id, { cancelled: true });
     const writes: SessionMessage[] = [];
